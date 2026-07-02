@@ -62,6 +62,13 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-content": "formatIpcError.invalidContent",
   "missing-tokens": "formatIpcError.missingTokens",
 
+  // ── Preview / workspace file-read (preview.ts, workspace.ts) ──
+  "not-a-file": "formatIpcError.notAFile",
+  "not-a-dir": "formatIpcError.notADirectory",
+  "binary-file": "formatIpcError.binaryFile",
+  "too-large": "formatIpcError.contentTooLarge",
+  "read-failed": "formatIpcError.notFound",
+
   // ── Args / canonicalization ──
   "args-not-object": "formatIpcError.argsNotObject",
   "args-not-json": "formatIpcError.argsNotJson",

@@ -236,6 +236,116 @@ function CopyButton({ value }: { value: string }) {
   );
 }
 
+type PreviewReadError = NonNullable<Awaited<ReturnType<typeof window.lvis.preview.readFile>>["error"]>;
+
+/** Map a preview-read error code to its Korean user message key. */
+function fileErrorKey(code: PreviewReadError): string {
+  switch (code) {
+    case "path-not-allowed":
+    case "sensitive-path":
+      return "chatPreviewRail.fileErrorNotAllowed";
+    case "binary-file":
+      return "chatPreviewRail.fileErrorBinary";
+    case "too-large":
+      return "chatPreviewRail.fileErrorTooLarge";
+    case "not-a-file":
+      return "chatPreviewRail.fileErrorGlob";
+    case "read-failed":
+      return "chatPreviewRail.fileErrorNotFound";
+    default:
+      return "chatPreviewRail.fileErrorGeneric";
+  }
+}
+
+/**
+ * File preview body. Renders the file's CONTENT through the progressive
+ * renderer registry (markdown/mermaid/text), loading it via the traversal-
+ * guarded `window.lvis.preview.readFile` IPC when the target has no inline
+ * text (diagnosis ①). Search-hit targets that already carry `inlineText`
+ * render it directly without an IPC round-trip.
+ */
+function FilePreviewBody({ target }: { target: Extract<ChatPreviewTarget, { kind: "file" }> }) {
+  const { t } = useTranslation();
+  const [state, setState] = useState<
+    | { phase: "idle" }
+    | { phase: "loading" }
+    | { phase: "ok"; content: string; path: string; truncated: boolean }
+    | { phase: "error"; code: PreviewReadError }
+  >({ phase: "idle" });
+
+  useEffect(() => {
+    // Inline text (e.g. an indexer search-hit snippet) needs no IPC read.
+    if (target.inlineText) {
+      setState({ phase: "idle" });
+      return;
+    }
+    let cancelled = false;
+    setState({ phase: "loading" });
+    void window.lvis.preview
+      .readFile(target.path)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.ok) {
+          setState({
+            phase: "ok",
+            content: result.content ?? "",
+            path: result.path ?? target.path,
+            truncated: Boolean(result.truncated),
+          });
+        } else {
+          setState({ phase: "error", code: result.error ?? "read-failed" });
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setState({ phase: "error", code: "read-failed" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [target.path, target.inlineText]);
+
+  const copyValue = target.inlineText
+    ?? (state.phase === "ok" ? state.content : target.path);
+
+  return (
+    <div className="space-y-3" data-testid="chat-side-panel-file-preview">
+      <div className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 font-mono text-[11px] [overflow-wrap:anywhere]">
+        {target.path}
+      </div>
+      {target.inlineText ? (
+        <PreviewContent descriptor={{ text: target.inlineText, path: target.path }} />
+      ) : state.phase === "loading" ? (
+        <div className="text-xs text-muted-foreground" data-testid="chat-side-panel-file-loading">
+          {t("chatPreviewRail.filePreviewLoading")}
+        </div>
+      ) : state.phase === "ok" ? (
+        <div className="space-y-2">
+          {state.truncated ? (
+            <Badge variant="outline" className="px-1 py-0 text-[10px]" data-testid="chat-side-panel-file-truncated">
+              {t("chatPreviewRail.filePreviewTruncated")}
+            </Badge>
+          ) : null}
+          <PreviewContent descriptor={{ text: state.content, path: state.path }} />
+        </div>
+      ) : state.phase === "error" ? (
+        <div className="text-[11px] text-destructive" data-testid="chat-side-panel-file-error">
+          {t(fileErrorKey(state.code))}
+        </div>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        {target.canOpenExternal ? (
+          <Button type="button" size="sm" variant="outline" onClick={() => void window.lvis.attach.openExternal(target.path)}>
+            <ExternalLink className="h-3.5 w-3.5" />
+            <span>{t("chatPreviewRail.openFile")}</span>
+          </Button>
+        ) : null}
+        <CopyButton value={copyValue} />
+      </div>
+    </div>
+  );
+}
+
 function PreviewBody({
   api,
   sessionId,
@@ -319,28 +429,7 @@ function PreviewBody({
   }
 
   if (target.kind === "file") {
-    return (
-      <div className="space-y-3">
-        <div className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 font-mono text-[11px] [overflow-wrap:anywhere]">
-          {target.path}
-        </div>
-        {target.inlineText ? (
-          <PreviewContent descriptor={{ text: target.inlineText, path: target.path }} />
-        ) : null}
-        <div className="flex flex-wrap gap-2">
-          {target.canOpenExternal ? (
-            <Button type="button" size="sm" variant="outline" onClick={() => void window.lvis.attach.openExternal(target.path)}>
-              <ExternalLink className="h-3.5 w-3.5" />
-              <span>{t("chatPreviewRail.openFile")}</span>
-            </Button>
-          ) : null}
-          <CopyButton value={target.inlineText ?? rawText} />
-        </div>
-        {!target.canOpenExternal && !target.inlineText ? (
-          <div className="text-[11px] text-muted-foreground">{t("chatPreviewRail.pathOnlyHint")}</div>
-        ) : null}
-      </div>
-    );
+    return <FilePreviewBody target={target} />;
   }
 
   if (target.kind === "url") {

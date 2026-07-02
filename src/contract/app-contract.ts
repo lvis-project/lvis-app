@@ -327,6 +327,14 @@ export const CHANNELS = {
     saveClipboardImage: "lvis:attach:saveClipboardImage",
     openExternal: "lvis:attach:openExternal",
   },
+  preview: {
+    readFile: "lvis:preview:read-file",
+  },
+  workspace: {
+    pickRoot: "lvis:workspace:pick-root",
+    listRoots: "lvis:workspace:list-roots",
+    listDir: "lvis:workspace:list-dir",
+  },
 } as const;
 
 type ValuesOf<T> = T[keyof T];
