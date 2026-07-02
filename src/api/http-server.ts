@@ -17,9 +17,15 @@
  *     `gesture-required-origin-unsupported`, `origin-unsupported`) pass through
  *     as HTTP 403 with the exact LocalApiResult JSON.
  *
- * node:http only (packaging discipline — no new prod deps). SSE (`/v1/events`)
- * is a later commit: the broadcaster option is accepted now so the signature is
- * final, but no event route is implemented here.
+ * node:http only (packaging discipline — no new prod deps).
+ *
+ * SSE (`GET /v1/events`): after auth, the request is upgraded to a
+ * `text/event-stream` and subscribed to the {@link StreamBroadcaster}. Each
+ * `(channel, payload)` frame becomes one SSE message (`event: <channel>` +
+ * `data: <JSON.stringify(payload)>`). A 15s heartbeat comment keeps proxies from
+ * idling the socket; its timer is `unref()`-ed so it never holds the process
+ * open. Every live stream is tracked so `close()` ends it AND runs its cleanup
+ * (unsubscribe + clear heartbeat) — no dangling broadcaster subscriptions.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
@@ -37,6 +43,12 @@ const MAX_BODY_BYTES = 1024 * 1024;
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 /** The origin tag attached to every dispatch from this transport. */
 const HTTP_ORIGIN = "local-api" as const;
+/** SSE content type applied to the /v1/events response. */
+const SSE_CONTENT_TYPE = "text/event-stream; charset=utf-8";
+/** SSE heartbeat interval: a `: ping` comment every 15s to defeat idle proxies. */
+const SSE_HEARTBEAT_MS = 15_000;
+/** SSE reconnection hint (ms) sent once on connect so clients back off sanely. */
+const SSE_RETRY_MS = 3000;
 
 /** Configuration for {@link startLocalApiHttpServer}. */
 export interface LocalApiHttpServerOptions {
@@ -164,11 +176,72 @@ async function handleDispatch(
   }
 }
 
+/**
+ * Handle GET /v1/events after auth has passed: upgrade to SSE and fan the
+ * broadcaster's `(channel, payload)` frames out to this client. `liveStreams`
+ * tracks a per-connection cleanup so `close()` can end every stream and run its
+ * unsubscribe + heartbeat-clear (no dangling broadcaster subscriptions).
+ */
+function handleEvents(
+  req: IncomingMessage,
+  res: ServerResponse,
+  broadcaster: StreamBroadcaster,
+  liveStreams: Set<() => void>,
+): void {
+  res.writeHead(200, {
+    "content-type": SSE_CONTENT_TYPE,
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+  });
+  // Disable Nagle so each frame flushes immediately (SSE is latency-sensitive).
+  res.socket?.setNoDelay(true);
+  // Preamble: reconnection hint + a comment so the client knows the stream lives.
+  res.write(`retry: ${SSE_RETRY_MS}\n`);
+  res.write(": connected\n\n");
+
+  const subscription = broadcaster.subscribe((channel, payload) => {
+    // `payload` may contain newlines only via JSON escaping, so one `data:` line
+    // is sufficient and correct.
+    res.write(`event: ${channel}\ndata: ${JSON.stringify(payload)}\n\n`);
+  });
+
+  const heartbeat = setInterval(() => {
+    res.write(": ping\n\n");
+  }, SSE_HEARTBEAT_MS);
+  // Never let the heartbeat hold the process open.
+  heartbeat.unref();
+
+  let cleaned = false;
+  // On server close(): end the response (which triggers the `close` events →
+  // cleanup) and defensively run cleanup so the subscription is dropped even if
+  // an ended socket does not re-emit `close`. Declared before `cleanup` so it can
+  // be removed from `liveStreams` by the same reference that was added.
+  const endStream = () => {
+    res.end();
+    cleanup();
+  };
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    clearInterval(heartbeat);
+    subscription();
+    liveStreams.delete(endStream);
+  };
+
+  // Client disconnect (either half of the socket closing) → unsubscribe + clear.
+  req.on("close", cleanup);
+  res.on("close", cleanup);
+
+  liveStreams.add(endStream);
+}
+
 /** Route a single authorized request. */
 async function route(
   req: IncomingMessage,
   res: ServerResponse,
   api: LocalApi,
+  broadcaster: StreamBroadcaster,
+  liveStreams: Set<() => void>,
   log?: (message: string) => void,
 ): Promise<void> {
   // Strip query/hash — routing is on the path only.
@@ -181,6 +254,15 @@ async function route(
       return;
     }
     await handleDispatch(req, res, api, log);
+    return;
+  }
+
+  if (path === "/v1/events") {
+    if (method !== "GET") {
+      sendJson(res, 405, { ok: false, error: "method-not-allowed" });
+      return;
+    }
+    handleEvents(req, res, broadcaster, liveStreams);
     return;
   }
 
@@ -203,7 +285,11 @@ async function route(
 export function startLocalApiHttpServer(
   opts: LocalApiHttpServerOptions,
 ): Promise<LocalApiHttpServer> {
-  const { api, secret, host = DEFAULT_HOST, port = DEFAULT_PORT, log } = opts;
+  const { api, secret, broadcaster, host = DEFAULT_HOST, port = DEFAULT_PORT, log } = opts;
+
+  // Per-connection SSE stream enders — `close()` runs each to end the response
+  // and unsubscribe from the broadcaster (no dangling subscriptions on shutdown).
+  const liveStreams = new Set<() => void>();
 
   const server: Server = createServer((req, res) => {
     // Auth on EVERY route before any other processing. Never log the secret or
@@ -212,7 +298,7 @@ export function startLocalApiHttpServer(
       sendJson(res, 401, { ok: false, error: "unauthorized" });
       return;
     }
-    void route(req, res, api, log).catch((err) => {
+    void route(req, res, api, broadcaster, liveStreams, log).catch((err) => {
       // Defensive: an unexpected error in the routing layer itself.
       log?.(`request routing error: ${err instanceof Error ? err.message : String(err)}`);
       if (!res.headersSent) {
@@ -238,6 +324,12 @@ export function startLocalApiHttpServer(
         port: boundPort,
         close: () =>
           new Promise<void>((res, rej) => {
+            // End every live SSE stream first: this unsubscribes from the
+            // broadcaster (no dangling subscriptions) and lets server.close()
+            // resolve instead of hanging on an open event-stream socket.
+            for (const endStream of [...liveStreams]) {
+              endStream();
+            }
             // Destroy idle keep-alive sockets so close() never hangs.
             server.closeAllConnections();
             server.close((closeErr) => (closeErr ? rej(closeErr) : res()));

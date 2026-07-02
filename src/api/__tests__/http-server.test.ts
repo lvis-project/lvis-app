@@ -17,7 +17,8 @@ import {
   startLocalApiHttpServer,
   type LocalApiHttpServer,
 } from "../http-server.js";
-import { createStreamBroadcaster } from "../stream-broadcaster.js";
+import { createStreamBroadcaster, type StreamBroadcaster } from "../stream-broadcaster.js";
+import { CHANNELS } from "../../contract/app-contract.js";
 import type { LocalApi, LocalApiResult } from "../local-api.js";
 
 const SECRET = "test-secret-0123456789abcdef";
@@ -31,10 +32,19 @@ function stubApi(
 
 let servers: LocalApiHttpServer[] = [];
 
-async function start(api: LocalApi, secret = SECRET): Promise<LocalApiHttpServer> {
+/** Start a tracked server AND return its broadcaster (for SSE fan-out tests). */
+async function startWithBroadcaster(
+  api: LocalApi,
+  secret = SECRET,
+): Promise<{ server: LocalApiHttpServer; broadcaster: StreamBroadcaster }> {
   const broadcaster = createStreamBroadcaster();
   const server = await startLocalApiHttpServer({ api, secret, broadcaster, host: "127.0.0.1", port: 0 });
   servers.push(server);
+  return { server, broadcaster };
+}
+
+async function start(api: LocalApi, secret = SECRET): Promise<LocalApiHttpServer> {
+  const { server } = await startWithBroadcaster(api, secret);
   return server;
 }
 
@@ -275,5 +285,138 @@ describe("stream-broadcaster", () => {
     b.sink("lvis:chat:stream", { streamId: 1 });
     expect(order).toEqual(["a", "b"]);
     expect(b.subscriberCount()).toBe(1);
+  });
+});
+
+/** Read from an SSE body reader, accumulating decoded text until `done(buf)`. */
+async function readUntil(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  done: (buffer: string) => boolean,
+): Promise<string> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (!done(buffer)) {
+    const { value, done: streamDone } = await reader.read();
+    if (streamDone) break;
+    buffer += decoder.decode(value, { stream: true });
+  }
+  return buffer;
+}
+
+/** Poll `check()` up to `tries` times (10ms apart) until it returns true. */
+async function poll(check: () => boolean, tries = 100): Promise<boolean> {
+  for (let i = 0; i < tries && !check(); i++) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  return check();
+}
+
+describe("http-server — GET /v1/events (SSE)", () => {
+  it("returns 401 (json, not SSE) without Authorization", async () => {
+    const { server } = await startWithBroadcaster(stubApi(() => ({ ok: true, data: {} })));
+    const res = await fetch(url(server, "/v1/events"));
+    expect(res.status).toBe(401);
+    expect(res.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(await res.json()).toEqual({ ok: false, error: "unauthorized" });
+  });
+
+  it("wrong method (POST) on /v1/events → 405 method-not-allowed", async () => {
+    const { server } = await startWithBroadcaster(stubApi(() => ({ ok: true, data: {} })));
+    const res = await fetch(url(server, "/v1/events"), { method: "POST", headers: authHeaders() });
+    expect(res.status).toBe(405);
+    expect(await res.json()).toEqual({ ok: false, error: "method-not-allowed" });
+  });
+
+  it("authorized connect sends the retry preamble then a broadcast frame", async () => {
+    const { server, broadcaster } = await startWithBroadcaster(stubApi(() => ({ ok: true, data: {} })));
+    const controller = new AbortController();
+    const res = await fetch(url(server, "/v1/events"), {
+      headers: authHeaders(),
+      signal: controller.signal,
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/event-stream; charset=utf-8");
+    expect(res.headers.get("cache-control")).toBe("no-cache, no-transform");
+    const reader = res.body!.getReader();
+
+    // Preamble arrives on connect.
+    const preamble = await readUntil(reader, (b) => b.includes(": connected"));
+    expect(preamble).toContain("retry: 3000");
+    expect(preamble).toContain(": connected");
+
+    // A broadcast frame becomes an SSE message with the channel + JSON payload.
+    broadcaster.sink(CHANNELS.chat.stream, { streamId: 1, type: "text_delta", text: "hi" });
+    const frame = await readUntil(reader, (b) => b.includes(`event: ${CHANNELS.chat.stream}`));
+    expect(frame).toContain(`event: ${CHANNELS.chat.stream}`);
+    expect(frame).toContain(`data: ${JSON.stringify({ streamId: 1, type: "text_delta", text: "hi" })}`);
+
+    controller.abort();
+    await reader.cancel().catch(() => {});
+  });
+
+  it("fans a single frame out to two concurrent SSE clients", async () => {
+    const { server, broadcaster } = await startWithBroadcaster(stubApi(() => ({ ok: true, data: {} })));
+    const c1 = new AbortController();
+    const c2 = new AbortController();
+    const [res1, res2] = await Promise.all([
+      fetch(url(server, "/v1/events"), { headers: authHeaders(), signal: c1.signal }),
+      fetch(url(server, "/v1/events"), { headers: authHeaders(), signal: c2.signal }),
+    ]);
+    const r1 = res1.body!.getReader();
+    const r2 = res2.body!.getReader();
+    await readUntil(r1, (b) => b.includes(": connected"));
+    await readUntil(r2, (b) => b.includes(": connected"));
+    // Both subscriptions are registered before the fan-out.
+    expect(await poll(() => broadcaster.subscriberCount() === 2)).toBe(true);
+
+    broadcaster.sink(CHANNELS.chat.stream, { streamId: 7, type: "text_delta", text: "yo" });
+    const want = `data: ${JSON.stringify({ streamId: 7, type: "text_delta", text: "yo" })}`;
+    const [f1, f2] = await Promise.all([
+      readUntil(r1, (b) => b.includes(want)),
+      readUntil(r2, (b) => b.includes(want)),
+    ]);
+    expect(f1).toContain(want);
+    expect(f2).toContain(want);
+
+    c1.abort();
+    c2.abort();
+    await r1.cancel().catch(() => {});
+    await r2.cancel().catch(() => {});
+  });
+
+  it("client disconnect unsubscribes from the broadcaster (count → 0)", async () => {
+    const { server, broadcaster } = await startWithBroadcaster(stubApi(() => ({ ok: true, data: {} })));
+    const controller = new AbortController();
+    const res = await fetch(url(server, "/v1/events"), {
+      headers: authHeaders(),
+      signal: controller.signal,
+    });
+    const reader = res.body!.getReader();
+    await readUntil(reader, (b) => b.includes(": connected"));
+    expect(await poll(() => broadcaster.subscriberCount() === 1)).toBe(true);
+
+    controller.abort();
+    await reader.cancel().catch(() => {});
+    expect(await poll(() => broadcaster.subscriberCount() === 0)).toBe(true);
+  });
+
+  it("server.close() with a live SSE client resolves and drops the subscription", async () => {
+    const { server, broadcaster } = await startWithBroadcaster(stubApi(() => ({ ok: true, data: {} })));
+    const controller = new AbortController();
+    const res = await fetch(url(server, "/v1/events"), {
+      headers: authHeaders(),
+      signal: controller.signal,
+    });
+    const reader = res.body!.getReader();
+    await readUntil(reader, (b) => b.includes(": connected"));
+    expect(await poll(() => broadcaster.subscriberCount() === 1)).toBe(true);
+
+    // close() must resolve (no hang) even with a live event-stream socket.
+    await server.close();
+    // Drop from the tracking list so afterEach does not double-close.
+    servers = servers.filter((s) => s !== server);
+    expect(broadcaster.subscriberCount()).toBe(0);
+    controller.abort();
+    await reader.cancel().catch(() => {});
   });
 });
