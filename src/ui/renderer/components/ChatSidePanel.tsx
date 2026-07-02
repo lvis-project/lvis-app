@@ -6,6 +6,8 @@ import {
 } from "./command-actions.js";
 import {
   Check,
+  ChevronDown,
+  ChevronRight,
   Code2,
   Copy,
   ExternalLink,
@@ -13,6 +15,7 @@ import {
   FileCode,
   FileText,
   Folder,
+  FolderPlus,
   Globe,
   Image,
   LayoutGrid,
@@ -613,6 +616,185 @@ function FileTreeRows({
   );
 }
 
+function fileBasename(path: string): string {
+  const segments = pathSegments(path);
+  return segments[segments.length - 1] ?? path;
+}
+
+type WorkspaceDirEntry = { name: string; path: string; type: "file" | "directory" };
+
+/**
+ * Project-folder browser (diagnosis ③). Lists the persisted project roots
+ * (default workspace + Settings `additionalDirectories`) and lets the user add
+ * a new one via the native picker. Folders lazy-expand through
+ * `window.lvis.workspace.listDir` (scope-revalidated in main); clicking a file
+ * routes to `onOpenFile`, which loads its content via the same traversal-guarded
+ * preview IPC used everywhere else.
+ */
+function ProjectRootsBrowser({
+  onOpenFile,
+  selectedPath,
+}: {
+  onOpenFile: (path: string) => void;
+  selectedPath: string | null;
+}) {
+  const { t } = useTranslation();
+  const [roots, setRoots] = useState<Array<{ path: string; isDefault: boolean }>>([]);
+  const [activeRoot, setActiveRoot] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [childrenByPath, setChildrenByPath] = useState<Record<string, WorkspaceDirEntry[]>>({});
+  const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
+
+  const loadDir = useCallback(async (path: string) => {
+    setLoadingPaths((prev) => new Set(prev).add(path));
+    try {
+      const res = await window.lvis.workspace.listDir(path);
+      if (res.ok && res.entries) {
+        setChildrenByPath((prev) => ({ ...prev, [path]: res.entries ?? [] }));
+      }
+    } finally {
+      setLoadingPaths((prev) => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    }
+  }, []);
+
+  const applyRoots = useCallback(
+    (next: Array<{ path: string; isDefault: boolean }>, preferred?: string | null) => {
+      setRoots(next);
+      setActiveRoot((prev) => {
+        const keep = preferred ?? prev;
+        if (keep && next.some((r) => r.path === keep)) return keep;
+        return next[0]?.path ?? null;
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.lvis.workspace.listRoots().then((res) => {
+      if (cancelled || !res.ok || !res.roots) return;
+      applyRoots(res.roots);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [applyRoots]);
+
+  useEffect(() => {
+    if (activeRoot && !childrenByPath[activeRoot] && !loadingPaths.has(activeRoot)) {
+      void loadDir(activeRoot);
+    }
+  }, [activeRoot, childrenByPath, loadingPaths, loadDir]);
+
+  const toggleFolder = (path: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+        if (!childrenByPath[path] && !loadingPaths.has(path)) void loadDir(path);
+      }
+      return next;
+    });
+  };
+
+  const addFolder = async () => {
+    const res = await window.lvis.workspace.pickRoot();
+    if (res.ok && res.roots) applyRoots(res.roots, res.added ?? null);
+  };
+
+  const renderEntries = (path: string, depth: number): ReactElement => (
+    <>
+      {(childrenByPath[path] ?? []).map((entry) => {
+        const isDir = entry.type === "directory";
+        const isOpen = expanded.has(entry.path);
+        const active = !isDir && entry.path === selectedPath;
+        return (
+          <div key={entry.path}>
+            <button
+              type="button"
+              data-testid={isDir ? "chat-side-panel-fs-folder" : "chat-side-panel-fs-file"}
+              className={`flex h-7 w-full min-w-0 items-center gap-1 rounded-md pr-2 text-left text-xs hover:bg-muted/(--opacity-muted) ${
+                active ? "bg-accent text-accent-foreground" : ""
+              }`}
+              style={{ paddingLeft: 8 + depth * 12 }}
+              onClick={() => (isDir ? toggleFolder(entry.path) : onOpenFile(entry.path))}
+            >
+              {isDir ? (
+                isOpen ? (
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                )
+              ) : (
+                <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              )}
+              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+            </button>
+            {isDir && isOpen ? renderEntries(entry.path, depth + 1) : null}
+          </div>
+        );
+      })}
+    </>
+  );
+
+  return (
+    <div className="space-y-1" data-testid="chat-side-panel-project-roots">
+      <div className="flex items-center gap-1">
+        {roots.length > 1 ? (
+          <select
+            aria-label={t("chatPreviewRail.rootSelectLabel")}
+            data-testid="chat-side-panel-root-select"
+            className="h-7 min-w-0 flex-1 rounded-md border bg-background px-1 text-xs"
+            value={activeRoot ?? ""}
+            onChange={(event) => setActiveRoot(event.target.value)}
+          >
+            {roots.map((root) => (
+              <option key={root.path} value={root.path}>
+                {fileBasename(root.path)}
+                {root.isDefault ? ` · ${t("chatPreviewRail.rootDefaultBadge")}` : ""}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-muted-foreground">
+            {activeRoot ? fileBasename(activeRoot) : t("chatPreviewRail.projectRoots")}
+          </span>
+        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              data-testid="chat-side-panel-add-root"
+              aria-label={t("chatPreviewRail.addProjectRoot")}
+              onClick={() => void addFolder()}
+            >
+              <FolderPlus className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t("chatPreviewRail.addProjectRoot")}</TooltipContent>
+        </Tooltip>
+      </div>
+      {activeRoot ? (
+        loadingPaths.has(activeRoot) && !childrenByPath[activeRoot] ? (
+          <div className="px-2 py-1 text-[11px] text-muted-foreground">{t("chatPreviewRail.filePreviewLoading")}</div>
+        ) : (
+          renderEntries(activeRoot, 0)
+        )
+      ) : (
+        <div className="px-2 py-1 text-[11px] text-muted-foreground">{t("chatPreviewRail.projectRootsEmpty")}</div>
+      )}
+    </div>
+  );
+}
+
 function FileBrowserWorkspace({
   api,
   sessionId,
@@ -631,6 +813,9 @@ function FileBrowserWorkspace({
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [treePanePercent, setTreePanePercent] = useState(45);
+  // A concrete filesystem file opened from the project-roots browser. Takes
+  // precedence over the session-artifact selection in the detail pane.
+  const [fsPath, setFsPath] = useState<string | null>(null);
   const splitLayoutRef = useRef<HTMLDivElement | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const tree = useMemo(() => filterFileTree(buildFileTree(files), query), [files, query]);
@@ -644,6 +829,20 @@ function FileBrowserWorkspace({
   );
   const selectedFileTarget = selectedFile?.previewTargetId ? targetById.get(selectedFile.previewTargetId) ?? null : null;
   const hasFiles = filteredFiles.length > 0;
+  const fsTarget = useMemo<Extract<ChatPreviewTarget, { kind: "file" }> | null>(() => {
+    if (!fsPath) return null;
+    return {
+      id: `fs:${fsPath}`,
+      kind: "file",
+      title: fileBasename(fsPath),
+      sourceLabel: "workspace",
+      createdOrder: Number.MAX_SAFE_INTEGER,
+      path: fsPath,
+      // Not in the attach allow-list, so the OS "open" button would be denied —
+      // keep it off; content still loads through the preview IPC.
+      canOpenExternal: false,
+    };
+  }, [fsPath]);
 
   useEffect(() => {
     if (selectedFile?.previewTargetId && selectedFile.previewTargetId !== selectedId) {
@@ -665,29 +864,36 @@ function FileBrowserWorkspace({
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-file-browser">
       <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
-      {!hasFiles ? (
-        <div className="min-h-0 flex-1 overflow-auto p-3" data-testid="chat-side-panel-file-empty">
-          <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>
-        </div>
-      ) : (
       <div
         ref={splitLayoutRef}
         className="grid min-h-0 w-full min-w-0 flex-1 overflow-hidden"
         data-testid="chat-side-panel-file-split-layout"
         style={{ gridTemplateRows: `${treePanePercent}% 0.75rem minmax(0, 1fr)` }}
       >
-        <div className="min-h-0 overflow-auto border-b p-2" data-testid="chat-side-panel-file-tree">
-          {tree.length > 0 ? (
-            <FileTreeRows
-              nodes={tree}
-              selectedFileId={selectedFile?.id}
-              onSelectFile={(file) => {
-                if (file.previewTargetId) onSelect(file.previewTargetId);
-              }}
-            />
-          ) : (
-            <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>
-          )}
+        <div className="min-h-0 space-y-2 overflow-auto border-b p-2" data-testid="chat-side-panel-file-tree">
+          <ProjectRootsBrowser
+            selectedPath={fsPath}
+            onOpenFile={(path) => {
+              setFsPath(path);
+            }}
+          />
+          <div className="border-t pt-1">
+            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t("chatPreviewRail.sessionFilesSection")}
+            </div>
+            {hasFiles && tree.length > 0 ? (
+              <FileTreeRows
+                nodes={tree}
+                selectedFileId={fsPath ? undefined : selectedFile?.id}
+                onSelectFile={(file) => {
+                  setFsPath(null);
+                  if (file.previewTargetId) onSelect(file.previewTargetId);
+                }}
+              />
+            ) : (
+              <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>
+            )}
+          </div>
         </div>
         <div
           role="separator"
@@ -732,7 +938,12 @@ function FileBrowserWorkspace({
           <span className="h-0.5 w-full rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
         </div>
         <div className="min-h-0 overflow-auto p-3">
-          {selectedFileTarget ? (
+          {fsTarget ? (
+            <div className="space-y-3">
+              <DetailHeader target={fsTarget} />
+              <PreviewBody api={api} sessionId={sessionId} target={fsTarget} />
+            </div>
+          ) : selectedFileTarget ? (
             <div className="space-y-3">
               <DetailHeader target={selectedFileTarget} />
               <PreviewBody api={api} sessionId={sessionId} target={selectedFileTarget} />
@@ -753,7 +964,6 @@ function FileBrowserWorkspace({
           )}
         </div>
       </div>
-      )}
     </div>
   );
 }
