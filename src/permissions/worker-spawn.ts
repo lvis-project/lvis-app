@@ -69,6 +69,7 @@ import {
   registerWorkerUnixSocketDir,
   unregisterWorkerUnixSocketDir,
   getDefaultSensitiveReadDenyPaths,
+  getDefaultSensitiveWriteDenyPaths,
 } from "./asrt-sandbox.js";
 import {
   markPluginWorkerWrapped,
@@ -253,6 +254,10 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
   // restated here or the worker regains read of `~/.lvis/secrets`, `~/.ssh`,
   // `~/.aws`, … — the SAME SOT bash/MCP wraps restate (the #1365 floor).
   const denyRead = getDefaultSensitiveReadDenyPaths();
+  // FAIL-CLOSED write floor: per-command `denyWrite` also replaces the shared
+  // boot floor, so restate the centralized persistence-vector deny-list here.
+  // This keeps long-lived plugin workers symmetric with terminal/MCP wraps.
+  const denyWrite = getDefaultSensitiveWriteDenyPaths();
 
   // UDS allow — SHARED config, NOT per-command (the per-command channel is INERT
   // for the seatbelt/seccomp UDS rules in current ASRT; see asrt-sandbox.ts's
@@ -272,7 +277,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     // per-command wrap carries ONLY the filesystem jail (the `--bind`).
     const cmdline = [spec.command, ...args].map((part) => shellQuote(part)).join(" ");
     const { argv, env } = await wrapWorkerCommand(cmdline, {
-      filesystem: { allowWrite, allowRead, denyRead },
+      filesystem: { allowWrite, allowRead, denyRead, denyWrite },
     });
     // The wrap incremented ASRT's per-command state (Linux activeSandboxCount,
     // proxy ref); from here a failure MUST decrement it (see the catch).

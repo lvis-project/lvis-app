@@ -53,6 +53,7 @@ import {
   wrapWorkerCommand,
   cleanupAsrtSandboxAfterCommand,
   getDefaultSensitiveReadDenyPaths,
+  getDefaultSensitiveWriteDenyPaths,
 } from "../permissions/asrt-sandbox.js";
 import { buildSandboxedChildEnv } from "../tools/safe-env.js";
 import {
@@ -1180,6 +1181,11 @@ class StdioTransport implements McpTransport {
     // No userDataDir arg here — mcp-client does not import electron. The
     // fallback per-platform derivation (XDG-aware on Linux) provides coverage.
     const denyRead = getDefaultSensitiveReadDenyPaths();
+    // denyWrite is likewise per-command and replaces the shared boot floor.
+    // Restate the centralized persistence-vector floor so an authorized MCP
+    // sandboxRoot cannot write shell rc files, credential dirs, LaunchAgents, or
+    // cron-like re-exec hooks if a future config broadens allowWrite.
+    const denyWrite = getDefaultSensitiveWriteDenyPaths();
 
     // Assemble the command string DEFENSIVELY: shell-quote the resolved binary
     // and every arg so a path with spaces / metacharacters cannot mis-split or
@@ -1215,7 +1221,7 @@ class StdioTransport implements McpTransport {
     }
 
     const { argv, env } = await wrapWorkerCommand(cmdline, {
-      filesystem: { allowWrite, allowRead, denyRead },
+      filesystem: { allowWrite, allowRead, denyRead, denyWrite },
       ...(binShell !== undefined ? { binShell } : {}),
     });
 
