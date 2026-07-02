@@ -1,7 +1,8 @@
 /**
  * Workspace file-browser domain IPC handlers.
  * Covers: lvis:workspace:pick-root, lvis:workspace:list-roots,
- *         lvis:workspace:list-dir
+ *         lvis:workspace:list-dir, lvis:workspace:remove-root,
+ *         lvis:workspace:reveal, lvis:workspace:add-root-by-path
  *
  * Renderer reaches these via window.lvis.workspace.*.
  *
@@ -22,7 +23,7 @@
 import { dialog, ipcMain } from "electron";
 import { t } from "../../i18n/index.js";
 import { promises as fs } from "node:fs";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { randomBytes } from "node:crypto";
 import { validateSender, auditUnauthorized } from "../gated.js";
 import { redactFsPath } from "../../audit/dlp-filter.js";
@@ -32,6 +33,7 @@ import { assertReadableFilePath } from "../../tools/file-read-core.js";
 import {
   readPermissionSettings,
   addAllowedDirectoryPersist,
+  removeAllowedDirectoryPersist,
 } from "../../permissions/permission-settings-store.js";
 import {
   buildRuntimeAllowedDirectories,
@@ -121,6 +123,31 @@ export interface WorkspaceListDirResult {
   entries?: WorkspaceDirEntry[];
   truncated?: boolean;
   error?: "unauthorized" | "path-not-allowed" | "sensitive-path" | "not-a-dir" | "read-failed";
+  message?: string;
+}
+
+export interface WorkspaceRemoveRootResult {
+  ok: boolean;
+  removed?: string;
+  roots?: WorkspaceRoot[];
+  error?: "unauthorized" | "invalid-path" | "not-an-additional-root" | "cannot-remove-default";
+  message?: string;
+}
+
+export interface WorkspaceRevealResult {
+  ok: boolean;
+  error?: "unauthorized" | "path-not-allowed" | "sensitive-path" | "not-found" | "reveal-failed";
+  message?: string;
+}
+
+export interface WorkspaceAddRootByPathResult {
+  ok: boolean;
+  requiresAcknowledgement?: boolean;
+  pendingPath?: string;
+  ackToken?: string;
+  warnings?: string[];
+  roots?: WorkspaceRoot[];
+  error?: "unauthorized" | "invalid-path" | "not-a-dir" | string;
   message?: string;
 }
 
@@ -318,6 +345,52 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
           message: err instanceof Error ? err.message : String(err),
         };
       }
+    },
+  );
+
+  /**
+   * Remove a project root from `permissions.additionalDirectories` (the
+   * executor's Layer-1 read allow-list SOT). Security: a removal can ONLY target
+   * a path already present in that list — never an arbitrary renderer-supplied
+   * path — and the default root (`process.cwd()`, which is not stored in the
+   * list) can never be removed. Matching is canonical/case-folded so a trailing
+   * slash or case variant of a stored path still resolves to its entry. The
+   * shrink is audited, mirroring the widening audit in persistValidatedRoot: the
+   * read scope narrowed, so the WRITE is recorded.
+   */
+  ipcMain.handle(
+    CHANNELS.workspace.removeRoot,
+    async (e, rawPath: string): Promise<WorkspaceRemoveRootResult> => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.workspace.removeRoot, e);
+        return { ok: false, error: "unauthorized", message: "sender frame not authorized" };
+      }
+      if (typeof rawPath !== "string" || rawPath.length === 0) {
+        return { ok: false, error: "invalid-path", message: "path must be a non-empty string" };
+      }
+      const targetCanon = caseFoldForMatch(canonicalizePathForMatch(resolvePath(rawPath)));
+      const defaultCanon = caseFoldForMatch(canonicalizePathForMatch(process.cwd()));
+      if (targetCanon === defaultCanon) {
+        return { ok: false, error: "cannot-remove-default", message: "default root cannot be removed" };
+      }
+      const additional = readPermissionSettings().permissions.additionalDirectories;
+      const match = additional.find(
+        (d) => caseFoldForMatch(canonicalizePathForMatch(d)) === targetCanon,
+      );
+      if (!match) {
+        return { ok: false, error: "not-an-additional-root", message: "path is not a removable project root" };
+      }
+      await removeAllowedDirectoryPersist(match);
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "workspace-remove-root",
+        type: "info",
+        input: JSON.stringify({
+          channel: CHANNELS.workspace.removeRoot,
+          path: redactFsPath(match),
+        }),
+      });
+      return { ok: true, removed: match, roots: computeRoots() };
     },
   );
 }
