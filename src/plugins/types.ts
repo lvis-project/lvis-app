@@ -1043,7 +1043,7 @@ export interface PluginHostApi {
    * Returns a handle whose `socketPath` is the host-side path to connect to
    * (undici `Agent({ connect: { socketPath } })` / `http.request({ socketPath })`)
    * — or `null` when the worker was plain-spawned (gate OFF, or Windows where
-   * ASRT is network-only), signalling the caller to use the legacy TCP channel.
+   * this UDS control-channel primitive falls back to legacy TCP).
    *
    * OPTIONAL: undefined on host builds that predate this primitive — guard with
    * `typeof hostApi.spawnWorker === "function"`, mirroring `resolveApiKey?`.

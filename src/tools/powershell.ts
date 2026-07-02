@@ -188,8 +188,9 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
     // §691: ASRT (Anthropic sandbox-runtime) adoption for the PowerShell spawn
     // path — parity with bash.ts. The sandbox is gated once at boot
     // (`initializeAsrtSandbox`); `isAsrtSandboxActive()` reflects that decision
-    // with no runtime re-evaluation. On Windows the boot path fails closed, so
-    // this stays false there and pwsh falls through to the plain spawn.
+    // with no runtime re-evaluation. On Windows this becomes true after the
+    // one-time srt-win setup is ready; before then boot degrades and pwsh falls
+    // through to the plain spawn.
     //
     // When the gate is OFF (the DEFAULT), this is skipped and pwsh runs via the
     // unchanged `spawnPowerShell` path.
@@ -449,8 +450,8 @@ function posixSingleQuote(arg: string): string {
  *
  * Filesystem jail mirrors bash.ts: `allowWrite` = the derived write-jail, and
  * the read-jail HOME-leak fix denies `$HOME` then re-allows cwd + write paths.
- * (On win32 ASRT 0.0.59 has no FS jail — the filesystem slice is harmlessly
- * ignored; network is the only Windows confinement.)
+ * On win32 ASRT 0.0.63+ applies the filesystem slice through its dedicated
+ * `srt-sandbox` user ACL backend; process isolation remains unavailable.
  *
  * @internal — called only when the ASRT sandbox is active (user opt-in).
  */

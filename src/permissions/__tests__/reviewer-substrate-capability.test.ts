@@ -189,10 +189,10 @@ describe("substrate-aware capability — end-to-end reviewer prompt + downgrade 
   });
 });
 
-describe("network-only asrt — per-category relaxation gating (Windows posture, dormant)", () => {
+describe("synthetic network-only asrt — per-category relaxation gating", () => {
   // A synthetic NETWORK-ONLY ASRT capability — confines egress but provides no
-  // filesystem jail. No producer emits this yet (Windows ASRT lands in a later
-  // PR), so these tests exercise the DORMANT category-gating path directly.
+  // filesystem jail. Current Windows ASRT is fs+network partial; this synthetic
+  // case remains as a regression guard for any future network-only substrate.
   //
   // Composition contract (design §401/§512): final = max(rule, llm); the LLM is
   // escalate-only and can NEVER pull a verdict below the rule. The per-category

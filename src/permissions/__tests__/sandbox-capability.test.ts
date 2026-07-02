@@ -4,6 +4,8 @@ import {
   __resetActiveSandboxCapabilityForTest,
   detectSandboxCapability,
   formatSandboxCapabilityForPrompt,
+  isActiveSandboxFilesystemContained,
+  isActiveSandboxFilesystemContainedForPluginEffects,
   isWeakSandbox,
   sandboxRelaxesCategory,
   setActiveSandboxCapability,
@@ -117,6 +119,19 @@ describe("sandbox-capability — setActiveSandboxCapability publish", () => {
     expect(cap.kind).toBe("none");
     expect(cap.confidence).toBe("verified");
     expect(isWeakSandbox(cap)).toBe(true);
+  });
+
+  it("keeps Windows host-shell filesystem containment separate from plugin worker effect containment", () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
+      confines: { filesystem: true, process: false, network: true },
+    });
+
+    expect(isActiveSandboxFilesystemContained()).toBe(true);
+    expect(isActiveSandboxFilesystemContainedForPluginEffects()).toBe(false);
   });
 });
 
@@ -239,7 +254,7 @@ describe("sandbox-capability — SandboxKind union members", () => {
 
 describe("sandboxRelaxesCategory — per-category, confines-gated relaxation", () => {
   const ALL_CATEGORIES: ToolCategory[] = ["read", "write", "shell", "network", "meta"];
-  const FS_CATEGORIES: ToolCategory[] = ["read", "write", "shell", "meta"];
+  const FS_CATEGORIES: ToolCategory[] = ["read", "write", "meta"];
 
   it("full-confine asrt relaxes ALL 5 categories (mac/linux dormancy — identical to isWeakSandbox=false)", () => {
     const fullConfine: SandboxCapability = {
@@ -257,7 +272,7 @@ describe("sandboxRelaxesCategory — per-category, confines-gated relaxation", (
     }
   });
 
-  it("NETWORK-ONLY asrt relaxes 'network' but NOT write/shell/read/meta (Windows posture)", () => {
+  it("synthetic network-only asrt relaxes network but not filesystem/process categories", () => {
     const networkOnly: SandboxCapability = {
       kind: "asrt",
       confidence: "verified",
@@ -269,6 +284,22 @@ describe("sandboxRelaxesCategory — per-category, confines-gated relaxation", (
     for (const category of FS_CATEGORIES) {
       expect(sandboxRelaxesCategory(networkOnly, category)).toBe(false);
     }
+    expect(sandboxRelaxesCategory(networkOnly, "shell")).toBe(false);
+  });
+
+  it("Windows ASRT fs+network partial relaxes fs/network categories but not shell", () => {
+    const windowsPartial: SandboxCapability = {
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
+      confines: { filesystem: true, process: false, network: true },
+    };
+    expect(sandboxRelaxesCategory(windowsPartial, "network")).toBe(true);
+    for (const category of FS_CATEGORIES) {
+      expect(sandboxRelaxesCategory(windowsPartial, category)).toBe(true);
+    }
+    expect(sandboxRelaxesCategory(windowsPartial, "shell")).toBe(false);
   });
 
   it("none capability relaxes NOTHING", () => {
@@ -330,17 +361,17 @@ describe("sandboxRelaxesCategory — per-category, confines-gated relaxation", (
 // ─── formatSandboxCapabilityForPrompt — confines surfacing ───────────────────
 
 describe("formatSandboxCapabilityForPrompt — per-dimension confines", () => {
-  it("surfaces confines[net/fs/proc] for a network-only asrt so the LLM sees honest confinement", () => {
-    const networkOnly: SandboxCapability = {
+  it("surfaces confines[net/fs/proc] for Windows partial ASRT so the LLM sees honest confinement", () => {
+    const windowsPartial: SandboxCapability = {
       kind: "asrt",
       confidence: "verified",
       platform: "win32",
-      reason: "ASRT (srt-win) active — network egress contained, no fs jail",
-      confines: { filesystem: false, process: false, network: true },
+      reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
+      confines: { filesystem: true, process: false, network: true },
     };
-    const result = formatSandboxCapabilityForPrompt(networkOnly);
+    const result = formatSandboxCapabilityForPrompt(windowsPartial);
     expect(result).toContain("executionSandbox=asrt (verified, win32)");
-    expect(result).toContain("confines[net:✓ fs:✗ proc:✗]");
+    expect(result).toContain("confines[net:✓ fs:✓ proc:✗]");
   });
 
   it("surfaces all-✓ confines for a full-confine asrt", () => {

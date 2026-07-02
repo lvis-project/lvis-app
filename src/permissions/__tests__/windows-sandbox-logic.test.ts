@@ -1,12 +1,12 @@
 /**
  * Windows ASRT sandbox — platform LOGIC tests.
  *
- * These prove the Windows network-only posture WITHOUT a real Windows host:
+ * These prove the Windows partial-confinement posture WITHOUT a real Windows host:
  * `process.platform` is forced to 'win32' and the pure config/capability/env
  * logic is asserted directly. What is NOT covered here (and cannot be on
- * darwin/CI): the live srt-win install, UAC elevation, the re-login dance, and
+ * darwin/CI): the live srt-win install, UAC elevation, and
  * actual WFP egress enforcement — those need a real Windows box (see the PR
- * body's "not verifiable" section). The install/relogin UX is a separate PR.
+ * body's "not verifiable" section).
  *
  * Added to the CI `windows-permission-tests` job (ci.yml, windows-latest) AND
  * runs on darwin/linux too — the platform is faked, so the logic is the same.
@@ -16,7 +16,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildSandboxConfig,
   DEFAULT_WINDOWS_PROXY_PORT_RANGE,
-  DEFAULT_WINDOWS_GROUP_NAME,
 } from "../asrt-sandbox.js";
 import {
   sandboxRelaxesCategory,
@@ -25,11 +24,10 @@ import {
 } from "../sandbox-capability.js";
 import { sandboxConfinementForPlatform } from "../../shared/sandbox-capability-info.js";
 import { buildSandboxedChildEnv } from "../../tools/safe-env.js";
-// Real ASRT 0.0.59 surfaces — pin our mirrored constants + the binShell adapter
+// Real ASRT surfaces — pin our mirrored constants + the binShell adapter
 // against the package so upstream drift fails CI (not silently desyncs).
 import {
   DEFAULT_WINDOWS_PROXY_PORT_RANGE as ASRT_PROXY_PORT_RANGE,
-  DEFAULT_WINDOWS_GROUP_NAME as ASRT_GROUP_NAME,
 } from "@anthropic-ai/sandbox-runtime";
 import { parseWindowsBinShell } from "@anthropic-ai/sandbox-runtime/dist/sandbox/windows-sandbox-utils.js";
 
@@ -45,7 +43,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("windows sandbox — mirrored constants pinned against ASRT 0.0.59", () => {
+describe("windows sandbox — mirrored constants pinned against ASRT", () => {
   it("DEFAULT_WINDOWS_PROXY_PORT_RANGE mirrors ASRT's exported value", () => {
     expect(DEFAULT_WINDOWS_PROXY_PORT_RANGE).toEqual([60080, 60089]);
     // Drift guard: if ASRT changes its default, this fails so the proxy bind
@@ -55,19 +53,15 @@ describe("windows sandbox — mirrored constants pinned against ASRT 0.0.59", ()
     ]);
   });
 
-  it("DEFAULT_WINDOWS_GROUP_NAME mirrors ASRT's exported value", () => {
-    expect(DEFAULT_WINDOWS_GROUP_NAME).toBe("sandbox-runtime-net");
-    expect(DEFAULT_WINDOWS_GROUP_NAME).toBe(ASRT_GROUP_NAME);
-  });
 });
 
 describe("windows sandbox — buildSandboxConfig emits the windows section on win32", () => {
-  it("emits windows.proxyPortRange (default range) + groupName on win32", () => {
+  it("emits windows.proxyPortRange (default range) without legacy groupName on win32", () => {
     forcePlatform("win32");
     const config = buildSandboxConfig({ allowedDomains: [], strictAllowlist: true });
     expect(config.windows).toBeDefined();
     expect(config.windows?.proxyPortRange).toEqual([60080, 60089]);
-    expect(config.windows?.groupName).toBe("sandbox-runtime-net");
+    expect((config.windows as Record<string, unknown>).groupName).toBeUndefined();
   });
 
   it("honors a trusted non-default proxyPortRange on win32 (enterprise install)", () => {
@@ -88,10 +82,10 @@ describe("windows sandbox — buildSandboxConfig emits the windows section on wi
   });
 });
 
-describe("windows sandbox — capability is NETWORK-ONLY (partial confine)", () => {
-  it("sandboxConfinementForPlatform(win32, full) is network-only (fs+proc false)", () => {
+describe("windows sandbox — capability is fs+network partial confinement", () => {
+  it("sandboxConfinementForPlatform(win32, partial) confines fs+network but not process", () => {
     expect(sandboxConfinementForPlatform("win32", "full")).toEqual({
-      filesystem: false,
+      filesystem: true,
       process: false,
       network: true,
     });
@@ -110,17 +104,18 @@ describe("windows sandbox — capability is NETWORK-ONLY (partial confine)", () 
     });
   });
 
-  it("the published win32 capability declares confines.filesystem === false", () => {
-    // The shape boot.ts publishes on win32 (network-only ASRT).
+  it("the published win32 capability declares process confinement false", () => {
+    // The shape boot.ts publishes on win32 (partial ASRT).
     const winCap: SandboxCapability = {
       kind: "asrt",
       confidence: "verified",
       platform: "win32",
-      reason: "ASRT (srt-win) active — network egress contained, NO filesystem jail",
+      reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
       confines: sandboxConfinementForPlatform("win32", "full"),
     };
-    expect(winCap.confines?.filesystem).toBe(false);
+    expect(winCap.confines?.filesystem).toBe(true);
     expect(winCap.confines?.network).toBe(true);
+    expect(winCap.confines?.process).toBe(false);
     // Still a verified, non-none ASRT capability → not "weak" by the binary
     // gate; the per-category gate is what makes it partial.
     expect(isWeakSandbox(winCap)).toBe(false);
@@ -132,18 +127,19 @@ describe("windows sandbox — PR1 sandboxRelaxesCategory now LIVE for win32", ()
     kind: "asrt",
     confidence: "verified",
     platform: "win32",
-    reason: "ASRT (srt-win) active — network egress contained, NO filesystem jail",
+    reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
     confines: sandboxConfinementForPlatform("win32", "full"),
   });
 
-  it("RELAXES the network category (egress IS jailed on Windows)", () => {
+  it("RELAXES network and filesystem-bearing categories covered by Windows ASRT", () => {
     expect(sandboxRelaxesCategory(winCap(), "network")).toBe(true);
+    for (const category of ["write", "read", "meta"] as const) {
+      expect(sandboxRelaxesCategory(winCap(), category)).toBe(true);
+    }
   });
 
-  it("does NOT relax write/shell/read/meta (no filesystem jail on Windows)", () => {
-    for (const category of ["write", "shell", "read", "meta"] as const) {
-      expect(sandboxRelaxesCategory(winCap(), category)).toBe(false);
-    }
+  it("does NOT relax shell because Windows ASRT still has no process isolation", () => {
+    expect(sandboxRelaxesCategory(winCap(), "shell")).toBe(false);
   });
 
   it("mac/linux full ASRT still relaxes ALL categories (dormancy preserved)", () => {

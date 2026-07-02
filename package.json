@@ -71,7 +71,7 @@
     "@ai-sdk/google-vertex": "^5.0.0",
     "@ai-sdk/openai": "^4.0.0",
     "@ai-sdk/openai-compatible": "~3.0.0",
-    "@anthropic-ai/sandbox-runtime": "0.0.59",
+    "@anthropic-ai/sandbox-runtime": "0.0.63",
     "@lvis/plugin-sdk": "github:lvis-project/lvis-plugin-sdk#v5.20.0",
     "adm-zip": "^0.5.16",
     "ai": "~7.0.2",
