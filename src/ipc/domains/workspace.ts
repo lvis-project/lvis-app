@@ -173,11 +173,12 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
         auditUnauthorized(auditLogger, CHANNELS.workspace.pickRoot, e);
         return { ok: false, error: "unauthorized" };
       }
-      // Phase 2 — the renderer confirmed the adjacency warnings for a path it was
-      // handed in phase 1. Persist WITHOUT reopening the dialog, but still through
-      // the SAME gate: a hostile renderer passing a Layer 0 / root path is still
-      // hard-refused (acknowledgement only clears adjacency warnings, never a hard
-      // deny — identical to `/permission dir allow … --ack-warnings`).
+      // Acknowledgement pass — the renderer confirmed the adjacency warnings for a
+      // path it was handed on the initial pick. Persist WITHOUT reopening the
+      // dialog, but still through the SAME gate: a hostile renderer passing a
+      // Layer 0 / root path is still hard-refused (acknowledgement only clears
+      // adjacency warnings, never a hard deny — identical to
+      // `/permission dir allow … --ack-warnings`).
       const acknowledgePath =
         typeof opts?.acknowledgePath === "string" && opts.acknowledgePath.length > 0
           ? opts.acknowledgePath
@@ -186,7 +187,7 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
         return persistPickedRoot(acknowledgePath, true);
       }
 
-      // Phase 1 — the native folder picker IS the user gesture.
+      // Initial pick — the native folder picker IS the user gesture.
       const win = getMainWindow();
       const { filePaths, canceled } = win
         ? await dialog.showOpenDialog(win, {
