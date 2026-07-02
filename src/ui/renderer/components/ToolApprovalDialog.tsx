@@ -812,15 +812,14 @@ export function approvalReviewRows(
       sandboxValue = t("toolApprovalDialog.sandboxFsOnly");
     } else if (isWeakSandbox(cap)) {
       sandboxValue = t("toolApprovalDialog.sandboxNone");
-    } else if (cap.confines && !cap.confines.filesystem) {
-      // PR2 finding b — confines honesty. `isWeakSandbox` is confines-BLIND: it
-      // reports "strong" for ANY verified non-none ASRT, which on Windows
-      // (network-only srt-win, confines.filesystem === false) wrongly printed a
-      // blanket "OS 격리 활성" for a write/shell tool that has NO FS jail. When
-      // the capability declares a non-full confinement, show the per-dimension
-      // breakdown so the label matches what is actually contained. Display-only:
-      // the actual relaxation control (sandboxRelaxesCategory, per-category) is
-      // untouched and lives in the reviewer.
+    } else if (
+      cap.confines &&
+      !(cap.confines.filesystem && cap.confines.process && cap.confines.network)
+    ) {
+      // Confines honesty. `isWeakSandbox` is confines-BLIND: it reports
+      // "strong" for ANY verified non-none ASRT, but Windows srt-win is partial
+      // (filesystem + network, no process isolation). Show the per-dimension
+      // breakdown whenever the active substrate is not full.
       sandboxValue = t("toolApprovalDialog.sandboxNetworkOnly", {
         net: cap.confines.network ? "✓" : "✗",
         fs: cap.confines.filesystem ? "✓" : "✗",

@@ -1,7 +1,7 @@
 /**
  * Permission policy Phase 3 — PermissionManager.dispatchReviewer + setReviewer wiring.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +16,12 @@ import {
   type RiskVerdict,
 } from "../reviewer/risk-classifier.js";
 import { BashTool } from "../../tools/bash.js";
+import {
+  __resetActiveSandboxCapabilityForTest,
+  __resetWrappedPluginWorkersForTest,
+  markPluginWorkerWrapped,
+  setActiveSandboxCapability,
+} from "../sandbox-capability.js";
 
 function tmpFile(name: string): string {
   const dir = mkdtempSync(join(tmpdir(), "lvis-pm-reviewer-"));
@@ -47,6 +53,11 @@ describe("PermissionManager.dispatchReviewer", () => {
 
   beforeEach(() => {
     ({ pm, cache, queue } = makeManager());
+  });
+
+  afterEach(() => {
+    __resetActiveSandboxCapabilityForTest();
+    __resetWrappedPluginWorkersForTest();
   });
 
   it("hasReviewer = false until setReviewer called", () => {
@@ -262,6 +273,56 @@ describe("PermissionManager.dispatchReviewer", () => {
     expect(second.cacheReason).toBe("miss-not-found");
     expect(firstAgain.cacheReason).toBe("hit");
     expect(classifier.classify).toHaveBeenCalledTimes(2);
+  });
+
+  it("threads plugin worker identity into reviewer sandbox capability and cache identity", async () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "ASRT active for plugin workers",
+      confines: { filesystem: true, process: true, network: true },
+    });
+    markPluginWorkerWrapped("plugin-a", "main");
+    markPluginWorkerWrapped("plugin-b", "main");
+    const seenReasons: string[] = [];
+    const classifier: RiskClassifier = {
+      classify: vi.fn((ctx: ToolInvocationContext): RiskVerdict => {
+        seenReasons.push(ctx.sandboxCapability.reason);
+        return { level: "low", reason: "classifier called" };
+      }),
+    };
+    pm.setReviewer({ classifier, cache, deferredQueue: queue });
+    const base = {
+      source: "plugin" as const,
+      category: "network" as const,
+      pathFields: [],
+      finalInput: { endpoint: "https://api.example.com/search" },
+      allowedDirectories: [],
+      sensitivePathsAdjacent: [],
+      trustOrigin: "llm-tool-arg" as const,
+      workerId: "main",
+    };
+
+    const first = await pm.dispatchReviewer("plugin_fetch", {
+      ...base,
+      pluginId: "plugin-a",
+    });
+    const second = await pm.dispatchReviewer("plugin_fetch", {
+      ...base,
+      pluginId: "plugin-b",
+    });
+    const firstAgain = await pm.dispatchReviewer("plugin_fetch", {
+      ...base,
+      pluginId: "plugin-a",
+    });
+
+    expect(first.cacheReason).toBe("miss-not-found");
+    expect(second.cacheReason).toBe("miss-not-found");
+    expect(firstAgain.cacheReason).toBe("hit");
+    expect(classifier.classify).toHaveBeenCalledTimes(2);
+    expect(seenReasons[0]).toContain("plugin worker 'plugin-a/main' ASRT-wrapped");
+    expect(seenReasons[1]).toContain("plugin worker 'plugin-b/main' ASRT-wrapped");
   });
 
   it("does not reuse reversible shell reviewer cache for destructive shell commands", async () => {

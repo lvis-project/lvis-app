@@ -9,7 +9,7 @@
  */
 import { ConversationHistory } from "./conversation-history.js";
 import { ToolExecutor } from "../tools/executor.js";
-import { isActiveSandboxFilesystemContained } from "../permissions/sandbox-capability.js";
+import { isActiveSandboxFilesystemContainedForPluginEffects } from "../permissions/sandbox-capability.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import type { LifecycleHookEvent } from "../hooks/script-hook-types.js";
 import {
@@ -222,14 +222,12 @@ export class ConversationLoop {
       deps.scriptHookManager,
       deps.auditLogger,
       () => deps.settingsService.get("features")?.hostClassifiesRisk ?? false,
-      // Couple the foreground plugin read-relaxation to the active OS sandbox
-      // FILESYSTEM-CONTAINING the host: the relaxation relies on the
-      // effect-boundary, which only contains the off-hostApi `node:fs` WRITE
-      // residual when the sandbox filesystem-contains. On a degraded,
-      // sandbox-off, or Windows network-only host (`confines.filesystem ===
-      // false`) this is false → the relaxation does not fire and the pre-exec
-      // ask stands (see ToolExecutor.sandboxFsContainedProvider).
-      isActiveSandboxFilesystemContained,
+      // Couple the foreground plugin read-relaxation to the plugin worker
+      // effect-boundary actually filesystem-containing off-hostApi residuals.
+      // Windows host shells are ASRT-wrapped after setup, but plugin workers
+      // are still unwrapped there, so the provider intentionally excludes
+      // Windows until that substrate is upgraded.
+      isActiveSandboxFilesystemContainedForPluginEffects,
     );
     this.auditLogger = deps.auditLogger ?? new AuditLogger();
     this.refreshProvider();

@@ -108,10 +108,12 @@ export async function dispatchReviewerForHeadless(
       ...(sandboxAttestation.ownerPluginSandboxRoot !== undefined
         ? { ownerPluginSandboxRoot: sandboxAttestation.ownerPluginSandboxRoot }
         : {}),
-      // worker-egress PR1: thread the MCP server id so the reviewer reports the
-      // genuine asrt capability for a wrapped external MCP worker (and the
-      // verdict cache scopes by the correct substrate).
+      // Thread worker identity so the reviewer reports the genuine asrt
+      // capability for wrapped external workers and scopes the verdict cache by
+      // the correct substrate.
       ...(meta.mcpServerId !== undefined ? { mcpServerId: meta.mcpServerId } : {}),
+      ...(meta.pluginId !== undefined ? { pluginId: meta.pluginId } : {}),
+      ...(meta.workerId !== undefined ? { workerId: meta.workerId } : {}),
     },
     {
       allowedPluginIds: context.allowedPluginIds
@@ -230,8 +232,10 @@ export async function dispatchReviewerForInteractiveAuto(
         ...(sandboxAttestation.ownerPluginSandboxRoot !== undefined
           ? { ownerPluginSandboxRoot: sandboxAttestation.ownerPluginSandboxRoot }
           : {}),
-        // worker-egress PR1: thread the MCP server id (see headless dispatch).
+        // Thread MCP/plugin worker identity (see headless dispatch).
         ...(meta.mcpServerId !== undefined ? { mcpServerId: meta.mcpServerId } : {}),
+        ...(meta.pluginId !== undefined ? { pluginId: meta.pluginId } : {}),
+        ...(meta.workerId !== undefined ? { workerId: meta.workerId } : {}),
       },
       {
         allowedPluginIds: context.allowedPluginIds

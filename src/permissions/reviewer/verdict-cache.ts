@@ -7,7 +7,9 @@
  * Storage: `~/.lvis/permissions/reviewer-cache.jsonl` (append-only,
  * per-feature namespace per CLAUDE.md storage rule).
  *
- * Cache key: sha256(toolName + source + category + trustOrigin + approvalCacheKey + canonicalInputIdentity + conversationContext).
+ * Cache key: sha256(toolName + source + category + trustOrigin +
+ * approvalCacheKey + canonicalInputIdentity + conversationContext +
+ * toolPolicyIdentity).
  *   - canonicalInputShape replaces every value with its type-name and
  *     deep-sorts keys for categories whose deterministic reviewer rules
  *     do not inspect literal values.
@@ -66,6 +68,12 @@ export interface VerdictCacheLookupKey {
   conversationContext?: {
     recentUserMessage?: string;
   };
+  pathFields?: readonly string[];
+  writesToOwnSandbox?: boolean;
+  ownerPluginSandboxRoot?: string;
+  mcpServerId?: string;
+  pluginId?: string;
+  workerId?: string;
   finalInput: Record<string, unknown>;
 }
 
@@ -133,7 +141,15 @@ export function computeCacheKey(lookup: VerdictCacheLookupKey): string {
   const conversationContext = canonicalInputValue({
     conversationContext: lookup.conversationContext ?? null,
   });
-  return sha256(`${lookup.toolName}\x1f${lookup.source}\x1f${lookup.category}\x1f${lookup.trustOrigin}\x1f${lookup.approvalCacheKey ?? ""}\x1f${shape}\x1f${conversationContext}`);
+  const toolPolicyIdentity = canonicalInputValue({
+    pathFields: lookup.pathFields ?? null,
+    writesToOwnSandbox: lookup.writesToOwnSandbox ?? null,
+    ownerPluginSandboxRoot: lookup.ownerPluginSandboxRoot ?? null,
+    mcpServerId: lookup.mcpServerId ?? null,
+    pluginId: lookup.pluginId ?? null,
+    workerId: lookup.workerId ?? null,
+  });
+  return sha256(`${lookup.toolName}\x1f${lookup.source}\x1f${lookup.category}\x1f${lookup.trustOrigin}\x1f${lookup.approvalCacheKey ?? ""}\x1f${shape}\x1f${conversationContext}\x1f${toolPolicyIdentity}`);
 }
 
 function isValueSensitiveCategory(category: ToolCategory): boolean {

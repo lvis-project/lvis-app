@@ -6,7 +6,7 @@
  * dev Electron launcher. It catches production-only dependency pruning errors
  * such as ERR_MODULE_NOT_FOUND before installers are uploaded.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -166,6 +166,32 @@ function findPackagedExecutable(target, releaseDir) {
     basename(file).toLowerCase() === "lvis.exe"
   );
   return pickBest(matches, [`win-unpacked${sep}LVIS.exe`]);
+}
+
+function resourcesDirForExecutable(target, executable) {
+  if (target === "mac") {
+    return join(dirname(dirname(executable)), "Resources");
+  }
+  return join(dirname(executable), "resources");
+}
+
+function assertPackagedFootprint(target, executable) {
+  const asarPath = join(resourcesDirForExecutable(target, executable), "app.asar");
+  if (!existsSync(asarPath)) {
+    throw new Error(`packaged app.asar missing: ${asarPath}`);
+  }
+
+  const script = resolve(root, "scripts", "check-package-footprint.mjs");
+  const result = spawnSync(process.execPath, [script, asarPath], {
+    cwd: root,
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (result.status !== 0) {
+    const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+    throw new Error(`packaged footprint check failed for ${asarPath}:\n${output}`);
+  }
+  process.stdout.write(`[packaged-smoke] app.asar footprint passed: ${asarPath}\n`);
 }
 
 function smokeArgs(platform, env) {
@@ -381,6 +407,7 @@ async function main() {
     throw new Error(`could not find packaged executable for target=${target} under ${releaseDir}`);
   }
 
+  assertPackagedFootprint(target, executable);
   await launchSmoke(executable, timeoutMs);
   if (target === "win") {
     await runWindowsInstallerSmoke(releaseDir, timeoutMs);

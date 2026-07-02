@@ -10,13 +10,11 @@
  *     strict-union allow-list, so egress IS contained (no longer the old
  *     sandbox-exec fake floor that left loopback/IPv6/DNS open).
  *   - Linux (bwrap via ASRT): filesystem + process + network.
- *   - Windows (srt-win via ASRT): NETWORK egress only. srt-win enforces egress
- *     with a WFP filter set + a restricted-token job, routing the child through
- *     the loopback proxy — but it provides NO filesystem and NO process
- *     isolation (ASRT 0.0.59 has no Windows FS jail). This is a PARTIAL-confine
- *     substrate: honest about what it does and does NOT contain. The reviewer's
- *     per-category relaxation (sandboxRelaxesCategory) relaxes `network` but NOT
- *     filesystem-bearing categories on Windows precisely because of this.
+ *   - Windows (srt-win via ASRT): filesystem ACL + network egress confinement.
+ *     ASRT provisions a dedicated `srt-sandbox` user, applies filesystem rules
+ *     through its Windows ACL backend, and enforces egress with WFP + the
+ *     loopback proxy. Windows still has NO process isolation, so this remains a
+ *     PARTIAL-confine substrate.
  */
 
 /** What the sandbox confines, by platform. `network` is false where egress is not contained. */
@@ -29,29 +27,33 @@ export interface SandboxConfinement {
 /**
  * Windows srt-win install readiness, returned to the renderer's consent panel.
  *
- * `ready` is the single boolean the UI gates on: the discriminator group is
- * enabled in the current token (`groupState === "ready"`) AND the WFP filter set
- * is installed (`wfpState === "installed"`). Until both hold, the sandbox cannot
- * confine egress and boot keeps `isAsrtSandboxActive()` false.
+ * `ready` is the single boolean the UI gates on: ASRT's dedicated
+ * `srt-sandbox` user is provisioned (`userState === "ready"`) AND the WFP
+ * filter set is installed (`wfpState === "installed"`). Until both hold, the
+ * sandbox cannot confine filesystem/network access and boot keeps
+ * `isAsrtSandboxActive()` false.
  *
  * `applicable` is false on every non-win32 platform — the renderer renders the
  * macOS/Linux capability copy instead of the Windows consent flow. The state
  * fields are `null` there (no Windows backend to query).
  *
- * `instructions` is the VERBATIM ASRT `windowsInstallInstructions(...)` text,
- * tailored to the observed group state (e.g. only the relogin step remains once
- * the install ran). Empty string when not applicable.
+ * `instructions` is the VERBATIM ASRT `windowsInstallInstructions(...)` text.
+ * Empty string when not applicable.
  */
 export interface SandboxWindowsStatusInfo {
   /** True only on win32. Non-win32 → false, with null state fields. */
   applicable: boolean;
-  /** `absent` | `created-not-on-token` | `ready`, or null off-win32. */
-  groupState: "absent" | "created-not-on-token" | "ready" | null;
-  /** `absent` | `installed`, or null off-win32. */
-  wfpState: "absent" | "installed" | null;
-  /** group === "ready" AND wfp === "installed". Always false off-win32. */
+  /** `absent` | `incomplete` | `ready`, or null off-win32. */
+  userState: "absent" | "incomplete" | "ready" | null;
+  /** `absent` | `installed` | `cannot-read`, or null off-win32. */
+  wfpState: "absent" | "installed" | "cannot-read" | null;
+  /**
+   * True when the sandbox user is ready and WFP is either directly observed as
+   * installed or `cannot-read` plus ASRT behavioral egress verification succeeds.
+   * Always false off-win32.
+   */
   ready: boolean;
-  /** Verbatim ASRT install/relogin instructions. Empty off-win32. */
+  /** Verbatim ASRT install instructions. Empty off-win32. */
   instructions: string;
 }
 
@@ -60,17 +62,17 @@ export interface SandboxWindowsStatusInfo {
  *
  * `cancelled: true` means the user dismissed the UAC prompt — NOT an error; the
  * install simply didn't run and the toggle should revert. On success the
- * post-install group + WFP state is returned so the renderer can advance to the
- * relogin-pending visual without a second round trip.
+ * post-install user + WFP state is returned so the renderer can advance without
+ * a second round trip.
  */
 export interface SandboxWindowsInstallResult {
   /** True when the user dismissed UAC. Mutually exclusive with the state fields. */
   cancelled?: true;
-  /** Post-install group state (absent when `cancelled`). */
-  groupState?: "absent" | "created-not-on-token" | "ready";
+  /** Post-install sandbox user state (absent when `cancelled`). */
+  userState?: "absent" | "incomplete" | "ready";
   /** Post-install WFP state (absent when `cancelled`). */
-  wfpState?: "absent" | "installed";
-  /** group === "ready" AND wfp === "installed" post-install. */
+  wfpState?: "absent" | "installed" | "cannot-read";
+  /** Post-install readiness, using the same WFP verification rule as status. */
   ready?: boolean;
 }
 
@@ -131,13 +133,11 @@ export function sandboxConfinementForPlatform(
     return { filesystem: true, process: true, network: true };
   }
   if (platform === "win32") {
-    // srt-win via ASRT confines NETWORK egress only (WFP + restricted-token
-    // job routing the child through the loopback proxy). ASRT 0.0.59 has NO
-    // Windows filesystem jail and no process confinement — so this substrate is
-    // honestly PARTIAL: network-only. This is what makes the reviewer's
-    // per-category relaxation bite on Windows (network relaxes, write/shell do
-    // NOT).
-    return { filesystem: false, process: false, network: true };
+    // srt-win via ASRT confines filesystem access through the dedicated
+    // `srt-sandbox` user ACL backend and confines egress with WFP + loopback
+    // proxy routing. Process isolation is still unavailable on Windows, so the
+    // substrate remains partial.
+    return { filesystem: true, process: false, network: true };
   }
   // Anything else: fail-closed, no sandbox.
   return { filesystem: false, process: false, network: false };

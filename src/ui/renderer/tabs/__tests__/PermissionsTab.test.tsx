@@ -823,7 +823,7 @@ describe("PermissionsTab — handleWindowsInstall error-shape robustness", () =>
   } = {}) {
     const windowsStatus = {
       applicable: true,
-      groupState: "absent" as const,
+      userState: "absent" as const,
       wfpState: "absent" as const,
       ready: false,
       instructions: "Run srt-win install…",
@@ -864,14 +864,14 @@ describe("PermissionsTab — handleWindowsInstall error-shape robustness", () =>
           enabled: true,
           available: true,
           kind: "partial" as const,
-          reason: "ASRT (srt-win) confines network egress only — NO filesystem jail; needs a one-time admin install + relogin",
-          potentialReason: "ASRT (srt-win) confines network egress only — NO filesystem jail; needs a one-time admin install + relogin",
+          reason: "ASRT (srt-win) confines filesystem access and network egress; process isolation is unavailable on Windows; needs a one-time admin install",
+          potentialReason: "ASRT (srt-win) confines filesystem access and network egress; process isolation is unavailable on Windows; needs a one-time admin install",
           runtime: {
             available: false,
             kind: "none" as const,
             reason: "no OS sandbox configured for the host process",
           },
-          confines: { filesystem: false, process: false, network: true },
+          confines: { filesystem: true, process: false, network: true },
         })),
         sandboxWindowsStatus: overrides.sandboxWindowsStatus ?? vi.fn(async () => windowsStatus),
         sandboxWindowsInstall: overrides.sandboxWindowsInstall ?? vi.fn(async () => ({ cancelled: true })),

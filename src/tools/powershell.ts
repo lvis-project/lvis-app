@@ -27,7 +27,10 @@ import {
   isAsrtSandboxActive,
   wrapToolCommand,
   cleanupAsrtSandboxAfterCommand,
+  getDefaultSensitiveReadDenyPaths,
+  getDefaultSensitiveWriteDenyPaths,
 } from "../permissions/asrt-sandbox.js";
+import { isActiveSandboxShellContained } from "../permissions/sandbox-capability.js";
 import { deriveSandboxWritePaths } from "../permissions/sandbox-write-jail.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
@@ -188,12 +191,22 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
     // §691: ASRT (Anthropic sandbox-runtime) adoption for the PowerShell spawn
     // path — parity with bash.ts. The sandbox is gated once at boot
     // (`initializeAsrtSandbox`); `isAsrtSandboxActive()` reflects that decision
-    // with no runtime re-evaluation. On Windows the boot path fails closed, so
-    // this stays false there and pwsh falls through to the plain spawn.
+    // with no runtime re-evaluation. On Windows this becomes true after the
+    // one-time srt-win setup is ready; before then boot degrades and pwsh falls
+    // through to the plain spawn.
     //
     // When the gate is OFF (the DEFAULT), this is skipped and pwsh runs via the
     // unchanged `spawnPowerShell` path.
     if (isAsrtSandboxActive()) {
+      if (!isActiveSandboxShellContained()) {
+        return {
+          output:
+            "PowerShell spawn failed: ASRT shell tools require filesystem and process isolation; " +
+            "the active sandbox is only partially confined.",
+          isError: true,
+          metadata: { sandboxed: true },
+        };
+      }
       // Namespace-scoped write-jail (owner plugin sandbox root ∪ allowed
       // directories), not the bare cwd. cwd stays readable.
       const writePaths = deriveSandboxWritePaths({
@@ -449,8 +462,10 @@ function posixSingleQuote(arg: string): string {
  *
  * Filesystem jail mirrors bash.ts: `allowWrite` = the derived write-jail, and
  * the read-jail HOME-leak fix denies `$HOME` then re-allows cwd + write paths.
- * (On win32 ASRT 0.0.59 has no FS jail — the filesystem slice is harmlessly
- * ignored; network is the only Windows confinement.)
+ * Windows ASRT is not shell-contained and ASRT 0.0.63 cannot accept the
+ * per-exec allowRead/allowWrite grants this path needs, so executeTyped refuses
+ * before this function on win32; the win32 binShell branch remains defensive
+ * for future ASRT capability changes.
  *
  * @internal — called only when the ASRT sandbox is active (user opt-in).
  */
@@ -488,10 +503,15 @@ async function spawnPowerShellWithSandbox(
 
   const home = process.env["HOME"];
   const allowRead = [cwd, ...writePaths];
+  const denyRead = [
+    ...getDefaultSensitiveReadDenyPaths(),
+    ...(home !== undefined && home !== "" ? [home] : []),
+  ];
   const filesystem = {
     allowWrite: [...writePaths],
     allowRead,
-    ...(home !== undefined && home !== "" ? { denyRead: [home] } : {}),
+    denyRead,
+    denyWrite: getDefaultSensitiveWriteDenyPaths(),
   };
 
   const abortController = new AbortController();

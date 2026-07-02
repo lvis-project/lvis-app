@@ -54,6 +54,7 @@ export interface ToolSchemaEntry {
   source: Tool["source"];
   category: Tool["category"];
   pluginId?: string;
+  workerId?: string;
   mcpServerId?: string;
 }
 
@@ -62,6 +63,7 @@ export interface ToolCatalogEntry {
   description: string;
   source: Extract<Tool["source"], "plugin" | "mcp">;
   pluginId?: string;
+  workerId?: string;
   mcpServerId?: string;
 }
 
@@ -86,6 +88,7 @@ function schemaEntryForTool(tool: Tool, inputSchema: unknown): ToolSchemaEntry {
     source: tool.source,
     category: tool.category,
     ...(tool.pluginId ? { pluginId: tool.pluginId } : {}),
+    ...(tool.workerId ? { workerId: tool.workerId } : {}),
     ...(tool.mcpServerId ? { mcpServerId: tool.mcpServerId } : {}),
   };
 }
@@ -97,6 +100,7 @@ function catalogEntryForTool(tool: Tool): ToolCatalogEntry | null {
     description: trimCatalogDescription(tool.description),
     source: tool.source,
     ...(tool.pluginId ? { pluginId: tool.pluginId } : {}),
+    ...(tool.workerId ? { workerId: tool.workerId } : {}),
     ...(tool.mcpServerId ? { mcpServerId: tool.mcpServerId } : {}),
   };
 }

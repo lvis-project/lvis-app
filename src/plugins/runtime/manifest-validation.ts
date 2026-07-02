@@ -47,6 +47,49 @@ async function loadSdkManifestSchema(): Promise<unknown> {
   return JSON.parse(schemaBytes);
 }
 
+function cloneJsonObject(value: unknown): unknown {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function schemaAcceptsToolSchemaWorkerId(validator: ValidateFunction): boolean {
+  const ok = validator({
+    id: "com.example.worker",
+    name: "Worker Plugin",
+    version: "1.0.0",
+    description: "Worker plugin fixture.",
+    publisher: "LVIS",
+    entry: "dist/index.js",
+    tools: ["worker_ping"],
+    toolSchemas: {
+      worker_ping: {
+        description: "Worker ping tool fixture.",
+        workerId: "main-worker",
+        inputSchema: { type: "object", properties: {} },
+      },
+    },
+  });
+  return ok === true;
+}
+
+function applyHostManifestSchemaCompatibility(schema: unknown): unknown {
+  const copy = cloneJsonObject(schema) as Record<string, unknown>;
+  const properties = copy.properties as Record<string, unknown> | undefined;
+  const toolSchemas = properties?.toolSchemas as Record<string, unknown> | undefined;
+  const entrySchema = toolSchemas?.additionalProperties as Record<string, unknown> | undefined;
+  const entryProperties = entrySchema?.properties as Record<string, unknown> | undefined;
+  if (entryProperties && entryProperties.workerId === undefined) {
+    entryProperties.workerId = {
+      type: "string",
+      minLength: 1,
+      maxLength: 128,
+      pattern: "^[A-Za-z0-9._-]+$",
+      description:
+        "Host-spawned plugin worker id. Paired with plugin id so the host reviewer can resolve the specific ASRT-wrapped worker substrate.",
+    };
+  }
+  return copy;
+}
+
 function compileAjvValidator(schema: unknown): ValidateFunction {
   // Ajv default export compat for ESM/CJS interop.
   const AjvAny = AjvModule as unknown as { default?: unknown };
@@ -95,10 +138,11 @@ export function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
  * host-local AJV compile of the shipped schema with a one-shot warn so
  * operators see the drift signal in logs.
  *
- * As of @lvis/plugin-sdk v5.18.0 the manifest schema natively carries every
+ * As of @lvis/plugin-sdk v5.20.0 the manifest schema natively carries every
  * host-required field (hostSecrets, networkAccess, requires.minAppVersion) and
- * makes per-tool `category` optional, so the former legacy-schema compatibility
- * patches are retired — the SDK schema is compiled verbatim.
+ * makes per-tool `category` optional. Host-only compatibility is now limited to
+ * `toolSchemas.*.workerId` while the SDK tag catches up; once the SDK helper
+ * accepts it natively this path uses the helper unchanged.
  */
 export async function buildManifestValidator(): Promise<ValidateFunction> {
   try {
@@ -106,7 +150,14 @@ export async function buildManifestValidator(): Promise<ValidateFunction> {
     type SdkModule = { compileManifestValidator?: () => ValidateFunction };
     const sdk = (await import("@lvis/plugin-sdk")) as unknown as SdkModule;
     if (typeof sdk.compileManifestValidator === "function") {
-      return sdk.compileManifestValidator();
+      const validator = sdk.compileManifestValidator();
+      if (schemaAcceptsToolSchemaWorkerId(validator)) {
+        return validator;
+      }
+      log.warn(
+        "SDK manifest validator does not yet accept toolSchemas.*.workerId — applying host-local compatibility patch. Update @lvis/plugin-sdk once the field lands upstream.",
+      );
+      return compileAjvValidator(applyHostManifestSchemaCompatibility(await loadSdkManifestSchema()));
     }
     log.warn(
       "SDK does not export compileManifestValidator() — falling back to host-local AJV compile. Update @lvis/plugin-sdk to keep manifest validation in lockstep.",
@@ -118,7 +169,7 @@ export async function buildManifestValidator(): Promise<ValidateFunction> {
     log.warn(`SDK validator import failed, using host-local AJV: ${(err as Error).message}`);
   }
   try {
-    return compileAjvValidator(await loadSdkManifestSchema());
+    return compileAjvValidator(applyHostManifestSchemaCompatibility(await loadSdkManifestSchema()));
   } catch (err) {
     throw new Error(`SDK plugin manifest schema unavailable: ${(err as Error).message}`);
   }

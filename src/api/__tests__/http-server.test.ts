@@ -64,6 +64,21 @@ afterEach(async () => {
   }
 });
 
+describe("http-server — loopback binding", () => {
+  it("rejects explicit ports that Fetch clients block", async () => {
+    const broadcaster = createStreamBroadcaster();
+    await expect(
+      startLocalApiHttpServer({
+        api: stubApi(() => ({ ok: true, data: {} })),
+        secret: SECRET,
+        broadcaster,
+        host: "127.0.0.1",
+        port: 6000,
+      }),
+    ).rejects.toThrow(/blocked by Fetch clients/);
+  });
+});
+
 describe("http-server — auth on every route", () => {
   it("returns 401 without Authorization", async () => {
     const server = await start(stubApi(() => ({ ok: true, data: {} })));

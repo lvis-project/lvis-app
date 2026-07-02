@@ -247,6 +247,38 @@ describe("toolSchemas authority metadata", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("end-to-end: parsePluginJson accepts toolSchemas workerId via host schema compatibility", async () => {
+    const { buildManifestValidator, parsePluginJson } = await import(
+      "../runtime/manifest-validation.js"
+    );
+    const validator = await buildManifestValidator();
+    const manifest = {
+      id: "worker-aware-plugin",
+      name: "Worker aware",
+      version: "1.0.0",
+      description: "A manifest whose tool schema declares a host-spawned worker id.",
+      publisher: "Test fixture",
+      entry: "dist/index.js",
+      tools: ["worker_ping"],
+      toolSchemas: {
+        worker_ping: {
+          description: "Worker ping with explicit worker substrate identity.",
+          workerId: "main-worker",
+          inputSchema: { type: "object", properties: {} },
+        },
+      },
+    };
+    const dir = await mkdtemp(join(realpathSync(tmpdir()), "manifest-worker-id-"));
+    try {
+      const file = join(dir, "plugin.json");
+      await writeFile(file, JSON.stringify(manifest), "utf-8");
+      const parsed = await parsePluginJson(file, validator);
+      expect(parsed.toolSchemas?.worker_ping?.workerId).toBe("main-worker");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("US-B2 / US-B6 — config-schema helpers", () => {
