@@ -60,6 +60,52 @@ describe("collectChatPreviewModel", () => {
     );
   });
 
+  it("promotes path-bearing search hits to inline-text file previews (indexer)", () => {
+    const entries: ChatEntry[] = [
+      {
+        kind: "tool_group",
+        groupId: "g1",
+        groupIds: ["g1"],
+        status: "done",
+        tools: [
+          {
+            toolUseId: "search-1",
+            name: "index_search",
+            displayOrder: 0,
+            status: "done",
+            source: "plugin",
+            pluginId: "local-indexer",
+            input: { query: "budget", mode: "hybrid", topK: 5 },
+            result: JSON.stringify({
+              hits: [
+                { chunkId: "c1", docId: "d1", docName: "plan.md", page: 3, path: "/docs/plan.md", snippet: "# Plan\n\nbudget" },
+                { chunkId: "c2", docId: "d2", docName: "notes.txt", path: "/docs/notes.txt", rawText: "plain notes" },
+                { chunkId: "c3", docId: "d3", docName: "no-path" },
+              ],
+            }),
+          },
+        ],
+      },
+    ];
+
+    const model = collectChatPreviewModel({ entries, attachments: [] });
+
+    const planTarget = model.targets.find((t) => t.kind === "file" && t.title === "plan.md");
+    expect(planTarget).toBeTruthy();
+    expect(planTarget && "inlineText" in planTarget && planTarget.inlineText).toContain("# Plan");
+    expect(planTarget?.subtitle).toContain("page 3");
+
+    const notesTarget = model.targets.find((t) => t.kind === "file" && t.title === "notes.txt");
+    expect(notesTarget && "inlineText" in notesTarget && notesTarget.inlineText).toBe("plain notes");
+
+    // The hit without a path is not promoted.
+    expect(model.targets.some((t) => t.title === "no-path")).toBe(false);
+    // With hits present, no generic json card is created for the same tool.
+    expect(model.targets.some((t) => t.kind === "json" && t.toolUseId === "search-1")).toBe(false);
+    // Hits also surface in the file-browser tree.
+    expect(model.files.some((f) => f.path === "/docs/plan.md" && f.operation === "read")).toBe(true);
+  });
+
   it("collects render_html, write diffs, urls, json, and MCP app payloads", () => {
     const entries: ChatEntry[] = [
       {
