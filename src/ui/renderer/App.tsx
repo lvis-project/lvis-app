@@ -21,7 +21,7 @@ import { usePluginViewRouting } from "./hooks/use-plugin-view-routing.js";
 import { useOnboardingChainController } from "./hooks/use-onboarding-chain-controller.js";
 import { usePluginLifecycleRefresh } from "./hooks/use-plugin-lifecycle-refresh.js";
 import { useChatStatusIndicators } from "./hooks/use-chat-status-indicators.js";
-import { type ActionPanelActivityState } from "./components/ActionPanel.js";
+import { ActionPanel, type ActionPanelActivityState } from "./components/ActionPanel.js";
 import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
 import { MainContent } from "./MainContent.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
@@ -160,6 +160,7 @@ export function App() {
     appMode, setAppMode,
     sidebarCollapsed, setSidebarCollapsed,
     actionPanelOpen, setActionPanelOpen,
+    sidePanelOpen, setSidePanelOpen,
   } = useAppMode(api);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
@@ -467,6 +468,23 @@ export function App() {
     setActiveView(target === "settings" ? "home" : target);
   }, []);
 
+  // Side panel (ChatSidePanel) is a home-view affordance: navigating away from
+  // home closes it so it never lingers behind another view. Toggling from a
+  // non-home view first returns to home, then opens the panel.
+  useEffect(() => {
+    if (activeView !== "home") {
+      setSidePanelOpen(false);
+    }
+  }, [activeView, setSidePanelOpen]);
+  const handleToggleSidePanel = useCallback(() => {
+    if (activeView !== "home") {
+      setActiveView("home");
+      setSidePanelOpen(true);
+      return;
+    }
+    setSidePanelOpen((open) => !open);
+  }, [activeView, setSidePanelOpen]);
+
   // Inline settings save → refresh the same live state the detached window's
   // onSettingsWindowSaved listener refreshes (api key + LLM settings), without
   // an IPC round-trip since the content renders in-process.
@@ -687,10 +705,8 @@ export function App() {
         onSearchLoadSession={handleLoadSessionAndRefresh}
         setActiveView={setActiveView}
         onRefreshSessions={refreshSessions}
-        actionPanelOpen={actionPanelOpen}
-        onActionPanelOpenChange={setActionPanelOpen}
-        actionPanelActivity={actionPanelActivity}
-        onOpenActionPanelUrl={openActionPanelUrl}
+        sidePanelOpen={sidePanelOpen}
+        onToggleSidePanel={handleToggleSidePanel}
       >
         {/* Inner ErrorBoundary scoped to MainContent so a single failing
               plugin (e.g. stale manifest schema mismatch — issue #736) does
@@ -765,6 +781,16 @@ export function App() {
               onToastClick: handleStatusToastClick,
               onToastDismiss: (toast) => statusRemoveToast(toast.id),
             }}
+            actionPanelSlot={appMode !== "chat" ? (
+              <ActionPanel
+                open={actionPanelOpen}
+                onOpenChange={setActionPanelOpen}
+                activity={actionPanelActivity}
+                onOpenExternalUrl={openActionPanelUrl}
+              />
+            ) : null}
+            sidePanelOpen={sidePanelOpen}
+            onSidePanelOpenChange={setSidePanelOpen}
           />
           </ErrorBoundary>
       </AppShell>

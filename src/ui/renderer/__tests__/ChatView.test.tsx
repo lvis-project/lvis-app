@@ -900,10 +900,11 @@ describe("ChatView", () => {
     });
 
     const openButton = await waitFor(() => {
-      const button = container.querySelector('[data-testid="chat-preview-open"]') as HTMLButtonElement | null;
+      const button = container.querySelector('[data-testid="chat-side-panel-toggle"]') as HTMLButtonElement | null;
       expect(button).not.toBeNull();
       return button!;
     });
+    expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeNull();
     expect(container.querySelector('[data-testid="chat-preview-rail"]')).toBeNull();
 
     await act(async () => {
@@ -911,12 +912,23 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
+      expect(container.querySelector('[data-testid="chat-side-panel"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="chat-preview-rail"]')).not.toBeNull();
       expect(container.querySelector(".lvis-chat-scroll [data-radix-scroll-area-viewport]")).not.toBeNull();
       expect(container.textContent).toContain("report.md");
     });
-    expect(container.querySelector('[data-testid="chat-view-root"]')?.className).toContain("lg:pr-96");
-    expect(container.querySelector('[data-testid="chat-preview-rail"]')?.className).toContain("absolute");
+    expect(container.querySelector('[data-testid="chat-view-root"]')?.className).toContain("flex-row");
+    expect(container.querySelector('[data-testid="chat-view-root"]')?.className).not.toContain("lg:pr-96");
+    expect(container.querySelector('[data-testid="chat-main-column"]')).not.toBeNull();
+    const sidePanelClassName = container.querySelector('[data-testid="chat-side-panel"]')?.className ?? "";
+    expect(sidePanelClassName).toContain("relative");
+    expect(sidePanelClassName).not.toContain("absolute");
+    expect(sidePanelClassName).not.toContain("lg:relative");
+    const previewCloseButtons = Array.from(container.querySelectorAll('button[aria-label="사이드 패널 닫기"]'));
+    expect(previewCloseButtons.some((button) => button.className.includes("absolute inset-0"))).toBe(false);
+    expect(container.querySelector('[data-testid="chat-side-panel-mode-files"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="chat-side-panel-mode-preview"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="chat-side-panel-mode-browser"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="input-action-bar"]')).not.toBeNull();
   });
 
@@ -979,6 +991,7 @@ describe("ChatView", () => {
     await waitFor(() => {
       expect(container.textContent).toContain("A 답변");
       expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeNull();
+      expect(container.querySelector('[data-testid="chat-preview-rail"]')).toBeNull();
     });
 
     await act(async () => {
@@ -987,7 +1000,17 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain("[File #1]");
-      expect(container.querySelector('[data-testid="chat-preview-open"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeNull();
+      expect(container.querySelector('[data-testid="chat-side-panel-toggle"]')).not.toBeNull();
+    });
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="chat-side-panel-toggle"]')!);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="chat-preview-rail"]')).not.toBeNull();
+      expect(container.textContent).toContain("draft-only.md");
     });
 
     const loadSessionHandler = await waitFor(() => {
@@ -1008,7 +1031,7 @@ describe("ChatView", () => {
       expect(container.querySelector('[data-testid="attachment-chip"]')).toBeNull();
       expect(container.querySelector('[data-testid="attachment-chip-collapsed"]')).toBeNull();
       expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeNull();
-      expect(container.querySelector('[data-testid="chat-preview-rail"]')).toBeNull();
+      expect(container.textContent).not.toContain("draft-only.md");
     });
   });
 

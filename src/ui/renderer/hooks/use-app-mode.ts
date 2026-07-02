@@ -19,6 +19,8 @@ export interface UseAppModeResult {
   setSidebarCollapsed: Dispatch<SetStateAction<boolean>>;
   actionPanelOpen: boolean;
   setActionPanelOpen: Dispatch<SetStateAction<boolean>>;
+  sidePanelOpen: boolean;
+  setSidePanelOpen: Dispatch<SetStateAction<boolean>>;
 }
 
 /**
@@ -56,6 +58,10 @@ export function useAppMode(api: Api): UseAppModeResult {
   // fresh launch the full expanded card should not auto-show — the user opens it
   // on demand. (Only rendered in work mode; see the appMode gate at its mount.)
   const [actionPanelOpen, setActionPanelOpen] = useState(false);
+  // The right-docked work panel (ChatSidePanel), toggled from the title bar.
+  // Chat-mode only affordance: opening it widens the OS window (resizeForSidePanel)
+  // and closing it restores the normal chat bounds.
+  const [sidePanelOpen, setSidePanelOpen] = useState(false);
   // Persist appMode to host settings and update local state. Guarded against
   // no-op writes (same mode) so a re-render or repeated toggle never fires a
   // redundant IPC write. Stable identity (useCallback with only `api`) so it is
@@ -106,6 +112,21 @@ export function useAppMode(api: Api): UseAppModeResult {
     if (appMode !== "work") return;
     void api.window?.closeAllDetached?.();
   }, [appMode, api]);
+  // Side panel is a chat-mode affordance: resize the OS window when it toggles
+  // (opening docks the work panel, closing restores the chat bounds). Guarded on
+  // chat mode so work mode never issues a side-panel resize. Bridge is optional
+  // (absent in jsdom / non-Electron).
+  useEffect(() => {
+    if (appMode !== "chat") return;
+    void api.window?.resizeForSidePanel?.(sidePanelOpen);
+  }, [appMode, api, sidePanelOpen]);
+  // The work-mode Tool Activity panel never persists into chat mode: collapse it
+  // on the transition so switching to chat starts from the focused surface.
+  useEffect(() => {
+    if (appMode === "chat") {
+      setActionPanelOpen(false);
+    }
+  }, [appMode]);
 
   return {
     appMode,
@@ -114,5 +135,7 @@ export function useAppMode(api: Api): UseAppModeResult {
     setSidebarCollapsed,
     actionPanelOpen,
     setActionPanelOpen,
+    sidePanelOpen,
+    setSidePanelOpen,
   };
 }

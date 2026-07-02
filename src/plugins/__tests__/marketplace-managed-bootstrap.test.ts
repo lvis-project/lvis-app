@@ -538,6 +538,120 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     ).rejects.toThrow(/pluginAccess does not match the catalog-approved grant/i);
   });
 
+  it("rejects marketplace artifacts whose networkAccess exceeds the catalog-approved grant", async () => {
+    const pluginDir = join(testDir, "plugins", "installed", "network-plugin");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "network-plugin",
+        name: "Network Plugin",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: [],
+        description: "Test fixture.",
+        capabilities: ["external-auth-consumer"],
+        networkAccess: {
+          allowedDomains: ["api.example.com", "login.example.com"],
+          reasoning: "Broader artifact grant.",
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = makeManagedService(testDir, marketplacePath);
+    await expect(
+      (service as unknown as {
+        assertInstalledManifestMatchesCatalog: (
+          plugin: {
+            id: string;
+            installPolicy: "user";
+            capabilities?: string[];
+            networkAccess?: {
+              allowedDomains: string[];
+              reasoning?: string;
+              allowPrivateNetworks?: boolean;
+            };
+          },
+          version: string,
+          manifestFile: string,
+          pluginDir: string,
+        ) => Promise<void>;
+      }).assertInstalledManifestMatchesCatalog(
+        {
+          id: "network-plugin",
+          installPolicy: "user",
+          capabilities: ["external-auth-consumer"],
+          networkAccess: {
+            allowedDomains: ["api.example.com"],
+            reasoning: "Catalog-approved grant.",
+          },
+        },
+        "1.0.0",
+        manifestPath,
+        pluginDir,
+      ),
+    ).rejects.toThrow(/networkAccess does not match the catalog-approved grant/i);
+  });
+
+  it("rejects marketplace artifacts whose hostFetch capability exceeds the catalog-approved grant", async () => {
+    const pluginDir = join(testDir, "plugins", "installed", "network-capability-plugin");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "network-capability-plugin",
+        name: "Network Capability Plugin",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: [],
+        description: "Test fixture.",
+        capabilities: ["external-auth-consumer"],
+        networkAccess: {
+          allowedDomains: ["api.example.com"],
+          reasoning: "Artifact-completed grant.",
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = makeManagedService(testDir, marketplacePath);
+    await expect(
+      (service as unknown as {
+        assertInstalledManifestMatchesCatalog: (
+          plugin: {
+            id: string;
+            installPolicy: "user";
+            capabilities?: string[];
+            networkAccess?: {
+              allowedDomains: string[];
+              reasoning?: string;
+              allowPrivateNetworks?: boolean;
+            };
+          },
+          version: string,
+          manifestFile: string,
+          pluginDir: string,
+        ) => Promise<void>;
+      }).assertInstalledManifestMatchesCatalog(
+        {
+          id: "network-capability-plugin",
+          installPolicy: "user",
+          capabilities: [],
+          networkAccess: {
+            allowedDomains: ["api.example.com"],
+            reasoning: "Catalog-approved grant.",
+          },
+        },
+        "1.0.0",
+        manifestPath,
+        pluginDir,
+      ),
+    ).rejects.toThrow(/external-auth-consumer capability does not match the catalog-approved grant/i);
+  });
+
   it("restores registry state during dependency rollback cleanup", async () => {
     const calendarDir = join(testDir, "plugins", "installed", "calendar");
     const emailDir = join(testDir, "plugins", "installed", "email");

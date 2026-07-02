@@ -199,7 +199,7 @@ export function usePluginViewRouting({
           pluginActionInflightRef.current.add(inflightKey);
           void (async () => {
             try {
-              await api.callPluginMethod(actionTool);
+              await api.callPluginMethod(actionTool, undefined, { userAction: true });
             } catch (err) {
               // Raw err.message 는 OAuth refresh-token / Bearer header fragment
               // 가 포함될 수 있어 사용자 chat 영역에 그대로 노출하지 않는다.
@@ -250,7 +250,7 @@ export function usePluginViewRouting({
         pluginAuthLoginInflightRef.current.add(inflightKey);
         void (async () => {
           try {
-            await api.callPluginMethod(loginTool);
+            await api.callPluginMethod(loginTool, undefined, { userAction: true });
             refreshPluginAuthStatus(view.pluginId);
           } catch (err) {
             // Raw err.message may carry OAuth/Bearer fragments — keep raw in

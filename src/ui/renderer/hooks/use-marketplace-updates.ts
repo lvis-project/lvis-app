@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isIpcErrorResult, type LvisApi } from "../types.js";
+import { isIpcErrorResult, type LvisApi, type MarketplaceItem } from "../types.js";
 
 export interface PluginUpdateInfo {
   pluginId: string;
   pluginName?: string;
   installedVersion: string;
   latestVersion: string;
+  networkAccess?: MarketplaceItem["networkAccess"];
 }
 
 const RESERVED_SKIPPED_UPDATE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
