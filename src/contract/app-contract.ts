@@ -411,6 +411,45 @@ export const CHANNEL_GESTURE: Record<string, "required" | "none"> = {
   [PERMISSIONS.sandboxWindowsInstall]: "required",
 };
 
+// ─── Approval-mediated external mutation ─────────────────────────────────────
+
+/**
+ * The allowlist of gesture-gated channels an EXTERNAL origin
+ * ({@link import("./trust-origin.js").ExternalOrigin} — local-api / cli /
+ * plugin-frame) MAY reach, and ONLY via an in-app {@link ../permissions/approval-gate.js}
+ * consent. Every member is a `CHANNEL_GESTURE:"required"` channel that is NOT
+ * in {@link PUBLIC_CHANNELS}; it stays unreachable from external origins by the
+ * fail-closed default, and this list is the single, explicit exception.
+ *
+ * CONSENT MODEL — there is NO token bypass. An external caller cannot present a
+ * credential, a stored gesture token, or any header to satisfy the gesture
+ * requirement. The ONLY thing that unblocks a channel listed here is the user's
+ * own approval click inside the running app: the human pressing "Allow" on the
+ * ApprovalGate modal IS the explicit user action that authorizes this single
+ * mutation. If the user declines or the request times out, the caller receives
+ * {@link EXTERNAL_MUTATION_DENIED}.
+ *
+ * Every OTHER `CHANNEL_GESTURE:"required"` channel (add/remove rule, policy set,
+ * dir/reviewer dispatch, deferred resolve, user-approval record/revoke, sandbox
+ * install) is deliberately absent here — those remain renderer-only by design
+ * and are never reachable from an external origin under any consent.
+ *
+ * Initially EXACTLY ONE entry: `PERMISSIONS.setMode`.
+ */
+export const EXTERNAL_MUTATION_CHANNELS = [
+  PERMISSIONS.setMode,
+] as const;
+
+/** A channel reachable from an external origin via ApprovalGate consent. */
+export type ExternalMutationChannel = (typeof EXTERNAL_MUTATION_CHANNELS)[number];
+
+/**
+ * Fail-closed error returned to an external caller when an approval-mediated
+ * external mutation ({@link EXTERNAL_MUTATION_CHANNELS}) is NOT authorized —
+ * the user declined the ApprovalGate consent, or the request timed out.
+ */
+export const EXTERNAL_MUTATION_DENIED = "external-mutation-denied";
+
 // ─── Host-internal out-of-tree channel families ─────────────────────────────
 
 /**

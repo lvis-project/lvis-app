@@ -123,6 +123,13 @@ src/
                                 system.localApiServer or LVIS_LOCAL_API=1, default OFF;
                                 discovery ~/.lvis/local-api/server.json via
                                 openFeatureNamespace; closed in app-shutdown).
+                                External mutations are ApprovalGate-mediated, not
+                                token-authorized: the Bearer secret authenticates the
+                                caller, the user's in-app "Allow" click authorizes the
+                                mutation. contract/app-contract.ts's
+                                EXTERNAL_MUTATION_CHANNELS is the only widening point
+                                (today: PERMISSIONS.setMode only) — any addition MUST
+                                route through the same consent path, never a token bypass.
   sdk/                        — #1409 narrow typed LvisClient facade over any
                                 LocalApi<string> (read+send only; mutating ops omitted).
   cli/                        — #1409 CLI (#1436): commands.ts table + http-client.ts

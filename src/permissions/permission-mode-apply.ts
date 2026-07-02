@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { t } from "../i18n/index.js";
+import type { ExternalOrigin } from "../contract/trust-origin.js";
 import type { ApprovalGate } from "./approval-gate.js";
 import type { PermissionManager } from "./permission-manager.js";
 import type { PermissionModeCommand } from "./permission-slash.js";
@@ -18,11 +19,38 @@ export type PermissionModeApplyResult =
       message: string;
     };
 
-export interface PermissionModeApprovalBypass {
-  source: "settings-ui" | "builtin-slash";
-  trustOrigin: "user-keyboard";
-  explicitUserAction: true;
-}
+/**
+ * The explicit-user-action confirmation an out-of-band caller has ALREADY
+ * obtained for a durable permission set-mode mutation, so
+ * {@link applyPermissionModeCommand} does NOT show a second in-app approval
+ * modal. Two discriminated variants for the two confirmation surfaces:
+ *
+ *   - `built-in` (`"settings-ui"` / `"builtin-slash"`) — a first-party renderer
+ *     user action. `trustOrigin` is `"user-keyboard"` (the physical key/click).
+ *
+ *   - `local-api-approval` (#1409) — an EXTERNAL origin (local-api / cli)
+ *     initiated the change and the user consented via the in-app ApprovalGate
+ *     modal at the transport-lifecycle layer (see
+ *     `src/main/local-api-server.ts`) BEFORE the handler ran. The ApprovalGate
+ *     "Allow" click IS the explicit user action; the {@link ExternalOrigin}
+ *     records WHO initiated it. Widening the guard for this variant is what
+ *     prevents a DOUBLE modal — the consent already happened.
+ *
+ * Fail-closed: any other source/trustOrigin combination does NOT satisfy the
+ * built-in-confirmation guard and falls through to the normal ApprovalGate ask.
+ */
+export type PermissionModeApprovalBypass =
+  | {
+      source: "settings-ui" | "builtin-slash";
+      trustOrigin: "user-keyboard";
+      explicitUserAction: true;
+    }
+  | {
+      source: "local-api-approval";
+      /** The external origin that initiated the (already user-approved) change. */
+      trustOrigin: ExternalOrigin;
+      explicitUserAction: true;
+    };
 
 export async function applyPermissionModeCommand(
   cmd: PermissionModeCommand,
@@ -35,10 +63,24 @@ export async function applyPermissionModeCommand(
 ): Promise<PermissionModeApplyResult> {
   const previous = deps.permissionManager.getMode();
 
+  // A durable mode change skips the in-app ApprovalGate ask ONLY when the
+  // caller supplies an explicit-user-action confirmation obtained on a trusted
+  // surface. Two accepted surfaces (see PermissionModeApprovalBypass):
+  //   - first-party renderer built-in (settings-ui / builtin-slash) with a
+  //     "user-keyboard" gesture, OR
+  //   - "local-api-approval" (#1409): an external origin whose durable change
+  //     the user ALREADY consented to via the ApprovalGate modal at the
+  //     transport-lifecycle layer. Honoring it here is deliberate — it prevents
+  //     a SECOND modal for a mutation the human just approved. It is NOT a
+  //     silent bypass: no "local-api-approval" bypass is ever constructed unless
+  //     `local-api-server.ts` observed a real ApprovalGate "allow" decision.
+  const bypass = deps.approvalBypass;
   const hasTrustedBuiltInConfirmation =
-    deps.approvalBypass?.explicitUserAction === true &&
-    deps.approvalBypass.trustOrigin === "user-keyboard" &&
-    (deps.approvalBypass.source === "settings-ui" || deps.approvalBypass.source === "builtin-slash");
+    bypass?.explicitUserAction === true &&
+    ((bypass.source === "settings-ui" || bypass.source === "builtin-slash"
+      ? bypass.trustOrigin === "user-keyboard"
+      : false) ||
+      bypass.source === "local-api-approval");
 
   if (cmd.durable && !hasTrustedBuiltInConfirmation) {
     if (!deps.approvalGate) {
@@ -87,7 +129,7 @@ export async function applyPermissionModeCommand(
         fromMode: previous,
         toMode: cmd.mode,
         durable: cmd.durable,
-        confirmationSource: hasTrustedBuiltInConfirmation ? deps.approvalBypass?.source : undefined,
+        confirmationSource: hasTrustedBuiltInConfirmation ? bypass?.source : undefined,
       });
     } catch (err) {
       return {

@@ -17,7 +17,6 @@ import { sendToWindow } from "../safe-send.js";
 import type { IpcDeps } from "../types.js";
 import type {
   PermissionDirCommand,
-  PermissionModeCommand,
   PermissionReviewerCommand,
   PermissionRulesCommand,
 } from "../../permissions/permission-slash.js";
@@ -40,7 +39,10 @@ import {
   detectSandboxCapability,
   type SandboxCapability,
 } from "../../permissions/sandbox-capability.js";
-import { handleGetMode } from "../handlers/permissions.js";
+import {
+  handleGetMode,
+  handleSetPermissionMode,
+} from "../handlers/permissions.js";
 
 function validateRulePatternInput(pattern: unknown): { ok: true; pattern: string } | { ok: false; error: string; message: string } {
   if (typeof pattern !== "string") {
@@ -76,14 +78,6 @@ function payloadRecord(value: unknown): Record<string, unknown> {
 
 function isParseError<T>(value: T | { ok: false; error: string }): value is { ok: false; error: string } {
   return "ok" in (value as Record<string, unknown>) && (value as { ok?: unknown }).ok === false;
-}
-
-function broadcastPermissionModeChanged(deps: IpcDeps, mode: string): void {
-  const mainWindow = deps.getMainWindow?.();
-  const windows = deps.getAppWindows?.() ?? [mainWindow];
-  for (const win of windows) {
-    sendToWindow(win, PERMISSIONS.modeChanged, { mode });
-  }
 }
 
 function runtimeKindFromCapability(
@@ -353,34 +347,11 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     const body = payloadRecord(payload);
     const intent = requireUserKeyboardIntent(body.intent);
     if (!intent.ok) return intent;
-    const mode = body.mode;
-    if (typeof mode !== "string") {
-      return { ok: false, error: "invalid-mode", message: "mode must be a string" };
-    }
-    const { parsePermissionModeCommand } = await import("../../permissions/permission-slash.js");
-    const parsed = parsePermissionModeCommand(`${mode} --durable`);
-    if (isParseError<PermissionModeCommand>(parsed)) {
-      return { ok: false, error: "invalid-mode", message: parsed.error };
-    }
-    if (parsed.durable !== true) {
-      return { ok: false, error: "missing-durable-confirm", message: "durable mode command must require modal confirmation" };
-    }
-    const pm = conversationLoop.permissionManager;
-    if (!pm) return { ok: false, error: "no-permission-manager", message: "permission manager not initialized" };
-    const { applyPermissionModeCommand } = await import("../../permissions/permission-mode-apply.js");
-    const result = await applyPermissionModeCommand(parsed, {
-      permissionManager: pm,
-      approvalGate,
-      auditLogger,
-      approvalBypass: {
-        source: "settings-ui",
-        trustOrigin: "user-keyboard",
-        explicitUserAction: true,
-      },
+    return handleSetPermissionMode(deps, body.mode, {
+      source: "settings-ui",
+      trustOrigin: "user-keyboard",
+      explicitUserAction: true,
     });
-    if (!result.ok) return result;
-    broadcastPermissionModeChanged(deps, result.mode);
-    return { ok: true, mode: result.mode };
   });
 
   // read-only, sender guard optional
