@@ -1260,9 +1260,6 @@ export function ChatSidePanel({
           <PanelRightClose className="h-4 w-4 text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">{t("chatPreviewRail.title")}</div>
-            <div className="truncate text-[11px] text-muted-foreground">
-              {t("chatPreviewRail.subtitle", { targets: targets.length, files: files.length })}
-            </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <Button type="button" size="icon-xs" variant="ghost" title={t("chatPreviewRail.close")} aria-label={t("chatPreviewRail.close")} onClick={onClose}>
