@@ -24,6 +24,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../ipc-bridge.js";
 import { validateHostRendererSender } from "../ipc/gated.js";
+import { CHANNELS } from "../contract/app-contract.js";
 import { isAuthOwned } from "./auth-window-registry.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
@@ -1206,9 +1207,9 @@ export class WindowManager {
     // Resize the main window when the in-chat right-side work panel opens or
     // closes. Work mode keeps the panel in normal flex layout and does not call
     // this channel; this is only for chat mode's narrower OS window.
-    ipcMain.handle("lvis:window:resize-for-side-panel", (event: IpcMainInvokeEvent, open: unknown) => {
+    ipcMain.handle(CHANNELS.window.resizeForSidePanel, (event: IpcMainInvokeEvent, open: unknown) => {
       if (!validateHostRendererSender(event)) {
-        auditUnauthorized(auditLogger, "lvis:window:resize-for-side-panel", event);
+        auditUnauthorized(auditLogger, CHANNELS.window.resizeForSidePanel, event);
         return UNAUTHORIZED_FRAME;
       }
       if (typeof open !== "boolean") {

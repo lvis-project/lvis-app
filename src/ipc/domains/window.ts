@@ -14,6 +14,7 @@ import {
   type OpenHtmlPreviewWindowResult,
 } from "../../shared/render-html-preview.js";
 import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../gated.js";
+import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { isWindowControlOwned } from "../window-control-registry.js";
 
@@ -81,9 +82,9 @@ export function registerWindowHandlers(deps: IpcDeps): void {
     }
   });
 
-  ipcMain.handle("lvis:window:open-html-preview", async (e, payload): Promise<OpenHtmlPreviewWindowResult> => {
+  ipcMain.handle(CHANNELS.window.openHtmlPreview, async (e, payload): Promise<OpenHtmlPreviewWindowResult> => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:window:open-html-preview", e);
+      auditUnauthorized(auditLogger, CHANNELS.window.openHtmlPreview, e);
       return { ok: false, error: UNAUTHORIZED_FRAME.error };
     }
 

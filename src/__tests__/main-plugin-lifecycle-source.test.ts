@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import { readBootWiring } from "../testing/boot-wiring-source.js";
 
 async function readSource(relative: string): Promise<string> {
   return readFile(new URL(relative, import.meta.url), "utf8");
@@ -7,9 +8,13 @@ async function readSource(relative: string): Promise<string> {
 
 describe("main process plugin lifecycle regression guards", () => {
   it("reports lvis:// install success only after runtime activation succeeds", async () => {
-    const source = await readSource("../main.ts");
+    // C17: the lvis:// deep-link install lifecycle moved from main.ts into
+    // src/main/lvis-deep-link.ts. Same guarantee, new location — the section
+    // is now terminated by the `broadcastPluginLifecycleEvent` definition that
+    // immediately follows `handleLvisUri` (previously `activateView`).
+    const source = await readSource("../main/lvis-deep-link.ts");
     const lifecycleSection = source.match(
-      /let installProgressSlug = params\.slug[\s\S]*?\r?\n}\r?\n\r?\nfunction activateView/,
+      /let installProgressSlug = params\.slug[\s\S]*?\r?\n}\r?\n\r?\nfunction broadcastPluginLifecycleEvent/,
     )?.[0];
 
     expect(lifecycleSection, "deep-link install lifecycle section must be present").toBeTruthy();
@@ -48,15 +53,20 @@ describe("main process plugin lifecycle regression guards", () => {
   });
 
   it("replaces plugin event bridge subscriptions when the main window is recreated", async () => {
-    const mainSource = await readSource("../main.ts");
-    const bootSource = await readSource("../boot.ts");
+    // C17: the deep-link window-recreation path (which re-registers the plugin
+    // event bridge for the freshly created main window) moved into
+    // src/main/lvis-deep-link.ts. C18: the bridge replacement wiring moved from
+    // boot.ts into boot/steps/conversation-wiring.ts + boot/assemble-services.ts
+    // as BootContext (`ctx.*`) fields — same guarantee, new location.
+    const mainSource = await readSource("../main/lvis-deep-link.ts");
+    const bootSource = await readBootWiring();
 
     expect(mainSource).toContain("registerMainWindowPluginEventBridge(mainWindow)");
-    expect(bootSource).toContain("const replacePluginEventBridge = (win: BrowserWindow) => {");
-    expect(bootSource).toContain("let pluginEventBridgeWindow = mainWindow;");
+    expect(bootSource).toContain("replacePluginEventBridge = (win: BrowserWindow) => {");
+    expect(bootSource).toContain("pluginEventBridgeWindow = mainWindow;");
     expect(bootSource).toContain("pluginEventBridgeWindow = win;");
     expect(bootSource).toContain("disposePluginEventBridge();");
-    expect(bootSource).toContain("replacePluginEventBridge(pluginEventBridgeWindow);");
-    expect(bootSource).toContain("registerPluginEventBridge: replacePluginEventBridge");
+    expect(bootSource).toContain("replacePluginEventBridge(ctx.pluginEventBridgeWindow);");
+    expect(bootSource).toContain("registerPluginEventBridge: ctx.replacePluginEventBridge");
   });
 });

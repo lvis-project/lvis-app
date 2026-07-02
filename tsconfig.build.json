@@ -11,6 +11,7 @@
     "src/**/*.stories.ts",
     "src/**/*.stories.tsx",
     "src/preload.ts",
+    "src/preload",
     "src/preload.cjs.ts",
     "src/renderer.tsx"
   ]
