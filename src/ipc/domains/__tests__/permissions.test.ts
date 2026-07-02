@@ -196,6 +196,29 @@ describe("permissions IPC handlers", () => {
     expect(permissionManager.setModePersist).toHaveBeenCalledWith("strict");
   });
 
+  // ── 3-agent cluster review of PR #1441 — critic minor 2 ────────────────
+  it("setMode rejects a foreign/invalid sender frame with UNAUTHORIZED_FRAME", async () => {
+    const { permissionManager } = await setup({ approvalChoice: "allow-once" });
+
+    const result = await invokeWithEvent(
+      PERMISSIONS.setMode,
+      makeForeignEvent(),
+      { mode: "auto", intent: USER_INTENT },
+    );
+
+    expect(result).toEqual(UNAUTHORIZED_FRAME);
+    expect(permissionManager.setModePersist).not.toHaveBeenCalled();
+  });
+
+  it("setMode rejects a request missing user-keyboard intent (mirrors addRule)", async () => {
+    const { permissionManager } = await setup({ approvalChoice: "allow-once" });
+
+    const result = await invoke(PERMISSIONS.setMode, { mode: "auto" });
+
+    expect(result).toMatchObject({ ok: false, error: "user-keyboard-required" });
+    expect(permissionManager.setModePersist).not.toHaveBeenCalled();
+  });
+
   it("setMode fails closed before persisting when permission audit append fails", async () => {
     const { permissionManager } = await setup({
       approvalChoice: "allow-once",
