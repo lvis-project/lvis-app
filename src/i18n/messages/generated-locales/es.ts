@@ -770,6 +770,7 @@ export const esMessages: Record<string, string> = {
   "chatPreviewRail.launcher.browser": "Navegador",
   "chatPreviewRail.launcher.file": "Archivos",
   "chatPreviewRail.resizeFilePanels": "Cambiar tamaño del árbol y visor de archivos",
+  "chatPreviewRail.resizePanel": "Cambiar tamaño del panel de trabajo",
   "chatPreviewRail.terminalSearchPlaceholder": "Buscar salida de terminal",
   "chatPreviewRail.browserAddressPlaceholder": "Ingresar URL",
   "chatPreviewRail.browserGo": "Ir",

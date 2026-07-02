@@ -770,6 +770,7 @@ export const deMessages: Record<string, string> = {
   "chatPreviewRail.launcher.browser": "Browser",
   "chatPreviewRail.launcher.file": "Dateien",
   "chatPreviewRail.resizeFilePanels": "Größe von Dateibaum und Dateiansicht ändern",
+  "chatPreviewRail.resizePanel": "Arbeitsbereichsleiste anpassen",
   "chatPreviewRail.terminalSearchPlaceholder": "Terminalausgabe suchen",
   "chatPreviewRail.browserAddressPlaceholder": "URL eingeben",
   "chatPreviewRail.browserGo": "Öffnen",

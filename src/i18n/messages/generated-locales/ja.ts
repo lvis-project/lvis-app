@@ -770,6 +770,7 @@ export const jaMessages: Record<string, string> = {
   "chatPreviewRail.launcher.browser": "ブラウザー",
   "chatPreviewRail.launcher.file": "ファイル",
   "chatPreviewRail.resizeFilePanels": "ファイルツリーとファイルビューアーのサイズを調整",
+  "chatPreviewRail.resizePanel": "ワークスペースパネルのサイズを調整",
   "chatPreviewRail.terminalSearchPlaceholder": "ターミナル出力を検索",
   "chatPreviewRail.browserAddressPlaceholder": "URL を入力",
   "chatPreviewRail.browserGo": "移動",
