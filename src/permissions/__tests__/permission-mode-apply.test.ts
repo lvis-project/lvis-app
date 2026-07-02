@@ -75,4 +75,32 @@ describe("applyPermissionModeCommand", () => {
     );
     expect(deps.permissionManager.setModePersist).toHaveBeenCalledWith("auto");
   });
+
+  // ── 3-agent cluster review of PR #1441 — critic minor 1 + audit forensics ──
+  it("does not request approval for durable mode changes backed by a local-api-approval bypass, and pins the confirmationSource forensic marker", async () => {
+    const deps = makeDeps();
+
+    const result = await applyPermissionModeCommand(durableAuto, {
+      ...deps,
+      approvalBypass: {
+        source: "local-api-approval",
+        trustOrigin: "local-api",
+        explicitUserAction: true,
+      },
+    } as never);
+
+    expect(result).toMatchObject({ ok: true, mode: "auto", durable: true });
+    expect(deps.approvalGate.requestAndWait).not.toHaveBeenCalled();
+    expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "mode_change",
+        trustOrigin: "user-keyboard",
+        fromMode: "default",
+        toMode: "auto",
+        durable: true,
+        confirmationSource: "local-api-approval",
+      }),
+    );
+    expect(deps.permissionManager.setModePersist).toHaveBeenCalledWith("auto");
+  });
 });

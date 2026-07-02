@@ -1303,9 +1303,51 @@ a per-boot Bearer secret on every route (persisted with the bound port to
 `GET /v1/health`, and is closed in the app-shutdown path. `sdk/index.ts` is a
 narrow typed `LvisClient` (read+send only) over any `LocalApi<string>`;
 `cli/http-client.ts` + `scripts/lvis-cli.ts` make the CLI a thin HTTP client of
-the same server (`bun run cli -- session:list` 등). Remaining #1409 follow-ups:
-authenticated non-renderer authz for privileged mutation, and any
-remote/multi-user exposure beyond loopback.
+the same server (`bun run cli -- session:list` 등).
+
+**Approval-gate-mediated external mutation (#1409 follow-up, landed).** The
+Bearer secret authenticates the CALLER (loopback, per-boot, constant-time
+compare) — it does NOT authorize a mutation by itself. There is no token
+bypass: authorization for a mutating channel comes only from the user's own
+"Allow" click on the in-app `ApprovalGate` modal at the moment of the request,
+which IS the explicit user action, mirroring the repo's "headless must not
+bypass approvals" posture (Permission Policy §Headless/routine 실행 rule
+above). Scope is intentionally narrow:
+
+- **Allowlist** — `contract/app-contract.ts`'s `EXTERNAL_MUTATION_CHANNELS`
+  is the ONLY set of gesture-gated channels an external origin (`local-api` /
+  `cli`) may ever reach, and only through this consent path. Today it holds
+  exactly one entry: `PERMISSIONS.setMode` (`permission:set-mode` on the CLI,
+  `LvisClient.setPermissionMode` on the SDK). Every other gesture-gated
+  mutating channel (add/remove rule, policy set, dir/reviewer dispatch,
+  deferred resolve, user-approval record/revoke, sandbox install) stays
+  renderer-only under any consent.
+- **Consent wiring** — `src/main/local-api-server.ts`'s
+  `buildExternalMutationApprover` surfaces the request to `ApprovalGate` as an
+  `"agent-action"` category with `requireExplicit`; only an `allow-*` choice
+  authorizes the mutation, and no `allow-always` exception is ever persisted
+  for this path (one click authorizes exactly one mutation). `src/api/local-api.ts`
+  checks this BEFORE the gesture-gated rejection, so the dispatcher's normal
+  fail-closed default is preserved for everything outside the allowlist.
+  `src/permissions/permission-mode-apply.ts` records the approval as a
+  `PermissionModeApprovalBypass` with `source: "local-api-approval"` so the
+  handler applies the change WITHOUT a second in-app modal — the ApprovalGate
+  click the user already made is the only confirmation, end-to-end exactly
+  ONE modal.
+- **Denial** — a decline or a timed-out/errored approval resolves as the
+  dispatcher's `external-mutation-denied` code, which the HTTP transport maps
+  to `403` (same JSON envelope as every other rejected dispatch).
+- **Default posture unchanged** — with no `externalMutationApprover` wired, or
+  for any gesture-gated channel outside the allowlist, the rejection stays
+  byte-identical to the pre-#1409 fail-closed default
+  (`gesture-required-origin-unsupported`).
+
+Remote access and multi-user authorization are explicitly OUT OF SCOPE for
+Epic #1409 — this consent model assumes a single loopback (127.0.0.1) caller
+on the same machine as the one user who clicks Allow; it is not a
+multi-tenant or network-facing authorization scheme. Remaining #1409
+follow-ups: authenticated non-renderer authz for the rest of the
+gesture-gated surface, and any remote/multi-user exposure beyond loopback.
 
 #### 4.6.2 Module Boundary Rules
 

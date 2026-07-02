@@ -111,6 +111,7 @@ import {
   PUBLIC_CHANNELS,
   CHANNEL_GESTURE,
   CHANNELS,
+  EXTERNAL_MUTATION_CHANNELS,
 } from "../app-contract.js";
 // M1 — exported domain channel consts, redefined to source from CHANNELS.
 import {
@@ -224,6 +225,31 @@ describe("#1409 contract version + public-surface freeze", () => {
     for (const channel of required) {
       expect(inventory.has(channel), `gesture:required channel not registered: ${channel}`).toBe(true);
       expect(publicSet.has(channel), `gesture:required channel leaked into PUBLIC_CHANNELS: ${channel}`).toBe(false);
+    }
+  });
+
+  it("every EXTERNAL_MUTATION_CHANNELS member is gesture:required, non-public, and registered", () => {
+    const publicSet = new Set<string>(PUBLIC_CHANNELS);
+
+    // Sanity: the allowlist must actually contain entries (currently exactly one).
+    expect(EXTERNAL_MUTATION_CHANNELS.length).toBeGreaterThan(0);
+
+    for (const channel of EXTERNAL_MUTATION_CHANNELS) {
+      // (a) gesture-gated — reachable externally ONLY via in-app ApprovalGate consent.
+      expect(
+        CHANNEL_GESTURE[channel],
+        `EXTERNAL_MUTATION channel is not gesture:required: ${channel}`,
+      ).toBe("required");
+      // (b) never in the externally-exposable public subset (fail-closed).
+      expect(
+        publicSet.has(channel),
+        `EXTERNAL_MUTATION channel leaked into PUBLIC_CHANNELS: ${channel}`,
+      ).toBe(false);
+      // (c) a real registered channel (reuses the registered-inventory harness).
+      expect(
+        inventory.has(channel),
+        `EXTERNAL_MUTATION channel not registered: ${channel}`,
+      ).toBe(true);
     }
   });
 });
