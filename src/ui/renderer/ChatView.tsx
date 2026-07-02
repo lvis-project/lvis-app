@@ -32,6 +32,7 @@ import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import { getKoreaDateKey } from "./utils/korea-date-key.js";
 import { isTurnStartEntry } from "./utils/classify-turn-entries.js";
 import { collectChatPreviewModel } from "./preview/preview-targets.js";
+import { useWorkspaceTabs } from "./preview/workspace-tabs.js";
 import { useChatScroll } from "./hooks/use-chat-scroll.js";
 import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useCheckpointView } from "./hooks/use-checkpoint-view.js";
@@ -186,6 +187,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     [previewModel.targets],
   );
   const [selectedPreviewId, setSelectedPreviewId] = useState<string | null>(null);
+  // Workspace-tab store lifted out of ChatSidePanel. ChatSidePanel is unmounted
+  // whenever the rail closes / the view leaves home / the session switches
+  // (see the conditional mount below); owning the tabs inside it would destroy
+  // them on every such transition. ChatView stays mounted across those, so the
+  // store lives here — tab state now survives. See preview/workspace-tabs.ts.
+  const workspaceTabs = useWorkspaceTabs();
   const previewRailVisible = sidePanelOpen;
 
   useEffect(() => {
@@ -662,6 +669,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           files={previewModel.files}
           selectedId={selectedPreviewId}
           onSelect={setSelectedPreviewId}
+          workspaceTabs={workspaceTabs}
           onClose={() => {
             onSidePanelOpenChange?.(false);
           }}
