@@ -181,6 +181,25 @@ const requiredEntries = [
 const missingRequired = requiredEntries.filter((entry) => !entrySet.has(entry));
 if (missingRequired.length > 0) fail("required runtime entries missing from app.asar", missingRequired);
 
+// Lazy renderer chunks — mermaid loads via a webpack dynamic import that
+// swallows load errors (preview-renderers.tsx catch → raw-source fallback), so a
+// chunk pruned out of the asar fails SILENTLY at runtime — a launch smoke can
+// never see it. Assert membership at build time instead. The chunk name carries
+// a contenthash (webpack.config.cjs chunkFilename [name].[contenthash:8].js), so
+// match by regex rather than exact string.
+const LAZY_RENDERER_CHUNKS = [
+  { name: "mermaid", pattern: /^\/dist\/src\/renderer\/chunks\/mermaid\.[0-9a-f]{8}\.js$/ },
+];
+const missingLazyChunks = LAZY_RENDERER_CHUNKS.filter(
+  (chunk) => !entries.some((entry) => chunk.pattern.test(entry)),
+);
+if (missingLazyChunks.length > 0) {
+  fail(
+    "required lazy renderer chunks missing from app.asar",
+    missingLazyChunks.map((chunk) => chunk.name),
+  );
+}
+
 const rootDevPattern = /^\/(?:\.github|\.storybook|docs|fixtures|release|resources|scripts|src|test)(?:\/|$)/;
 const rootDevEntries = entries.filter((entry) => rootDevPattern.test(entry));
 if (rootDevEntries.length > 0) fail("root development files leaked into app.asar", rootDevEntries);

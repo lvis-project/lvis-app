@@ -169,6 +169,9 @@ describe("preload contextBridge world shape lock", () => {
             "get",
             "set",
           ],
+          "preview": [
+            "readFile",
+          ],
           "ui": [
             "onAssistantContextAction",
             "showAssistantContextMenu",
@@ -177,6 +180,11 @@ describe("preload contextBridge world shape lock", () => {
             "list",
             "record",
             "revokeByKey",
+          ],
+          "workspace": [
+            "listDir",
+            "listRoots",
+            "pickRoot",
           ],
         },
         "lvisApi": {

@@ -230,4 +230,52 @@ describe("collectChatPreviewModel", () => {
       }),
     );
   });
+
+  it("does not turn a glob pattern into a file target, but promotes its matches (diagnosis ③)", () => {
+    const entries: ChatEntry[] = [
+      {
+        kind: "tool_group",
+        groupId: "g-glob",
+        groupIds: ["g-glob"],
+        status: "done",
+        tools: [
+          {
+            toolUseId: "glob-1",
+            name: "glob_files",
+            displayOrder: 0,
+            status: "done",
+            category: "read",
+            input: { pattern: "**/*architecture*.md", path: "/workspace" },
+            result: JSON.stringify({
+              path: "/workspace",
+              pattern: "**/*architecture*.md",
+              matches: ["/workspace/docs/architecture.md", "/workspace/docs/architecture-v4.md"],
+              truncated: false,
+            }),
+          },
+        ],
+      },
+    ];
+
+    const model = collectChatPreviewModel({ entries, attachments: [] });
+
+    // The glob pattern itself never becomes a file target/entry.
+    expect(model.targets.some((tgt) => "path" in tgt && tgt.path.includes("**"))).toBe(false);
+    expect(model.files.some((item) => item.path.includes("**"))).toBe(false);
+
+    // Its concrete matches ARE openable file targets.
+    expect(model.targets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "file", title: "architecture.md", path: "/workspace/docs/architecture.md" }),
+        expect.objectContaining({ kind: "file", title: "architecture-v4.md", path: "/workspace/docs/architecture-v4.md" }),
+      ]),
+    );
+    expect(model.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "/workspace/docs/architecture.md", operation: "read", canOpenExternal: false }),
+      ]),
+    );
+    // With matches present, no generic json card collapses the same tool.
+    expect(model.targets.some((tgt) => tgt.kind === "json" && tgt.toolUseId === "glob-1")).toBe(false);
+  });
 });
