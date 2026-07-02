@@ -8,6 +8,7 @@ import type { ChatPreviewTarget, WorkspaceFileItem } from "../../preview/preview
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../../shared/side-browser.js";
 import { ChatSidePanel } from "../ChatSidePanel.js";
+import { useWorkspaceTabs } from "../../preview/workspace-tabs.js";
 
 function api(): LvisApi {
   return {
@@ -24,20 +25,30 @@ function renderPanel(ui: ReactElement) {
   );
 }
 
-function StatefulPanel({
+/**
+ * Panel harness that owns the workspace-tab store the same way the real
+ * ChatView does (via `useWorkspaceTabs`), plus the selected-preview state. The
+ * store lives ABOVE the ChatSidePanel mount so tab state survives the panel
+ * unmounting — the whole point of lifting it out of the component.
+ */
+function HarnessPanel({
   api,
   sessionId,
   targets,
   files,
   initialSelectedId,
+  panelMounted = true,
 }: {
   api: LvisApi;
   sessionId?: string;
   targets: ChatPreviewTarget[];
   files: WorkspaceFileItem[];
   initialSelectedId: string | null;
+  panelMounted?: boolean;
 }) {
   const [selectedId, setSelectedId] = useState(initialSelectedId);
+  const workspaceTabs = useWorkspaceTabs();
+  if (!panelMounted) return null;
   return (
     <ChatSidePanel
       api={api}
@@ -46,6 +57,7 @@ function StatefulPanel({
       files={files}
       selectedId={selectedId}
       onSelect={setSelectedId}
+      workspaceTabs={workspaceTabs}
       onClose={vi.fn()}
     />
   );
@@ -92,14 +104,12 @@ describe("ChatSidePanel", () => {
     ];
 
     renderPanel(
-      <ChatSidePanel
+      <HarnessPanel
         api={api()}
         sessionId="session-1"
         targets={targets}
         files={files}
-        selectedId="file-1"
-        onSelect={vi.fn()}
-        onClose={vi.fn()}
+        initialSelectedId="file-1"
       />,
     );
 
@@ -167,7 +177,7 @@ describe("ChatSidePanel", () => {
     ];
 
     const { container } = renderPanel(
-      <StatefulPanel
+      <HarnessPanel
         api={api()}
         sessionId="session-1"
         targets={targets}
@@ -211,6 +221,62 @@ describe("ChatSidePanel", () => {
     expect(screen.getAllByText("metrics.json").length).toBeGreaterThanOrEqual(1);
   });
 
+  it("preserves added workspace tabs across a ChatSidePanel unmount (session switch)", () => {
+    // The store lives above the panel (in the harness, mirroring ChatView), so
+    // unmounting the panel — as happens on a session switch, leaving home, or
+    // closing the rail — must NOT lose tab state. Previously the tabs lived in
+    // ChatSidePanel's own useState and were destroyed on every unmount.
+    const targets: ChatPreviewTarget[] = [];
+    const files: WorkspaceFileItem[] = [];
+
+    const { rerender } = renderPanel(
+      <HarnessPanel
+        api={api()}
+        sessionId="session-1"
+        targets={targets}
+        files={files}
+        initialSelectedId={null}
+      />,
+    );
+
+    // Four default tabs at mount.
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+    // Add a browser tab -> five tabs, and it becomes active.
+    fireEvent.click(screen.getByTestId("chat-side-panel-add-browser-tab"));
+    expect(screen.getAllByRole("tab")).toHaveLength(5);
+
+    // Unmount the panel (session switch / rail close) — the harness (store)
+    // stays mounted, exactly like ChatView across the conditional render.
+    rerender(
+      <TooltipProvider>
+        <HarnessPanel
+          api={api()}
+          sessionId="session-2"
+          targets={targets}
+          files={files}
+          initialSelectedId={null}
+          panelMounted={false}
+        />
+      </TooltipProvider>,
+    );
+    expect(screen.queryByTestId("chat-side-panel")).toBeNull();
+
+    // Remount the panel — the added tab is still present (state survived).
+    rerender(
+      <TooltipProvider>
+        <HarnessPanel
+          api={api()}
+          sessionId="session-2"
+          targets={targets}
+          files={files}
+          initialSelectedId={null}
+        />
+      </TooltipProvider>,
+    );
+    expect(screen.getByTestId("chat-side-panel")).toBeTruthy();
+    expect(screen.getAllByRole("tab")).toHaveLength(5);
+  });
+
   it("renders MCP app payloads through McpAppView", async () => {
     const readUiResource = vi.fn(async () => "<main>MCP preview card</main>");
     vi.stubGlobal("lvis", {
@@ -242,14 +308,12 @@ describe("ChatSidePanel", () => {
     ];
 
     const { container } = renderPanel(
-      <ChatSidePanel
+      <HarnessPanel
         api={api()}
         sessionId="session-1"
         targets={targets}
         files={[]}
-        selectedId="plugin-1"
-        onSelect={vi.fn()}
-        onClose={vi.fn()}
+        initialSelectedId="plugin-1"
       />,
     );
 

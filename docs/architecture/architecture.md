@@ -19,7 +19,7 @@
 5. [Memory — 경량 기억 구조](#5-memory--경량-기억-구조)
    - 5.1 설계 원칙 · 5.2 Memory 파일 구조
 6. [Client Core Engines](#6-client-core-engines)
-   - 6.1 Keyword Detecting Engine · 6.2 Agent Route Engine · **6.3 Tool Permission Model** · **6.4 Tool Registry & Taxonomy** · **6.5 Command Safety** · **6.6 Observability & Audit** · **6.7 Theme & Design Tokens** · **6.8 Floating Question Panel** · **6.9 Settings Dialog Tab Layout**
+   - 6.1 Keyword Detecting Engine · 6.2 Agent Route Engine · **6.3 Tool Permission Model** · **6.4 Tool Registry & Taxonomy** · **6.5 Command Safety** · **6.6 Observability & Audit** · **6.7 Theme & Design Tokens** · **6.8 Floating Question Panel** · **6.9 Settings Dialog Tab Layout** · **6.10 ChatSidePanel & Workspace Rail**
 7. [Overlay Trigger Surface](#7-overlay-trigger-surface)
 8. [Agent Approval System — 에이전트 요청 승인](#8-agent-approval-system--에이전트-요청-승인)
 9. [Plugin System & UI Extension](#9-plugin-system--ui-extension)
@@ -2478,6 +2478,90 @@ SDK 에는 fallback artifact (JSON / CSS / TS const) 가 없으며, plugin 은
 | temperature / seed / maxOutputTokens / responseFormat / stopSequences | 고급 (Advanced) 탭 | **삭제** (프론티어 모델 자동 처리) |
 | 채팅 언어 선택기 (langLock) | ChatView 툴바 | **삭제** (LLM 자동 감지) |
 | 고급 (Advanced) 탭 | 존재 | **탭 전체 삭제** |
+
+---
+
+## 6.10 ChatSidePanel & Workspace Rail — 목표 모델
+
+> **상태 표기:** 이 섹션은 ChatSidePanel(우측 워크스페이스 레일) 재설계의 **목표(TARGET) 아키텍처**를 정의한다. 레퍼런스 이슈 **#1415**(Hermes Desktop)가 요구한 *데이터 모델 우선* 설계 — preview-target 스토어 + 공통 open action — 을 정본으로 삼는다.
+>
+> 구현은 아래 "단계별 PR 플랜"에 따라 점진적으로 이루어진다. **PR-0**(이 섹션) + **PR-1**(state lift)이 기반(foundation)이며, PR-2~PR-6+ 가 나머지 목표를 실현한다. 각 subsection 은 별도 표기가 없으면 *목표 상태*를 기술한다. 현재 코드 상태와 다른 부분은 "현재 →目標" 로 명시한다.
+
+### 6.10.1 근본원인 (Why redesign)
+
+초기 구현은 #1415 의 데이터모델-우선 요구(preview-target 스토어 + 공통 open action)를 건너뛰고 UI 형태(4-고정탭)만 급조했다. 그 결과 **모든 워크스페이스 state 가 `ChatSidePanel.tsx` 로컬 `useState` 에 갇혔다** — 레일을 닫거나(home 이탈), 세션을 전환하면 패널이 언마운트되며 탭/활성탭/브라우저 URL 이 소실되고, 외부 표면(예: ActionPanel 의 open action)이 패널에 항목을 열어줄 수 없었다. 아키텍처 SOT 부재 + `--no-verify` 우회 머지가 이 드리프트를 방치했다.
+
+### 6.10.2 콘텐츠-주도 탭 모델 (content-driven tabs)
+
+- **No-default:** 워크스페이스는 빈 상태로 시작한다. 고정된 4개 기본 탭은 없다. 탭은 사용자 액션(런처) 또는 콘텐츠 라우팅(ActionPanel / 인덱서 결과)이 만든다.
+  - *현재 → 목표:* 현재는 `file-browser` / `preview` / `browser` / `terminal` 4개 탭이 `closeable:false` 로 마운트-하드코딩(PR-2 에서 빈 배열로 전환). PR-1 은 이 기본 탭 세트를 **그대로 유지**하되 소유 위치만 옮긴다(§6.10.7).
+- **All-closeable:** 모든 탭은 닫을 수 있다. never-empty 가드는 제거된다(빈 워크스페이스는 empty-state 런처가 채운다).
+- **Per-item:** 탭은 kind-그룹(현재 방식)이 아니라 개별 항목(파일/브라우저 URL/미리보기) 단위로 열린다. `WorkspaceTab` 이 자신이 표시하는 preview-target 을 직접 가리킨다.
+- **Ephemeral ↔ pinned:** 탭은 임시(ephemeral, 단일 클릭 → 미리보기 자리 교체) 또는 고정(pinned, 더블 클릭/명시 고정)될 수 있다. `openInEphemeral()` / `promoteToPinned()` 로 전이한다(PR-5).
+
+### 6.10.3 empty-state 런처 (launcher picker)
+
+빈 워크스페이스는 런처 피커를 보여준다. **확정 4항목:** 검토(⌃⇧G) · 터미널 · 브라우저(⌘T) · 파일(⌘P). 각 항목의 클릭/단축키는 해당 kind 의 탭을 생성한다.
+
+- **사이드채팅은 런처서 제외**(후속 과제로 defer). 런처 SOT 는 `src/ui/renderer/components/command-actions.ts` 의 `buildQuickActions` / `QuickAction{id,label,run}` 를 확장하며, `WorkspaceTabKind` 와 수렴시킨다(PR-3). `CommandPaletteDialog.tsx` 는 아직 부재.
+
+### 6.10.4 카운트 제거 — ActionPanel 단일 활동 소스
+
+탭에서 항목 카운트 배지를 제거한다. **활동 신호는 ActionPanel(도구 활동 패널)이 단일 소스**다. 워크스페이스 레일은 콘텐츠를 여는 곳이지 활동을 집계하는 곳이 아니다.
+
+- *현재 → 목표:* 현재는 탭 라벨 옆에 kind 별 카운트를 렌더(`counts` map + 배지). PR-2 에서 제거. PR-1 은 카운트를 **그대로 유지**.
+
+### 6.10.5 ActionPanel 인앱 라우팅 + 우클릭 시스템앱
+
+- **인앱 라우팅(기본):** ActionPanel 항목 open 은 시스템 브라우저가 아니라 워크스페이스 레일 안으로 라우팅한다 — 웹 URL → browser 탭, 지원 파일 → preview 탭.
+  - *현재 → 목표:* 현재 `App.tsx` 의 `openActionPanelUrl` → `api.openExternalUrl` (시스템 브라우저)로 직결(`ActionPanel.tsx` 의 `onOpenExternalUrl`). PR-4 에서 인앱 open action 으로 재배선하며 `onOpenExternalUrl` → `onOpenItem` 으로 일반화.
+- **우클릭 → '시스템앱으로 열기':** 시스템 앱 열기는 우클릭 컨텍스트 메뉴에서만 명시적으로 제공한다.
+- **보안 계약(불변):** 로컬 경로 auto-open 금지(commit `c04f3b0f` — action panel local path opener 제거). URL 은 검증 후에만 라우팅한다(CodeQL 해소). 이 두 계약은 PR-4 이후에도 유지된다.
+
+### 6.10.6 점진적 파일 뷰어 (progressive file viewer)
+
+파일 뷰어는 확장자/MIME → renderer 레지스트리로 점진 확장한다: **text → md → mermaid**.
+
+- 렌더는 §6.6.5 의 **HtmlPreview 격리 셸**(`lvis-render-html` 파티션, CSP-first host shell, sandboxed iframe) 안에서 이루어진다.
+- **mermaid 는 로컬 번들**만 사용한다(외부 CDN 로드 금지 — 파티션의 http/https 차단 계약과 정합). 렌더 실패 시 원본 코드펜스로 폴백.
+
+### 6.10.7 State 소유 — 워크스페이스 탭 스토어 (PR-1, 구현됨)
+
+워크스페이스 탭 state 는 `ChatSidePanel` 로컬 `useState` 가 아니라 **패널보다 상위에서 사는 스토어**가 소유한다.
+
+- **스토어:** `src/ui/renderer/preview/workspace-tabs.ts` 의 `useWorkspaceTabs()` — `tabs` / `activeTabId` / `browserUrlByTab` 를 소유하고 `addTab` / `closeTab` / `setActiveTabId` / `setBrowserTabUrl` 를 노출한다. `WorkspaceTabKind` / `WorkspaceTab` 타입도 이 모듈에 둔다(런처 SOT 인 `command-actions.ts` 와의 수렴은 PR-3).
+- **마운트 위치:** `ChatView` 레벨. `ChatSidePanel` 은 레일 닫힘 / home 이탈 / 세션 전환 시 **조건부 언마운트**(`{previewRailVisible ? <ChatSidePanel/> : null}`)되지만 `ChatView` 는 그 전이 동안 마운트를 유지하므로, 스토어를 여기 두면 **탭 state 가 세션 전환/패널 토글을 넘어 유지**된다. 이는 `sidePanelOpen` 이 `use-app-mode.ts` 에서 상위 소유되어 threaded-down 되는 패턴과 동일하다. 이 위치는 향후 ActionPanel 의 open action(§6.10.5)이 스토어에 닿을 수 있는 지점이기도 하다.
+- **PR-1 불변식(pure refactor):** 이 lift 는 **행동을 바꾸지 않는다**. 기본 4탭 · 카운트 · never-empty 가드 · 닫기 규칙이 전부 동일하며, state 가 사는 *위치*만 바뀐다. 후속 PR 이 모델(§6.10.2~6.10.6)을 실제로 변경한다.
+
+### 6.10.8 반응형 / 인덱서 통합 (부가)
+
+- **좁은 화면 drawer fallback:** 폭이 좁을 때 레일은 오버레이 drawer 로 폴백한다(#1415 criteria, 부가-A).
+- **Local Indexer 결과 → 원문 preview:** 인덱서 검색 결과에서 원문을 워크스페이스 preview 탭으로 연다(#1415 criteria, 부가-B).
+
+### 6.10.9 단계별 PR 플랜
+
+| PR | 범위 | 상태 |
+|----|------|------|
+| **PR-0** | 이 아키텍처 SOT 섹션(§6.10) 신설 | 이 문서 |
+| **PR-1** | 탭 state(tabs/activeTabId/browserUrlByTab)를 로컬 `useState` → `useWorkspaceTabs` 스토어로 승격 (§6.10.7). 순수 리팩터, 행동 불변. 세션 전환 시 탭 유지 검증. | 기반 |
+| **PR-2** | 기본 탭 제거(빈 배열) + 전부 closeable + never-empty 가드 삭제 + 카운트 제거. (PR-3 와 순서 결합: empty-state 없으면 빈 화면.) | 후속 |
+| **PR-3** | empty-state 런처 피커(§6.10.3). `command-actions.ts` SOT 확장, `WorkspaceTabKind` 수렴. | 후속 |
+| **PR-4** | ActionPanel 인앱 라우팅 + 우클릭 '시스템앱으로 열기'(§6.10.5). URL 검증, 로컬경로 auto-open 금지. | 후속 |
+| **PR-5** | ephemeral ↔ pinned(§6.10.2). `WorkspaceTab.mode`, `openInEphemeral()` + `promoteToPinned()`. | 후속 |
+| **PR-6+** | 점진적 파일 뷰어(§6.10.6). renderer 레지스트리, mermaid 로컬 번들. | 후속 |
+| **부가-A/B** | 좁은 화면 drawer fallback · 인덱서 결과 → 원문 preview(§6.10.8). | 후속 |
+
+### 6.10.10 앵커 (구현 기준점)
+
+- `src/ui/renderer/preview/workspace-tabs.ts` — `useWorkspaceTabs` 스토어 + `WorkspaceTabKind` / `WorkspaceTab` 타입 (PR-1).
+- `src/ui/renderer/components/ChatSidePanel.tsx` — 워크스페이스 레일 UI. PR-1 이후 스토어를 `workspaceTabs` prop 으로 소비.
+- `src/ui/renderer/ChatView.tsx` — 스토어 마운트 지점(`useWorkspaceTabs()`), 조건부 `ChatSidePanel` 렌더.
+- `src/ui/renderer/preview/preview-targets.ts` — preview-target 데이터 모델(`ChatPreviewTarget` / `WorkspaceFileItem` / `collectChatPreviewModel`).
+- `src/ui/renderer/components/command-actions.ts` — 런처 SOT(`buildQuickActions` / `QuickAction`), PR-3 수렴 대상.
+- `src/ui/renderer/App.tsx` — `openActionPanelUrl`(PR-4 재배선 대상), `sidePanelOpen` threading.
+- `src/ui/renderer/components/ActionPanel.tsx` — `onOpenExternalUrl`(PR-4 에서 `onOpenItem` 일반화).
+- `src/main/side-browser-webview.ts` + `src/shared/side-browser.ts` — 인앱 webview(`LVIS_SIDE_BROWSER_PARTITION`).
+- §6.6.5 — HtmlPreview 격리 셸(`lvis-render-html` 파티션), md/mermaid 렌더 경계.
 
 ---
 
