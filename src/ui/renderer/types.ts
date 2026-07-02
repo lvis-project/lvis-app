@@ -1626,12 +1626,16 @@ export interface LvisWorkspaceApi {
     roots?: Array<{ path: string; isDefault: boolean }>;
     error?: string;
   }>;
-  pickRoot: () => Promise<{
+  pickRoot: (opts?: { acknowledgePath?: string }) => Promise<{
     ok: boolean;
     canceled?: boolean;
     added?: string;
     roots?: Array<{ path: string; isDefault: boolean }>;
     warnings?: string[];
+    /** Adjacency warnings present + not persisted — renderer must confirm. */
+    requiresAcknowledgement?: boolean;
+    /** Picked path awaiting acknowledgement — echo back via `acknowledgePath`. */
+    pendingPath?: string;
     error?: string;
   }>;
   listDir: (path: string) => Promise<{

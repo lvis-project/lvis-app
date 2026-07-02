@@ -521,4 +521,80 @@ describe("ChatSidePanel", () => {
     await screen.findByTestId("chat-side-panel-file-preview");
     await waitFor(() => expect(screen.getByText(/real content/)).toBeTruthy());
   });
+
+  it("does not loop listDir when the active root fails to list", async () => {
+    const listDir = vi.fn(async () => ({ ok: false as const, error: "read-failed" as const }));
+    vi.stubGlobal("lvis", {
+      attach: { openExternal: vi.fn(async () => ({ ok: true })) },
+      preview: { readFile: vi.fn(async () => ({ ok: true, content: "", path: "/ws/x", truncated: false })) },
+      workspace: {
+        listRoots: vi.fn(async () => ({ ok: true, defaultRoot: "/ws", roots: [{ path: "/ws", isDefault: true }] })),
+        pickRoot: vi.fn(async () => ({ ok: true, canceled: true, roots: [{ path: "/ws", isDefault: true }] })),
+        listDir,
+      },
+    });
+    (window as unknown as { lvis: unknown }).lvis = (globalThis as unknown as { lvis: unknown }).lvis;
+
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+
+    // The failing active-root load surfaces an error and is NOT retried forever.
+    await screen.findByTestId("chat-side-panel-fs-error");
+    const callsAfterError = listDir.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // No additional IPC after the failure settled — the render→IPC loop is broken.
+    expect(listDir.mock.calls.length).toBe(callsAfterError);
+    expect(callsAfterError).toBeLessThanOrEqual(2);
+  });
+
+  it("requires acknowledgement before persisting a folder with adjacency warnings", async () => {
+    const pickRoot = vi.fn(async (opts?: { acknowledgePath?: string }) => {
+      if (opts?.acknowledgePath) {
+        return {
+          ok: true as const,
+          added: opts.acknowledgePath,
+          roots: [
+            { path: "/ws", isDefault: true },
+            { path: opts.acknowledgePath, isDefault: false },
+          ],
+        };
+      }
+      return {
+        ok: true as const,
+        requiresAcknowledgement: true as const,
+        pendingPath: "/ws/.git",
+        warnings: ["path contains '.git' segment — secrets may be exposed if added"],
+        roots: [{ path: "/ws", isDefault: true }],
+      };
+    });
+    vi.stubGlobal("lvis", {
+      attach: { openExternal: vi.fn(async () => ({ ok: true })) },
+      preview: { readFile: vi.fn(async () => ({ ok: true, content: "", path: "/ws/x", truncated: false })) },
+      workspace: {
+        listRoots: vi.fn(async () => ({ ok: true, defaultRoot: "/ws", roots: [{ path: "/ws", isDefault: true }] })),
+        pickRoot,
+        listDir: vi.fn(async () => ({ ok: true, path: "/ws", entries: [], truncated: false })),
+      },
+    });
+    (window as unknown as { lvis: unknown }).lvis = (globalThis as unknown as { lvis: unknown }).lvis;
+
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId("chat-side-panel-add-root"));
+
+    // Phase 1: warning banner appears; the pick was NOT persisted (no ack yet).
+    await screen.findByTestId("chat-side-panel-root-warning");
+    expect(pickRoot).toHaveBeenCalledTimes(1);
+    expect(pickRoot).toHaveBeenLastCalledWith();
+
+    // Phase 2: confirm → pickRoot re-invoked WITH the acknowledged path.
+    fireEvent.click(screen.getByTestId("chat-side-panel-root-warning-confirm"));
+    await waitFor(() => expect(pickRoot).toHaveBeenCalledTimes(2));
+    expect(pickRoot).toHaveBeenLastCalledWith({ acknowledgePath: "/ws/.git" });
+    await waitFor(() => expect(screen.queryByTestId("chat-side-panel-root-warning")).toBeNull());
+  });
 });

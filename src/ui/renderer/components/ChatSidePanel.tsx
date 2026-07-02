@@ -644,6 +644,15 @@ function ProjectRootsBrowser({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [childrenByPath, setChildrenByPath] = useState<Record<string, WorkspaceDirEntry[]>>({});
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
+  // A path is "attempted" once loadDir resolves (success OR failure). The
+  // auto-load effect keys off this so a dir whose listDir FAILED is not retried
+  // forever: a failed listDir never populates childrenByPath, so without this the
+  // effect would refire every render → an infinite render→IPC loop.
+  const [attemptedPaths, setAttemptedPaths] = useState<Set<string>>(new Set());
+  const [errorByPath, setErrorByPath] = useState<Record<string, string>>({});
+  // A picked folder whose adjacency warnings must be acknowledged before the
+  // main process (workspace.pickRoot gate) will persist it into the read scope.
+  const [pendingWarning, setPendingWarning] = useState<{ path: string; warnings: string[] } | null>(null);
 
   const loadDir = useCallback(async (path: string) => {
     setLoadingPaths((prev) => new Set(prev).add(path));
@@ -651,8 +660,20 @@ function ProjectRootsBrowser({
       const res = await window.lvis.workspace.listDir(path);
       if (res.ok && res.entries) {
         setChildrenByPath((prev) => ({ ...prev, [path]: res.entries ?? [] }));
+        setErrorByPath((prev) => {
+          if (!(path in prev)) return prev;
+          const next = { ...prev };
+          delete next[path];
+          return next;
+        });
+      } else {
+        // Surface the failure rather than swallowing it silently.
+        setErrorByPath((prev) => ({ ...prev, [path]: res.error ?? "read-failed" }));
       }
+    } catch {
+      setErrorByPath((prev) => ({ ...prev, [path]: "read-failed" }));
     } finally {
+      setAttemptedPaths((prev) => new Set(prev).add(path));
       setLoadingPaths((prev) => {
         const next = new Set(prev);
         next.delete(path);
@@ -685,10 +706,15 @@ function ProjectRootsBrowser({
   }, [applyRoots]);
 
   useEffect(() => {
-    if (activeRoot && !childrenByPath[activeRoot] && !loadingPaths.has(activeRoot)) {
+    if (
+      activeRoot &&
+      !childrenByPath[activeRoot] &&
+      !loadingPaths.has(activeRoot) &&
+      !attemptedPaths.has(activeRoot)
+    ) {
       void loadDir(activeRoot);
     }
-  }, [activeRoot, childrenByPath, loadingPaths, loadDir]);
+  }, [activeRoot, childrenByPath, loadingPaths, attemptedPaths, loadDir]);
 
   const toggleFolder = (path: string) => {
     setExpanded((prev) => {
@@ -697,7 +723,17 @@ function ProjectRootsBrowser({
         next.delete(path);
       } else {
         next.add(path);
-        if (!childrenByPath[path] && !loadingPaths.has(path)) void loadDir(path);
+        // Manual expand is a user gesture (not a render loop): allow a retry of a
+        // previously-failed folder by clearing its attempted mark before loading.
+        if (!childrenByPath[path] && !loadingPaths.has(path)) {
+          setAttemptedPaths((prevAttempted) => {
+            if (!prevAttempted.has(path)) return prevAttempted;
+            const nextAttempted = new Set(prevAttempted);
+            nextAttempted.delete(path);
+            return nextAttempted;
+          });
+          void loadDir(path);
+        }
       }
       return next;
     });
@@ -705,6 +741,21 @@ function ProjectRootsBrowser({
 
   const addFolder = async () => {
     const res = await window.lvis.workspace.pickRoot();
+    if (!res.ok) return;
+    if (res.requiresAcknowledgement && res.pendingPath) {
+      setPendingWarning({ path: res.pendingPath, warnings: res.warnings ?? [] });
+      return;
+    }
+    if (res.roots) applyRoots(res.roots, res.added ?? null);
+  };
+
+  const confirmPendingFolder = async () => {
+    const pending = pendingWarning;
+    if (!pending) return;
+    // Second, explicit confirmation — persist WITH acknowledgement (main-process
+    // still hard-refuses a sensitive/root path even when acknowledged).
+    const res = await window.lvis.workspace.pickRoot({ acknowledgePath: pending.path });
+    setPendingWarning(null);
     if (res.ok && res.roots) applyRoots(res.roots, res.added ?? null);
   };
 
@@ -715,7 +766,7 @@ function ProjectRootsBrowser({
         const isOpen = expanded.has(entry.path);
         const active = !isDir && entry.path === selectedPath;
         return (
-          <div key={entry.path}>
+          <div key={entry.path} role="treeitem" aria-expanded={isDir ? isOpen : undefined}>
             <button
               type="button"
               data-testid={isDir ? "chat-side-panel-fs-folder" : "chat-side-panel-fs-file"}
@@ -782,11 +833,48 @@ function ProjectRootsBrowser({
           <TooltipContent side="bottom">{t("chatPreviewRail.addProjectRoot")}</TooltipContent>
         </Tooltip>
       </div>
+      {pendingWarning ? (
+        <div
+          data-testid="chat-side-panel-root-warning"
+          className="space-y-2 rounded-md border border-destructive bg-destructive/(--opacity-muted) p-2 text-[11px]"
+        >
+          <div className="font-medium text-destructive">{t("chatPreviewRail.rootWarningTitle")}</div>
+          <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground [overflow-wrap:anywhere]">
+            {pendingWarning.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              data-testid="chat-side-panel-root-warning-confirm"
+              onClick={() => void confirmPendingFolder()}
+            >
+              {t("chatPreviewRail.rootWarningConfirm")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              data-testid="chat-side-panel-root-warning-cancel"
+              onClick={() => setPendingWarning(null)}
+            >
+              {t("common.cancel")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {activeRoot ? (
         loadingPaths.has(activeRoot) && !childrenByPath[activeRoot] ? (
           <div className="px-2 py-1 text-[11px] text-muted-foreground">{t("chatPreviewRail.filePreviewLoading")}</div>
+        ) : errorByPath[activeRoot] ? (
+          <div className="px-2 py-1 text-[11px] text-destructive" data-testid="chat-side-panel-fs-error">
+            {t("chatPreviewRail.dirLoadError")}
+          </div>
         ) : (
-          renderEntries(activeRoot, 0)
+          <div role="tree" aria-label={t("chatPreviewRail.projectRoots")}>{renderEntries(activeRoot, 0)}</div>
         )
       ) : (
         <div className="px-2 py-1 text-[11px] text-muted-foreground">{t("chatPreviewRail.projectRootsEmpty")}</div>
