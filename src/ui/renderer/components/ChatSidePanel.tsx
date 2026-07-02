@@ -1,4 +1,5 @@
 import { createElement, useEffect, useMemo, useRef, useState } from "react";
+import type { WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
 import {
   Check,
   Code2,
@@ -31,15 +32,6 @@ import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-ta
 import { FileEditDiff } from "./FileEditDiff.js";
 import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
 import { McpAppView } from "./McpAppView.js";
-
-type WorkspaceTabKind = "file-browser" | "preview" | "browser" | "terminal";
-
-interface WorkspaceTab {
-  id: string;
-  kind: WorkspaceTabKind;
-  ordinal: number;
-  closeable: boolean;
-}
 
 interface FileTreeNode {
   id: string;
@@ -1075,6 +1067,14 @@ export interface ChatSidePanelProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onClose: () => void;
+  /**
+   * Workspace-tab store, lifted out of this component (see
+   * `preview/workspace-tabs.ts`). ChatSidePanel is unmounted whenever the rail
+   * closes / the view leaves home / the session switches; owning tab state here
+   * would destroy it on every such transition. The store lives at ChatView
+   * level so tab state survives.
+   */
+  workspaceTabs: WorkspaceTabsStore;
   className?: string;
 }
 
@@ -1086,24 +1086,19 @@ export function ChatSidePanel({
   selectedId,
   onSelect,
   onClose,
+  workspaceTabs,
   className = "",
 }: ChatSidePanelProps) {
   const { t } = useTranslation();
-  const [tabs, setTabs] = useState<WorkspaceTab[]>([
-    { id: "file-browser:1", kind: "file-browser", ordinal: 1, closeable: false },
-    { id: "preview:1", kind: "preview", ordinal: 1, closeable: false },
-    { id: "browser:1", kind: "browser", ordinal: 1, closeable: false },
-    { id: "terminal:1", kind: "terminal", ordinal: 1, closeable: false },
-  ]);
-  const [activeTabId, setActiveTabId] = useState("file-browser:1");
-  const nextIdRef = useRef(2);
-  const nextOrdinalRef = useRef<Record<WorkspaceTabKind, number>>({
-    "file-browser": 2,
-    preview: 2,
-    browser: 2,
-    terminal: 2,
-  });
-  const [browserUrlByTab, setBrowserUrlByTab] = useState<Record<string, string>>({});
+  const {
+    tabs,
+    activeTabId,
+    browserUrlByTab,
+    setActiveTabId,
+    addTab,
+    closeTab,
+    setBrowserTabUrl,
+  } = workspaceTabs;
 
   const targetById = useMemo(
     () => new Map(targets.map((target) => [target.id, target])),
@@ -1128,43 +1123,6 @@ export function ChatSidePanel({
     browser: browserTargets.length,
     terminal: terminalTargets.length,
   };
-
-  function addTab(kind: "file-browser" | "browser" | "terminal") {
-    const ordinal = nextOrdinalRef.current[kind]++;
-    const id = `${kind}:${nextIdRef.current++}`;
-    setTabs((current) => [...current, { id, kind, ordinal, closeable: true }]);
-    setActiveTabId(id);
-  }
-
-  function closeTab(id: string) {
-    setTabs((current) => {
-      const closingIndex = current.findIndex((tab) => tab.id === id);
-      const next = current.filter((tab) => tab.id !== id);
-      if (activeTabId === id) {
-        const fallback = next[Math.max(0, closingIndex - 1)] ?? next[0];
-        if (fallback) setActiveTabId(fallback.id);
-      }
-      return next.length > 0 ? next : current;
-    });
-    setBrowserUrlByTab((current) => {
-      if (!(id in current)) return current;
-      const next = { ...current };
-      delete next[id];
-      return next;
-    });
-  }
-
-  function setBrowserTabUrl(tabId: string, url: string | null) {
-    setBrowserUrlByTab((current) => {
-      if (url == null) {
-        if (!(tabId in current)) return current;
-        const next = { ...current };
-        delete next[tabId];
-        return next;
-      }
-      return { ...current, [tabId]: url };
-    });
-  }
 
   return (
     <aside
