@@ -51,6 +51,9 @@ function TextRenderer({ descriptor }: { descriptor: PreviewContentDescriptor }) 
 }
 
 let mermaidIdCounter = 0;
+// mermaid.initialize mutates a module-global config; calling it on every render
+// is redundant work. Run it exactly once per loaded mermaid module.
+let mermaidInitialized = false;
 
 function MermaidBlock({ code }: { code: string }) {
   const { t } = useTranslation();
@@ -64,7 +67,10 @@ function MermaidBlock({ code }: { code: string }) {
     void (async () => {
       try {
         const mermaid = (await import(/* webpackChunkName: "mermaid" */ "mermaid")).default;
-        mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
+        if (!mermaidInitialized) {
+          mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
+          mermaidInitialized = true;
+        }
         const id = `lvis-mermaid-${mermaidIdCounter++}`;
         const { svg } = await mermaid.render(id, code);
         if (cancelled) return;
@@ -122,7 +128,11 @@ function MarkdownRenderer({ descriptor }: { descriptor: PreviewContentDescriptor
               </code>
             );
           },
-          // Links never navigate the renderer window from a preview surface.
+          // A preview surface must never navigate the renderer window itself.
+          // Left-click is neutralized here; middle/modifier-click is left to the
+          // app's global link handler, which hands the URL to the system browser
+          // (a new OS window) rather than navigating this renderer. The href is
+          // kept so the destination is visible on hover / copy.
           a({ href, children }) {
             return (
               <a href={href} onClick={(event) => event.preventDefault()} className="underline">
