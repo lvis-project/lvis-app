@@ -583,6 +583,81 @@ export function getDefaultSensitiveReadDenyPaths(userDataDir?: string): string[]
 }
 
 /**
+ * The SINGLE SOURCE OF TRUTH for the host WRITE deny-floor — the paths a
+ * sandboxed shell/tool must NEVER be able to WRITE, even when its write-jail
+ * (`allowWrite`) is anchored somewhere that would otherwise cover them.
+ *
+ * ⚠️ WHY A WRITE FLOOR IS SEPARATE FROM THE READ FLOOR ⚠️
+ * {@link getDefaultSensitiveReadDenyPaths} stops a sandboxed process from
+ * READING secrets; it does NOT stop it WRITING. A shell that can write
+ * `~/.zshrc` / `~/.ssh/authorized_keys` / a `~/Library/LaunchAgents` plist / a
+ * `~/.config/autostart` entry gains code execution OUTSIDE the sandbox on the
+ * next login/shell/agent run — a sandbox escape via persistence / re-exec. ASRT's
+ * write model is allow-list + `denyWrite` precedence (macOS seatbelt
+ * `(deny file-write* (subpath …))`, Linux bwrap deny-bind), so this floor is
+ * passed as `filesystem.denyWrite` and TAKES PRECEDENCE over `allowWrite` — even
+ * when the write-jail is the whole home the child still cannot touch these.
+ *
+ * The floor is the UNION of:
+ *   1. every read-deny path (no writing a secret/credential store either); and
+ *   2. write-persistence / re-exec vectors that are not secret-READ concerns:
+ *      - POSIX shell startup files (sourced on the next interactive/login shell)
+ *      - `~/.config` WHOLESALE (XDG autostart, systemd --user units, app config)
+ *      - macOS per-user LaunchAgents (launchd runs the plist at login)
+ *      - user crontab spool dirs + system cron drop-ins
+ *
+ * Unlike the read floor (which deliberately does NOT deny `~/.config` wholesale
+ * so a build that READS `~/.config/…` still works), the WRITE floor CAN deny
+ * `~/.config` wholesale: a sandboxed command has no legitimate need to WRITE
+ * arbitrary autostart/app-config under the user's real home — its writes belong
+ * in its own cwd / plugin sandbox root.
+ *
+ * PLATFORM: literal absolute paths (no globs) — same seatbelt-subpath / bwrap
+ * deny-bind semantics as the read floor. Windows FS isolation is the srt-win acl
+ * stamp path (see {@link initializeAsrtSandbox}); non-existent paths are harmless
+ * to list (ASRT/bwrap skip them). No "allow if not found" branch (No-Fallback).
+ *
+ * @param userDataDir  forwarded to {@link getDefaultSensitiveReadDenyPaths}.
+ * @returns deduped, order-stable absolute paths to deny writes of.
+ */
+export function getDefaultSensitiveWriteDenyPaths(userDataDir?: string): string[] {
+  const home = homedir();
+  const readDeny = getDefaultSensitiveReadDenyPaths(userDataDir);
+  const writePersistence = [
+    // ── POSIX shell startup files — a write here re-executes on the next shell ──
+    join(home, ".zshenv"),
+    join(home, ".zprofile"),
+    join(home, ".zshrc"),
+    join(home, ".zlogin"),
+    join(home, ".zlogout"),
+    join(home, ".bash_profile"),
+    join(home, ".bash_login"),
+    join(home, ".bashrc"),
+    join(home, ".bash_logout"),
+    join(home, ".profile"),
+    // ── XDG config root — autostart entries, systemd --user units, app config ──
+    join(home, ".config"),
+    // ── macOS per-user Launch Agents — launchd runs the plist at login ──
+    join(home, "Library", "LaunchAgents"),
+    // ── User crontab spool + system cron drop-ins (a crontab edit re-executes
+    //    outside the sandbox) ──
+    "/usr/lib/cron/tabs", // macOS user crontab spool
+    "/var/spool/cron/crontabs", // Linux (Debian/Ubuntu) user crontab spool
+    "/var/spool/cron", // Linux (RHEL/Fedora) user crontab spool
+    "/etc/cron.d", // system cron drop-in dir
+  ];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of [...readDeny, ...writePersistence]) {
+    if (!seen.has(p)) {
+      seen.add(p);
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+/**
  * Build a fully-resolved {@link SandboxRuntimeConfig} from TRUSTED settings.
  *
  * Deny-by-default: when no `allowedDomains` are supplied the network section

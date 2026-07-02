@@ -90,6 +90,11 @@ const buildOptions = {
     "electron",
     "electron-updater",
     "better-sqlite3",
+    // node-pty is a native addon (`.node` + spawn-helper) the main process
+    // resolves unbundled from node_modules (asarUnpack'd). Bundling it inline
+    // would break the prebuild `.node` resolution the same way better-sqlite3
+    // / ASRT would — keep it external so it ships as a real node_modules entry.
+    "node-pty",
     "@lvis/plugin-sdk",
     "@sentry/electron",
     "fsevents",
