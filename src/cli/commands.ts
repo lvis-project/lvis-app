@@ -5,9 +5,9 @@
  * typed {@link LvisClient}. It proves the CLI consumes the SAME app contract as
  * the renderer (read + send subset) through the `cli` {@link TrustOrigin}.
  *
- * SCAFFOLD ONLY: this file wires NO real process entrypoint and NO `package.json`
- * bin — argv parsing, exit codes, output formatting, and the loopback network
- * transport are the documented #1409 follow-up. Only read/send commands exist,
+ * The real process entrypoint is `scripts/lvis-cli.ts` (`bun run cli -- <cmd>`,
+ * exit codes 0/1/2) over the loopback HTTP transport in `cli/http-client.ts`
+ * (#1436). Only read/send commands exist,
  * plus ONE approval-mediated mutation (US-104): `permission:set-mode`, the sole
  * entry in the contract's `EXTERNAL_MUTATION_CHANNELS` allowlist (#1409). Every
  * OTHER mutating gesture-gated operation is absent because the `cli` origin can
