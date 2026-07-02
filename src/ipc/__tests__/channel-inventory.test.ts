@@ -167,45 +167,12 @@ const SERVICE_KEYS: (string | symbol)[] = [
   "scriptHookManager",
 ];
 
-/**
- * Recursive callable proxy. Any property access returns the same nested
- * callable proxy (never `undefined`); any call returns the proxy too — so a
- * registrar can traverse `deps.foo.bar.baz(...)` without real services.
- * `getSessionId` is special-cased to a string because registerIpcHandlers
- * eagerly calls `deps.conversationLoop.getSessionId()` at wiring time.
- */
-function makeDeepProxy(): unknown {
-  const target = (): void => undefined;
-  const proxy: unknown = new Proxy(target, {
-    get(_t, prop) {
-      if (prop === "getSessionId") return () => "test-session-id";
-      if (prop === "then") return undefined; // never a thenable
-      if (prop === "toString" || prop === "valueOf") return () => "mock";
-      if (prop === Symbol.toPrimitive) return () => "mock";
-      if (prop === Symbol.iterator || prop === Symbol.asyncIterator) return undefined;
-      if (prop === Symbol.toStringTag) return undefined;
-      return proxy;
-    },
-    apply() {
-      return proxy;
-    },
-    ownKeys() {
-      return SERVICE_KEYS;
-    },
-    getOwnPropertyDescriptor() {
-      return { enumerable: true, configurable: true, writable: true, value: proxy };
-    },
-    has() {
-      return true;
-    },
-  });
-  return proxy;
-}
+import { makeDeepProxy } from "../../testing/deep-proxy.js";
 
 beforeAll(() => {
   channels.length = 0;
   setIsPackaged(false);
-  const services = makeDeepProxy() as unknown as AppServices;
+  const services = makeDeepProxy(SERVICE_KEYS) as unknown as AppServices;
   registerIpcHandlers(services, () => null);
 });
 

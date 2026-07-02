@@ -1,28 +1,9 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import { readBootWiring } from "../testing/boot-wiring-source.js";
 
 async function readSource(relative: string): Promise<string> {
   return readFile(new URL(relative, import.meta.url), "utf8");
-}
-
-/**
- * Boot wiring is spread across boot.ts + boot/*.ts + boot/steps/*.ts after the
- * C18 BootContext split (e.g. the plugin-event-bridge replace/dispose wiring moved
- * into boot/steps/conversation-wiring.ts). Scan the union so a wiring guard finds
- * its pattern wherever its step module landed.
- */
-async function readBootWiring(): Promise<string> {
-  const parts: string[] = [await readSource("../boot.ts")];
-  for (const dir of ["../boot/", "../boot/steps/"]) {
-    const dirUrl = new URL(dir, import.meta.url);
-    const entries = await readdir(dirUrl);
-    for (const name of entries.sort()) {
-      if (name.endsWith(".ts") && !name.endsWith(".d.ts")) {
-        parts.push(await readFile(new URL(name, dirUrl), "utf8"));
-      }
-    }
-  }
-  return parts.join("\n");
 }
 
 describe("main process plugin lifecycle regression guards", () => {
