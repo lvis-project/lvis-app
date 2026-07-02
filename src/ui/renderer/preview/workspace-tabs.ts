@@ -13,10 +13,12 @@ import { useCallback, useMemo, useRef, useState } from "react";
  * across session navigation and the panel's open/close toggle — so tab state
  * now SURVIVES those transitions.
  *
- * This is a PURE LIFT: the default tab set, the counts, and the close rules are
- * IDENTICAL to the previous in-panel behavior. Subsequent PRs (no-default tabs,
- * all-closeable, launcher, ephemeral↔pinned) change the model; this hook only
- * moves WHERE the state lives.
+ * Content-driven model (§6.10.2): the workspace opens EMPTY (no default tabs).
+ * Tabs are created by user action (the empty-state launcher) or content routing
+ * (ActionPanel / indexer results). Every tab is closeable; closing the last one
+ * empties the list and the launcher takes over. There is no never-empty guard
+ * and no per-kind count on the tab bar (activity signal lives solely in the
+ * ActionPanel — §6.10.4).
  */
 
 export type WorkspaceTabKind = "file-browser" | "preview" | "browser" | "terminal";
@@ -25,40 +27,30 @@ export interface WorkspaceTab {
   id: string;
   kind: WorkspaceTabKind;
   ordinal: number;
-  closeable: boolean;
-}
-
-/** The mount-time tab set — four non-closeable default tabs (unchanged). */
-function defaultTabs(): WorkspaceTab[] {
-  return [
-    { id: "file-browser:1", kind: "file-browser", ordinal: 1, closeable: false },
-    { id: "preview:1", kind: "preview", ordinal: 1, closeable: false },
-    { id: "browser:1", kind: "browser", ordinal: 1, closeable: false },
-    { id: "terminal:1", kind: "terminal", ordinal: 1, closeable: false },
-  ];
 }
 
 export interface WorkspaceTabsStore {
   tabs: WorkspaceTab[];
-  activeTabId: string;
+  activeTabId: string | null;
   browserUrlByTab: Record<string, string>;
   setActiveTabId: (id: string) => void;
-  /** Append a new closeable tab of the given kind and activate it. */
-  addTab: (kind: "file-browser" | "browser" | "terminal") => void;
+  /** Append a new tab of the given kind and activate it. Every tab is closeable. */
+  addTab: (kind: WorkspaceTabKind) => void;
   closeTab: (id: string) => void;
   /** Set (or clear, with `null`) the manually-typed address for a browser tab. */
   setBrowserTabUrl: (tabId: string, url: string | null) => void;
 }
 
 export function useWorkspaceTabs(): WorkspaceTabsStore {
-  const [tabs, setTabs] = useState<WorkspaceTab[]>(defaultTabs);
-  const [activeTabId, setActiveTabIdState] = useState("file-browser:1");
-  const nextIdRef = useRef(2);
+  // No default tabs — the workspace starts empty and the launcher fills it.
+  const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
+  const [activeTabId, setActiveTabIdState] = useState<string | null>(null);
+  const nextIdRef = useRef(1);
   const nextOrdinalRef = useRef<Record<WorkspaceTabKind, number>>({
-    "file-browser": 2,
-    preview: 2,
-    browser: 2,
-    terminal: 2,
+    "file-browser": 1,
+    preview: 1,
+    browser: 1,
+    terminal: 1,
   });
   const [browserUrlByTab, setBrowserUrlByTab] = useState<Record<string, string>>({});
 
@@ -66,10 +58,10 @@ export function useWorkspaceTabs(): WorkspaceTabsStore {
     setActiveTabIdState(id);
   }, []);
 
-  const addTab = useCallback((kind: "file-browser" | "browser" | "terminal") => {
+  const addTab = useCallback((kind: WorkspaceTabKind) => {
     const ordinal = nextOrdinalRef.current[kind]++;
     const id = `${kind}:${nextIdRef.current++}`;
-    setTabs((current) => [...current, { id, kind, ordinal, closeable: true }]);
+    setTabs((current) => [...current, { id, kind, ordinal }]);
     setActiveTabIdState(id);
   }, []);
 
@@ -79,10 +71,12 @@ export function useWorkspaceTabs(): WorkspaceTabsStore {
       const next = current.filter((tab) => tab.id !== id);
       setActiveTabIdState((active) => {
         if (active !== id) return active;
-        const fallback = next[Math.max(0, closingIndex - 1)] ?? next[0];
-        return fallback ? fallback.id : active;
+        // Fall back to the tab before the closed one; when the list empties,
+        // activeTabId becomes null and the empty-state launcher renders.
+        const fallback = next[Math.max(0, closingIndex - 1)] ?? next[0] ?? null;
+        return fallback ? fallback.id : null;
       });
-      return next.length > 0 ? next : current;
+      return next;
     });
     setBrowserUrlByTab((current) => {
       if (!(id in current)) return current;
