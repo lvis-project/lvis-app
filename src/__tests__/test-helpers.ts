@@ -60,3 +60,7 @@ export function makeMockConversationLoop(
 export function makeMockApprovalGate() {
   return { resolve: vi.fn(), setPolicy: vi.fn() };
 }
+
+export function withPlatformForTest(platform: NodeJS.Platform): void {
+  Object.defineProperty(process, "platform", { value: platform, configurable: true });
+}
