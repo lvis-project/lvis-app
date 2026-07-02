@@ -87,7 +87,7 @@ describe("windows sandbox — buildSandboxConfig emits the windows section on wi
 
 describe("windows sandbox — capability is fs+network partial confinement", () => {
   it("sandboxConfinementForPlatform(win32, partial) confines fs+network but not process", () => {
-    expect(sandboxConfinementForPlatform("win32", "full")).toEqual({
+    expect(sandboxConfinementForPlatform("win32", "partial")).toEqual({
       filesystem: true,
       process: false,
       network: true,
@@ -114,7 +114,7 @@ describe("windows sandbox — capability is fs+network partial confinement", () 
       confidence: "verified",
       platform: "win32",
       reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
-      confines: sandboxConfinementForPlatform("win32", "full"),
+      confines: sandboxConfinementForPlatform("win32", "partial"),
     };
     expect(winCap.confines?.filesystem).toBe(true);
     expect(winCap.confines?.network).toBe(true);
@@ -131,7 +131,7 @@ describe("windows sandbox — PR1 sandboxRelaxesCategory now LIVE for win32", ()
     confidence: "verified",
     platform: "win32",
     reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
-    confines: sandboxConfinementForPlatform("win32", "full"),
+    confines: sandboxConfinementForPlatform("win32", "partial"),
   });
 
   it("RELAXES network and filesystem-bearing categories covered by Windows ASRT", () => {
