@@ -549,6 +549,16 @@ export function isActiveSandboxFilesystemContained(): boolean {
 }
 
 /**
+ * Whether the active sandbox is strong enough for an arbitrary interactive
+ * shell surface. A shell can create subprocesses and persistence hooks, so it
+ * follows the same category rule as {@link sandboxRelaxesCategory}: filesystem
+ * AND process confinement must both be true.
+ */
+export function isActiveSandboxShellContained(): boolean {
+  return sandboxRelaxesCategory(detectSandboxCapability(), "shell");
+}
+
+/**
  * Whether the foreground plugin effect-boundary can stand in for the removed
  * pre-exec ask.
  *

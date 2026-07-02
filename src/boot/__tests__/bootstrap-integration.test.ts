@@ -404,6 +404,7 @@ vi.mock("../../plugins/plugin-paths.js", () => ({
 // ── permissions/* (incl. dynamically imported sandbox modules) ───────────────
 vi.mock("../../permissions/sandbox-capability.js", () => ({
   isActiveSandboxFilesystemContained: vi.fn(() => false),
+  isActiveSandboxShellContained: vi.fn(() => false),
   isActiveSandboxFilesystemContainedForPluginEffects: vi.fn(() => false),
   setActiveSandboxCapability: vi.fn(),
 }));

@@ -6,6 +6,7 @@ import {
   formatSandboxCapabilityForPrompt,
   isActiveSandboxFilesystemContained,
   isActiveSandboxFilesystemContainedForPluginEffects,
+  isActiveSandboxShellContained,
   isWeakSandbox,
   sandboxRelaxesCategory,
   setActiveSandboxCapability,
@@ -132,6 +133,7 @@ describe("sandbox-capability — setActiveSandboxCapability publish", () => {
 
     expect(isActiveSandboxFilesystemContained()).toBe(true);
     expect(isActiveSandboxFilesystemContainedForPluginEffects()).toBe(false);
+    expect(isActiveSandboxShellContained()).toBe(false);
   });
 });
 

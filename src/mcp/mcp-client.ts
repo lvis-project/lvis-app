@@ -1107,9 +1107,11 @@ class StdioTransport implements McpTransport {
     // route this long-lived stdio worker through ASRT's wrapWorkerCommand so its
     // egress is enforced by the SAME global strict-union allow-list as host tools
     // and its writes are confined to the per-server filesystem jail. ASRT is
-    // stdio-transparent: it wraps as `[shell, -c, <wrapped>]` (mac/linux) / a real
-    // argv (win32); a child spawned with inherited stdio:["pipe","pipe","pipe"]
-    // passes stdin/stdout through, so MCP's Content-Length framing survives.
+    // stdio-transparent on mac/linux: it wraps as `[shell, -c, <wrapped>]`;
+    // a child spawned with inherited stdio:["pipe","pipe","pipe"] passes
+    // stdin/stdout through, so MCP's Content-Length framing survives. Windows
+    // is fail-closed in openWrapped until ASRT can apply the per-server
+    // allowRead/allowWrite grants this path needs.
     // Gate OFF ⇒ the plain spawn below is UNCHANGED.
     if (isAsrtSandboxActive()) {
       try {
@@ -1153,6 +1155,16 @@ class StdioTransport implements McpTransport {
     spawnCommand: { command: string; args: string[] },
     baseEnv: NodeJS.ProcessEnv,
   ): Promise<void> {
+    if (process.platform === "win32") {
+      throw new Error(
+        "[mcp-client] ASRT-wrapped MCP stdio on Windows is disabled because " +
+          "ASRT 0.0.63 cannot apply per-server filesystem.allowRead/allowWrite " +
+          "grants per exec; only denyRead/denyWrite are supported. Keep MCP " +
+          "stdio fail-closed until the Windows session-grant/control-channel " +
+          "work in #1367 lands.",
+      );
+    }
+
     // FAIL-CLOSED filesystem jail (deny-by-default A.a): the host populates
     // `sandboxRoot` at connect time. If it is somehow still absent (e.g. a
     // direct StdioTransport construction in a test), grant NO writable path at

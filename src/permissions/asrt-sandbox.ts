@@ -223,6 +223,11 @@ export interface TrustedSandboxSettings {
  * per command, and it can only ever NARROW or RE-SHAPE the filesystem jail —
  * it cannot widen network egress and cannot carry any sandbox-weakening flag.
  *
+ * Windows ASRT 0.0.63 note: `srt-win exec` supports per-exec `denyRead` /
+ * `denyWrite` only. Non-empty per-exec `allowRead` / `allowWrite` is rejected
+ * before calling ASRT; callers must move those grants to the session-level
+ * config or keep that Windows execution path disabled/fail-closed.
+ *
  * ⚠️ TRUST BOUNDARY (security MINOR from the PR #1355 cluster review) ⚠️
  * `wrapWithSandboxArgv` accepts a `customConfig: Partial<SandboxRuntimeConfig>`
  * that ASRT merges over the initialized config for this command only — that is
@@ -230,9 +235,10 @@ export interface TrustedSandboxSettings {
  * a weakening flag (`allowAppleEvents`, `enableWeakerNetworkIsolation`,
  * `network.allowAllUnixSockets`) past the trusted-settings gate. To keep that
  * channel safe by construction, callers pass ONLY this narrow filesystem shape;
- * {@link toCustomConfig} maps it to the exact `{ filesystem }` slice handed to
- * ASRT. There is deliberately no field here for network or weakening flags, so
- * a plugin/project-influenced call site cannot reach them.
+ * {@link buildPerCommandSandboxCustomConfig} maps it to the exact
+ * `{ filesystem }` slice handed to ASRT. There is deliberately no field here
+ * for network or weakening flags, so a plugin/project-influenced call site
+ * cannot reach them.
  */
 export interface PerCommandFilesystem {
   /** Paths the child may write for this command (the derived write-jail). */
@@ -361,19 +367,41 @@ function withWorkerUnixSockets(
  * here: network and weakening flags are intentionally unreachable from a
  * per-command call so the trusted-settings gate cannot be bypassed.
  */
-function toCustomConfig(
+export function hasPerExecFilesystemAllowGrants(
+  filesystem: PerCommandFilesystem | undefined,
+): boolean {
+  return (
+    (filesystem?.allowRead?.length ?? 0) > 0 ||
+    (filesystem?.allowWrite?.length ?? 0) > 0
+  );
+}
+
+export function assertPerExecFilesystemSupported(
+  filesystem: PerCommandFilesystem | undefined,
+  caller: string,
+): void {
+  if (process.platform !== "win32" || !hasPerExecFilesystemAllowGrants(filesystem)) {
+    return;
+  }
+  throw new Error(
+    `${caller}: ASRT 0.0.63 on Windows does not support per-exec ` +
+      "filesystem.allowRead/allowWrite; only per-exec denyRead/denyWrite " +
+      "are supported. Move allow grants to initializeAsrtSandbox() session " +
+      "config or keep this Windows execution path disabled until #1367 lands.",
+  );
+}
+
+export function buildPerCommandSandboxCustomConfig(
   filesystem: PerCommandFilesystem | undefined,
 ): Partial<SandboxRuntimeConfig> | undefined {
   if (filesystem === undefined) return undefined;
-  const fs: FilesystemConfig = {
-    denyRead: [...(filesystem.denyRead ?? [])],
-    allowWrite: [...(filesystem.allowWrite ?? [])],
-    denyWrite: [...(filesystem.denyWrite ?? [])],
-    ...(filesystem.allowRead !== undefined
-      ? { allowRead: [...filesystem.allowRead] }
-      : {}),
-  };
-  return { filesystem: fs };
+  const fs: Partial<FilesystemConfig> = {};
+  if (filesystem.denyRead !== undefined) fs.denyRead = [...filesystem.denyRead];
+  if (filesystem.allowWrite !== undefined) fs.allowWrite = [...filesystem.allowWrite];
+  if (filesystem.denyWrite !== undefined) fs.denyWrite = [...filesystem.denyWrite];
+  if (filesystem.allowRead !== undefined) fs.allowRead = [...filesystem.allowRead];
+  if (Object.keys(fs).length === 0) return undefined;
+  return { filesystem: fs as FilesystemConfig };
 }
 
 /** The host spawns this; ASRT never spawns the workload itself. */
@@ -833,11 +861,12 @@ export async function wrapToolCommand(
   if (!isAsrtSandboxActive()) {
     throw new Error("wrapToolCommand: ASRT sandbox is not active (initialize at boot first)");
   }
+  assertPerExecFilesystemSupported(options.filesystem, "wrapToolCommand");
   const SandboxManager = await loadSandboxManager();
   const wrapped = await SandboxManager.wrapWithSandboxArgv(
     command,
     options.binShell,
-    toCustomConfig(options.filesystem),
+    buildPerCommandSandboxCustomConfig(options.filesystem),
     options.abortSignal,
   );
   return wrapped;
@@ -886,11 +915,12 @@ export async function wrapWorkerCommand(
   if (!isAsrtSandboxActive()) {
     throw new Error("wrapWorkerCommand: ASRT sandbox is not active (initialize at boot first)");
   }
+  assertPerExecFilesystemSupported(options.filesystem, "wrapWorkerCommand");
   const SandboxManager = await loadSandboxManager();
   const wrapped = await SandboxManager.wrapWithSandboxArgv(
     command,
     options.binShell,
-    toCustomConfig(options.filesystem),
+    buildPerCommandSandboxCustomConfig(options.filesystem),
     options.abortSignal,
   );
   return wrapped;
