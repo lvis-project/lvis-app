@@ -267,8 +267,10 @@ describe("lvis-prose CSS coverage — markdown tables stay readable", () => {
       extract: (text) => text.match(/body\s*\{[^{}]*?font-family:\s*([^;}]+)/)?.[1] ?? null,
     },
     {
-      label: "main.ts splash inline",
-      path: "src/main.ts",
+      // C17: the bootstrap splash HTML moved from src/main.ts into
+      // src/main/bootstrap-splash.ts. Same inline font-family mirror.
+      label: "bootstrap-splash.ts splash inline",
+      path: "src/main/bootstrap-splash.ts",
       extract: (text) => text.match(/html,body\s*\{[^{}]*?font-family:\s*([^;}]+)/)?.[1] ?? null,
     },
     {
