@@ -137,10 +137,31 @@ describe("readLocalApiConnection — discovery via LVIS_HOME override", () => {
     expect(await readLocalApiConnection()).toBeNull();
   });
 
-  it("returns { port, secret } for a valid discovery file", async () => {
-    const info: LocalApiServerInfoFile = { port: 51789, secret: "deadbeef".repeat(8), pid: 4242 };
+  it("returns { port, secret } for a valid discovery file (live pid)", async () => {
+    // The test process itself is the canonical "alive" pid.
+    const info: LocalApiServerInfoFile = {
+      port: 51789,
+      secret: "deadbeef".repeat(8),
+      pid: process.pid,
+    };
     await openFeatureNamespace(LOCAL_API_FEATURE).writeJson(LOCAL_API_INFO_FILE, info);
     expect(await readLocalApiConnection()).toEqual({ port: 51789, secret: info.secret });
+  });
+
+  it("returns null when the recorded pid is no longer alive (stale after crash)", async () => {
+    // Spawn-and-reap a real child so its pid is guaranteed dead (a fixed fake
+    // pid could collide with a live process on a busy machine).
+    const { spawnSync } = await import("node:child_process");
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    const deadPid = dead.pid ?? 0;
+    expect(deadPid).toBeGreaterThan(0);
+    const info: LocalApiServerInfoFile = {
+      port: 51789,
+      secret: "deadbeef".repeat(8),
+      pid: deadPid,
+    };
+    await openFeatureNamespace(LOCAL_API_FEATURE).writeJson(LOCAL_API_INFO_FILE, info);
+    expect(await readLocalApiConnection()).toBeNull();
   });
 });
 

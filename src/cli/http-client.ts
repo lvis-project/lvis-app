@@ -102,7 +102,26 @@ export async function readLocalApiConnection(): Promise<CliConnection | null> {
   if (info.port <= 0 || info.secret.length === 0) {
     return null;
   }
+  // Stale-after-crash detection: a crashed host never tombstones the file, so a
+  // live-looking entry may point at a dead process. `kill(pid, 0)` probes
+  // liveness without signalling (ESRCH → gone; EPERM → exists but foreign —
+  // treat as alive, the connect attempt will fail closed anyway). Best-effort:
+  // a recycled pid slips through and simply yields `server-unavailable`.
+  if (info.pid > 0 && !isProcessAlive(info.pid)) {
+    return null;
+  }
   return { port: info.port, secret: info.secret };
+}
+
+/** Probe pid liveness via signal 0 (no signal is delivered). */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM = the process exists but belongs to another user — alive.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 /**

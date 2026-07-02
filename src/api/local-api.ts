@@ -27,8 +27,8 @@
  * {@link ChatSendContext} (stream plumbing) for `chat send`.
  *
  * This module is part of the main tsc project (unlike preload): it must be
- * fully type-clean. It imports the contract SOT from `src/contract/` — never
- * inline `"lvis:*"` literals.
+ * fully type-clean. It imports the contract SOT from `src/contract/` — wire
+ * channel names are never inlined here (enforced by check-no-inline-channels).
  */
 import {
   CHANNELS,
