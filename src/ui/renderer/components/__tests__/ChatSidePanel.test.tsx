@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LvisApi } from "../../types.js";
@@ -91,6 +91,9 @@ describe("ChatSidePanel", () => {
         listRoots: vi.fn(async () => ({ ok: true, defaultRoot: "/ws", roots: [{ path: "/ws", isDefault: true }] })),
         pickRoot: vi.fn(async () => ({ ok: true, canceled: true, roots: [{ path: "/ws", isDefault: true }] })),
         listDir: vi.fn(async () => ({ ok: true, path: "/ws", entries: [], truncated: false })),
+        removeRoot: vi.fn(async () => ({ ok: true, removed: "", roots: [{ path: "/ws", isDefault: true }] })),
+        reveal: vi.fn(async () => ({ ok: true })),
+        addRootByPath: vi.fn(async () => ({ ok: true, roots: [{ path: "/ws", isDefault: true }] })),
       },
     });
     (window as unknown as { lvis: unknown }).lvis = (globalThis as unknown as { lvis: unknown }).lvis;
@@ -598,5 +601,162 @@ describe("ChatSidePanel", () => {
     await waitFor(() => expect(pickRoot).toHaveBeenCalledTimes(2));
     expect(pickRoot).toHaveBeenLastCalledWith({ ackToken: "tok-abc" });
     await waitFor(() => expect(screen.queryByTestId("chat-side-panel-root-warning")).toBeNull());
+  });
+
+  // ── ProjectRootsBrowser: keyboard nav + a11y + context menu + remove root ──
+
+  /** Stub whose /ws lists two folders and one file; /ws/alpha lists one child. */
+  function stubRichWorkspace(overrides?: Record<string, unknown>) {
+    const listDir = vi.fn(async (p: string) => {
+      if (p === "/ws") {
+        return {
+          ok: true as const,
+          path: "/ws",
+          entries: [
+            { name: "alpha", path: "/ws/alpha", type: "directory" as const },
+            { name: "beta", path: "/ws/beta", type: "directory" as const },
+            { name: "readme.md", path: "/ws/readme.md", type: "file" as const },
+          ],
+          truncated: false,
+        };
+      }
+      if (p === "/ws/alpha") {
+        return {
+          ok: true as const,
+          path: "/ws/alpha",
+          entries: [{ name: "a1.md", path: "/ws/alpha/a1.md", type: "file" as const }],
+          truncated: false,
+        };
+      }
+      return { ok: true as const, path: p, entries: [], truncated: false };
+    });
+    const reveal = vi.fn(async () => ({ ok: true as const }));
+    const removeRoot = vi.fn(async () => ({
+      ok: true as const,
+      removed: "/ws/proj",
+      roots: [{ path: "/ws", isDefault: true }],
+    }));
+    const writeText = vi.fn();
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText }, platform: "MacIntel" });
+    vi.stubGlobal("lvis", {
+      attach: { openExternal: vi.fn(async () => ({ ok: true })) },
+      preview: { readFile: vi.fn(async () => ({ ok: true, content: "# x", path: "/ws/readme.md", truncated: false })) },
+      workspace: {
+        listRoots: vi.fn(async () => ({
+          ok: true,
+          defaultRoot: "/ws",
+          roots: [
+            { path: "/ws", isDefault: true },
+            { path: "/ws/proj", isDefault: false },
+          ],
+        })),
+        pickRoot: vi.fn(async () => ({ ok: true, canceled: true })),
+        listDir,
+        removeRoot,
+        reveal,
+        addRootByPath: vi.fn(async () => ({ ok: true })),
+        ...overrides,
+      },
+    });
+    (window as unknown as { lvis: unknown }).lvis = (globalThis as unknown as { lvis: unknown }).lvis;
+    return { listDir, reveal, removeRoot, writeText };
+  }
+
+  it("renders rows as ARIA treeitems with level/setsize/posinset and a single roving tabindex", async () => {
+    stubRichWorkspace();
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const tree = await screen.findByRole("tree");
+    const items = within(tree).getAllByRole("treeitem");
+    expect(items.length).toBe(3);
+    expect(items[0].getAttribute("aria-level")).toBe("1");
+    expect(items[0].getAttribute("aria-setsize")).toBe("3");
+    expect(items[0].getAttribute("aria-posinset")).toBe("1");
+    // Exactly one row is in the tab order (roving tabindex).
+    const tabbable = items.filter((el) => el.getAttribute("tabindex") === "0");
+    expect(tabbable.length).toBe(1);
+  });
+
+  it("ArrowDown moves the roving focus to the next row", async () => {
+    stubRichWorkspace();
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const tree = await screen.findByRole("tree");
+    fireEvent.keyDown(tree, { key: "ArrowDown" });
+    const items = within(tree).getAllByRole("treeitem");
+    // Second row (beta) becomes the tabbable/selected one.
+    expect(items[1].getAttribute("tabindex")).toBe("0");
+    expect(items[1].getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("Enter on a folder expands it (lazy-loads children into a role=group)", async () => {
+    stubRichWorkspace();
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const tree = await screen.findByRole("tree");
+    // First row is "alpha" (a directory) and is the active item.
+    fireEvent.keyDown(tree, { key: "Enter" });
+    await screen.findByText("a1.md");
+    expect(within(tree).getByRole("group")).toBeTruthy();
+  });
+
+  it("type-ahead focuses the row whose name starts with the typed character", async () => {
+    stubRichWorkspace();
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const tree = await screen.findByRole("tree");
+    fireEvent.keyDown(tree, { key: "r" }); // -> readme.md
+    const items = within(tree).getAllByRole("treeitem");
+    expect(items[2].getAttribute("tabindex")).toBe("0");
+  });
+
+  it("right-click Reveal calls workspace.reveal with the row path (never opens the file)", async () => {
+    const { reveal } = stubRichWorkspace();
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const fileRow = await screen.findByText("readme.md");
+    fireEvent.contextMenu(fileRow);
+    const revealItem = await screen.findByTestId("chat-side-panel-fs-ctx-reveal");
+    fireEvent.click(revealItem);
+    await waitFor(() => expect(reveal).toHaveBeenCalledWith("/ws/readme.md"));
+  });
+
+  it("right-click Copy path writes the absolute path to the clipboard", async () => {
+    const { writeText } = stubRichWorkspace();
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const fileRow = await screen.findByText("readme.md");
+    fireEvent.contextMenu(fileRow);
+    fireEvent.click(await screen.findByTestId("chat-side-panel-fs-ctx-copy-path"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("/ws/readme.md"));
+  });
+
+  it("remove-root button (non-default root) calls workspace.removeRoot; default root has no button", async () => {
+    const { removeRoot } = stubRichWorkspace();
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    // Default root active -> no remove button.
+    await screen.findByTestId("chat-side-panel-add-root");
+    expect(screen.queryByTestId("chat-side-panel-remove-root")).toBeNull();
+    // Switch the active root to the non-default addition.
+    const select = (await screen.findByTestId("chat-side-panel-root-select")) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "/ws/proj" } });
+    const removeBtn = await screen.findByTestId("chat-side-panel-remove-root");
+    fireEvent.click(removeBtn);
+    await waitFor(() => expect(removeRoot).toHaveBeenCalledWith("/ws/proj"));
   });
 });

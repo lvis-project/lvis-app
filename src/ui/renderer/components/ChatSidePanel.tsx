@@ -1,4 +1,4 @@
-import { createElement, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { createElement, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
 import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
 import {
   WORKSPACE_TAB_LAUNCHER,
@@ -669,6 +669,21 @@ function ProjectRootsBrowser({
     { path: string; warnings: string[]; ackToken: string } | null
   >(null);
 
+  // Roving-tabindex active row (the single treeitem with tabIndex=0). Distinct
+  // from `selectedPath` (the OPENED file, drives bg-accent) — this is keyboard
+  // focus, not the opened file.
+  const [activeItemPath, setActiveItemPath] = useState<string | null>(null);
+  // path -> row element, for imperative focus moves (roving tabindex).
+  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  // Set true just before a keyboard-driven setActiveItemPath so the post-render
+  // effect calls .focus(); prevents stealing focus on mount / mouse clicks.
+  const pendingFocusRef = useRef(false);
+  // Type-ahead buffer with a 500ms reset window.
+  const typeaheadRef = useRef<{ buffer: string; timer: ReturnType<typeof setTimeout> | null }>({
+    buffer: "",
+    timer: null,
+  });
+
   const loadDir = useCallback(async (path: string) => {
     setLoadingPaths((prev) => new Set(prev).add(path));
     try {
@@ -754,6 +769,133 @@ function ProjectRootsBrowser({
     });
   };
 
+  // Flattened pre-order list of the CURRENTLY VISIBLE nodes (expanded subtrees
+  // only). Rendering stays recursive; this memo backs keyboard navigation only.
+  const flatNodes = useMemo<
+    Array<{ path: string; name: string; isDir: boolean; depth: number; parentPath: string }>
+  >(() => {
+    if (!activeRoot) return [];
+    const out: Array<{ path: string; name: string; isDir: boolean; depth: number; parentPath: string }> = [];
+    const walk = (parentPath: string, depth: number) => {
+      const siblings = childrenByPath[parentPath] ?? [];
+      for (const entry of siblings) {
+        const isDir = entry.type === "directory";
+        out.push({ path: entry.path, name: entry.name, isDir, depth, parentPath });
+        if (isDir && expanded.has(entry.path)) walk(entry.path, depth + 1);
+      }
+    };
+    walk(activeRoot, 0);
+    return out;
+  }, [activeRoot, childrenByPath, expanded]);
+
+  // Clamp the roving pointer when the tree changes (collapse / reload / switch).
+  useEffect(() => {
+    if (flatNodes.length === 0) {
+      if (activeItemPath !== null) setActiveItemPath(null);
+      return;
+    }
+    if (!activeItemPath || !flatNodes.some((n) => n.path === activeItemPath)) {
+      setActiveItemPath(flatNodes[0].path);
+    }
+  }, [flatNodes, activeItemPath]);
+
+  // Move DOM focus only for keyboard-driven changes (roving tabindex).
+  useEffect(() => {
+    if (!pendingFocusRef.current) return;
+    pendingFocusRef.current = false;
+    if (activeItemPath) itemRefs.current.get(activeItemPath)?.focus();
+  }, [activeItemPath]);
+
+  // Clear the type-ahead timer on unmount.
+  useEffect(
+    () => () => {
+      if (typeaheadRef.current.timer) clearTimeout(typeaheadRef.current.timer);
+    },
+    [],
+  );
+
+  const focusPath = useCallback((path: string | null) => {
+    if (!path) return;
+    pendingFocusRef.current = true;
+    setActiveItemPath(path);
+  }, []);
+
+  const runTypeahead = (char: string, curIdx: number) => {
+    const ta = typeaheadRef.current;
+    if (ta.timer) clearTimeout(ta.timer);
+    ta.buffer += char.toLowerCase();
+    ta.timer = setTimeout(() => {
+      ta.buffer = "";
+      ta.timer = null;
+    }, 500);
+    const n = flatNodes.length;
+    // Single-char buffer starts the search at the NEXT node (cycles repeats);
+    // multi-char refines from the current node.
+    const startOffset = ta.buffer.length === 1 ? 1 : 0;
+    for (let i = 0; i < n; i++) {
+      const cand = flatNodes[(curIdx + startOffset + i) % n];
+      if (cand.name.toLowerCase().startsWith(ta.buffer)) {
+        focusPath(cand.path);
+        return;
+      }
+    }
+  };
+
+  const onTreeKeyDown = (e: ReactKeyboardEvent) => {
+    if (flatNodes.length === 0) return;
+    const idx = flatNodes.findIndex((n) => n.path === activeItemPath);
+    const i = idx >= 0 ? idx : 0;
+    const cur = flatNodes[i];
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        focusPath(flatNodes[Math.min(i + 1, flatNodes.length - 1)].path);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        focusPath(flatNodes[Math.max(i - 1, 0)].path);
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        if (cur.isDir) {
+          if (!expanded.has(cur.path)) {
+            toggleFolder(cur.path); // collapsed -> expand (also lazy-loads)
+          } else {
+            const child = flatNodes[i + 1]; // expanded -> first child (if loaded)
+            if (child && child.parentPath === cur.path) focusPath(child.path);
+          }
+        }
+        break;
+      case "ArrowLeft":
+        e.preventDefault();
+        if (cur.isDir && expanded.has(cur.path)) {
+          toggleFolder(cur.path); // expanded -> collapse
+        } else if (cur.parentPath !== activeRoot) {
+          focusPath(cur.parentPath); // else -> parent (activeRoot isn't a treeitem)
+        }
+        break;
+      case "Enter":
+      case " ":
+        e.preventDefault();
+        if (cur.isDir) toggleFolder(cur.path);
+        else onOpenFile(cur.path);
+        break;
+      case "Home":
+        e.preventDefault();
+        focusPath(flatNodes[0].path);
+        break;
+      case "End":
+        e.preventDefault();
+        focusPath(flatNodes[flatNodes.length - 1].path);
+        break;
+      default:
+        if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          runTypeahead(e.key, i);
+        }
+    }
+  };
+
   const addFolder = async () => {
     const res = await window.lvis.workspace.pickRoot();
     if (!res.ok) return;
@@ -798,24 +940,41 @@ function ProjectRootsBrowser({
     applyRoots(res.roots, res.roots[0]?.path ?? null);
   };
 
-  const renderEntries = (path: string, depth: number): ReactElement => (
+  const renderEntries = (path: string, depth: number): ReactElement => {
+    const entries = childrenByPath[path] ?? [];
+    return (
     <>
-      {(childrenByPath[path] ?? []).map((entry) => {
+      {entries.map((entry, index) => {
         const isDir = entry.type === "directory";
         const isOpen = expanded.has(entry.path);
-        const active = !isDir && entry.path === selectedPath;
+        const opened = !isDir && entry.path === selectedPath;
+        const isActiveItem = entry.path === activeItemPath;
         return (
-          <div key={entry.path} role="treeitem" aria-expanded={isDir ? isOpen : undefined}>
+          <div key={entry.path}>
             <ContextMenu>
               <ContextMenuTrigger asChild>
-                <button
-                  type="button"
+                <div
+                  ref={(el) => {
+                    if (el) itemRefs.current.set(entry.path, el);
+                    else itemRefs.current.delete(entry.path);
+                  }}
+                  role="treeitem"
+                  aria-expanded={isDir ? isOpen : undefined}
+                  aria-selected={isActiveItem}
+                  aria-level={depth + 1}
+                  aria-setsize={entries.length}
+                  aria-posinset={index + 1}
+                  tabIndex={isActiveItem ? 0 : -1}
                   data-testid={isDir ? "chat-side-panel-fs-folder" : "chat-side-panel-fs-file"}
-                  className={`flex h-7 w-full min-w-0 items-center gap-1 rounded-md pr-2 text-left text-xs hover:bg-muted/(--opacity-muted) ${
-                    active ? "bg-accent text-accent-foreground" : ""
+                  className={`flex h-7 w-full min-w-0 cursor-pointer items-center gap-1 rounded-md pr-2 text-left text-xs outline-none hover:bg-muted/(--opacity-muted) focus-visible:ring-1 focus-visible:ring-ring ${
+                    opened ? "bg-accent text-accent-foreground" : ""
                   }`}
                   style={{ paddingLeft: 8 + depth * 12 }}
-                  onClick={() => (isDir ? toggleFolder(entry.path) : onOpenFile(entry.path))}
+                  onClick={() => {
+                    setActiveItemPath(entry.path);
+                    if (isDir) toggleFolder(entry.path);
+                    else onOpenFile(entry.path);
+                  }}
                 >
                   {isDir ? (
                     isOpen ? (
@@ -827,7 +986,7 @@ function ProjectRootsBrowser({
                     <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   )}
                   <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-                </button>
+                </div>
               </ContextMenuTrigger>
               <ContextMenuContent className="min-w-[11rem]" data-testid="chat-side-panel-fs-context-menu">
                 <ContextMenuItem
@@ -861,12 +1020,13 @@ function ProjectRootsBrowser({
                 </ContextMenuItem>
               </ContextMenuContent>
             </ContextMenu>
-            {isDir && isOpen ? renderEntries(entry.path, depth + 1) : null}
+            {isDir && isOpen ? <div role="group">{renderEntries(entry.path, depth + 1)}</div> : null}
           </div>
         );
       })}
     </>
-  );
+    );
+  };
 
   return (
     <div className="space-y-1" data-testid="chat-side-panel-project-roots">
@@ -965,7 +1125,9 @@ function ProjectRootsBrowser({
             {t("chatPreviewRail.dirLoadError")}
           </div>
         ) : (
-          <div role="tree" aria-label={t("chatPreviewRail.projectRoots")}>{renderEntries(activeRoot, 0)}</div>
+          <div role="tree" aria-label={t("chatPreviewRail.projectRoots")} onKeyDown={onTreeKeyDown}>
+            {renderEntries(activeRoot, 0)}
+          </div>
         )
       ) : (
         <div className="px-2 py-1 text-[11px] text-muted-foreground">{t("chatPreviewRail.projectRootsEmpty")}</div>
