@@ -459,6 +459,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       onSnapEdge: vi.fn(() => () => {}),
       onDetachedNavigate: vi.fn(() => () => {}),
       loadSessionInMain: vi.fn(async () => ({ ok: true })),
+      resizeForMode: vi.fn(async () => ({ ok: true })),
+      resizeForSidePanel: vi.fn(async () => ({ ok: true })),
       onLoadSessionInMain: vi.fn(() => () => {}),
     },
 

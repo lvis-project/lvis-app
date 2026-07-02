@@ -1065,6 +1065,8 @@ export type LvisApi = {
     loadSessionInMain: (sessionId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
     /** Resize the main window to match the workspace mode (work → centered canvas; chat → 기존 right-docked). */
     resizeForMode: (mode: "chat" | "work") => Promise<{ ok: true } | { ok: false; error: string }>;
+    /** Resize the chat-mode main window when the right-side work panel opens/closes. */
+    resizeForSidePanel: (open: boolean) => Promise<{ ok: true } | { ok: false; error: string }>;
     openHtmlPreview: (payload: OpenHtmlPreviewWindowPayload) => Promise<OpenHtmlPreviewWindowResult>;
     onSnapEdge: (handler: (edge: "n" | "s" | "e" | "w" | null) => void) => () => void;
     /** Subscribe to in-place navigation (single-instance shell content swap). */

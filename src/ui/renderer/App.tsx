@@ -427,6 +427,7 @@ export function App() {
   // fresh launch the full expanded card should not auto-show — the user opens it
   // on demand. (Only rendered in work mode; see the appMode gate at its mount.)
   const [actionPanelOpen, setActionPanelOpen] = useState(false);
+  const [sidePanelOpen, setSidePanelOpen] = useState(false);
   // Persist appMode to host settings and update local state. Guarded against
   // no-op writes (same mode) so a re-render or repeated toggle never fires a
   // redundant IPC write. Stable identity (useCallback with only `api`) so it is
@@ -466,6 +467,28 @@ export function App() {
     }
     void api.window?.resizeForMode?.(appMode);
   }, [appMode, api]);
+  useEffect(() => {
+    if (appMode !== "chat") return;
+    void api.window?.resizeForSidePanel?.(sidePanelOpen);
+  }, [appMode, api, sidePanelOpen]);
+  useEffect(() => {
+    if (appMode === "chat") {
+      setActionPanelOpen(false);
+    }
+  }, [appMode]);
+  useEffect(() => {
+    if (activeView !== "home") {
+      setSidePanelOpen(false);
+    }
+  }, [activeView]);
+  const handleToggleSidePanel = useCallback(() => {
+    if (activeView !== "home") {
+      setActiveView("home");
+      setSidePanelOpen(true);
+      return;
+    }
+    setSidePanelOpen((open) => !open);
+  }, [activeView]);
   // Work mode is the inline workspace: every view renders in the main tab,
   // so any windows that were detached in chat mode must close on the
   // transition. The login/auth window is ALWAYS a separate window
@@ -1784,14 +1807,6 @@ export function App() {
 
     return activity;
   }, [entries]);
-  const actionPanelHasActivity =
-    actionPanelActivity.toolCallCount > 0 ||
-    actionPanelActivity.pluginCallCount > 0 ||
-    actionPanelActivity.mcpCallCount > 0 ||
-    actionPanelActivity.readFileCount > 0 ||
-    actionPanelActivity.writtenFileCount > 0 ||
-    actionPanelActivity.fetchedPageCount > 0;
-
   const openActionPanelUrl = useCallback((url: string) => {
     void api.openExternalUrl(url);
   }, [api]);
@@ -1929,6 +1944,8 @@ export function App() {
               hasApiKey={effectiveHasApiKey}
               appMode={appMode}
               onToggleAppMode={setAppMode}
+              sidePanelOpen={sidePanelOpen}
+              onToggleSidePanel={handleToggleSidePanel}
               onOpenDevTools={() => setDevToolsOpen((v) => !v)}
               appUpdateState={appUpdate.state}
               appUpdateInFlight={appUpdate.inFlight}
@@ -2145,7 +2162,7 @@ export function App() {
               onToastClick: handleStatusToastClick,
               onToastDismiss: (toast) => statusRemoveToast(toast.id),
             }}
-            actionPanelSlot={(appMode !== "chat" || actionPanelHasActivity) ? (
+            actionPanelSlot={appMode !== "chat" ? (
               <ActionPanel
                 open={actionPanelOpen}
                 onOpenChange={setActionPanelOpen}
@@ -2153,6 +2170,8 @@ export function App() {
                 onOpenExternalUrl={openActionPanelUrl}
               />
             ) : null}
+            sidePanelOpen={sidePanelOpen}
+            onSidePanelOpenChange={setSidePanelOpen}
           />
           </ErrorBoundary>
           {/* StatusBar notifications render inside ChatView, directly above

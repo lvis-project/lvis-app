@@ -29,6 +29,7 @@ import type { AuditLogger } from "../audit/audit-logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { resolveAppIconPath } from "./app-icon.js";
 import {
+  computeChatModeSidePanelBounds,
   computeInitialMainWindowBounds,
   computeWorkModeBounds,
 } from "./main-window-bounds.js";
@@ -1199,6 +1200,30 @@ export class WindowManager {
       } else {
         this.animateBoundsTo(main, computeInitialMainWindowBounds(workArea));
       }
+      return { ok: true };
+    });
+
+    // Resize the main window when the in-chat right-side work panel opens or
+    // closes. Work mode keeps the panel in normal flex layout and does not call
+    // this channel; this is only for chat mode's narrower OS window.
+    ipcMain.handle("lvis:window:resize-for-side-panel", (event: IpcMainInvokeEvent, open: unknown) => {
+      if (!validateHostRendererSender(event)) {
+        auditUnauthorized(auditLogger, "lvis:window:resize-for-side-panel", event);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (typeof open !== "boolean") {
+        return { ok: false, error: "invalid-open-state" };
+      }
+      const main = this.getMainWindow();
+      if (!main || main.isDestroyed()) return { ok: false, error: "main-window-not-found" };
+
+      const { workArea } = screen.getPrimaryDisplay();
+      this.animateBoundsTo(
+        main,
+        open
+          ? computeChatModeSidePanelBounds(workArea)
+          : computeInitialMainWindowBounds(workArea),
+      );
       return { ok: true };
     });
   }
