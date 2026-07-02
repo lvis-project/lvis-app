@@ -203,10 +203,10 @@ describe("workspace handlers", () => {
     expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
   });
 
-  it("pickRoot does NOT persist an adjacency-warned path until it is acknowledged", async () => {
+  it("pickRoot does NOT persist an adjacency-warned path until it is acknowledged (token flow)", async () => {
     // A directory whose path carries a `.git` segment trips an adjacency warning
     // (not a hard deny) — the pick must be withheld from the read allow-list
-    // until the renderer confirms.
+    // until the renderer confirms by echoing the one-time token.
     const base = mkdtempSync(join(tmpdir(), "lvis-ws-warn-"));
     const warnDir = join(base, ".git");
     mkdirSync(warnDir);
@@ -216,19 +216,23 @@ describe("workspace handlers", () => {
       ok: boolean;
       requiresAcknowledgement?: boolean;
       pendingPath?: string;
+      ackToken?: string;
       warnings?: string[];
       added?: string;
     };
     expect(first.ok).toBe(true);
     expect(first.requiresAcknowledgement).toBe(true);
     expect(first.pendingPath).toBe(warnDir);
+    expect(typeof first.ackToken).toBe("string");
+    expect((first.ackToken ?? "").length).toBeGreaterThan(0);
     expect((first.warnings ?? []).length).toBeGreaterThan(0);
     expect(first.added).toBeUndefined();
     expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
 
-    // Second, explicit confirmation persists WITHOUT reopening the dialog.
+    // Second, explicit confirmation echoes the TOKEN (not a path) and persists
+    // WITHOUT reopening the dialog.
     showOpenDialogMock.mockClear();
-    const second = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME, { acknowledgePath: warnDir })) as {
+    const second = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME, { ackToken: first.ackToken })) as {
       ok: boolean;
       added?: string;
     };
@@ -237,6 +241,92 @@ describe("workspace handlers", () => {
     expect(addAllowedDirectoryPersistMock).toHaveBeenCalledWith(warnDir);
 
     rmSync(base, { recursive: true, force: true });
+  });
+
+  it("pickRoot REFUSES an ack token that was never issued by a dialog pick (forged/unknown)", async () => {
+    // A compromised renderer cannot forge a token: without a main-process-held
+    // pending entry the ack pass is refused and NOTHING is persisted, so it can
+    // never self-clear adjacency warnings for a directory of its own choosing.
+    const res = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME, {
+      ackToken: "forged-token-never-minted",
+    })) as { ok: boolean; error?: string; added?: string };
+    expect(res).toMatchObject({ ok: false, error: "ack-unknown" });
+    expect(res.added).toBeUndefined();
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+    // Dialog is NEVER reopened on a bogus ack — a forged token can't trigger a
+    // fresh pick either.
+    expect(showOpenDialogMock).not.toHaveBeenCalled();
+  });
+
+  it("pickRoot is a ONE-TIME token — a replayed token is refused after first use", async () => {
+    const base = mkdtempSync(join(tmpdir(), "lvis-ws-replay-"));
+    const warnDir = join(base, ".git");
+    mkdirSync(warnDir);
+    showOpenDialogMock.mockResolvedValue({ canceled: false, filePaths: [warnDir] });
+
+    const first = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME)) as { ackToken?: string };
+    const token = first.ackToken;
+    const ok = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME, { ackToken: token })) as {
+      ok: boolean;
+      added?: string;
+    };
+    expect(ok).toMatchObject({ ok: true, added: warnDir });
+
+    addAllowedDirectoryPersistMock.mockClear();
+    const replay = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME, { ackToken: token })) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(replay).toMatchObject({ ok: false, error: "ack-unknown" });
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it("pickRoot REFUSES an expired ack token (TTL elapsed)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const base = mkdtempSync(join(tmpdir(), "lvis-ws-expire-"));
+      const warnDir = join(base, ".git");
+      mkdirSync(warnDir);
+      showOpenDialogMock.mockResolvedValue({ canceled: false, filePaths: [warnDir] });
+
+      const first = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME)) as { ackToken?: string };
+      const token = first.ackToken;
+
+      // Advance past the 60s acknowledgement window.
+      vi.setSystemTime(Date.now() + 61_000);
+      addAllowedDirectoryPersistMock.mockClear();
+      const res = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME, { ackToken: token })) as {
+        ok: boolean;
+        error?: string;
+        added?: string;
+      };
+      expect(res).toMatchObject({ ok: false, error: "ack-expired" });
+      expect(res.added).toBeUndefined();
+      expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+
+      rmSync(base, { recursive: true, force: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pickRoot audits the allow-list widening on a successful persist", async () => {
+    const log = (deps as unknown as { auditLogger: { log: ReturnType<typeof vi.fn> } }).auditLogger.log;
+    log.mockClear();
+    const picked = mkdtempSync(join(tmpdir(), "lvis-ws-audit-"));
+    showOpenDialogMock.mockResolvedValue({ canceled: false, filePaths: [picked] });
+    const res = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME)) as { ok: boolean; added?: string };
+    expect(res).toMatchObject({ ok: true, added: picked });
+    // The read-scope WRITE is audited (redacted path), mirroring the preview READ.
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "info",
+        input: expect.stringContaining(CHANNELS.workspace.pickRoot),
+      }),
+    );
+    rmSync(picked, { recursive: true, force: true });
   });
 
   it("listDir omits Layer 0 sensitive entries inside an allowed root", async () => {

@@ -1112,6 +1112,8 @@ export const jaMessages: Record<string, string> = {
   "firstTaskProposals.workAssistantCta": "受信箱を整理する",
   "firstTaskProposals.workAssistantHeadline": "今日のタスクを整理しましょうか？",
   "forest.description": "ライトシェル + ティールアクセント + ライトコード",
+  "formatIpcError.ackExpired": "フォルダーの確認の有効期限が切れました。もう一度フォルダーを選択してください。",
+  "formatIpcError.ackUnknown": "そのフォルダーの確認は無効になりました。もう一度フォルダーを選択してください。",
   "formatIpcError.addFailed": "ルールの追加に失敗しました。",
   "formatIpcError.alreadyResolved": "商品はすでに処理されています。",
   "formatIpcError.alreadyResolving": "アイテムはすでに処理されています。",

@@ -1112,6 +1112,8 @@ export const zhMessages: Record<string, string> = {
   "firstTaskProposals.workAssistantCta": "整理收件箱",
   "firstTaskProposals.workAssistantHeadline": "我们来安排一下你今天的任务吧？",
   "forest.description": "浅色外壳+青色调+浅色代码",
+  "formatIpcError.ackExpired": "文件夹确认已过期。请重新选择文件夹。",
+  "formatIpcError.ackUnknown": "该文件夹确认已失效。请重新选择文件夹。",
   "formatIpcError.addFailed": "添加规则失败。",
   "formatIpcError.alreadyResolved": "该项目已被处理。",
   "formatIpcError.alreadyResolving": "该项目已在处理中。",
