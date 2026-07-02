@@ -421,6 +421,30 @@ export type LvisApi = {
     onReactivateDemo?: (handler: () => void) => () => void;
   };
   /**
+   * Interactive PTY terminal (#1444, workspace rail). `spawn` is idempotent per
+   * tab (a remount replays the scrollback rather than starting a fresh shell);
+   * `onData` / `onExit` return unsubscribe functions (the onChatStream pattern).
+   * Optional so test fixtures casting a partial object to LvisApi keep compiling
+   * — production preload always defines it.
+   */
+  terminal?: {
+    spawn: (payload: { tabId: string; cwd?: string; cols?: number; rows?: number }) => Promise<
+      | { ok: true; tabId: string; replayed: boolean }
+      | { ok: false; reason: string; message: string }
+    >;
+    input: (tabId: string, data: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+    resize: (
+      tabId: string,
+      cols: number,
+      rows: number,
+    ) => Promise<{ ok: true } | { ok: false; error: string }>;
+    kill: (tabId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+    onData: (handler: (payload: { tabId: string; chunk: string }) => void) => () => void;
+    onExit: (
+      handler: (payload: { tabId: string; exitCode: number; signal?: number }) => void,
+    ) => () => void;
+  };
+  /**
    * Demo activation bridge. `status` exposes only the captured activation
    * state from main; it does not read `process.env` in the renderer because
    * packaged builds scrub `LVIS_DEMO_*` before preload inherits env. `activate`

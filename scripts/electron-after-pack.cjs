@@ -201,10 +201,60 @@ function assertSandboxVendorBinaries(context) {
   }
 }
 
+/**
+ * node-pty ships a native `.node` addon (+ a `spawn-helper` exec on POSIX) that
+ * the main process resolves unbundled from `app.asar.unpacked/node_modules/
+ * node-pty` (the package.json `asarUnpack` glob). Assert both are present and
+ * (POSIX) executable so a prune regression fails the BUILD loudly instead of
+ * bricking the terminal at runtime with an `ERR_DLOPEN_FAILED` / missing
+ * spawn-helper. node-pty is N-API (ABI-stable), so no per-Electron-ABI matrix
+ * is needed here — presence + exec bit is the correct packaged invariant.
+ */
+function assertNodePtyBinary(context) {
+  const platform = context.electronPlatformName;
+  const resourcesDir = electronResourcesDir(context);
+  const ptyRoot = join(
+    resourcesDir,
+    "app.asar.unpacked",
+    "node_modules",
+    "node-pty",
+    "build",
+    "Release",
+  );
+  const nodeAddon = join(ptyRoot, "pty.node");
+  if (!existsSync(nodeAddon)) {
+    throw new Error(
+      `packaged node-pty native addon missing: ${nodeAddon} (asarUnpack of node_modules/node-pty/** drifted?)`,
+    );
+  }
+  if (statSync(nodeAddon).size === 0) {
+    throw new Error(`packaged node-pty native addon is empty: ${nodeAddon}`);
+  }
+  // POSIX: node-pty forks its `spawn-helper` to set the controlling TTY; it MUST
+  // be present + executable. Windows uses conpty.dll bundled in the addon — no
+  // separate helper — so this check is POSIX-only.
+  if (platform !== "win32") {
+    const helper = join(ptyRoot, "spawn-helper");
+    if (!existsSync(helper)) {
+      throw new Error(
+        `packaged node-pty spawn-helper missing for ${platform}: ${helper}`,
+      );
+    }
+    try {
+      accessSync(helper, fsConstants.X_OK);
+    } catch {
+      throw new Error(
+        `packaged node-pty spawn-helper not executable for ${platform}: ${helper} (mode ${(statSync(helper).mode & 0o777).toString(8)})`,
+      );
+    }
+  }
+}
+
 module.exports = async function afterPack(context) {
   const keepWebgl = process.env.LVIS_KEEP_WEBGL === "1";
   assertBundledUvResource(context);
   assertSandboxVendorBinaries(context);
+  assertNodePtyBinary(context);
 
   if (context.electronPlatformName === "linux") {
     for (const file of LINUX_GPU_RUNTIME_FILES) {
