@@ -33,7 +33,7 @@ import {
 } from "./reviewer/risk-classifier.js";
 import {
   resolveReviewerSandboxCacheState,
-  resolveReviewerSandboxCapability,
+  type ReviewerSandboxCacheState,
 } from "./sandbox-capability.js";
 import type { PermissionEvaluationContext } from "./evaluation-context.js";
 import type { VerdictCache } from "./reviewer/verdict-cache.js";
@@ -44,6 +44,7 @@ import { t } from "../i18n/index.js";
 import { lookupApproval, canonicalStringify } from "./user-approval-store.js";
 import { buildSandboxAuditEntry } from "../audit/sandbox-audit.js";
 import { emitSandboxAudit } from "../audit/sandbox-audit-sink.js";
+import { maskSensitiveData } from "../audit/dlp-filter.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto" | "allow";
@@ -211,6 +212,29 @@ export interface ReviewerDispatchResult {
 export type ReviewerDeferPolicy = "none" | "high" | "medium-high";
 
 // RejectResponse interface and MAX_REVIEWER_RETRIES deferred to follow-up.
+
+function sameReviewerSandboxCacheState(
+  a: ReviewerSandboxCacheState,
+  b: ReviewerSandboxCacheState,
+): boolean {
+  const ac = a.capability;
+  const bc = b.capability;
+  return (
+    a.source === b.source &&
+    a.substrate === b.substrate &&
+    a.wrapped === b.wrapped &&
+    a.mcpServerId === b.mcpServerId &&
+    a.pluginId === b.pluginId &&
+    a.workerId === b.workerId &&
+    ac.kind === bc.kind &&
+    ac.confidence === bc.confidence &&
+    ac.reason === bc.reason &&
+    ac.platform === bc.platform &&
+    ac.confines?.filesystem === bc.confines?.filesystem &&
+    ac.confines?.process === bc.confines?.process &&
+    ac.confines?.network === bc.confines?.network
+  );
+}
 // LLM caller retry wiring lives in conversation-loop.ts scope.
 // Tracked in follow-up issue for "LLM caller retry wiring" with
 // max 2 retry / counter scope / args-change-reset contract.
@@ -728,33 +752,6 @@ export class PermissionManager {
       pluginId: input.pluginId,
       workerId: input.workerId,
     };
-    // Include the sandbox capability in the cache scope so a change to OS
-    // isolation invalidates stale verdicts produced under different sandbox
-    // assumptions. Substrate-aware (same resolver the reviewer consults): a
-    // plugin/MCP verdict cached under the unwrapped-worker "none" substrate
-    // must not collide with the host-shell "asrt" substrate once the gate is
-    // ON. The ASRT sandbox publishes its capability at boot via
-    // setActiveSandboxCapability; the host-shell path then sees the active
-    // kind/confidence while non-wrapped substrates stay "none".
-    const sandboxCacheState = resolveReviewerSandboxCacheState(
-      input.source,
-      toolName,
-      input.mcpServerId,
-      input.workerId,
-      input.pluginId,
-    );
-    const sandboxScope = sandboxCacheState.capability;
-    const cacheCtx = {
-      allowedDirectories: input.allowedDirectories,
-      scope: {
-        ...(routineScope ?? {}),
-        reviewer: this.reviewerCacheScope,
-        sandboxKind: sandboxScope.kind,
-        sandboxConfidence: sandboxScope.confidence,
-      },
-      sandboxWrapState: sandboxCacheState,
-    };
-
     // ── User-approval memory hit ──────────────────────────────────────────
     // Check the user-approval store before consulting the LLM classifier.
     // A memory hit for a non-revoked approval bypasses the LLM call and
@@ -770,6 +767,35 @@ export class PermissionManager {
       input.approvalCacheKey,
     ).catch(() => null); // storage failure must not block tool execution
 
+    const readSandboxCacheState = (): ReviewerSandboxCacheState =>
+      resolveReviewerSandboxCacheState(
+        input.source,
+        toolName,
+        input.mcpServerId,
+        input.workerId,
+        input.pluginId,
+      );
+    const buildCacheContext = (sandboxCacheState: ReviewerSandboxCacheState) => {
+      const sandboxScope = sandboxCacheState.capability;
+      return {
+        allowedDirectories: input.allowedDirectories,
+        scope: {
+          ...(routineScope ?? {}),
+          reviewer: this.reviewerCacheScope,
+          sandboxKind: sandboxScope.kind,
+          sandboxConfidence: sandboxScope.confidence,
+        },
+        sandboxWrapState: sandboxCacheState,
+      };
+    };
+
+    // Include the sandbox capability in the cache scope so a change to OS
+    // isolation invalidates stale verdicts produced under different sandbox
+    // assumptions. Capture this live state immediately before cache lookup:
+    // no await may sit between wrap-state sampling and cache lookup, or a
+    // worker un-wrap could replay a verdict relaxed under stale confinement.
+    const sandboxCacheState = readSandboxCacheState();
+    const cacheCtx = buildCacheContext(sandboxCacheState);
     const cacheResult = cache.lookup(lookupKey, cacheCtx);
     let verdict: RiskVerdict;
     let ruleVerdictForAudit: RiskVerdict["level"] | null = null;
@@ -779,7 +805,10 @@ export class PermissionManager {
       nlJustification: string | null;
       verdictAtApproval: UserApprovalVerdict | null;
     } | null = null;
-    const buildReviewerContext = (): ToolInvocationContext => ({
+    let sandboxStateForAudit = sandboxCacheState;
+    const buildReviewerContext = (
+      reviewerSandboxState: ReviewerSandboxCacheState = sandboxCacheState,
+    ): ToolInvocationContext => ({
       toolName,
       source: input.source,
       category: input.category,
@@ -795,13 +824,7 @@ export class PermissionManager {
       // effect — except a genuinely ASRT-wrapped external MCP worker
       // (keyed on input.mcpServerId) or plugin worker (keyed on
       // input.pluginId/input.workerId). See the resolver invariant.
-      sandboxCapability: resolveReviewerSandboxCapability(
-        input.source,
-        toolName,
-        input.mcpServerId,
-        input.workerId,
-        input.pluginId,
-      ),
+      sandboxCapability: reviewerSandboxState.capability,
       ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
       ...(input.writesToOwnSandbox !== undefined
         ? { writesToOwnSandbox: input.writesToOwnSandbox }
@@ -891,8 +914,23 @@ export class PermissionManager {
           ruleVerdictForAudit = verdict.level;
           llmVerdictForAudit = null;
         }
-        // Persist for next time (HIGH cached too — re-deny is fast).
-        await cache.store(lookupKey, cacheCtx, verdict);
+        const postReviewSandboxState = readSandboxCacheState();
+        if (!sameReviewerSandboxCacheState(sandboxCacheState, postReviewSandboxState)) {
+          sandboxStateForAudit = postReviewSandboxState;
+          const freshRuleVerdict = new RuleBasedRiskClassifier().classify(
+            buildReviewerContext(postReviewSandboxState),
+          );
+          ruleVerdictForAudit = freshRuleVerdict.level;
+          verdict = {
+            level: "high",
+            reason: "reviewer sandbox state changed during classification — fail-safe re-review required",
+          };
+        } else {
+          // Persist for next time (HIGH cached too — re-deny is fast). The
+          // verdict is stored only if the live wrap state still matches the
+          // reviewer context that produced it.
+          await cache.store(lookupKey, cacheCtx, verdict);
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         verdict = { level: "high", reason: `reviewer error — ${message}` };
@@ -905,22 +943,18 @@ export class PermissionManager {
     // Emit a sandbox audit entry for every dispatchReviewer call so the
     // audit log captures reviewer composition signals + user-approval provenance.
     // Failures are swallowed so audit never blocks tool execution.
-    // Record the SUBSTRATE-aware capability the reviewer actually saw (not the
-    // process-global) so the audit honestly reflects the isolation in force for
-    // THIS call's execution substrate (incl. a wrapped MCP worker — PR1).
-    const sandboxCap = resolveReviewerSandboxCapability(
-      input.source,
-      toolName,
-      input.mcpServerId,
-      input.workerId,
-      input.pluginId,
-    );
+    // Record the SUBSTRATE-aware capability used for the final reviewer verdict
+    // (not the process-global) so the audit honestly reflects this call's
+    // execution substrate.
+    const sandboxCap = sandboxStateForAudit.capability;
     const auditEntry = buildSandboxAuditEntry({
       tool: {
         name: toolName,
-        // args already DLP-redacted by caller (ReviewerDispatchInput.finalInput)
-        args: JSON.stringify(input.finalInput),
+        // emitSandboxAudit's sink trusts callers to pass DLP-redacted fields.
+        args: maskSensitiveData(JSON.stringify(input.finalInput)).masked,
         source: input.source,
+        trustOrigin: input.trustOrigin,
+        ...(input.approvalCacheKey ? { approvalCacheKey: input.approvalCacheKey } : {}),
       },
       sandbox: {
         kind: sandboxCap.kind,
@@ -934,7 +968,15 @@ export class PermissionManager {
         llmVerdict: llmVerdictForAudit,
         finalVerdict: verdict.level,
         compositionRulesTriggered: [],
-        userApprovalUsed,
+        userApprovalUsed: userApprovalUsed
+          ? {
+              ...userApprovalUsed,
+              nlJustification:
+                userApprovalUsed.nlJustification === null
+                  ? null
+                  : maskSensitiveData(userApprovalUsed.nlJustification).masked,
+            }
+          : null,
       },
     });
     emitSandboxAudit(auditEntry).catch(() => {

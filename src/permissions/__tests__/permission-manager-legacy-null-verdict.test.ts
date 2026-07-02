@@ -239,4 +239,38 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
     expect(auditEntry?.reviewer.llmVerdict).toBe("low");
     expect(auditEntry?.reviewer.finalVerdict).toBe("high");
   });
+
+  it("reviewer audit masks finalInput and preserves the trust tuple", async () => {
+    await pm.dispatchReviewer("plugin_send", {
+      source: "plugin",
+      category: "network",
+      pathFields: [],
+      finalInput: {
+        email: "alice@example.com",
+        apiKey: "sk-abcdefghijklmnopqrst",
+      },
+      allowedDirectories: [],
+      sensitivePathsAdjacent: [],
+      trustOrigin: "plugin-emitted" as const,
+      approvalCacheKey: "plugin_send:scope-a",
+    });
+
+    const auditEntry = emitSandboxAuditMock.mock.calls.at(-1)?.[0] as
+      | {
+          tool: {
+            args: string;
+            source: string;
+            trustOrigin?: string;
+            approvalCacheKey?: string;
+          };
+        }
+      | undefined;
+    expect(auditEntry?.tool.args).not.toContain("alice@example.com");
+    expect(auditEntry?.tool.args).not.toContain("sk-abcdefghijklmnopqrst");
+    expect(auditEntry?.tool.args).toContain("***@example.com");
+    expect(auditEntry?.tool.args).toContain("sk-****");
+    expect(auditEntry?.tool.source).toBe("plugin");
+    expect(auditEntry?.tool.trustOrigin).toBe("plugin-emitted");
+    expect(auditEntry?.tool.approvalCacheKey).toBe("plugin_send:scope-a");
+  });
 });
