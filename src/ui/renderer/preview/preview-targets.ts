@@ -34,6 +34,13 @@ export interface FilePreviewTarget extends ChatPreviewTargetBase {
   kind: "file";
   path: string;
   canOpenExternal: boolean;
+  /**
+   * Inline document text carried with the target (e.g. a Local Indexer search
+   * hit's snippet/rawText). When present the file preview renders this text
+   * through the progressive renderer registry (markdown/mermaid by extension)
+   * instead of showing only the path. Path-only targets omit it.
+   */
+  inlineText?: string;
 }
 
 export interface ImagePreviewTarget extends ChatPreviewTargetBase {
@@ -204,6 +211,45 @@ function visitUnknown(value: unknown, visit: (key: string | null, item: unknown)
   for (const [childKey, childValue] of Object.entries(value)) {
     visitUnknown(childValue, visit, childKey);
   }
+}
+
+/**
+ * A search-result hit that carries an on-disk `path` to the source document
+ * plus (optionally) an inline snippet. Shape-driven so the host stays plugin-
+ * agnostic (§ "NO plugin-specific code in host"): any tool whose result JSON
+ * has a `hits`/`results` array of `{ path, ... }` objects surfaces its hits as
+ * openable file-preview targets (e.g. the Local Indexer's hybrid/vector search).
+ */
+interface SearchResultHit {
+  path: string;
+  docName?: string;
+  page?: number;
+  text?: string;
+}
+
+function extractSearchResultHits(result: unknown): SearchResultHit[] {
+  if (typeof result !== "string") return [];
+  const parsed = parseJson(result);
+  if (!isRecord(parsed)) return [];
+  const rawHits = parsed.hits ?? parsed.results;
+  if (!Array.isArray(rawHits)) return [];
+  const hits: SearchResultHit[] = [];
+  for (const item of rawHits) {
+    if (!isRecord(item)) continue;
+    const path = item.path;
+    if (typeof path !== "string" || !isLikelyPath(path)) continue;
+    const hit: SearchResultHit = { path };
+    if (typeof item.docName === "string") hit.docName = item.docName;
+    if (typeof item.page === "number") hit.page = item.page;
+    const text = typeof item.rawText === "string"
+      ? item.rawText
+      : typeof item.snippet === "string"
+        ? item.snippet
+        : undefined;
+    if (text) hit.text = trimPreviewText(text);
+    hits.push(hit);
+  }
+  return hits;
 }
 
 function parseJson(raw: string): unknown | null {
@@ -458,9 +504,45 @@ export function collectChatPreviewModel({
         }, targetIds);
       }
 
+      // Search-result hits (§6.10.8 부가-B): promote path-bearing hits to
+      // file-preview targets carrying their inline snippet, so a hit opens the
+      // source document in-preview instead of collapsing into one JSON card.
+      const searchHits = extractSearchResultHits(tool.result);
+      for (const hit of searchHits) {
+        const targetId = `search-hit:${tool.toolUseId}:${hit.path}:${hit.page ?? ""}`;
+        const subtitleParts = [hit.docName, hit.page != null ? `page ${hit.page}` : null]
+          .filter((part): part is string => Boolean(part));
+        addUnique(targets, {
+          id: targetId,
+          kind: "file",
+          title: basename(hit.path),
+          subtitle: subtitleParts.length > 0 ? subtitleParts.join(" · ") : `${displayName} · ${sourceLabel}`,
+          sourceLabel,
+          createdOrder: order++,
+          toolUseId: tool.toolUseId,
+          toolName: tool.name,
+          status: tool.status,
+          path: hit.path,
+          canOpenExternal: false,
+          ...(hit.text ? { inlineText: hit.text } : {}),
+        }, targetIds);
+        addOrMergeFile(files, {
+          id: `tool:${hit.path}`,
+          path: hit.path,
+          label: basename(hit.path),
+          detail: compactDetail(hit.path),
+          sourceLabel: displayName,
+          operation: "read",
+          previewTargetId: targetId,
+          canOpenExternal: false,
+          status: tool.status,
+        }, fileIds);
+      }
+
       if (typeof tool.result === "string" && tool.result.length > 0) {
         const parsedJson = parseJson(tool.result);
-        const hasRicherPreview = htmlPayload != null || diff != null || tool.uiPayload != null;
+        const hasRicherPreview =
+          htmlPayload != null || diff != null || tool.uiPayload != null || searchHits.length > 0;
         if (parsedJson !== null && !hasRicherPreview) {
           addUnique(targets, {
             id: `json:${tool.toolUseId}`,

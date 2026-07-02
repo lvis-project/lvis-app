@@ -312,9 +312,10 @@ export function AppShell({
           {/* StatusBar notifications render inside ChatView, directly above
               the composer. The composer's own status sub-row keeps showing
               the ring / permission / model cells. The 도구 활동 (Tool Activity)
-              panel is now rendered inside ChatView via its `actionPanelSlot`
-              (work-mode only), anchored to the chat column so it coexists with
-              the right-docked ChatSidePanel. */}
+              panel is now constructed inside ChatView (controlled via
+              `actionPanelOpen` / `onActionPanelOpenChange`, work-mode only) so
+              its open-actions reach the workspace store, anchored to the chat
+              column so it coexists with the right-docked ChatSidePanel. */}
         </main>
       </div>
     </div>

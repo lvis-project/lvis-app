@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../i18n/react.js";
 import { ChevronDown, KeyRound } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
@@ -33,6 +33,12 @@ import { getKoreaDateKey } from "./utils/korea-date-key.js";
 import { isTurnStartEntry } from "./utils/classify-turn-entries.js";
 import { collectChatPreviewModel } from "./preview/preview-targets.js";
 import { useWorkspaceTabs } from "./preview/workspace-tabs.js";
+import { useSidePanelWidth } from "./hooks/use-side-panel-width.js";
+import { normalizeBrowserNavigationUrl } from "./preview/url-safety.js";
+import { ActionPanel } from "./components/ActionPanel.js";
+import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
+import { useContainerNarrow } from "./hooks/use-container-narrow.js";
+import { WorkspaceRailDrawer } from "./components/WorkspaceRailDrawer.js";
 import { useChatScroll } from "./hooks/use-chat-scroll.js";
 import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useCheckpointView } from "./hooks/use-checkpoint-view.js";
@@ -103,8 +109,9 @@ export interface ChatViewProps {
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
   /** Toast surface rendered directly above the composer input. */
   statusBar?: StatusBarProps;
-  /** Floating activity affordance anchored to the chat column, not the side panel. */
-  actionPanelSlot?: ReactNode;
+  /** Controlled Tool Activity (ActionPanel) open state — work mode only. */
+  actionPanelOpen?: boolean;
+  onActionPanelOpenChange?: (open: boolean) => void;
   /** Controlled right-side work panel state, toggled from the title bar. */
   sidePanelOpen?: boolean;
   onSidePanelOpenChange?: (open: boolean) => void;
@@ -112,7 +119,7 @@ export interface ChatViewProps {
   blogLayout?: boolean;
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelSlot, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -186,6 +193,18 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     () => previewModel.targets.map((target) => target.id).join("\u0001"),
     [previewModel.targets],
   );
+  const previewTargetIds = useMemo(
+    () => new Set(previewModel.targets.map((target) => target.id)),
+    [previewModel.targets],
+  );
+  // Latest resolvable target-id set, read (non-reactively) by the session-switch
+  // prune effect. handleLoadSession applies the new session's entries and the
+  // new session id in one batched commit, so this ref already reflects the new
+  // session by the time the prune effect fires.
+  const previewTargetIdsRef = useRef(previewTargetIds);
+  useEffect(() => {
+    previewTargetIdsRef.current = previewTargetIds;
+  }, [previewTargetIds]);
   const [selectedPreviewId, setSelectedPreviewId] = useState<string | null>(null);
   // Workspace-tab store lifted out of ChatSidePanel. ChatSidePanel is unmounted
   // whenever the rail closes / the view leaves home / the session switches
@@ -193,11 +212,82 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   // them on every such transition. ChatView stays mounted across those, so the
   // store lives here — tab state now survives. See preview/workspace-tabs.ts.
   const workspaceTabs = useWorkspaceTabs();
+  // Docked side-panel width — durable shell preference (settings round-trip),
+  // owned next to the tab store so it survives ChatSidePanel unmount.
+  const { sidePanelWidth, setSidePanelWidth, commitSidePanelWidth } = useSidePanelWidth(api);
   const previewRailVisible = sidePanelOpen;
+  // Narrow-screen fallback: when the ChatView container is too narrow to dock
+  // the rail beside the transcript, render it as a modal drawer instead
+  // (§6.10.8). The observed element is the chat-view-root (the parent of the
+  // docked/drawer branch) so switching branches does not move the signal.
+  const chatViewRootRef = useRef<HTMLDivElement | null>(null);
+  const { isNarrow } = useContainerNarrow(chatViewRootRef);
+
+  // Tool Activity (ActionPanel) — co-located here (§6.10.7) so its open-actions
+  // reach the workspace store / preview model / side-panel toggle that also
+  // live at ChatView level. Left-click routes items in-app; right-click offers
+  // "open in system app" (web only — tool-derived local paths have no
+  // authorized OS-open channel, so that menu item is hidden for files).
+  const actionPanelActivity = useMemo(() => computeActionPanelActivity(entries), [entries]);
+
+  // Route an ActionPanel item into the workspace rail. Single-click (`ephemeral`)
+  // opens it in the one reusable preview slot; double-click (`pinned`) opens and
+  // keeps it as a durable tab — the VS Code preview-tab model the workspace-tab
+  // store documents (single = ephemeral, double = pinned).
+  const routeActivity = useCallback((target: string, web: boolean, mode: "ephemeral" | "pinned") => {
+    const open = mode === "pinned" ? workspaceTabs.openPinned : workspaceTabs.openInEphemeral;
+    if (web) {
+      const safe = normalizeBrowserNavigationUrl(target);
+      if (!safe) return;
+      open({ source: "browser", url: safe });
+    } else {
+      const fileTarget = previewModel.targets.find(
+        (candidate) => "path" in candidate && candidate.path === target,
+      );
+      if (fileTarget) {
+        open({ source: "preview", targetId: fileTarget.id });
+      } else {
+        // No preview-target for this path — open the file-browser container so
+        // the user can still locate it in the tree.
+        workspaceTabs.addTab("file-browser");
+      }
+    }
+    onSidePanelOpenChange?.(true);
+  }, [workspaceTabs, previewModel.targets, onSidePanelOpenChange]);
+  const routeActivityItem = useCallback(
+    (target: string, web: boolean) => routeActivity(target, web, "ephemeral"),
+    [routeActivity],
+  );
+  const routeActivityItemPinned = useCallback(
+    (target: string, web: boolean) => routeActivity(target, web, "pinned"),
+    [routeActivity],
+  );
+
+  const openActivityItemInSystemApp = useCallback((target: string, web: boolean) => {
+    if (web) {
+      const safe = normalizeBrowserNavigationUrl(target);
+      if (safe) void api.openExternalUrl(safe);
+    }
+    // Local paths: no authorized OS-open channel for tool-derived paths
+    // (c04f3b0f) — the menu item is not shown for files, so this is a no-op.
+  }, [api]);
 
   useEffect(() => {
     setSelectedPreviewId(null);
   }, [currentSessionId]);
+
+  // Prune stale preview/content tabs when the session changes. The workspace-tab
+  // store lives at ChatView (surviving the panel's unmount), so without this the
+  // prior session's session-scoped preview tabs would linger as dead
+  // `content-unavailable` placeholders and accumulate on every switch. Browser
+  // (url) content tabs + launcher container tabs are session-independent and are
+  // kept by the store. Depends only on the session id + the stable prune fn, so
+  // it runs on switch — not on every intra-session target change (which would
+  // wrongly close a tab whose target id was reclassified mid-stream).
+  const { pruneContentTabs } = workspaceTabs;
+  useEffect(() => {
+    pruneContentTabs((targetId) => previewTargetIdsRef.current.has(targetId));
+  }, [currentSessionId, pruneContentTabs]);
 
   useEffect(() => {
     if (previewModel.targets.length === 0) {
@@ -428,6 +518,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
 
   return (
     <div
+      ref={chatViewRootRef}
       className="relative flex min-h-0 min-w-0 w-full flex-1 flex-row overflow-hidden"
       data-testid="chat-view-root"
     >
@@ -435,7 +526,16 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
         data-testid="chat-main-column"
       >
-      {actionPanelSlot}
+      {appMode !== "chat" ? (
+        <ActionPanel
+          open={actionPanelOpen}
+          onOpenChange={(open) => onActionPanelOpenChange?.(open)}
+          activity={actionPanelActivity}
+          onOpenItem={routeActivityItem}
+          onOpenItemPinned={routeActivityItemPinned}
+          onOpenItemInSystemApp={openActivityItemInSystemApp}
+        />
+      ) : null}
       {hasApiKey === false && (
         <div className="absolute inset-x-4 top-1/2 z-10 flex -translate-y-1/2 justify-center">
           <Card className="w-full max-w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>{t("chatView.noApiKeyTitle")}</CardTitle><CardDescription>{t("chatView.noApiKeyDescription")}</CardDescription></CardHeader>
@@ -661,7 +761,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         onResolveAskQuestion={onResolveAskQuestion}
       />
       </div>
-      {previewRailVisible ? (
+      {previewRailVisible && !isNarrow ? (
         <ChatSidePanel
           api={api}
           sessionId={currentSessionId}
@@ -670,11 +770,40 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           selectedId={selectedPreviewId}
           onSelect={setSelectedPreviewId}
           workspaceTabs={workspaceTabs}
+          width={sidePanelWidth}
+          onWidthChange={setSidePanelWidth}
+          onWidthCommit={commitSidePanelWidth}
           onClose={() => {
             onSidePanelOpenChange?.(false);
           }}
-          className="relative z-40 flex w-[clamp(28rem,44vw,42rem)] max-w-[calc(100vw-12rem)] shrink-0 self-stretch"
+          className="relative z-40 flex max-w-[calc(100vw-12rem)] shrink-0 self-stretch"
         />
+      ) : null}
+      {previewRailVisible && isNarrow ? (
+        <WorkspaceRailDrawer
+          open
+          onOpenChange={(open) => {
+            if (!open) onSidePanelOpenChange?.(false);
+          }}
+        >
+          <ChatSidePanel
+            api={api}
+            sessionId={currentSessionId}
+            targets={previewModel.targets}
+            files={previewModel.files}
+            selectedId={selectedPreviewId}
+            onSelect={setSelectedPreviewId}
+            workspaceTabs={workspaceTabs}
+            width={sidePanelWidth}
+            onWidthChange={setSidePanelWidth}
+            onWidthCommit={commitSidePanelWidth}
+            resizable={false}
+            onClose={() => {
+              onSidePanelOpenChange?.(false);
+            }}
+            className="flex h-full min-h-0 w-full min-w-0"
+          />
+        </WorkspaceRailDrawer>
       ) : null}
     </div>
   );
