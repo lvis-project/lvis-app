@@ -11,6 +11,7 @@ import { app } from "electron";
 import { createLogger } from "../lib/logger.js";
 import { logger as rootPinoLogger } from "../lib/logger.js";
 import { runShutdownRoutines } from "./shutdown-routines.js";
+import { stopLocalApiServer } from "./local-api-server.js";
 import { forceKillManagedChildProcesses } from "./managed-child-processes.js";
 import {
   resolveShutdownCleanupTimeoutMs,
@@ -83,6 +84,12 @@ export async function runAppShutdownCleanup(options: {
       // last window layout. The remaining steps honor the AbortSignal so
       // they can break out of their inner loops when the deadline fires.
       getWindowManager()?.persistAll();
+      if (signal.aborted) return;
+      // Stop the opt-in local API server EARLY — it's fast (destroys idle
+      // sockets + ends live SSE streams) and blanks its on-disk discovery file
+      // so a stale secret + port never lingers after quit. Idempotent + a no-op
+      // when the gate was off this boot.
+      await stopLocalApiServer();
       if (signal.aborted) return;
       await svc.runPluginShutdownHandlers?.();
       if (signal.aborted) return;

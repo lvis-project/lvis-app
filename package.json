@@ -36,6 +36,7 @@
     "plugins:remove": "tsx scripts/plugins-cli.ts remove",
     "plugins:enable": "tsx scripts/plugins-cli.ts enable",
     "plugins:disable": "tsx scripts/plugins-cli.ts disable",
+    "cli": "tsx scripts/lvis-cli.ts",
     "test": "vitest run",
     "check:i18n-catalog": "tsx scripts/i18n-validate-catalog.ts",
     "check:sunset-inventory": "node scripts/check-sunset-inventory.mjs",

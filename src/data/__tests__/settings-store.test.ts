@@ -470,7 +470,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
 
   it("defaults closeBehavior to 'hide-to-tray' on a fresh install", () => {
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work" });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false });
   });
 
   it("applies default 'hide-to-tray' when system field is absent on disk (legacy settings.json)", () => {
@@ -480,16 +480,16 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work" });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false });
   });
 
   it("round-trips a 'quit' preference across restart", async () => {
     const service = new SettingsService({ userDataPath });
     await service.patch({ system: { closeBehavior: "quit" } });
-    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work" });
+    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false });
 
     const reloaded = new SettingsService({ userDataPath });
-    expect(reloaded.get("system")).toEqual({ closeBehavior: "quit", appMode: "work" });
+    expect(reloaded.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false });
   });
 
   // Critic M1 — schema-invalid value on disk falls back to default for THIS
@@ -510,7 +510,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work" });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false });
     expect(service.get("chat").systemPrompt).toBe("preserved-prompt");
     expect(service.get("chat").autoCompact).toBe(false);
     expect(service.get("marketplace").cloudBaseUrl).toBe("https://preserved.example");
@@ -523,7 +523,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work" });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false });
   });
 
   // Critic N1 — patch-merge must NOT clobber a valid prior preference when
@@ -577,7 +577,7 @@ describe("SettingsService system — workspace appMode", () => {
     );
     const service = new SettingsService({ userDataPath });
     // closeBehavior preserved; appMode falls back to default — neither clobbers the other.
-    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work" });
+    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false });
   });
 
   it("normalizes legacy 'action' appMode on disk to 'work'", () => {
@@ -587,7 +587,7 @@ describe("SettingsService system — workspace appMode", () => {
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work" });
+    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false });
   });
 
   it("normalizes a legacy 'action' appMode patch to 'work'", async () => {
@@ -609,7 +609,23 @@ describe("SettingsService system — workspace appMode", () => {
     const service = new SettingsService({ userDataPath });
     await service.patch({ system: { closeBehavior: "quit" } });
     await service.patch({ system: { appMode: "chat" } });
-    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "chat" });
+    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "chat", localApiServer: false });
+  });
+
+  it("round-trips a localApiServer=true preference across restart", async () => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({ system: { localApiServer: true } });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: true });
+
+    const reloaded = new SettingsService({ userDataPath });
+    expect(reloaded.get("system").localApiServer).toBe(true);
+  });
+
+  it("ignores an invalid localApiServer patch and preserves prior value", async () => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({ system: { localApiServer: true } });
+    await service.patch({ system: { localApiServer: "yes" as never } });
+    expect(service.get("system").localApiServer).toBe(true);
   });
 });
 

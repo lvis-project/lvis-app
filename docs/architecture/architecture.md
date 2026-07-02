@@ -1271,27 +1271,41 @@ lvis-app/src/
 │       + INTERNAL_HOST_CHANNELS out-of-tree 분류),
 │       events.ts (AppEvent union), trust-origin.ts
 │
-├── api/           # #1409 C12 external surface — in-process dispatcher
-│   └── local-api.ts  # dispatch({channel,args,origin}) over PUBLIC_CHANNELS;
-│                     #  same contract as the renderer, non-renderer TrustOrigin.
-│                     #  localhost network server = #1409 follow-up
-├── sdk/           # #1409 C12 narrow typed LvisClient facade over local-api
-│   └── index.ts      # read+send only; mutating gesture-gated ops omitted
-├── cli/           # #1409 C12 command table + runCommand(argv, client)
-│   └── commands.ts   # scaffold; no process entrypoint / bin (follow-up)
+├── api/           # #1409 external surface — dispatcher + loopback server (#1436)
+│   ├── local-api.ts         # dispatch({channel,args,origin}) over PUBLIC_CHANNELS;
+│   │                        #  same contract as the renderer, non-renderer TrustOrigin;
+│   │                        #  fail-closed on non-public + gesture-gated channels
+│   ├── http-server.ts       # node:http loopback (127.0.0.1) transport: Bearer-secret
+│   │                        #  auth on every route (timingSafeEqual), POST /v1/dispatch,
+│   │                        #  GET /v1/events (SSE), GET /v1/health
+│   └── stream-broadcaster.ts # ChatStreamSink fan-out feeding the SSE endpoint
+├── sdk/           # #1409 narrow typed LvisClient facade over any LocalApi
+│   └── index.ts      # read+send only; mutating gesture-gated ops omitted;
+│                     #  accepts LocalApi<string> (in-process or HTTP transport)
+├── cli/           # #1409 CLI over the same contract (#1436)
+│   ├── commands.ts     # command table + pure runCommand(argv, client)
+│   └── http-client.ts  # HTTP LocalApi transport (reads ~/.lvis/local-api/server.json);
+│                       #  entry = scripts/lvis-cli.ts (`bun run cli -- <command>`)
 │
 ├── data/, main/, lib/, components/ui/, ui/, __tests__/
 ```
 
-**External surfaces (`api/` · `sdk/` · `cli/`, #1409 C12)** — thin in-process
-consumers that speak the SAME `contract/` wire contract as the renderer, but
-over a non-renderer `TrustOrigin` (`local-api` / `cli`). `api/local-api.ts`
-dispatches only `PUBLIC_CHANNELS` to the C10 `ipc/handlers/*` and fails closed
-on non-public + gesture-gated mutating channels; `sdk/index.ts` is a narrow
-typed `LvisClient` (read+send only); `cli/commands.ts` is a command table over
-the SDK. Deps are injected — no real services constructed. The localhost
-network server, a `package.json` bin/entrypoint, and authenticated-authz for
-privileged external mutation are the documented #1409 follow-ups.
+**External surfaces (`api/` · `sdk/` · `cli/`, #1409/#1436)** — the SAME
+`contract/` wire contract the renderer consumes, over a non-renderer
+`TrustOrigin` (`local-api` / `cli`). `api/local-api.ts` dispatches only
+`PUBLIC_CHANNELS` to the `ipc/handlers/*` and fails closed on non-public +
+gesture-gated mutating channels. The **loopback server** (`api/http-server.ts`)
+is opt-in (Settings `system.localApiServer` or `LVIS_LOCAL_API=1`, default OFF;
+lifecycle in `src/main/local-api-server.ts`): it binds 127.0.0.1 only, requires
+a per-boot Bearer secret on every route (persisted with the bound port to
+`~/.lvis/local-api/server.json` via `openFeatureNamespace`, 0o600), exposes
+`POST /v1/dispatch` + `GET /v1/events` (SSE mirror of the chat stream frames) +
+`GET /v1/health`, and is closed in the app-shutdown path. `sdk/index.ts` is a
+narrow typed `LvisClient` (read+send only) over any `LocalApi<string>`;
+`cli/http-client.ts` + `scripts/lvis-cli.ts` make the CLI a thin HTTP client of
+the same server (`bun run cli -- session:list` 등). Remaining #1409 follow-ups:
+authenticated non-renderer authz for privileged mutation, and any
+remote/multi-user exposure beyond loopback.
 
 #### 4.6.2 Module Boundary Rules
 
