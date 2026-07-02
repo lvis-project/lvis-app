@@ -50,6 +50,7 @@ import { PreviewContent } from "../preview/preview-renderers.js";
 import { FileEditDiff } from "./FileEditDiff.js";
 import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
 import { McpAppView } from "./McpAppView.js";
+import { PtyTerminalView } from "./PtyTerminalView.js";
 
 interface FileTreeNode {
   id: string;
@@ -61,7 +62,6 @@ interface FileTreeNode {
 
 const FILE_TARGET_KINDS = new Set<ChatPreviewTarget["kind"]>(["file", "diff", "image"]);
 const BROWSER_TARGET_KINDS = new Set<ChatPreviewTarget["kind"]>(["html", "url"]);
-const TERMINAL_TOOL_PATTERN = /(^|[._:-])(shell|bash|cmd|powershell|terminal|exec|run)([._:-]|$)/i;
 const FILE_TREE_MIN_PERCENT = 22;
 const FILE_TREE_MAX_PERCENT = 72;
 /** Pointer travel (px) that promotes a tab press into a horizontal pan. */
@@ -173,21 +173,6 @@ function filterFileTree(nodes: FileTreeNode[], query: string): FileTreeNode[] {
     }
   }
   return filtered;
-}
-
-function isTerminalTarget(target: ChatPreviewTarget): boolean {
-  return Boolean(target.toolName && TERMINAL_TOOL_PATTERN.test(target.toolName));
-}
-
-function terminalText(target: ChatPreviewTarget): string {
-  if (target.kind === "tool-result") return target.raw;
-  if (target.kind === "json") return target.raw;
-  if (target.kind === "paste") return target.text;
-  if (target.kind === "file" || target.kind === "diff" || target.kind === "image") return target.path;
-  if (target.kind === "url") return target.url;
-  if (target.kind === "plugin") return target.resourceUri;
-  if (target.kind === "html") return target.payload.html;
-  return "";
 }
 
 function useCopyFlash() {
@@ -1246,52 +1231,6 @@ function BrowserWorkspace({
   );
 }
 
-function TerminalWorkspace({
-  targets,
-  selectedId,
-  onSelect,
-}: {
-  targets: ChatPreviewTarget[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [query, setQuery] = useState("");
-  const filteredTargets = useMemo(
-    () => targets.filter((target) => matchesQuery(query, target.title, target.subtitle, target.sourceLabel, terminalText(target))),
-    [targets, query],
-  );
-  const selectedTarget = useMemo(
-    () => filteredTargets.find((target) => target.id === selectedId) ?? filteredTargets[0] ?? null,
-    [filteredTargets, selectedId],
-  );
-  const output = selectedTarget ? terminalText(selectedTarget) : "";
-
-  useEffect(() => {
-    if (selectedTarget && selectedTarget.id !== selectedId) onSelect(selectedTarget.id);
-  }, [onSelect, selectedId, selectedTarget]);
-
-  return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-terminal-workspace">
-      <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.terminalSearchPlaceholder")} />
-      <div className="max-h-32 shrink-0 overflow-auto border-b p-2">
-        {filteredTargets.length > 0 ? (
-          <TargetRows targets={filteredTargets} selectedId={selectedTarget?.id} rowTestId="chat-side-panel-terminal-row" onSelect={onSelect} />
-        ) : (
-          <EmptyState>{t("chatPreviewRail.noTerminalTargets")}</EmptyState>
-        )}
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto bg-foreground p-3 text-background" data-testid="chat-side-panel-terminal-output">
-        {selectedTarget ? (
-          <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed [overflow-wrap:anywhere]">{output}</pre>
-        ) : (
-          <div className="text-xs text-background/(--opacity-muted)">{t("chatPreviewRail.noTerminalTargets")}</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function SearchInput({
   query,
   setQuery,
@@ -1784,6 +1723,18 @@ export function ChatSidePanel({
     setBrowserTabUrl,
   } = workspaceTabs;
 
+  // #1444: closing a terminal tab must also kill its live PTY in the main
+  // process (the store only drops the tab record). Non-terminal tabs are
+  // unaffected.
+  const closeWorkspaceTab = useCallback(
+    (id: string) => {
+      const closing = tabs.find((tab) => tab.id === id);
+      if (closing?.kind === "terminal") void api.terminal?.kill(id);
+      closeTab(id);
+    },
+    [tabs, api, closeTab],
+  );
+
   const targetById = useMemo(
     () => new Map(targets.map((target) => [target.id, target])),
     [targets],
@@ -1792,12 +1743,12 @@ export function ChatSidePanel({
     () => targets.filter((target) => BROWSER_TARGET_KINDS.has(target.kind)),
     [targets],
   );
+  // #1444: the terminal tab is now a REAL interactive PTY, so the read-only
+  // tool-shell command outputs (formerly filtered into the old TerminalWorkspace)
+  // are folded into the review/preview tab — nothing is lost, and the terminal
+  // tab hosts a live shell instead.
   const previewTargets = useMemo(
-    () => targets.filter((target) => !FILE_TARGET_KINDS.has(target.kind) && !BROWSER_TARGET_KINDS.has(target.kind) && !isTerminalTarget(target)),
-    [targets],
-  );
-  const terminalTargets = useMemo(
-    () => targets.filter(isTerminalTarget),
+    () => targets.filter((target) => !FILE_TARGET_KINDS.has(target.kind) && !BROWSER_TARGET_KINDS.has(target.kind)),
     [targets],
   );
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? null;
@@ -1995,7 +1946,7 @@ export function ChatSidePanel({
                     type="button"
                     aria-label={t("chatPreviewRail.closeTab")}
                     className="ml-0.5 rounded p-0.5 hover:bg-background/(--opacity-muted) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
-                    onClick={() => closeTab(tab.id)}
+                    onClick={() => closeWorkspaceTab(tab.id)}
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -2035,7 +1986,7 @@ export function ChatSidePanel({
               onManualUrlChange={setBrowserTabUrl}
             />
           ) : activeTab.kind === "terminal" ? (
-            <TerminalWorkspace targets={terminalTargets} selectedId={selectedId} onSelect={onSelect} />
+            <PtyTerminalView api={api} tabId={activeTab.id} />
           ) : (
             <PreviewWorkspace api={api} sessionId={sessionId} targets={previewTargets} selectedId={selectedId} onSelect={onSelect} />
           )}

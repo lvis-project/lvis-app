@@ -13,6 +13,7 @@ import { logger as rootPinoLogger } from "../lib/logger.js";
 import { runShutdownRoutines } from "./shutdown-routines.js";
 import { stopLocalApiServer } from "./local-api-server.js";
 import { forceKillManagedChildProcesses } from "./managed-child-processes.js";
+import { killAllTerminals } from "./terminal/pty-manager.js";
 import {
   resolveShutdownCleanupTimeoutMs,
   runCleanupWithHardTimeout,
@@ -99,6 +100,10 @@ export async function runAppShutdownCleanup(options: {
       if (signal.aborted) return;
       await svc.shutdown?.();
       if (signal.aborted) return;
+      // Kill any live interactive PTY terminals (#1444). The pty children are
+      // NOT in the managed-child tracker (node-pty's IPty is not a
+      // ChildProcess), so force them down here on the graceful path.
+      killAllTerminals();
       await svc.pluginRuntime.stopAll();
     }, cleanupTimeoutMs);
 
