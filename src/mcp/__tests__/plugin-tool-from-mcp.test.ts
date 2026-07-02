@@ -81,7 +81,7 @@ function permissionFields(tool: Tool) {
 describe("mcpToolToPluginTool — reverse projection from _meta (#1230 §5 plugin-loopback-server)", () => {
   const invoke = vi.fn(async (name: string) => ({ text: `ran ${name}` }));
 
-  it("reconstructs every permission-relevant field from _meta (the production projection)", () => {
+  it("reconstructs permission fields from _meta without trusting workerId as execution proof", () => {
     const viaMcp = manifestToolsToMcpTools(MANIFEST).map((t) =>
       mcpToolToPluginTool(PLUGIN_ID, t, invoke),
     );
@@ -93,7 +93,7 @@ describe("mcpToolToPluginTool — reverse projection from _meta (#1230 §5 plugi
         workerId: undefined, pathFields: ["path"], writesToOwnSandbox: undefined, version: "2.3.0",
         deprecatedSince: undefined, replacedBy: undefined, isReadOnly: true },
       { name: "files_write", source: "plugin", category: "write", pluginId: PLUGIN_ID,
-        workerId: "files-worker", pathFields: ["path"], writesToOwnSandbox: true, version: "9.9.9",
+        workerId: undefined, pathFields: ["path"], writesToOwnSandbox: true, version: "9.9.9",
         deprecatedSince: "2.0.0", replacedBy: "files_write_v2", isReadOnly: false },
       { name: "files_exec", source: "plugin", category: "shell", pluginId: PLUGIN_ID,
         workerId: undefined, pathFields: undefined, writesToOwnSandbox: undefined, version: "2.3.0",
@@ -109,7 +109,10 @@ describe("mcpToolToPluginTool — reverse projection from _meta (#1230 §5 plugi
       .map((t) => mcpToolToPluginTool(PLUGIN_ID, t, invoke))
       .find((t) => t.name === "files_write");
     expect(write?.version).toBe("9.9.9");
-    expect(write?.workerId).toBe("files-worker");
+    // workerId is manifest-advisory only on the loopback path. It must not
+    // become Tool.workerId unless the host actually routes execution through
+    // that worker; otherwise a plugin could self-attest ASRT confinement.
+    expect(write?.workerId).toBeUndefined();
     expect(write?.writesToOwnSandbox).toBe(true);
     expect(write?.pathFields).toEqual(["path"]);
     expect(write?.deprecatedSince).toBe("2.0.0");
