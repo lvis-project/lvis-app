@@ -915,7 +915,6 @@ describe("ChatView", () => {
       expect(container.querySelector('[data-testid="chat-side-panel"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="chat-preview-rail"]')).not.toBeNull();
       expect(container.querySelector(".lvis-chat-scroll [data-radix-scroll-area-viewport]")).not.toBeNull();
-      expect(container.textContent).toContain("report.md");
     });
     expect(container.querySelector('[data-testid="chat-view-root"]')?.className).toContain("flex-row");
     expect(container.querySelector('[data-testid="chat-view-root"]')?.className).not.toContain("lg:pr-96");
@@ -926,9 +925,18 @@ describe("ChatView", () => {
     expect(sidePanelClassName).not.toContain("lg:relative");
     const previewCloseButtons = Array.from(container.querySelectorAll('button[aria-label="사이드 패널 닫기"]'));
     expect(previewCloseButtons.some((button) => button.className.includes("absolute inset-0"))).toBe(false);
-    expect(container.querySelector('[data-testid="chat-side-panel-mode-files"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="chat-side-panel-mode-preview"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="chat-side-panel-mode-browser"]')).not.toBeNull();
+    // Content-driven tabs: the panel opens EMPTY to the launcher (no default
+    // tabs). Opening the file-browser tab from the launcher then shows the file.
+    const launcher = container.querySelector('[data-testid="chat-side-panel-launcher"]') as HTMLElement | null;
+    expect(launcher).not.toBeNull();
+    const fileLauncher = container.querySelector('[data-testid="chat-side-panel-launcher-file-browser"]') as HTMLButtonElement | null;
+    expect(fileLauncher).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(fileLauncher!);
+    });
+    await waitFor(() => {
+      expect(container.textContent).toContain("report.md");
+    });
     expect(container.querySelector('[data-testid="input-action-bar"]')).not.toBeNull();
   });
 
@@ -1010,6 +1018,13 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="chat-preview-rail"]')).not.toBeNull();
+    });
+    // Content-driven tabs: open the file-browser tab from the launcher to view
+    // the draft attachment in the file tree.
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="chat-side-panel-launcher-file-browser"]')!);
+    });
+    await waitFor(() => {
       expect(container.textContent).toContain("draft-only.md");
     });
 
