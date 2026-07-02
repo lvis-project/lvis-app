@@ -1,11 +1,11 @@
 /**
  * Windows srt-win consent IPC handlers + the win32 sandboxCapability reconcile.
  *
- * Covers PR3 item 1 (sandboxWindowsStatus / sandboxWindowsInstall handler
- * shapes) and item 2's main-side half (win32 → available:true, network-only
- * confines). The live UAC/relogin/WFP behaviour is NOT CI-testable — these
- * tests mock ASRT's windows-sandbox-utils to assert the HANDLER contract: the
- * shapes returned for each group/WFP state, the {cancelled:true} pass-through,
+ * Covers sandboxWindowsStatus / sandboxWindowsInstall handler shapes and the
+ * main-side win32 capability reconcile (fs+network partial confinement). The
+ * live UAC/WFP behaviour is NOT CI-testable — these tests mock ASRT's Windows
+ * API to assert the HANDLER contract: the shapes returned for each user/WFP
+ * state, the {cancelled:true} pass-through,
  * and the sender-frame guard on the mutating install handler.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -18,13 +18,34 @@ const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };
 
 // Mutable ASRT mock state — each test sets the desired group/WFP/install result.
 const asrtState = vi.hoisted(() => ({
-  groupState: "absent" as "absent" | "created-not-on-token" | "ready",
-  wfpState: "absent" as "absent" | "installed",
+  userStatus: {} as {
+    provisioned?: boolean;
+    sid?: string;
+    groupExists?: boolean;
+    inBuiltinUsers?: boolean;
+    inSandboxGroup?: boolean;
+    hiddenFromLogon?: boolean;
+    credPresent?: boolean;
+  },
+  wfpState: "absent" as "absent" | "installed" | "cannot-read",
   installResult: null as
     | { cancelled: true }
-    | { group: { state: string }; wfp: { state: string } }
+    | {
+        user: {
+          provisioned?: boolean;
+          sid?: string;
+          groupExists?: boolean;
+          inBuiltinUsers?: boolean;
+          inSandboxGroup?: boolean;
+          hiddenFromLogon?: boolean;
+          credPresent?: boolean;
+        };
+        wfp: { state: string };
+      }
     | null,
   installCalls: [] as Array<{ proxyPortRange?: readonly [number, number] }>,
+  verifyCalls: [] as Array<{ proxyPortRange?: readonly [number, number] }>,
+  verifyRejects: false,
   instructions: "INSTRUCTIONS_TEXT",
 }));
 
@@ -37,12 +58,16 @@ vi.mock("electron", () => ({
 }));
 
 vi.mock("@anthropic-ai/sandbox-runtime", () => ({
-  getWindowsGroupStatus: vi.fn((_ref: unknown) => ({ state: asrtState.groupState })),
+  getWindowsSandboxUserStatus: vi.fn(() => asrtState.userStatus),
   getWindowsWfpStatus: vi.fn(() => ({ state: asrtState.wfpState, filters: 2 })),
-  windowsInstallInstructions: vi.fn(
-    (_ref: unknown, _sublayer: unknown, groupState: string) =>
-      `${asrtState.instructions}:${groupState}`,
-  ),
+  windowsInstallInstructions: vi.fn((_sublayer?: string) => asrtState.instructions),
+  verifyWindowsWfpEgress: vi.fn((opts?: { proxyPortRange?: readonly [number, number] }) => {
+    asrtState.verifyCalls.push(opts ?? {});
+    if (asrtState.verifyRejects) {
+      throw new Error("WFP egress verification failed");
+    }
+    return Promise.resolve({ target: "127.0.0.1:49152", stderr: "BLOCKED" });
+  }),
   installWindowsSandbox: vi.fn((opts?: { proxyPortRange?: readonly [number, number] }) => {
     asrtState.installCalls.push(opts ?? {});
     return asrtState.installResult;
@@ -88,15 +113,29 @@ async function setup() {
 const ORIGINAL_PLATFORM = process.platform;
 
 beforeEach(() => {
-  asrtState.groupState = "absent";
+  asrtState.userStatus = {};
   asrtState.wfpState = "absent";
   asrtState.installResult = null;
   asrtState.installCalls = [];
+  asrtState.verifyCalls = [];
+  asrtState.verifyRejects = false;
 });
 
 afterEach(() => {
   setProcessPlatform(ORIGINAL_PLATFORM);
 });
+
+function readyUserStatus(): typeof asrtState.userStatus {
+  return {
+    provisioned: true,
+    sid: "S-1-5-21-1",
+    groupExists: true,
+    inBuiltinUsers: true,
+    inSandboxGroup: true,
+    hiddenFromLogon: true,
+    credPresent: true,
+  };
+}
 
 describe("sandboxWindowsStatus", () => {
   it("returns a not-applicable shape off win32 (no ASRT call)", async () => {
@@ -105,45 +144,68 @@ describe("sandboxWindowsStatus", () => {
     const result = await invoke(PERMISSIONS.sandboxWindowsStatus, null);
     expect(result).toEqual({
       applicable: false,
-      groupState: null,
+      userState: null,
       wfpState: null,
       ready: false,
       instructions: "",
     });
   });
 
-  it("created-not-on-token + WFP absent → ready:false with verbatim instructions", async () => {
+  it("incomplete user + WFP absent → ready:false with verbatim instructions", async () => {
     setProcessPlatform("win32");
-    asrtState.groupState = "created-not-on-token";
+    asrtState.userStatus = { provisioned: true, sid: "S-1-5-21-1" };
     asrtState.wfpState = "absent";
     await setup();
     const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, null)) as Record<string, unknown>;
     expect(result.applicable).toBe(true);
-    expect(result.groupState).toBe("created-not-on-token");
+    expect(result.userState).toBe("incomplete");
     expect(result.wfpState).toBe("absent");
     expect(result.ready).toBe(false);
-    // Verbatim ASRT text, tailored to the observed group state.
-    expect(result.instructions).toBe("INSTRUCTIONS_TEXT:created-not-on-token");
+    expect(result.instructions).toBe("INSTRUCTIONS_TEXT");
   });
 
-  it("group ready + WFP installed → ready:true", async () => {
+  it("user ready + WFP installed → ready:true", async () => {
     setProcessPlatform("win32");
-    asrtState.groupState = "ready";
+    asrtState.userStatus = readyUserStatus();
     asrtState.wfpState = "installed";
     await setup();
     const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, null)) as Record<string, unknown>;
     expect(result.ready).toBe(true);
-    expect(result.groupState).toBe("ready");
+    expect(result.userState).toBe("ready");
     expect(result.wfpState).toBe("installed");
   });
 
-  it("group ready but WFP absent → ready:false (both conditions required)", async () => {
+  it("user ready but WFP absent → ready:false (both conditions required)", async () => {
     setProcessPlatform("win32");
-    asrtState.groupState = "ready";
+    asrtState.userStatus = readyUserStatus();
     asrtState.wfpState = "absent";
     await setup();
     const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, null)) as Record<string, unknown>;
     expect(result.ready).toBe(false);
+  });
+
+  it("WFP cannot-read is surfaced and treated as ready when verifier proves egress is blocked", async () => {
+    setProcessPlatform("win32");
+    asrtState.userStatus = readyUserStatus();
+    asrtState.wfpState = "cannot-read";
+    await setup();
+    const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, null)) as Record<string, unknown>;
+    expect(result.wfpState).toBe("cannot-read");
+    expect(result.ready).toBe(true);
+    expect(asrtState.verifyCalls).toHaveLength(1);
+    expect(asrtState.verifyCalls[0].proxyPortRange).toEqual([60080, 60089]);
+  });
+
+  it("WFP cannot-read fails closed when behavioral verification fails", async () => {
+    setProcessPlatform("win32");
+    asrtState.userStatus = readyUserStatus();
+    asrtState.wfpState = "cannot-read";
+    asrtState.verifyRejects = true;
+    await setup();
+    const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, null)) as Record<string, unknown>;
+    expect(result.wfpState).toBe("cannot-read");
+    expect(result.ready).toBe(false);
+    expect(asrtState.verifyCalls).toHaveLength(1);
   });
 });
 
@@ -175,29 +237,42 @@ describe("sandboxWindowsInstall", () => {
     expect(asrtState.installCalls[0].proxyPortRange).toEqual([60080, 60089]);
   });
 
-  it("returns post-install group + WFP state on success", async () => {
+  it("returns post-install user + WFP state on success", async () => {
     setProcessPlatform("win32");
     asrtState.installResult = {
-      group: { state: "created-not-on-token" },
+      user: { provisioned: true, sid: "S-1-5-21-1" },
       wfp: { state: "installed" },
     };
     await setup();
     const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, null, { intent: USER_INTENT })) as Record<string, unknown>;
-    expect(result.groupState).toBe("created-not-on-token");
+    expect(result.userState).toBe("incomplete");
     expect(result.wfpState).toBe("installed");
-    // Group not yet on token → still not ready until relogin.
     expect(result.ready).toBe(false);
   });
 
-  it("reports ready:true when install lands group ready + WFP installed", async () => {
+  it("reports ready:true when install lands user ready + WFP installed", async () => {
     setProcessPlatform("win32");
     asrtState.installResult = {
-      group: { state: "ready" },
+      user: readyUserStatus(),
       wfp: { state: "installed" },
     };
     await setup();
     const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, null, { intent: USER_INTENT })) as Record<string, unknown>;
     expect(result.ready).toBe(true);
+  });
+
+  it("reports ready:true when install returns WFP cannot-read but verifier proves egress is blocked", async () => {
+    setProcessPlatform("win32");
+    asrtState.installResult = {
+      user: readyUserStatus(),
+      wfp: { state: "cannot-read" },
+    };
+    await setup();
+    const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, null, { intent: USER_INTENT })) as Record<string, unknown>;
+    expect(result.wfpState).toBe("cannot-read");
+    expect(result.ready).toBe(true);
+    expect(asrtState.verifyCalls).toHaveLength(1);
+    expect(asrtState.verifyCalls[0].proxyPortRange).toEqual([60080, 60089]);
   });
 
   it("refuses off win32 (not-applicable)", async () => {
@@ -210,7 +285,7 @@ describe("sandboxWindowsInstall", () => {
 });
 
 describe("sandboxCapability win32 reconcile", () => {
-  it("reports win32 as available with network-only confines (matches boot SOT)", async () => {
+  it("reports win32 as available with fs+network partial confines (matches boot SOT)", async () => {
     setProcessPlatform("win32");
     await setup();
     const result = (await invoke(PERMISSIONS.sandboxCapability, null)) as {
@@ -228,8 +303,8 @@ describe("sandboxCapability win32 reconcile", () => {
     expect(result.runtime.available).toBe(false);
     expect(result.runtime.kind).toBe("none");
     expect(result.runtime.reason).toContain("no OS sandbox configured");
-    // Network-only — the asymmetric relaxation seam: egress confined, FS not.
-    expect(result.confines).toEqual({ filesystem: false, process: false, network: true });
+    // Partial — fs + egress confined, process not confined.
+    expect(result.confines).toEqual({ filesystem: true, process: false, network: true });
   });
 
   it("still reports darwin as full-confine available", async () => {

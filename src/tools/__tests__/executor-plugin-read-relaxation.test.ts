@@ -15,10 +15,10 @@
  *     ACTIVE OS sandbox to FILESYSTEM-CONTAIN the host (`confines.filesystem ===
  *     true`), not merely be active (it relies on the effect-boundary, which only
  *     contains the off-hostApi `node:fs` WRITE residual when the sandbox
- *     filesystem-contains). Filesystem-contained (mac/linux full-confine ASRT) →
- *     relax; NOT filesystem-contained (degraded / off / Windows network-only
- *     srt-win, `confines.filesystem === false`) → the pre-exec ask stands
- *     (known-safe fallback).
+ *     filesystem-contains). Filesystem-contained plugin worker effects
+ *     (mac/linux ASRT-wrapped workers) → relax; NOT filesystem-contained
+ *     (degraded / off / synthetic network-only / current Windows unwrapped
+ *     plugin worker) → the pre-exec ask stands (known-safe fallback).
  *   • FLAG OFF (default) → full pre-exec ask, byte-for-byte unchanged.
  *   • PLUGIN ONLY → MCP + builtin keep the pre-exec ask (not relaxed).
  *   • FOREGROUND ONLY → a headless plugin tool keeps the existing headless lane.
@@ -46,6 +46,7 @@ import {
 } from "../../permissions/effect-enforcement.js";
 import {
   isActiveSandboxFilesystemContained,
+  isActiveSandboxFilesystemContainedForPluginEffects,
   setActiveSandboxCapability,
   __resetActiveSandboxCapabilityForTest,
 } from "../../permissions/sandbox-capability.js";
@@ -258,7 +259,7 @@ function makeExecutor(
   // the active sandbox FILESYSTEM-CONTAINING the host (`confines.filesystem ===
   // true`); existing relaxation assertions run with the sandbox fs-contained.
   // The coupling tests below pass `() => false` to assert the degraded /
-  // sandbox-off / Windows network-only fallback.
+  // sandbox-off / synthetic network-only fallback.
   sandboxFsContained: () => boolean = () => true,
 ): { executor: ToolExecutor; permMgr: PermissionManager } {
   const registry = new ToolRegistry();
@@ -561,7 +562,7 @@ describe("plugin read-relaxation — coupled to the OS sandbox FILESYSTEM-CONTAI
   });
 
   it("flag ON + sandbox NOT filesystem-contained + foreground plugin ask → NOT relaxed: the pre-exec ask is shown, tool NOT auto-allowed", async () => {
-    // On a degraded / sandbox-off / Windows network-only host the
+    // On a degraded / sandbox-off / synthetic network-only host the
     // effect-boundary cannot contain the off-hostApi `node:fs` WRITE residual,
     // so relaxing would be WEAKER than the pre-exec ask. The coupling clause
     // keeps the pre-exec approval ask: on deny-once the tool never runs.
@@ -648,11 +649,10 @@ describe("plugin read-relaxation — coupled to the OS sandbox FILESYSTEM-CONTAI
 });
 
 // Confines-aware coupling wired through the REAL active-capability SOT. These
-// assert the production provider `isActiveSandboxFilesystemContained` (the same
-// active capability + filesystem-confinement truth the reviewer lane reads)
-// drives the relaxation correctly per substrate: a full-confine ASRT relaxes; a
-// Windows network-only ASRT (active, but `confines.filesystem === false`) does
-// NOT; an inactive sandbox does NOT.
+// assert both the generic active filesystem-containment signal and the narrower
+// production plugin-effect provider. Windows ASRT can filesystem-contain
+// host-shell commands, but current Windows plugin workers are still unwrapped,
+// so the production plugin provider keeps the pre-exec ask there.
 describe("plugin read-relaxation — confines-aware via the active-capability SOT", () => {
   beforeEach(() => {
     __resetActiveSandboxCapabilityForTest();
@@ -691,7 +691,67 @@ describe("plugin read-relaxation — confines-aware via the active-capability SO
     expect(result.content).toContain("noeffect-ok");
   });
 
-  it("active capability NETWORK-ONLY (Windows srt-win, confines.filesystem === false) → NOT relaxed: pre-exec ask stands, tool NOT auto-allowed", async () => {
+  it("active capability filesystem-contained (Windows ASRT fs+network partial) → relaxed (NO modal, tool runs)", async () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
+      confines: { filesystem: true, process: false, network: true },
+    });
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginNoEffectTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      isActiveSandboxFilesystemContained,
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_noeffect", input: {} }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    expect(requests).toHaveLength(0);
+    expect(spy.ran).toBe(true);
+    expect(result.is_error).toBeFalsy();
+    expect(result.content).toContain("noeffect-ok");
+  });
+
+  it("production plugin provider excludes Windows partial until plugin workers are ASRT-wrapped", async () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
+      confines: { filesystem: true, process: false, network: true },
+    });
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginNoEffectTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      isActiveSandboxFilesystemContainedForPluginEffects,
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_noeffect", input: {} }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.category).toBe("tool");
+    expect(spy.ran).toBe(false);
+    expect(result.is_error).toBe(true);
+  });
+
+  it("active capability synthetic NETWORK-ONLY (confines.filesystem === false) → NOT relaxed: pre-exec ask stands, tool NOT auto-allowed", async () => {
     // The core fix: an ACTIVE network-only sandbox contains egress but NOT the
     // off-hostApi FS-write residual, so the relaxation must NOT fire even though
     // a sandbox is active.
@@ -699,7 +759,7 @@ describe("plugin read-relaxation — confines-aware via the active-capability SO
       kind: "asrt",
       confidence: "verified",
       platform: "win32",
-      reason: "ASRT (srt-win) active — network egress contained, NO filesystem jail",
+      reason: "synthetic network-only ASRT — network egress contained, no filesystem jail",
       confines: { filesystem: false, process: false, network: true },
     });
     const spy = { ran: false };
@@ -949,12 +1009,12 @@ describe("plugin read auto-allow coupling — confines-aware via the active-capa
     expect(result.content).toContain("reader-ok");
   });
 
-  it("active capability NETWORK-ONLY (Windows srt-win, confines.filesystem === false) → plugin read now ASKS (NOT silently auto-allowed)", async () => {
+  it("active capability synthetic NETWORK-ONLY (confines.filesystem === false) → plugin read now ASKS (NOT silently auto-allowed)", async () => {
     setActiveSandboxCapability({
       kind: "asrt",
       confidence: "verified",
       platform: "win32",
-      reason: "ASRT (srt-win) active — network egress contained, NO filesystem jail",
+      reason: "synthetic network-only ASRT — network egress contained, no filesystem jail",
       confines: { filesystem: false, process: false, network: true },
     });
     const spy = { ran: false };

@@ -73,8 +73,8 @@ describe("decideSandboxGate", () => {
   });
 
   it("Windows deps-missing always DEGRADES (non-bricking) — even for the explicit env opt-in", () => {
-    // Windows cannot abort: the one-time UAC install + re-login is unreachable
-    // before boot, so a throw would permanently brick first-run.
+    // Windows cannot abort: the one-time UAC setup is unreachable before boot
+    // reaches the consent UI, so a throw would permanently brick first-run.
     expect(
       decideSandboxGate({ settingOn: true, explicitEnv: false, platform: "win32", depsOk: false }),
     ).toEqual({ action: "degrade", reason: "degrade-windows-not-installed" });

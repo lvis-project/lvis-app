@@ -1143,7 +1143,7 @@ class StdioTransport implements McpTransport {
    * ({@link getDefaultSensitiveReadDenyPaths}) — secrets, session/routine
    * history, `~/.ssh`, `~/.aws`, etc. — so a wrapped worker cannot read them.
    * This is a deny-list of known-sensitive subpaths, NOT a read-allow jail:
-   * ASRT 0.0.59's read model is deny-only, so a path not on the list stays
+   * ASRT's read model is deny-only, so a path not on the list stays
    * readable (the worker still needs cwd / its sandbox root / tmp). Network
    * egress is governed by the SHARED boot config (strict union allow-list), not
    * per command. Only invoked when {@link isAsrtSandboxActive}.

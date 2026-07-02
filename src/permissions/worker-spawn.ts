@@ -27,13 +27,13 @@
  *     the socketDir on `network.allowUnixSockets` emits the seatbelt allow rule
  *     so the worker may BIND the socket. The host connects from OUTSIDE the
  *     sandbox (unconstrained).
- *   - Windows: ASRT is NETWORK-ONLY (no reliable UDS-bind primitive), so the
- *     win32 branch uses the LEGACY (unwrapped) TCP path even when the gate is ON
- *     — see the win32 note on {@link spawnWorker}. Windows worker FS/UDS
- *     confinement is OUT OF SCOPE here (network-only WFP still applies).
+ *   - Windows: no reliable UDS-bind primitive, so this HTTP-worker control path
+ *     keeps the LEGACY unwrapped TCP branch on win32 even when the gate is ON.
+ *     Windows worker wrapping needs a separate TCP-control-channel design; do
+ *     not infer it from the mac/linux UDS path.
  *
  * ⚠️ The Unix-socket ALLOW config (macOS `allowUnixSockets` / Linux
- * `allowAllUnixSockets`) is INERT per-command in ASRT 0.0.59 — it MUST be set on
+ * `allowAllUnixSockets`) is INERT per-command in current ASRT — it MUST be set on
  * the SHARED config. {@link spawnWorker} therefore calls
  * {@link registerWorkerUnixSocketDir} (a live, additive shared-config update)
  * BEFORE wrapping, and {@link unregisterWorkerUnixSocketDir} on cleanup. The
@@ -191,10 +191,10 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
   };
 
   // ── Gate OFF, OR Windows even with the gate ON → LEGACY plain spawn ──
-  // Windows: ASRT is network-only (no reliable UDS-bind primitive), so worker
-  // FS/UDS confinement is out of scope; the legacy TCP path applies (the WFP
-  // network filter still governs egress when the gate is on). Do NOT fabricate
-  // a Windows UDS. Byte-for-byte the pre-existing spawn behaviour.
+  // Windows: this primitive's confinement path depends on a UDS control channel
+  // that does not exist on win32. Keep the legacy TCP path until a Windows
+  // wrapped-worker control channel is designed. Do NOT fabricate a Windows UDS.
+  // Byte-for-byte the pre-existing spawn behaviour for this branch.
   if (!isAsrtSandboxActive() || process.platform === "win32") {
     const child = spawn(spec.command, args, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -255,7 +255,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
   const denyRead = getDefaultSensitiveReadDenyPaths();
 
   // UDS allow — SHARED config, NOT per-command (the per-command channel is INERT
-  // for the seatbelt/seccomp UDS rules in ASRT 0.0.59; see asrt-sandbox.ts's
+  // for the seatbelt/seccomp UDS rules in current ASRT; see asrt-sandbox.ts's
   // WORKER UDS header). Register the socketDir so the live shared config grants
   // the worker's bind: macOS `allowUnixSockets:(subpath <dir>)`, Linux the
   // `allowAllUnixSockets` weakening (the `--bind` of the writable dir scopes

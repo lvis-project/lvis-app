@@ -12,7 +12,7 @@
  *   - gate ON (mac/linux) → registerWorkerUnixSocketDir(socketDir) called BEFORE
  *     the wrap (the UDS allow is SHARED-config, not per-command); wrapWorkerCommand
  *     called with allowWrite=[socketDir,…] (FS jail only — no per-command UDS
- *     option, which is inert in ASRT 0.0.59); spawn gets the wrapped argv
+ *     option, which is inert in current ASRT); spawn gets the wrapped argv
  *     (shell:false, stdin ignored); socketPath non-null; the worker is marked
  *     wrapped so the reviewer reports genuine asrt for its plugin tool.
  *   - udsArgName injection (arg form + env form).
@@ -197,7 +197,7 @@ describe("spawnWorker — gate ON (macOS)", () => {
     expect(unlinkSyncMock).toHaveBeenCalledWith(socketPath);
 
     // The UDS allow is registered on the SHARED config (NOT per-command — that
-    // channel is inert in ASRT 0.0.59).
+    // channel is inert in current ASRT).
     expect(registerUdsMock).toHaveBeenCalledWith(socketDir);
 
     // The per-command wrap carries ONLY the FS jail (socketDir first); there is

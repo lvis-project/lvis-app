@@ -16,7 +16,7 @@
  * `package.json` build.asarUnpack) or the binaries cannot exec from an asar.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * NETWORK ENFORCEMENT MODEL — READ BEFORE EDITING (ASRT 0.0.59 constraint) ⚠️
+ * NETWORK ENFORCEMENT MODEL — READ BEFORE EDITING (ASRT shared-config constraint)
  * ASRT's runtime egress decision lives in `filterNetworkRequest()`
  * (dist/sandbox/sandbox-manager.js). The proxy filter closures are bound as
  * `filter: (port, host) => filterNetworkRequest(port, host, sandboxAskCallback)`
@@ -44,7 +44,7 @@
  * any domain declared by ANY loaded plugin, not only its own. This is acceptable
  * under LVIS's 1st-party plugin trust model. TRUE per-worker network isolation
  * would require a future ASRT with per-process proxies / distinct egress auth
- * tokens; 0.0.59's single shared proxy + single shared config cannot express it.
+ * tokens; the current single shared proxy + single shared config cannot express it.
  * Do NOT claim per-worker network isolation.
  * ─────────────────────────────────────────────────────────────────────────────
  *
@@ -65,13 +65,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
-import {
-  stampWindowsFsDeny,
-  restoreWindowsFsDeny,
-  recoverWindowsFsStamps,
-  toExplicitFiles,
-  injectHolderPid,
-} from "./windows-fs-jail.js";
 
 import type {
   SandboxRuntimeConfig,
@@ -89,13 +82,13 @@ import type {
  * the runtime config sets (`config.windows.proxyPortRange`), or the proxy binds
  * a port the WFP filter blocks and ALL egress hard-fails. Both sides reference
  * THIS one constant — {@link buildSandboxConfig} sources the runtime value from
- * it; the Windows install/relogin UX (a separate follow-up) sources the WFP
+ * it; the Windows install UX sources the WFP
  * value from the same export.
  *
  * Why not `export … from "@anthropic-ai/sandbox-runtime"`: ASRT is ESM-only and
  * deliberately NOT statically imported (a static import inlines its source into
  * the main bundle and breaks its vendor-binary resolution — see the module
- * header). So this mirrors ASRT 0.0.59's `DEFAULT_WINDOWS_PROXY_PORT_RANGE`
+ * header). So this mirrors ASRT's `DEFAULT_WINDOWS_PROXY_PORT_RANGE`
  * value `[60080, 60089]` as a plain literal. A unit test (asrt-sandbox.test.ts)
  * pins this against ASRT's REAL exported constant so any upstream drift fails
  * CI rather than silently desyncing the proxy bind from the WFP permit.
@@ -103,16 +96,6 @@ import type {
 export const DEFAULT_WINDOWS_PROXY_PORT_RANGE: readonly [number, number] = [
   60080, 60089,
 ];
-
-/**
- * The local discriminator group srt-win keys its WFP filters on. Mirrors ASRT
- * 0.0.59's `DEFAULT_WINDOWS_GROUP_NAME` (= `sandbox-runtime-net`) for the same
- * single-source-of-truth reason as {@link DEFAULT_WINDOWS_PROXY_PORT_RANGE}: the
- * runtime config and the install flow must name the SAME group. Pinned as a
- * literal (ASRT is dynamically imported, never statically) and verified against
- * ASRT's real export by a unit test so upstream drift fails CI.
- */
-export const DEFAULT_WINDOWS_GROUP_NAME = "sandbox-runtime-net";
 
 /**
  * The subset of ASRT configuration that is ONLY ever permitted to originate
@@ -294,7 +277,7 @@ export interface WrapOptions {
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
- * WORKER UDS CONTROL CHANNEL — SHARED-CONFIG, NOT PER-COMMAND ⚠️ (ASRT 0.0.59)
+ * WORKER UDS CONTROL CHANNEL — SHARED-CONFIG, NOT PER-COMMAND
  * A long-lived HTTP plugin worker the HOST connects INBOUND to needs a Unix-
  * domain-socket (UDS) control channel — loopback TCP is unreachable through
  * Linux's bwrap `--unshare-net` namespace. The Unix-socket ALLOW config that
@@ -421,16 +404,6 @@ async function loadSandboxManager() {
  */
 let active = false;
 
-/**
- * win32 only (Windows FS completion — lvis-app#1367): the holder PID under which
- * the Windows sensitive-floor DACL stamps are held — the LONG-LIVED host
- * (process.pid) — or null when the FS jail is inactive (off-win32, gate-off, or
- * a stamp that failed → network-only, no false confinement claim).
- * {@link wrapToolCommand}/{@link wrapWorkerCommand} inject `exec --holder-pid
- * <this>` ONLY when it is set; {@link resetAsrtSandbox} restores under it.
- */
-let _windowsFsJailHolderPid: number | null = null;
-
 /** Host-tool spawn gate. True once {@link initializeAsrtSandbox} succeeds. */
 export function isAsrtSandboxActive(): boolean {
   return active;
@@ -440,7 +413,7 @@ export function isAsrtSandboxActive(): boolean {
  * The SINGLE SOURCE OF TRUTH for the host-secret / sensitive read deny-list.
  *
  * ⚠️ HONEST SCOPE — this is a DENY-LIST, NOT a read-ALLOW jail ⚠️
- * ASRT 0.0.59's filesystem READ model is deny-only (sandbox-manager.js
+ * ASRT's filesystem READ model is deny-only (sandbox-manager.js
  * `getFsReadConfig` / `wrapWithSandbox`): `filesystem.denyRead` becomes the
  * `denyOnly` set (seatbelt `(deny file-read* (subpath …))` / bwrap path-deny)
  * and `filesystem.allowRead` is `allowWithinDeny` — it only RE-ALLOWS a nested
@@ -495,9 +468,8 @@ export function isAsrtSandboxActive(): boolean {
  * PLATFORM: every entry is a LITERAL absolute path (NO glob chars). On macOS the
  * stripped path is a recursive seatbelt subpath; on Linux bwrap deny-binds the
  * literal path (bwrap cannot glob — ASRT only `expandGlobPattern`s entries that
- * CONTAIN glob chars, so literals are safe on both). Windows has NO filesystem
- * isolation in ASRT 0.0.59 (network-only srt-win) so denyRead is simply a no-op
- * there — harmless, never crashes.
+ * CONTAIN glob chars, so literals are safe on both). On Windows, ASRT 0.0.63+
+ * applies filesystem rules through the srt-sandbox user ACL backend.
  *
  * NO-FALLBACK (deny-by-default): paths are derived from `os.homedir()` /
  * {@link lvisHome} — host-trusted. A path that does not exist on disk is
@@ -748,9 +720,6 @@ export function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): San
   const windows: WindowsConfig | undefined =
     process.platform === "win32"
       ? {
-          // Name the SAME discriminator group the install WFP-keyed on, so the
-          // restricted-token child resolves to the installed filter set.
-          groupName: DEFAULT_WINDOWS_GROUP_NAME,
           proxyPortRange: [
             ...(trustedSettings.windows?.proxyPortRange ??
               DEFAULT_WINDOWS_PROXY_PORT_RANGE),
@@ -831,58 +800,6 @@ export async function initializeAsrtSandbox(
   const config = buildSandboxConfig(withWorkerUnixSockets(trustedSettings));
   await SandboxManager.initialize(config, askCb, enableLogMonitor);
   active = true;
-  // Windows FS completion (lvis-app#1367): ASRT's win32 wrap does NOT apply
-  // `customConfig.filesystem`; the FS-deny primitive lives in the dark
-  // `srt-win acl` CLI (upstream anthropic-experimental/sandbox-runtime#336).
-  // Stamp the host's sensitive deny-floor (read AND write/delete protected)
-  // under THIS long-lived process, then fence each wrapped child with
-  // `exec --holder-pid` (see applyWindowsHolderFence). FAIL-CLOSED but
-  // NON-BRICKING: a failed stamp (e.g. WFP group not yet installed) degrades to
-  // network-only — holderPid stays null so confines.filesystem is NEVER claimed
-  // (no false relaxation) — and is surfaced LOUD, never silently swallowed.
-  // Darwin-untestable: real enforcement is the manual Windows QA gate (#1367).
-  if (process.platform === "win32") {
-    // Best-effort crash recovery FIRST (prune a prior crash's dead holders),
-    // DECOUPLED in its own try/catch so a recover hiccup never disables an
-    // otherwise-stampable jail (recover is cleanup, not a stamp precondition).
-    try {
-      recoverWindowsFsStamps(DEFAULT_WINDOWS_GROUP_NAME);
-    } catch (err) {
-      console.warn(
-        `[asrt-sandbox] Windows FS jail: acl recover (crash cleanup) failed, ` +
-          `continuing to stamp: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    try {
-      const { files: floorFiles, droppedNonFiles } = toExplicitFiles(
-        getDefaultSensitiveReadDenyPaths(trustedSettings.userDataDir),
-      );
-      if (droppedNonFiles.length > 0) {
-        // No-Fallback: the dropped paths are exactly the sensitive DIRECTORIES
-        // (~/.ssh, ~/.aws, ~/.lvis/secrets, the Electron userData dir) that acl
-        // (file-only) cannot stamp — surface them LOUD so "FS jail active" is
-        // never read as "those dirs are protected" (dir coverage tracked in #1367).
-        console.warn(
-          `[asrt-sandbox] Windows FS jail: ${droppedNonFiles.length} sensitive ` +
-            `DIRECTORY path(s) NOT stamped (acl stamps explicit files only; dir ` +
-            `coverage tracked in #1367): ${droppedNonFiles.join(", ")}`,
-        );
-      }
-      stampWindowsFsDeny(
-        { denyRead: floorFiles, denyWrite: floorFiles },
-        process.pid,
-        DEFAULT_WINDOWS_GROUP_NAME,
-      );
-      _windowsFsJailHolderPid = process.pid;
-    } catch (err) {
-      _windowsFsJailHolderPid = null;
-      console.error(
-        `[asrt-sandbox] Windows FS jail INACTIVE this session (network-only) — ` +
-          `could not stamp the sensitive deny-floor: ` +
-          `${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
 }
 
 /**
@@ -898,19 +815,6 @@ export async function checkAsrtDependencies(): Promise<{
 }> {
   const SandboxManager = await loadSandboxManager();
   return SandboxManager.checkDependencies();
-}
-
-/**
- * win32 FS-jail fence (lvis-app#1367): when the Windows sensitive-floor stamps
- * are active (see {@link _windowsFsJailHolderPid}), inject `exec --holder-pid
- * <hostPid>` into the wrapped argv so srt-win opens a no-FILE_SHARE_DELETE
- * handle on every stamped file for the child's lifetime — a DACL alone cannot
- * fence delete/rename (the parent dir authorizes delete). A no-op off-win32 or
- * when the jail is inactive. Darwin-untestable — manual Windows QA (#1367).
- */
-function applyWindowsHolderFence(wrapped: SandboxWrapResult): SandboxWrapResult {
-  if (process.platform !== "win32" || _windowsFsJailHolderPid === null) return wrapped;
-  return { ...wrapped, argv: injectHolderPid(wrapped.argv, _windowsFsJailHolderPid) };
 }
 
 /**
@@ -936,7 +840,7 @@ export async function wrapToolCommand(
     toCustomConfig(options.filesystem),
     options.abortSignal,
   );
-  return applyWindowsHolderFence(wrapped);
+  return wrapped;
 }
 
 /**
@@ -953,7 +857,7 @@ export async function wrapToolCommand(
  * PyPI egress, so they plain-spawn.
  *
  * EGRESS: workers do NOT carry a per-command egress override — the
- * `allowedDomains`/`deniedDomains` channel is INERT in ASRT 0.0.59
+ * `allowedDomains`/`deniedDomains` channel is INERT per command
  * (`filterNetworkRequest` reads the SHARED config, not `customConfig`; see the
  * module header). Worker egress is ENFORCED by the shared config set at boot:
  * `strictAllowlist: true` + the UNION of every loaded plugin's manifest
@@ -969,7 +873,7 @@ export async function wrapToolCommand(
  * <dir>` mount (host-visible from both namespaces) and, on macOS, the writable
  * region where the socket file may be created. The Unix-socket ALLOW config
  * (macOS `allowUnixSockets` / Linux `allowAllUnixSockets`) is INERT per-command
- * in ASRT 0.0.59 — it MUST live on the SHARED config and is managed by
+ * in current ASRT — it MUST live on the SHARED config and is managed by
  * {@link registerWorkerUnixSocketDir} (see the WORKER UDS header). The
  * {@link spawnWorker} primitive (worker-spawn.ts) drives both: it registers the
  * socketDir on the shared config, then wraps with the FS jail here.
@@ -989,7 +893,7 @@ export async function wrapWorkerCommand(
     toCustomConfig(options.filesystem),
     options.abortSignal,
   );
-  return applyWindowsHolderFence(wrapped);
+  return wrapped;
 }
 
 /**
@@ -1187,7 +1091,7 @@ export async function updateAsrtSandboxConfig(
 /**
  * Register a host-allocated worker control-socket DIRECTORY for UDS access and
  * push the rebuilt SHARED config (worker-confinement PR D-1). The per-command
- * `customConfig.network.allowUnixSockets` is INERT in ASRT 0.0.59 (see the
+ * `customConfig.network.allowUnixSockets` is INERT in current ASRT (see the
  * WORKER UDS header), so the allowance MUST live on the shared config — this is
  * the additive mutator {@link spawnWorker} calls right before it spawns a
  * wrapped HTTP worker.
@@ -1248,23 +1152,6 @@ export async function resetAsrtSandbox(): Promise<void> {
   const SandboxManager = await loadSandboxManager();
   await SandboxManager.reset();
   active = false;
-  // Windows FS completion (lvis-app#1367): release the sensitive-floor DACL
-  // stamps held under this process. Non-bricking — a restore failure leaves
-  // files stamped (recoverable via `srt-win acl recover --force`), surfaced
-  // LOUD (No-Fallback rule), never silently swallowed.
-  if (_windowsFsJailHolderPid !== null) {
-    const holderPid = _windowsFsJailHolderPid;
-    _windowsFsJailHolderPid = null;
-    try {
-      restoreWindowsFsDeny(holderPid, DEFAULT_WINDOWS_GROUP_NAME);
-    } catch (err) {
-      console.error(
-        `[asrt-sandbox] Windows FS jail restore failed — paths may remain ` +
-          `stamped (\`srt-win acl recover --force\` to clear): ` +
-          `${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
   // worker-confinement PR D-1: drop the remembered base settings + live worker
   // UDS dirs so a fresh init starts from a clean slate (no stale socket allow).
   _baseTrustedSettings = undefined;

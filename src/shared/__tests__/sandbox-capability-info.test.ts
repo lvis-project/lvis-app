@@ -30,6 +30,14 @@ describe("sandboxConfinementForPlatform", () => {
     });
   });
 
+  it("Windows ASRT confines filesystem + network, but not process", () => {
+    expect(sandboxConfinementForPlatform("win32", "partial")).toEqual({
+      filesystem: true,
+      process: false,
+      network: true,
+    });
+  });
+
   it("reports no confinement when the runner kind is none regardless of platform", () => {
     expect(sandboxConfinementForPlatform("linux", "none")).toEqual({
       filesystem: false,

@@ -184,6 +184,14 @@ export function AskUserQuestionCard({
   useEffect(() => {
     if (onConfirmStep) return;
     const frame = requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        cardRef.current?.contains(active) &&
+        active !== cardRef.current
+      ) {
+        return;
+      }
       if (!questionFormRef.current?.focusFirstAnswer()) {
         cardRef.current?.focus();
       }
