@@ -9,6 +9,7 @@ const MAIN_WINDOW_WIDTH = 460;
 const MAIN_WINDOW_HEIGHT = 840;
 export const MAIN_WINDOW_MIN_WIDTH = 460;
 export const MAIN_WINDOW_MIN_HEIGHT = 640;
+export const CHAT_SIDE_PANEL_WIDTH = 448;
 const MAIN_WINDOW_TOP_GAP = 24;
 const MAIN_WINDOW_BOTTOM_GAP = 24;
 const MAIN_WINDOW_RIGHT_GAP = 10;
@@ -66,5 +67,24 @@ export function computeWorkModeBounds(
     y: Math.round(workArea.y + (workArea.height - height) / 2),
     width,
     height,
+  };
+}
+
+/**
+ * Chat mode with the right-side work panel open. Keep the chat window
+ * right-docked like normal chat mode, but reserve enough width for the
+ * 28rem side panel so the panel does not cover the transcript.
+ */
+export function computeChatModeSidePanelBounds(
+  workArea: WorkAreaBounds,
+  platform: NodeJS.Platform = process.platform
+): { x: number; y: number; width: number; height: number } {
+  const chatBounds = computeInitialMainWindowBounds(workArea, platform);
+  const width = Math.min(workArea.width, chatBounds.width + CHAT_SIDE_PANEL_WIDTH);
+  const rightGap = width < workArea.width ? MAIN_WINDOW_RIGHT_GAP : 0;
+  return {
+    ...chatBounds,
+    x: workArea.x + workArea.width - width - rightGap,
+    width,
   };
 }
