@@ -851,7 +851,9 @@ export async function queryLoop(
       // Tool-Level Deferral — tool_search 가로채기. request_plugin 과 동일
       // 패턴: catalog 매치 → activeToolNames promote → schema rebuild →
       // tool_result 합성 (tool-pair invariant) + round 예산 환불.
-      let toolUsesForExecutor: ToolUseBlock[] = pluginOutcome.remaining;
+      // Assigned unconditionally from searchOutcome.remaining below (never read
+      // before then) — declared without the dead initializer (CodeQL).
+      let toolUsesForExecutor: ToolUseBlock[];
       let searchPromotedThisRound = false;
       const prevToolCountForSearch = toolSchemas.length;
       const searchOutcome = handleToolSearch(pluginOutcome.remaining, {
