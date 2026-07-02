@@ -181,7 +181,7 @@ const requiredEntries = [
 const missingRequired = requiredEntries.filter((entry) => !entrySet.has(entry));
 if (missingRequired.length > 0) fail("required runtime entries missing from app.asar", missingRequired);
 
-// Lazy renderer chunks (#1446). mermaid loads via a webpack dynamic import that
+// Lazy renderer chunks — mermaid loads via a webpack dynamic import that
 // swallows load errors (preview-renderers.tsx catch → raw-source fallback), so a
 // chunk pruned out of the asar fails SILENTLY at runtime — a launch smoke can
 // never see it. Assert membership at build time instead. The chunk name carries

@@ -89,8 +89,12 @@ test.describe("workspace rail follow-up", () => {
     await page.getByTestId("chat-side-panel-toggle").click();
     await expect(page.getByTestId("chat-side-panel")).toBeVisible();
 
-    // Open several tabs so the strip overflows its width.
-    for (const kind of ["file-browser", "browser", "terminal", "preview"] as const) {
+    // Open enough tabs that the strip is guaranteed to overflow its width. The
+    // FIRST tab comes from the empty-state launcher (no tabs → no tab bar yet);
+    // the tab-bar "+" (add-tab) menu only appears once at least one tab exists.
+    const kinds = ["file-browser", "browser", "terminal", "preview"] as const;
+    await page.getByTestId(`chat-side-panel-launcher-${kinds[0]}`).click();
+    for (const kind of [...kinds.slice(1), ...kinds]) {
       await page.getByTestId("chat-side-panel-add-tab").click();
       await page.getByTestId(`chat-side-panel-launcher-menu-${kind}`).click();
     }
