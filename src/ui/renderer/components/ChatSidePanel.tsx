@@ -43,6 +43,7 @@ import { SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
 import { normalizeBrowserNavigationUrl } from "../preview/url-safety.js";
+import { PreviewContent } from "../preview/preview-renderers.js";
 import { FileEditDiff } from "./FileEditDiff.js";
 import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
 import { McpAppView } from "./McpAppView.js";
@@ -383,7 +384,7 @@ function PreviewBody({
       {target.kind === "tool-result" && target.isStub && loadedStub == null && !loadError ? (
         <div className="text-xs text-muted-foreground">{t("chatPreviewRail.loadingFullResult")}</div>
       ) : null}
-      <TextBlock text={rawText} />
+      <PreviewContent descriptor={{ text: rawText, filename: target.title }} />
       <CopyButton value={rawText} />
     </div>
   );

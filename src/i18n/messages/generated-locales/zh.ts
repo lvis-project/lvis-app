@@ -776,6 +776,8 @@ export const zhMessages: Record<string, string> = {
   "chatPreviewRail.resizePanel": "调整工作区面板大小",
   "chatPreviewRail.pinTab": "固定标签页",
   "chatPreviewRail.contentUnavailable": "此项目已不再可用。",
+  "chatPreviewRail.diagramRendering": "正在渲染图表…",
+  "chatPreviewRail.diagramRenderFailed": "无法渲染此图表。",
   "chatPreviewRail.terminalSearchPlaceholder": "搜索终端输出",
   "chatPreviewRail.browserAddressPlaceholder": "输入 URL",
   "chatPreviewRail.browserGo": "前往",

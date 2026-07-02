@@ -776,6 +776,8 @@ export const esMessages: Record<string, string> = {
   "chatPreviewRail.resizePanel": "Cambiar tamaño del panel de trabajo",
   "chatPreviewRail.pinTab": "Fijar pestaña",
   "chatPreviewRail.contentUnavailable": "Este elemento ya no está disponible.",
+  "chatPreviewRail.diagramRendering": "Renderizando diagrama…",
+  "chatPreviewRail.diagramRenderFailed": "No se pudo renderizar este diagrama.",
   "chatPreviewRail.terminalSearchPlaceholder": "Buscar salida de terminal",
   "chatPreviewRail.browserAddressPlaceholder": "Ingresar URL",
   "chatPreviewRail.browserGo": "Ir",
