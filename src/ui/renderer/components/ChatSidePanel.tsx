@@ -1,4 +1,4 @@
-import { createElement, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { createElement, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
 import {
   WORKSPACE_TAB_LAUNCHER,
@@ -61,6 +61,8 @@ const BROWSER_TARGET_KINDS = new Set<ChatPreviewTarget["kind"]>(["html", "url"])
 const TERMINAL_TOOL_PATTERN = /(^|[._:-])(shell|bash|cmd|powershell|terminal|exec|run)([._:-]|$)/i;
 const FILE_TREE_MIN_PERCENT = 22;
 const FILE_TREE_MAX_PERCENT = 72;
+/** Pointer travel (px) that promotes a tab press into a horizontal pan. */
+const TAB_DRAG_THRESHOLD_PX = 6;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -1390,6 +1392,71 @@ export function ChatSidePanel({
   // splitter cleanup) so a drag crossing an unmount boundary leaks no listeners.
   useEffect(() => () => resizeCleanupRef.current?.(), []);
 
+  // ─── Tab-bar horizontal scroll / drag-pan (diagnosis ②) ──────────────────
+  const tabScrollElRef = useRef<HTMLDivElement | null>(null);
+  const wheelCleanupRef = useRef<(() => void) | null>(null);
+  // dragging = pointer is down and tracked; moved = pan threshold crossed (so
+  // the trailing click is swallowed instead of selecting/closing a tab).
+  const tabDragRef = useRef({ dragging: false, startX: 0, startScroll: 0, moved: false });
+  useEffect(() => () => wheelCleanupRef.current?.(), []);
+
+  // Wheel (vertical → horizontal) + overflow tracking. Bound as a NON-passive
+  // native listener via a callback ref: React's onWheel is passive, so its
+  // preventDefault() is ignored (and the tab strip is conditionally rendered,
+  // so useEffect([]) would miss the mount). ResizeObserver keeps overflow live.
+  const attachTabScroll = useCallback((node: HTMLDivElement | null) => {
+    wheelCleanupRef.current?.();
+    wheelCleanupRef.current = null;
+    tabScrollElRef.current = node;
+    if (!node) return;
+    const onWheel = (event: WheelEvent) => {
+      if (node.scrollWidth <= node.clientWidth) return; // no overflow → let it be
+      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+      if (delta === 0) return;
+      node.scrollLeft += delta;
+      event.preventDefault(); // suppress ancestor vertical scroll / history back
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    wheelCleanupRef.current = () => node.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const onTabPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    // Mouse-only: touch already gets native `overflow-x-auto` panning; a second
+    // handler would double-scroll. Right/middle buttons never start a pan.
+    if (event.pointerType !== "mouse" || event.button !== 0) return;
+    const el = tabScrollElRef.current;
+    if (!el) return;
+    tabDragRef.current = { dragging: true, startX: event.clientX, startScroll: el.scrollLeft, moved: false };
+  };
+  const onTabPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const st = tabDragRef.current;
+    const el = tabScrollElRef.current;
+    if (!st.dragging || !el) return;
+    const dx = event.clientX - st.startX;
+    if (!st.moved && Math.abs(dx) > TAB_DRAG_THRESHOLD_PX) {
+      st.moved = true;
+      el.setPointerCapture?.(event.pointerId);
+      el.dataset.dragging = "true"; // cursor: grabbing, no re-render
+    }
+    if (st.moved) el.scrollLeft = st.startScroll - dx;
+  };
+  const onTabPointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    const st = tabDragRef.current;
+    const el = tabScrollElRef.current;
+    if (st.moved && el) {
+      el.releasePointerCapture?.(event.pointerId);
+      delete el.dataset.dragging;
+    }
+    st.dragging = false; // st.moved kept so onClickCapture can swallow the click
+  };
+  const onTabClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (tabDragRef.current.moved) {
+      event.preventDefault();
+      event.stopPropagation();
+      tabDragRef.current.moved = false;
+    }
+  };
+
   // Compute the clamped docked width for a pointer x, or null if the panel is
   // not mounted. Pure — it never touches React state (see the drag handler).
   const widthForClientX = (clientX: number): number | null => {
@@ -1453,6 +1520,20 @@ export function ChatSidePanel({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [addTab]);
+
+  // Keep the active tab in view when it changes / the strip resizes. Uses
+  // getBoundingClientRect + manual scrollLeft (not scrollIntoView) so it never
+  // nudges the ancestor vertical scroll.
+  useEffect(() => {
+    const el = tabScrollElRef.current;
+    if (!el || !activeTab) return;
+    const tabEl = el.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(activeTab.id)}"]`);
+    if (!tabEl) return;
+    const c = el.getBoundingClientRect();
+    const r = tabEl.getBoundingClientRect();
+    if (r.left < c.left) el.scrollLeft -= (c.left - r.left) + 8;
+    else if (r.right > c.right) el.scrollLeft += (r.right - c.right) + 8;
+  }, [activeTab, tabs.length]);
 
   return (
     <aside
@@ -1550,7 +1631,18 @@ export function ChatSidePanel({
 
         {tabs.length > 0 ? (
         <div className="flex min-w-0 shrink-0 items-center gap-2 border-b px-2 py-1">
-          <div className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="tablist" aria-label={t("chatPreviewRail.tabsLabel")}>
+          <div
+            ref={attachTabScroll}
+            role="tablist"
+            aria-label={t("chatPreviewRail.tabsLabel")}
+            data-testid="chat-side-panel-tab-scroll"
+            className="min-w-0 flex-1 cursor-grab overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden data-[dragging=true]:cursor-grabbing"
+            onPointerDown={onTabPointerDown}
+            onPointerMove={onTabPointerMove}
+            onPointerUp={onTabPointerEnd}
+            onPointerCancel={onTabPointerEnd}
+            onClickCapture={onTabClickCapture}
+          >
           <div className="flex min-w-max gap-1">
             {tabs.map((tab) => {
               const Icon = tabIcon(tab.kind);
