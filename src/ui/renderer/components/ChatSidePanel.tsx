@@ -40,6 +40,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../../components/ui/dropdown-menu.js";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "../../../components/ui/context-menu.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { wrapRenderHtmlInlineFrameDocument } from "../../../shared/render-html-preview.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../shared/side-browser.js";
@@ -607,6 +614,23 @@ function fileBasename(path: string): string {
   return segments[segments.length - 1] ?? path;
 }
 
+/**
+ * Relative path of `full` under `root` (renderer-side string math — no node:path
+ * in the renderer). Browser entries are always children of `root`, so a prefix
+ * strip is sufficient; falls back to the basename for the root itself and to the
+ * absolute path when `full` is not under `root`.
+ */
+function toRelativePath(root: string | null, full: string): string {
+  if (!root) return full;
+  if (full === root) return fileBasename(full);
+  const stripped = full.startsWith(root) ? full.slice(root.length) : full;
+  return stripped.replace(/^[/\\]+/, "") || full;
+}
+
+/** Platform hint for the reveal label (Finder on macOS, Explorer elsewhere). */
+const IS_MAC_LIKE =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+
 type WorkspaceDirEntry = { name: string; path: string; type: "file" | "directory" };
 
 /**
@@ -782,26 +806,61 @@ function ProjectRootsBrowser({
         const active = !isDir && entry.path === selectedPath;
         return (
           <div key={entry.path} role="treeitem" aria-expanded={isDir ? isOpen : undefined}>
-            <button
-              type="button"
-              data-testid={isDir ? "chat-side-panel-fs-folder" : "chat-side-panel-fs-file"}
-              className={`flex h-7 w-full min-w-0 items-center gap-1 rounded-md pr-2 text-left text-xs hover:bg-muted/(--opacity-muted) ${
-                active ? "bg-accent text-accent-foreground" : ""
-              }`}
-              style={{ paddingLeft: 8 + depth * 12 }}
-              onClick={() => (isDir ? toggleFolder(entry.path) : onOpenFile(entry.path))}
-            >
-              {isDir ? (
-                isOpen ? (
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                ) : (
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                )
-              ) : (
-                <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              )}
-              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-            </button>
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <button
+                  type="button"
+                  data-testid={isDir ? "chat-side-panel-fs-folder" : "chat-side-panel-fs-file"}
+                  className={`flex h-7 w-full min-w-0 items-center gap-1 rounded-md pr-2 text-left text-xs hover:bg-muted/(--opacity-muted) ${
+                    active ? "bg-accent text-accent-foreground" : ""
+                  }`}
+                  style={{ paddingLeft: 8 + depth * 12 }}
+                  onClick={() => (isDir ? toggleFolder(entry.path) : onOpenFile(entry.path))}
+                >
+                  {isDir ? (
+                    isOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    )
+                  ) : (
+                    <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="min-w-[11rem]" data-testid="chat-side-panel-fs-context-menu">
+                <ContextMenuItem
+                  data-testid="chat-side-panel-fs-ctx-open"
+                  onSelect={() => (isDir ? toggleFolder(entry.path) : onOpenFile(entry.path))}
+                >
+                  {isDir ? <Folder className="h-3.5 w-3.5" /> : <File className="h-3.5 w-3.5" />}
+                  {t("chatPreviewRail.ctxOpen")}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  data-testid="chat-side-panel-fs-ctx-reveal"
+                  onSelect={() => void window.lvis.workspace.reveal(entry.path)}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  {t(IS_MAC_LIKE ? "chatPreviewRail.revealInFinder" : "chatPreviewRail.revealInExplorer")}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  data-testid="chat-side-panel-fs-ctx-copy-path"
+                  onSelect={() => void navigator.clipboard?.writeText(entry.path)}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  {t("chatPreviewRail.copyPath")}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  data-testid="chat-side-panel-fs-ctx-copy-rel"
+                  onSelect={() => void navigator.clipboard?.writeText(toRelativePath(activeRoot, entry.path))}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  {t("chatPreviewRail.copyRelativePath")}
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
             {isDir && isOpen ? renderEntries(entry.path, depth + 1) : null}
           </div>
         );

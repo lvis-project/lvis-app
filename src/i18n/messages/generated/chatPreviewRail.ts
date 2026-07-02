@@ -1,5 +1,10 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/ChatPreviewRail.tsx. Do not edit by hand.
 export const en = {
+  "chatPreviewRail.ctxOpen": "Open",
+  "chatPreviewRail.revealInFinder": "Reveal in Finder",
+  "chatPreviewRail.revealInExplorer": "Reveal in Explorer",
+  "chatPreviewRail.copyPath": "Copy path",
+  "chatPreviewRail.copyRelativePath": "Copy relative path",
   "chatPreviewRail.removeRoot": "Remove folder",
   "chatPreviewRail.title": "Workspace",
   "chatPreviewRail.subtitle": "{targets} previews · {files} files",
@@ -79,6 +84,11 @@ export const en = {
 };
 
 export const ko = {
+  "chatPreviewRail.ctxOpen": "열기",
+  "chatPreviewRail.revealInFinder": "Finder에서 보기",
+  "chatPreviewRail.revealInExplorer": "탐색기에서 보기",
+  "chatPreviewRail.copyPath": "경로 복사",
+  "chatPreviewRail.copyRelativePath": "상대 경로 복사",
   "chatPreviewRail.removeRoot": "폴더 제거",
   "chatPreviewRail.title": "작업 패널",
   "chatPreviewRail.subtitle": "미리보기 {targets}개 · 파일 {files}개",

@@ -401,4 +401,52 @@ describe("workspace handlers", () => {
     expect(res).toMatchObject({ ok: false, error: "unauthorized" });
     expect(removeAllowedDirectoryPersistMock).not.toHaveBeenCalled();
   });
+
+  it("reveal shows a scope-checked file's location and never the raw renderer path", async () => {
+    const res = (await invoke(CHANNELS.workspace.reveal, OK_FRAME, join(root, "docs", "architecture.md"))) as {
+      ok: boolean;
+    };
+    expect(res.ok).toBe(true);
+    expect(showItemInFolderMock).toHaveBeenCalledTimes(1);
+    // The shell only ever receives the main-owned realpath from the scope guard.
+    const [arg] = showItemInFolderMock.mock.calls[0] as [string];
+    expect(arg.endsWith(join("docs", "architecture.md"))).toBe(true);
+  });
+
+  it("reveal reveals a directory too (guard allows dirs)", async () => {
+    const res = (await invoke(CHANNELS.workspace.reveal, OK_FRAME, join(root, "docs"))) as { ok: boolean };
+    expect(res.ok).toBe(true);
+    expect(showItemInFolderMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reveal rejects a path outside the allowed roots (never touches the shell)", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-ws-reveal-outside-"));
+    writeFileSync(join(outside, "secret.txt"), "nope");
+    additionalDirectories.value = [];
+    const res = (await invoke(CHANNELS.workspace.reveal, OK_FRAME, join(outside, "secret.txt"))) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "path-not-allowed" });
+    expect(showItemInFolderMock).not.toHaveBeenCalled();
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  it("reveal hard-blocks a Layer 0 sensitive path", async () => {
+    const res = (await invoke(CHANNELS.workspace.reveal, OK_FRAME, join(homedir(), ".ssh", "id_rsa"))) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "sensitive-path" });
+    expect(showItemInFolderMock).not.toHaveBeenCalled();
+  });
+
+  it("reveal rejects an unauthorized sender frame (fail-closed)", async () => {
+    const res = (await invoke(CHANNELS.workspace.reveal, EVIL_FRAME, join(root, "docs"))) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "unauthorized" });
+    expect(showItemInFolderMock).not.toHaveBeenCalled();
+  });
 });
