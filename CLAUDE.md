@@ -11,37 +11,56 @@ See `docs/architecture/architecture.md` §4.6 and `docs/blueprints/phase3-folder
 
 ```
 src/
-  main.ts                     — Electron entry point
-  boot.ts                     — §4.2 Boot Sequence (service init, plugin loading)
+  main.ts                     — thin Electron entry (single-instance/whenReady/main());
+                                setup extracted to src/main/* (C17)
+  boot.ts                     — §4.2 thin bootstrap orchestrator — BootContext + ordered
+                                steps + assembleAppServices (C18)
+  boot/                       — context.ts, assemble-services.ts, steps/* (sandbox-init,
+                                network-fetch-setup, mcp-setup, conversation-wiring, …;
+                                plugin-runtime.ts barrel + plugin-runtime/* host-api-factory)
+  ipc/                        — index.ts + domains/* (thin ipcMain.handle wrappers) +
+                                handlers/* (transport-agnostic pure impls, C10) + gated.ts
   ipc-bridge.ts               — Compatibility re-export shim. Real handlers
                                 live under `src/ipc/domains/*` and are wired
                                 from `src/ipc/index.ts`.
-  preload.ts / preload.cjs    — Electron preload scripts
+  preload.ts / preload.cjs    — Electron preload; preload.ts composes
+                                preload/{gesture-intent,public-surface,internal-surface} (C11)
   renderer.tsx                — minimal entry mounting ui/renderer/App.tsx
   plugin-ui-host.tsx          — Dynamic plugin UI mounting
 
-  ui/renderer/                — Renderer composition root (Phase 1~4.6 split 완료)
-    App.tsx                   — composition root (<300 lines)
-    ChatView.tsx · Sidebar.tsx · SettingsDialog.tsx · MainToolbar.tsx
+  ui/renderer/                — Renderer composition root (Phase 1~4.6 split; Phase 4 App/ChatView 분해)
+    App.tsx                   — composition root: wires domain hooks + renders
+                                AppProviders > AppShell(children) + AppDialogs (C16)
+    AppProviders.tsx · AppShell.tsx · AppDialogs.tsx  — App presentational split
+    ChatView.tsx              — composition root: ChatView hooks + ChatTranscript +
+                                ChatComposerDock (C15) · Sidebar.tsx · SettingsDialog.tsx · MainToolbar.tsx
     context/                  — ChatContext (state provider for ChatView subtree)
-    hooks/                    — 14 domain hooks (settings, chat-state, briefing,
-                               approval, search, context-budget, cost-estimate,
-                               sessions, starred, plugin-marketplace, role-presets,
-                               app-bootstrap, indexed-docs, marketplace-updates)
+    state/                    — chat-scroll-store (module scroll singletons)
+    hooks/                    — domain hooks: 14 original + Phase-4 App/ChatView hooks
+                               (use-app-mode, use-routine-overlay, use-send-message,
+                                use-plugin-view-routing, use-onboarding-chain-controller,
+                                use-chat-scroll, use-message-queue, use-attachment-picker,
+                                use-permission-toasts, use-checkpoint-view, use-transcript-entries, …)
     components/               — BriefingCard, AssistantCard, UserMessageEditor,
                                ReasoningCard, ToolApprovalDialog, ToolGroupCard,
-                               ChatSearchOverlay, Sparkline, UsageDashboard,
+                               ChatTranscript, ChatComposerDock, ImportedTriggerCard,
+                               AskUserAnswerBubble, ChatSearchOverlay, Sparkline, UsageDashboard,
                                HtmlPreview (partition lvis-render-html, webRequest block A5),
                                StarredView, MarketplaceUpdateBanner
     dialogs/                  — ApprovalDialog, PluginInstallDialog,
                                PluginUninstallDialog, CommandPaletteDialog
     tabs/                     — RolesTab, PermissionsTab, AuditTab,
                                PluginPerfTab, PrivacyTab
-    utils/                    — cost-format, html-preview, history, compose
+    utils/                    — cost-format, html-preview, history, compose,
+                               action-panel-activity, plugin-auth-error, read-initial-app-mode,
+                               chat-entry-revision, korea-date-key, classify-turn-entries
     types.ts · constants.ts · api-client.ts
 
   engine/                     — Agent loop + LLM providers (was src/agent/)
-    conversation-loop.ts      — §4.5 Core agentic cycle (stream + tool loop)
+    conversation-loop.ts      — §4.5 thin class shell + assembler + re-export facade (C9)
+    turn/                     — turn units (C9): types · trust-origin · context-carrier ·
+                                tool-exposure · tool-scope · provider · lifecycle-hooks ·
+                                compaction · session · commands · loop-context · run-turn · query-loop
     conversation-history.ts   — In-memory message management
     auto-compact.ts           — Token-aware history compression
     llm/
@@ -50,7 +69,13 @@ src/
       vercel/                 — VercelUnifiedProvider — single LLM adapter for all vendors
 
   tools/                      — 1-file-per-tool (Tier S3 BaseTool pattern)
-    executor.ts               — §4.5.6 8-step pipeline with hooks (was tool-executor.ts)
+    executor.ts               — §4.5.6 ToolExecutor facade + executeAll/executeOne orchestrator
+    executor-ceiling.ts       — runWithCeiling AbortController helper (owns ToolCeiling* SOT)
+    pipeline/                 — pipeline units (C7/C8): path-extraction · approval-purpose ·
+                                audit-entries · display-mask · rate-limiter ·
+                                reviewer-authorization-store · reviewer-dispatch ·
+                                approval-memory-skip · risk-classification · audit-writer ·
+                                invocation-context
     knowledge-search.ts       — LLM agentic knowledge search (was knowledge-search-tool.ts)
 
   prompts/                    — System prompt assembly
@@ -101,7 +126,10 @@ src/
 
   plugins/                    — Plugin runtime (was plugin-runtime/)
     types.ts                  — PluginManifest, HostApi, RuntimePlugin
-    runtime.ts                — Plugin loading, HostApi injection
+    runtime.ts                — re-export shim (verbatim surface)
+    runtime/                  — PluginRuntime class + collaborators (C4): index (orchestrator),
+                                perf-stats, config-overrides, preparation, lifecycle-timeout,
+                                access-control, cards, plugin-loader, manifest-validation
     marketplace.ts            — Install/remove plugins
     registry.ts               — Plugin registry file management
     deployment-guard.ts       — Deployment mode enforcement
@@ -109,7 +137,10 @@ src/
   data/
     settings-store.ts         — Multi-vendor settings + encrypted API keys
 
-  main/                       — Electron main-process helpers (corp-ca, python-runtime, ...)
+  main/                       — Electron main-process helpers + C17 entry modules
+                                (app-state, main-window, app-menu, app-tray, settings-window,
+                                lvis-deep-link, corp-ca-runtime, bootstrap-splash, early-boot-env,
+                                app-shutdown, main-paths, python-runtime, ...)
   lib/                        — Pure TS utilities (approval-queue-reducer, utils)
   components/ui/              — shadcn
   ui/                         — LVIS-custom UI components/views
