@@ -1,5 +1,9 @@
-import { createElement, useEffect, useMemo, useRef, useState } from "react";
+import { createElement, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type { WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
+import {
+  WORKSPACE_TAB_LAUNCHER,
+  matchesLauncherShortcut,
+} from "./command-actions.js";
 import {
   Check,
   Code2,
@@ -11,6 +15,7 @@ import {
   Folder,
   Globe,
   Image,
+  LayoutGrid,
   PanelRightClose,
   Plug,
   Plus,
@@ -24,6 +29,12 @@ import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../../../components/ui/dropdown-menu.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { wrapRenderHtmlInlineFrameDocument } from "../../../shared/render-html-preview.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../shared/side-browser.js";
@@ -1017,45 +1028,143 @@ function tabLabelKey(kind: WorkspaceTabKind): string {
   }
 }
 
-function tabCount(kind: WorkspaceTabKind, counts: Record<WorkspaceTabKind, number>): number {
-  return counts[kind];
-}
-
-function tabTestId(kind: WorkspaceTabKind, closeable: boolean): string | undefined {
-  if (closeable) return undefined;
+function tabTestId(kind: WorkspaceTabKind): string {
   switch (kind) {
     case "file-browser":
-      return "chat-side-panel-mode-files";
+      return "chat-side-panel-tab-file-browser";
     case "browser":
-      return "chat-side-panel-mode-browser";
+      return "chat-side-panel-tab-browser";
     case "preview":
-      return "chat-side-panel-mode-preview";
+      return "chat-side-panel-tab-preview";
     case "terminal":
-      return "chat-side-panel-mode-terminal";
+      return "chat-side-panel-tab-terminal";
   }
 }
 
-function AddTabButton({
-  icon: Icon,
-  label,
-  testId,
-  onClick,
+/**
+ * The launcher item list (§6.10.3), rendered from the single SOT
+ * `WORKSPACE_TAB_LAUNCHER` in `command-actions.ts`. It is used in TWO places —
+ * the empty-state picker (`WorkspaceLauncher`) and the tab-bar "+" dropdown
+ * (`WorkspaceLauncherMenu`) — so both surfaces share one list and one set of
+ * shortcuts. `renderItem` lets each surface wrap a row in its own element
+ * (a plain `button` for the inline list, a `DropdownMenuItem` for the menu).
+ *
+ * `사이드채팅` (side chat) is a planned launcher item but is DEFERRED — it is not
+ * in `WORKSPACE_TAB_LAUNCHER` and no functional entry is added here.
+ */
+function LauncherItems({
+  onOpen,
+  renderItem,
 }: {
-  icon: LucideIcon;
-  label: string;
-  testId: string;
-  onClick: () => void;
+  onOpen: (kind: WorkspaceTabKind) => void;
+  renderItem: (item: (typeof WORKSPACE_TAB_LAUNCHER)[number], children: ReactElement, onSelect: () => void) => ReactElement;
 }) {
+  const { t } = useTranslation();
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button type="button" size="icon-xs" variant="ghost" data-testid={testId} aria-label={label} title={label} onClick={onClick}>
-          <Icon className="h-3.5 w-3.5" />
-          <Plus className="-ml-1 h-2.5 w-2.5" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
-    </Tooltip>
+    <>
+      {WORKSPACE_TAB_LAUNCHER.map((item) => {
+        const Icon = item.icon;
+        const label = t(item.labelKey);
+        const row = (
+          <>
+            <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate">{label}</span>
+            {item.shortcutHint ? (
+              <kbd className="shrink-0 rounded bg-muted/(--opacity-muted) px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                {item.shortcutHint}
+              </kbd>
+            ) : null}
+          </>
+        );
+        return renderItem(item, row, () => onOpen(item.kind));
+      })}
+    </>
+  );
+}
+
+/**
+ * Empty-state launcher (§6.10.3). Renders when the workspace has no tabs — a
+ * vertical, centered picker of the openable content kinds. Shares the item list
+ * with the tab-bar "+" dropdown via `LauncherItems`.
+ */
+function WorkspaceLauncher({ onOpen }: { onOpen: (kind: WorkspaceTabKind) => void }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="flex h-full min-h-0 w-full flex-col items-center justify-center overflow-auto p-6"
+      data-testid="chat-side-panel-launcher"
+    >
+      <div className="w-full max-w-xs space-y-3">
+        <div className="flex flex-col items-center gap-1 text-center">
+          <LayoutGrid className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+          <div className="text-sm font-semibold">{t("chatPreviewRail.launcher.title")}</div>
+          <div className="text-[11px] text-muted-foreground">{t("chatPreviewRail.launcher.subtitle")}</div>
+        </div>
+        <div className="space-y-1" role="menu" aria-label={t("chatPreviewRail.launcher.title")}>
+          <LauncherItems
+            onOpen={onOpen}
+            renderItem={(item, children, onSelect) => (
+              <button
+                key={item.kind}
+                type="button"
+                role="menuitem"
+                data-testid={`chat-side-panel-launcher-${item.kind}`}
+                className="flex w-full items-center gap-3 rounded-md border px-3 py-2.5 text-left text-sm hover:bg-muted/(--opacity-muted)"
+                onClick={onSelect}
+              >
+                {children}
+              </button>
+            )}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Tab-bar "+" button — opens the same launcher as a dropdown menu. Replaces the
+ * old scattered per-kind add-tab buttons; the SOT list drives both this and the
+ * empty-state picker.
+ */
+function WorkspaceLauncherMenu({ onOpen }: { onOpen: (kind: WorkspaceTabKind) => void }) {
+  const { t } = useTranslation();
+  const label = t("chatPreviewRail.launcher.addTab");
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              data-testid="chat-side-panel-add-tab"
+              aria-label={label}
+              title={label}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{label}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-52" data-testid="chat-side-panel-launcher-menu">
+        <LauncherItems
+          onOpen={onOpen}
+          renderItem={(item, children, onSelect) => (
+            <DropdownMenuItem
+              key={item.kind}
+              data-testid={`chat-side-panel-launcher-menu-${item.kind}`}
+              className="flex items-center gap-3"
+              onSelect={onSelect}
+            >
+              {children}
+            </DropdownMenuItem>
+          )}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -1116,13 +1225,30 @@ export function ChatSidePanel({
     () => targets.filter(isTerminalTarget),
     [targets],
   );
-  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
-  const counts: Record<WorkspaceTabKind, number> = {
-    "file-browser": files.length,
-    preview: previewTargets.length,
-    browser: browserTargets.length,
-    terminal: terminalTargets.length,
-  };
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? null;
+
+  // Panel-scoped launcher shortcuts (§6.10.3). Bound only while the panel is
+  // mounted so ⌘T/⌘P/⌃⇧G reach the workspace rail without stealing app-wide
+  // keys (none of these three are bound elsewhere — verified). Ignored when a
+  // text input/textarea/contenteditable is focused so typing is not hijacked.
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const activeElement = document.activeElement as HTMLElement | null;
+      if (activeElement) {
+        const tag = activeElement.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || activeElement.isContentEditable) return;
+      }
+      for (const item of WORKSPACE_TAB_LAUNCHER) {
+        if (item.shortcut && matchesLauncherShortcut(item.shortcut, event)) {
+          event.preventDefault();
+          addTab(item.kind);
+          return;
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [addTab]);
 
   return (
     <aside
@@ -1145,12 +1271,13 @@ export function ChatSidePanel({
           </div>
         </div>
 
+        {tabs.length > 0 ? (
         <div className="flex min-w-0 shrink-0 items-center gap-2 border-b px-2 py-1">
           <div className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="tablist" aria-label={t("chatPreviewRail.tabsLabel")}>
           <div className="flex min-w-max gap-1">
             {tabs.map((tab) => {
               const Icon = tabIcon(tab.kind);
-              const active = tab.id === activeTab.id;
+              const active = tab.id === activeTab?.id;
               const label = t(tabLabelKey(tab.kind));
               return (
                 <button
@@ -1158,65 +1285,48 @@ export function ChatSidePanel({
                   type="button"
                   role="tab"
                   aria-selected={active}
-                  data-testid={tabTestId(tab.kind, tab.closeable)}
+                  data-testid={tabTestId(tab.kind)}
                   className={`flex h-8 min-w-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
                     active ? "bg-primary/(--opacity-subtle) text-primary" : "text-muted-foreground hover:bg-muted/(--opacity-muted) hover:text-foreground"
                   }`}
                   onClick={() => setActiveTabId(tab.id)}
                 >
                   <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className="max-w-24 truncate">{tab.closeable ? `${label} ${tab.ordinal}` : label}</span>
-                  <span className="font-mono text-[10px] tabular-nums">{tabCount(tab.kind, counts)}</span>
-                  {tab.closeable ? (
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      aria-label={t("chatPreviewRail.closeTab")}
-                      className="ml-0.5 rounded p-0.5 hover:bg-background/(--opacity-muted)"
-                      onClick={(event) => {
+                  <span className="max-w-24 truncate">{`${label} ${tab.ordinal}`}</span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={t("chatPreviewRail.closeTab")}
+                    className="ml-0.5 rounded p-0.5 hover:bg-background/(--opacity-muted)"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      closeTab(tab.id);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
                         event.stopPropagation();
                         closeTab(tab.id);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          closeTab(tab.id);
-                        }
-                      }}
-                    >
-                      <X className="h-3 w-3" />
-                    </span>
-                  ) : null}
+                      }
+                    }}
+                  >
+                    <X className="h-3 w-3" />
+                  </span>
                 </button>
               );
             })}
           </div>
           </div>
           <div className="flex shrink-0 items-center gap-1 border-l pl-2" data-testid="chat-side-panel-tab-actions">
-            <AddTabButton
-              icon={Folder}
-              label={t("chatPreviewRail.addFileBrowserTab")}
-              testId="chat-side-panel-add-file-browser-tab"
-              onClick={() => addTab("file-browser")}
-            />
-            <AddTabButton
-              icon={Globe}
-              label={t("chatPreviewRail.addBrowserTab")}
-              testId="chat-side-panel-add-browser-tab"
-              onClick={() => addTab("browser")}
-            />
-            <AddTabButton
-              icon={Terminal}
-              label={t("chatPreviewRail.addTerminalTab")}
-              testId="chat-side-panel-add-terminal-tab"
-              onClick={() => addTab("terminal")}
-            />
+            <WorkspaceLauncherMenu onOpen={addTab} />
           </div>
         </div>
+        ) : null}
 
-        <div className="min-h-0 flex-1 overflow-hidden" data-active-tab-kind={activeTab.kind}>
-          {activeTab.kind === "file-browser" ? (
+        <div className="min-h-0 flex-1 overflow-hidden" data-active-tab-kind={activeTab?.kind}>
+          {activeTab == null ? (
+            <WorkspaceLauncher onOpen={addTab} />
+          ) : activeTab.kind === "file-browser" ? (
             <FileBrowserWorkspace
               api={api}
               sessionId={sessionId}
