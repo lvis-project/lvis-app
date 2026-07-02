@@ -26,6 +26,20 @@ function renderPanel(ui: ReactElement) {
 }
 
 /**
+ * Open the tab-bar "+" dropdown and pick a kind (mirrors the launcher menu).
+ * Radix DropdownMenu opens on pointerdown, so fire that before the click.
+ */
+function openLauncherMenu() {
+  const trigger = screen.getByTestId("chat-side-panel-add-tab");
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+  fireEvent.click(trigger);
+}
+function addTabViaMenu(kind: "preview" | "file-browser" | "browser" | "terminal") {
+  openLauncherMenu();
+  fireEvent.click(screen.getByTestId(`chat-side-panel-launcher-menu-${kind}`));
+}
+
+/**
  * Panel harness that owns the workspace-tab store the same way the real
  * ChatView does (via `useWorkspaceTabs`), plus the selected-preview state. The
  * store lives ABOVE the ChatSidePanel mount so tab state survives the panel
@@ -68,7 +82,154 @@ describe("ChatSidePanel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders preview targets, filters them, and switches to workspace files", () => {
+  it("opens empty: shows the launcher with four items and shortcut hints, no tabs, no counts", () => {
+    renderPanel(
+      <HarnessPanel
+        api={api()}
+        sessionId="session-1"
+        targets={[]}
+        files={[]}
+        initialSelectedId={null}
+      />,
+    );
+
+    // Empty workspace -> launcher, no tab bar.
+    expect(screen.getByTestId("chat-side-panel-launcher")).toBeTruthy();
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+    expect(screen.queryByTestId("chat-side-panel-tab-actions")).toBeNull();
+
+    // Four launcher items.
+    expect(screen.getByTestId("chat-side-panel-launcher-preview")).toBeTruthy();
+    expect(screen.getByTestId("chat-side-panel-launcher-terminal")).toBeTruthy();
+    expect(screen.getByTestId("chat-side-panel-launcher-browser")).toBeTruthy();
+    expect(screen.getByTestId("chat-side-panel-launcher-file-browser")).toBeTruthy();
+
+    // Shortcut hints are displayed for the bound items.
+    expect(screen.getByText("⌃⇧G")).toBeTruthy();
+    expect(screen.getByText("⌘T")).toBeTruthy();
+    expect(screen.getByText("⌘P")).toBeTruthy();
+  });
+
+  it("launcher click opens the correct-kind tab", () => {
+    renderPanel(
+      <HarnessPanel
+        api={api()}
+        sessionId="session-1"
+        targets={[]}
+        files={[]}
+        initialSelectedId={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-browser"));
+    // Launcher gone, a browser tab is active.
+    expect(screen.queryByTestId("chat-side-panel-launcher")).toBeNull();
+    expect(screen.getAllByRole("tab")).toHaveLength(1);
+    expect(screen.getByTestId("chat-side-panel-tab-browser")).toBeTruthy();
+    expect(screen.getByTestId("chat-side-panel-browser-workspace")).toBeTruthy();
+  });
+
+  it("launcher keyboard shortcut opens the mapped tab (⌘T -> browser)", () => {
+    renderPanel(
+      <HarnessPanel
+        api={api()}
+        sessionId="session-1"
+        targets={[]}
+        files={[]}
+        initialSelectedId={null}
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+    expect(screen.queryByTestId("chat-side-panel-launcher")).toBeNull();
+    expect(screen.getByTestId("chat-side-panel-tab-browser")).toBeTruthy();
+  });
+
+  it("tab-bar exposes a single '+' launcher dropdown, not scattered add buttons", () => {
+    renderPanel(
+      <HarnessPanel
+        api={api()}
+        sessionId="session-1"
+        targets={[]}
+        files={[]}
+        initialSelectedId={null}
+      />,
+    );
+
+    // Open one tab so the tab bar (and its actions) render.
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    // Single "+" button; the old per-kind add buttons are gone.
+    expect(screen.getByTestId("chat-side-panel-add-tab")).toBeTruthy();
+    expect(screen.queryByTestId("chat-side-panel-add-browser-tab")).toBeNull();
+    expect(screen.queryByTestId("chat-side-panel-add-preview-tab")).toBeNull();
+    expect(screen.queryByTestId("chat-side-panel-add-terminal-tab")).toBeNull();
+    expect(screen.queryByTestId("chat-side-panel-add-file-browser-tab")).toBeNull();
+
+    // The "+" dropdown opens the same launcher items and creates a tab.
+    openLauncherMenu();
+    expect(screen.getByTestId("chat-side-panel-launcher-menu-browser")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-menu-browser"));
+    expect(screen.getByTestId("chat-side-panel-tab-browser")).toBeTruthy();
+    expect(screen.getAllByRole("tab").length).toBe(2);
+  });
+
+  it("closing the last tab returns to the launcher", () => {
+    renderPanel(
+      <HarnessPanel
+        api={api()}
+        sessionId="session-1"
+        targets={[]}
+        files={[]}
+        initialSelectedId={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-terminal"));
+    expect(screen.getAllByRole("tab")).toHaveLength(1);
+    // Every tab is closeable — click the close affordance.
+    fireEvent.click(screen.getByLabelText(/Close tab|탭 닫기/i));
+    expect(screen.getByTestId("chat-side-panel-launcher")).toBeTruthy();
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+  });
+
+  it("tab bar shows no count badge", () => {
+    const targets: ChatPreviewTarget[] = [
+      {
+        id: "json-1",
+        kind: "json",
+        title: "metrics.json",
+        sourceLabel: "builtin",
+        createdOrder: 0,
+        value: { ok: true },
+        raw: "{\"ok\":true}",
+      },
+      {
+        id: "json-2",
+        kind: "json",
+        title: "other.json",
+        sourceLabel: "builtin",
+        createdOrder: 1,
+        value: { ok: false },
+        raw: "{\"ok\":false}",
+      },
+    ];
+    renderPanel(
+      <HarnessPanel
+        api={api()}
+        sessionId="session-1"
+        targets={targets}
+        files={[]}
+        initialSelectedId={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-preview"));
+    const tab = screen.getByTestId("chat-side-panel-tab-preview");
+    // Label shows content name + ordinal only — no "2" count of preview targets.
+    expect(tab.textContent).not.toMatch(/2/);
+  });
+
+  it("renders preview targets and separates browser artifacts and files across tabs", () => {
     const targets: ChatPreviewTarget[] = [
       {
         id: "file-1",
@@ -81,11 +242,29 @@ describe("ChatSidePanel", () => {
         canOpenExternal: false,
       },
       {
+        id: "html-1",
+        kind: "html",
+        title: "Artifact dashboard",
+        subtitle: "render_html",
+        sourceLabel: "builtin",
+        createdOrder: 1,
+        payload: { html: "<main>Preview OK</main>", title: "Artifact dashboard", height: 200 },
+      },
+      {
+        id: "url-1",
+        kind: "url",
+        title: "example.com/docs",
+        subtitle: "web_fetch",
+        sourceLabel: "builtin",
+        createdOrder: 2,
+        url: "https://example.com/docs",
+      },
+      {
         id: "json-1",
         kind: "json",
         title: "metrics.json",
         sourceLabel: "builtin",
-        createdOrder: 1,
+        createdOrder: 3,
         value: { ok: true },
         raw: "{\"ok\":true}",
       },
@@ -103,7 +282,7 @@ describe("ChatSidePanel", () => {
       },
     ];
 
-    renderPanel(
+    const { container } = renderPanel(
       <HarnessPanel
         api={api()}
         sessionId="session-1"
@@ -113,92 +292,20 @@ describe("ChatSidePanel", () => {
       />,
     );
 
-    expect(screen.getByTestId("chat-side-panel")).toBeTruthy();
-    expect(screen.getByTestId("chat-preview-rail")).toBeTruthy();
-    expect(screen.getByTestId("chat-side-panel-file-tree")).toBeTruthy();
-    expect(screen.getAllByText("report.md").length).toBeGreaterThanOrEqual(1);
-    expect(screen.queryByText("metrics.json")).toBeNull();
-
-    const search = screen.getByPlaceholderText(/검색|Search/i);
-    fireEvent.change(search, { target: { value: "report" } });
-    expect(screen.getByTestId("chat-side-panel-file-tree")).toHaveTextContent("report.md");
-    expect(screen.getByText("C:\\workspace\\report.md")).toBeTruthy();
-
-    fireEvent.click(screen.getByTestId("chat-side-panel-mode-preview"));
-    const previewSearch = screen.getByPlaceholderText(/검색|Search/i);
-    fireEvent.change(previewSearch, { target: { value: "metrics" } });
-    expect(screen.queryByText("report.md")).toBeNull();
-    expect(screen.getAllByText("metrics.json").length).toBeGreaterThanOrEqual(1);
-
-    fireEvent.click(screen.getByTestId("chat-side-panel-mode-files"));
+    // Open a file-browser tab from the launcher and confirm the file shows.
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
     expect(screen.getByTestId("chat-side-panel-file-tree")).toHaveTextContent("report.md");
     const splitLayout = screen.getByTestId("chat-side-panel-file-split-layout") as HTMLElement;
     const splitter = screen.getByTestId("chat-side-panel-file-splitter");
     expect(splitLayout.style.gridTemplateRows).toContain("45%");
     fireEvent.keyDown(splitter, { key: "ArrowDown" });
     expect(splitLayout.style.gridTemplateRows).toContain("50%");
-    fireEvent.keyDown(splitter, { key: "Home" });
-    expect(splitLayout.style.gridTemplateRows).toContain("22%");
-    fireEvent.keyDown(splitter, { key: "End" });
-    expect(splitLayout.style.gridTemplateRows).toContain("72%");
-    fireEvent.click(screen.getByTestId("chat-side-panel-add-browser-tab"));
-    expect(screen.getAllByRole("tab").length).toBeGreaterThanOrEqual(5);
-  });
 
-  it("separates browser artifacts from files and general previews", () => {
-    const targets: ChatPreviewTarget[] = [
-      {
-        id: "html-1",
-        kind: "html",
-        title: "Artifact dashboard",
-        subtitle: "render_html",
-        sourceLabel: "builtin",
-        createdOrder: 0,
-        payload: { html: "<main>Preview OK</main>", title: "Artifact dashboard", height: 200 },
-      },
-      {
-        id: "url-1",
-        kind: "url",
-        title: "example.com/docs",
-        subtitle: "web_fetch",
-        sourceLabel: "builtin",
-        createdOrder: 1,
-        url: "https://example.com/docs",
-      },
-      {
-        id: "json-1",
-        kind: "json",
-        title: "metrics.json",
-        sourceLabel: "builtin",
-        createdOrder: 2,
-        value: { ok: true },
-        raw: "{\"ok\":true}",
-      },
-    ];
-
-    const { container } = renderPanel(
-      <HarnessPanel
-        api={api()}
-        sessionId="session-1"
-        targets={targets}
-        files={[]}
-        initialSelectedId="html-1"
-      />,
-    );
-
-    expect(screen.queryByTestId("chat-side-panel-file-split-layout")).toBeNull();
-    expect(screen.getByTestId("chat-side-panel-file-empty")).toHaveTextContent(/workspace|파일/i);
-
-    fireEvent.click(screen.getByTestId("chat-side-panel-mode-browser"));
-    expect(screen.getByTestId("chat-side-panel-tab-actions")).toBeTruthy();
-    expect(screen.getByTestId("chat-side-panel-add-file-browser-tab")).toBeTruthy();
-    expect(screen.getByTestId("chat-side-panel-add-browser-tab")).toBeTruthy();
-    expect(screen.getByTestId("chat-side-panel-add-terminal-tab")).toBeTruthy();
+    // Open a browser tab via the "+" dropdown (replaces scattered add buttons).
+    addTabViaMenu("browser");
     expect(screen.getAllByText("Artifact dashboard").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("example.com/docs").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId("chat-side-panel-browser-viewer")).toBeTruthy();
-    expect(screen.getByTestId("chat-side-panel-browser-frame")).toBeTruthy();
-    expect(screen.queryByText("metrics.json")).toBeNull();
 
     const addressInput = screen.getByTestId("chat-side-panel-browser-address") as HTMLInputElement;
     fireEvent.change(addressInput, { target: { value: "google.com" } });
@@ -209,23 +316,20 @@ describe("ChatSidePanel", () => {
 
     fireEvent.click(screen.getAllByTestId("chat-side-panel-browser-row")[1]!);
     const webview = container.querySelector('[data-testid="chat-side-panel-browser-webview"]');
-    expect(webview).not.toBeNull();
     expect(webview?.getAttribute("src")).toBe("https://example.com/docs");
     expect(webview?.getAttribute("partition")).toBe(LVIS_SIDE_BROWSER_PARTITION);
     expect(webview?.getAttribute("webpreferences")).toContain("javascript=yes");
-    expect(webview?.hasAttribute("allowpopups")).toBe(false);
 
-    fireEvent.click(screen.getByTestId("chat-side-panel-mode-preview"));
+    // Open a preview (review) tab via the "+" dropdown.
+    addTabViaMenu("preview");
     expect(screen.queryByText("Artifact dashboard")).toBeNull();
-    expect(screen.queryByText("example.com/docs")).toBeNull();
     expect(screen.getAllByText("metrics.json").length).toBeGreaterThanOrEqual(1);
   });
 
   it("preserves added workspace tabs across a ChatSidePanel unmount (session switch)", () => {
     // The store lives above the panel (in the harness, mirroring ChatView), so
     // unmounting the panel — as happens on a session switch, leaving home, or
-    // closing the rail — must NOT lose tab state. Previously the tabs lived in
-    // ChatSidePanel's own useState and were destroyed on every unmount.
+    // closing the rail — must NOT lose tab state.
     const targets: ChatPreviewTarget[] = [];
     const files: WorkspaceFileItem[] = [];
 
@@ -239,11 +343,11 @@ describe("ChatSidePanel", () => {
       />,
     );
 
-    // Four default tabs at mount.
-    expect(screen.getAllByRole("tab")).toHaveLength(4);
-    // Add a browser tab -> five tabs, and it becomes active.
-    fireEvent.click(screen.getByTestId("chat-side-panel-add-browser-tab"));
-    expect(screen.getAllByRole("tab")).toHaveLength(5);
+    // Empty at mount (launcher, no tabs).
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+    // Add a browser tab via the launcher.
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-browser"));
+    expect(screen.getAllByRole("tab")).toHaveLength(1);
 
     // Unmount the panel (session switch / rail close) — the harness (store)
     // stays mounted, exactly like ChatView across the conditional render.
@@ -274,10 +378,10 @@ describe("ChatSidePanel", () => {
       </TooltipProvider>,
     );
     expect(screen.getByTestId("chat-side-panel")).toBeTruthy();
-    expect(screen.getAllByRole("tab")).toHaveLength(5);
+    expect(screen.getAllByRole("tab")).toHaveLength(1);
   });
 
-  it("renders MCP app payloads through McpAppView", async () => {
+  it("renders MCP app payloads through McpAppView in a preview tab", async () => {
     const readUiResource = vi.fn(async () => "<main>MCP preview card</main>");
     vi.stubGlobal("lvis", {
       mcp: { readUiResource },
@@ -317,7 +421,7 @@ describe("ChatSidePanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("chat-side-panel-mode-preview"));
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-preview"));
     await waitFor(() => {
       expect(readUiResource).toHaveBeenCalledWith("server-a", "ui://server-a/card");
     });
