@@ -77,6 +77,14 @@ vi.mock("../asrt-sandbox.js", () => ({
   unregisterWorkerUnixSocketDir: (dir: string) => unregisterUdsMock(dir),
   // The host-secret read floor restated on the worker wrap (#1365 SOT).
   getDefaultSensitiveReadDenyPaths: () => ["/home/u/.lvis/secrets", "/home/u/.ssh"],
+  // The persistence-vector write floor restated on the worker wrap (#1449 SOT).
+  getDefaultSensitiveWriteDenyPaths: () => [
+    "/home/u/.lvis/secrets",
+    "/home/u/.ssh",
+    "/home/u/.zshrc",
+    "/home/u/.config",
+    "/home/u/Library/LaunchAgents",
+  ],
 }));
 
 // Module imports AFTER the mocks.
@@ -205,7 +213,7 @@ describe("spawnWorker — gate ON (macOS)", () => {
     expect(wrapWorkerCommandMock).toHaveBeenCalledTimes(1);
     const [cmdline, options] = wrapWorkerCommandMock.mock.calls[0] as [
       string,
-      { filesystem: { allowWrite: string[]; allowRead: string[]; denyRead?: string[] }; allowUnixSocketPath?: string; allowAllUnixSockets?: boolean },
+      { filesystem: { allowWrite: string[]; allowRead: string[]; denyRead?: string[]; denyWrite?: string[] }; allowUnixSocketPath?: string; allowAllUnixSockets?: boolean },
     ];
     expect(options.filesystem.allowWrite[0]).toBe(socketDir);
     expect(options.filesystem.allowWrite).toContain("/data/index");
@@ -217,6 +225,13 @@ describe("spawnWorker — gate ON (macOS)", () => {
     // worker. Non-empty array here proves the #1365 floor is carried.
     expect(Array.isArray(options.filesystem.denyRead)).toBe(true);
     expect(options.filesystem.denyRead?.length ?? 0).toBeGreaterThan(0);
+    // The sensitive write floor is also restated — a per-command denyWrite
+    // REPLACES the shared boot floor, so worker/MCP wraps must carry it just as
+    // the terminal does (#1449).
+    expect(options.filesystem.denyWrite).toContain("/home/u/.zshrc");
+    expect(options.filesystem.denyWrite).toContain("/home/u/.ssh");
+    expect(options.filesystem.denyWrite).toContain("/home/u/.config");
+    expect(options.filesystem.denyWrite).toContain("/home/u/Library/LaunchAgents");
     // The udsArgName was injected EXACTLY once (a duplicated injection would feed
     // the worker `--uds <path> --uds <path>` and break its arg contract).
     expect(cmdline).toContain("--uds");
