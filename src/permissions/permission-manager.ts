@@ -174,6 +174,14 @@ export interface ReviewerDispatchInput {
    * verdict cache scopes by the real substrate). Omitted for non-MCP calls.
    */
   mcpServerId?: string;
+  /**
+   * worker-confinement — originating plugin worker identity (from Tool
+   * pluginId/workerId). Both fields are required for plugin calls to report a
+   * genuine ASRT capability; omitted values keep the historical unwrapped
+   * plugin substrate (`none`).
+   */
+  pluginId?: string;
+  workerId?: string;
 }
 
 /**
@@ -713,6 +721,9 @@ export class PermissionManager {
       // (e.g. plugin renamed/reinstalled) invalidates stale verdicts.
       writesToOwnSandbox: input.writesToOwnSandbox,
       ownerPluginSandboxRoot: input.ownerPluginSandboxRoot,
+      mcpServerId: input.mcpServerId,
+      pluginId: input.pluginId,
+      workerId: input.workerId,
     };
     // Include the sandbox capability in the cache scope so a change to OS
     // isolation invalidates stale verdicts produced under different sandbox
@@ -722,7 +733,13 @@ export class PermissionManager {
     // ON. The ASRT sandbox publishes its capability at boot via
     // setActiveSandboxCapability; the host-shell path then sees the active
     // kind/confidence while non-wrapped substrates stay "none".
-    const sandboxScope = resolveReviewerSandboxCapability(input.source, toolName, input.mcpServerId);
+    const sandboxScope = resolveReviewerSandboxCapability(
+      input.source,
+      toolName,
+      input.mcpServerId,
+      input.workerId,
+      input.pluginId,
+    );
     const cacheCtx = {
       allowedDirectories: input.allowedDirectories,
       scope: {
@@ -771,8 +788,15 @@ export class PermissionManager {
       // and in-process builtins resolve to `none` so isWeakSandbox stays weak
       // and the LLM cannot downgrade a MEDIUM/HIGH verdict for an unsandboxed
       // effect — except a genuinely ASRT-wrapped external MCP worker
-      // (worker-egress PR1, keyed on input.mcpServerId). See the resolver invariant.
-      sandboxCapability: resolveReviewerSandboxCapability(input.source, toolName, input.mcpServerId),
+      // (keyed on input.mcpServerId) or plugin worker (keyed on
+      // input.pluginId/input.workerId). See the resolver invariant.
+      sandboxCapability: resolveReviewerSandboxCapability(
+        input.source,
+        toolName,
+        input.mcpServerId,
+        input.workerId,
+        input.pluginId,
+      ),
       ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
       ...(input.writesToOwnSandbox !== undefined
         ? { writesToOwnSandbox: input.writesToOwnSandbox }
@@ -879,7 +903,13 @@ export class PermissionManager {
     // Record the SUBSTRATE-aware capability the reviewer actually saw (not the
     // process-global) so the audit honestly reflects the isolation in force for
     // THIS call's execution substrate (incl. a wrapped MCP worker — PR1).
-    const sandboxCap = resolveReviewerSandboxCapability(input.source, toolName, input.mcpServerId);
+    const sandboxCap = resolveReviewerSandboxCapability(
+      input.source,
+      toolName,
+      input.mcpServerId,
+      input.workerId,
+      input.pluginId,
+    );
     const auditEntry = buildSandboxAuditEntry({
       tool: {
         name: toolName,

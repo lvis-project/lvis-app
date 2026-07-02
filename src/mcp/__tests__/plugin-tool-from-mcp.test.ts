@@ -37,6 +37,7 @@ const MANIFEST: PluginManifest = {
       description: "Write a file",
       category: "write",
       pathFields: ["path"],
+      workerId: "files-worker",
       writesToOwnSandbox: true,
       version: "9.9.9", // per-tool version override (should win over manifest 2.3.0)
       deprecatedSince: "2.0.0",
@@ -67,6 +68,7 @@ function permissionFields(tool: Tool) {
     source: tool.source,
     category: tool.category,
     pluginId: tool.pluginId,
+    workerId: tool.workerId,
     pathFields: tool.pathFields,
     writesToOwnSandbox: tool.writesToOwnSandbox,
     version: tool.version,
@@ -88,16 +90,16 @@ describe("mcpToolToPluginTool — reverse projection from _meta (#1230 §5 plugi
     // assert it yields the authoritative permission fields straight from _meta.
     expect(viaMcp.map(permissionFields)).toEqual([
       { name: "files_read", source: "plugin", category: "read", pluginId: PLUGIN_ID,
-        pathFields: ["path"], writesToOwnSandbox: undefined, version: "2.3.0",
+        workerId: undefined, pathFields: ["path"], writesToOwnSandbox: undefined, version: "2.3.0",
         deprecatedSince: undefined, replacedBy: undefined, isReadOnly: true },
       { name: "files_write", source: "plugin", category: "write", pluginId: PLUGIN_ID,
-        pathFields: ["path"], writesToOwnSandbox: true, version: "9.9.9",
+        workerId: "files-worker", pathFields: ["path"], writesToOwnSandbox: true, version: "9.9.9",
         deprecatedSince: "2.0.0", replacedBy: "files_write_v2", isReadOnly: false },
       { name: "files_exec", source: "plugin", category: "shell", pluginId: PLUGIN_ID,
-        pathFields: undefined, writesToOwnSandbox: undefined, version: "2.3.0",
+        workerId: undefined, pathFields: undefined, writesToOwnSandbox: undefined, version: "2.3.0",
         deprecatedSince: undefined, replacedBy: undefined, isReadOnly: false },
       { name: "files_fetch", source: "plugin", category: "network", pluginId: PLUGIN_ID,
-        pathFields: undefined, writesToOwnSandbox: undefined, version: "2.3.0",
+        workerId: undefined, pathFields: undefined, writesToOwnSandbox: undefined, version: "2.3.0",
         deprecatedSince: undefined, replacedBy: undefined, isReadOnly: false },
     ]);
   });
@@ -107,6 +109,7 @@ describe("mcpToolToPluginTool — reverse projection from _meta (#1230 §5 plugi
       .map((t) => mcpToolToPluginTool(PLUGIN_ID, t, invoke))
       .find((t) => t.name === "files_write");
     expect(write?.version).toBe("9.9.9");
+    expect(write?.workerId).toBe("files-worker");
     expect(write?.writesToOwnSandbox).toBe(true);
     expect(write?.pathFields).toEqual(["path"]);
     expect(write?.deprecatedSince).toBe("2.0.0");
