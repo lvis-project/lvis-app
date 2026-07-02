@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
+import { normalizeBrowserNavigationUrl } from "./url-safety.js";
 
 /**
  * Workspace-tab store — the state that ChatSidePanel used to hold in
@@ -76,6 +77,17 @@ export interface WorkspaceTabsStore {
   openPinned: (content: WorkspaceTabContentRef) => void;
   /** Promote a tab to pinned (double-click / pin button). Idempotent. */
   promoteToPinned: (id: string) => void;
+  /**
+   * Drop stale CONTENT tabs on a session switch. `isResolvable(targetId)` tests
+   * a preview target against the NEW session's target set. Preview-content tabs
+   * are keyed by session-scoped target ids (they embed the session's toolUseIds
+   * / attachment ids), so one opened in a prior session can never resolve
+   * against the new session — left un-pruned it survives as a dead
+   * `content-unavailable` placeholder and accumulates on every switch. Browser
+   * (url) content tabs carry their own url and launcher CONTAINER tabs carry no
+   * target, so both are always kept.
+   */
+  pruneContentTabs: (isResolvable: (targetId: string) => boolean) => void;
   closeTab: (id: string) => void;
   /** Set (or clear, with `null`) the manually-typed address for a browser tab. */
   setBrowserTabUrl: (tabId: string, url: string | null) => void;
@@ -83,6 +95,19 @@ export interface WorkspaceTabsStore {
 
 function contentKey(ref: WorkspaceTabContentRef): string {
   return ref.source === "browser" ? `browser:${ref.url}` : `preview:${ref.targetId}`;
+}
+
+/**
+ * Validate/normalize a content ref at the store boundary. Browser urls pass
+ * through the url-safety SOT validator (rejects non-http(s) / credential-laden
+ * urls, prepends https:// when scheme-less) so the store cannot hold an unsafe
+ * url — this is the defense-in-depth the url-safety header advertises. Preview
+ * refs pass through unchanged. `null` means "reject; do not open".
+ */
+function normalizeContentRef(ref: WorkspaceTabContentRef): WorkspaceTabContentRef | null {
+  if (ref.source !== "browser") return ref;
+  const url = normalizeBrowserNavigationUrl(ref.url);
+  return url ? { source: "browser", url } : null;
 }
 
 function contentKind(ref: WorkspaceTabContentRef): WorkspaceTabKind {
@@ -120,7 +145,9 @@ export function useWorkspaceTabs(): WorkspaceTabsStore {
     });
   }, []);
 
-  const openInEphemeral = useCallback((content: WorkspaceTabContentRef) => {
+  const openInEphemeral = useCallback((rawContent: WorkspaceTabContentRef) => {
+    const content = normalizeContentRef(rawContent);
+    if (!content) return;
     const key = contentKey(content);
     const kind = contentKind(content);
     setState((prev) => {
@@ -149,7 +176,9 @@ export function useWorkspaceTabs(): WorkspaceTabsStore {
     });
   }, []);
 
-  const openPinned = useCallback((content: WorkspaceTabContentRef) => {
+  const openPinned = useCallback((rawContent: WorkspaceTabContentRef) => {
+    const content = normalizeContentRef(rawContent);
+    if (!content) return;
     const key = contentKey(content);
     const kind = contentKind(content);
     setState((prev) => {
@@ -177,6 +206,26 @@ export function useWorkspaceTabs(): WorkspaceTabsStore {
         ...prev,
         tabs: prev.tabs.map((tab) => (tab.id === id ? { ...tab, mode: "pinned" } : tab)),
       };
+    });
+  }, []);
+
+  const pruneContentTabs = useCallback((isResolvable: (targetId: string) => boolean) => {
+    setState((prev) => {
+      const tabs = prev.tabs.filter((tab) =>
+        tab.content?.source === "preview" ? isResolvable(tab.content.targetId) : true,
+      );
+      if (tabs.length === prev.tabs.length) return prev;
+      const survivingIds = new Set(tabs.map((tab) => tab.id));
+      let activeTabId = prev.activeTabId;
+      if (activeTabId != null && !survivingIds.has(activeTabId)) {
+        // Active tab was pruned — fall back to the last survivor (or launcher).
+        activeTabId = tabs.at(-1)?.id ?? null;
+      }
+      const browserUrlByTab: Record<string, string> = {};
+      for (const [tabId, url] of Object.entries(prev.browserUrlByTab)) {
+        if (survivingIds.has(tabId)) browserUrlByTab[tabId] = url;
+      }
+      return { tabs, activeTabId, browserUrlByTab };
     });
   }, []);
 
@@ -219,9 +268,10 @@ export function useWorkspaceTabs(): WorkspaceTabsStore {
       openInEphemeral,
       openPinned,
       promoteToPinned,
+      pruneContentTabs,
       closeTab,
       setBrowserTabUrl,
     }),
-    [state, setActiveTabId, addTab, openInEphemeral, openPinned, promoteToPinned, closeTab, setBrowserTabUrl],
+    [state, setActiveTabId, addTab, openInEphemeral, openPinned, promoteToPinned, pruneContentTabs, closeTab, setBrowserTabUrl],
   );
 }

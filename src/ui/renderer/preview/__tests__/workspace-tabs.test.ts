@@ -165,4 +165,78 @@ describe("useWorkspaceTabs", () => {
     act(() => result.current.openInEphemeral({ source: "preview", targetId: "d" }));
     expect(ephemeralCount(result.current.tabs)).toBeLessThanOrEqual(1);
   });
+
+  describe("url-safety at the store boundary", () => {
+    it("openInEphemeral rejects a browser url carrying credentials", () => {
+      const { result } = renderHook(() => useWorkspaceTabs());
+      act(() => result.current.openInEphemeral({ source: "browser", url: "https://user:pass@evil.example/" }));
+      expect(result.current.tabs).toEqual([]);
+    });
+
+    it("openPinned rejects a non-http(s) browser url", () => {
+      const { result } = renderHook(() => useWorkspaceTabs());
+      act(() => result.current.openPinned({ source: "browser", url: "ftp://files.example/" }));
+      expect(result.current.tabs).toEqual([]);
+    });
+
+    it("openInEphemeral normalizes a scheme-less browser url via the SOT validator", () => {
+      const { result } = renderHook(() => useWorkspaceTabs());
+      act(() => result.current.openInEphemeral({ source: "browser", url: "example.com" }));
+      expect(result.current.tabs).toHaveLength(1);
+      expect(result.current.tabs[0]!.content).toEqual({ source: "browser", url: "https://example.com/" });
+    });
+  });
+
+  describe("pruneContentTabs (session switch)", () => {
+    it("keeps a preview-content tab whose target still resolves", () => {
+      const { result } = renderHook(() => useWorkspaceTabs());
+      act(() => result.current.openPinned({ source: "preview", targetId: "keep-me" }));
+      act(() => result.current.pruneContentTabs((id) => id === "keep-me"));
+      expect(result.current.tabs).toHaveLength(1);
+      expect(result.current.tabs[0]!.content).toEqual({ source: "preview", targetId: "keep-me" });
+    });
+
+    it("does not leak session A preview-content tabs into session B, while browser + container tabs persist", () => {
+      const { result } = renderHook(() => useWorkspaceTabs());
+      // Session A workspace: a preview-content tab (session-scoped target id), a
+      // browser-content tab (self-contained url), and a launcher container tab.
+      act(() => result.current.openPinned({ source: "preview", targetId: "search-hit:tA:/a.md:" }));
+      act(() => result.current.openPinned({ source: "browser", url: "https://kept.example/" }));
+      act(() => result.current.addTab("terminal"));
+      const previewTabId = result.current.tabs.find((tab) => tab.content?.source === "preview")!.id;
+
+      // Switch to session B: only B's targets resolve; A's preview id is gone.
+      act(() => result.current.pruneContentTabs((id) => id === "json:tB"));
+
+      expect(result.current.tabs.some((tab) => tab.id === previewTabId)).toBe(false);
+      expect(result.current.tabs.some((tab) => tab.content?.source === "preview")).toBe(false);
+      expect(result.current.tabs.some((tab) => tab.content?.source === "browser")).toBe(true);
+      expect(result.current.tabs.some((tab) => tab.content === null)).toBe(true);
+      expect(result.current.tabs).toHaveLength(2);
+    });
+
+    it("re-points the active tab when the active tab was pruned", () => {
+      const { result } = renderHook(() => useWorkspaceTabs());
+      act(() => result.current.openPinned({ source: "preview", targetId: "a" }));
+      act(() => result.current.addTab("terminal"));
+      const previewTabId = result.current.tabs.find((tab) => tab.content?.source === "preview")!.id;
+      act(() => result.current.setActiveTabId(previewTabId));
+      expect(result.current.activeTabId).toBe(previewTabId);
+
+      act(() => result.current.pruneContentTabs(() => false));
+
+      expect(result.current.tabs.some((tab) => tab.id === previewTabId)).toBe(false);
+      expect(result.current.activeTabId).not.toBe(previewTabId);
+      expect(result.current.tabs.some((tab) => tab.id === result.current.activeTabId)).toBe(true);
+    });
+
+    it("is a no-op (stable reference) when nothing is pruned", () => {
+      const { result } = renderHook(() => useWorkspaceTabs());
+      act(() => result.current.addTab("terminal"));
+      act(() => result.current.openPinned({ source: "browser", url: "https://kept.example/" }));
+      const before = result.current.tabs;
+      act(() => result.current.pruneContentTabs(() => true));
+      expect(result.current.tabs).toBe(before);
+    });
+  });
 });
