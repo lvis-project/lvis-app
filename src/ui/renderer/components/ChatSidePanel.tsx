@@ -38,6 +38,7 @@ import {
 import { useTranslation } from "../../../i18n/react.js";
 import { wrapRenderHtmlInlineFrameDocument } from "../../../shared/render-html-preview.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../shared/side-browser.js";
+import { SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
 import { FileEditDiff } from "./FileEditDiff.js";
@@ -1184,6 +1185,12 @@ export interface ChatSidePanelProps {
    * level so tab state survives.
    */
   workspaceTabs: WorkspaceTabsStore;
+  /** Docked panel width (px), owned by ChatView (useSidePanelWidth). */
+  width: number;
+  /** Drag-live width update — state only, no persist. */
+  onWidthChange: (px: number) => void;
+  /** Persist width (drag-end / keyboard step). */
+  onWidthCommit: (px: number) => void;
   className?: string;
 }
 
@@ -1196,9 +1203,35 @@ export function ChatSidePanel({
   onSelect,
   onClose,
   workspaceTabs,
+  width,
+  onWidthChange,
+  onWidthCommit,
   className = "",
 }: ChatSidePanelProps) {
   const { t } = useTranslation();
+  const asideRef = useRef<HTMLElement | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+  // Latest width, read by the drag-end cleanup closure (non-reactive) so the
+  // persisted value is exact.
+  const widthRef = useRef(width);
+  useEffect(() => {
+    widthRef.current = width;
+  }, [width]);
+  // Release any in-flight pointer capture on unmount (mirrors the file-tree
+  // splitter cleanup) so a drag crossing an unmount boundary leaks no listeners.
+  useEffect(() => () => resizeCleanupRef.current?.(), []);
+
+  const updateWidthFromClientX = (clientX: number) => {
+    const el = asideRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    // 12rem viewport margin == the max-w-[calc(100vw-12rem)] safety cap.
+    const max = Math.max(SIDE_PANEL_MIN_WIDTH, window.innerWidth - 192);
+    // Panel is right-docked: the right edge is fixed, dragging the left edge
+    // leftwards widens it.
+    const next = rect.right - clientX;
+    onWidthChange(clampNumber(Math.round(next), SIDE_PANEL_MIN_WIDTH, max));
+  };
   const {
     tabs,
     activeTabId,
@@ -1252,9 +1285,65 @@ export function ChatSidePanel({
 
   return (
     <aside
+      ref={asideRef}
       data-testid="chat-side-panel"
+      style={{ width: `${width}px` }}
       className={`min-h-0 min-w-0 border-l border-border/(--opacity-strong) bg-background/(--opacity-solid) backdrop-blur ${className}`}
     >
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t("chatPreviewRail.resizePanel")}
+        aria-valuenow={Math.round(width)}
+        aria-valuemin={SIDE_PANEL_MIN_WIDTH}
+        aria-valuemax={Math.round(Math.max(SIDE_PANEL_MIN_WIDTH, window.innerWidth - 192))}
+        tabIndex={0}
+        data-testid="chat-side-panel-width-splitter"
+        className="group absolute inset-y-0 left-0 z-50 flex w-2 -translate-x-1/2 cursor-col-resize touch-none select-none items-center justify-center outline-none"
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+          resizeCleanupRef.current?.();
+          updateWidthFromClientX(event.clientX);
+          const onMove = (moveEvent: PointerEvent) => updateWidthFromClientX(moveEvent.clientX);
+          const cleanup = () => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", cleanup);
+            window.removeEventListener("pointercancel", cleanup);
+            resizeCleanupRef.current = null;
+            onWidthCommit(widthRef.current);
+          };
+          resizeCleanupRef.current = cleanup;
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", cleanup);
+          window.addEventListener("pointercancel", cleanup);
+        }}
+        onKeyDown={(event) => {
+          const max = Math.max(SIDE_PANEL_MIN_WIDTH, window.innerWidth - 192);
+          const STEP = 16;
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            const v = clampNumber(width + STEP, SIDE_PANEL_MIN_WIDTH, max);
+            onWidthChange(v);
+            onWidthCommit(v);
+          } else if (event.key === "ArrowRight") {
+            event.preventDefault();
+            const v = clampNumber(width - STEP, SIDE_PANEL_MIN_WIDTH, max);
+            onWidthChange(v);
+            onWidthCommit(v);
+          } else if (event.key === "Home") {
+            event.preventDefault();
+            onWidthChange(SIDE_PANEL_MIN_WIDTH);
+            onWidthCommit(SIDE_PANEL_MIN_WIDTH);
+          } else if (event.key === "End") {
+            event.preventDefault();
+            onWidthChange(max);
+            onWidthCommit(max);
+          }
+        }}
+      >
+        <span className="h-full w-0.5 rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
+      </div>
       <div data-testid="chat-preview-rail" className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
           <PanelRightClose className="h-4 w-4 text-muted-foreground" />

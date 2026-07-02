@@ -770,6 +770,7 @@ export const zhMessages: Record<string, string> = {
   "chatPreviewRail.launcher.browser": "浏览器",
   "chatPreviewRail.launcher.file": "文件",
   "chatPreviewRail.resizeFilePanels": "调整文件树和文件查看器大小",
+  "chatPreviewRail.resizePanel": "调整工作区面板大小",
   "chatPreviewRail.terminalSearchPlaceholder": "搜索终端输出",
   "chatPreviewRail.browserAddressPlaceholder": "输入 URL",
   "chatPreviewRail.browserGo": "前往",

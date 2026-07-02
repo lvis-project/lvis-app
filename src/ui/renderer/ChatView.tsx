@@ -33,6 +33,7 @@ import { getKoreaDateKey } from "./utils/korea-date-key.js";
 import { isTurnStartEntry } from "./utils/classify-turn-entries.js";
 import { collectChatPreviewModel } from "./preview/preview-targets.js";
 import { useWorkspaceTabs } from "./preview/workspace-tabs.js";
+import { useSidePanelWidth } from "./hooks/use-side-panel-width.js";
 import { useChatScroll } from "./hooks/use-chat-scroll.js";
 import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useCheckpointView } from "./hooks/use-checkpoint-view.js";
@@ -193,6 +194,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   // them on every such transition. ChatView stays mounted across those, so the
   // store lives here — tab state now survives. See preview/workspace-tabs.ts.
   const workspaceTabs = useWorkspaceTabs();
+  // Docked side-panel width — durable shell preference (settings round-trip),
+  // owned next to the tab store so it survives ChatSidePanel unmount.
+  const { sidePanelWidth, setSidePanelWidth, commitSidePanelWidth } = useSidePanelWidth(api);
   const previewRailVisible = sidePanelOpen;
 
   useEffect(() => {
@@ -670,10 +674,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           selectedId={selectedPreviewId}
           onSelect={setSelectedPreviewId}
           workspaceTabs={workspaceTabs}
+          width={sidePanelWidth}
+          onWidthChange={setSidePanelWidth}
+          onWidthCommit={commitSidePanelWidth}
           onClose={() => {
             onSidePanelOpenChange?.(false);
           }}
-          className="relative z-40 flex w-[clamp(28rem,44vw,42rem)] max-w-[calc(100vw-12rem)] shrink-0 self-stretch"
+          className="relative z-40 flex max-w-[calc(100vw-12rem)] shrink-0 self-stretch"
         />
       ) : null}
     </div>

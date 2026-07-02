@@ -770,6 +770,7 @@ export const frMessages: Record<string, string> = {
   "chatPreviewRail.launcher.browser": "Navigateur",
   "chatPreviewRail.launcher.file": "Fichiers",
   "chatPreviewRail.resizeFilePanels": "Redimensionner l'arborescence et la visionneuse de fichiers",
+  "chatPreviewRail.resizePanel": "Redimensionner le panneau d'espace de travail",
   "chatPreviewRail.terminalSearchPlaceholder": "Rechercher la sortie du terminal",
   "chatPreviewRail.browserAddressPlaceholder": "Saisir une URL",
   "chatPreviewRail.browserGo": "Ouvrir",
