@@ -327,6 +327,22 @@ export const CHANNELS = {
     saveClipboardImage: "lvis:attach:saveClipboardImage",
     openExternal: "lvis:attach:openExternal",
   },
+  // ── Interactive PTY terminal (#1444, workspace rail) ──────────────────────
+  // ALL INTERNAL: deliberately absent from PUBLIC_CHANNELS / CHANNEL_GESTURE /
+  // EXTERNAL_MUTATION_CHANNELS. A terminal spawns arbitrary user commands, so
+  // it must be unreachable from any external origin (local-api / cli / plugin
+  // frame) — the fail-closed default (isPublicChannel === false) enforces that.
+  // Each invoke handler additionally gates on validateHostRendererSender so a
+  // plugin-ui-shell frame cannot reach them either. data/exit are main→renderer
+  // events sent via safe-send/sendToWindow.
+  terminal: {
+    spawn: "lvis:terminal:spawn", // invoke renderer→main → { ok, tabId } | { ok:false, reason }
+    input: "lvis:terminal:input", // invoke  (keystrokes → pty stdin)
+    resize: "lvis:terminal:resize", // invoke  (cols/rows)
+    kill: "lvis:terminal:kill", // invoke  (tab close / teardown)
+    data: "lvis:terminal:data", // event   main→renderer (pty output chunk)
+    exit: "lvis:terminal:exit", // event   main→renderer (pty exited)
+  },
 } as const;
 
 type ValuesOf<T> = T[keyof T];

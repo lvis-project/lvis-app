@@ -411,6 +411,14 @@ describe("preload contextBridge world shape lock", () => {
           "starredList": "function",
           "starredRemove": "function",
           "submitFeedback": "function",
+          "terminal": [
+            "input",
+            "kill",
+            "onData",
+            "onExit",
+            "resize",
+            "spawn",
+          ],
           "tour": [
             "dismiss",
             "getState",
