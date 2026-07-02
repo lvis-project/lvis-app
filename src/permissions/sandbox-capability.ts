@@ -226,7 +226,7 @@ export function __resetWrappedMcpServersForTest(): void {
  * This is the per-worker "wrapped" signal {@link resolveReviewerSandboxCapability}
  * consults so a plugin tool call reports the GENUINE asrt capability ONLY for a
  * worker that is genuinely confined — an unwrapped worker (gate off, wrap
- * failed, win32 legacy path, or a plugin with no host-spawned worker) stays
+ * failed, Windows ASRT fail-closed path, or a plugin with no host-spawned worker) stays
  * `none`. Membership is necessary but NOT sufficient: the resolver also
  * re-checks {@link detectSandboxCapability} so a torn-down sandbox cannot leave
  * a stale `asrt` report (the #1359/#1364 no-leak invariant).
