@@ -4,8 +4,8 @@
  * The "보안 격리" (security isolation) row must reflect per-dimension confines.
  * Before the fix, the confines-BLIND `isWeakSandbox` printed a blanket
  * "OS 격리 활성" for ANY verified non-none ASRT — so a write/shell tool on
- * Windows (network-only srt-win, confines.filesystem === false) wrongly read
- * as fully isolated. Now a non-full confinement renders the network-only
+ * Windows (partial srt-win, process not confined) wrongly read
+ * as fully isolated. Now a non-full confinement renders the partial-isolation
  * qualifier with the per-dimension breakdown. Display-only — the relaxation
  * control (sandboxRelaxesCategory) is untouched.
  *
@@ -39,21 +39,21 @@ function sandboxRow(req: ApprovalRequest) {
 }
 
 describe("ToolApprovalDialog sandbox confines label", () => {
-  it("shows the network-only breakdown for a win32 network-only ASRT (fs not confined)", () => {
+  it("shows the partial breakdown for a win32 partial ASRT (process not confined)", () => {
     const row = sandboxRow(
       makeRequest({
         kind: "asrt",
         confidence: "verified",
         platform: "win32",
-        reason: "srt-win network-only",
-        confines: { filesystem: false, process: false, network: true },
+        reason: "srt-win fs+network partial",
+        confines: { filesystem: true, process: false, network: true },
       }),
     );
     expect(row).toBeDefined();
-    // KO: "⚠ 네트워크만 격리 … [net:✓ fs:✗ proc:✗]"
-    expect(row?.value).toContain("네트워크만 격리");
+    // KO: "⚠ OS 격리 부분적 … [net:✓ fs:✓ proc:✗]"
+    expect(row?.value).toContain("OS 격리 부분적");
     expect(row?.value).toContain("net:✓");
-    expect(row?.value).toContain("fs:✗");
+    expect(row?.value).toContain("fs:✓");
     expect(row?.value).toContain("proc:✗");
     // It must NOT print the blanket "OS 격리 활성" full-isolation label.
     expect(row?.value).not.toContain("OS 격리 활성");
@@ -70,7 +70,7 @@ describe("ToolApprovalDialog sandbox confines label", () => {
       }),
     );
     expect(row?.value).toContain("OS 격리 활성");
-    expect(row?.value).not.toContain("네트워크만 격리");
+    expect(row?.value).not.toContain("OS 격리 부분적");
   });
 
   it("shows no-isolation for a kind:none capability", () => {

@@ -117,6 +117,23 @@ describe("installer smoke and packaging discipline", () => {
     expect(electronLaunchOptions).toContain("SANDBOX_BYPASS_FLAG");
   });
 
+  it("keeps #1444/#1446 packaged smoke gates wired", () => {
+    const afterPack = readRepoFile("scripts/electron-after-pack.cjs");
+    const smokePackagedApp = readRepoFile("scripts/smoke-packaged-app.mjs");
+    const packageFootprint = readRepoFile("scripts/check-package-footprint.mjs");
+
+    expect(afterPack).toContain("assertNodePtyBinary(context)");
+    expect(afterPack).toContain("conpty.node");
+    expect(afterPack).toContain("conpty_console_list.node");
+    expect(afterPack).toContain("winpty.dll");
+    expect(afterPack).toContain("winpty-agent.exe");
+    expect(smokePackagedApp).toContain("assertPackagedFootprint(target, executable)");
+    expect(smokePackagedApp).toContain("check-package-footprint.mjs");
+    expect(smokePackagedApp).toContain("app.asar footprint passed");
+    expect(packageFootprint).toContain("mermaid\\.[0-9a-f]{8}\\.js");
+    expect(packageFootprint).toContain("required lazy renderer chunks missing from app.asar");
+  });
+
   it("derives packaged runtime script footprint from the build asset SOT", () => {
     const packageFootprint = readRepoFile("scripts/check-package-footprint.mjs");
 

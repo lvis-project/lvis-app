@@ -221,14 +221,25 @@ function assertNodePtyBinary(context) {
     "build",
     "Release",
   );
-  const nodeAddon = join(ptyRoot, "pty.node");
-  if (!existsSync(nodeAddon)) {
-    throw new Error(
-      `packaged node-pty native addon missing: ${nodeAddon} (asarUnpack of node_modules/node-pty/** drifted?)`,
-    );
-  }
-  if (statSync(nodeAddon).size === 0) {
-    throw new Error(`packaged node-pty native addon is empty: ${nodeAddon}`);
+  const requiredNativeFiles = platform === "win32"
+    ? [
+        "pty.node",
+        "conpty.node",
+        "conpty_console_list.node",
+        "winpty.dll",
+        "winpty-agent.exe",
+      ]
+    : ["pty.node"];
+  for (const file of requiredNativeFiles) {
+    const nodeAddon = join(ptyRoot, file);
+    if (!existsSync(nodeAddon)) {
+      throw new Error(
+        `packaged node-pty native addon missing: ${nodeAddon} (asarUnpack of node_modules/node-pty/** drifted?)`,
+      );
+    }
+    if (statSync(nodeAddon).size === 0) {
+      throw new Error(`packaged node-pty native addon is empty: ${nodeAddon}`);
+    }
   }
   // POSIX: node-pty forks its `spawn-helper` to set the controlling TTY; it MUST
   // be present + executable. Windows uses conpty.dll bundled in the addon — no

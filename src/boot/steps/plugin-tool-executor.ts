@@ -19,11 +19,11 @@ import { readPermissionSettings } from "../../permissions/permission-settings-st
 import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "../../ipc/domains/permissions.js";
 // Confines-aware reader for the foreground plugin read-relaxation coupling. It
 // reads the published active-sandbox capability snapshot (no asrt-sandbox.js
-// import) and reports whether the active sandbox FILESYSTEM-CONTAINS the host
-// (`confines.filesystem === true`) — the same capability + truth the reviewer
-// lane's sandboxRelaxesCategory consults. A bare "sandbox active" boolean is
-// insufficient: the Windows srt-win sandbox is network-only.
-import { isActiveSandboxFilesystemContained } from "../../permissions/sandbox-capability.js";
+// import) and reports whether plugin off-hostApi filesystem residuals are
+// actually contained. This is narrower than generic filesystem confinement:
+// Windows host shells are ASRT-wrapped, but Windows plugin workers are still the
+// legacy unwrapped spawn path until that substrate is upgraded.
+import { isActiveSandboxFilesystemContainedForPluginEffects } from "../../permissions/sandbox-capability.js";
 import type { PluginToolInvocationContext } from "../../plugins/runtime.js";
 import {
   currentInvocationOrigin,
@@ -76,11 +76,11 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     // FILESYSTEM-CONTAINING the host (evaluated per tool-call, after boot's
     // sandbox gate has run + published the active capability). The relaxation
     // relies on the effect-boundary, which only contains the off-hostApi
-    // `node:fs` WRITE residual when the sandbox filesystem-contains; a degraded,
-    // sandbox-off, or Windows network-only host (`confines.filesystem === false`)
-    // returns false here so the pre-exec ask stands (see
+    // `node:fs` WRITE residual when the sandbox filesystem-contains; a degraded
+    // or sandbox-off host (`confines.filesystem !== true`) returns false here so
+    // the pre-exec ask stands (see
     // ToolExecutor.sandboxFsContainedProvider).
-    isActiveSandboxFilesystemContained,
+    isActiveSandboxFilesystemContainedForPluginEffects,
   );
   const pluginSurfacePermissionScope = createPluginSurfacePermissionScope({
     readPersistedDirectories: () => readPermissionSettings().permissions.additionalDirectories,

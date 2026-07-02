@@ -1878,8 +1878,8 @@ Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* �
 - **Filesystem jail (per-wrap)**: write-jail 은 owner plugin sandbox root ∪
   허용 디렉토리로 canonicalize 한 union (bare cwd 아님). read-jail 은
   `denyRead: [$HOME]` 후 cwd + write paths 만 re-allow 한다.
-- **Network floor (shared, deny-by-default)**: ASRT 0.0.59 의
-  `filterNetworkRequest` 는 *모듈-레벨 SHARED config* 만 읽으므로, egress 는
+- **Network floor (shared, deny-by-default)**: ASRT 의 loopback proxy network
+  floor 는 *모듈-레벨 SHARED config* 를 읽으므로, egress 는
   boot 에서 `strictAllowlist: true` + 모든 로드된 plugin manifest 의
   `networkAccess.allowedDomains` UNION 을 SHARED config 로 설정해 강제한다
   (loopback proxy 가 strict-union 바닥). 이는 *per-worker* 격리가 아니라
@@ -1905,26 +1905,21 @@ Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* �
   skip|activate|degrade|abort)` 한 곳. host-classify↔sandbox interlock 경고는
   실제 `sandboxActive` 상태에서 발화(degrade 경로 포함). Gate 는 boot 에서
   *정확히 한 번* 결정되며 runtime 변경 채널은 없다.
-- **Read-relaxation ↔ sandbox FILESYSTEM-CONTAINMENT 커플링 (confines-aware)**:
-  foreground plugin read-relaxation (`src/tools/executor.ts` executeOne) 은
-  `hostClassifiesRisk` ON **AND `sandboxFsContainedProvider()`
-  (= `isActiveSandboxFilesystemContained`) true** 일 때만 발화한다. relaxation 은
-  pre-exec ask (off-hostApi `node:fs` WRITE residual 을 gate 하는 것 포함) 를
-  제거하고 effect-boundary gate 에 의존하는데, 그 boundary 는 활성 샌드박스가
-  **filesystem 을 contain** (`confines.filesystem === true`) 할 때만 off-hostApi
-  mutation(direct node:fs / bare fetch / detached async frame)을 contain 한다.
-  따라서 단순 active 가 아니라 filesystem-contained 여야 한다 — Windows srt-win 은
-  NETWORK-ONLY (`confines.filesystem === false`) 라 active 여도 FS-write residual
-  을 contain 하지 못한다. filesystem-contained 아닌 호스트(degrade/off/network-only)
-  에서는 relaxation 이 미발화하고 known-safe pre-exec ask 가 유지된다. 그 결과
-  "relaxation 발효 ⇒ off-hostApi FS-write residual contained" 불변식이 전
-  플랫폼에서 성립 — relaxation 이 filesystem-contained 일 때만 발화하기 때문 →
-  `hostClassifiesRisk`-ON 이 전 플랫폼에서 안전. reviewer SOT
-  `sandboxRelaxesCategory` (filesystem-bearing category 는 `confines.filesystem
-  === true` 일 때만 relax) 와 동일 active-capability + 동일 truth 를 mirror 한다.
-  두 production 생성 지점(`boot.ts` pluginSurfaceExecutor +
-  `engine/conversation-loop.ts`)이 `isActiveSandboxFilesystemContained` 를
-  주입한다.
+- **Read-relaxation ↔ plugin effect-boundary FILESYSTEM-CONTAINMENT 커플링
+  (confines-aware)**: foreground plugin read-relaxation
+  (`src/tools/executor.ts` executeOne) 은 `hostClassifiesRisk` ON **AND
+  `sandboxFsContainedProvider()` (= `isActiveSandboxFilesystemContainedForPluginEffects`)
+  true** 일 때만 발화한다. relaxation 은 pre-exec ask (off-hostApi `node:fs`
+  WRITE residual 을 gate 하는 것 포함) 를 제거하고 effect-boundary gate 에
+  의존하므로, plugin worker substrate 가 그 residual 을 실제로
+  filesystem-contain 할 때만 허용된다. macOS/Linux plugin workers 는
+  ASRT-wrapped UDS path 를 쓰므로 relax 가능하다. Windows host-shell 은 ASRT
+  0.0.63+ 로 filesystem+network partial confinement 를 갖지만, Windows plugin
+  worker path 는 아직 legacy unwrapped spawn 이므로 plugin read-relaxation 에서
+  Windows 를 명시적으로 제외한다. degraded/off/egress-only synthetic substrate/Windows
+  unwrapped plugin worker 에서는 known-safe pre-exec ask 가 유지된다. reviewer
+  SOT `sandboxRelaxesCategory` 는 host-shell ASRT capability 기준이고, plugin
+  read-relaxation provider 는 worker effect-boundary 현실을 반영해 더 좁다.
 - **Activation telemetry**: boot 의 gate 는 **boot 당 1건** 의 구조화 audit
   이벤트를 발행한다 — `{ platform, onSignal(explicit-env|default-settings|off),
   outcome(activate|degrade|abort|skip), reason }`. `AuditLogger.logSandboxGate()`
@@ -1933,22 +1928,26 @@ Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* �
   activation 성공/degrade 율 모니터링용. **Rollback**: Settings → 권한 'OS 도구
   샌드박스' 토글(per-host opt-out) + `hostClassifiesRisk` 토글(relaxation off).
 - **Windows (srt-win)**: 동일 gate 에 합류한다 (`LVIS_SANDBOX_WINDOWS` 별도
-  opt-in 제거). srt-win.exe 는 **NETWORK-only** 샌드박스다 — WFP +
-  restricted-token job 으로 egress 만 격리하고 **filesystem/process 격리는
-  없다** (ASRT 0.0.59). srt-win.exe 는 **번들** (asarUnpack vendor/**) 이라
-  **다운로드가 없다** — 활성화는 *오직* 1회 UAC 설치 + 재로그인만 트리거한다.
-  1회 UAC 설치 + 재로그인 (discriminator group 이 토큰에 enable + WFP filter
-  설치) 이 필요하며 `checkAsrtDependencies()` 가 그때까지 errors 로 보고한다.
-  **Windows 는 deps-missing 시 hard-throw 하지 않는다** — throw 는 설치/재로그인
-  전 first-run 을 brick 하기 때문. 대신 `isAsrtSandboxActive()` 를 FALSE 로
+  opt-in 제거). ASRT 0.0.63+ srt-win 은 dedicated `srt-sandbox` user ACL backend
+  로 filesystem rules 를 적용하고 WFP + loopback proxy 로 egress 를 제한하는
+  **filesystem+network partial** 샌드박스다. process 격리는 제공하지 않는다.
+  srt-win.exe 는 **번들** (asarUnpack vendor/**) 이라 **다운로드가 없다** —
+  활성화는 *오직* 명시적 consent 버튼이 호출하는 1회 self-elevating UAC 설치만
+  트리거한다. Windows 계정 로그아웃은 요구하지 않는다.
+  `checkAsrtDependencies()` 는 user/WFP readiness 전까지 errors 로 보고한다.
+  **Windows 는 deps-missing 시 hard-throw 하지 않는다** — throw 는 설치 전
+  first-run 을 brick 하기 때문. 대신 `isAsrtSandboxActive()` 를 FALSE 로
   유지(호스트 셸 도구는 비격리 plain spawn)하고 "Windows sandbox requested but
-  not installed/relogged — tools run with NO OS isolation until setup completes"
-  loud 신호를 남긴다. win32 가 ready 면 ASRT 를 정상 초기화하고 **network-only
-  capability** (`confines.filesystem === false`) 를 발행한다.
-- **Windows 설치/재로그인 consent UX**: Settings → 권한 의 "OS 도구 샌드박스"
+  not installed — tools run with NO OS isolation until setup completes" loud
+  신호를 남긴다. win32 가 ready 면 ASRT 를 정상 초기화하고 **fs+network
+  partial capability** (`confines = { filesystem:true, network:true,
+  process:false }`) 를 발행한다.
+- **Windows 설치 consent UX**: Settings → 권한 의 "OS 도구 샌드박스"
   토글을 win32 에서 ON 으로 하면 `sandboxWindowsStatus` IPC (read-only —
-  `getWindowsGroupStatus` + `getWindowsWfpStatus`, UAC 없음) 로 readiness 를
-  조회한다. `ready === false` 면 명시적 **consent 패널** (경고 카드 +
+  `getWindowsSandboxUserStatus` + `getWindowsWfpStatus`, UAC 없음) 로 readiness
+  를 조회한다. WFP enum 이 `cannot-read` 를 반환하면 BFE enumeration 이
+  admin-gated 된 상태이므로 ASRT `verifyWindowsWfpEgress()` behavioral proof 로
+  준비 상태를 판정한다. `ready === false` 면 명시적 **consent 패널** (경고 카드 +
   verbatim `windowsInstallInstructions` 텍스트 + "Install now" 버튼) 을
   렌더한다. **auto-UAC 금지** — 버튼 클릭만이 `sandboxWindowsInstall` IPC
   (MUTATING, sender-frame-guarded + user-keyboard intent — peer mutating
@@ -1956,15 +1955,14 @@ Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* �
   `installWindowsSandbox({ proxyPortRange: DEFAULT_WINDOWS_PROXY_PORT_RANGE })`
   의 **단일 self-elevating UAC** 를 트리거하는 *유일한* privilege-escalation
   진입점이다. UAC 거부 → `{cancelled:true}` (throw 아님) → 토글 revert +
-  "Install cancelled" 배너. 성공 → relogin 지시 상태 (verbatim instructions +
-  "pending relogin" 비주얼). 설치는 재로그인 전 네트워크를 끊지 않는다
-  (WFP filter-0 가 non-member 트래픽을 PERMIT). i18n: `permissionsTab.osSandboxWindows*`
+  "Install cancelled" 배너. 성공 → 앱 재시작/상태 재조회 안내.
+  i18n: `permissionsTab.osSandboxWindows*`
   (EN+KO).
 - **Settings-UI win32 capability reconcile**: `sandboxCapability` IPC 는 이전에
   win32 → `available:false`/`kind:"none"` 을 보고해 boot 가 발행하는
-  network-only `asrt` capability 와 **divergence** 했다. 이제 win32 →
-  `available:true`/`kind:"partial"` (Windows 는 network egress 를 격리할 수
-  있다) + network-only `confines` 를 보고해 toggle UI 와 boot SOT 가 일치한다.
+  older Windows `asrt` capability assumptions 와 **divergence** 했다. 이제 win32 →
+  `available:true`/`kind:"partial"` (Windows 는 filesystem+network 를 격리할 수
+  있다) + fs+network partial `confines` 를 보고해 toggle UI 와 boot SOT 가 일치한다.
 - **Linux deps-missing**: gate ON 인데 `bwrap`/`socat`/`ripgrep` 가 없으면
   no-fallback 룰에 따라 boot 를 fail-closed 로 abort 한다 (unsandboxed plain
   spawn 으로 silently drop 하지 않는다). mac/linux 만 hard-throw; Windows 는
@@ -1973,10 +1971,10 @@ Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* �
   `setActiveSandboxCapability({ kind: "asrt", confidence: "verified",
   confines: { filesystem, process, network }, … })` 로 발행한다 (`confines` 는
   machine-checkable 격리 표면 — network honesty 감사 + substrate 별 강제용).
-  mac/linux 는 full `{fs,proc,net: true}`, **win32 는 network-only
-  `{fs:false, proc:false, net:true}`** 를 발행한다 — 이 PARTIAL-confine
+  mac/linux 는 full `{fs,proc,net: true}`, **win32 는 fs+network partial
+  `{fs:true, proc:false, net:true}`** 를 발행한다 — 이 PARTIAL-confine
   capability 가 reviewer 의 `sandboxRelaxesCategory` 를 live 로 작동시킨다
-  (network 는 relax, write/shell/read 는 relax 안 함). Gate OFF /
+  (network/read/write/meta 는 relax, shell 은 process 격리 부재로 relax 안 함). Gate OFF /
   Windows-not-ready / Linux deps-missing 에서는 발행하지 않으므로 SOT 는
   `kind: "none"` 으로 남는다.
 - **Substrate-aware reviewer capability (필수 불변식)**: process-global
@@ -1993,14 +1991,14 @@ Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* �
   ON 이 비격리 plugin/MCP 도구의 승인 게이트를 *완화* 하던 역효과를 차단한다.
   동일 resolver 가 verdict-cache scope 와 audit 에도 쓰여 substrate 간 verdict
   교차 재사용을 막는다.
-- **Asymmetric reviewer relaxation (network relaxes, FS 안 함)**: win32 의
-  network-only `confines` 가 reviewer 의 `sandboxRelaxesCategory` 를 *비대칭*
-  으로 작동시킨다 — `network` 카테고리는 relax (egress 가 실제 격리되므로) 하지만
-  `write`/`shell`/`read`/`meta` (filesystem-bearing) 는 relax 안 한다 (Windows
-  에 FS jail 이 없으므로). ToolApprovalDialog 의 보안-격리 라벨도 동일하게 정직
+- **Asymmetric reviewer relaxation (fs+network relaxes, process 안 함)**: win32 의
+  fs+network partial `confines` 가 reviewer 의 `sandboxRelaxesCategory` 를
+  *비대칭* 으로 작동시킨다 — `network` 및 filesystem-bearing
+  `read`/`write`/`meta` 카테고리는 relax 하지만, `shell` 은 process 격리가
+  없으므로 relax 안 한다. ToolApprovalDialog 의 보안-격리 라벨도 동일하게 정직
   하다 (PR2 finding b): 이전에는 confines-blind `isWeakSandbox` 가 win32 의
-  write/shell 도구에도 "OS 격리 활성" 을 표시했는데, 이제 `confines.filesystem`
-  이 false 면 per-dimension 라벨 ("네트워크만 격리 [net:✓ fs:✗ proc:✗]") 을
+  shell 도구에도 "OS 격리 활성" 을 표시했는데, 이제 `confines.process`
+  가 false 면 per-dimension 라벨 ("[net:✓ fs:✓ proc:✗]") 을
   표시한다 (display-only — relaxation control 자체는 미변경).
 - **pwsh 7 binShell (PR2 finding c)**: win32 의 `resolvePowerShellExecutable()`
   은 PowerShell 7 (`pwsh.exe`) 이 PATH 에 있으면 그것을, 없으면 Windows
@@ -2894,8 +2892,9 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
   격리가 아니라 UNION 이므로, sandboxed 자식은 임의의 로드된 plugin 이 선언한
   도메인에 도달 가능하다 (LVIS 1st-party 신뢰 모델 하에서 허용; per-worker
   격리는 future ASRT 필요).
-- **Windows (srt-win, network-only)**: §6.3.9 와 동일 — 동일 gate, network-only
-  capability, win32-not-ready 시 non-bricking 신호 (hard-throw 안 함).
+- **Windows (srt-win, fs+network partial)**: §6.3.9 와 동일 — 동일 gate,
+  fs+network partial capability, win32-not-ready 시 non-bricking 신호
+  (hard-throw 안 함).
 - **알려진 follow-up**: long-lived worker (예: `lvis-plugin-ep-api` /
   `lvis-plugin-local-indexer` 의 Python 워커) 의 egress 를 이 shared floor 로
   완전히 수렴시키는 것은 문서화된 후속 작업이다. 현행 plugin egress 의 일부는

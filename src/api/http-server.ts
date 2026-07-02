@@ -49,6 +49,20 @@ const SSE_CONTENT_TYPE = "text/event-stream; charset=utf-8";
 const SSE_HEARTBEAT_MS = 15_000;
 /** SSE reconnection hint (ms) sent once on connect so clients back off sanely. */
 const SSE_RETRY_MS = 3000;
+/** Retry cap for OS-assigned ephemeral ports that Fetch clients cannot use. */
+const EPHEMERAL_PORT_RETRY_LIMIT = 20;
+/**
+ * WHATWG Fetch blocks requests to these ports before a socket is opened. The
+ * local API is consumed through `fetch`, so binding one of them makes the
+ * discovery file advertise an unusable endpoint.
+ */
+const FETCH_FORBIDDEN_PORTS = new Set<number>([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79,
+  87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137,
+  139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532,
+  540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723,
+  2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6697, 10080,
+]);
 
 /** Configuration for {@link startLocalApiHttpServer}. */
 export interface LocalApiHttpServerOptions {
@@ -79,6 +93,11 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, { "content-type": JSON_CONTENT_TYPE });
   res.end(payload);
+}
+
+/** Does WHATWG Fetch reject this HTTP port before trying the connection? */
+function isFetchForbiddenPort(port: number): boolean {
+  return FETCH_FORBIDDEN_PORTS.has(port) || (port >= 6665 && port <= 6669);
 }
 
 /**
@@ -286,6 +305,11 @@ export function startLocalApiHttpServer(
   opts: LocalApiHttpServerOptions,
 ): Promise<LocalApiHttpServer> {
   const { api, secret, broadcaster, host = DEFAULT_HOST, port = DEFAULT_PORT, log } = opts;
+  if (port !== DEFAULT_PORT && isFetchForbiddenPort(port)) {
+    return Promise.reject(
+      new Error(`local-api http server port ${port} is blocked by Fetch clients`),
+    );
+  }
 
   // Per-connection SSE stream enders — `close()` runs each to end the response
   // and unsubscribe from the broadcaster (no dangling subscriptions on shutdown).
@@ -310,31 +334,68 @@ export function startLocalApiHttpServer(
   });
 
   return new Promise<LocalApiHttpServer>((resolve, reject) => {
-    const onError = (err: Error) => {
+    let attempts = 0;
+    let settled = false;
+    const rejectOnce = (err: Error) => {
+      if (settled) return;
+      settled = true;
       server.removeListener("error", onError);
       reject(err);
     };
+    const onError = (err: Error) => {
+      rejectOnce(err);
+    };
     server.on("error", onError);
-    server.listen(port, host, () => {
-      server.removeListener("error", onError);
-      const address = server.address() as AddressInfo | null;
-      const boundPort = address?.port ?? 0;
-      log?.(`local-api http server listening on ${host}:${boundPort}`);
-      resolve({
-        port: boundPort,
-        close: () =>
-          new Promise<void>((res, rej) => {
-            // End every live SSE stream first: this unsubscribes from the
-            // broadcaster (no dangling subscriptions) and lets server.close()
-            // resolve instead of hanging on an open event-stream socket.
-            for (const endStream of [...liveStreams]) {
-              endStream();
+    const listen = () => {
+      attempts += 1;
+      server.listen(port, host, () => {
+        const address = server.address() as AddressInfo | null;
+        const boundPort = address?.port ?? 0;
+        if (port === DEFAULT_PORT && isFetchForbiddenPort(boundPort)) {
+          if (attempts >= EPHEMERAL_PORT_RETRY_LIMIT) {
+            server.close(() => {
+              rejectOnce(
+                new Error(
+                  `local-api http server received ${attempts} Fetch-blocked ephemeral ports`,
+                ),
+              );
+            });
+            return;
+          }
+          log?.(
+            `local-api http server received Fetch-blocked ephemeral port ${boundPort}; retrying`,
+          );
+          server.close((closeErr) => {
+            if (closeErr) {
+              rejectOnce(closeErr);
+              return;
             }
-            // Destroy idle keep-alive sockets so close() never hangs.
-            server.closeAllConnections();
-            server.close((closeErr) => (closeErr ? rej(closeErr) : res()));
-          }),
+            listen();
+          });
+          return;
+        }
+
+        if (settled) return;
+        settled = true;
+        server.removeListener("error", onError);
+        log?.(`local-api http server listening on ${host}:${boundPort}`);
+        resolve({
+          port: boundPort,
+          close: () =>
+            new Promise<void>((res, rej) => {
+              // End every live SSE stream first: this unsubscribes from the
+              // broadcaster (no dangling subscriptions) and lets server.close()
+              // resolve instead of hanging on an open event-stream socket.
+              for (const endStream of [...liveStreams]) {
+                endStream();
+              }
+              // Destroy idle keep-alive sockets so close() never hangs.
+              server.closeAllConnections();
+              server.close((closeErr) => (closeErr ? rej(closeErr) : res()));
+            }),
+        });
       });
-    });
+    };
+    listen();
   });
 }

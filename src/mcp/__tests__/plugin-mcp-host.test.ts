@@ -32,6 +32,7 @@ const MANIFEST: PluginManifest = {
       description: "Save a note",
       category: "write",
       pathFields: ["path"],
+      workerId: "notes-worker",
       writesToOwnSandbox: true,
       inputSchema: {
         type: "object",
@@ -70,6 +71,10 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
 
     const save = registry.findByName("notes_save");
     expect(save?.category).toBe("write");
+    // The manifest declares workerId, but loopback calls are not host-routed
+    // through that worker. Do not promote self-attested worker identity into the
+    // Tool descriptor the reviewer uses for ASRT relaxation.
+    expect(save?.workerId).toBeUndefined();
     expect(save?.writesToOwnSandbox).toBe(true);
 
     // tools/call round-trips host → loopback → server → delegate → back.

@@ -1,14 +1,14 @@
 /**
  * pty-manager unit tests (#1444). Stub ASRT (gate + wrap + cleanup) + the
- * sandbox-capability filesystem-containment gate + node-pty, and assert the
+ * sandbox-capability shell-containment gate + node-pty, and assert the
  * WIRING — they do NOT exercise the real Seatbelt/bwrap PTY allocation (that is
  * the macOS/Linux runtime QA, which the design flags as the primary unknown).
  *
  * Covered:
- *   - FAIL CLOSED: gate off / not-fs-contained → spawn refused, node-pty never
+ *   - FAIL CLOSED: gate off / not-shell-contained → spawn refused, node-pty never
  *     loaded, ASRT never wrapped.
  *   - bad-request: empty tabId.
- *   - happy path (fs-contained): wrapWorkerCommand receives the RESTATED
+ *   - happy path (shell-contained): wrapWorkerCommand receives the RESTATED
  *     sensitive denyRead floor + a cwd-derived write jail; pty spawned with the
  *     wrapped argv; onData → ring + emit; input/resize forwarded; onExit emits +
  *     cleans up ASRT state.
@@ -38,10 +38,10 @@ vi.mock("../../../permissions/asrt-sandbox.js", () => ({
   ],
 }));
 
-// ─── filesystem-containment gate ────────────────────────────
-let fsContained = true;
+// ─── shell-containment gate ─────────────────────────────────
+let shellContained = true;
 vi.mock("../../../permissions/sandbox-capability.js", () => ({
-  isActiveSandboxFilesystemContained: () => fsContained,
+  isActiveSandboxShellContained: () => shellContained,
 }));
 
 // ─── write-jail derivation (deterministic) ──────────────────
@@ -117,7 +117,7 @@ const emit: TerminalEmit = (event, payload) => emitted.push({ event, payload });
 
 beforeEach(() => {
   gateActive = true;
-  fsContained = true;
+  shellContained = true;
   emitted = [];
   lastPty = null;
   wrapWorkerCommandMock.mockClear();
@@ -140,8 +140,8 @@ describe("pty-manager fail-closed", () => {
     expect(wrapWorkerCommandMock).not.toHaveBeenCalled();
   });
 
-  it("refuses to spawn when the sandbox is not filesystem-contained (e.g. Windows network-only)", async () => {
-    fsContained = false;
+  it("refuses to spawn when the sandbox is not shell-contained (e.g. Windows fs+network partial)", async () => {
+    shellContained = false;
     const res = await spawnTerminal({ tabId: "terminal:1" });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe("not-fs-contained");
