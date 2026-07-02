@@ -308,10 +308,12 @@ export interface PluginManifest {
       /** Filesystem argument names that must be checked against allowed directories. */
       pathFields?: string[];
       /**
-       * Host-spawned worker identity for tools whose side effects run in a
-       * long-lived worker started through `hostApi.spawnWorker`. When present,
-       * the host pairs it with this manifest's `id` so the reviewer can resolve
-       * the real ASRT substrate for that specific worker.
+       * Advisory host-spawned worker identity for tools intended to run in a
+       * long-lived worker started through `hostApi.spawnWorker`. This manifest
+       * field is not an execution proof: the loopback MCP registration path
+       * must not promote it to `Tool.workerId` unless the host routes the actual
+       * tool invocation through that worker. Reviewer ASRT relaxation is allowed
+       * only from a host-owned Tool descriptor whose call path is worker-backed.
        */
       workerId?: string;
       /**

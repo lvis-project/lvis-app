@@ -6,12 +6,18 @@
  *
  * This is the "category SOT from `_meta`" half of the `plugin-loopback-server`
  * milestone (docs/architecture/mcp-alignment-design.md §5): a migrated plugin's
- * permission-relevant authority — category / pathFields / workerId /
- * writesToOwnSandbox / version / deprecation — is read back from the tool's
- * reverse-DNS `xyz.lvis/*` `_meta`, NOT from a second direct manifest read. The
+ * permission-relevant authority — category / pathFields / writesToOwnSandbox /
+ * version / deprecation — is read back from the tool's reverse-DNS `xyz.lvis/*`
+ * `_meta`, NOT from a second direct manifest read. The
  * manifest is projected to MCP exactly once (forward), and host policy still
  * reads a single authoritative `category` — now carried in `_meta` rather than
  * the raw manifest field.
+ *
+ * Trust boundary: `_meta["xyz.lvis/workerId"]` is intentionally NOT promoted to
+ * `Tool.workerId` here. Loopback `tools/call` executes through
+ * pluginRuntime.call(), not through a host-routed ASRT worker. Treating a
+ * manifest-declared worker id as execution proof would let a plugin
+ * self-attest ASRT confinement and relax reviewer risk for an unconfined call.
  *
  * Why this is NOT `mcp-tool-adapter.ts`: that adapter handles EXTERNAL/untrusted
  * MCP servers, which are foreign network peers → hardcoded `category:"network"`,
@@ -135,7 +141,6 @@ export function mcpToolToPluginTool(
     source: "plugin",
     category,
     pluginId,
-    workerId: readString(meta, "workerId"),
     pathFields: readPathFields(meta),
     writesToOwnSandbox: readBoolean(meta, "writesToOwnSandbox"),
     version: readString(meta, "version"),
