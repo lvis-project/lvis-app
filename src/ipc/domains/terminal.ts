@@ -91,7 +91,7 @@ export function registerTerminalHandlers(deps: IpcDeps): void {
       }
       const tabId = asString(payload?.tabId);
       const data = asString(payload?.data);
-      if (!tabId) return { ok: false, error: "bad-request" };
+      if (!tabId) return { ok: false, error: "invalid-params" };
       writeTerminal(tabId, data);
       return { ok: true };
     },
@@ -108,7 +108,7 @@ export function registerTerminalHandlers(deps: IpcDeps): void {
         return { ok: false, error: UNAUTHORIZED_FRAME.error };
       }
       const tabId = asString(payload?.tabId);
-      if (!tabId) return { ok: false, error: "bad-request" };
+      if (!tabId) return { ok: false, error: "invalid-params" };
       resizeTerminal(tabId, asNumber(payload?.cols), asNumber(payload?.rows));
       return { ok: true };
     },
@@ -125,7 +125,7 @@ export function registerTerminalHandlers(deps: IpcDeps): void {
         return { ok: false, error: UNAUTHORIZED_FRAME.error };
       }
       const tabId = asString(payload?.tabId);
-      if (!tabId) return { ok: false, error: "bad-request" };
+      if (!tabId) return { ok: false, error: "invalid-params" };
       killTerminal(tabId);
       return { ok: true };
     },
