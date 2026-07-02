@@ -103,7 +103,7 @@ function isParseError<T>(value: T | { ok: false; error: string }): value is { ok
  * the domain) so `handleSetPermissionMode` owns the whole post-apply core and
  * the domain wrapper stays a thin transport shell.
  */
-export function broadcastPermissionModeChanged(deps: IpcDeps, mode: string): void {
+function broadcastPermissionModeChanged(deps: IpcDeps, mode: string): void {
   const mainWindow = deps.getMainWindow?.();
   const windows = deps.getAppWindows?.() ?? [mainWindow];
   for (const win of windows) {
