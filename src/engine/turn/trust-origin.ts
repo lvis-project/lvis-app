@@ -1,5 +1,5 @@
 /**
- * Tool trust-origin helpers (C9 Wave 1).
+ * Tool trust-origin helpers.
  *
  * Pure functions that derive the {@link ToolTrustOrigin} for a turn and its
  * subsequent rounds, plus the permission user-intent summary. Extracted from

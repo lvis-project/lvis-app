@@ -1,5 +1,5 @@
 /**
- * runTurn (C9 Wave 4) — the top-level turn orchestration, extracted from
+ * runTurn — the top-level turn orchestration, extracted from
  * conversation-loop.ts as a free function over `self: LoopContext`. It threads
  * the turn through classify/route, lifecycle hooks, queryLoop, the post-turn
  * hook chain, and the turn_summary projection. The lastRound/lastContext

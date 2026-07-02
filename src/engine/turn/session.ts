@@ -1,5 +1,5 @@
 /**
- * Session lifecycle (C9 Wave 3).
+ * Session lifecycle.
  *
  * newConversation / loadSession / resetAndResume / branchFromCheckpoint /
  * startRoutineConversation. The newConversation + loadSession field-reset

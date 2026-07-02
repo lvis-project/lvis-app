@@ -1,5 +1,5 @@
 /**
- * LLM provider lifecycle helpers (C9 Wave 2).
+ * LLM provider lifecycle helpers.
  *
  * `buildProvider` (settings -> primary + fallback chain), `generateText`
  * (plugin one-shot), `pingProvider` (status probe), and `resolveVendorName`.
