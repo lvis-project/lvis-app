@@ -28,9 +28,9 @@
  *     so the worker may BIND the socket. The host connects from OUTSIDE the
  *     sandbox (unconstrained).
  *   - Windows: no reliable UDS-bind primitive, so this HTTP-worker control path
- *     keeps the LEGACY unwrapped TCP branch on win32 even when the gate is ON.
- *     Windows worker wrapping needs a separate TCP-control-channel design; do
- *     not infer it from the mac/linux UDS path.
+ *     FAILS CLOSED when ASRT is active. The legacy unwrapped TCP branch is kept
+ *     only while the gate is OFF. Windows worker wrapping needs a separate
+ *     TCP-control-channel design; do not infer it from the mac/linux UDS path.
  *
  * ⚠️ The Unix-socket ALLOW config (macOS `allowUnixSockets` / Linux
  * `allowAllUnixSockets`) is INERT per-command in current ASRT — it MUST be set on
@@ -115,11 +115,12 @@ export interface SpawnWorkerSpec {
 /**
  * The handle {@link spawnWorker} returns. `socketPath` is the host-side path to
  * connect to (undici `Agent({ connect: { socketPath } })` / `http.request({
- * socketPath })`) — or `null` when the worker was plain-spawned (gate OFF or
- * win32), signalling the consumer to use the legacy TCP channel.
+ * socketPath })`) — or `null` when the worker was plain-spawned (gate OFF),
+ * signalling the consumer to use the legacy TCP channel. Windows with ASRT
+ * active throws before spawn until a Windows control-channel design exists.
  */
 export interface SpawnedWorker {
-  /** Host-side UDS path, or null on the legacy (gate-OFF / win32) path. */
+  /** Host-side UDS path, or null on the legacy gate-OFF path. */
   readonly socketPath: string | null;
   /** The child pid (undefined only if spawn produced no pid). */
   readonly pid: number | undefined;
@@ -173,7 +174,7 @@ function removeSocketArtifacts(socketPath: string, socketDir: string): void {
  * with a bind-mounted UDS control channel. See the module header for the model.
  *
  * @returns a {@link SpawnedWorker}. `socketPath` is non-null only on the wrapped
- *   (gate ON, non-win32) path; null otherwise (legacy TCP fallback signal).
+ *   (gate ON, non-win32) path; null on the gate-OFF legacy TCP fallback.
  */
 export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker> {
   const safePlugin = safeSegment(spec.pluginId, "pluginId");
@@ -191,12 +192,9 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     ...spec.env,
   };
 
-  // ── Gate OFF, OR Windows even with the gate ON → LEGACY plain spawn ──
-  // Windows: this primitive's confinement path depends on a UDS control channel
-  // that does not exist on win32. Keep the legacy TCP path until a Windows
-  // wrapped-worker control channel is designed. Do NOT fabricate a Windows UDS.
+  // ── Gate OFF → LEGACY plain spawn ───────────────────────────────────
   // Byte-for-byte the pre-existing spawn behaviour for this branch.
-  if (!isAsrtSandboxActive() || process.platform === "win32") {
+  if (!isAsrtSandboxActive()) {
     const child = spawn(spec.command, args, {
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
@@ -207,6 +205,15 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     return makeHandle(child, null, () => {
       /* no ASRT/UDS state to release on the legacy path */
     });
+  }
+
+  // Windows: this primitive's confinement path depends on a UDS control channel
+  // that does not exist on win32. Fail closed while the ASRT gate is active so
+  // callers cannot mistake an unwrapped TCP worker for a contained substrate.
+  if (process.platform === "win32") {
+    throw new Error(
+      "[worker-spawn] ASRT-wrapped plugin workers on Windows are disabled: this UDS control-channel primitive has no Windows equivalent. Keep fail-closed until a Windows TCP control-channel/session-grant design lands.",
+    );
   }
 
   // ── Gate ON, mac/linux → ASRT-wrapped with a bind-mounted UDS ──

@@ -7,8 +7,8 @@
  * host-spawned, ASRT-wrapped plugin worker ({@link spawnWorker}). The `asrt`
  * reviewer relaxation must apply ONLY to a worker GENUINELY wrapped in THIS
  * process — gate ON + the worker id in the registry. An unwrapped worker (gate
- * off, never spawned, win32 legacy path, or after the worker exits / the
- * sandbox is torn down) must stay `none` so the reviewer cannot relax a
+ * off, never spawned, Windows ASRT fail-closed path, or after the worker exits
+ * / the sandbox is torn down) must stay `none` so the reviewer cannot relax a
  * MEDIUM/HIGH verdict to LOW for an UNSANDBOXED plugin effect.
  */
 import { afterEach, describe, expect, it } from "vitest";
@@ -56,7 +56,7 @@ describe("resolveReviewerSandboxCapability — plugin-worker substrate awareness
       reason: "ASRT (bwrap) active",
       confines: { filesystem: true, process: true, network: true },
     });
-    // …but THIS worker was never wrapped (no host-spawned worker / win32 legacy).
+    // …but THIS worker was never wrapped (no host-spawned worker / Windows fail-closed path).
     const cap = resolveReviewerSandboxCapability("plugin", "index_search", undefined, "other-worker", "local-indexer");
     expect(cap.kind).toBe("none");
     expect(isWeakSandbox(cap)).toBe(true);
