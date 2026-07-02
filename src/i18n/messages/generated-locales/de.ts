@@ -771,6 +771,8 @@ export const deMessages: Record<string, string> = {
   "chatPreviewRail.launcher.file": "Dateien",
   "chatPreviewRail.resizeFilePanels": "Größe von Dateibaum und Dateiansicht ändern",
   "chatPreviewRail.resizePanel": "Arbeitsbereichsleiste anpassen",
+  "chatPreviewRail.pinTab": "Tab anheften",
+  "chatPreviewRail.contentUnavailable": "Dieses Element ist nicht mehr verfügbar.",
   "chatPreviewRail.terminalSearchPlaceholder": "Terminalausgabe suchen",
   "chatPreviewRail.browserAddressPlaceholder": "URL eingeben",
   "chatPreviewRail.browserGo": "Öffnen",

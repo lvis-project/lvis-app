@@ -771,6 +771,8 @@ export const frMessages: Record<string, string> = {
   "chatPreviewRail.launcher.file": "Fichiers",
   "chatPreviewRail.resizeFilePanels": "Redimensionner l'arborescence et la visionneuse de fichiers",
   "chatPreviewRail.resizePanel": "Redimensionner le panneau d'espace de travail",
+  "chatPreviewRail.pinTab": "Épingler l'onglet",
+  "chatPreviewRail.contentUnavailable": "Cet élément n'est plus disponible.",
   "chatPreviewRail.terminalSearchPlaceholder": "Rechercher la sortie du terminal",
   "chatPreviewRail.browserAddressPlaceholder": "Saisir une URL",
   "chatPreviewRail.browserGo": "Ouvrir",
