@@ -14,7 +14,7 @@
  * Every test that starts a server tears it down in afterEach so vitest exits
  * with no leaked handles.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -22,6 +22,7 @@ import {
   isLocalApiEnabled,
   maybeStartLocalApiServer,
   stopLocalApiServer,
+  buildExternalMutationApprover,
   LOCAL_API_INFO_FILE,
   type LocalApiServerInfoFile,
 } from "../local-api-server.js";
@@ -29,6 +30,8 @@ import { makeDeepProxy } from "../../testing/deep-proxy.js";
 import type { AppServices } from "../../boot.js";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { SystemSettings } from "../../data/settings-store.js";
+import type { ApprovalGate } from "../../permissions/approval-gate.js";
+import { PERMISSIONS, EXTERNAL_MUTATION_DENIED } from "../../contract/app-contract.js";
 
 /** Minimal SettingsService stub — only `get("system")` is consulted by the gate. */
 function stubSettings(system: Partial<SystemSettings>): SettingsService {
@@ -57,7 +60,11 @@ const SERVICE_KEYS: readonly string[] = [
  * with `settingsService` (gate) + a `permissionManager.getMode` (smoke dispatch)
  * overridden to concrete values.
  */
-function makeServices(system: Partial<SystemSettings>, getMode = "plan"): AppServices {
+function makeServices(
+  system: Partial<SystemSettings>,
+  getMode = "plan",
+  approvalGate?: Pick<ApprovalGate, "requestAndWait">,
+): AppServices {
   const base = makeDeepProxy(SERVICE_KEYS) as Record<string, unknown>;
   return new Proxy(base, {
     get(target, prop) {
@@ -68,6 +75,10 @@ function makeServices(system: Partial<SystemSettings>, getMode = "plan"): AppSer
           permissionManager: { getMode: () => getMode },
         };
       }
+      // When a test supplies a stub ApprovalGate, expose it so the wired
+      // external-mutation approver drives it. Otherwise fall through to the
+      // deep-proxy (the approver still builds, but no mutation test exercises it).
+      if (prop === "approvalGate" && approvalGate) return approvalGate;
       return Reflect.get(target, prop);
     },
     ownKeys() {
@@ -231,6 +242,104 @@ describe("local-api-server", () => {
 
     it("stopLocalApiServer resolves when nothing is running (gate was off)", async () => {
       await expect(stopLocalApiServer()).resolves.toBeUndefined();
+    });
+  });
+
+  // ── #1409 approval-mediated external mutation ─────────────────────────────
+  describe("external-mutation approver wiring", () => {
+    it("returns undefined when no ApprovalGate is available (fail-closed default)", () => {
+      expect(buildExternalMutationApprover(undefined, () => {})).toBeUndefined();
+    });
+
+    it("calls requestAndWait with category 'agent-action' + Korean reason; allow-once → true", async () => {
+      const requestAndWait = vi.fn(async () => ({ requestId: "r", choice: "allow-once" as const }));
+      const approver = buildExternalMutationApprover(
+        { requestAndWait } as unknown as ApprovalGate,
+        () => {},
+      );
+      expect(approver).toBeDefined();
+
+      const approved = await approver!({
+        channel: PERMISSIONS.setMode,
+        args: { mode: "auto" },
+        origin: "local-api",
+      });
+
+      expect(approved).toBe(true);
+      expect(requestAndWait).toHaveBeenCalledTimes(1);
+      const req = requestAndWait.mock.calls[0][0] as Record<string, unknown>;
+      expect(req.category).toBe("agent-action");
+      expect(req.kind).toBe("agent-action");
+      expect(req.toolName).toBe(PERMISSIONS.setMode);
+      expect(req.toolCategory).toBe("meta");
+      expect(req.trustOrigin).toBe("local-api");
+      expect(req.args).toEqual({ mode: "auto" });
+      // Renderer-facing Korean reason (IPC-language convention).
+      expect(typeof req.reason).toBe("string");
+      expect(req.reason as string).toMatch(/권한 모드/);
+      // The gate owns `requireExplicit` (derived from policy) — the caller must
+      // NOT set it on the request (signature is Omit<ApprovalRequest,"requireExplicit">).
+      expect(req.requireExplicit).toBeUndefined();
+    });
+
+    it("deny-once → false", async () => {
+      const requestAndWait = vi.fn(async () => ({ requestId: "r", choice: "deny-once" as const }));
+      const approver = buildExternalMutationApprover(
+        { requestAndWait } as unknown as ApprovalGate,
+        () => {},
+      );
+      const approved = await approver!({
+        channel: PERMISSIONS.setMode,
+        args: { mode: "auto" },
+        origin: "cli",
+      });
+      expect(approved).toBe(false);
+    });
+
+    it("a thrown gate → false (fail-closed) and logs one line", async () => {
+      const requestAndWait = vi.fn(async () => {
+        throw new Error("gate exploded");
+      });
+      const logs: string[] = [];
+      const approver = buildExternalMutationApprover(
+        { requestAndWait } as unknown as ApprovalGate,
+        (m) => logs.push(m),
+      );
+      const approved = await approver!({
+        channel: PERMISSIONS.setMode,
+        args: { mode: "auto" },
+        origin: "local-api",
+      });
+      expect(approved).toBe(false);
+      expect(logs.some((l) => l.includes("external-mutation approval errored"))).toBe(true);
+      // No secret is ever logged — only channel + origin diagnostics.
+      expect(logs.join("\n")).not.toContain("Bearer");
+    });
+  });
+
+  describe("HTTP passthrough — approval-denied set-mode", () => {
+    it("POST /v1/dispatch set-mode with a stub approver-denied gate → 403 external-mutation-denied", async () => {
+      process.env.LVIS_LOCAL_API = "1";
+      // Stub gate that denies (deny-once) → approver resolves false.
+      const requestAndWait = vi.fn(async () => ({ requestId: "r", choice: "deny-once" as const }));
+      const result = await maybeStartLocalApiServer({
+        services: makeServices({}, "plan", { requestAndWait }),
+        ...START_ARGS,
+      });
+      const info = readInfo(home);
+
+      const res = await fetch(`http://127.0.0.1:${result!.port}/v1/dispatch`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${info.secret}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ channel: PERMISSIONS.setMode, args: { mode: "auto" } }),
+      });
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ ok: false, error: EXTERNAL_MUTATION_DENIED });
+      expect(requestAndWait).toHaveBeenCalledTimes(1);
     });
   });
 });
