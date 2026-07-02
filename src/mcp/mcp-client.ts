@@ -60,7 +60,7 @@ import {
   markMcpServerWrapped,
   unmarkMcpServerWrapped,
 } from "../permissions/sandbox-capability.js";
-import { shellQuote, resolveShell } from "../lib/shell-resolver.js";
+import { shellQuote } from "../lib/shell-resolver.js";
 import { t } from "../i18n/index.js";
 const log = createLogger("mcp-client");
 
@@ -1206,35 +1206,8 @@ class StdioTransport implements McpTransport {
       .map((part) => shellQuote(part))
       .join(" ");
 
-    // binShell: mirror bash.ts — on win32 hand ASRT the ABSOLUTE Git Bash / sh
-    // path so the POSIX-quoted command string is interpreted by a POSIX shell on
-    // every platform (ASRT defaults to `cmd` on win32, which would mis-parse
-    // single-quoted cmdlines). On mac/linux leave it undefined (ASRT uses bash).
-    // FAIL CLOSED on win32: if Git Bash is not resolvable, throw rather than
-    // silently falling back to cmd.exe — cmd.exe mis-parses POSIX single-quoting
-    // and would run an incorrectly split command in an unconfined shell.
-    let binShell: string | undefined;
-    if (process.platform === "win32") {
-      let resolvedShell: string | undefined;
-      try {
-        const candidate = resolveShell().cmd;
-        if (/^[A-Za-z]:[\\/]/.test(candidate)) resolvedShell = candidate;
-      } catch {
-        // resolveShell() threw — fall through to fail-closed error below.
-      }
-      if (resolvedShell === undefined) {
-        throw new Error(
-          "[mcp-client] ASRT-wrapped MCP requires Git Bash (or a POSIX shell) on Windows — " +
-            "cmd.exe cannot interpret the POSIX-single-quoted command string safely. " +
-            "Install Git for Windows and ensure git-bash.exe is resolvable.",
-        );
-      }
-      binShell = resolvedShell;
-    }
-
     const { argv, env } = await wrapWorkerCommand(cmdline, {
       filesystem: { allowWrite, allowRead, denyRead, denyWrite },
-      ...(binShell !== undefined ? { binShell } : {}),
     });
 
     const [cmd, ...args] = argv;
