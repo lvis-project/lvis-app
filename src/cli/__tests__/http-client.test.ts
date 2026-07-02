@@ -17,7 +17,7 @@
  *
  * Every started server is torn down in afterEach so vitest exits clean.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -193,5 +193,116 @@ describe("runCommand over the real transport (cli origin, end-to-end)", () => {
     const { runCommand } = await import("../commands.js");
     const result = await runCommand(["permission:mode"], client);
     expect(result).toEqual({ ok: true, command: "permission:mode", data: { mode: "acceptEdits" } });
+  });
+});
+
+// ── US-104: permission:set-mode over the real transport ─────────────────────
+
+describe("permission:set-mode over the real transport (approval-mediated external mutation)", () => {
+  const inertChatContext: ChatSendContext = {
+    sink: () => undefined,
+    allocateStreamId: () => 0,
+    trackStreamTurn: (make) => make(),
+  };
+
+  /**
+   * Deps sufficient for `handleSetPermissionMode` to run end-to-end (mirrors
+   * `local-api.test.ts`'s `makeMutationDeps`): a permission manager (getMode +
+   * setModePersist), a ready audit-log chain, and a main-window stub for the
+   * post-apply broadcast. `externalMutationApprover` resolves per-test.
+   */
+  function mutationIpc(): IpcDeps {
+    let mode = "default";
+    return {
+      conversationLoop: {
+        getSessionId: () => "s",
+        permissionManager: {
+          getMode: () => mode,
+          setMode: (next: string) => {
+            mode = next;
+          },
+          setModePersist: async (next: string) => {
+            mode = next;
+          },
+        },
+      },
+      approvalGate: { requestAndWait: async () => ({ requestId: "x", choice: "allow-once" as const }) },
+      auditLogger: {
+        isPermissionAuditChainReady: () => true,
+        appendPermissionAuditEntry: async () => undefined,
+      },
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { isDestroyed: () => false, send: () => {} } }),
+    } as unknown as IpcDeps;
+  }
+
+  it("approver true → set-mode succeeds end-to-end (cli → http → dispatcher → handler)", async () => {
+    const conn = await bootServer(
+      createLocalApi({
+        ipc: mutationIpc(),
+        chatSendContext: inertChatContext,
+        externalMutationApprover: async () => true,
+      }),
+    );
+    const client = createLvisClient(createHttpLocalApi(conn), "cli");
+
+    const { runCommand } = await import("../commands.js");
+    const result = await runCommand(["permission:set-mode", "auto"], client);
+    expect(result).toEqual({
+      ok: true,
+      command: "permission:set-mode",
+      data: { ok: true, mode: "auto" },
+    });
+  });
+
+  it("approver false → 403 external-mutation-denied surfaces through createHttpLocalApi + LvisClientError", async () => {
+    const conn = await bootServer(
+      createLocalApi({
+        ipc: mutationIpc(),
+        chatSendContext: inertChatContext,
+        externalMutationApprover: async () => false,
+      }),
+    );
+    const httpApi = createHttpLocalApi(conn);
+
+    const direct = await httpApi.dispatch({ channel: PERMISSIONS.setMode, args: { mode: "auto" }, origin: "cli" });
+    expect(direct).toEqual({ ok: false, error: "external-mutation-denied" });
+
+    const client = createLvisClient(httpApi, "cli");
+    await expect(client.setPermissionMode("auto")).rejects.toMatchObject({
+      code: "external-mutation-denied",
+      channel: PERMISSIONS.setMode,
+    });
+  });
+
+  it("runCommand denial rejects with LvisClientError (maps to CLI exit 1)", async () => {
+    const conn = await bootServer(
+      createLocalApi({
+        ipc: mutationIpc(),
+        chatSendContext: inertChatContext,
+        externalMutationApprover: async () => false,
+      }),
+    );
+    const client = createLvisClient(createHttpLocalApi(conn), "cli");
+
+    const { runCommand } = await import("../commands.js");
+    await expect(runCommand(["permission:set-mode", "auto"], client)).rejects.toMatchObject({
+      code: "external-mutation-denied",
+      channel: PERMISSIONS.setMode,
+    });
+  });
+
+  it("runCommand with no <mode> argument short-circuits as usage-error (maps to CLI exit 2, dispatcher never reached)", async () => {
+    const dispatch = vi.fn(async () => ({ ok: true, data: {} }));
+    const client = createLvisClient({ dispatch }, "cli");
+
+    const { runCommand } = await import("../commands.js");
+    const result = await runCommand(["permission:set-mode"], client);
+    expect(result).toEqual({
+      ok: false,
+      error: "usage-error",
+      command: "permission:set-mode",
+      message: "permission:set-mode requires a <mode> argument",
+    });
+    expect(dispatch).not.toHaveBeenCalled();
   });
 });
