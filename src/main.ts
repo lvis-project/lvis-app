@@ -53,6 +53,7 @@ import {
 import { detachedWindowOptionsForViewKey, refreshApplicationMenu } from "./main/app-menu.js";
 import { ensureTray, showOrCreateMainWindow } from "./main/app-tray.js";
 import { registerSettingsWindowHandlers } from "./main/settings-window.js";
+import { maybeStartLocalApiServer } from "./main/local-api-server.js";
 import { handleLvisUri, lvisDevLog } from "./main/lvis-deep-link.js";
 import {
   getMainWindow,
@@ -161,6 +162,22 @@ async function main() {
     getAppWindows,
   );
   registerSettingsWindowHandlers(services.auditLogger);
+
+  // #1436: start the OPT-IN loopback local API server (OFF by default; enabled
+  // via Settings → system.localApiServer OR env LVIS_LOCAL_API=1). Wrapped in
+  // try/catch so this aux transport can NEVER brick app boot — when the gate is
+  // off maybeStartLocalApiServer returns null immediately (no code path throws).
+  try {
+    const localApi = await maybeStartLocalApiServer({
+      services,
+      getMainWindow: () => getMainWindow(),
+      getAppWindows,
+      log: (m) => log.info(m),
+    });
+    if (localApi) log.info(`local API server listening on 127.0.0.1:${localApi.port}`);
+  } catch (err) {
+    log.error({ err }, "local API server failed to start (continuing boot)");
+  }
 
   // L1: start the routines scheduler AFTER IPC handlers are wired so a
   // routine past-due at boot fires into a renderer that already has a
