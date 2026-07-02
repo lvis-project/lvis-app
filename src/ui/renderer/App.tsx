@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../i18n/react.js";
-import type { ChatEntry } from "../../lib/chat-stream-state.js";
 import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { AppProviders } from "./AppProviders.js";
@@ -21,8 +20,6 @@ import { usePluginViewRouting } from "./hooks/use-plugin-view-routing.js";
 import { useOnboardingChainController } from "./hooks/use-onboarding-chain-controller.js";
 import { usePluginLifecycleRefresh } from "./hooks/use-plugin-lifecycle-refresh.js";
 import { useChatStatusIndicators } from "./hooks/use-chat-status-indicators.js";
-import { ActionPanel, type ActionPanelActivityState } from "./components/ActionPanel.js";
-import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
 import { MainContent } from "./MainContent.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
@@ -575,15 +572,6 @@ export function App() {
     [pluginViews, handleNewChat, handleViewSelect, onOpenSettings],
   );
 
-  const actionPanelActivity = useMemo<ActionPanelActivityState>(
-    () => computeActionPanelActivity(entries as ChatEntry[]),
-    [entries],
-  );
-
-  const openActionPanelUrl = useCallback((url: string) => {
-    void api.openExternalUrl(url);
-  }, [api]);
-
   const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
   const handleMarketplaceAnnouncementDismiss = useCallback(
     (id: number) => {
@@ -781,14 +769,8 @@ export function App() {
               onToastClick: handleStatusToastClick,
               onToastDismiss: (toast) => statusRemoveToast(toast.id),
             }}
-            actionPanelSlot={appMode !== "chat" ? (
-              <ActionPanel
-                open={actionPanelOpen}
-                onOpenChange={setActionPanelOpen}
-                activity={actionPanelActivity}
-                onOpenExternalUrl={openActionPanelUrl}
-              />
-            ) : null}
+            actionPanelOpen={actionPanelOpen}
+            onActionPanelOpenChange={setActionPanelOpen}
             sidePanelOpen={sidePanelOpen}
             onSidePanelOpenChange={setSidePanelOpen}
           />

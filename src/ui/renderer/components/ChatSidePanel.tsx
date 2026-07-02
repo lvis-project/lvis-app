@@ -42,6 +42,7 @@ import { LVIS_SIDE_BROWSER_PARTITION } from "../../../shared/side-browser.js";
 import { SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
+import { normalizeBrowserNavigationUrl } from "../preview/url-safety.js";
 import { FileEditDiff } from "./FileEditDiff.js";
 import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
 import { McpAppView } from "./McpAppView.js";
@@ -62,19 +63,6 @@ const FILE_TREE_MAX_PERCENT = 72;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
-}
-
-function normalizeBrowserNavigationUrl(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-  try {
-    const url = new URL(candidate);
-    if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
 }
 
 function targetIcon(kind: ChatPreviewTarget["kind"]) {
