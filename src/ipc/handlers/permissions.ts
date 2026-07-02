@@ -36,6 +36,13 @@ export function handleGetMode(deps: IpcDeps): { mode: string } {
  * future non-renderer surface can supply its own provenance; the renderer
  * wrapper passes the fixed settings-ui / user-keyboard tuple. The core forwards
  * this verbatim to {@link applyPermissionModeCommand}'s approval bypass.
+ *
+ * @internal Raw {@link SetPermissionModeBypass} structs must NEVER be forwarded
+ * verbatim from caller-controlled values (e.g. an IPC payload or external HTTP
+ * body). All narrowing from this loose shape into the strict, trust-checked
+ * {@link PermissionModeApprovalBypass} happens EXCLUSIVELY inside
+ * {@link resolveApprovalBypass} — that is the one auditable choke point where
+ * the fail-closed trust conditions live (security-lane MINOR-3).
  */
 export interface SetPermissionModeBypass {
   source: string;
@@ -63,8 +70,12 @@ export interface SetPermissionModeBypass {
  *     SECOND modal for the same mutation. It is never a silent bypass — the
  *     lifecycle only constructs this shape after observing a real "allow"
  *     ApprovalGate decision.
+ *
+ * @internal Exported ONLY as a test seam (negative-path regression coverage
+ * for the trust narrowing — see `src/ipc/handlers/__tests__/permissions.test.ts`).
+ * Must NEVER be called outside {@link handleSetPermissionMode}.
  */
-function resolveApprovalBypass(
+export function resolveApprovalBypass(
   bypass: SetPermissionModeBypass,
 ): PermissionModeApprovalBypass | undefined {
   if (bypass.explicitUserAction !== true) return undefined;

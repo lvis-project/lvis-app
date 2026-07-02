@@ -315,6 +315,100 @@ describe("local-api-server", () => {
       // No secret is ever logged — only channel + origin diagnostics.
       expect(logs.join("\n")).not.toContain("Bearer");
     });
+
+    // ── security MINOR-1 (#1441 cluster review): attention-DoS in-flight cap ──
+    describe("in-flight cap (attention-DoS hardening, fail-closed)", () => {
+      it("two concurrent asks → gate's requestAndWait called exactly once; the second resolves false immediately", async () => {
+        let releaseGate!: (choice: "allow-once") => void;
+        const gateResult = new Promise<{ requestId: string; choice: "allow-once" }>((resolve) => {
+          releaseGate = (choice) => resolve({ requestId: "r", choice });
+        });
+        const requestAndWait = vi.fn(async () => gateResult);
+        const logs: string[] = [];
+        const approver = buildExternalMutationApprover(
+          { requestAndWait } as unknown as ApprovalGate,
+          (m) => logs.push(m),
+        )!;
+
+        const first = approver({
+          channel: PERMISSIONS.setMode,
+          args: { mode: "auto" },
+          origin: "local-api",
+        });
+        // Let the first call reach `requestAndWait` before firing the second.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        const second = await approver({
+          channel: PERMISSIONS.setMode,
+          args: { mode: "auto" },
+          origin: "cli",
+        });
+
+        expect(second).toBe(false);
+        expect(requestAndWait).toHaveBeenCalledTimes(1);
+        expect(
+          logs.some((l) => l.includes("external mutation approval already pending — denying concurrent request")),
+        ).toBe(true);
+        // Log line must include channel + origin, never args/secret.
+        const capLog = logs.find((l) => l.includes("already pending"));
+        expect(capLog).toContain(`channel=${PERMISSIONS.setMode}`);
+        expect(capLog).toContain("origin=cli");
+        expect(capLog).not.toContain("Bearer");
+        expect(capLog).not.toContain("auto");
+
+        releaseGate("allow-once");
+        await expect(first).resolves.toBe(true);
+      });
+
+      it("after the first ask resolves allow, a subsequent ask calls the gate again (guard released)", async () => {
+        const requestAndWait = vi.fn(async () => ({ requestId: "r", choice: "allow-once" as const }));
+        const approver = buildExternalMutationApprover(
+          { requestAndWait } as unknown as ApprovalGate,
+          () => {},
+        )!;
+
+        const firstApproved = await approver({
+          channel: PERMISSIONS.setMode,
+          args: { mode: "auto" },
+          origin: "local-api",
+        });
+        const secondApproved = await approver({
+          channel: PERMISSIONS.setMode,
+          args: { mode: "strict" },
+          origin: "local-api",
+        });
+
+        expect(firstApproved).toBe(true);
+        expect(secondApproved).toBe(true);
+        expect(requestAndWait).toHaveBeenCalledTimes(2);
+      });
+
+      it("the guard releases even when the gate throws, so the next ask calls the gate again", async () => {
+        const requestAndWait = vi
+          .fn()
+          .mockRejectedValueOnce(new Error("gate exploded"))
+          .mockResolvedValueOnce({ requestId: "r", choice: "allow-once" as const });
+        const approver = buildExternalMutationApprover(
+          { requestAndWait } as unknown as ApprovalGate,
+          () => {},
+        )!;
+
+        const firstApproved = await approver({
+          channel: PERMISSIONS.setMode,
+          args: { mode: "auto" },
+          origin: "local-api",
+        });
+        const secondApproved = await approver({
+          channel: PERMISSIONS.setMode,
+          args: { mode: "strict" },
+          origin: "local-api",
+        });
+
+        expect(firstApproved).toBe(false);
+        expect(secondApproved).toBe(true);
+        expect(requestAndWait).toHaveBeenCalledTimes(2);
+      });
+    });
   });
 
   describe("HTTP passthrough — approval-denied set-mode", () => {
