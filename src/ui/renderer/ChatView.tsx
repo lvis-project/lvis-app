@@ -37,6 +37,8 @@ import { useSidePanelWidth } from "./hooks/use-side-panel-width.js";
 import { normalizeBrowserNavigationUrl } from "./preview/url-safety.js";
 import { ActionPanel } from "./components/ActionPanel.js";
 import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
+import { useContainerNarrow } from "./hooks/use-container-narrow.js";
+import { WorkspaceRailDrawer } from "./components/WorkspaceRailDrawer.js";
 import { useChatScroll } from "./hooks/use-chat-scroll.js";
 import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useCheckpointView } from "./hooks/use-checkpoint-view.js";
@@ -202,6 +204,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   // owned next to the tab store so it survives ChatSidePanel unmount.
   const { sidePanelWidth, setSidePanelWidth, commitSidePanelWidth } = useSidePanelWidth(api);
   const previewRailVisible = sidePanelOpen;
+  // Narrow-screen fallback: when the ChatView container is too narrow to dock
+  // the rail beside the transcript, render it as a modal drawer instead
+  // (§6.10.8). The observed element is the chat-view-root (the parent of the
+  // docked/drawer branch) so switching branches does not move the signal.
+  const chatViewRootRef = useRef<HTMLDivElement | null>(null);
+  const { isNarrow } = useContainerNarrow(chatViewRootRef);
 
   // Tool Activity (ActionPanel) — co-located here (§6.10.7) so its open-actions
   // reach the workspace store / preview model / side-panel toggle that also
@@ -472,6 +480,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
 
   return (
     <div
+      ref={chatViewRootRef}
       className="relative flex min-h-0 min-w-0 w-full flex-1 flex-row overflow-hidden"
       data-testid="chat-view-root"
     >
@@ -713,7 +722,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         onResolveAskQuestion={onResolveAskQuestion}
       />
       </div>
-      {previewRailVisible ? (
+      {previewRailVisible && !isNarrow ? (
         <ChatSidePanel
           api={api}
           sessionId={currentSessionId}
@@ -730,6 +739,32 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           }}
           className="relative z-40 flex max-w-[calc(100vw-12rem)] shrink-0 self-stretch"
         />
+      ) : null}
+      {previewRailVisible && isNarrow ? (
+        <WorkspaceRailDrawer
+          open
+          onOpenChange={(open) => {
+            if (!open) onSidePanelOpenChange?.(false);
+          }}
+        >
+          <ChatSidePanel
+            api={api}
+            sessionId={currentSessionId}
+            targets={previewModel.targets}
+            files={previewModel.files}
+            selectedId={selectedPreviewId}
+            onSelect={setSelectedPreviewId}
+            workspaceTabs={workspaceTabs}
+            width={sidePanelWidth}
+            onWidthChange={setSidePanelWidth}
+            onWidthCommit={commitSidePanelWidth}
+            resizable={false}
+            onClose={() => {
+              onSidePanelOpenChange?.(false);
+            }}
+            className="flex h-full min-h-0 w-full min-w-0"
+          />
+        </WorkspaceRailDrawer>
       ) : null}
     </div>
   );
