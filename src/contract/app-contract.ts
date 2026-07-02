@@ -327,6 +327,14 @@ export const CHANNELS = {
     saveClipboardImage: "lvis:attach:saveClipboardImage",
     openExternal: "lvis:attach:openExternal",
   },
+  preview: {
+    readFile: "lvis:preview:read-file",
+  },
+  workspace: {
+    pickRoot: "lvis:workspace:pick-root",
+    listRoots: "lvis:workspace:list-roots",
+    listDir: "lvis:workspace:list-dir",
+  },
   // ── Interactive PTY terminal (#1444, workspace rail) ──────────────────────
   // ALL INTERNAL: deliberately absent from PUBLIC_CHANNELS / CHANNEL_GESTURE /
   // EXTERNAL_MUTATION_CHANNELS. A terminal spawns arbitrary user commands, so

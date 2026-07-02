@@ -6,6 +6,8 @@ import {
 } from "./command-actions.js";
 import {
   Check,
+  ChevronDown,
+  ChevronRight,
   Code2,
   Copy,
   ExternalLink,
@@ -13,6 +15,7 @@ import {
   FileCode,
   FileText,
   Folder,
+  FolderPlus,
   Globe,
   Image,
   LayoutGrid,
@@ -61,6 +64,8 @@ const FILE_TARGET_KINDS = new Set<ChatPreviewTarget["kind"]>(["file", "diff", "i
 const BROWSER_TARGET_KINDS = new Set<ChatPreviewTarget["kind"]>(["html", "url"]);
 const FILE_TREE_MIN_PERCENT = 22;
 const FILE_TREE_MAX_PERCENT = 72;
+/** Pointer travel (px) that promotes a tab press into a horizontal pan. */
+const TAB_DRAG_THRESHOLD_PX = 6;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -221,6 +226,116 @@ function CopyButton({ value }: { value: string }) {
   );
 }
 
+type PreviewReadError = NonNullable<Awaited<ReturnType<typeof window.lvis.preview.readFile>>["error"]>;
+
+/** Map a preview-read error code to its Korean user message key. */
+function fileErrorKey(code: PreviewReadError): string {
+  switch (code) {
+    case "path-not-allowed":
+    case "sensitive-path":
+      return "chatPreviewRail.fileErrorNotAllowed";
+    case "binary-file":
+      return "chatPreviewRail.fileErrorBinary";
+    case "too-large":
+      return "chatPreviewRail.fileErrorTooLarge";
+    case "not-a-file":
+      return "chatPreviewRail.fileErrorGlob";
+    case "read-failed":
+      return "chatPreviewRail.fileErrorNotFound";
+    default:
+      return "chatPreviewRail.fileErrorGeneric";
+  }
+}
+
+/**
+ * File preview body. Renders the file's CONTENT through the progressive
+ * renderer registry (markdown/mermaid/text), loading it via the traversal-
+ * guarded `window.lvis.preview.readFile` IPC when the target has no inline
+ * text (diagnosis ①). Search-hit targets that already carry `inlineText`
+ * render it directly without an IPC round-trip.
+ */
+function FilePreviewBody({ target }: { target: Extract<ChatPreviewTarget, { kind: "file" }> }) {
+  const { t } = useTranslation();
+  const [state, setState] = useState<
+    | { phase: "idle" }
+    | { phase: "loading" }
+    | { phase: "ok"; content: string; path: string; truncated: boolean }
+    | { phase: "error"; code: PreviewReadError }
+  >({ phase: "idle" });
+
+  useEffect(() => {
+    // Inline text (e.g. an indexer search-hit snippet) needs no IPC read.
+    if (target.inlineText) {
+      setState({ phase: "idle" });
+      return;
+    }
+    let cancelled = false;
+    setState({ phase: "loading" });
+    void window.lvis.preview
+      .readFile(target.path)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.ok) {
+          setState({
+            phase: "ok",
+            content: result.content ?? "",
+            path: result.path ?? target.path,
+            truncated: Boolean(result.truncated),
+          });
+        } else {
+          setState({ phase: "error", code: result.error ?? "read-failed" });
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setState({ phase: "error", code: "read-failed" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [target.path, target.inlineText]);
+
+  const copyValue = target.inlineText
+    ?? (state.phase === "ok" ? state.content : target.path);
+
+  return (
+    <div className="space-y-3" data-testid="chat-side-panel-file-preview">
+      <div className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 font-mono text-[11px] [overflow-wrap:anywhere]">
+        {target.path}
+      </div>
+      {target.inlineText ? (
+        <PreviewContent descriptor={{ text: target.inlineText, path: target.path }} />
+      ) : state.phase === "loading" ? (
+        <div className="text-xs text-muted-foreground" data-testid="chat-side-panel-file-loading">
+          {t("chatPreviewRail.filePreviewLoading")}
+        </div>
+      ) : state.phase === "ok" ? (
+        <div className="space-y-2">
+          {state.truncated ? (
+            <Badge variant="outline" className="px-1 py-0 text-[10px]" data-testid="chat-side-panel-file-truncated">
+              {t("chatPreviewRail.filePreviewTruncated")}
+            </Badge>
+          ) : null}
+          <PreviewContent descriptor={{ text: state.content, path: state.path }} />
+        </div>
+      ) : state.phase === "error" ? (
+        <div className="text-[11px] text-destructive" data-testid="chat-side-panel-file-error">
+          {t(fileErrorKey(state.code))}
+        </div>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        {target.canOpenExternal ? (
+          <Button type="button" size="sm" variant="outline" onClick={() => void window.lvis.attach.openExternal(target.path)}>
+            <ExternalLink className="h-3.5 w-3.5" />
+            <span>{t("chatPreviewRail.openFile")}</span>
+          </Button>
+        ) : null}
+        <CopyButton value={copyValue} />
+      </div>
+    </div>
+  );
+}
+
 function PreviewBody({
   api,
   sessionId,
@@ -304,28 +419,7 @@ function PreviewBody({
   }
 
   if (target.kind === "file") {
-    return (
-      <div className="space-y-3">
-        <div className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 font-mono text-[11px] [overflow-wrap:anywhere]">
-          {target.path}
-        </div>
-        {target.inlineText ? (
-          <PreviewContent descriptor={{ text: target.inlineText, path: target.path }} />
-        ) : null}
-        <div className="flex flex-wrap gap-2">
-          {target.canOpenExternal ? (
-            <Button type="button" size="sm" variant="outline" onClick={() => void window.lvis.attach.openExternal(target.path)}>
-              <ExternalLink className="h-3.5 w-3.5" />
-              <span>{t("chatPreviewRail.openFile")}</span>
-            </Button>
-          ) : null}
-          <CopyButton value={target.inlineText ?? rawText} />
-        </div>
-        {!target.canOpenExternal && !target.inlineText ? (
-          <div className="text-[11px] text-muted-foreground">{t("chatPreviewRail.pathOnlyHint")}</div>
-        ) : null}
-      </div>
-    );
+    return <FilePreviewBody target={target} />;
   }
 
   if (target.kind === "url") {
@@ -507,6 +601,279 @@ function FileTreeRows({
   );
 }
 
+function fileBasename(path: string): string {
+  const segments = pathSegments(path);
+  return segments[segments.length - 1] ?? path;
+}
+
+type WorkspaceDirEntry = { name: string; path: string; type: "file" | "directory" };
+
+/**
+ * Project-folder browser (diagnosis ③). Lists the persisted project roots
+ * (default workspace + Settings `additionalDirectories`) and lets the user add
+ * a new one via the native picker. Folders lazy-expand through
+ * `window.lvis.workspace.listDir` (scope-revalidated in main); clicking a file
+ * routes to `onOpenFile`, which loads its content via the same traversal-guarded
+ * preview IPC used everywhere else.
+ */
+function ProjectRootsBrowser({
+  onOpenFile,
+  selectedPath,
+}: {
+  onOpenFile: (path: string) => void;
+  selectedPath: string | null;
+}) {
+  const { t } = useTranslation();
+  const [roots, setRoots] = useState<Array<{ path: string; isDefault: boolean }>>([]);
+  const [activeRoot, setActiveRoot] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [childrenByPath, setChildrenByPath] = useState<Record<string, WorkspaceDirEntry[]>>({});
+  const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
+  // A path is "attempted" once loadDir resolves (success OR failure). The
+  // auto-load effect keys off this so a dir whose listDir FAILED is not retried
+  // forever: a failed listDir never populates childrenByPath, so without this the
+  // effect would refire every render → an infinite render→IPC loop.
+  const [attemptedPaths, setAttemptedPaths] = useState<Set<string>>(new Set());
+  const [errorByPath, setErrorByPath] = useState<Record<string, string>>({});
+  // A picked folder whose adjacency warnings must be acknowledged before the
+  // main process (workspace.pickRoot gate) will persist it into the read scope.
+  // `ackToken` binds the confirmation to the exact dialog-picked path the main
+  // process holds — the renderer echoes the token, never a path, so it can't
+  // widen the read scope to a directory the native picker never returned.
+  const [pendingWarning, setPendingWarning] = useState<
+    { path: string; warnings: string[]; ackToken: string } | null
+  >(null);
+
+  const loadDir = useCallback(async (path: string) => {
+    setLoadingPaths((prev) => new Set(prev).add(path));
+    try {
+      const res = await window.lvis.workspace.listDir(path);
+      if (res.ok && res.entries) {
+        setChildrenByPath((prev) => ({ ...prev, [path]: res.entries ?? [] }));
+        setErrorByPath((prev) => {
+          if (!(path in prev)) return prev;
+          const next = { ...prev };
+          delete next[path];
+          return next;
+        });
+      } else {
+        // Surface the failure rather than swallowing it silently.
+        setErrorByPath((prev) => ({ ...prev, [path]: res.error ?? "read-failed" }));
+      }
+    } catch {
+      setErrorByPath((prev) => ({ ...prev, [path]: "read-failed" }));
+    } finally {
+      setAttemptedPaths((prev) => new Set(prev).add(path));
+      setLoadingPaths((prev) => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    }
+  }, []);
+
+  const applyRoots = useCallback(
+    (next: Array<{ path: string; isDefault: boolean }>, preferred?: string | null) => {
+      setRoots(next);
+      setActiveRoot((prev) => {
+        const keep = preferred ?? prev;
+        if (keep && next.some((r) => r.path === keep)) return keep;
+        return next[0]?.path ?? null;
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.lvis.workspace.listRoots().then((res) => {
+      if (cancelled || !res.ok || !res.roots) return;
+      applyRoots(res.roots);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [applyRoots]);
+
+  useEffect(() => {
+    if (
+      activeRoot &&
+      !childrenByPath[activeRoot] &&
+      !loadingPaths.has(activeRoot) &&
+      !attemptedPaths.has(activeRoot)
+    ) {
+      void loadDir(activeRoot);
+    }
+  }, [activeRoot, childrenByPath, loadingPaths, attemptedPaths, loadDir]);
+
+  const toggleFolder = (path: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+        // Manual expand is a user gesture (not a render loop): allow a retry of a
+        // previously-failed folder by clearing its attempted mark before loading.
+        if (!childrenByPath[path] && !loadingPaths.has(path)) {
+          setAttemptedPaths((prevAttempted) => {
+            if (!prevAttempted.has(path)) return prevAttempted;
+            const nextAttempted = new Set(prevAttempted);
+            nextAttempted.delete(path);
+            return nextAttempted;
+          });
+          void loadDir(path);
+        }
+      }
+      return next;
+    });
+  };
+
+  const addFolder = async () => {
+    const res = await window.lvis.workspace.pickRoot();
+    if (!res.ok) return;
+    if (res.requiresAcknowledgement && res.pendingPath && res.ackToken) {
+      setPendingWarning({ path: res.pendingPath, warnings: res.warnings ?? [], ackToken: res.ackToken });
+      return;
+    }
+    if (res.roots) applyRoots(res.roots, res.added ?? null);
+  };
+
+  const confirmPendingFolder = async () => {
+    const pending = pendingWarning;
+    if (!pending) return;
+    // Second, explicit confirmation — echo the one-time token (never a path).
+    // Main persists the token-bound dialog path and still hard-refuses a
+    // sensitive/root path even when acknowledged.
+    const res = await window.lvis.workspace.pickRoot({ ackToken: pending.ackToken });
+    setPendingWarning(null);
+    if (res.ok && res.roots) applyRoots(res.roots, res.added ?? null);
+  };
+
+  const renderEntries = (path: string, depth: number): ReactElement => (
+    <>
+      {(childrenByPath[path] ?? []).map((entry) => {
+        const isDir = entry.type === "directory";
+        const isOpen = expanded.has(entry.path);
+        const active = !isDir && entry.path === selectedPath;
+        return (
+          <div key={entry.path} role="treeitem" aria-expanded={isDir ? isOpen : undefined}>
+            <button
+              type="button"
+              data-testid={isDir ? "chat-side-panel-fs-folder" : "chat-side-panel-fs-file"}
+              className={`flex h-7 w-full min-w-0 items-center gap-1 rounded-md pr-2 text-left text-xs hover:bg-muted/(--opacity-muted) ${
+                active ? "bg-accent text-accent-foreground" : ""
+              }`}
+              style={{ paddingLeft: 8 + depth * 12 }}
+              onClick={() => (isDir ? toggleFolder(entry.path) : onOpenFile(entry.path))}
+            >
+              {isDir ? (
+                isOpen ? (
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                )
+              ) : (
+                <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              )}
+              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+            </button>
+            {isDir && isOpen ? renderEntries(entry.path, depth + 1) : null}
+          </div>
+        );
+      })}
+    </>
+  );
+
+  return (
+    <div className="space-y-1" data-testid="chat-side-panel-project-roots">
+      <div className="flex items-center gap-1">
+        {roots.length > 1 ? (
+          <select
+            aria-label={t("chatPreviewRail.rootSelectLabel")}
+            data-testid="chat-side-panel-root-select"
+            className="h-7 min-w-0 flex-1 rounded-md border bg-background px-1 text-xs"
+            value={activeRoot ?? ""}
+            onChange={(event) => setActiveRoot(event.target.value)}
+          >
+            {roots.map((root) => (
+              <option key={root.path} value={root.path}>
+                {fileBasename(root.path)}
+                {root.isDefault ? ` · ${t("chatPreviewRail.rootDefaultBadge")}` : ""}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-muted-foreground">
+            {activeRoot ? fileBasename(activeRoot) : t("chatPreviewRail.projectRoots")}
+          </span>
+        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              data-testid="chat-side-panel-add-root"
+              aria-label={t("chatPreviewRail.addProjectRoot")}
+              onClick={() => void addFolder()}
+            >
+              <FolderPlus className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t("chatPreviewRail.addProjectRoot")}</TooltipContent>
+        </Tooltip>
+      </div>
+      {pendingWarning ? (
+        <div
+          data-testid="chat-side-panel-root-warning"
+          className="space-y-2 rounded-md border border-destructive bg-destructive/(--opacity-muted) p-2 text-[11px]"
+        >
+          <div className="font-medium text-destructive">{t("chatPreviewRail.rootWarningTitle")}</div>
+          <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground [overflow-wrap:anywhere]">
+            {pendingWarning.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              data-testid="chat-side-panel-root-warning-confirm"
+              onClick={() => void confirmPendingFolder()}
+            >
+              {t("chatPreviewRail.rootWarningConfirm")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              data-testid="chat-side-panel-root-warning-cancel"
+              onClick={() => setPendingWarning(null)}
+            >
+              {t("common.cancel")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {activeRoot ? (
+        loadingPaths.has(activeRoot) && !childrenByPath[activeRoot] ? (
+          <div className="px-2 py-1 text-[11px] text-muted-foreground">{t("chatPreviewRail.filePreviewLoading")}</div>
+        ) : errorByPath[activeRoot] ? (
+          <div className="px-2 py-1 text-[11px] text-destructive" data-testid="chat-side-panel-fs-error">
+            {t("chatPreviewRail.dirLoadError")}
+          </div>
+        ) : (
+          <div role="tree" aria-label={t("chatPreviewRail.projectRoots")}>{renderEntries(activeRoot, 0)}</div>
+        )
+      ) : (
+        <div className="px-2 py-1 text-[11px] text-muted-foreground">{t("chatPreviewRail.projectRootsEmpty")}</div>
+      )}
+    </div>
+  );
+}
+
 function FileBrowserWorkspace({
   api,
   sessionId,
@@ -525,6 +892,9 @@ function FileBrowserWorkspace({
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [treePanePercent, setTreePanePercent] = useState(45);
+  // A concrete filesystem file opened from the project-roots browser. Takes
+  // precedence over the session-artifact selection in the detail pane.
+  const [fsPath, setFsPath] = useState<string | null>(null);
   const splitLayoutRef = useRef<HTMLDivElement | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const tree = useMemo(() => filterFileTree(buildFileTree(files), query), [files, query]);
@@ -538,6 +908,20 @@ function FileBrowserWorkspace({
   );
   const selectedFileTarget = selectedFile?.previewTargetId ? targetById.get(selectedFile.previewTargetId) ?? null : null;
   const hasFiles = filteredFiles.length > 0;
+  const fsTarget = useMemo<Extract<ChatPreviewTarget, { kind: "file" }> | null>(() => {
+    if (!fsPath) return null;
+    return {
+      id: `fs:${fsPath}`,
+      kind: "file",
+      title: fileBasename(fsPath),
+      sourceLabel: "workspace",
+      createdOrder: Number.MAX_SAFE_INTEGER,
+      path: fsPath,
+      // Not in the attach allow-list, so the OS "open" button would be denied —
+      // keep it off; content still loads through the preview IPC.
+      canOpenExternal: false,
+    };
+  }, [fsPath]);
 
   useEffect(() => {
     if (selectedFile?.previewTargetId && selectedFile.previewTargetId !== selectedId) {
@@ -559,29 +943,36 @@ function FileBrowserWorkspace({
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-file-browser">
       <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
-      {!hasFiles ? (
-        <div className="min-h-0 flex-1 overflow-auto p-3" data-testid="chat-side-panel-file-empty">
-          <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>
-        </div>
-      ) : (
       <div
         ref={splitLayoutRef}
         className="grid min-h-0 w-full min-w-0 flex-1 overflow-hidden"
         data-testid="chat-side-panel-file-split-layout"
         style={{ gridTemplateRows: `${treePanePercent}% 0.75rem minmax(0, 1fr)` }}
       >
-        <div className="min-h-0 overflow-auto border-b p-2" data-testid="chat-side-panel-file-tree">
-          {tree.length > 0 ? (
-            <FileTreeRows
-              nodes={tree}
-              selectedFileId={selectedFile?.id}
-              onSelectFile={(file) => {
-                if (file.previewTargetId) onSelect(file.previewTargetId);
-              }}
-            />
-          ) : (
-            <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>
-          )}
+        <div className="min-h-0 space-y-2 overflow-auto border-b p-2" data-testid="chat-side-panel-file-tree">
+          <ProjectRootsBrowser
+            selectedPath={fsPath}
+            onOpenFile={(path) => {
+              setFsPath(path);
+            }}
+          />
+          <div className="border-t pt-1">
+            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t("chatPreviewRail.sessionFilesSection")}
+            </div>
+            {hasFiles && tree.length > 0 ? (
+              <FileTreeRows
+                nodes={tree}
+                selectedFileId={fsPath ? undefined : selectedFile?.id}
+                onSelectFile={(file) => {
+                  setFsPath(null);
+                  if (file.previewTargetId) onSelect(file.previewTargetId);
+                }}
+              />
+            ) : (
+              <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>
+            )}
+          </div>
         </div>
         <div
           role="separator"
@@ -626,7 +1017,12 @@ function FileBrowserWorkspace({
           <span className="h-0.5 w-full rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
         </div>
         <div className="min-h-0 overflow-auto p-3">
-          {selectedFileTarget ? (
+          {fsTarget ? (
+            <div className="space-y-3">
+              <DetailHeader target={fsTarget} />
+              <PreviewBody api={api} sessionId={sessionId} target={fsTarget} />
+            </div>
+          ) : selectedFileTarget ? (
             <div className="space-y-3">
               <DetailHeader target={selectedFileTarget} />
               <PreviewBody api={api} sessionId={sessionId} target={selectedFileTarget} />
@@ -647,7 +1043,6 @@ function FileBrowserWorkspace({
           )}
         </div>
       </div>
-      )}
     </div>
   );
 }
@@ -1240,6 +1635,71 @@ export function ChatSidePanel({
   // splitter cleanup) so a drag crossing an unmount boundary leaks no listeners.
   useEffect(() => () => resizeCleanupRef.current?.(), []);
 
+  // ─── Tab-bar horizontal scroll / drag-pan (diagnosis ②) ──────────────────
+  const tabScrollElRef = useRef<HTMLDivElement | null>(null);
+  const wheelCleanupRef = useRef<(() => void) | null>(null);
+  // dragging = pointer is down and tracked; moved = pan threshold crossed (so
+  // the trailing click is swallowed instead of selecting/closing a tab).
+  const tabDragRef = useRef({ dragging: false, startX: 0, startScroll: 0, moved: false });
+  useEffect(() => () => wheelCleanupRef.current?.(), []);
+
+  // Wheel (vertical → horizontal) + overflow tracking. Bound as a NON-passive
+  // native listener via a callback ref: React's onWheel is passive, so its
+  // preventDefault() is ignored (and the tab strip is conditionally rendered,
+  // so useEffect([]) would miss the mount). ResizeObserver keeps overflow live.
+  const attachTabScroll = useCallback((node: HTMLDivElement | null) => {
+    wheelCleanupRef.current?.();
+    wheelCleanupRef.current = null;
+    tabScrollElRef.current = node;
+    if (!node) return;
+    const onWheel = (event: WheelEvent) => {
+      if (node.scrollWidth <= node.clientWidth) return; // no overflow → let it be
+      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+      if (delta === 0) return;
+      node.scrollLeft += delta;
+      event.preventDefault(); // suppress ancestor vertical scroll / history back
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    wheelCleanupRef.current = () => node.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const onTabPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    // Mouse-only: touch already gets native `overflow-x-auto` panning; a second
+    // handler would double-scroll. Right/middle buttons never start a pan.
+    if (event.pointerType !== "mouse" || event.button !== 0) return;
+    const el = tabScrollElRef.current;
+    if (!el) return;
+    tabDragRef.current = { dragging: true, startX: event.clientX, startScroll: el.scrollLeft, moved: false };
+  };
+  const onTabPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const st = tabDragRef.current;
+    const el = tabScrollElRef.current;
+    if (!st.dragging || !el) return;
+    const dx = event.clientX - st.startX;
+    if (!st.moved && Math.abs(dx) > TAB_DRAG_THRESHOLD_PX) {
+      st.moved = true;
+      el.setPointerCapture?.(event.pointerId);
+      el.dataset.dragging = "true"; // cursor: grabbing, no re-render
+    }
+    if (st.moved) el.scrollLeft = st.startScroll - dx;
+  };
+  const onTabPointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    const st = tabDragRef.current;
+    const el = tabScrollElRef.current;
+    if (st.moved && el) {
+      el.releasePointerCapture?.(event.pointerId);
+      delete el.dataset.dragging;
+    }
+    st.dragging = false; // st.moved kept so onClickCapture can swallow the click
+  };
+  const onTabClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (tabDragRef.current.moved) {
+      event.preventDefault();
+      event.stopPropagation();
+      tabDragRef.current.moved = false;
+    }
+  };
+
   // Compute the clamped docked width for a pointer x, or null if the panel is
   // not mounted. Pure — it never touches React state (see the drag handler).
   const widthForClientX = (clientX: number): number | null => {
@@ -1315,6 +1775,20 @@ export function ChatSidePanel({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [addTab]);
+
+  // Keep the active tab in view when it changes / the strip resizes. Uses
+  // getBoundingClientRect + manual scrollLeft (not scrollIntoView) so it never
+  // nudges the ancestor vertical scroll.
+  useEffect(() => {
+    const el = tabScrollElRef.current;
+    if (!el || !activeTab) return;
+    const tabEl = el.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(activeTab.id)}"]`);
+    if (!tabEl) return;
+    const c = el.getBoundingClientRect();
+    const r = tabEl.getBoundingClientRect();
+    if (r.left < c.left) el.scrollLeft -= (c.left - r.left) + 8;
+    else if (r.right > c.right) el.scrollLeft += (r.right - c.right) + 8;
+  }, [activeTab, tabs.length]);
 
   return (
     <aside
@@ -1412,7 +1886,18 @@ export function ChatSidePanel({
 
         {tabs.length > 0 ? (
         <div className="flex min-w-0 shrink-0 items-center gap-2 border-b px-2 py-1">
-          <div className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="tablist" aria-label={t("chatPreviewRail.tabsLabel")}>
+          <div
+            ref={attachTabScroll}
+            role="tablist"
+            aria-label={t("chatPreviewRail.tabsLabel")}
+            data-testid="chat-side-panel-tab-scroll"
+            className="min-w-0 flex-1 cursor-grab overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden data-[dragging=true]:cursor-grabbing"
+            onPointerDown={onTabPointerDown}
+            onPointerMove={onTabPointerMove}
+            onPointerUp={onTabPointerEnd}
+            onPointerCancel={onTabPointerEnd}
+            onClickCapture={onTabClickCapture}
+          >
           <div className="flex min-w-max gap-1">
             {tabs.map((tab) => {
               const Icon = tabIcon(tab.kind);

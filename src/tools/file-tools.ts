@@ -11,7 +11,6 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { homedir } from "node:os";
 import {
   dirname,
   isAbsolute,
@@ -24,6 +23,12 @@ import { createInterface } from "node:readline";
 import { z } from "zod";
 
 import { validateSandboxPath } from "../sandbox/path-validator.js";
+import {
+  MAX_TEXT_FILE_BYTES,
+  expandTilde,
+  isBinaryFile,
+  readTextFileWindow,
+} from "./file-read-core.js";
 import { globToRegExp } from "../lib/glob-matcher.js";
 import { writeDiffSidecar, WRITE_DIFF_PREVIEW_LIMIT } from "./write-diff-cache.js";
 import {
@@ -44,10 +49,7 @@ type Result<T> = { ok: true; value: T } | { ok: false; error: ToolErrorResult };
 
 const DEFAULT_LINE_LIMIT = 2_000;
 const MAX_LINE_LIMIT = 5_000;
-const MAX_TEXT_FILE_BYTES = 2_000_000;
-
 const MAX_SEARCH_FILE_BYTES = 1_000_000;
-const BINARY_SAMPLE_BYTES = 8_192;
 const DEFAULT_RESULT_LIMIT = 200;
 const MAX_RESULT_LIMIT = 1_000;
 const MAX_SCAN_FILES = 50_000;
@@ -187,7 +189,7 @@ export class ReadFileTool extends FileTool<typeof ReadFileInputSchema> {
       return toolError(`read_file refused binary file: ${target}`);
     }
 
-    const window = await readLineWindow(target, input.offset, input.limit);
+    const window = await readTextFileWindow(target, input.offset, input.limit);
     return {
       output: JSON.stringify({
         path: target,
@@ -625,12 +627,6 @@ export function createFileTools(): Tool[] {
   ];
 }
 
-function expandTilde(path: string): string {
-  if (path === "~") return homedir();
-  if (path.startsWith("~/")) return join(homedir(), path.slice(2));
-  return path;
-}
-
 function sensitivePatternForPath(path: string): string | null {
   return isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(path)));
 }
@@ -652,40 +648,6 @@ async function statExistingPath(path: string): Promise<Result<Stats | null>> {
     }
     return { ok: false, error: toolError(`File stat failed: ${(err as Error).message}`) };
   }
-}
-
-async function isBinaryFile(path: string): Promise<boolean> {
-  const stream = createReadStream(path, { start: 0, end: BINARY_SAMPLE_BYTES - 1 });
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).includes(0);
-}
-
-async function readLineWindow(
-  path: string,
-  offset: number,
-  limit: number,
-): Promise<{ lines: string[]; truncated: boolean }> {
-  const input = createReadStream(path, { encoding: "utf8" });
-  const rl = createInterface({ input, crlfDelay: Infinity });
-  const lines: string[] = [];
-  let lineNo = 0;
-  let truncated = false;
-
-  for await (const line of rl) {
-    if (lineNo >= offset && lines.length < limit) {
-      lines.push(line);
-    } else if (lineNo >= offset && lines.length >= limit) {
-      truncated = true;
-      break;
-    }
-    lineNo += 1;
-  }
-  rl.close();
-  input.destroy();
-  return { lines, truncated };
 }
 
 interface ListedEntry {
