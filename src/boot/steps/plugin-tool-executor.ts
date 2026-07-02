@@ -29,7 +29,10 @@ import {
   currentInvocationOrigin,
   runWithInvocationOrigin,
 } from "../../plugins/runtime/origin-chain.js";
-import { isUiOnlyRuntimeInvocation } from "../plugin-tool-invocation.js";
+import {
+  isUiOnlyRuntimeInvocation,
+  uiOnlyRuntimeInvocationRequiresUserAction,
+} from "../plugin-tool-invocation.js";
 import type { BootContext } from "../context.js";
 
 function toPluginToolInput(payload: unknown): Record<string, unknown> {
@@ -100,7 +103,13 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     return runWithInvocationOrigin(context.origin, context.parentOrigin, async () => {
       const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
       if (isUiOnlyRuntimeInvocation(pluginRuntime, toolName, context, effectiveOrigin)) {
-        return pluginRuntime.call(toolName, toPluginToolInput(payload));
+        if (
+          uiOnlyRuntimeInvocationRequiresUserAction(pluginRuntime, toolName, context) &&
+          context.userAction !== true
+        ) {
+          throw new Error(`UI action '${toolName}' requires an active user activation`);
+        }
+        return pluginRuntime.callDeclaredUiAction(toolName, toPluginToolInput(payload));
       }
 
       const [result] = await pluginSurfaceExecutor.executeAll(
@@ -118,6 +127,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
             // honoured and the reviewer lane is not re-engaged.
             headless: effectiveOrigin !== "ui",
             trustOrigin: "plugin-emitted",
+            pluginPanelUserAction: effectiveOrigin === "ui" && context.userAction === true,
           }),
         },
       );

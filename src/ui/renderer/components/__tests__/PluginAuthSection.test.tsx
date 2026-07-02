@@ -94,7 +94,9 @@ describe("PluginAuthSection", () => {
     );
     fireEvent.click(screen.getByTestId("plugin-auth-login-ms-graph"));
     await waitFor(() => {
-      expect(api.callPluginMethod).toHaveBeenCalledWith("ms_login");
+      expect(api.callPluginMethod).toHaveBeenCalledWith("ms_login", undefined, {
+        userAction: true,
+      });
     });
     expect(onRefresh).toHaveBeenCalled();
   });
@@ -120,7 +122,9 @@ describe("PluginAuthSection", () => {
     await waitFor(() => {
       expect(onOpenLoginUi).toHaveBeenCalledOnce();
     });
-    expect(api.callPluginMethod).not.toHaveBeenCalledWith("detached_login");
+    expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "detached_login")).toBe(
+      false,
+    );
     expect(onRefresh).not.toHaveBeenCalled();
   });
 
@@ -146,7 +150,9 @@ describe("PluginAuthSection", () => {
         expect(screen.getByText(/로그인에 실패했습니다/)).toBeInTheDocument();
       });
       expect(onOpenLoginUi).toHaveBeenCalledOnce();
-      expect(api.callPluginMethod).not.toHaveBeenCalledWith("detached_login");
+      expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "detached_login")).toBe(
+        false,
+      );
     } finally {
       consoleSpy.mockRestore();
     }
@@ -167,7 +173,9 @@ describe("PluginAuthSection", () => {
     );
     fireEvent.click(screen.getByTestId("plugin-auth-logout-ms-graph"));
     await waitFor(() => {
-      expect(api.callPluginMethod).toHaveBeenCalledWith("ms_signout");
+      expect(api.callPluginMethod).toHaveBeenCalledWith("ms_signout", undefined, {
+        userAction: true,
+      });
     });
     expect(onRefresh).toHaveBeenCalled();
   });
@@ -204,7 +212,7 @@ describe("PluginAuthSection", () => {
   it("renders generic Korean error copy on login rejection (does not leak raw IPC message)", async () => {
     const api = {
       callPluginMethod: vi.fn(async () => {
-        throw new Error("Method 'msgraph_auth' is not UI-callable for plugin 'ms-graph'");
+        throw new Error("Method 'msgraph_auth' is not declared as a UI action for plugin 'ms-graph'");
       }),
       onPluginEvent: vi.fn(() => () => undefined),
     } as unknown as LvisApi;
@@ -226,7 +234,7 @@ describe("PluginAuthSection", () => {
         expect(screen.getByText(/로그인에 실패했습니다/)).toBeInTheDocument();
       });
       // Raw IPC message must NOT appear in the rendered UI.
-      expect(screen.queryByText(/UI-callable/)).toBeNull();
+      expect(screen.queryByText(/UI action/)).toBeNull();
     } finally {
       consoleSpy.mockRestore();
     }

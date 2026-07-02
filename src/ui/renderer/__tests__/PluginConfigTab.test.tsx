@@ -665,7 +665,9 @@ describe("PluginConfigTab — auth UI", () => {
     fireEvent.click(loginButton);
 
     await waitFor(() => {
-      expect(callPluginMethod).toHaveBeenCalledWith("token_login");
+      expect(callPluginMethod).toHaveBeenCalledWith("token_login", undefined, {
+        userAction: true,
+      });
     });
     expect(window.lvisApi.window.openDetached).not.toHaveBeenCalled();
   });

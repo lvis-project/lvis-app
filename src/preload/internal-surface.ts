@@ -572,7 +572,13 @@ export function buildInternalApiSurface() {
   // ({ ok, pluginId, enabled } | { ok:false, error, message }).
   setPluginEnabled: async (pluginId: string, enabled: boolean) =>
     ipcRenderer.invoke(CHANNELS.plugins.setEnabled, pluginId, enabled),
-  callPluginMethod: async (method: string, payload?: unknown) => ipcRenderer.invoke(CHANNELS.plugins.call, method, payload),
+  callPluginMethod: async (
+    method: string,
+    payload?: unknown,
+    options?: { userAction?: boolean },
+  ) => ipcRenderer.invoke(CHANNELS.plugins.call, method, payload, {
+    userAction: options?.userAction === true && navigator.userActivation?.isActive === true,
+  }),
 
 
   // ─── Overlay trigger lifecycle ────────────────────────────────────────
@@ -656,7 +662,17 @@ export function buildInternalApiSurface() {
     }>,
 
   // ─── Marketplace update notifications (S8) ───────
-  onMarketplaceUpdatesAvailable: (handler: (updates: Array<{ pluginId: string; pluginName?: string; installedVersion: string; latestVersion: string }>) => void) => {
+  onMarketplaceUpdatesAvailable: (handler: (updates: Array<{
+    pluginId: string;
+    pluginName?: string;
+    installedVersion: string;
+    latestVersion: string;
+    networkAccess?: {
+      allowedDomains: string[];
+      reasoning?: string;
+      allowPrivateNetworks?: boolean;
+    };
+  }>) => void) => {
     const listener = (_event: unknown, updates: Parameters<typeof handler>[0]) => handler(updates);
     ipcRenderer.on("marketplace:updates-available", listener);
     return () => ipcRenderer.removeListener("marketplace:updates-available", listener);
@@ -1485,6 +1501,14 @@ export function buildInternalApiSurface() {
       ipcRenderer.invoke(CHANNELS.window.resizeForMode, mode) as Promise<
         { ok: true } | { ok: false; error: string }
       >,
+    /**
+     * Resize the chat-mode main window for the right-side work panel. Opening
+     * adds side-panel width; closing restores the normal chat bounds.
+     */
+    resizeForSidePanel: async (open: boolean) =>
+      ipcRenderer.invoke(CHANNELS.window.resizeForSidePanel, open) as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
     /** Open a render_html result in an isolated BrowserWindow. */
     openHtmlPreview: async (payload: OpenHtmlPreviewWindowPayload) =>
       ipcRenderer.invoke(CHANNELS.window.openHtmlPreview, payload) as Promise<OpenHtmlPreviewWindowResult>,
@@ -1565,8 +1589,15 @@ export function buildLvisHostWorld() {
     if (hostMarketplaceApiClaimed) return null;
     hostMarketplaceApiClaimed = true;
     return {
-      installMarketplacePlugin: async (pluginId: string, expectedVersion?: string) =>
-        normalizePluginActionResult(await ipcRenderer.invoke(CHANNELS.plugins.install, pluginId, expectedVersion ? { expectedVersion } : undefined)),
+      installMarketplacePlugin: async (
+        pluginId: string,
+        expectedVersion?: string,
+        options?: { networkAccessAcknowledgement?: unknown },
+      ) =>
+        normalizePluginActionResult(await ipcRenderer.invoke(CHANNELS.plugins.install, pluginId, {
+          ...(expectedVersion ? { expectedVersion } : {}),
+          ...(options?.networkAccessAcknowledgement ? { networkAccessAcknowledgement: options.networkAccessAcknowledgement } : {}),
+        })),
       uninstallMarketplacePlugin: async (pluginId: string) =>
         normalizePluginActionResult(await ipcRenderer.invoke(CHANNELS.plugins.uninstall, pluginId)),
       installMarketplaceAgent: async (slug: string) =>

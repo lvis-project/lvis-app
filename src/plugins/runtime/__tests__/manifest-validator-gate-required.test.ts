@@ -78,7 +78,7 @@ describe("parsePluginJson — SDK schema validator required", () => {
         version: "1.0.0",
         entry: "dist/index.js",
         tools: [],
-        uiCallable: ["ui_upload_chunk"],
+        uiActions: { ui_upload_chunk: {} },
         description: "Validator UI-only runtime method test plugin",
         publisher: "Test",
       }),
@@ -87,8 +87,71 @@ describe("parsePluginJson — SDK schema validator required", () => {
 
     const validator = await buildManifestValidator();
     await expect(parsePluginJson(manifestPath, validator)).resolves.toMatchObject({
-      uiCallable: ["ui_upload_chunk"],
+      uiActions: { ui_upload_chunk: {} },
       tools: [],
+    });
+  });
+
+  it("allows uiActions runtime methods to stay out of tools[]", async () => {
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "test-validator",
+        name: "Validator Test",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: [],
+        uiActions: {
+          ui_upload_chunk: { description: "Upload a staged chunk from the panel" },
+        },
+        description: "Validator UI action runtime method test plugin",
+        publisher: "Test",
+      }),
+      "utf-8",
+    );
+
+    const validator = await buildManifestValidator();
+    await expect(parsePluginJson(manifestPath, validator)).resolves.toMatchObject({
+      uiActions: {
+        ui_upload_chunk: { description: "Upload a staged chunk from the panel" },
+      },
+      tools: [],
+    });
+  });
+
+  it("allows auth tools to be declared in uiActions without legacy uiActions", async () => {
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "test-validator",
+        name: "Validator Test",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: [],
+        uiActions: {
+          auth_status: {},
+          auth_login: {},
+        },
+        auth: {
+          statusTool: "auth_status",
+          loginTool: "auth_login",
+        },
+        description: "Validator UI action auth test plugin",
+        publisher: "Test",
+      }),
+      "utf-8",
+    );
+
+    const validator = await buildManifestValidator();
+    await expect(parsePluginJson(manifestPath, validator)).resolves.toMatchObject({
+      auth: {
+        statusTool: "auth_status",
+        loginTool: "auth_login",
+      },
+      uiActions: {
+        auth_status: {},
+        auth_login: {},
+      },
     });
   });
 });

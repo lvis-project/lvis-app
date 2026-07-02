@@ -398,6 +398,48 @@ describe("WindowManager IPC — validateSender guard", () => {
       expect(bounds.x + bounds.width).toBeLessThanOrEqual(1920);
     });
 
+    it("resizes chat mode for the side panel and restores normal chat bounds when closed", async () => {
+      const main = makeMainWindow();
+      wm.registerMainWindow(main as never);
+      fromId.mockReturnValue(main);
+      const handler = handleMap.get("lvis:window:resize-for-side-panel")!;
+
+      const openResult = await handler(trustedEvent(), true);
+      expect(openResult).toEqual({ ok: true });
+      flushTween();
+      const expanded = lastBounds(main);
+      expect(expanded.width).toBe(908);
+      expect(expanded.height).toBe(840);
+      expect(expanded.x + expanded.width).toBe(1910);
+
+      const closeResult = await handler(trustedEvent(), false);
+      expect(closeResult).toEqual({ ok: true });
+      flushTween();
+      const restored = lastBounds(main);
+      expect(restored.width).toBe(460);
+      expect(restored.height).toBe(expanded.height);
+      expect(restored.y).toBe(expanded.y);
+      expect(restored.x + restored.width).toBe(expanded.x + expanded.width);
+    });
+
+    it("rejects invalid side-panel resize payloads", async () => {
+      const main = makeMainWindow();
+      wm.registerMainWindow(main as never);
+      fromId.mockReturnValue(main);
+      const handler = handleMap.get("lvis:window:resize-for-side-panel")!;
+
+      const result = await handler(trustedEvent(), "open");
+      expect(result).toEqual({ ok: false, error: "invalid-open-state" });
+      expect(main.setBounds).not.toHaveBeenCalled();
+    });
+
+    it("audits unauthorized side-panel resize requests", async () => {
+      const handler = handleMap.get("lvis:window:resize-for-side-panel")!;
+      const result = await handler(unauthorizedEvent(), true);
+      expect(result).toEqual(UNAUTHORIZED_FRAME);
+      expect(auditLogger.log).toHaveBeenCalledOnce();
+    });
+
     it("cancels an in-flight tween so the latest target wins and lands exactly", async () => {
       const main = makeMainWindow();
       wm.registerMainWindow(main as never);

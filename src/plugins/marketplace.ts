@@ -27,6 +27,11 @@ import { createLogger } from "../lib/logger.js";
 import { readAgentRegistry } from "../agents/agent-registry.js";
 import { readSkillRegistry } from "../skills/skill-registry.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import {
+  buildNetworkAccessAcknowledgement,
+  networkAccessGrantsEqual,
+  type NetworkAccessAcknowledgement,
+} from "../shared/network-access.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 const log = createLogger("marketplace");
 
@@ -58,6 +63,24 @@ function shaOfManifest(manifest: unknown): string {
  */
 function shaOfCatalogItem(item: PluginMarketplaceItem): string {
   return createHash("sha256").update(canonicalJSON(item)).digest("hex");
+}
+
+function hasExternalAuthConsumerCapability(source: {
+  capabilities?: readonly string[];
+}): boolean {
+  return source.capabilities?.includes("external-auth-consumer") === true;
+}
+
+function assertNetworkAccessAcknowledgement(options: {
+  plugin: PluginMarketplaceItem;
+  acknowledgement?: NetworkAccessAcknowledgement;
+}): void {
+  const expected = buildNetworkAccessAcknowledgement(options.plugin.networkAccess);
+  if (!expected) return;
+  if (JSON.stringify(options.acknowledgement ?? null) === JSON.stringify(expected)) return;
+  throw new Error(
+    `plugin "${options.plugin.id}" networkAccess grant must be acknowledged before install`,
+  );
 }
 
 function resolveRollbackInstallSource(
@@ -443,6 +466,7 @@ export class PluginMarketplaceService {
   async install(
     pluginId: string,
     onProgress?: (event: InstallerProgressEvent) => void,
+    options?: { networkAccessAcknowledgement?: NetworkAccessAcknowledgement },
   ): Promise<{ pluginId: string; installed: true }> {
     // #1098 — capture ONE catalog snapshot and use it for the whole install:
     // the escalation decision, the deployment guard, and the artifact select.
@@ -458,6 +482,12 @@ export class PluginMarketplaceService {
     const catalogItem = catalogSnapshot.find(
       (x) => x.id === pluginId || x.slug === pluginId,
     );
+    if (catalogItem) {
+      assertNetworkAccessAcknowledgement({
+        plugin: catalogItem,
+        acknowledgement: options?.networkAccessAcknowledgement,
+      });
+    }
     if (catalogItem && normalizeInstallPolicy(catalogItem) === "admin") {
       actor = "it-admin";
       try {
@@ -850,6 +880,7 @@ export class PluginMarketplaceService {
   async installPlugin(
     pluginId: string,
     version: string,
+    options?: { networkAccessAcknowledgement?: NetworkAccessAcknowledgement },
   ): Promise<{ pluginId: string; installed: true; version: string }> {
     return this.withPluginLock(pluginId, async () => {
       const plugins = await this.fetcher.listPlugins();
@@ -857,6 +888,10 @@ export class PluginMarketplaceService {
       if (!plugin) {
         throw new Error(`Plugin not found in marketplace: ${pluginId}`);
       }
+      assertNetworkAccessAcknowledgement({
+        plugin,
+        acknowledgement: options?.networkAccessAcknowledgement,
+      });
       if (this.deploymentGuard) {
         const guardResult = await this.deploymentGuard.canInstall(
           pluginId,
@@ -1415,13 +1450,14 @@ export class PluginMarketplaceService {
     if (options.ui && options.ui.length > 0) manifest.ui = options.ui;
     if (plugin.capabilities && plugin.capabilities.length > 0) manifest.capabilities = plugin.capabilities;
     if (plugin.keywords && plugin.keywords.length > 0) manifest.keywords = plugin.keywords;
-    if (plugin.uiCallable && plugin.uiCallable.length > 0) manifest.uiCallable = plugin.uiCallable;
+    if (plugin.uiActions && Object.keys(plugin.uiActions).length > 0) manifest.uiActions = plugin.uiActions;
     if (plugin.emittedEvents && plugin.emittedEvents.length > 0) manifest.emittedEvents = plugin.emittedEvents;
     if (plugin.notificationEvents && plugin.notificationEvents.length > 0) manifest.notificationEvents = plugin.notificationEvents;
     if (plugin.toolSchemas && Object.keys(plugin.toolSchemas).length > 0) manifest.toolSchemas = plugin.toolSchemas;
     if (plugin.installPolicy) manifest.installPolicy = plugin.installPolicy;
     if (plugin.dependencies && plugin.dependencies.length > 0) manifest.dependencies = plugin.dependencies;
     if (plugin.pluginAccess) manifest.pluginAccess = plugin.pluginAccess;
+    if (plugin.networkAccess) manifest.networkAccess = plugin.networkAccess;
     // Persist `requires` when EITHER capabilities or a minAppVersion is
     // declared so the load-time minAppVersion gate (runtime/index.ts) can
     // re-check after install / app downgrade.
@@ -1473,6 +1509,22 @@ export class PluginMarketplaceService {
         if (JSON.stringify(actualPluginAccess) !== JSON.stringify(expectedPluginAccess)) {
           throw new Error(
             `plugin "${plugin.id}" artifact manifest pluginAccess does not match the catalog-approved grant`,
+          );
+        }
+
+        if (!networkAccessGrantsEqual(plugin.networkAccess, manifest.networkAccess)) {
+          throw new Error(
+            `plugin "${plugin.id}" artifact manifest networkAccess does not match the catalog-approved grant`,
+          );
+        }
+        const expectedHostFetchCapability = hasExternalAuthConsumerCapability(plugin);
+        const actualHostFetchCapability = hasExternalAuthConsumerCapability(manifest);
+        if (
+          (plugin.networkAccess || manifest.networkAccess) &&
+          actualHostFetchCapability !== expectedHostFetchCapability
+        ) {
+          throw new Error(
+            `plugin "${plugin.id}" artifact manifest external-auth-consumer capability does not match the catalog-approved grant`,
           );
         }
 

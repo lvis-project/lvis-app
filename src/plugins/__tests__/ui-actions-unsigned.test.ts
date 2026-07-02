@@ -1,9 +1,9 @@
 /**
- * uiCallable validation — post-redesign behavior.
+ * uiActions validation — post-redesign behavior.
  *
  * The legacy suffix-based "destructive verb" gate (and its
  * `allowManagedUnsigned` escape hatch for managed plugins) has been
- * REMOVED. uiCallable validation is now purely structural: every entry
+ * REMOVED. uiActions validation is now purely structural: every entry
  * must be a string declared in manifest.tools[]. Any verb suffix
  * (`_get`, `_delete`, `_drop`, …) is accepted regardless of install policy
  * type or signature status.
@@ -15,15 +15,15 @@
  *     responsibility inside their own UI (see email_reply precedent).
  *
  * The `allowManagedUnsigned` option still exists in the constructor
- * signature but has NO EFFECT on uiCallable validation. The
- * `plugin_uiCallable_destructive_rejected` audit event is no longer emitted.
+ * signature but has NO EFFECT on uiActions validation. The
+ * `plugin_uiActions_destructive_rejected` audit event is no longer emitted.
  *
  * These tests pin that new contract:
- *   1. managed + `_delete` in uiCallable + no verifier → LOADS.
- *   2. user + `_delete` in uiCallable → LOADS.
- *   3. allowManagedUnsigned=true is a no-op for uiCallable (both
+ *   1. managed + `_delete` in uiActions + no verifier → LOADS.
+ *   2. user + `_delete` in uiActions → LOADS.
+ *   3. allowManagedUnsigned=true is a no-op for uiActions (both
  *      managed and user plugins load).
- *   4. No `plugin_uiCallable_destructive_rejected` audit entries are
+ *   4. No `plugin_uiActions_destructive_rejected` audit entries are
  *      ever generated.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -37,7 +37,7 @@ import {
   type TestPluginRuntimeFixture,
 } from "./test-helpers.js";
 
-describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
+describe("PluginRuntime — uiActions suffix-blocking removed", () => {
   let fixture: TestPluginRuntimeFixture;
   let auditEntries: Array<{ level: string; message: string; data?: unknown }>;
 
@@ -82,7 +82,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
     await writePlugin("p-managed-default", {
       installPolicy: "admin",
       tools: ["pmd_get", "pmd_delete"],
-      uiCallable: ["pmd_delete"],
+      uiActions: { pmd_delete: {} },
     });
 
     const runtime = runtimeWithAudit();
@@ -95,7 +95,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
     await writePlugin("p-user-delete", {
       installPolicy: "user",
       tools: ["pud_get", "pud_delete"],
-      uiCallable: ["pud_delete"],
+      uiActions: { pud_delete: {} },
     });
 
     const runtime = runtimeWithAudit();
@@ -104,16 +104,16 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
     expect(runtime.listPluginIds()).toContain("p-user-delete");
   });
 
-  it("allowManagedUnsigned has no effect on uiCallable validation (backward compat)", async () => {
+  it("allowManagedUnsigned has no effect on uiActions validation (backward compat)", async () => {
     await writePlugin("p-managed-allow", {
       installPolicy: "admin",
       tools: ["pma_get", "pma_delete"],
-      uiCallable: ["pma_delete"],
+      uiActions: { pma_delete: {} },
     });
     await writePlugin("p-user-allow", {
       installPolicy: "user",
       tools: ["pua_get", "pua_delete"],
-      uiCallable: ["pua_delete"],
+      uiActions: { pua_delete: {} },
     });
 
     // Rewrite the registry to include both plugins (writePlugin overwrites it).
@@ -139,7 +139,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
     await writePlugin("p-audit-check", {
       installPolicy: "user",
       tools: ["pac_get", "pac_delete"],
-      uiCallable: ["pac_delete"],
+      uiActions: { pac_delete: {} },
     });
 
     const runtime = runtimeWithAudit();
@@ -148,7 +148,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
     expect(runtime.listPluginIds()).toContain("p-audit-check");
     expect(
       auditEntries.some(
-        (e) => e.message === "plugin_uiCallable_destructive_rejected",
+        (e) => e.message === "plugin_uiActions_destructive_rejected",
       ),
     ).toBe(false);
   });

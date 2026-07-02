@@ -6,7 +6,7 @@
  *   - tool invocation across plugins (`assertToolAccess`)
  *   - event subscription across plugins (`assertEventSubscribeAccess`)
  *   - event emission of another plugin's event (`assertEventEmitAccess`)
- *   - renderer→plugin invocation allowlist (`assertUiCallable`)
+ *   - renderer→plugin invocation allowlist (`assertUiActionInvokable`)
  *
  * Each function is pure given its resolved inputs; the runtime resolves the
  * owner/grant/state and delegates the policy decision here so the rules and
@@ -100,17 +100,17 @@ export function assertEventEmitAccess(opts: {
 
 /**
  * Enforce the renderer→plugin allowlist: only methods declared in
- * `manifest.uiCallable[]` may be invoked from the UI IPC bridge.
+ * `manifest.uiActions` may be invoked from the UI IPC bridge.
  */
-export function assertUiCallable(opts: {
+export function assertUiActionInvokable(opts: {
   method: string;
   pluginId: string;
-  uiCallable: string[];
+  uiInvokable: string[];
 }): void {
-  if (!opts.uiCallable.includes(opts.method)) {
+  if (!opts.uiInvokable.includes(opts.method)) {
     throw new Error(
-      `Method '${opts.method}' is not UI-callable for plugin '${opts.pluginId}'. ` +
-        `Declare it in manifest.uiCallable[] to allow renderer invocation.`,
+      `Method '${opts.method}' is not declared as a UI action for plugin '${opts.pluginId}'. ` +
+        `Declare it in manifest.uiActions to allow renderer invocation.`,
     );
   }
 }

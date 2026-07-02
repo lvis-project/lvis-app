@@ -441,6 +441,7 @@ describe("preload contextBridge world shape lock", () => {
             "openDetached",
             "openHtmlPreview",
             "resizeForMode",
+            "resizeForSidePanel",
           ],
         },
         "lvisHost": {

@@ -41,6 +41,7 @@ import {
 import { uninstallPluginWithLifecycle } from "../../plugins/uninstall-lifecycle.js";
 import { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../../plugins/types.js";
 import { lvisHome } from "../../shared/lvis-home.js";
+import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import { handlePluginCards, handleMarketplaceList } from "../handlers/plugins.js";
 const log = createLogger("lvis");
 const MARKETPLACE_PING_TIMEOUT_MS = 15_000;
@@ -60,6 +61,19 @@ function asPlainRecord(value: unknown): Record<string, unknown> {
     return value as Record<string, unknown>;
   }
   return {};
+}
+
+function parseNetworkAccessAcknowledgement(value: unknown): NetworkAccessAcknowledgement | undefined {
+  const input = asPlainRecord(value);
+  const rawDomains = input.allowedDomains;
+  if (!Array.isArray(rawDomains)) return undefined;
+  const allowedDomains = rawDomains
+    .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    .map((entry) => entry.trim());
+  return {
+    allowedDomains,
+    ...(input.allowPrivateNetworks === true ? { allowPrivateNetworks: true as const } : {}),
+  };
 }
 
 function sanitizeNotificationContextRef(value: unknown): NotificationContextRef | undefined {
@@ -411,6 +425,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const lifecycleSlug = pluginId;
     const installOptions = asPlainRecord(options);
     const expectedVersionValue = installOptions.expectedVersion;
+    const networkAccessAcknowledgement = parseNetworkAccessAcknowledgement(
+      installOptions.networkAccessAcknowledgement,
+    );
     if (expectedVersionValue !== undefined && typeof expectedVersionValue !== "string") {
       throw new Error("expectedVersion must be a string when provided");
     }
@@ -425,6 +442,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         requestedPluginId: pluginId,
         eventSlug: lifecycleSlug,
         expectedVersion,
+        networkAccessAcknowledgement,
         pluginRuntime,
         pluginMarketplace,
         broadcastInstallProgress: (payload) =>
@@ -936,9 +954,16 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // read-only, sender guard optional
   ipcMain.handle(CHANNELS.plugins.perfStats, () => pluginRuntime.getPerfStats());
 
-  ipcMain.handle(CHANNELS.plugins.call, (e, method: string, payload?: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.call, e); return UNAUTHORIZED_FRAME; }
-    return pluginRuntime.callFromUi(method, payload);
+  ipcMain.handle(CHANNELS.plugins.call, (
+    e,
+    method: string,
+    payload?: unknown,
+    options?: { userAction?: boolean },
+  ) => {
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.call, e); return UNAUTHORIZED_FRAME; }
+    return pluginRuntime.callFromUi(method, payload, {
+      userAction: options?.userAction === true,
+    });
   });
 
   // ─── MCP ──────────────────────────────────────
@@ -1366,7 +1391,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     return { ok: true as const, theme: getLastThemePayload() };
   });
 
-  ipcMain.handle(CHANNELS.pluginBridge.callTool, async (e, method: string, payload?: unknown) => {
+  ipcMain.handle(CHANNELS.pluginBridge.callTool, async (
+    e,
+    method: string,
+    payload?: unknown,
+    options?: { userAction?: boolean },
+  ) => {
     const binding = resolvePluginFromSender(e);
     if (!binding) {
       auditUnauthorized(auditLogger, CHANNELS.pluginBridge.callTool, e);
@@ -1389,7 +1419,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: false, error: "cross-plugin-call-denied" };
     }
     try {
-      const result = await pluginRuntime.callFromUi(method, payload);
+      const result = await pluginRuntime.callFromUi(method, payload, {
+        userAction: options?.userAction === true,
+      });
       return { ok: true, result };
     } catch (err) {
       return { ok: false, error: (err as Error).message };

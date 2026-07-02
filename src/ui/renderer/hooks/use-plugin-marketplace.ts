@@ -1,6 +1,11 @@
 import { useCallback, useState } from "react";
 import type { LvisApi } from "../types.js";
-import type { MarketplaceItem, PluginCardSummary, PluginUiExtension } from "../types.js";
+import type {
+  MarketplaceItem,
+  PluginCardSummary,
+  PluginMarketplaceInstallOptions,
+  PluginUiExtension,
+} from "../types.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import { t } from "../../../i18n/runtime.js";
 
@@ -58,10 +63,14 @@ export function usePluginMarketplace(api: LvisApi) {
     }
   }, [api]);
 
-  const installPlugin = useCallback(async (id: string, expectedVersion?: string) => {
+  const installPlugin = useCallback(async (
+    id: string,
+    expectedVersion?: string,
+    options?: PluginMarketplaceInstallOptions,
+  ) => {
     setWorking(true);
     try {
-      const result = await getHostMarketplaceApi().installMarketplacePlugin(id, expectedVersion);
+      const result = await getHostMarketplaceApi().installMarketplacePlugin(id, expectedVersion, options);
       if (!result.ok) {
         throw new Error(result.message ?? result.error);
       }
