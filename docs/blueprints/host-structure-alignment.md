@@ -1,4 +1,4 @@
-# Phase 4 — Host Structure Alignment (#1409 SDK/API/CLI boundary + #1411 mega-file decomposition)
+# Host Structure Alignment (#1409 SDK/API/CLI boundary + #1411 mega-file decomposition)
 
 > Status: **Landed** (single-PR, atomic commits C0–C19, branch `refactor/host-structure-alignment`).
 > Supersedes the "first refactor target" framing of #1411 with a full, dependency-ordered

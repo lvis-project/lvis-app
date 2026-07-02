@@ -1,7 +1,7 @@
 /**
  * ConversationLoop turn-runtime types.
  *
- * Wave 1 extraction (C9) — the public turn contract (`TurnCallbacks`,
+ * the public turn contract (`TurnCallbacks`,
  * `TurnStopReason`, `TurnResult`, `ConversationLoopDeps`) plus the internal
  * scope / diagnostics types shared across the `engine/turn/` units. These are
  * re-exported byte-identically from `engine/conversation-loop.js` so external

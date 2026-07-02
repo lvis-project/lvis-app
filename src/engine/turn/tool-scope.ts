@@ -1,5 +1,5 @@
 /**
- * Lazy tool-scope resolution helpers (C9 Wave 2).
+ * Lazy tool-scope resolution helpers.
  *
  * `resolveToolScope` + `rebuildToolSchemas` + scope predicates, extracted from
  * `conversation-loop.ts`. The class keeps delegators that forward `this.deps`

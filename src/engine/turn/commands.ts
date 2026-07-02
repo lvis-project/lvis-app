@@ -1,5 +1,5 @@
 /**
- * Slash-command handlers (C9 Wave 3).
+ * Slash-command handlers.
  *
  * `handleCommand` (built-in slash dispatch) and `handlePermissionCommand`
  * (`/permission ...` sub-dispatch). Extracted from `conversation-loop.ts` as

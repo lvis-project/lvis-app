@@ -1,5 +1,5 @@
 /**
- * queryLoop (C9 Wave 4) — the vendor-abstracted agentic round loop, extracted
+ * queryLoop — the vendor-abstracted agentic round loop, extracted
  * from conversation-loop.ts as a free function over `self: LoopContext`. All
  * turn state (history, provider, usage, lastRound/lastContext token fields,
  * guidance queue) stays on the ConversationLoop instance, accessed via `self`.

@@ -28,7 +28,7 @@ src/
   renderer.tsx                — minimal entry mounting ui/renderer/App.tsx
   plugin-ui-host.tsx          — Dynamic plugin UI mounting
 
-  ui/renderer/                — Renderer composition root (Phase 1~4.6 split; Phase 4 App/ChatView 분해)
+  ui/renderer/                — Renderer composition root (App/ChatView decomposed into roots + hooks)
     App.tsx                   — composition root: wires domain hooks + renders
                                 AppProviders > AppShell(children) + AppDialogs (C16)
     AppProviders.tsx · AppShell.tsx · AppDialogs.tsx  — App presentational split
@@ -36,7 +36,7 @@ src/
                                 ChatComposerDock (C15) · Sidebar.tsx · SettingsDialog.tsx · MainToolbar.tsx
     context/                  — ChatContext (state provider for ChatView subtree)
     state/                    — chat-scroll-store (module scroll singletons)
-    hooks/                    — domain hooks: 14 original + Phase-4 App/ChatView hooks
+    hooks/                    — domain hooks: 14 original + extracted App/ChatView hooks
                                (use-app-mode, use-routine-overlay, use-send-message,
                                 use-plugin-view-routing, use-onboarding-chain-controller,
                                 use-chat-scroll, use-message-queue, use-attachment-picker,
