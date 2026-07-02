@@ -324,6 +324,9 @@ function PreviewBody({
         <div className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 font-mono text-[11px] [overflow-wrap:anywhere]">
           {target.path}
         </div>
+        {target.inlineText ? (
+          <PreviewContent descriptor={{ text: target.inlineText, path: target.path }} />
+        ) : null}
         <div className="flex flex-wrap gap-2">
           {target.canOpenExternal ? (
             <Button type="button" size="sm" variant="outline" onClick={() => void window.lvis.attach.openExternal(target.path)}>
@@ -331,9 +334,9 @@ function PreviewBody({
               <span>{t("chatPreviewRail.openFile")}</span>
             </Button>
           ) : null}
-          <CopyButton value={rawText} />
+          <CopyButton value={target.inlineText ?? rawText} />
         </div>
-        {!target.canOpenExternal ? (
+        {!target.canOpenExternal && !target.inlineText ? (
           <div className="text-[11px] text-muted-foreground">{t("chatPreviewRail.pathOnlyHint")}</div>
         ) : null}
       </div>
