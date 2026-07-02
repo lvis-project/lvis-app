@@ -419,14 +419,11 @@ function BrowserDocumentViewer({ target }: { target: Extract<ChatPreviewTarget, 
 
 function UrlDocumentViewer({ api, target }: { api: LvisApi; target: Extract<ChatPreviewTarget, { kind: "url" }> }) {
   const { t } = useTranslation();
-  const url = useMemo(() => {
-    try {
-      const parsed = new URL(target.url);
-      return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : null;
-    } catch {
-      return null;
-    }
-  }, [target.url]);
+  // Single URL-safety SOT (rejects non-http(s) + credential-laden urls). This is
+  // the viewer boundary the url-safety header documents — it must not diverge
+  // from the store / main-process checks, so it calls the shared validator
+  // rather than re-implementing a weaker inline protocol-only check.
+  const url = useMemo(() => normalizeBrowserNavigationUrl(target.url), [target.url]);
 
   if (!url) {
     return (
@@ -1074,15 +1071,20 @@ function ContentTabView({
 }) {
   const { t } = useTranslation();
   const content = tab.content;
-  if (!content) return null;
-  if (content.source === "browser") {
+  // Memoized synthetic url target for browser content tabs — rebuilding it every
+  // render would remount the sandboxed webview on unrelated re-renders. The url
+  // is already store-validated (normalizeContentRef) and re-validated by the
+  // shared url-safety SOT inside UrlDocumentViewer; `new URL` here only derives
+  // the display title, not a safety gate.
+  const browserTarget = useMemo<Extract<ChatPreviewTarget, { kind: "url" }> | null>(() => {
+    if (content?.source !== "browser") return null;
     let title = content.url;
     try {
       title = new URL(content.url).hostname || content.url;
     } catch {
       title = content.url;
     }
-    const target: Extract<ChatPreviewTarget, { kind: "url" }> = {
+    return {
       id: `content-browser:${tab.id}`,
       kind: "url",
       title,
@@ -1090,18 +1092,21 @@ function ContentTabView({
       createdOrder: Number.MAX_SAFE_INTEGER,
       url: content.url,
     };
-    return <UrlDocumentViewer api={api} target={target} />;
+  }, [content, tab.id, t]);
+  if (!content) return null;
+  if (browserTarget) {
+    return <UrlDocumentViewer api={api} target={browserTarget} />;
   }
-  const target = targetById.get(content.targetId);
+  const target = content.source === "preview" ? targetById.get(content.targetId) : undefined;
   if (!target) {
     return (
-      <div className="p-4 text-xs text-muted-foreground" data-testid="chat-side-panel-content-unavailable">
+      <div className="p-4 text-xs text-muted-foreground" data-testid="chat-side-panel-content-unavailable" data-tab-id={tab.id}>
         {t("chatPreviewRail.contentUnavailable")}
       </div>
     );
   }
   return (
-    <div className="h-full min-h-0 overflow-auto p-3" data-testid="chat-side-panel-content-view">
+    <div className="h-full min-h-0 overflow-auto p-3" data-testid="chat-side-panel-content-view" data-tab-id={tab.id}>
       <div className="space-y-3">
         <DetailHeader target={target} />
         <PreviewBody api={api} sessionId={sessionId} target={target} />
@@ -1296,16 +1301,17 @@ export function ChatSidePanel({
   // splitter cleanup) so a drag crossing an unmount boundary leaks no listeners.
   useEffect(() => () => resizeCleanupRef.current?.(), []);
 
-  const updateWidthFromClientX = (clientX: number) => {
+  // Compute the clamped docked width for a pointer x, or null if the panel is
+  // not mounted. Pure — it never touches React state (see the drag handler).
+  const widthForClientX = (clientX: number): number | null => {
     const el = asideRef.current;
-    if (!el) return;
+    if (!el) return null;
     const rect = el.getBoundingClientRect();
     // 12rem viewport margin == the max-w-[calc(100vw-12rem)] safety cap.
     const max = Math.max(SIDE_PANEL_MIN_WIDTH, window.innerWidth - 192);
     // Panel is right-docked: the right edge is fixed, dragging the left edge
     // leftwards widens it.
-    const next = rect.right - clientX;
-    onWidthChange(clampNumber(Math.round(next), SIDE_PANEL_MIN_WIDTH, max));
+    return clampNumber(Math.round(rect.right - clientX), SIDE_PANEL_MIN_WIDTH, max);
   };
   const {
     tabs,
@@ -1381,13 +1387,31 @@ export function ChatSidePanel({
           event.preventDefault();
           event.currentTarget.setPointerCapture?.(event.pointerId);
           resizeCleanupRef.current?.();
-          updateWidthFromClientX(event.clientX);
-          const onMove = (moveEvent: PointerEvent) => updateWidthFromClientX(moveEvent.clientX);
+          const el = asideRef.current;
+          let raf = 0;
+          // A drag applies width straight to the panel DOM (coalesced via rAF)
+          // and records it in widthRef — NOT React state — so a pointermove does
+          // not re-render the whole ChatView tree every frame. The final width is
+          // pushed to React state + persisted once on release.
+          const apply = (clientX: number) => {
+            const next = widthForClientX(clientX);
+            if (next == null) return;
+            widthRef.current = next;
+            if (raf) return;
+            raf = requestAnimationFrame(() => {
+              raf = 0;
+              if (el) el.style.width = `${widthRef.current}px`;
+            });
+          };
+          apply(event.clientX);
+          const onMove = (moveEvent: PointerEvent) => apply(moveEvent.clientX);
           const cleanup = () => {
             window.removeEventListener("pointermove", onMove);
             window.removeEventListener("pointerup", cleanup);
             window.removeEventListener("pointercancel", cleanup);
+            if (raf) cancelAnimationFrame(raf);
             resizeCleanupRef.current = null;
+            onWidthChange(widthRef.current);
             onWidthCommit(widthRef.current);
           };
           resizeCleanupRef.current = cleanup;
@@ -1445,64 +1469,52 @@ export function ChatSidePanel({
               const label = tabLabel(tab, targetById, t);
               const isEphemeral = tab.mode === "ephemeral";
               return (
-                <button
+                // Layout wrapper only (role="presentation"): the pin/close
+                // controls are SIBLINGS of the tab button, never nested inside
+                // it — an interactive-in-interactive tree is invalid HTML and an
+                // a11y violation. Each is a real <button> with native keyboard
+                // activation; being siblings, their clicks don't select the tab.
+                <div
                   key={tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  data-testid={tab.content ? "chat-side-panel-tab" : tabTestId(tab.kind)}
+                  role="presentation"
                   data-tab-id={tab.id}
                   data-tab-mode={tab.mode}
-                  className={`flex h-8 min-w-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
+                  className={`group flex h-8 min-w-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
                     active ? "bg-primary/(--opacity-subtle) text-primary" : "text-muted-foreground hover:bg-muted/(--opacity-muted) hover:text-foreground"
                   }`}
-                  onClick={() => setActiveTabId(tab.id)}
-                  onDoubleClick={() => promoteToPinned(tab.id)}
                 >
-                  <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className={`max-w-24 truncate ${isEphemeral ? "italic" : ""}`}>{label}</span>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    data-testid={tab.content ? "chat-side-panel-tab" : tabTestId(tab.kind)}
+                    className="flex min-w-0 items-center gap-1 rounded-sm text-inherit focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                    onClick={() => setActiveTabId(tab.id)}
+                    onDoubleClick={() => promoteToPinned(tab.id)}
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span className={`max-w-24 truncate ${isEphemeral ? "italic" : ""}`}>{label}</span>
+                  </button>
                   {isEphemeral ? (
-                    <span
-                      role="button"
-                      tabIndex={0}
+                    <button
+                      type="button"
                       aria-label={t("chatPreviewRail.pinTab")}
                       data-testid="chat-side-panel-pin-tab"
-                      className="ml-0.5 rounded p-0.5 hover:bg-background/(--opacity-muted)"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        promoteToPinned(tab.id);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          promoteToPinned(tab.id);
-                        }
-                      }}
+                      className="ml-0.5 rounded p-0.5 hover:bg-background/(--opacity-muted) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                      onClick={() => promoteToPinned(tab.id)}
                     >
                       <Pin className="h-3 w-3" />
-                    </span>
+                    </button>
                   ) : null}
-                  <span
-                    role="button"
-                    tabIndex={0}
+                  <button
+                    type="button"
                     aria-label={t("chatPreviewRail.closeTab")}
-                    className="ml-0.5 rounded p-0.5 hover:bg-background/(--opacity-muted)"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      closeTab(tab.id);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        closeTab(tab.id);
-                      }
-                    }}
+                    className="ml-0.5 rounded p-0.5 hover:bg-background/(--opacity-muted) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                    onClick={() => closeTab(tab.id)}
                   >
                     <X className="h-3 w-3" />
-                  </span>
-                </button>
+                  </button>
+                </div>
               );
             })}
           </div>
