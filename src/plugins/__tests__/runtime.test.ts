@@ -325,11 +325,11 @@ describe("PluginRuntime.disable", () => {
     errSpy.mockRestore();
   });
 
-  it("callFromUi rejects methods not declared in manifest.uiCallable[]", async () => {
+  it("callFromUi rejects methods not declared in manifest.uiActions", async () => {
     // Renderer-originated plugin calls must only reach methods the plugin
-    // explicitly exposes via manifest.uiCallable. Everything else has to go
+    // explicitly exposes via manifest.uiActions. Everything else has to go
     // through ConversationLoop (scope + permission + expansion caps).
-    const pluginDir = join(installedDir, "ui-callable");
+    const pluginDir = join(installedDir, "ui-actions");
     await mkdir(pluginDir, { recursive: true });
 
     await writeFile(
@@ -350,26 +350,36 @@ describe("PluginRuntime.disable", () => {
     await writeFile(
       manifestPath,
       JSON.stringify({
-        id: "ui-callable",
-        name: "ui-callable",
+        id: "ui-actions",
+        name: "ui-actions",
         version: "1.0.0",
         description: "Test fixture.",
         publisher: "Test fixture",
         entry: "entry.mjs",
         tools: ["uic_get", "uic_private"],
-        uiCallable: ["uic_get"],
+        uiActions: { uic_get: {} },
       }),
       "utf-8",
     );
 
-    await writeTestPluginRegistry({ registryPath }, [{ id: "ui-callable", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "ui-actions", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
     await runtime.startAll();
-    runtime.setToolInvocationDelegate((method, payload) => runtime.call(method, payload));
+    const delegate = vi.fn((method, payload) => runtime.call(method, payload));
+    runtime.setToolInvocationDelegate(delegate);
 
-    await expect(runtime.callFromUi("uic_get")).resolves.toBe("public-ok");
+    await expect(runtime.callFromUi("uic_get", undefined, { userAction: true })).resolves.toBe("public-ok");
+    expect(delegate).toHaveBeenCalledWith(
+      "uic_get",
+      undefined,
+      expect.objectContaining({
+        origin: "ui",
+        ownerPluginId: "ui-actions",
+        userAction: true,
+      }),
+    );
     await expect(runtime.callFromUi("uic_private")).rejects.toThrow(
-      /not UI-callable/,
+      /not declared as a UI action/,
     );
     // Normal call() path (ConversationLoop) still works for both.
     await expect(runtime.call("uic_private")).resolves.toBe("private-ok");
@@ -403,7 +413,7 @@ describe("PluginRuntime.disable", () => {
         publisher: "Test fixture",
         entry: "entry.mjs",
         tools: [],
-        uiCallable: ["uio_upload_chunk"],
+        uiActions: { uio_upload_chunk: {} },
       }),
       "utf-8",
     );

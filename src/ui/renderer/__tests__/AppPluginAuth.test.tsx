@@ -121,7 +121,9 @@ describe("App plugin auth routing", () => {
     // Auth is a host-managed lifecycle (architecture.md §9.4a): for an unauthed
     // auth plugin the host fires the loginTool (opens the SSO window ONLY)...
     await waitFor(() => {
-      expect(api.callPluginMethod).toHaveBeenCalledWith("token_login");
+      expect(api.callPluginMethod).toHaveBeenCalledWith("token_login", undefined, {
+        userAction: true,
+      });
     });
     // ...and must NOT open the detached panel until the plugin reports authed.
     expect(api.window.openDetached).not.toHaveBeenCalled();
@@ -141,7 +143,7 @@ describe("App plugin auth routing", () => {
     await waitFor(() => {
       expect(api.window.openDetached).toHaveBeenCalledWith("plugin:token-plugin:main");
     });
-    expect(api.callPluginMethod).not.toHaveBeenCalledWith("token_login");
+    expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "token_login")).toBe(false);
   });
 
   it("detached login completes → host opens the deferred panel on the unauthed→authed transition", async () => {
@@ -158,7 +160,9 @@ describe("App plugin auth routing", () => {
 
     // Unauthed: host fires loginTool (opens SSO window) and DEFERS the panel.
     await waitFor(() => {
-      expect(api.callPluginMethod).toHaveBeenCalledWith("token_login");
+      expect(api.callPluginMethod).toHaveBeenCalledWith("token_login", undefined, {
+        userAction: true,
+      });
     });
     expect(api.window.openDetached).not.toHaveBeenCalled();
 
@@ -189,7 +193,9 @@ describe("App plugin auth routing", () => {
     await selectPluginView(user, "Token Plugin");
 
     await waitFor(() => {
-      expect(api.callPluginMethod).toHaveBeenCalledWith("token_login");
+      expect(api.callPluginMethod).toHaveBeenCalledWith("token_login", undefined, {
+        userAction: true,
+      });
     });
     expect(api.window.openDetached).not.toHaveBeenCalled();
     await waitFor(() => {
@@ -238,7 +244,7 @@ describe("App plugin auth routing", () => {
     await waitFor(() => {
       expect(api.window.openDetached).toHaveBeenCalledWith("plugin:token-plugin:main");
     });
-    expect(api.callPluginMethod).not.toHaveBeenCalledWith("token_login");
+    expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "token_login")).toBe(false);
   });
 
   it("surfaces detached-window open failures instead of dropping them", async () => {
@@ -303,7 +309,9 @@ describe("App plugin auth routing", () => {
     await selectPluginView(user, "OAuth Plugin");
 
     await waitFor(() => {
-      expect(api.callPluginMethod).toHaveBeenCalledWith("oauth_login");
+      expect(api.callPluginMethod).toHaveBeenCalledWith("oauth_login", undefined, {
+        userAction: true,
+      });
     });
     expect(api.window.openDetached).not.toHaveBeenCalled();
 
@@ -367,6 +375,6 @@ describe("App plugin auth routing", () => {
     // Inline, not detached; and with no loginTool declared the host must not
     // invoke one (no token_login / fabricated login bypass).
     expect(api.window.openDetached).not.toHaveBeenCalled();
-    expect(api.callPluginMethod).not.toHaveBeenCalledWith("nlt_login");
+    expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "nlt_login")).toBe(false);
   });
 });

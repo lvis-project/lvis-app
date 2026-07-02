@@ -12,6 +12,12 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createLogger } from "../lib/logger.js";
 import { mainDir } from "./main-paths.js";
+import {
+  attachSideBrowserWebview,
+  configureSideBrowserWebviewAttach,
+  isSideBrowserContents,
+  takePendingSideBrowserSrc,
+} from "./side-browser-webview.js";
 import { getCommonChromeOptions } from "./window-chrome.js";
 import { getLastThemePayload, registerWindowEventListeners } from "../ipc-bridge.js";
 import {
@@ -260,6 +266,25 @@ export function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
     } else if (!win.isDestroyed()) {
       log.warn("render-process-gone reload suppressed to avoid crash loop");
     }
+  });
+
+  const pendingSideBrowserWebviews: string[] = [];
+  win.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    const result = configureSideBrowserWebviewAttach({
+      event,
+      webPreferences: webPreferences as Record<string, unknown>,
+      params,
+      enqueueAllowedSrc: (src) => pendingSideBrowserWebviews.push(src),
+    });
+    if (result === "blocked") {
+      log.warn({ src: params.src, partition: params.partition }, "blocked side browser webview attach");
+    }
+  });
+  win.webContents.on("did-attach-webview", (_event, contents) => {
+    const src = takePendingSideBrowserSrc(pendingSideBrowserWebviews, contents.getURL());
+    if (!src || !isSideBrowserContents(contents)) return;
+    attachSideBrowserWebview(contents);
+    log.debug({ src, webContentsId: contents.id }, "side browser webview attached");
   });
 
   // 외부 URL → 시스템 브라우저로 리다이렉트 (앱 내 탐색 방지)

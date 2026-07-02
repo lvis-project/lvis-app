@@ -27,6 +27,7 @@ import {
 import { isAuthOwned } from "./main/auth-window-registry.js";
 import { isLinkOwned } from "./main/link-window-registry.js";
 import { shouldBlockGlobalWebviewNavigation } from "./main/webview-navigation-policy.js";
+import { installSideBrowserPartitionPolicy } from "./main/side-browser-webview.js";
 import { findLvisProtocolUri } from "./main/lvis-protocol.js";
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
@@ -273,6 +274,7 @@ if (!gotSingleInstanceLock) {
   app.whenReady().then(() => {
     applyRuntimeAppIcon();
     installHtmlPreviewPartitionBlock();
+    installSideBrowserPartitionPolicy();
     void main().catch((error) => {
       log.error({ err: error }, "bootstrap failed");
       app.quit();

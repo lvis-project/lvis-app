@@ -45,7 +45,6 @@ export interface ActionPanelProps {
 }
 
 const ACTIVITY_PREVIEW_LIMIT = 5;
-const INVOCATION_PREVIEW_LIMIT = 10;
 
 function statusClass(status: ActionPanelActivityItem["status"]): string {
   switch (status) {
@@ -208,61 +207,13 @@ function CompactDashboardStat({
   );
 }
 
-function InvocationIconStrip({
-  title,
-  icon: Icon,
-  items,
-}: {
-  title: string;
-  icon: LucideIcon;
-  items: ActionPanelActivityItem[];
-}) {
-  const visibleItems = items.slice(0, INVOCATION_PREVIEW_LIMIT);
-  if (visibleItems.length === 0) return null;
-  return (
-    <section className="border-t border-border px-3 py-2.5">
-      <div className="mb-1.5 flex min-w-0 items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Icon className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-          <h3 className="truncate text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">
-            {title}
-          </h3>
-        </div>
-        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
-          {visibleItems.length}
-        </span>
-      </div>
-      <div className="grid grid-cols-5 gap-1.5" data-testid={`action-panel-icon-strip-${title}`}>
-        {visibleItems.map((item) => (
-          <Tooltip key={item.id}>
-            <TooltipTrigger asChild>
-              <div
-                className="flex h-8 min-w-0 items-center justify-center rounded-md bg-muted/(--opacity-faint) text-muted-foreground hover:bg-accent hover:text-foreground"
-                title={item.detail ? `${item.label}\n${item.detail}` : item.label}
-              >
-                <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-              </div>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <div className="max-w-56">
-                <div className="truncate font-medium">{item.label}</div>
-                {item.detail ? <div className="truncate text-muted-foreground">{item.detail}</div> : null}
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function FloatingPanel({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
 
   return (
     <aside
       aria-label={t("actionPanel.title")}
-      className="lvis-surface-floating absolute right-3 top-3 z-40 flex w-[23rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl bg-card/(--opacity-solid) text-card-foreground backdrop-blur"
+      className="lvis-surface-floating absolute right-4 top-14 z-50 flex w-[23rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl bg-card/(--opacity-solid) text-card-foreground backdrop-blur"
       data-testid="action-panel"
       style={{ maxHeight: "min(34rem, calc(100vh - 7rem))" }}
     >
@@ -292,7 +243,7 @@ export function ActionPanel({
     return (
       <aside
         aria-label={t("actionPanel.title")}
-        className="absolute right-3 top-3 z-40"
+        className="pointer-events-none absolute right-4 top-14 z-50"
         data-testid="action-panel-rail"
       >
         <div
@@ -305,7 +256,7 @@ export function ActionPanel({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                className="pointer-events-auto h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
                 aria-label={t("actionPanel.openAriaLabel")}
                 aria-expanded={false}
                 data-testid="action-panel-open"
@@ -358,12 +309,12 @@ export function ActionPanel({
       <StatsDashboard stats={allStats} />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <InvocationIconStrip
+        <ActivitySection
           title={t("actionPanel.pluginCallsTitle")}
           icon={Boxes}
           items={activity.pluginCalls}
         />
-        <InvocationIconStrip
+        <ActivitySection
           title={t("actionPanel.mcpCallsTitle")}
           icon={Cable}
           items={activity.mcpCalls}

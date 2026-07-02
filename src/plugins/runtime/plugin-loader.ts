@@ -21,11 +21,22 @@ import type {
 import { buildImportUrl } from "./sandbox.js";
 
 /**
+ * The UI-invokable method names a manifest declares — the keys of
+ * `manifest.uiActions`. These are the only methods reachable from the renderer
+ * IPC bridge (SDK 5.20.0 migrated off the legacy `uiCallable[]` allowlist).
+ */
+export function declaredUiInvokableMethods(
+  manifest: Pick<PluginManifest, "uiActions">,
+): string[] {
+  return manifest.uiActions ? Object.keys(manifest.uiActions) : [];
+}
+
+/**
  * The set of runtime method names a manifest declares — the union of `tools`
- * and `uiCallable`, de-duplicated while preserving first-seen order.
+ * and `uiActions`, de-duplicated while preserving first-seen order.
  */
 export function declaredRuntimeMethods(manifest: PluginManifest): string[] {
-  return [...new Set([...(manifest.tools ?? []), ...(manifest.uiCallable ?? [])])];
+  return [...new Set([...(manifest.tools ?? []), ...declaredUiInvokableMethods(manifest)])];
 }
 
 /**

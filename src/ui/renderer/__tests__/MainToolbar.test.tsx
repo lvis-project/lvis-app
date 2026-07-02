@@ -11,6 +11,8 @@ function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}
     hasApiKey: true as boolean | null,
     appMode: "work" as const,
     onToggleAppMode: vi.fn(),
+    sidePanelOpen: false,
+    onToggleSidePanel: vi.fn(),
     ...overrides,
   };
 }
@@ -64,6 +66,20 @@ describe("MainToolbar", () => {
     expect(screen.queryByText("액션")).toBeNull();
     fireEvent.click(screen.getByTestId("app-mode-chat"));
     expect(onToggleAppMode).toHaveBeenCalledWith("chat");
+  });
+
+  it("renders an icon-only side-panel toggle to the right of the mode toggle", () => {
+    const onToggleSidePanel = vi.fn();
+    const { container } = renderWithProvider(defaultProps({ onToggleSidePanel }));
+
+    const modeToggle = screen.getByTestId("app-mode-toggle");
+    const sidePanelToggle = screen.getByTestId("chat-side-panel-toggle");
+    expect(sidePanelToggle.textContent?.trim()).toBe("");
+    expect(sidePanelToggle.compareDocumentPosition(modeToggle) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+
+    fireEvent.click(sidePanelToggle);
+    expect(onToggleSidePanel).toHaveBeenCalledOnce();
+    expect(container.querySelector("[data-testid='chat-side-panel-toggle'] svg")).toBeTruthy();
   });
 });
 

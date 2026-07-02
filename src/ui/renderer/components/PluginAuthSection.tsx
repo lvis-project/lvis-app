@@ -63,13 +63,13 @@ export function PluginAuthSection({
           throw new Error(result.error?.trim() || "detached login window failed");
         }
       } else {
-        await api.callPluginMethod(auth.loginTool);
+        await api.callPluginMethod(auth.loginTool, undefined, { userAction: true });
         onRefresh();
       }
     } catch (err) {
       // Generic user-facing copy + log raw error to the console for support
       // triage. Avoids leaking IPC reject internals (e.g.
-      // "Method 'x' is not UI-callable for plugin 'y'") into the badge UI.
+      // "Method 'x' is not declared as a UI action for plugin 'y'") into the badge UI.
       console.error(`[plugin-auth] ${pluginId} loginTool ${auth.loginTool} failed`, err);
       setLocalError(t("pluginAuthSection.loginError"));
     } finally {
@@ -82,7 +82,7 @@ export function PluginAuthSection({
     setLocalError(null);
     setWorking(true);
     try {
-      await api.callPluginMethod(auth.logoutTool);
+      await api.callPluginMethod(auth.logoutTool, undefined, { userAction: true });
       onRefresh();
     } catch (err) {
       console.error(`[plugin-auth] ${pluginId} logoutTool ${auth.logoutTool} failed`, err);

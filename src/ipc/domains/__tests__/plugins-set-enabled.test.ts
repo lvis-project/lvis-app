@@ -50,11 +50,13 @@ async function setup() {
   const setPluginEnabled = vi.fn(async (pluginId: string) => {
     if (pluginId === "ghost") throw new Error("Plugin not found: ghost");
   });
+  const callFromUi = vi.fn(async () => ({ ok: true }));
   const deps = {
     pluginMarketplace: { list: vi.fn(async () => []) },
     pluginRuntime: {
       listPluginIds: vi.fn((): string[] => ["com.example.meeting"]),
       setPluginEnabled,
+      callFromUi,
     },
     settingsService: { get: vi.fn(() => ({})) },
     auditLogger: { log: vi.fn() },
@@ -64,11 +66,41 @@ async function setup() {
   };
   const { registerPluginsHandlers } = await import("../plugins.js");
   registerPluginsHandlers(deps as never);
-  return { deps, appWindows, setPluginEnabled };
+  return { deps, appWindows, setPluginEnabled, callFromUi };
 }
 
 beforeEach(() => {
   handlers.clear();
+});
+
+describe("lvis:plugins:call", () => {
+  it("rejects plugin UI shell frames from the host renderer call channel", async () => {
+    const { deps, callFromUi } = await setup();
+    const handler = handlers.get("lvis:plugins:call");
+    expect(handler).toBeDefined();
+    const pluginShellEvent = { senderFrame: { url: "file:///dist/src/plugin-ui-shell.html" } };
+
+    const res = await handler!(pluginShellEvent, "sample_ui_action", undefined, {
+      userAction: true,
+    });
+
+    expect(res).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(callFromUi).not.toHaveBeenCalled();
+    expect(deps.auditLogger.log).toHaveBeenCalled();
+  });
+
+  it("passes host renderer user action state to callFromUi", async () => {
+    const { callFromUi } = await setup();
+
+    const res = await invoke("lvis:plugins:call", "sample_ui_action", { id: 1 }, {
+      userAction: true,
+    });
+
+    expect(res).toEqual({ ok: true });
+    expect(callFromUi).toHaveBeenCalledWith("sample_ui_action", { id: 1 }, {
+      userAction: true,
+    });
+  });
 });
 
 describe("lvis:plugins:set-enabled", () => {

@@ -8,14 +8,12 @@ import { MarketplaceUpdateBanner } from "./components/MarketplaceUpdateBanner.js
 import { MarketplaceAnnouncementBanner } from "./components/MarketplaceAnnouncementBanner.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
-import { ActionPanel } from "./components/ActionPanel.js";
 import type { useAppUpdate } from "./hooks/use-app-update.js";
 
 type Api = ReturnType<typeof getApi>;
 type MainToolbarProps = Parameters<typeof MainToolbar>[0];
 type SidebarProps = Parameters<typeof Sidebar>[0];
 type USPProps = Parameters<typeof UnifiedSearchPanel>[0];
-type ActionPanelProps = Parameters<typeof ActionPanel>[0];
 type BootstrapBannerProps = Parameters<typeof BootstrapStatusBanner>[0];
 type UpdateBannerProps = Parameters<typeof MarketplaceUpdateBanner>[0];
 type AnnouncementBannerProps = Parameters<typeof MarketplaceAnnouncementBanner>[0];
@@ -93,11 +91,9 @@ export function AppShell({
   onSearchLoadSession,
   setActiveView,
   onRefreshSessions,
-  // action panel
-  actionPanelOpen,
-  onActionPanelOpenChange,
-  actionPanelActivity,
-  onOpenActionPanelUrl,
+  // side panel toggle (title bar → ChatSidePanel)
+  sidePanelOpen,
+  onToggleSidePanel,
 }: {
   api: Api;
   children: ReactNode;
@@ -152,10 +148,8 @@ export function AppShell({
   onSearchLoadSession: (sessionId: string) => Promise<boolean | void>;
   setActiveView: (view: string) => void;
   onRefreshSessions: USPProps["onRefreshSessions"];
-  actionPanelOpen: boolean;
-  onActionPanelOpenChange: ActionPanelProps["onOpenChange"];
-  actionPanelActivity: ActionPanelProps["activity"];
-  onOpenActionPanelUrl: ActionPanelProps["onOpenExternalUrl"];
+  sidePanelOpen: MainToolbarProps["sidePanelOpen"];
+  onToggleSidePanel: MainToolbarProps["onToggleSidePanel"];
 }) {
   return (
     /* `relative` makes THIS full-height shell column the positioning
@@ -173,6 +167,8 @@ export function AppShell({
           hasApiKey={hasApiKey}
           appMode={appMode}
           onToggleAppMode={onToggleAppMode}
+          sidePanelOpen={sidePanelOpen}
+          onToggleSidePanel={onToggleSidePanel}
           onOpenDevTools={onOpenDevTools}
           appUpdateState={appUpdate.state}
           appUpdateInFlight={appUpdate.inFlight}
@@ -315,19 +311,11 @@ export function AppShell({
           {children}
           {/* StatusBar notifications render inside ChatView, directly above
               the composer. The composer's own status sub-row keeps showing
-              the ring / permission / model cells. */}
+              the ring / permission / model cells. The 도구 활동 (Tool Activity)
+              panel is now rendered inside ChatView via its `actionPanelSlot`
+              (work-mode only), anchored to the chat column so it coexists with
+              the right-docked ChatSidePanel. */}
         </main>
-        {/* The 도구 활동 panel is a work-mode affordance only. In chat mode the
-            shell is the focused conversation surface, so the panel (and its
-            collapsed rail) is omitted from the DOM entirely. */}
-        {appMode !== "chat" && (
-          <ActionPanel
-            open={actionPanelOpen}
-            onOpenChange={onActionPanelOpenChange}
-            activity={actionPanelActivity}
-            onOpenExternalUrl={onOpenActionPanelUrl}
-          />
-        )}
       </div>
     </div>
   );

@@ -206,7 +206,7 @@ describe("runtime manifest validation hardening", () => {
       ui: [
         { id: "a", slot: "sidebar", kind: "action", title: "A", tool: "my_tool" },
       ],
-      uiCallable: ["my_tool"],
+      uiActions: { my_tool: {} },
     });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();

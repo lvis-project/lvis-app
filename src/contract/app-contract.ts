@@ -312,6 +312,7 @@ export const CHANNELS = {
     loadSessionInMain: "lvis:window:load-session-in-main",
     loadSessionInMainResult: "lvis:window:load-session-in-main-result",
     resizeForMode: "lvis:window:resize-for-mode",
+    resizeForSidePanel: "lvis:window:resize-for-side-panel",
     openHtmlPreview: "lvis:window:open-html-preview",
     snapEdge: "lvis:window:snap-edge",
     detachedNavigate: "lvis:detached:navigate",

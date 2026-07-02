@@ -118,4 +118,31 @@ describe("MarketplaceTab", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("관리자"));
     expect(screen.getByRole("button", { name: "관리자 권한으로 설치" })).toBeTruthy();
   });
+
+  it("routes networkAccess plugin installs through the disclosure dialog (#1279)", async () => {
+    const networkPlugin: MarketplaceItem = {
+      id: "network-plug",
+      name: "Network Plug",
+      description: "d",
+      packageSpec: "s",
+      installed: false,
+      enabled: false,
+      pluginType: "plugin",
+      installPolicy: "user",
+      networkAccess: {
+        allowedDomains: ["api.example.com"],
+        reasoning: "Needs API access to sync user data.",
+      },
+    };
+    const api = marketplaceTabApi({
+      listMarketplacePlugins: vi.fn().mockResolvedValue([networkPlugin]),
+    });
+    const { findByTestId } = render(<MarketplaceTab {...defaultProps(api)} />);
+
+    fireEvent.click(await findByTestId("marketplace:action:network-plug"));
+
+    await waitFor(() => expect(screen.getByTestId("plugin-install-network-access").textContent).toContain("Needs API access"));
+    expect(screen.getByTestId("plugin-install-network-access").textContent).toContain("api.example.com");
+    expect(screen.getByRole("button", { name: "설치" })).toBeTruthy();
+  });
 });

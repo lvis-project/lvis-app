@@ -1,11 +1,11 @@
 /**
- * uiCallable security model — runtime scope enforcement.
+ * uiActions security model — runtime scope enforcement.
  *
  * The runtime no longer blocks verbs by suffix. Instead:
  *   1. tools[] is the LLM registration surface.
- *   2. uiCallable[] may name UI-only runtime methods that are not in tools[].
+ *   2. uiActions[] may name UI-only runtime methods that are not in tools[].
  *   3. callFromUi() re-checks the method is declared in that plugin's
- *      uiCallable at invocation time (defense in depth against stale maps).
+ *      uiActions at invocation time (defense in depth against stale maps).
  *
  * Security properties come from:
  *   - code review of the plugin source,
@@ -15,7 +15,7 @@
  * _create, _update, …) is permitted regardless of install policy. The
  * plugin developer is responsible for destructive-action confirmation UX in
  * their own renderer surface — see `index_remove_folder` which ships this way
- * today (note: `email_reply` is in tools[] only, not uiCallable[]).
+ * today (note: `email_reply` is in tools[] only, not uiActions[]).
  */
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -30,18 +30,18 @@ const __dirname = dirname(__filename);
 async function writeTempPlugin(opts: {
   installPolicy: "admin" | "user";
   tools: string[];
-  uiCallable: string[];
+  uiActions: Record<string, unknown>;
 }): Promise<string> {
-  const root = mkdtempSync(join(tmpdir(), "lvis-uicallable-"));
+  const root = mkdtempSync(join(tmpdir(), "lvis-ui-actions-"));
   const manifest = {
     id: `test-${Math.random().toString(36).slice(2, 8)}`,
-    name: "uiCallable Test",
+    name: "uiActions Test",
     version: "1.0.0",
     description: "Test fixture.",
     publisher: "Test fixture",
     entry: "dist/index.js",
     tools: opts.tools,
-    uiCallable: opts.uiCallable,
+    uiActions: opts.uiActions,
     installPolicy: opts.installPolicy,
   };
   writeFileSync(join(root, "plugin.json"), JSON.stringify(manifest, null, 2));
@@ -69,12 +69,12 @@ const PREVIOUSLY_BLOCKED_VERBS = [
   "thing_truncate",
 ];
 
-describe("uiCallable runtime-method validation", () => {
+describe("uiActions runtime-method validation", () => {
   it("accepts UI-only methods that are not in tools[]", async () => {
     const manifestPath = await writeTempPlugin({
       installPolicy: "user",
       tools: ["foo_get"],
-      uiCallable: ["foo_get", "foo_missing"],
+      uiActions: { foo_get: {}, foo_missing: {} },
     });
     const rt = new PluginRuntime({
       hostRoot: resolve(__dirname, "..", "..", ".."),
@@ -84,25 +84,25 @@ describe("uiCallable runtime-method validation", () => {
     await expect(parse(manifestPath)).resolves.toBeDefined();
   });
 
-  it("rejects non-string uiCallable entries", async () => {
+  it("rejects non-string uiActions entries", async () => {
     const manifestPath = await writeTempPlugin({
       installPolicy: "user",
       tools: ["foo_get"],
-      uiCallable: [123 as unknown as string],
+      uiActions: [123 as unknown as string],
     });
     const rt = new PluginRuntime({
       hostRoot: resolve(__dirname, "..", "..", ".."),
       manifestPaths: [manifestPath],
     });
     const parse = (rt as unknown as { readManifest(p: string): Promise<unknown> }).readManifest.bind(rt);
-    await expect(parse(manifestPath)).rejects.toThrow(/uiCallable/);
+    await expect(parse(manifestPath)).rejects.toThrow(/uiActions/);
   });
 
-  it("accepts when every uiCallable entry is also declared in tools[]", async () => {
+  it("accepts when every uiActions entry is also declared in tools[]", async () => {
     const manifestPath = await writeTempPlugin({
       installPolicy: "user",
       tools: ["foo_get", "foo_list"],
-      uiCallable: ["foo_get", "foo_list"],
+      uiActions: { foo_get: {}, foo_list: {} },
     });
     const rt = new PluginRuntime({
       hostRoot: resolve(__dirname, "..", "..", ".."),
@@ -113,13 +113,13 @@ describe("uiCallable runtime-method validation", () => {
   });
 });
 
-describe("uiCallable accepts any suffix regardless of install policy", () => {
+describe("uiActions accepts any suffix regardless of install policy", () => {
   for (const verb of PREVIOUSLY_BLOCKED_VERBS) {
     it(`[user] accepts '${verb}' when it is in tools[]`, async () => {
       const manifestPath = await writeTempPlugin({
         installPolicy: "user",
         tools: [verb],
-        uiCallable: [verb],
+        uiActions: { [verb]: {} },
       });
       const rt = new PluginRuntime({
         hostRoot: resolve(__dirname, "..", "..", ".."),
@@ -133,7 +133,7 @@ describe("uiCallable accepts any suffix regardless of install policy", () => {
       const manifestPath = await writeTempPlugin({
         installPolicy: "admin",
         tools: [verb],
-        uiCallable: [verb],
+        uiActions: { [verb]: {} },
       });
       const rt = new PluginRuntime({
         hostRoot: resolve(__dirname, "..", "..", ".."),
@@ -154,7 +154,7 @@ describe("callFromUi scope enforcement", () => {
     await expect(rt.callFromUi("nonexistent_method")).rejects.toThrow(/not found/);
   });
 
-  it("throws when method is declared in tools[] but missing from uiCallable[]", async () => {
+  it("throws when method is declared in tools[] but missing from uiActions[]", async () => {
     // Build a runtime with a hand-crafted plugin map so we can exercise
     // callFromUi without spinning up a real plugin entry file.
     const rt = new PluginRuntime({
@@ -162,11 +162,11 @@ describe("callFromUi scope enforcement", () => {
       manifestPaths: [],
     });
     const internals = rt as unknown as {
-      plugins: Map<string, { manifest: { uiCallable: string[] } }>;
+      plugins: Map<string, { manifest: { uiActions: Record<string, unknown> } }>;
       methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
     };
     internals.plugins.set("test.plugin", {
-      manifest: { uiCallable: ["foo_get"] },
+      manifest: { uiActions: { foo_get: {} } },
     } as unknown as never);
     internals.methodMap.set("foo_delete", {
       pluginId: "test.plugin",
@@ -182,21 +182,21 @@ describe("callFromUi scope enforcement", () => {
       return entry.handler(payload);
     });
 
-    await expect(rt.callFromUi("foo_delete")).rejects.toThrow(/not UI-callable/);
+    await expect(rt.callFromUi("foo_delete")).rejects.toThrow(/not declared as a UI action/);
     await expect(rt.callFromUi("foo_get")).resolves.toBe("ok");
   });
 
-  it("fails closed when a UI-callable method has no executor delegate", async () => {
+  it("fails closed when a UI action method has no executor delegate", async () => {
     const rt = new PluginRuntime({
       hostRoot: resolve(__dirname, "..", "..", ".."),
       manifestPaths: [],
     });
     const internals = rt as unknown as {
-      plugins: Map<string, { manifest: { uiCallable: string[] } }>;
+      plugins: Map<string, { manifest: { uiActions: Record<string, unknown> } }>;
       methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
     };
     internals.plugins.set("test.plugin", {
-      manifest: { uiCallable: ["foo_get"] },
+      manifest: { uiActions: { foo_get: {} } },
     } as unknown as never);
     internals.methodMap.set("foo_get", {
       pluginId: "test.plugin",
