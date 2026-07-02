@@ -168,6 +168,17 @@ function isLikelyPath(value: string): boolean {
   return /[\\/]/.test(value) && /\.[A-Za-z0-9]{1,12}$/.test(value);
 }
 
+/**
+ * A glob pattern (`**\/*architecture*.md`, `foo?.ts`, `a{b,c}`) is a tool
+ * ARGUMENT, not a concrete file — it must never become a file-preview target.
+ * `isLikelyPath` alone accepts `**\/*.md` (it has a `/` and a `.md` tail), so
+ * the diagnosis-③ placeholder card came from a glob leaking into a file target.
+ * The pattern's real MATCHES are surfaced separately via {@link extractGlobMatches}.
+ */
+function isGlobPattern(value: string): boolean {
+  return /[*?[\]{}]/.test(value) || value.includes("**");
+}
+
 function isToolResultStub(value: string): boolean {
   return value.startsWith("[tool_result stripped:") || value.startsWith("[tool_result truncated by host");
 }
@@ -192,6 +203,8 @@ function collectPathStrings(value: unknown): string[] {
   const paths = new Set<string>();
   visitUnknown(value, (key, item) => {
     if (typeof item !== "string") return;
+    // Glob patterns are tool arguments, never files — never a file target.
+    if (isGlobPattern(item)) return;
     if (key != null && PATH_KEYS.has(key.toLowerCase())) {
       if (isLikelyPath(item)) paths.add(item);
       return;
@@ -199,6 +212,30 @@ function collectPathStrings(value: unknown): string[] {
     if (isLikelyPath(item)) paths.add(item);
   });
   return [...paths];
+}
+
+/**
+ * Promote a glob/list tool's concrete result `matches[]` (string paths — see
+ * `glob_files`/`list_files` result JSON in `file-tools.ts`) to openable file
+ * paths. Symmetric with {@link extractSearchResultHits}: the pattern card
+ * disappears, and the files the pattern actually found become openable.
+ */
+function extractGlobMatches(result: unknown): string[] {
+  if (typeof result !== "string") return [];
+  const parsed = parseJson(result);
+  if (!isRecord(parsed)) return [];
+  const rawMatches = parsed.matches;
+  if (!Array.isArray(rawMatches)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of rawMatches) {
+    if (typeof item !== "string") continue;
+    if (isGlobPattern(item) || !isLikelyPath(item)) continue;
+    if (seen.has(item)) continue;
+    seen.add(item);
+    out.push(item);
+  }
+  return out;
 }
 
 function visitUnknown(value: unknown, visit: (key: string | null, item: unknown) => void, key: string | null = null): void {
@@ -539,10 +576,43 @@ export function collectChatPreviewModel({
         }, fileIds);
       }
 
+      // Glob/list result matches (diagnosis ③): the pattern itself is not a
+      // file, but each concrete match IS — surface them as openable file
+      // targets so a `glob_files`/`list_files` call yields a real file list
+      // instead of a dead pattern placeholder.
+      const globMatches = extractGlobMatches(tool.result);
+      for (const matchPath of globMatches) {
+        const targetId = `glob-match:${tool.toolUseId}:${matchPath}`;
+        addUnique(targets, {
+          id: targetId,
+          kind: "file",
+          title: basename(matchPath),
+          subtitle: `${displayName} · ${sourceLabel}`,
+          sourceLabel,
+          createdOrder: order++,
+          toolUseId: tool.toolUseId,
+          toolName: tool.name,
+          status: tool.status,
+          path: matchPath,
+          canOpenExternal: false,
+        }, targetIds);
+        addOrMergeFile(files, {
+          id: `tool:${matchPath}`,
+          path: matchPath,
+          label: basename(matchPath),
+          detail: compactDetail(matchPath),
+          sourceLabel: displayName,
+          operation: "read",
+          previewTargetId: targetId,
+          canOpenExternal: false,
+          status: tool.status,
+        }, fileIds);
+      }
+
       if (typeof tool.result === "string" && tool.result.length > 0) {
         const parsedJson = parseJson(tool.result);
         const hasRicherPreview =
-          htmlPayload != null || diff != null || tool.uiPayload != null || searchHits.length > 0;
+          htmlPayload != null || diff != null || tool.uiPayload != null || searchHits.length > 0 || globMatches.length > 0;
         if (parsedJson !== null && !hasRicherPreview) {
           addUnique(targets, {
             id: `json:${tool.toolUseId}`,
