@@ -58,9 +58,11 @@ export interface Tool {
   readonly decisionOverride?: ToolDecisionOverride;
   readonly pluginId?: string;
   /**
-   * Host-spawned plugin worker identity for plugin tools whose side effects run
-   * in a long-lived worker. Paired with `pluginId` so the permission reviewer
-   * can resolve the real ASRT substrate for that specific worker.
+   * Host-owned plugin worker identity for plugin tools whose side effects are
+   * actually routed through a long-lived worker. Paired with `pluginId` so the
+   * permission reviewer can resolve the real ASRT substrate for that specific
+   * worker. Manifest `_meta.workerId` alone must not populate this field; it is
+   * only safe when the host controls the invocation path into that worker.
    */
   readonly workerId?: string;
   readonly mcpServerId?: string;
