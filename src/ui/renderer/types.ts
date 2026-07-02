@@ -223,6 +223,8 @@ export type AppSettings = {
     closeBehavior: "hide-to-tray" | "quit";
     /** Persisted workspace mode (chat vs work). SOT: `SystemSettings`. */
     appMode?: "chat" | "work";
+    /** Persisted docked side-panel width (px). SOT: `SystemSettings`. */
+    sidePanelWidth?: number;
   };
   /** Experimental feature flags — all default false. */
   features?: {

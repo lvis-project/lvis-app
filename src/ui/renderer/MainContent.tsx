@@ -81,7 +81,8 @@ export interface MainContentProps {
   /** Called when a completed routine overlay result has been seen or dismissed. */
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
   statusBar?: Parameters<typeof ChatView>[0]["statusBar"];
-  actionPanelSlot?: Parameters<typeof ChatView>[0]["actionPanelSlot"];
+  actionPanelOpen?: Parameters<typeof ChatView>[0]["actionPanelOpen"];
+  onActionPanelOpenChange?: Parameters<typeof ChatView>[0]["onActionPanelOpenChange"];
   sidePanelOpen?: Parameters<typeof ChatView>[0]["sidePanelOpen"];
   onSidePanelOpenChange?: Parameters<typeof ChatView>[0]["onSidePanelOpenChange"];
 }
@@ -150,7 +151,8 @@ function HomeChatPane(props: MainContentProps) {
         onPluginPrimaryAction={props.onPluginPrimaryAction}
         onRoutineAcknowledge={props.onRoutineAcknowledge}
         statusBar={props.statusBar}
-        actionPanelSlot={props.actionPanelSlot}
+        actionPanelOpen={props.actionPanelOpen}
+        onActionPanelOpenChange={props.onActionPanelOpenChange}
         sidePanelOpen={props.sidePanelOpen}
         onSidePanelOpenChange={props.onSidePanelOpenChange}
         blogLayout={props.appMode === "work"}
