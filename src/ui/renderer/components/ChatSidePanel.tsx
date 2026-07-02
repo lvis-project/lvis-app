@@ -1078,7 +1078,7 @@ function ContentTabView({
   // the display title, not a safety gate.
   const browserTarget = useMemo<Extract<ChatPreviewTarget, { kind: "url" }> | null>(() => {
     if (content?.source !== "browser") return null;
-    let title = content.url;
+    let title: string;
     try {
       title = new URL(content.url).hostname || content.url;
     } catch {
