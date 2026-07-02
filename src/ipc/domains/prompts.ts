@@ -1,8 +1,9 @@
 import { ipcMain } from "electron";
 import { auditUnauthorized, UNAUTHORIZED_FRAME, validateSender } from "../gated.js";
+import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 
-const PROMPTS_UPDATED = "lvis:prompts:updated";
+const PROMPTS_UPDATED = CHANNELS.prompts.updated;
 
 function normalizePromptPatch(value: unknown): {
   id: string;
@@ -37,9 +38,9 @@ function broadcastPromptsUpdated(deps: IpcDeps): void {
 export function registerPromptHandlers(deps: IpcDeps): void {
   const { auditLogger, personaPromptStore } = deps;
 
-  ipcMain.handle("lvis:prompts:list", async (event) => {
+  ipcMain.handle(CHANNELS.prompts.list, async (event) => {
     if (!validateSender(event)) {
-      auditUnauthorized(auditLogger, "lvis:prompts:list", event);
+      auditUnauthorized(auditLogger, CHANNELS.prompts.list, event);
       return UNAUTHORIZED_FRAME;
     }
     const prompts = (await personaPromptStore?.list() ?? []).map((prompt) => ({
@@ -50,9 +51,9 @@ export function registerPromptHandlers(deps: IpcDeps): void {
     return { prompts };
   });
 
-  ipcMain.handle("lvis:prompts:list-summaries", async (event) => {
+  ipcMain.handle(CHANNELS.prompts.listSummaries, async (event) => {
     if (!validateSender(event)) {
-      auditUnauthorized(auditLogger, "lvis:prompts:list-summaries", event);
+      auditUnauthorized(auditLogger, CHANNELS.prompts.listSummaries, event);
       return UNAUTHORIZED_FRAME;
     }
     const prompts = (await personaPromptStore?.list() ?? []).map((prompt) => ({
@@ -62,9 +63,9 @@ export function registerPromptHandlers(deps: IpcDeps): void {
     return { prompts };
   });
 
-  ipcMain.handle("lvis:prompts:save", async (event, payload: unknown) => {
+  ipcMain.handle(CHANNELS.prompts.save, async (event, payload: unknown) => {
     if (!validateSender(event)) {
-      auditUnauthorized(auditLogger, "lvis:prompts:save", event);
+      auditUnauthorized(auditLogger, CHANNELS.prompts.save, event);
       return UNAUTHORIZED_FRAME;
     }
     const prompt = normalizePromptPatch(payload);
@@ -87,9 +88,9 @@ export function registerPromptHandlers(deps: IpcDeps): void {
     }
   });
 
-  ipcMain.handle("lvis:prompts:delete", async (event, id: unknown) => {
+  ipcMain.handle(CHANNELS.prompts.delete, async (event, id: unknown) => {
     if (!validateSender(event)) {
-      auditUnauthorized(auditLogger, "lvis:prompts:delete", event);
+      auditUnauthorized(auditLogger, CHANNELS.prompts.delete, event);
       return UNAUTHORIZED_FRAME;
     }
     if (typeof id !== "string" || !personaPromptStore) {

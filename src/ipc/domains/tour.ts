@@ -25,6 +25,7 @@ import {
 } from "../../main/storage/feature-namespace.js";
 import { fanOutToAllWindows } from "../broadcast-helpers.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { CHANNELS } from "../../contract/app-contract.js";
 import { createLogger } from "../../lib/logger.js";
 import {
   DEFAULT_TOUR_STATE,
@@ -49,7 +50,7 @@ const log = createLogger("tour-ipc");
 /** `~/.lvis/onboarding/` namespace — owns onboarding-context.md. */
 const onboardingNs = openFeatureNamespace("onboarding");
 
-export const TOUR_START_CHANNEL = "lvis:tour:start";
+export const TOUR_START_CHANNEL = CHANNELS.tour.start;
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
@@ -59,7 +60,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
   const { auditLogger } = deps;
 
   ipcMain.handle(
-    "lvis:tour:get-state",
+    CHANNELS.tour.getState,
     async (
       e,
     ): Promise<
@@ -67,7 +68,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
       | { ok: false; error: string; message: string }
     > => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:tour:get-state", e);
+        auditUnauthorized(auditLogger, CHANNELS.tour.getState, e);
         return {
           ok: false,
           error: UNAUTHORIZED_FRAME.error,
@@ -88,7 +89,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
   );
 
   ipcMain.handle(
-    "lvis:tour:mark-complete",
+    CHANNELS.tour.markComplete,
     async (
       e,
       payload: { scenarioId?: unknown },
@@ -97,7 +98,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
       | { ok: false; error: string; message: string }
     > => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:tour:mark-complete", e);
+        auditUnauthorized(auditLogger, CHANNELS.tour.markComplete, e);
         return {
           ok: false,
           error: UNAUTHORIZED_FRAME.error,
@@ -130,7 +131,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
   );
 
   ipcMain.handle(
-    "lvis:tour:dismiss",
+    CHANNELS.tour.dismiss,
     async (
       e,
       payload: { scenarioId?: unknown },
@@ -139,7 +140,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
       | { ok: false; error: string; message: string }
     > => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:tour:dismiss", e);
+        auditUnauthorized(auditLogger, CHANNELS.tour.dismiss, e);
         return {
           ok: false,
           error: UNAUTHORIZED_FRAME.error,
@@ -172,7 +173,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
   );
 
   ipcMain.handle(
-    "lvis:tour:start",
+    CHANNELS.tour.start,
     async (
       e,
       payload: { scenarioId?: unknown },
@@ -181,7 +182,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
       | { ok: false; error: string; message: string }
     > => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:tour:start", e);
+        auditUnauthorized(auditLogger, CHANNELS.tour.start, e);
         return {
           ok: false,
           error: UNAUTHORIZED_FRAME.error,
@@ -216,7 +217,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
   // treated as "clear" (write empty string) — keeps the file present so a
   // future read short-circuits cleanly.
   ipcMain.handle(
-    "lvis:onboarding:context:set",
+    CHANNELS.onboarding.contextSet,
     async (
       e,
       payload: { content?: unknown },
@@ -225,7 +226,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
       | { ok: false; error: string; message: string }
     > => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:onboarding:context:set", e);
+        auditUnauthorized(auditLogger, CHANNELS.onboarding.contextSet, e);
         return {
           ok: false,
           error: UNAUTHORIZED_FRAME.error,

@@ -24,6 +24,7 @@ import {
   type NotificationKind,
 } from "../../main/notification-service.js";
 import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFrame } from "../gated.js";
+import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWindow } from "../safe-send.js";
 import { BUNDLE_IDS } from "../../shared/theme-bundles.js";
@@ -41,6 +42,7 @@ import { uninstallPluginWithLifecycle } from "../../plugins/uninstall-lifecycle.
 import { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../../plugins/types.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
+import { handlePluginCards, handleMarketplaceList } from "../handlers/plugins.js";
 const log = createLogger("lvis");
 const MARKETPLACE_PING_TIMEOUT_MS = 15_000;
 const MARKETPLACE_PING_CACHE_TTL_MS = 10_000;
@@ -207,7 +209,7 @@ export function replayThemeToWebview(webContentsId: number): SafeThemePayload | 
   try {
     const wc = webContents.fromId(webContentsId);
     if (wc && !wc.isDestroyed()) {
-      wc.send("lvis:plugin:event", "host.theme.changed", theme);
+      wc.send(CHANNELS.pluginBridge.event, "host.theme.changed", theme);
       return theme;
     }
   } catch {
@@ -403,9 +405,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     return promise;
   };
   // Bootstrap retry
-  ipcMain.handle("lvis:bootstrap:retry", async (e) => {
+  ipcMain.handle(CHANNELS.bootstrap.retry, async (e) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:bootstrap:retry", e);
+      auditUnauthorized(auditLogger, CHANNELS.bootstrap.retry, e);
       return UNAUTHORIZED_FRAME;
     }
     const marketplace = settingsService.get("marketplace");
@@ -418,8 +420,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     return { ok: true } as const;
   });
 
-  ipcMain.handle("lvis:plugins:install", async (e, pluginId: string, options?: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:install", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.plugins.install, async (e, pluginId: string, options?: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.install, e); return UNAUTHORIZED_FRAME; }
     const lifecycleSlug = pluginId;
     const installOptions = asPlainRecord(options);
     const expectedVersionValue = installOptions.expectedVersion;
@@ -444,7 +446,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         pluginRuntime,
         pluginMarketplace,
         broadcastInstallProgress: (payload) =>
-          broadcastPluginLifecycleEvent("lvis:plugins:install-progress", payload),
+          broadcastPluginLifecycleEvent(CHANNELS.plugins.installProgress, payload),
         emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
         refreshPluginNotifications,
         log,
@@ -458,7 +460,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       const code = err instanceof IncompatibleAppVersionError
         ? INCOMPATIBLE_APP_VERSION_CODE
         : undefined;
-      broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
+      broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, {
         slug: lifecycleSlug,
         success: false,
         error: code ?? message,
@@ -466,14 +468,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       });
       throw err;
     }
-    broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: lifecycleSlug, success: true });
+    broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, { slug: lifecycleSlug, success: true });
     return result;
   });
 
-  ipcMain.handle("lvis:plugins:uninstall", async (e, pluginId: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:uninstall", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.plugins.uninstall, async (e, pluginId: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.uninstall, e); return UNAUTHORIZED_FRAME; }
     const broadcastUninstallResult = (payload: { slug: string; success: boolean; error?: string }) => {
-      broadcastPluginLifecycleEvent("lvis:plugins:uninstall-result", payload);
+      broadcastPluginLifecycleEvent(CHANNELS.plugins.uninstallResult, payload);
     };
     try {
       // Lifecycle ordering lives in uninstallPluginWithLifecycle:
@@ -506,10 +508,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // plugin cards. The plugin stays loaded; only its per-turn tool exposure is
   // gated (PluginRuntime.setPluginEnabled does not unload/reload).
   ipcMain.handle(
-    "lvis:plugins:set-enabled",
+    CHANNELS.plugins.setEnabled,
     async (e, pluginId: unknown, enabled: unknown) => {
       if (!validateHostRendererSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:plugins:set-enabled", e);
+        auditUnauthorized(auditLogger, CHANNELS.plugins.setEnabled, e);
         return UNAUTHORIZED_FRAME;
       }
       if (typeof pluginId !== "string" || pluginId.length === 0) {
@@ -529,13 +531,13 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         return pluginConfigError("toggle-failed", "plugin enabled state could not be changed");
       }
       emitHostEvent("plugin.enabled-changed", { pluginId, enabled });
-      broadcastPluginLifecycleEvent("lvis:plugins:enabled-changed", { pluginId, enabled });
+      broadcastPluginLifecycleEvent(CHANNELS.plugins.enabledChanged, { pluginId, enabled });
       return { ok: true, pluginId, enabled } as const;
     },
   );
 
-  ipcMain.handle("lvis:plugins:install-local", async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:install-local", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.plugins.installLocal, async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.installLocal, e); return UNAUTHORIZED_FRAME; }
     if (!isDevModeUnlocked()) {
       throw new Error("[security] dev mode not unlocked — enable a supported LVIS_DEV* flag in a non-packaged build");
     }
@@ -560,14 +562,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           pluginRuntime,
           pluginMarketplace,
           broadcastInstallProgress: (payload) =>
-            broadcastPluginLifecycleEvent("lvis:plugins:install-progress", payload),
+            broadcastPluginLifecycleEvent(CHANNELS.plugins.installProgress, payload),
           emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
           refreshPluginNotifications,
           log,
         });
       } catch (err) {
         const message = errMessage(err) || "addPlugin failed";
-        broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
+        broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, {
           slug: result.pluginId,
           success: false,
           error: message,
@@ -576,7 +578,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       }
       // Mirror the marketplace install path's renderer broadcast so
       // `App.tsx` `onPluginInstallResult` listener fires `refreshViews()`.
-      broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
+      broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, {
         slug: result.pluginId,
         success: true,
       });
@@ -585,11 +587,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:plugins:ui:list", () => pluginRuntime.listUiExtensions());
+  ipcMain.handle(CHANNELS.plugins.uiList, () => pluginRuntime.listUiExtensions());
 
-  ipcMain.handle("lvis:plugins:ui:read-module", async (e, payload?: { pluginId?: string; viewId?: string }) => {
+  ipcMain.handle(CHANNELS.plugins.uiReadModule, async (e, payload?: { pluginId?: string; viewId?: string }) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:plugins:ui:read-module", e);
+      auditUnauthorized(auditLogger, CHANNELS.plugins.uiReadModule, e);
       throw new Error("Unauthorized renderer frame for lvis:plugins:ui:read-module");
     }
 
@@ -630,10 +632,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:plugins:cards", () => pluginRuntime.listPluginCards(deps.toolRegistry));
+  ipcMain.handle(CHANNELS.plugins.cards, () => handlePluginCards(deps));
 
-  ipcMain.handle("lvis:runtime:counts", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:runtime:counts", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.runtime.counts, (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.runtime.counts, e); return UNAUTHORIZED_FRAME; }
     return {
       tools: deps.toolRegistry.size,
       plugins: pluginRuntime.listPluginIds().length,
@@ -641,8 +643,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     };
   });
 
-  ipcMain.handle("lvis:runtime:env", async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:runtime:env", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.runtime.env, async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.runtime.env, e); return UNAUTHORIZED_FRAME; }
     const os = await import("node:os");
     return {
       platform: process.platform,
@@ -651,17 +653,17 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     };
   });
 
-  ipcMain.handle("lvis:marketplace:ping", async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:marketplace:ping", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.marketplace.ping, async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.marketplace.ping, e); return UNAUTHORIZED_FRAME; }
     return runMarketplacePing();
   });
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:plugins:marketplace:list", () => pluginMarketplace.list());
+  ipcMain.handle(CHANNELS.plugins.marketplaceList, () => handleMarketplaceList(deps));
 
-  ipcMain.handle("lvis:agents:list", async (e) => {
+  ipcMain.handle(CHANNELS.agents.list, async (e) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:agents:list", e);
+      auditUnauthorized(auditLogger, CHANNELS.agents.list, e);
       return UNAUTHORIZED_FRAME;
     }
     const agents = (await deps.agentProfileStore?.list() ?? []).map((agent) => ({
@@ -675,18 +677,18 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     return { agents };
   });
 
-  ipcMain.handle("lvis:skills:list", async (e) => {
+  ipcMain.handle(CHANNELS.skills.list, async (e) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:skills:list", e);
+      auditUnauthorized(auditLogger, CHANNELS.skills.list, e);
       return UNAUTHORIZED_FRAME;
     }
     const skills = deps.skillStore?.listCatalogSync() ?? [];
     return { skills };
   });
 
-  ipcMain.handle("lvis:agents:install", async (e, slug: string) => {
+  ipcMain.handle(CHANNELS.agents.install, async (e, slug: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:agents:install", e);
+      auditUnauthorized(auditLogger, CHANNELS.agents.install, e);
       return UNAUTHORIZED_FRAME;
     }
     const trimmed = typeof slug === "string" ? slug.trim() : "";
@@ -700,26 +702,26 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     try {
       const { installAgentPackageFromMarketplace } = await import("../../agents/agent-installer.js");
-      broadcastPluginLifecycleEvent("lvis:agents:install-progress", { slug: trimmed, phase: "installing" });
+      broadcastPluginLifecycleEvent(CHANNELS.agents.installProgress, { slug: trimmed, phase: "installing" });
       const result = await installAgentPackageFromMarketplace(trimmed, {
         fetcher: pluginMarketplace.getFetcher(),
         store: agentArtifactStore,
         registryPath: path.resolve(lvisHome(), "agents", "registry.json"),
         onProgress: (evt) => {
           if (evt.phase === "downloading") {
-            broadcastPluginLifecycleEvent("lvis:agents:install-progress", {
+            broadcastPluginLifecycleEvent(CHANNELS.agents.installProgress, {
               slug: trimmed,
               phase: "downloading",
               bytesDownloaded: evt.bytesDownloaded,
               bytesTotal: evt.bytesTotal,
             });
           } else {
-            broadcastPluginLifecycleEvent("lvis:agents:install-progress", { slug: trimmed, phase: evt.phase });
+            broadcastPluginLifecycleEvent(CHANNELS.agents.installProgress, { slug: trimmed, phase: evt.phase });
           }
         },
       });
       emitHostEvent("agent.installed", { agentId: result.agentId, slug: result.slug, source: "marketplace" });
-      broadcastPluginLifecycleEvent("lvis:agents:install-result", {
+      broadcastPluginLifecycleEvent(CHANNELS.agents.installResult, {
         slug: result.slug,
         agentId: result.agentId,
         success: true,
@@ -727,14 +729,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: true as const, slug: result.slug, agentId: result.agentId, version: result.version, installed: true as const };
     } catch (err) {
       const message = (err as Error).message ?? "Agent install failed";
-      broadcastPluginLifecycleEvent("lvis:agents:install-result", { slug: trimmed, success: false, error: message });
+      broadcastPluginLifecycleEvent(CHANNELS.agents.installResult, { slug: trimmed, success: false, error: message });
       return { ok: false as const, error: "install-failed", message };
     }
   });
 
-  ipcMain.handle("lvis:agents:uninstall", async (e, slug: string) => {
+  ipcMain.handle(CHANNELS.agents.uninstall, async (e, slug: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:agents:uninstall", e);
+      auditUnauthorized(auditLogger, CHANNELS.agents.uninstall, e);
       return UNAUTHORIZED_FRAME;
     }
     const trimmed = typeof slug === "string" ? slug.trim() : "";
@@ -746,7 +748,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         registryPath: path.resolve(lvisHome(), "agents", "registry.json"),
       });
       emitHostEvent("agent.uninstalled", { agentId: result.agentId, slug: result.slug, source: "marketplace" });
-      broadcastPluginLifecycleEvent("lvis:agents:uninstall-result", {
+      broadcastPluginLifecycleEvent(CHANNELS.agents.uninstallResult, {
         slug: result.slug,
         agentId: result.agentId,
         success: true,
@@ -754,14 +756,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: true as const, slug: result.slug, agentId: result.agentId, uninstalled: true as const };
     } catch (err) {
       const message = (err as Error).message ?? "Agent uninstall failed";
-      broadcastPluginLifecycleEvent("lvis:agents:uninstall-result", { slug: trimmed, success: false, error: message });
+      broadcastPluginLifecycleEvent(CHANNELS.agents.uninstallResult, { slug: trimmed, success: false, error: message });
       return { ok: false as const, error: "uninstall-failed", message };
     }
   });
 
-  ipcMain.handle("lvis:skills:install", async (e, slug: string) => {
+  ipcMain.handle(CHANNELS.skills.install, async (e, slug: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:skills:install", e);
+      auditUnauthorized(auditLogger, CHANNELS.skills.install, e);
       return UNAUTHORIZED_FRAME;
     }
     const trimmed = typeof slug === "string" ? slug.trim() : "";
@@ -775,26 +777,26 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     try {
       const { installSkillPackageFromMarketplace } = await import("../../skills/skill-installer.js");
-      broadcastPluginLifecycleEvent("lvis:skills:install-progress", { slug: trimmed, phase: "installing" });
+      broadcastPluginLifecycleEvent(CHANNELS.skills.installProgress, { slug: trimmed, phase: "installing" });
       const result = await installSkillPackageFromMarketplace(trimmed, {
         fetcher: pluginMarketplace.getFetcher(),
         store: skillArtifactStore,
         registryPath: path.resolve(lvisHome(), "skills", "registry.json"),
         onProgress: (evt) => {
           if (evt.phase === "downloading") {
-            broadcastPluginLifecycleEvent("lvis:skills:install-progress", {
+            broadcastPluginLifecycleEvent(CHANNELS.skills.installProgress, {
               slug: trimmed,
               phase: "downloading",
               bytesDownloaded: evt.bytesDownloaded,
               bytesTotal: evt.bytesTotal,
             });
           } else {
-            broadcastPluginLifecycleEvent("lvis:skills:install-progress", { slug: trimmed, phase: evt.phase });
+            broadcastPluginLifecycleEvent(CHANNELS.skills.installProgress, { slug: trimmed, phase: evt.phase });
           }
         },
       });
       emitHostEvent("skill.installed", { skillId: result.skillId, slug: result.slug, source: "marketplace" });
-      broadcastPluginLifecycleEvent("lvis:skills:install-result", {
+      broadcastPluginLifecycleEvent(CHANNELS.skills.installResult, {
         slug: result.slug,
         skillId: result.skillId,
         success: true,
@@ -802,14 +804,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: true as const, slug: result.slug, skillId: result.skillId, version: result.version, installed: true as const };
     } catch (err) {
       const message = (err as Error).message ?? "Skill install failed";
-      broadcastPluginLifecycleEvent("lvis:skills:install-result", { slug: trimmed, success: false, error: message });
+      broadcastPluginLifecycleEvent(CHANNELS.skills.installResult, { slug: trimmed, success: false, error: message });
       return { ok: false as const, error: "install-failed", message };
     }
   });
 
-  ipcMain.handle("lvis:skills:uninstall", async (e, slug: string) => {
+  ipcMain.handle(CHANNELS.skills.uninstall, async (e, slug: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:skills:uninstall", e);
+      auditUnauthorized(auditLogger, CHANNELS.skills.uninstall, e);
       return UNAUTHORIZED_FRAME;
     }
     const trimmed = typeof slug === "string" ? slug.trim() : "";
@@ -821,7 +823,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         registryPath: path.resolve(lvisHome(), "skills", "registry.json"),
       });
       emitHostEvent("skill.uninstalled", { skillId: result.skillId, slug: result.slug, source: "marketplace" });
-      broadcastPluginLifecycleEvent("lvis:skills:uninstall-result", {
+      broadcastPluginLifecycleEvent(CHANNELS.skills.uninstallResult, {
         slug: result.slug,
         skillId: result.skillId,
         success: true,
@@ -829,14 +831,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: true as const, slug: result.slug, skillId: result.skillId, uninstalled: true as const };
     } catch (err) {
       const message = (err as Error).message ?? "Skill uninstall failed";
-      broadcastPluginLifecycleEvent("lvis:skills:uninstall-result", { slug: trimmed, success: false, error: message });
+      broadcastPluginLifecycleEvent(CHANNELS.skills.uninstallResult, { slug: trimmed, success: false, error: message });
       return { ok: false as const, error: "uninstall-failed", message };
     }
   });
 
-  ipcMain.handle("lvis:plugins:config:get", (e, pluginId: string) => {
+  ipcMain.handle(CHANNELS.plugins.configGet, (e, pluginId: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:plugins:config:get", e);
+      auditUnauthorized(auditLogger, CHANNELS.plugins.configGet, e);
       return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
     try {
@@ -846,9 +848,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
   });
 
-  ipcMain.handle("lvis:plugins:config:set", async (e, pluginId: string, config: unknown) => {
+  ipcMain.handle(CHANNELS.plugins.configSet, async (e, pluginId: string, config: unknown) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:plugins:config:set", e);
+      auditUnauthorized(auditLogger, CHANNELS.plugins.configSet, e);
       return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
     try {
@@ -874,9 +876,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
   });
 
-  ipcMain.handle("lvis:plugins:config:schema:get", (e, pluginId: string) => {
+  ipcMain.handle(CHANNELS.plugins.configSchemaGet, (e, pluginId: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:plugins:config:schema:get", e);
+      auditUnauthorized(auditLogger, CHANNELS.plugins.configSchemaGet, e);
       return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
     try {
@@ -887,9 +889,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
   });
 
-  ipcMain.handle("lvis:plugins:config:secret:set", async (e, pluginId: string, key: string, value: string) => {
+  ipcMain.handle(CHANNELS.plugins.configSecretSet, async (e, pluginId: string, key: string, value: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:plugins:config:secret:set", e);
+      auditUnauthorized(auditLogger, CHANNELS.plugins.configSecretSet, e);
       return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
     try {
@@ -923,9 +925,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
   });
 
-  ipcMain.handle("lvis:plugins:config:secret:list-keys", (e, pluginId: string) => {
+  ipcMain.handle(CHANNELS.plugins.configSecretListKeys, (e, pluginId: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:plugins:config:secret:list-keys", e);
+      auditUnauthorized(auditLogger, CHANNELS.plugins.configSecretListKeys, e);
       return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
     try {
@@ -950,15 +952,15 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:plugins:perf-stats", () => pluginRuntime.getPerfStats());
+  ipcMain.handle(CHANNELS.plugins.perfStats, () => pluginRuntime.getPerfStats());
 
-  ipcMain.handle("lvis:plugins:call", (
+  ipcMain.handle(CHANNELS.plugins.call, (
     e,
     method: string,
     payload?: unknown,
     options?: { userAction?: boolean },
   ) => {
-    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:call", e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.call, e); return UNAUTHORIZED_FRAME; }
     return pluginRuntime.callFromUi(method, payload, {
       userAction: options?.userAction === true,
     });
@@ -999,54 +1001,54 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     return true;
   }
 
-  ipcMain.handle("lvis:mcp:servers", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:servers", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.mcp.servers, (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.servers, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.listServers();
   });
-  ipcMain.handle("lvis:mcp:kill", (e, serverId: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:kill", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.mcp.kill, (e, serverId: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.kill, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.killSwitch(serverId);
   });
-  ipcMain.handle("lvis:mcp:config:get", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:get", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.mcp.configGet, (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configGet, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.getConfigs();
   });
-  ipcMain.handle("lvis:mcp:config:path", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:path", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.mcp.configPath, (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configPath, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.getConfigPath();
   });
-  ipcMain.handle("lvis:mcp:config:add", async (e, config: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:add", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.mcp.configAdd, async (e, config: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configAdd, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.addConfig(config as import("../../mcp/types.js").McpServerConfig);
   });
-  ipcMain.handle("lvis:mcp:config:set-api-key", async (e, serverId: string, apiKey: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:set-api-key", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.mcp.configSetApiKey, async (e, serverId: string, apiKey: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configSetApiKey, e); return UNAUTHORIZED_FRAME; }
     if (!checkSetApiKeyRateLimit(String(serverId))) {
       throw new Error("Rate limit exceeded: lvis:mcp:config:set-api-key (5/min per server)");
     }
     return deps.mcpManager.setApiKey(serverId, apiKey);
   });
-  ipcMain.handle("lvis:mcp:config:remove", async (e, serverId: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:remove", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.mcp.configRemove, async (e, serverId: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configRemove, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.removeConfig(serverId);
   });
-  ipcMain.handle("lvis:mcp:ui-resource", async (e, serverId: string, uri: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:ui-resource", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.mcp.uiResource, async (e, serverId: string, uri: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.uiResource, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.readUiResource(serverId, uri);
   });
 
-  ipcMain.handle("lvis:mcp:catalog:list", async (e) => {
+  ipcMain.handle(CHANNELS.mcp.catalogList, async (e) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:mcp:catalog:list", e);
+      auditUnauthorized(auditLogger, CHANNELS.mcp.catalogList, e);
       return UNAUTHORIZED_FRAME;
     }
     const all = await pluginMarketplace.list();
     return all.filter((p) => p.pluginType === "mcp");
   });
 
-  ipcMain.handle("lvis:mcp:install-from-marketplace", async (e, slug: string) => {
+  ipcMain.handle(CHANNELS.mcp.installFromMarketplace, async (e, slug: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:mcp:install-from-marketplace", e);
+      auditUnauthorized(auditLogger, CHANNELS.mcp.installFromMarketplace, e);
       return UNAUTHORIZED_FRAME;
     }
     if (!mcpArtifactStore) {
@@ -1084,9 +1086,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
   });
 
-  ipcMain.handle("lvis:mcp:import:claude-desktop:preview", async (e, raw: string) => {
+  ipcMain.handle(CHANNELS.mcp.importClaudeDesktopPreview, async (e, raw: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:mcp:import:claude-desktop:preview", e);
+      auditUnauthorized(auditLogger, CHANNELS.mcp.importClaudeDesktopPreview, e);
       return UNAUTHORIZED_FRAME;
     }
     if (typeof raw === "string" && raw.length > 1_000_000) {
@@ -1100,13 +1102,13 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(
-    "lvis:mcp:import:claude-desktop:apply",
+    CHANNELS.mcp.importClaudeDesktopApply,
     async (
       e,
       payload: { raw: string; conflictPolicy?: "skip" | "overwrite" },
     ) => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:mcp:import:claude-desktop:apply", e);
+        auditUnauthorized(auditLogger, CHANNELS.mcp.importClaudeDesktopApply, e);
         return UNAUTHORIZED_FRAME;
       }
       const { parseClaudeDesktopConfig } = await import("../../mcp/claude-desktop-import.js");
@@ -1196,7 +1198,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         sessionId: "ipc-guard",
         type: "warn",
         input: safeStringify({
-          channel: "lvis:plugin:register-webview",
+          channel: CHANNELS.pluginBridge.registerWebview,
           reason,
           payload: redactAuditPayload(payload),
         }),
@@ -1205,9 +1207,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       // Never let audit logging break the IPC sentinel return.
     }
   };
-  ipcMain.handle("lvis:plugin:register-webview", (e, payload: { webContentsId: number; pluginId: string; entryUrl: string }) => {
+  ipcMain.handle(CHANNELS.pluginBridge.registerWebview, (e, payload: { webContentsId: number; pluginId: string; entryUrl: string }) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:plugin:register-webview", e);
+      auditUnauthorized(auditLogger, CHANNELS.pluginBridge.registerWebview, e);
       return UNAUTHORIZED_FRAME;
     }
     const { webContentsId, pluginId, entryUrl } = payload ?? {};
@@ -1308,12 +1310,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     return pluginWebviewRegistry.get(senderId) ?? null;
   }
 
-  ipcMain.handle("lvis:plugin:get-entry-url", (e) => {
+  ipcMain.handle(CHANNELS.pluginBridge.getEntryUrl, (e) => {
     const binding = resolvePluginFromSender(e);
     if (binding) return { ok: true as const, entryUrl: binding.assetEntryUrl };
 
     if (!validatePluginFrame(e)) {
-      auditUnauthorized(auditLogger, "lvis:plugin:get-entry-url", e);
+      auditUnauthorized(auditLogger, CHANNELS.pluginBridge.getEntryUrl, e);
       return UNAUTHORIZED_FRAME;
     }
     const senderId = e.sender?.id;
@@ -1353,7 +1355,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
               sessionId: "ipc-guard",
               type: "warn",
               input: safeStringify({
-                channel: "lvis:plugin:get-entry-url",
+                channel: CHANNELS.pluginBridge.getEntryUrl,
                 reason: "not-registered",
                 frameUrl: redactFsPath(e?.senderFrame?.url ?? ""),
                 senderId,
@@ -1381,48 +1383,50 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // Returns `null` when the host hasn't broadcast yet (extreme cold-
   // boot window). The shell falls back to SDK CSS-side defaults in
   // that case.
-  ipcMain.handle("lvis:plugin:get-theme", (e) => {
+  ipcMain.handle(CHANNELS.pluginBridge.getTheme, (e) => {
     if (!validatePluginFrame(e)) {
-      auditUnauthorized(auditLogger, "lvis:plugin:get-theme", e);
+      auditUnauthorized(auditLogger, CHANNELS.pluginBridge.getTheme, e);
       return UNAUTHORIZED_FRAME;
     }
     return { ok: true as const, theme: getLastThemePayload() };
   });
 
-  ipcMain.handle(
-    "lvis:plugin:call-tool",
-    async (e, method: string, payload?: unknown, options?: { userAction?: boolean }) => {
-      const binding = resolvePluginFromSender(e);
-      if (!binding) {
-        auditUnauthorized(auditLogger, "lvis:plugin:call-tool", e);
-        return UNAUTHORIZED_FRAME;
-      }
-      if (typeof method !== "string" || !method.trim()) {
-        return { ok: false, error: "invalid-method" };
-      }
-      const ownerPluginId = pluginRuntime.resolveToolOwner(method);
-      if (!ownerPluginId) {
-        return { ok: false, error: `Plugin method not found: ${method}` };
-      }
-      if (ownerPluginId !== binding.pluginId) {
-        auditLogger.log({
-          timestamp: new Date().toISOString(),
-          sessionId: "plugin-frame",
-          type: "error",
-          input: `[plugin:${binding.pluginId}] cross-plugin call denied: method='${method}' owner='${ownerPluginId}'`,
-        });
-        return { ok: false, error: "cross-plugin-call-denied" };
-      }
-      try {
-        const result = await pluginRuntime.callFromUi(method, payload, {
-          userAction: options?.userAction === true,
-        });
-        return { ok: true, result };
-      } catch (err) {
-        return { ok: false, error: (err as Error).message };
-      }
-    },
-  );
+  ipcMain.handle(CHANNELS.pluginBridge.callTool, async (
+    e,
+    method: string,
+    payload?: unknown,
+    options?: { userAction?: boolean },
+  ) => {
+    const binding = resolvePluginFromSender(e);
+    if (!binding) {
+      auditUnauthorized(auditLogger, CHANNELS.pluginBridge.callTool, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (typeof method !== "string" || !method.trim()) {
+      return { ok: false, error: "invalid-method" };
+    }
+    const ownerPluginId = pluginRuntime.resolveToolOwner(method);
+    if (!ownerPluginId) {
+      return { ok: false, error: `Plugin method not found: ${method}` };
+    }
+    if (ownerPluginId !== binding.pluginId) {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "plugin-frame",
+        type: "error",
+        input: `[plugin:${binding.pluginId}] cross-plugin call denied: method='${method}' owner='${ownerPluginId}'`,
+      });
+      return { ok: false, error: "cross-plugin-call-denied" };
+    }
+    try {
+      const result = await pluginRuntime.callFromUi(method, payload, {
+        userAction: options?.userAction === true,
+      });
+      return { ok: true, result };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
 
   // ─── Plugin webview config bridge (#B1 — bridge.config namespace) ─────────
   // Plugin UI webviews call these via `bridge.config.get/set(key)` to read/
@@ -1432,10 +1436,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // plugin's config. Secret fields are stripped before persistence (matches
   // `lvis:plugins:config:set` behaviour) so plugin UI cannot bypass the
   // keychain-backed secret store via this surface.
-  ipcMain.handle("lvis:plugin:config:get", (e, key: string) => {
+  ipcMain.handle(CHANNELS.pluginBridge.configGet, (e, key: string) => {
     const binding = resolvePluginFromSender(e);
     if (!binding) {
-      auditUnauthorized(auditLogger, "lvis:plugin:config:get", e);
+      auditUnauthorized(auditLogger, CHANNELS.pluginBridge.configGet, e);
       return UNAUTHORIZED_FRAME;
     }
     if (typeof key !== "string" || !key.trim()) {
@@ -1449,10 +1453,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
   });
 
-  ipcMain.handle("lvis:plugin:config:set", async (e, key: string, value: unknown) => {
+  ipcMain.handle(CHANNELS.pluginBridge.configSet, async (e, key: string, value: unknown) => {
     const binding = resolvePluginFromSender(e);
     if (!binding) {
-      auditUnauthorized(auditLogger, "lvis:plugin:config:set", e);
+      auditUnauthorized(auditLogger, CHANNELS.pluginBridge.configSet, e);
       return UNAUTHORIZED_FRAME;
     }
     if (typeof key !== "string" || !key.trim()) {
@@ -1494,10 +1498,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (trimmed === "." || trimmed === "..") return null;
     return trimmed;
   }
-  ipcMain.handle("lvis:plugin:storage:get", async (e, key: string) => {
+  ipcMain.handle(CHANNELS.pluginBridge.storageGet, async (e, key: string) => {
     const binding = resolvePluginFromSender(e);
     if (!binding) {
-      auditUnauthorized(auditLogger, "lvis:plugin:storage:get", e);
+      auditUnauthorized(auditLogger, CHANNELS.pluginBridge.storageGet, e);
       return UNAUTHORIZED_FRAME;
     }
     const safeKey = sanitizeStorageKey(key);
@@ -1511,10 +1515,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: false as const, error: (err as Error).message };
     }
   });
-  ipcMain.handle("lvis:plugin:storage:set", async (e, key: string, value: unknown) => {
+  ipcMain.handle(CHANNELS.pluginBridge.storageSet, async (e, key: string, value: unknown) => {
     const binding = resolvePluginFromSender(e);
     if (!binding) {
-      auditUnauthorized(auditLogger, "lvis:plugin:storage:set", e);
+      auditUnauthorized(auditLogger, CHANNELS.pluginBridge.storageSet, e);
       return UNAUTHORIZED_FRAME;
     }
     const safeKey = sanitizeStorageKey(key);
@@ -1529,10 +1533,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
   });
 
-  ipcMain.handle("lvis:plugin:emit-event", (e, type: string, data?: unknown) => {
+  ipcMain.handle(CHANNELS.pluginBridge.emitEvent, (e, type: string, data?: unknown) => {
     const binding = resolvePluginFromSender(e);
     if (!binding) {
-      auditUnauthorized(auditLogger, "lvis:plugin:emit-event", e);
+      auditUnauthorized(auditLogger, CHANNELS.pluginBridge.emitEvent, e);
       return UNAUTHORIZED_FRAME;
     }
     if (typeof type !== "string" || !type.trim()) {
@@ -1572,9 +1576,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // Host renderer calls this when any theme axis changes; main fans out to
   // every registered plugin webview via the existing lvis:plugin:event channel
   // and publishes the same host event for plugin host services.
-  ipcMain.handle("lvis:host:plugin-theme-notify", (e, payload: unknown) => {
+  ipcMain.handle(CHANNELS.host.pluginThemeNotify, (e, payload: unknown) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:host:plugin-theme-notify", e);
+      auditUnauthorized(auditLogger, CHANNELS.host.pluginThemeNotify, e);
       return UNAUTHORIZED_FRAME;
     }
     const validated = recordValidatedTheme(payload);
@@ -1585,7 +1589,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       try {
         const wc = webContents.fromId(wcId);
         if (wc && !wc.isDestroyed()) {
-          wc.send("lvis:plugin:event", "host.theme.changed", cloneThemePayload(safe));
+          wc.send(CHANNELS.pluginBridge.event, "host.theme.changed", cloneThemePayload(safe));
         }
       } catch { /* webview destroyed between registry read and send */ }
     }
@@ -1593,9 +1597,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   // ─── Notifications ──────────────────────────────────────────────────────
-  ipcMain.handle("lvis:notification:clicked", (e, payload: unknown) => {
+  ipcMain.handle(CHANNELS.notification.clicked, (e, payload: unknown) => {
     if (!validateHostRendererSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:notification:clicked", e);
+      auditUnauthorized(auditLogger, CHANNELS.notification.clicked, e);
       return UNAUTHORIZED_FRAME;
     }
     const kind = (payload as { kind?: unknown } | null | undefined)?.kind;

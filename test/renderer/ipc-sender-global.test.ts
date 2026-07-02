@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2 } from "../../src/shared/ipc-channels.js";
+import { CHANNELS } from "../../src/contract/app-contract.js";
 import { validateSender } from "../../src/ipc/gated.js";
 import type { IpcMainInvokeEvent } from "electron";
 
@@ -167,6 +168,22 @@ describe("ipc-bridge.ts — mutating/sensitive channels have a sender guard", ()
   for (const [key, value] of Object.entries(OVERLAY_V1)) {
     constInlinePairs.push([`OVERLAY_V1.${key}`, `"${value}"`]);
   }
+  // Handlers swept onto the contract SOT read as `ipcMain.handle(CHANNELS.<group>.<key>, …)`
+  // (see C2/C11 literal sweep). Recursively inline every CHANNELS.* leaf → its literal so
+  // those registrations are matched by the same `ipcMain.handle("lvis:…"` scan. Robust to
+  // future sweeps: any new CHANNELS reference is picked up automatically.
+  const walkChannels = (obj: unknown, path: string): void => {
+    if (!obj || typeof obj !== "object") return;
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      const nextPath = `${path}.${key}`;
+      if (typeof value === "string") {
+        constInlinePairs.push([nextPath, `"${value}"`]);
+      } else {
+        walkChannels(value, nextPath);
+      }
+    }
+  };
+  walkChannels(CHANNELS, "CHANNELS");
   // Substitute longer reference strings first so prefix collisions don't
   // corrupt later replacements (e.g. `ROUTINES_V2.list` would otherwise
   // partially rewrite `ROUTINES_V2.listSessions`).
