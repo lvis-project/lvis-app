@@ -5,9 +5,13 @@
  * Validation is STRUCTURAL — it parses with `new URL()` and inspects the parsed
  * protocol / credentials. It never uses substring/`startsWith`/`includes`
  * checks (those are the CodeQL "incomplete URL substring sanitization" sink).
- * This is the only place the renderer should decide whether a URL is safe to
- * navigate to; both the routing callback and the workspace-tab store call it
- * (defense-in-depth), and the main process re-validates on the IPC boundary.
+ * This is the only place the renderer decides whether a URL is safe to navigate
+ * to. Every renderer boundary calls THIS validator (defense-in-depth, one SOT):
+ *   - the ActionPanel routing callback (routeActivityItem / routeActivityItemPinned),
+ *   - the workspace-tab store (openInEphemeral / openPinned reject invalid urls),
+ *   - the in-app browser viewer (UrlDocumentViewer, incl. its credential check).
+ * The main process independently re-validates on the IPC / webview boundary
+ * (side-browser-webview.ts) with the same protocol + credential rules.
  */
 export function normalizeBrowserNavigationUrl(value: string): string | null {
   const trimmed = value.trim();
