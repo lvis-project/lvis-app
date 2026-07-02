@@ -20,7 +20,7 @@
  * listDir re-validates every requested path against the same scope guard so a
  * compromised renderer cannot list outside the selected roots.
  */
-import { dialog, ipcMain } from "electron";
+import { dialog, ipcMain, shell } from "electron";
 import { t } from "../../i18n/index.js";
 import { promises as fs } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
@@ -391,6 +391,47 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
         }),
       });
       return { ok: true, removed: match, roots: computeRoots() };
+    },
+  );
+
+  /**
+   * Reveal a file/folder in the OS file manager (Finder / Explorer). This is a
+   * strictly WEAKER capability than "open": `showItemInFolder` only selects the
+   * item's location, it never launches/executes it — consistent with the
+   * `canOpenExternal:false` policy that deliberately disables the OS "open"
+   * button in the preview pane.
+   *
+   * Trust boundary (identical to listDir): the renderer-supplied `rawPath` is
+   * NOT trusted. `assertReadableFilePath` re-validates it against the SAME scope
+   * (cwd + additionalDirectories), rejecting globs, Layer 0 sensitive paths, and
+   * anything outside the allowed roots. Only `verdict.resolved` — the main-owned,
+   * realpath'd, scope-checked absolute path — is ever handed to the shell, never
+   * the raw renderer string.
+   */
+  ipcMain.handle(
+    CHANNELS.workspace.reveal,
+    async (e, rawPath: string): Promise<WorkspaceRevealResult> => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.workspace.reveal, e);
+        return { ok: false, error: "unauthorized", message: "sender frame not authorized" };
+      }
+      if (typeof rawPath !== "string" || rawPath.length === 0) {
+        return { ok: false, error: "not-found", message: "path must be a non-empty string" };
+      }
+      const { cwd, extraAllowed } = currentScope();
+      const verdict = assertReadableFilePath(rawPath, cwd, extraAllowed);
+      if (!verdict.ok) {
+        const error = verdict.error === "not-a-file" ? "not-found" : verdict.error;
+        return { ok: false, error, message: `scope guard rejected: ${verdict.error}` };
+      }
+      const target = verdict.resolved;
+      try {
+        await fs.stat(target);
+      } catch {
+        return { ok: false, error: "not-found", message: "path no longer exists" };
+      }
+      shell.showItemInFolder(target);
+      return { ok: true };
     },
   );
 }
