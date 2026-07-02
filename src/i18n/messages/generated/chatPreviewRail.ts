@@ -1,5 +1,6 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/ChatPreviewRail.tsx. Do not edit by hand.
 export const en = {
+  "chatPreviewRail.removeRoot": "Remove folder",
   "chatPreviewRail.title": "Workspace",
   "chatPreviewRail.subtitle": "{targets} previews · {files} files",
   "chatPreviewRail.close": "Close side panel",
@@ -78,6 +79,7 @@ export const en = {
 };
 
 export const ko = {
+  "chatPreviewRail.removeRoot": "폴더 제거",
   "chatPreviewRail.title": "작업 패널",
   "chatPreviewRail.subtitle": "미리보기 {targets}개 · 파일 {files}개",
   "chatPreviewRail.close": "사이드 패널 닫기",

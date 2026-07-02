@@ -26,6 +26,7 @@ import {
   Search,
   Table,
   Terminal,
+  Trash2,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -750,6 +751,29 @@ function ProjectRootsBrowser({
     if (res.ok && res.roots) applyRoots(res.roots, res.added ?? null);
   };
 
+  const activeRootIsDefault = Boolean(
+    activeRoot && roots.find((r) => r.path === activeRoot)?.isDefault,
+  );
+
+  // Remove the active root from the read allow-list. Non-destructive (files are
+  // untouched — only the Layer-1 read scope narrows); main refuses to remove the
+  // default root or any path not already in `additionalDirectories`.
+  const removeActiveRoot = async () => {
+    if (!activeRoot || activeRootIsDefault) return;
+    const res = await window.lvis.workspace.removeRoot(activeRoot);
+    if (!res.ok || !res.roots) return;
+    // Drop cached children/expansion for the removed subtree so a re-add reloads.
+    setChildrenByPath((prev) => {
+      const next: Record<string, WorkspaceDirEntry[]> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        if (key === activeRoot || key.startsWith(`${activeRoot}/`)) continue;
+        next[key] = value;
+      }
+      return next;
+    });
+    applyRoots(res.roots, res.roots[0]?.path ?? null);
+  };
+
   const renderEntries = (path: string, depth: number): ReactElement => (
     <>
       {(childrenByPath[path] ?? []).map((entry) => {
@@ -823,6 +847,23 @@ function ProjectRootsBrowser({
           </TooltipTrigger>
           <TooltipContent side="bottom">{t("chatPreviewRail.addProjectRoot")}</TooltipContent>
         </Tooltip>
+        {activeRoot && !activeRootIsDefault ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                data-testid="chat-side-panel-remove-root"
+                aria-label={t("chatPreviewRail.removeRoot")}
+                onClick={() => void removeActiveRoot()}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("chatPreviewRail.removeRoot")}</TooltipContent>
+          </Tooltip>
+        ) : null}
       </div>
       {pendingWarning ? (
         <div
