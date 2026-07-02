@@ -1,5 +1,5 @@
 /**
- * Context-fill carrier helpers (C9 Wave 1).
+ * Context-fill carrier helpers.
  *
  * Pure functions that (a) recover the latest persisted context-token count from
  * a message array and (b) attach a `checkpointMeta.contextTokensAfter` carrier

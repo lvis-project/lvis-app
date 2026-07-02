@@ -1,5 +1,5 @@
 /**
- * Script-hook lifecycle dispatch helpers (C9 Wave 2).
+ * Script-hook lifecycle dispatch helpers.
  *
  * `fireLifecycleEvent` (NON-BLOCKING, observe-only, fail-soft) and
  * `fireUserPromptSubmit` (BLOCKING, FAIL-CLOSED). Extracted verbatim from

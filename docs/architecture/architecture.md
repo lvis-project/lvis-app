@@ -1144,7 +1144,7 @@ Phase 3 리팩터 기준 `lvis-app/src/` 모듈 경계다. Phase 1~2의 `src/age
 
 #### 4.6.1 Canonical Directory Map
 
-> **Phase 4 (host structure alignment, #1409 + #1411) landed** — the seven
+> **Host structure alignment (#1409 + #1411) landed** — the seven
 > orchestration mega-files were decomposed into per-responsibility subdirs
 > (`engine/turn/`, `tools/pipeline/`, `plugins/runtime/`, `boot/steps/` +
 > `boot/context.ts`/`boot/assemble-services.ts`, `ipc/handlers/`, `src/main/`
@@ -1152,7 +1152,7 @@ Phase 3 리팩터 기준 `lvis-app/src/` 모듈 경계다. Phase 1~2의 `src/age
 > `contract/` firewall + thin `api/`·`cli/`·`sdk/` surfaces were added. Each
 > mega-file now stays as a thin orchestrator/composition-root that re-exports or
 > assembles its extracted units. Full rationale + per-file plan:
-> [`docs/blueprints/phase4-host-structure-alignment.md`](../blueprints/phase4-host-structure-alignment.md).
+> [`docs/blueprints/host-structure-alignment.md`](../blueprints/host-structure-alignment.md).
 
 ```
 lvis-app/src/
@@ -1174,7 +1174,7 @@ lvis-app/src/
 ├── ipc-bridge.ts, plugin-ui-host.tsx                          # 엔트리 / 브릿지
 │
 ├── renderer.tsx   # minimal entry — mounts ui/renderer/App.tsx
-├── ui/renderer/   # Renderer composition root (Phase 1~4.6 split 완료; Phase 4 App/ChatView 분해)
+├── ui/renderer/   # Renderer composition root (App/ChatView decomposed into roots + hooks)
 │   ├── App.tsx                  # composition root — wires domain hooks + renders
 │   │                            #  AppProviders > AppShell(children) + AppDialogs (C16)
 │   ├── AppProviders.tsx, AppShell.tsx, AppDialogs.tsx   # App presentational split
@@ -1183,7 +1183,7 @@ lvis-app/src/
 │   ├── SettingsDialog.tsx, MainToolbar.tsx
 │   ├── context/                 # ChatContext (state provider for ChatView subtree)
 │   ├── state/                   # chat-scroll-store (module scroll singletons)
-│   ├── hooks/                   # domain hooks — 14 original + Phase-4 App/ChatView hooks
+│   ├── hooks/                   # domain hooks — 14 original + extracted App/ChatView hooks
 │   │                            #  (use-app-mode, use-routine-overlay, use-send-message,
 │   │                            #   use-plugin-view-routing, use-onboarding-chain-controller,
 │   │                            #   use-chat-scroll, use-message-queue, use-attachment-picker,

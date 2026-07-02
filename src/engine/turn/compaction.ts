@@ -1,5 +1,5 @@
 /**
- * Compaction path (C9 Wave 3).
+ * Compaction path.
  *
  * manualCompact (`/compact`) / runPreflightGuard (token preflight + force-
  * recover + rate-limit recovery) / applyBoundaryToSession (boundary apply +

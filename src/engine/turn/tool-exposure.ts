@@ -1,5 +1,5 @@
 /**
- * Tool-exposure metrics + provider-request diagnostics (C9 Wave 2).
+ * Tool-exposure metrics + provider-request diagnostics.
  *
  * `buildToolExposureMetrics` and `buildProviderRequestDiagnostics`, extracted
  * from `conversation-loop.ts` with their private source-count helpers.

@@ -1,5 +1,5 @@
 /**
- * Guidance-queue bounds (C9 Wave 4) — the mid-stream guide buffer limits
+ * Guidance-queue bounds — the mid-stream guide buffer limits
  * shared by ConversationLoop.queueGuidance and the queryLoop drain site.
  */
 export const GUIDE_MAX_ENTRIES = 16;
