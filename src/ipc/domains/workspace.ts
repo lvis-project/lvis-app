@@ -36,6 +36,11 @@ import {
   sanitizeRuntimeAllowedDirectories,
   validateDirectoryAddition,
 } from "../../permissions/allowed-directories.js";
+import {
+  canonicalizePathForMatch,
+  caseFoldForMatch,
+  isSensitivePath,
+} from "../../permissions/sensitive-paths.js";
 
 /** Max directory entries returned per lazy listing (bounds huge dirs). */
 const MAX_DIR_ENTRIES = 1_000;
@@ -60,6 +65,16 @@ export interface WorkspacePickRootResult {
   roots?: WorkspaceRoot[];
   /** Adjacency warnings (`.env`/`.git`/…) surfaced to the renderer. */
   warnings?: string[];
+  /**
+   * The pick had adjacency warnings and was NOT persisted — the renderer must
+   * surface {@link warnings} and re-invoke `pickRoot({ acknowledgePath })` to
+   * confirm. Mirrors the two-step `/permission dir allow … --ack-warnings` gate
+   * in permission-slash.ts, so a folder pick can never silently widen the
+   * Layer-1 read allow-list.
+   */
+  requiresAcknowledgement?: boolean;
+  /** Echoed picked path awaiting acknowledgement (renderer sends it back). */
+  pendingPath?: string;
   error?: string;
 }
 
@@ -98,6 +113,48 @@ function computeRoots(): WorkspaceRoot[] {
   return roots;
 }
 
+/**
+ * Persist a picked project folder through the SAME validation + adjacency-ack
+ * gate the `/permission dir allow` slash enforces (permission-slash.ts §allow):
+ *
+ *   1. `validateDirectoryAddition` — hard-refuses filesystem root / Layer 0
+ *      sensitive dirs and surfaces `.env`/`.git`/`.ssh`/… adjacency warnings.
+ *   2. Adjacency warnings present AND not acknowledged → DO NOT persist; return
+ *      `requiresAcknowledgement` so the renderer can confirm (second gesture).
+ *   3. Otherwise persist to `permissions.additionalDirectories` — the executor's
+ *      Layer-1 read allow-list SOT.
+ *
+ * This is the single choke point that stops a folder pick from silently widening
+ * the read allow-list by discarding warnings.
+ */
+async function persistPickedRoot(
+  picked: string,
+  acknowledge: boolean,
+): Promise<WorkspacePickRootResult> {
+  const verdict = validateDirectoryAddition(picked);
+  if (!verdict.ok) {
+    return { ok: false, error: verdict.reason, warnings: verdict.adjacencyWarnings };
+  }
+  if (verdict.adjacencyWarnings.length > 0 && !acknowledge) {
+    return {
+      ok: true,
+      requiresAcknowledgement: true,
+      pendingPath: picked,
+      warnings: verdict.adjacencyWarnings,
+      roots: computeRoots(),
+    };
+  }
+  // Persist the user-picked absolute path (settings SOT stores the raw path;
+  // sanitize/canonicalize happens at read time). Dedup handled by the store.
+  await addAllowedDirectoryPersist(picked);
+  return {
+    ok: true,
+    added: picked,
+    roots: computeRoots(),
+    warnings: verdict.adjacencyWarnings,
+  };
+}
+
 export function registerWorkspaceHandlers(deps: IpcDeps): void {
   const { auditLogger, getMainWindow } = deps;
 
@@ -109,40 +166,41 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
     return { ok: true, defaultRoot: process.cwd(), roots: computeRoots() };
   });
 
-  ipcMain.handle(CHANNELS.workspace.pickRoot, async (e): Promise<WorkspacePickRootResult> => {
-    if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, CHANNELS.workspace.pickRoot, e);
-      return { ok: false, error: "unauthorized" };
-    }
-    const win = getMainWindow();
-    const { filePaths, canceled } = win
-      ? await dialog.showOpenDialog(win, {
-          title: t("chatPreviewRail.pickRootTitle"),
-          properties: ["openDirectory", "createDirectory"],
-        })
-      : await dialog.showOpenDialog({
-          title: t("chatPreviewRail.pickRootTitle"),
-          properties: ["openDirectory", "createDirectory"],
-        });
-    if (canceled || !filePaths[0]) return { ok: true, canceled: true, roots: computeRoots() };
+  ipcMain.handle(
+    CHANNELS.workspace.pickRoot,
+    async (e, opts?: { acknowledgePath?: string }): Promise<WorkspacePickRootResult> => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.workspace.pickRoot, e);
+        return { ok: false, error: "unauthorized" };
+      }
+      // Phase 2 — the renderer confirmed the adjacency warnings for a path it was
+      // handed in phase 1. Persist WITHOUT reopening the dialog, but still through
+      // the SAME gate: a hostile renderer passing a Layer 0 / root path is still
+      // hard-refused (acknowledgement only clears adjacency warnings, never a hard
+      // deny — identical to `/permission dir allow … --ack-warnings`).
+      const acknowledgePath =
+        typeof opts?.acknowledgePath === "string" && opts.acknowledgePath.length > 0
+          ? opts.acknowledgePath
+          : null;
+      if (acknowledgePath) {
+        return persistPickedRoot(acknowledgePath, true);
+      }
 
-    // Pre-flight the picked directory through the same Layer 0/root guard the
-    // Settings permission flow uses — filesystem-root / sensitive dirs rejected,
-    // `.env`/`.git`/… adjacency surfaced as warnings.
-    const verdict = validateDirectoryAddition(filePaths[0]);
-    if (!verdict.ok) {
-      return { ok: false, error: verdict.reason, warnings: verdict.adjacencyWarnings };
-    }
-    // Persist the user-typed absolute path (settings SOT stores the raw path;
-    // sanitize/canonicalize happens at read time). Dedup handled by the store.
-    await addAllowedDirectoryPersist(filePaths[0]);
-    return {
-      ok: true,
-      added: filePaths[0],
-      roots: computeRoots(),
-      warnings: verdict.adjacencyWarnings,
-    };
-  });
+      // Phase 1 — the native folder picker IS the user gesture.
+      const win = getMainWindow();
+      const { filePaths, canceled } = win
+        ? await dialog.showOpenDialog(win, {
+            title: t("chatPreviewRail.pickRootTitle"),
+            properties: ["openDirectory", "createDirectory"],
+          })
+        : await dialog.showOpenDialog({
+            title: t("chatPreviewRail.pickRootTitle"),
+            properties: ["openDirectory", "createDirectory"],
+          });
+      if (canceled || !filePaths[0]) return { ok: true, canceled: true, roots: computeRoots() };
+      return persistPickedRoot(filePaths[0], false);
+    },
+  );
 
   ipcMain.handle(
     CHANNELS.workspace.listDir,
@@ -174,10 +232,16 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
             truncated = true;
             break;
           }
+          const full = join(dir, ent.name);
+          // Layer 0 filtering, identical to the read/list tools (file-tools.ts
+          // walk): a `.env`/`.ssh`/`secrets`/… entry inside an allowed root is
+          // never enumerated, so the browser can't surface a path the preview /
+          // read_file guard would then hard-block.
+          if (isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(full)))) continue;
           // Only surface plain files and directories; skip symlinks/sockets/etc
           // so a symlink can't advertise an out-of-scope target as an entry.
-          if (ent.isFile()) entries.push({ name: ent.name, path: join(dir, ent.name), type: "file" });
-          else if (ent.isDirectory()) entries.push({ name: ent.name, path: join(dir, ent.name), type: "directory" });
+          if (ent.isFile()) entries.push({ name: ent.name, path: full, type: "file" });
+          else if (ent.isDirectory()) entries.push({ name: ent.name, path: full, type: "directory" });
         }
         entries.sort((a, b) => {
           if (a.type !== b.type) return a.type === "directory" ? -1 : 1;

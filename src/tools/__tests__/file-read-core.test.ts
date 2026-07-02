@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -61,6 +61,30 @@ describe("assertReadableFilePath", () => {
     const outside = join(homedir(), "Documents", "lvis-outside-scope-xyz.txt");
     const verdict = assertReadableFilePath(outside, root, []);
     expect(verdict).toEqual({ ok: false, error: "path-not-allowed" });
+  });
+
+  it("rejects a symlink whose real target escapes the allowed roots", () => {
+    // The guard realpath's the link BEFORE the boundary check, so a symlink that
+    // lives inside the root but points out of it is rejected on its true target.
+    const outside = mkdtempSync(join(tmpdir(), "lvis-read-core-escape-"));
+    writeFileSync(join(outside, "secret.txt"), "escaped");
+    const link = join(root, "escape-link.txt");
+    symlinkSync(join(outside, "secret.txt"), link);
+    const verdict = assertReadableFilePath(link, root, []);
+    expect(verdict).toEqual({ ok: false, error: "path-not-allowed" });
+    rmSync(link, { force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  it("returns the realpath'd target for an in-scope symlink (guard target === read target)", () => {
+    const link = join(root, "alias.md");
+    symlinkSync(join(root, "in.md"), link);
+    const verdict = assertReadableFilePath(link, root, []);
+    expect(verdict.ok).toBe(true);
+    // The resolved path is the realpath target (in.md), not the lexical link —
+    // so the boundary check and the eventual read/stat operate on the same file.
+    if (verdict.ok) expect(verdict.resolved.endsWith("in.md")).toBe(true);
+    rmSync(link, { force: true });
   });
 });
 
