@@ -99,7 +99,10 @@ export async function readLocalApiConnection(): Promise<CliConnection | null> {
     secret: "",
     pid: 0,
   });
-  if (info.port <= 0 || info.secret.length === 0) {
+  // Bound the file-sourced port strictly (integer, valid TCP range) — the
+  // request host is pinned to 127.0.0.1, so the port is the ONLY value the
+  // discovery file contributes to the connection target.
+  if (!Number.isInteger(info.port) || info.port <= 0 || info.port > 65535 || info.secret.length === 0) {
     return null;
   }
   // Stale-after-crash detection: a crashed host never tombstones the file, so a
