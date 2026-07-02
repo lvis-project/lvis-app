@@ -771,6 +771,8 @@ export const esMessages: Record<string, string> = {
   "chatPreviewRail.launcher.file": "Archivos",
   "chatPreviewRail.resizeFilePanels": "Cambiar tamaño del árbol y visor de archivos",
   "chatPreviewRail.resizePanel": "Cambiar tamaño del panel de trabajo",
+  "chatPreviewRail.pinTab": "Fijar pestaña",
+  "chatPreviewRail.contentUnavailable": "Este elemento ya no está disponible.",
   "chatPreviewRail.terminalSearchPlaceholder": "Buscar salida de terminal",
   "chatPreviewRail.browserAddressPlaceholder": "Ingresar URL",
   "chatPreviewRail.browserGo": "Ir",

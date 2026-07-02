@@ -1,5 +1,5 @@
 import { createElement, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import type { WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
+import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
 import {
   WORKSPACE_TAB_LAUNCHER,
   matchesLauncherShortcut,
@@ -17,6 +17,7 @@ import {
   Image,
   LayoutGrid,
   PanelRightClose,
+  Pin,
   Plug,
   Plus,
   Search,
@@ -1043,6 +1044,81 @@ function tabTestId(kind: WorkspaceTabKind): string {
 }
 
 /**
+ * Tab label: container tabs show `{kind} {ordinal}` (e.g. "Browser 2"); content
+ * tabs show the item they point at (preview-target title, or the URL host).
+ */
+function tabLabel(
+  tab: WorkspaceTab,
+  targetById: Map<string, ChatPreviewTarget>,
+  t: (key: string) => string,
+): string {
+  if (!tab.content) return `${t(tabLabelKey(tab.kind))} ${tab.ordinal}`;
+  if (tab.content.source === "browser") {
+    try {
+      return new URL(tab.content.url).hostname || tab.content.url;
+    } catch {
+      return tab.content.url;
+    }
+  }
+  return targetById.get(tab.content.targetId)?.title ?? t(tabLabelKey("preview"));
+}
+
+/**
+ * Renders a CONTENT tab — a tab that points at one specific item. Browser
+ * content reuses the sandboxed webview shell (`UrlDocumentViewer`); preview
+ * content renders its target via the shared detail/body pair. Unlike container
+ * tabs it does not carry the per-kind list — it shows exactly one thing.
+ */
+function ContentTabView({
+  api,
+  sessionId,
+  tab,
+  targetById,
+}: {
+  api: LvisApi;
+  sessionId?: string;
+  tab: WorkspaceTab;
+  targetById: Map<string, ChatPreviewTarget>;
+}) {
+  const { t } = useTranslation();
+  const content = tab.content;
+  if (!content) return null;
+  if (content.source === "browser") {
+    let title = content.url;
+    try {
+      title = new URL(content.url).hostname || content.url;
+    } catch {
+      title = content.url;
+    }
+    const target: Extract<ChatPreviewTarget, { kind: "url" }> = {
+      id: `content-browser:${tab.id}`,
+      kind: "url",
+      title,
+      sourceLabel: t("chatPreviewRail.manualUrlSource"),
+      createdOrder: Number.MAX_SAFE_INTEGER,
+      url: content.url,
+    };
+    return <UrlDocumentViewer api={api} target={target} />;
+  }
+  const target = targetById.get(content.targetId);
+  if (!target) {
+    return (
+      <div className="p-4 text-xs text-muted-foreground" data-testid="chat-side-panel-content-unavailable">
+        {t("chatPreviewRail.contentUnavailable")}
+      </div>
+    );
+  }
+  return (
+    <div className="h-full min-h-0 overflow-auto p-3" data-testid="chat-side-panel-content-view">
+      <div className="space-y-3">
+        <DetailHeader target={target} />
+        <PreviewBody api={api} sessionId={sessionId} target={target} />
+      </div>
+    </div>
+  );
+}
+
+/**
  * The launcher item list (§6.10.3), rendered from the single SOT
  * `WORKSPACE_TAB_LAUNCHER` in `command-actions.ts`. It is used in TWO places —
  * the empty-state picker (`WorkspaceLauncher`) and the tab-bar "+" dropdown
@@ -1238,6 +1314,7 @@ export function ChatSidePanel({
     browserUrlByTab,
     setActiveTabId,
     addTab,
+    promoteToPinned,
     closeTab,
     setBrowserTabUrl,
   } = workspaceTabs;
@@ -1364,21 +1441,47 @@ export function ChatSidePanel({
             {tabs.map((tab) => {
               const Icon = tabIcon(tab.kind);
               const active = tab.id === activeTab?.id;
-              const label = t(tabLabelKey(tab.kind));
+              const label = tabLabel(tab, targetById, t);
+              const isEphemeral = tab.mode === "ephemeral";
               return (
                 <button
                   key={tab.id}
                   type="button"
                   role="tab"
                   aria-selected={active}
-                  data-testid={tabTestId(tab.kind)}
+                  data-testid={tab.content ? "chat-side-panel-tab" : tabTestId(tab.kind)}
+                  data-tab-id={tab.id}
+                  data-tab-mode={tab.mode}
                   className={`flex h-8 min-w-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
                     active ? "bg-primary/(--opacity-subtle) text-primary" : "text-muted-foreground hover:bg-muted/(--opacity-muted) hover:text-foreground"
                   }`}
                   onClick={() => setActiveTabId(tab.id)}
+                  onDoubleClick={() => promoteToPinned(tab.id)}
                 >
                   <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className="max-w-24 truncate">{`${label} ${tab.ordinal}`}</span>
+                  <span className={`max-w-24 truncate ${isEphemeral ? "italic" : ""}`}>{label}</span>
+                  {isEphemeral ? (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label={t("chatPreviewRail.pinTab")}
+                      data-testid="chat-side-panel-pin-tab"
+                      className="ml-0.5 rounded p-0.5 hover:bg-background/(--opacity-muted)"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        promoteToPinned(tab.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          promoteToPinned(tab.id);
+                        }
+                      }}
+                    >
+                      <Pin className="h-3 w-3" />
+                    </span>
+                  ) : null}
                   <span
                     role="button"
                     tabIndex={0}
@@ -1409,9 +1512,11 @@ export function ChatSidePanel({
         </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-hidden" data-active-tab-kind={activeTab?.kind}>
+        <div className="min-h-0 flex-1 overflow-hidden" data-active-tab-kind={activeTab?.kind} data-active-tab-mode={activeTab?.mode}>
           {activeTab == null ? (
             <WorkspaceLauncher onOpen={addTab} />
+          ) : activeTab.content ? (
+            <ContentTabView api={api} sessionId={sessionId} tab={activeTab} targetById={targetById} />
           ) : activeTab.kind === "file-browser" ? (
             <FileBrowserWorkspace
               api={api}
