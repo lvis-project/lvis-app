@@ -40,7 +40,7 @@ import {
 } from "../asrt-sandbox.js";
 import { asrtCanInitialize } from "./test-helpers.js";
 // ASRT-contract guards: the real vendored matcher + parent-proxy resolver, so
-// the host-side fixes are proven against ASRT 0.0.59's ACTUAL semantics (not a
+// the host-side fixes are proven against ASRT's ACTUAL semantics (not a
 // re-implementation that could drift from the package).
 import { matchesDomainPattern } from "@anthropic-ai/sandbox-runtime/dist/sandbox/domain-pattern.js";
 import { resolveParentProxy } from "@anthropic-ai/sandbox-runtime/dist/sandbox/parent-proxy.js";
@@ -173,7 +173,7 @@ describe("asrt-sandbox — worker wrap carries only the filesystem jail", () => 
     if (!(await asrtCanInitialize())) return;
     await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
     // WrapOptions exposes only `filesystem` + `abortSignal` — there is no
-    // `network` channel (it would be INERT in ASRT 0.0.59; enforcement is the
+    // `network` channel (it would be INERT per command; enforcement is the
     // shared config). The wrap succeeds with the filesystem slice only.
     const { argv } = await wrapWorkerCommand("echo worker-ok", {
       filesystem: { allowWrite: [], allowRead: [] },
@@ -479,7 +479,7 @@ describe("asrt-sandbox — computeDynamicEndpointHosts (user-configured endpoint
 
 describe("asrt-sandbox — parentProxy direct-connect floor (PR #1356 MAJOR, corrected)", () => {
   /**
-   * Pins the ASRT 0.0.59 contract the buildSandboxConfig default path depends
+   * Pins the ASRT contract the buildSandboxConfig default path depends
    * on: resolveParentProxy (parent-proxy.js:46) is
    *   `cfg?.http ?? process.env.HTTP_PROXY ?? process.env.http_proxy`.
    * An EMPTY object `{}` (the prior buggy value) has no `http` key, so the `??`

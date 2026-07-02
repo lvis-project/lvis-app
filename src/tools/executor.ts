@@ -300,13 +300,13 @@ export class ToolExecutor {
    * ask and relies on the host-mediated effect-boundary gate — but that
    * boundary only CONTAINS off-hostApi mutations (direct `node:fs` / bare
    * `fetch` / detached async frames) when the OS sandbox FILESYSTEM-CONTAINS the
-   * host. A bare "sandbox active" boolean is NOT enough: the Windows srt-win
-   * substrate is NETWORK-ONLY (`confines.filesystem === false`) — egress is
-   * contained but the off-hostApi `node:fs` WRITE residual is not. So the
-   * relaxation fires ONLY when this returns `true` (mirrors the reviewer SOT
-   * `sandboxRelaxesCategory` for filesystem-bearing categories). Defaults to
-   * always-off so existing call sites / tests fall back to the known-safe
-   * pre-exec ask; boot wires it to {@link isActiveSandboxFilesystemContained}.
+   * host. A bare "sandbox active" boolean is NOT enough: degraded/off hosts do
+   * not contain the off-hostApi `node:fs` WRITE residual. ASRT 0.0.63+ can make
+   * host-shell commands filesystem-contained on Windows, but production plugin
+   * workers still use the unwrapped Windows spawn path, so boot wires the
+   * narrower plugin-effect provider. The relaxation fires ONLY when this
+   * returns `true`. Defaults to always-off so existing call sites / tests fall
+   * back to the known-safe pre-exec ask.
    */
   private readonly sandboxFsContainedProvider: () => boolean;
   private readonly reviewerAuthorizations = new ReviewerAuthorizationStore();
@@ -1349,10 +1349,10 @@ export class ToolExecutor {
       //     Headless plugin reads keep today's auto-allow, exactly as the
       //     relaxation leaves the headless write lane untouched.
       //   • NOT FILESYSTEM-CONTAINED only (`!sandboxFsContainedProvider()`).
-      //     macOS/Linux full-confine ASRT (`confines.filesystem === true`) → the
-      //     read auto-allows unchanged; a degraded / sandbox-off / Windows
-      //     network-only host → the pre-exec ask stands. Same fs-contained signal
-      //     the relaxation uses.
+      //     macOS/Linux full-confine plugin workers → the read auto-allows
+      //     unchanged; degraded / sandbox-off / current Windows plugin workers
+      //     → the pre-exec ask stands. Same plugin-effect containment signal the
+      //     relaxation uses.
       // Deny rules still win — they resolve to a layer-1 `deny` and never reach here.
       if (
         this.hostClassifiesRiskProvider() &&
@@ -1408,19 +1408,16 @@ export class ToolExecutor {
       //     The effect-boundary only CONTAINS the off-hostApi mutation residual
       //     (residual #1 below) when the OS sandbox FILESYSTEM-CONTAINS the host.
       //     This requires `confines.filesystem === true` on the ACTIVE sandbox
-      //     capability, NOT merely that some sandbox is active: the Windows
-      //     srt-win substrate is NETWORK-ONLY (`confines.filesystem === false`),
-      //     so an active network-only sandbox contains egress but NOT the
-      //     off-hostApi `node:fs` WRITE residual. On a host that is not
-      //     filesystem-contained (degraded / gate off / network-only) the
-      //     relaxation would be WEAKER than the pre-exec ask it replaces, so it
-      //     does NOT fire — the existing pre-exec approval ask stands. This
-      //     makes `hostClassifiesRisk`-ON safe on every platform: macOS / Linux
-      //     (filesystem-contained ASRT) relax for the clean UX; a degraded,
-      //     sandbox-off, or Windows network-only host falls back to the
-      //     known-safe ask. Mirrors the reviewer SOT `sandboxRelaxesCategory`,
-      //     which relaxes filesystem-bearing categories only when
-      //     `confines.filesystem === true`.
+      //     capability, NOT merely that some sandbox is active. On a host that is
+      //     not filesystem-contained (degraded / gate off) the relaxation would
+      //     be WEAKER than the pre-exec ask it replaces, so it does NOT fire —
+      //     the existing pre-exec approval ask stands. This makes
+      //     `hostClassifiesRisk`-ON safe on every platform: macOS / Linux
+      //     (full ASRT) and Windows ASRT 0.0.63+ (filesystem ACL backend) can
+      //     relax filesystem-contained plugin reads; degraded/sandbox-off hosts
+      //     fall back to the known-safe ask. Mirrors the reviewer SOT
+      //     `sandboxRelaxesCategory`, which relaxes filesystem-bearing
+      //     categories only when `confines.filesystem === true`.
       //   • FLAG OFF (default) → this whole block is skipped: behaviour is
       //     byte-for-byte today's full pre-exec ask. The condition is the FIRST
       //     read, so the relaxed path is reachable only with the flag ON.
@@ -1455,10 +1452,11 @@ export class ToolExecutor {
       //      `sandboxFsContainedProvider()` clause above — `confines.filesystem
       //      === true`), so whenever the relaxation is in effect this `node:fs`
       //      WRITE residual is contained by the sandbox. A host that is NOT
-      //      filesystem-contained does not relax — including a Windows srt-win
-      //      NETWORK-ONLY sandbox (`confines.filesystem === false`): it is active
-      //      and contains egress, but the FS-write residual would be uncontained,
-      //      so the pre-exec ask stands there. NOT a regression: a first-party
+      //      filesystem-contained does not relax. Windows host-shell ASRT 0.0.63+
+      //      is filesystem-contained once setup is ready, but current Windows
+      //      plugin workers are not ASRT-wrapped, so the production provider
+      //      keeps them on the pre-exec ask path until that substrate is
+      //      upgraded. NOT a regression: a first-party
       //      plugin already executes arbitrary in-process code today — this is an
       //      LLM-action gate over mediated effects, not an in-process jail.
       //   2. The mediated excluded writes (ENFORCEMENT_EXCLUSIONS). The relaxation

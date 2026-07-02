@@ -1194,9 +1194,9 @@ export type ApprovalRequest = {
      * Per-dimension confinement (filesystem / process / network) for the
      * substrate this capability describes. Mirrors the optional `confines`
      * field on the canonical SandboxCapability so the approval dialog can show
-     * an HONEST label — e.g. a Windows network-only ASRT confines egress but
-     * NOT the filesystem, and the dialog must not show "OS isolation active"
-     * for a write/shell tool that has no FS jail. Absent ⇒ "not declared";
+     * an HONEST label — e.g. Windows ASRT confines filesystem + network but not
+     * process, and the dialog must not show a blanket full-isolation label.
+     * Absent ⇒ "not declared";
      * callers MUST NOT read absence as "all confined".
      */
     confines?: SandboxConfinement;

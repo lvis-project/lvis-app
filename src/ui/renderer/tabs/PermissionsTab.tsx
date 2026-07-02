@@ -173,7 +173,7 @@ export function PermissionsTab() {
       setSandboxCapability(sandboxRes);
       const osSandboxOn = settingsRes.features?.osToolSandbox ?? false;
       setSandboxEnabled(osSandboxOn);
-      // On win32 with the setting already ON, surface the consent/relogin state
+      // On win32 with the setting already ON, surface the consent/setup state
       // on tab entry so the panel persists across navigations until ready.
       if (sandboxRes.platform === "win32" && osSandboxOn) {
         setWindowsStatus(await window.lvis.permission.sandboxWindowsStatus());
@@ -358,7 +358,7 @@ export function PermissionsTab() {
       const capability = await window.lvis.permission.sandboxCapability();
       setSandboxCapability(capability);
       // Windows: enabling the setting alone does NOT confine anything — srt-win
-      // needs a one-time admin install + relogin. When the user flips the toggle
+      // needs a one-time admin install. When the user flips the toggle
       // ON on win32, fetch the readiness snapshot so the consent panel can guide
       // the (explicit, non-auto) install. Turning OFF clears the panel.
       if (capability.platform === "win32") {
@@ -407,7 +407,7 @@ export function PermissionsTab() {
         return;
       }
       // Install ran — refresh the readiness snapshot so the panel advances to
-      // the relogin-pending state (verbatim instructions still drive the copy).
+      // the ready or setup-status state (verbatim instructions still drive the copy).
       const status = await window.lvis.permission.sandboxWindowsStatus();
       setWindowsStatus(status);
     } catch (e) {
@@ -750,17 +750,30 @@ export function PermissionsTab() {
             </p>
           ) : null}
           {sandboxEnabled && windowsStatus?.applicable && !windowsStatus.ready ? (
-            windowsStatus.groupState === "created-not-on-token" &&
-            windowsStatus.wfpState === "installed" ? (
-              // Install ran; only the relogin remains. Show the verbatim ASRT
-              // instruction text + a pending-relogin visual.
+            windowsStatus.userState !== "absent" ||
+            windowsStatus.wfpState !== "absent" ? (
+              // Install partially ran or status cannot be fully read. Show the
+              // verbatim ASRT instructions and keep the explicit retry action
+              // available. ASRT 0.0.63 no longer requires Windows sign-out.
               <div
-                data-testid="os-sandbox-windows-relogin"
+                data-testid="os-sandbox-windows-setup-status"
                 className="space-y-2 rounded-md border border-info/(--opacity-medium) bg-info/(--opacity-soft) px-3 py-2 text-[11px] text-info"
               >
                 <p className="font-medium">{t("permissionsTab.osSandboxWindowsReloginHeading")}</p>
                 <p className="whitespace-pre-line font-mono text-foreground">{windowsStatus.instructions}</p>
                 <p className="italic">{t("permissionsTab.osSandboxWindowsReloginPending")}</p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="default"
+                  data-testid="os-sandbox-windows-install"
+                  disabled={windowsInstallBusy}
+                  onClick={() => void handleWindowsInstall()}
+                >
+                  {windowsInstallBusy
+                    ? t("permissionsTab.osSandboxWindowsInstalling")
+                    : t("permissionsTab.osSandboxWindowsInstallButton")}
+                </Button>
               </div>
             ) : (
               // Not yet installed. EXPLICIT consent: warning card + an "Install
