@@ -21,9 +21,25 @@
 > default OFF; discovery file `~/.lvis/local-api/server.json` via `openFeatureNamespace`;
 > closed in app-shutdown), and the runnable CLI (`cli/http-client.ts` +
 > `scripts/lvis-cli.ts`, `bun run cli -- <command>`) over the same contract.
+>
+> **Follow-up landed (external mutation authz):** approval-gate-mediated external
+> mutation for the one channel in `contract/app-contract.ts`'s
+> `EXTERNAL_MUTATION_CHANNELS` allowlist (`PERMISSIONS.setMode`) — the loopback
+> Bearer secret authenticates the caller, but the mutation itself is authorized
+> only by the user's own "Allow" click on the in-app `ApprovalGate` modal
+> (`buildExternalMutationApprover` in `src/main/local-api-server.ts`, wired
+> through `src/api/local-api.ts`); a decline/timeout resolves as
+> `external-mutation-denied` (HTTP 403). `src/permissions/permission-mode-apply.ts`
+> accepts the resulting `PermissionModeApprovalBypass` (`source:
+> "local-api-approval"`) so the approved change applies without a second modal.
+> `LvisClient.setPermissionMode` (SDK) and `permission:set-mode <mode>` (CLI,
+> exit 0 approved / 1 denied / 2 usage) are the external entry points. Default
+> posture without a wired approver is unchanged (fail-closed). Remote access and
+> multi-user authorization stay out of scope for Epic #1409.
+>
 > Remaining follow-ups (still deferred): authenticated non-renderer authz for
-> privileged/gesture-gated mutation, remote/multi-user exposure beyond loopback,
-> and thinning App.tsx further toward <300.
+> the rest of the gesture-gated surface, remote/multi-user exposure beyond
+> loopback, and thinning App.tsx further toward <300.
 
 ## 1. Why (both issues, one root problem)
 
