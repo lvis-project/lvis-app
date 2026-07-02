@@ -1,8 +1,28 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 async function readSource(relative: string): Promise<string> {
   return readFile(new URL(relative, import.meta.url), "utf8");
+}
+
+/**
+ * Boot wiring is spread across boot.ts + boot/*.ts + boot/steps/*.ts after the
+ * C18 BootContext split (e.g. the plugin-event-bridge replace/dispose wiring moved
+ * into boot/steps/conversation-wiring.ts). Scan the union so a wiring guard finds
+ * its pattern wherever its step module landed.
+ */
+async function readBootWiring(): Promise<string> {
+  const parts: string[] = [await readSource("../boot.ts")];
+  for (const dir of ["../boot/", "../boot/steps/"]) {
+    const dirUrl = new URL(dir, import.meta.url);
+    const entries = await readdir(dirUrl);
+    for (const name of entries.sort()) {
+      if (name.endsWith(".ts") && !name.endsWith(".d.ts")) {
+        parts.push(await readFile(new URL(name, dirUrl), "utf8"));
+      }
+    }
+  }
+  return parts.join("\n");
 }
 
 describe("main process plugin lifecycle regression guards", () => {
@@ -54,16 +74,18 @@ describe("main process plugin lifecycle regression guards", () => {
   it("replaces plugin event bridge subscriptions when the main window is recreated", async () => {
     // C17: the deep-link window-recreation path (which re-registers the plugin
     // event bridge for the freshly created main window) moved into
-    // src/main/lvis-deep-link.ts. boot.ts still owns the bridge replacement.
+    // src/main/lvis-deep-link.ts. C18: the bridge replacement wiring moved from
+    // boot.ts into boot/steps/conversation-wiring.ts + boot/assemble-services.ts
+    // as BootContext (`ctx.*`) fields — same guarantee, new location.
     const mainSource = await readSource("../main/lvis-deep-link.ts");
-    const bootSource = await readSource("../boot.ts");
+    const bootSource = await readBootWiring();
 
     expect(mainSource).toContain("registerMainWindowPluginEventBridge(mainWindow)");
-    expect(bootSource).toContain("const replacePluginEventBridge = (win: BrowserWindow) => {");
-    expect(bootSource).toContain("let pluginEventBridgeWindow = mainWindow;");
+    expect(bootSource).toContain("replacePluginEventBridge = (win: BrowserWindow) => {");
+    expect(bootSource).toContain("pluginEventBridgeWindow = mainWindow;");
     expect(bootSource).toContain("pluginEventBridgeWindow = win;");
     expect(bootSource).toContain("disposePluginEventBridge();");
-    expect(bootSource).toContain("replacePluginEventBridge(pluginEventBridgeWindow);");
-    expect(bootSource).toContain("registerPluginEventBridge: replacePluginEventBridge");
+    expect(bootSource).toContain("replacePluginEventBridge(ctx.pluginEventBridgeWindow);");
+    expect(bootSource).toContain("registerPluginEventBridge: ctx.replacePluginEventBridge");
   });
 });
