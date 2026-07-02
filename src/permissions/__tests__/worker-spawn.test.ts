@@ -97,6 +97,7 @@ import {
   __resetWrappedPluginWorkersForTest,
   isPluginWorkerWrapped,
 } from "../sandbox-capability.js";
+import { withPlatformForTest } from "../../__tests__/test-helpers.js";
 
 /** A minimal child-process double (NOT a shared helper — local to this file). */
 class StubWorkerChild extends EventEmitter {
@@ -109,10 +110,6 @@ class StubWorkerChild extends EventEmitter {
   }
 }
 
-/** Force `process.platform` for one test (restored in afterEach). */
-function withPlatform(platform: NodeJS.Platform): void {
-  Object.defineProperty(process, "platform", { value: platform, configurable: true });
-}
 const REAL_PLATFORM = process.platform;
 
 beforeEach(() => {
@@ -130,7 +127,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  withPlatform(REAL_PLATFORM);
+  withPlatformForTest(REAL_PLATFORM);
   __resetActiveSandboxCapabilityForTest();
   __resetWrappedPluginWorkersForTest();
 });
@@ -173,7 +170,7 @@ describe("spawnWorker — gate OFF (default)", () => {
 
 describe("spawnWorker — gate ON (macOS)", () => {
   it("registers the socketDir on the shared config, wraps with allowWrite=[socketDir,…] (FS jail only), marks wrapped, socketPath non-null", async () => {
-    withPlatform("darwin");
+    withPlatformForTest("darwin");
     gateActive = true;
     setActiveSandboxCapability({
       kind: "asrt",
@@ -253,7 +250,7 @@ describe("spawnWorker — gate ON (macOS)", () => {
   });
 
   it("injects the UDS path via env when udsArgName is the env form", async () => {
-    withPlatform("darwin");
+    withPlatformForTest("darwin");
     gateActive = true;
     wrapWorkerCommandMock.mockResolvedValueOnce({
       argv: ["/bin/bash", "-c", "wrapped"],
@@ -281,7 +278,7 @@ describe("spawnWorker — gate ON (macOS)", () => {
 
 describe("spawnWorker — gate ON (linux)", () => {
   it("registers the socketDir on the shared config and wraps with the FS jail only (no per-command UDS option)", async () => {
-    withPlatform("linux");
+    withPlatformForTest("linux");
     gateActive = true;
     wrapWorkerCommandMock.mockResolvedValueOnce({
       argv: ["/bin/bash", "-c", "wrapped"],
@@ -313,7 +310,7 @@ describe("spawnWorker — gate ON (linux)", () => {
 
 describe("spawnWorker — idempotent any-exit cleanup", () => {
   it("unmarks the worker + cleans up ONCE on child exit, then reviewer is none", async () => {
-    withPlatform("darwin");
+    withPlatformForTest("darwin");
     gateActive = true;
     setActiveSandboxCapability({
       kind: "asrt",
@@ -354,7 +351,7 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
   });
 
   it("stop() before exit runs cleanup once; a later exit does not re-run it", async () => {
-    withPlatform("linux");
+    withPlatformForTest("linux");
     gateActive = true;
     wrapWorkerCommandMock.mockResolvedValueOnce({
       argv: ["/bin/bash", "-c", "wrapped"],
@@ -378,7 +375,7 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
   });
 
   it("onExit forwards the child's exit (code + signal) to the consumer", async () => {
-    withPlatform("darwin");
+    withPlatformForTest("darwin");
     gateActive = true;
     setActiveSandboxCapability({
       kind: "asrt",
@@ -413,7 +410,7 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
 
 describe("spawnWorker — Windows with gate ON", () => {
   it("fails closed before spawn because the UDS control channel has no Windows equivalent", async () => {
-    withPlatform("win32");
+    withPlatformForTest("win32");
     gateActive = true;
 
     await expect(
