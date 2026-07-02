@@ -60,6 +60,7 @@ import { promises as fs } from "node:fs";
 import { dirname } from "node:path";
 import { fanOutToAllWindows } from "../broadcast-helpers.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { CHANNELS } from "../../contract/app-contract.js";
 import { createLogger } from "../../lib/logger.js";
 import {
   decryptActivationCode,
@@ -105,8 +106,8 @@ const log = createLogger("demo-activation-ipc");
  *                                         `forceActivation=true` 로 mount
  *                                         하도록 cue.
  */
-export const AUTH_LOGOUT_RESET_CHANNEL = "lvis:auth:logout-reset";
-export const AUTH_REACTIVATE_DEMO_CHANNEL = "lvis:auth:reactivate-demo";
+export const AUTH_LOGOUT_RESET_CHANNEL = CHANNELS.auth.logoutReset;
+export const AUTH_REACTIVATE_DEMO_CHANNEL = CHANNELS.auth.reactivateDemo;
 
 function demoKeyEnvVar(vendor: string): string {
   return `LVIS_DEMO_KEY_${vendor.toUpperCase().replace(/-/g, "_")}`;
@@ -265,7 +266,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
   const demoWasEffectiveAtBoot = demoFoundryResolverFingerprintAtBoot !== null;
 
   ipcMain.handle(
-    "lvis:demo:status",
+    CHANNELS.demo.status,
     async (
       e,
     ): Promise<
@@ -273,7 +274,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       | { ok: false; error: "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:demo:status", e);
+        auditUnauthorized(auditLogger, CHANNELS.demo.status, e);
         return { ok: false, error: UNAUTHORIZED_FRAME.error };
       }
       const activated = demoEffectiveForCurrentProcess && isDemoEnabled();
@@ -473,13 +474,13 @@ export function registerDemoHandlers(deps: IpcDeps): void {
   }
 
   ipcMain.handle(
-    "lvis:demo:activate",
+    CHANNELS.demo.activate,
     async (
       e,
       payload: { code?: unknown },
     ): Promise<ActivationOutcome | { ok: false; error: "unauthorized-frame" }> => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:demo:activate", e);
+        auditUnauthorized(auditLogger, CHANNELS.demo.activate, e);
         return { ok: false, error: UNAUTHORIZED_FRAME.error };
       }
       const code = typeof payload?.code === "string" ? payload.code : "";
@@ -491,7 +492,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
   );
 
   ipcMain.handle(
-    "lvis:demo:activate-embedded",
+    CHANNELS.demo.activateEmbedded,
     async (
       e,
     ): Promise<
@@ -499,7 +500,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       | { ok: false; error: "no-embedded-code" | "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:demo:activate-embedded", e);
+        auditUnauthorized(auditLogger, CHANNELS.demo.activateEmbedded, e);
         return { ok: false, error: UNAUTHORIZED_FRAME.error };
       }
       // The embedded code is a compile-time constant, so this only fires
@@ -515,7 +516,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
   );
 
   ipcMain.handle(
-    "lvis:demo:clear",
+    CHANNELS.demo.clear,
     async (
       e,
     ): Promise<
@@ -523,7 +524,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       | { ok: false; error: "clear-failed" | "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:demo:clear", e);
+        auditUnauthorized(auditLogger, CHANNELS.demo.clear, e);
         return { ok: false, error: UNAUTHORIZED_FRAME.error };
       }
       // 2026-05-20 Settings → "데모 자격증명 재입력" 의 보조 path. Logout 버튼이
@@ -587,7 +588,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
   );
 
   ipcMain.handle(
-    "lvis:auth:logout-broadcast",
+    CHANNELS.auth.logoutBroadcast,
     async (
       e,
     ): Promise<
@@ -595,7 +596,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       | { ok: false; error: "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:auth:logout-broadcast", e);
+        auditUnauthorized(auditLogger, CHANNELS.auth.logoutBroadcast, e);
         return { ok: false, error: UNAUTHORIZED_FRAME.error };
       }
       broadcastAuthEvent(deps, AUTH_LOGOUT_RESET_CHANNEL);
@@ -604,7 +605,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
   );
 
   ipcMain.handle(
-    "lvis:auth:reactivate-broadcast",
+    CHANNELS.auth.reactivateBroadcast,
     async (
       e,
     ): Promise<
@@ -612,7 +613,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       | { ok: false; error: "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:auth:reactivate-broadcast", e);
+        auditUnauthorized(auditLogger, CHANNELS.auth.reactivateBroadcast, e);
         return { ok: false, error: UNAUTHORIZED_FRAME.error };
       }
       broadcastAuthEvent(deps, AUTH_REACTIVATE_DEMO_CHANNEL);
@@ -621,7 +622,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
   );
 
   ipcMain.handle(
-    "lvis:demo:relaunch-after-activation",
+    CHANNELS.demo.relaunchAfterActivation,
     async (
       e,
     ): Promise<
@@ -629,7 +630,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       | { ok: false; error: "not-armed" | "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:demo:relaunch-after-activation", e);
+        auditUnauthorized(auditLogger, CHANNELS.demo.relaunchAfterActivation, e);
         return { ok: false, error: UNAUTHORIZED_FRAME.error };
       }
       if (!relaunchArmed) {

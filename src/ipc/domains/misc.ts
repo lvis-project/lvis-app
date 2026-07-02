@@ -5,6 +5,7 @@
  */
 import { ipcMain } from "electron";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import type { RoutineExecution, RoutineFiredPayload, RoutineSchedule } from "../../shared/routines-types.js";
 import { ROUTINES_V2 } from "../../shared/ipc-channels.js";
@@ -167,7 +168,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   //     OS label and 데이터 경로 row.
   // Read-only and idempotent; no sender guard required (mirrors
   // `lvis:settings:get` / `lvis:audit:stats`).
-  ipcMain.handle("lvis:app:info", async () => {
+  ipcMain.handle(CHANNELS.app.info, async () => {
     const { app } = await import("electron");
     return {
       version: getLvisAppVersion(),
@@ -182,18 +183,18 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   });
 
   // ─── Session Todo ────────────────────────────────
-  ipcMain.handle("lvis:session-todo:list", (e, sessionId?: string) => {
+  ipcMain.handle(CHANNELS.sessionTodo.list, (e, sessionId?: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:session-todo:list", e);
+      auditUnauthorized(auditLogger, CHANNELS.sessionTodo.list, e);
       return UNAUTHORIZED_FRAME;
     }
     if (!sessionTodoStore) return [];
     const sid = sessionId ?? conversationLoop.getSessionId();
     return sessionTodoStore.list(sid);
   });
-  ipcMain.handle("lvis:session-todo:clear", (e, sessionId?: string) => {
+  ipcMain.handle(CHANNELS.sessionTodo.clear, (e, sessionId?: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:session-todo:clear", e);
+      auditUnauthorized(auditLogger, CHANNELS.sessionTodo.clear, e);
       return UNAUTHORIZED_FRAME;
     }
     if (!sessionTodoStore) return { ok: false, error: "no-session-todo-store" };
@@ -204,7 +205,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   if (sessionTodoStore) {
     sessionTodoStore.onChange((sessionId, items) => {
       try {
-        getMainWindow()?.webContents.send("lvis:session-todo:changed", {
+        getMainWindow()?.webContents.send(CHANNELS.sessionTodo.changed, {
           sessionId,
           items,
         });
