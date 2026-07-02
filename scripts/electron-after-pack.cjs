@@ -226,7 +226,8 @@ function assertNodePtyBinary(context) {
         "pty.node",
         "conpty.node",
         "conpty_console_list.node",
-        join("conpty", "conpty.dll"),
+        "winpty.dll",
+        "winpty-agent.exe",
       ]
     : ["pty.node"];
   for (const file of requiredNativeFiles) {
