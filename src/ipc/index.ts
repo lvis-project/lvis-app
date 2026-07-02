@@ -41,6 +41,8 @@ import { registerWindowHandlers } from "./domains/window.js";
 import { registerMiscHandlers } from "./domains/misc.js";
 import { registerWorkBoardHandlers } from "./domains/work-board.js";
 import { registerAttachHandlers } from "./domains/attach.js";
+import { registerPreviewHandlers } from "./domains/preview.js";
+import { registerWorkspaceHandlers } from "./domains/workspace.js";
 import { registerUiHandlers } from "./domains/ui.js";
 import { registerDevHandlers } from "./domains/dev.js";
 import type { IpcDeps } from "./types.js";
@@ -81,6 +83,8 @@ export function registerIpcHandlers(
   registerMiscHandlers(deps);
   registerWorkBoardHandlers(deps);
   registerAttachHandlers(deps);
+  registerPreviewHandlers(deps);
+  registerWorkspaceHandlers(deps);
   registerUiHandlers(deps);
   // Dev IPC is *not* registered in packaged builds — the channels never
   // exist on `ipcMain`, so a compromised renderer/preload cannot probe them.

@@ -646,6 +646,17 @@ export function makeMockLvisNamespace(overrides: LvisNamespaceOverrides = {}) {
         })),
         set: vi.fn(async () => ({ ok: true })),
       },
+      // File-preview + project-folder browser surfaces (workspace rail). Default
+      // stubs so any renderApp-based test that opens the file-browser tab renders
+      // without a real preload bridge.
+      preview: {
+        readFile: vi.fn(async (path: string) => ({ ok: true, content: "", path, truncated: false })),
+      },
+      workspace: {
+        listRoots: vi.fn(async () => ({ ok: true, defaultRoot: "/ws", roots: [{ path: "/ws", isDefault: true }] })),
+        pickRoot: vi.fn(async () => ({ ok: true, canceled: true, roots: [{ path: "/ws", isDefault: true }] })),
+        listDir: vi.fn(async (path: string) => ({ ok: true, path, entries: [], truncated: false })),
+      },
       env: {
         isDev: false,
         isE2E: false,

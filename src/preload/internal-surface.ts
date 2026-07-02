@@ -1687,5 +1687,15 @@ export function buildLvisNamespaceExtras() {
     openExternal: (filePath: string) =>
       ipcRenderer.invoke(CHANNELS.attach.openExternal, filePath),
   },
+  preview: {
+    readFile: (filePath: string) =>
+      ipcRenderer.invoke(CHANNELS.preview.readFile, filePath),
+  },
+  workspace: {
+    listRoots: () => ipcRenderer.invoke(CHANNELS.workspace.listRoots),
+    pickRoot: () => ipcRenderer.invoke(CHANNELS.workspace.pickRoot),
+    listDir: (dirPath: string) =>
+      ipcRenderer.invoke(CHANNELS.workspace.listDir, dirPath),
+  },
   };
 }
