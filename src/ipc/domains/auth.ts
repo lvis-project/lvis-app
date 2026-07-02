@@ -53,6 +53,7 @@
  */
 import { ipcMain } from "electron";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { CHANNELS } from "../../contract/app-contract.js";
 import { createLogger } from "../../lib/logger.js";
 import { getIsPackaged } from "../../boot/dev-flags.js";
 import {
@@ -128,7 +129,7 @@ export function registerAuthHandlers(deps: IpcDeps): void {
   );
 
   ipcMain.handle(
-    "lvis:auth:login-mockup",
+    CHANNELS.auth.loginMockup,
     async (
       e,
       payload: { username?: unknown; password?: unknown },
@@ -145,7 +146,7 @@ export function registerAuthHandlers(deps: IpcDeps): void {
       | { ok: false; error: string }
     > => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:auth:login-mockup", e);
+        auditUnauthorized(auditLogger, CHANNELS.auth.loginMockup, e);
         return { ok: false, error: UNAUTHORIZED_FRAME.error };
       }
 

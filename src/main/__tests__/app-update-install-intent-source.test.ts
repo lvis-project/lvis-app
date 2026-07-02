@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 
 describe("app update install intent source contract", () => {
   it("lets updater-owned window close bypass hide-to-tray", () => {
-    const source = readFileSync(new URL("../../main.ts", import.meta.url), "utf8");
+    // C17: createWindow() (and its "close" handler) moved from main.ts into
+    // src/main/main-window.ts. Same guarantee, new location.
+    const source = readFileSync(new URL("../main-window.ts", import.meta.url), "utf8");
     const closeHandlerStart = source.indexOf('win.on("close"');
     const closeHandler = source.slice(
       closeHandlerStart,

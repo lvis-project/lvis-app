@@ -1,0 +1,491 @@
+/**
+ * app-contract.ts — the #1409 single source of truth for the app's public wire
+ * contract (channel names + public allowlist + gesture classification + session
+ * addressing rule).
+ *
+ * SECURITY-SENSITIVE + BEHAVIOR-PRESERVING: every string in this module is
+ * BYTE-IDENTICAL to the channel literal it replaces at the handler / preload
+ * call sites. The C0 snapshot tests (`channel-inventory`, `preload-shape`,
+ * `domain-exports`) must stay green with zero snapshot changes.
+ *
+ * Channel-name SOT first; request/response payload types are added
+ * incrementally (per-handler) in later commits. The streaming/event contract
+ * lives in `./events.ts`.
+ */
+
+import {
+  PERMISSIONS,
+  MARKETPLACE,
+  UI,
+  ROUTINES_V2,
+  WORK_BOARD,
+  SETTINGS,
+  OVERLAY_V1,
+  SUGGESTED_REPLIES,
+} from "../shared/ipc-channels.js";
+
+// Re-export the pre-existing per-domain SOT groups so `src/contract/` is the
+// single import surface for the wire contract. The preload sweep (C11) and the
+// external API/CLI/SDK surfaces will consume these from here.
+export {
+  PERMISSIONS,
+  MARKETPLACE,
+  UI,
+  ROUTINES_V2,
+  WORK_BOARD,
+  SETTINGS,
+  OVERLAY_V1,
+  SUGGESTED_REPLIES,
+};
+
+/**
+ * Channel-name SOT, grouped by domain. Values are byte-identical to the literal
+ * strings previously inlined in `src/ipc/domains/{chat,plugins,settings}.ts`.
+ *
+ * NOTE: groups whose channels already had a SOT const in
+ * `src/shared/ipc-channels.ts` (permissions, work-board, routines, ui,
+ * marketplace announcements, overlay, suggested-replies, settings.updated /
+ * settings.applyHostMap) are re-exported above rather than duplicated here.
+ */
+export const CHANNELS = {
+  chat: {
+    hasProvider: "lvis:chat:has-provider",
+    send: "lvis:chat:send",
+    guide: "lvis:chat:guide",
+    abort: "lvis:chat:abort",
+    new: "lvis:chat:new",
+    sessions: "lvis:chat:sessions",
+    compact: "lvis:chat:compact",
+    sessionResume: "lvis:chat:session-resume",
+    getHistory: "lvis:chat:get-history",
+    mainActiveState: "lvis:chat:main-active-state",
+    sessionHistory: "lvis:chat:session-history",
+    editResend: "lvis:chat:edit-resend",
+    fork: "lvis:chat:fork",
+    continueLastUser: "lvis:chat:continue-last-user",
+    retryEffort: "lvis:chat:retry-effort",
+    export: "lvis:chat:export",
+    enterCheckpointView: "lvis:chat:enter-checkpoint-view",
+    exitCheckpointView: "lvis:chat:exit-checkpoint-view",
+    branchFromCheckpoint: "lvis:chat:branch-from-checkpoint",
+    getVerbatimToolResult: "lvis:chat:get-verbatim-tool-result",
+    getWriteDiff: "lvis:chat:get-write-diff",
+    // Streaming / event channels (main → renderer). Full event schema in ./events.ts.
+    stream: "lvis:chat:stream",
+    fallback: "lvis:chat:fallback",
+  },
+  llm: {
+    ping: "lvis:llm:ping",
+  },
+  memory: {
+    entriesList: "lvis:memory:entries:list",
+    entriesSave: "lvis:memory:entries:save",
+    entriesDelete: "lvis:memory:entries:delete",
+    entriesSearch: "lvis:memory:entries:search",
+    indexGet: "lvis:memory:index:get",
+    indexUpdateIfUnchanged: "lvis:memory:index:update-if-unchanged",
+    indexSectionsUpdate: "lvis:memory:index:sections:update",
+    sessionsList: "lvis:memory:sessions:list",
+    sessionsSearch: "lvis:memory:sessions:search",
+    agentsMdGet: "lvis:memory:agents-md:get",
+    agentsMdUpdate: "lvis:memory:agents-md:update",
+    userPrefsGet: "lvis:memory:user-prefs:get",
+    userPrefsUpdate: "lvis:memory:user-prefs:update",
+    userPrefsRefresh: "lvis:memory:user-prefs:refresh",
+  },
+  starred: {
+    list: "lvis:starred:list",
+    add: "lvis:starred:add",
+    remove: "lvis:starred:remove",
+  },
+  feedback: {
+    submit: "lvis:feedback:submit",
+  },
+  askUserQuestion: {
+    respond: "lvis:ask-user-question:respond",
+    // Request + timeout events (main → renderer).
+    request: "lvis:ask-user-question:request",
+    timeout: "lvis:ask-user-question:timeout",
+  },
+  plugins: {
+    install: "lvis:plugins:install",
+    uninstall: "lvis:plugins:uninstall",
+    setEnabled: "lvis:plugins:set-enabled",
+    installLocal: "lvis:plugins:install-local",
+    uiList: "lvis:plugins:ui:list",
+    uiReadModule: "lvis:plugins:ui:read-module",
+    cards: "lvis:plugins:cards",
+    marketplaceList: "lvis:plugins:marketplace:list",
+    configGet: "lvis:plugins:config:get",
+    configSet: "lvis:plugins:config:set",
+    configSchemaGet: "lvis:plugins:config:schema:get",
+    configSecretSet: "lvis:plugins:config:secret:set",
+    configSecretListKeys: "lvis:plugins:config:secret:list-keys",
+    perfStats: "lvis:plugins:perf-stats",
+    call: "lvis:plugins:call",
+    // Lifecycle event channels (main → renderer). Not registered via ipcMain.
+    installProgress: "lvis:plugins:install-progress",
+    installResult: "lvis:plugins:install-result",
+    uninstallResult: "lvis:plugins:uninstall-result",
+    enabledChanged: "lvis:plugins:enabled-changed",
+    runtimeUpdated: "lvis:plugins:runtime-updated",
+  },
+  bootstrap: {
+    retry: "lvis:bootstrap:retry",
+    // Lifecycle status event (main → renderer).
+    status: "lvis:bootstrap:status",
+  },
+  runtime: {
+    counts: "lvis:runtime:counts",
+    env: "lvis:runtime:env",
+  },
+  marketplace: {
+    ping: "lvis:marketplace:ping",
+  },
+  agents: {
+    list: "lvis:agents:list",
+    install: "lvis:agents:install",
+    uninstall: "lvis:agents:uninstall",
+    // Lifecycle event channels (main → renderer).
+    installProgress: "lvis:agents:install-progress",
+    installResult: "lvis:agents:install-result",
+    uninstallResult: "lvis:agents:uninstall-result",
+  },
+  skills: {
+    list: "lvis:skills:list",
+    install: "lvis:skills:install",
+    uninstall: "lvis:skills:uninstall",
+    // Lifecycle event channels (main → renderer).
+    installProgress: "lvis:skills:install-progress",
+    installResult: "lvis:skills:install-result",
+    uninstallResult: "lvis:skills:uninstall-result",
+  },
+  mcp: {
+    servers: "lvis:mcp:servers",
+    kill: "lvis:mcp:kill",
+    configGet: "lvis:mcp:config:get",
+    configPath: "lvis:mcp:config:path",
+    configAdd: "lvis:mcp:config:add",
+    configSetApiKey: "lvis:mcp:config:set-api-key",
+    configRemove: "lvis:mcp:config:remove",
+    uiResource: "lvis:mcp:ui-resource",
+    catalogList: "lvis:mcp:catalog:list",
+    installFromMarketplace: "lvis:mcp:install-from-marketplace",
+    importClaudeDesktopPreview: "lvis:mcp:import:claude-desktop:preview",
+    importClaudeDesktopApply: "lvis:mcp:import:claude-desktop:apply",
+  },
+  /** Plugin webview bridge (lvis:plugin:*) — sandboxed plugin-frame origin. */
+  pluginBridge: {
+    registerWebview: "lvis:plugin:register-webview",
+    getEntryUrl: "lvis:plugin:get-entry-url",
+    getTheme: "lvis:plugin:get-theme",
+    callTool: "lvis:plugin:call-tool",
+    configGet: "lvis:plugin:config:get",
+    configSet: "lvis:plugin:config:set",
+    storageGet: "lvis:plugin:storage:get",
+    storageSet: "lvis:plugin:storage:set",
+    emitEvent: "lvis:plugin:emit-event",
+    // Fan-out to plugin webviews (main → plugin frame).
+    event: "lvis:plugin:event",
+  },
+  host: {
+    pluginThemeNotify: "lvis:host:plugin-theme-notify",
+  },
+  notification: {
+    clicked: "lvis:notification:clicked",
+    // In-app toast push (main → renderer).
+    toast: "lvis:notification:toast",
+  },
+  settings: {
+    get: "lvis:settings:get",
+    update: "lvis:settings:update",
+    setApiKey: "lvis:settings:set-api-key",
+    hasApiKey: "lvis:settings:has-api-key",
+    deleteApiKey: "lvis:settings:delete-api-key",
+    marketplaceSetApiKey: "lvis:settings:marketplace:set-api-key",
+    marketplaceHasApiKey: "lvis:settings:marketplace:has-api-key",
+    marketplaceDeleteApiKey: "lvis:settings:marketplace:delete-api-key",
+    setWebApiKey: "lvis:settings:set-web-api-key",
+    hasWebApiKey: "lvis:settings:has-web-api-key",
+    deleteWebApiKey: "lvis:settings:delete-web-api-key",
+  },
+  shell: {
+    openExternal: "lvis:shell:open-external",
+  },
+  telemetry: {
+    consentAnswer: "lvis:telemetry:consent-answer",
+  },
+  usage: {
+    summary: "lvis:usage:summary",
+    range: "lvis:usage:range",
+    exportCsv: "lvis:usage:export-csv",
+  },
+  // ── preload-swept channel groups (C11: #1409 + #1411) ──────────────────────
+  // Added so the preload surfaces (public/internal) reference the contract SOT
+  // instead of inline `"lvis:*"` literals. Byte-identical to the strings the
+  // preload previously inlined; registered-handler groups are cross-checked by
+  // the channel-inventory snapshot.
+  auth: {
+    loginMockup: "lvis:auth:login-mockup",
+    progress: "lvis:auth:progress",
+    logoutBroadcast: "lvis:auth:logout-broadcast",
+    reactivateBroadcast: "lvis:auth:reactivate-broadcast",
+    logoutReset: "lvis:auth:logout-reset",
+    reactivateDemo: "lvis:auth:reactivate-demo",
+  },
+  demo: {
+    status: "lvis:demo:status",
+    activate: "lvis:demo:activate",
+    activateEmbedded: "lvis:demo:activate-embedded",
+    relaunchAfterActivation: "lvis:demo:relaunch-after-activation",
+    clear: "lvis:demo:clear",
+  },
+  tour: {
+    getState: "lvis:tour:get-state",
+    markComplete: "lvis:tour:mark-complete",
+    dismiss: "lvis:tour:dismiss",
+    start: "lvis:tour:start",
+  },
+  onboarding: {
+    contextSet: "lvis:onboarding:context:set",
+  },
+  settingsWindow: {
+    open: "lvis:settings-window:open",
+    saved: "lvis:settings-window:saved",
+    tab: "lvis:settings-window:tab",
+  },
+  prompts: {
+    listSummaries: "lvis:prompts:list-summaries",
+    list: "lvis:prompts:list",
+    save: "lvis:prompts:save",
+    delete: "lvis:prompts:delete",
+    updated: "lvis:prompts:updated",
+  },
+  trigger: {
+    started: "lvis:trigger:started",
+    completed: "lvis:trigger:completed",
+    failed: "lvis:trigger:failed",
+    expired: "lvis:trigger:expired",
+    imported: "lvis:trigger:imported",
+    dismiss: "lvis:trigger:dismiss",
+    import: "lvis:trigger:import",
+  },
+  update: {
+    state: "lvis:update:state",
+    getState: "lvis:update:get-state",
+    downloadNow: "lvis:update:download-now",
+    installNow: "lvis:update:install-now",
+    skipVersion: "lvis:update:skip-version",
+  },
+  app: {
+    info: "lvis:app:info",
+  },
+  approval: {
+    request: "lvis:approval:request",
+  },
+  dlp: {
+    stats: "lvis:dlp:stats",
+  },
+  audit: {
+    search: "lvis:audit:search",
+    stats: "lvis:audit:stats",
+  },
+  view: {
+    activate: "lvis:view:activate",
+  },
+  sessionTodo: {
+    list: "lvis:session-todo:list",
+    clear: "lvis:session-todo:clear",
+    changed: "lvis:session-todo:changed",
+  },
+  agentSpawn: {
+    event: "lvis:agent-spawn:event",
+  },
+  skillLoad: {
+    event: "lvis:skill-load:event",
+  },
+  window: {
+    openDetached: "lvis:window:open-detached",
+    closeDetached: "lvis:window:close-detached",
+    listDetached: "lvis:window:list-detached",
+    closeAllDetached: "lvis:window:close-all-detached",
+    loadSessionInMain: "lvis:window:load-session-in-main",
+    loadSessionInMainResult: "lvis:window:load-session-in-main-result",
+    resizeForMode: "lvis:window:resize-for-mode",
+    resizeForSidePanel: "lvis:window:resize-for-side-panel",
+    openHtmlPreview: "lvis:window:open-html-preview",
+    snapEdge: "lvis:window:snap-edge",
+    detachedNavigate: "lvis:detached:navigate",
+  },
+  dev: {
+    setPreflightOverride: "lvis:dev:setPreflightOverride",
+    getPreflightStatus: "lvis:dev:getPreflightStatus",
+  },
+  attach: {
+    openFile: "lvis:attach:openFile",
+    readImage: "lvis:attach:readImage",
+    saveClipboardImage: "lvis:attach:saveClipboardImage",
+    openExternal: "lvis:attach:openExternal",
+  },
+} as const;
+
+type ValuesOf<T> = T[keyof T];
+
+/** Every channel name defined on {@link CHANNELS} (union of all group values). */
+export type ChannelName = ValuesOf<{
+  [Group in keyof typeof CHANNELS]: ValuesOf<(typeof CHANNELS)[Group]>;
+}>;
+
+// ─── Versioned public contract ──────────────────────────────────────────────
+
+/**
+ * Wire-contract version. Bump when the public surface (PUBLIC_CHANNELS, gesture
+ * classification, or a public channel's payload shape) changes in a way an
+ * external SDK/CLI must react to. Read-first callers pin this.
+ */
+export const CONTRACT_VERSION = "1.0.0";
+
+/**
+ * The versioned allowlist of channels an external surface (SDK / CLI / local
+ * API) MAY touch. Deliberately a small, mostly-read subset:
+ *   - chat send + session list/history/get-history (renderer-parity reads + send)
+ *   - plugin status/list + marketplace list
+ *   - permission mode (READ only — mutation stays internal + gesture-gated)
+ *   - usage summary/range
+ *
+ * Fail-closed: anything NOT in this list is internal. The gesture-gated
+ * mutating channels (permission/policy/sandbox-install) MUST never appear here
+ * — enforced by the contract-version-freeze test.
+ */
+export const PUBLIC_CHANNELS = [
+  CHANNELS.chat.send,
+  CHANNELS.chat.sessions,
+  CHANNELS.chat.getHistory,
+  CHANNELS.chat.sessionHistory,
+  CHANNELS.plugins.cards,
+  CHANNELS.plugins.marketplaceList,
+  PERMISSIONS.getMode,
+  CHANNELS.usage.summary,
+  CHANNELS.usage.range,
+] as const;
+
+/** A channel that is part of the externally-exposable public subset. */
+export type PublicChannel = (typeof PUBLIC_CHANNELS)[number];
+
+/** Is this channel in the externally-exposable public subset? (fail-closed) */
+export function isPublicChannel(channel: string): channel is PublicChannel {
+  return (PUBLIC_CHANNELS as readonly string[]).includes(channel);
+}
+
+/**
+ * Gesture requirement per channel. `"required"` ⇒ the mutating
+ * permission/policy/sandbox-install family that demands a fresh user-keyboard
+ * gesture REGARDLESS of origin (see {@link ./trust-origin}). `"none"` ⇒ reads
+ * (and chat send) that do not consume the gesture token.
+ *
+ * Public channels are all classified `"none"`. The `"required"` entries are the
+ * internal mutating channels — they are listed here so the freeze test can
+ * assert none of them ever leaks into {@link PUBLIC_CHANNELS}.
+ */
+export const CHANNEL_GESTURE: Record<string, "required" | "none"> = {
+  // ── public subset (reads + chat send) — gesture: none ──
+  [CHANNELS.chat.send]: "none",
+  [CHANNELS.chat.sessions]: "none",
+  [CHANNELS.chat.getHistory]: "none",
+  [CHANNELS.chat.sessionHistory]: "none",
+  [CHANNELS.plugins.cards]: "none",
+  [CHANNELS.plugins.marketplaceList]: "none",
+  [PERMISSIONS.getMode]: "none",
+  [CHANNELS.usage.summary]: "none",
+  [CHANNELS.usage.range]: "none",
+  // ── mutating gesture-gated (permission / policy / sandbox-install) ──
+  [PERMISSIONS.setMode]: "required",
+  [PERMISSIONS.addRule]: "required",
+  [PERMISSIONS.removeRule]: "required",
+  [PERMISSIONS.policySet]: "required",
+  [PERMISSIONS.dirDispatch]: "required",
+  [PERMISSIONS.reviewerDispatch]: "required",
+  [PERMISSIONS.deferredResolve]: "required",
+  [PERMISSIONS.userApprovalRecord]: "required",
+  [PERMISSIONS.userApprovalRevoke]: "required",
+  [PERMISSIONS.sandboxWindowsInstall]: "required",
+};
+
+// ─── Host-internal out-of-tree channel families ─────────────────────────────
+
+/**
+ * Channel families whose `ipcMain.handle` / `ipcMain.on` registrations live
+ * OUTSIDE `src/ipc/` — the three "out-of-tree" host surfaces:
+ *   - `settingsWindow` → registered in `src/main.ts` (settings BrowserWindow).
+ *   - `detachedWindow` → registered in `src/main/window-manager.ts`.
+ *   - `autoUpdater`    → registered in `src/main/auto-updater.ts`.
+ *
+ * Recorded here so the contract's public/internal classification is COMPLETE —
+ * there is no longer an "unclassified" out-of-tree hole. All three are
+ * INTERNAL: none appear in {@link PUBLIC_CHANNELS}, so an external
+ * (local-api / cli / sdk) {@link import("./trust-origin.js").TrustOrigin} can
+ * never reach them — {@link isPublicChannel} fails closed. They are host-only
+ * surfaces (a first-party BrowserWindow lifecycle, detached-window management,
+ * and the packaged auto-updater) with no external wire contract.
+ *
+ * BYTE-IDENTICAL: values mirror {@link CHANNELS} exactly, which already match
+ * the literals at the registration sites. C12 only RECORDS the classification;
+ * the C17 sweep replaces the inline literals at those sites with these consts.
+ * `lvis:window:open-html-preview` is intentionally NOT listed — it is
+ * registered in-tree by the `window` IPC domain and is already classified
+ * (internal: registered-but-not-public) by the channel inventory.
+ */
+export const INTERNAL_HOST_CHANNELS = {
+  settingsWindow: [
+    CHANNELS.settingsWindow.open,
+    CHANNELS.settingsWindow.saved,
+    CHANNELS.settingsWindow.tab,
+  ],
+  detachedWindow: [
+    CHANNELS.window.openDetached,
+    CHANNELS.window.closeDetached,
+    CHANNELS.window.listDetached,
+    CHANNELS.window.closeAllDetached,
+    CHANNELS.window.loadSessionInMain,
+    CHANNELS.window.loadSessionInMainResult,
+    CHANNELS.window.resizeForMode,
+    CHANNELS.window.snapEdge,
+    CHANNELS.window.detachedNavigate,
+  ],
+  autoUpdater: [
+    CHANNELS.update.state,
+    CHANNELS.update.getState,
+    CHANNELS.update.downloadNow,
+    CHANNELS.update.installNow,
+    CHANNELS.update.skipVersion,
+  ],
+} as const;
+
+// ─── Session addressing contract ────────────────────────────────────────────
+
+/**
+ * Session-scoped channels: their leading `sessionId` argument MUST match the
+ * currently-active conversation session. The handler NEVER silently retargets
+ * to the active session when they diverge — it fails closed and returns
+ * {@link SESSION_NOT_ADDRESSABLE}. This prevents a stale/foreign `sessionId`
+ * (e.g. from a background renderer, a plugin, or an external caller) from
+ * mutating or reading the wrong session.
+ *
+ * The C10 handlers adopt {@link SESSION_NOT_ADDRESSABLE} as the canonical
+ * return code; today the handlers return per-site codes ("session-mismatch",
+ * bare `null`) — behavior is unchanged in this commit, the constant is defined
+ * for C10 to consume.
+ */
+export const SESSION_SCOPED_CHANNELS = [
+  CHANNELS.chat.getHistory,
+  CHANNELS.chat.sessionHistory,
+  CHANNELS.chat.enterCheckpointView,
+  CHANNELS.chat.branchFromCheckpoint,
+  CHANNELS.chat.continueLastUser,
+] as const;
+
+/**
+ * Canonical fail-closed error returned by session-scoped handlers when the
+ * requested `sessionId` is not the active session (never silently retargeted).
+ */
+export const SESSION_NOT_ADDRESSABLE = "session-not-active";
