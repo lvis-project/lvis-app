@@ -1626,7 +1626,7 @@ export interface LvisWorkspaceApi {
     roots?: Array<{ path: string; isDefault: boolean }>;
     error?: string;
   }>;
-  pickRoot: (opts?: { acknowledgePath?: string }) => Promise<{
+  pickRoot: (opts?: { ackToken?: string }) => Promise<{
     ok: boolean;
     canceled?: boolean;
     added?: string;
@@ -1634,8 +1634,10 @@ export interface LvisWorkspaceApi {
     warnings?: string[];
     /** Adjacency warnings present + not persisted — renderer must confirm. */
     requiresAcknowledgement?: boolean;
-    /** Picked path awaiting acknowledgement — echo back via `acknowledgePath`. */
+    /** Picked path awaiting acknowledgement — display only. */
     pendingPath?: string;
+    /** One-time token bound to the picked path — confirm by echoing it via `ackToken`. */
+    ackToken?: string;
     error?: string;
   }>;
   listDir: (path: string) => Promise<{

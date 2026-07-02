@@ -1112,6 +1112,8 @@ export const frMessages: Record<string, string> = {
   "firstTaskProposals.workAssistantCta": "Organiser la boîte de réception",
   "firstTaskProposals.workAssistantHeadline": "Pouvons-nous organiser vos tâches pour aujourd'hui?",
   "forest.description": "Coque lumineuse + accent bleu sarcelle + code lumineux",
+  "formatIpcError.ackExpired": "La confirmation du dossier a expiré. Veuillez choisir le dossier à nouveau.",
+  "formatIpcError.ackUnknown": "Cette confirmation du dossier n'est plus valide. Veuillez choisir le dossier à nouveau.",
   "formatIpcError.addFailed": "Échec de l'ajout de la règle.",
   "formatIpcError.alreadyResolved": "L'article a déjà été traité.",
   "formatIpcError.alreadyResolving": "L'article est déjà en cours de traitement.",

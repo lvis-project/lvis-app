@@ -652,7 +652,12 @@ function ProjectRootsBrowser({
   const [errorByPath, setErrorByPath] = useState<Record<string, string>>({});
   // A picked folder whose adjacency warnings must be acknowledged before the
   // main process (workspace.pickRoot gate) will persist it into the read scope.
-  const [pendingWarning, setPendingWarning] = useState<{ path: string; warnings: string[] } | null>(null);
+  // `ackToken` binds the confirmation to the exact dialog-picked path the main
+  // process holds — the renderer echoes the token, never a path, so it can't
+  // widen the read scope to a directory the native picker never returned.
+  const [pendingWarning, setPendingWarning] = useState<
+    { path: string; warnings: string[]; ackToken: string } | null
+  >(null);
 
   const loadDir = useCallback(async (path: string) => {
     setLoadingPaths((prev) => new Set(prev).add(path));
@@ -742,8 +747,8 @@ function ProjectRootsBrowser({
   const addFolder = async () => {
     const res = await window.lvis.workspace.pickRoot();
     if (!res.ok) return;
-    if (res.requiresAcknowledgement && res.pendingPath) {
-      setPendingWarning({ path: res.pendingPath, warnings: res.warnings ?? [] });
+    if (res.requiresAcknowledgement && res.pendingPath && res.ackToken) {
+      setPendingWarning({ path: res.pendingPath, warnings: res.warnings ?? [], ackToken: res.ackToken });
       return;
     }
     if (res.roots) applyRoots(res.roots, res.added ?? null);
@@ -752,9 +757,10 @@ function ProjectRootsBrowser({
   const confirmPendingFolder = async () => {
     const pending = pendingWarning;
     if (!pending) return;
-    // Second, explicit confirmation — persist WITH acknowledgement (main-process
-    // still hard-refuses a sensitive/root path even when acknowledged).
-    const res = await window.lvis.workspace.pickRoot({ acknowledgePath: pending.path });
+    // Second, explicit confirmation — echo the one-time token (never a path).
+    // Main persists the token-bound dialog path and still hard-refuses a
+    // sensitive/root path even when acknowledged.
+    const res = await window.lvis.workspace.pickRoot({ ackToken: pending.ackToken });
     setPendingWarning(null);
     if (res.ok && res.roots) applyRoots(res.roots, res.added ?? null);
   };
