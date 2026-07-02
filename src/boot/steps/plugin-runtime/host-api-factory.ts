@@ -703,16 +703,13 @@ export function createHostApiFactory(
       onShutdown: (handler) => {
         pluginShutdownHandlers.push({ pluginId, handler });
       },
-      // ─── Host-mediated worker spawn (worker-confinement PR D-1) ───────
-      // HOST PRIMITIVE — NO PRODUCTION CALLER YET. Exposes the host's
-      // {@link spawnWorker} (src/permissions/worker-spawn.ts) on the per-plugin
-      // hostApi surface with `pluginId` bound from THIS hostApi instance (a
-      // plugin can never name another plugin's namespace). The local-indexer
-      // worker is wired to this in PR D-3 (which owns the plugin/worker UDS
-      // contract); there is intentionally no caller in this PR. When the ASRT
-      // gate is ON (non-Windows) the worker runs ASRT-wrapped with a
-      // bind-mounted UDS control channel; gate OFF / win32 ⇒ a plain spawn that
-      // returns `socketPath: null` (legacy TCP fallback signal).
+      // ─── Host-mediated worker spawn ───────────────────────────────────
+      // HOST PRIMITIVE — Tool.workerId producer is intentionally NOT wired here.
+      // Exposes the host's spawnWorker on the per-plugin hostApi surface with
+      // `pluginId` bound from THIS hostApi instance (a plugin can never name
+      // another plugin's namespace). A future host-routed tool producer must
+      // prove that its call path actually uses this worker before setting
+      // Tool.workerId; manifest `toolSchemas.workerId` alone is advisory.
       spawnWorker: (workerSpec) => {
         return spawnWorker({ ...workerSpec, pluginId });
       },
