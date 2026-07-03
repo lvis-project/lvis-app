@@ -169,6 +169,21 @@ function isLikelyPath(value: string): boolean {
 }
 
 /**
+ * A bare filename-with-extension carrying NO directory separator
+ * (`2026-07-03.md`) — the shape `write_file`/`read_file` produce when the model
+ * writes into the working directory by name. `isLikelyPath` rejects it (its
+ * generic clause demands a separator so free-text tokens like "index.ts" inside
+ * a `content` blob don't leak in), so it is only accepted for values whose KEY
+ * is a path key (see {@link collectPathStrings}). Whitespace disqualifies it —
+ * a bare name is a single token, never a sentence. The glob guard runs first,
+ * so `*.md` never reaches here.
+ */
+function isBareFilename(value: string): boolean {
+  if (/\s/.test(value)) return false;
+  return !/[\\/]/.test(value) && /\.[A-Za-z0-9]{1,12}$/.test(value);
+}
+
+/**
  * A glob pattern (`**\/*architecture*.md`, `foo?.ts`, `a{b,c}`) is a tool
  * ARGUMENT, not a concrete file — it must never become a file-preview target.
  * `isLikelyPath` alone accepts `**\/*.md` (it has a `/` and a `.md` tail), so
@@ -206,7 +221,9 @@ function collectPathStrings(value: unknown): string[] {
     // Glob patterns are tool arguments, never files — never a file target.
     if (isGlobPattern(item)) return;
     if (key != null && PATH_KEYS.has(key.toLowerCase())) {
-      if (isLikelyPath(item)) paths.add(item);
+      // A path-keyed value may be a bare working-dir filename (no separator);
+      // accept it here where the key vouches for its role as a path.
+      if (isLikelyPath(item) || isBareFilename(item)) paths.add(item);
       return;
     }
     if (isLikelyPath(item)) paths.add(item);
@@ -479,6 +496,12 @@ export function collectChatPreviewModel({
       }
 
       for (const path of collectPathStrings(tool.input)) {
+        // Link the file-tree entry to the preview target it opens: a diff target
+        // when this tool edited the path, else the plain `file:` target created
+        // just below. Without this link a written/read file lists in the session
+        // segment but clicking it opens nothing (no `previewTargetId` to resolve).
+        const previewTargetId =
+          diff?.path === path ? `diff:${tool.toolUseId}:${path}` : `file:${tool.toolUseId}:${path}`;
         addOrMergeFile(files, {
           id: `tool:${path}`,
           path,
@@ -486,7 +509,7 @@ export function collectChatPreviewModel({
           detail: compactDetail(path),
           sourceLabel: displayName,
           operation,
-          previewTargetId: diff?.path === path ? `diff:${tool.toolUseId}:${path}` : undefined,
+          previewTargetId,
           canOpenExternal: false,
           status: tool.status,
         }, fileIds);

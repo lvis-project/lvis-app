@@ -226,6 +226,31 @@ describe("ChatSidePanel", () => {
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
   });
 
+  it("hides the ordinal on a lone container tab and shows it once a second of the same kind opens", () => {
+    renderPanel(
+      <HarnessPanel
+        api={api()}
+        sessionId="session-1"
+        targets={[]}
+        files={[]}
+        initialSelectedId={null}
+      />,
+    );
+
+    // A single browser tab: the label carries no meaningless "1".
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-browser"));
+    let browserTabs = screen.getAllByTestId("chat-side-panel-tab-browser");
+    expect(browserTabs).toHaveLength(1);
+    expect(browserTabs[0].textContent).not.toMatch(/\d/);
+
+    // Opening a second browser tab makes both show their ordinal to disambiguate.
+    addTabViaMenu("browser");
+    browserTabs = screen.getAllByTestId("chat-side-panel-tab-browser");
+    expect(browserTabs).toHaveLength(2);
+    expect(browserTabs[0].textContent).toMatch(/1/);
+    expect(browserTabs[1].textContent).toMatch(/2/);
+  });
+
   it("tab bar shows no count badge", () => {
     const targets: ChatPreviewTarget[] = [
       {

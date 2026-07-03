@@ -2191,15 +2191,22 @@ function tabTestId(kind: WorkspaceTabKind): string {
 }
 
 /**
- * Tab label: container tabs show `{kind} {ordinal}` (e.g. "Browser 2"); content
- * tabs show the item they point at (preview-target title, or the URL host).
+ * Tab label: container tabs show `{kind}` alone, appending the `{ordinal}` (e.g.
+ * "Browser 2") ONLY when `showOrdinal` is set — the caller sets it when 2+
+ * container tabs of the same kind coexist, so a lone tab reads "Browser" with no
+ * meaningless "1". Content tabs show the item they point at (preview-target
+ * title, or the URL host) and ignore the ordinal entirely.
  */
 function tabLabel(
   tab: WorkspaceTab,
   targetById: Map<string, ChatPreviewTarget>,
   t: (key: string) => string,
+  showOrdinal: boolean,
 ): string {
-  if (!tab.content) return `${t(tabLabelKey(tab.kind))} ${tab.ordinal}`;
+  if (!tab.content) {
+    const base = t(tabLabelKey(tab.kind));
+    return showOrdinal ? `${base} ${tab.ordinal}` : base;
+  }
   if (tab.content.source === "browser") {
     try {
       return new URL(tab.content.url).hostname || tab.content.url;
@@ -2733,7 +2740,12 @@ export function ChatSidePanel({
             {tabs.map((tab) => {
               const Icon = tabIcon(tab.kind);
               const active = tab.id === activeTab?.id;
-              const label = tabLabel(tab, targetById, t);
+              // Ordinal disambiguates only when 2+ CONTAINER tabs (content: null)
+              // of this kind coexist; a lone container tab drops the "1".
+              const showOrdinal =
+                !tab.content &&
+                tabs.filter((other) => !other.content && other.kind === tab.kind).length > 1;
+              const label = tabLabel(tab, targetById, t, showOrdinal);
               const isEphemeral = tab.mode === "ephemeral";
               return (
                 // Layout wrapper only (role="presentation"): the pin/close
