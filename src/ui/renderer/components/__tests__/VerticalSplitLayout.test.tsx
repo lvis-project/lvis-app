@@ -32,6 +32,16 @@ describe("VerticalSplitLayout", () => {
     expect(screen.getByTestId("bottom-pane")).toBeTruthy();
   });
 
+  it("gives the separator a ≥20px hit zone (1.25rem row) while the visual line stays thin", () => {
+    renderLayout(45);
+    // The middle grid track is the pointer hit zone: 1.25rem == 20px, above the
+    // ~20-24px floor for a reliable drag (R1). The visible line inside is 2px.
+    const layout = screen.getByTestId("split");
+    expect(layout.style.gridTemplateRows).toContain("1.25rem");
+    const line = screen.getByTestId("splitter").querySelector("span");
+    expect(line?.className).toContain("h-0.5");
+  });
+
   it("ArrowDown nudges the split down and commits (keyboard step)", () => {
     const { onDragChange, onCommit } = renderLayout(45);
     fireEvent.keyDown(screen.getByTestId("splitter"), { key: "ArrowDown" });

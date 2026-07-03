@@ -76,11 +76,15 @@ export function VerticalSplitLayout({
   };
 
   return (
+    // The separator ROW is 1.25rem (20px) tall so the whole row is the pointer
+    // hit zone — above the ~20-24px floor for a reliable drag. The VISUAL line
+    // inside stays thin (2px, `h-0.5`), centered by `items-center`, so the
+    // widened interactive area costs no extra visible chrome.
     <div
       ref={layoutRef}
       className="grid min-h-0 w-full min-w-0 flex-1 overflow-hidden"
       data-testid={testId}
-      style={{ gridTemplateRows: `${topPercent}% 0.75rem minmax(0, 1fr)` }}
+      style={{ gridTemplateRows: `${topPercent}% 1.25rem minmax(0, 1fr)` }}
     >
       <div className="min-h-0 overflow-auto border-b">{top}</div>
       <div

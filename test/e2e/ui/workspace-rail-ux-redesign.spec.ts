@@ -79,8 +79,38 @@ test.describe("workspace rail UX redesign", () => {
     await expect(sessionSeg).toBeDisabled();
     await expect(page.getByTestId("chat-side-panel-file-source-session-count")).toHaveText("0");
 
+    // R3: the segment strip is compact — its total footprint stays ~24-28px so
+    // it does not crowd the narrow file pane. Each button is 24px (h-6).
+    const dirBtnBox = await page.getByTestId("chat-side-panel-file-source-directory").boundingBox();
+    expect(dirBtnBox).not.toBeNull();
+    expect(dirBtnBox!.height).toBeLessThanOrEqual(26);
+    const stripBox = await page.getByTestId("chat-side-panel-file-source-segment").boundingBox();
+    expect(stripBox).not.toBeNull();
+    expect(stripBox!.height).toBeLessThanOrEqual(30);
+
+    // R3: no dead search — the search box is not rendered on the Directory
+    // segment (ProjectRootsBrowser has no query wiring).
+    await expect(page.getByTestId("chat-preview-search")).toHaveCount(0);
+
     const shot = await page.getByTestId("chat-side-panel").screenshot();
     await test.info().attach("file-source-segment.png", { contentType: "image/png", body: shot });
+  });
+
+  test("file tab: the vertical separator has a ≥20px drag hit zone (R1)", async () => {
+    await page.setViewportSize({ width: 1400, height: 840 });
+    await page.getByTestId("chat-side-panel-toggle").click();
+    await page.getByTestId("chat-side-panel-launcher-file-browser").click();
+
+    const splitter = page.getByTestId("chat-side-panel-file-splitter");
+    await expect(splitter).toBeVisible();
+    // The separator ROW is 1.25rem (20px) tall — the whole row is the pointer
+    // target — so a drag is reliable even though the visible line is 2px.
+    const box = await splitter.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(20);
+
+    const shot = await page.getByTestId("chat-side-panel").screenshot();
+    await test.info().attach("separator-drag-zone.png", { contentType: "image/png", body: shot });
   });
 
   test("file tab: vertical splitter persists across restart", async () => {
