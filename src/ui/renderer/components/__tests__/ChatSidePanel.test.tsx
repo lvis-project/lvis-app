@@ -1034,7 +1034,7 @@ describe("ChatSidePanel", () => {
     expect(sessionSeg.disabled).toBe(true);
     expect(screen.getByTestId("chat-side-panel-file-source-session-count").textContent).toBe("0");
     // Directory is the default source.
-    expect(screen.getByTestId("chat-side-panel-file-source-directory").getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("chat-side-panel-file-source-directory").getAttribute("aria-pressed")).toBe("true");
   });
 
   it("file tab: switching to the session segment shows the session artifacts", () => {
