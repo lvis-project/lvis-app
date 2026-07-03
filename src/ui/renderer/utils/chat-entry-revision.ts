@@ -40,8 +40,10 @@ export function subAgentRevision(spawn: SubAgentSpawn): string {
     spawn.toolCallCount,
     textRevision(spawn.summary),
     textRevision(spawn.errorMessage),
-    spawn.turns
-      .map((turn) => `${turn.turn}:${turn.toolCallCount}:${textRevision(turn.text)}`)
+    // Fingerprint the child transcript so a live-updating spawn re-renders when
+    // its entries change (new tool row, streamed reasoning, final assistant).
+    spawn.entries
+      .map((entry, i) => entryRenderRevision({ entry, idx: i, searchHighlight: "", starred: false }))
       .join("|"),
   ].join(":");
 }

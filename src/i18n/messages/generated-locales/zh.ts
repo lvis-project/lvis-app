@@ -2411,6 +2411,7 @@ export const zhMessages: Record<string, string> = {
   "subAgentCard.statusRunning": "运行中",
   "subAgentCard.summaryLabel": "概括",
   "subAgentCard.toolCalls": "工具调用：{count}",
+  "subAgentCard.detailInTab": "详情在标签页",
   "subAgentCard.turnCount": "{count} 转",
   "subAgentCard.turnHeading": "转动{turn}",
   "suggestedRepliesChipRow.toolbarAriaLabel": "替代回复建议",

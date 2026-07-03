@@ -48,8 +48,68 @@ import {
   type TranscriptStorage,
   type RunTranscriptWriter,
 } from "../work-board/run-transcript.js";
+import type { SubAgentActivityUpdate } from "../engine/subagent-runner.js";
 
 const log = createLogger("work-board-engine");
+
+/**
+ * Map a sub-agent activity snapshot to the work-board transcript's per-turn
+ * shape (`turn` = 1-based COMPLETED assistant round count, `text` = latest
+ * assistant text). The board records a coarse per-turn plan/exec narrative — it
+ * does not render the full ChatEntry timeline (that surface is the chat's
+ * sub-agent tab), so it consumes the same `onActivity` snapshot but flattens it
+ * to the turn text.
+ *
+ * `turn === 0` means no assistant round has completed yet — the snapshot only
+ * holds in-flight tool_start/permission_review/streaming entries. Such a frame
+ * carries no board-relevant turn narrative, so the caller drops it (see
+ * `makeTurnRecorder`).
+ */
+function activityToTurn(u: SubAgentActivityUpdate): { turn: number; text: string } {
+  let turn = 0;
+  let text = "";
+  for (const entry of u.entries) {
+    if (entry.kind === "assistant" && entry.streaming !== true) {
+      turn += 1;
+      if (entry.text) text = entry.text;
+    }
+  }
+  return { turn, text };
+}
+
+/**
+ * Build the per-phase `onActivity` handler that emits + records ONE turn event
+ * per newly-completed assistant round.
+ *
+ * WHY this guard exists: `onActivity` fires on EVERY child-loop callback
+ * (tool_start / tool_end / permission_review / assistant_round) so the sub-agent
+ * TAB can live-render the full ChatEntry timeline. The board, however, wants
+ * only the coarse per-turn narrative. Forwarding raw `activityToTurn` on every
+ * callback floods the board two ways: (1) every pre-first-round tool/permission
+ * frame maps to a blank `{turn:0, text:""}`, and (2) every extra callback WITHIN
+ * a round re-emits the SAME `{turn:N, text}` — and `record()` APPENDS to the
+ * JSONL transcript, so the dupes accumulate on disk (and flood the live
+ * `runProgress` IPC channel).
+ *
+ * The guard collapses that back to the pre-transcript-migration semantics: skip
+ * `turn === 0` (no completed round) and skip any turn already forwarded — one
+ * event per new completed round, no blanks, no dupes. The handler holds its own
+ * per-phase `lastTurn` (created fresh for plan and for execute), so each phase's
+ * turn count restarts from 1.
+ */
+function makeTurnRecorder(
+  onTurn: (turn: number, text: string) => void,
+): (u: SubAgentActivityUpdate) => void {
+  let lastTurn = 0;
+  return (u) => {
+    const { turn, text } = activityToTurn(u);
+    // No completed assistant round yet (turn 0), or this round was already
+    // forwarded — nothing new to narrate for the board.
+    if (turn <= lastTurn) return;
+    lastTurn = turn;
+    onTurn(turn, text);
+  };
+}
 
 /**
  * Read-only tool surface for the PLAN phase. The plan agent investigates the
@@ -368,10 +428,10 @@ export function createWorkBoardEngine(
           maxTurns: PLAN_MAX_TURNS,
         },
         {
-          onTurn: (u) => {
-            emit({ itemId, phase: "planning", turn: u.turn, text: u.text });
-            record({ phase: "planning", kind: "turn", turn: u.turn, text: u.text });
-          },
+          onActivity: makeTurnRecorder((turn, text) => {
+            emit({ itemId, phase: "planning", turn, text });
+            record({ phase: "planning", kind: "turn", turn, text });
+          }),
           onError: (message) => emit({ itemId, phase: "error", message }),
         },
       );
@@ -435,10 +495,10 @@ export function createWorkBoardEngine(
           profileModel: profile?.model,
         },
         {
-          onTurn: (u) => {
-            emit({ itemId, phase: "executing", turn: u.turn, text: u.text });
-            record({ phase: "executing", kind: "turn", turn: u.turn, text: u.text });
-          },
+          onActivity: makeTurnRecorder((turn, text) => {
+            emit({ itemId, phase: "executing", turn, text });
+            record({ phase: "executing", kind: "turn", turn, text });
+          }),
           onError: (message) => emit({ itemId, phase: "error", message }),
         },
       );

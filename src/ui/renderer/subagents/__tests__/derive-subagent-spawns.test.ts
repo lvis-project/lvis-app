@@ -51,13 +51,55 @@ describe("deriveSubAgentSpawnsFromEntries", () => {
     expect(spawn.status).toBe("done");
     expect(spawn.summary).toBe("Found 3 relevant files");
     expect(spawn.toolCallCount).toBe(5);
-    // Final output collapsed into a single synthetic turn.
-    expect(spawn.turns).toHaveLength(1);
-    expect(spawn.turns[0]).toEqual({
-      turn: 1,
+    // Legacy result (no embedded `entries`) → single synthetic assistant entry.
+    expect(spawn.entries).toHaveLength(1);
+    expect(spawn.entries[0]).toEqual({
+      kind: "assistant",
       text: "Found 3 relevant files",
-      toolCallCount: 5,
+      streaming: false,
     });
+  });
+
+  it("uses the embedded child transcript (entries) when present (PR3 persistence)", () => {
+    const childEntries: ChatEntry[] = [
+      {
+        kind: "tool_group",
+        groupId: "cg",
+        groupIds: ["cg"],
+        status: "done",
+        tools: [
+          {
+            toolUseId: "child-read-1",
+            name: "read_file",
+            displayOrder: 0,
+            status: "done",
+            input: { path: "/tmp/a" },
+            result: "child content",
+          },
+        ],
+      },
+      { kind: "assistant", text: "child final", streaming: false },
+    ];
+    const spawn = deriveSubAgentSpawnsFromEntries(
+      entriesOf([
+        {
+          toolUseId: "tu-embed",
+          name: "agent_spawn",
+          displayOrder: 0,
+          status: "done",
+          input: { title: "Embedded" },
+          result: JSON.stringify({
+            summary: "child final",
+            toolCallCount: 1,
+            entries: childEntries,
+          }),
+        },
+      ]),
+    )[0];
+    // Real embedded transcript is used verbatim — NOT the synthetic fallback.
+    expect(spawn.entries).toHaveLength(2);
+    expect(spawn.entries[0].kind).toBe("tool_group");
+    expect(spawn.entries[1]).toEqual({ kind: "assistant", text: "child final", streaming: false });
   });
 
   it("falls back to agentName when title is absent", () => {
@@ -91,7 +133,7 @@ describe("deriveSubAgentSpawnsFromEntries", () => {
     )[0];
     expect(spawn.status).toBe("error");
     expect(spawn.errorMessage).toBe("agent profile not found: nope");
-    expect(spawn.turns).toHaveLength(0);
+    expect(spawn.entries).toHaveLength(0);
   });
 
   it("downgrades a nominally-done tool to error when the result carries { error }", () => {
@@ -166,7 +208,11 @@ describe("deriveSubAgentSpawnsFromEntries", () => {
       ]),
     )[0];
     expect(spawn.summary).toBe("plain text summary");
-    expect(spawn.turns[0].text).toBe("plain text summary");
+    expect(spawn.entries[0]).toEqual({
+      kind: "assistant",
+      text: "plain text summary",
+      streaming: false,
+    });
   });
 });
 
@@ -175,9 +221,9 @@ describe("mergeSubAgentSpawns", () => {
     spawnId: "live-uuid-1",
     title: "Live run",
     status: "done",
-    turns: [
-      { turn: 1, text: "step 1", toolCallCount: 1 },
-      { turn: 2, text: "step 2", toolCallCount: 2 },
+    entries: [
+      { kind: "assistant", text: "step 1", streaming: false },
+      { kind: "assistant", text: "step 2", streaming: false },
     ],
     summary: "live summary",
     toolCallCount: 4,
@@ -187,7 +233,7 @@ describe("mergeSubAgentSpawns", () => {
     spawnId: derivedSpawnId("tu-1"),
     title: "Live run",
     status: "done",
-    turns: [{ turn: 1, text: "live summary", toolCallCount: 4 }],
+    entries: [{ kind: "assistant", text: "live summary", streaming: false }],
     summary: "live summary",
     toolCallCount: 4,
     toolUseId: "tu-1",
@@ -196,7 +242,7 @@ describe("mergeSubAgentSpawns", () => {
     spawnId: derivedSpawnId("tu-9"),
     title: "Past run",
     status: "done",
-    turns: [{ turn: 1, text: "past summary", toolCallCount: 2 }],
+    entries: [{ kind: "assistant", text: "past summary", streaming: false }],
     summary: "past summary",
     toolCallCount: 2,
     toolUseId: "tu-9",
@@ -205,10 +251,10 @@ describe("mergeSubAgentSpawns", () => {
   it("keeps the live spawn and drops the derived duplicate for the same run (dedupe by toolUseId)", () => {
     const merged = mergeSubAgentSpawns([live], [derivedSameRun, derivedPastRun]);
     expect(merged).toHaveLength(2);
-    // Live richness preserved (2 turns, not the collapsed single derived turn).
+    // Live richness preserved (2 entries, not the collapsed single derived entry).
     const liveResult = merged.find((s) => s.toolUseId === "tu-1");
     expect(liveResult?.spawnId).toBe("live-uuid-1");
-    expect(liveResult?.turns).toHaveLength(2);
+    expect(liveResult?.entries).toHaveLength(2);
     // Past run derived from loaded entries is included.
     expect(merged.find((s) => s.toolUseId === "tu-9")?.title).toBe("Past run");
   });

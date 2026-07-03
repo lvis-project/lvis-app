@@ -82,7 +82,7 @@ describe("subAgentRevision + toolGroupRevision", () => {
       title: "T",
       status: "done",
       toolCallCount: 2,
-      turns: [{ turn: 1, text: "x", toolCallCount: 1 }],
+      entries: [{ kind: "assistant", text: "x", streaming: false }],
     };
     const rev = subAgentRevision(spawn);
     expect(rev).toBe(subAgentRevision(spawn));
