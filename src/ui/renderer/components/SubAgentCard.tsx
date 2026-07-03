@@ -43,6 +43,14 @@ export interface SubAgentSpawn {
    * sub-agent tab).
    */
   toolUseId?: string;
+  /**
+   * The addressable sub-agent session id — the JOIN KEY that unifies a spawn
+   * and its resume(s) into one transcript in the sub-agent viewer. A resume is
+   * a distinct spawn (own `spawnId`/`toolUseId`) but shares this value with the
+   * original, so `groupSubAgentSessions` concatenates their segments. Absent on
+   * legacy sessions / clean-complete originals → the spawn stays a solo group.
+   */
+  childSessionId?: string;
 }
 
 /**
