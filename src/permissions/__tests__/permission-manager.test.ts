@@ -2,13 +2,19 @@
  * PermissionManager unit tests — B1 persistence layer
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { PermissionManager } from "../permission-manager.js";
+import {
+  PermissionManager,
+  requiredTier,
+  grantCovers,
+  normalizeTier,
+  tierRank,
+} from "../permission-manager.js";
 import { updatePermissionsFile } from "../permissions-store.js";
 
 // ─── Mock permissions-store ───────────────────────────
 // We mock the store module so tests don't touch the real filesystem.
 
-const mockStore: { rules: Array<{ pattern: string; action: "allow" | "deny"; source?: string }>; mode: string } = {
+const mockStore: { rules: Array<{ pattern: string; action: "allow" | "deny"; source?: string; tier?: "read" | "write" }>; mode: string } = {
   rules: [],
   mode: "default",
 };
@@ -66,8 +72,8 @@ describe("PermissionManager (B1 persistence)", () => {
     expect(result.reason).toBe("사용자 영구 승인");
     expect(result.layer).toBe(5);
 
-    // 영구: store에 rule이 추가됐는지
-    expect(mockStore.rules).toContainEqual({ pattern: "my_tool", action: "allow" });
+    // 영구: store에 rule이 추가됐는지 (P2: 수동 경로 default write-tier)
+    expect(mockStore.rules).toContainEqual({ pattern: "my_tool", action: "allow", tier: "write" });
   });
 
   it("does not add in-memory allow when durable allow persistence fails", async () => {
@@ -531,5 +537,245 @@ describe("PermissionManager — revoke controllers (cluster M1)", () => {
     // No controller has been requested — revoke must not throw or create
     // spurious entries that leak memory.
     expect(() => pm.revokePluginAccess("never-seen", "test")).not.toThrow();
+  });
+});
+
+// ─── P2 graduated grant tier ─────────────────────────
+
+describe("P2 grant-tier helpers", () => {
+  it("requiredTier maps read→read and every mutating category→write", () => {
+    expect(requiredTier("read")).toBe("read");
+    expect(requiredTier("write")).toBe("write");
+    expect(requiredTier("shell")).toBe("write");
+    expect(requiredTier("network")).toBe("write");
+    // meta requires write so a read-tier grant cannot short-circuit it.
+    expect(requiredTier("meta")).toBe("write");
+  });
+
+  it("grantCovers — write covers all, read covers only read", () => {
+    for (const cat of ["read", "write", "shell", "network", "meta"] as const) {
+      expect(grantCovers("write", cat)).toBe(true);
+    }
+    expect(grantCovers("read", "read")).toBe(true);
+    expect(grantCovers("read", "write")).toBe(false);
+    expect(grantCovers("read", "shell")).toBe(false);
+    expect(grantCovers("read", "network")).toBe(false);
+    expect(grantCovers("read", "meta")).toBe(false);
+  });
+
+  it("tierRank orders read below write", () => {
+    expect(tierRank("read")).toBeLessThan(tierRank("write"));
+  });
+
+  it("normalizeTier keeps read, coerces everything else (garbage/undefined) to write", () => {
+    expect(normalizeTier("read")).toBe("read");
+    expect(normalizeTier("write")).toBe("write");
+    expect(normalizeTier(undefined)).toBe("write");
+    expect(normalizeTier("garbage")).toBe("write");
+    expect(normalizeTier(42)).toBe("write");
+    expect(normalizeTier(null)).toBe("write");
+  });
+});
+
+describe("PermissionManager — P2 graduated grant tiers", () => {
+  let pm: PermissionManager;
+
+  beforeEach(() => {
+    mockStore.rules = [];
+    mockStore.mode = "default";
+    _mockLock = Promise.resolve();
+    pm = new PermissionManager("/tmp/test-tier-permissions.json");
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // ── tier gate (in-session, layer-5 Map) ──────────────
+
+  it("read-tier grant allows a read invocation but ASKS on write/shell/network", async () => {
+    await pm.addAlwaysAllowedPersist("dual_tool", "read");
+
+    // read invocation → covered (allow). read is allowed by policy anyway, but
+    // this confirms the grant does not downgrade it.
+    expect(pm.checkDetailed("dual_tool", "builtin", "read").decision).toBe("allow");
+
+    // write/shell/network invocations of the same pattern → NOT covered → ask.
+    const write = pm.checkDetailed("dual_tool", "builtin", "write");
+    expect(write.decision).toBe("ask");
+    expect(write.layer).toBe(6);
+    expect(pm.checkDetailed("dual_tool", "builtin", "shell").decision).toBe("ask");
+    expect(pm.checkDetailed("dual_tool", "builtin", "network").decision).toBe("ask");
+  });
+
+  it("write-tier grant covers read, write, shell, and network invocations", async () => {
+    await pm.addAlwaysAllowedPersist("power_tool", "write");
+
+    for (const cat of ["read", "write", "shell", "network"] as const) {
+      const r = pm.checkDetailed("power_tool", "builtin", cat);
+      expect(r.decision).toBe("allow");
+      expect(r.layer).toBe(5);
+    }
+  });
+
+  it("grandfather — an untiered persisted allow rule defaults to write-tier (covers writes)", () => {
+    // A rule with no `tier` field (legacy / hand-edited) must preserve the
+    // pre-P2 all-or-nothing behaviour = write-tier coverage.
+    pm.setRules([{ pattern: "legacy_tool", action: "allow" }]);
+    const r = pm.checkDetailed("legacy_tool", "builtin", "write");
+    expect(r.decision).toBe("allow");
+    expect(r.layer).toBe(3);
+  });
+
+  // ── restart-shadow regression (layer-3 gate) ─────────
+
+  it("restart-shadow: a reloaded read-tier grant ASKS on write (layer-3 gate, not just layer-5)", async () => {
+    // Simulate a persisted read-tier grant, then a fresh app process reloading
+    // it. loadRulesFromFile hydrates the grant into BOTH this.rules (layer-3,
+    // checked first) AND alwaysAllowed (layer-5). If the tier gate lived only at
+    // layer-5, the layer-3 shadow would wrongly allow the write after restart.
+    mockStore.rules = [{ pattern: "reloaded_tool", action: "allow", tier: "read" }];
+    const fresh = new PermissionManager("/tmp/test-tier-permissions.json");
+    await fresh.loadRulesFromFile();
+
+    // read is covered (allowed by the reloaded grant / policy)…
+    expect(fresh.checkDetailed("reloaded_tool", "builtin", "read").decision).toBe("allow");
+    // …but the write invocation MUST ask — proving the layer-3 gate.
+    const write = fresh.checkDetailed("reloaded_tool", "builtin", "write");
+    expect(write.decision).toBe("ask");
+    expect(write.layer).toBe(6);
+  });
+
+  it("restart-shadow: a reloaded write-tier grant still covers write after reload", async () => {
+    mockStore.rules = [{ pattern: "reloaded_writer", action: "allow", tier: "write" }];
+    const fresh = new PermissionManager("/tmp/test-tier-permissions.json");
+    await fresh.loadRulesFromFile();
+
+    const write = fresh.checkDetailed("reloaded_writer", "builtin", "write");
+    expect(write.decision).toBe("allow");
+    expect(write.layer).toBe(3);
+  });
+
+  // ── migration round-trip ─────────────────────────────
+
+  it("migration round-trip — read grant persists tier:read and re-reads preserved", async () => {
+    await pm.addAlwaysAllowedPersist("roundtrip_tool", "read");
+    // Persisted with tier:read, version:1 kept (store serializes verbatim).
+    expect(mockStore.rules).toContainEqual({
+      pattern: "roundtrip_tool",
+      action: "allow",
+      tier: "read",
+    });
+
+    // A fresh process reloads the file — the read tier survives.
+    const fresh = new PermissionManager("/tmp/test-tier-permissions.json");
+    await fresh.loadRulesFromFile();
+    expect(fresh.checkDetailed("roundtrip_tool", "builtin", "read").decision).toBe("allow");
+    expect(fresh.checkDetailed("roundtrip_tool", "builtin", "write").decision).toBe("ask");
+  });
+
+  // ── monotonic upgrade / no downgrade ─────────────────
+
+  it("monotonic — read then write upgrades the grant to write-tier", async () => {
+    await pm.addAlwaysAllowedPersist("upgrade_tool", "read");
+    expect(pm.checkDetailed("upgrade_tool", "builtin", "write").decision).toBe("ask");
+
+    await pm.addAlwaysAllowedPersist("upgrade_tool", "write");
+    // Now write is covered, and the persisted rule reflects the upgrade.
+    expect(pm.checkDetailed("upgrade_tool", "builtin", "write").decision).toBe("allow");
+    expect(mockStore.rules).toContainEqual({
+      pattern: "upgrade_tool",
+      action: "allow",
+      tier: "write",
+    });
+    // No duplicate rule — upgrade mutated in place.
+    expect(mockStore.rules.filter((r) => r.pattern === "upgrade_tool")).toHaveLength(1);
+  });
+
+  it("monotonic — write then read never downgrades (stays write-tier)", async () => {
+    await pm.addAlwaysAllowedPersist("noshrink_tool", "write");
+    await pm.addAlwaysAllowedPersist("noshrink_tool", "read");
+
+    // Still covers write — the read re-grant was a no-op.
+    expect(pm.checkDetailed("noshrink_tool", "builtin", "write").decision).toBe("allow");
+    expect(mockStore.rules).toContainEqual({
+      pattern: "noshrink_tool",
+      action: "allow",
+      tier: "write",
+    });
+  });
+
+  it("manual default — addAlwaysAllowedPersist with no tier arg grants write-tier", async () => {
+    await pm.addAlwaysAllowedPersist("manual_tool");
+    expect(pm.checkDetailed("manual_tool", "builtin", "write").decision).toBe("allow");
+    expect(mockStore.rules).toContainEqual({
+      pattern: "manual_tool",
+      action: "allow",
+      tier: "write",
+    });
+  });
+
+  it("garbage persisted tier is grandfathered to write-tier on reload", async () => {
+    // A hand-edited file with an invalid tier must fail to write-tier (most
+    // permissive — preserves the saved grant), never silently to read.
+    mockStore.rules = [
+      { pattern: "corrupt_tool", action: "allow", tier: "banana" as unknown as "read" },
+    ];
+    const fresh = new PermissionManager("/tmp/test-tier-permissions.json");
+    await fresh.loadRulesFromFile();
+    expect(fresh.checkDetailed("corrupt_tool", "builtin", "write").decision).toBe("allow");
+  });
+
+  // ── MINOR-1: layer-3 glob + corrupt tier grandfathers to write ──────────────
+
+  it("MINOR-1: glob allow rule with corrupt tier grandfathers to write at layer-3 (not ask)", () => {
+    // A hand-edited rule with an invalid tier string must NOT cause the gate to
+    // skip the glob and produce an ask. normalizeTier maps anything non-"read"
+    // to "write" (external-boundary grandfather), so the glob still fires and
+    // the write is allowed. Without this fix, `?? "write"` passes the raw
+    // garbage string into grantCovers whose TIER_RANK lookup yields undefined →
+    // the >= comparison is false → the glob is skipped → writes ask.
+    pm.setRules([{ pattern: "mem_*", action: "allow", tier: "banana" as unknown as "write" }]);
+
+    const r = pm.checkDetailed("mem_tool", "builtin", "write");
+    expect(r.decision).toBe("allow");
+    expect(r.layer).toBe(3);
+  });
+
+  // ── MINOR-2: dup-hit tier reconciliation (boot-default shadow) ───────────
+
+  it("MINOR-2: persisted read-tier grant matching an untiered boot default is not lost to dedup", async () => {
+    // Simulate the boot-default scenario: setRules pre-seeds an untiered allow
+    // rule (like web_search/web_fetch in conversation.ts), then loadRulesFromFile
+    // loads a user-persisted read-tier grant for the same pattern. Previously the
+    // dedup branch skipped the Map update entirely, leaving the Map empty — so
+    // layer-5 missed the pattern and layer-3's untiered surviving rule grandfathered
+    // to write, silently over-permitting writes relative to the user's intent.
+    // After the MINOR-2 fix, the surviving rule's tier AND the Map are reconciled
+    // to merged = maxTier(Map.get(undefined), normalizeTier("read")) = "read".
+    pm.setRules([{ pattern: "boot_tool", action: "allow" }]); // untiered boot default
+
+    mockStore.rules = [{ pattern: "boot_tool", action: "allow", tier: "read" }];
+    await pm.loadRulesFromFile();
+
+    // Reads are still covered.
+    expect(pm.checkDetailed("boot_tool", "builtin", "read").decision).toBe("allow");
+    // Writes MUST ask — user's explicit read-tier persisted intent wins.
+    expect(pm.checkDetailed("boot_tool", "builtin", "write").decision).toBe("ask");
+  });
+
+  // ── P1 post-guard composition (meta + write grant + override:ask) ─────────
+
+  it("post-guard composes with tier gate: meta write-grant → allow then ask+forceModal", async () => {
+    // A write-tier grant covers meta (write ≥ requiredTier(meta)=write), so the
+    // layer produces allow — then the P1 per-invocation post-guard re-elevates
+    // an author's decisionOverride:'ask' to ask+forceModal.
+    await pm.addAlwaysAllowedPersist("agent_spawn", "write");
+    const r = pm.checkDetailed("agent_spawn", "builtin", "meta", null, {
+      decisionOverride: "ask",
+    });
+    expect(r.decision).toBe("ask");
+    expect(r.forceModal).toBe(true);
+    expect(r.layer).toBe(6);
   });
 });

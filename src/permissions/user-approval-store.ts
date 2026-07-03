@@ -9,7 +9,7 @@
  * skip the LLM classifier and go straight to the rule-based verdict.
  *
  * Two-store role separation (do NOT merge — migration is out of scope):
- *   • Store A — durable glob allow/deny RULES + the `alwaysAllowed` Set in
+ *   • Store A — durable glob allow/deny RULES + the `alwaysAllowed` Map in
  *     PermissionManager, managed by PermissionsTab and consulted by the SYNC
  *     `checkDetailed` (Layers 3 glob / 5 exact). Only the dialog's
  *     `allow-always` choice writes to Store A (addAlwaysAllowedPersist).
