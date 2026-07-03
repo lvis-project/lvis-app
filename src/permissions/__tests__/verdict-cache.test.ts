@@ -171,6 +171,32 @@ describe("computeInvalidationKey", () => {
     const b = computeInvalidationKey({ ...CTX, allowedDirectories: ["/a", "/b"] });
     expect(a).not.toBe(b);
   });
+
+  it("changing sandbox wrap-state changes key", () => {
+    const wrapped = computeInvalidationKey({
+      ...CTX,
+      sandboxWrapState: {
+        source: "plugin",
+        substrate: "plugin-worker",
+        pluginId: "local-indexer",
+        workerId: "embed",
+        wrapped: true,
+        capability: { kind: "asrt", confidence: "verified", platform: "darwin" },
+      },
+    });
+    const unwrapped = computeInvalidationKey({
+      ...CTX,
+      sandboxWrapState: {
+        source: "plugin",
+        substrate: "plugin-worker",
+        pluginId: "local-indexer",
+        workerId: "embed",
+        wrapped: false,
+        capability: { kind: "none", confidence: "verified", platform: "darwin" },
+      },
+    });
+    expect(wrapped).not.toBe(unwrapped);
+  });
 });
 
 describe("VerdictCache lookup states", () => {

@@ -217,13 +217,13 @@ describe("spawnWorker — gate ON (macOS)", () => {
     expect(options.allowUnixSocketPath).toBeUndefined();
     expect(options.allowAllUnixSockets).toBeUndefined();
     // The host-secret read floor MUST be restated on the worker wrap — a
-    // per-command denyRead REPLACES (not unions) the shared boot floor in ASRT,
+    // per-command denyRead REPLACES (not unions) the shared boot array in ASRT,
     // so an absent/empty denyRead re-exposes ~/.lvis/secrets, ~/.ssh, … to the
     // worker. Non-empty array here proves the #1365 floor is carried.
     expect(Array.isArray(options.filesystem.denyRead)).toBe(true);
     expect(options.filesystem.denyRead?.length ?? 0).toBeGreaterThan(0);
     // The sensitive write floor is also restated — a per-command denyWrite
-    // REPLACES the shared boot floor, so worker/MCP wraps must carry it just as
+    // REPLACES the shared boot array, so worker/MCP wraps must carry it just as
     // the terminal does (#1449).
     expect(options.filesystem.denyWrite).toContain("/home/u/.zshrc");
     expect(options.filesystem.denyWrite).toContain("/home/u/.ssh");
