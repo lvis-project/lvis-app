@@ -98,7 +98,7 @@ export async function tryUserApprovalMemorySkip(
   // Substrate-aware (NOT process-global): a plugin/MCP or in-process builtin
   // call resolves to a "none" capability so the audit + any sandbox-sensitive
   // rule reflect that this call's effects are NOT ASRT-isolated — except a
-  // genuinely ASRT-wrapped external MCP worker (worker-egress PR1, keyed on id)
+  // genuinely ASRT-wrapped external MCP worker (keyed on id)
   // or host-spawned plugin worker (keyed on pluginId + workerId).
   const sandboxCapability = resolveReviewerSandboxCapability(
     source,
@@ -151,6 +151,8 @@ export async function tryUserApprovalMemorySkip(
         // fields (sandbox-audit-sink.ts DLP note) — mask before writing.
         args: maskSensitiveData(JSON.stringify(finalInput)).masked,
         source,
+        trustOrigin: context.trustOrigin,
+        ...(approvalCacheKey ? { approvalCacheKey } : {}),
       },
       sandbox: {
         kind: sandboxCapability.kind,

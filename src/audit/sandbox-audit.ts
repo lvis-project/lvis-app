@@ -22,6 +22,7 @@
 
 import type { SandboxKind, SandboxCapability } from "../permissions/sandbox-capability.js";
 import type { UserApprovalVerdict } from "../shared/permissions-events.js";
+import type { ToolTrustOrigin } from "../tools/types.js";
 
 // ─── Event shapes ─────────────────────────────────────────────────────────────
 
@@ -53,8 +54,8 @@ export type SandboxEvent =
  *
  * Fields:
  *   `timestamp`  ISO 8601 — wall-clock time the spawn was initiated.
- *   `tool`       Identifies the tool invocation (name, raw args string,
- *                trust origin source).
+  *   `tool`       Identifies the tool invocation (name, DLP-redacted args string,
+  *                source, and approval trust tuple).
  *   `sandbox`    Execution context: kind/confidence from the SOT, events
  *                observed during execution, and spawn overhead metrics.
  *   `reviewer`   Reviewer composition signals: rule + LLM + final verdicts,
@@ -67,10 +68,14 @@ export interface SandboxAuditEntry {
   tool: {
     /** Tool name (underscore format, per CLAUDE.md Tool Naming Convention). */
     name: string;
-    /** Raw args as a JSON string (pre-DLP-redaction — DLP is applied by the emit caller). */
+    /** DLP-redacted args as a JSON string. Callers must mask before emit. */
     args: string;
-    /** Trust origin of the tool call (mirrors ToolInvocationContext.trustOrigin). */
+    /** Tool source (`builtin`, `plugin`, or `mcp`). */
     source: string;
+    /** Trust origin of the tool call (mirrors ToolInvocationContext.trustOrigin). */
+    trustOrigin?: ToolTrustOrigin;
+    /** Optional authority-sensitive approval identity for this invocation. */
+    approvalCacheKey?: string;
   };
 
   sandbox: {
