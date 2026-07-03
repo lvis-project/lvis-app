@@ -878,9 +878,11 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
       expect(meta?.sourceTools).toEqual(["noop"]);
       expect(meta?.profileModel).toBe("high");
       expect(meta?.profileMode).toBe("execute");
-      // Counters init to 0 for PR-D's loop guards.
+      // resumeCount inits to 0 (no resume yet). cumulativeRounds now records the
+      // spawn's OWN round count (PR-C Commit 2 fix: previously left at 0, which
+      // made the resume-chain ceiling inaccurate). A clean 1-round spawn → 1.
       expect(meta?.resumeCount).toBe(0);
-      expect(meta?.cumulativeRounds).toBe(0);
+      expect(meta?.cumulativeRounds).toBe(result.turnCount);
       // The session surfaces in the isolated store's listing as a subagent.
       const listed = subAgentMemoryManager
         .listSessions({ kind: "subagent" })
@@ -909,7 +911,8 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
       expect(meta?.profileModel).toBeUndefined();
       expect(meta?.profileMode).toBeUndefined();
       expect(meta?.resumeCount).toBe(0);
-      expect(meta?.cumulativeRounds).toBe(0);
+      // cumulativeRounds records the spawn's own round count (PR-C Commit 2 fix).
+      expect(meta?.cumulativeRounds).toBe(result.turnCount);
       // sourceTools falls back to the full (blocklist-stripped) parent surface,
       // which for this registry is the single "noop" tool.
       expect(meta?.sourceTools).toEqual(["noop"]);
