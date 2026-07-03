@@ -50,21 +50,53 @@ export function useSideChat(api: LvisApi): UseSideChat {
   const [isStreaming, setIsStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   // Guards the reducer against stale frames after abort / new-session: only the
-  // in-flight streamId is applied to the transcript.
+  // in-flight streamId is applied to the transcript. The main process allocates
+  // the streamId monotonically (`++nextSideStreamId`), so the renderer cannot
+  // know it at `send` time (the send invoke resolves only when the turn ENDS).
+  // Instead the FIRST frame of a turn ADOPTS its streamId here; any later frame
+  // whose streamId differs is from a superseded turn and is dropped. `send`
+  // re-arms `activeStreamIdRef` to null so the next turn's first frame adopts the
+  // new id; `done`/`error`/`abort`/`newSession` clear it back to null.
   const activeStreamIdRef = useRef<number | null>(null);
+  // Highest streamId ever adopted. Because main allocates ids monotonically, a
+  // straggler frame from a JUST-FINISHED turn carries a LOWER id than the next
+  // turn's — after a re-arm we must adopt only a strictly-greater id so such a
+  // straggler can never be mistaken for the new turn's first frame.
+  const maxStreamIdRef = useRef<number>(-1);
+  // Mirror of `isStreaming` for the unmount teardown, which cannot read the
+  // latest state directly without re-subscribing on every toggle.
+  const isStreamingRef = useRef(false);
+  isStreamingRef.current = isStreaming;
+
+  // Abort the in-flight turn when the view unmounts (e.g. switching workspace
+  // tabs unmounts SideChatView). Without this the main-process side turn keeps
+  // running orphaned — burning tokens and leaving frames that would land on the
+  // NEXT mount's subscriber. Runs only on final unmount ([] deps), not on the
+  // `api`-identity churn that re-runs the subscribe effect below.
+  useEffect(() => {
+    return () => {
+      if (isStreamingRef.current) void api.sideChat?.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Subscribe to the DEDICATED side-chat stream. Reducer appends/updates the
   // trailing streaming assistant entry.
   useEffect(() => {
     if (!api.sideChat) return;
     const off = api.sideChat.onStream((event: StreamEvent) => {
-      // A frame from a superseded turn (aborted / replaced) is dropped.
-      if (
-        activeStreamIdRef.current !== null &&
-        typeof event.streamId === "number" &&
-        event.streamId !== activeStreamIdRef.current
-      ) {
-        return;
+      if (typeof event.streamId === "number") {
+        if (activeStreamIdRef.current === null) {
+          // Between turns: adopt this frame's streamId ONLY if it is newer than
+          // any id we've already seen. A lower/equal id is a straggler from a
+          // finished turn and is dropped (never adopted as the "new" turn).
+          if (event.streamId <= maxStreamIdRef.current) return;
+          activeStreamIdRef.current = event.streamId;
+          maxStreamIdRef.current = event.streamId;
+        } else if (event.streamId !== activeStreamIdRef.current) {
+          // A frame from a superseded turn (aborted / replaced) is dropped.
+          return;
+        }
       }
       if (event.type === "text_delta" && typeof event.text === "string") {
         const delta = event.text;
@@ -91,6 +123,9 @@ export function useSideChat(api: LvisApi): UseSideChat {
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || isStreaming || !api.sideChat) return;
+      // Re-arm the stale-frame guard: the next turn's first frame adopts its
+      // freshly-allocated streamId (see activeStreamIdRef doc).
+      activeStreamIdRef.current = null;
       setMessages((prev) => [
         ...prev,
         { kind: "user", text: trimmed },
