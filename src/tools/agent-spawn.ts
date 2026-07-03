@@ -51,6 +51,16 @@ export interface AgentSpawnEvent {
    * spawns at the top of the chat.
    */
   toolUseId?: string;
+  /**
+   * The addressable sub-agent session id (`SubAgentSpawnResult.childSessionId`).
+   * This is the JOIN KEY the renderer uses to unify a spawn and its resumes into
+   * a single sub-agent transcript: a resume is a SEPARATE `agent_spawn` call
+   * (own `toolUseId`) but shares the original's `childSessionId`, so the viewer
+   * groups on this field. A resume carries it on EVERY phase (it equals the
+   * `resumeId` from the tool call); the original spawn learns its own value only
+   * on completion, so it is set on the `done` (or terminal `error`) phase.
+   */
+  childSessionId?: string;
 }
 
 export interface AgentSpawnToolDeps {
@@ -177,7 +187,10 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
           ? (ctx.metadata.toolUseId as string)
           : undefined;
       const spawnId = randomUUID();
-      deps.emit({ spawnId, type: "start", title, toolUseId });
+      // A resume knows its join key up front (it equals `resumeId`); the original
+      // spawn learns `childSessionId` only from the run result (set on `done`).
+      const resumeChildSessionId = resumeId ? { childSessionId: resumeId } : {};
+      deps.emit({ spawnId, type: "start", title, toolUseId, ...resumeChildSessionId });
       try {
         const callbacks = {
           onActivity: (u: { entries: ChatEntry[]; toolCallCount: number }) =>
@@ -186,9 +199,10 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
               type: "activity" as const,
               entries: u.entries,
               toolCallCount: u.toolCallCount,
+              ...resumeChildSessionId,
             }),
           onError: (msg: string) =>
-            deps.emit({ spawnId, type: "error" as const, message: msg }),
+            deps.emit({ spawnId, type: "error" as const, message: msg, ...resumeChildSessionId }),
         };
         // Resume RE-HYDRATES a frozen sub-agent; spawn starts a fresh one. The
         // resume path takes NO sourceTools/profile from the tool call — those are
@@ -220,18 +234,22 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         // treat the error string as a successful sub-agent result.
         if (result.ok === false) {
           const message = result.error ?? result.summary;
-          deps.emit({ spawnId, type: "error", message });
+          deps.emit({ spawnId, type: "error", message, ...resumeChildSessionId });
           return {
             output: JSON.stringify({ error: message }),
             isError: true,
           };
         }
+        // On the terminal `done` phase the join key is always available from the
+        // result (for a resume it equals `resumeId`; for the original spawn this
+        // is the first phase carrying it), so the renderer can group segments.
         deps.emit({
           spawnId,
           type: "done",
           summary: result.summary,
           toolCallCount: result.toolCallCount,
           entries: result.entries,
+          childSessionId: result.childSessionId,
         });
         return {
           output: JSON.stringify({
@@ -270,7 +288,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         };
       } catch (err) {
         const message = (err as Error).message ?? "agent_spawn failed";
-        deps.emit({ spawnId, type: "error", message });
+        deps.emit({ spawnId, type: "error", message, ...resumeChildSessionId });
         return {
           output: JSON.stringify({ error: message }),
           isError: true,

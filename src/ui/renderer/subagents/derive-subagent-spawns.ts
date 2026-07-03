@@ -46,6 +46,13 @@ interface ParsedSpawnResult {
   error?: string;
   /** Embedded child transcript (PR3+). Absent on legacy persisted results. */
   entries?: ChatEntry[];
+  /**
+   * The addressable sub-agent session id (JOIN KEY for the unified resume
+   * transcript). An `agent_spawn` result embeds it as `resumeId` — the
+   * cut-off resume handle — ONLY when the run was incomplete (agent-spawn.ts).
+   * Absent on clean completions, which then stay solo groups (natural degrade).
+   */
+  childSessionId?: string;
 }
 
 function parseSpawnResult(raw: string | undefined): ParsedSpawnResult {
@@ -63,6 +70,12 @@ function parseSpawnResult(raw: string | undefined): ParsedSpawnResult {
   if (typeof obj.summary === "string") result.summary = obj.summary;
   if (typeof obj.toolCallCount === "number") result.toolCallCount = obj.toolCallCount;
   if (typeof obj.error === "string") result.error = obj.error;
+  // The original spawn's result carries `resumeId` (= its own childSessionId)
+  // when it was incomplete — that is the value a follow-up resume passes back,
+  // so it doubles as the JOIN KEY for grouping the two derived segments.
+  if (typeof obj.resumeId === "string" && obj.resumeId.trim()) {
+    result.childSessionId = obj.resumeId.trim();
+  }
   // The embedded transcript is trusted structurally (same-origin persisted
   // state written by agent-spawn.ts). We only guard the array shape so a
   // corrupt / truncated jsonl line degrades to the synthetic fallback instead
@@ -103,6 +116,15 @@ export function deriveSubAgentSpawnsFromEntries(entries: ChatEntry[]): SubAgentS
           : status !== "error" && parsed.summary
             ? [{ kind: "assistant", text: parsed.summary, streaming: false }]
             : [];
+      // JOIN KEY: prefer the result's own `resumeId` (present on the ORIGINAL
+      // spawn's incomplete result), else the tool INPUT's `resumeId` (present on
+      // a RESUME call). Both resolve to the SAME original childSessionId, so the
+      // original and its resume segments group together. Absent → solo group.
+      const inputResumeId =
+        typeof tool.input?.resumeId === "string" && tool.input.resumeId.trim()
+          ? tool.input.resumeId.trim()
+          : undefined;
+      const childSessionId = parsed.childSessionId ?? inputResumeId;
       spawns.push({
         spawnId: derivedSpawnId(tool.toolUseId),
         title: deriveTitle(tool.input),
@@ -112,6 +134,7 @@ export function deriveSubAgentSpawnsFromEntries(entries: ChatEntry[]): SubAgentS
         ...(parsed.summary !== undefined ? { summary: parsed.summary } : {}),
         ...(parsed.error !== undefined ? { errorMessage: parsed.error } : {}),
         toolUseId: tool.toolUseId,
+        ...(childSessionId ? { childSessionId } : {}),
       });
     }
   }

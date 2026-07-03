@@ -1076,6 +1076,9 @@ export type LvisApi = {
       toolCallCount?: number;
       message?: string;
       toolUseId?: string;
+      // JOIN KEY for unifying a spawn + its resumes into one transcript (see
+      // `AgentSpawnEvent.childSessionId` in `tools/agent-spawn.ts`).
+      childSessionId?: string;
     }) => void,
   ) => () => void;
   onSkillLoaded: (
