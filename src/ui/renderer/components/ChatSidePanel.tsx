@@ -1,4 +1,4 @@
-import { createElement, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
+import { createElement, memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
 import { cn } from "../../../lib/utils.js";
 import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
 import {
@@ -6,6 +6,7 @@ import {
   matchesLauncherShortcut,
 } from "./command-actions.js";
 import {
+  Bot,
   Check,
   ChevronDown,
   ChevronRight,
@@ -21,6 +22,8 @@ import {
   Globe,
   Image,
   LayoutGrid,
+  Loader2,
+  MessageSquare,
   PanelRightClose,
   Pin,
   Plug,
@@ -65,6 +68,7 @@ import { McpAppView } from "./McpAppView.js";
 import { PtyTerminalView } from "./PtyTerminalView.js";
 import { VerticalSplitLayout } from "./VerticalSplitLayout.js";
 import { useVerticalSplit } from "../hooks/use-vertical-split.js";
+import { SubAgentCard, type SubAgentSpawn } from "./SubAgentCard.js";
 
 interface FileTreeNode {
   id: string;
@@ -114,6 +118,10 @@ function tabIcon(kind: WorkspaceTabKind): LucideIcon {
       return Terminal;
     case "preview":
       return Table;
+    case "subagent":
+      return Bot;
+    case "side-chat":
+      return MessageSquare;
   }
 }
 
@@ -1863,6 +1871,123 @@ function BrowserWorkspace({
   );
 }
 
+/** Status tone for the sub-agent list row badge. */
+function subAgentStatusTone(status: SubAgentSpawn["status"]): string {
+  if (status === "error") return "text-destructive";
+  if (status === "done") return "text-muted-foreground";
+  return "text-warning";
+}
+
+/**
+ * One selectable row in the sub-agent list. Memoized so a live-updating spawn
+ * (its turn count / status ticks as the agent runs) only re-renders its OWN row,
+ * not every sibling — the list can hold many concurrent spawns.
+ */
+const SubAgentRow = memo(function SubAgentRow({
+  spawn,
+  active,
+  onSelect,
+}: {
+  spawn: SubAgentSpawn;
+  active: boolean;
+  onSelect: (spawnId: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid="chat-side-panel-subagent-row"
+      aria-selected={active}
+      className={cn(
+        "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-muted/(--opacity-muted)",
+        active ? "bg-accent text-accent-foreground" : "",
+      )}
+      onClick={() => onSelect(spawn.spawnId)}
+    >
+      {spawn.status === "running" ? (
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-warning" aria-hidden="true" />
+      ) : (
+        <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      )}
+      <span className="min-w-0 flex-1 truncate font-medium" title={spawn.title}>
+        {spawn.title}
+      </span>
+      <span className={cn("shrink-0 text-[10px]", subAgentStatusTone(spawn.status))}>{spawn.status}</span>
+    </button>
+  );
+});
+
+/**
+ * Sub-agent viewer tab (R4). Top pane = the list of this chat's sub-agent spawns
+ * (live + completed); bottom pane = the SELECTED spawn's transcript/tool-activity
+ * via the shared SubAgentCard. Only the selected spawn is rendered in detail (not
+ * every card), and the list rows are memoized, so a chat that fanned out many
+ * agents stays cheap. The top↕bottom split persists via sidePanelSplitSubagentPercent.
+ */
+function SubAgentViewer({
+  api,
+  subAgentSpawns,
+}: {
+  api: LvisApi;
+  subAgentSpawns: SubAgentSpawn[];
+}) {
+  const { t } = useTranslation();
+  const { topPercent, setTopPercent, commitTopPercent } = useVerticalSplit(api, "sidePanelSplitSubagentPercent");
+  const [selectedSpawnId, setSelectedSpawnId] = useState<string | null>(null);
+  // Running spawns first (the user usually wants the live one), then completed.
+  const orderedSpawns = useMemo(() => {
+    const running = subAgentSpawns.filter((spawn) => spawn.status === "running");
+    const rest = subAgentSpawns.filter((spawn) => spawn.status !== "running");
+    return [...running, ...rest];
+  }, [subAgentSpawns]);
+  const selectedSpawn = useMemo(
+    () => orderedSpawns.find((spawn) => spawn.spawnId === selectedSpawnId) ?? orderedSpawns[0] ?? null,
+    [orderedSpawns, selectedSpawnId],
+  );
+
+  if (orderedSpawns.length === 0) {
+    return (
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-col items-center justify-center p-6 text-center" data-testid="chat-side-panel-subagent-empty">
+        <Bot className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+        <div className="mt-2 text-xs text-muted-foreground">{t("chatPreviewRail.subagentEmpty")}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-subagent-viewer">
+      <VerticalSplitLayout
+        topPercent={topPercent}
+        onDragChange={setTopPercent}
+        onCommit={commitTopPercent}
+        ariaLabel={t("chatPreviewRail.resizeSubagentPanels")}
+        testId="chat-side-panel-subagent-split-layout"
+        separatorTestId="chat-side-panel-subagent-splitter"
+        top={
+          <div className="min-h-0 space-y-1 p-2" data-testid="chat-side-panel-subagent-list">
+            {orderedSpawns.map((spawn) => (
+              <SubAgentRow
+                key={spawn.spawnId}
+                spawn={spawn}
+                active={spawn.spawnId === selectedSpawn?.spawnId}
+                onSelect={setSelectedSpawnId}
+              />
+            ))}
+          </div>
+        }
+        bottom={
+          <div className="min-h-0 p-3" data-testid="chat-side-panel-subagent-detail">
+            {selectedSpawn ? (
+              <SubAgentCard spawn={selectedSpawn} />
+            ) : (
+              <div className="text-xs text-muted-foreground">{t("chatPreviewRail.subagentSelectHint")}</div>
+            )}
+          </div>
+        }
+      />
+    </div>
+  );
+}
+
 function SearchInput({
   query,
   setQuery,
@@ -1994,6 +2119,10 @@ function tabLabelKey(kind: WorkspaceTabKind): string {
       return "chatPreviewRail.tab.terminal";
     case "preview":
       return "chatPreviewRail.tab.preview";
+    case "subagent":
+      return "chatPreviewRail.tab.subagent";
+    case "side-chat":
+      return "chatPreviewRail.tab.sideChat";
   }
 }
 
@@ -2007,6 +2136,10 @@ function tabTestId(kind: WorkspaceTabKind): string {
       return "chat-side-panel-tab-preview";
     case "terminal":
       return "chat-side-panel-tab-terminal";
+    case "subagent":
+      return "chat-side-panel-tab-subagent";
+    case "side-chat":
+      return "chat-side-panel-tab-side-chat";
   }
 }
 
@@ -2236,6 +2369,12 @@ export interface ChatSidePanelProps {
    * level so tab state survives.
    */
   workspaceTabs: WorkspaceTabsStore;
+  /**
+   * This chat's sub-agent spawns (live + completed), sourced from ChatView's
+   * spawn stream. Drives the subagent viewer tab (R4). Prop-drilled rather than
+   * re-subscribed here so there is one spawn source of truth.
+   */
+  subAgentSpawns: SubAgentSpawn[];
   /** Docked panel width (px), owned by ChatView (useSidePanelWidth). */
   width: number;
   /** Drag-live width update — state only, no persist. */
@@ -2260,6 +2399,7 @@ export function ChatSidePanel({
   onSelect,
   onClose,
   workspaceTabs,
+  subAgentSpawns,
   width,
   onWidthChange,
   onWidthCommit,
@@ -2631,6 +2771,17 @@ export function ChatSidePanel({
             />
           ) : activeTab.kind === "terminal" ? (
             <PtyTerminalView api={api} tabId={activeTab.id} />
+          ) : activeTab.kind === "subagent" ? (
+            <SubAgentViewer api={api} subAgentSpawns={subAgentSpawns} />
+          ) : activeTab.kind === "side-chat" ? (
+            // Unreachable in this PR: side-chat has no launcher entry and no
+            // content producer, so a tab of this kind cannot be created until
+            // the companion PR ships the 2nd ConversationLoop. This placeholder
+            // exists only to keep the body dispatch exhaustive alongside the
+            // reserved `side-chat` tab kind (Field-Addition Sweep).
+            <div className="p-4 text-xs text-muted-foreground" data-testid="chat-side-panel-side-chat-placeholder">
+              {t("chatPreviewRail.sideChatComingSoon")}
+            </div>
           ) : (
             <PreviewWorkspace api={api} sessionId={sessionId} targets={previewTargets} selectedId={selectedId} onSelect={onSelect} />
           )}
