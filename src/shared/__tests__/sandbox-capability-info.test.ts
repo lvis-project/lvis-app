@@ -38,6 +38,14 @@ describe("sandboxConfinementForPlatform", () => {
     });
   });
 
+  it("honors partial kind on platforms that are normally full", () => {
+    expect(sandboxConfinementForPlatform("darwin", "partial")).toEqual({
+      filesystem: true,
+      process: false,
+      network: true,
+    });
+  });
+
   it("reports no confinement when the runner kind is none regardless of platform", () => {
     expect(sandboxConfinementForPlatform("linux", "none")).toEqual({
       filesystem: false,

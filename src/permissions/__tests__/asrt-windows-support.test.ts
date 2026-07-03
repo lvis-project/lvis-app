@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
 import {
   isAsrtWindowsReady,
@@ -6,6 +9,12 @@ import {
   normalizeAsrtWindowsWfpState,
   resolveAsrtWindowsReady,
 } from "../asrt-windows-support.js";
+
+function readAsrtSandboxManagerSource(): string {
+  const require = createRequire(import.meta.url);
+  const indexPath = require.resolve("@anthropic-ai/sandbox-runtime");
+  return readFileSync(join(dirname(indexPath), "sandbox", "sandbox-manager.js"), "utf-8");
+}
 
 describe("asrt-windows-support adapter", () => {
   it("normalizes the ASRT 0.0.63 ready sandbox-user shape", () => {
@@ -64,5 +73,15 @@ describe("asrt-windows-support adapter", () => {
       throw new Error("should not verify absent WFP");
     });
     expect(absent).toBe(false);
+  });
+
+  it("pins Windows filesystem ACL readiness to ASRT initialize fail-closed behavior", () => {
+    const source = readAsrtSandboxManagerSource();
+    expect(source).toContain("grantWindowsAcl({");
+    expect(source).toContain("stampWindowsAcl({");
+    expect(source).toContain("revokeWindowsAcl({ sandboxUserSid: windowsFsSbUserSid })");
+    expect(source).toContain("restoreWindowsAcl({ sandboxUserSid: windowsFsSbUserSid })");
+    expect(source).toContain("config = undefined;");
+    expect(source).toContain("throw e;");
   });
 });

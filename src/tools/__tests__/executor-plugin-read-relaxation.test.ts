@@ -816,7 +816,7 @@ describe("plugin read-relaxation — confines-aware via the active-capability SO
 // SAME off-hostApi residual the relaxation closes — when the sandbox is NOT
 // filesystem-contained, a plugin read auto-allow must instead show the pre-exec
 // ask. Mirrors the relaxation coupling exactly: flag-on + plugin + foreground +
-// not-fs-contained → ask; fs-contained → unchanged auto-allow.
+// not shell-contained → ask; filesystem-contained plugin effects → unchanged auto-allow.
 describe("plugin read auto-allow — coupled to sandbox FILESYSTEM-CONTAINMENT", () => {
   it("flag ON + host-derived plugin read + sandbox FILESYSTEM-CONTAINED → auto-allows (NO modal, tool runs) — macOS/Linux unchanged", async () => {
     const spy = { ran: false };

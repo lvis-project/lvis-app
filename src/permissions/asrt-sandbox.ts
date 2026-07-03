@@ -387,7 +387,7 @@ export function assertPerExecFilesystemSupported(
     `${caller}: ASRT 0.0.63 on Windows does not support per-exec ` +
       "filesystem.allowRead/allowWrite; only per-exec denyRead/denyWrite " +
       "are supported. Move allow grants to initializeAsrtSandbox() session " +
-      "config or keep this Windows execution path disabled until #1367 lands.",
+      "config or keep this Windows execution path disabled.",
   );
 }
 
@@ -730,10 +730,23 @@ export function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): San
       denyReadUnion.push(p);
     }
   }
+  // denyWrite floor: same boot-level belt as denyRead for callers that do not
+  // supply per-command filesystem.denyWrite. Per-command wraps still restate
+  // this SOT because ASRT's customConfig filesystem section replaces the shared
+  // arrays, but the session config now has a real persistence-vector floor too.
+  const sensitiveDenyWrite = getDefaultSensitiveWriteDenyPaths(trustedSettings.userDataDir);
+  const denyWriteUnion: string[] = [];
+  const denyWriteSeen = new Set<string>();
+  for (const p of [...sensitiveDenyWrite, ...(trustedSettings.denyWrite ?? [])]) {
+    if (!denyWriteSeen.has(p)) {
+      denyWriteSeen.add(p);
+      denyWriteUnion.push(p);
+    }
+  }
   const filesystem: FilesystemConfig = {
     denyRead: denyReadUnion,
     allowWrite: [...(trustedSettings.allowWrite ?? [])],
-    denyWrite: [...(trustedSettings.denyWrite ?? [])],
+    denyWrite: denyWriteUnion,
     ...(trustedSettings.allowRead !== undefined
       ? { allowRead: [...trustedSettings.allowRead] }
       : {}),
@@ -879,7 +892,7 @@ export async function wrapToolCommand(
  * {@link wrapToolCommand}: the per-command channel carries ONLY the filesystem
  * jail (scoped to the worker's plugin sandbox root + needed dirs).
  *
- * Caller: `StdioTransport.openWrapped` in `mcp-client.ts` (worker-egress PR1)
+ * Caller: `StdioTransport.openWrapped` in `mcp-client.ts`
  * wraps every external MCP stdio worker when {@link isAsrtSandboxActive}. The
  * Python SETUP spawns (`python-runtime.ts` `runUv`/`runPython`) are NOT
  * wrapped — they run at boot before the gate is active and legitimately need
@@ -1186,11 +1199,11 @@ export async function resetAsrtSandbox(): Promise<void> {
   // UDS dirs so a fresh init starts from a clean slate (no stale socket allow).
   _baseTrustedSettings = undefined;
   _workerUnixSocketDirs.clear();
-  // worker-egress PR1 + worker-confinement PR D-1: drop every wrapped-worker
-  // marker (MCP servers AND host-spawned plugin workers) so a torn-down sandbox
-  // cannot leave a stale `asrt` signal the reviewer would honour. Lazy import
-  // keeps the module-load edge one-way (sandbox-capability is renderer-safe and
-  // never imports back into this main-only module).
+  // Drop every wrapped-worker marker (MCP servers AND host-spawned plugin
+  // workers) so a torn-down sandbox cannot leave a stale `asrt` signal the
+  // reviewer would honour. Lazy import keeps the module-load edge one-way
+  // (sandbox-capability is renderer-safe and never imports back into this
+  // main-only module).
   const { clearWrappedMcpServers, clearWrappedPluginWorkers } = await import(
     "./sandbox-capability.js"
   );
