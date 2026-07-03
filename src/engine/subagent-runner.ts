@@ -9,7 +9,8 @@
  *     `sourceTools` list (or the parent's full tool set if omitted). The
  *     `agent_spawn` tool itself is ALWAYS stripped from the child registry
  *     regardless of the supplied list — sub-agents cannot recurse.
- *   - A turn cap (default 5) — runTurn(`maxRounds: cappedTurns`) terminates
+ *   - A host-assigned round budget (default 30; lower per mode) —
+ *     runTurn(`maxRounds: cappedRounds`) terminates
  *     queryLoop cleanly between rounds, and the executor's per-round
  *     fan-out cap (10 calls/round) bounds total tool execution count.
  *   - An ApprovalGate wrapper that prepends "[Sub-Agent: <title>]" to the
@@ -51,7 +52,17 @@ export interface SubAgentSpawnInput {
   title: string;
   instructions: string;
   sourceTools?: string[];
-  maxTurns?: number;
+  /**
+   * Host-assigned round budget for the child loop, in assistant rounds.
+   * The LLM cannot pick this: the `agent_spawn` tool no longer exposes a
+   * `maxTurns` schema field. It is set ONLY by host callers that run a
+   * sub-agent for a FIXED-shape task (e.g. WorkBoardEngine's plan/execute
+   * phases) and know the right budget for that phase. When absent, the
+   * budget is derived from the profile's `mode:` (`maxToolRoundsHint`) and
+   * finally `MAX_TURNS_DEFAULT` — see `spawn()`. This is host policy, not an
+   * LLM-tunable knob, so it is intentionally not surfaced in the tool schema.
+   */
+  maxRounds?: number;
   /** Origin session id — propagated for audit attribution only. */
   originSessionId?: string;
   /**
@@ -106,6 +117,24 @@ export interface SubAgentSpawnResult {
   ok: boolean;
   /** Failure reason when `ok === false`. Absent on a clean completion. */
   error?: string;
+  /**
+   * Why the child loop stopped, forwarded verbatim from the child's
+   * `runTurn`. Undefined when the child threw before returning a turn result
+   * (in that case `ok === false` already signals the failure).
+   */
+  stopReason?: import("./turn/types.js").TurnStopReason;
+  /**
+   * `true` when the child hit its host-assigned round budget (stopReason
+   * "round-cap") before producing a natural end_turn — i.e. the sub-agent ran
+   * out of rounds with WORK STILL PENDING. `summary` then holds the PARTIAL
+   * output (last assistant text), not a finished answer. This is distinct from
+   * `ok === false` (a failed spawn): an incomplete run is a SUCCESSFUL run that
+   * simply did not finish. The parent (agent_spawn tool result) surfaces this
+   * so the parent LLM can decide whether to re-spawn / continue the task rather
+   * than treating the truncated summary as complete. Absent/false on a clean
+   * end_turn or any non-budget stop.
+   */
+  incomplete?: boolean;
 }
 
 export interface SubAgentSpawnCallbacks {
@@ -124,16 +153,20 @@ export interface SubAgentRunnerDeps {
   toolRegistry: ToolRegistry;
 }
 
-// Sub-agent turn budget. The child runs on the same ConversationLoop whose
+// Sub-agent round budget. The child runs on the same ConversationLoop whose
 // per-run hard limit is MAX_TOOL_ROUNDS (30) — a child can never exceed it —
-// so the advertised cap is pinned to 30 to avoid promising the LLM (via the
-// `agent_spawn` maxTurns schema) rounds that the loop would silently drop.
-// Default 30 covers most multi-step research/edit flows; the LLM picks a
-// lower maxTurns for simpler tasks per the `agent_spawn` description.
-// Exported so `agent-spawn.ts` clamps the LLM-supplied maxTurns to the same
-// SOT ceiling instead of a drifting literal.
+// so the ceiling is pinned to 30. The budget is HOST-ASSIGNED, not LLM-picked:
+// `agent_spawn` no longer exposes a `maxTurns` schema field. Resolution order
+// (see `spawn()`): explicit host `input.maxRounds` (fixed-shape host callers
+// like WorkBoardEngine) → profile `mode.maxToolRoundsHint` → MAX_TURNS_DEFAULT.
+// Default 30 covers most multi-step research/edit flows; the mode map assigns
+// lower budgets for lighter postures (explore=15, execute=20, research=25).
 const MAX_TURNS_DEFAULT = 30;
-export const MAX_TURNS_CAP = 30;
+// Internal ceiling only — the child ConversationLoop's own MAX_TOOL_ROUNDS (30)
+// is the real hard limit, so any resolved budget is clamped to this before
+// being passed as `maxRounds`. No longer exported: agent-spawn.ts used to
+// import it to clamp an LLM-supplied maxTurns, but that schema field is gone.
+const MAX_TURNS_CAP = 30;
 /**
  * C3(b): tools that must NEVER appear in a sub-agent's registry, regardless
  * of `sourceTools`. Adding `agent_spawn` here is the primary fork-bomb
@@ -261,7 +294,7 @@ export class SubAgentRunner {
   ): Promise<SubAgentSpawnResult> {
     const childSessionId = `${input.originSessionId ?? "spawn"}::${randomUUID()}`;
 
-    // Resolve the profile's mode → working-posture preamble + maxTurns hint.
+    // Resolve the profile's mode → working-posture preamble + round-budget hint.
     // Unknown / absent mode resolves to the inert `default` mode; a non-empty
     // unmatched mode is logged so the audit trail captures the typo.
     const modeResult = resolveAgentMode(input.profileMode);
@@ -272,11 +305,16 @@ export class SubAgentRunner {
       );
     }
 
-    // Mode's maxToolRoundsHint seeds maxTurns only when the agent_spawn call
-    // did not specify one; explicit input.maxTurns always wins.
-    const requestedTurns =
-      input.maxTurns ?? modeResult.config.maxToolRoundsHint ?? MAX_TURNS_DEFAULT;
-    const cappedTurns = Math.max(1, Math.min(MAX_TURNS_CAP, requestedTurns));
+    // Host-assigned round budget. Resolution: an explicit host `maxRounds`
+    // (fixed-shape callers such as WorkBoardEngine's plan/execute phases) wins;
+    // otherwise the profile mode's `maxToolRoundsHint` (explore/execute/
+    // research/plan); otherwise MAX_TURNS_DEFAULT. The LLM has no say — the
+    // `agent_spawn` tool dropped its `maxTurns` field, so a sub-agent's budget
+    // is pure host policy derived from the (coarse-grained) mode the LLM chose
+    // via agentName.
+    const requestedRounds =
+      input.maxRounds ?? modeResult.config.maxToolRoundsHint ?? MAX_TURNS_DEFAULT;
+    const cappedRounds = Math.max(1, Math.min(MAX_TURNS_CAP, requestedRounds));
 
     // C3(b): build the sub-agent's tool surface. Always strip the blocklist
     // (agent_spawn) so a sub-agent cannot recurse. When `sourceTools` is
@@ -374,6 +412,7 @@ export class SubAgentRunner {
     // never a completed run.
     let ok = false;
     let failureReason: string | undefined;
+    let childStopReason: import("./turn/types.js").TurnStopReason | undefined;
 
     // Prepend the mode preamble (posture + auto-skill recommendation) to the
     // instructions. The preamble is empty for the default mode, leaving the
@@ -425,7 +464,7 @@ export class SubAgentRunner {
         },
         undefined,
         {
-          maxRounds: cappedTurns,
+          maxRounds: cappedRounds,
           sessionIdOverride: childSessionId,
           spawnDepth: 1,
           inputOrigin: "llm-tool-arg",
@@ -436,6 +475,7 @@ export class SubAgentRunner {
       // engine's number in case a round dropped a callback).
       totalToolCalls = result.toolCalls.length;
       lastText = result.text;
+      childStopReason = result.stopReason;
       ok = true;
     } catch (err) {
       const msg = (err as Error).message ?? "sub-agent run failed";
@@ -454,6 +494,10 @@ export class SubAgentRunner {
       entries: transcript.snapshot(),
       ok,
       ...(ok ? {} : { error: failureReason ?? lastText }),
+      ...(childStopReason ? { stopReason: childStopReason } : {}),
+      // A clean-but-budget-capped run: the child returned real partial work
+      // (ok === true) but stopped on its round budget, so the task is unfinished.
+      ...(ok && childStopReason === "round-cap" ? { incomplete: true } : {}),
     };
   }
 
