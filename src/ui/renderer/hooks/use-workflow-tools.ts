@@ -51,6 +51,7 @@ export function useWorkflowTools(api: LvisApi) {
             entries: [],
             toolCallCount: 0,
             toolUseId: event.toolUseId,
+            childSessionId: event.childSessionId,
           };
           return [...prev, fresh];
         }
@@ -72,11 +73,19 @@ export function useWorkflowTools(api: LvisApi) {
             summary: event.summary,
             errorMessage: event.message,
             toolUseId: event.toolUseId,
+            childSessionId: event.childSessionId,
           };
           return [...prev, synthetic];
         }
         const next = [...prev];
         const existing = next[existingIdx];
+        // `childSessionId` (the resume JOIN KEY) may first arrive on a later
+        // phase (the original spawn only learns it on `done`). Only overwrite
+        // when the event carries a value so a known id is never clobbered with
+        // undefined on a phase that omits it.
+        const childSessionIdPatch = event.childSessionId
+          ? { childSessionId: event.childSessionId }
+          : {};
         if (event.type === "activity") {
           next[existingIdx] = {
             ...existing,
@@ -85,6 +94,7 @@ export function useWorkflowTools(api: LvisApi) {
             // and idempotent against re-emitted events.
             ...(event.entries ? { entries: event.entries } : {}),
             toolCallCount: event.toolCallCount ?? existing.toolCallCount,
+            ...childSessionIdPatch,
           };
         } else if (event.type === "done") {
           next[existingIdx] = {
@@ -93,6 +103,7 @@ export function useWorkflowTools(api: LvisApi) {
             summary: event.summary,
             ...(event.entries ? { entries: event.entries } : {}),
             toolCallCount: event.toolCallCount ?? existing.toolCallCount,
+            ...childSessionIdPatch,
           };
         } else if (event.type === "error") {
           next[existingIdx] = {
@@ -100,6 +111,7 @@ export function useWorkflowTools(api: LvisApi) {
             status: "error",
             errorMessage: event.message,
             ...(event.entries ? { entries: event.entries } : {}),
+            ...childSessionIdPatch,
           };
         }
         return next;
