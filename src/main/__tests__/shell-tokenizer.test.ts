@@ -70,6 +70,7 @@ describe("tokenizeShell — redirects", () => {
     const { leaves } = tokenizeShell("echo hi > out.txt");
     expect(leaves[0]!.argv).toEqual(["echo", "hi"]);
     expect(leaves[0]!.redirectTargets).toEqual(["out.txt"]);
+    expect(leaves[0]!.hasOutputRedirect).toBe(true);
   });
 
   it("collects append (>>) and clobber (>|) targets", () => {
@@ -87,10 +88,25 @@ describe("tokenizeShell — redirects", () => {
     expect(leaves[0]!.argv).toEqual(["cat"]);
     expect(leaves[0]!.redirectTargets).toEqual([]);
     expect(leaves[0]!.hasInputRedirect).toBe(true);
+    expect(leaves[0]!.hasOutputRedirect).toBe(false);
   });
 
   it("does not flag hasInputRedirect on an output-only redirect", () => {
     expect(tokenizeShell("echo hi > out").leaves[0]!.hasInputRedirect).toBe(false);
+  });
+
+  it("fd-dup (>&m, n>&m) sets hasOutputRedirect but adds NO redirect target", () => {
+    // `ls 2>&1` duplicates fd 2 onto fd 1 — no file is named, so redirectTargets
+    // is empty, but hasOutputRedirect is true (output-redirect operator is present).
+    const leaf1 = tokenizeShell("ls 2>&1").leaves[0]!;
+    expect(leaf1.hasOutputRedirect).toBe(true);
+    expect(leaf1.redirectTargets).toEqual([]);
+    expect(leaf1.argv).toEqual(["ls"]);
+
+    const leaf2 = tokenizeShell("ls >&2").leaves[0]!;
+    expect(leaf2.hasOutputRedirect).toBe(true);
+    expect(leaf2.redirectTargets).toEqual([]);
+    expect(leaf2.argv).toEqual(["ls"]);
   });
 });
 
