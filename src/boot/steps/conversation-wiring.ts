@@ -207,6 +207,18 @@ export function wireConversation(ctx: BootContext): void {
   });
   preferenceRefreshService.start();
 
+  // Sub-agent runs persist to an ISOLATED MemoryManager rooted at
+  // `~/.lvis/subagent/` (resolved via openFeatureNamespace, the storage-
+  // namespace SOT — no hand-rolled mkdir/mode bits). Reusing the main
+  // `memoryManager` here is exactly what leaked orphan sub-agent JSONL into
+  // the main `~/.lvis/sessions/` list; a dedicated store keeps sub-agent
+  // transcripts out of `chat.sessions` and gives same-instance resume its own
+  // addressable namespace. Mirrors the sideChatMemoryManager wiring above.
+  const subAgentMemoryManager = new MemoryManager({
+    lvisDir: openFeatureNamespace("subagent").dir,
+  });
+  subAgentMemoryManager.load();
+
   // Workflow system tools — late bindings now that ConversationLoop exists.
   // SubAgentRunner reuses the parent loop's deps (LLM, registry, gates) but
   // a fresh ConversationLoop is constructed per spawn inside the runner.
@@ -229,6 +241,7 @@ export function wireConversation(ctx: BootContext): void {
       llmFetch,
     },
     toolRegistry,
+    subAgentMemoryManager,
   });
   // skill_load no longer mutates conversation history. The body is registered
   // into SkillOverlay for the current user-turn window and read by
