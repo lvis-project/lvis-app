@@ -1835,28 +1835,40 @@ function ListDetailWorkspace({
   rowTestId: string;
   onSelect: (id: string) => void;
 }) {
+  const { topPercent, setTopPercent, commitTopPercent } = useVerticalSplit(api, "sidePanelSplitPreviewPercent");
+  const { t } = useTranslation();
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
       <SearchInput query={query} setQuery={setQuery} placeholder={placeholder} />
-      <div className="grid min-h-0 w-full min-w-0 flex-1 grid-rows-[minmax(10rem,0.85fr)_minmax(14rem,1.15fr)] overflow-hidden">
-        <div className="min-h-0 overflow-auto border-b p-2">
-          {rows.length > 0 ? (
-            <TargetRows targets={rows} selectedId={selectedTarget?.id} rowTestId={rowTestId} onSelect={onSelect} />
-          ) : (
-            <EmptyState>{emptyText}</EmptyState>
-          )}
-        </div>
-        <div className="min-h-0 overflow-auto p-3">
-          {selectedTarget ? (
-            <div className="space-y-3">
-              <DetailHeader target={selectedTarget} />
-              <PreviewBody api={api} sessionId={sessionId} target={selectedTarget} />
-            </div>
-          ) : (
-            <div className="text-xs text-muted-foreground">{emptyText}</div>
-          )}
-        </div>
-      </div>
+      <VerticalSplitLayout
+        topPercent={topPercent}
+        onDragChange={setTopPercent}
+        onCommit={commitTopPercent}
+        ariaLabel={t("chatPreviewRail.resizePreviewPanels")}
+        testId="chat-side-panel-preview-split-layout"
+        separatorTestId="chat-side-panel-preview-splitter"
+        top={
+          <div className="min-h-0 p-2">
+            {rows.length > 0 ? (
+              <TargetRows targets={rows} selectedId={selectedTarget?.id} rowTestId={rowTestId} onSelect={onSelect} />
+            ) : (
+              <EmptyState>{emptyText}</EmptyState>
+            )}
+          </div>
+        }
+        bottom={
+          <div className="min-h-0 p-3">
+            {selectedTarget ? (
+              <div className="space-y-3">
+                <DetailHeader target={selectedTarget} />
+                <PreviewBody api={api} sessionId={sessionId} target={selectedTarget} />
+              </div>
+            ) : (
+              <div className="text-xs text-muted-foreground">{emptyText}</div>
+            )}
+          </div>
+        }
+      />
     </div>
   );
 }
