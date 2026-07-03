@@ -9,7 +9,6 @@
 import { randomUUID } from "node:crypto";
 import { createDynamicTool, type Tool } from "./base.js";
 import type { SubAgentRunner } from "../engine/subagent-runner.js";
-import { MAX_TURNS_CAP } from "../engine/subagent-runner.js";
 import {
   AGENT_NAME_ALLOWLIST,
   type LoadedAgentProfile,
@@ -89,12 +88,6 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
           items: { type: "string" },
           description: t("be_agentSpawn.propSourceToolsDescription"),
         },
-        maxTurns: {
-          type: "integer",
-          minimum: 1,
-          maximum: MAX_TURNS_CAP,
-          description: t("be_agentSpawn.propMaxTurnsDescription"),
-        },
       },
     },
     execute: async (rawInput, ctx) => {
@@ -162,10 +155,6 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         : profile?.sourceTools && profile.sourceTools.length > 0
           ? profile.sourceTools
           : undefined;
-      const maxTurns =
-        typeof a.maxTurns === "number" && Number.isFinite(a.maxTurns)
-          ? Math.max(1, Math.min(MAX_TURNS_CAP, Math.floor(a.maxTurns)))
-          : undefined;
       const originSessionId =
         typeof ctx.metadata?.sessionId === "string"
           ? (ctx.metadata.sessionId as string)
@@ -184,7 +173,6 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
               ? renderAgentProfilePrompt(profile, instructions)
               : instructions,
             sourceTools,
-            maxTurns,
             originSessionId,
             // #1112: profile's `model:` frontmatter (complexity tier or
             // explicit model ID). SubAgentRunner resolves it against the
@@ -233,6 +221,19 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             turnCount: result.turnCount,
             spawnId,
             agentName: profile?.name,
+            // Cut-off resume signal (Claude Code "the sub-agent ran out of
+            // turns and didn't finish" pattern). When the child hit its
+            // host-assigned round budget, `summary` is PARTIAL — surface that
+            // explicitly so the parent LLM does not treat the truncated text as
+            // a completed result and can decide to re-spawn / continue the task.
+            // Omitted entirely on a clean end_turn so normal completions carry
+            // no extra fields.
+            ...(result.incomplete
+              ? {
+                  incomplete: true,
+                  incompleteReason: t("be_agentSpawn.incompleteNotice"),
+                }
+              : {}),
             // Embed the child transcript so a reloaded session rebuilds the
             // sub-agent tab's full tool/reasoning timeline from persistence
             // (derive-subagent-spawns reads `entries` here). DLP-masked at the
