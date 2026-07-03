@@ -649,6 +649,24 @@ export class SubAgentRunner {
       failureReason = msg;
     }
 
+    // Commit 2: record the spawn's OWN assistant-round count into
+    // cumulativeRounds. The pre-turn write above seeded it at 0; without this
+    // update a resume chain would start counting from 0 as if the original
+    // spawn spent no rounds, making CUMULATIVE_ROUNDS_CEILING inaccurate. This
+    // is a FULL-OVERWRITE write (saveSessionMetadata does not merge), so we
+    // re-supply every field the pre-turn write set. Only on a clean run (ok) —
+    // a failed/threw spawn leaves the seeded 0 (no real rounds to account).
+    if (ok) {
+      await this.deps.subAgentMemoryManager.saveSessionMetadata(childSessionId, {
+        sessionKind: "subagent",
+        sourceTools: scopedTools.map((tool) => tool.name),
+        ...(input.profileModel !== undefined ? { profileModel: input.profileModel } : {}),
+        ...(input.profileMode !== undefined ? { profileMode: input.profileMode } : {}),
+        resumeCount: 0,
+        cumulativeRounds: turn,
+      });
+    }
+
     return {
       summary: lastText,
       toolCallCount: totalToolCalls,
