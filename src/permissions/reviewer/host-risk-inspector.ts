@@ -51,7 +51,15 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "grep", "egrep", "fgrep", "rg", "ag", "find", "fd", "wc", "stat", "file",
   "du", "df", "tree", "which", "type", "whoami", "id", "hostname", "uname",
   "date", "env", "printenv", "uptime", "ps", "top", "sort", "uniq", "cut",
-  "awk", "sed", "diff", "cmp", "basename", "dirname", "realpath", "readlink",
+  // NOTE: `awk` is intentionally ABSENT. awk has its own output-redirection
+  // (`print > "file"`), pipe-to-command (`print | "cmd"`), and system() that
+  // execute arbitrary code inside the awk-program string. These are opaque to
+  // shell tokenization (correctly so — the shell sees a single-quoted literal
+  // string). Classifying awk as read-only would require a full awk-language
+  // parser; without one the classifier cannot distinguish `awk '{print $1}'`
+  // from `awk 'BEGIN{system("rm -rf /")}'`. Any awk call therefore classifies
+  // as `shell` (extra approval prompt — the safe, stated discipline of this module).
+  "sed", "diff", "cmp", "basename", "dirname", "realpath", "readlink",
   "true", "false", "test", "sleep", "seq", "yes", "tr", "nl", "tac", "rev",
   "column", "comm", "join", "paste", "expand", "unexpand", "fold", "split",
 ]);
@@ -88,7 +96,8 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
  */
 const MUTATING_FLAGS: ReadonlyMap<string, ReadonlySet<string> | null> = new Map([
   ["sed",  new Set(["-i", "--in-place"])],
-  ["awk",  new Set(["-i", "--in-place"])],
+  // `awk` is NOT listed here — it is not in READ_ONLY_COMMANDS (see above),
+  // so hasMutatingFlag is never called for awk. Entry removed to avoid confusion.
   ["find", new Set(["-delete", "-exec", "-execdir", "-ok", "-okdir",
                     "-fprint", "-fprintf", "-fls"])],
   ["fd",   new Set(["-x", "--exec", "-X", "--exec-batch"])],
@@ -110,7 +119,7 @@ const MUTATING_FLAGS: ReadonlyMap<string, ReadonlySet<string> | null> = new Map(
  */
 const MUTATING_SHORT_LETTERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ["sed", new Set(["i"])],
-  ["awk", new Set(["i"])],
+  // `awk` removed — awk is not in READ_ONLY_COMMANDS, so this entry is dead.
 ]);
 
 /**
@@ -287,15 +296,33 @@ function extractShellCommand(input: Record<string, unknown>): string | null {
  * {@link tokenizeShell} SOT so this module and {@link BashAstValidator} agree
  * on what a leaf is.
  *
+ * Tool-internal mini-languages: this classifier operates at the SHELL grammar
+ * layer only. It does NOT model tool-internal languages (awk programs, perl
+ * one-liners, etc.) that can write files or exec commands inside a single-quoted
+ * string that is opaque to the shell tokenizer. Verbs whose tool-internal
+ * language cannot be safely analysed without a dedicated parser are excluded
+ * from READ_ONLY_COMMANDS so they fail closed as `shell`. `awk` is the primary
+ * example (see its absence from READ_ONLY_COMMANDS above).
+ *
+ * KNOWN LIMITATION (pre-existing, tracked as follow-up): `sed`'s in-program
+ * write (`w`, `s///w`) and exec (`e`, `r`) commands inside the sed-script
+ * argument are NOT detected. Both the old and new code classify
+ * `sed 's/a/b/w out' f` as `read`. A sed-script parser is out of scope for
+ * this PR — fixing it would require parsing sed-program syntax and risks
+ * noisy false-positive escalation of common read-only `sed 's/a/b/'` patterns.
+ * The extra approval burden of dropping `sed` from READ_ONLY_COMMANDS (as was
+ * done for `awk`) is not yet justified given sed's vastly more common read-only
+ * usage; this trade-off will be re-evaluated in the follow-up issue.
+ *
  * Tighten-only claim (precise): every `read→shell` transition introduced by
  * this change is a genuine tighten — a command that WAS safe to classify read
  * is now escalated because we detect a mutating flag or write git subcommand
  * form. A small enumerated set of `shell→read` transitions also exists; these
  * are NOT hardenings — they are CORRECTIONS of prior mis-classifications where
  * the old naive tokenizer wrongly classified a benign command as shell:
- *   - `grep "a && b" f`   — the `&&` was inside a quoted arg, not a separator
- *   - `grep '$(whoami)' f`— the `$(` was inside a single-quoted arg
- *   - `echo '\`rm\`' f`   — backtick inside single quotes, no execution
+ *   - `grep "a && b" f`   — `&&` was inside a quoted arg, not a separator
+ *   - `grep '$(whoami)' f`— `$(` was inside a single-quoted arg (no execution)
+ *   - `echo '\`rm\`' f`   — backtick inside single quotes (no execution)
  *   - `env X=1 ls`        — old tokenizer did not strip env-style assignments
  * Each of these is provably side-effect-free and is tested explicitly below.
  * The differential/property test in the test file asserts the full enumerated
