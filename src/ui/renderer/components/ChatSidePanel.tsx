@@ -1,4 +1,4 @@
-import { createElement, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { createElement, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
 import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
 import {
   WORKSPACE_TAB_LAUNCHER,
@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
   Code2,
   Copy,
   ExternalLink,
@@ -26,6 +27,7 @@ import {
   Search,
   Table,
   Terminal,
+  Trash2,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -39,6 +41,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../../components/ui/dropdown-menu.js";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "../../../components/ui/context-menu.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { wrapRenderHtmlInlineFrameDocument } from "../../../shared/render-html-preview.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../shared/side-browser.js";
@@ -46,6 +55,7 @@ import { SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
 import { normalizeBrowserNavigationUrl } from "../preview/url-safety.js";
+import { formatIpcError } from "../format-ipc-error.js";
 import { PreviewContent } from "../preview/preview-renderers.js";
 import { FileEditDiff } from "./FileEditDiff.js";
 import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
@@ -606,6 +616,82 @@ function fileBasename(path: string): string {
   return segments[segments.length - 1] ?? path;
 }
 
+/**
+ * Is `candidate` `root` itself or a descendant of it? Boundary-safe and
+ * platform-agnostic: a bare `startsWith(root)` would let `/foo` falsely match
+ * `/foobar`, so the character right after the prefix MUST be a path separator
+ * (`/` or `\` — the renderer receives platform-native paths from main).
+ */
+function isPathWithinRoot(root: string, candidate: string): boolean {
+  if (candidate === root) return true;
+  return candidate.startsWith(root) && /[/\\]/.test(candidate.charAt(root.length));
+}
+
+/**
+ * Relative path of `full` under `root` (renderer-side string math — no node:path
+ * in the renderer). Falls back to the basename for the root itself and to the
+ * absolute path when `full` is not a descendant of `root` (boundary-checked, so
+ * `/foobar` is NOT treated as being under `/foo`).
+ */
+function toRelativePath(root: string | null, full: string): string {
+  if (!root) return full;
+  if (full === root) return fileBasename(full);
+  if (!isPathWithinRoot(root, full)) return full;
+  return full.slice(root.length).replace(/^[/\\]+/, "") || full;
+}
+
+/** Platform hint for the reveal label (Finder on macOS, Explorer elsewhere). */
+const IS_MAC_LIKE =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+
+/**
+ * Extension → row icon. `File` is the legitimate domain default for an unknown
+ * extension (not a papering-over fallback).
+ */
+function fileIcon(name: string): LucideIcon {
+  const dot = name.lastIndexOf(".");
+  const ext = dot >= 0 ? name.slice(dot).toLowerCase() : "";
+  switch (ext) {
+    case ".md":
+    case ".txt":
+    case ".rst":
+      return FileText;
+    case ".ts":
+    case ".tsx":
+    case ".js":
+    case ".jsx":
+    case ".py":
+    case ".go":
+    case ".rs":
+      return FileCode;
+    case ".json":
+    case ".yaml":
+    case ".yml":
+    case ".toml":
+      return Code2;
+    case ".png":
+    case ".jpg":
+    case ".jpeg":
+    case ".gif":
+    case ".svg":
+    case ".webp":
+      return Image;
+    case ".csv":
+    case ".tsv":
+    case ".xlsx":
+      return Table;
+    case ".html":
+    case ".htm":
+      return Globe;
+    case ".sh":
+    case ".zsh":
+    case ".bash":
+      return Terminal;
+    default:
+      return File;
+  }
+}
+
 type WorkspaceDirEntry = { name: string; path: string; type: "file" | "directory" };
 
 /**
@@ -635,6 +721,9 @@ function ProjectRootsBrowser({
   // effect would refire every render → an infinite render→IPC loop.
   const [attemptedPaths, setAttemptedPaths] = useState<Set<string>>(new Set());
   const [errorByPath, setErrorByPath] = useState<Record<string, string>>({});
+  // Directories whose listing hit MAX_DIR_ENTRIES (main returns `truncated`), so
+  // the browser can flag that only a prefix of the folder is shown.
+  const [truncatedPaths, setTruncatedPaths] = useState<Set<string>>(new Set());
   // A picked folder whose adjacency warnings must be acknowledged before the
   // main process (workspace.pickRoot gate) will persist it into the read scope.
   // `ackToken` binds the confirmation to the exact dialog-picked path the main
@@ -644,12 +733,42 @@ function ProjectRootsBrowser({
     { path: string; warnings: string[]; ackToken: string } | null
   >(null);
 
+  // Roving-tabindex active row (the single treeitem with tabIndex=0). Distinct
+  // from `selectedPath` (the OPENED file, drives bg-accent) — this is keyboard
+  // focus, not the opened file.
+  const [activeItemPath, setActiveItemPath] = useState<string | null>(null);
+  // path -> row element, for imperative focus moves (roving tabindex).
+  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  // Set true just before a keyboard-driven setActiveItemPath so the post-render
+  // effect calls .focus(); prevents stealing focus on mount / mouse clicks.
+  const pendingFocusRef = useRef(false);
+  // Type-ahead buffer with a 500ms reset window.
+  const typeaheadRef = useRef<{ buffer: string; timer: ReturnType<typeof setTimeout> | null }>({
+    buffer: "",
+    timer: null,
+  });
+  // Inline failure surface for the mutating ops (removeRoot / reveal). Cleared
+  // when a new op starts or the user dismisses it — a failed op no longer
+  // swallows its error result silently.
+  const [opError, setOpError] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
   const loadDir = useCallback(async (path: string) => {
     setLoadingPaths((prev) => new Set(prev).add(path));
     try {
       const res = await window.lvis.workspace.listDir(path);
       if (res.ok && res.entries) {
         setChildrenByPath((prev) => ({ ...prev, [path]: res.entries ?? [] }));
+        setTruncatedPaths((prev) => {
+          const has = prev.has(path);
+          if (res.truncated && !has) return new Set(prev).add(path);
+          if (!res.truncated && has) {
+            const next = new Set(prev);
+            next.delete(path);
+            return next;
+          }
+          return prev;
+        });
         setErrorByPath((prev) => {
           if (!(path in prev)) return prev;
           const next = { ...prev };
@@ -729,7 +848,134 @@ function ProjectRootsBrowser({
     });
   };
 
-  const addFolder = async () => {
+  // Flattened pre-order list of the CURRENTLY VISIBLE nodes (expanded subtrees
+  // only). Rendering stays recursive; this memo backs keyboard navigation only.
+  const flatNodes = useMemo<
+    Array<{ path: string; name: string; isDir: boolean; depth: number; parentPath: string }>
+  >(() => {
+    if (!activeRoot) return [];
+    const out: Array<{ path: string; name: string; isDir: boolean; depth: number; parentPath: string }> = [];
+    const walk = (parentPath: string, depth: number) => {
+      const siblings = childrenByPath[parentPath] ?? [];
+      for (const entry of siblings) {
+        const isDir = entry.type === "directory";
+        out.push({ path: entry.path, name: entry.name, isDir, depth, parentPath });
+        if (isDir && expanded.has(entry.path)) walk(entry.path, depth + 1);
+      }
+    };
+    walk(activeRoot, 0);
+    return out;
+  }, [activeRoot, childrenByPath, expanded]);
+
+  // Clamp the roving pointer when the tree changes (collapse / reload / switch).
+  useEffect(() => {
+    if (flatNodes.length === 0) {
+      if (activeItemPath !== null) setActiveItemPath(null);
+      return;
+    }
+    if (!activeItemPath || !flatNodes.some((n) => n.path === activeItemPath)) {
+      setActiveItemPath(flatNodes[0].path);
+    }
+  }, [flatNodes, activeItemPath]);
+
+  // Move DOM focus only for keyboard-driven changes (roving tabindex).
+  useEffect(() => {
+    if (!pendingFocusRef.current) return;
+    pendingFocusRef.current = false;
+    if (activeItemPath) itemRefs.current.get(activeItemPath)?.focus();
+  }, [activeItemPath]);
+
+  // Clear the type-ahead timer on unmount.
+  useEffect(
+    () => () => {
+      if (typeaheadRef.current.timer) clearTimeout(typeaheadRef.current.timer);
+    },
+    [],
+  );
+
+  const focusPath = useCallback((path: string | null) => {
+    if (!path) return;
+    pendingFocusRef.current = true;
+    setActiveItemPath(path);
+  }, []);
+
+  const runTypeahead = (char: string, curIdx: number) => {
+    const ta = typeaheadRef.current;
+    if (ta.timer) clearTimeout(ta.timer);
+    ta.buffer += char.toLowerCase();
+    ta.timer = setTimeout(() => {
+      ta.buffer = "";
+      ta.timer = null;
+    }, 500);
+    const n = flatNodes.length;
+    // Single-char buffer starts the search at the NEXT node (cycles repeats);
+    // multi-char refines from the current node.
+    const startOffset = ta.buffer.length === 1 ? 1 : 0;
+    for (let i = 0; i < n; i++) {
+      const cand = flatNodes[(curIdx + startOffset + i) % n];
+      if (cand.name.toLowerCase().startsWith(ta.buffer)) {
+        focusPath(cand.path);
+        return;
+      }
+    }
+  };
+
+  const onTreeKeyDown = (e: ReactKeyboardEvent) => {
+    if (flatNodes.length === 0) return;
+    const idx = flatNodes.findIndex((n) => n.path === activeItemPath);
+    const i = idx >= 0 ? idx : 0;
+    const cur = flatNodes[i];
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        focusPath(flatNodes[Math.min(i + 1, flatNodes.length - 1)].path);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        focusPath(flatNodes[Math.max(i - 1, 0)].path);
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        if (cur.isDir) {
+          if (!expanded.has(cur.path)) {
+            toggleFolder(cur.path); // collapsed -> expand (also lazy-loads)
+          } else {
+            const child = flatNodes[i + 1]; // expanded -> first child (if loaded)
+            if (child && child.parentPath === cur.path) focusPath(child.path);
+          }
+        }
+        break;
+      case "ArrowLeft":
+        e.preventDefault();
+        if (cur.isDir && expanded.has(cur.path)) {
+          toggleFolder(cur.path); // expanded -> collapse
+        } else if (cur.parentPath !== activeRoot) {
+          focusPath(cur.parentPath); // else -> parent (activeRoot isn't a treeitem)
+        }
+        break;
+      case "Enter":
+      case " ":
+        e.preventDefault();
+        if (cur.isDir) toggleFolder(cur.path);
+        else onOpenFile(cur.path);
+        break;
+      case "Home":
+        e.preventDefault();
+        focusPath(flatNodes[0].path);
+        break;
+      case "End":
+        e.preventDefault();
+        focusPath(flatNodes[flatNodes.length - 1].path);
+        break;
+      default:
+        if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          runTypeahead(e.key, i);
+        }
+    }
+  };
+
+  const addFolder = useCallback(async () => {
     const res = await window.lvis.workspace.pickRoot();
     if (!res.ok) return;
     if (res.requiresAcknowledgement && res.pendingPath && res.ackToken) {
@@ -737,6 +983,44 @@ function ProjectRootsBrowser({
       return;
     }
     if (res.roots) applyRoots(res.roots, res.added ?? null);
+  }, [applyRoots]);
+
+  // ⌘O / Ctrl+O opens the folder picker when focus is within the panel (scoped —
+  // no global shortcut pollution).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "o" || e.key === "O")) {
+        const root = rootRef.current;
+        if (root && root.contains(document.activeElement)) {
+          e.preventDefault();
+          void addFolder();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [addFolder]);
+
+  // Surface a mutating-op IPC failure inline. `path-not-allowed` / `sensitive-path`
+  // are the workspace-specific reveal codes absent from the shared IPC map, so
+  // map them to the same "outside allowed folders" copy the file preview uses.
+  const formatOpError = useCallback(
+    (error: string | undefined, message: string | undefined) =>
+      formatIpcError(error, message, {
+        codeMap: {
+          "path-not-allowed": t("chatPreviewRail.fileErrorNotAllowed"),
+          "sensitive-path": t("chatPreviewRail.fileErrorNotAllowed"),
+        },
+      }),
+    [t],
+  );
+
+  // Reveal a file/folder in the OS file manager. Re-validated in main; surfaces
+  // any failure inline instead of swallowing the result.
+  const revealEntry = async (path: string) => {
+    setOpError(null);
+    const res = await window.lvis.workspace.reveal(path);
+    if (!res.ok) setOpError(formatOpError(res.error, res.message));
   };
 
   const confirmPendingFolder = async () => {
@@ -750,43 +1034,212 @@ function ProjectRootsBrowser({
     if (res.ok && res.roots) applyRoots(res.roots, res.added ?? null);
   };
 
-  const renderEntries = (path: string, depth: number): ReactElement => (
+  const activeRootIsDefault = Boolean(
+    activeRoot && roots.find((r) => r.path === activeRoot)?.isDefault,
+  );
+
+  // Remove the active root from the read allow-list. Non-destructive (files are
+  // untouched — only the Layer-1 read scope narrows); main refuses to remove the
+  // default root or any path not already in `additionalDirectories`.
+  const removeActiveRoot = async () => {
+    if (!activeRoot || activeRootIsDefault) return;
+    const removedRoot = activeRoot;
+    setOpError(null);
+    const res = await window.lvis.workspace.removeRoot(removedRoot);
+    if (!res.ok) {
+      setOpError(formatOpError(res.error, res.message));
+      return;
+    }
+    if (!res.roots) return;
+    // Drop cached children/expansion for the removed subtree so a re-add reloads.
+    // Boundary-safe + cross-platform: `isPathWithinRoot` matches on a full
+    // segment (so `/foo` won't purge `/foobar`) and both `/` and `\` separators.
+    setChildrenByPath((prev) => {
+      const next: Record<string, WorkspaceDirEntry[]> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        if (isPathWithinRoot(removedRoot, key)) continue;
+        next[key] = value;
+      }
+      return next;
+    });
+    applyRoots(res.roots, res.roots[0]?.path ?? null);
+  };
+
+  // Re-list a folder whose previous listDir FAILED. A user gesture, so it clears
+  // the attempted mark (the render-loop guard) before reloading.
+  const retryDir = (path: string) => {
+    setAttemptedPaths((prev) => {
+      if (!prev.has(path)) return prev;
+      const next = new Set(prev);
+      next.delete(path);
+      return next;
+    });
+    setErrorByPath((prev) => {
+      if (!(path in prev)) return prev;
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+    void loadDir(path);
+  };
+
+  const renderEntries = (path: string, depth: number): ReactElement => {
+    const entries = childrenByPath[path] ?? [];
+    const childPad = 8 + depth * 12;
+    // Child-folder listing states (the active root's own loading/error is handled
+    // one level up so the role=tree wrapper is always present).
+    if (depth > 0 && loadingPaths.has(path) && entries.length === 0) {
+      return (
+        <div
+          role="presentation"
+          className="flex h-7 items-center gap-1 text-[11px] text-muted-foreground"
+          style={{ paddingLeft: childPad }}
+          data-testid="chat-side-panel-fs-child-loading"
+        >
+          {t("chatPreviewRail.filePreviewLoading")}
+        </div>
+      );
+    }
+    if (depth > 0 && errorByPath[path]) {
+      return (
+        <button
+          type="button"
+          className="flex h-7 w-full items-center gap-1 text-left text-[11px] text-destructive hover:underline"
+          style={{ paddingLeft: childPad }}
+          data-testid="chat-side-panel-fs-child-error"
+          onClick={() => retryDir(path)}
+        >
+          {t("chatPreviewRail.dirLoadError")} · {t("common.retry")}
+        </button>
+      );
+    }
+    if (entries.length === 0 && attemptedPaths.has(path) && !loadingPaths.has(path) && !errorByPath[path]) {
+      return (
+        <div
+          role="presentation"
+          className="flex h-7 items-center text-[11px] italic text-muted-foreground"
+          style={{ paddingLeft: childPad }}
+          data-testid="chat-side-panel-fs-empty"
+        >
+          {t("chatPreviewRail.dirEmpty")}
+        </div>
+      );
+    }
+    return (
     <>
-      {(childrenByPath[path] ?? []).map((entry) => {
+      {entries.map((entry, index) => {
         const isDir = entry.type === "directory";
         const isOpen = expanded.has(entry.path);
-        const active = !isDir && entry.path === selectedPath;
+        const opened = !isDir && entry.path === selectedPath;
+        const isActiveItem = entry.path === activeItemPath;
         return (
-          <div key={entry.path} role="treeitem" aria-expanded={isDir ? isOpen : undefined}>
-            <button
-              type="button"
-              data-testid={isDir ? "chat-side-panel-fs-folder" : "chat-side-panel-fs-file"}
-              className={`flex h-7 w-full min-w-0 items-center gap-1 rounded-md pr-2 text-left text-xs hover:bg-muted/(--opacity-muted) ${
-                active ? "bg-accent text-accent-foreground" : ""
-              }`}
-              style={{ paddingLeft: 8 + depth * 12 }}
-              onClick={() => (isDir ? toggleFolder(entry.path) : onOpenFile(entry.path))}
-            >
-              {isDir ? (
-                isOpen ? (
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                ) : (
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                )
-              ) : (
-                <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              )}
-              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-            </button>
-            {isDir && isOpen ? renderEntries(entry.path, depth + 1) : null}
+          <div key={entry.path}>
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <div
+                  ref={(el) => {
+                    if (el) itemRefs.current.set(entry.path, el);
+                    else itemRefs.current.delete(entry.path);
+                  }}
+                  role="treeitem"
+                  aria-expanded={isDir ? isOpen : undefined}
+                  // APG tree pattern: aria-selected reflects SELECTION (the
+                  // opened file), not roving keyboard focus. Focus is carried
+                  // separately by the roving tabindex below, so a screen reader
+                  // announces the opened file — not merely the arrow-key cursor
+                  // position — as "selected". Non-opened rows omit the attribute.
+                  aria-selected={opened ? true : undefined}
+                  aria-level={depth + 1}
+                  aria-setsize={entries.length}
+                  aria-posinset={index + 1}
+                  tabIndex={isActiveItem ? 0 : -1}
+                  data-testid={isDir ? "chat-side-panel-fs-folder" : "chat-side-panel-fs-file"}
+                  className={`flex h-7 w-full min-w-0 cursor-pointer items-center gap-1 rounded-md pr-2 text-left text-xs outline-none hover:bg-muted/(--opacity-muted) focus-visible:ring-1 focus-visible:ring-ring ${
+                    opened ? "bg-accent text-accent-foreground" : ""
+                  }`}
+                  style={{ paddingLeft: 8 + depth * 12 }}
+                  onClick={() => {
+                    setActiveItemPath(entry.path);
+                    if (isDir) toggleFolder(entry.path);
+                    else onOpenFile(entry.path);
+                  }}
+                >
+                  {isDir ? (
+                    isOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    )
+                  ) : (
+                    createElement(fileIcon(entry.name), {
+                      className: "h-3.5 w-3.5 shrink-0 text-muted-foreground",
+                    })
+                  )}
+                  <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="min-w-[11rem]" data-testid="chat-side-panel-fs-context-menu">
+                <ContextMenuItem
+                  data-testid="chat-side-panel-fs-ctx-open"
+                  onSelect={() => (isDir ? toggleFolder(entry.path) : onOpenFile(entry.path))}
+                >
+                  {isDir ? <Folder className="h-3.5 w-3.5" /> : <File className="h-3.5 w-3.5" />}
+                  {t("chatPreviewRail.ctxOpen")}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  data-testid="chat-side-panel-fs-ctx-reveal"
+                  onSelect={() => void revealEntry(entry.path)}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  {t(IS_MAC_LIKE ? "chatPreviewRail.revealInFinder" : "chatPreviewRail.revealInExplorer")}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  data-testid="chat-side-panel-fs-ctx-copy-path"
+                  onSelect={() => void navigator.clipboard?.writeText(entry.path)}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  {t("chatPreviewRail.copyPath")}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  data-testid="chat-side-panel-fs-ctx-copy-rel"
+                  onSelect={() => void navigator.clipboard?.writeText(toRelativePath(activeRoot, entry.path))}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  {t("chatPreviewRail.copyRelativePath")}
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+            {isDir && isOpen ? <div role="group">{renderEntries(entry.path, depth + 1)}</div> : null}
           </div>
         );
       })}
+      {truncatedPaths.has(path) ? (
+        <div
+          role="presentation"
+          className="flex h-6 items-center text-[11px] italic text-muted-foreground"
+          style={{ paddingLeft: childPad }}
+          data-testid="chat-side-panel-fs-truncated"
+        >
+          {t("chatPreviewRail.dirTruncated")}
+        </div>
+      ) : null}
     </>
-  );
+    );
+  };
 
   return (
-    <div className="space-y-1" data-testid="chat-side-panel-project-roots">
+    // Drag-drop-to-add-root was intentionally NOT wired here. A dropped File has
+    // no reliable path in Electron ≥32 (File.prototype.path was removed) and
+    // trusting a renderer-named path would regress the #1448 ack-token read-scope
+    // invariant. Doing it right needs a webUtils.getPathForFile preload bridge +
+    // a trust-model decision + a real-Electron drop e2e — deferred to a follow-up
+    // issue. Add-root stays on the native picker (the FolderPlus button + ⌘/Ctrl+O).
+    <div
+      ref={rootRef}
+      className="space-y-1 rounded-md"
+      data-testid="chat-side-panel-project-roots"
+    >
       <div className="flex items-center gap-1">
         {roots.length > 1 ? (
           <select
@@ -823,7 +1276,58 @@ function ProjectRootsBrowser({
           </TooltipTrigger>
           <TooltipContent side="bottom">{t("chatPreviewRail.addProjectRoot")}</TooltipContent>
         </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              data-testid="chat-side-panel-collapse-all"
+              aria-label={t("chatPreviewRail.collapseAll")}
+              disabled={expanded.size === 0}
+              onClick={() => setExpanded(new Set())}
+            >
+              <ChevronsDownUp className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t("chatPreviewRail.collapseAll")}</TooltipContent>
+        </Tooltip>
+        {activeRoot && !activeRootIsDefault ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                data-testid="chat-side-panel-remove-root"
+                aria-label={t("chatPreviewRail.removeRoot")}
+                onClick={() => void removeActiveRoot()}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("chatPreviewRail.removeRoot")}</TooltipContent>
+          </Tooltip>
+        ) : null}
       </div>
+      {opError ? (
+        <div
+          role="alert"
+          data-testid="chat-side-panel-op-error"
+          className="flex items-start gap-1 rounded-md border border-destructive bg-destructive/(--opacity-muted) px-2 py-1 text-[11px] text-destructive"
+        >
+          <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{opError}</span>
+          <button
+            type="button"
+            className="shrink-0 rounded p-0.5 hover:bg-destructive/(--opacity-muted)"
+            aria-label={t("common.close")}
+            data-testid="chat-side-panel-op-error-dismiss"
+            onClick={() => setOpError(null)}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      ) : null}
       {pendingWarning ? (
         <div
           data-testid="chat-side-panel-root-warning"
@@ -861,14 +1365,30 @@ function ProjectRootsBrowser({
         loadingPaths.has(activeRoot) && !childrenByPath[activeRoot] ? (
           <div className="px-2 py-1 text-[11px] text-muted-foreground">{t("chatPreviewRail.filePreviewLoading")}</div>
         ) : errorByPath[activeRoot] ? (
-          <div className="px-2 py-1 text-[11px] text-destructive" data-testid="chat-side-panel-fs-error">
-            {t("chatPreviewRail.dirLoadError")}
-          </div>
+          <button
+            type="button"
+            className="flex w-full items-center gap-1 px-2 py-1 text-left text-[11px] text-destructive hover:underline"
+            data-testid="chat-side-panel-fs-error"
+            onClick={() => retryDir(activeRoot)}
+          >
+            {t("chatPreviewRail.dirLoadError")} · {t("common.retry")}
+          </button>
         ) : (
-          <div role="tree" aria-label={t("chatPreviewRail.projectRoots")}>{renderEntries(activeRoot, 0)}</div>
+          <div role="tree" aria-label={t("chatPreviewRail.projectRoots")} onKeyDown={onTreeKeyDown}>
+            {renderEntries(activeRoot, 0)}
+          </div>
         )
       ) : (
-        <div className="px-2 py-1 text-[11px] text-muted-foreground">{t("chatPreviewRail.projectRootsEmpty")}</div>
+        <div
+          className="flex flex-col items-start gap-2 px-2 py-3 text-[11px] text-muted-foreground"
+          data-testid="chat-side-panel-roots-empty"
+        >
+          <p>{t("chatPreviewRail.projectRootsEmpty")}</p>
+          <Button type="button" size="sm" variant="outline" onClick={() => void addFolder()}>
+            <FolderPlus className="h-3.5 w-3.5" />
+            {t("chatPreviewRail.addProjectRoot")}
+          </Button>
+        </div>
       )}
     </div>
   );
