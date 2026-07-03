@@ -262,6 +262,9 @@ test.describe("chat preview rail", () => {
       await expect(ctx.page.getByTestId("chat-side-panel-launcher")).toBeVisible();
       await ctx.page.getByTestId("chat-side-panel-launcher-file-browser").click();
       await expect(ctx.page.getByTestId("chat-side-panel-tab-file-browser")).toBeVisible();
+      // The top pane defaults to the Directory source; session artifacts live
+      // behind the Session files segment. Switch to it to review report.md.
+      await ctx.page.getByTestId("chat-side-panel-file-source-session").click();
       await expect(rail).toContainText("report.md");
       await expect(ctx.page.getByTestId("chat-side-panel-file-tree")).toBeVisible();
       await expect(ctx.page.getByTestId("chat-side-panel-file-splitter")).toBeVisible();
@@ -286,8 +289,14 @@ test.describe("chat preview rail", () => {
       await expect(ctx.page.getByRole("tab")).toHaveCount(tabCountBefore + 1);
       await expect(ctx.page.getByTestId("chat-side-panel-tab-browser")).toBeVisible();
       await expect(ctx.page.getByTestId("chat-side-panel-tab-actions")).toBeVisible();
-      await expect(rail).toContainText("Artifact dashboard");
-      await expect(rail).toContainText(sideBrowserHost);
+      // The web-artifact list + search now live behind the floating 🔍 Popover,
+      // not an always-on strip. Open it to confirm the artifacts are listed.
+      await ctx.page.getByTestId("chat-side-panel-browser-search-trigger").click();
+      const searchPopover = ctx.page.getByTestId("chat-side-panel-browser-search-popover");
+      await expect(searchPopover).toContainText("Artifact dashboard");
+      await expect(searchPopover).toContainText(sideBrowserHost);
+      // Close the Popover; the browser tab shows the html viewer directly.
+      await ctx.page.keyboard.press("Escape");
       await expect(ctx.page.getByTestId("chat-side-panel-browser-viewer")).toBeVisible();
       await expect(ctx.page.getByTestId("chat-side-panel-browser-frame")).toBeVisible();
       await expect(ctx.page.frameLocator('[data-testid="chat-side-panel-browser-frame"]').getByText("Preview OK")).toBeVisible();
@@ -306,6 +315,8 @@ test.describe("chat preview rail", () => {
 
       // The narrow-screen drawer fallback is covered by workspace-rail-redesign.spec.ts;
       // this spec stays at a docked viewport to exercise the side-by-side geometry.
+      // Pick a listed artifact from the search Popover (rows moved off the strip).
+      await ctx.page.getByTestId("chat-side-panel-browser-search-trigger").click();
       await ctx.page.getByTestId("chat-side-panel-browser-row").nth(1).click();
       const browserWebview = ctx.page.getByTestId("chat-side-panel-browser-webview");
       await expect(browserWebview).toBeVisible();
