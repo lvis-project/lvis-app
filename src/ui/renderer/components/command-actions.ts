@@ -1,4 +1,4 @@
-import { Folder, Globe, Table, Terminal, type LucideIcon } from "lucide-react";
+import { Bot, Folder, Globe, Table, Terminal, type LucideIcon } from "lucide-react";
 import { getPluginViewLabel, toViewKey } from "../api-client.js";
 import { t } from "../../../i18n/runtime.js";
 import type { WorkspaceTabKind } from "../preview/workspace-tabs.js";
@@ -18,7 +18,10 @@ export interface QuickAction {
  * app command surface share one list rather than duplicating it. Order here is
  * the render order in the launcher.
  *
- * `사이드채팅` (side chat) is intentionally deferred — it is not a launcher item.
+ * `side-chat` is intentionally NOT a launcher item — its engine (a second
+ * ConversationLoop) lands in a companion PR, so surfacing it here now would be a
+ * dead affordance. The tab kind is reserved in `WorkspaceTabKind` for switch
+ * coherence but has no entry in this table.
  */
 export interface WorkspaceLauncherItem {
   kind: WorkspaceTabKind;
@@ -71,6 +74,13 @@ export const WORKSPACE_TAB_LAUNCHER: readonly WorkspaceLauncherItem[] = [
     shortcutHint: "⌘P",
     shortcut: { key: "p", meta: true, ctrl: false, shift: false },
     icon: Folder,
+  },
+  {
+    kind: "subagent",
+    labelKey: "chatPreviewRail.launcher.subagent",
+    shortcutHint: "⌘⇧A",
+    shortcut: { key: "a", meta: true, ctrl: false, shift: true },
+    icon: Bot,
   },
 ];
 
