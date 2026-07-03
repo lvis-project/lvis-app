@@ -16,6 +16,8 @@ export const en = {
     "Task for the sub-agent to perform — combined system+user prompt.",
   "be_agentSpawn.propSourceToolsDescription":
     "List of tool names to expose to the sub-agent. If omitted, the same tool set as the parent is used.",
+  "be_agentSpawn.propResumeIdDescription":
+    "Optional: resume a previously-spawned sub-agent by its resumeId (returned in an incomplete result). When set, the sub-agent's history is re-hydrated and continued with instructions as the follow-up prompt; its tool scope stays frozen to the original spawn (not re-granted). Omit to start a fresh sub-agent.",
   "be_agentSpawn.incompleteNotice":
     "The sub-agent reached its round budget before finishing — the summary above is PARTIAL, not a completed result. Review it and, if the task still needs work, spawn the sub-agent again to continue from where it left off (or take over the remaining steps yourself).",
 } as const;
@@ -36,6 +38,8 @@ export const ko: Record<keyof typeof en, string> = {
     "sub-agent 가 수행할 작업 — system+user prompt 결합본.",
   "be_agentSpawn.propSourceToolsDescription":
     "sub-agent 에 노출할 tool 이름 목록. 생략 시 부모와 동일한 tool 셋.",
+  "be_agentSpawn.propResumeIdDescription":
+    "선택: 이전에 띄운 sub-agent 를 resumeId (미완료 결과에 반환됨) 로 이어서 실행합니다. 지정 시 sub-agent 히스토리를 재수화하고 instructions 를 후속 프롬프트로 이어갑니다. tool 범위는 최초 spawn 시점으로 고정되어 재부여되지 않습니다. 생략하면 새 sub-agent 를 시작합니다.",
   "be_agentSpawn.incompleteNotice":
     "sub-agent 가 완료 전에 라운드 예산에 도달했습니다 — 위 요약은 완성된 결과가 아니라 부분 출력입니다. 검토 후 작업이 더 필요하면 sub-agent 를 다시 띄워 중단된 지점부터 이어가거나 (또는 남은 단계를 직접 처리하세요).",
 };
