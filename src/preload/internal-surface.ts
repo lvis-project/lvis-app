@@ -52,6 +52,9 @@ import type {
   OpenHtmlPreviewWindowResult,
 } from "../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../shared/session-todo.js";
+import type { StreamEvent } from "../lib/chat-stream-state.js";
+import type { SerializedHistoryMessage } from "../shared/chat-history.js";
+import type { TurnResult } from "../engine/conversation-loop.js";
 
 export type LvisInitialThemePayload = Readonly<InitialThemePrime>;
 
@@ -367,6 +370,48 @@ export function buildInternalApiSurface() {
       };
       ipcRenderer.on(CHANNELS.terminal.exit, listener);
       return () => ipcRenderer.removeListener(CHANNELS.terminal.exit, listener);
+    },
+  },
+  // ─── Side chat (workspace rail) ──────────────────────
+  // A second, independently-streaming chat session. send/new/load/list/abort
+  // are invokes; onStream/onFallback subscribe to the DEDICATED
+  // CHANNELS.sidechat.{stream,fallback} events (NOT chat.stream) and return an
+  // unsubscribe fn (the onChatStream pattern). All channels are INTERNAL — an
+  // external origin can never reach them (fail-closed isPublicChannel).
+  sideChat: {
+    send: async (input: string, attachments?: unknown[]) =>
+      ipcRenderer.invoke(CHANNELS.sidechat.send, { input, attachments }) as Promise<
+        | { ok: true; result: TurnResult }
+        | { ok: false; error: string }
+      >,
+    new: async () =>
+      ipcRenderer.invoke(CHANNELS.sidechat.new) as Promise<
+        | { ok: true; sessionId: string }
+        | { ok: false; error: string }
+      >,
+    load: async (sessionId: string) =>
+      ipcRenderer.invoke(CHANNELS.sidechat.load, sessionId) as Promise<
+        | { ok: true; sessionId: string; messages: SerializedHistoryMessage[] }
+        | { ok: false; error: string; messages: SerializedHistoryMessage[] }
+      >,
+    list: async () =>
+      ipcRenderer.invoke(CHANNELS.sidechat.list) as Promise<{
+        current: string | null;
+        sessions: Array<{ id: string; modifiedAt: string; title: string }>;
+      }>,
+    abort: async () =>
+      ipcRenderer.invoke(CHANNELS.sidechat.abort) as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
+    onStream: (handler: (event: StreamEvent) => void) => {
+      const listener = (_event: unknown, payload: StreamEvent) => handler(payload);
+      ipcRenderer.on(CHANNELS.sidechat.stream, listener);
+      return () => ipcRenderer.removeListener(CHANNELS.sidechat.stream, listener);
+    },
+    onFallback: (handler: (payload: { from: string; to: string }) => void) => {
+      const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+      ipcRenderer.on(CHANNELS.sidechat.fallback, listener);
+      return () => ipcRenderer.removeListener(CHANNELS.sidechat.fallback, listener);
     },
   },
   /**
