@@ -88,6 +88,10 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
           items: { type: "string" },
           description: t("be_agentSpawn.propSourceToolsDescription"),
         },
+        resumeId: {
+          type: "string",
+          description: t("be_agentSpawn.propResumeIdDescription"),
+        },
       },
     },
     execute: async (rawInput, ctx) => {
@@ -137,10 +141,19 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         : profile?.name ?? "";
       const instructions =
         typeof a.instructions === "string" ? a.instructions.trim() : "";
-      if (!title || !instructions) {
+      // Resume path: a `resumeId` re-hydrates a previously-spawned sub-agent and
+      // continues it with `instructions` as the follow-up prompt (its tool scope
+      // stays frozen to the original spawn — permission is NOT re-granted). The
+      // title still labels approval modals but is not otherwise required for a
+      // resume (the profile/allowlist come from persisted metadata), so the
+      // title-required rule below is relaxed when resuming.
+      const resumeId = typeof a.resumeId === "string" && a.resumeId.trim()
+        ? a.resumeId.trim()
+        : undefined;
+      if (!instructions || (!resumeId && !title)) {
         return {
           output: JSON.stringify({
-            error: "instructions are required; title is required when agentName is not provided",
+            error: "instructions are required; title is required when agentName is not provided (unless resumeId is set)",
           }),
           isError: true,
         };
@@ -166,35 +179,41 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
       const spawnId = randomUUID();
       deps.emit({ spawnId, type: "start", title, toolUseId });
       try {
-        const result = await runner.spawn(
-          {
-            title,
-            instructions: profile
-              ? renderAgentProfilePrompt(profile, instructions)
-              : instructions,
-            sourceTools,
-            originSessionId,
-            // #1112: profile's `model:` frontmatter (complexity tier or
-            // explicit model ID). SubAgentRunner resolves it against the
-            // active vendor; undefined leaves the child on the parent model.
-            profileModel: profile?.model,
-            // #1113: profile's `mode:` frontmatter (execute/plan/research/
-            // explore). SubAgentRunner prepends a working-posture preamble +
-            // auto-skill recommendation; undefined → inert default mode.
-            profileMode: profile?.mode,
-          },
-          {
-            onActivity: (u) =>
-              deps.emit({
-                spawnId,
-                type: "activity",
-                entries: u.entries,
-                toolCallCount: u.toolCallCount,
-              }),
-            onError: (msg) =>
-              deps.emit({ spawnId, type: "error", message: msg }),
-          },
-        );
+        const callbacks = {
+          onActivity: (u: { entries: ChatEntry[]; toolCallCount: number }) =>
+            deps.emit({
+              spawnId,
+              type: "activity" as const,
+              entries: u.entries,
+              toolCallCount: u.toolCallCount,
+            }),
+          onError: (msg: string) =>
+            deps.emit({ spawnId, type: "error" as const, message: msg }),
+        };
+        // Resume RE-HYDRATES a frozen sub-agent; spawn starts a fresh one. The
+        // resume path takes NO sourceTools/profile from the tool call — those are
+        // read from the persisted metadata so a resume cannot re-scope the child.
+        const result = resumeId
+          ? await runner.resume(resumeId, instructions, title, callbacks, originSessionId)
+          : await runner.spawn(
+              {
+                title,
+                instructions: profile
+                  ? renderAgentProfilePrompt(profile, instructions)
+                  : instructions,
+                sourceTools,
+                originSessionId,
+                // #1112: profile's `model:` frontmatter (complexity tier or
+                // explicit model ID). SubAgentRunner resolves it against the
+                // active vendor; undefined leaves the child on the parent model.
+                profileModel: profile?.model,
+                // #1113: profile's `mode:` frontmatter (execute/plan/research/
+                // explore). SubAgentRunner prepends a working-posture preamble +
+                // auto-skill recommendation; undefined → inert default mode.
+                profileMode: profile?.mode,
+              },
+              callbacks,
+            );
         // A spawn that could not run (LLM provider unconfigured, child loop
         // threw) returns `ok: false` with the error text as `summary` rather
         // than throwing. Surface it as a tool error so the assistant does not
@@ -232,6 +251,13 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
               ? {
                   incomplete: true,
                   incompleteReason: t("be_agentSpawn.incompleteNotice"),
+                  // Same-instance resume handle (PR-C). `childSessionId` is the
+                  // addressable sub-agent session id; passing it back as
+                  // `resumeId` on a follow-up agent_spawn RE-HYDRATES this exact
+                  // sub-agent (frozen tool scope, full history) instead of
+                  // starting a fresh one. This is the ONLY surface the parent
+                  // LLM learns the id from.
+                  resumeId: result.childSessionId,
                 }
               : {}),
             // Embed the child transcript so a reloaded session rebuilds the
