@@ -183,6 +183,8 @@ test.describe("workspace drag-drop add-root (#1458)", () => {
       sensitiveTarget,
     );
     expect(prep.ok).toBe(false);
+    // Stable code (renderer maps to Korean) — NOT the validator's English prose.
+    expect(prep.error).toBe("sensitive-path");
     expect(prep.ackToken).toBeUndefined();
     const roots = await page.evaluate(() => window.lvis.workspace.listRoots());
     expect((roots.roots ?? []).some((r) => r.path === sensitiveTarget)).toBe(false);
@@ -194,5 +196,30 @@ test.describe("workspace drag-drop add-root (#1458)", () => {
     expect(prep.ok).toBe(false);
     expect(prep.error).toBe("not-a-dir");
     expect(prep.ackToken).toBeUndefined();
+  });
+
+  test("real pipeline: a dir swapped for a file between prepare and ack is refused (TOCTOU)", async () => {
+    await openRootsZone();
+    // Prepare a real directory and mint a token, then replace the directory with
+    // a regular file before echoing the token. The ack/persist pass must re-stat
+    // and refuse the non-directory rather than widening the read scope.
+    const toctouTarget = resolve(tempHome, "toctou-project");
+    mkdirSync(toctouTarget, { recursive: true });
+    const prep = await page.evaluate((p) => window.lvis.workspace.dropPrepare(p), toctouTarget);
+    expect(prep.ok).toBe(true);
+    expect(typeof prep.ackToken).toBe("string");
+    // Swap the directory for a file (main-side fs, outside the renderer).
+    rmSync(toctouTarget, { recursive: true, force: true });
+    writeFileSync(toctouTarget, "now a file\n", "utf-8");
+    const done = await page.evaluate(
+      (tok) => window.lvis.workspace.pickRoot({ ackToken: tok }),
+      prep.ackToken as string,
+    );
+    expect(done.ok).toBe(false);
+    expect(done.error).toBe("not-a-dir");
+    const canonical = realpathSync(toctouTarget);
+    const after = await page.evaluate(() => window.lvis.workspace.listRoots());
+    expect((after.roots ?? []).some((r) => r.path === canonical || r.path === toctouTarget)).toBe(false);
+    rmSync(toctouTarget, { force: true });
   });
 });
