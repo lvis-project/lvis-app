@@ -9,11 +9,16 @@ import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../../shared/side-browser.js";
 import { ChatSidePanel } from "../ChatSidePanel.js";
 import { useWorkspaceTabs } from "../../preview/workspace-tabs.js";
+import type { SubAgentSpawn } from "../SubAgentCard.js";
 
 function api(): LvisApi {
   return {
     openExternalUrl: vi.fn(async () => ({ ok: true })),
     chatGetVerbatimToolResult: vi.fn(async () => null),
+    // useVerticalSplit (file-browser / preview / subagent tabs) seeds + persists
+    // the split ratio through the settings round-trip.
+    getSettings: vi.fn(async () => ({}) as never),
+    updateSettings: vi.fn(async () => ({ ok: true }) as never),
   } as unknown as LvisApi;
 }
 
@@ -34,7 +39,7 @@ function openLauncherMenu() {
   fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
   fireEvent.click(trigger);
 }
-function addTabViaMenu(kind: "preview" | "file-browser" | "browser" | "terminal") {
+function addTabViaMenu(kind: "preview" | "file-browser" | "browser" | "terminal" | "subagent") {
   openLauncherMenu();
   fireEvent.click(screen.getByTestId(`chat-side-panel-launcher-menu-${kind}`));
 }
@@ -52,6 +57,7 @@ function HarnessPanel({
   files,
   initialSelectedId,
   panelMounted = true,
+  subAgentSpawns = [],
 }: {
   api: LvisApi;
   sessionId?: string;
@@ -59,6 +65,7 @@ function HarnessPanel({
   files: WorkspaceFileItem[];
   initialSelectedId: string | null;
   panelMounted?: boolean;
+  subAgentSpawns?: SubAgentSpawn[];
 }) {
   const [selectedId, setSelectedId] = useState(initialSelectedId);
   const workspaceTabs = useWorkspaceTabs();
@@ -72,6 +79,7 @@ function HarnessPanel({
       selectedId={selectedId}
       onSelect={setSelectedId}
       workspaceTabs={workspaceTabs}
+      subAgentSpawns={subAgentSpawns}
       onClose={vi.fn()}
     />
   );
@@ -106,7 +114,7 @@ describe("ChatSidePanel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("opens empty: shows the launcher with four items and shortcut hints, no tabs, no counts", () => {
+  it("opens empty: shows the launcher with five items and shortcut hints, no tabs, no counts", () => {
     renderPanel(
       <HarnessPanel
         api={api()}
@@ -122,11 +130,13 @@ describe("ChatSidePanel", () => {
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
     expect(screen.queryByTestId("chat-side-panel-tab-actions")).toBeNull();
 
-    // Four launcher items.
+    // Five launcher items (side-chat is intentionally NOT a launcher item).
     expect(screen.getByTestId("chat-side-panel-launcher-preview")).toBeTruthy();
     expect(screen.getByTestId("chat-side-panel-launcher-terminal")).toBeTruthy();
     expect(screen.getByTestId("chat-side-panel-launcher-browser")).toBeTruthy();
     expect(screen.getByTestId("chat-side-panel-launcher-file-browser")).toBeTruthy();
+    expect(screen.getByTestId("chat-side-panel-launcher-subagent")).toBeTruthy();
+    expect(screen.queryByTestId("chat-side-panel-launcher-side-chat")).toBeNull();
 
     // Shortcut hints are displayed for the bound items.
     expect(screen.getByText("⌃⇧G")).toBeTruthy();
@@ -316,8 +326,10 @@ describe("ChatSidePanel", () => {
       />,
     );
 
-    // Open a file-browser tab from the launcher and confirm the file shows.
+    // Open a file-browser tab from the launcher; the top pane defaults to the
+    // Directory source, so switch to the Session files segment to see artifacts.
     fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId("chat-side-panel-file-source-session"));
     expect(screen.getByTestId("chat-side-panel-file-tree")).toHaveTextContent("report.md");
     const splitLayout = screen.getByTestId("chat-side-panel-file-split-layout") as HTMLElement;
     const splitter = screen.getByTestId("chat-side-panel-file-splitter");
@@ -326,10 +338,13 @@ describe("ChatSidePanel", () => {
     expect(splitLayout.style.gridTemplateRows).toContain("50%");
 
     // Open a browser tab via the "+" dropdown (replaces scattered add buttons).
+    // The first web artifact is an html doc, so the html viewer renders directly.
     addTabViaMenu("browser");
-    expect(screen.getAllByText("Artifact dashboard").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("example.com/docs").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId("chat-side-panel-browser-viewer")).toBeTruthy();
+
+    // The web-artifact search + list live behind the floating 🔍 Popover now.
+    // Before opening it, the always-on strip is gone (no rows in the DOM).
+    expect(screen.queryAllByTestId("chat-side-panel-browser-row")).toHaveLength(0);
 
     const addressInput = screen.getByTestId("chat-side-panel-browser-address") as HTMLInputElement;
     fireEvent.change(addressInput, { target: { value: "google.com" } });
@@ -338,7 +353,11 @@ describe("ChatSidePanel", () => {
     expect(manualWebview).not.toBeNull();
     expect(manualWebview?.getAttribute("src")).toBe("https://google.com/");
 
-    fireEvent.click(screen.getAllByTestId("chat-side-panel-browser-row")[1]!);
+    // Open the search Popover and pick the second artifact (example.com/docs).
+    fireEvent.click(screen.getByTestId("chat-side-panel-browser-search-trigger"));
+    const rows = screen.getAllByTestId("chat-side-panel-browser-row");
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    fireEvent.click(rows[1]!);
     const webview = container.querySelector('[data-testid="chat-side-panel-browser-webview"]');
     expect(webview?.getAttribute("src")).toBe("https://example.com/docs");
     expect(webview?.getAttribute("partition")).toBe(LVIS_SIDE_BROWSER_PARTITION);
@@ -1004,5 +1023,170 @@ describe("ChatSidePanel", () => {
     fireEvent.contextMenu(fileRow);
     fireEvent.click(await screen.findByTestId("chat-side-panel-fs-ctx-reveal"));
     await screen.findByTestId("chat-side-panel-op-error");
+  });
+
+  it("file tab: session segment is disabled with a 0 badge when there are no artifacts", () => {
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const sessionSeg = screen.getByTestId("chat-side-panel-file-source-session") as HTMLButtonElement;
+    expect(sessionSeg.disabled).toBe(true);
+    expect(screen.getByTestId("chat-side-panel-file-source-session-count").textContent).toBe("0");
+    // Directory is the default source.
+    expect(screen.getByTestId("chat-side-panel-file-source-directory").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("file tab: switching to the session segment shows the session artifacts", () => {
+    const targets: ChatPreviewTarget[] = [
+      { id: "file-1", kind: "file", title: "report.md", sourceLabel: "read_file", createdOrder: 1, path: "/ws/report.md", canOpenExternal: false },
+    ];
+    const files: WorkspaceFileItem[] = [
+      { id: "tool:/ws/report.md", path: "/ws/report.md", label: "report.md", detail: "/ws/report.md", sourceLabel: "read_file", operation: "read", previewTargetId: "file-1", canOpenExternal: false },
+    ];
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={targets} files={files} initialSelectedId="file-1" />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    // Default (directory) source does not list the session artifact.
+    expect(screen.getByTestId("chat-side-panel-file-tree")).not.toHaveTextContent("report.md");
+    const sessionSeg = screen.getByTestId("chat-side-panel-file-source-session") as HTMLButtonElement;
+    expect(sessionSeg.disabled).toBe(false);
+    expect(screen.getByTestId("chat-side-panel-file-source-session-count").textContent).toBe("1");
+    fireEvent.click(sessionSeg);
+    expect(screen.getByTestId("chat-side-panel-file-tree")).toHaveTextContent("report.md");
+  });
+
+  it("file tab: the source segment strip is compact (h-6 buttons, tight padding)", () => {
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    // R3: the strip must not crowd the narrow file pane — 24px buttons + py-0.5.
+    const strip = screen.getByTestId("chat-side-panel-file-source-segment");
+    expect(strip.className).toContain("py-0.5");
+    const dir = screen.getByTestId("chat-side-panel-file-source-directory");
+    expect(dir.className).toContain("h-6");
+    expect(dir.className).not.toContain("h-7");
+  });
+
+  it("file tab: the search box is hidden on the Directory segment and shown on Session (no dead search)", () => {
+    const targets: ChatPreviewTarget[] = [
+      { id: "file-1", kind: "file", title: "report.md", sourceLabel: "read_file", createdOrder: 1, path: "/ws/report.md", canOpenExternal: false },
+    ];
+    const files: WorkspaceFileItem[] = [
+      { id: "tool:/ws/report.md", path: "/ws/report.md", label: "report.md", detail: "/ws/report.md", sourceLabel: "read_file", operation: "read", previewTargetId: "file-1", canOpenExternal: false },
+    ];
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={targets} files={files} initialSelectedId="file-1" />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    // Directory is the default source; the search box would be a no-op there
+    // (ProjectRootsBrowser takes no query), so it is not rendered.
+    expect(screen.queryByTestId("chat-preview-search")).toBeNull();
+    // Switching to Session (which the search actually filters) reveals it.
+    fireEvent.click(screen.getByTestId("chat-side-panel-file-source-session"));
+    expect(screen.getByTestId("chat-preview-search")).toBeTruthy();
+  });
+
+  it("subagent tab: lists spawns (running first) and shows the selected one's detail", () => {
+    const subAgentSpawns: SubAgentSpawn[] = [
+      { spawnId: "done-1", title: "Completed agent", status: "done", turns: [{ turn: 1, text: "did work", toolCallCount: 2 }], summary: "all done", toolCallCount: 2 },
+      { spawnId: "run-1", title: "Live agent", status: "running", turns: [{ turn: 1, text: "working", toolCallCount: 1 }], toolCallCount: 1 },
+    ];
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    const rows = screen.getAllByTestId("chat-side-panel-subagent-row");
+    expect(rows).toHaveLength(2);
+    // Running spawn sorts first and is auto-selected in the detail pane.
+    expect(rows[0]!.textContent).toContain("Live agent");
+    expect(rows[0]!.getAttribute("aria-selected")).toBe("true");
+    const detail = screen.getByTestId("chat-side-panel-subagent-detail");
+    expect(detail.textContent).toContain("Live agent");
+    // Selecting the completed spawn swaps the detail card.
+    fireEvent.click(rows[1]!);
+    expect(screen.getByTestId("chat-side-panel-subagent-detail").textContent).toContain("Completed agent");
+  });
+
+  it("subagent tab: list is a role=listbox and each row is a role=option (valid aria-selected)", () => {
+    const subAgentSpawns: SubAgentSpawn[] = [
+      { spawnId: "run-1", title: "Live agent", status: "running", turns: [], toolCallCount: 0 },
+    ];
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    // aria-selected is only valid inside a select container (listbox/grid/…).
+    const listbox = screen.getByTestId("chat-side-panel-subagent-list");
+    expect(listbox.getAttribute("role")).toBe("listbox");
+    const rows = within(listbox).getAllByRole("option");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("subagent tab: renders a localized status label, not the raw enum", () => {
+    const subAgentSpawns: SubAgentSpawn[] = [
+      { spawnId: "done-1", title: "Done agent", status: "done", turns: [], toolCallCount: 0 },
+    ];
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    const row = screen.getByTestId("chat-side-panel-subagent-row");
+    // Test locale is Korean: "완료" (statusDone), never the raw "done" enum.
+    expect(row.textContent).toContain("완료");
+    expect(row.textContent).not.toContain("done");
+  });
+
+  it("subagent tab: selection is pinned to the chosen spawn and does not jump when the list reorders", () => {
+    // Two done spawns; select the second. When a new running spawn arrives and
+    // reorders the list (running-first), the pinned selection must stay on the
+    // originally-chosen spawn, not silently jump to the new top row.
+    const initial: SubAgentSpawn[] = [
+      { spawnId: "a", title: "Agent A", status: "done", turns: [], toolCallCount: 0 },
+      { spawnId: "b", title: "Agent B", status: "done", turns: [], toolCallCount: 0 },
+    ];
+    const { rerender } = renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={initial} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    const rows = screen.getAllByTestId("chat-side-panel-subagent-row");
+    fireEvent.click(rows[1]!); // select Agent B
+    expect(screen.getByTestId("chat-side-panel-subagent-detail").textContent).toContain("Agent B");
+
+    // A new running spawn arrives and would sort to the top of the list.
+    const reordered: SubAgentSpawn[] = [
+      ...initial,
+      { spawnId: "c", title: "Agent C", status: "running", turns: [], toolCallCount: 0 },
+    ];
+    rerender(
+      <TooltipProvider>
+        <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={reordered} />
+      </TooltipProvider>,
+    );
+    // The detail stays pinned to Agent B — no silent jump to the new top row.
+    expect(screen.getByTestId("chat-side-panel-subagent-detail").textContent).toContain("Agent B");
+  });
+
+  it("subagent tab: empty state when the chat has no spawns", () => {
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={[]} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    expect(screen.getByTestId("chat-side-panel-subagent-empty")).toBeTruthy();
+  });
+
+  it("side-chat is not a launcher item (reserved kind, no dead affordance)", () => {
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    expect(screen.queryByTestId("chat-side-panel-launcher-side-chat")).toBeNull();
+    // Also absent from the tab-bar "+" menu once a tab exists.
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    openLauncherMenu();
+    expect(screen.queryByTestId("chat-side-panel-launcher-menu-side-chat")).toBeNull();
+    expect(screen.getByTestId("chat-side-panel-launcher-menu-subagent")).toBeTruthy();
   });
 });

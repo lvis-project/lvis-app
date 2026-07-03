@@ -770,6 +770,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           selectedId={selectedPreviewId}
           onSelect={setSelectedPreviewId}
           workspaceTabs={workspaceTabs}
+          subAgentSpawns={subAgentSpawns}
           width={sidePanelWidth}
           onWidthChange={setSidePanelWidth}
           onWidthCommit={commitSidePanelWidth}
@@ -794,6 +795,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             selectedId={selectedPreviewId}
             onSelect={setSelectedPreviewId}
             workspaceTabs={workspaceTabs}
+            subAgentSpawns={subAgentSpawns}
             width={sidePanelWidth}
             onWidthChange={setSidePanelWidth}
             onWidthCommit={commitSidePanelWidth}

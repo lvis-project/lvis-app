@@ -1,4 +1,4 @@
-import { createElement, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
+import { createElement, memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
 import { cn } from "../../../lib/utils.js";
 import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
 import {
@@ -6,6 +6,7 @@ import {
   matchesLauncherShortcut,
 } from "./command-actions.js";
 import {
+  Bot,
   Check,
   ChevronDown,
   ChevronRight,
@@ -21,6 +22,8 @@ import {
   Globe,
   Image,
   LayoutGrid,
+  Loader2,
+  MessageSquare,
   PanelRightClose,
   Pin,
   Plug,
@@ -49,6 +52,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "../../../components/ui/context-menu.js";
+import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { wrapRenderHtmlInlineFrameDocument } from "../../../shared/render-html-preview.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../shared/side-browser.js";
@@ -62,6 +66,9 @@ import { FileEditDiff } from "./FileEditDiff.js";
 import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
 import { McpAppView } from "./McpAppView.js";
 import { PtyTerminalView } from "./PtyTerminalView.js";
+import { VerticalSplitLayout } from "./VerticalSplitLayout.js";
+import { useVerticalSplit } from "../hooks/use-vertical-split.js";
+import { SubAgentCard, type SubAgentSpawn } from "./SubAgentCard.js";
 
 interface FileTreeNode {
   id: string;
@@ -73,8 +80,6 @@ interface FileTreeNode {
 
 const FILE_TARGET_KINDS = new Set<ChatPreviewTarget["kind"]>(["file", "diff", "image"]);
 const BROWSER_TARGET_KINDS = new Set<ChatPreviewTarget["kind"]>(["html", "url"]);
-const FILE_TREE_MIN_PERCENT = 22;
-const FILE_TREE_MAX_PERCENT = 72;
 /** Pointer travel (px) that promotes a tab press into a horizontal pan. */
 const TAB_DRAG_THRESHOLD_PX = 6;
 
@@ -113,6 +118,10 @@ function tabIcon(kind: WorkspaceTabKind): LucideIcon {
       return Terminal;
     case "preview":
       return Table;
+    case "subagent":
+      return Bot;
+    case "side-chat":
+      return MessageSquare;
   }
 }
 
@@ -507,7 +516,23 @@ function BrowserDocumentViewer({ target }: { target: Extract<ChatPreviewTarget, 
   );
 }
 
-function UrlDocumentViewer({ api, target }: { api: LvisApi; target: Extract<ChatPreviewTarget, { kind: "url" }> }) {
+function UrlDocumentViewer({
+  api,
+  target,
+  showHeader = true,
+}: {
+  api: LvisApi;
+  target: Extract<ChatPreviewTarget, { kind: "url" }>;
+  /**
+   * Render the viewer's own URL/open-external header band. Default true. The
+   * BrowserWorkspace tab passes false because the tab already owns a single
+   * address bar above the webview — rendering the header here too produced the
+   * duplicate-address-bar nesting (#11). This toggles ONLY the header <div>; the
+   * webview node's key/position is invariant so the Electron guest is never
+   * remounted when the flag changes.
+   */
+  showHeader?: boolean;
+}) {
   const { t } = useTranslation();
   // Single URL-safety SOT (rejects non-http(s) + credential-laden urls). This is
   // the viewer boundary the url-safety header documents — it must not diverge
@@ -529,25 +554,27 @@ function UrlDocumentViewer({ api, target }: { api: LvisApi; target: Extract<Chat
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background" data-testid="chat-side-panel-url-viewer">
-      <div className="flex min-h-9 shrink-0 items-center gap-2 border-b bg-muted/(--opacity-muted) px-2 text-[11px] text-muted-foreground">
-        <Globe className="h-3.5 w-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{url}</span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7 shrink-0"
-              onClick={() => void api.openExternalUrl(url)}
-              aria-label={t("chatPreviewRail.openUrl")}
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("chatPreviewRail.openUrl")}</TooltipContent>
-        </Tooltip>
-      </div>
+      {showHeader ? (
+        <div className="flex min-h-9 shrink-0 items-center gap-2 border-b bg-muted/(--opacity-muted) px-2 text-[11px] text-muted-foreground">
+          <Globe className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{url}</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7 shrink-0"
+                onClick={() => void api.openExternalUrl(url)}
+                aria-label={t("chatPreviewRail.openUrl")}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("chatPreviewRail.openUrl")}</TooltipContent>
+          </Tooltip>
+        </div>
+      ) : null}
       {createElement("webview", {
         "data-testid": "chat-side-panel-browser-webview",
         src: url,
@@ -1462,12 +1489,21 @@ function FileBrowserWorkspace({
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
-  const [treePanePercent, setTreePanePercent] = useState(45);
+  const { topPercent, setTopPercent, commitTopPercent } = useVerticalSplit(api, "sidePanelSplitFilePercent");
   // A concrete filesystem file opened from the project-roots browser. Takes
   // precedence over the session-artifact selection in the detail pane.
   const [fsPath, setFsPath] = useState<string | null>(null);
-  const splitLayoutRef = useRef<HTMLDivElement | null>(null);
-  const resizeCleanupRef = useRef<(() => void) | null>(null);
+  // Which source the TOP pane shows (R3): the project directory tree or this
+  // chat's session artifacts. A segment toggle replaces the old vertical
+  // stacking that squeezed the session list into a sliver. This is a SOURCE
+  // switch on the horizontal axis — orthogonal to the top/bottom split axis
+  // above, so the two never fight.
+  const [fileSource, setFileSource] = useState<"directory" | "session">("directory");
+  const sessionFileCount = files.length;
+  const hasSessionFiles = sessionFileCount > 0;
+  // The session segment is disabled with zero files; snap back to directory so a
+  // previously-selected-but-now-empty session source can't strand an empty pane.
+  const effectiveSource = fileSource === "session" && hasSessionFiles ? "session" : "directory";
   const tree = useMemo(() => filterFileTree(buildFileTree(files), query), [files, query]);
   const filteredFiles = useMemo(
     () => files.filter((file) => matchesQuery(query, file.label, file.detail, file.path, file.sourceLabel)),
@@ -1500,120 +1536,126 @@ function FileBrowserWorkspace({
     }
   }, [onSelect, selectedFile, selectedId]);
 
-  useEffect(() => () => resizeCleanupRef.current?.(), []);
-
-  const updateTreePaneFromClientY = (clientY: number) => {
-    const layout = splitLayoutRef.current;
-    if (!layout) return;
-    const rect = layout.getBoundingClientRect();
-    if (rect.height <= 0) return;
-    const next = ((clientY - rect.top) / rect.height) * 100;
-    setTreePanePercent(clampNumber(Math.round(next), FILE_TREE_MIN_PERCENT, FILE_TREE_MAX_PERCENT));
-  };
-
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-file-browser">
-      <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
-      <div
-        ref={splitLayoutRef}
-        className="grid min-h-0 w-full min-w-0 flex-1 overflow-hidden"
-        data-testid="chat-side-panel-file-split-layout"
-        style={{ gridTemplateRows: `${treePanePercent}% 0.75rem minmax(0, 1fr)` }}
-      >
-        <div className="min-h-0 space-y-2 overflow-auto border-b p-2" data-testid="chat-side-panel-file-tree">
-          <ProjectRootsBrowser
-            selectedPath={fsPath}
-            onOpenFile={(path) => {
-              setFsPath(path);
-            }}
-          />
-          <div className="border-t pt-1">
-            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {t("chatPreviewRail.sessionFilesSection")}
+      {/*
+        The search box filters ONLY the session-artifact list (filteredFiles /
+        tree); the Directory source (ProjectRootsBrowser) has no query wiring, so
+        showing it there is a dead affordance. Render it only for the Session
+        segment so there is no no-op search control.
+      */}
+      {effectiveSource === "session" ? (
+        <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
+      ) : null}
+      <VerticalSplitLayout
+        topPercent={topPercent}
+        onDragChange={setTopPercent}
+        onCommit={commitTopPercent}
+        ariaLabel={t("chatPreviewRail.resizeFilePanels")}
+        testId="chat-side-panel-file-split-layout"
+        separatorTestId="chat-side-panel-file-splitter"
+        top={
+          <div className="flex min-h-0 flex-col" data-testid="chat-side-panel-file-tree">
+            {/*
+              R3 segment toggle: pick the top pane's source (project directory
+              vs session artifacts) instead of stacking both. Only the chosen
+              source occupies the whole pane, so the session list is no longer
+              squeezed. The session segment is disabled when the chat has no
+              artifacts yet.
+            */}
+            <div
+              role="group"
+              aria-label={t("chatPreviewRail.fileSourceLabel")}
+              className="flex shrink-0 items-center gap-1 border-b px-1 py-0.5"
+              data-testid="chat-side-panel-file-source-segment"
+            >
+              <button
+                type="button"
+                aria-pressed={effectiveSource === "directory"}
+                data-testid="chat-side-panel-file-source-directory"
+                className={cn(
+                  "flex h-6 flex-1 items-center justify-center gap-1 rounded-md px-2 text-[11px] font-medium",
+                  effectiveSource === "directory"
+                    ? "bg-primary/(--opacity-subtle) text-primary"
+                    : "text-muted-foreground hover:bg-muted/(--opacity-muted) hover:text-foreground",
+                )}
+                onClick={() => setFileSource("directory")}
+              >
+                <Folder className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("chatPreviewRail.fileSourceDirectory")}
+              </button>
+              <button
+                type="button"
+                aria-pressed={effectiveSource === "session"}
+                disabled={!hasSessionFiles}
+                data-testid="chat-side-panel-file-source-session"
+                className={cn(
+                  "flex h-6 flex-1 items-center justify-center gap-1 rounded-md px-2 text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-(--opacity-half)",
+                  effectiveSource === "session"
+                    ? "bg-primary/(--opacity-subtle) text-primary"
+                    : "text-muted-foreground hover:bg-muted/(--opacity-muted) hover:text-foreground",
+                )}
+                onClick={() => setFileSource("session")}
+              >
+                <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("chatPreviewRail.fileSourceSession")}
+                <Badge variant="outline" className="px-1 py-0 text-[10px]" data-testid="chat-side-panel-file-source-session-count">
+                  {sessionFileCount}
+                </Badge>
+              </button>
             </div>
-            {hasFiles && tree.length > 0 ? (
-              <FileTreeRows
-                nodes={tree}
-                selectedFileId={fsPath ? undefined : selectedFile?.id}
-                onSelectFile={(file) => {
-                  setFsPath(null);
-                  if (file.previewTargetId) onSelect(file.previewTargetId);
-                }}
-              />
+            <div className="min-h-0 flex-1 overflow-auto p-2">
+              {effectiveSource === "directory" ? (
+                <ProjectRootsBrowser
+                  selectedPath={fsPath}
+                  onOpenFile={(path) => {
+                    setFsPath(path);
+                  }}
+                />
+              ) : hasFiles && tree.length > 0 ? (
+                <FileTreeRows
+                  nodes={tree}
+                  selectedFileId={fsPath ? undefined : selectedFile?.id}
+                  onSelectFile={(file) => {
+                    setFsPath(null);
+                    if (file.previewTargetId) onSelect(file.previewTargetId);
+                  }}
+                />
+              ) : (
+                <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>
+              )}
+            </div>
+          </div>
+        }
+        bottom={
+          <div className="min-h-0 p-3">
+            {fsTarget ? (
+              <div className="space-y-3">
+                <DetailHeader target={fsTarget} />
+                <PreviewBody api={api} sessionId={sessionId} target={fsTarget} />
+              </div>
+            ) : selectedFileTarget ? (
+              <div className="space-y-3">
+                <DetailHeader target={selectedFileTarget} />
+                <PreviewBody api={api} sessionId={sessionId} target={selectedFileTarget} />
+              </div>
+            ) : selectedFile ? (
+              <div className="space-y-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{selectedFile.label}</h3>
+                </div>
+                <div className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 font-mono text-[11px] [overflow-wrap:anywhere]">
+                  {selectedFile.path}
+                </div>
+                <div className="text-[11px] text-muted-foreground">{t("chatPreviewRail.pathOnlyHint")}</div>
+              </div>
             ) : (
-              <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>
+              <div className="text-xs text-muted-foreground">{t("chatPreviewRail.emptyState")}</div>
             )}
           </div>
-        </div>
-        <div
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label={t("chatPreviewRail.resizeFilePanels")}
-          tabIndex={0}
-          data-testid="chat-side-panel-file-splitter"
-          className="group flex cursor-row-resize touch-none select-none items-center px-2 outline-none"
-          onPointerDown={(event) => {
-            event.preventDefault();
-            event.currentTarget.setPointerCapture?.(event.pointerId);
-            resizeCleanupRef.current?.();
-            updateTreePaneFromClientY(event.clientY);
-            const onMove = (moveEvent: PointerEvent) => updateTreePaneFromClientY(moveEvent.clientY);
-            const cleanup = () => {
-              window.removeEventListener("pointermove", onMove);
-              window.removeEventListener("pointerup", cleanup);
-              window.removeEventListener("pointercancel", cleanup);
-              resizeCleanupRef.current = null;
-            };
-            resizeCleanupRef.current = cleanup;
-            window.addEventListener("pointermove", onMove);
-            window.addEventListener("pointerup", cleanup);
-            window.addEventListener("pointercancel", cleanup);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowUp") {
-              event.preventDefault();
-              setTreePanePercent((value) => clampNumber(value - 5, FILE_TREE_MIN_PERCENT, FILE_TREE_MAX_PERCENT));
-            } else if (event.key === "ArrowDown") {
-              event.preventDefault();
-              setTreePanePercent((value) => clampNumber(value + 5, FILE_TREE_MIN_PERCENT, FILE_TREE_MAX_PERCENT));
-            } else if (event.key === "Home") {
-              event.preventDefault();
-              setTreePanePercent(FILE_TREE_MIN_PERCENT);
-            } else if (event.key === "End") {
-              event.preventDefault();
-              setTreePanePercent(FILE_TREE_MAX_PERCENT);
-            }
-          }}
-        >
-          <span className="h-0.5 w-full rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
-        </div>
-        <div className="min-h-0 overflow-auto p-3">
-          {fsTarget ? (
-            <div className="space-y-3">
-              <DetailHeader target={fsTarget} />
-              <PreviewBody api={api} sessionId={sessionId} target={fsTarget} />
-            </div>
-          ) : selectedFileTarget ? (
-            <div className="space-y-3">
-              <DetailHeader target={selectedFileTarget} />
-              <PreviewBody api={api} sessionId={sessionId} target={selectedFileTarget} />
-            </div>
-          ) : selectedFile ? (
-            <div className="space-y-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{selectedFile.label}</h3>
-              </div>
-              <div className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 font-mono text-[11px] [overflow-wrap:anywhere]">
-                {selectedFile.path}
-              </div>
-              <div className="text-[11px] text-muted-foreground">{t("chatPreviewRail.pathOnlyHint")}</div>
-            </div>
-          ) : (
-            <div className="text-xs text-muted-foreground">{t("chatPreviewRail.emptyState")}</div>
-          )}
-        </div>
-      </div>
+        }
+      />
     </div>
   );
 }
@@ -1683,6 +1725,7 @@ function BrowserWorkspace({
   const [query, setQuery] = useState("");
   const [addressDraft, setAddressDraft] = useState("");
   const [addressError, setAddressError] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const filteredTargets = useMemo(
     () => targets.filter((target) => matchesQuery(query, target.title, target.subtitle, target.sourceLabel, target.kind === "url" ? target.url : undefined)),
     [targets, query],
@@ -1734,6 +1777,12 @@ function BrowserWorkspace({
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-browser-workspace">
+      {/*
+        Single address bar (#11): the browser tab owns ONE address row here and
+        the viewer's own header is suppressed (UrlDocumentViewer showHeader=false)
+        so there is no duplicate URL band nesting. The web-artifact list + search
+        moved out of the always-on stacked strip into the floating 🔍 Popover.
+      */}
       <form
         className="flex shrink-0 items-center gap-2 border-b px-3 py-2"
         onSubmit={(event) => {
@@ -1752,6 +1801,51 @@ function BrowserWorkspace({
           placeholder={t("chatPreviewRail.browserAddressPlaceholder")}
           className="h-8 min-w-0 flex-1 text-xs"
         />
+        <Popover open={searchOpen} onOpenChange={setSearchOpen}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  // Radix sets data-state=open on the trigger while the search
+                  // Popover is open; reflect that with an active tint so the
+                  // toggled state is visible (R2).
+                  className="h-8 w-8 shrink-0 data-[state=open]:bg-primary/(--opacity-subtle) data-[state=open]:text-primary"
+                  aria-label={t("chatPreviewRail.browserSearch")}
+                  data-testid="chat-side-panel-browser-search-trigger"
+                >
+                  <Search className="h-3.5 w-3.5" />
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>{t("chatPreviewRail.browserSearch")}</TooltipContent>
+          </Tooltip>
+          <PopoverContent
+            align="end"
+            className="w-72 p-0"
+            data-testid="chat-side-panel-browser-search-popover"
+          >
+            <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
+            <div className="max-h-64 overflow-auto p-2">
+              {filteredTargets.length > 0 ? (
+                <TargetRows
+                  targets={filteredTargets}
+                  selectedId={manualTarget ? undefined : selectedTarget?.id}
+                  rowTestId="chat-side-panel-browser-row"
+                  onSelect={(id) => {
+                    onManualUrlChange(tabId, null);
+                    onSelect(id);
+                    setSearchOpen(false);
+                  }}
+                />
+              ) : (
+                <EmptyState>{t("chatPreviewRail.noBrowserTargets")}</EmptyState>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -1773,31 +1867,170 @@ function BrowserWorkspace({
           {addressError}
         </div>
       ) : null}
-      <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
-      <div className="max-h-36 shrink-0 overflow-auto border-b p-2">
-        {filteredTargets.length > 0 ? (
-          <TargetRows
-            targets={filteredTargets}
-            selectedId={manualTarget ? undefined : selectedTarget?.id}
-            rowTestId="chat-side-panel-browser-row"
-            onSelect={(id) => {
-              onManualUrlChange(tabId, null);
-              onSelect(id);
-            }}
-          />
-        ) : (
-          <EmptyState>{t("chatPreviewRail.noBrowserTargets")}</EmptyState>
-        )}
-      </div>
       <div className="min-h-0 w-full min-w-0 flex-1 overflow-hidden">
         {displayedTarget?.kind === "html" ? (
           <BrowserDocumentViewer target={displayedTarget} />
         ) : displayedTarget?.kind === "url" ? (
-          <UrlDocumentViewer api={api} target={displayedTarget} />
+          <UrlDocumentViewer api={api} target={displayedTarget} showHeader={false} />
         ) : (
-          <div className="text-xs text-muted-foreground">{t("chatPreviewRail.noBrowserTargets")}</div>
+          <div className="p-4 text-xs text-muted-foreground">{t("chatPreviewRail.noBrowserTargets")}</div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Status tone for the sub-agent list row badge. */
+function subAgentStatusTone(status: SubAgentSpawn["status"]): string {
+  if (status === "error") return "text-destructive";
+  if (status === "done") return "text-muted-foreground";
+  return "text-warning";
+}
+
+/**
+ * One selectable row in the sub-agent list. Memoized so a live-updating spawn
+ * (its turn count / status ticks as the agent runs) only re-renders its OWN row,
+ * not every sibling — the list can hold many concurrent spawns.
+ */
+/** Localized status label, reusing the SubAgentCard status i18n keys. */
+function subAgentStatusLabel(status: SubAgentSpawn["status"], t: (key: string) => string): string {
+  if (status === "error") return t("subAgentCard.statusError");
+  if (status === "done") return t("subAgentCard.statusDone");
+  return t("subAgentCard.statusRunning");
+}
+
+const SubAgentRow = memo(function SubAgentRow({
+  spawn,
+  active,
+  onSelect,
+}: {
+  spawn: SubAgentSpawn;
+  active: boolean;
+  onSelect: (spawnId: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    // role="option": this row lives in a role="listbox"; aria-selected is valid
+    // only on a listbox option (not a bare button).
+    <button
+      type="button"
+      role="option"
+      data-testid="chat-side-panel-subagent-row"
+      aria-selected={active}
+      className={cn(
+        "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-muted/(--opacity-muted)",
+        active ? "bg-accent text-accent-foreground" : "",
+      )}
+      onClick={() => onSelect(spawn.spawnId)}
+    >
+      {spawn.status === "running" ? (
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-warning" aria-hidden="true" />
+      ) : (
+        <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      )}
+      <span className="min-w-0 flex-1 truncate font-medium" title={spawn.title}>
+        {spawn.title}
+      </span>
+      <span className={cn("shrink-0 text-[10px]", subAgentStatusTone(spawn.status))}>
+        {subAgentStatusLabel(spawn.status, t)}
+      </span>
+    </button>
+  );
+});
+
+/**
+ * Sub-agent viewer tab (R4). Top pane = the list of this chat's sub-agent spawns
+ * (live + completed); bottom pane = the SELECTED spawn's transcript/tool-activity
+ * via the shared SubAgentCard. Only the selected spawn is rendered in detail (not
+ * every card), and the list rows are memoized, so a chat that fanned out many
+ * agents stays cheap. The top↕bottom split persists via sidePanelSplitSubagentPercent.
+ */
+function SubAgentViewer({
+  api,
+  subAgentSpawns,
+}: {
+  api: LvisApi;
+  subAgentSpawns: SubAgentSpawn[];
+}) {
+  const { t } = useTranslation();
+  const { topPercent, setTopPercent, commitTopPercent } = useVerticalSplit(api, "sidePanelSplitSubagentPercent");
+  const [selectedSpawnId, setSelectedSpawnId] = useState<string | null>(null);
+  // Running spawns first (the user usually wants the live one), then completed.
+  const orderedSpawns = useMemo(() => {
+    const running = subAgentSpawns.filter((spawn) => spawn.status === "running");
+    const rest = subAgentSpawns.filter((spawn) => spawn.status !== "running");
+    return [...running, ...rest];
+  }, [subAgentSpawns]);
+  // Pin the detail to the CHOSEN spawnId. The synchronous `?? orderedSpawns[0]`
+  // fallback only applies while nothing is chosen yet (no first-render flash);
+  // once a spawn resolves, `.find` keeps it, so a status flip that reorders the
+  // list (running→done reshuffles `orderedSpawns`) can never silently jump the
+  // viewed spawn out from under the user. The effect below persists the seed
+  // into `selectedSpawnId` so the row highlight (`active`) matches the detail.
+  const selectedSpawn = useMemo(
+    () => orderedSpawns.find((spawn) => spawn.spawnId === selectedSpawnId) ?? orderedSpawns[0] ?? null,
+    [orderedSpawns, selectedSpawnId],
+  );
+
+  useEffect(() => {
+    if (orderedSpawns.length === 0) {
+      if (selectedSpawnId !== null) setSelectedSpawnId(null);
+      return;
+    }
+    // Seed / re-pin only when the current selection is absent — never when it
+    // still resolves, so an in-place list reorder does not move the selection.
+    if (!selectedSpawnId || !orderedSpawns.some((spawn) => spawn.spawnId === selectedSpawnId)) {
+      setSelectedSpawnId(orderedSpawns[0].spawnId);
+    }
+  }, [orderedSpawns, selectedSpawnId]);
+
+  if (orderedSpawns.length === 0) {
+    return (
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-col items-center justify-center p-6 text-center" data-testid="chat-side-panel-subagent-empty">
+        <Bot className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+        <div className="mt-2 text-xs text-muted-foreground">{t("chatPreviewRail.subagentEmpty")}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-subagent-viewer">
+      <VerticalSplitLayout
+        topPercent={topPercent}
+        onDragChange={setTopPercent}
+        onCommit={commitTopPercent}
+        ariaLabel={t("chatPreviewRail.resizeSubagentPanels")}
+        testId="chat-side-panel-subagent-split-layout"
+        separatorTestId="chat-side-panel-subagent-splitter"
+        top={
+          // role="listbox" makes each row's aria-selected valid (it is only
+          // meaningful on option/row/tab/… children of a select container).
+          <div
+            role="listbox"
+            aria-label={t("chatPreviewRail.subagentListLabel")}
+            className="min-h-0 space-y-1 p-2"
+            data-testid="chat-side-panel-subagent-list"
+          >
+            {orderedSpawns.map((spawn) => (
+              <SubAgentRow
+                key={spawn.spawnId}
+                spawn={spawn}
+                active={spawn.spawnId === selectedSpawn?.spawnId}
+                onSelect={setSelectedSpawnId}
+              />
+            ))}
+          </div>
+        }
+        bottom={
+          <div className="min-h-0 p-3" data-testid="chat-side-panel-subagent-detail">
+            {selectedSpawn ? (
+              <SubAgentCard spawn={selectedSpawn} />
+            ) : (
+              <div className="text-xs text-muted-foreground">{t("chatPreviewRail.subagentSelectHint")}</div>
+            )}
+          </div>
+        }
+      />
     </div>
   );
 }
@@ -1885,28 +2118,40 @@ function ListDetailWorkspace({
   rowTestId: string;
   onSelect: (id: string) => void;
 }) {
+  const { topPercent, setTopPercent, commitTopPercent } = useVerticalSplit(api, "sidePanelSplitPreviewPercent");
+  const { t } = useTranslation();
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
       <SearchInput query={query} setQuery={setQuery} placeholder={placeholder} />
-      <div className="grid min-h-0 w-full min-w-0 flex-1 grid-rows-[minmax(10rem,0.85fr)_minmax(14rem,1.15fr)] overflow-hidden">
-        <div className="min-h-0 overflow-auto border-b p-2">
-          {rows.length > 0 ? (
-            <TargetRows targets={rows} selectedId={selectedTarget?.id} rowTestId={rowTestId} onSelect={onSelect} />
-          ) : (
-            <EmptyState>{emptyText}</EmptyState>
-          )}
-        </div>
-        <div className="min-h-0 overflow-auto p-3">
-          {selectedTarget ? (
-            <div className="space-y-3">
-              <DetailHeader target={selectedTarget} />
-              <PreviewBody api={api} sessionId={sessionId} target={selectedTarget} />
-            </div>
-          ) : (
-            <div className="text-xs text-muted-foreground">{emptyText}</div>
-          )}
-        </div>
-      </div>
+      <VerticalSplitLayout
+        topPercent={topPercent}
+        onDragChange={setTopPercent}
+        onCommit={commitTopPercent}
+        ariaLabel={t("chatPreviewRail.resizePreviewPanels")}
+        testId="chat-side-panel-preview-split-layout"
+        separatorTestId="chat-side-panel-preview-splitter"
+        top={
+          <div className="min-h-0 p-2">
+            {rows.length > 0 ? (
+              <TargetRows targets={rows} selectedId={selectedTarget?.id} rowTestId={rowTestId} onSelect={onSelect} />
+            ) : (
+              <EmptyState>{emptyText}</EmptyState>
+            )}
+          </div>
+        }
+        bottom={
+          <div className="min-h-0 p-3">
+            {selectedTarget ? (
+              <div className="space-y-3">
+                <DetailHeader target={selectedTarget} />
+                <PreviewBody api={api} sessionId={sessionId} target={selectedTarget} />
+              </div>
+            ) : (
+              <div className="text-xs text-muted-foreground">{emptyText}</div>
+            )}
+          </div>
+        }
+      />
     </div>
   );
 }
@@ -1921,6 +2166,10 @@ function tabLabelKey(kind: WorkspaceTabKind): string {
       return "chatPreviewRail.tab.terminal";
     case "preview":
       return "chatPreviewRail.tab.preview";
+    case "subagent":
+      return "chatPreviewRail.tab.subagent";
+    case "side-chat":
+      return "chatPreviewRail.tab.sideChat";
   }
 }
 
@@ -1934,6 +2183,10 @@ function tabTestId(kind: WorkspaceTabKind): string {
       return "chat-side-panel-tab-preview";
     case "terminal":
       return "chat-side-panel-tab-terminal";
+    case "subagent":
+      return "chat-side-panel-tab-subagent";
+    case "side-chat":
+      return "chat-side-panel-tab-side-chat";
   }
 }
 
@@ -2163,6 +2416,12 @@ export interface ChatSidePanelProps {
    * level so tab state survives.
    */
   workspaceTabs: WorkspaceTabsStore;
+  /**
+   * This chat's sub-agent spawns (live + completed), sourced from ChatView's
+   * spawn stream. Drives the subagent viewer tab (R4). Prop-drilled rather than
+   * re-subscribed here so there is one spawn source of truth.
+   */
+  subAgentSpawns: SubAgentSpawn[];
   /** Docked panel width (px), owned by ChatView (useSidePanelWidth). */
   width: number;
   /** Drag-live width update — state only, no persist. */
@@ -2187,6 +2446,7 @@ export function ChatSidePanel({
   onSelect,
   onClose,
   workspaceTabs,
+  subAgentSpawns,
   width,
   onWidthChange,
   onWidthCommit,
@@ -2558,6 +2818,17 @@ export function ChatSidePanel({
             />
           ) : activeTab.kind === "terminal" ? (
             <PtyTerminalView api={api} tabId={activeTab.id} />
+          ) : activeTab.kind === "subagent" ? (
+            <SubAgentViewer api={api} subAgentSpawns={subAgentSpawns} />
+          ) : activeTab.kind === "side-chat" ? (
+            // Unreachable in this PR: side-chat has no launcher entry and no
+            // content producer, so a tab of this kind cannot be created until
+            // the companion PR ships the 2nd ConversationLoop. This placeholder
+            // exists only to keep the body dispatch exhaustive alongside the
+            // reserved `side-chat` tab kind (Field-Addition Sweep).
+            <div className="p-4 text-xs text-muted-foreground" data-testid="chat-side-panel-side-chat-placeholder">
+              {t("chatPreviewRail.sideChatComingSoon")}
+            </div>
           ) : (
             <PreviewWorkspace api={api} sessionId={sessionId} targets={previewTargets} selectedId={selectedId} onSelect={onSelect} />
           )}
