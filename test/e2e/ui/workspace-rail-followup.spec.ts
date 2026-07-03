@@ -111,4 +111,47 @@ test.describe("workspace rail follow-up", () => {
     const scrolled = await scroll.evaluate((el) => el.scrollLeft);
     expect(scrolled).toBeGreaterThan(0);
   });
+
+  test("file-browser: ARIA tree, keyboard nav, folder expand, and right-click menu", async () => {
+    // Seed a subfolder so the tree has a directory to expand + navigate.
+    const docsDir = resolve(workspaceDir, "docs");
+    mkdirSync(docsDir, { recursive: true });
+    writeFileSync(resolve(docsDir, "guide.md"), "# Guide\n\nnested-marker\n", "utf-8");
+
+    await page.setViewportSize({ width: 1400, height: 840 });
+    await page.getByTestId("chat-side-panel-toggle").click();
+    await expect(page.getByTestId("chat-side-panel")).toBeVisible();
+    await page.getByTestId("chat-side-panel-launcher-file-browser").click();
+
+    // ARIA tree widget with conformant treeitem rows.
+    const tree = page.getByRole("tree");
+    await expect(tree).toBeVisible();
+    const folderRow = page.getByTestId("chat-side-panel-fs-folder").filter({ hasText: "docs" });
+    await expect(folderRow).toBeVisible({ timeout: 10_000 });
+    await expect(folderRow).toHaveAttribute("aria-level", "1");
+    await expect(folderRow).toHaveAttribute("aria-expanded", "false");
+
+    // Keyboard: focus the folder, ArrowRight expands it, revealing its child.
+    await folderRow.focus();
+    await folderRow.press("ArrowRight");
+    await expect(folderRow).toHaveAttribute("aria-expanded", "true");
+    await expect(tree.getByRole("group")).toBeVisible();
+    await expect(page.getByTestId("chat-side-panel-fs-file").filter({ hasText: "guide.md" })).toBeVisible();
+
+    // ArrowLeft collapses it again.
+    await folderRow.press("ArrowLeft");
+    await expect(folderRow).toHaveAttribute("aria-expanded", "false");
+
+    // Right-click opens the context menu with reveal + copy items (Escape to
+    // close — clicking Reveal would pop the OS file manager).
+    await folderRow.click({ button: "right" });
+    await expect(page.getByTestId("chat-side-panel-fs-context-menu")).toBeVisible();
+    await expect(page.getByTestId("chat-side-panel-fs-ctx-reveal")).toBeVisible();
+    await expect(page.getByTestId("chat-side-panel-fs-ctx-copy-path")).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    // Collapse-all is present; the default root has no remove button.
+    await expect(page.getByTestId("chat-side-panel-collapse-all")).toBeVisible();
+    await expect(page.getByTestId("chat-side-panel-remove-root")).toHaveCount(0);
+  });
 });
