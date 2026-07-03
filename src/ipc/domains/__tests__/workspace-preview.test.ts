@@ -450,3 +450,190 @@ describe("workspace handlers", () => {
     expect(showItemInFolderMock).not.toHaveBeenCalled();
   });
 });
+
+describe("workspace:drop-prepare handler (#1458 drag-drop add-root)", () => {
+  it("rejects an unauthorized sender frame (fail-closed)", async () => {
+    const res = (await invoke(CHANNELS.workspace.dropPrepare, EVIL_FRAME, root)) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "unauthorized" });
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-string / empty path (invalid-path)", async () => {
+    const res = (await invoke(CHANNELS.workspace.dropPrepare, OK_FRAME, "")) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "invalid-path" });
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+
+  it("mints a MAIN-OWNED ack token for a valid dropped folder and NEVER persists directly", async () => {
+    // A drop always requires acknowledgement (even with zero warnings): the OS
+    // dialog never vouched for the path, so the explicit user ack is that vouch.
+    const dropped = mkdtempSync(join(tmpdir(), "lvis-ws-drop-"));
+    const res = (await invoke(CHANNELS.workspace.dropPrepare, OK_FRAME, dropped)) as {
+      ok: boolean;
+      pendingPath?: string;
+      ackToken?: string;
+      added?: string;
+    };
+    expect(res.ok).toBe(true);
+    expect(res.pendingPath).toBe(dropped);
+    expect(typeof res.ackToken).toBe("string");
+    expect((res.ackToken ?? "").length).toBeGreaterThan(0);
+    // dropPrepare NEVER widens the read scope on its own — persistence only
+    // happens on the pickRoot ack pass. (added is not returned by dropPrepare.)
+    expect((res as { added?: string }).added).toBeUndefined();
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+    rmSync(dropped, { recursive: true, force: true });
+  });
+
+  it("HARD-DENIES a Layer 0 sensitive dropped path and mints NO token", async () => {
+    // A renderer that resolves a dropped ~/.ssh cannot widen the read scope: the
+    // deny happens before any token is minted, so it can never be acknowledged.
+    // The surfaced error is the STABLE `sensitive-path` code (mapped to Korean in
+    // the renderer), NEVER the validator's raw English prose.
+    const res = (await invoke(CHANNELS.workspace.dropPrepare, OK_FRAME, join(homedir(), ".ssh"))) as {
+      ok: boolean;
+      error?: string;
+      ackToken?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "sensitive-path" });
+    expect(res.ackToken).toBeUndefined();
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+
+  it("REFUSES the filesystem root (hard deny, no token)", async () => {
+    // Surfaces the stable `path-not-allowed` code, not raw English prose.
+    const fsRoot = process.platform === "win32" ? "C:\\" : "/";
+    const res = (await invoke(CHANNELS.workspace.dropPrepare, OK_FRAME, fsRoot)) as {
+      ok: boolean;
+      error?: string;
+      ackToken?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "path-not-allowed" });
+    expect(res.ackToken).toBeUndefined();
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a dropped FILE (not-a-dir — the renderer never guesses a parent)", async () => {
+    const base = mkdtempSync(join(tmpdir(), "lvis-ws-dropfile-"));
+    const file = join(base, "note.txt");
+    writeFileSync(file, "hi");
+    const res = (await invoke(CHANNELS.workspace.dropPrepare, OK_FRAME, file)) as {
+      ok: boolean;
+      error?: string;
+      ackToken?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "not-a-dir" });
+    expect(res.ackToken).toBeUndefined();
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it("rejects a non-existent dropped path (not-found)", async () => {
+    const res = (await invoke(
+      CHANNELS.workspace.dropPrepare,
+      OK_FRAME,
+      join(tmpdir(), "lvis-ws-does-not-exist-xyz"),
+    )) as { ok: boolean; error?: string; ackToken?: string };
+    expect(res).toMatchObject({ ok: false, error: "not-found" });
+    expect(res.ackToken).toBeUndefined();
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+
+  it("drop → dropPrepare → pickRoot(token) persists the folder and audits gesture=drop", async () => {
+    const log = (deps as unknown as { auditLogger: { log: ReturnType<typeof vi.fn> } }).auditLogger.log;
+    const dropped = mkdtempSync(join(tmpdir(), "lvis-ws-drop-flow-"));
+    const prep = (await invoke(CHANNELS.workspace.dropPrepare, OK_FRAME, dropped)) as {
+      ok: boolean;
+      ackToken?: string;
+    };
+    expect(prep.ok).toBe(true);
+    log.mockClear();
+    addAllowedDirectoryPersistMock.mockClear();
+    // The renderer confirms by echoing the TOKEN (never re-supplying the path).
+    const done = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME, { ackToken: prep.ackToken })) as {
+      ok: boolean;
+      added?: string;
+    };
+    expect(done).toMatchObject({ ok: true, added: dropped });
+    expect(addAllowedDirectoryPersistMock).toHaveBeenCalledWith(dropped);
+    // The widening audit records gesture=drop so a renderer-named drop widening
+    // is distinguishable from a native-picker widening.
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "info",
+        input: expect.stringContaining('"gesture":"drop"'),
+      }),
+    );
+    rmSync(dropped, { recursive: true, force: true });
+  });
+
+  it("a drop ack token is ONE-TIME — a replay is refused after first use", async () => {
+    const dropped = mkdtempSync(join(tmpdir(), "lvis-ws-drop-replay-"));
+    const prep = (await invoke(CHANNELS.workspace.dropPrepare, OK_FRAME, dropped)) as { ackToken?: string };
+    const token = prep.ackToken;
+    const first = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME, { ackToken: token })) as {
+      ok: boolean;
+      added?: string;
+    };
+    expect(first).toMatchObject({ ok: true, added: dropped });
+    addAllowedDirectoryPersistMock.mockClear();
+    const replay = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME, { ackToken: token })) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(replay).toMatchObject({ ok: false, error: "ack-unknown" });
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+    rmSync(dropped, { recursive: true, force: true });
+  });
+
+  it("re-checks is-a-directory at the ack pass — a dir swapped for a file after prepare is refused (TOCTOU)", async () => {
+    // prepare a real directory, mint a token, THEN replace the directory with a
+    // regular file before the ack lands. The persist pass must re-stat and refuse
+    // a non-directory rather than widening the read scope to a file.
+    const base = mkdtempSync(join(tmpdir(), "lvis-ws-drop-toctou-"));
+    const target = join(base, "target");
+    mkdirSync(target);
+    const prep = (await invoke(CHANNELS.workspace.dropPrepare, OK_FRAME, target)) as {
+      ok: boolean;
+      ackToken?: string;
+    };
+    expect(prep.ok).toBe(true);
+    expect(typeof prep.ackToken).toBe("string");
+    // Swap the directory for a file between prepare and ack.
+    rmSync(target, { recursive: true, force: true });
+    writeFileSync(target, "now a file");
+    addAllowedDirectoryPersistMock.mockClear();
+    const done = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME, { ackToken: prep.ackToken })) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(done).toMatchObject({ ok: false, error: "not-a-dir" });
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it("re-checks existence at the ack pass — a path deleted after prepare is refused (not-found)", async () => {
+    // A directory removed entirely between prepare and ack must fail closed at
+    // persist rather than persisting a vanished path into the read allow-list.
+    const dropped = mkdtempSync(join(tmpdir(), "lvis-ws-drop-vanish-"));
+    const prep = (await invoke(CHANNELS.workspace.dropPrepare, OK_FRAME, dropped)) as {
+      ok: boolean;
+      ackToken?: string;
+    };
+    expect(prep.ok).toBe(true);
+    rmSync(dropped, { recursive: true, force: true });
+    addAllowedDirectoryPersistMock.mockClear();
+    const done = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME, { ackToken: prep.ackToken })) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(done).toMatchObject({ ok: false, error: "not-found" });
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+});
