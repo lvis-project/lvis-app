@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../..
 import { isDebugStreamEnabled } from "../../lib/debug-stream.js";
 import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import { ViewModeBanner, type ViewModeState } from "./components/ViewModeBanner.js";
-import { SubAgentCard } from "./components/SubAgentCard.js";
+import { SubAgentSpawnChip } from "./components/SubAgentSpawnChip.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { type StatusBarProps } from "./components/StatusBar.js";
 import { ChatSidePanel } from "./components/ChatSidePanel.js";
@@ -366,6 +366,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     return map;
   }, [visibleEntries]);
 
+  // Inline surface for a spawn attached to its `agent_spawn` tool row: a
+  // LIGHTWEIGHT completion chip only (status + counts + "detail in tab"). The
+  // full child transcript (tool/reasoning/assistant timeline) is rendered in the
+  // sub-agent tab via the shared TranscriptRenderer — NOT inline. This replaces
+  // the former full inline SubAgentCard, which duplicated the tab and stacked
+  // (2026-05-07 "missed at top" regression class).
   const renderSpawnsForGroup = useCallback(
     (group: { tools: { toolUseId: string }[] }) => {
       const seen = new Set<string>();
@@ -376,7 +382,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         for (const spawn of list) {
           if (seen.has(spawn.spawnId)) continue;
           seen.add(spawn.spawnId);
-          nodes.push(<SubAgentCard key={spawn.spawnId} spawn={spawn} />);
+          nodes.push(<SubAgentSpawnChip key={spawn.spawnId} spawn={spawn} />);
         }
       }
       return nodes;

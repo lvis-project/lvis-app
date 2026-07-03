@@ -52,7 +52,7 @@ import type {
   OpenHtmlPreviewWindowResult,
 } from "../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../shared/session-todo.js";
-import type { StreamEvent } from "../lib/chat-stream-state.js";
+import type { StreamEvent, ChatEntry } from "../lib/chat-stream-state.js";
 import type { SerializedHistoryMessage } from "../shared/chat-history.js";
 import type { TurnResult } from "../engine/conversation-loop.js";
 
@@ -1482,10 +1482,9 @@ export function buildInternalApiSurface() {
   onAgentSpawnEvent: (
     handler: (event: {
       spawnId: string;
-      type: "start" | "turn" | "done" | "error";
+      type: "start" | "activity" | "done" | "error";
       title?: string;
-      turn?: number;
-      text?: string;
+      entries?: ChatEntry[];
       summary?: string;
       toolCallCount?: number;
       message?: string;

@@ -2411,6 +2411,7 @@ export const esMessages: Record<string, string> = {
   "subAgentCard.statusRunning": "En ejecución",
   "subAgentCard.summaryLabel": "Resumen",
   "subAgentCard.toolCalls": "llamadas a herramientas: {count}",
+  "subAgentCard.detailInTab": "detalles en la pestaña",
   "subAgentCard.turnCount": "{count} turno",
   "subAgentCard.turnHeading": "Gire {turn}",
   "suggestedRepliesChipRow.toolbarAriaLabel": "Sugerencias de respuesta alternativas",
