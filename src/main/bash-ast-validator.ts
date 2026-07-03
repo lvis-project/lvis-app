@@ -1,4 +1,5 @@
 import { t } from "../i18n/index.js";
+import { tokenizeShell } from "./shell-tokenizer.js";
 
 /**
  * Bash AST Pre-Validator — LVIS local shell safety policy
@@ -18,6 +19,13 @@ import { t } from "../i18n/index.js";
  *  11. ifs-command-injection — `r${IFS}m -rf /` IFS 조작 우회
  *  12. brace-expansion-exec — `r{m} -rf /` brace expansion 우회
  *  13. subshell-command-exec — `$(echo rm) -rf /` subshell 우회
+ *
+ * Leaf boundaries come from the shared {@link tokenizeShell} SOT so this
+ * validator and the host risk inspector agree on what a compound-command "leaf"
+ * is. A tokenizer-based `rm -rf <dangerous>` leaf check runs as an ADDITIONAL
+ * deny layer alongside the regex patterns — it can only ADD denies (a
+ * quote-aware split catches `rm -rf /` leaves the raw-regex boundary might miss)
+ * and never relaxes an existing deny.
  */
 
 export type ValidationDecision = "allow" | "warn" | "deny";
@@ -140,7 +148,65 @@ export class BashAstValidator {
       }
     }
 
+    // Additional leaf-aware guard using the shared tokenizer. Runs AFTER the
+    // regex patterns so their patternId attribution is unchanged; it only adds
+    // denies the raw-regex boundary could miss (e.g. a quoted separator hiding
+    // an `rm -rf /` leaf). Never relaxes an existing deny.
+    const leafGuard = this._detectDangerousRmLeaf(command);
+    if (leafGuard) {
+      return {
+        decision: this.opts.mode === "warn" ? "warn" : "deny",
+        reason: leafGuard.reason,
+        patternId: leafGuard.patternId,
+      };
+    }
+
     return { decision: "allow" };
+  }
+
+  /**
+   * Tokenizer-based detection of an `rm -rf <dangerous-path>` leaf anywhere in a
+   * compound command. Uses the shared {@link tokenizeShell} leaf definition so a
+   * quote-aware split identifies the leaf the raw regex might miss. Returns null
+   * when no such leaf is found (or on a parse error — the regex patterns and the
+   * host risk inspector already fail closed on unparseable input, so this
+   * additive layer stays silent rather than double-attributing).
+   */
+  private _detectDangerousRmLeaf(
+    command: string,
+  ): { reason: string; patternId: string } | null {
+    const { leaves, parseError } = tokenizeShell(command);
+    if (parseError) return null;
+    for (const leaf of leaves) {
+      const argv = leaf.argv;
+      if (argv.length === 0) continue;
+      const verb = this._basename(argv[0]!);
+      if (verb !== "rm") continue;
+      const flags = argv.slice(1);
+      const recursiveForce = flags.some((f) => /^-[a-zA-Z]*r[a-zA-Z]*$/i.test(f))
+        && flags.some((f) => /^-[a-zA-Z]*f[a-zA-Z]*$/i.test(f));
+      if (!recursiveForce) continue;
+      const target = flags.find((f) => !f.startsWith("-"));
+      if (target !== undefined && this._isDangerousRmTarget(target)) {
+        return { reason: t("be_bashAstValidator.rmRfCompound"), patternId: "rm-rf-compound" };
+      }
+    }
+    return null;
+  }
+
+  /** Reduce `/bin/rm` → `rm`; leave bare verbs unchanged. */
+  private _basename(token: string): string {
+    const slash = token.lastIndexOf("/");
+    return slash >= 0 ? token.slice(slash + 1) : token;
+  }
+
+  /** True for the dangerous `rm` targets the regex patterns also treat as
+   * catastrophic: `/`, `~`/`~/`, `$HOME`, `*`. */
+  private _isDangerousRmTarget(target: string): boolean {
+    return /^\/+$/.test(target)
+      || /^~\/?$/.test(target)
+      || /^\$HOME\/?$/.test(target)
+      || target === "*";
   }
 
   private _isBashTool(toolName: string): boolean {

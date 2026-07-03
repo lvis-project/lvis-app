@@ -34,6 +34,7 @@
  */
 import type { ToolCategory } from "../../tools/types.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
+import { tokenizeShell, type ShellLeaf } from "../../main/shell-tokenizer.js";
 
 /**
  * Built-in read-only command set (Claude Code / Codex model). A compound shell
@@ -50,26 +51,123 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "grep", "egrep", "fgrep", "rg", "ag", "find", "fd", "wc", "stat", "file",
   "du", "df", "tree", "which", "type", "whoami", "id", "hostname", "uname",
   "date", "env", "printenv", "uptime", "ps", "top", "sort", "uniq", "cut",
-  "awk", "sed", "diff", "cmp", "basename", "dirname", "realpath", "readlink",
+  // NOTE: `awk` is intentionally ABSENT. awk has its own output-redirection
+  // (`print > "file"`), pipe-to-command (`print | "cmd"`), and system() that
+  // execute arbitrary code inside the awk-program string. These are opaque to
+  // shell tokenization (correctly so — the shell sees a single-quoted literal
+  // string). Classifying awk as read-only would require a full awk-language
+  // parser; without one the classifier cannot distinguish `awk '{print $1}'`
+  // from `awk 'BEGIN{system("rm -rf /")}'`. Any awk call therefore classifies
+  // as `shell` (extra approval prompt — the safe, stated discipline of this module).
+  "sed", "diff", "cmp", "basename", "dirname", "realpath", "readlink",
   "true", "false", "test", "sleep", "seq", "yes", "tr", "nl", "tac", "rev",
   "column", "comm", "join", "paste", "expand", "unexpand", "fold", "split",
 ]);
 
 /**
- * Wrapper commands that delegate to a real command in a later operand. Claude
- * Code strips these before classifying. The effective verb is the first
- * operand that is not itself a wrapper or an option flag.
+ * Read-only verbs that nonetheless MUTATE when carrying certain flags. Even
+ * though the head verb is in {@link READ_ONLY_COMMANDS}, a call carrying one of
+ * these flags edits/creates/destroys files and must escalate to `"shell"`.
+ *
+ * `null` means the verb is ALWAYS mutating regardless of flags (it has no
+ * side-effect-free form worth the read fast-path).
+ *
+ * Defense-in-depth note: `tee`, `dd`, `truncate`, and `split` are NOT in
+ * {@link READ_ONLY_COMMANDS} and already fail closed as unknown verbs. Their
+ * `null` entries here are retained so the MUTATING_FLAGS table stays accurate
+ * if those verbs are ever added to READ_ONLY_COMMANDS in the future.
+ *
+ * Flag matching — three modes, all applied:
+ *  1. Long flags: exact-token (`--in-place`) or `--flag=value` prefix
+ *     (`--in-place=.bak`), never a substring.
+ *  2. Short-flag clusters: for verbs in this table, a single-dash non-`--` arg
+ *     is mutating if any mutating SHORT LETTER appears in its leading
+ *     letter-cluster. This catches `-i`, `-i.bak` (glued suffix), `-ibak`,
+ *     `-ni` (combined with other flags), and `-iinplace` (gawk form). The
+ *     cluster is the maximal run of ASCII letters at the start of the arg
+ *     (stopping at the first non-letter, which for GNU sed/gawk can be a glued
+ *     backup suffix). Example: `-ni.bak` → cluster `ni` → contains `i` → mutating.
+ *  3. Dollar-expansion fail-closed: for mutating-CAPABLE verbs (those with a
+ *     MUTATING_FLAGS entry), any argv token containing an unexpanded `$`
+ *     (e.g. `$IFS`, `${IFS}`, `$var`) escalates to shell. This closes the
+ *     `sed $IFS-i f` word-splitting vector where a runtime-expanded arg could
+ *     smuggle a mutating flag past the flag scanner. Scoped to mutating-capable
+ *     verbs only — `grep "$pattern" f` and `cat "$file"` stay read.
  */
-const WRAPPER_COMMANDS: ReadonlySet<string> = new Set([
-  "timeout", "nice", "ionice", "nohup", "stdbuf", "env", "command", "xargs",
-  "time", "watch",
+const MUTATING_FLAGS: ReadonlyMap<string, ReadonlySet<string> | null> = new Map([
+  ["sed",  new Set(["-i", "--in-place"])],
+  // `awk` is NOT listed here — it is not in READ_ONLY_COMMANDS (see above),
+  // so hasMutatingFlag is never called for awk. Entry removed to avoid confusion.
+  ["find", new Set(["-delete", "-exec", "-execdir", "-ok", "-okdir",
+                    "-fprint", "-fprintf", "-fls"])],
+  ["fd",   new Set(["-x", "--exec", "-X", "--exec-batch"])],
+  ["sort", new Set(["-o", "--output"])],
+  // Always-mutating (no side-effect-free bare form):
+  ["tee",      null],  // always writes to every named file
+  ["dd",       null],  // always reads/writes block devices or files
+  ["truncate", null],  // always modifies file size
+  ["split",    null],  // always writes output files (xaa… / prefix-based)
 ]);
 
-/** git subcommands that are read-only (no mutation of the working tree / refs). */
+/**
+ * Short mutating flag letters per verb, for cluster/glued-suffix detection
+ * (mode 2 above). Keyed by the same verb names as {@link MUTATING_FLAGS}.
+ * A single-dash arg whose leading letter-cluster contains any of these letters
+ * is treated as mutating regardless of what follows (glued suffix or combined
+ * flags). Long-flag-only verbs (find, fd, sort) have no short mutating letter
+ * and are handled by exact/prefix matching alone.
+ */
+const MUTATING_SHORT_LETTERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ["sed", new Set(["i"])],
+  // `awk` removed — awk is not in READ_ONLY_COMMANDS, so this entry is dead.
+]);
+
+/**
+ * git subcommands that are unconditionally read-only (no mutation possible
+ * regardless of flags). Subcommands that are read-only ONLY for certain flag
+ * forms (`config`, `tag`, `branch`, `remote`) are NOT listed here — they are
+ * handled by {@link isReadOnlyGitLeaf} which inspects the post-subcommand args.
+ */
 const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
-  "status", "log", "diff", "show", "branch", "remote", "config", "rev-parse",
+  "status", "log", "diff", "show", "rev-parse",
   "describe", "blame", "shortlog", "ls-files", "ls-tree", "cat-file",
-  "for-each-ref", "reflog", "tag", "whatchanged",
+  "for-each-ref", "reflog", "whatchanged",
+]);
+
+/**
+ * Flags that keep an otherwise-ambiguous git subcommand in read-only territory.
+ * For `config`, `tag`, `branch`, and `remote` the PRESENCE of a non-flag
+ * operand (beyond the subcommand itself) or a write-mode flag means mutation.
+ * These sets list the ONLY flags that are unambiguously read — everything else
+ * escalates. Default-strict: unknown flags → shell.
+ */
+const GIT_READ_ONLY_FLAGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  // `git config --list`, `git config --get key`, `git config --get-all key`
+  // are reads. `git config section.key value` or any write flag mutates.
+  ["config", new Set(["-l", "--list", "--get", "--get-all", "--get-regexp",
+                      "--get-urlmatch", "--global", "--system", "--local",
+                      "--worktree", "--show-origin", "--show-scope",
+                      "--type", "--bool", "--int", "--bool-or-int",
+                      "--path", "--expiry-date", "--null", "-z",
+                      "--name-only", "--includes", "--no-includes",
+                      "--default", "-e", "--edit"])],
+  // `git tag` / `git tag -l` / `git tag --list` are reads.
+  // `git tag v2`, `git tag -d v1`, `git tag -a v2` etc. mutate.
+  ["tag",    new Set(["-l", "--list", "--sort", "--format", "--color",
+                      "--column", "--no-column", "--merged", "--no-merged",
+                      "--contains", "--no-contains", "--points-at",
+                      "--create-reflog"])],
+  // `git branch` / `git branch -a` / `git branch -r` / `git branch --list`
+  // are reads. `git branch -D f`, `git branch -m f g`, `git branch newname`
+  // mutate.
+  ["branch", new Set(["-a", "--all", "-r", "--remotes", "-l", "--list",
+                      "-v", "--verbose", "-vv", "--format", "--sort",
+                      "--color", "--no-color", "--column", "--no-column",
+                      "--merged", "--no-merged", "--contains", "--no-contains",
+                      "--points-at", "--show-current"])],
+  // `git remote` / `git remote -v` / `git remote show <name>` are reads.
+  // `git remote add`, `git remote remove`, `git remote set-url` mutate.
+  ["remote", new Set(["-v", "--verbose", "show", "get-url"])],
 ]);
 
 /** Argument selectors that commonly carry a shell command string. */
@@ -193,69 +291,162 @@ function extractShellCommand(input: Record<string, unknown>): string | null {
 /**
  * A compound shell command is read-only iff EVERY leaf command's effective
  * head verb is in {@link READ_ONLY_COMMANDS} (or is a read-only `git`
- * subcommand). Compound separators `&& || ; |` and newlines split leaves;
- * wrapper commands (`timeout`, `nice`, `xargs`, …) are stripped to reach the
- * real verb. Any unknown verb fails the whole command closed.
+ * subcommand / flag-form) AND carries no mutating flag ({@link MUTATING_FLAGS}).
+ * Leaf boundaries, quoting, redirects and substitution come from the shared
+ * {@link tokenizeShell} SOT so this module and {@link BashAstValidator} agree
+ * on what a leaf is.
+ *
+ * Tool-internal mini-languages: this classifier operates at the SHELL grammar
+ * layer only. It does NOT model tool-internal languages (awk programs, perl
+ * one-liners, etc.) that can write files or exec commands inside a single-quoted
+ * string that is opaque to the shell tokenizer. Verbs whose tool-internal
+ * language cannot be safely analysed without a dedicated parser are excluded
+ * from READ_ONLY_COMMANDS so they fail closed as `shell`. `awk` is the primary
+ * example (see its absence from READ_ONLY_COMMANDS above).
+ *
+ * KNOWN LIMITATION (pre-existing, tracked as follow-up): `sed`'s in-program
+ * write (`w`, `s///w`) and exec (`e`, `r`) commands inside the sed-script
+ * argument are NOT detected. Both the old and new code classify
+ * `sed 's/a/b/w out' f` as `read`. A sed-script parser is out of scope for
+ * this PR — fixing it would require parsing sed-program syntax and risks
+ * noisy false-positive escalation of common read-only `sed 's/a/b/'` patterns.
+ * The extra approval burden of dropping `sed` from READ_ONLY_COMMANDS (as was
+ * done for `awk`) is not yet justified given sed's vastly more common read-only
+ * usage; this trade-off will be re-evaluated in the follow-up issue.
+ *
+ * Tighten-only claim (precise): every `read→shell` transition introduced by
+ * this change is a genuine tighten — a command that WAS safe to classify read
+ * is now escalated because we detect a mutating flag or write git subcommand
+ * form. A small enumerated set of `shell→read` transitions also exists; these
+ * are NOT hardenings — they are CORRECTIONS of prior mis-classifications where
+ * the old naive tokenizer wrongly classified a benign command as shell:
+ *   - `grep "a && b" f`   — `&&` was inside a quoted arg, not a separator
+ *   - `grep '$(whoami)' f`— `$(` was inside a single-quoted arg (no execution)
+ *   - `echo '\`rm\`' f`   — backtick inside single quotes (no execution)
+ *   - `env X=1 ls`        — old tokenizer did not strip env-style assignments
+ * Each of these is provably side-effect-free and is tested explicitly below.
+ * The differential/property test in the test file asserts the full enumerated
+ * correction set and proves no other shell→read transition occurs.
+ *
+ * Fails closed to non-read-only on:
+ *  - a parse error (unbalanced quotes/parens),
+ *  - any command/process substitution (`$(…)`, backticks, `<(…)`, `>(…)`) —
+ *    hidden commands the head-verb scan cannot see,
+ *  - any redirect, input OR output (`>`, `>>`, `2>`, `&>`, `<`, `<<`). Output
+ *    redirects write a file; input redirects reach a file the argv-path check
+ *    cannot contain. Failing closed on BOTH preserves the prior fail-closed
+ *    set (a char-class guard on `< > \` $(`).
  */
 export function isReadOnlyCommand(command: string): boolean {
-  // Redirections (`>`, `>>`, `<`) and command substitution (`$(…)`, backticks)
-  // can write files or execute hidden commands the head-verb scan cannot see
-  // (`echo hi > out`, `ls $(rm -rf /)`). Default-strict: a command carrying any
-  // of these is not provably read-only. (Bare `${VAR}` parameter expansion does
-  // NOT execute, so it is not treated as mutating.)
-  if (/[<>`]|\$\(/.test(command)) return false;
-  const leaves = splitCompound(command);
+  const { leaves, parseError } = tokenizeShell(command);
+  if (parseError) return false;
   if (leaves.length === 0) return false;
   return leaves.every((leaf) => isReadOnlyLeaf(leaf));
 }
 
-/** Split a compound command on `&& || ; | & \n` into trimmed non-empty leaves. */
-function splitCompound(command: string): string[] {
-  return command
-    .split(/(?:&&|\|\||[;|&\n])/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
+function isReadOnlyLeaf(leaf: ShellLeaf): boolean {
+  // Any hidden execution or redirect (output OR input) taints the whole
+  // command (default-strict — see the doc comment on isReadOnlyCommand).
+  // hasOutputRedirect covers both file-target redirects AND fd-dup (>&m, n>&m)
+  // so `ls 2>&1` / `ls >&2` correctly stay shell — they have an output-redirect
+  // operator even though no file target is named.
+  if (leaf.hasCommandSubstitution || leaf.hasProcessSubstitution) return false;
+  if (leaf.hasOutputRedirect || leaf.hasInputRedirect) return false;
 
-function isReadOnlyLeaf(leaf: string): boolean {
-  const tokens = tokenize(leaf);
-  let i = 0;
-  // Strip leading VAR=value assignments (e.g. `FOO=bar ls`).
-  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i]!)) i += 1;
-  // Strip wrapper commands and their option flags to reach the real verb.
-  let lastWrapper: string | undefined;
-  while (i < tokens.length) {
-    const head = stripPath(tokens[i]!);
-    if (WRAPPER_COMMANDS.has(head)) {
-      lastWrapper = head;
-      i += 1;
-      // Skip option flags that belong to the wrapper (e.g. `timeout -s KILL 5s`).
-      while (i < tokens.length && tokens[i]!.startsWith("-")) i += 1;
-      // For wrappers that take a non-flag operand before the command
-      // (e.g. `timeout 5s ls`, `nice -n 5 ls`), skip a single numeric/duration
-      // operand so the next token is the real verb.
-      if (i < tokens.length && /^[0-9]+[smhd]?$/.test(tokens[i]!)) i += 1;
-      continue;
-    }
-    break;
+  const argv = leaf.argv;
+  if (argv.length === 0) {
+    // The leaf was only assignments/wrappers. A bare read-only wrapper verb
+    // (`env`, which prints the environment) is read-only; a bare incomplete
+    // wrapper (`timeout`, `nice`) is not. The first stripped wrapper is the
+    // effective verb the leaf would have run.
+    const bareVerb = leaf.strippedWrappers[0];
+    return bareVerb !== undefined && READ_ONLY_COMMANDS.has(bareVerb);
   }
-  // A wrapper used with no following command (bare `env`, which prints the
-  // environment) is read-only iff the wrapper verb is itself a read-only
-  // command. `timeout`/`nice` alone are incomplete → non-read-only (safe).
-  if (i >= tokens.length) {
-    return lastWrapper !== undefined && READ_ONLY_COMMANDS.has(lastWrapper);
-  }
-  const verb = stripPath(tokens[i]!);
+
+  const verb = stripPath(argv[0]!);
   if (verb === "git") {
-    const sub = tokens[i + 1];
-    return typeof sub === "string" && READ_ONLY_GIT_SUBCOMMANDS.has(sub);
+    return isReadOnlyGitLeaf(argv);
   }
-  return READ_ONLY_COMMANDS.has(verb);
+  if (!READ_ONLY_COMMANDS.has(verb)) return false;
+  // A read-only verb still MUTATES when carrying a mutating flag (`sed -i`,
+  // `find … -delete`, …). Escalate to non-read-only.
+  if (hasMutatingFlag(verb, argv.slice(1))) return false;
+  return true;
 }
 
-/** Naive whitespace tokenizer — sufficient for head-verb identification. */
-function tokenize(leaf: string): string[] {
-  return leaf.split(/\s+/).filter((t) => t.length > 0);
+/**
+ * True when the git leaf (full argv, `argv[0] === "git"`) is read-only.
+ *
+ * Unconditionally-read subcommands pass immediately. Ambiguous subcommands
+ * (`config`, `tag`, `branch`, `remote`) are read-only ONLY when EVERY
+ * post-subcommand token is a flag listed in {@link GIT_READ_ONLY_FLAGS} — any
+ * non-flag operand or write-mode flag escalates to shell. Default-strict:
+ * unlisted subcommands (including `commit`, `push`, `merge`, …) are shell.
+ */
+function isReadOnlyGitLeaf(argv: readonly string[]): boolean {
+  const sub = argv[1];
+  if (typeof sub !== "string") return false;
+  if (READ_ONLY_GIT_SUBCOMMANDS.has(sub)) return true;
+  const readFlags = GIT_READ_ONLY_FLAGS.get(sub);
+  if (readFlags === undefined) return false; // unlisted → shell
+  // Every token after the subcommand must be in the read-only flag set.
+  // A bare `git remote` (no args after sub) and `git branch` (no args) are
+  // read-only listing forms — allowed when postArgs is empty.
+  const postArgs = argv.slice(2);
+  return postArgs.every((t) => readFlags.has(t));
+}
+
+/**
+ * True when `verb`'s argument tokens carry a flag that turns a read-only verb
+ * into a mutating one (per {@link MUTATING_FLAGS} / {@link MUTATING_SHORT_LETTERS}).
+ *
+ * Three matching modes (all applied):
+ *  1. Exact-token long flags: `-i`, `--in-place`, `-delete`, etc.
+ *  2. `--flag=value` prefix: `--in-place=.bak` matches `--in-place`.
+ *  3. Short-flag cluster/glue (for verbs in {@link MUTATING_SHORT_LETTERS}):
+ *     a single-dash non-`--` arg is mutating if any mutating letter appears in
+ *     its leading letter-cluster. `-ni.bak` → cluster `ni` → contains `i` →
+ *     mutating. `-ibak` → cluster `ibak` → contains `i` → mutating.
+ *  4. Dollar-expansion fail-closed (for any mutating-capable verb): if an argv
+ *     token contains an unexpanded `$`, the runtime shell may expand it into a
+ *     mutating flag (e.g. `sed $IFS-i f`). Fail closed → shell.
+ */
+function hasMutatingFlag(verb: string, args: readonly string[]): boolean {
+  if (!MUTATING_FLAGS.has(verb)) return false;
+  // `.get()` is always defined here because `.has()` just returned true;
+  // TypeScript cannot narrow Map.get() through .has() so we assert non-null.
+  const flagSet = MUTATING_FLAGS.get(verb)!;
+  if (flagSet === null) return true; // always-mutating verb
+
+  const shortLetters = MUTATING_SHORT_LETTERS.get(verb);
+
+  for (const arg of args) {
+    // Mode 4: dollar-expansion in any arg for this mutating-capable verb.
+    if (arg.includes("$")) return true;
+
+    // Mode 1: exact token.
+    if (flagSet.has(arg)) return true;
+
+    // Mode 2: `--flag=value` prefix for long flags.
+    if (arg.startsWith("--")) {
+      const eq = arg.indexOf("=");
+      if (eq > 0 && flagSet.has(arg.slice(0, eq))) return true;
+      continue; // long flag — skip short-cluster check
+    }
+
+    // Mode 3: short-flag cluster/glue matching.
+    // Applies only to single-dash args and verbs with known mutating letters.
+    if (arg.startsWith("-") && shortLetters !== undefined) {
+      // Extract the leading letter-cluster (stops at first non-ASCII-letter).
+      const cluster = /^-([A-Za-z]+)/.exec(arg);
+      if (cluster !== null) {
+        for (const letter of cluster[1]!) {
+          if (shortLetters.has(letter)) return true;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 /** Reduce `/usr/bin/ls` → `ls`; leave bare verbs unchanged. */
