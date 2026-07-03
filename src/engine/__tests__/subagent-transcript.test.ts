@@ -44,6 +44,34 @@ describe("SubAgentTranscriptAccumulator", () => {
     expect(group.tools[0].result).toContain("***@example.com");
   });
 
+  it("DLP-masks the MCP uiPayload title (server-authored free-text label)", () => {
+    const acc = new SubAgentTranscriptAccumulator();
+    acc.onToolStart("mcp_widget", {}, meta());
+    // A server-authored resource TITLE that echoes PII — it enters the same
+    // NEW persisted/forwarded snapshot, so it must be masked like the result.
+    acc.onToolEnd(
+      "mcp_widget",
+      "ok",
+      false,
+      meta(),
+      {
+        serverId: "srv-1",
+        resourceUri: "ui://widget/1",
+        title: "report for leaked.user@example.com",
+      },
+      7,
+    );
+    const group = acc.snapshot()[0];
+    if (group.kind !== "tool_group") throw new Error("expected tool_group");
+    const stored = group.tools[0].uiPayload;
+    expect(stored?.title).toBeDefined();
+    expect(stored?.title).not.toContain("leaked.user@example.com");
+    expect(stored?.title).toContain("***@example.com");
+    // Structural identifiers are left verbatim (masking a URI would corrupt it).
+    expect(stored?.resourceUri).toBe("ui://widget/1");
+    expect(stored?.serverId).toBe("srv-1");
+  });
+
   it("DLP-masks reasoning + assistant text from a child round", () => {
     const acc = new SubAgentTranscriptAccumulator();
     acc.onAssistantRound("email me at leak@example.com", "reply to leak2@example.com");
