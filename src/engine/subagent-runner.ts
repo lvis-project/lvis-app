@@ -10,7 +10,7 @@
  *     `agent_spawn` tool itself is ALWAYS stripped from the child registry
  *     regardless of the supplied list — sub-agents cannot recurse.
  *   - A host-assigned round budget (default 30; lower per mode) —
- *     runTurn(`maxRounds: cappedTurns`) terminates
+ *     runTurn(`maxRounds: cappedRounds`) terminates
  *     queryLoop cleanly between rounds, and the executor's per-round
  *     fan-out cap (10 calls/round) bounds total tool execution count.
  *   - An ApprovalGate wrapper that prepends "[Sub-Agent: <title>]" to the
@@ -314,7 +314,7 @@ export class SubAgentRunner {
     // via agentName.
     const requestedRounds =
       input.maxRounds ?? modeResult.config.maxToolRoundsHint ?? MAX_TURNS_DEFAULT;
-    const cappedTurns = Math.max(1, Math.min(MAX_TURNS_CAP, requestedRounds));
+    const cappedRounds = Math.max(1, Math.min(MAX_TURNS_CAP, requestedRounds));
 
     // C3(b): build the sub-agent's tool surface. Always strip the blocklist
     // (agent_spawn) so a sub-agent cannot recurse. When `sourceTools` is
@@ -464,7 +464,7 @@ export class SubAgentRunner {
         },
         undefined,
         {
-          maxRounds: cappedTurns,
+          maxRounds: cappedRounds,
           sessionIdOverride: childSessionId,
           spawnDepth: 1,
           inputOrigin: "llm-tool-arg",

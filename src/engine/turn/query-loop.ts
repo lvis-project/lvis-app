@@ -234,7 +234,7 @@ export async function queryLoop(
             .filter((m) => m.role === "assistant")
             .slice(-1)[0]?.content ?? "";
         return withServingIdentity({
-          text: typeof lastAssistantText === "string" && lastAssistantText.length > 0
+          text: lastAssistantText.length > 0
             ? lastAssistantText
             : t("be_conversationLoop.roundCapError", { max: effectiveMaxRounds }),
           toolCalls: allToolCalls,
