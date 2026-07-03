@@ -58,6 +58,16 @@ export interface PermissionRule {
   source?: ToolSource;
 }
 
+/**
+ * Layer 5 reviewer routing lane. Distinguishes the two automatic-approval
+ * lanes that {@link PermissionManager.resolveReviewerDecision} translates a
+ * verdict for: `headless` (background/routine turns — non-low denies) and
+ * `foreground-auto` (interactive auto-review opt-in — non-low asks). Shared by
+ * the `reviewer.route` marker and the reviewer-dispatch callsites so the lane
+ * union has a single source of truth.
+ */
+export type ReviewerLane = "foreground-auto" | "headless";
+
 export interface PermissionCheckResult {
   decision: PermissionDecision;
   reason: string;
@@ -68,7 +78,7 @@ export interface PermissionCheckResult {
    * overlay-trigger, strict, and low-trust MCP asks are hard user-approval gates.
    */
   reviewer?: {
-    route: "foreground-auto" | "headless";
+    route: ReviewerLane;
     verdict?: RiskVerdict;
   };
   /**
@@ -119,6 +129,17 @@ export interface PermissionCheckContext {
    * authorize a later call with a broader argument scope.
    */
   approvalCacheKey?: string;
+  /**
+   * Tool-author `decisionOverride` for `meta`-category builtin tools, carried
+   * from the executor so the "override" branch of {@link categoryBasedDecision}
+   * owns the re-elevation decision (V1 SOT). `"ask"` (e.g. agent_spawn) elevates
+   * the override-`allow` to a per-invocation `forceModal` ask in every mode
+   * except `allow` (the allow-all opt-in); `"always-allow-with-audit"` is
+   * short-circuited before checkDetailed runs and never reaches here. Non-meta
+   * callers pass `undefined` (current behaviour — the override branch keeps its
+   * `allow`).
+   */
+  decisionOverride?: "ask" | "always-allow-with-audit";
 }
 
 /**
@@ -361,7 +382,7 @@ export class PermissionManager {
    */
   resolveReviewerDecision(
     verdict: RiskVerdict,
-    lane: "headless" | "foreground-auto",
+    lane: ReviewerLane,
   ): PermissionCheckResult {
     const isLow = verdict.level === "low";
     if (lane === "headless") {
@@ -1171,13 +1192,44 @@ export class PermissionManager {
           layer: 6,
           reviewer: { route: "headless" },
         };
-      case "override":
-        // meta category — executor handles via tool.decisionOverride
+      case "override": {
+        // meta category — the tool author's `decisionOverride` is carried in
+        // `context.decisionOverride` (V1 SOT: the re-elevation decision lives
+        // here, not in the executor).
+        //
+        //   `ask` (e.g. agent_spawn): the control-flow primitive is sensitive
+        //     enough to warrant a per-invocation approval modal. Elevate the
+        //     override-`allow` to a `forceModal` ask so the Store B memory-skip
+        //     never auto-allows it from a prior grant.
+        //
+        //   `always-allow-with-audit` (e.g. ask_user_question): short-circuited
+        //     by the executor BEFORE checkDetailed runs, so it never reaches
+        //     here. `undefined` (non-meta callers, or a meta builtin with no
+        //     override) keeps the historical override-`allow`.
+        //
+        // Allow-all invariant is SINGLE-SOURCED, not mirrored: the
+        // `if (this.mode === "allow")` early return above already returned
+        // `allow` (no prompt) for every category, meta included, before this
+        // switch — so `this.mode` here is narrowed to `"default" | "auto"` and
+        // an `!== "allow"` guard would be dead. `strict` likewise returned an
+        // `ask` at the top of this method (and mode-first at layer 2 in
+        // checkDetailed). This branch therefore only runs for default/auto —
+        // exactly the non-allow modes the ask is meant to gate — so the
+        // elevation is unconditional on the override value here.
+        if (context.decisionOverride === "ask") {
+          return {
+            decision: "ask",
+            reason: t("be_executor.metaToolAskOverrideReason"),
+            layer: 6,
+            forceModal: true,
+          };
+        }
         return {
           decision: "allow",
           reason: t("be_permissionManager.metaToolDecisionOverride", { category }),
           layer: 6,
         };
+      }
       case "ask":
       default: {
         // Issue #690 — foreground reviewer auto-approve gating.
