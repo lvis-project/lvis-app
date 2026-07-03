@@ -3,9 +3,11 @@
  * (turn-cap enforcement, sourceTools allowlist, recursive spawn refusal):
  *
  *   1. C3(a) maxRounds bound — the runner must stop emitting LLM rounds
- *      once `maxTurns` is reached, even if the fake provider would happily
- *      keep streaming. The new `maxRounds` plumb-through in queryLoop is
- *      the loop-boundary defense for this.
+ *      once the host-assigned `maxRounds` budget is reached, even if the fake
+ *      provider would happily keep streaming. The `maxRounds` plumb-through in
+ *      queryLoop is the loop-boundary defense for this. When the budget is hit
+ *      with work still pending, the runner marks the result `incomplete` and
+ *      forwards stopReason "round-cap" (cut-off resume signal).
  *
  *   2. sourceTools allowlist — a sub-agent that requests a tool not in
  *      `sourceTools` must receive a "tool not found" result. Validates
@@ -82,7 +84,7 @@ function buildLoopDeps(toolRegistry: ToolRegistry) {
 // ─── 1) maxRounds bound ───────────────────────────────
 
 describe("SubAgentRunner — maxRounds bound", () => {
-  it("terminates after `maxTurns` assistant rounds even if provider keeps emitting tool calls", async () => {
+  it("terminates after the host-assigned `maxRounds` budget even if provider keeps emitting tool calls, and flags the cut-off run incomplete", async () => {
     const toolRegistry = new ToolRegistry();
     const execSpy = vi.fn(async () => ({ output: "ok", isError: false }));
     toolRegistry.register(
@@ -132,7 +134,7 @@ describe("SubAgentRunner — maxRounds bound", () => {
         title: "test",
         instructions: "do",
         sourceTools: ["noop"],
-        maxTurns: 2,
+        maxRounds: 2,
       });
       // R2-CR-2: tighten — `<=2` would also pass on a regression that bails
       // out at 0 or 1 rounds. The provider script emits 5 valid tool_use
@@ -145,6 +147,58 @@ describe("SubAgentRunner — maxRounds bound", () => {
       // since the provider emits a single tool_call per round). A regression
       // that early-terminates would invoke the executor 0 or 1 times only.
       expect(execSpy).toHaveBeenCalledTimes(2);
+      // Cut-off resume signal: the provider still wanted to keep calling tools
+      // when the budget was hit, so this run stopped on its round budget with
+      // work pending. The runner must surface that as a SUCCESSFUL-but-
+      // incomplete result (ok=true, incomplete=true) forwarding stopReason
+      // "round-cap" — NOT a failed spawn — so the parent can decide to continue.
+      expect(result.ok).toBe(true);
+      expect(result.incomplete).toBe(true);
+      expect(result.stopReason).toBe("round-cap");
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+    }
+  });
+
+  it("does NOT flag a clean end_turn completion as incomplete", async () => {
+    const toolRegistry = new ToolRegistry();
+    // Provider ends naturally on round 1, well within the budget.
+    const provider = new ScriptedProvider([
+      [
+        { type: "text_delta", text: "final answer" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+    });
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { refreshProvider: () => void },
+        "refreshProvider",
+      )
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+    try {
+      const result = await runner.spawn({
+        title: "clean",
+        instructions: "do",
+        maxRounds: 5,
+      });
+      expect(result.ok).toBe(true);
+      expect(result.stopReason).toBe("end_turn");
+      // Cut-off resume signal must be OFF: a finished turn is not incomplete.
+      expect(result.incomplete).toBeFalsy();
+      expect(result.summary).toContain("final answer");
     } finally {
       hasProviderSpy.mockRestore();
       refreshProviderSpy.mockRestore();
@@ -248,7 +302,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
         title: "team schedule",
         instructions: "오늘 팀 스케줄 조회",
         sourceTools: [scheduleToolName],
-        maxTurns: 2,
+        maxRounds: 2,
       });
 
       expect(provider.observedToolNames[0]).toEqual([scheduleToolName]);
@@ -315,7 +369,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
         title: "indexer",
         instructions: "scan",
         sourceTools: [toolName],
-        maxTurns: 2,
+        maxRounds: 2,
       });
 
       // Exposed to the child (sourceTools is not isPluginEnabled-filtered)…
@@ -533,7 +587,7 @@ describe("SubAgentRunner — unknown mode audit warn", () => {
         title: "t",
         instructions: "do",
         profileMode: "supervise", // not a member of AGENT_MODES
-        maxTurns: 1,
+        maxRounds: 1,
       });
       const logged = warnSpy.mock.calls.map((c) => c.join(" ")).join("\n");
       expect(logged).toMatch(/unknown mode/i);

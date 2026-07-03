@@ -53,8 +53,8 @@ import { t } from "../i18n/index.js";
  * so a mode does NOT carry a temperature. `reasoningHint` is injected into
  * the sub-agent's instructions so the LLM knows the working posture
  * expected of this mode; `maxToolRoundsHint` is a soft suggestion the
- * spawn caller may use to seed `maxTurns` when the agent_spawn invocation
- * did not specify one.
+ * spawn caller may use to seed the host round budget when no explicit
+ * `maxRounds` override is provided.
  */
 export interface AgentModeConfig {
   /** One-line working-posture hint injected into the sub-agent prompt. */
@@ -67,8 +67,9 @@ export interface AgentModeConfig {
    */
   autoSkills: readonly string[];
   /**
-   * Soft default for `maxTurns` when the agent_spawn call omits it.
-   * undefined → fall back to SubAgentRunner's own MAX_TURNS_DEFAULT.
+   * Soft default for the host round budget when no explicit maxRounds is
+   * provided by the caller. undefined → fall back to SubAgentRunner's own
+   * MAX_TURNS_DEFAULT.
    */
   maxToolRoundsHint?: number;
 }
@@ -117,11 +118,22 @@ export const AGENT_MODE_MAP: Readonly<Record<AgentMode, AgentModeConfig>> =
       maxToolRoundsHint: 15,
     },
     default: {
-      // Design-intent fallback: unknown / absent mode lands here. No auto
-      // skills, no posture injection — the profile body alone drives the
-      // sub-agent, exactly as it did before mode support existed.
+      // Design-intent fallback: unknown / absent mode lands here (including an
+      // anonymous `agent_spawn` with no `agentName`). No auto skills, no posture
+      // injection — the profile body alone drives the sub-agent, exactly as it
+      // did before mode support existed.
+      //
+      // Round budget: since `agent_spawn` no longer lets the LLM pick a
+      // `maxTurns`, this hint is the host's budget for EVERY anonymous spawn.
+      // 20 assistant rounds — standard multi-step work — sits between the
+      // read-only explore posture (15) and the full 30 ceiling: high enough
+      // that a normal multi-step sub-task finishes without a premature
+      // round-cap, low enough that a runaway loop is still bounded. A caller
+      // that knows it needs the full 30 uses a `plan`-mode profile (or passes
+      // an explicit host `maxRounds`).
       reasoningHint: "",
       autoSkills: [],
+      maxToolRoundsHint: 20,
     },
   });
 
