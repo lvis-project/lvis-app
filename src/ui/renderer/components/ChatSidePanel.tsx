@@ -1538,7 +1538,15 @@ function FileBrowserWorkspace({
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-file-browser">
-      <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
+      {/*
+        The search box filters ONLY the session-artifact list (filteredFiles /
+        tree); the Directory source (ProjectRootsBrowser) has no query wiring, so
+        showing it there is a dead affordance. Render it only for the Session
+        segment so there is no no-op search control.
+      */}
+      {effectiveSource === "session" ? (
+        <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
+      ) : null}
       <VerticalSplitLayout
         topPercent={topPercent}
         onDragChange={setTopPercent}
@@ -1558,7 +1566,7 @@ function FileBrowserWorkspace({
             <div
               role="group"
               aria-label={t("chatPreviewRail.fileSourceLabel")}
-              className="flex shrink-0 items-center gap-1 border-b p-1"
+              className="flex shrink-0 items-center gap-1 border-b px-1 py-0.5"
               data-testid="chat-side-panel-file-source-segment"
             >
               <button
@@ -1566,7 +1574,7 @@ function FileBrowserWorkspace({
                 aria-pressed={effectiveSource === "directory"}
                 data-testid="chat-side-panel-file-source-directory"
                 className={cn(
-                  "flex h-7 flex-1 items-center justify-center gap-1 rounded-md text-[11px] font-medium",
+                  "flex h-6 flex-1 items-center justify-center gap-1 rounded-md px-2 text-[11px] font-medium",
                   effectiveSource === "directory"
                     ? "bg-primary/(--opacity-subtle) text-primary"
                     : "text-muted-foreground hover:bg-muted/(--opacity-muted) hover:text-foreground",
@@ -1582,7 +1590,7 @@ function FileBrowserWorkspace({
                 disabled={!hasSessionFiles}
                 data-testid="chat-side-panel-file-source-session"
                 className={cn(
-                  "flex h-7 flex-1 items-center justify-center gap-1 rounded-md text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-(--opacity-half)",
+                  "flex h-6 flex-1 items-center justify-center gap-1 rounded-md px-2 text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-(--opacity-half)",
                   effectiveSource === "session"
                     ? "bg-primary/(--opacity-subtle) text-primary"
                     : "text-muted-foreground hover:bg-muted/(--opacity-muted) hover:text-foreground",
@@ -1801,7 +1809,10 @@ function BrowserWorkspace({
                   type="button"
                   size="icon"
                   variant="ghost"
-                  className="h-8 w-8 shrink-0"
+                  // Radix sets data-state=open on the trigger while the search
+                  // Popover is open; reflect that with an active tint so the
+                  // toggled state is visible (R2).
+                  className="h-8 w-8 shrink-0 data-[state=open]:bg-primary/(--opacity-subtle) data-[state=open]:text-primary"
                   aria-label={t("chatPreviewRail.browserSearch")}
                   data-testid="chat-side-panel-browser-search-trigger"
                 >
@@ -1881,6 +1892,13 @@ function subAgentStatusTone(status: SubAgentSpawn["status"]): string {
  * (its turn count / status ticks as the agent runs) only re-renders its OWN row,
  * not every sibling — the list can hold many concurrent spawns.
  */
+/** Localized status label, reusing the SubAgentCard status i18n keys. */
+function subAgentStatusLabel(status: SubAgentSpawn["status"], t: (key: string) => string): string {
+  if (status === "error") return t("subAgentCard.statusError");
+  if (status === "done") return t("subAgentCard.statusDone");
+  return t("subAgentCard.statusRunning");
+}
+
 const SubAgentRow = memo(function SubAgentRow({
   spawn,
   active,
@@ -1890,9 +1908,13 @@ const SubAgentRow = memo(function SubAgentRow({
   active: boolean;
   onSelect: (spawnId: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
+    // role="option": this row lives in a role="listbox"; aria-selected is valid
+    // only on a listbox option (not a bare button).
     <button
       type="button"
+      role="option"
       data-testid="chat-side-panel-subagent-row"
       aria-selected={active}
       className={cn(
@@ -1909,7 +1931,9 @@ const SubAgentRow = memo(function SubAgentRow({
       <span className="min-w-0 flex-1 truncate font-medium" title={spawn.title}>
         {spawn.title}
       </span>
-      <span className={cn("shrink-0 text-[10px]", subAgentStatusTone(spawn.status))}>{spawn.status}</span>
+      <span className={cn("shrink-0 text-[10px]", subAgentStatusTone(spawn.status))}>
+        {subAgentStatusLabel(spawn.status, t)}
+      </span>
     </button>
   );
 });
@@ -1937,10 +1961,28 @@ function SubAgentViewer({
     const rest = subAgentSpawns.filter((spawn) => spawn.status !== "running");
     return [...running, ...rest];
   }, [subAgentSpawns]);
+  // Pin the detail to the CHOSEN spawnId. The synchronous `?? orderedSpawns[0]`
+  // fallback only applies while nothing is chosen yet (no first-render flash);
+  // once a spawn resolves, `.find` keeps it, so a status flip that reorders the
+  // list (running→done reshuffles `orderedSpawns`) can never silently jump the
+  // viewed spawn out from under the user. The effect below persists the seed
+  // into `selectedSpawnId` so the row highlight (`active`) matches the detail.
   const selectedSpawn = useMemo(
     () => orderedSpawns.find((spawn) => spawn.spawnId === selectedSpawnId) ?? orderedSpawns[0] ?? null,
     [orderedSpawns, selectedSpawnId],
   );
+
+  useEffect(() => {
+    if (orderedSpawns.length === 0) {
+      if (selectedSpawnId !== null) setSelectedSpawnId(null);
+      return;
+    }
+    // Seed / re-pin only when the current selection is absent — never when it
+    // still resolves, so an in-place list reorder does not move the selection.
+    if (!selectedSpawnId || !orderedSpawns.some((spawn) => spawn.spawnId === selectedSpawnId)) {
+      setSelectedSpawnId(orderedSpawns[0].spawnId);
+    }
+  }, [orderedSpawns, selectedSpawnId]);
 
   if (orderedSpawns.length === 0) {
     return (
@@ -1961,7 +2003,14 @@ function SubAgentViewer({
         testId="chat-side-panel-subagent-split-layout"
         separatorTestId="chat-side-panel-subagent-splitter"
         top={
-          <div className="min-h-0 space-y-1 p-2" data-testid="chat-side-panel-subagent-list">
+          // role="listbox" makes each row's aria-selected valid (it is only
+          // meaningful on option/row/tab/… children of a select container).
+          <div
+            role="listbox"
+            aria-label={t("chatPreviewRail.subagentListLabel")}
+            className="min-h-0 space-y-1 p-2"
+            data-testid="chat-side-panel-subagent-list"
+          >
             {orderedSpawns.map((spawn) => (
               <SubAgentRow
                 key={spawn.spawnId}

@@ -24,10 +24,17 @@ export const SIDE_PANEL_SPLIT_MIN_PERCENT = 22;
 export const SIDE_PANEL_SPLIT_MAX_PERCENT = 78;
 export const SIDE_PANEL_SPLIT_DEFAULT_PERCENT = 45;
 
-/** Clamp + round a raw split percent to the allowed pane range. */
+/**
+ * Clamp a raw split percent to the allowed pane range, then round. Non-finite
+ * input (NaN from a zero-height rect, ±Infinity) falls back to the default so a
+ * bad measurement can never poison the persisted ratio. Clamp precedes round so
+ * the result is a rounded value guaranteed to sit inside [MIN, MAX].
+ */
 export function clampSidePanelSplitPercent(value: number): number {
-  return Math.min(
+  if (!Number.isFinite(value)) return SIDE_PANEL_SPLIT_DEFAULT_PERCENT;
+  const clamped = Math.min(
     SIDE_PANEL_SPLIT_MAX_PERCENT,
-    Math.max(SIDE_PANEL_SPLIT_MIN_PERCENT, Math.round(value)),
+    Math.max(SIDE_PANEL_SPLIT_MIN_PERCENT, value),
   );
+  return Math.round(clamped);
 }
