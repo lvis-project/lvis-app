@@ -494,24 +494,27 @@ describe("workspace:drop-prepare handler (#1458 drag-drop add-root)", () => {
   it("HARD-DENIES a Layer 0 sensitive dropped path and mints NO token", async () => {
     // A renderer that resolves a dropped ~/.ssh cannot widen the read scope: the
     // deny happens before any token is minted, so it can never be acknowledged.
+    // The surfaced error is the STABLE `sensitive-path` code (mapped to Korean in
+    // the renderer), NEVER the validator's raw English prose.
     const res = (await invoke(CHANNELS.workspace.dropPrepare, OK_FRAME, join(homedir(), ".ssh"))) as {
       ok: boolean;
       error?: string;
       ackToken?: string;
     };
-    expect(res.ok).toBe(false);
+    expect(res).toMatchObject({ ok: false, error: "sensitive-path" });
     expect(res.ackToken).toBeUndefined();
     expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
   });
 
   it("REFUSES the filesystem root (hard deny, no token)", async () => {
+    // Surfaces the stable `path-not-allowed` code, not raw English prose.
     const fsRoot = process.platform === "win32" ? "C:\\" : "/";
     const res = (await invoke(CHANNELS.workspace.dropPrepare, OK_FRAME, fsRoot)) as {
       ok: boolean;
       error?: string;
       ackToken?: string;
     };
-    expect(res.ok).toBe(false);
+    expect(res).toMatchObject({ ok: false, error: "path-not-allowed" });
     expect(res.ackToken).toBeUndefined();
     expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
   });
@@ -587,5 +590,50 @@ describe("workspace:drop-prepare handler (#1458 drag-drop add-root)", () => {
     expect(replay).toMatchObject({ ok: false, error: "ack-unknown" });
     expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
     rmSync(dropped, { recursive: true, force: true });
+  });
+
+  it("re-checks is-a-directory at the ack pass — a dir swapped for a file after prepare is refused (TOCTOU)", async () => {
+    // prepare a real directory, mint a token, THEN replace the directory with a
+    // regular file before the ack lands. The persist pass must re-stat and refuse
+    // a non-directory rather than widening the read scope to a file.
+    const base = mkdtempSync(join(tmpdir(), "lvis-ws-drop-toctou-"));
+    const target = join(base, "target");
+    mkdirSync(target);
+    const prep = (await invoke(CHANNELS.workspace.dropPrepare, OK_FRAME, target)) as {
+      ok: boolean;
+      ackToken?: string;
+    };
+    expect(prep.ok).toBe(true);
+    expect(typeof prep.ackToken).toBe("string");
+    // Swap the directory for a file between prepare and ack.
+    rmSync(target, { recursive: true, force: true });
+    writeFileSync(target, "now a file");
+    addAllowedDirectoryPersistMock.mockClear();
+    const done = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME, { ackToken: prep.ackToken })) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(done).toMatchObject({ ok: false, error: "not-a-dir" });
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it("re-checks existence at the ack pass — a path deleted after prepare is refused (not-found)", async () => {
+    // A directory removed entirely between prepare and ack must fail closed at
+    // persist rather than persisting a vanished path into the read allow-list.
+    const dropped = mkdtempSync(join(tmpdir(), "lvis-ws-drop-vanish-"));
+    const prep = (await invoke(CHANNELS.workspace.dropPrepare, OK_FRAME, dropped)) as {
+      ok: boolean;
+      ackToken?: string;
+    };
+    expect(prep.ok).toBe(true);
+    rmSync(dropped, { recursive: true, force: true });
+    addAllowedDirectoryPersistMock.mockClear();
+    const done = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME, { ackToken: prep.ackToken })) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(done).toMatchObject({ ok: false, error: "not-found" });
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
   });
 });

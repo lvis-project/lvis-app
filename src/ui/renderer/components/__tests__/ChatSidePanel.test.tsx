@@ -535,11 +535,13 @@ describe("ChatSidePanel", () => {
     await waitFor(() => expect(screen.getByTestId("chat-side-panel-root-warning")).toBeTruthy());
   });
 
-  it("dropping a hard-denied folder surfaces an inline error and shows no ack panel (#1458)", async () => {
+  it("dropping a hard-denied folder surfaces a Korean-mapped error and shows no ack panel (#1458)", async () => {
     // A Layer-0 deny from dropPrepare must not offer an ack path — the renderer
-    // surfaces the error and never reaches the confirmation panel.
+    // surfaces the error and never reaches the confirmation panel. The main
+    // process returns the STABLE `sensitive-path` code (never raw English prose),
+    // which the renderer maps to the localized "outside allowed folders" copy.
     const resolveDroppedPaths = vi.fn(() => ["/home/me/.ssh"]);
-    const dropPrepare = vi.fn(async () => ({ ok: false as const, error: "path matches sensitive pattern '.ssh'" }));
+    const dropPrepare = vi.fn(async () => ({ ok: false as const, error: "sensitive-path" }));
     vi.stubGlobal("lvisDrop", { resolveDroppedPaths });
     (window as unknown as { lvisDrop: unknown }).lvisDrop = (globalThis as unknown as { lvisDrop: unknown }).lvisDrop;
     vi.stubGlobal("lvis", {
@@ -561,7 +563,44 @@ describe("ChatSidePanel", () => {
     const zone = screen.getByTestId("chat-side-panel-project-roots");
     fireEvent.drop(zone, { dataTransfer: { files: [{ name: ".ssh" }] as unknown as FileList } });
 
-    await waitFor(() => expect(screen.getByTestId("chat-side-panel-op-error")).toBeTruthy());
+    const banner = await waitFor(() => screen.getByTestId("chat-side-panel-op-error"));
+    // The surfaced text is the localized (Korean, per the test locale) copy — the
+    // raw validator prose ("sensitive pattern") must NEVER reach the UI.
+    expect(banner.textContent ?? "").toContain("허용된 프로젝트 폴더");
+    expect(banner.textContent ?? "").not.toMatch(/sensitive pattern|sensitive-path/);
+    expect(screen.queryByTestId("chat-side-panel-root-warning")).toBeNull();
+  });
+
+  it("dropping a file (not-a-dir) surfaces the Korean not-a-directory copy, not the raw code (#1459)", async () => {
+    // The dropPrepare is-a-dir reject and the ack-pass TOCTOU re-check both return
+    // the stable `not-a-dir` code; the renderer maps it to Korean via the shared
+    // IPC error map — never surfacing the bare code.
+    const resolveDroppedPaths = vi.fn(() => ["/ws/note.txt"]);
+    const dropPrepare = vi.fn(async () => ({ ok: false as const, error: "not-a-dir" }));
+    vi.stubGlobal("lvisDrop", { resolveDroppedPaths });
+    (window as unknown as { lvisDrop: unknown }).lvisDrop = (globalThis as unknown as { lvisDrop: unknown }).lvisDrop;
+    vi.stubGlobal("lvis", {
+      attach: { openExternal: vi.fn(async () => ({ ok: true })) },
+      preview: { readFile: vi.fn(async () => ({ ok: true, content: "# x", path: "/ws/a.md", truncated: false })) },
+      workspace: {
+        listRoots: vi.fn(async () => ({ ok: true, defaultRoot: "/ws", roots: [{ path: "/ws", isDefault: true }] })),
+        pickRoot: vi.fn(async () => ({ ok: true, canceled: true, roots: [{ path: "/ws", isDefault: true }] })),
+        listDir: vi.fn(async () => ({ ok: true, path: "/ws", entries: [], truncated: false })),
+        dropPrepare,
+      },
+    });
+    (window as unknown as { lvis: unknown }).lvis = (globalThis as unknown as { lvis: unknown }).lvis;
+
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const zone = screen.getByTestId("chat-side-panel-project-roots");
+    fireEvent.drop(zone, { dataTransfer: { files: [{ name: "note.txt" }] as unknown as FileList } });
+
+    const banner = await waitFor(() => screen.getByTestId("chat-side-panel-op-error"));
+    expect(banner.textContent ?? "").toContain("디렉터리가 아닙니다");
+    expect(banner.textContent ?? "").not.toContain("not-a-dir");
     expect(screen.queryByTestId("chat-side-panel-root-warning")).toBeNull();
   });
 

@@ -79,6 +79,25 @@ function prunePendingPicks(now: number): void {
   }
 }
 
+/**
+ * Map a {@link validateDirectoryAddition} hard-deny `reason` (raw English prose)
+ * to a STABLE renderer error code. The IPC boundary emits English, but only a
+ * discrete code — never the prose — must reach the UI, which maps it to Korean
+ * (CLAUDE.md "IPC Error Message Language Convention"). Returning `verdict.reason`
+ * verbatim leaked untranslated English into the ChatSidePanel drop toast; these
+ * codes route through the renderer's existing formatOpError code map instead.
+ *
+ * The prose is a closed set produced by `validateDirectoryAddition`:
+ *   - "directory path is empty"          → `invalid-path`
+ *   - "filesystem root is not allowed"   → `path-not-allowed`
+ *   - "path matches sensitive pattern …" → `sensitive-path`
+ */
+function directoryDenyCode(reason: string): "invalid-path" | "path-not-allowed" | "sensitive-path" {
+  if (reason.startsWith("path matches sensitive pattern")) return "sensitive-path";
+  if (reason === "filesystem root is not allowed") return "path-not-allowed";
+  return "invalid-path";
+}
+
 export interface WorkspaceRoot {
   path: string;
   /** The default workspace root (`process.cwd()`), badged in the UI. */
@@ -208,7 +227,12 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
    *   1. `validateDirectoryAddition` — hard-refuses filesystem root / Layer 0
    *      sensitive dirs. Re-run even on the acknowledgement pass: a valid token
    *      clears adjacency warnings, NEVER a hard deny.
-   *   2. Persist, then audit the widening (redacted path) — the read scope grew,
+   *   2. `fs.stat` is-a-directory — re-run at THIS (ack/persist) pass, not only
+   *      at prepare time. `dropPrepare` verified is-a-dir when it minted the
+   *      token, but the entry could be swapped for a file/symlink between prepare
+   *      and ack (a narrow TOCTOU). Re-checking here — the single choke point —
+   *      also covers a native warned-pick whose target changed after the dialog.
+   *   3. Persist, then audit the widening (redacted path) — the read scope grew,
    *      so the WRITE is recorded, mirroring the preview-read audit.
    *
    * `picked` is ALWAYS a path the main process owns (a `showOpenDialog` result or
@@ -220,7 +244,19 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
   ): Promise<WorkspacePickRootResult> {
     const verdict = validateDirectoryAddition(picked);
     if (!verdict.ok) {
-      return { ok: false, error: verdict.reason, warnings: verdict.adjacencyWarnings };
+      return { ok: false, error: directoryDenyCode(verdict.reason), warnings: verdict.adjacencyWarnings };
+    }
+    // Re-verify the path is STILL an existing directory at the moment of persist.
+    // The is-a-dir check at prepare time can be invalidated by a swap-to-file /
+    // swap-to-symlink race before the ack lands; a non-directory must never enter
+    // the Layer-1 read allow-list.
+    try {
+      const stat = await fs.stat(picked);
+      if (!stat.isDirectory()) {
+        return { ok: false, error: "not-a-dir", warnings: verdict.adjacencyWarnings };
+      }
+    } catch {
+      return { ok: false, error: "not-found", warnings: verdict.adjacencyWarnings };
     }
     // Persist the picked absolute path (settings SOT stores the raw path;
     // sanitize/canonicalize happens at read time). Dedup handled by the store.
@@ -299,7 +335,7 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
       const dialogPath = filePaths[0];
       const verdict = validateDirectoryAddition(dialogPath);
       if (!verdict.ok) {
-        return { ok: false, error: verdict.reason, warnings: verdict.adjacencyWarnings };
+        return { ok: false, error: directoryDenyCode(verdict.reason), warnings: verdict.adjacencyWarnings };
       }
       if (verdict.adjacencyWarnings.length > 0) {
         // Withhold the pick: mint a one-time token bound to the MAIN-OWNED dialog
@@ -484,15 +520,21 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
    *   3. `fs.stat` is-a-directory — a dropped FILE is rejected (`not-a-dir`);
    *      the renderer never guesses a parent dir (No-Fallback).
    *
-   * On success it mints a one-time, MAIN-OWNED ack token bound to the validated
-   * path and stores it in `pendingPicks`. A drop ALWAYS requires acknowledgement
-   * (even with zero adjacency warnings): unlike a native picker, the OS dialog
-   * never vouched for the path, so the explicit user ack is that missing vouch.
-   * The renderer confirms via `pickRoot({ ackToken })`, echoing the token (never
-   * a path) — so the renderer names the candidate exactly once, and the moment
-   * this handler validates it, the path becomes main-owned. This preserves the
-   * #1448 invariant that persistence only ever touches a path the main process
-   * owns, never a raw renderer string handed back with `acknowledge=true`.
+   * On success it mints a one-time ack token and stores it in `pendingPicks`
+   * bound to the (renderer-NAMED) validated path. A drop ALWAYS requires
+   * acknowledgement (even with zero adjacency warnings): unlike a native picker,
+   * the OS dialog never vouched for the path, so the explicit user ack is that
+   * missing vouch. The renderer confirms via `pickRoot({ ackToken })`, echoing
+   * the MAIN-OWNED token — never a path. That is the actual trust model: the
+   * path string is renderer-originated (the renderer chose which directory to
+   * name), but the deny/persist decision is made entirely in main — Layer-0
+   * hard-deny before any token is minted, an always-explicit user ack, and a
+   * one-time main-owned token that binds the ack to the exact string validated
+   * here. The renderer can never hand back an arbitrary path with
+   * `acknowledge=true`: on the ack pass it presents the token, and main persists
+   * the string the token was bound to (re-validated + re-stat'd), so the renderer
+   * cannot substitute a different directory after the fact. The widening is
+   * audited (`gesture:"drop"`).
    */
   ipcMain.handle(
     CHANNELS.workspace.dropPrepare,
@@ -505,10 +547,12 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
         return { ok: false, error: "invalid-path" };
       }
       // Layer-0 hard-deny FIRST — a sensitive/root path is refused outright and
-      // no token is ever minted, so it can never be acknowledged into scope.
+      // no token is ever minted, so it can never be acknowledged into scope. The
+      // deny surfaces a STABLE code (not the validator's English prose) so the
+      // renderer can map it to Korean.
       const verdict = validateDirectoryAddition(rawPath);
       if (!verdict.ok) {
-        return { ok: false, error: verdict.reason, warnings: verdict.adjacencyWarnings };
+        return { ok: false, error: directoryDenyCode(verdict.reason), warnings: verdict.adjacencyWarnings };
       }
       // A dropped FILE is not a root — reject rather than inferring its parent.
       try {
