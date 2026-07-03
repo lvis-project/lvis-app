@@ -1181,8 +1181,8 @@ describe("ChatSidePanel", () => {
     // reorders the list (running-first), the pinned selection must stay on the
     // originally-chosen spawn, not silently jump to the new top row.
     const initial: SubAgentSpawn[] = [
-      { spawnId: "a", title: "Agent A", status: "done", turns: [], toolCallCount: 0 },
-      { spawnId: "b", title: "Agent B", status: "done", turns: [], toolCallCount: 0 },
+      { spawnId: "a", title: "Agent A", status: "done", entries: [], toolCallCount: 0 },
+      { spawnId: "b", title: "Agent B", status: "done", entries: [], toolCallCount: 0 },
     ];
     const { rerender } = renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={initial} />,
@@ -1195,7 +1195,7 @@ describe("ChatSidePanel", () => {
     // A new running spawn arrives and would sort to the top of the list.
     const reordered: SubAgentSpawn[] = [
       ...initial,
-      { spawnId: "c", title: "Agent C", status: "running", turns: [], toolCallCount: 0 },
+      { spawnId: "c", title: "Agent C", status: "running", entries: [], toolCallCount: 0 },
     ];
     rerender(
       <TooltipProvider>
