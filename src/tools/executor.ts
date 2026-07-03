@@ -1713,7 +1713,7 @@ export class ToolExecutor {
       }
       // ── Store B: explicit-approval memory skip (foreground only) ──────────
       // checkDetailed (sync) consults Store A — durable glob rules + the
-      // alwaysAllowed Set (Layers 3/5). It cannot see Store B, the exact-tuple
+      // alwaysAllowed Map (Layers 3/5). It cannot see Store B, the exact-tuple
       // user-approval memory written by ToolApprovalDialog for DURABLE
       // choices only (allow-session / allow-always; allow-once never
       // records). Pre-fix, choosing "allow this session" still
