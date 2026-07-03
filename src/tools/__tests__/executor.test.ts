@@ -1819,8 +1819,9 @@ describe("ToolExecutor — C1 ask_user_question short-circuit", () => {
 
 // ─── agent_spawn honors allow-all mode — no popup in "모두 허용" ──
 
-describe("ToolExecutor — agent_spawn (meta + decisionOverride:'ask') allow-all carve-out", () => {
-  // Build a meta tool that mirrors agent_spawn's category contract
+describe("ToolExecutor — agent_spawn (meta + decisionOverride:'ask') permission gate", () => {
+  // Shared helper — single definition used by all sub-groups.
+  // Builds a meta tool mirroring agent_spawn's category contract
   // (category:"meta" + decisionOverride:"ask") with a stubbed execute so we
   // can observe whether the executor auto-allowed it or forced the modal.
   function makeSpawnLikeTool(execute: () => Promise<{ output: string; isError: boolean }>) {
@@ -1829,14 +1830,13 @@ describe("ToolExecutor — agent_spawn (meta + decisionOverride:'ask') allow-all
       description: "spawn a sub-agent",
       source: "builtin",
       category: "meta",
-      // decisionOverride:"ask" is the per-invocation confirmation gate the
-      // executor elevates in strict/default/auto. The allow-all carve-out
-      // must suppress that elevation.
       decisionOverride: "ask",
       jsonSchema: { type: "object", properties: {} },
       execute,
     });
   }
+
+  // ── allow-all carve-out ────────────────────────────────────────────────
 
   it("in allow mode does NOT force the approval modal and executes", async () => {
     const innerExecuteSpy = vi.fn(async () => ({
@@ -1848,9 +1848,9 @@ describe("ToolExecutor — agent_spawn (meta + decisionOverride:'ask') allow-all
     const registry = new ToolRegistry();
     registry.register(spawnTool);
 
-    // Real PermissionManager in allow-all mode. categoryBasedDecision returns
-    // "allow" for meta in allow mode; the executor's meta-ask elevation must
-    // NOT rewrite it back to a forceModal "ask".
+    // Real PermissionManager in allow-all mode. The PM post-guard's
+    // `mode !== "allow"` check must suppress the decisionOverride="ask"
+    // re-elevation so agent_spawn auto-allows with no prompt.
     const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
     permMgr.setMode("allow");
 
@@ -1911,6 +1911,80 @@ describe("ToolExecutor — agent_spawn (meta + decisionOverride:'ask') allow-all
       expect(innerExecuteSpy).not.toHaveBeenCalled();
     },
   );
+
+  // ── MAJOR-2 regression — persisted grant must not defeat per-invocation gate ──
+  //
+  // addAlwaysAllowedPersist("agent_spawn") (= "Allow always" modal click) sets
+  // layer-5 alwaysAllowed, so subsequent checkDetailed calls return allow at
+  // layer 5 BEFORE categoryBasedDecision runs. The PM post-guard (layer-agnostic)
+  // must still re-elevate to ask+forceModal to honour the per-invocation contract.
+
+  it("default mode: modal fires even after addAlwaysAllowedPersist('agent_spawn')", async () => {
+    const innerExecuteSpy = vi.fn(async () => ({
+      output: JSON.stringify({ ok: true }),
+      isError: false,
+    }));
+    const spawnTool = makeSpawnLikeTool(innerExecuteSpy);
+
+    const registry = new ToolRegistry();
+    registry.register(spawnTool);
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.setMode("default");
+    // Simulate the user having clicked "Allow always" on a prior invocation.
+    await permMgr.addAlwaysAllowedPersist("agent_spawn");
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    // Auto-deny so the test terminates; we only care the modal was requested.
+    const requestSpy = vi
+      .spyOn(gate, "requestAndWait")
+      .mockResolvedValue({ requestId: "req-persist", choice: "deny-once" } as never);
+
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    await executor.executeAll(
+      [{ id: "tu-spawn-persist", name: "agent_spawn", input: {} }],
+      { sessionId: "sess-spawn-persist", permissionContext: userPermissionContext() },
+    );
+
+    // The per-invocation decisionOverride:"ask" gate must STILL fire even though
+    // alwaysAllowed hit at layer 5 (which would otherwise skip the modal).
+    expect(requestSpy).toHaveBeenCalledTimes(1);
+    // Tool must NOT have executed (modal was denied).
+    expect(innerExecuteSpy).not.toHaveBeenCalled();
+  });
+
+  it("allow mode: persisted grant + allow mode → modal does NOT fire (allow-all wins)", async () => {
+    const innerExecuteSpy = vi.fn(async () => ({
+      output: JSON.stringify({ ok: true }),
+      isError: false,
+    }));
+    const spawnTool = makeSpawnLikeTool(innerExecuteSpy);
+
+    const registry = new ToolRegistry();
+    registry.register(spawnTool);
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.setMode("allow");
+    await permMgr.addAlwaysAllowedPersist("agent_spawn");
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const requestSpy = vi.spyOn(gate, "requestAndWait");
+
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-spawn-persist-allow", name: "agent_spawn", input: {} }],
+      { sessionId: "sess-spawn-persist-allow", permissionContext: userPermissionContext() },
+    );
+
+    // allow mode: no modal even with persisted grant — allow-all invariant wins.
+    expect(requestSpy).not.toHaveBeenCalled();
+    expect(innerExecuteSpy).toHaveBeenCalledTimes(1);
+    expect(results[0].is_error).toBeUndefined();
+  });
 });
 
 // ─── R2-CR-4 regression — audit redaction must be source-gated ─────
