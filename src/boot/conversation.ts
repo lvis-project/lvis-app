@@ -311,6 +311,91 @@ export function createRoutineConversationLoop(
   });
 }
 
+/**
+ * Side-chat ConversationLoop factory (workspace-rail side chat).
+ *
+ * Like the routine factory, this returns a SECOND ConversationLoop that is fully
+ * isolated from the interactive main chat — it owns its own ConversationHistory,
+ * sessionId, and (crucially) its own {@link MemoryManager} rooted at
+ * `~/.lvis/side-chat/` (`sideChatMemoryManager`) so side-chat sessions never
+ * appear in the main chat's session list and can be cleared as a single domain
+ * (project CLAUDE.md storage-namespace rule).
+ *
+ * UNLIKE routine loops, side chat is INTERACTIVE and PERSISTENT:
+ *   - `headless: false` — it streams to the renderer through the dedicated
+ *     `CHANNELS.sidechat.*` sink (see `domains/sidechat.ts`).
+ *   - a dedicated PostTurnHookChain persists each turn to the side-chat store.
+ *   - a dedicated (non-routine) SystemPromptBuilder — routineMode stays false.
+ *
+ * Model + permissions are INHERITED from the main chat by sharing the same
+ * stateless deps (`settingsService` → same vendor/model; `permissionManager` +
+ * `approvalGate` → same rules + approval modal). Side chat is NOT scope-isolated
+ * (no allow-list): it runs with the full active plugin/tool set, exactly like
+ * the main chat.
+ */
+export type SideChatConversationLoopDeps = Pick<
+  ConversationDeps,
+  | "settingsService"
+  | "keywordEngine"
+  | "routeEngine"
+  | "toolRegistry"
+  | "permissionManager"
+  | "approvalGate"
+  | "hookRunner"
+  | "scriptHookManager"
+  | "bashAstValidator"
+  | "pluginRuntime"
+  | "llmFetch"
+  | "auditLogger"
+> & {
+  /** Isolated MemoryManager rooted at `~/.lvis/side-chat/`. */
+  sideChatMemoryManager: MemoryManager;
+  /** Shared settings service — reads `additionalDirectories` at each turn. */
+  getAdditionalDirectories?: () => readonly string[];
+};
+
+export function createSideChatConversationLoop(
+  deps: SideChatConversationLoopDeps,
+): ConversationLoop {
+  // Dedicated SystemPromptBuilder bound to the side-chat MemoryManager so its
+  // memory/AGENTS.md context comes from the side-chat namespace, not the main
+  // one. routineMode stays false (default) — side chat is a normal interactive
+  // session, not a summarizing routine.
+  const sideChatSystemPromptBuilder = createSystemPromptBuilder({
+    memoryManager: deps.sideChatMemoryManager,
+    toolRegistry: deps.toolRegistry,
+    pluginRuntime: deps.pluginRuntime,
+  });
+  // Dedicated post-turn hook chain — persists each side-chat turn to the
+  // isolated store. No idleScheduler (side chat does not drive idle refresh).
+  const { postTurnHookChain } = createPostTurnHookChain({
+    memoryManager: deps.sideChatMemoryManager,
+    settingsService: deps.settingsService,
+    ...(deps.auditLogger ? { auditLogger: deps.auditLogger } : {}),
+  });
+  return new ConversationLoop({
+    settingsService: deps.settingsService,
+    systemPromptBuilder: sideChatSystemPromptBuilder,
+    keywordEngine: deps.keywordEngine,
+    routeEngine: deps.routeEngine,
+    toolRegistry: deps.toolRegistry,
+    memoryManager: deps.sideChatMemoryManager,
+    permissionManager: deps.permissionManager,
+    approvalGate: deps.approvalGate,
+    hookRunner: deps.hookRunner,
+    scriptHookManager: deps.scriptHookManager,
+    bashAstValidator: deps.bashAstValidator,
+    pluginRuntime: deps.pluginRuntime,
+    postTurnHookChain,
+    auditLogger: deps.auditLogger,
+    llmFetch: deps.llmFetch,
+    ...(deps.getAdditionalDirectories
+      ? { getAdditionalDirectories: deps.getAdditionalDirectories }
+      : {}),
+    // headless defaults to false — interactive, streaming loop.
+  });
+}
+
 export function createConversationLoop(deps: ConversationDeps): ConversationLoop {
   // §4.5: ConversationLoop
   return new ConversationLoop({
