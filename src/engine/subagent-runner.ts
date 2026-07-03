@@ -28,7 +28,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import type { MemoryManager } from "../memory/memory-manager.js";
+import { isValidSessionId, type MemoryManager } from "../memory/memory-manager.js";
 import type { ApprovalGate, ApprovalRequest, ApprovalDecision } from "../permissions/approval-gate.js";
 import {
   isModelComplexityLevel,
@@ -136,6 +136,15 @@ export interface SubAgentSpawnResult {
    * end_turn or any non-budget stop.
    */
   incomplete?: boolean;
+  /**
+   * `true` when a `resume()` was REFUSED before running any turn because the
+   * session hit a resume-axis loop guard (`resumeCount >= MAX_RESUMES` or
+   * `cumulativeRounds >= CUMULATIVE_ROUNDS_CEILING`). Distinct from `incomplete`
+   * (a run that started but hit its per-turn round budget): a resume-exhausted
+   * result never ran a turn at all. Always paired with `ok === false`. Absent on
+   * spawn results and on resumes that were allowed to run.
+   */
+  resumeExhausted?: boolean;
 }
 
 export interface SubAgentSpawnCallbacks {
@@ -185,6 +194,23 @@ const MAX_TURNS_CAP = 30;
  * defense-in-depth backstop.
  */
 const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>(["agent_spawn"]);
+
+/**
+ * Resume-axis loop guards (Commit 2 — security-required to land WITH the resume
+ * entry point). A sub-agent can be re-hydrated and continued via `resume()`, but
+ * an unbounded resume chain is a fork-bomb on the resume axis and blows past the
+ * global round budget the per-turn `maxRounds` cap enforces per turn.
+ *
+ *   - MAX_RESUMES: how many times a single sub-agent session may be resumed.
+ *   - CUMULATIVE_ROUNDS_CEILING: total assistant rounds across the original
+ *     spawn plus every resume segment. Pinned to 4× the per-turn hard cap so
+ *     even a maximally-budgeted spawn + MAX_RESUMES resumes cannot exceed it.
+ *
+ * A resume that would breach either guard is refused BEFORE any turn runs
+ * (`{ ok:false, resumeExhausted:true }`), so no LLM round is spent.
+ */
+const MAX_RESUMES = 3;
+const CUMULATIVE_ROUNDS_CEILING = 4 * MAX_TURNS_CAP;
 
 /**
  * Build the child loop's session id. It MUST satisfy MemoryManager's
@@ -326,6 +352,118 @@ export class SubAgentRunner {
   constructor(private readonly deps: SubAgentRunnerDeps) {}
 
   /**
+   * Per-`childSessionId` in-flight lock. `resume()` loads metadata, runs a
+   * turn, then rewrites the metadata (`resumeCount`/`cumulativeRounds`). That
+   * load→run→save is a LOGICAL transaction; `withFileLock` (memory-manager)
+   * only serializes the individual file WRITE, not the whole read-modify-write.
+   * Two concurrent resumes of the same session would each load the same
+   * pre-increment metadata, run, and last-writer-wins the counter (a lost
+   * update that defeats MAX_RESUMES). This in-memory map fail-closes the
+   * second concurrent resume of the same id. Single main-process, so a Map
+   * keyed on the session id is sufficient — no cross-process contention.
+   */
+  private readonly inFlight = new Map<string, Promise<SubAgentSpawnResult>>();
+
+  /**
+   * Shared child-loop reconstruction used by BOTH `spawn()` and `resume()`.
+   * Returns the composed {@link ConversationLoopDeps}, the resolved scoped tool
+   * list (the frozen permission surface), and the wrapped ApprovalGate.
+   *
+   * The tool surface is derived ONLY from `frozenSourceTools`:
+   *   - spawn passes the caller-supplied `sourceTools` (or null → full parent
+   *     surface minus blocklist, the historical "no allowlist" behavior);
+   *   - resume passes `meta.sourceTools` from disk as a NON-NULL explicit list,
+   *     so a resumed child's scope is frozen to exactly what the original spawn
+   *     recorded — the parent registry is never consulted, closing scope
+   *     widening mathematically (a resume cannot gain tools the parent gained
+   *     after the spawn).
+   *
+   * The blocklist (agent_spawn) is ALWAYS stripped so a sub-agent — spawned or
+   * resumed — cannot recurse.
+   */
+  private buildChildDeps(args: {
+    /**
+     * The frozen source-tool allowlist. `null` ⇒ full parent surface minus the
+     * blocklist (spawn's "no explicit allowlist" path). A non-null array ⇒ the
+     * child is scoped to exactly those names (minus the blocklist). resume
+     * ALWAYS passes a non-null array (meta.sourceTools) so it never widens.
+     */
+    frozenSourceTools: string[] | null;
+    title: string;
+    profileModel: string | undefined;
+  }): {
+    childDeps: ConversationLoopDeps;
+    scopedTools: import("../tools/base.js").Tool[];
+  } {
+    // C3(b): build the sub-agent's tool surface. Always strip the blocklist
+    // (agent_spawn) so a sub-agent cannot recurse. When the allowlist is
+    // null (spawn's no-allowlist path) we still want the agent_spawn block to
+    // apply, so we start from the full tool list and intersect with the
+    // blocklist. resume never takes the null branch — it hands a frozen list.
+    const filteredSourceTools = args.frozenSourceTools
+      ? args.frozenSourceTools.filter((name) => !SUB_AGENT_TOOL_BLOCKLIST.has(name))
+      : null;
+    const scopedRegistry = filteredSourceTools
+      ? this.deps.toolRegistry.createScopedView(filteredSourceTools)
+      : this.parentRegistryWithoutBlocklist();
+    const scopedTools = scopedRegistry.listAll();
+    const forcedActivePluginIds = new Set(
+      filteredSourceTools
+        ? scopedTools
+            .filter((tool) => tool.source === "plugin" && tool.pluginId)
+            .map((tool) => tool.pluginId as string)
+        : [],
+    );
+    const forcedActiveToolNames = filteredSourceTools
+      ? new Set(scopedTools.map((tool) => tool.name))
+      : undefined;
+
+    // Wrap the parent ApprovalGate so approval modals from this sub-agent's
+    // tool calls show "[Sub-Agent: <title>]" in their reason text.
+    const wrappedApprovalGate = this.deps.parentDeps.approvalGate
+      ? makeSubAgentApprovalAdapter(this.deps.parentDeps.approvalGate, args.title)
+      : undefined;
+
+    // Compose deps for the child loop. We share the parent's permissionManager,
+    // hookRunner so the child plays by the same security rules.
+    // History is fresh because ConversationLoop.constructor instantiates a new
+    // ConversationHistory (spawn); resume re-hydrates it via loadSession.
+    // Resolve the child's model from the profile's `model:` frontmatter
+    // against the parent's active vendor. null → leave modelOverride unset
+    // so the child runs on the parent's configured model.
+    const activeVendor = this.deps.parentDeps.settingsService.get("llm").provider;
+    const resolvedModel = resolveSubAgentModel(args.profileModel, activeVendor);
+
+    const childDeps: ConversationLoopDeps = {
+      ...this.deps.parentDeps,
+      toolRegistry: scopedRegistry,
+      // Route the child's session persistence to the ISOLATED subagent store
+      // (`~/.lvis/subagent/`), never the parent's main-chat MemoryManager.
+      // Reusing the parent store is what leaked orphan sub-agent JSONL into
+      // the main `~/.lvis/sessions/` list; the child's saveSession/loadSession
+      // (via `self.deps.memoryManager` in run-turn) now target the subagent
+      // namespace under the regex-valid childSessionId set by the caller.
+      memoryManager: this.deps.subAgentMemoryManager,
+      approvalGate: wrappedApprovalGate,
+      // Sub-agent runs are fire-and-forget — no post-turn hook chain to keep
+      // the parent session unaffected.
+      postTurnHookChain: undefined,
+      // Sub-agent does not request_plugin (its tool surface is fixed at spawn).
+      pluginRuntime: undefined,
+      forcedActivePluginIds,
+      ...(forcedActiveToolNames ? { forcedActiveToolNames } : {}),
+      // C2(c): the sub-agent uses the parent's SkillOverlay reference to
+      // load skills if the user grants — but its own session id will be
+      // tracked separately via setActiveSessionId.
+      skillOverlay: this.deps.parentDeps.skillOverlay,
+      // #1112: per-profile model override. undefined when unresolved so the
+      // child inherits the parent vendor block's model.
+      modelOverride: resolvedModel ?? undefined,
+    };
+    return { childDeps, scopedTools };
+  }
+
+  /**
    * Spawn a sub-agent and run it inline. Returns the final summary text.
    */
   async spawn(
@@ -356,70 +494,18 @@ export class SubAgentRunner {
       input.maxRounds ?? modeResult.config.maxToolRoundsHint ?? MAX_TURNS_DEFAULT;
     const cappedRounds = Math.max(1, Math.min(MAX_TURNS_CAP, requestedRounds));
 
-    // C3(b): build the sub-agent's tool surface. Always strip the blocklist
-    // (agent_spawn) so a sub-agent cannot recurse. When `sourceTools` is
-    // empty/absent we still want the agent_spawn block to apply, so we
-    // start from the full tool list and intersect with the blocklist.
-    const filteredSourceTools = input.sourceTools && input.sourceTools.length > 0
-      ? input.sourceTools.filter((name) => !SUB_AGENT_TOOL_BLOCKLIST.has(name))
+    // C3(b): build the sub-agent's tool surface. `sourceTools` empty/absent →
+    // null so buildChildDeps falls back to the full parent surface minus the
+    // blocklist (historical no-allowlist behavior). Resume never takes this
+    // path — it hands buildChildDeps the frozen meta.sourceTools list.
+    const frozenSourceTools = input.sourceTools && input.sourceTools.length > 0
+      ? input.sourceTools
       : null;
-    const scopedRegistry = filteredSourceTools
-      ? this.deps.toolRegistry.createScopedView(filteredSourceTools)
-      : this.parentRegistryWithoutBlocklist();
-    const scopedTools = scopedRegistry.listAll();
-    const forcedActivePluginIds = new Set(
-      filteredSourceTools
-        ? scopedTools
-            .filter((tool) => tool.source === "plugin" && tool.pluginId)
-            .map((tool) => tool.pluginId as string)
-        : [],
-    );
-    const forcedActiveToolNames = filteredSourceTools
-      ? new Set(scopedTools.map((tool) => tool.name))
-      : undefined;
-
-    // Wrap the parent ApprovalGate so approval modals from this sub-agent's
-    // tool calls show "[Sub-Agent: <title>]" in their reason text.
-    const wrappedApprovalGate = this.deps.parentDeps.approvalGate
-      ? makeSubAgentApprovalAdapter(this.deps.parentDeps.approvalGate, input.title)
-      : undefined;
-
-    // Compose deps for the child loop. We share the parent's permissionManager,
-    // hookRunner so the child plays by the same security rules.
-    // History is fresh because ConversationLoop.constructor instantiates a new
-    // ConversationHistory.
-    // Resolve the child's model from the profile's `model:` frontmatter
-    // against the parent's active vendor. null → leave modelOverride unset
-    // so the child runs on the parent's configured model.
-    const activeVendor = this.deps.parentDeps.settingsService.get("llm").provider;
-    const resolvedModel = resolveSubAgentModel(input.profileModel, activeVendor);
-
-    const childDeps: ConversationLoopDeps = {
-      ...this.deps.parentDeps,
-      toolRegistry: scopedRegistry,
-      // Route the child's session persistence to the ISOLATED subagent store
-      // (`~/.lvis/subagent/`), never the parent's main-chat MemoryManager.
-      // Reusing the parent store is what leaked orphan sub-agent JSONL into
-      // the main `~/.lvis/sessions/` list; the child's saveSession/loadSession
-      // (via `self.deps.memoryManager` in run-turn) now target the subagent
-      // namespace under the regex-valid `childSessionId` set below.
-      memoryManager: this.deps.subAgentMemoryManager,
-      approvalGate: wrappedApprovalGate,
-      // Sub-agent runs are fire-and-forget — no post-turn hook chain to keep
-      // the parent session unaffected.
-      postTurnHookChain: undefined,
-      // Sub-agent does not request_plugin (its tool surface is fixed at spawn).
-      pluginRuntime: undefined,
-      forcedActivePluginIds,
-      ...(forcedActiveToolNames ? { forcedActiveToolNames } : {}),
-      // C2(c): the sub-agent uses the parent's SkillOverlay reference to
-      // load skills if the user grants — but its own session id will be
-      // tracked separately via setActiveSessionId.
-      skillOverlay: this.deps.parentDeps.skillOverlay,
-      // #1112: per-profile model override. undefined when unresolved so the
-      // child inherits the parent vendor block's model.
-      modelOverride: resolvedModel ?? undefined,
-    };
+    const { childDeps, scopedTools } = this.buildChildDeps({
+      frozenSourceTools,
+      title: input.title,
+      profileModel: input.profileModel,
+    });
 
     const child = new ConversationLoop(childDeps);
     // Bind the child loop's session identity to the regex-valid childSessionId
@@ -576,6 +662,277 @@ export class SubAgentRunner {
       ...(childStopReason ? { stopReason: childStopReason } : {}),
       // A clean-but-budget-capped run: the child returned real partial work
       // (ok === true) but stopped on its round budget, so the task is unfinished.
+      ...(ok && childStopReason === "round-cap" ? { incomplete: true } : {}),
+    };
+  }
+
+  /**
+   * Resume a previously-spawned sub-agent in the SAME instance by RE-HYDRATING
+   * its persisted history and running one fresh-budget continuation turn.
+   *
+   * ── Security invariant: RE-HYDRATE, never RE-AUTHORIZE ──
+   * A resume reconstructs the child from the metadata the ORIGINAL spawn froze
+   * to disk. It does NOT re-grant permissions:
+   *   - Tool scope is `meta.sourceTools` (the frozen allowlist) minus the
+   *     blocklist — the parent registry is NEVER consulted, so a resume cannot
+   *     gain a tool the parent registered after the spawn (scope widening is
+   *     closed mathematically: there is no "empty → full parent surface" branch;
+   *     spawn always persisted the concrete resolved list, so meta.sourceTools
+   *     is a complete explicit allowlist).
+   *   - `agent_spawn` is stripped from the registry (blocklist) AND the turn
+   *     runs at `spawnDepth: 1`, so a resumed child cannot recurse — the same
+   *     byte-identical double defense a fresh spawn gets.
+   *   - Depth stays 1 (hard-coded); the child persists only to the isolated
+   *     `~/.lvis/subagent/` store (child deps' MemoryManager).
+   *
+   * ── Loop guards (Commit 2) ──
+   * Refused BEFORE any turn (`{ ok:false, resumeExhausted:true }`) when the
+   * session already hit `MAX_RESUMES` or `CUMULATIVE_ROUNDS_CEILING`. A
+   * per-`childSessionId` in-flight lock fail-closes a second concurrent resume
+   * of the same id (the load→run→save transaction is not covered by the
+   * file-level write lock).
+   *
+   * @param resumeId  The `childSessionId` returned by the original spawn (also
+   *                  surfaced to the parent LLM via the incomplete tool result).
+   * @param continuationInstructions  The follow-up prompt for the fresh turn.
+   * @param title     Sub-agent title for the approval-modal label. Not stored
+   *                  in metadata, so the caller (agent_spawn) forwards it; a
+   *                  resume without a title uses the raw reason text.
+   */
+  async resume(
+    resumeId: string,
+    continuationInstructions: string,
+    title: string,
+    callbacks?: SubAgentSpawnCallbacks,
+  ): Promise<SubAgentSpawnResult> {
+    // In-flight lock: fail-closed if a resume for THIS session is already
+    // running. Checked before any load so two concurrent resumes cannot both
+    // read the same pre-increment metadata (lost-update on the counters).
+    const existing = this.inFlight.get(resumeId);
+    if (existing) {
+      const msg = "sub-agent resume: a resume for this session is already in flight";
+      callbacks?.onError?.(msg);
+      return {
+        summary: msg,
+        toolCallCount: 0,
+        turnCount: 0,
+        childSessionId: resumeId,
+        entries: [],
+        ok: false,
+        error: msg,
+      };
+    }
+
+    const runPromise = this.runResume(resumeId, continuationInstructions, title, callbacks);
+    this.inFlight.set(resumeId, runPromise);
+    try {
+      return await runPromise;
+    } finally {
+      this.inFlight.delete(resumeId);
+    }
+  }
+
+  /** Inner resume body — wrapped by {@link resume} with the in-flight lock. */
+  private async runResume(
+    resumeId: string,
+    continuationInstructions: string,
+    title: string,
+    callbacks?: SubAgentSpawnCallbacks,
+  ): Promise<SubAgentSpawnResult> {
+    const fail = (msg: string, extra?: Partial<SubAgentSpawnResult>): SubAgentSpawnResult => {
+      callbacks?.onError?.(msg);
+      return {
+        summary: msg,
+        toolCallCount: 0,
+        turnCount: 0,
+        childSessionId: resumeId,
+        entries: [],
+        ok: false,
+        error: msg,
+        ...extra,
+      };
+    };
+
+    // 1. Load + validate the frozen metadata. loadSessionMetadata throws on an
+    //    invalid id (not returns null), so guard the id shape first to keep the
+    //    failure fail-closed rather than an uncaught throw.
+    if (!isValidSessionId(resumeId)) {
+      return fail(`sub-agent resume: invalid resumeId "${resumeId}"`);
+    }
+    const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(resumeId);
+    if (meta === null) {
+      return fail(`sub-agent resume: no session metadata for "${resumeId}"`);
+    }
+    if (meta.sessionKind !== "subagent") {
+      // Refuse to resume anything that is not a sub-agent session (a main or
+      // routine session must never be driven through the sub-agent seam).
+      return fail(
+        `sub-agent resume: session "${resumeId}" is not a sub-agent (kind=${meta.sessionKind ?? "unknown"})`,
+      );
+    }
+
+    // 2. Loop guards (Commit 2). Refuse BEFORE running any turn.
+    const priorResumeCount = meta.resumeCount ?? 0;
+    const priorCumulativeRounds = meta.cumulativeRounds ?? 0;
+    if (priorResumeCount >= MAX_RESUMES) {
+      return fail(
+        `sub-agent resume: exhausted (resumeCount=${priorResumeCount} >= ${MAX_RESUMES})`,
+        { resumeExhausted: true },
+      );
+    }
+    if (priorCumulativeRounds >= CUMULATIVE_ROUNDS_CEILING) {
+      return fail(
+        `sub-agent resume: cumulative-rounds ceiling reached (${priorCumulativeRounds} >= ${CUMULATIVE_ROUNDS_CEILING})`,
+        { resumeExhausted: true },
+      );
+    }
+
+    // 3. Re-derive the round budget from the FROZEN profile mode (same
+    //    resolution spawn used, minus the host `maxRounds` override which is a
+    //    spawn-time-only knob). A resume gets a fresh per-turn budget.
+    const modeResult = resolveAgentMode(meta.profileMode);
+    const requestedRounds = modeResult.config.maxToolRoundsHint ?? MAX_TURNS_DEFAULT;
+    const cappedRounds = Math.max(1, Math.min(MAX_TURNS_CAP, requestedRounds));
+
+    // 4. Reconstruct child deps from the FROZEN scope. meta.sourceTools is the
+    //    ONLY scope source — passed as a non-null explicit list so buildChildDeps
+    //    never falls back to the parent surface (scope widening closed).
+    const frozenSourceTools = meta.sourceTools ?? [];
+    if (frozenSourceTools.length === 0) {
+      // A real spawn always persists a concrete non-empty allowlist (the
+      // resolved scoped surface). An empty frozen scope here implies a
+      // corrupted / tampered .meta.json — the resumed child gets a zero-tool
+      // registry (fail-safe: it can only emit text), but surface the anomaly
+      // for the audit trail rather than continuing silently.
+      log.warn(
+        "sub-agent resume: session '%s' has an empty frozen tool scope — possible metadata tampering (child will have no tools)",
+        resumeId,
+      );
+    }
+    const { childDeps } = this.buildChildDeps({
+      frozenSourceTools,
+      title,
+      profileModel: meta.profileModel,
+    });
+
+    const child = new ConversationLoop(childDeps);
+    // Bind identity to the resumeId BEFORE loading so persistence + tracing key
+    // on the addressable id (mirrors spawn's rebind seam).
+    child.sessionId = resumeId;
+    child.sessionKind = "subagent";
+    child.rebindTracer();
+    if (!child.hasProvider()) {
+      return fail("sub-agent resume: LLM provider not configured");
+    }
+
+    // 5. RE-HYDRATE the full history from the isolated subagent store. loadSession
+    //    validates the id, restores + normalizes the tool-pair invariant, and
+    //    re-applies metadata. A false return (missing/unsafe) fails closed.
+    const loaded = child.loadSession(resumeId);
+    if (!loaded) {
+      return fail(`sub-agent resume: failed to load session history for "${resumeId}"`);
+    }
+
+    let totalToolCalls = 0;
+    let lastText = "";
+    let turn = 0;
+    let assistantRounds = 0;
+    // Accumulator seed decision (design point 7): `historyToEntries` lives in
+    // `src/ui/renderer/utils/history.ts` — a renderer-layer util the engine
+    // (main process) must not import (the engine imports nothing from
+    // `ui/renderer`). Rather than duplicate its reducer logic here, we take the
+    // documented DEGRADE path: the resumed run's accumulator starts fresh
+    // (resumed segment only). Continuity across chip/tab is handled downstream —
+    // the resume writes its OWN `agent_spawn` tool result with the resumed
+    // segment's `entries`, and on reload `deriveSubAgentSpawnsFromEntries` walks
+    // BOTH the original and resume tool calls while `mergeSubAgentSpawns` dedupes
+    // by `toolUseId` (distinct per call), so both segments render. The parent
+    // LLM stitches the continuation via the surfaced `resumeId`.
+    const transcript = new SubAgentTranscriptAccumulator();
+    const emitActivity = () =>
+      callbacks?.onActivity?.({
+        entries: transcript.snapshot(),
+        toolCallCount: totalToolCalls,
+      });
+    let ok = false;
+    let failureReason: string | undefined;
+    let childStopReason: import("./turn/types.js").TurnStopReason | undefined;
+
+    try {
+      const result = await child.runTurn(
+        continuationInstructions,
+        {
+          onToolStart: (name, input, cbMeta) => {
+            transcript.onToolStart(name, input, cbMeta);
+            emitActivity();
+          },
+          onPermissionReview: (event) => {
+            transcript.onPermissionReview(event);
+            emitActivity();
+          },
+          onToolEnd: (name, toolResult, isError, cbMeta, uiPayload, durationMs) => {
+            totalToolCalls += 1;
+            transcript.onToolEnd(name, toolResult, isError, cbMeta, uiPayload, durationMs);
+            emitActivity();
+          },
+          onAssistantRound: (round) => {
+            assistantRounds += 1;
+            turn = assistantRounds;
+            lastText = round.text;
+            transcript.onAssistantRound(round.thought, round.text);
+            emitActivity();
+          },
+          onError: (e) => {
+            callbacks?.onError?.(e);
+          },
+        },
+        undefined,
+        {
+          maxRounds: cappedRounds,
+          // Same addressable id → the continuation turn's audit + persistence
+          // stay under the resumed session.
+          sessionIdOverride: resumeId,
+          // spawnDepth 1 is the byte-identical recursion defense a fresh spawn
+          // gets — a resumed child cannot agent_spawn.
+          spawnDepth: 1,
+          inputOrigin: "llm-tool-arg",
+        },
+      );
+      totalToolCalls = result.toolCalls.length;
+      lastText = result.text;
+      childStopReason = result.stopReason;
+      ok = true;
+    } catch (err) {
+      const msg = (err as Error).message ?? "sub-agent resume run failed";
+      callbacks?.onError?.(msg);
+      lastText = msg;
+      failureReason = msg;
+    }
+
+    // 6. Commit 2: update counters. saveSessionMetadata is FULL-OVERWRITE (not
+    //    merge), so spread the loaded meta to preserve sourceTools/profile*
+    //    (dropping them would corrupt the frozen scope on the NEXT resume) and
+    //    bump resumeCount by 1 + cumulativeRounds by this turn's round count.
+    //    Only on a clean run — a failed run spent no accountable rounds and must
+    //    not consume a resume slot.
+    if (ok) {
+      await this.deps.subAgentMemoryManager.saveSessionMetadata(resumeId, {
+        ...meta,
+        sessionKind: "subagent",
+        resumeCount: priorResumeCount + 1,
+        cumulativeRounds: priorCumulativeRounds + turn,
+      });
+    }
+
+    return {
+      summary: lastText,
+      toolCallCount: totalToolCalls,
+      turnCount: turn,
+      childSessionId: resumeId,
+      entries: transcript.snapshot(),
+      ok,
+      ...(ok ? {} : { error: failureReason ?? lastText }),
+      ...(childStopReason ? { stopReason: childStopReason } : {}),
       ...(ok && childStopReason === "round-cap" ? { incomplete: true } : {}),
     };
   }

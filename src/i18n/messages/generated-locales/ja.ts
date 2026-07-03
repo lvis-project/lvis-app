@@ -184,6 +184,7 @@ export const jaMessages: Record<string, string> = {
   "be_agentSpawn.propAgentNameDescription": "オプション: ~/.lvis/agents/ で定義されたエージェント プロファイル名。指定すると、そのプロファイル本体とデフォルトのsourceToolsが使用されます。",
   "be_agentSpawn.propInstructionsDescription": "サブエージェントが実行するタスク - システムとユーザーのプロンプトを組み合わせたもの。",
   "be_agentSpawn.propSourceToolsDescription": "サブエージェントに公開するツール名のリスト。省略した場合、親と同じツール セットが使用されます。",
+  "be_agentSpawn.propResumeIdDescription": "任意: 以前に起動したサブエージェントを resumeId（未完了の結果で返される）で再開します。指定すると、サブエージェントの履歴が再水和され、instructions を後続のプロンプトとして続行します。ツールの範囲は元の起動時に固定され、再付与されません。省略すると新しいサブエージェントを開始します。",
   "be_agentSpawn.incompleteNotice": "サブエージェントは完了前にラウンド予算に達しました — 上記の概要は完成した結果ではなく部分的なものです。確認し、タスクにまだ作業が必要な場合は、サブエージェントを再度起動して中断したところから続行してください(または残りの手順を自分で引き継いでください)。",
   "be_agentSpawn.propTitleDescription": "サブエージェントの短いタイトル (UI カードのヘッダーに表示されます)。 AgentName が指定されていない場合は必須です。",
   "be_agentSpawn.toolDescription": "独立した小さなタスクを実行するサブエージェントを生成します。親の会話履歴から分離された新しいコンテキスト。指定されたsourceToolsのみが使用可能です。サブエージェントのラウンド予算はエージェントのモードからホストが自動的に割り当てます(作業に合ったagentNameを選んでください) — あなたが設定するものではありません。agentNameが指定されている場合、~/.lvis/agents/<name>.md または ~/.lvis/agents/<name>/AGENTS.md プロファイルがプロファイル プロンプトとしてマージされます。概要テキスト + ツール呼び出し数を返します。サブエージェントが完了前にラウンド予算に達すると、結果は未完了としてマークされ(部分出力付き)、続行するかどうかを判断できます。特定のツール/プラグインを直接呼び出すためのフォールバック パスとして使用しないでください。ターゲット ツールが表示されている場合は、それを直接呼び出します。そうでない場合は、request_plugin 経由でアクティブ化します。",
