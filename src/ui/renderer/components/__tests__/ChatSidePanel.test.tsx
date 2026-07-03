@@ -1024,4 +1024,77 @@ describe("ChatSidePanel", () => {
     fireEvent.click(await screen.findByTestId("chat-side-panel-fs-ctx-reveal"));
     await screen.findByTestId("chat-side-panel-op-error");
   });
+
+  it("file tab: session segment is disabled with a 0 badge when there are no artifacts", () => {
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const sessionSeg = screen.getByTestId("chat-side-panel-file-source-session") as HTMLButtonElement;
+    expect(sessionSeg.disabled).toBe(true);
+    expect(screen.getByTestId("chat-side-panel-file-source-session-count").textContent).toBe("0");
+    // Directory is the default source.
+    expect(screen.getByTestId("chat-side-panel-file-source-directory").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("file tab: switching to the session segment shows the session artifacts", () => {
+    const targets: ChatPreviewTarget[] = [
+      { id: "file-1", kind: "file", title: "report.md", sourceLabel: "read_file", createdOrder: 1, path: "/ws/report.md", canOpenExternal: false },
+    ];
+    const files: WorkspaceFileItem[] = [
+      { id: "tool:/ws/report.md", path: "/ws/report.md", label: "report.md", detail: "/ws/report.md", sourceLabel: "read_file", operation: "read", previewTargetId: "file-1", canOpenExternal: false },
+    ];
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={targets} files={files} initialSelectedId="file-1" />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    // Default (directory) source does not list the session artifact.
+    expect(screen.getByTestId("chat-side-panel-file-tree")).not.toHaveTextContent("report.md");
+    const sessionSeg = screen.getByTestId("chat-side-panel-file-source-session") as HTMLButtonElement;
+    expect(sessionSeg.disabled).toBe(false);
+    expect(screen.getByTestId("chat-side-panel-file-source-session-count").textContent).toBe("1");
+    fireEvent.click(sessionSeg);
+    expect(screen.getByTestId("chat-side-panel-file-tree")).toHaveTextContent("report.md");
+  });
+
+  it("subagent tab: lists spawns (running first) and shows the selected one's detail", () => {
+    const subAgentSpawns: SubAgentSpawn[] = [
+      { spawnId: "done-1", title: "Completed agent", status: "done", turns: [{ turn: 1, text: "did work", toolCallCount: 2 }], summary: "all done", toolCallCount: 2 },
+      { spawnId: "run-1", title: "Live agent", status: "running", turns: [{ turn: 1, text: "working", toolCallCount: 1 }], toolCallCount: 1 },
+    ];
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    const rows = screen.getAllByTestId("chat-side-panel-subagent-row");
+    expect(rows).toHaveLength(2);
+    // Running spawn sorts first and is auto-selected in the detail pane.
+    expect(rows[0]!.textContent).toContain("Live agent");
+    expect(rows[0]!.getAttribute("aria-selected")).toBe("true");
+    const detail = screen.getByTestId("chat-side-panel-subagent-detail");
+    expect(detail.textContent).toContain("Live agent");
+    // Selecting the completed spawn swaps the detail card.
+    fireEvent.click(rows[1]!);
+    expect(screen.getByTestId("chat-side-panel-subagent-detail").textContent).toContain("Completed agent");
+  });
+
+  it("subagent tab: empty state when the chat has no spawns", () => {
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={[]} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    expect(screen.getByTestId("chat-side-panel-subagent-empty")).toBeTruthy();
+  });
+
+  it("side-chat is not a launcher item (reserved kind, no dead affordance)", () => {
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    expect(screen.queryByTestId("chat-side-panel-launcher-side-chat")).toBeNull();
+    // Also absent from the tab-bar "+" menu once a tab exists.
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    openLauncherMenu();
+    expect(screen.queryByTestId("chat-side-panel-launcher-menu-side-chat")).toBeNull();
+    expect(screen.getByTestId("chat-side-panel-launcher-menu-subagent")).toBeTruthy();
+  });
 });
