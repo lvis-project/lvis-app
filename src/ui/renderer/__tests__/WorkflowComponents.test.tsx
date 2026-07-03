@@ -718,7 +718,7 @@ describe("SubAgentCard", () => {
           spawnId: "s1",
           title: "search task",
           status: "done",
-          turns: [{ turn: 1, text: "hello", toolCallCount: 0 }],
+          entries: [{ kind: "assistant", text: "hello", streaming: false }],
           summary: "all done",
           toolCallCount: 0,
         }}
@@ -735,7 +735,7 @@ describe("SubAgentCard", () => {
           spawnId: "s2",
           title: "broken",
           status: "error",
-          turns: [],
+          entries: [],
           toolCallCount: 0,
           errorMessage: "kapow",
         }}

@@ -42,6 +42,8 @@ import {
 } from "../shared/agent-mode-map.js";
 import { createLogger } from "../lib/logger.js";
 import { t } from "../i18n/index.js";
+import { SubAgentTranscriptAccumulator } from "./subagent-transcript.js";
+import type { ChatEntry } from "../lib/chat-stream-state.js";
 
 const log = createLogger("lvis");
 
@@ -69,9 +71,13 @@ export interface SubAgentSpawnInput {
   profileMode?: string;
 }
 
-export interface SubAgentTurnUpdate {
-  turn: number;
-  text: string;
+export interface SubAgentActivityUpdate {
+  /**
+   * Full child transcript snapshot as `ChatEntry[]` (the shared chat model).
+   * Idempotent replace — the consumer overwrites the spawn's entries with this
+   * array rather than appending. Already DLP-masked at the accumulator source.
+   */
+  entries: ChatEntry[];
   toolCallCount: number;
 }
 
@@ -80,6 +86,13 @@ export interface SubAgentSpawnResult {
   toolCallCount: number;
   turnCount: number;
   childSessionId: string;
+  /**
+   * Final child transcript as `ChatEntry[]`. Embedded verbatim in the
+   * `agent_spawn` tool result so a reloaded session can rebuild the sub-agent
+   * tab's full transcript without any live event stream (persistence parity).
+   * Already DLP-masked.
+   */
+  entries: ChatEntry[];
   /**
    * Structural success signal. `true` only when the child loop completed a
    * clean `runTurn` (the `summary` is the agent's final message). `false` when
@@ -96,7 +109,12 @@ export interface SubAgentSpawnResult {
 }
 
 export interface SubAgentSpawnCallbacks {
-  onTurn?: (update: SubAgentTurnUpdate) => void;
+  /**
+   * Fired whenever the child loop produces new transcript content (tool
+   * start/end, permission review, completed assistant round). Carries the full
+   * `ChatEntry[]` snapshot so the consumer swaps the whole child transcript.
+   */
+  onActivity?: (update: SubAgentActivityUpdate) => void;
   onError?: (message: string) => void;
 }
 
@@ -327,6 +345,7 @@ export class SubAgentRunner {
         toolCallCount: 0,
         turnCount: 0,
         childSessionId,
+        entries: [],
         // Provider-missing is a failed spawn, not a completed run with the
         // error text as its summary — signal it structurally so callers do
         // not record it as success.
@@ -338,6 +357,17 @@ export class SubAgentRunner {
     let totalToolCalls = 0;
     let lastText = "";
     let turn = 0;
+
+    // Accumulates the child's activity into a `ChatEntry[]` via the shared
+    // chat-stream-state reducers (DLP-masked at the source). Snapshots are
+    // forwarded on every activity so the sub-agent tab renders live through the
+    // same TranscriptRenderer the main chat uses.
+    const transcript = new SubAgentTranscriptAccumulator();
+    const emitActivity = () =>
+      callbacks?.onActivity?.({
+        entries: transcript.snapshot(),
+        toolCallCount: totalToolCalls,
+      });
     // Track whether the child loop completed cleanly. Starts false; flips true
     // only after `runTurn` returns without throwing. The catch leaves it false
     // so the error text surfaced as `summary` is reported as a FAILED spawn,
@@ -365,14 +395,29 @@ export class SubAgentRunner {
       const result = await child.runTurn(
         initialPrompt,
         {
+          // Forward the FULL child activity — tool calls, permission reviews,
+          // reasoning, and assistant rounds — into the shared ChatEntry model.
+          // `toolCallCount:0` hardcode removed: real tool counts flow from the
+          // accumulator's tool_start/tool_end rows.
+          onToolStart: (name, input, meta) => {
+            transcript.onToolStart(name, input, meta);
+            emitActivity();
+          },
+          onPermissionReview: (event) => {
+            transcript.onPermissionReview(event);
+            emitActivity();
+          },
+          onToolEnd: (name, toolResult, isError, meta, uiPayload, durationMs) => {
+            totalToolCalls += 1;
+            transcript.onToolEnd(name, toolResult, isError, meta, uiPayload, durationMs);
+            emitActivity();
+          },
           onAssistantRound: (round) => {
             assistantRounds += 1;
             turn = assistantRounds;
-            callbacks?.onTurn?.({
-              turn: assistantRounds,
-              text: round.text,
-              toolCallCount: 0,
-            });
+            lastText = round.text;
+            transcript.onAssistantRound(round.thought, round.text);
+            emitActivity();
           },
           onError: (e) => {
             callbacks?.onError?.(e);
@@ -386,6 +431,9 @@ export class SubAgentRunner {
           inputOrigin: "llm-tool-arg",
         },
       );
+      // `result.toolCalls.length` is the authoritative final count (the
+      // incremental `totalToolCalls` matches it round-by-round; pin to the
+      // engine's number in case a round dropped a callback).
       totalToolCalls = result.toolCalls.length;
       lastText = result.text;
       ok = true;
@@ -401,6 +449,9 @@ export class SubAgentRunner {
       toolCallCount: totalToolCalls,
       turnCount: turn,
       childSessionId,
+      // Final DLP-masked transcript, embedded so a reloaded session rebuilds
+      // the sub-agent tab without any live stream.
+      entries: transcript.snapshot(),
       ok,
       ...(ok ? {} : { error: failureReason ?? lastText }),
     };

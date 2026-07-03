@@ -48,8 +48,28 @@ import {
   type TranscriptStorage,
   type RunTranscriptWriter,
 } from "../work-board/run-transcript.js";
+import type { SubAgentActivityUpdate } from "../engine/subagent-runner.js";
 
 const log = createLogger("work-board-engine");
+
+/**
+ * Map a sub-agent activity snapshot to the work-board transcript's per-turn
+ * shape (`turn` = 1-based assistant round count, `text` = latest assistant
+ * text). The board records a coarse per-turn plan/exec narrative — it does not
+ * render the full ChatEntry timeline (that surface is the chat's sub-agent tab),
+ * so it consumes the same `onActivity` snapshot but flattens it to the turn text.
+ */
+function activityToTurn(u: SubAgentActivityUpdate): { turn: number; text: string } {
+  let turn = 0;
+  let text = "";
+  for (const entry of u.entries) {
+    if (entry.kind === "assistant" && entry.streaming !== true) {
+      turn += 1;
+      if (entry.text) text = entry.text;
+    }
+  }
+  return { turn, text };
+}
 
 /**
  * Read-only tool surface for the PLAN phase. The plan agent investigates the
@@ -368,9 +388,10 @@ export function createWorkBoardEngine(
           maxTurns: PLAN_MAX_TURNS,
         },
         {
-          onTurn: (u) => {
-            emit({ itemId, phase: "planning", turn: u.turn, text: u.text });
-            record({ phase: "planning", kind: "turn", turn: u.turn, text: u.text });
+          onActivity: (u) => {
+            const { turn, text } = activityToTurn(u);
+            emit({ itemId, phase: "planning", turn, text });
+            record({ phase: "planning", kind: "turn", turn, text });
           },
           onError: (message) => emit({ itemId, phase: "error", message }),
         },
@@ -435,9 +456,10 @@ export function createWorkBoardEngine(
           profileModel: profile?.model,
         },
         {
-          onTurn: (u) => {
-            emit({ itemId, phase: "executing", turn: u.turn, text: u.text });
-            record({ phase: "executing", kind: "turn", turn: u.turn, text: u.text });
+          onActivity: (u) => {
+            const { turn, text } = activityToTurn(u);
+            emit({ itemId, phase: "executing", turn, text });
+            record({ phase: "executing", kind: "turn", turn, text });
           },
           onError: (message) => emit({ itemId, phase: "error", message }),
         },

@@ -57,6 +57,8 @@ function fakeRunner(): { runner: SubAgentRunner; calls: SpawnCall[] } {
         toolCallCount: 0,
         turnCount: 1,
         childSessionId: `${input.originSessionId}::${isPlan ? "plan" : "exec"}`,
+        entries: [],
+        ok: true,
       };
     },
   } as unknown as SubAgentRunner;
