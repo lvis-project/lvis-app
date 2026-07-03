@@ -32,7 +32,7 @@ import type {
 import { trustFromSource } from "./types.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { runWithCeiling } from "./executor-ceiling.js";
-import { PermissionManager, type PermissionCheckResult } from "../permissions/permission-manager.js";
+import { PermissionManager, requiredTier, type PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
 import {
   buildPermissionEvaluationContext,
@@ -1713,7 +1713,7 @@ export class ToolExecutor {
       }
       // ── Store B: explicit-approval memory skip (foreground only) ──────────
       // checkDetailed (sync) consults Store A — durable glob rules + the
-      // alwaysAllowed Set (Layers 3/5). It cannot see Store B, the exact-tuple
+      // alwaysAllowed Map (Layers 3/5). It cannot see Store B, the exact-tuple
       // user-approval memory written by ToolApprovalDialog for DURABLE
       // choices only (allow-session / allow-always; allow-once never
       // records). Pre-fix, choosing "allow this session" still
@@ -1874,7 +1874,15 @@ export class ToolExecutor {
           // allow-always: 영구 허용 규칙 추가
           if (decision.choice === "allow-always" && this.permissionManager) {
             const pattern = approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
-            await this.permissionManager.addAlwaysAllowedPersist(pattern);
+            // P2 — stamp the grant tier from the final resolved category so an
+            // "Allow always" on a read tool grants read-tier (still asks on a
+            // later write of the same pattern) while a write/shell/network/meta
+            // tool grants write-tier (covers everything). requiredTier is the
+            // shared SOT for the category→tier mapping.
+            await this.permissionManager.addAlwaysAllowedPersist(
+              pattern,
+              requiredTier(invocationCategory),
+            );
           }
           permissionResult = {
             decision: "allow",

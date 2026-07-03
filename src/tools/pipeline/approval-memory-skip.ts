@@ -7,7 +7,7 @@
  *
  * Background — two approval stores, asymmetric reads (root cause of the
  * "I chose 'allow this session' but the modal keeps reappearing" bug):
- *   • Store A — durable glob allow/deny rules + the `alwaysAllowed` Set,
+ *   • Store A — durable glob allow/deny rules + the `alwaysAllowed` Map,
  *     managed by PermissionsTab and consulted by the SYNC
  *     {@link PermissionManager.checkDetailed} (Layers 3 glob / 5 exact).
  *     Only the dialog's `allow-always` choice writes here

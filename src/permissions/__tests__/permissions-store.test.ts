@@ -53,4 +53,23 @@ describe("readPermissionsFile", () => {
 
     await expect(readPermissionsFile("/tmp/permissions.json")).resolves.toEqual(valid);
   });
+
+  it("preserves P2 grant tier on a version:1 file (additive field, no version bump)", async () => {
+    // P2 keeps version:1 — `tier` is an additive optional field. A v1 file with
+    // tiered allow rules must load unchanged (bumping the version would make
+    // readPermissionsFile reject it and lose every saved rule).
+    const tiered = {
+      version: 1,
+      rules: [
+        { pattern: "reader_tool", action: "allow", tier: "read" },
+        { pattern: "writer_tool", action: "allow", tier: "write" },
+        { pattern: "legacy_tool", action: "allow" },
+      ],
+      mode: "default",
+      updatedAt: "2026-07-04T00:00:00.000Z",
+    };
+    readFileMock.mockResolvedValue(JSON.stringify(tiered));
+
+    await expect(readPermissionsFile("/tmp/permissions.json")).resolves.toEqual(tiered);
+  });
 });
