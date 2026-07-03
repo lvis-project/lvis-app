@@ -127,7 +127,7 @@ describe("PermissionManager — meta decisionOverride re-elevation (V1 SOT)", ()
   it("layer-5 alwaysAllowed + default mode + decisionOverride='ask' → forceModal ask", async () => {
     // Regression: the OLD executor block was layer-agnostic. A user clicking
     // "Allow always" on agent_spawn's modal calls addAlwaysAllowedPersist and
-    // subsequent invocations hit layer-5 (alwaysAllowed.has()), returning allow
+    // subsequent invocations hit layer-5 (alwaysAllowed.get()), returning allow
     // BEFORE categoryBasedDecision. The post-guard (layer-agnostic) must still
     // re-elevate to ask+forceModal to honour the tool author's per-invocation
     // contract, even against a persisted grant.
