@@ -1,4 +1,4 @@
-import { createElement, useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
+import { createElement, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
 import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
 import {
   WORKSPACE_TAB_LAUNCHER,
@@ -55,6 +55,7 @@ import { SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
 import { normalizeBrowserNavigationUrl } from "../preview/url-safety.js";
+import { formatIpcError } from "../format-ipc-error.js";
 import { PreviewContent } from "../preview/preview-renderers.js";
 import { FileEditDiff } from "./FileEditDiff.js";
 import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
@@ -616,16 +617,27 @@ function fileBasename(path: string): string {
 }
 
 /**
+ * Is `candidate` `root` itself or a descendant of it? Boundary-safe and
+ * platform-agnostic: a bare `startsWith(root)` would let `/foo` falsely match
+ * `/foobar`, so the character right after the prefix MUST be a path separator
+ * (`/` or `\` — the renderer receives platform-native paths from main).
+ */
+function isPathWithinRoot(root: string, candidate: string): boolean {
+  if (candidate === root) return true;
+  return candidate.startsWith(root) && /[/\\]/.test(candidate.charAt(root.length));
+}
+
+/**
  * Relative path of `full` under `root` (renderer-side string math — no node:path
- * in the renderer). Browser entries are always children of `root`, so a prefix
- * strip is sufficient; falls back to the basename for the root itself and to the
- * absolute path when `full` is not under `root`.
+ * in the renderer). Falls back to the basename for the root itself and to the
+ * absolute path when `full` is not a descendant of `root` (boundary-checked, so
+ * `/foobar` is NOT treated as being under `/foo`).
  */
 function toRelativePath(root: string | null, full: string): string {
   if (!root) return full;
   if (full === root) return fileBasename(full);
-  const stripped = full.startsWith(root) ? full.slice(root.length) : full;
-  return stripped.replace(/^[/\\]+/, "") || full;
+  if (!isPathWithinRoot(root, full)) return full;
+  return full.slice(root.length).replace(/^[/\\]+/, "") || full;
 }
 
 /** Platform hint for the reveal label (Finder on macOS, Explorer elsewhere). */
@@ -735,8 +747,10 @@ function ProjectRootsBrowser({
     buffer: "",
     timer: null,
   });
-  // Drag-drop-a-folder affordance: highlight while a drag is over the panel.
-  const [dropActive, setDropActive] = useState(false);
+  // Inline failure surface for the mutating ops (removeRoot / reveal). Cleared
+  // when a new op starts or the user dismisses it — a failed op no longer
+  // swallows its error result silently.
+  const [opError, setOpError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   const loadDir = useCallback(async (path: string) => {
@@ -987,21 +1001,26 @@ function ProjectRootsBrowser({
     return () => document.removeEventListener("keydown", onKey);
   }, [addFolder]);
 
-  // Drop a folder onto the panel to add it as a project root. The dropped path is
-  // UNTRUSTED (no native-dialog gesture) — main withholds it behind the ackToken
-  // confirmation, so a drop surfaces the same warning panel a warned pick does
-  // and never silently widens the read scope.
-  const handleDropFolder = (e: ReactDragEvent) => {
-    e.preventDefault();
-    setDropActive(false);
-    const file = e.dataTransfer.files[0];
-    const droppedPath = (file as unknown as { path?: string })?.path;
-    if (!droppedPath) return;
-    void window.lvis.workspace.addRootByPath(droppedPath).then((res) => {
-      if (res.ok && res.requiresAcknowledgement && res.pendingPath && res.ackToken) {
-        setPendingWarning({ path: res.pendingPath, warnings: res.warnings ?? [], ackToken: res.ackToken });
-      }
-    });
+  // Surface a mutating-op IPC failure inline. `path-not-allowed` / `sensitive-path`
+  // are the workspace-specific reveal codes absent from the shared IPC map, so
+  // map them to the same "outside allowed folders" copy the file preview uses.
+  const formatOpError = useCallback(
+    (error: string | undefined, message: string | undefined) =>
+      formatIpcError(error, message, {
+        codeMap: {
+          "path-not-allowed": t("chatPreviewRail.fileErrorNotAllowed"),
+          "sensitive-path": t("chatPreviewRail.fileErrorNotAllowed"),
+        },
+      }),
+    [t],
+  );
+
+  // Reveal a file/folder in the OS file manager. Re-validated in main; surfaces
+  // any failure inline instead of swallowing the result.
+  const revealEntry = async (path: string) => {
+    setOpError(null);
+    const res = await window.lvis.workspace.reveal(path);
+    if (!res.ok) setOpError(formatOpError(res.error, res.message));
   };
 
   const confirmPendingFolder = async () => {
@@ -1024,13 +1043,21 @@ function ProjectRootsBrowser({
   // default root or any path not already in `additionalDirectories`.
   const removeActiveRoot = async () => {
     if (!activeRoot || activeRootIsDefault) return;
-    const res = await window.lvis.workspace.removeRoot(activeRoot);
-    if (!res.ok || !res.roots) return;
+    const removedRoot = activeRoot;
+    setOpError(null);
+    const res = await window.lvis.workspace.removeRoot(removedRoot);
+    if (!res.ok) {
+      setOpError(formatOpError(res.error, res.message));
+      return;
+    }
+    if (!res.roots) return;
     // Drop cached children/expansion for the removed subtree so a re-add reloads.
+    // Boundary-safe + cross-platform: `isPathWithinRoot` matches on a full
+    // segment (so `/foo` won't purge `/foobar`) and both `/` and `\` separators.
     setChildrenByPath((prev) => {
       const next: Record<string, WorkspaceDirEntry[]> = {};
       for (const [key, value] of Object.entries(prev)) {
-        if (key === activeRoot || key.startsWith(`${activeRoot}/`)) continue;
+        if (isPathWithinRoot(removedRoot, key)) continue;
         next[key] = value;
       }
       return next;
@@ -1064,6 +1091,7 @@ function ProjectRootsBrowser({
     if (depth > 0 && loadingPaths.has(path) && entries.length === 0) {
       return (
         <div
+          role="presentation"
           className="flex h-7 items-center gap-1 text-[11px] text-muted-foreground"
           style={{ paddingLeft: childPad }}
           data-testid="chat-side-panel-fs-child-loading"
@@ -1088,6 +1116,7 @@ function ProjectRootsBrowser({
     if (entries.length === 0 && attemptedPaths.has(path) && !loadingPaths.has(path) && !errorByPath[path]) {
       return (
         <div
+          role="presentation"
           className="flex h-7 items-center text-[11px] italic text-muted-foreground"
           style={{ paddingLeft: childPad }}
           data-testid="chat-side-panel-fs-empty"
@@ -1114,7 +1143,12 @@ function ProjectRootsBrowser({
                   }}
                   role="treeitem"
                   aria-expanded={isDir ? isOpen : undefined}
-                  aria-selected={isActiveItem}
+                  // APG tree pattern: aria-selected reflects SELECTION (the
+                  // opened file), not roving keyboard focus. Focus is carried
+                  // separately by the roving tabindex below, so a screen reader
+                  // announces the opened file — not merely the arrow-key cursor
+                  // position — as "selected". Non-opened rows omit the attribute.
+                  aria-selected={opened ? true : undefined}
                   aria-level={depth + 1}
                   aria-setsize={entries.length}
                   aria-posinset={index + 1}
@@ -1154,7 +1188,7 @@ function ProjectRootsBrowser({
                 </ContextMenuItem>
                 <ContextMenuItem
                   data-testid="chat-side-panel-fs-ctx-reveal"
-                  onSelect={() => void window.lvis.workspace.reveal(entry.path)}
+                  onSelect={() => void revealEntry(entry.path)}
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                   {t(IS_MAC_LIKE ? "chatPreviewRail.revealInFinder" : "chatPreviewRail.revealInExplorer")}
@@ -1182,6 +1216,7 @@ function ProjectRootsBrowser({
       })}
       {truncatedPaths.has(path) ? (
         <div
+          role="presentation"
           className="flex h-6 items-center text-[11px] italic text-muted-foreground"
           style={{ paddingLeft: childPad }}
           data-testid="chat-side-panel-fs-truncated"
@@ -1194,21 +1229,16 @@ function ProjectRootsBrowser({
   };
 
   return (
+    // Drag-drop-to-add-root was intentionally NOT wired here. A dropped File has
+    // no reliable path in Electron ≥32 (File.prototype.path was removed) and
+    // trusting a renderer-named path would regress the #1448 ack-token read-scope
+    // invariant. Doing it right needs a webUtils.getPathForFile preload bridge +
+    // a trust-model decision + a real-Electron drop e2e — deferred to a follow-up
+    // issue. Add-root stays on the native picker (the FolderPlus button + ⌘/Ctrl+O).
     <div
       ref={rootRef}
-      className={`space-y-1 rounded-md ${dropActive ? "ring-1 ring-primary ring-offset-1" : ""}`}
+      className="space-y-1 rounded-md"
       data-testid="chat-side-panel-project-roots"
-      data-drop-active={dropActive ? "true" : undefined}
-      onDragOver={(e) => {
-        e.preventDefault();
-        if (!dropActive) setDropActive(true);
-      }}
-      onDragLeave={(e) => {
-        // Only clear when the pointer actually leaves the panel, not on inner
-        // element boundaries (relatedTarget still inside).
-        if (!rootRef.current?.contains(e.relatedTarget as Node | null)) setDropActive(false);
-      }}
-      onDrop={handleDropFolder}
     >
       <div className="flex items-center gap-1">
         {roots.length > 1 ? (
@@ -1280,6 +1310,24 @@ function ProjectRootsBrowser({
           </Tooltip>
         ) : null}
       </div>
+      {opError ? (
+        <div
+          role="alert"
+          data-testid="chat-side-panel-op-error"
+          className="flex items-start gap-1 rounded-md border border-destructive bg-destructive/(--opacity-muted) px-2 py-1 text-[11px] text-destructive"
+        >
+          <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{opError}</span>
+          <button
+            type="button"
+            className="shrink-0 rounded p-0.5 hover:bg-destructive/(--opacity-muted)"
+            aria-label={t("common.close")}
+            data-testid="chat-side-panel-op-error-dismiss"
+            onClick={() => setOpError(null)}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      ) : null}
       {pendingWarning ? (
         <div
           data-testid="chat-side-panel-root-warning"

@@ -336,7 +336,6 @@ export const CHANNELS = {
     listDir: "lvis:workspace:list-dir",
     removeRoot: "lvis:workspace:remove-root",
     reveal: "lvis:workspace:reveal",
-    addRootByPath: "lvis:workspace:add-root-by-path",
   },
   // ── Interactive PTY terminal (#1444, workspace rail) ──────────────────────
   // ALL INTERNAL: deliberately absent from PUBLIC_CHANNELS / CHANNEL_GESTURE /

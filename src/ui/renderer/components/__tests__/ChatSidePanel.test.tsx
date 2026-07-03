@@ -93,7 +93,6 @@ describe("ChatSidePanel", () => {
         listDir: vi.fn(async () => ({ ok: true, path: "/ws", entries: [], truncated: false })),
         removeRoot: vi.fn(async () => ({ ok: true, removed: "", roots: [{ path: "/ws", isDefault: true }] })),
         reveal: vi.fn(async () => ({ ok: true })),
-        addRootByPath: vi.fn(async () => ({ ok: true, roots: [{ path: "/ws", isDefault: true }] })),
       },
     });
     (window as unknown as { lvis: unknown }).lvis = (globalThis as unknown as { lvis: unknown }).lvis;
@@ -654,7 +653,6 @@ describe("ChatSidePanel", () => {
         listDir,
         removeRoot,
         reveal,
-        addRootByPath: vi.fn(async () => ({ ok: true })),
         ...overrides,
       },
     });
@@ -688,9 +686,11 @@ describe("ChatSidePanel", () => {
     const tree = await screen.findByRole("tree");
     fireEvent.keyDown(tree, { key: "ArrowDown" });
     const items = within(tree).getAllByRole("treeitem");
-    // Second row (beta) becomes the tabbable/selected one.
+    // Second row (beta) becomes the roving-focus row (tabindex=0). Roving focus
+    // is DISTINCT from selection: moving the arrow cursor does NOT set
+    // aria-selected — that tracks the opened file only (APG tree pattern).
     expect(items[1].getAttribute("tabindex")).toBe("0");
-    expect(items[1].getAttribute("aria-selected")).toBe("true");
+    expect(items[1].getAttribute("aria-selected")).toBeNull();
   });
 
   it("Enter on a folder expands it (lazy-loads children into a role=group)", async () => {
@@ -809,24 +809,58 @@ describe("ChatSidePanel", () => {
     await screen.findByTestId("chat-side-panel-fs-truncated");
   });
 
-  it("dropping a folder routes through addRootByPath and shows the ack warning panel (no silent add)", async () => {
-    const addRootByPath = vi.fn(async () => ({
-      ok: true as const,
-      requiresAcknowledgement: true as const,
-      pendingPath: "/dropped/proj",
-      ackToken: "drop-tok",
-      warnings: ["path contains '.git' segment — secrets may be exposed if added"],
-      roots: [{ path: "/ws", isDefault: true }],
-    }));
-    stubRichWorkspace({ addRootByPath });
+  it("marks the OPENED file (selection) with aria-selected, distinct from roving focus", async () => {
+    stubRichWorkspace();
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
     fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
-    const panel = await screen.findByTestId("chat-side-panel-project-roots");
-    fireEvent.drop(panel, { dataTransfer: { files: [{ path: "/dropped/proj" }] } });
-    await waitFor(() => expect(addRootByPath).toHaveBeenCalledWith("/dropped/proj"));
-    // The dropped path is withheld behind the same ack warning panel a warned pick uses.
-    await screen.findByTestId("chat-side-panel-root-warning");
+    const tree = await screen.findByRole("tree");
+    // Open readme.md — that is the SELECTION (opened file), not merely focus.
+    fireEvent.click(await screen.findByText("readme.md"));
+    await waitFor(() => {
+      const readmeRow = within(tree)
+        .getAllByRole("treeitem")
+        .find((el) => el.textContent?.includes("readme.md"));
+      expect(readmeRow?.getAttribute("aria-selected")).toBe("true");
+    });
+    // The folder rows (not opened) carry no aria-selected — selection ≠ focus.
+    const alphaRow = within(tree)
+      .getAllByRole("treeitem")
+      .find((el) => el.textContent?.includes("alpha"));
+    expect(alphaRow?.getAttribute("aria-selected")).toBeNull();
+  });
+
+  it("surfaces a removeRoot failure inline instead of swallowing it", async () => {
+    stubRichWorkspace({
+      removeRoot: vi.fn(async () => ({ ok: false as const, error: "not-an-additional-root" as const })),
+    });
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const select = (await screen.findByTestId("chat-side-panel-root-select")) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "/ws/proj" } });
+    fireEvent.click(await screen.findByTestId("chat-side-panel-remove-root"));
+    // The failure is shown to the user, not dropped silently.
+    const banner = await screen.findByTestId("chat-side-panel-op-error");
+    expect(banner.textContent).toBeTruthy();
+    // Dismissible.
+    fireEvent.click(screen.getByTestId("chat-side-panel-op-error-dismiss"));
+    await waitFor(() => expect(screen.queryByTestId("chat-side-panel-op-error")).toBeNull());
+  });
+
+  it("surfaces a reveal failure inline instead of swallowing it", async () => {
+    stubRichWorkspace({
+      reveal: vi.fn(async () => ({ ok: false as const, error: "path-not-allowed" as const })),
+    });
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const fileRow = await screen.findByText("readme.md");
+    fireEvent.contextMenu(fileRow);
+    fireEvent.click(await screen.findByTestId("chat-side-panel-fs-ctx-reveal"));
+    await screen.findByTestId("chat-side-panel-op-error");
   });
 });
