@@ -1913,6 +1913,95 @@ describe("ToolExecutor — agent_spawn (meta + decisionOverride:'ask') allow-all
   );
 });
 
+// ─── MAJOR-2 regression — alwaysAllowed persisted grant must not defeat per-invocation gate ───
+
+describe("ToolExecutor — agent_spawn persisted-allow still forces modal (MAJOR-2 regression)", () => {
+  // Prove that addAlwaysAllowedPersist("agent_spawn") — which corresponds to the
+  // user clicking "Allow always" on the approval modal — does NOT silently bypass
+  // the decisionOverride:"ask" per-invocation gate on subsequent calls.
+  // The OLD executor re-elevation block was layer-agnostic (fired regardless of
+  // which layer produced the allow). The new PM post-guard must be equally
+  // layer-agnostic; a layer-5 alwaysAllowed hit must still be re-elevated.
+  function makeSpawnLikeTool(execute: () => Promise<{ output: string; isError: boolean }>) {
+    return createDynamicTool({
+      name: "agent_spawn",
+      description: "spawn a sub-agent",
+      source: "builtin",
+      category: "meta",
+      decisionOverride: "ask",
+      jsonSchema: { type: "object", properties: {} },
+      execute,
+    });
+  }
+
+  it("default mode: modal fires even after addAlwaysAllowedPersist('agent_spawn')", async () => {
+    const innerExecuteSpy = vi.fn(async () => ({
+      output: JSON.stringify({ ok: true }),
+      isError: false,
+    }));
+    const spawnTool = makeSpawnLikeTool(innerExecuteSpy);
+
+    const registry = new ToolRegistry();
+    registry.register(spawnTool);
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.setMode("default");
+    // Simulate the user having clicked "Allow always" on a prior invocation.
+    await permMgr.addAlwaysAllowedPersist("agent_spawn");
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    // Auto-deny so the test terminates; we only care the modal was requested.
+    const requestSpy = vi
+      .spyOn(gate, "requestAndWait")
+      .mockResolvedValue({ requestId: "req-persist", choice: "deny-once" } as never);
+
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    await executor.executeAll(
+      [{ id: "tu-spawn-persist", name: "agent_spawn", input: {} }],
+      { sessionId: "sess-spawn-persist", permissionContext: userPermissionContext() },
+    );
+
+    // The per-invocation decisionOverride:"ask" gate must STILL fire even though
+    // alwaysAllowed hit at layer 5 (which would otherwise skip the modal).
+    expect(requestSpy).toHaveBeenCalledTimes(1);
+    // Tool must NOT have executed (modal was denied).
+    expect(innerExecuteSpy).not.toHaveBeenCalled();
+  });
+
+  it("allow mode: persisted grant + allow mode → modal does NOT fire (allow-all wins)", async () => {
+    const innerExecuteSpy = vi.fn(async () => ({
+      output: JSON.stringify({ ok: true }),
+      isError: false,
+    }));
+    const spawnTool = makeSpawnLikeTool(innerExecuteSpy);
+
+    const registry = new ToolRegistry();
+    registry.register(spawnTool);
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.setMode("allow");
+    await permMgr.addAlwaysAllowedPersist("agent_spawn");
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const requestSpy = vi.spyOn(gate, "requestAndWait");
+
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-spawn-persist-allow", name: "agent_spawn", input: {} }],
+      { sessionId: "sess-spawn-persist-allow", permissionContext: userPermissionContext() },
+    );
+
+    // allow mode: no modal even with persisted grant — allow-all invariant wins.
+    expect(requestSpy).not.toHaveBeenCalled();
+    expect(innerExecuteSpy).toHaveBeenCalledTimes(1);
+    expect(results[0].is_error).toBeUndefined();
+  });
+});
+
 // ─── R2-CR-4 regression — audit redaction must be source-gated ─────
 
 describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by source", () => {
