@@ -17,14 +17,19 @@
 import { webUtils } from "electron";
 
 /**
- * Resolve the filesystem paths of dropped files. Non-file drags (text/URL) and
- * entries `webUtils` cannot resolve yield `""`, which is dropped — so the result
- * contains only real, non-empty candidate paths in drop order.
+ * Resolve the filesystem paths of dropped files. `webUtils.getPathForFile`
+ * returns `""` for a `File` with no OS-backed path — a non-file drag (text/URL)
+ * or a synthetic/blob-backed file (electron#44600). That empty string is
+ * filtered EXPLICITLY here so it can never flow downstream to
+ * `workspace.dropPrepare` (where it would otherwise read as an `invalid-path`
+ * rejection): the result contains only real, non-empty candidate paths in drop
+ * order.
  */
 export function resolveDroppedPaths(files: FileList | readonly File[]): string[] {
   const out: string[] = [];
   for (const file of Array.from(files)) {
     const resolved = webUtils.getPathForFile(file);
+    // Explicit empty-string guard — an unresolved path is never forwarded.
     if (resolved) out.push(resolved);
   }
   return out;
