@@ -25,7 +25,8 @@ import type {
 } from "../../permissions/approval-gate.js";
 import type { WorkBoardRunEvent } from "../../shared/work-board-types.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
-import { readRunTranscript, type TranscriptStorage } from "../../work-board/run-transcript.js";
+import { readRunTranscript } from "../../work-board/run-transcript.js";
+import { memTranscriptStorage } from "../../work-board/__tests__/board-test-fixtures.js";
 
 function tempBoard() {
   const dir = mkdtempSync(join(tmpdir(), "lvis-wbe-"));
@@ -242,19 +243,8 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
   // persisted JSONL with turn:0 blanks + duplicate turn rows. This locks the fix
   // (one event per NEW completed round, no blanks, no dupes).
 
-  /** In-memory transcript storage so the persisted (recorded) rows are assertable. */
-  function memTranscriptStorage(): TranscriptStorage & { files: Record<string, string> } {
-    const files: Record<string, string> = {};
-    return {
-      files,
-      readText: async (rel) => files[rel] ?? "",
-      write: async (rel, data) => {
-        files[rel] = data;
-      },
-      exists: async (rel) => rel in files,
-      mkdir: async () => {},
-    };
-  }
+  // In-memory transcript storage (shared fixture) makes the persisted
+  // (recorded) rows assertable — see board-test-fixtures.memTranscriptStorage.
 
   function assistant(text: string): ChatEntry {
     return { kind: "assistant", text, streaming: false };
