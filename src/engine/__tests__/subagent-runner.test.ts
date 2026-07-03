@@ -17,8 +17,13 @@
  *      must receive the "cannot be invoked from a sub-agent" error,
  *      regardless of whether the registry strip succeeded.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ConversationLoop } from "../conversation-loop.js";
+import { MemoryManager } from "../../memory/memory-manager.js";
+import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { KeywordEngine } from "../../core/keyword-engine.js";
@@ -55,6 +60,21 @@ class ScriptedProvider implements LLMProvider {
       { type: "message_complete", stopReason: "end_turn" },
     ];
   }
+}
+
+/**
+ * Minimal fake for the ISOLATED subagent MemoryManager (`~/.lvis/subagent/`).
+ * SubAgentRunner now composes the child loop with this store instead of the
+ * parent's main-chat MemoryManager, so every construction must supply it.
+ * A no-op saveSession is enough for the behavioral suites here; the
+ * persistence-routing suite below uses a REAL MemoryManager on a temp home.
+ */
+function fakeSubAgentMemoryManager() {
+  return {
+    saveSession: () => Promise.resolve(),
+    listSessions: () => [],
+    load: () => undefined,
+  } as unknown as ConstructorParameters<typeof SubAgentRunner>[0]["subAgentMemoryManager"];
 }
 
 function buildLoopDeps(toolRegistry: ToolRegistry) {
@@ -114,6 +134,7 @@ describe("SubAgentRunner — maxRounds bound", () => {
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
       toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
     });
     // Inject the fake provider into the child loop too — runner constructs
     // a fresh ConversationLoop per spawn, so we patch the prototype.
@@ -173,6 +194,7 @@ describe("SubAgentRunner — maxRounds bound", () => {
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
       toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
     });
     const hasProviderSpy = vi
       .spyOn(
@@ -236,6 +258,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
       toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
     });
 
     // Build the scoped view via the runner's registry filter and assert it
@@ -287,7 +310,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       ],
     ]);
     const parentDeps = buildLoopDeps(toolRegistry);
-    const runner = new SubAgentRunner({ parentDeps, toolRegistry });
+    const runner = new SubAgentRunner({ parentDeps, toolRegistry, subAgentMemoryManager: fakeSubAgentMemoryManager() });
     const hasProviderSpy = vi
       .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
       .mockReturnValue(true);
@@ -354,7 +377,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
-    const runner = new SubAgentRunner({ parentDeps: buildLoopDeps(toolRegistry), toolRegistry });
+    const runner = new SubAgentRunner({ parentDeps: buildLoopDeps(toolRegistry), toolRegistry, subAgentMemoryManager: fakeSubAgentMemoryManager() });
     const hasProviderSpy = vi
       .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
       .mockReturnValue(true);
@@ -564,6 +587,7 @@ describe("SubAgentRunner — unknown mode audit warn", () => {
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
       toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
     });
     const hasProviderSpy = vi
       .spyOn(
@@ -595,6 +619,152 @@ describe("SubAgentRunner — unknown mode audit warn", () => {
       hasProviderSpy.mockRestore();
       refreshProviderSpy.mockRestore();
       warnSpy.mockRestore();
+    }
+  });
+});
+
+// ─── PR-A: session namespace isolation + regex-valid id ───────────────
+//
+// The orphan/pollution bug: the child loop used to persist under its bare
+// constructor UUID into the parent's main-chat MemoryManager, so sub-agent
+// JSONL landed in `~/.lvis/sessions/` and leaked into the main session list;
+// the returned childSessionId (`origin::uuid`) failed SESSION_ID_REGEX and was
+// addressable by nobody. This suite pins the fix end-to-end against REAL
+// MemoryManagers on a temp LVIS_HOME.
+
+// Mirror MemoryManager's SESSION_ID_REGEX exactly (not exported).
+const SESSION_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
+
+describe("SubAgentRunner — subagent session namespace isolation (PR-A)", () => {
+  let tmpHome: string;
+  let prevLvisHome: string | undefined;
+
+  beforeEach(() => {
+    prevLvisHome = process.env.LVIS_HOME;
+    tmpHome = mkdtempSync(join(tmpdir(), "lvis-subagent-test-"));
+    process.env.LVIS_HOME = tmpHome;
+  });
+
+  afterEach(() => {
+    if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
+    else process.env.LVIS_HOME = prevLvisHome;
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("persists the child JSONL under ~/.lvis/subagent/, keeps it out of the main session list, and returns a regex-valid childSessionId", async () => {
+    const toolRegistry = new ToolRegistry();
+    // Provider ends cleanly on round 1 so the child's fallback persistence path
+    // (postTurnHookChain undefined) writes exactly one session JSONL.
+    const provider = new ScriptedProvider([
+      [
+        { type: "text_delta", text: "child answer" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    // REAL stores rooted at the temp home. Main = ~/.lvis/sessions/;
+    // subagent = ~/.lvis/subagent/sessions/ (via openFeatureNamespace).
+    const mainMemoryManager = new MemoryManager({ lvisDir: tmpHome });
+    mainMemoryManager.load();
+    const subAgentMemoryManager = new MemoryManager({
+      lvisDir: openFeatureNamespace("subagent").dir,
+    });
+    subAgentMemoryManager.load();
+
+    const parentDeps = buildLoopDeps(toolRegistry);
+    // Point the PARENT deps at the real main store so a regression that reused
+    // the parent MemoryManager would visibly pollute the main session list.
+    (parentDeps as { memoryManager: unknown }).memoryManager = mainMemoryManager;
+
+    const runner = new SubAgentRunner({
+      parentDeps,
+      toolRegistry,
+      subAgentMemoryManager,
+    });
+
+    const hasProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { refreshProvider: () => void }, "refreshProvider")
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+
+    try {
+      const result = await runner.spawn({
+        title: "isolated",
+        instructions: "do",
+        originSessionId: "abc123-DEF-should:be::sanitized",
+        maxRounds: 3,
+      });
+
+      // 1) The returned childSessionId is regex-valid (loadSession/saveSession
+      //    both reject anything else). The old `::` form failed this.
+      expect(result.childSessionId).toMatch(SESSION_ID_REGEX);
+      // It also carries the sanitized-origin + sub- prefix shape.
+      expect(result.childSessionId.startsWith("sub-")).toBe(true);
+
+      // 2) The child JSONL lives in the SUBAGENT namespace…
+      const subSessionsDir = join(tmpHome, "subagent", "sessions");
+      expect(existsSync(join(subSessionsDir, `${result.childSessionId}.jsonl`))).toBe(true);
+
+      // 3) …and NOT in the main sessions dir.
+      const mainSessionsDir = join(tmpHome, "sessions");
+      const mainFiles = existsSync(mainSessionsDir)
+        ? readdirSync(mainSessionsDir).filter((f) => f.endsWith(".jsonl"))
+        : [];
+      expect(mainFiles).toEqual([]);
+
+      // 4) The main listSessions no longer surfaces the sub-agent session.
+      expect(mainMemoryManager.listSessions()).toEqual([]);
+      // The isolated store DOES see it (addressable for future resume).
+      const subIds = subAgentMemoryManager.listSessions().map((s) => s.id);
+      expect(subIds).toContain(result.childSessionId);
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+    }
+  });
+
+  it("sanitizes an origin session id to the id charset (no `::`, no leaked separators)", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new ScriptedProvider([
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const subAgentMemoryManager = new MemoryManager({
+      lvisDir: openFeatureNamespace("subagent").dir,
+    });
+    subAgentMemoryManager.load();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager,
+    });
+    const hasProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { refreshProvider: () => void }, "refreshProvider")
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+    try {
+      const result = await runner.spawn({
+        title: "sanitize",
+        instructions: "do",
+        originSessionId: "a::b//c..d",
+        maxRounds: 1,
+      });
+      expect(result.childSessionId).toMatch(SESSION_ID_REGEX);
+      expect(result.childSessionId).not.toContain("::");
+      expect(result.childSessionId).not.toContain("/");
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
     }
   });
 });
