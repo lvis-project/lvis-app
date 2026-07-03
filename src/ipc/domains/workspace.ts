@@ -1,7 +1,8 @@
 /**
  * Workspace file-browser domain IPC handlers.
  * Covers: lvis:workspace:pick-root, lvis:workspace:list-roots,
- *         lvis:workspace:list-dir
+ *         lvis:workspace:list-dir, lvis:workspace:remove-root,
+ *         lvis:workspace:reveal
  *
  * Renderer reaches these via window.lvis.workspace.*.
  *
@@ -19,10 +20,10 @@
  * listDir re-validates every requested path against the same scope guard so a
  * compromised renderer cannot list outside the selected roots.
  */
-import { dialog, ipcMain } from "electron";
+import { dialog, ipcMain, shell } from "electron";
 import { t } from "../../i18n/index.js";
 import { promises as fs } from "node:fs";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { randomBytes } from "node:crypto";
 import { validateSender, auditUnauthorized } from "../gated.js";
 import { redactFsPath } from "../../audit/dlp-filter.js";
@@ -32,6 +33,7 @@ import { assertReadableFilePath } from "../../tools/file-read-core.js";
 import {
   readPermissionSettings,
   addAllowedDirectoryPersist,
+  removeAllowedDirectoryPersist,
 } from "../../permissions/permission-settings-store.js";
 import {
   buildRuntimeAllowedDirectories,
@@ -121,6 +123,20 @@ export interface WorkspaceListDirResult {
   entries?: WorkspaceDirEntry[];
   truncated?: boolean;
   error?: "unauthorized" | "path-not-allowed" | "sensitive-path" | "not-a-dir" | "read-failed";
+  message?: string;
+}
+
+export interface WorkspaceRemoveRootResult {
+  ok: boolean;
+  removed?: string;
+  roots?: WorkspaceRoot[];
+  error?: "unauthorized" | "invalid-path" | "not-an-additional-root" | "cannot-remove-default";
+  message?: string;
+}
+
+export interface WorkspaceRevealResult {
+  ok: boolean;
+  error?: "unauthorized" | "path-not-allowed" | "sensitive-path" | "not-found";
   message?: string;
 }
 
@@ -320,4 +336,100 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
       }
     },
   );
+
+  /**
+   * Remove a project root from `permissions.additionalDirectories` (the
+   * executor's Layer-1 read allow-list SOT). Security: a removal can ONLY target
+   * a path already present in that list — never an arbitrary renderer-supplied
+   * path — and the default root (`process.cwd()`, which is not stored in the
+   * list) can never be removed. Matching is canonical/case-folded so a trailing
+   * slash or case variant of a stored path still resolves to its entry. The
+   * shrink is audited, mirroring the widening audit in persistValidatedRoot: the
+   * read scope narrowed, so the WRITE is recorded.
+   */
+  ipcMain.handle(
+    CHANNELS.workspace.removeRoot,
+    async (e, rawPath: string): Promise<WorkspaceRemoveRootResult> => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.workspace.removeRoot, e);
+        return { ok: false, error: "unauthorized", message: "sender frame not authorized" };
+      }
+      if (typeof rawPath !== "string" || rawPath.length === 0) {
+        return { ok: false, error: "invalid-path", message: "path must be a non-empty string" };
+      }
+      const targetCanon = caseFoldForMatch(canonicalizePathForMatch(resolvePath(rawPath)));
+      const defaultCanon = caseFoldForMatch(canonicalizePathForMatch(process.cwd()));
+      if (targetCanon === defaultCanon) {
+        return { ok: false, error: "cannot-remove-default", message: "default root cannot be removed" };
+      }
+      const additional = readPermissionSettings().permissions.additionalDirectories;
+      const match = additional.find(
+        (d) => caseFoldForMatch(canonicalizePathForMatch(d)) === targetCanon,
+      );
+      if (!match) {
+        return { ok: false, error: "not-an-additional-root", message: "path is not a removable project root" };
+      }
+      await removeAllowedDirectoryPersist(match);
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "workspace-remove-root",
+        type: "info",
+        input: JSON.stringify({
+          channel: CHANNELS.workspace.removeRoot,
+          path: redactFsPath(match),
+        }),
+      });
+      return { ok: true, removed: match, roots: computeRoots() };
+    },
+  );
+
+  /**
+   * Reveal a file/folder in the OS file manager (Finder / Explorer). This is a
+   * strictly WEAKER capability than "open": `showItemInFolder` only selects the
+   * item's location, it never launches/executes it — consistent with the
+   * `canOpenExternal:false` policy that deliberately disables the OS "open"
+   * button in the preview pane.
+   *
+   * Trust boundary (identical to listDir): the renderer-supplied `rawPath` is
+   * NOT trusted. `assertReadableFilePath` re-validates it against the SAME scope
+   * (cwd + additionalDirectories), rejecting globs, Layer 0 sensitive paths, and
+   * anything outside the allowed roots. Only `verdict.resolved` — the main-owned,
+   * realpath'd, scope-checked absolute path — is ever handed to the shell, never
+   * the raw renderer string.
+   */
+  ipcMain.handle(
+    CHANNELS.workspace.reveal,
+    async (e, rawPath: string): Promise<WorkspaceRevealResult> => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.workspace.reveal, e);
+        return { ok: false, error: "unauthorized", message: "sender frame not authorized" };
+      }
+      if (typeof rawPath !== "string" || rawPath.length === 0) {
+        return { ok: false, error: "not-found", message: "path must be a non-empty string" };
+      }
+      const { cwd, extraAllowed } = currentScope();
+      const verdict = assertReadableFilePath(rawPath, cwd, extraAllowed);
+      if (!verdict.ok) {
+        const error = verdict.error === "not-a-file" ? "not-found" : verdict.error;
+        return { ok: false, error, message: `scope guard rejected: ${verdict.error}` };
+      }
+      const target = verdict.resolved;
+      try {
+        await fs.stat(target);
+      } catch {
+        return { ok: false, error: "not-found", message: "path no longer exists" };
+      }
+      shell.showItemInFolder(target);
+      return { ok: true };
+    },
+  );
+
+  // NOTE: drag-drop-to-add-root was intentionally NOT shipped here. A dropped
+  // File carries no reliable filesystem path in Electron ≥32 (File.prototype.path
+  // was removed), and minting an ackToken for a RENDERER-SUPPLIED path would
+  // regress the #1448 read-scope invariant (the ack token must bind ONLY to a
+  // main-process showOpenDialog pick). Doing it correctly requires a
+  // webUtils.getPathForFile preload bridge + an explicit trust-model decision +
+  // a real-Electron drop e2e — deferred to a dedicated follow-up issue. The
+  // native picker (pickRoot / Cmd+O) remains the only add-root path.
 }

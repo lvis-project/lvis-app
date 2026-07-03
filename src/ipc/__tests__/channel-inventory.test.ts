@@ -378,6 +378,8 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:workspace:list-dir",
         "lvis:workspace:list-roots",
         "lvis:workspace:pick-root",
+        "lvis:workspace:remove-root",
+        "lvis:workspace:reveal",
         "window:close",
         "window:minimize",
         "window:syncTitleBarTheme",

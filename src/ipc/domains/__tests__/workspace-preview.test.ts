@@ -3,13 +3,24 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 
-const { handlers, showOpenDialogMock, addAllowedDirectoryPersistMock, additionalDirectories } =
-  vi.hoisted(() => ({
-    handlers: new Map<string, (...args: unknown[]) => unknown>(),
-    showOpenDialogMock: vi.fn(),
-    addAllowedDirectoryPersistMock: vi.fn(async () => [] as string[]),
-    additionalDirectories: { value: [] as string[] },
-  }));
+const {
+  handlers,
+  showOpenDialogMock,
+  showItemInFolderMock,
+  addAllowedDirectoryPersistMock,
+  removeAllowedDirectoryPersistMock,
+  additionalDirectories,
+} = vi.hoisted(() => ({
+  handlers: new Map<string, (...args: unknown[]) => unknown>(),
+  showOpenDialogMock: vi.fn(),
+  showItemInFolderMock: vi.fn(),
+  addAllowedDirectoryPersistMock: vi.fn(async () => [] as string[]),
+  removeAllowedDirectoryPersistMock: vi.fn(async (dir: string) => {
+    additionalDirectories.value = additionalDirectories.value.filter((d) => d !== dir);
+    return additionalDirectories.value;
+  }),
+  additionalDirectories: { value: [] as string[] },
+}));
 
 vi.mock("electron", () => ({
   ipcMain: {
@@ -18,6 +29,7 @@ vi.mock("electron", () => ({
     }),
   },
   dialog: { showOpenDialog: showOpenDialogMock },
+  shell: { showItemInFolder: showItemInFolderMock },
 }));
 
 vi.mock("../../../permissions/permission-settings-store.js", () => ({
@@ -25,6 +37,7 @@ vi.mock("../../../permissions/permission-settings-store.js", () => ({
     permissions: { additionalDirectories: additionalDirectories.value },
   }),
   addAllowedDirectoryPersist: addAllowedDirectoryPersistMock,
+  removeAllowedDirectoryPersist: removeAllowedDirectoryPersistMock,
 }));
 
 import { registerPreviewHandlers } from "../preview.js";
@@ -60,7 +73,9 @@ beforeAll(() => {
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 beforeEach(() => {
   showOpenDialogMock.mockReset();
+  showItemInFolderMock.mockReset();
   addAllowedDirectoryPersistMock.mockClear();
+  removeAllowedDirectoryPersistMock.mockClear();
   additionalDirectories.value = [root];
 });
 
@@ -339,5 +354,99 @@ describe("workspace handlers", () => {
     expect(res.ok).toBe(true);
     expect(res.entries?.some((e) => e.name === ".env")).toBe(false);
     rmSync(join(root, ".env"), { force: true });
+  });
+
+  it("removeRoot removes an additional root and audits the shrink", async () => {
+    const log = (deps as unknown as { auditLogger: { log: ReturnType<typeof vi.fn> } }).auditLogger.log;
+    log.mockClear();
+    const res = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, root)) as {
+      ok: boolean;
+      removed?: string;
+      roots?: Array<{ path: string; isDefault: boolean }>;
+    };
+    expect(res).toMatchObject({ ok: true, removed: root });
+    expect(removeAllowedDirectoryPersistMock).toHaveBeenCalledWith(root);
+    expect(res.roots?.some((r) => r.path === root)).toBe(false);
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "info",
+        input: expect.stringContaining(CHANNELS.workspace.removeRoot),
+      }),
+    );
+  });
+
+  it("removeRoot REFUSES the default root (cwd) — it is not a removable addition", async () => {
+    const res = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, process.cwd())) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "cannot-remove-default" });
+    expect(removeAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+
+  it("removeRoot REFUSES a path that is not in the allow-list (no arbitrary removal)", async () => {
+    const res = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, join(tmpdir(), "never-added-xyz"))) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "not-an-additional-root" });
+    expect(removeAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+
+  it("removeRoot rejects an unauthorized sender frame (fail-closed)", async () => {
+    const res = (await invoke(CHANNELS.workspace.removeRoot, EVIL_FRAME, root)) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "unauthorized" });
+    expect(removeAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+
+  it("reveal shows a scope-checked file's location and never the raw renderer path", async () => {
+    const res = (await invoke(CHANNELS.workspace.reveal, OK_FRAME, join(root, "docs", "architecture.md"))) as {
+      ok: boolean;
+    };
+    expect(res.ok).toBe(true);
+    expect(showItemInFolderMock).toHaveBeenCalledTimes(1);
+    // The shell only ever receives the main-owned realpath from the scope guard.
+    const [arg] = showItemInFolderMock.mock.calls[0] as [string];
+    expect(arg.endsWith(join("docs", "architecture.md"))).toBe(true);
+  });
+
+  it("reveal reveals a directory too (guard allows dirs)", async () => {
+    const res = (await invoke(CHANNELS.workspace.reveal, OK_FRAME, join(root, "docs"))) as { ok: boolean };
+    expect(res.ok).toBe(true);
+    expect(showItemInFolderMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reveal rejects a path outside the allowed roots (never touches the shell)", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-ws-reveal-outside-"));
+    writeFileSync(join(outside, "secret.txt"), "nope");
+    additionalDirectories.value = [];
+    const res = (await invoke(CHANNELS.workspace.reveal, OK_FRAME, join(outside, "secret.txt"))) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "path-not-allowed" });
+    expect(showItemInFolderMock).not.toHaveBeenCalled();
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  it("reveal hard-blocks a Layer 0 sensitive path", async () => {
+    const res = (await invoke(CHANNELS.workspace.reveal, OK_FRAME, join(homedir(), ".ssh", "id_rsa"))) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "sensitive-path" });
+    expect(showItemInFolderMock).not.toHaveBeenCalled();
+  });
+
+  it("reveal rejects an unauthorized sender frame (fail-closed)", async () => {
+    const res = (await invoke(CHANNELS.workspace.reveal, EVIL_FRAME, join(root, "docs"))) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "unauthorized" });
+    expect(showItemInFolderMock).not.toHaveBeenCalled();
   });
 });
