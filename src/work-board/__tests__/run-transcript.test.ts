@@ -8,28 +8,14 @@ import {
   createRunTranscript,
   readRunTranscript,
   runTranscriptPath,
-  type TranscriptStorage,
 } from "../run-transcript.js";
+import { memTranscriptStorage } from "./board-test-fixtures.js";
 
 const NOW = Date.parse("2026-06-16T00:00:00.000Z");
 
-/** In-memory storage standing in for the work-board namespace dir. */
-function memStorage(): TranscriptStorage & { files: Record<string, string> } {
-  const files: Record<string, string> = {};
-  return {
-    files,
-    readText: async (rel) => files[rel] ?? "",
-    write: async (rel, data) => {
-      files[rel] = data;
-    },
-    exists: async (rel) => rel in files,
-    mkdir: async () => {},
-  };
-}
-
 describe("run-transcript", () => {
   it("accumulates appended events into one JSONL file", async () => {
-    const storage = memStorage();
+    const storage = memTranscriptStorage();
     const t = createRunTranscript(storage, 1, "run-A", () => NOW);
 
     await t.append({ phase: "planning", kind: "turn", turn: 1, text: "investigating" });
@@ -46,7 +32,7 @@ describe("run-transcript", () => {
   });
 
   it("survives a restart — a fresh reader sees all prior appends", async () => {
-    const storage = memStorage();
+    const storage = memTranscriptStorage();
     await createRunTranscript(storage, 7, "run-X", () => NOW).append({
       phase: "planning",
       kind: "turn",
@@ -61,7 +47,7 @@ describe("run-transcript", () => {
   });
 
   it("keeps re-runs in separate files (prior run never overwritten)", async () => {
-    const storage = memStorage();
+    const storage = memTranscriptStorage();
     await createRunTranscript(storage, 1, "run-1", () => NOW).append({ phase: "done", kind: "output", text: "first" });
     await createRunTranscript(storage, 1, "run-2", () => NOW).append({ phase: "done", kind: "output", text: "second" });
 
@@ -72,7 +58,7 @@ describe("run-transcript", () => {
   });
 
   it("rejects a traversal-bearing runId (path-escape guard)", async () => {
-    const storage = memStorage();
+    const storage = memTranscriptStorage();
     // Plant a file the traversal would target, then prove it is NOT read.
     storage.files["../secret.jsonl"] = JSON.stringify({ ts: "x", phase: "done", kind: "output", text: "leak" }) + "\n";
     expect(await readRunTranscript(storage, 1, "../../secret")).toEqual([]);
@@ -80,7 +66,7 @@ describe("run-transcript", () => {
   });
 
   it("returns [] for a missing transcript and skips a torn final line", async () => {
-    const storage = memStorage();
+    const storage = memTranscriptStorage();
     expect(await readRunTranscript(storage, 99, "nope")).toEqual([]);
 
     // A valid line followed by a partially-flushed line.
