@@ -27,6 +27,15 @@ describe("useWorkspaceTabs", () => {
     expect(result.current.activeTabId).toBe(added.id);
   });
 
+  it("addTab supports the subagent kind (launcher 'sub-agents')", () => {
+    const { result } = renderHook(() => useWorkspaceTabs());
+    act(() => result.current.addTab("subagent"));
+    const added = result.current.tabs.at(-1)!;
+    expect(added.kind).toBe("subagent");
+    expect(added.ordinal).toBe(1);
+    expect(result.current.activeTabId).toBe(added.id);
+  });
+
   it("addTab assigns per-kind ordinals and unique ids", () => {
     const { result } = renderHook(() => useWorkspaceTabs());
     act(() => result.current.addTab("browser"));

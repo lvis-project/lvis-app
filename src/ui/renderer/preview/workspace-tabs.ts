@@ -33,7 +33,20 @@ import { normalizeBrowserNavigationUrl } from "./url-safety.js";
  * launcher takes over. Activity counts live solely in the ActionPanel (§6.10.4).
  */
 
-export type WorkspaceTabKind = "file-browser" | "preview" | "browser" | "terminal";
+export type WorkspaceTabKind =
+  | "file-browser"
+  | "preview"
+  | "browser"
+  | "terminal"
+  | "subagent"
+  // Reserved for the side-chat companion PR (a second, independently-streaming
+  // chat session in the rail). The tab kind is declared here now so the
+  // exhaustive tab switches (icon/label/testid/body) and the ordinal map stay
+  // coherent with `subagent`, added in the same sweep. It is intentionally NOT a
+  // launcher item and NOT reachable in this PR — opening one needs the 2nd
+  // ConversationLoop the companion PR adds, so surfacing it now would be a dead
+  // affordance. Its body-dispatch branch is an unreachable placeholder.
+  | "side-chat";
 export type WorkspaceTabMode = "ephemeral" | "pinned";
 
 /**
@@ -130,6 +143,8 @@ export function useWorkspaceTabs(): WorkspaceTabsStore {
     preview: 1,
     browser: 1,
     terminal: 1,
+    subagent: 1,
+    "side-chat": 1,
   });
 
   const setActiveTabId = useCallback((id: string) => {
