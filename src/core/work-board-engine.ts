@@ -23,8 +23,9 @@
  * `agent-spawn.ts` is a thin caller over the same runner.
  *
  * Session isolation: each phase spawns with `originSessionId:
- * "work-board:<itemId>"`, so the runner persists the child under
- * `work-board:<itemId>::<uuid>` — the work-board-namespaced isolated session
+ * "work-board:<itemId>"`, so the runner persists the child in the isolated
+ * `~/.lvis/subagent/` namespace under a regex-valid `sub-<originTag>-<uuid>` id
+ * (where `originTag` is a short hash of the origin id) — the isolated session
  * the design calls for. The execute child's `childSessionId` is stored back on
  * the item (`runSessionId`) for audit/trace linking.
  *
