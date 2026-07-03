@@ -58,6 +58,16 @@ export interface PermissionRule {
   source?: ToolSource;
 }
 
+/**
+ * Layer 5 reviewer routing lane. Distinguishes the two automatic-approval
+ * lanes that {@link PermissionManager.resolveReviewerDecision} translates a
+ * verdict for: `headless` (background/routine turns — non-low denies) and
+ * `foreground-auto` (interactive auto-review opt-in — non-low asks). Shared by
+ * the `reviewer.route` marker and the reviewer-dispatch callsites so the lane
+ * union has a single source of truth.
+ */
+export type ReviewerLane = "foreground-auto" | "headless";
+
 export interface PermissionCheckResult {
   decision: PermissionDecision;
   reason: string;
@@ -68,7 +78,7 @@ export interface PermissionCheckResult {
    * overlay-trigger, strict, and low-trust MCP asks are hard user-approval gates.
    */
   reviewer?: {
-    route: "foreground-auto" | "headless";
+    route: ReviewerLane;
     verdict?: RiskVerdict;
   };
   /**
@@ -119,6 +129,17 @@ export interface PermissionCheckContext {
    * authorize a later call with a broader argument scope.
    */
   approvalCacheKey?: string;
+  /**
+   * Tool-author `decisionOverride` for `meta`-category builtin tools, carried
+   * from the executor so the "override" branch of {@link categoryBasedDecision}
+   * owns the re-elevation decision (V1 SOT). `"ask"` (e.g. agent_spawn) elevates
+   * the override-`allow` to a per-invocation `forceModal` ask in every mode
+   * except `allow` (the allow-all opt-in); `"always-allow-with-audit"` is
+   * short-circuited before checkDetailed runs and never reaches here. Non-meta
+   * callers pass `undefined` (current behaviour — the override branch keeps its
+   * `allow`).
+   */
+  decisionOverride?: "ask" | "always-allow-with-audit";
 }
 
 /**
@@ -361,7 +382,7 @@ export class PermissionManager {
    */
   resolveReviewerDecision(
     verdict: RiskVerdict,
-    lane: "headless" | "foreground-auto",
+    lane: ReviewerLane,
   ): PermissionCheckResult {
     const isLow = verdict.level === "low";
     if (lane === "headless") {
@@ -738,21 +759,63 @@ export class PermissionManager {
     }
 
     // 3. Allow rules
+    let result: PermissionCheckResult | undefined;
     for (const rule of this.rules) {
       if (rule.action !== "allow") continue;
       if (rule.source && rule.source !== source) continue;
       if (globMatch(allowTarget, rule.pattern)) {
-        return { decision: "allow", reason: t("be_permissionManager.allowRuleReason", { pattern: rule.pattern }), layer: 3 };
+        result = { decision: "allow", reason: t("be_permissionManager.allowRuleReason", { pattern: rule.pattern }), layer: 3 };
+        break;
       }
     }
 
     // 5. Always-allowed (사용자 이전 승인)
-    if (this.alwaysAllowed.has(allowTarget)) {
-      return { decision: "allow", reason: t("be_permissionManager.userPermanentApproval"), layer: 5 };
+    if (result === undefined && this.alwaysAllowed.has(allowTarget)) {
+      result = { decision: "allow", reason: t("be_permissionManager.userPermanentApproval"), layer: 5 };
     }
 
-    // 6. Layer 3 — Category × Source × Trust via registry descriptor
-    return this.categoryBasedDecision(trust, resolvedCategory, context);
+    // 6. Category × Source × Trust via registry descriptor
+    if (result === undefined) {
+      result = this.categoryBasedDecision(trust, resolvedCategory, context);
+    }
+
+    // Permission policy V1 SOT — per-invocation `decisionOverride="ask"` gate.
+    //
+    // A `meta`-category builtin tool that declares `decisionOverride: "ask"`
+    // (e.g. agent_spawn) must show an approval modal on EVERY invocation,
+    // regardless of which layer produced the current `allow` verdict:
+    //
+    //   layer 3 (allow rule)    — user added agent_spawn to their allow-list
+    //   layer 5 (alwaysAllowed) — user clicked "Allow always" on the modal
+    //   layer 6 (override case) — the normal first-invocation path
+    //
+    // The post-guard is layer-agnostic: layers 3/5/6 all fall through to it.
+    // The previous override-branch-only approach silently bypassed layer-3/5
+    // hits because those paths returned early before categoryBasedDecision ran.
+    //
+    // Allow-all invariant: `mode !== "allow"` is NOT dead code here — unlike
+    // inside the override branch (where strict/allow early-returns narrow the
+    // mode), at this point in checkDetailed the mode is not narrowed. Allow
+    // mode can reach here via the layer-3 allow-rule loop. The guard must stay
+    // so that an explicit allow-all opt-in still auto-allows agent_spawn with
+    // no prompt, matching the allow-all invariant.
+    //
+    // Strict mode: already returned ask at layer 2 before this point, so
+    // `result.decision` is never `allow` under strict and the guard never fires.
+    if (
+      result.decision === "allow" &&
+      context.decisionOverride === "ask" &&
+      this.mode !== "allow"
+    ) {
+      return {
+        decision: "ask",
+        reason: t("be_executor.metaToolAskOverrideReason"),
+        layer: 6,
+        forceModal: true,
+      };
+    }
+
+    return result;
   }
 
   /**
@@ -1172,7 +1235,11 @@ export class PermissionManager {
           reviewer: { route: "headless" },
         };
       case "override":
-        // meta category — executor handles via tool.decisionOverride
+        // meta category — returns `allow` (the registry override sentinel).
+        // The per-invocation `decisionOverride="ask"` re-elevation is handled
+        // by the post-computation guard at the bottom of `checkDetailed`, which
+        // is layer-agnostic (covers layer-3 allow-rule and layer-5 alwaysAllowed
+        // hits too, not just this branch). See the post-guard comment there.
         return {
           decision: "allow",
           reason: t("be_permissionManager.metaToolDecisionOverride", { category }),

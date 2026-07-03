@@ -1288,42 +1288,20 @@ export class ToolExecutor {
       : undefined;
     const isAlwaysAllowMeta = metaOverride === "always-allow-with-audit";
     if (this.permissionManager && !isAlwaysAllowMeta) {
+      // Permission policy V1 SOT — the meta `decisionOverride="ask"` re-elevation
+      // (agent_spawn: elevate the registry's override-`allow` to a per-invocation
+      // `forceModal` ask, except under allow-all mode) now lives inside
+      // categoryBasedDecision's "override" branch. The executor only CARRIES the
+      // override into the check context; it never rewrites the verdict or
+      // re-consults getMode(). The allow-all invariant (mode==="allow" → no
+      // prompt, meta included) is single-sourced in PermissionManager.
       permissionResult = this.permissionManager.checkDetailed(
         toolUse.name,
         source,
         invocationCategory,
         overlayTriggerOrigin,
-        invocationPermissionContext,
+        { ...invocationPermissionContext, decisionOverride: metaOverride },
       );
-      // Permission policy — meta tools with decisionOverride="ask" force the approval
-      // modal regardless of the registry descriptor's "override" lane.
-      // The override means "skip automatic approval lanes"; the registry already
-      // returns "allow" for `meta` (override sentinel) so we must elevate
-      // to ask here when the tool author marked it sensitive.
-      //
-      // Allow-all carve-out: when the user has explicitly opted into "allow"
-      // mode, the meta-ask elevation does NOT fire — matching how a write- or
-      // shell-category tool auto-allows silently under the same opt-in. The
-      // decisionOverride="ask" gate scopes the confirmation to strict/default/
-      // auto modes (the §8 approval gate for non-allow users); it is not meant
-      // to override a user who already turned every non-hard-blocked tool loose.
-      // Layer 0 sensitive-path / Layer 1 directory-scope / deny-rule / overlay
-      // guards run before this branch and are unaffected.
-      if (
-        metaOverride === "ask" &&
-        permissionResult.decision === "allow" &&
-        this.permissionManager.getMode() !== "allow"
-      ) {
-        permissionResult = {
-          decision: "ask",
-          reason: t("be_executor.metaToolAskOverrideReason"),
-          layer: 6,
-          // The tool author asked to be confirmed on EVERY invocation. Mark
-          // the ask so the Store B memory-skip below never auto-allows it from
-          // a prior session/persistent grant.
-          forceModal: true,
-        };
-      }
       // ── Plugin-read auto-allow ↔ sandbox-fs-containment coupling ──────────
       //
       // The merged read-relaxation coupling (the block immediately below) only
