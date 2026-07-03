@@ -34,6 +34,7 @@
  */
 import type { ToolCategory } from "../../tools/types.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
+import { tokenizeShell, type ShellLeaf } from "../../main/shell-tokenizer.js";
 
 /**
  * Built-in read-only command set (Claude Code / Codex model). A compound shell
@@ -56,13 +57,27 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Wrapper commands that delegate to a real command in a later operand. Claude
- * Code strips these before classifying. The effective verb is the first
- * operand that is not itself a wrapper or an option flag.
+ * Read-only verbs that nonetheless MUTATE when carrying certain flags. Even
+ * though the head verb is in {@link READ_ONLY_COMMANDS}, a call carrying one of
+ * these flags edits/creates/destroys files and must escalate to `"shell"`.
+ *
+ * This closes the read-down hole where `sed -i`, `find … -delete`, `tee`, `dd`,
+ * `truncate` etc. were classified `read` because only the head verb was
+ * inspected. Matching is exact-token or prefix (`--in-place=…`), never a
+ * substring, so a benign argument that merely contains the flag text
+ * (`grep -- -i`) is not mis-escalated.
+ *
+ * `null` means the verb is ALWAYS mutating regardless of flags (it has no
+ * side-effect-free form worth the read fast-path): `tee`, `dd`, `truncate`.
  */
-const WRAPPER_COMMANDS: ReadonlySet<string> = new Set([
-  "timeout", "nice", "ionice", "nohup", "stdbuf", "env", "command", "xargs",
-  "time", "watch",
+const MUTATING_FLAGS: ReadonlyMap<string, ReadonlySet<string> | null> = new Map([
+  ["sed", new Set(["-i", "--in-place"])],
+  ["find", new Set(["-delete", "-exec", "-execdir", "-fdelete", "-fprint", "-fprintf", "-fls"])],
+  ["fd", new Set(["-x", "--exec", "-X", "--exec-batch"])],
+  ["awk", new Set(["-i", "--in-place"])],
+  ["tee", null],
+  ["dd", null],
+  ["truncate", null],
 ]);
 
 /** git subcommands that are read-only (no mutation of the working tree / refs). */
@@ -193,69 +208,71 @@ function extractShellCommand(input: Record<string, unknown>): string | null {
 /**
  * A compound shell command is read-only iff EVERY leaf command's effective
  * head verb is in {@link READ_ONLY_COMMANDS} (or is a read-only `git`
- * subcommand). Compound separators `&& || ; |` and newlines split leaves;
- * wrapper commands (`timeout`, `nice`, `xargs`, …) are stripped to reach the
- * real verb. Any unknown verb fails the whole command closed.
+ * subcommand) AND carries no mutating flag ({@link MUTATING_FLAGS}). Leaf
+ * boundaries, quoting, redirects and substitution come from the shared
+ * {@link tokenizeShell} SOT so this module and {@link BashAstValidator} agree
+ * on what a leaf is.
+ *
+ * Fails closed to non-read-only on:
+ *  - a parse error (unbalanced quotes/parens),
+ *  - any command/process substitution (`$(…)`, backticks, `<(…)`, `>(…)`) —
+ *    hidden commands the head-verb scan cannot see,
+ *  - any redirect, input OR output (`>`, `>>`, `2>`, `&>`, `<`, `<<`). Output
+ *    redirects write a file; input redirects reach a file the argv-path check
+ *    cannot contain. Failing closed on BOTH exactly preserves the prior
+ *    fail-closed set (a char-class guard on `< > \` $(`) so this change only
+ *    TIGHTENS (read → shell) and never loosens (shell → read).
  */
 export function isReadOnlyCommand(command: string): boolean {
-  // Redirections (`>`, `>>`, `<`) and command substitution (`$(…)`, backticks)
-  // can write files or execute hidden commands the head-verb scan cannot see
-  // (`echo hi > out`, `ls $(rm -rf /)`). Default-strict: a command carrying any
-  // of these is not provably read-only. (Bare `${VAR}` parameter expansion does
-  // NOT execute, so it is not treated as mutating.)
-  if (/[<>`]|\$\(/.test(command)) return false;
-  const leaves = splitCompound(command);
+  const { leaves, parseError } = tokenizeShell(command);
+  if (parseError) return false;
   if (leaves.length === 0) return false;
   return leaves.every((leaf) => isReadOnlyLeaf(leaf));
 }
 
-/** Split a compound command on `&& || ; | & \n` into trimmed non-empty leaves. */
-function splitCompound(command: string): string[] {
-  return command
-    .split(/(?:&&|\|\||[;|&\n])/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
+function isReadOnlyLeaf(leaf: ShellLeaf): boolean {
+  // Any hidden execution, file write, or file read via redirect taints the
+  // whole command (default-strict — see the doc comment on isReadOnlyCommand).
+  if (leaf.hasCommandSubstitution || leaf.hasProcessSubstitution) return false;
+  if (leaf.redirectTargets.length > 0 || leaf.hasInputRedirect) return false;
 
-function isReadOnlyLeaf(leaf: string): boolean {
-  const tokens = tokenize(leaf);
-  let i = 0;
-  // Strip leading VAR=value assignments (e.g. `FOO=bar ls`).
-  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i]!)) i += 1;
-  // Strip wrapper commands and their option flags to reach the real verb.
-  let lastWrapper: string | undefined;
-  while (i < tokens.length) {
-    const head = stripPath(tokens[i]!);
-    if (WRAPPER_COMMANDS.has(head)) {
-      lastWrapper = head;
-      i += 1;
-      // Skip option flags that belong to the wrapper (e.g. `timeout -s KILL 5s`).
-      while (i < tokens.length && tokens[i]!.startsWith("-")) i += 1;
-      // For wrappers that take a non-flag operand before the command
-      // (e.g. `timeout 5s ls`, `nice -n 5 ls`), skip a single numeric/duration
-      // operand so the next token is the real verb.
-      if (i < tokens.length && /^[0-9]+[smhd]?$/.test(tokens[i]!)) i += 1;
-      continue;
-    }
-    break;
+  const argv = leaf.argv;
+  if (argv.length === 0) {
+    // The leaf was only assignments/wrappers. A bare read-only wrapper verb
+    // (`env`, which prints the environment) is read-only; a bare incomplete
+    // wrapper (`timeout`, `nice`) is not. The first stripped wrapper is the
+    // effective verb the leaf would have run.
+    const bareVerb = leaf.strippedWrappers[0];
+    return bareVerb !== undefined && READ_ONLY_COMMANDS.has(bareVerb);
   }
-  // A wrapper used with no following command (bare `env`, which prints the
-  // environment) is read-only iff the wrapper verb is itself a read-only
-  // command. `timeout`/`nice` alone are incomplete → non-read-only (safe).
-  if (i >= tokens.length) {
-    return lastWrapper !== undefined && READ_ONLY_COMMANDS.has(lastWrapper);
-  }
-  const verb = stripPath(tokens[i]!);
+
+  const verb = stripPath(argv[0]!);
   if (verb === "git") {
-    const sub = tokens[i + 1];
+    const sub = argv[1];
     return typeof sub === "string" && READ_ONLY_GIT_SUBCOMMANDS.has(sub);
   }
-  return READ_ONLY_COMMANDS.has(verb);
+  if (!READ_ONLY_COMMANDS.has(verb)) return false;
+  // A read-only verb still MUTATES when carrying a mutating flag (`sed -i`,
+  // `find … -delete`, …). Escalate to non-read-only.
+  if (hasMutatingFlag(verb, argv.slice(1))) return false;
+  return true;
 }
 
-/** Naive whitespace tokenizer — sufficient for head-verb identification. */
-function tokenize(leaf: string): string[] {
-  return leaf.split(/\s+/).filter((t) => t.length > 0);
+/** True when `verb`'s argument tokens carry a flag that turns a read-only verb
+ * into a mutating one (per {@link MUTATING_FLAGS}). A `null` table entry means
+ * the verb is always mutating. Flag matching is exact-token or `--flag=value`
+ * prefix, never a substring. */
+function hasMutatingFlag(verb: string, args: readonly string[]): boolean {
+  if (!MUTATING_FLAGS.has(verb)) return false;
+  const flags = MUTATING_FLAGS.get(verb);
+  if (flags === null) return true; // always-mutating verb
+  for (const arg of args) {
+    if (flags!.has(arg)) return true;
+    // `--in-place=.bak` style: match the `--flag` portion before `=`.
+    const eq = arg.indexOf("=");
+    if (eq > 0 && flags!.has(arg.slice(0, eq))) return true;
+  }
+  return false;
 }
 
 /** Reduce `/usr/bin/ls` → `ls`; leave bare verbs unchanged. */

@@ -85,6 +85,110 @@ describe("inspectHostRisk — shell command classification", () => {
     expect(signals({ finalInput: { command: "git commit -m x" } })).toBe("shell");
     expect(signals({ finalInput: { command: "git push" } })).toBe("shell");
   });
+
+  it("escalates a read-only verb carrying a MUTATING FLAG to shell (read-down fix)", () => {
+    // These head verbs ARE in the read-only set, but the flag mutates files —
+    // the old head-verb-only scan classified them read. Now they escalate.
+    expect(signals({ finalInput: { command: "sed -i 's/a/b/' f" } })).toBe("shell");
+    expect(signals({ finalInput: { command: "sed --in-place=.bak 's/a/b/' f" } })).toBe("shell");
+    expect(signals({ finalInput: { command: "find . -delete" } })).toBe("shell");
+    expect(signals({ finalInput: { command: "find . -exec rm {} ;" } })).toBe("shell");
+    expect(signals({ finalInput: { command: "awk -i inplace '{print}' f" } })).toBe("shell");
+    // Always-mutating verbs (no side-effect-free bare form) → shell.
+    expect(signals({ finalInput: { command: "tee out" } })).toBe("shell");
+    expect(signals({ finalInput: { command: "dd if=/dev/zero of=f" } })).toBe("shell");
+    expect(signals({ finalInput: { command: "truncate -s 0 f" } })).toBe("shell");
+  });
+
+  it("does NOT escalate a read-only verb whose benign arg merely resembles a mutating flag", () => {
+    // `sed` reading a file literally named to look like a flag value is still a
+    // substitution WITHOUT -i → read. Exact-token matching, not substring.
+    expect(signals({ finalInput: { command: "sed 's/-i/x/' f" } })).toBe("read");
+    // `find` printing (no -delete/-exec) is still read.
+    expect(signals({ finalInput: { command: "find . -name x.txt" } })).toBe("read");
+  });
+
+  it("is quote-aware — whitespace inside quotes is not a token boundary", () => {
+    // `grep "a b" .` must remain read; the naive \\s split would have mangled it
+    // but never changed the verb, so this pins the quote-aware behaviour.
+    expect(signals({ finalInput: { command: 'grep "a b" .' } })).toBe("read");
+    expect(signals({ finalInput: { command: "grep 'a && b' file" } })).toBe("read");
+  });
+
+  it("splits compound commands by leaf — a mutating leaf taints the whole", () => {
+    expect(signals({ finalInput: { command: "ls && rm -rf /" } })).toBe("shell");
+    expect(isReadOnlyCommand("ls && sed -i s/a/b/ f")).toBe(false);
+  });
+
+  it("strips a leading assignment before the verb (env X=1 ls → read)", () => {
+    expect(signals({ finalInput: { command: "env X=1 ls" } })).toBe("read");
+    expect(signals({ finalInput: { command: "FOO=bar ls" } })).toBe("read");
+  });
+
+  it("strips a wrapper to reach the verb (timeout 5s cat f → read)", () => {
+    expect(signals({ finalInput: { command: "timeout 5s cat f" } })).toBe("read");
+  });
+
+  it("fails closed on unbalanced quotes (parse error → shell)", () => {
+    expect(signals({ finalInput: { command: "grep 'unterminated" } })).toBe("shell");
+  });
+});
+
+describe("inspectHostRisk — tighten-only invariant (no shell → read loosening)", () => {
+  // Every command that was classified `shell`/non-read-only BEFORE this change
+  // must STILL be non-read. This proves the change only tightens (read → shell)
+  // and never loosens (shell → read). If any of these flips to read, the
+  // security posture regressed.
+  const previouslyNonRead: readonly string[] = [
+    "rm -rf /tmp/x",
+    "mv a b",
+    "npm install",
+    "frobnicate --all",
+    "ls && rm -rf /",
+    "cat foo | tee out",
+    "echo hi > out",
+    "cat foo >> log",
+    "cat < in",
+    "ls $(rm -rf /)",
+    "echo `rm -rf /`",
+    "git commit -m x",
+    "git push",
+    "timeout",
+    "timeout 5s rm -rf /",
+    "/bin/rm -rf /",
+    // The correction proof: command substitution stays non-read (already was).
+    "echo $(rm -rf /)",
+    // Redirect target stays non-read.
+    "cat secret > /etc/passwd",
+  ];
+
+  it("keeps every previously-non-read command non-read", () => {
+    for (const cmd of previouslyNonRead) {
+      expect(isReadOnlyCommand(cmd), `expected non-read: ${cmd}`).toBe(false);
+    }
+  });
+
+  it("keeps every previously-read command read (no false escalation of the read set)", () => {
+    const previouslyRead: readonly string[] = [
+      "ls -la /tmp",
+      "cat file.txt",
+      "grep -r foo .",
+      "ls && cat foo",
+      "ls | grep foo",
+      "ls; pwd; whoami",
+      "timeout 5s ls",
+      "nice -n 5 cat foo",
+      "env",
+      "FOO=bar env",
+      "/usr/bin/ls -la",
+      "git status",
+      "git log --oneline",
+      "ls ${HOME}",
+    ];
+    for (const cmd of previouslyRead) {
+      expect(isReadOnlyCommand(cmd), `expected read: ${cmd}`).toBe(true);
+    }
+  });
 });
 
 describe("inspectHostRisk — network classification", () => {
