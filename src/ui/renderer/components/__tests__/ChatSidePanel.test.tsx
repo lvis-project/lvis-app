@@ -1127,8 +1127,8 @@ describe("ChatSidePanel", () => {
 
   it("subagent tab: lists spawns (running first) and shows the selected one's detail", () => {
     const subAgentSpawns: SubAgentSpawn[] = [
-      { spawnId: "done-1", title: "Completed agent", status: "done", turns: [{ turn: 1, text: "did work", toolCallCount: 2 }], summary: "all done", toolCallCount: 2 },
-      { spawnId: "run-1", title: "Live agent", status: "running", turns: [{ turn: 1, text: "working", toolCallCount: 1 }], toolCallCount: 1 },
+      { spawnId: "done-1", title: "Completed agent", status: "done", entries: [{ kind: "assistant", text: "did work", streaming: false }], summary: "all done", toolCallCount: 2 },
+      { spawnId: "run-1", title: "Live agent", status: "running", entries: [{ kind: "assistant", text: "working", streaming: false }], toolCallCount: 1 },
     ];
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
@@ -1148,7 +1148,7 @@ describe("ChatSidePanel", () => {
 
   it("subagent tab: list is a role=listbox and each row is a role=option (valid aria-selected)", () => {
     const subAgentSpawns: SubAgentSpawn[] = [
-      { spawnId: "run-1", title: "Live agent", status: "running", turns: [], toolCallCount: 0 },
+      { spawnId: "run-1", title: "Live agent", status: "running", entries: [], toolCallCount: 0 },
     ];
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
@@ -1164,7 +1164,7 @@ describe("ChatSidePanel", () => {
 
   it("subagent tab: renders a localized status label, not the raw enum", () => {
     const subAgentSpawns: SubAgentSpawn[] = [
-      { spawnId: "done-1", title: "Done agent", status: "done", turns: [], toolCallCount: 0 },
+      { spawnId: "done-1", title: "Done agent", status: "done", entries: [], toolCallCount: 0 },
     ];
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,

@@ -2411,6 +2411,7 @@ export const deMessages: Record<string, string> = {
   "subAgentCard.statusRunning": "Läuft",
   "subAgentCard.summaryLabel": "Zusammenfassung",
   "subAgentCard.toolCalls": "Werkzeugaufrufe: {count}",
+  "subAgentCard.detailInTab": "Details im Tab",
   "subAgentCard.turnCount": "{count} umdrehen",
   "subAgentCard.turnHeading": "Drehen Sie {turn}",
   "suggestedRepliesChipRow.toolbarAriaLabel": "Alternative Antwortvorschläge",
