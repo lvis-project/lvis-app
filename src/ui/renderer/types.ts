@@ -1683,18 +1683,7 @@ export interface LvisWorkspaceApi {
   /** Reveal a scope-revalidated file/folder in the OS file manager (location only, never opens it). */
   reveal: (path: string) => Promise<{
     ok: boolean;
-    error?: "unauthorized" | "path-not-allowed" | "sensitive-path" | "not-found" | "reveal-failed";
-    message?: string;
-  }>;
-  /** Add a project root from a drag-dropped path — always gated through the ackToken confirmation. */
-  addRootByPath: (path: string) => Promise<{
-    ok: boolean;
-    requiresAcknowledgement?: boolean;
-    pendingPath?: string;
-    ackToken?: string;
-    warnings?: string[];
-    roots?: Array<{ path: string; isDefault: boolean }>;
-    error?: string;
+    error?: "unauthorized" | "path-not-allowed" | "sensitive-path" | "not-found";
     message?: string;
   }>;
 }
