@@ -7,6 +7,7 @@ import { contextBridge } from "electron";
 import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildPublicSurface } from "./preload/public-surface.js";
+import { resolveDroppedPaths } from "./preload/webutils-bridge.js";
 import {
   applyInitialThemePrime,
   buildInternalApiSurface,
@@ -93,6 +94,14 @@ contextBridge.exposeInMainWorld("lvisWindow", buildLvisWindowWorld());
 // renderer에서 window.lvis.approval / window.lvis.permission으로 접근.
 // permission/approval/userApproval/policy/mcp are shared with lvisApi (same
 // object refs); the remaining namespaces come from the internal surface.
+// ─── Drop-path resolution bridge (webUtils.getPathForFile) ────────────────
+// A dropped File cannot cross IPC, so its path must be resolved here in preload.
+// The returned string is only a CANDIDATE path — the main-process
+// workspace.dropPrepare gate (Layer-0 deny + is-a-dir + main-owned ack token)
+// makes the actual read-scope decision, so this bridge grants no capability.
+// Exposed as its own minimal world (a single resolver), never raw webUtils.
+contextBridge.exposeInMainWorld("lvisDrop", { resolveDroppedPaths });
+
 contextBridge.exposeInMainWorld("lvis", {
   permission: api.permission,
   approval: api.approval,
