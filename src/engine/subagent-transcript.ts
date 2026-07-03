@@ -72,13 +72,19 @@ export class SubAgentTranscriptAccumulator {
     // Child tool RESULTS are unmasked at this boundary — mask before persist.
     // `uiPayload` is narrowed to the ToolEntryItem shape (drop `csp` — the
     // renderer's stored payload never carried it); slot values already match.
+    // `title` is a free-text server-authored label that enters this NEW
+    // persisted+forwarded snapshot, so it is DLP-masked like every other
+    // child-authored text field. serverId/resourceUri/slot/height are
+    // structural identifiers (masking a URI would corrupt it), left verbatim.
     const storedUiPayload = uiPayload
       ? {
           serverId: uiPayload.serverId,
           resourceUri: uiPayload.resourceUri,
           ...(uiPayload.slot ? { slot: uiPayload.slot } : {}),
           ...(uiPayload.height !== undefined ? { height: uiPayload.height } : {}),
-          ...(uiPayload.title !== undefined ? { title: uiPayload.title } : {}),
+          ...(uiPayload.title !== undefined
+            ? { title: maskSensitiveData(uiPayload.title).masked }
+            : {}),
         }
       : undefined;
     this.entries = applyToolEnd(this.entries, {
