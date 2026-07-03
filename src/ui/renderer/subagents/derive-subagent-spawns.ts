@@ -22,12 +22,18 @@
  *              live spawn (which carries the same `toolUseId`)
  *   - toolUseId: the tool_use id — groups the card under its ToolGroupCard
  *
- * NOT recoverable from persistence: the per-turn `turns[]` timeline (the live
- * stream's incremental `turn` events are not persisted). We reconstruct a
- * minimal single turn from the final output so the card still has body content.
+ * Persistence parity (PR3): the `agent_spawn` tool result now EMBEDS the child's
+ * full `entries: ChatEntry[]` transcript (written by agent-spawn.ts, DLP-masked
+ * at the SubAgentTranscriptAccumulator source). When present, the derived spawn
+ * carries the real tool/reasoning/assistant timeline — visually identical to the
+ * live run. When ABSENT (legacy sessions written before this PR), we fall back to
+ * a single synthetic assistant entry built from `result.summary` so the card
+ * still has body content. This fallback is a legitimate external-boundary
+ * fallback over persisted history (CLAUDE.md No-Fallback carve-out for the
+ * persistence boundary), not an internal-contract paper-over.
  */
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
-import type { SubAgentSpawn, SubAgentTurn } from "../components/SubAgentCard.js";
+import type { SubAgentSpawn } from "../components/SubAgentCard.js";
 
 /** Deterministic spawnId for a derived spawn, keyed by its tool_use id. */
 export function derivedSpawnId(toolUseId: string): string {
@@ -38,6 +44,8 @@ interface ParsedSpawnResult {
   summary?: string;
   toolCallCount?: number;
   error?: string;
+  /** Embedded child transcript (PR3+). Absent on legacy persisted results. */
+  entries?: ChatEntry[];
 }
 
 function parseSpawnResult(raw: string | undefined): ParsedSpawnResult {
@@ -55,6 +63,11 @@ function parseSpawnResult(raw: string | undefined): ParsedSpawnResult {
   if (typeof obj.summary === "string") result.summary = obj.summary;
   if (typeof obj.toolCallCount === "number") result.toolCallCount = obj.toolCallCount;
   if (typeof obj.error === "string") result.error = obj.error;
+  // The embedded transcript is trusted structurally (same-origin persisted
+  // state written by agent-spawn.ts). We only guard the array shape so a
+  // corrupt / truncated jsonl line degrades to the synthetic fallback instead
+  // of crashing the renderer.
+  if (Array.isArray(obj.entries)) result.entries = obj.entries as ChatEntry[];
   return result;
 }
 
@@ -81,15 +94,20 @@ export function deriveSubAgentSpawnsFromEntries(entries: ChatEntry[]): SubAgentS
           : tool.status === "running"
             ? "running"
             : "done";
-      const turns: SubAgentTurn[] =
-        status !== "error" && parsed.summary
-          ? [{ turn: 1, text: parsed.summary, toolCallCount: parsed.toolCallCount ?? 0 }]
-          : [];
+      // Prefer the embedded full transcript (PR3+). Legacy results without it
+      // fall back to a single synthetic assistant entry from the summary so the
+      // card still renders body content on old sessions.
+      const entries: ChatEntry[] =
+        parsed.entries && parsed.entries.length > 0
+          ? parsed.entries
+          : status !== "error" && parsed.summary
+            ? [{ kind: "assistant", text: parsed.summary, streaming: false }]
+            : [];
       spawns.push({
         spawnId: derivedSpawnId(tool.toolUseId),
         title: deriveTitle(tool.input),
         status,
-        turns,
+        entries,
         toolCallCount: parsed.toolCallCount ?? 0,
         ...(parsed.summary !== undefined ? { summary: parsed.summary } : {}),
         ...(parsed.error !== undefined ? { errorMessage: parsed.error } : {}),

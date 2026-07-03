@@ -167,8 +167,9 @@ test.describe("workspace rail UX redesign", () => {
     await page.setViewportSize({ width: 1400, height: 840 });
     await page.getByTestId("chat-side-panel-toggle").click();
     await expect(page.getByTestId("chat-side-panel-launcher-subagent")).toBeVisible();
-    // side-chat is reserved but never a launcher item (no dead affordance).
-    await expect(page.getByTestId("chat-side-panel-launcher-side-chat")).toHaveCount(0);
+    // side-chat is a first-class launcher item alongside sub-agent — both are
+    // live surfaces, both openable from the same empty-state picker.
+    await expect(page.getByTestId("chat-side-panel-launcher-side-chat")).toBeVisible();
 
     await page.getByTestId("chat-side-panel-launcher-subagent").click();
     await expect(page.getByTestId("chat-side-panel-tab-subagent")).toBeVisible();
