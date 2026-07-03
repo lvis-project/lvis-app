@@ -595,9 +595,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     });
     restore();
     const afterSpawn = subStore.loadSessionMetadata(spawn.childSessionId)!;
-    // Spawn seeds cumulativeRounds at 0 (the spawn-side accounting fix lands in
-    // the follow-up commit); the resume-side increment is what this test pins.
-    expect(afterSpawn.cumulativeRounds).toBe(0);
+    // Spawn now records its OWN round count into cumulativeRounds (the accounting
+    // fix in this commit; previously left at 0 → inaccurate resume-chain ceiling).
+    expect(afterSpawn.cumulativeRounds).toBe(spawn.turnCount);
     expect(afterSpawn.resumeCount).toBe(0);
     const resumeId = spawn.childSessionId;
 
