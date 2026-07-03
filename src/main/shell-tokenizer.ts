@@ -38,8 +38,18 @@ export interface ShellLeaf {
    */
   argv: string[];
   /** Targets of output redirects (`>`, `>>`, `>|`, `2>`, `&>`, `n>`). Input
-   * redirects (`<`, `<<`) are NOT collected here — they are reads, not writes. */
+   * redirects (`<`, `<<`) are NOT collected here — they are reads, not writes.
+   * Note: fd-duplication operators (`>&m`, `n>&m`) are output redirects but
+   * have no file target — they do NOT appear here, but they DO set
+   * {@link hasOutputRedirect}. */
   redirectTargets: string[];
+  /**
+   * True when the leaf contained any output redirect operator (`>`, `>>`, `>|`,
+   * `2>`, `&>`, `n>`, `>&m`, `n>&m`). Callers that want to fail closed on ALL
+   * output redirection (including fd-dup) should check this flag rather than
+   * `redirectTargets.length > 0`, because fd-dup operators have no file target.
+   */
+  hasOutputRedirect: boolean;
   /** True when the leaf contained an input redirect (`<`, `<<`). These do not
    * write, but they reach a file the argv-path check cannot see, so a
    * default-strict caller may still choose to treat the leaf as non-read. */
@@ -210,9 +220,17 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
       continue;
     }
 
-    // `$(...)` command substitution or `$var` / `${var}` (no substitution).
+    // `$(...)` command substitution or `$var` / `${var}` / `$((arith))`.
     if (ch === "$") {
       if (command[i + 1] === "(") {
+        // This matches both `$(cmd)` (command substitution) and `$((expr))`
+        // (arithmetic expansion). We conservatively set hasCommandSubstitution
+        // for BOTH — arithmetic expansion cannot execute arbitrary commands but
+        // distinguishing `$(` from `$((` adds parser complexity for minimal gain:
+        // any `$((…))` that contains side effects would be unusual, and treating
+        // it as substitution keeps the classifier safely closed. Callers that
+        // care only about execution risk (not arithmetic) accept this over-
+        // approximation as the safe direction.
         const close = matchParen(command, i + 1);
         if (close === -1) return { leaves: [], parseError: true };
         current += command.slice(i, close + 1);
@@ -221,7 +239,8 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
         i = close + 1;
         continue;
       }
-      // Plain parameter expansion — part of the current word, no substitution.
+      // Plain parameter expansion (`$var`, `${var}`) — part of the current word,
+      // NOT a command substitution (no execution, only value lookup).
       current += ch;
       wordActive = true;
       i += 1;
@@ -273,6 +292,21 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
     // space). `<`/`<<` are input reads (recorded, no target).
     if (ch === ">") {
       // `>>` append, `>|` clobber, `>` truncate — all output redirects.
+      // NOTE: `>&m` (fd-dup, e.g. `>&2`, `2>&1`) duplicates a file descriptor
+      // rather than naming a FILE target. We recognise it here and record it as
+      // an output redirect operator with NO subsequent word token consumed as a
+      // target, so the fd digit after `>&` stays out of `redirectTargets` and
+      // does not produce a spurious leaf token like `["1"]` or `["2"]`.
+      if (command[i + 1] === "&") {
+        // `>&m` or `>>&m` — consume operator + optional trailing digit(s).
+        let opEnd = i + 2;
+        while (opEnd < n && command[opEnd]! >= "0" && command[opEnd]! <= "9") opEnd += 1;
+        pushOperator(command.slice(i, opEnd), true);
+        i = opEnd;
+        // The fd number was already consumed into the operator string; do NOT
+        // treat it as a redirect-target word. Advance past any trailing space.
+        continue;
+      }
       const opLen = command[i + 1] === ">" || command[i + 1] === "|" ? 2 : 1;
       pushOperator(command.slice(i, i + opLen), true);
       i += opLen;
@@ -285,9 +319,19 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
       continue;
     }
 
-    // A digit immediately followed by `>` is a numbered fd output redirect.
+    // A digit immediately followed by `>` is a numbered fd output redirect
+    // (e.g. `2>file`, `2>&1`, `2>>file`). When it is `n>&m` (fd-dup), the `m`
+    // digit belongs to the operator and must NOT be consumed as a target word.
     if (ch >= "0" && ch <= "9" && command[i + 1] === ">" && !wordActive) {
       const afterDigit = i + 1;
+      // `n>&m` fd-duplication: consume operator + destination-fd digits.
+      if (command[afterDigit + 1] === "&") {
+        let opEnd = afterDigit + 2;
+        while (opEnd < n && command[opEnd]! >= "0" && command[opEnd]! <= "9") opEnd += 1;
+        pushOperator(command.slice(i, opEnd), true);
+        i = opEnd;
+        continue;
+      }
       const opLen = command[afterDigit + 1] === ">" || command[afterDigit + 1] === "|" ? 2 : 1;
       pushOperator(command.slice(i, afterDigit + opLen), true);
       i = afterDigit + opLen;
@@ -400,6 +444,7 @@ function stripPath(token: string): string {
 function buildLeaf(raw: RawLeaf): ShellLeaf {
   const argvWords: string[] = [];
   const redirectTargets: string[] = [];
+  let hasOutputRedirect = false;
   let hasInputRedirect = false;
   let hasCommandSubstitution = false;
   let hasProcessSubstitution = false;
@@ -410,17 +455,27 @@ function buildLeaf(raw: RawLeaf): ShellLeaf {
     if (w.hasCommandSubstitution) hasCommandSubstitution = true;
     if (w.hasProcessSubstitution) hasProcessSubstitution = true;
     if (w.isRedirectOperator) {
-      if (!w.isOutputRedirect) hasInputRedirect = true;
-      // The next non-operator word is the target (for output redirects).
-      const target = words[i + 1];
-      if (w.isOutputRedirect && target && !target.isRedirectOperator) {
-        redirectTargets.push(target.value);
-      }
-      if (target && !target.isRedirectOperator) {
-        // Consume the target so it is not mistaken for an argv token.
-        if (target.hasCommandSubstitution) hasCommandSubstitution = true;
-        if (target.hasProcessSubstitution) hasProcessSubstitution = true;
-        i += 1;
+      if (w.isOutputRedirect) {
+        hasOutputRedirect = true;
+        // The next non-operator word is a file target (not a fd-dup digit,
+        // since those were already consumed into the operator string by the
+        // scanner). Collect it only when it is a real word token.
+        const target = words[i + 1];
+        if (target && !target.isRedirectOperator) {
+          redirectTargets.push(target.value);
+          if (target.hasCommandSubstitution) hasCommandSubstitution = true;
+          if (target.hasProcessSubstitution) hasProcessSubstitution = true;
+          i += 1;
+        }
+      } else {
+        hasInputRedirect = true;
+        // Input redirects: consume the source word so it is not mistaken for argv.
+        const src = words[i + 1];
+        if (src && !src.isRedirectOperator) {
+          if (src.hasCommandSubstitution) hasCommandSubstitution = true;
+          if (src.hasProcessSubstitution) hasProcessSubstitution = true;
+          i += 1;
+        }
       }
       continue;
     }
@@ -431,6 +486,7 @@ function buildLeaf(raw: RawLeaf): ShellLeaf {
   return {
     argv,
     redirectTargets,
+    hasOutputRedirect,
     hasInputRedirect,
     hasCommandSubstitution,
     hasProcessSubstitution,
