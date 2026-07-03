@@ -25,7 +25,7 @@
  * shared state (`sessionId`, `history`, `cumulativeUsage`), and lets each
  * spawn audit-log under a child sessionId tagged with the origin session id.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
@@ -193,17 +193,25 @@ const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>(["agent_spawn"]);
  * The previous `${origin}::${uuid}` form contained `::`, which fails the
  * regex — so the child silently fell back to persisting under its bare
  * constructor UUID into the MAIN chat namespace (orphan + pollution). Here we
- * sanitize the origin to the allowed charset, keep a short prefix for human
- * traceability, and append a fresh UUID. The `sub-` prefix also keeps the id
- * OUT of the UUID-shaped filters (`^[0-9a-f-]{8,}$`) the main session list
- * uses, so even a misrouted file would never surface there — defense in depth.
+ * derive a short, stable ORIGIN TAG for human traceability and append a fresh
+ * UUID. The `sub-` prefix also keeps the id OUT of the UUID-shaped filters
+ * (`^[0-9a-f-]{8,}$`) the main session list uses, so even a misrouted file
+ * would never surface there — defense in depth.
+ *
+ * The origin tag is a short SHA-256 hash of the origin session id, NOT a raw
+ * slice of it. A raw slice let the child filename correlate directly to the
+ * parent session id (an info-leak: anyone reading `~/.lvis/subagent/` could
+ * tie a child back to a specific parent chat by prefix match). The hash keeps
+ * the tag deterministic (same parent → same tag, useful for grouping) and
+ * bounded to the id charset while breaking that correlation.
  */
 function buildChildSessionId(originSessionId?: string): string {
-  const originShort = (originSessionId ?? "")
-    .replace(/[^a-zA-Z0-9]/g, "")
-    .slice(0, 8);
-  return originShort
-    ? `sub-${originShort}-${randomUUID()}`
+  const origin = originSessionId ?? "";
+  const originTag = origin
+    ? createHash("sha256").update(origin).digest("hex").slice(0, 8)
+    : "";
+  return originTag
+    ? `sub-${originTag}-${randomUUID()}`
     : `sub-${randomUUID()}`;
 }
 
@@ -420,6 +428,14 @@ export class SubAgentRunner {
     // under the addressable id (not the bare constructor UUID). Assigning
     // `sessionId` directly mirrors how `newConversation` establishes identity.
     child.sessionId = childSessionId;
+    child.sessionKind = "subagent";
+    // The tracer was created at field-init against the constructor UUID (see
+    // ConversationLoop.tracer). We just rebound `sessionId`, so re-init the
+    // tracer to key dev traces on the addressable childSessionId — otherwise a
+    // trace under the stale UUID would never correlate to the persisted
+    // session. Mirrors how `newConversation`/`loadSession` re-init the tracer
+    // after they change the session identity.
+    child.rebindTracer();
     if (!child.hasProvider()) {
       const msg = "sub-agent: LLM provider not configured";
       callbacks?.onError?.(msg);
@@ -467,6 +483,24 @@ export class SubAgentRunner {
       ? `${modePreamble}\n\n${input.instructions}`
       : input.instructions;
     let assistantRounds = 0;
+
+    // Persist resume metadata (PR-B) alongside the child JSONL BEFORE the turn
+    // runs, into the SAME isolated subagent namespace (child loop's
+    // MemoryManager). run-turn's saveSession writes the JSONL; this writes the
+    // .meta.json sibling. `sessionKind: "subagent"` lets listing/rotation
+    // distinguish sub-agent sessions from main/routine. The scoped tool surface
+    // (`scopedTools`, the resolved allowlist the child was frozen with) is the
+    // exact set PR-C's resume must re-scope to — permission is frozen at spawn,
+    // not re-granted on resume. `resumeCount`/`cumulativeRounds` init to 0 for
+    // PR-D's loop guards. No resume logic here — this is metadata foundation.
+    await this.deps.subAgentMemoryManager.saveSessionMetadata(childSessionId, {
+      sessionKind: "subagent",
+      sourceTools: scopedTools.map((tool) => tool.name),
+      ...(input.profileModel !== undefined ? { profileModel: input.profileModel } : {}),
+      ...(input.profileMode !== undefined ? { profileMode: input.profileMode } : {}),
+      resumeCount: 0,
+      cumulativeRounds: 0,
+    });
 
     try {
       // C3(a): pass `maxRounds` so queryLoop terminates cleanly between
