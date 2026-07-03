@@ -1,26 +1,35 @@
 /**
- * SideChatView — the lightweight side-chat transcript + composer rendered in the
+ * SideChatView — the side-chat transcript + composer rendered in the
  * workspace-rail `side-chat` tab.
  *
- * Deliberately bespoke and lightweight (spec R5): it reuses the AssistantCard
- * PRIMITIVE for assistant bubbles but does NOT pull in the heavy main-chat
- * ChatContext / ChatTranscript / ChatComposerDock (checkpoint, fork, star,
- * compact, token-cost, persona machinery). User messages render as a plain
- * bubble. All streaming is driven by `useSideChat`, which subscribes to the
- * DEDICATED side-chat IPC channel so main-chat frames never appear here.
+ * Renders through the SHARED `TranscriptRenderer` (the same renderer the main
+ * chat uses) so tool calls, thinking, and permission-review status cards appear
+ * identically to the main transcript — the "single SOT UI" goal. Capability
+ * differences are expressed by OMITTING the optional prop clusters: side chat
+ * passes no `edit` / `search` / `spawns` / `actions`, so the shared renderer
+ * degrades to a read-only transcript (no pencil / fork / star / retry / feedback,
+ * no ghost-text composer). It still passes its OWN `turnSummaryByTurnStart` so
+ * the WorkGroup step count + TurnActionBar cost badge reflect the side loop's
+ * own token / cost totals.
+ *
+ * The composer + New-session chrome stay bespoke (compact rail affordances). All
+ * streaming is driven by `useSideChat`, which subscribes to the DEDICATED
+ * side-chat IPC channel so main-chat frames never appear here. Tool APPROVAL
+ * modals surface in the app-level ApprovalDialog (shared global ApprovalGate),
+ * never inside this tab.
  */
 import { useLayoutEffect, useRef, useState } from "react";
 import { Send, Square, Plus } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Textarea } from "../../../components/ui/textarea.js";
-import { AssistantCard } from "./AssistantCard.js";
-import { useSideChat, toAssistantChatEntry } from "../hooks/use-side-chat.js";
+import { TranscriptRenderer } from "./TranscriptRenderer.js";
+import { useSideChat } from "../hooks/use-side-chat.js";
 import type { LvisApi } from "../types.js";
 
 export function SideChatView({ api }: { api: LvisApi }) {
   const { t } = useTranslation();
-  const { messages, isStreaming, send, newSession, abort } = useSideChat(api);
+  const { entries, turnSummaryByTurnStart, isStreaming, sessionId, send, newSession, abort } = useSideChat(api);
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -28,7 +37,7 @@ export function SideChatView({ api }: { api: LvisApi }) {
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+  }, [entries]);
 
   // If side chat is unavailable (preload without the surface), surface a stable
   // disabled state rather than a broken composer.
@@ -78,27 +87,20 @@ export function SideChatView({ api }: { api: LvisApi }) {
 
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-2"
+        className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2"
         data-testid="side-chat-transcript"
       >
-        {messages.length === 0 ? (
+        {entries.length === 0 ? (
           <div className="pt-6 text-center text-xs text-muted-foreground">
             {t("chatPreviewRail.sideChat.empty")}
           </div>
         ) : (
-          messages.map((entry, i) =>
-            entry.kind === "user" ? (
-              <div
-                key={i}
-                className="ml-auto max-w-[85%] rounded-lg bg-muted/(--opacity-medium) px-3 py-1.5 text-sm"
-                data-testid="side-chat-user-message"
-              >
-                {entry.text}
-              </div>
-            ) : (
-              <AssistantCard key={i} entry={toAssistantChatEntry(entry)} />
-            ),
-          )
+          <TranscriptRenderer
+            entries={entries}
+            streaming={isStreaming}
+            currentSessionId={sessionId ?? "side-chat"}
+            turnSummaryByTurnStart={turnSummaryByTurnStart}
+          />
         )}
       </div>
 
