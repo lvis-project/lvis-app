@@ -48,7 +48,7 @@ import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useCheckpointView } from "./hooks/use-checkpoint-view.js";
 import { useMessageQueue } from "./hooks/use-message-queue.js";
 import { useAttachmentPicker } from "./hooks/use-attachment-picker.js";
-import { useTranscriptEntries, type TurnSummary } from "./hooks/use-transcript-entries.js";
+import { TranscriptRenderer, type TurnSummary } from "./components/TranscriptRenderer.js";
 import { ChatTranscript } from "./components/ChatTranscript.js";
 import { ChatComposerDock } from "./components/ChatComposerDock.js";
 
@@ -505,33 +505,33 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     return () => window.removeEventListener("keydown", handler);
   }, [streaming, onAbort]);
 
-  const transcriptEntries = useTranscriptEntries({
-    visibleEntries,
-    streaming,
-    currentSessionId,
-    viewMode,
-    editingEntryIdx,
-    editBusy,
-    setEditingEntryIdx,
-    searchOpen,
-    searchMatches,
-    searchMatchSet,
-    searchIdx,
-    searchHighlight,
-    isEntryStarred,
-    onEditSave,
-    onFork,
-    onToggleStar,
-    onRetryEffort,
-    onFeedback,
-    activeVendor,
-    debugStreamEnabled,
-    spawnsByToolUseId,
-    renderSpawnsForGroup,
-    turnSummaryByTurnStart,
-    handleEnterView,
-    handleBranchFrom,
-  });
+  // Main chat renders through the shared TranscriptRenderer with every
+  // capability cluster fully populated, so the transcript is byte-identical to
+  // the pre-extraction inline useMemo. Side-chat / sub-agent sources (PR2/PR3)
+  // omit clusters to opt out of edit / search / spawns / actions.
+  const transcriptEntries = (
+    <TranscriptRenderer
+      entries={visibleEntries}
+      streaming={streaming}
+      currentSessionId={currentSessionId}
+      viewMode={viewMode}
+      edit={{ editingEntryIdx, editBusy, setEditingEntryIdx, onEditSave }}
+      search={{ searchOpen, searchMatches, searchMatchSet, searchIdx, searchHighlight }}
+      spawns={{ spawnsByToolUseId, renderSpawnsForGroup }}
+      actions={{
+        isEntryStarred,
+        onFork,
+        onToggleStar,
+        onRetryEffort,
+        onFeedback,
+        handleEnterView,
+        handleBranchFrom,
+      }}
+      turnSummaryByTurnStart={turnSummaryByTurnStart}
+      activeVendor={activeVendor}
+      debugStreamEnabled={debugStreamEnabled}
+    />
+  );
 
   return (
     <div
