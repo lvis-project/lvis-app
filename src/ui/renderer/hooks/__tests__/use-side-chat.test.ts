@@ -3,7 +3,7 @@ import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useSideChat } from "../use-side-chat.js";
-import type { StreamEvent } from "../../../../lib/chat-stream-state.js";
+import type { StreamEvent, ChatEntry } from "../../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../../types.js";
 
 /**
@@ -16,12 +16,14 @@ function makeApi() {
   const abort = vi.fn(async () => ({ ok: true as const }));
   const send = vi.fn(async () => ({ ok: true as const, result: {} }));
   const newSession = vi.fn(async () => ({ ok: true as const, sessionId: "side-2" }));
+  const load = vi.fn(async () => ({ ok: true as const, sessionId: "side-3", messages: [] }));
+  const list = vi.fn(async () => ({ current: "side-1", sessions: [] }));
   const api = {
     sideChat: {
       send,
       new: newSession,
-      load: vi.fn(),
-      list: vi.fn(),
+      load,
+      list,
       abort,
       onStream: (h: (e: StreamEvent) => void) => {
         handler = h;
@@ -35,8 +37,16 @@ function makeApi() {
   return {
     api,
     emit: (e: StreamEvent) => act(() => handler?.(e)),
-    spies: { abort, send, newSession },
+    spies: { abort, send, newSession, load, list },
   };
+}
+
+function lastAssistant(entries: ChatEntry[]): Extract<ChatEntry, { kind: "assistant" }> | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (e && e.kind === "assistant") return e;
+  }
+  return undefined;
 }
 
 describe("useSideChat stale-frame guard", () => {
@@ -51,8 +61,11 @@ describe("useSideChat stale-frame guard", () => {
     emit({ type: "text_delta", text: "wor", streamId: 7 });
     emit({ type: "text_delta", text: "ld", streamId: 7 });
 
-    const last = result.current.messages.at(-1);
-    expect(last).toMatchObject({ kind: "assistant", text: "world", streaming: true });
+    expect(lastAssistant(result.current.entries)).toMatchObject({
+      kind: "assistant",
+      text: "world",
+      streaming: true,
+    });
   });
 
   it("drops frames from a superseded turn (different streamId)", async () => {
@@ -69,9 +82,9 @@ describe("useSideChat stale-frame guard", () => {
     emit({ type: "text_delta", text: "STALE", streamId: 2 });
     emit({ type: "text_delta", text: "A", streamId: 1 });
 
-    const last = result.current.messages.at(-1);
-    expect(last).toMatchObject({ kind: "assistant", text: "AA" });
-    expect((last as { text: string }).text).not.toContain("STALE");
+    const last = lastAssistant(result.current.entries);
+    expect(last).toMatchObject({ text: "AA" });
+    expect(last?.text).not.toContain("STALE");
   });
 
   it("re-arms on the next send so a new turn adopts its own streamId", async () => {
@@ -93,8 +106,7 @@ describe("useSideChat stale-frame guard", () => {
     emit({ type: "text_delta", text: "STALE", streamId: 1 });
     emit({ type: "text_delta", text: "second", streamId: 2 });
 
-    const last = result.current.messages.at(-1);
-    expect((last as { text: string }).text).toBe("second");
+    expect(lastAssistant(result.current.entries)?.text).toBe("second");
   });
 
   it("aborts the in-flight turn on unmount (tab switch teardown, no orphan)", async () => {
@@ -116,5 +128,118 @@ describe("useSideChat stale-frame guard", () => {
     const { unmount } = renderHook(() => useSideChat(api));
     unmount();
     expect(spies.abort).not.toHaveBeenCalled();
+  });
+});
+
+describe("useSideChat unified-transcript rendering (tool / thinking / permission)", () => {
+  it("renders a tool_start/tool_end pair as a tool_group entry (parity with main)", async () => {
+    const { api, emit } = makeApi();
+    const { result } = renderHook(() => useSideChat(api));
+
+    await act(async () => {
+      await result.current.send("run a tool");
+    });
+    emit({
+      type: "tool_start",
+      streamId: 1,
+      name: "index_scan",
+      groupId: "g1",
+      toolUseId: "t1",
+      displayOrder: 0,
+    });
+    emit({
+      type: "tool_end",
+      streamId: 1,
+      name: "index_scan",
+      groupId: "g1",
+      toolUseId: "t1",
+      result: "42 files",
+    });
+
+    const toolGroup = result.current.entries.find((e) => e.kind === "tool_group");
+    expect(toolGroup).toBeDefined();
+    expect(toolGroup).toMatchObject({ kind: "tool_group" });
+  });
+
+  it("renders reasoning_delta as a reasoning entry (thinking parity)", async () => {
+    const { api, emit } = makeApi();
+    const { result } = renderHook(() => useSideChat(api));
+
+    await act(async () => {
+      await result.current.send("think");
+    });
+    emit({ type: "reasoning_delta", text: "let me consider…", streamId: 1 });
+
+    const reasoning = result.current.entries.find((e) => e.kind === "reasoning");
+    expect(reasoning).toMatchObject({ kind: "reasoning", text: "let me consider…" });
+  });
+
+  it("upserts a permission_review status card (informational, not the modal)", async () => {
+    const { api, emit } = makeApi();
+    const { result } = renderHook(() => useSideChat(api));
+
+    await act(async () => {
+      await result.current.send("do something risky");
+    });
+    emit({
+      type: "permission_review",
+      streamId: 1,
+      reviewStatus: "reviewing",
+      name: "bash",
+      groupId: "g1",
+      toolUseId: "t1",
+      displayOrder: 0,
+    });
+
+    const review = result.current.entries.find((e) => e.kind === "permission_review");
+    expect(review).toMatchObject({ kind: "permission_review", status: "reviewing", toolName: "bash" });
+  });
+
+  it("appends a turn_summary entry and derives turnSummaryByTurnStart", async () => {
+    const { api, emit } = makeApi();
+    const { result } = renderHook(() => useSideChat(api));
+
+    await act(async () => {
+      await result.current.send("hi");
+    });
+    emit({ type: "text_delta", text: "answer", streamId: 1 });
+    emit({
+      type: "turn_summary",
+      streamId: 1,
+      turnDurationMs: 1200,
+      toolCount: 1,
+      cumulativeToolMs: 300,
+      tokensIn: 100,
+      freshInputTokens: 90,
+      tokensOut: 40,
+    });
+    emit({ type: "done", streamId: 1 });
+
+    const summaryEntry = result.current.entries.find((e) => e.kind === "turn_summary");
+    expect(summaryEntry).toMatchObject({ kind: "turn_summary", toolCount: 1, tokensIn: 100 });
+    // The turn starts at the user entry (index 0); the derived map keys by it.
+    expect(result.current.turnSummaryByTurnStart.get(0)).toMatchObject({ toolCount: 1, turnDurationMs: 1200 });
+  });
+
+  it("renders a checkpoint divider on a side-chat compact_notice (not silently dropped)", async () => {
+    const { api, emit } = makeApi();
+    const { result } = renderHook(() => useSideChat(api));
+
+    await act(async () => {
+      await result.current.send("long conversation");
+    });
+    emit({
+      type: "compact_notice",
+      streamId: 1,
+      removedMessages: 5,
+      freedTokens: 2000,
+      estimatedAfter: 800,
+      trigger: "context-tokens",
+    });
+
+    const checkpoint = result.current.entries.find((e) => e.kind === "checkpoint");
+    expect(checkpoint).toMatchObject({ kind: "checkpoint", removedMessages: 5 });
+    const ctxUsage = result.current.entries.find((e) => e.kind === "context_usage");
+    expect(ctxUsage).toMatchObject({ kind: "context_usage", tokensIn: 800 });
   });
 });
