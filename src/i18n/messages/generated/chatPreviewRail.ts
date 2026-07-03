@@ -1,5 +1,8 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/ChatPreviewRail.tsx. Do not edit by hand.
 export const en = {
+  "chatPreviewRail.collapseAll": "Collapse all",
+  "chatPreviewRail.dirTruncated": "Showing first 1000 entries",
+  "chatPreviewRail.dirEmpty": "Empty folder",
   "chatPreviewRail.ctxOpen": "Open",
   "chatPreviewRail.revealInFinder": "Reveal in Finder",
   "chatPreviewRail.revealInExplorer": "Reveal in Explorer",
@@ -84,6 +87,9 @@ export const en = {
 };
 
 export const ko = {
+  "chatPreviewRail.collapseAll": "모두 접기",
+  "chatPreviewRail.dirTruncated": "처음 1000개 항목만 표시",
+  "chatPreviewRail.dirEmpty": "빈 폴더",
   "chatPreviewRail.ctxOpen": "열기",
   "chatPreviewRail.revealInFinder": "Finder에서 보기",
   "chatPreviewRail.revealInExplorer": "탐색기에서 보기",

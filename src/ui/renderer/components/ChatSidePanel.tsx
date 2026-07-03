@@ -1,4 +1,4 @@
-import { createElement, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
+import { createElement, useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
 import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
 import {
   WORKSPACE_TAB_LAUNCHER,
@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
   Code2,
   Copy,
   ExternalLink,
@@ -631,6 +632,54 @@ function toRelativePath(root: string | null, full: string): string {
 const IS_MAC_LIKE =
   typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
+/**
+ * Extension → row icon. `File` is the legitimate domain default for an unknown
+ * extension (not a papering-over fallback).
+ */
+function fileIcon(name: string): LucideIcon {
+  const dot = name.lastIndexOf(".");
+  const ext = dot >= 0 ? name.slice(dot).toLowerCase() : "";
+  switch (ext) {
+    case ".md":
+    case ".txt":
+    case ".rst":
+      return FileText;
+    case ".ts":
+    case ".tsx":
+    case ".js":
+    case ".jsx":
+    case ".py":
+    case ".go":
+    case ".rs":
+      return FileCode;
+    case ".json":
+    case ".yaml":
+    case ".yml":
+    case ".toml":
+      return Code2;
+    case ".png":
+    case ".jpg":
+    case ".jpeg":
+    case ".gif":
+    case ".svg":
+    case ".webp":
+      return Image;
+    case ".csv":
+    case ".tsv":
+    case ".xlsx":
+      return Table;
+    case ".html":
+    case ".htm":
+      return Globe;
+    case ".sh":
+    case ".zsh":
+    case ".bash":
+      return Terminal;
+    default:
+      return File;
+  }
+}
+
 type WorkspaceDirEntry = { name: string; path: string; type: "file" | "directory" };
 
 /**
@@ -660,6 +709,9 @@ function ProjectRootsBrowser({
   // effect would refire every render → an infinite render→IPC loop.
   const [attemptedPaths, setAttemptedPaths] = useState<Set<string>>(new Set());
   const [errorByPath, setErrorByPath] = useState<Record<string, string>>({});
+  // Directories whose listing hit MAX_DIR_ENTRIES (main returns `truncated`), so
+  // the browser can flag that only a prefix of the folder is shown.
+  const [truncatedPaths, setTruncatedPaths] = useState<Set<string>>(new Set());
   // A picked folder whose adjacency warnings must be acknowledged before the
   // main process (workspace.pickRoot gate) will persist it into the read scope.
   // `ackToken` binds the confirmation to the exact dialog-picked path the main
@@ -683,6 +735,9 @@ function ProjectRootsBrowser({
     buffer: "",
     timer: null,
   });
+  // Drag-drop-a-folder affordance: highlight while a drag is over the panel.
+  const [dropActive, setDropActive] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   const loadDir = useCallback(async (path: string) => {
     setLoadingPaths((prev) => new Set(prev).add(path));
@@ -690,6 +745,16 @@ function ProjectRootsBrowser({
       const res = await window.lvis.workspace.listDir(path);
       if (res.ok && res.entries) {
         setChildrenByPath((prev) => ({ ...prev, [path]: res.entries ?? [] }));
+        setTruncatedPaths((prev) => {
+          const has = prev.has(path);
+          if (res.truncated && !has) return new Set(prev).add(path);
+          if (!res.truncated && has) {
+            const next = new Set(prev);
+            next.delete(path);
+            return next;
+          }
+          return prev;
+        });
         setErrorByPath((prev) => {
           if (!(path in prev)) return prev;
           const next = { ...prev };
@@ -896,7 +961,7 @@ function ProjectRootsBrowser({
     }
   };
 
-  const addFolder = async () => {
+  const addFolder = useCallback(async () => {
     const res = await window.lvis.workspace.pickRoot();
     if (!res.ok) return;
     if (res.requiresAcknowledgement && res.pendingPath && res.ackToken) {
@@ -904,6 +969,39 @@ function ProjectRootsBrowser({
       return;
     }
     if (res.roots) applyRoots(res.roots, res.added ?? null);
+  }, [applyRoots]);
+
+  // ⌘O / Ctrl+O opens the folder picker when focus is within the panel (scoped —
+  // no global shortcut pollution).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "o" || e.key === "O")) {
+        const root = rootRef.current;
+        if (root && root.contains(document.activeElement)) {
+          e.preventDefault();
+          void addFolder();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [addFolder]);
+
+  // Drop a folder onto the panel to add it as a project root. The dropped path is
+  // UNTRUSTED (no native-dialog gesture) — main withholds it behind the ackToken
+  // confirmation, so a drop surfaces the same warning panel a warned pick does
+  // and never silently widens the read scope.
+  const handleDropFolder = (e: ReactDragEvent) => {
+    e.preventDefault();
+    setDropActive(false);
+    const file = e.dataTransfer.files[0];
+    const droppedPath = (file as unknown as { path?: string })?.path;
+    if (!droppedPath) return;
+    void window.lvis.workspace.addRootByPath(droppedPath).then((res) => {
+      if (res.ok && res.requiresAcknowledgement && res.pendingPath && res.ackToken) {
+        setPendingWarning({ path: res.pendingPath, warnings: res.warnings ?? [], ackToken: res.ackToken });
+      }
+    });
   };
 
   const confirmPendingFolder = async () => {
@@ -940,8 +1038,64 @@ function ProjectRootsBrowser({
     applyRoots(res.roots, res.roots[0]?.path ?? null);
   };
 
+  // Re-list a folder whose previous listDir FAILED. A user gesture, so it clears
+  // the attempted mark (the render-loop guard) before reloading.
+  const retryDir = (path: string) => {
+    setAttemptedPaths((prev) => {
+      if (!prev.has(path)) return prev;
+      const next = new Set(prev);
+      next.delete(path);
+      return next;
+    });
+    setErrorByPath((prev) => {
+      if (!(path in prev)) return prev;
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+    void loadDir(path);
+  };
+
   const renderEntries = (path: string, depth: number): ReactElement => {
     const entries = childrenByPath[path] ?? [];
+    const childPad = 8 + depth * 12;
+    // Child-folder listing states (the active root's own loading/error is handled
+    // one level up so the role=tree wrapper is always present).
+    if (depth > 0 && loadingPaths.has(path) && entries.length === 0) {
+      return (
+        <div
+          className="flex h-7 items-center gap-1 text-[11px] text-muted-foreground"
+          style={{ paddingLeft: childPad }}
+          data-testid="chat-side-panel-fs-child-loading"
+        >
+          {t("chatPreviewRail.filePreviewLoading")}
+        </div>
+      );
+    }
+    if (depth > 0 && errorByPath[path]) {
+      return (
+        <button
+          type="button"
+          className="flex h-7 w-full items-center gap-1 text-left text-[11px] text-destructive hover:underline"
+          style={{ paddingLeft: childPad }}
+          data-testid="chat-side-panel-fs-child-error"
+          onClick={() => retryDir(path)}
+        >
+          {t("chatPreviewRail.dirLoadError")} · {t("common.retry")}
+        </button>
+      );
+    }
+    if (entries.length === 0 && attemptedPaths.has(path) && !loadingPaths.has(path) && !errorByPath[path]) {
+      return (
+        <div
+          className="flex h-7 items-center text-[11px] italic text-muted-foreground"
+          style={{ paddingLeft: childPad }}
+          data-testid="chat-side-panel-fs-empty"
+        >
+          {t("chatPreviewRail.dirEmpty")}
+        </div>
+      );
+    }
     return (
     <>
       {entries.map((entry, index) => {
@@ -983,7 +1137,9 @@ function ProjectRootsBrowser({
                       <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     )
                   ) : (
-                    <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    createElement(fileIcon(entry.name), {
+                      className: "h-3.5 w-3.5 shrink-0 text-muted-foreground",
+                    })
                   )}
                   <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                 </div>
@@ -1024,12 +1180,36 @@ function ProjectRootsBrowser({
           </div>
         );
       })}
+      {truncatedPaths.has(path) ? (
+        <div
+          className="flex h-6 items-center text-[11px] italic text-muted-foreground"
+          style={{ paddingLeft: childPad }}
+          data-testid="chat-side-panel-fs-truncated"
+        >
+          {t("chatPreviewRail.dirTruncated")}
+        </div>
+      ) : null}
     </>
     );
   };
 
   return (
-    <div className="space-y-1" data-testid="chat-side-panel-project-roots">
+    <div
+      ref={rootRef}
+      className={`space-y-1 rounded-md ${dropActive ? "ring-1 ring-primary ring-offset-1" : ""}`}
+      data-testid="chat-side-panel-project-roots"
+      data-drop-active={dropActive ? "true" : undefined}
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (!dropActive) setDropActive(true);
+      }}
+      onDragLeave={(e) => {
+        // Only clear when the pointer actually leaves the panel, not on inner
+        // element boundaries (relatedTarget still inside).
+        if (!rootRef.current?.contains(e.relatedTarget as Node | null)) setDropActive(false);
+      }}
+      onDrop={handleDropFolder}
+    >
       <div className="flex items-center gap-1">
         {roots.length > 1 ? (
           <select
@@ -1065,6 +1245,22 @@ function ProjectRootsBrowser({
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">{t("chatPreviewRail.addProjectRoot")}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              data-testid="chat-side-panel-collapse-all"
+              aria-label={t("chatPreviewRail.collapseAll")}
+              disabled={expanded.size === 0}
+              onClick={() => setExpanded(new Set())}
+            >
+              <ChevronsDownUp className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t("chatPreviewRail.collapseAll")}</TooltipContent>
         </Tooltip>
         {activeRoot && !activeRootIsDefault ? (
           <Tooltip>
@@ -1121,16 +1317,30 @@ function ProjectRootsBrowser({
         loadingPaths.has(activeRoot) && !childrenByPath[activeRoot] ? (
           <div className="px-2 py-1 text-[11px] text-muted-foreground">{t("chatPreviewRail.filePreviewLoading")}</div>
         ) : errorByPath[activeRoot] ? (
-          <div className="px-2 py-1 text-[11px] text-destructive" data-testid="chat-side-panel-fs-error">
-            {t("chatPreviewRail.dirLoadError")}
-          </div>
+          <button
+            type="button"
+            className="flex w-full items-center gap-1 px-2 py-1 text-left text-[11px] text-destructive hover:underline"
+            data-testid="chat-side-panel-fs-error"
+            onClick={() => retryDir(activeRoot)}
+          >
+            {t("chatPreviewRail.dirLoadError")} · {t("common.retry")}
+          </button>
         ) : (
           <div role="tree" aria-label={t("chatPreviewRail.projectRoots")} onKeyDown={onTreeKeyDown}>
             {renderEntries(activeRoot, 0)}
           </div>
         )
       ) : (
-        <div className="px-2 py-1 text-[11px] text-muted-foreground">{t("chatPreviewRail.projectRootsEmpty")}</div>
+        <div
+          className="flex flex-col items-start gap-2 px-2 py-3 text-[11px] text-muted-foreground"
+          data-testid="chat-side-panel-roots-empty"
+        >
+          <p>{t("chatPreviewRail.projectRootsEmpty")}</p>
+          <Button type="button" size="sm" variant="outline" onClick={() => void addFolder()}>
+            <FolderPlus className="h-3.5 w-3.5" />
+            {t("chatPreviewRail.addProjectRoot")}
+          </Button>
+        </div>
       )}
     </div>
   );

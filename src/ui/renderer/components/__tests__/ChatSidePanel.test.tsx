@@ -759,4 +759,74 @@ describe("ChatSidePanel", () => {
     fireEvent.click(removeBtn);
     await waitFor(() => expect(removeRoot).toHaveBeenCalledWith("/ws/proj"));
   });
+
+  it("collapse-all folds every open folder and disables itself when nothing is open", async () => {
+    stubRichWorkspace();
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const alpha = await screen.findByText("alpha");
+    // Disabled while nothing is expanded.
+    expect((screen.getByTestId("chat-side-panel-collapse-all") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(alpha);
+    await screen.findByText("a1.md");
+    const collapse = screen.getByTestId("chat-side-panel-collapse-all") as HTMLButtonElement;
+    expect(collapse.disabled).toBe(false);
+    fireEvent.click(collapse);
+    await waitFor(() => expect(screen.queryByText("a1.md")).toBeNull());
+    expect((screen.getByTestId("chat-side-panel-collapse-all") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows an empty-folder placeholder when an expanded child dir has no entries", async () => {
+    stubRichWorkspace();
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const beta = await screen.findByText("beta"); // /ws/beta lists []
+    fireEvent.click(beta);
+    await screen.findByTestId("chat-side-panel-fs-empty");
+  });
+
+  it("flags a truncated directory listing", async () => {
+    stubRichWorkspace({
+      listDir: vi.fn(async (p: string) =>
+        p === "/ws"
+          ? {
+              ok: true,
+              path: "/ws",
+              entries: [{ name: "readme.md", path: "/ws/readme.md", type: "file" }],
+              truncated: true,
+            }
+          : { ok: true, path: p, entries: [], truncated: false },
+      ),
+    });
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    await screen.findByTestId("chat-side-panel-fs-truncated");
+  });
+
+  it("dropping a folder routes through addRootByPath and shows the ack warning panel (no silent add)", async () => {
+    const addRootByPath = vi.fn(async () => ({
+      ok: true as const,
+      requiresAcknowledgement: true as const,
+      pendingPath: "/dropped/proj",
+      ackToken: "drop-tok",
+      warnings: ["path contains '.git' segment — secrets may be exposed if added"],
+      roots: [{ path: "/ws", isDefault: true }],
+    }));
+    stubRichWorkspace({ addRootByPath });
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const panel = await screen.findByTestId("chat-side-panel-project-roots");
+    fireEvent.drop(panel, { dataTransfer: { files: [{ path: "/dropped/proj" }] } });
+    await waitFor(() => expect(addRootByPath).toHaveBeenCalledWith("/dropped/proj"));
+    // The dropped path is withheld behind the same ack warning panel a warned pick uses.
+    await screen.findByTestId("chat-side-panel-root-warning");
+  });
 });

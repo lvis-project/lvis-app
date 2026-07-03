@@ -434,4 +434,57 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
       return { ok: true };
     },
   );
+
+  /**
+   * Add a project root from a DRAG-DROPPED path. The dropped path is
+   * renderer-supplied and carries NO native-dialog gesture proof, so — unlike a
+   * `showOpenDialog` pick — it is NEVER persisted immediately. It ALWAYS goes
+   * through the same one-time ackToken confirmation the adjacency-warned pick
+   * uses: this handler only validates + mints a token, and the existing
+   * `pickRoot({ ackToken })` path performs the actual (re-validated) persist. So a
+   * drop can never silently widen the Layer-1 read allow-list; the user must
+   * confirm the resolved path in the warning panel first.
+   */
+  ipcMain.handle(
+    CHANNELS.workspace.addRootByPath,
+    async (e, rawPath: string): Promise<WorkspaceAddRootByPathResult> => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.workspace.addRootByPath, e);
+        return { ok: false, error: "unauthorized", message: "sender frame not authorized" };
+      }
+      if (typeof rawPath !== "string" || rawPath.length === 0) {
+        return { ok: false, error: "invalid-path", message: "path must be a non-empty string" };
+      }
+      const resolved = resolvePath(rawPath);
+      // A dropped FILE is not a project root — main rejects it rather than
+      // guessing its parent (No-Fallback: no renderer-side dirname inference).
+      try {
+        const stat = await fs.stat(resolved);
+        if (!stat.isDirectory()) {
+          return { ok: false, error: "not-a-dir", message: "dropped path is not a directory" };
+        }
+      } catch {
+        return { ok: false, error: "invalid-path", message: "path does not exist" };
+      }
+      const verdict = validateDirectoryAddition(resolved);
+      if (!verdict.ok) {
+        return { ok: false, error: verdict.reason, warnings: verdict.adjacencyWarnings };
+      }
+      // ALWAYS require acknowledgement — a drop has no native gesture proof, so
+      // even a warning-free path is withheld until the user confirms the resolved
+      // path. Mint a one-time token bound to the MAIN-OWNED resolved path.
+      const now = Date.now();
+      prunePendingPicks(now);
+      const token = randomBytes(32).toString("base64url");
+      pendingPicks.set(token, { path: resolved, expires: now + ACK_TOKEN_TTL_MS });
+      return {
+        ok: true,
+        requiresAcknowledgement: true,
+        pendingPath: resolved,
+        ackToken: token,
+        warnings: verdict.adjacencyWarnings,
+        roots: computeRoots(),
+      };
+    },
+  );
 }

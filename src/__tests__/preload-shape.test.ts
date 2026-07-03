@@ -182,9 +182,12 @@ describe("preload contextBridge world shape lock", () => {
             "revokeByKey",
           ],
           "workspace": [
+            "addRootByPath",
             "listDir",
             "listRoots",
             "pickRoot",
+            "removeRoot",
+            "reveal",
           ],
         },
         "lvisApi": {
