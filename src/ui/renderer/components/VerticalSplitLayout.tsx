@@ -86,7 +86,7 @@ export function VerticalSplitLayout({
       data-testid={testId}
       style={{ gridTemplateRows: `${topPercent}% 1.25rem minmax(0, 1fr)` }}
     >
-      <div className="min-h-0 overflow-auto border-b">{top}</div>
+      <div className="min-h-0 overflow-auto">{top}</div>
       <div
         role="separator"
         aria-orientation="horizontal"

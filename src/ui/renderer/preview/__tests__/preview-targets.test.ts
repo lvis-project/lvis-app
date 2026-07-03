@@ -231,6 +231,81 @@ describe("collectChatPreviewModel", () => {
     );
   });
 
+  it("captures a bare working-dir filename written by write_file into the session files list", () => {
+    const entries: ChatEntry[] = [
+      {
+        kind: "tool_group",
+        groupId: "g-write",
+        groupIds: ["g-write"],
+        status: "done",
+        tools: [
+          {
+            toolUseId: "write-bare-1",
+            name: "write_file",
+            displayOrder: 0,
+            status: "done",
+            category: "write",
+            // A bare filename with NO directory separator — the shape the model
+            // produces when writing into the working directory by name.
+            input: { path: "2026-07-03.md", content: "# Notes" },
+            result: JSON.stringify({ kind: "lvis.write_file", path: "2026-07-03.md" }),
+          },
+        ],
+      },
+    ];
+
+    const model = collectChatPreviewModel({ entries, attachments: [] });
+
+    // The bare-name write appears in the session files list as a write, linked to
+    // an openable file target (clicking it opens the preview).
+    const file = model.files.find((item) => item.path === "2026-07-03.md");
+    expect(file).toEqual(
+      expect.objectContaining({
+        path: "2026-07-03.md",
+        label: "2026-07-03.md",
+        operation: "write",
+        previewTargetId: "file:write-bare-1:2026-07-03.md",
+      }),
+    );
+    // The linked preview target exists so the click resolves to a real preview.
+    expect(
+      model.targets.some(
+        (tgt) => tgt.id === "file:write-bare-1:2026-07-03.md" && "path" in tgt && tgt.path === "2026-07-03.md",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not treat free-text tokens in a tool's content field as session files", () => {
+    const entries: ChatEntry[] = [
+      {
+        kind: "tool_group",
+        groupId: "g-content",
+        groupIds: ["g-content"],
+        status: "done",
+        tools: [
+          {
+            toolUseId: "write-content-1",
+            name: "write_file",
+            displayOrder: 0,
+            status: "done",
+            category: "write",
+            // The `content` body mentions filename-like tokens; only the `path`
+            // key vouches for a real file, so the body must NOT leak entries.
+            input: { path: "report.md", content: "see index.ts and config.json" },
+            result: JSON.stringify({ kind: "lvis.write_file", path: "report.md" }),
+          },
+        ],
+      },
+    ];
+
+    const model = collectChatPreviewModel({ entries, attachments: [] });
+
+    expect(model.files.some((item) => item.path === "report.md")).toBe(true);
+    // Bare filenames inside the content blob (non-path key) are not files.
+    expect(model.files.some((item) => item.path === "index.ts")).toBe(false);
+    expect(model.files.some((item) => item.path === "config.json")).toBe(false);
+  });
+
   it("does not turn a glob pattern into a file target, but promotes its matches (diagnosis ③)", () => {
     const entries: ChatEntry[] = [
       {
