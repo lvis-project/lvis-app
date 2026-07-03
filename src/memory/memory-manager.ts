@@ -69,7 +69,7 @@ export interface ToolResultArtifact {
   createdAt: string;
 }
 
-export type SessionKind = "main" | "routine";
+export type SessionKind = "main" | "routine" | "subagent";
 
 export interface ListSessionsOptions {
   kind?: SessionKind | "all";
@@ -183,6 +183,34 @@ export interface SessionMetadata {
    * Absent for normal (non-branched) sessions.
    */
   branchedAt?: string;
+  /**
+   * Sub-agent resume metadata. Written on spawn (SubAgentRunner), read by the
+   * PR-C resume entry point to reconstruct the child with the SAME permission
+   * scope it was frozen with. Present only on `sessionKind === "subagent"`
+   * sessions; absent for main/routine.
+   *
+   * The scoped tool names the child was spawned with. A resume MUST re-scope
+   * the child's ToolRegistry to exactly this set (permission is frozen at the
+   * original spawn — resume re-hydrates history, it does not re-grant tools).
+   */
+  sourceTools?: string[];
+  /** Agent profile's `model:` frontmatter the child was spawned with (resume reuses it). */
+  profileModel?: string;
+  /** Agent profile's `mode:` frontmatter the child was spawned with (resume reuses it). */
+  profileMode?: string;
+  /**
+   * Number of times this sub-agent session has been resumed. Initialized to 0
+   * on spawn. PR-D's MAX_RESUMES loop guard reads this to refuse a fork-bomb
+   * via the resume axis.
+   */
+  resumeCount?: number;
+  /**
+   * Cumulative assistant rounds spent across the original spawn plus every
+   * resume segment. Initialized to 0 on spawn (the spawn's own rounds are added
+   * by the resume accounting in PR-C/PR-D). PR-D's cumulative-rounds ceiling
+   * reads this so a long resume chain cannot exceed the global round budget.
+   */
+  cumulativeRounds?: number;
 }
 
 const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
@@ -299,7 +327,7 @@ const VALID_CHECKPOINT_TRIGGERS = new Set<CheckpointTrigger>([
 ]);
 
 function normalizeSessionKind(value: unknown): SessionKind {
-  if (value === "main" || value === "routine") return value;
+  if (value === "main" || value === "routine" || value === "subagent") return value;
   return "main";
 }
 
@@ -366,6 +394,20 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     : undefined;
   const rawBranchedAt = typeof raw.branchedAt === "string" ? raw.branchedAt : undefined;
   const routineId = typeof raw.routineId === "string" ? raw.routineId : undefined;
+  // Sub-agent resume metadata (PR-B). Only string[] of strings survives for
+  // sourceTools; non-negative integers for the counters. Invalid shapes drop to
+  // undefined rather than corrupting the frozen permission scope on resume.
+  const sourceTools = Array.isArray(raw.sourceTools)
+    ? raw.sourceTools.filter((n): n is string => typeof n === "string")
+    : undefined;
+  const profileModel = typeof raw.profileModel === "string" ? raw.profileModel : undefined;
+  const profileMode = typeof raw.profileMode === "string" ? raw.profileMode : undefined;
+  const resumeCount = typeof raw.resumeCount === "number" && Number.isInteger(raw.resumeCount) && raw.resumeCount >= 0
+    ? raw.resumeCount
+    : undefined;
+  const cumulativeRounds = typeof raw.cumulativeRounds === "number" && Number.isInteger(raw.cumulativeRounds) && raw.cumulativeRounds >= 0
+    ? raw.cumulativeRounds
+    : undefined;
   return {
     sessionKind: normalizeSessionKind(raw.sessionKind),
     routineId,
@@ -382,6 +424,12 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     // Checkpoint branch provenance fields.
     branchedFromCompactNum: rawBranchedFromCompactNum,
     branchedAt: rawBranchedAt,
+    // Sub-agent resume metadata (PR-B).
+    sourceTools: sourceTools && sourceTools.length > 0 ? sourceTools : undefined,
+    profileModel,
+    profileMode,
+    resumeCount,
+    cumulativeRounds,
   };
 }
 
