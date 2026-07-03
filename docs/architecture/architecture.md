@@ -2617,6 +2617,17 @@ SDK 에는 fallback artifact (JSON / CSS / TS const) 가 없으며, plugin 은
 - `src/main/side-browser-webview.ts` + `src/shared/side-browser.ts` — 인앱 webview(`LVIS_SIDE_BROWSER_PARTITION`).
 - §6.6.5 — HtmlPreview 격리 셸(`lvis-render-html` 파티션), md/mermaid 렌더 경계.
 
+### 6.10.11 Drag-drop add-root — 신뢰 티어 (#1458)
+
+프로젝트 루트는 네이티브 피커(`showOpenDialog`, ⌘/Ctrl+O)뿐 아니라 폴더 **드래그-드롭**으로도 추가할 수 있다. 드롭 경로는 본질적으로 **renderer-named**(렌더러가 명명)이므로 — Electron ≥32 는 `File.prototype.path` 를 제거했고 `webUtils.getPathForFile(file)` 만이 드롭 File 의 실경로를 준다 — 네이티브 피커와 **동일 방어선**을 전 경로에 강제해 read-scope widening 을 안전하게 만든다.
+
+- **preload webUtils bridge**: 드롭 File 은 IPC 로 직렬화되지 않으므로 경로는 preload 에서만 해석 가능하다. `src/preload/webutils-bridge.ts` 의 `resolveDroppedPaths(files)` 가 `webUtils.getPathForFile` 로 File→경로를 변환해 `window.lvisDrop` world 로 노출한다. 반환 문자열은 **candidate 경로일 뿐 아무 권한도 부여하지 않는다** — 신뢰 판정은 전적으로 main 이 한다.
+- **신뢰 티어 = #1448 ack 티어**(감사 권고 ②(main-owned) 대신 ①(ack-tier) 채택). 근거: 드롭은 main 이 경로를 *생성*하는 게이트(`showOpenDialog`)가 없어 main-owned 를 물리적으로 적용할 수 없다(경로를 명명할 주체가 renderer 뿐). 그래서 드롭은 renderer-supplied 임을 정직히 인정하고 네이티브 warned-pick 과 동일한 방어선을 요구한다.
+- **2-step, main-owned 승격**: `workspace.dropPrepare(path)`(INTERNAL 채널, `src/ipc/domains/workspace.ts`)가 ① `validateSender` ② `validateDirectoryAddition`(Layer-0 hard-deny — sensitive/root 는 ack 로도 해제 불가) ③ `fs.stat` is-a-directory(드롭된 **파일**은 `not-a-dir` 거부, 부모 dir 추측 없음) 를 재검증하고, 통과 시 그 경로를 **main 이 소유**하여 one-time ack token 을 발급한다. 렌더러는 이후 기존 `pickRoot({ ackToken })` 로 **토큰만 echo**(경로 재제출 불가)해 확정한다. 드롭은 warning 이 0건이어도 **항상 명시 ack** 를 요구한다(OS 다이얼로그가 대리 증명하지 못하므로 사용자 확인이 그 대리물).
+- **audit**: `persistValidatedRoot` 의 widening audit 에 `gesture: "dialog" | "drop"` 마커를 기록해 renderer-named 드롭 widening 을 네이티브 피커 widening 과 구분한다. 되돌리기(`removeRoot`)·settings 가시성은 기존 `additionalDirectories` SOT 로 그대로 상속.
+- **검증**: real-Electron drop e2e(`test/e2e/ui/workspace-drag-drop.spec.ts`) — CDP `Input.dispatchDragEvent` 는 File 을 OS-back 하지 못해 `getPathForFile` 이 ""(electron#44600)를 반환하므로, (A) 실제 드롭 wiring+bridge 가 안전한 no-op 임과 (B) 실제 preload IPC+main 핸들러 신뢰 파이프라인(valid→ack→persist / sensitive→deny / file→not-a-dir)을 각각 검증. jsdom `{path}` fake 금지.
+- **앵커**: `src/preload/webutils-bridge.ts`, `src/preload.ts`(`lvisDrop` world), `src/ipc/domains/workspace.ts`(`dropPrepare` handler + `PickGesture`), `src/contract/app-contract.ts`(`workspace.dropPrepare`, INTERNAL), `src/ui/renderer/components/ChatSidePanel.tsx`(드롭존 핸들러 + `handleFolderDrop`).
+
 ---
 
 ## 7. Overlay Trigger Surface

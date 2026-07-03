@@ -336,6 +336,13 @@ export const CHANNELS = {
     listDir: "lvis:workspace:list-dir",
     removeRoot: "lvis:workspace:remove-root",
     reveal: "lvis:workspace:reveal",
+    // Drag-drop add-root, step 1 (#1458). A dropped folder path is renderer-NAMED
+    // (resolved in preload via webUtils.getPathForFile), so this handler re-runs
+    // the SAME Layer-0 hard-deny + is-a-directory checks and — on success — mints
+    // the one-time, MAIN-OWNED ack token that pickRoot({ackToken}) later consumes.
+    // INTERNAL: deliberately absent from PUBLIC_CHANNELS so an external origin can
+    // never propose a read-scope-widening path (fail-closed default).
+    dropPrepare: "lvis:workspace:drop-prepare",
   },
   // ── Interactive PTY terminal (#1444, workspace rail) ──────────────────────
   // ALL INTERNAL: deliberately absent from PUBLIC_CHANNELS / CHANNEL_GESTURE /
