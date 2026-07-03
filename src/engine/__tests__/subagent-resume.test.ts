@@ -679,6 +679,159 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     expect(resumed.childSessionId).toBe("bad::id//with:sep");
     expect(resumed.childSessionId).not.toMatch(SESSION_ID_REGEX);
   });
+
+  // ── MAJOR-3: cross-session origin binding ─────────────
+  it("refuses cross-session resume: conversation B cannot resume conversation A's sub-agent (no history loaded, no turn run)", async () => {
+    const { createHash } = await import("node:crypto");
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    // Spawn from conversation A (originSessionId = "session-A").
+    const originA = "session-A";
+    const tagA = createHash("sha256").update(originA).digest("hex").slice(0, 8);
+    // We need a real spawn with origin. Manually write metadata under a
+    // correctly-tagged id (mirrors what spawn writes when passed originSessionId).
+    const { randomUUID } = await import("node:crypto");
+    const resumeId = `sub-${tagA}-${randomUUID()}`;
+    await subStore.saveSessionMetadata(resumeId, {
+      sessionKind: "subagent",
+      sourceTools: ["noop"],
+      resumeCount: 0,
+      cumulativeRounds: 0,
+    });
+    // Also write a minimal session JSONL so loadSession would succeed IF we got
+    // past the origin check (proves the guard fires before history is loaded).
+    await subStore.saveSession(resumeId, []);
+
+    // A provider that must NOT run (if it does, the test fails).
+    const guardProvider = new ScriptedProvider([
+      [{ type: "text_delta", text: "CROSS-SESSION-MUST-NOT-RUN" }, { type: "message_complete", stopReason: "end_turn" }],
+    ]);
+    const restoreGuard = patchProvider(guardProvider);
+    try {
+      // Conversation B tries to resume with a DIFFERENT originSessionId.
+      const originB = "session-B";
+      const result = await runner.resume(resumeId, "hijack attempt", "attacker", undefined, originB);
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/does not belong to this session/i);
+      // No turn was run — the guard fires before the LLM is invoked.
+      expect(guardProvider.turnsServed).toBe(0);
+    } finally {
+      restoreGuard();
+    }
+
+    // Positive: same origin (conversation A) CAN resume its own sub-agent.
+    const resumeProvider = new ScriptedProvider([
+      [{ type: "text_delta", text: "legitimate resume" }, { type: "message_complete", stopReason: "end_turn" }],
+    ]);
+    const restoreResume = patchProvider(resumeProvider);
+    try {
+      const result = await runner.resume(resumeId, "legitimate continuation", "owner", undefined, originA);
+      expect(result.ok).toBe(true);
+      expect(result.summary).toContain("legitimate resume");
+    } finally {
+      restoreResume();
+    }
+  });
+
+  it("untagged sub-agent id (spawned without originSessionId) is resumable only by a no-origin caller", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    // Spawn without originSessionId → untagged id `sub-<uuid>`.
+    let restore = patchProvider(cleanSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "untagged",
+      instructions: "do",
+      sourceTools: ["noop"],
+      maxRounds: 2,
+    });
+    restore();
+    expect(spawn.ok).toBe(true);
+    const resumeId = spawn.childSessionId;
+    // Confirm the id is in untagged form (sub- followed immediately by UUID).
+    expect(resumeId).toMatch(/^sub-[0-9a-f]{8}-[0-9a-f]{4}-/);
+
+    // A caller with an explicit originSessionId is refused (the id has no tag
+    // to match against, so idTag="" but expectedTag is non-empty).
+    const guardProvider = new ScriptedProvider([
+      [{ type: "text_delta", text: "SHOULD-NOT-RUN" }, { type: "message_complete", stopReason: "end_turn" }],
+    ]);
+    restore = patchProvider(guardProvider);
+    try {
+      const result = await runner.resume(resumeId, "attempt", "caller", undefined, "some-session-id");
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/does not belong to this session/i);
+      expect(guardProvider.turnsServed).toBe(0);
+    } finally {
+      restore();
+    }
+
+    // No-origin caller (undefined) CAN resume it.
+    const okProvider = new ScriptedProvider([
+      [{ type: "text_delta", text: "ok" }, { type: "message_complete", stopReason: "end_turn" }],
+    ]);
+    restore = patchProvider(okProvider);
+    try {
+      const result = await runner.resume(resumeId, "no-origin continue", "untagged-caller");
+      expect(result.ok).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  // ── MINOR: empty frozen scope → fail-closed ────────────
+  it("refuses a resume when meta.sourceTools is empty (corruption/tamper signal), no turn run", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    // Write metadata with an explicitly empty sourceTools — simulates a
+    // corrupted or tampered .meta.json (a real spawn always persists a non-empty
+    // allowlist because the resolved scoped surface is non-empty after blocklist
+    // strip; the only way to get [] is external tampering or corruption).
+    const { randomUUID } = await import("node:crypto");
+    const resumeId = `sub-${randomUUID()}`;
+    await subStore.saveSessionMetadata(resumeId, {
+      sessionKind: "subagent",
+      sourceTools: [], // deliberately empty — corruption signal
+      resumeCount: 0,
+      cumulativeRounds: 0,
+    });
+
+    const guardProvider = new ScriptedProvider([
+      [{ type: "text_delta", text: "MUST-NOT-RUN" }, { type: "message_complete", stopReason: "end_turn" }],
+    ]);
+    const restore = patchProvider(guardProvider);
+    try {
+      const result = await runner.resume(resumeId, "continue", "tamper-test");
+      expect(result.ok).toBe(false);
+      // Must refuse fail-closed, not warn and continue.
+      expect(result.error).toMatch(/empty frozen tool scope/i);
+      // No turn was run.
+      expect(guardProvider.turnsServed).toBe(0);
+      expect(result.resumeExhausted).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
 });
 
 // ─── 9) agent_spawn tool — resumeId surface + routing ─────────────────────────
@@ -757,10 +910,12 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
       { cwd: process.cwd(), metadata: { sessionId: "parent", spawnDepth: 0 }, extraAllowedDirectories: [] },
     );
     expect(r.isError).toBe(false);
-    // resume() called with (resumeId, continuationInstructions, title, callbacks).
+    // resume() called with (resumeId, continuationInstructions, title, callbacks, originSessionId).
     expect(resumeSpy).toHaveBeenCalledTimes(1);
     expect(resumeSpy.mock.calls[0][0]).toBe("sub-resume-me");
     expect(resumeSpy.mock.calls[0][1]).toBe("keep going");
+    // 5th arg is originSessionId (from ctx.metadata.sessionId = "parent").
+    expect(resumeSpy.mock.calls[0][4]).toBe("parent");
     // spawn() never called on the resume path.
     expect(spawnSpy).not.toHaveBeenCalled();
     const parsed = JSON.parse(r.output);

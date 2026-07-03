@@ -194,7 +194,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         // resume path takes NO sourceTools/profile from the tool call — those are
         // read from the persisted metadata so a resume cannot re-scope the child.
         const result = resumeId
-          ? await runner.resume(resumeId, instructions, title, callbacks)
+          ? await runner.resume(resumeId, instructions, title, callbacks, originSessionId)
           : await runner.spawn(
               {
                 title,
