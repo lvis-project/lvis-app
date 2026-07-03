@@ -19,7 +19,7 @@ import {
   dispatchReviewerForHeadless,
   dispatchReviewerForInteractiveAuto,
 } from "../reviewer-dispatch.js";
-import type { PermissionManager, PermissionCheckResult } from "../../../permissions/permission-manager.js";
+import type { PermissionManager, PermissionCheckResult, ReviewerLane } from "../../../permissions/permission-manager.js";
 import type { RiskVerdict } from "../../../permissions/reviewer/risk-classifier.js";
 import type { ToolPermissionContext, ToolCallMeta } from "../../executor.js";
 import type { PermissionEvaluationContext } from "../../../permissions/evaluation-context.js";
@@ -43,7 +43,7 @@ function makeStub(opts: {
   pm: PermissionManager;
   resolveSpy: ReturnType<typeof vi.fn>;
 } {
-  const real = (verdict: RiskVerdict, lane: "headless" | "foreground-auto"): PermissionCheckResult => {
+  const real = (verdict: RiskVerdict, lane: ReviewerLane): PermissionCheckResult => {
     const isLow = verdict.level === "low";
     if (lane === "headless") {
       return isLow
@@ -65,7 +65,7 @@ function makeStub(opts: {
   return { pm, resolveSpy };
 }
 
-function dispatch(pm: PermissionManager, kind: "headless" | "foreground-auto", category: "write" = "write") {
+function dispatch(pm: PermissionManager, kind: ReviewerLane, category: "write" = "write") {
   const args = [
     pm,
     "some_tool",
