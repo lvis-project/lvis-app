@@ -74,6 +74,13 @@ export interface AppServices {
   toolRegistry: ToolRegistry;
   systemPromptBuilder: SystemPromptBuilder;
   conversationLoop: ConversationLoop;
+  /**
+   * Side-chat (workspace rail) — a SECOND, independently-streaming
+   * ConversationLoop with its own history/sessionId and an isolated
+   * MemoryManager rooted at `~/.lvis/side-chat/`. Optional: absent in test
+   * fixtures that boot only the main loop. Wired in `conversation-wiring.ts`.
+   */
+  sideChatConversationLoop?: ConversationLoop;
   routineEngine?: RoutineEngine;
   mcpManager: McpManager;
   /**

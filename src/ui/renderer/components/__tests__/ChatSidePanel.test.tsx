@@ -19,6 +19,15 @@ function api(): LvisApi {
     // the split ratio through the settings round-trip.
     getSettings: vi.fn(async () => ({}) as never),
     updateSettings: vi.fn(async () => ({ ok: true }) as never),
+    sideChat: {
+      send: vi.fn(async () => ({ ok: true, result: {} })),
+      new: vi.fn(async () => ({ ok: true, sessionId: "side-1" })),
+      load: vi.fn(async () => ({ ok: true, sessionId: "side-1", messages: [] })),
+      list: vi.fn(async () => ({ current: "side-1", sessions: [] })),
+      abort: vi.fn(async () => ({ ok: true })),
+      onStream: vi.fn(() => () => undefined),
+      onFallback: vi.fn(() => () => undefined),
+    },
   } as unknown as LvisApi;
 }
 
@@ -130,18 +139,20 @@ describe("ChatSidePanel", () => {
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
     expect(screen.queryByTestId("chat-side-panel-tab-actions")).toBeNull();
 
-    // Five launcher items (side-chat is intentionally NOT a launcher item).
+    // Six launcher items (side-chat is now a launcher item — its engine ships
+    // in this PR).
     expect(screen.getByTestId("chat-side-panel-launcher-preview")).toBeTruthy();
     expect(screen.getByTestId("chat-side-panel-launcher-terminal")).toBeTruthy();
     expect(screen.getByTestId("chat-side-panel-launcher-browser")).toBeTruthy();
     expect(screen.getByTestId("chat-side-panel-launcher-file-browser")).toBeTruthy();
     expect(screen.getByTestId("chat-side-panel-launcher-subagent")).toBeTruthy();
-    expect(screen.queryByTestId("chat-side-panel-launcher-side-chat")).toBeNull();
+    expect(screen.getByTestId("chat-side-panel-launcher-side-chat")).toBeTruthy();
 
     // Shortcut hints are displayed for the bound items.
     expect(screen.getByText("⌃⇧G")).toBeTruthy();
     expect(screen.getByText("⌘T")).toBeTruthy();
     expect(screen.getByText("⌘P")).toBeTruthy();
+    expect(screen.getByText("⌥⌘S")).toBeTruthy();
   });
 
   it("launcher click opens the correct-kind tab", () => {
@@ -1203,15 +1214,24 @@ describe("ChatSidePanel", () => {
     expect(screen.getByTestId("chat-side-panel-subagent-empty")).toBeTruthy();
   });
 
-  it("side-chat is not a launcher item (reserved kind, no dead affordance)", () => {
+  it("side-chat IS a launcher item and opens the SideChatView", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    expect(screen.queryByTestId("chat-side-panel-launcher-side-chat")).toBeNull();
-    // Also absent from the tab-bar "+" menu once a tab exists.
+    expect(screen.getByTestId("chat-side-panel-launcher-side-chat")).toBeTruthy();
+    // Present in the tab-bar "+" menu once a tab exists.
     fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
     openLauncherMenu();
-    expect(screen.queryByTestId("chat-side-panel-launcher-menu-side-chat")).toBeNull();
+    expect(screen.getByTestId("chat-side-panel-launcher-menu-side-chat")).toBeTruthy();
     expect(screen.getByTestId("chat-side-panel-launcher-menu-subagent")).toBeTruthy();
+  });
+
+  it("opening the side-chat tab renders the SideChatView (not a placeholder)", () => {
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-side-chat"));
+    expect(screen.getByTestId("side-chat-view")).toBeTruthy();
+    expect(screen.queryByTestId("chat-side-panel-side-chat-placeholder")).toBeNull();
   });
 });
