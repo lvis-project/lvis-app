@@ -940,6 +940,90 @@ describe("ChatView", () => {
     expect(container.querySelector('[data-testid="input-action-bar"]')).not.toBeNull();
   });
 
+  it("shows sub-agents from a loaded past session (derived from agent_spawn entries) in the viewer + inline", async () => {
+    const now = new Date().toISOString();
+    const { container } = await renderApp({
+      currentSession: "subagent-session",
+      mainActiveState: {
+        mainActiveSessionId: "subagent-session",
+        mainActiveMode: "resume",
+        updatedAt: now,
+      },
+      history: {
+        sessionId: "subagent-session",
+        messages: [
+          { index: 0, role: "user", content: "서브에이전트 히스토리 확인" },
+          {
+            index: 1,
+            role: "assistant",
+            content: "",
+            thought: "검색 서브에이전트를 실행합니다.",
+            toolCalls: [
+              {
+                id: "spawn-tool-1",
+                name: "agent_spawn",
+                input: { title: "인덱서 조사", instructions: "관련 파일을 찾아줘" },
+              },
+            ],
+          },
+          {
+            index: 2,
+            role: "tool_result",
+            toolUseId: "spawn-tool-1",
+            toolName: "agent_spawn",
+            content: JSON.stringify({ summary: "관련 파일 3개 확인", toolCallCount: 4, turnCount: 2 }),
+          },
+          { index: 3, role: "assistant", content: "서브에이전트 실행이 완료되었습니다." },
+        ],
+      },
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("서브에이전트 실행이 완료되었습니다.");
+    });
+
+    // The loaded session's agent_spawn tool call is derived into a spawn even
+    // though the live agent-spawn event stream never replayed. Past-turn
+    // WorkGroups start collapsed, so expand it to reveal the inline SubAgentCard
+    // that now renders next to its tool group from derived history.
+    const workGroupToggle = await waitFor(() => {
+      const button = container.querySelector('[data-testid="work-group"] button') as HTMLButtonElement | null;
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    await act(async () => {
+      fireEvent.click(workGroupToggle);
+    });
+    await waitFor(() => {
+      const inlineCards = container.querySelectorAll('[data-testid="sub-agent-card"]');
+      expect(inlineCards.length).toBeGreaterThan(0);
+      expect(container.textContent).toContain("인덱서 조사");
+    });
+
+    // Open the workspace rail and its sub-agent tab — the viewer must be
+    // NON-empty (previously showed the "no sub-agents" empty state on load).
+    const openButton = await waitFor(() => {
+      const button = container.querySelector('[data-testid="chat-side-panel-toggle"]') as HTMLButtonElement | null;
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    await act(async () => {
+      fireEvent.click(openButton);
+    });
+    const subagentLauncher = await waitFor(() => {
+      const button = container.querySelector('[data-testid="chat-side-panel-launcher-subagent"]') as HTMLButtonElement | null;
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    await act(async () => {
+      fireEvent.click(subagentLauncher!);
+    });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="chat-side-panel-subagent-viewer"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="chat-side-panel-subagent-empty"]')).toBeNull();
+    });
+  });
+
   it("clears draft attachment preview artifacts when switching sessions", async () => {
     const now = new Date().toISOString();
     const { container, api } = await renderApp({
