@@ -1271,7 +1271,7 @@ function ProjectRootsBrowser({
       ref={rootRef}
       className={cn(
         "space-y-1 rounded-md transition-colors",
-        dragOver && "ring-2 ring-primary/50 bg-primary/5",
+        dragOver && "ring-2 ring-primary/(--opacity-half) bg-primary/(--opacity-faint)",
       )}
       data-testid="chat-side-panel-project-roots"
       onDragOver={(event) => {
