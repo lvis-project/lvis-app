@@ -209,14 +209,24 @@ export interface WorkBoardEngine {
 }
 
 /**
- * Turn cap for the PLAN phase. Planning is "investigate briefly → produce a
- * plan", not open-ended work — a low cap forces fast convergence and prevents
- * the runaway loop / context blow-up observed when a plan agent kept re-asking
- * an unanswerable clarifying question (autonomous runs have no answer channel)
- * or retried an erroring tool. The spawn returns its best plan-so-far when the
- * cap is hit, so the run always reaches the approval gate.
+ * Host-assigned round budget for the PLAN phase. Planning is "investigate
+ * briefly → produce a plan", not open-ended work — a bounded budget forces
+ * convergence and prevents the runaway loop / context blow-up observed when a
+ * plan agent kept re-asking an unanswerable clarifying question (autonomous
+ * runs have no answer channel) or retried an erroring tool. The spawn returns
+ * its best plan-so-far when the budget is hit, so the run always reaches the
+ * approval gate.
+ *
+ * Set to 20 (was 6): 6 was the source of the "sub-agent stops at 6 rounds"
+ * report — investigation of a non-trivial item (a few read-only tool calls +
+ * reasoning + writing the plan) legitimately needs more than 6 assistant
+ * rounds, so 6 caused premature round-caps that truncated real plans. 20
+ * matches the `default`/`execute` standard-work budget while staying well
+ * under the 30 ceiling. This is a HOST policy value (a fixed-shape internal
+ * phase), passed as `maxRounds` — the LLM cannot influence it (the
+ * `agent_spawn` tool no longer exposes a round knob).
  */
-const PLAN_MAX_TURNS = 6;
+const PLAN_ROUND_BUDGET = 20;
 
 /** Build the PLAN-phase task prompt from the item's title + detail. */
 function buildPlanPrompt(item: WorkItem): string {
@@ -425,7 +435,7 @@ export function createWorkBoardEngine(
           originSessionId,
           profileMode: "plan",
           profileModel: profile?.model,
-          maxTurns: PLAN_MAX_TURNS,
+          maxRounds: PLAN_ROUND_BUDGET,
         },
         {
           onActivity: makeTurnRecorder((turn, text) => {
