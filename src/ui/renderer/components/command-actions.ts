@@ -1,4 +1,4 @@
-import { Bot, Folder, Globe, Table, Terminal, type LucideIcon } from "lucide-react";
+import { Bot, Folder, Globe, MessageSquare, Table, Terminal, type LucideIcon } from "lucide-react";
 import { getPluginViewLabel, toViewKey } from "../api-client.js";
 import { t } from "../../../i18n/runtime.js";
 import type { WorkspaceTabKind } from "../preview/workspace-tabs.js";
@@ -18,10 +18,6 @@ export interface QuickAction {
  * app command surface share one list rather than duplicating it. Order here is
  * the render order in the launcher.
  *
- * `side-chat` is intentionally NOT a launcher item — its engine (a second
- * ConversationLoop) lands in a companion PR, so surfacing it here now would be a
- * dead affordance. The tab kind is reserved in `WorkspaceTabKind` for switch
- * coherence but has no entry in this table.
  */
 export interface WorkspaceLauncherItem {
   kind: WorkspaceTabKind;
@@ -44,6 +40,8 @@ export interface WorkspaceLauncherShortcut {
   /** Requires Ctrl specifically (for ⌃⇧G — Ctrl on every platform). */
   ctrl: boolean;
   shift: boolean;
+  /** Requires Alt/Option (⌥ on macOS) — matched exactly (present or absent). */
+  alt: boolean;
 }
 
 export const WORKSPACE_TAB_LAUNCHER: readonly WorkspaceLauncherItem[] = [
@@ -51,7 +49,7 @@ export const WORKSPACE_TAB_LAUNCHER: readonly WorkspaceLauncherItem[] = [
     kind: "preview",
     labelKey: "chatPreviewRail.launcher.review",
     shortcutHint: "⌃⇧G",
-    shortcut: { key: "g", meta: false, ctrl: true, shift: true },
+    shortcut: { key: "g", meta: false, ctrl: true, shift: true, alt: false },
     icon: Table,
   },
   {
@@ -65,22 +63,29 @@ export const WORKSPACE_TAB_LAUNCHER: readonly WorkspaceLauncherItem[] = [
     kind: "browser",
     labelKey: "chatPreviewRail.launcher.browser",
     shortcutHint: "⌘T",
-    shortcut: { key: "t", meta: true, ctrl: false, shift: false },
+    shortcut: { key: "t", meta: true, ctrl: false, shift: false, alt: false },
     icon: Globe,
   },
   {
     kind: "file-browser",
     labelKey: "chatPreviewRail.launcher.file",
     shortcutHint: "⌘P",
-    shortcut: { key: "p", meta: true, ctrl: false, shift: false },
+    shortcut: { key: "p", meta: true, ctrl: false, shift: false, alt: false },
     icon: Folder,
   },
   {
     kind: "subagent",
     labelKey: "chatPreviewRail.launcher.subagent",
     shortcutHint: "⌘⇧A",
-    shortcut: { key: "a", meta: true, ctrl: false, shift: true },
+    shortcut: { key: "a", meta: true, ctrl: false, shift: true, alt: false },
     icon: Bot,
+  },
+  {
+    kind: "side-chat",
+    labelKey: "chatPreviewRail.launcher.sideChat",
+    shortcutHint: "⌥⌘S",
+    shortcut: { key: "s", meta: true, ctrl: false, shift: false, alt: true },
+    icon: MessageSquare,
   },
 ];
 
@@ -88,13 +93,15 @@ export const WORKSPACE_TAB_LAUNCHER: readonly WorkspaceLauncherItem[] = [
  * Match a KeyboardEvent against a launcher shortcut. Kept next to the table so
  * the launcher UI and the panel-scoped keydown handler agree on semantics.
  * `meta` accepts either the platform meta key (⌘) or Ctrl so the binding works
- * on macOS and other platforms; `ctrl` requires Ctrl exactly (⌃⇧G).
+ * on macOS and other platforms; `ctrl` requires Ctrl exactly (⌃⇧G); `alt` is
+ * matched exactly (present or absent) so ⌥-anchored bindings like ⌥⌘S resolve
+ * while non-alt bindings still reject a stray Option press.
  */
 export function matchesLauncherShortcut(
   shortcut: WorkspaceLauncherShortcut,
   event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">,
 ): boolean {
-  if (event.altKey) return false;
+  if (event.altKey !== shortcut.alt) return false;
   if (event.key.toLowerCase() !== shortcut.key) return false;
   if (event.shiftKey !== shortcut.shift) return false;
   if (shortcut.ctrl) {
