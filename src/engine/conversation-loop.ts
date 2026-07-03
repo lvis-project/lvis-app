@@ -493,6 +493,19 @@ export class ConversationLoop {
     return this.sessionKind;
   }
 
+  /**
+   * Re-create the tracer keyed on the CURRENT `sessionId`. `tracer` is created
+   * at field-init against the constructor UUID; any code path that rebinds
+   * `sessionId` after construction (SubAgentRunner assigns the addressable
+   * childSessionId directly, without going through `newConversation`) must call
+   * this so dev traces are written under the live id. `newConversation` /
+   * `loadSession` already re-init the tracer inline; this is the equivalent
+   * seam for direct `sessionId` assignment.
+   */
+  rebindTracer(): void {
+    this.tracer = createTracer(this.sessionId);
+  }
+
   getSessionRoutineTitle(): string | null {
     return this.sessionRoutineTitle;
   }
