@@ -28,6 +28,7 @@
 import { randomUUID } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import type { MemoryManager } from "../memory/memory-manager.js";
 import type { ApprovalGate, ApprovalRequest, ApprovalDecision } from "../permissions/approval-gate.js";
 import {
   isModelComplexityLevel,
@@ -151,6 +152,16 @@ export interface SubAgentRunnerDeps {
   /** Parent's ConversationLoopDeps. We clone but swap toolRegistry to a scoped view. */
   parentDeps: ConversationLoopDeps;
   toolRegistry: ToolRegistry;
+  /**
+   * Isolated MemoryManager rooted at `~/.lvis/subagent/` (via
+   * `openFeatureNamespace("subagent")` in boot). Sub-agent runs persist here,
+   * NOT to the parent's `~/.lvis/sessions/` main-chat store. Reusing the
+   * parent MemoryManager is exactly what leaked orphan sub-agent JSONL into
+   * the main session list; the child loop is composed with THIS store so its
+   * transcript lands in the subagent namespace under an addressable, regex-
+   * valid session id. Mirrors the `sideChatMemoryManager` isolation pattern.
+   */
+  subAgentMemoryManager: MemoryManager;
 }
 
 // Sub-agent round budget. The child runs on the same ConversationLoop whose
@@ -174,6 +185,27 @@ const MAX_TURNS_CAP = 30;
  * defense-in-depth backstop.
  */
 const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>(["agent_spawn"]);
+
+/**
+ * Build the child loop's session id. It MUST satisfy MemoryManager's
+ * `SESSION_ID_REGEX` (`^[a-zA-Z0-9_-]+$`) so `saveSession` persists it (that
+ * method throws on an invalid id) and `loadSession` can later re-hydrate it.
+ * The previous `${origin}::${uuid}` form contained `::`, which fails the
+ * regex — so the child silently fell back to persisting under its bare
+ * constructor UUID into the MAIN chat namespace (orphan + pollution). Here we
+ * sanitize the origin to the allowed charset, keep a short prefix for human
+ * traceability, and append a fresh UUID. The `sub-` prefix also keeps the id
+ * OUT of the UUID-shaped filters (`^[0-9a-f-]{8,}$`) the main session list
+ * uses, so even a misrouted file would never surface there — defense in depth.
+ */
+function buildChildSessionId(originSessionId?: string): string {
+  const originShort = (originSessionId ?? "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 8);
+  return originShort
+    ? `sub-${originShort}-${randomUUID()}`
+    : `sub-${randomUUID()}`;
+}
 
 /**
  * Resolve an agent profile's `model:` frontmatter to a concrete model ID
@@ -292,7 +324,7 @@ export class SubAgentRunner {
     input: SubAgentSpawnInput,
     callbacks?: SubAgentSpawnCallbacks,
   ): Promise<SubAgentSpawnResult> {
-    const childSessionId = `${input.originSessionId ?? "spawn"}::${randomUUID()}`;
+    const childSessionId = buildChildSessionId(input.originSessionId);
 
     // Resolve the profile's mode → working-posture preamble + round-budget hint.
     // Unknown / absent mode resolves to the inert `default` mode; a non-empty
@@ -357,6 +389,13 @@ export class SubAgentRunner {
     const childDeps: ConversationLoopDeps = {
       ...this.deps.parentDeps,
       toolRegistry: scopedRegistry,
+      // Route the child's session persistence to the ISOLATED subagent store
+      // (`~/.lvis/subagent/`), never the parent's main-chat MemoryManager.
+      // Reusing the parent store is what leaked orphan sub-agent JSONL into
+      // the main `~/.lvis/sessions/` list; the child's saveSession/loadSession
+      // (via `self.deps.memoryManager` in run-turn) now target the subagent
+      // namespace under the regex-valid `childSessionId` set below.
+      memoryManager: this.deps.subAgentMemoryManager,
       approvalGate: wrappedApprovalGate,
       // Sub-agent runs are fire-and-forget — no post-turn hook chain to keep
       // the parent session unaffected.
@@ -375,6 +414,12 @@ export class SubAgentRunner {
     };
 
     const child = new ConversationLoop(childDeps);
+    // Bind the child loop's session identity to the regex-valid childSessionId
+    // BEFORE any turn runs. run-turn's persistence path keys saveSession on
+    // `self.sessionId`, so this is the seam that makes the child's JSONL land
+    // under the addressable id (not the bare constructor UUID). Assigning
+    // `sessionId` directly mirrors how `newConversation` establishes identity.
+    child.sessionId = childSessionId;
     if (!child.hasProvider()) {
       const msg = "sub-agent: LLM provider not configured";
       callbacks?.onError?.(msg);
