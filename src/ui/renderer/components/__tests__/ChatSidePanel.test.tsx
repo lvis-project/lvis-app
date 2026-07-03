@@ -1206,6 +1206,43 @@ describe("ChatSidePanel", () => {
     expect(screen.getByTestId("chat-side-panel-subagent-detail").textContent).toContain("Agent B");
   });
 
+  it("subagent tab: unifies a spawn + its resume (shared childSessionId) into one row with a concatenated transcript", () => {
+    // An original spawn and its resume are two distinct agent_spawn calls (two
+    // spawnIds) but share one childSessionId — the viewer must group them into a
+    // SINGLE row whose detail concatenates both segments' transcripts.
+    const subAgentSpawns: SubAgentSpawn[] = [
+      {
+        spawnId: "orig-1",
+        title: "Long research",
+        status: "done",
+        childSessionId: "child-1",
+        entries: [{ kind: "assistant", text: "original segment", streaming: false }],
+        toolCallCount: 3,
+      },
+      {
+        spawnId: "resume-1",
+        title: "(sub-agent)",
+        status: "running",
+        childSessionId: "child-1",
+        entries: [{ kind: "assistant", text: "resumed segment", streaming: false }],
+        toolCallCount: 2,
+      },
+    ];
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    // Exactly ONE row (the two segments collapsed into one logical agent).
+    const rows = screen.getAllByTestId("chat-side-panel-subagent-row");
+    expect(rows).toHaveLength(1);
+    // The row uses the ORIGINAL's title (one logical agent = one name).
+    expect(rows[0]!.textContent).toContain("Long research");
+    // The detail transcript concatenates both segments in order.
+    const detail = screen.getByTestId("chat-side-panel-subagent-detail");
+    expect(detail.textContent).toContain("original segment");
+    expect(detail.textContent).toContain("resumed segment");
+  });
+
   it("subagent tab: empty state when the chat has no spawns", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={[]} />,

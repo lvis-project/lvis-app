@@ -194,6 +194,61 @@ describe("deriveSubAgentSpawnsFromEntries", () => {
     expect(spawns.map((s) => s.title)).toEqual(["First", "Second"]);
   });
 
+  it("extracts childSessionId from an original spawn's incomplete result resumeId", () => {
+    const spawn = deriveSubAgentSpawnsFromEntries(
+      entriesOf([
+        {
+          toolUseId: "tu-orig",
+          name: "agent_spawn",
+          displayOrder: 0,
+          status: "done",
+          input: { title: "Long task" },
+          result: JSON.stringify({
+            summary: "partial progress",
+            toolCallCount: 3,
+            incomplete: true,
+            resumeId: "child-session-42",
+          }),
+        },
+      ]),
+    )[0];
+    // The result's own resumeId (= this spawn's childSessionId) is the JOIN KEY.
+    expect(spawn.childSessionId).toBe("child-session-42");
+  });
+
+  it("extracts childSessionId from a resume call's input resumeId", () => {
+    const spawn = deriveSubAgentSpawnsFromEntries(
+      entriesOf([
+        {
+          toolUseId: "tu-resume",
+          name: "agent_spawn",
+          displayOrder: 0,
+          status: "done",
+          input: { instructions: "continue", resumeId: "child-session-42" },
+          result: JSON.stringify({ summary: "resumed and finished", toolCallCount: 2 }),
+        },
+      ]),
+    )[0];
+    // A resume's input.resumeId is the ORIGINAL's childSessionId — same JOIN KEY.
+    expect(spawn.childSessionId).toBe("child-session-42");
+  });
+
+  it("leaves childSessionId undefined on a clean-complete original (solo group)", () => {
+    const spawn = deriveSubAgentSpawnsFromEntries(
+      entriesOf([
+        {
+          toolUseId: "tu-clean",
+          name: "agent_spawn",
+          displayOrder: 0,
+          status: "done",
+          input: { title: "One-shot" },
+          result: JSON.stringify({ summary: "done", toolCallCount: 1 }),
+        },
+      ]),
+    )[0];
+    expect(spawn.childSessionId).toBeUndefined();
+  });
+
   it("handles a non-JSON result string as the sub-agent output", () => {
     const spawn = deriveSubAgentSpawnsFromEntries(
       entriesOf([

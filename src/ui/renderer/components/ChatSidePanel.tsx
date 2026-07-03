@@ -70,6 +70,7 @@ import { SideChatView } from "./SideChatView.js";
 import { VerticalSplitLayout } from "./VerticalSplitLayout.js";
 import { useVerticalSplit } from "../hooks/use-vertical-split.js";
 import { SubAgentCard, type SubAgentSpawn } from "./SubAgentCard.js";
+import { groupSubAgentSessions } from "../subagents/group-subagent-sessions.js";
 
 interface FileTreeNode {
   id: string;
@@ -1956,12 +1957,17 @@ function SubAgentViewer({
   const { t } = useTranslation();
   const { topPercent, setTopPercent, commitTopPercent } = useVerticalSplit(api, "sidePanelSplitSubagentPercent");
   const [selectedSpawnId, setSelectedSpawnId] = useState<string | null>(null);
+  // Unify each spawn with its resume segments (JOIN KEY = childSessionId) into a
+  // single row with a concatenated transcript. The prop stays a FLAT list (one
+  // spawn source of truth prop-drilled from ChatView) — grouping is a viewer-only
+  // presentation concern applied here, so the inline chat cards are unaffected.
+  const groupedSpawns = useMemo(() => groupSubAgentSessions(subAgentSpawns), [subAgentSpawns]);
   // Running spawns first (the user usually wants the live one), then completed.
   const orderedSpawns = useMemo(() => {
-    const running = subAgentSpawns.filter((spawn) => spawn.status === "running");
-    const rest = subAgentSpawns.filter((spawn) => spawn.status !== "running");
+    const running = groupedSpawns.filter((spawn) => spawn.status === "running");
+    const rest = groupedSpawns.filter((spawn) => spawn.status !== "running");
     return [...running, ...rest];
-  }, [subAgentSpawns]);
+  }, [groupedSpawns]);
   // Pin the detail to the CHOSEN spawnId. The synchronous `?? orderedSpawns[0]`
   // fallback only applies while nothing is chosen yet (no first-render flash);
   // once a spawn resolves, `.find` keeps it, so a status flip that reorders the
