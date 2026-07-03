@@ -42,7 +42,7 @@ export async function runTurn(
        * C3(a): hard cap on assistant rounds for this turn. When set,
        * queryLoop terminates cleanly between rounds once the cap is hit
        * regardless of tool_use chains the LLM still wants to run. Used by
-       * SubAgentRunner to enforce the agent_spawn `maxTurns` parameter at
+       * SubAgentRunner to enforce the host-assigned `maxRounds` budget at
        * the loop boundary instead of using user-cancel semantics.
        */
       maxRounds?: number;

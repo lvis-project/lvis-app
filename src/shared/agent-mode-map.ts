@@ -53,8 +53,8 @@ import { t } from "../i18n/index.js";
  * so a mode does NOT carry a temperature. `reasoningHint` is injected into
  * the sub-agent's instructions so the LLM knows the working posture
  * expected of this mode; `maxToolRoundsHint` is a soft suggestion the
- * spawn caller may use to seed `maxTurns` when the agent_spawn invocation
- * did not specify one.
+ * spawn caller may use to seed the host round budget when no explicit
+ * `maxRounds` override is provided.
  */
 export interface AgentModeConfig {
   /** One-line working-posture hint injected into the sub-agent prompt. */
@@ -67,8 +67,9 @@ export interface AgentModeConfig {
    */
   autoSkills: readonly string[];
   /**
-   * Soft default for `maxTurns` when the agent_spawn call omits it.
-   * undefined → fall back to SubAgentRunner's own MAX_TURNS_DEFAULT.
+   * Soft default for the host round budget when no explicit maxRounds is
+   * provided by the caller. undefined → fall back to SubAgentRunner's own
+   * MAX_TURNS_DEFAULT.
    */
   maxToolRoundsHint?: number;
 }
