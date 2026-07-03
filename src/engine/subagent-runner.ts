@@ -702,6 +702,11 @@ export class SubAgentRunner {
    *     byte-identical double defense a fresh spawn gets.
    *   - Depth stays 1 (hard-coded); the child persists only to the isolated
    *     `~/.lvis/subagent/` store (child deps' MemoryManager).
+   *   - Origin binding: `resumeId` is validated against the calling origin tag
+   *     extracted from the id itself. A cross-session resume (conversation B
+   *     passing conversation A's childSessionId) is refused fail-closed before
+   *     any history is loaded. Untagged ids (no origin prefix) are only
+   *     resumable by a no-origin caller, keeping the invariant consistent.
    *
    * ── Loop guards (Commit 2) ──
    * Refused BEFORE any turn (`{ ok:false, resumeExhausted:true }`) when the
@@ -716,12 +721,16 @@ export class SubAgentRunner {
    * @param title     Sub-agent title for the approval-modal label. Not stored
    *                  in metadata, so the caller (agent_spawn) forwards it; a
    *                  resume without a title uses the raw reason text.
+   * @param originSessionId  The calling session's id (ctx.metadata.sessionId
+   *                  in agent-spawn.ts). Matched against the tag embedded in
+   *                  `resumeId` to refuse cross-session hijack attempts.
    */
   async resume(
     resumeId: string,
     continuationInstructions: string,
     title: string,
     callbacks?: SubAgentSpawnCallbacks,
+    originSessionId?: string,
   ): Promise<SubAgentSpawnResult> {
     // In-flight lock: fail-closed if a resume for THIS session is already
     // running. Checked before any load so two concurrent resumes cannot both
@@ -741,7 +750,7 @@ export class SubAgentRunner {
       };
     }
 
-    const runPromise = this.runResume(resumeId, continuationInstructions, title, callbacks);
+    const runPromise = this.runResume(resumeId, continuationInstructions, title, callbacks, originSessionId);
     this.inFlight.set(resumeId, runPromise);
     try {
       return await runPromise;
@@ -756,6 +765,7 @@ export class SubAgentRunner {
     continuationInstructions: string,
     title: string,
     callbacks?: SubAgentSpawnCallbacks,
+    originSessionId?: string,
   ): Promise<SubAgentSpawnResult> {
     const fail = (msg: string, extra?: Partial<SubAgentSpawnResult>): SubAgentSpawnResult => {
       callbacks?.onError?.(msg);
@@ -777,6 +787,48 @@ export class SubAgentRunner {
     if (!isValidSessionId(resumeId)) {
       return fail(`sub-agent resume: invalid resumeId "${resumeId}"`);
     }
+
+    // 1b. Origin binding — refuse cross-session hijack BEFORE loading any
+    //     history. The id format is `sub-<originTag8>-<uuid>` where originTag8
+    //     is sha256(originSessionId).hex.slice(0,8). Extract that tag and
+    //     compare it to what THIS caller's origin hashes to.
+    //
+    //     Why this is safe to do on the id alone (without consulting metadata):
+    //     the tag is embedded at spawn time in the id itself, so an attacker
+    //     must both know the tag AND forge a regex-valid sub-<tag>-<uuid> form
+    //     to pass `isValidSessionId`. The tag is non-reversible (sha256), so
+    //     guessing it for an unknown originSessionId is computationally
+    //     infeasible.
+    //
+    //     Session ID stability: `originSessionId` in agent-spawn.ts comes from
+    //     `ctx.metadata.sessionId`, which is `sessionIdOverride ?? self.sessionId`
+    //     in query-loop (run-turn.ts:66). For the PARENT conversation loop (not
+    //     a sub-agent), there is no `sessionIdOverride`, so it is `self.sessionId`
+    //     — the field assigned once at `newConversation` / `loadSession` and
+    //     never mutated during a conversation. Compaction creates a checkpoint
+    //     snapshot but does NOT change `self.sessionId`. Therefore the tag
+    //     computed at spawn time and the tag computed at resume time are
+    //     identical within the same conversation, and the check correctly allows
+    //     a legitimate same-conversation resume while refusing a cross-session one.
+    {
+      // Distinguishing pattern: origin-tagged ids are `sub-<8hex>-<uuid>` where
+      // uuid starts with another 8-hex segment (`sub-<8hex>-<8hex>-<4hex>-...`).
+      // Untagged ids are `sub-<uuid>` = `sub-<8hex>-<4hex>-...`. The two 8-hex
+      // segments in a row are unique to the tagged form (a UUID's second segment
+      // is only 4 hex chars), so this regex only extracts a tag from a truly
+      // origin-tagged id and correctly returns undefined for untagged ids.
+      const m = /^sub-([0-9a-f]{8})-[0-9a-f]{8}-/.exec(resumeId);
+      const idTag = m?.[1] ?? "";
+      const expectedTag = originSessionId
+        ? createHash("sha256").update(originSessionId).digest("hex").slice(0, 8)
+        : "";
+      if (idTag !== expectedTag) {
+        return fail(
+          `sub-agent resume: resumeId does not belong to this session`,
+        );
+      }
+    }
+
     const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(resumeId);
     if (meta === null) {
       return fail(`sub-agent resume: no session metadata for "${resumeId}"`);
@@ -815,16 +867,16 @@ export class SubAgentRunner {
     // 4. Reconstruct child deps from the FROZEN scope. meta.sourceTools is the
     //    ONLY scope source — passed as a non-null explicit list so buildChildDeps
     //    never falls back to the parent surface (scope widening closed).
+    //
+    //    Empty scope is fail-closed: a legitimate spawn ALWAYS persists a
+    //    concrete non-empty allowlist (the resolved scoped surface after blocklist
+    //    strip). An empty `meta.sourceTools` at resume time means the metadata
+    //    was corrupted or tampered — spending an LLM round on a knowingly-broken
+    //    session wastes budget and obscures the anomaly. Refuse immediately.
     const frozenSourceTools = meta.sourceTools ?? [];
     if (frozenSourceTools.length === 0) {
-      // A real spawn always persists a concrete non-empty allowlist (the
-      // resolved scoped surface). An empty frozen scope here implies a
-      // corrupted / tampered .meta.json — the resumed child gets a zero-tool
-      // registry (fail-safe: it can only emit text), but surface the anomaly
-      // for the audit trail rather than continuing silently.
-      log.warn(
-        "sub-agent resume: session '%s' has an empty frozen tool scope — possible metadata tampering (child will have no tools)",
-        resumeId,
+      return fail(
+        `sub-agent resume: session "${resumeId}" has an empty frozen tool scope — metadata may be corrupted or tampered`,
       );
     }
     const { childDeps } = this.buildChildDeps({
@@ -855,17 +907,21 @@ export class SubAgentRunner {
     let lastText = "";
     let turn = 0;
     let assistantRounds = 0;
-    // Accumulator seed decision (design point 7): `historyToEntries` lives in
-    // `src/ui/renderer/utils/history.ts` — a renderer-layer util the engine
-    // (main process) must not import (the engine imports nothing from
-    // `ui/renderer`). Rather than duplicate its reducer logic here, we take the
-    // documented DEGRADE path: the resumed run's accumulator starts fresh
-    // (resumed segment only). Continuity across chip/tab is handled downstream —
-    // the resume writes its OWN `agent_spawn` tool result with the resumed
-    // segment's `entries`, and on reload `deriveSubAgentSpawnsFromEntries` walks
-    // BOTH the original and resume tool calls while `mergeSubAgentSpawns` dedupes
-    // by `toolUseId` (distinct per call), so both segments render. The parent
-    // LLM stitches the continuation via the surfaced `resumeId`.
+    // Accumulator seed decision (design point 7 — DEGRADE path, intentional):
+    // `historyToEntries` lives in `src/ui/renderer/utils/history.ts` — a
+    // renderer-layer util the engine (main process) must not import (the engine
+    // imports nothing from `ui/renderer`). Rather than duplicate ~90 lines of
+    // reducer logic here, we take the documented DEGRADE path: the resumed run's
+    // accumulator starts fresh (resumed segment only). Continuity across chip/tab
+    // is handled downstream — each resume writes its OWN `agent_spawn` tool result
+    // with its OWN `entries` snapshot (distinct `toolUseId` per call), and on
+    // reload `deriveSubAgentSpawnsFromEntries` walks BOTH the original spawn's and
+    // every resume's tool calls while `mergeSubAgentSpawns` dedupes by `toolUseId`,
+    // so each segment renders as its OWN sub-agent card (not a unified transcript).
+    // A unified continuous transcript across segments is OUT OF SCOPE for PR-C and
+    // is deferred to PR-E. Do NOT "fix" this by seeding the accumulator from the
+    // re-hydrated history — doing so would require importing renderer-layer code
+    // into the engine, violating the layer boundary.
     const transcript = new SubAgentTranscriptAccumulator();
     const emitActivity = () =>
       callbacks?.onActivity?.({
