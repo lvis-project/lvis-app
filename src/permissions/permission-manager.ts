@@ -752,6 +752,28 @@ export class PermissionManager {
             );
           }
         }
+      } else if (rule.action === "allow" && !rule.source) {
+        // Dup-hit tier reconciliation — MINOR-2 insurance. The surviving rule
+        // may be a boot default with no explicit tier (e.g. conversation.ts
+        // setRules pre-seeds web_search/web_fetch). setRules does NOT populate
+        // alwaysAllowed, so the Map has no entry for that pattern. A persisted
+        // tiered file rule hitting this dedup branch would otherwise lose its
+        // tier silently: the Map update is skipped and the surviving rule's
+        // tier stays undefined (= write-tier via layer-3's normalizeTier,
+        // over-permitting relative to a user-explicit read-tier grant).
+        //
+        // Fix: compute merged = maxTier(Map.get, normalizeTier(file.tier)).
+        // This takes the Map's current view (from an earlier non-dup load or a
+        // prior call) as the "existing" baseline, NOT the surviving rule's
+        // implicit write-tier, so the user's explicit persisted tier wins when
+        // the Map is empty. Set both the Map and the surviving rule's tier to
+        // merged so layer-3 and layer-5 remain consistent.
+        const merged = maxTier(this.alwaysAllowed.get(rule.pattern), normalizeTier(rule.tier));
+        this.alwaysAllowed.set(rule.pattern, merged);
+        const surviving = this.rules.find(
+          (r) => r.pattern === rule.pattern && r.action === "allow" && r.source === rule.source,
+        );
+        if (surviving) surviving.tier = merged;
       }
     }
   }
@@ -875,7 +897,7 @@ export class PermissionManager {
         // (evaluated HERE, first) AND alwaysAllowed (layer-5). A tier gate
         // applied only at layer-5 would therefore be silently defeated by this
         // layer-3 shadow on the first app restart.
-        if (!grantCovers(rule.tier ?? "write", resolvedCategory)) continue;
+        if (!grantCovers(normalizeTier(rule.tier), resolvedCategory)) continue;
         result = { decision: "allow", reason: t("be_permissionManager.allowRuleReason", { pattern: rule.pattern }), layer: 3 };
         break;
       }

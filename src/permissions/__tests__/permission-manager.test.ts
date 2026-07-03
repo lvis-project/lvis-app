@@ -726,6 +726,44 @@ describe("PermissionManager — P2 graduated grant tiers", () => {
     expect(fresh.checkDetailed("corrupt_tool", "builtin", "write").decision).toBe("allow");
   });
 
+  // ── MINOR-1: layer-3 glob + corrupt tier grandfathers to write ──────────────
+
+  it("MINOR-1: glob allow rule with corrupt tier grandfathers to write at layer-3 (not ask)", () => {
+    // A hand-edited rule with an invalid tier string must NOT cause the gate to
+    // skip the glob and produce an ask. normalizeTier maps anything non-"read"
+    // to "write" (external-boundary grandfather), so the glob still fires and
+    // the write is allowed. Without this fix, `?? "write"` passes the raw
+    // garbage string into grantCovers whose TIER_RANK lookup yields undefined →
+    // the >= comparison is false → the glob is skipped → writes ask.
+    pm.setRules([{ pattern: "mem_*", action: "allow", tier: "banana" as unknown as "write" }]);
+
+    const r = pm.checkDetailed("mem_tool", "builtin", "write");
+    expect(r.decision).toBe("allow");
+    expect(r.layer).toBe(3);
+  });
+
+  // ── MINOR-2: dup-hit tier reconciliation (boot-default shadow) ───────────
+
+  it("MINOR-2: persisted read-tier grant matching an untiered boot default is not lost to dedup", async () => {
+    // Simulate the boot-default scenario: setRules pre-seeds an untiered allow
+    // rule (like web_search/web_fetch in conversation.ts), then loadRulesFromFile
+    // loads a user-persisted read-tier grant for the same pattern. Previously the
+    // dedup branch skipped the Map update entirely, leaving the Map empty — so
+    // layer-5 missed the pattern and layer-3's untiered surviving rule grandfathered
+    // to write, silently over-permitting writes relative to the user's intent.
+    // After the MINOR-2 fix, the surviving rule's tier AND the Map are reconciled
+    // to merged = maxTier(Map.get(undefined), normalizeTier("read")) = "read".
+    pm.setRules([{ pattern: "boot_tool", action: "allow" }]); // untiered boot default
+
+    mockStore.rules = [{ pattern: "boot_tool", action: "allow", tier: "read" }];
+    await pm.loadRulesFromFile();
+
+    // Reads are still covered.
+    expect(pm.checkDetailed("boot_tool", "builtin", "read").decision).toBe("allow");
+    // Writes MUST ask — user's explicit read-tier persisted intent wins.
+    expect(pm.checkDetailed("boot_tool", "builtin", "write").decision).toBe("ask");
+  });
+
   // ── P1 post-guard composition (meta + write grant + override:ask) ─────────
 
   it("post-guard composes with tier gate: meta write-grant → allow then ask+forceModal", async () => {
