@@ -507,7 +507,23 @@ function BrowserDocumentViewer({ target }: { target: Extract<ChatPreviewTarget, 
   );
 }
 
-function UrlDocumentViewer({ api, target }: { api: LvisApi; target: Extract<ChatPreviewTarget, { kind: "url" }> }) {
+function UrlDocumentViewer({
+  api,
+  target,
+  showHeader = true,
+}: {
+  api: LvisApi;
+  target: Extract<ChatPreviewTarget, { kind: "url" }>;
+  /**
+   * Render the viewer's own URL/open-external header band. Default true. The
+   * BrowserWorkspace tab passes false because the tab already owns a single
+   * address bar above the webview — rendering the header here too produced the
+   * duplicate-address-bar nesting (#11). This toggles ONLY the header <div>; the
+   * webview node's key/position is invariant so the Electron guest is never
+   * remounted when the flag changes.
+   */
+  showHeader?: boolean;
+}) {
   const { t } = useTranslation();
   // Single URL-safety SOT (rejects non-http(s) + credential-laden urls). This is
   // the viewer boundary the url-safety header documents — it must not diverge
@@ -529,25 +545,27 @@ function UrlDocumentViewer({ api, target }: { api: LvisApi; target: Extract<Chat
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background" data-testid="chat-side-panel-url-viewer">
-      <div className="flex min-h-9 shrink-0 items-center gap-2 border-b bg-muted/(--opacity-muted) px-2 text-[11px] text-muted-foreground">
-        <Globe className="h-3.5 w-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{url}</span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7 shrink-0"
-              onClick={() => void api.openExternalUrl(url)}
-              aria-label={t("chatPreviewRail.openUrl")}
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("chatPreviewRail.openUrl")}</TooltipContent>
-        </Tooltip>
-      </div>
+      {showHeader ? (
+        <div className="flex min-h-9 shrink-0 items-center gap-2 border-b bg-muted/(--opacity-muted) px-2 text-[11px] text-muted-foreground">
+          <Globe className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{url}</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7 shrink-0"
+                onClick={() => void api.openExternalUrl(url)}
+                aria-label={t("chatPreviewRail.openUrl")}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("chatPreviewRail.openUrl")}</TooltipContent>
+          </Tooltip>
+        </div>
+      ) : null}
       {createElement("webview", {
         "data-testid": "chat-side-panel-browser-webview",
         src: url,
