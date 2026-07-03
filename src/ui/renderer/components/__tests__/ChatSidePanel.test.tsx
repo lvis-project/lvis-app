@@ -9,11 +9,16 @@ import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../../shared/side-browser.js";
 import { ChatSidePanel } from "../ChatSidePanel.js";
 import { useWorkspaceTabs } from "../../preview/workspace-tabs.js";
+import type { SubAgentSpawn } from "../SubAgentCard.js";
 
 function api(): LvisApi {
   return {
     openExternalUrl: vi.fn(async () => ({ ok: true })),
     chatGetVerbatimToolResult: vi.fn(async () => null),
+    // useVerticalSplit (file-browser / preview / subagent tabs) seeds + persists
+    // the split ratio through the settings round-trip.
+    getSettings: vi.fn(async () => ({}) as never),
+    updateSettings: vi.fn(async () => ({ ok: true }) as never),
   } as unknown as LvisApi;
 }
 
@@ -34,7 +39,7 @@ function openLauncherMenu() {
   fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
   fireEvent.click(trigger);
 }
-function addTabViaMenu(kind: "preview" | "file-browser" | "browser" | "terminal") {
+function addTabViaMenu(kind: "preview" | "file-browser" | "browser" | "terminal" | "subagent") {
   openLauncherMenu();
   fireEvent.click(screen.getByTestId(`chat-side-panel-launcher-menu-${kind}`));
 }
@@ -52,6 +57,7 @@ function HarnessPanel({
   files,
   initialSelectedId,
   panelMounted = true,
+  subAgentSpawns = [],
 }: {
   api: LvisApi;
   sessionId?: string;
@@ -59,6 +65,7 @@ function HarnessPanel({
   files: WorkspaceFileItem[];
   initialSelectedId: string | null;
   panelMounted?: boolean;
+  subAgentSpawns?: SubAgentSpawn[];
 }) {
   const [selectedId, setSelectedId] = useState(initialSelectedId);
   const workspaceTabs = useWorkspaceTabs();
@@ -72,6 +79,7 @@ function HarnessPanel({
       selectedId={selectedId}
       onSelect={setSelectedId}
       workspaceTabs={workspaceTabs}
+      subAgentSpawns={subAgentSpawns}
       onClose={vi.fn()}
     />
   );
@@ -106,7 +114,7 @@ describe("ChatSidePanel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("opens empty: shows the launcher with four items and shortcut hints, no tabs, no counts", () => {
+  it("opens empty: shows the launcher with five items and shortcut hints, no tabs, no counts", () => {
     renderPanel(
       <HarnessPanel
         api={api()}
@@ -122,11 +130,13 @@ describe("ChatSidePanel", () => {
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
     expect(screen.queryByTestId("chat-side-panel-tab-actions")).toBeNull();
 
-    // Four launcher items.
+    // Five launcher items (side-chat is intentionally NOT a launcher item).
     expect(screen.getByTestId("chat-side-panel-launcher-preview")).toBeTruthy();
     expect(screen.getByTestId("chat-side-panel-launcher-terminal")).toBeTruthy();
     expect(screen.getByTestId("chat-side-panel-launcher-browser")).toBeTruthy();
     expect(screen.getByTestId("chat-side-panel-launcher-file-browser")).toBeTruthy();
+    expect(screen.getByTestId("chat-side-panel-launcher-subagent")).toBeTruthy();
+    expect(screen.queryByTestId("chat-side-panel-launcher-side-chat")).toBeNull();
 
     // Shortcut hints are displayed for the bound items.
     expect(screen.getByText("⌃⇧G")).toBeTruthy();
@@ -316,8 +326,10 @@ describe("ChatSidePanel", () => {
       />,
     );
 
-    // Open a file-browser tab from the launcher and confirm the file shows.
+    // Open a file-browser tab from the launcher; the top pane defaults to the
+    // Directory source, so switch to the Session files segment to see artifacts.
     fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId("chat-side-panel-file-source-session"));
     expect(screen.getByTestId("chat-side-panel-file-tree")).toHaveTextContent("report.md");
     const splitLayout = screen.getByTestId("chat-side-panel-file-split-layout") as HTMLElement;
     const splitter = screen.getByTestId("chat-side-panel-file-splitter");
@@ -326,10 +338,13 @@ describe("ChatSidePanel", () => {
     expect(splitLayout.style.gridTemplateRows).toContain("50%");
 
     // Open a browser tab via the "+" dropdown (replaces scattered add buttons).
+    // The first web artifact is an html doc, so the html viewer renders directly.
     addTabViaMenu("browser");
-    expect(screen.getAllByText("Artifact dashboard").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("example.com/docs").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId("chat-side-panel-browser-viewer")).toBeTruthy();
+
+    // The web-artifact search + list live behind the floating 🔍 Popover now.
+    // Before opening it, the always-on strip is gone (no rows in the DOM).
+    expect(screen.queryAllByTestId("chat-side-panel-browser-row")).toHaveLength(0);
 
     const addressInput = screen.getByTestId("chat-side-panel-browser-address") as HTMLInputElement;
     fireEvent.change(addressInput, { target: { value: "google.com" } });
@@ -338,7 +353,11 @@ describe("ChatSidePanel", () => {
     expect(manualWebview).not.toBeNull();
     expect(manualWebview?.getAttribute("src")).toBe("https://google.com/");
 
-    fireEvent.click(screen.getAllByTestId("chat-side-panel-browser-row")[1]!);
+    // Open the search Popover and pick the second artifact (example.com/docs).
+    fireEvent.click(screen.getByTestId("chat-side-panel-browser-search-trigger"));
+    const rows = screen.getAllByTestId("chat-side-panel-browser-row");
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    fireEvent.click(rows[1]!);
     const webview = container.querySelector('[data-testid="chat-side-panel-browser-webview"]');
     expect(webview?.getAttribute("src")).toBe("https://example.com/docs");
     expect(webview?.getAttribute("partition")).toBe(LVIS_SIDE_BROWSER_PARTITION);
