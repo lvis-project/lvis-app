@@ -51,6 +51,18 @@ import { isPathAllowed } from "./allowed-directories.js";
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto" | "allow";
 
+/**
+ * P2 graduated grant tier. A persisted "Allow always" grant carries a tier so
+ * a grant made on a read tool ("read") does NOT silently authorize a later
+ * write/shell/network/meta invocation of the same pattern, while a grant made
+ * on a write/shell/network/meta tool ("write") covers everything. This makes a
+ * grant category-aware instead of the previous flat, all-or-nothing behaviour.
+ *
+ * The ranking is monotone (read < write): a grant is only ever upgraded, never
+ * downgraded, and the covered set widens with the tier.
+ */
+export type GrantTier = "read" | "write";
+
 export interface PermissionRule {
   /** 도구 이름 패턴 (glob: "memory_*", "mcp_*", "*") */
   pattern: string;
@@ -58,6 +70,12 @@ export interface PermissionRule {
   action: "allow" | "deny";
   /** 적용 소스 제한 (없으면 전체 적용) */
   source?: ToolSource;
+  /**
+   * P2 graduated grant tier for `action: "allow"` rules. Absent = legacy
+   * untiered grant, grandfathered to write-tier (most permissive — preserves a
+   * user's previously saved "Allow always"). Ignored for `action: "deny"`.
+   */
+  tier?: GrantTier;
 }
 
 /**
@@ -265,7 +283,13 @@ function sameReviewerSandboxCacheState(
 export class PermissionManager {
   private rules: PermissionRule[] = [];
   private mode: ExecutionMode = "default";
-  private readonly alwaysAllowed = new Set<string>();
+  /**
+   * P2 — "Allow always" grants keyed by pattern → highest granted {@link
+   * GrantTier}. Was a flat `Set<string>` (category-blind). The Map structurally
+   * enforces the "1 grant, highest tier" invariant so a re-grant can only widen
+   * coverage (monotone), never desynchronize.
+   */
+  private readonly alwaysAllowed = new Map<string, GrantTier>();
   /** MCP approval.toolPermissionMode 등 per-tool 실행 모드 override */
   private readonly toolModeOverrides = new Map<string, ExecutionMode>();
   /** 영구 규칙 저장 경로 (~/.lvis/permissions.json) */
@@ -612,19 +636,33 @@ export class PermissionManager {
   /**
    * 도구 이름(패턴)을 영구 allow 규칙으로 추가.
    * permissions.json 저장이 성공한 뒤에만 인메모리 allow cache를 갱신한다.
+   *
+   * P2 — `tier` records how broadly the grant applies. It defaults to `"write"`
+   * so the non-executor callers (slash `/allow`, the PermissionsTab addRule IPC)
+   * keep their category-blind grant (grandfather). The executor passes
+   * {@link requiredTier}(invocationCategory) so a grant made on a read tool is
+   * read-tier. Re-granting is monotone: the tier is only ever upgraded (read→
+   * write), never downgraded — a downgrade must go through {@link removeRule}.
    */
-  async addAlwaysAllowedPersist(pattern: string): Promise<void> {
-    // 영구: rules 배열에 allow 규칙 추가 (중복 방지)
+  async addAlwaysAllowedPersist(pattern: string, tier: GrantTier = "write"): Promise<void> {
+    // 영구: rules 배열에 allow 규칙 추가/승격 (중복 방지 + monotone tier)
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
-      const exists = file.rules.some(
+      const existing = file.rules.find(
         (r) => r.action === "allow" && r.pattern === pattern && !r.source,
       );
-      if (!exists) {
-        file.rules.push({ pattern, action: "allow" });
+      if (existing) {
+        // Upgrade only — never downgrade a saved grant. A legacy/absent tier
+        // grandfathers to write, so a "read" re-grant onto it is a no-op.
+        if (tierRank(tier) > tierRank(normalizeTier(existing.tier))) {
+          existing.tier = tier;
+        }
+      } else {
+        file.rules.push({ pattern, action: "allow", tier });
       }
     });
-    // 인메모리: durable write 성공 후 alwaysAllowed Set (checkDetailed layer 5)
-    this.alwaysAllowed.add(pattern);
+    // 인메모리: durable write 성공 후 alwaysAllowed Map (checkDetailed layer 5).
+    // maxTier keeps the invariant that the Map holds the highest granted tier.
+    this.alwaysAllowed.set(pattern, maxTier(this.alwaysAllowed.get(pattern), tier));
     this.broadcastConfigChanged?.();
     // Cluster review M1 — rule change aborts outstanding bearers so plugins
     // re-resolve their keys under the new policy. An allow rule going wider
@@ -704,8 +742,15 @@ export class PermissionManager {
           this.rules.unshift(rule); // deny는 최우선
         } else {
           this.rules.push(rule);
-          // allow 규칙은 alwaysAllowed Set에도 반영
-          if (!rule.source) this.alwaysAllowed.add(rule.pattern);
+          // allow 규칙은 alwaysAllowed Map에도 반영 (P2: tier 보존).
+          // normalizeTier grandfathers a legacy/absent tier to write; maxTier
+          // keeps the highest tier if the pattern is hydrated more than once.
+          if (!rule.source) {
+            this.alwaysAllowed.set(
+              rule.pattern,
+              maxTier(this.alwaysAllowed.get(rule.pattern), normalizeTier(rule.tier)),
+            );
+          }
         }
       }
     }
@@ -821,14 +866,29 @@ export class PermissionManager {
       if (rule.action !== "allow") continue;
       if (rule.source && rule.source !== source) continue;
       if (globMatch(allowTarget, rule.pattern)) {
+        // P2 tier gate — a read-tier grant must not cover a
+        // write/shell/network/meta invocation. Untiered/legacy rules default to
+        // "write" (grandfather = the pre-P2 all-or-nothing behaviour).
+        //
+        // This gate MUST mirror the layer-5 gate below. loadRulesFromFile
+        // rehydrates a persisted "Allow always" grant into BOTH this.rules
+        // (evaluated HERE, first) AND alwaysAllowed (layer-5). A tier gate
+        // applied only at layer-5 would therefore be silently defeated by this
+        // layer-3 shadow on the first app restart.
+        if (!grantCovers(rule.tier ?? "write", resolvedCategory)) continue;
         result = { decision: "allow", reason: t("be_permissionManager.allowRuleReason", { pattern: rule.pattern }), layer: 3 };
         break;
       }
     }
 
     // 5. Always-allowed (사용자 이전 승인)
-    if (result === undefined && this.alwaysAllowed.has(allowTarget)) {
-      result = { decision: "allow", reason: t("be_permissionManager.userPermanentApproval"), layer: 5 };
+    if (result === undefined) {
+      const grantTier = this.alwaysAllowed.get(allowTarget);
+      // P2 tier gate — see the layer-3 mirror above. A read-tier grant covers
+      // only read invocations; write-tier covers everything.
+      if (grantTier !== undefined && grantCovers(grantTier, resolvedCategory)) {
+        result = { decision: "allow", reason: t("be_permissionManager.userPermanentApproval"), layer: 5 };
+      }
     }
 
     // 6. Category × Source × Trust via registry descriptor
@@ -1336,6 +1396,55 @@ export class PermissionManager {
 }
 
 // ─── Helpers ────────────────────────────────────────
+
+// ── P2 graduated grant tier helpers ──────────────────
+const TIER_RANK: Record<GrantTier, number> = { read: 0, write: 1 };
+
+/** Ordinal rank of a grant tier (read=0 < write=1). */
+export function tierRank(tier: GrantTier): number {
+  return TIER_RANK[tier];
+}
+
+/**
+ * The grant tier a category requires to be auto-allowed by a prior
+ * "Allow always" grant. `read` → read-tier; `write`/`shell`/`network`/`meta`
+ * → write-tier. `meta` deliberately requires write so that a read-tier grant
+ * cannot silently short-circuit a meta tool (e.g. agent_spawn).
+ *
+ * This is the single source of truth for the category→tier mapping; the
+ * executor imports it when stamping the tier onto a new grant so the grant-time
+ * tier and the check-time coverage predicate can never diverge.
+ */
+export function requiredTier(category: ToolCategory): GrantTier {
+  return category === "read" ? "read" : "write";
+}
+
+/**
+ * Does a `granted` tier cover an invocation of `category`? A write grant covers
+ * every category; a read grant covers only read invocations.
+ */
+export function grantCovers(granted: GrantTier, category: ToolCategory): boolean {
+  return tierRank(granted) >= tierRank(requiredTier(category));
+}
+
+/**
+ * External-boundary normalization for a persisted `tier` field. permissions.json
+ * is a user-editable file; an absent or corrupt `tier` denotes a legacy /
+ * untiered grant, which grandfathers to write-tier (most permissive — preserves
+ * the user's saved "Allow always"). Normalizing to read-tier instead would
+ * silently break saved grants (weakening) and is forbidden. This is the only
+ * sanctioned fallback in P2 — it lives at the file boundary, not between
+ * internal callers.
+ */
+export function normalizeTier(tier: unknown): GrantTier {
+  return tier === "read" ? "read" : "write";
+}
+
+/** Monotone merge — the higher-ranked of two tiers (undefined = take `b`). */
+function maxTier(a: GrantTier | undefined, b: GrantTier): GrantTier {
+  if (a === undefined) return b;
+  return tierRank(a) >= tierRank(b) ? a : b;
+}
 
 function normalizeApprovalCacheKey(key: string | undefined): string | null {
   if (!key) return null;
