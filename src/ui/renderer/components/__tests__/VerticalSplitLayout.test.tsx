@@ -42,6 +42,18 @@ describe("VerticalSplitLayout", () => {
     expect(line?.className).toContain("h-0.5");
   });
 
+  it("draws no divider other than the separator's line (no double line above the resize handle)", () => {
+    renderLayout(45);
+    const layout = screen.getByTestId("split");
+    // The panes are the first + last grid children; neither carries its own
+    // border, so the ONLY horizontal divider is the separator's thin line.
+    const panes = layout.querySelectorAll(":scope > div:not([role='separator'])");
+    for (const pane of panes) {
+      expect(pane.className).not.toMatch(/border-b\b/);
+      expect(pane.className).not.toMatch(/border-t\b/);
+    }
+  });
+
   it("ArrowDown nudges the split down and commits (keyboard step)", () => {
     const { onDragChange, onCommit } = renderLayout(45);
     fireEvent.keyDown(screen.getByTestId("splitter"), { key: "ArrowDown" });
