@@ -1485,6 +1485,17 @@ function FileBrowserWorkspace({
   // A concrete filesystem file opened from the project-roots browser. Takes
   // precedence over the session-artifact selection in the detail pane.
   const [fsPath, setFsPath] = useState<string | null>(null);
+  // Which source the TOP pane shows (R3): the project directory tree or this
+  // chat's session artifacts. A segment toggle replaces the old vertical
+  // stacking that squeezed the session list into a sliver. This is a SOURCE
+  // switch on the horizontal axis — orthogonal to the top/bottom split axis
+  // above, so the two never fight.
+  const [fileSource, setFileSource] = useState<"directory" | "session">("directory");
+  const sessionFileCount = files.length;
+  const hasSessionFiles = sessionFileCount > 0;
+  // The session segment is disabled with zero files; snap back to directory so a
+  // previously-selected-but-now-empty session source can't strand an empty pane.
+  const effectiveSource = fileSource === "session" && hasSessionFiles ? "session" : "directory";
   const tree = useMemo(() => filterFileTree(buildFileTree(files), query), [files, query]);
   const filteredFiles = useMemo(
     () => files.filter((file) => matchesQuery(query, file.label, file.detail, file.path, file.sourceLabel)),
@@ -1528,18 +1539,66 @@ function FileBrowserWorkspace({
         testId="chat-side-panel-file-split-layout"
         separatorTestId="chat-side-panel-file-splitter"
         top={
-          <div className="min-h-0 space-y-2 p-2" data-testid="chat-side-panel-file-tree">
-            <ProjectRootsBrowser
-              selectedPath={fsPath}
-              onOpenFile={(path) => {
-                setFsPath(path);
-              }}
-            />
-            <div className="border-t pt-1">
-              <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {t("chatPreviewRail.sessionFilesSection")}
-              </div>
-              {hasFiles && tree.length > 0 ? (
+          <div className="flex min-h-0 flex-col" data-testid="chat-side-panel-file-tree">
+            {/*
+              R3 segment toggle: pick the top pane's source (project directory
+              vs session artifacts) instead of stacking both. Only the chosen
+              source occupies the whole pane, so the session list is no longer
+              squeezed. The session segment is disabled when the chat has no
+              artifacts yet.
+            */}
+            <div
+              role="tablist"
+              aria-label={t("chatPreviewRail.fileSourceLabel")}
+              className="flex shrink-0 items-center gap-1 border-b p-1"
+              data-testid="chat-side-panel-file-source-segment"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={effectiveSource === "directory"}
+                data-testid="chat-side-panel-file-source-directory"
+                className={cn(
+                  "flex h-7 flex-1 items-center justify-center gap-1 rounded-md text-[11px] font-medium",
+                  effectiveSource === "directory"
+                    ? "bg-primary/(--opacity-subtle) text-primary"
+                    : "text-muted-foreground hover:bg-muted/(--opacity-muted) hover:text-foreground",
+                )}
+                onClick={() => setFileSource("directory")}
+              >
+                <Folder className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("chatPreviewRail.fileSourceDirectory")}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={effectiveSource === "session"}
+                disabled={!hasSessionFiles}
+                data-testid="chat-side-panel-file-source-session"
+                className={cn(
+                  "flex h-7 flex-1 items-center justify-center gap-1 rounded-md text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-(--opacity-half)",
+                  effectiveSource === "session"
+                    ? "bg-primary/(--opacity-subtle) text-primary"
+                    : "text-muted-foreground hover:bg-muted/(--opacity-muted) hover:text-foreground",
+                )}
+                onClick={() => setFileSource("session")}
+              >
+                <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("chatPreviewRail.fileSourceSession")}
+                <Badge variant="outline" className="px-1 py-0 text-[10px]" data-testid="chat-side-panel-file-source-session-count">
+                  {sessionFileCount}
+                </Badge>
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto p-2">
+              {effectiveSource === "directory" ? (
+                <ProjectRootsBrowser
+                  selectedPath={fsPath}
+                  onOpenFile={(path) => {
+                    setFsPath(path);
+                  }}
+                />
+              ) : hasFiles && tree.length > 0 ? (
                 <FileTreeRows
                   nodes={tree}
                   selectedFileId={fsPath ? undefined : selectedFile?.id}
