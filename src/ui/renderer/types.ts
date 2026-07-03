@@ -453,6 +453,32 @@ export type LvisApi = {
     ) => () => void;
   };
   /**
+   * Side chat (workspace rail) — a second, independently-streaming chat session
+   * driven by a dedicated ConversationLoop in main. `onStream` / `onFallback`
+   * subscribe to the DEDICATED CHANNELS.sidechat.{stream,fallback} events (never
+   * the main chat.stream), so a main-chat stream frame never reaches this
+   * subscriber and vice versa. Optional so test fixtures casting a partial
+   * object to LvisApi keep compiling — production preload always defines it.
+   */
+  sideChat?: {
+    send: (input: string, attachments?: unknown[]) => Promise<
+      | { ok: true; result: unknown }
+      | { ok: false; error: string }
+    >;
+    new: () => Promise<{ ok: true; sessionId: string } | { ok: false; error: string }>;
+    load: (sessionId: string) => Promise<
+      | { ok: true; sessionId: string; messages: SerializedHistoryMessage[] }
+      | { ok: false; error: string; messages: SerializedHistoryMessage[] }
+    >;
+    list: () => Promise<{
+      current: string | null;
+      sessions: Array<{ id: string; modifiedAt: string; title: string }>;
+    }>;
+    abort: () => Promise<{ ok: true } | { ok: false; error: string }>;
+    onStream: (handler: (event: StreamEvent) => void) => () => void;
+    onFallback: (handler: (payload: { from: string; to: string }) => void) => () => void;
+  };
+  /**
    * Demo activation bridge. `status` exposes only the captured activation
    * state from main; it does not read `process.env` in the renderer because
    * packaged builds scrub `LVIS_DEMO_*` before preload inherits env. `activate`

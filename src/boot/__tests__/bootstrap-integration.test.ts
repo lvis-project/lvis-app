@@ -129,6 +129,7 @@ vi.mock("../conversation.js", () => ({
     return { getSessionId: vi.fn(() => undefined) };
   }),
   createRoutineConversationLoop: vi.fn(() => ({})),
+  createSideChatConversationLoop: vi.fn(() => ({ getSessionId: vi.fn(() => "side-1") })),
   createCallLlm: vi.fn(() => vi.fn()),
   createCallLlmForPlugin: vi.fn(() => vi.fn()),
 }));
@@ -530,6 +531,7 @@ describe("bootstrap() integration lock", () => {
         "sessionTodoStore",
         "settingsService",
         "shutdown",
+        "sideChatConversationLoop",
         "skillArtifactStore",
         "skillStore",
         "starredStore",
