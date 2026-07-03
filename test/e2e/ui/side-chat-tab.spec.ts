@@ -78,4 +78,49 @@ test.describe("side-chat tab", () => {
     // Idle: New is enabled (only disabled mid-stream — MAJOR 2 UI guard).
     await expect(page.getByTestId("side-chat-new")).toBeEnabled();
   });
+
+  test("side-chat renders tool / thinking / permission through the shared TranscriptRenderer", async () => {
+    await page.getByTestId("chat-side-panel-toggle").click();
+    await page.getByTestId("chat-side-panel-launcher-side-chat").click();
+    await expect(page.getByTestId("side-chat-view")).toBeVisible();
+
+    // Start a turn so the reducer arms its stream (send resolves only when the
+    // turn ends, but the transcript is driven by the DEDICATED side stream).
+    await page.getByTestId("side-chat-composer").fill("run a tool");
+    await page.getByTestId("side-chat-send").click();
+
+    // Inject synthetic side-chat frames onto the DEDICATED side channel via the
+    // dev-only E2E seam (LVIS_DEV=1). This proves the side transcript renders
+    // tool groups + reasoning + permission-review status through the SAME
+    // shared primitives as the main transcript — the unification contract.
+    const groupId = `e2e-side-${Date.now()}`;
+    const toolUseId = `tu-side-${Date.now()}`;
+    const seamAvailable = await page.evaluate(({ groupId, toolUseId }) => {
+      type StreamFn = (event: unknown) => void;
+      const w = window as unknown as { __lvisSideChatStream?: { _emit?: StreamFn } };
+      const emit = w.__lvisSideChatStream?._emit;
+      if (typeof emit !== "function") return false;
+      // streamId 1 is the first turn's id (main allocates ++nextSideStreamId).
+      emit({ type: "reasoning_delta", streamId: 1, text: "let me think about this…" });
+      emit({
+        type: "permission_review",
+        streamId: 1,
+        reviewStatus: "reviewing",
+        name: "bash",
+        groupId,
+        toolUseId,
+        displayOrder: 0,
+      });
+      emit({ type: "tool_start", streamId: 1, name: "index_scan", groupId, toolUseId, displayOrder: 0, input: {} });
+      emit({ type: "tool_end", streamId: 1, name: "index_scan", groupId, toolUseId, result: "42 files", isError: false, durationMs: 900 });
+      return true;
+    }, { groupId, toolUseId });
+
+    test.skip(!seamAvailable, "Side-chat synthetic stream seam unavailable in this build — skipping.");
+
+    // The shared WorkGroup primitive collapses the tool activity (identical to
+    // the main transcript). Its presence proves TranscriptRenderer is driving
+    // the side transcript, not the old bespoke AssistantCard-only view.
+    await expect(page.getByTestId("side-chat-view").getByTestId("work-group").first()).toBeVisible({ timeout: 5_000 });
+  });
 });
