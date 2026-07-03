@@ -1686,6 +1686,32 @@ export interface LvisWorkspaceApi {
     error?: "unauthorized" | "path-not-allowed" | "sensitive-path" | "not-found";
     message?: string;
   }>;
+  /**
+   * Drag-drop add-root, step 1 (#1458). Submit a renderer-resolved dropped folder
+   * path (from `window.lvisDrop.resolveDroppedPaths`) for Layer-0 hard-deny +
+   * is-a-directory validation. On success returns a one-time ack token bound to
+   * the now-main-owned path — confirm the add via `pickRoot({ ackToken })`.
+   */
+  dropPrepare: (path: string) => Promise<{
+    ok: boolean;
+    error?: string;
+    warnings?: string[];
+    /** Validated main-owned path awaiting acknowledgement — display only. */
+    pendingPath?: string;
+    /** One-time token bound to the path — confirm by echoing it via `pickRoot`. */
+    ackToken?: string;
+  }>;
+}
+
+/**
+ * Drop-path resolution bridge (#1458). Exposed as its own preload world. Resolves
+ * dropped `File` objects to filesystem paths via `webUtils.getPathForFile` — the
+ * ONLY context that can, since a `File` cannot cross IPC. The returned paths are
+ * renderer-NAMED candidates that grant no capability; the main-process
+ * `workspace.dropPrepare` gate makes the read-scope decision.
+ */
+export interface LvisDropApi {
+  resolveDroppedPaths: (files: FileList | readonly File[]) => string[];
 }
 
 export interface LvisUiApi {
@@ -1701,6 +1727,7 @@ declare global {
   interface Window {
     lvisApi: LvisApi;
     lvisHost: LvisHostApi;
+    lvisDrop: LvisDropApi;
     lvis: {
       permission: LvisPermissionApi;
       approval: LvisApprovalApi;

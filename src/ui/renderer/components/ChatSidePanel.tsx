@@ -1,4 +1,5 @@
 import { createElement, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
+import { cn } from "../../../lib/utils.js";
 import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
 import {
   WORKSPACE_TAB_LAUNCHER,
@@ -732,6 +733,8 @@ function ProjectRootsBrowser({
   const [pendingWarning, setPendingWarning] = useState<
     { path: string; warnings: string[]; ackToken: string } | null
   >(null);
+  // True while a folder drag hovers the roots panel — drives the drop-zone ring.
+  const [dragOver, setDragOver] = useState(false);
 
   // Roving-tabindex active row (the single treeitem with tabIndex=0). Distinct
   // from `selectedPath` (the OPENED file, drives bg-accent) — this is keyboard
@@ -1015,6 +1018,36 @@ function ProjectRootsBrowser({
     [t],
   );
 
+  // Drag-drop add-root (#1458). A dropped folder path is renderer-NAMED — the
+  // preload webUtils bridge turns the dropped File into a candidate path, which
+  // main-side dropPrepare re-validates (Layer-0 hard-deny + is-a-directory)
+  // before minting a MAIN-OWNED ack token. A drop ALWAYS routes through the same
+  // acknowledgement panel the native warned-pick uses (the OS dialog never
+  // vouched for the path, so the explicit user ack is that missing vouch), and
+  // confirmPendingFolder echoes the token — never the path — to pickRoot. So the
+  // drop can never widen the read scope without the user confirming.
+  const handleFolderDrop = useCallback(
+    async (files: FileList) => {
+      setOpError(null);
+      const paths = window.lvisDrop.resolveDroppedPaths(files);
+      const dropped = paths[0]; // first dropped item only — no multi-add fan-out
+      if (!dropped) return; // non-file drag (text/url) or unresolvable — no-op
+      const res = await window.lvis.workspace.dropPrepare(dropped);
+      if (!res.ok) {
+        setOpError(formatOpError(res.error, undefined));
+        return;
+      }
+      if (res.pendingPath && res.ackToken) {
+        setPendingWarning({
+          path: res.pendingPath,
+          warnings: res.warnings ?? [],
+          ackToken: res.ackToken,
+        });
+      }
+    },
+    [formatOpError],
+  );
+
   // Reveal a file/folder in the OS file manager. Re-validated in main; surfaces
   // any failure inline instead of swallowing the result.
   const revealEntry = async (path: string) => {
@@ -1229,16 +1262,34 @@ function ProjectRootsBrowser({
   };
 
   return (
-    // Drag-drop-to-add-root was intentionally NOT wired here. A dropped File has
-    // no reliable path in Electron ≥32 (File.prototype.path was removed) and
-    // trusting a renderer-named path would regress the #1448 ack-token read-scope
-    // invariant. Doing it right needs a webUtils.getPathForFile preload bridge +
-    // a trust-model decision + a real-Electron drop e2e — deferred to a follow-up
-    // issue. Add-root stays on the native picker (the FolderPlus button + ⌘/Ctrl+O).
+    // Drag-drop add-root (#1458): a dropped folder resolves to a renderer-named
+    // candidate path (preload webUtils bridge) that main-side dropPrepare
+    // hard-validates before an explicit ack — so it rides the #1448 ack tier
+    // rather than regressing it. Add-root also stays on the native picker (the
+    // FolderPlus button + ⌘/Ctrl+O), which the drop convenience sits on top of.
     <div
       ref={rootRef}
-      className="space-y-1 rounded-md"
+      className={cn(
+        "space-y-1 rounded-md transition-colors",
+        dragOver && "ring-2 ring-primary/50 bg-primary/5",
+      )}
       data-testid="chat-side-panel-project-roots"
+      onDragOver={(event) => {
+        // preventDefault is required or the browser navigates to the file.
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        if (!dragOver) setDragOver(true);
+      }}
+      onDragLeave={(event) => {
+        // Ignore leave events bubbling from children still inside the panel.
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setDragOver(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDragOver(false);
+        void handleFolderDrop(event.dataTransfer.files);
+      }}
     >
       <div className="flex items-center gap-1">
         {roots.length > 1 ? (

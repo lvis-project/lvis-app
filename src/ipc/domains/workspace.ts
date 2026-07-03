@@ -62,7 +62,15 @@ const ACK_TOKEN_TTL_MS = 60_000;
  * compromised renderer could hand back an arbitrary path with `acknowledge=true`
  * and silently widen the Layer-1 read allow-list.
  */
-const pendingPicks = new Map<string, { path: string; expires: number }>();
+const pendingPicks = new Map<string, { path: string; expires: number; gesture: PickGesture }>();
+
+/**
+ * How the pending path entered the ack flow — recorded in the widening audit so
+ * a native-picker widening (`dialog`) and a drag-drop widening (`drop`) are
+ * distinguishable in the log. A dropped path is renderer-NAMED, so its audit
+ * trail matters more than a native `showOpenDialog` result the OS vouched for.
+ */
+type PickGesture = "dialog" | "drop";
 
 /** Drop expired tokens so a stream of un-acknowledged picks can't grow the map. */
 function prunePendingPicks(now: number): void {
@@ -109,6 +117,35 @@ export interface WorkspacePickRootResult {
    */
   ackToken?: string;
   error?: string;
+}
+
+/**
+ * Result of the drag-drop add-root prepare step (#1458). A dropped folder path
+ * is renderer-NAMED (resolved in preload via webUtils.getPathForFile), so unlike
+ * a native picker it is NEVER persisted immediately: this step re-validates the
+ * path and — on success — hands back a one-time ack token bound to the path the
+ * MAIN process now owns. The renderer confirms via `pickRoot({ ackToken })`,
+ * echoing the token (never a path), so it can never widen the Layer-1 read
+ * allow-list to a directory of its own choosing without an explicit user ack.
+ */
+export interface WorkspaceDropPrepareResult {
+  ok: boolean;
+  /**
+   * A hard deny (Layer-0 sensitive/root path) OR the dropped entry is not a
+   * directory (`not-a-dir` — a dropped file is rejected; the renderer never
+   * guesses a parent dir). Present only when `ok` is false.
+   */
+  error?: string;
+  /** Adjacency warnings (`.env`/`.git`/…) to surface alongside the ack prompt. */
+  warnings?: string[];
+  /** The validated, MAIN-OWNED path awaiting acknowledgement — display only. */
+  pendingPath?: string;
+  /**
+   * One-time token bound to {@link pendingPath}. The renderer confirms the add
+   * by presenting THIS token to `pickRoot`, never a path — mirroring the native
+   * warned-pick ack so the drop trust tier equals the #1448 ack tier.
+   */
+  ackToken?: string;
 }
 
 export interface WorkspaceDirEntry {
@@ -177,7 +214,10 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
    * `picked` is ALWAYS a path the main process owns (a `showOpenDialog` result or
    * the token-bound pending path) — never a raw renderer string.
    */
-  async function persistValidatedRoot(picked: string): Promise<WorkspacePickRootResult> {
+  async function persistValidatedRoot(
+    picked: string,
+    gesture: PickGesture,
+  ): Promise<WorkspacePickRootResult> {
     const verdict = validateDirectoryAddition(picked);
     if (!verdict.ok) {
       return { ok: false, error: verdict.reason, warnings: verdict.adjacencyWarnings };
@@ -187,7 +227,9 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
     await addAllowedDirectoryPersist(picked);
     // Audit the allow-list widening: the permission SOT just grew the executor's
     // Layer-1 read scope. Mirrors the preview-read audit (redacted path via the
-    // shared DLP filter) so a read-scope WRITE is recorded, not only READS.
+    // shared DLP filter) so a read-scope WRITE is recorded, not only READS. The
+    // `gesture` marker distinguishes a native-picker widening from a drag-drop
+    // widening (a renderer-named path) in the audit trail.
     auditLogger.log({
       timestamp: new Date().toISOString(),
       sessionId: "workspace-pick-root",
@@ -195,6 +237,7 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
       input: JSON.stringify({
         channel: CHANNELS.workspace.pickRoot,
         path: redactFsPath(picked),
+        gesture,
       }),
     });
     return {
@@ -237,7 +280,7 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
         if (pending) pendingPicks.delete(ackToken); // consume regardless of validity
         if (!pending) return { ok: false, error: "ack-unknown" };
         if (now > pending.expires) return { ok: false, error: "ack-expired" };
-        return persistValidatedRoot(pending.path);
+        return persistValidatedRoot(pending.path, pending.gesture);
       }
 
       // Initial pick — the native folder picker IS the user gesture.
@@ -265,7 +308,11 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
         const now = Date.now();
         prunePendingPicks(now);
         const token = randomBytes(32).toString("base64url");
-        pendingPicks.set(token, { path: dialogPath, expires: now + ACK_TOKEN_TTL_MS });
+        pendingPicks.set(token, {
+          path: dialogPath,
+          expires: now + ACK_TOKEN_TTL_MS,
+          gesture: "dialog",
+        });
         return {
           ok: true,
           requiresAcknowledgement: true,
@@ -276,7 +323,7 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
         };
       }
       // No adjacency warnings — persist immediately (still audited).
-      return persistValidatedRoot(dialogPath);
+      return persistValidatedRoot(dialogPath, "dialog");
     },
   );
 
@@ -424,12 +471,68 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
     },
   );
 
-  // NOTE: drag-drop-to-add-root was intentionally NOT shipped here. A dropped
-  // File carries no reliable filesystem path in Electron ≥32 (File.prototype.path
-  // was removed), and minting an ackToken for a RENDERER-SUPPLIED path would
-  // regress the #1448 read-scope invariant (the ack token must bind ONLY to a
-  // main-process showOpenDialog pick). Doing it correctly requires a
-  // webUtils.getPathForFile preload bridge + an explicit trust-model decision +
-  // a real-Electron drop e2e — deferred to a dedicated follow-up issue. The
-  // native picker (pickRoot / Cmd+O) remains the only add-root path.
+  /**
+   * Drag-drop add-root, step 1 (#1458). A dropped folder path is renderer-NAMED
+   * — the preload webUtils bridge turned a dropped `File` into a candidate path,
+   * which carries no capability on its own. This handler is the trust gate that
+   * gives the drop the SAME defense as the #1448 native warned-pick:
+   *
+   *   1. `validateSender` — a plugin-ui-shell / external frame is refused.
+   *   2. `validateDirectoryAddition` — Layer-0 HARD-DENY (filesystem root /
+   *      sensitive dir). An ack can NEVER clear a hard deny, so a dropped
+   *      `~/.lvis/secrets` is rejected here and never reaches persistence.
+   *   3. `fs.stat` is-a-directory — a dropped FILE is rejected (`not-a-dir`);
+   *      the renderer never guesses a parent dir (No-Fallback).
+   *
+   * On success it mints a one-time, MAIN-OWNED ack token bound to the validated
+   * path and stores it in `pendingPicks`. A drop ALWAYS requires acknowledgement
+   * (even with zero adjacency warnings): unlike a native picker, the OS dialog
+   * never vouched for the path, so the explicit user ack is that missing vouch.
+   * The renderer confirms via `pickRoot({ ackToken })`, echoing the token (never
+   * a path) — so the renderer names the candidate exactly once, and the moment
+   * this handler validates it, the path becomes main-owned. This preserves the
+   * #1448 invariant that persistence only ever touches a path the main process
+   * owns, never a raw renderer string handed back with `acknowledge=true`.
+   */
+  ipcMain.handle(
+    CHANNELS.workspace.dropPrepare,
+    async (e, rawPath: string): Promise<WorkspaceDropPrepareResult> => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.workspace.dropPrepare, e);
+        return { ok: false, error: "unauthorized" };
+      }
+      if (typeof rawPath !== "string" || rawPath.length === 0) {
+        return { ok: false, error: "invalid-path" };
+      }
+      // Layer-0 hard-deny FIRST — a sensitive/root path is refused outright and
+      // no token is ever minted, so it can never be acknowledged into scope.
+      const verdict = validateDirectoryAddition(rawPath);
+      if (!verdict.ok) {
+        return { ok: false, error: verdict.reason, warnings: verdict.adjacencyWarnings };
+      }
+      // A dropped FILE is not a root — reject rather than inferring its parent.
+      try {
+        const stat = await fs.stat(rawPath);
+        if (!stat.isDirectory()) return { ok: false, error: "not-a-dir" };
+      } catch {
+        return { ok: false, error: "not-found" };
+      }
+      // Mint a MAIN-OWNED ack token bound to the validated path. The path is now
+      // owned by the main process; the renderer can only echo the token back.
+      const now = Date.now();
+      prunePendingPicks(now);
+      const token = randomBytes(32).toString("base64url");
+      pendingPicks.set(token, {
+        path: rawPath,
+        expires: now + ACK_TOKEN_TTL_MS,
+        gesture: "drop",
+      });
+      return {
+        ok: true,
+        pendingPath: rawPath,
+        ackToken: token,
+        warnings: verdict.adjacencyWarnings,
+      };
+    },
+  );
 }
