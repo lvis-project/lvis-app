@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.4.5 — 2026-07-03
+
+Workspace rail, chat-rendering unification, side-chat, and permission/sub-agent hardening release. Bundles everything merged after the `v0.4.4` tag.
+
+### UI / Workspace rail
+
+- **Chat side panel rebuilt as a workspace rail** (PR #1428, #1430, #1433, #1434, #1437, #1439, #1440) — content-driven tabs with an empty-state launcher, workspace state lifted to a store (survives session switch/tab unmount), preview rail docked beside the composer, side-panel toggle moved into the toolbar, and floating action-activity panel top-aligned.
+- **Workspace rail redesign batch** (PR #1443, #1447, #1448, #1460, #1461) — header-count removal, vertical/panel resize, in-app routing with a "시스템 앱으로 열기" context menu, ephemeral↔pinned tabs, md/mermaid file preview, a real PTY terminal, file-content preview, tab-bar scroll/drag, project-path selection, browser de-nest + search popover, a file-source segment, and a sub-agent viewer.
+- **Project directory browser completeness** (PR #1457) — remove-root, context menu (Reveal in Finder / Copy Path), keyboard navigation + a11y, and session-file inclusion aligned to VS Code / JetBrains / Zed references.
+
+### Chat rendering unification
+
+- **Single shared transcript renderer across all three chat surfaces** (PR #1464, #1465, #1467, #1468, #1463) — main, sub-agent, and side-chat now render through one `TranscriptRenderer` (tool/thinking parity); chat-mode side panel docks without a modal blur; the sub-agent tab shows the full conversation-loop transcript inline (tool-call-style) plus history from loaded sessions.
+
+### Side-chat engine
+
+- **Dedicated side-chat engine** (PR #1462) — a second conversation loop over a dedicated internal IPC channel with a lightweight surface, monotonic stale-frame guard, and abort-on-unmount isolation.
+
+### Sub-agent / Permissions
+
+- **Host-assigned sub-agent round budget** (PR #1470) — the LLM no longer self-selects `maxTurns`; the host assigns a mode-based round budget, and round-cut-off now emits a `round-cap` stop reason + `incomplete` signal with preserved partial output.
+- **`agent_spawn` honors allow-all mode** (PR #1469) — no approval popup for sub-agent spawns when the mode is "모두 허용" (allow-all).
+
+### Permissions / Sandbox / API
+
+- **ASRT Windows sandbox support + audit-gap closure** (PR #1450, #1456, #1459) — Windows srt-win readiness/consent flow refinements and post-audit sandbox hardening (workerId producer, verdict-cache TOCTOU, drag-drop).
+- **Local API surface** (PR #1435, #1438, #1441) — SDK/API/CLI boundary + mega-file decomposition, a loopback HTTP+SSE local API server with a thin CLI, and approval-gate-mediated external mutation authorization.
+- **MCP + plugin hardening** (PR #1429, #1431, #1432) — closed app CSP/elicitation gaps, separated plugin UI actions from LLM tools, and hardened `hostFetch` follow-ups.
+
 ## v0.4.4 — 2026-07-01
 
 Packaging fix-forward for the failed `v0.4.3` tag.
