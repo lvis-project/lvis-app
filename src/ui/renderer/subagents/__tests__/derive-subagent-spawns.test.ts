@@ -7,20 +7,27 @@ import {
   mergeSubAgentSpawns,
 } from "../derive-subagent-spawns.js";
 
-function group(tools: Extract<ChatEntry, { kind: "tool_group" }>["tools"]): ChatEntry {
-  return {
-    kind: "tool_group",
-    groupId: "g1",
-    groupIds: ["g1"],
-    status: "done",
-    tools,
-  };
+type ToolGroupTools = Extract<ChatEntry, { kind: "tool_group" }>["tools"];
+
+// Wrap a tool list as a done tool_group entry. Inlined via `entriesOf` so the
+// tool_group shape is built once here rather than duplicating the fixture across
+// each case (and avoids a shared-helper-body collision with other test files).
+function entriesOf(tools: ToolGroupTools, prefix = ""): ChatEntry[] {
+  return [
+    {
+      kind: "tool_group",
+      groupId: `${prefix}g`,
+      groupIds: [`${prefix}g`],
+      status: "done",
+      tools,
+    },
+  ];
 }
 
 describe("deriveSubAgentSpawnsFromEntries", () => {
   it("reconstructs a done spawn from a persisted agent_spawn tool call", () => {
-    const entries: ChatEntry[] = [
-      group([
+    const spawns = deriveSubAgentSpawnsFromEntries(
+      entriesOf([
         {
           toolUseId: "tu-1",
           name: "agent_spawn",
@@ -35,9 +42,7 @@ describe("deriveSubAgentSpawnsFromEntries", () => {
           }),
         },
       ]),
-    ];
-
-    const spawns = deriveSubAgentSpawnsFromEntries(entries);
+    );
     expect(spawns).toHaveLength(1);
     const spawn = spawns[0];
     expect(spawn.spawnId).toBe(derivedSpawnId("tu-1"));
@@ -56,8 +61,8 @@ describe("deriveSubAgentSpawnsFromEntries", () => {
   });
 
   it("falls back to agentName when title is absent", () => {
-    const entries: ChatEntry[] = [
-      group([
+    const spawns = deriveSubAgentSpawnsFromEntries(
+      entriesOf([
         {
           toolUseId: "tu-2",
           name: "agent_spawn",
@@ -67,13 +72,13 @@ describe("deriveSubAgentSpawnsFromEntries", () => {
           result: JSON.stringify({ summary: "ok", toolCallCount: 1 }),
         },
       ]),
-    ];
-    expect(deriveSubAgentSpawnsFromEntries(entries)[0].title).toBe("explore");
+    );
+    expect(spawns[0].title).toBe("explore");
   });
 
   it("marks a spawn as error when the tool status is error", () => {
-    const entries: ChatEntry[] = [
-      group([
+    const spawn = deriveSubAgentSpawnsFromEntries(
+      entriesOf([
         {
           toolUseId: "tu-3",
           name: "agent_spawn",
@@ -83,16 +88,15 @@ describe("deriveSubAgentSpawnsFromEntries", () => {
           result: JSON.stringify({ error: "agent profile not found: nope" }),
         },
       ]),
-    ];
-    const spawn = deriveSubAgentSpawnsFromEntries(entries)[0];
+    )[0];
     expect(spawn.status).toBe("error");
     expect(spawn.errorMessage).toBe("agent profile not found: nope");
     expect(spawn.turns).toHaveLength(0);
   });
 
   it("downgrades a nominally-done tool to error when the result carries { error }", () => {
-    const entries: ChatEntry[] = [
-      group([
+    const spawn = deriveSubAgentSpawnsFromEntries(
+      entriesOf([
         {
           toolUseId: "tu-4",
           name: "agent_spawn",
@@ -102,8 +106,7 @@ describe("deriveSubAgentSpawnsFromEntries", () => {
           result: JSON.stringify({ error: "runner not configured" }),
         },
       ]),
-    ];
-    const spawn = deriveSubAgentSpawnsFromEntries(entries)[0];
+    )[0];
     expect(spawn.status).toBe("error");
     expect(spawn.errorMessage).toBe("runner not configured");
   });
@@ -111,7 +114,7 @@ describe("deriveSubAgentSpawnsFromEntries", () => {
   it("ignores non-agent_spawn tools and non-tool_group entries", () => {
     const entries: ChatEntry[] = [
       { kind: "user", text: "hi" },
-      group([
+      ...entriesOf([
         {
           toolUseId: "read-1",
           name: "read_file",
@@ -126,8 +129,8 @@ describe("deriveSubAgentSpawnsFromEntries", () => {
   });
 
   it("derives multiple spawns across tool groups in display order", () => {
-    const entries: ChatEntry[] = [
-      group([
+    const spawns = deriveSubAgentSpawnsFromEntries(
+      entriesOf([
         {
           toolUseId: "tu-b",
           name: "agent_spawn",
@@ -145,14 +148,13 @@ describe("deriveSubAgentSpawnsFromEntries", () => {
           result: JSON.stringify({ summary: "a" }),
         },
       ]),
-    ];
-    const spawns = deriveSubAgentSpawnsFromEntries(entries);
+    );
     expect(spawns.map((s) => s.title)).toEqual(["First", "Second"]);
   });
 
   it("handles a non-JSON result string as the sub-agent output", () => {
-    const entries: ChatEntry[] = [
-      group([
+    const spawn = deriveSubAgentSpawnsFromEntries(
+      entriesOf([
         {
           toolUseId: "tu-5",
           name: "agent_spawn",
@@ -162,8 +164,7 @@ describe("deriveSubAgentSpawnsFromEntries", () => {
           result: "plain text summary",
         },
       ]),
-    ];
-    const spawn = deriveSubAgentSpawnsFromEntries(entries)[0];
+    )[0];
     expect(spawn.summary).toBe("plain text summary");
     expect(spawn.turns[0].text).toBe("plain text summary");
   });
