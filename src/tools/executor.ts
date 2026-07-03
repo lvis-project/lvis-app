@@ -32,18 +32,17 @@ import type {
 import { trustFromSource } from "./types.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { runWithCeiling } from "./executor-ceiling.js";
-import type { PermissionManager, PermissionCheckResult } from "../permissions/permission-manager.js";
+import { PermissionManager, type PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
 import {
   buildPermissionEvaluationContext,
   type PermissionEvaluationContext,
 } from "../permissions/evaluation-context.js";
-import { isSensitivePath, canonicalizePathForMatch, caseFoldForMatch } from "../permissions/sensitive-paths.js";
+import { canonicalizePathForMatch, caseFoldForMatch } from "../permissions/sensitive-paths.js";
 import {
   buildAllowedScope,
   buildRuntimeAllowedDirectories,
   isFilesystemRootPath,
-  isPathAllowed,
   pickClosestParent,
   validateDirectoryAddition,
 } from "../permissions/allowed-directories.js";
@@ -1168,9 +1167,16 @@ export class ToolExecutor {
       filePath,
       canonicalPath: caseFoldForMatch(canonicalizePathForMatch(filePath)),
     }));
-    const sensitiveTarget = canonicalTargets
-      .map((target) => ({ ...target, pattern: isSensitivePath(target.canonicalPath) }))
-      .find((target) => target.pattern);
+    // Layer 0/1 path-scope predicate lives in PermissionManager (SOT V2).
+    // The executor keeps canonicalization (above) + the layer-0 deny and
+    // layer-1 modal wiring below; PM only answers "which target is sensitive
+    // / out-of-allowed". Static call so this runs even when no
+    // PermissionManager instance is wired (the Layer 0/1 hard-block and
+    // out-of-directory prompt are not gated on `this.permissionManager`).
+    const sensitiveTarget = PermissionManager.checkPathScope({
+      canonicalTargets,
+      allowedDirectories: invocationAllowedScope.directories,
+    }).sensitiveHit;
     const targetFilePath = canonicalTargets[0]?.filePath;
     const sensitivePathPattern = sensitiveTarget?.pattern ?? null;
 
@@ -1221,9 +1227,13 @@ export class ToolExecutor {
     // from SDK manifest authority metadata by plugin-tool-adapter.
     if (canonicalTargets.length > 0) {
       while (true) {
-        const outOfAllowedTarget = canonicalTargets.find(
-          (target) => !isPathAllowed(target.canonicalPath, invocationAllowedScope),
-        );
+        // Re-run the Layer 1 predicate each iteration: applyApprovedDirectory
+        // widens `invocationAllowedScope` after a grant, so the scope must be
+        // re-supplied to PermissionManager.checkPathScope (SOT V2).
+        const outOfAllowedTarget = PermissionManager.checkPathScope({
+          canonicalTargets,
+          allowedDirectories: invocationAllowedScope.directories,
+        }).outOfAllowed;
         if (!outOfAllowedTarget) break;
         const dirLayerResult: PermissionCheckResult = {
           decision: "ask",
