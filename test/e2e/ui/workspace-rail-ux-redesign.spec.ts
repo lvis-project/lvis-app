@@ -179,4 +179,92 @@ test.describe("workspace rail UX redesign", () => {
     const shot = await page.getByTestId("chat-side-panel").screenshot();
     await test.info().attach("subagent-tab-empty.png", { contentType: "image/png", body: shot });
   });
+
+  test("subagent tab: a spawn + its resume (shared childSessionId) render as ONE unified, live-growing transcript", async () => {
+    // Inject the real `lvis:agent-spawn:event` stream (the same channel the main
+    // process forwards on) so the renderer's live spawn hook + the viewer's
+    // groupSubAgentSessions run end-to-end without a real LLM. The original spawn
+    // and its resume are two separate agent_spawn calls (two spawnIds/toolUseIds)
+    // that share ONE childSessionId — the viewer must unify them into a single
+    // row whose transcript concatenates both segments.
+    await page.setViewportSize({ width: 1400, height: 840 });
+    await page.getByTestId("chat-side-panel-toggle").click();
+    await page.getByTestId("chat-side-panel-launcher-subagent").click();
+    await expect(page.getByTestId("chat-side-panel-tab-subagent")).toBeVisible();
+
+    const sendSpawn = async (event: Record<string, unknown>): Promise<void> => {
+      await app.evaluate(({ BrowserWindow }, ev) => {
+        const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+        if (!win) return;
+        win.webContents.send("lvis:agent-spawn:event", ev);
+      }, event);
+    };
+
+    const CHILD = "e2e-child-session";
+    // 1) original spawn runs to an INCOMPLETE finish (learns its childSessionId
+    //    on `done`, the first phase to carry the join key).
+    await sendSpawn({ spawnId: "e2e-orig", type: "start", title: "E2E research", toolUseId: "tu-orig" });
+    await sendSpawn({
+      spawnId: "e2e-orig",
+      type: "done",
+      summary: "partial",
+      toolCallCount: 2,
+      childSessionId: CHILD,
+      entries: [{ kind: "assistant", text: "ORIGINAL_SEGMENT", streaming: false }],
+    });
+
+    const detail = page.getByTestId("chat-side-panel-subagent-detail");
+    await expect(page.getByTestId("chat-side-panel-subagent-row")).toHaveCount(1);
+    await expect(detail).toContainText("ORIGINAL_SEGMENT");
+
+    // 2) a resume (separate spawnId, SAME childSessionId) starts and streams a
+    //    growing tail. The unified transcript's prefix (the original segment)
+    //    must stay stable while the tail grows — no flicker / re-mount.
+    await sendSpawn({ spawnId: "e2e-resume", type: "start", title: "(sub-agent)", toolUseId: "tu-resume", childSessionId: CHILD });
+    await sendSpawn({
+      spawnId: "e2e-resume",
+      type: "activity",
+      toolCallCount: 1,
+      childSessionId: CHILD,
+      entries: [{ kind: "assistant", text: "RESUME_TAIL_A", streaming: false }],
+    });
+
+    // Still ONE row; prefix stable, first tail chunk appended.
+    await expect(page.getByTestId("chat-side-panel-subagent-row")).toHaveCount(1);
+    await expect(detail).toContainText("ORIGINAL_SEGMENT");
+    await expect(detail).toContainText("RESUME_TAIL_A");
+
+    await sendSpawn({
+      spawnId: "e2e-resume",
+      type: "done",
+      summary: "done",
+      toolCallCount: 2,
+      childSessionId: CHILD,
+      entries: [
+        { kind: "assistant", text: "RESUME_TAIL_A", streaming: false },
+        { kind: "assistant", text: "RESUME_TAIL_B", streaming: false },
+      ],
+    });
+
+    // Final assertion: ONE row, and the concatenated transcript is ordered
+    // original → resume tail A → resume tail B (stable prefix, grown tail).
+    await expect(page.getByTestId("chat-side-panel-subagent-row")).toHaveCount(1);
+    await expect(detail).toContainText("RESUME_TAIL_B");
+    const order = await detail.evaluate((el) => {
+      const text = el.textContent ?? "";
+      return {
+        orig: text.indexOf("ORIGINAL_SEGMENT"),
+        tailA: text.indexOf("RESUME_TAIL_A"),
+        tailB: text.indexOf("RESUME_TAIL_B"),
+      };
+    });
+    expect(order.orig).toBeGreaterThanOrEqual(0);
+    expect(order.tailA).toBeGreaterThan(order.orig);
+    expect(order.tailB).toBeGreaterThan(order.tailA);
+    // The row carries the ORIGINAL's title (one logical agent = one name).
+    await expect(page.getByTestId("chat-side-panel-subagent-row")).toContainText("E2E research");
+
+    const shot = await page.getByTestId("chat-side-panel").screenshot();
+    await test.info().attach("subagent-tab-unified-resume.png", { contentType: "image/png", body: shot });
+  });
 });

@@ -1489,6 +1489,8 @@ export function buildInternalApiSurface() {
       toolCallCount?: number;
       message?: string;
       toolUseId?: string;
+      // JOIN KEY for the unified resume transcript (mirrors `AgentSpawnEvent`).
+      childSessionId?: string;
     }) => void,
   ) => {
     const listener = (_e: unknown, ev: Parameters<typeof handler>[0]) => handler(ev);
