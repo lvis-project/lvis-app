@@ -41,6 +41,24 @@ export type ChatStreamSink = (channel: string, payload: unknown) => void;
  */
 export const STREAM_TURN_OPTIONS = { inputOrigin: "user-keyboard" as const };
 
+/**
+ * Wire channels a streamed turn publishes to. Defaults to the main chat pair so
+ * the main callsite stays BYTE-IDENTICAL. The side-chat transport
+ * (`domains/sidechat.ts`) passes its dedicated `CHANNELS.sidechat.*` pair so its
+ * frames never reach the main renderer's `onChatStream` subscriber (No-Fallback:
+ * the sink is never asked to guess which session a frame belongs to — the wire
+ * channel itself is the discriminator).
+ */
+export interface StreamTurnChannels {
+  stream: string;
+  fallback: string;
+}
+
+const DEFAULT_STREAM_CHANNELS: StreamTurnChannels = {
+  stream: CHANNELS.chat.stream,
+  fallback: CHANNELS.chat.fallback,
+};
+
 export async function runStreamedTurn(
   conversationLoop: ConversationLoop,
   input: string,
@@ -51,9 +69,10 @@ export async function runStreamedTurn(
     inputOrigin: ChatInputOrigin;
     rolePrompt?: ActiveRolePrompt;
   },
+  channels: StreamTurnChannels = DEFAULT_STREAM_CHANNELS,
 ): Promise<TurnResult> {
   const send = (payload: unknown) =>
-    sink(CHANNELS.chat.stream, { streamId, ...((payload as Record<string, unknown>) ?? {}) });
+    sink(channels.stream, { streamId, ...((payload as Record<string, unknown>) ?? {}) });
   const originSource = options.inputOrigin === "plugin-emitted"
     ? parseImportedTriggerEnvelope(input)
     : null;
@@ -163,7 +182,7 @@ export async function runStreamedTurn(
           ...(breakdown ? { breakdown } : {}),
         }),
       onLlmStatus: (status) => send({ type: "llm_status", ...status }),
-      onFallback: (from, to) => sink(CHANNELS.chat.fallback, { from, to }),
+      onFallback: (from, to) => sink(channels.fallback, { from, to }),
       onGuidanceInjected: (text) => send({ type: "guidance_injected", text }),
       onGuidanceDropped: (text) => send({ type: "guidance_dropped", text }),
     },

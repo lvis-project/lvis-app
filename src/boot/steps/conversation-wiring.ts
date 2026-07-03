@@ -19,9 +19,12 @@ import {
   createPostTurnHookChain,
   createConversationLoop,
   createRoutineConversationLoop,
+  createSideChatConversationLoop,
   createCallLlm,
   createCallLlmForPlugin,
 } from "../conversation.js";
+import { MemoryManager } from "../../memory/memory-manager.js";
+import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import { registerPluginNotifications } from "../plugins.js";
 import { registerPluginEventBridge } from "./ipc-bridge.js";
 import { readPermissionSettings } from "../../permissions/permission-settings-store.js";
@@ -158,6 +161,37 @@ export function wireConversation(ctx: BootContext): void {
     rewireReviewerAgent,
     llmFetch,
   });
+
+  // Side-chat (workspace rail) — a SECOND ConversationLoop with an ISOLATED
+  // MemoryManager rooted at `~/.lvis/side-chat/`. The dir path is resolved
+  // through openFeatureNamespace (storage-namespace SOT) rather than a raw
+  // join, so side-chat data lives in its own domain directory and can be
+  // cleared/backed-up as a unit. The loop shares the same settingsService
+  // (model inheritance) and permissionManager/approvalGate (permission
+  // inheritance) as the main chat but never mixes sessions with it — the
+  // isolated store guarantees `chat.sessions` (main) never lists a side-chat
+  // session. Its own history/sessionId keep the two streams fully independent.
+  const sideChatMemoryManager = new MemoryManager({
+    lvisDir: openFeatureNamespace("side-chat").dir,
+  });
+  sideChatMemoryManager.load();
+  const sideChatConversationLoop = createSideChatConversationLoop({
+    settingsService,
+    keywordEngine,
+    routeEngine,
+    toolRegistry,
+    permissionManager,
+    approvalGate,
+    hookRunner,
+    scriptHookManager,
+    bashAstValidator,
+    pluginRuntime,
+    auditLogger: bootAuditLogger,
+    llmFetch,
+    sideChatMemoryManager,
+    getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
+  });
+  ctx.sideChatConversationLoop = sideChatConversationLoop;
 
   // Late-binding 주입 — ConversationLoop 생성 직후.
   lateBinding.conversationLoopRef.fn = conversationLoop;

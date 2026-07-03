@@ -32,6 +32,7 @@ import { registerAuthHandlers } from "./domains/auth.js";
 import { registerDemoHandlers } from "./domains/demo.js";
 import { registerTourHandlers } from "./domains/tour.js";
 import { registerChatHandlers } from "./domains/chat.js";
+import { registerSideChatHandlers } from "./domains/sidechat.js";
 import { registerPluginsHandlers } from "./domains/plugins.js";
 import { registerPromptHandlers } from "./domains/prompts.js";
 import { registerUsageHandlers } from "./domains/usage.js";
@@ -75,6 +76,7 @@ export function registerIpcHandlers(
   registerDemoHandlers(deps);
   registerTourHandlers(deps);
   registerChatHandlers(deps);
+  registerSideChatHandlers(deps);
   registerPluginsHandlers(deps);
   registerPromptHandlers(deps);
   registerUsageHandlers(deps);

@@ -34,6 +34,7 @@ export function assembleAppServices(ctx: BootContext): AppServices {
     toolRegistry: ctx.toolRegistry,
     systemPromptBuilder: ctx.systemPromptBuilder,
     conversationLoop: ctx.conversationLoop,
+    sideChatConversationLoop: ctx.sideChatConversationLoop,
     routineEngine: ctx.routineEngine,
     mcpManager: ctx.mcpManager,
     mcpArtifactStore: ctx.mcpArtifactStore,
