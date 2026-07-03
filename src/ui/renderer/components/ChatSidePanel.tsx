@@ -62,6 +62,8 @@ import { FileEditDiff } from "./FileEditDiff.js";
 import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
 import { McpAppView } from "./McpAppView.js";
 import { PtyTerminalView } from "./PtyTerminalView.js";
+import { VerticalSplitLayout } from "./VerticalSplitLayout.js";
+import { useVerticalSplit } from "../hooks/use-vertical-split.js";
 
 interface FileTreeNode {
   id: string;
@@ -73,8 +75,6 @@ interface FileTreeNode {
 
 const FILE_TARGET_KINDS = new Set<ChatPreviewTarget["kind"]>(["file", "diff", "image"]);
 const BROWSER_TARGET_KINDS = new Set<ChatPreviewTarget["kind"]>(["html", "url"]);
-const FILE_TREE_MIN_PERCENT = 22;
-const FILE_TREE_MAX_PERCENT = 72;
 /** Pointer travel (px) that promotes a tab press into a horizontal pan. */
 const TAB_DRAG_THRESHOLD_PX = 6;
 
@@ -1462,12 +1462,10 @@ function FileBrowserWorkspace({
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
-  const [treePanePercent, setTreePanePercent] = useState(45);
+  const { topPercent, setTopPercent, commitTopPercent } = useVerticalSplit(api, "sidePanelSplitFilePercent");
   // A concrete filesystem file opened from the project-roots browser. Takes
   // precedence over the session-artifact selection in the detail pane.
   const [fsPath, setFsPath] = useState<string | null>(null);
-  const splitLayoutRef = useRef<HTMLDivElement | null>(null);
-  const resizeCleanupRef = useRef<(() => void) | null>(null);
   const tree = useMemo(() => filterFileTree(buildFileTree(files), query), [files, query]);
   const filteredFiles = useMemo(
     () => files.filter((file) => matchesQuery(query, file.label, file.detail, file.path, file.sourceLabel)),
@@ -1500,120 +1498,72 @@ function FileBrowserWorkspace({
     }
   }, [onSelect, selectedFile, selectedId]);
 
-  useEffect(() => () => resizeCleanupRef.current?.(), []);
-
-  const updateTreePaneFromClientY = (clientY: number) => {
-    const layout = splitLayoutRef.current;
-    if (!layout) return;
-    const rect = layout.getBoundingClientRect();
-    if (rect.height <= 0) return;
-    const next = ((clientY - rect.top) / rect.height) * 100;
-    setTreePanePercent(clampNumber(Math.round(next), FILE_TREE_MIN_PERCENT, FILE_TREE_MAX_PERCENT));
-  };
-
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-file-browser">
       <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
-      <div
-        ref={splitLayoutRef}
-        className="grid min-h-0 w-full min-w-0 flex-1 overflow-hidden"
-        data-testid="chat-side-panel-file-split-layout"
-        style={{ gridTemplateRows: `${treePanePercent}% 0.75rem minmax(0, 1fr)` }}
-      >
-        <div className="min-h-0 space-y-2 overflow-auto border-b p-2" data-testid="chat-side-panel-file-tree">
-          <ProjectRootsBrowser
-            selectedPath={fsPath}
-            onOpenFile={(path) => {
-              setFsPath(path);
-            }}
-          />
-          <div className="border-t pt-1">
-            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {t("chatPreviewRail.sessionFilesSection")}
+      <VerticalSplitLayout
+        topPercent={topPercent}
+        onDragChange={setTopPercent}
+        onCommit={commitTopPercent}
+        ariaLabel={t("chatPreviewRail.resizeFilePanels")}
+        testId="chat-side-panel-file-split-layout"
+        separatorTestId="chat-side-panel-file-splitter"
+        top={
+          <div className="min-h-0 space-y-2 p-2" data-testid="chat-side-panel-file-tree">
+            <ProjectRootsBrowser
+              selectedPath={fsPath}
+              onOpenFile={(path) => {
+                setFsPath(path);
+              }}
+            />
+            <div className="border-t pt-1">
+              <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {t("chatPreviewRail.sessionFilesSection")}
+              </div>
+              {hasFiles && tree.length > 0 ? (
+                <FileTreeRows
+                  nodes={tree}
+                  selectedFileId={fsPath ? undefined : selectedFile?.id}
+                  onSelectFile={(file) => {
+                    setFsPath(null);
+                    if (file.previewTargetId) onSelect(file.previewTargetId);
+                  }}
+                />
+              ) : (
+                <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>
+              )}
             </div>
-            {hasFiles && tree.length > 0 ? (
-              <FileTreeRows
-                nodes={tree}
-                selectedFileId={fsPath ? undefined : selectedFile?.id}
-                onSelectFile={(file) => {
-                  setFsPath(null);
-                  if (file.previewTargetId) onSelect(file.previewTargetId);
-                }}
-              />
+          </div>
+        }
+        bottom={
+          <div className="min-h-0 p-3">
+            {fsTarget ? (
+              <div className="space-y-3">
+                <DetailHeader target={fsTarget} />
+                <PreviewBody api={api} sessionId={sessionId} target={fsTarget} />
+              </div>
+            ) : selectedFileTarget ? (
+              <div className="space-y-3">
+                <DetailHeader target={selectedFileTarget} />
+                <PreviewBody api={api} sessionId={sessionId} target={selectedFileTarget} />
+              </div>
+            ) : selectedFile ? (
+              <div className="space-y-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{selectedFile.label}</h3>
+                </div>
+                <div className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 font-mono text-[11px] [overflow-wrap:anywhere]">
+                  {selectedFile.path}
+                </div>
+                <div className="text-[11px] text-muted-foreground">{t("chatPreviewRail.pathOnlyHint")}</div>
+              </div>
             ) : (
-              <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>
+              <div className="text-xs text-muted-foreground">{t("chatPreviewRail.emptyState")}</div>
             )}
           </div>
-        </div>
-        <div
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label={t("chatPreviewRail.resizeFilePanels")}
-          tabIndex={0}
-          data-testid="chat-side-panel-file-splitter"
-          className="group flex cursor-row-resize touch-none select-none items-center px-2 outline-none"
-          onPointerDown={(event) => {
-            event.preventDefault();
-            event.currentTarget.setPointerCapture?.(event.pointerId);
-            resizeCleanupRef.current?.();
-            updateTreePaneFromClientY(event.clientY);
-            const onMove = (moveEvent: PointerEvent) => updateTreePaneFromClientY(moveEvent.clientY);
-            const cleanup = () => {
-              window.removeEventListener("pointermove", onMove);
-              window.removeEventListener("pointerup", cleanup);
-              window.removeEventListener("pointercancel", cleanup);
-              resizeCleanupRef.current = null;
-            };
-            resizeCleanupRef.current = cleanup;
-            window.addEventListener("pointermove", onMove);
-            window.addEventListener("pointerup", cleanup);
-            window.addEventListener("pointercancel", cleanup);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowUp") {
-              event.preventDefault();
-              setTreePanePercent((value) => clampNumber(value - 5, FILE_TREE_MIN_PERCENT, FILE_TREE_MAX_PERCENT));
-            } else if (event.key === "ArrowDown") {
-              event.preventDefault();
-              setTreePanePercent((value) => clampNumber(value + 5, FILE_TREE_MIN_PERCENT, FILE_TREE_MAX_PERCENT));
-            } else if (event.key === "Home") {
-              event.preventDefault();
-              setTreePanePercent(FILE_TREE_MIN_PERCENT);
-            } else if (event.key === "End") {
-              event.preventDefault();
-              setTreePanePercent(FILE_TREE_MAX_PERCENT);
-            }
-          }}
-        >
-          <span className="h-0.5 w-full rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
-        </div>
-        <div className="min-h-0 overflow-auto p-3">
-          {fsTarget ? (
-            <div className="space-y-3">
-              <DetailHeader target={fsTarget} />
-              <PreviewBody api={api} sessionId={sessionId} target={fsTarget} />
-            </div>
-          ) : selectedFileTarget ? (
-            <div className="space-y-3">
-              <DetailHeader target={selectedFileTarget} />
-              <PreviewBody api={api} sessionId={sessionId} target={selectedFileTarget} />
-            </div>
-          ) : selectedFile ? (
-            <div className="space-y-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{selectedFile.label}</h3>
-              </div>
-              <div className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 font-mono text-[11px] [overflow-wrap:anywhere]">
-                {selectedFile.path}
-              </div>
-              <div className="text-[11px] text-muted-foreground">{t("chatPreviewRail.pathOnlyHint")}</div>
-            </div>
-          ) : (
-            <div className="text-xs text-muted-foreground">{t("chatPreviewRail.emptyState")}</div>
-          )}
-        </div>
-      </div>
+        }
+      />
     </div>
   );
 }
