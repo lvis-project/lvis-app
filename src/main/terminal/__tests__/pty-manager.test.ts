@@ -135,7 +135,7 @@ describe("pty-manager fail-closed", () => {
     gateActive = false;
     const res = await spawnTerminal({ tabId: "terminal:1" });
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.reason).toBe("not-fs-contained");
+    if (!res.ok) expect(res.reason).toBe("not-shell-contained");
     expect(ptySpawnMock).not.toHaveBeenCalled();
     expect(wrapWorkerCommandMock).not.toHaveBeenCalled();
   });
@@ -144,7 +144,7 @@ describe("pty-manager fail-closed", () => {
     shellContained = false;
     const res = await spawnTerminal({ tabId: "terminal:1" });
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.reason).toBe("not-fs-contained");
+    if (!res.ok) expect(res.reason).toBe("not-shell-contained");
     expect(ptySpawnMock).not.toHaveBeenCalled();
   });
 
@@ -167,10 +167,10 @@ describe("pty-manager happy path (fs-contained)", () => {
       string,
       { filesystem: { allowWrite: string[]; allowRead: string[]; denyRead: string[]; denyWrite: string[] } },
     ];
-    // denyRead floor is RESTATED (per-command denyRead REPLACES the ASRT boot floor).
+    // denyRead floor is RESTATED (per-command denyRead REPLACES the ASRT boot array).
     expect(options.filesystem.denyRead).toContain("/home/u/.lvis/secrets");
     expect(options.filesystem.denyRead).toContain("/home/u/.ssh");
-    // denyWrite FLOOR is RESTATED (per-command denyWrite REPLACES the boot floor) —
+    // denyWrite FLOOR is RESTATED (per-command denyWrite REPLACES the boot array) —
     // shell-rc / ~/.ssh / ~/.config / LaunchAgents persistence vectors are denied.
     expect(options.filesystem.denyWrite).toContain("/home/u/.zshrc");
     expect(options.filesystem.denyWrite).toContain("/home/u/.ssh");

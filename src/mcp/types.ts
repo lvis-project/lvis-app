@@ -162,7 +162,7 @@ export interface McpStdioServerConfig extends McpServerConfigBase {
   apiKeyEnv?: string;
   /**
    * HOST-POPULATED filesystem-jail root for the ASRT-wrapped worker spawn
-   * (worker-egress PR1). When the OS-tool sandbox gate is ON, the stdio worker
+   * When the OS-tool sandbox gate is ON, the stdio worker
    * is wrapped through {@link ../permissions/asrt-sandbox.js wrapWorkerCommand}
    * and this directory is the ONLY path the wrapped process may write — its
    * per-server sandbox root under `~/.lvis/mcp/<serverId>/`.

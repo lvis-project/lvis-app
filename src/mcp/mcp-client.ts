@@ -1054,7 +1054,7 @@ class StdioTransport implements McpTransport {
   private closedExternally = false;
   /**
    * True only when THIS transport's worker was actually spawned through the
-   * ASRT wrap (worker-egress PR1). Drives both the per-command cleanup on close
+   * ASRT wrap. Drives both the per-command cleanup on close
    * (Linux bwrap mount teardown) AND the reviewer's genuine-capability signal
    * via {@link markMcpServerWrapped}. Stays false on the plain-spawn path so an
    * unwrapped server never reports `asrt` to the reviewer (no-leak invariant).
@@ -1065,7 +1065,7 @@ class StdioTransport implements McpTransport {
    * (unexpected crash, OS kill, or the explicit close() path). Ensures
    * `unmarkMcpServerWrapped` + `cleanupAsrtSandboxAfterCommand` run EXACTLY
    * ONCE per wrapped worker lifetime regardless of exit cause (worker-egress
-   * PR1 MAJOR fix — unexpected child death previously bypassed cleanup,
+   * Unexpected child death previously bypassed cleanup,
    * violating the no-leak invariant and leaking the bwrap ref-count).
    */
   private asrtCleanupRan = false;
@@ -1103,7 +1103,7 @@ class StdioTransport implements McpTransport {
         : {}),
     };
 
-    // worker-egress PR1 — gate DEFAULT-OFF. When the OS-tool sandbox is active,
+    // ASRT stdio worker wrap — gate DEFAULT-OFF. When the OS-tool sandbox is active,
     // route this long-lived stdio worker through ASRT's wrapWorkerCommand so its
     // egress is enforced by the SAME global strict-union allow-list as host tools
     // and its writes are confined to the per-server filesystem jail. ASRT is
@@ -1140,7 +1140,7 @@ class StdioTransport implements McpTransport {
   }
 
   /**
-   * Spawn the stdio worker WRAPPED by ASRT (worker-egress PR1). The filesystem
+   * Spawn the stdio worker WRAPPED by ASRT. The filesystem
    * write-jail confines writes to the host-derived per-server sandbox root. For
    * reads it applies the CENTRALIZED host-secret / sensitive read DENY-LIST
    * ({@link getDefaultSensitiveReadDenyPaths}) — secrets, session/routine
@@ -1160,8 +1160,8 @@ class StdioTransport implements McpTransport {
         "[mcp-client] ASRT-wrapped MCP stdio on Windows is disabled because " +
           "ASRT 0.0.63 cannot apply per-server filesystem.allowRead/allowWrite " +
           "grants per exec; only denyRead/denyWrite are supported. Keep MCP " +
-          "stdio fail-closed until the Windows session-grant/control-channel " +
-          "work in #1367 lands.",
+          "stdio fail-closed until a Windows session-grant/control-channel " +
+          "design lands.",
       );
     }
 
@@ -1193,8 +1193,8 @@ class StdioTransport implements McpTransport {
     // No userDataDir arg here — mcp-client does not import electron. The
     // fallback per-platform derivation (XDG-aware on Linux) provides coverage.
     const denyRead = getDefaultSensitiveReadDenyPaths();
-    // denyWrite is likewise per-command and replaces the shared boot floor.
-    // Restate the centralized persistence-vector floor so an authorized MCP
+    // denyWrite is likewise per-command and replaces the shared boot array.
+    // Restate the centralized persistence-vector SOT so an authorized MCP
     // sandboxRoot cannot write shell rc files, credential dirs, LaunchAgents, or
     // cron-like re-exec hooks if a future config broadens allowWrite.
     const denyWrite = getDefaultSensitiveWriteDenyPaths();
@@ -1231,7 +1231,7 @@ class StdioTransport implements McpTransport {
   }
 
   /**
-   * Compose the WRAPPED worker's env per platform (worker-egress PR1, the 3b
+   * Compose the WRAPPED worker's env per platform (the 3b
    * cross-platform gotcha):
    *   - mac/linux: ASRT bakes the proxy into the command string and returns
    *     `env === process.env`; buildSandboxedChildEnv contributes only the
@@ -1303,7 +1303,7 @@ class StdioTransport implements McpTransport {
 
   async close(): Promise<void> {
     this.closedExternally = true;
-    // worker-egress PR1: release the per-command ASRT state via the idempotent
+    // Release the per-command ASRT state via the idempotent
     // one-shot helper. This is the EXPLICIT-CLOSE path; the unexpected-exit path
     // (process 'exit'/'error' handlers in setupProcessHandlers) calls the same
     // helper. Whichever fires first wins; the second is a no-op.
@@ -1357,7 +1357,7 @@ class StdioTransport implements McpTransport {
 
     this.process.on("exit", (code, signal) => {
       log.warn(`${this.config.id} 프로세스 종료: code=${code}, signal=${signal}`);
-      // worker-egress PR1 MAJOR fix: fire ASRT cleanup on ANY child termination,
+      // Fire ASRT cleanup on ANY child termination,
       // including unexpected crashes/kills. The idempotent one-shot helper ensures
       // this and the explicit close() path do not double-run the cleanup.
       this.runAsrtCleanupOnce();

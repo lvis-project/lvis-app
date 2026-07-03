@@ -166,7 +166,7 @@ export class McpManager {
       this.clients.delete(config.id);
     }
 
-    // worker-egress PR1: the HOST decides the stdio worker's filesystem-jail
+    // The HOST decides the stdio worker's filesystem-jail
     // root — it is NEVER sourced from plugin/renderer/marketplace/config-file
     // input. `connectServer` is the single chokepoint every external MCP server
     // config passes through before `new McpClient`, so the invariant "the host
@@ -229,7 +229,7 @@ export class McpManager {
 
   /**
    * Host-derive (and create) the per-server filesystem-jail root for an external
-   * stdio MCP worker — `~/.lvis/mcp/<serverId>/sandbox/` (worker-egress PR1).
+   * stdio MCP worker — `~/.lvis/mcp/<serverId>/sandbox/`.
    *
    * This is the ONLY writable path the ASRT-wrapped worker is granted. The
    * directory is created mode 0o700 per the storage-namespace convention so the
@@ -557,7 +557,7 @@ export class McpManager {
     // - env: may contain injected credentials
     // - args: may embed secrets on stdio command lines
     // - sandboxRoot: host-derived filesystem-jail path; never a renderer concern
-    //   and never sourced from renderer input (worker-egress PR1).
+    //   and never sourced from renderer input.
     const { apiKey: _apiKey, headers: _headers, env: _env, args: _args, ...rest } =
       config;
     const { sandboxRoot: _sandboxRoot, ...safe } = rest as Record<string, unknown>;

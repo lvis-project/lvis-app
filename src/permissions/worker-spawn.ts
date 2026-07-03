@@ -1,13 +1,12 @@
 /**
  * Host-mediated long-lived plugin-worker spawn primitive.
  *
- * ⚠️ HOST PRIMITIVE — NO PRODUCTION CALLER YET (consumer lands in PR D-3) ⚠️
+ * ⚠️ HOST PRIMITIVE — TOOL PRODUCER NOT WIRED YET ⚠️
  * {@link spawnWorker} is the host half of worker-confinement-via-ASRT for an
  * HTTP plugin worker the HOST connects INBOUND to. It is added to the host +
- * hostApi surface here; the local-indexer worker is wired to it in PR D-3
- * (which owns the plugin/worker UDS contract). It is intentionally exported and
- * referenced by the hostApi factory (boot/steps/plugin-runtime.ts) but has no
- * production call site in THIS PR — do not flag it as dead code.
+ * hostApi surface here, but no production Tool descriptor is host-routed
+ * through it yet. Until that producer exists, manifest `toolSchemas.workerId`
+ * remains advisory and must not be promoted to `Tool.workerId`.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * WHY A UDS CONTROL CHANNEL (the egress gap this closes)
@@ -105,9 +104,9 @@ export interface SpawnWorkerSpec {
    * non-win32 only — when `socketPath` is non-null):
    *   - a string like `"--uds"` → appends `[udsArgName, socketPath]` to args;
    *   - `{ env: "LVIS_CONTROL_SOCKET" }` → sets that env var to socketPath.
-   * The actual worker contract (which form local-indexer expects) is PR D-3;
-   * this primitive only provides the injection mechanism. Omitted ⇒ the worker
-   * is NOT told the path here (a future contract may discover it another way).
+   * The actual worker contract is plugin-specific; this primitive only provides
+   * the injection mechanism. Omitted ⇒ the worker is NOT told the path here (a
+   * future contract may discover it another way).
    */
   readonly udsArgName?: string | { readonly env: string };
 }
@@ -240,8 +239,8 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     throw new Error(`[worker-spawn] refusing symlinked control dir: ${socketDir}`);
   }
 
-  // Tell the worker where to bind (the injection mechanism; the worker contract
-  // is PR D-3). Either append `[name, path]` to argv or set an env var.
+  // Tell the worker where to bind. Either append `[name, path]` to argv or set
+  // an env var; the higher-level worker protocol remains plugin-specific.
   if (typeof spec.udsArgName === "string") {
     args.push(spec.udsArgName, socketPath);
   } else if (spec.udsArgName && typeof spec.udsArgName === "object") {
@@ -262,7 +261,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
   // `~/.aws`, … — the SAME SOT bash/MCP wraps restate (the #1365 floor).
   const denyRead = getDefaultSensitiveReadDenyPaths();
   // FAIL-CLOSED write floor: per-command `denyWrite` also replaces the shared
-  // boot floor, so restate the centralized persistence-vector deny-list here.
+  // boot array, so restate the centralized persistence-vector SOT here.
   // This keeps long-lived plugin workers symmetric with terminal/MCP wraps.
   const denyWrite = getDefaultSensitiveWriteDenyPaths();
 

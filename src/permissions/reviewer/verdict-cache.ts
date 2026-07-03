@@ -17,9 +17,13 @@
  *     hosts, and target paths drive the deterministic risk classifier, so
  *     those keys use sorted literal JSON.
  *
- * invalidationKey: sha256(allowedDirectories.sorted ‖ scope.json.sorted).
+ * invalidationKey: sha256(allowedDirectories.sorted ‖ scope.json.sorted ‖
+ * sandboxWrapState.json.sorted).
  *   - When settings change (additionalDirectories, scope) the cached
  *     entries with stale invalidationKey are dropped on next read.
+ *   - When ASRT reviewer relaxation depends on a long-lived worker being
+ *     wrapped, that worker's live wrap marker is part of the key. A relaxed
+ *     verdict therefore cannot outlive the confinement that justified it.
  *     Cold-start hit rate is preserved for entries whose context is
  *     still valid.
  *
@@ -81,6 +85,12 @@ export interface VerdictCacheContext {
   allowedDirectories: string[];
   /** Free-form scope object (RoutineScope or `{}` for non-routine paths). */
   scope: Record<string, unknown>;
+  /**
+   * Live sandbox substrate marker for reviewer invalidation. This is separate
+   * from `scope` because routine/settings scope changes and long-lived-worker
+   * wrap/un-wrap changes are different invalidation axes.
+   */
+  sandboxWrapState?: unknown;
 }
 
 function defaultPath(): string {
@@ -159,7 +169,8 @@ function isValueSensitiveCategory(category: ToolCategory): boolean {
 export function computeInvalidationKey(ctx: VerdictCacheContext): string {
   const dirs = [...ctx.allowedDirectories].sort();
   const scopeJson = JSON.stringify(ctx.scope, sortedReplacer);
-  return sha256(`${JSON.stringify(dirs)}\x1f${scopeJson}`);
+  const sandboxWrapJson = JSON.stringify(ctx.sandboxWrapState ?? null, sortedReplacer);
+  return sha256(`${JSON.stringify(dirs)}\x1f${scopeJson}\x1f${sandboxWrapJson}`);
 }
 
 function sortedReplacer(_key: string, value: unknown): unknown {
