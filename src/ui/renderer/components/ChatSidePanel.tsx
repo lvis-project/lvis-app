@@ -66,6 +66,7 @@ import { FileEditDiff } from "./FileEditDiff.js";
 import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
 import { McpAppView } from "./McpAppView.js";
 import { PtyTerminalView } from "./PtyTerminalView.js";
+import { SideChatView } from "./SideChatView.js";
 import { VerticalSplitLayout } from "./VerticalSplitLayout.js";
 import { useVerticalSplit } from "../hooks/use-vertical-split.js";
 import { SubAgentCard, type SubAgentSpawn } from "./SubAgentCard.js";
@@ -2833,14 +2834,10 @@ export function ChatSidePanel({
           ) : activeTab.kind === "subagent" ? (
             <SubAgentViewer api={api} subAgentSpawns={subAgentSpawns} />
           ) : activeTab.kind === "side-chat" ? (
-            // Unreachable in this PR: side-chat has no launcher entry and no
-            // content producer, so a tab of this kind cannot be created until
-            // the companion PR ships the 2nd ConversationLoop. This placeholder
-            // exists only to keep the body dispatch exhaustive alongside the
-            // reserved `side-chat` tab kind (Field-Addition Sweep).
-            <div className="p-4 text-xs text-muted-foreground" data-testid="chat-side-panel-side-chat-placeholder">
-              {t("chatPreviewRail.sideChatComingSoon")}
-            </div>
+            // Side chat — a second, independently-streaming chat session driven
+            // by a dedicated ConversationLoop in main. The view subscribes to the
+            // DEDICATED side-chat IPC channel, fully isolated from the main chat.
+            <SideChatView api={api} />
           ) : (
             <PreviewWorkspace api={api} sessionId={sessionId} targets={previewTargets} selectedId={selectedId} onSelect={onSelect} />
           )}
