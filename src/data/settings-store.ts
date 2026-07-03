@@ -2,7 +2,12 @@ import { safeStorage } from "electron";
 import { closeSync, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
-import { SIDE_PANEL_DEFAULT_WIDTH, SIDE_PANEL_MIN_WIDTH } from "../shared/side-panel.js";
+import {
+  SIDE_PANEL_DEFAULT_WIDTH,
+  SIDE_PANEL_MIN_WIDTH,
+  SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
+  clampSidePanelSplitPercent,
+} from "../shared/side-panel.js";
 import {
   sanitizePluginConfig,
   sanitizePluginConfigKey,
@@ -360,6 +365,17 @@ export interface SystemSettings {
    * [SIDE_PANEL_MIN_WIDTH, viewport) at drag time in the renderer. Default 448.
    */
   sidePanelWidth?: number;
+  /**
+   * Persisted TOP-pane percent of the workspace-rail vertical (list↕viewer)
+   * split, one field per tab kind whose body is a list-over-viewer layout
+   * (file-browser / preview / subagent). Clamped to the
+   * [SIDE_PANEL_SPLIT_MIN_PERCENT, SIDE_PANEL_SPLIT_MAX_PERCENT] pane range at
+   * drag time in the renderer. Browser is excluded — its list moved into a
+   * floating search Popover, so it has no vertical splitter. Default 45.
+   */
+  sidePanelSplitFilePercent?: number;
+  sidePanelSplitPreviewPercent?: number;
+  sidePanelSplitSubagentPercent?: number;
 }
 
 /**
@@ -534,6 +550,9 @@ const DEFAULT_SETTINGS: AppSettings = {
     // LVIS_LOCAL_API=1). #1409/#1436.
     localApiServer: false,
     sidePanelWidth: SIDE_PANEL_DEFAULT_WIDTH,
+    sidePanelSplitFilePercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
+    sidePanelSplitPreviewPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
+    sidePanelSplitSubagentPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
   },
   plugins: {},
   pluginConfigs: {},
@@ -764,6 +783,20 @@ export class SettingsService {
           `system.sidePanelWidth patch ignored (received ${JSON.stringify(rawSidePanelWidth)}), keeping %s`,
           this.settings.system.sidePanelWidth,
         );
+      }
+      // Per-tab vertical split percents — each normalized independently through
+      // the shared clamp so an out-of-range or non-finite value is ignored while
+      // a valid sibling is preserved (mirrors the width path above).
+      for (const key of SIDE_PANEL_SPLIT_KEYS) {
+        const raw = partial.system[key];
+        if (typeof raw === "number" && Number.isFinite(raw)) {
+          next[key] = clampSidePanelSplitPercent(raw);
+        } else if (raw !== undefined) {
+          log.warn(
+            `system.${key} patch ignored (received ${JSON.stringify(raw)}), keeping %s`,
+            this.settings.system[key],
+          );
+        }
       }
       this.settings.system = next;
     }
@@ -1279,11 +1312,28 @@ function normalizeWebView(input: unknown): WebViewSettings {
 
 const VALID_CLOSE_BEHAVIORS: readonly SystemCloseBehavior[] = ["hide-to-tray", "quit"];
 
+/**
+ * The per-tab-kind vertical-split percent keys, iterated identically in the
+ * update-patch and normalize paths so a new split-bearing tab kind is added in
+ * exactly one place. `satisfies` pins each entry to a real `SystemSettings`
+ * field, so a typo can never silently no-op.
+ */
+const SIDE_PANEL_SPLIT_KEYS = [
+  "sidePanelSplitFilePercent",
+  "sidePanelSplitPreviewPercent",
+  "sidePanelSplitSubagentPercent",
+] as const satisfies readonly (keyof SystemSettings)[];
+
 function normalizeSystem(input: unknown): SystemSettings {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return { ...DEFAULT_SETTINGS.system };
   }
-  const obj = input as { closeBehavior?: unknown; appMode?: unknown; localApiServer?: unknown; sidePanelWidth?: unknown };
+  const obj = input as {
+    closeBehavior?: unknown;
+    appMode?: unknown;
+    localApiServer?: unknown;
+    sidePanelWidth?: unknown;
+  } & Record<(typeof SIDE_PANEL_SPLIT_KEYS)[number], unknown>;
   // Each field is normalized independently: a missing/invalid field falls
   // back to its default while a valid sibling is preserved (mirrors the
   // per-field patch path in `update`).
@@ -1327,6 +1377,17 @@ function normalizeSystem(input: unknown): SystemSettings {
       `system.sidePanelWidth invalid (received ${JSON.stringify(rawSidePanelWidth)}), using default %s`,
       SIDE_PANEL_DEFAULT_WIDTH,
     );
+  }
+  for (const key of SIDE_PANEL_SPLIT_KEYS) {
+    const raw = obj[key];
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      result[key] = clampSidePanelSplitPercent(raw);
+    } else if (raw !== undefined) {
+      log.warn(
+        `system.${key} invalid (received ${JSON.stringify(raw)}), using default %s`,
+        SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
+      );
+    }
   }
   return result;
 }
