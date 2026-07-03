@@ -49,6 +49,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "../../../components/ui/context-menu.js";
+import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { wrapRenderHtmlInlineFrameDocument } from "../../../shared/render-html-preview.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../shared/side-browser.js";
@@ -1651,6 +1652,7 @@ function BrowserWorkspace({
   const [query, setQuery] = useState("");
   const [addressDraft, setAddressDraft] = useState("");
   const [addressError, setAddressError] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const filteredTargets = useMemo(
     () => targets.filter((target) => matchesQuery(query, target.title, target.subtitle, target.sourceLabel, target.kind === "url" ? target.url : undefined)),
     [targets, query],
@@ -1702,6 +1704,12 @@ function BrowserWorkspace({
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-browser-workspace">
+      {/*
+        Single address bar (#11): the browser tab owns ONE address row here and
+        the viewer's own header is suppressed (UrlDocumentViewer showHeader=false)
+        so there is no duplicate URL band nesting. The web-artifact list + search
+        moved out of the always-on stacked strip into the floating 🔍 Popover.
+      */}
       <form
         className="flex shrink-0 items-center gap-2 border-b px-3 py-2"
         onSubmit={(event) => {
@@ -1720,6 +1728,48 @@ function BrowserWorkspace({
           placeholder={t("chatPreviewRail.browserAddressPlaceholder")}
           className="h-8 min-w-0 flex-1 text-xs"
         />
+        <Popover open={searchOpen} onOpenChange={setSearchOpen}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8 shrink-0"
+                  aria-label={t("chatPreviewRail.browserSearch")}
+                  data-testid="chat-side-panel-browser-search-trigger"
+                >
+                  <Search className="h-3.5 w-3.5" />
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>{t("chatPreviewRail.browserSearch")}</TooltipContent>
+          </Tooltip>
+          <PopoverContent
+            align="end"
+            className="w-72 p-0"
+            data-testid="chat-side-panel-browser-search-popover"
+          >
+            <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
+            <div className="max-h-64 overflow-auto p-2">
+              {filteredTargets.length > 0 ? (
+                <TargetRows
+                  targets={filteredTargets}
+                  selectedId={manualTarget ? undefined : selectedTarget?.id}
+                  rowTestId="chat-side-panel-browser-row"
+                  onSelect={(id) => {
+                    onManualUrlChange(tabId, null);
+                    onSelect(id);
+                    setSearchOpen(false);
+                  }}
+                />
+              ) : (
+                <EmptyState>{t("chatPreviewRail.noBrowserTargets")}</EmptyState>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -1741,29 +1791,13 @@ function BrowserWorkspace({
           {addressError}
         </div>
       ) : null}
-      <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
-      <div className="max-h-36 shrink-0 overflow-auto border-b p-2">
-        {filteredTargets.length > 0 ? (
-          <TargetRows
-            targets={filteredTargets}
-            selectedId={manualTarget ? undefined : selectedTarget?.id}
-            rowTestId="chat-side-panel-browser-row"
-            onSelect={(id) => {
-              onManualUrlChange(tabId, null);
-              onSelect(id);
-            }}
-          />
-        ) : (
-          <EmptyState>{t("chatPreviewRail.noBrowserTargets")}</EmptyState>
-        )}
-      </div>
       <div className="min-h-0 w-full min-w-0 flex-1 overflow-hidden">
         {displayedTarget?.kind === "html" ? (
           <BrowserDocumentViewer target={displayedTarget} />
         ) : displayedTarget?.kind === "url" ? (
-          <UrlDocumentViewer api={api} target={displayedTarget} />
+          <UrlDocumentViewer api={api} target={displayedTarget} showHeader={false} />
         ) : (
-          <div className="text-xs text-muted-foreground">{t("chatPreviewRail.noBrowserTargets")}</div>
+          <div className="p-4 text-xs text-muted-foreground">{t("chatPreviewRail.noBrowserTargets")}</div>
         )}
       </div>
     </div>
