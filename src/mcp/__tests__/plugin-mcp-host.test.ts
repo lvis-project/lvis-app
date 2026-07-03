@@ -8,11 +8,18 @@
  * This is the reusable host the untrusted-stdio milestone re-points to a stdio
  * transport without changing registration.
  */
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { PluginMcpHost } from "../plugin-mcp-host.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import type { PluginToolDelegate } from "../plugin-mcp-server.js";
 import type { PluginManifest } from "../../plugins/types.js";
+import {
+  __resetActiveSandboxCapabilityForTest,
+  __resetWrappedPluginWorkersForTest,
+  markPluginWorkerWrapped,
+  resolveReviewerSandboxCapability,
+  setActiveSandboxCapability,
+} from "../../permissions/sandbox-capability.js";
 
 const MANIFEST: PluginManifest = {
   id: "com.example.notes",
@@ -44,6 +51,11 @@ const MANIFEST: PluginManifest = {
 } as PluginManifest;
 
 describe("PluginMcpHost — first-party loopback registration + round-trip", () => {
+  afterEach(() => {
+    __resetActiveSandboxCapabilityForTest();
+    __resetWrappedPluginWorkersForTest();
+  });
+
   it("registers plugin tools under natural names with plugin authority from _meta", async () => {
     const delegate: PluginToolDelegate = vi.fn(async (name, args) => ({
       content: [{ type: "text", text: `${name}:${JSON.stringify(args)}` }],
@@ -90,6 +102,37 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
         },
       },
     });
+  });
+
+  it("keeps manifest workerId inert on the loopback path even when a worker marker exists", async () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "ASRT active",
+      confines: { filesystem: true, process: true, network: true },
+    });
+    markPluginWorkerWrapped("com.example.notes", "notes-worker");
+
+    const registry = new ToolRegistry();
+    const host = PluginMcpHost.loopback(
+      MANIFEST,
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+      registry,
+    );
+    await host.start();
+
+    const save = registry.findByName("notes_save");
+    expect(save?.workerId).toBeUndefined();
+    expect(
+      resolveReviewerSandboxCapability(
+        save!.source,
+        save!.name,
+        save!.mcpServerId,
+        save!.workerId,
+        save!.pluginId,
+      ).kind,
+    ).toBe("none");
   });
 
   it("surfaces a thrown delegate as an isError tool result (not a host throw)", async () => {
