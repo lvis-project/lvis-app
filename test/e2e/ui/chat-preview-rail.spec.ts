@@ -418,7 +418,10 @@ test.describe("chat preview rail", () => {
       await expect(ctx.page.getByTestId("action-panel-rail")).toBeVisible();
 
       // Switch back to the earlier file-browser tab (still open) to filter files.
+      // The tab body remounts, so its source resets to Directory — switch to the
+      // Session files segment again to see the session artifacts.
       await ctx.page.getByTestId("chat-side-panel-tab-file-browser").click();
+      await ctx.page.getByTestId("chat-side-panel-file-source-session").click();
       await expect(rail).toContainText("notes.md");
       await expect(rail).toContainText("report.md");
       await ctx.page.getByTestId("chat-preview-search").fill("report");

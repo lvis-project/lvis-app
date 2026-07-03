@@ -1556,15 +1556,14 @@ function FileBrowserWorkspace({
               artifacts yet.
             */}
             <div
-              role="tablist"
+              role="group"
               aria-label={t("chatPreviewRail.fileSourceLabel")}
               className="flex shrink-0 items-center gap-1 border-b p-1"
               data-testid="chat-side-panel-file-source-segment"
             >
               <button
                 type="button"
-                role="tab"
-                aria-selected={effectiveSource === "directory"}
+                aria-pressed={effectiveSource === "directory"}
                 data-testid="chat-side-panel-file-source-directory"
                 className={cn(
                   "flex h-7 flex-1 items-center justify-center gap-1 rounded-md text-[11px] font-medium",
@@ -1579,8 +1578,7 @@ function FileBrowserWorkspace({
               </button>
               <button
                 type="button"
-                role="tab"
-                aria-selected={effectiveSource === "session"}
+                aria-pressed={effectiveSource === "session"}
                 disabled={!hasSessionFiles}
                 data-testid="chat-side-panel-file-source-session"
                 className={cn(

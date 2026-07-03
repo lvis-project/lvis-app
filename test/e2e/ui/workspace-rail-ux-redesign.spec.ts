@@ -70,7 +70,7 @@ test.describe("workspace rail UX redesign", () => {
     await page.getByTestId("chat-side-panel-launcher-file-browser").click();
 
     // Directory is the default source; the project file is listed there.
-    await expect(page.getByTestId("chat-side-panel-file-source-directory")).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("chat-side-panel-file-source-directory")).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("chat-side-panel-fs-file").filter({ hasText: "architecture.md" })).toBeVisible();
 
     // No chat has run, so there are no session artifacts → the segment is disabled
