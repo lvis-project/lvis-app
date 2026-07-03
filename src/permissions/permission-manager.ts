@@ -45,6 +45,8 @@ import { lookupApproval, canonicalStringify } from "./user-approval-store.js";
 import { buildSandboxAuditEntry } from "../audit/sandbox-audit.js";
 import { emitSandboxAudit } from "../audit/sandbox-audit-sink.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
+import { isSensitivePath } from "./sensitive-paths.js";
+import { isPathAllowed } from "./allowed-directories.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto" | "allow";
@@ -416,6 +418,61 @@ export class PermissionManager {
       layer: 5,
       reviewer: { route: "foreground-auto", verdict },
     };
+  }
+
+  /**
+   * Permission SOT V2 — evaluate the Layer 0 (sensitive-path hard-block) and
+   * Layer 1 (allowed-directories) path-scope predicates over a set of
+   * already-canonicalized targets. This is the single source of truth for the
+   * path-scope predicate: the executor calls this instead of invoking
+   * `isSensitivePath` / `isPathAllowed` inline, so "is this path sensitive /
+   * out-of-directory" is answered in one place.
+   *
+   * Predicate ONLY (behavior-neutral move from `executor.ts`). It returns raw
+   * hits, NOT a {@link PermissionCheckResult}: the executor still owns the
+   * layer-0 deny (message + audit + return) and the layer-1 out-of-directory
+   * approval modal + scope mutation, and just drives them off these hits. The
+   * audit `layer` field values are unchanged (sensitive = 0, out-of-dir = 1).
+   *
+   * Frozen-canonical contract: `canonicalTargets[].canonicalPath` MUST already
+   * be realpath'd + case-folded by the caller. This method performs NO realpath
+   * I/O — it is a pure predicate over the supplied strings. `allowedDirectories`
+   * is supplied per-call so the executor can re-evaluate after each directory
+   * grant widens the scope.
+   *
+   * Static because the path-scope predicate is stateless and MUST run on every
+   * tool call regardless of whether a PermissionManager instance is wired (the
+   * executor's `permissionManager` is optional; the Layer 0/1 hard-block and
+   * out-of-directory prompt fire even without one).
+   *
+   *  - `sensitiveHit`: the first target matching a Layer 0 sensitive-path
+   *    pattern, or `null`.
+   *  - `outOfAllowed`: the first target NOT covered by `allowedDirectories`,
+   *    or `null`.
+   */
+  static checkPathScope(args: {
+    canonicalTargets: readonly { filePath: string; canonicalPath: string }[];
+    allowedDirectories: readonly string[];
+  }): {
+    sensitiveHit: { filePath: string; pattern: string } | null;
+    outOfAllowed: { filePath: string; canonicalPath: string } | null;
+  } {
+    let sensitiveHit: { filePath: string; pattern: string } | null = null;
+    for (const target of args.canonicalTargets) {
+      const pattern = isSensitivePath(target.canonicalPath);
+      if (pattern) {
+        sensitiveHit = { filePath: target.filePath, pattern };
+        break;
+      }
+    }
+    let outOfAllowed: { filePath: string; canonicalPath: string } | null = null;
+    for (const target of args.canonicalTargets) {
+      if (!isPathAllowed(target.canonicalPath, { directories: args.allowedDirectories })) {
+        outOfAllowed = { filePath: target.filePath, canonicalPath: target.canonicalPath };
+        break;
+      }
+    }
+    return { sensitiveHit, outOfAllowed };
   }
 
   /**
