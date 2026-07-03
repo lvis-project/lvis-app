@@ -16,20 +16,40 @@ import {
 } from "../main/agent-profile-store.js";
 import { t } from "../i18n/index.js";
 
+import type { ChatEntry } from "../lib/chat-stream-state.js";
+
 export interface AgentSpawnEvent {
   spawnId: string;
-  type: "start" | "turn" | "done" | "error";
+  /**
+   * Lifecycle phase:
+   *   - `start`    — spawn created; carries `title` + `toolUseId`.
+   *   - `activity` — the child loop produced new transcript content; carries
+   *                  the FULL {@link entries} snapshot (idempotent replace, not
+   *                  a delta) so the renderer swaps the whole child transcript.
+   *   - `done`     — clean completion; carries `summary`, `toolCallCount`, and
+   *                  the final {@link entries} snapshot (embedded for persistence
+   *                  parity — the same array is written into the tool result).
+   *   - `error`    — failed run; carries `message` (+ any partial `entries`).
+   */
+  type: "start" | "activity" | "done" | "error";
   title?: string;
-  turn?: number;
-  text?: string;
+  /**
+   * Full child transcript snapshot as `ChatEntry[]` — the SAME model the main
+   * chat renders. Present on `activity` / `done` (and `error` when partial
+   * output exists). DLP-masked at the source (child tool results + thoughts run
+   * through `maskSensitiveData` before entering this snapshot). Idempotent
+   * replace: the renderer overwrites the spawn's entries with each snapshot
+   * rather than appending, so a re-emitted event never double-renders.
+   */
+  entries?: ChatEntry[];
   summary?: string;
   toolCallCount?: number;
   message?: string;
   /**
    * The `tool_use` id of the `agent_spawn` invocation that triggered this
-   * spawn. Set on the `start` event so the renderer can render the
-   * SubAgentCard inline next to the originating ToolGroupCard instead of
-   * stacking all spawns at the top of the chat.
+   * spawn. Set on the `start` event so the renderer can attach the sub-agent
+   * to the originating ToolGroupCard (completion chip) instead of stacking all
+   * spawns at the top of the chat.
    */
   toolUseId?: string;
 }
@@ -176,12 +196,11 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             profileMode: profile?.mode,
           },
           {
-            onTurn: (u) =>
+            onActivity: (u) =>
               deps.emit({
                 spawnId,
-                type: "turn",
-                turn: u.turn,
-                text: u.text,
+                type: "activity",
+                entries: u.entries,
                 toolCallCount: u.toolCallCount,
               }),
             onError: (msg) =>
@@ -205,6 +224,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
           type: "done",
           summary: result.summary,
           toolCallCount: result.toolCallCount,
+          entries: result.entries,
         });
         return {
           output: JSON.stringify({
@@ -213,6 +233,11 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             turnCount: result.turnCount,
             spawnId,
             agentName: profile?.name,
+            // Embed the child transcript so a reloaded session rebuilds the
+            // sub-agent tab's full tool/reasoning timeline from persistence
+            // (derive-subagent-spawns reads `entries` here). DLP-masked at the
+            // SubAgentTranscriptAccumulator source.
+            entries: result.entries,
           }),
           isError: false,
         };

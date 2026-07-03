@@ -360,6 +360,8 @@ describe("agent_spawn — recursive call refusal", () => {
           toolCallCount: 0,
           turnCount: 1,
           childSessionId: "c",
+          entries: [],
+          ok: true,
         }),
       }) as never,
       emit: () => undefined,

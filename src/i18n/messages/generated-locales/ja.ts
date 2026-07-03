@@ -2411,6 +2411,7 @@ export const jaMessages: Record<string, string> = {
   "subAgentCard.statusRunning": "実行中",
   "subAgentCard.summaryLabel": "まとめ",
   "subAgentCard.toolCalls": "ツール呼び出し: {count}",
+  "subAgentCard.detailInTab": "詳細はタブで",
   "subAgentCard.turnCount": "{count} ターン",
   "subAgentCard.turnHeading": "{turn} を回します",
   "suggestedRepliesChipRow.toolbarAriaLabel": "代替返信の提案",

@@ -984,8 +984,9 @@ describe("ChatView", () => {
 
     // The loaded session's agent_spawn tool call is derived into a spawn even
     // though the live agent-spawn event stream never replayed. Past-turn
-    // WorkGroups start collapsed, so expand it to reveal the inline SubAgentCard
-    // that now renders next to its tool group from derived history.
+    // WorkGroups start collapsed, so expand it to reveal the inline completion
+    // CHIP (PR3: the lightweight inline surface — full transcript lives in the
+    // sub-agent tab, not inline) that renders next to its tool group.
     const workGroupToggle = await waitFor(() => {
       const button = container.querySelector('[data-testid="work-group"] button') as HTMLButtonElement | null;
       expect(button).not.toBeNull();
@@ -995,8 +996,8 @@ describe("ChatView", () => {
       fireEvent.click(workGroupToggle);
     });
     await waitFor(() => {
-      const inlineCards = container.querySelectorAll('[data-testid="sub-agent-card"]');
-      expect(inlineCards.length).toBeGreaterThan(0);
+      const inlineChips = container.querySelectorAll('[data-testid="sub-agent-spawn-chip"]');
+      expect(inlineChips.length).toBeGreaterThan(0);
       expect(container.textContent).toContain("인덱서 조사");
     });
 

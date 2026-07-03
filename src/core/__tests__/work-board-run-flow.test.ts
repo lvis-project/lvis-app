@@ -96,6 +96,7 @@ function fakeRunner(opts?: {
           toolCallCount: 0,
           turnCount: 0,
           childSessionId: `${input.originSessionId}::exec`,
+          entries: [],
           ok: false,
           error: "sub-agent: LLM provider not configured",
         };
@@ -105,6 +106,7 @@ function fakeRunner(opts?: {
         toolCallCount: 0,
         turnCount: 1,
         childSessionId: `${input.originSessionId}::${isPlan ? "plan" : "exec"}`,
+        entries: [],
         ok: true,
       };
     },

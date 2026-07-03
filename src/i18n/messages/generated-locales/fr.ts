@@ -2411,6 +2411,7 @@ export const frMessages: Record<string, string> = {
   "subAgentCard.statusRunning": "En cours",
   "subAgentCard.summaryLabel": "Résumé",
   "subAgentCard.toolCalls": "appels d'outil: {count}",
+  "subAgentCard.detailInTab": "détails dans l'onglet",
   "subAgentCard.turnCount": "{count} tour",
   "subAgentCard.turnHeading": "Tournez {turn}",
   "suggestedRepliesChipRow.toolbarAriaLabel": "Suggestions de réponses alternatives",
