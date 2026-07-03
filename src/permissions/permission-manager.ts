@@ -345,6 +345,59 @@ export class PermissionManager {
   }
 
   /**
+   * Permission SOT V3 — map a reviewer {@link RiskVerdict} to the layer-5
+   * allow/deny/ask decision. This is the single source of truth for the
+   * verdict→decision translation; the pipeline reviewer-dispatch lanes must
+   * call this rather than branching on `verdict.level` inline, so the
+   * execution layer can never loosen a verdict on its own.
+   *
+   * Rules (behavior-neutral move from `reviewer-dispatch.ts`):
+   *  - headless lane: `low` → allow(layer 5); non-low (medium/high) → deny(layer 5).
+   *  - foreground-auto lane: `low` → allow(layer 5); non-low → ask(layer 5).
+   *
+   * The returned result carries the reviewer route + verdict marker. The
+   * pipeline still owns the human-facing `message`, deferred-queue append,
+   * and i18n assembly — this method only decides allow/deny/ask.
+   */
+  resolveReviewerDecision(
+    verdict: RiskVerdict,
+    lane: "headless" | "foreground-auto",
+  ): PermissionCheckResult {
+    const isLow = verdict.level === "low";
+    if (lane === "headless") {
+      if (isLow) {
+        return {
+          decision: "allow",
+          reason: `reviewer ${verdict.level}: ${verdict.reason}`,
+          layer: 5,
+          reviewer: { route: "headless", verdict },
+        };
+      }
+      return {
+        decision: "deny",
+        reason: `reviewer ${verdict.level}: ${verdict.reason}`,
+        layer: 5,
+        reviewer: { route: "headless", verdict },
+      };
+    }
+    // foreground-auto lane
+    if (isLow) {
+      return {
+        decision: "allow",
+        reason: `reviewer low: ${verdict.reason}`,
+        layer: 5,
+        reviewer: { route: "foreground-auto", verdict },
+      };
+    }
+    return {
+      decision: "ask",
+      reason: `reviewer ${verdict.level}: ${verdict.reason}`,
+      layer: 5,
+      reviewer: { route: "foreground-auto", verdict },
+    };
+  }
+
+  /**
    * Issue #690 — set interactive auto-approve policy. Boot reads
    * `permissions.reviewer.interactive.autoApprove` from settings and
    * pushes it here so the gate inside {@link categoryBasedDecision}
