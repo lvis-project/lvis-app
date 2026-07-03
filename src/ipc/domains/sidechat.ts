@@ -93,6 +93,23 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
   const buildSink = (wc: WebContents | undefined): ChatStreamSink =>
     (channel, payload) => sendToWebContents(wc, channel, payload, log);
 
+  // Abort + await any in-flight side turn before mutating the shared side loop
+  // (new / load). Without this, `newConversation()` / `loadSession()` would run
+  // while a prior turn is still streaming into the SAME loop, and that turn's
+  // remaining frames would leak into the fresh/loaded transcript (cross-session
+  // leak). Mirrors the abort handler below and the main chat.ts abort pattern.
+  const abortActiveSideTurn = async (): Promise<void> => {
+    // Always signal the loop (idempotent when idle); await the tracked promise
+    // only when a turn is actually in flight so callers see it fully settled.
+    loop.abortCurrentTurn();
+    if (!activeSideStreamTurn) return;
+    try {
+      await activeSideStreamTurn;
+    } catch {
+      // expected: interrupted turns may reject
+    }
+  };
+
   ipcMain.handle(CHANNELS.sidechat.send, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.send, e); return UNAUTHORIZED_FRAME; }
     const p = (payload ?? {}) as { input?: unknown; attachments?: unknown };
@@ -129,6 +146,9 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.sidechat.new, async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.new, e); return UNAUTHORIZED_FRAME; }
+    // Abort any in-flight turn first so its remaining frames never leak into the
+    // fresh session (mirrors abort handler; contrast the prior unguarded call).
+    await abortActiveSideTurn();
     loop.newConversation();
     return { ok: true as const, sessionId: loop.getSessionId() };
   });
@@ -138,6 +158,9 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
     if (!isSafeSessionId(sessionId)) {
       return { ok: false as const, error: "invalid-session-id", messages: [] };
     }
+    // Abort any in-flight turn first so its remaining frames never leak into the
+    // loaded session's transcript (same concurrency hazard as `new`).
+    await abortActiveSideTurn();
     const loaded = loop.loadSession(sessionId);
     if (!loaded) {
       return { ok: false as const, error: "session-not-found", messages: [] };
@@ -153,7 +176,10 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
   ipcMain.handle(CHANNELS.sidechat.list, (e) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.sidechat.list, e);
-      return { current: loop.getSessionId(), sessions: [] };
+      // Fail closed: an unauthorized frame gets NO data — not even the real
+      // current session id (info disclosure). Same empty shape as the
+      // loop-absent branch above.
+      return { current: null, sessions: [] };
     }
     // The side-chat MemoryManager's session store is isolated to
     // `~/.lvis/side-chat/` — listSessions here never returns a main-chat
@@ -168,14 +194,7 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.sidechat.abort, async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.abort, e); return UNAUTHORIZED_FRAME; }
-    loop.abortCurrentTurn();
-    if (activeSideStreamTurn) {
-      try {
-        await activeSideStreamTurn;
-      } catch {
-        // expected: interrupted turns may reject
-      }
-    }
+    await abortActiveSideTurn();
     return { ok: true as const };
   });
 }

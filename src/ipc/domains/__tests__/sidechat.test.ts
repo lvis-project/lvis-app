@@ -118,6 +118,89 @@ describe("side-chat IPC domain", () => {
     expect(side.newConversation).toHaveBeenCalledTimes(1);
   });
 
+  it("new aborts + awaits an in-flight turn BEFORE starting the fresh session", async () => {
+    // A side loop whose turn stays in-flight until we release it, so we can
+    // observe the ordering: abort → turn settles → newConversation.
+    let releaseTurn!: () => void;
+    const order: string[] = [];
+    const side = makeSideLoop();
+    side.runTurn = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          releaseTurn = () => {
+            order.push("turn-settled");
+            resolve({ route: "chat" });
+          };
+        }),
+    );
+    side.abortCurrentTurn = vi.fn(() => {
+      order.push("abort");
+      // A real abort makes the in-flight runTurn settle.
+      releaseTurn?.();
+    });
+    side.newConversation = vi.fn(() => order.push("newConversation"));
+    register(side, makeMainLoop());
+
+    // Start a turn (do NOT await — it is deliberately in-flight).
+    const sendHandler = handlers.get(CHANNELS.sidechat.send)!;
+    const sendPromise = sendHandler(ev("file:///index.html"), { input: "long turn" });
+
+    // While it streams, request a new session.
+    const newHandler = handlers.get(CHANNELS.sidechat.new)!;
+    const result = await newHandler(ev("file:///index.html"));
+
+    expect(result).toEqual({ ok: true, sessionId: "side-1" });
+    // The in-flight turn was aborted + awaited BEFORE the loop was mutated —
+    // no new-session-receives-prior-turn-frames leak.
+    expect(order).toEqual(["abort", "turn-settled", "newConversation"]);
+    expect(side.abortCurrentTurn).toHaveBeenCalledTimes(1);
+    await sendPromise;
+  });
+
+  it("load aborts + awaits an in-flight turn BEFORE loading the session", async () => {
+    let releaseTurn!: () => void;
+    const order: string[] = [];
+    const side = makeSideLoop();
+    side.runTurn = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          releaseTurn = () => {
+            order.push("turn-settled");
+            resolve({ route: "chat" });
+          };
+        }),
+    );
+    side.abortCurrentTurn = vi.fn(() => {
+      order.push("abort");
+      releaseTurn?.();
+    });
+    side.loadSession = vi.fn(() => {
+      order.push("loadSession");
+      return true;
+    });
+    register(side, makeMainLoop());
+
+    const sendHandler = handlers.get(CHANNELS.sidechat.send)!;
+    const sendPromise = sendHandler(ev("file:///index.html"), { input: "long turn" });
+
+    const loadHandler = handlers.get(CHANNELS.sidechat.load)!;
+    const result = await loadHandler(ev("file:///index.html"), "side-42");
+
+    expect(result).toMatchObject({ ok: true });
+    expect(order).toEqual(["abort", "turn-settled", "loadSession"]);
+    await sendPromise;
+  });
+
+  it("list fails closed on an unauthorized frame (no session-id disclosure)", async () => {
+    const side = makeSideLoop();
+    register(side, makeMainLoop());
+    const handler = handlers.get(CHANNELS.sidechat.list)!;
+    const result = await handler(ev("https://evil.example.com"));
+    // No real current-session id — same empty shape as the loop-absent branch.
+    expect(result).toEqual({ current: null, sessions: [] });
+    expect(side.getSessionId).not.toHaveBeenCalled();
+  });
+
   it("rejects an unauthorized frame on send", async () => {
     const side = makeSideLoop();
     register(side, makeMainLoop());

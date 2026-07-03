@@ -64,6 +64,10 @@ export function SideChatView({ api }: { api: LvisApi }) {
           size="sm"
           className="h-6 gap-1 px-1.5 text-[11px]"
           onClick={() => void newSession()}
+          // Disabled mid-stream: starting a new session mutates the shared side
+          // loop; the main handler aborts the in-flight turn first, but blocking
+          // the affordance avoids the surprising "New drops my streaming reply".
+          disabled={isStreaming}
           data-testid="side-chat-new"
           aria-label={t("chatPreviewRail.sideChat.newSession")}
         >
