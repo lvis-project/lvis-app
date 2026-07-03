@@ -1748,6 +1748,10 @@ export function buildLvisNamespaceExtras() {
       ipcRenderer.invoke(CHANNELS.workspace.removeRoot, dirPath),
     reveal: (targetPath: string) =>
       ipcRenderer.invoke(CHANNELS.workspace.reveal, targetPath),
+    // Drag-drop add-root, step 1 (#1458): submit a renderer-resolved dropped
+    // folder path for Layer-0 + is-a-dir validation and a main-owned ack token.
+    dropPrepare: (droppedPath: string) =>
+      ipcRenderer.invoke(CHANNELS.workspace.dropPrepare, droppedPath),
   },
   };
 }

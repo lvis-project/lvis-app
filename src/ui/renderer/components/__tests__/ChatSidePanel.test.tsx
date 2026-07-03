@@ -93,9 +93,14 @@ describe("ChatSidePanel", () => {
         listDir: vi.fn(async () => ({ ok: true, path: "/ws", entries: [], truncated: false })),
         removeRoot: vi.fn(async () => ({ ok: true, removed: "", roots: [{ path: "/ws", isDefault: true }] })),
         reveal: vi.fn(async () => ({ ok: true })),
+        dropPrepare: vi.fn(async () => ({ ok: true, pendingPath: "/ws/dropped", ackToken: "tok" })),
       },
     });
     (window as unknown as { lvis: unknown }).lvis = (globalThis as unknown as { lvis: unknown }).lvis;
+    // Drop-path bridge (#1458): resolveDroppedPaths is preload-only; default stub
+    // returns no path so tests that don't drop are unaffected.
+    vi.stubGlobal("lvisDrop", { resolveDroppedPaths: vi.fn(() => [] as string[]) });
+    (window as unknown as { lvisDrop: unknown }).lvisDrop = (globalThis as unknown as { lvisDrop: unknown }).lvisDrop;
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -488,6 +493,143 @@ describe("ChatSidePanel", () => {
     fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
     fireEvent.click(screen.getByTestId("chat-side-panel-add-root"));
     await waitFor(() => expect(pickRoot).toHaveBeenCalledTimes(1));
+  });
+
+  it("dropping a folder resolves the path via the preload bridge and routes through dropPrepare → ack panel (#1458)", async () => {
+    // Renderer-wiring lock: the drop MUST go through the webUtils bridge and the
+    // main-side dropPrepare gate, then surface the acknowledgement panel — it can
+    // NEVER persist a renderer-named path directly. (The real-Electron e2e proves
+    // getPathForFile actually resolves a dropped File; this proves the wiring.)
+    const resolveDroppedPaths = vi.fn(() => ["/ws/dropped-proj"]);
+    const dropPrepare = vi.fn(async () => ({
+      ok: true as const,
+      pendingPath: "/ws/dropped-proj",
+      ackToken: "drop-tok-1",
+      warnings: [] as string[],
+    }));
+    vi.stubGlobal("lvisDrop", { resolveDroppedPaths });
+    (window as unknown as { lvisDrop: unknown }).lvisDrop = (globalThis as unknown as { lvisDrop: unknown }).lvisDrop;
+    vi.stubGlobal("lvis", {
+      attach: { openExternal: vi.fn(async () => ({ ok: true })) },
+      preview: { readFile: vi.fn(async () => ({ ok: true, content: "# x", path: "/ws/a.md", truncated: false })) },
+      workspace: {
+        listRoots: vi.fn(async () => ({ ok: true, defaultRoot: "/ws", roots: [{ path: "/ws", isDefault: true }] })),
+        pickRoot: vi.fn(async () => ({ ok: true, canceled: true, roots: [{ path: "/ws", isDefault: true }] })),
+        listDir: vi.fn(async () => ({ ok: true, path: "/ws", entries: [], truncated: false })),
+        dropPrepare,
+      },
+    });
+    (window as unknown as { lvis: unknown }).lvis = (globalThis as unknown as { lvis: unknown }).lvis;
+
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const zone = screen.getByTestId("chat-side-panel-project-roots");
+    const dataTransfer = { files: [{ name: "dropped-proj" }] as unknown as FileList, dropEffect: "" };
+    fireEvent.drop(zone, { dataTransfer });
+
+    await waitFor(() => expect(resolveDroppedPaths).toHaveBeenCalledTimes(1));
+    expect(dropPrepare).toHaveBeenCalledWith("/ws/dropped-proj");
+    // The ack panel is shown — the drop does NOT silently widen the read scope.
+    await waitFor(() => expect(screen.getByTestId("chat-side-panel-root-warning")).toBeTruthy());
+  });
+
+  it("dropping a hard-denied folder surfaces a Korean-mapped error and shows no ack panel (#1458)", async () => {
+    // A Layer-0 deny from dropPrepare must not offer an ack path — the renderer
+    // surfaces the error and never reaches the confirmation panel. The main
+    // process returns the STABLE `sensitive-path` code (never raw English prose),
+    // which the renderer maps to the localized "outside allowed folders" copy.
+    const resolveDroppedPaths = vi.fn(() => ["/home/me/.ssh"]);
+    const dropPrepare = vi.fn(async () => ({ ok: false as const, error: "sensitive-path" }));
+    vi.stubGlobal("lvisDrop", { resolveDroppedPaths });
+    (window as unknown as { lvisDrop: unknown }).lvisDrop = (globalThis as unknown as { lvisDrop: unknown }).lvisDrop;
+    vi.stubGlobal("lvis", {
+      attach: { openExternal: vi.fn(async () => ({ ok: true })) },
+      preview: { readFile: vi.fn(async () => ({ ok: true, content: "# x", path: "/ws/a.md", truncated: false })) },
+      workspace: {
+        listRoots: vi.fn(async () => ({ ok: true, defaultRoot: "/ws", roots: [{ path: "/ws", isDefault: true }] })),
+        pickRoot: vi.fn(async () => ({ ok: true, canceled: true, roots: [{ path: "/ws", isDefault: true }] })),
+        listDir: vi.fn(async () => ({ ok: true, path: "/ws", entries: [], truncated: false })),
+        dropPrepare,
+      },
+    });
+    (window as unknown as { lvis: unknown }).lvis = (globalThis as unknown as { lvis: unknown }).lvis;
+
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const zone = screen.getByTestId("chat-side-panel-project-roots");
+    fireEvent.drop(zone, { dataTransfer: { files: [{ name: ".ssh" }] as unknown as FileList } });
+
+    const banner = await waitFor(() => screen.getByTestId("chat-side-panel-op-error"));
+    // The surfaced text is the localized (Korean, per the test locale) copy — the
+    // raw validator prose ("sensitive pattern") must NEVER reach the UI.
+    expect(banner.textContent ?? "").toContain("허용된 프로젝트 폴더");
+    expect(banner.textContent ?? "").not.toMatch(/sensitive pattern|sensitive-path/);
+    expect(screen.queryByTestId("chat-side-panel-root-warning")).toBeNull();
+  });
+
+  it("dropping a file (not-a-dir) surfaces the Korean not-a-directory copy, not the raw code (#1459)", async () => {
+    // The dropPrepare is-a-dir reject and the ack-pass TOCTOU re-check both return
+    // the stable `not-a-dir` code; the renderer maps it to Korean via the shared
+    // IPC error map — never surfacing the bare code.
+    const resolveDroppedPaths = vi.fn(() => ["/ws/note.txt"]);
+    const dropPrepare = vi.fn(async () => ({ ok: false as const, error: "not-a-dir" }));
+    vi.stubGlobal("lvisDrop", { resolveDroppedPaths });
+    (window as unknown as { lvisDrop: unknown }).lvisDrop = (globalThis as unknown as { lvisDrop: unknown }).lvisDrop;
+    vi.stubGlobal("lvis", {
+      attach: { openExternal: vi.fn(async () => ({ ok: true })) },
+      preview: { readFile: vi.fn(async () => ({ ok: true, content: "# x", path: "/ws/a.md", truncated: false })) },
+      workspace: {
+        listRoots: vi.fn(async () => ({ ok: true, defaultRoot: "/ws", roots: [{ path: "/ws", isDefault: true }] })),
+        pickRoot: vi.fn(async () => ({ ok: true, canceled: true, roots: [{ path: "/ws", isDefault: true }] })),
+        listDir: vi.fn(async () => ({ ok: true, path: "/ws", entries: [], truncated: false })),
+        dropPrepare,
+      },
+    });
+    (window as unknown as { lvis: unknown }).lvis = (globalThis as unknown as { lvis: unknown }).lvis;
+
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const zone = screen.getByTestId("chat-side-panel-project-roots");
+    fireEvent.drop(zone, { dataTransfer: { files: [{ name: "note.txt" }] as unknown as FileList } });
+
+    const banner = await waitFor(() => screen.getByTestId("chat-side-panel-op-error"));
+    expect(banner.textContent ?? "").toContain("디렉터리가 아닙니다");
+    expect(banner.textContent ?? "").not.toContain("not-a-dir");
+    expect(screen.queryByTestId("chat-side-panel-root-warning")).toBeNull();
+  });
+
+  it("a non-file drag (no resolved path) is a no-op — dropPrepare is never called (#1458)", async () => {
+    const resolveDroppedPaths = vi.fn(() => [] as string[]);
+    const dropPrepare = vi.fn();
+    vi.stubGlobal("lvisDrop", { resolveDroppedPaths });
+    (window as unknown as { lvisDrop: unknown }).lvisDrop = (globalThis as unknown as { lvisDrop: unknown }).lvisDrop;
+    vi.stubGlobal("lvis", {
+      attach: { openExternal: vi.fn(async () => ({ ok: true })) },
+      preview: { readFile: vi.fn(async () => ({ ok: true, content: "# x", path: "/ws/a.md", truncated: false })) },
+      workspace: {
+        listRoots: vi.fn(async () => ({ ok: true, defaultRoot: "/ws", roots: [{ path: "/ws", isDefault: true }] })),
+        pickRoot: vi.fn(async () => ({ ok: true, canceled: true, roots: [{ path: "/ws", isDefault: true }] })),
+        listDir: vi.fn(async () => ({ ok: true, path: "/ws", entries: [], truncated: false })),
+        dropPrepare,
+      },
+    });
+    (window as unknown as { lvis: unknown }).lvis = (globalThis as unknown as { lvis: unknown }).lvis;
+
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const zone = screen.getByTestId("chat-side-panel-project-roots");
+    fireEvent.drop(zone, { dataTransfer: { files: [] as unknown as FileList } });
+
+    await waitFor(() => expect(resolveDroppedPaths).toHaveBeenCalledTimes(1));
+    expect(dropPrepare).not.toHaveBeenCalled();
   });
 
   it("opens a filesystem file's content through the traversal-guarded preview IPC (diagnosis ①)", async () => {
