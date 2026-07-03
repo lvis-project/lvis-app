@@ -72,6 +72,10 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // token was never issued / already consumed / past its TTL.
   "ack-unknown": "formatIpcError.ackUnknown",
   "ack-expired": "formatIpcError.ackExpired",
+  // Workspace root remove (workspace.ts): removeRoot.
+  "invalid-path": "formatIpcError.invalidPath",
+  "cannot-remove-default": "formatIpcError.cannotRemoveDefaultRoot",
+  "not-an-additional-root": "formatIpcError.notAnAdditionalRoot",
 
   // ── Args / canonicalization ──
   "args-not-object": "formatIpcError.argsNotObject",
