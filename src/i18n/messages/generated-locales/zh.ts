@@ -184,6 +184,7 @@ export const zhMessages: Record<string, string> = {
   "be_agentSpawn.propAgentNameDescription": "可选：在 ~/.lvis/agents/ 下定义的代理配置文件名称。指定后，使用该配置文件正文和默认的 sourceTools。",
   "be_agentSpawn.propInstructionsDescription": "子代理要执行的任务——系统+用户提示相结合。",
   "be_agentSpawn.propSourceToolsDescription": "要向子代理公开的工具名称列表。如果省略，则使用与父级相同的工具集。",
+  "be_agentSpawn.propResumeIdDescription": "可选：通过 resumeId（在未完成结果中返回）恢复先前启动的子代理。设置后，子代理的历史记录将重新水合，并以 instructions 作为后续提示继续执行；其工具范围保持冻结在原始启动时（不重新授予）。省略则启动一个新的子代理。",
   "be_agentSpawn.incompleteNotice": "子代理在完成前达到了其轮次预算——上面的摘要是部分内容，而非已完成的结果。请检查它，如果任务仍需处理，请再次生成子代理以从中断处继续（或自行接管剩余步骤）。",
   "be_agentSpawn.propTitleDescription": "子代理的简称（显示在 UI 卡标题中）。未提供 agentName 时为必填项。",
   "be_agentSpawn.toolDescription": "产生一个子代理来执行一个小的、独立的任务。新的上下文与父对话历史分离；仅指定的 sourceTools 可用。子代理的轮次预算由主机根据代理的模式自动分配（请选择合适的 agentName）——您无需设置。如果指定了 agentName，则 ~/.lvis/agents/<name>.md 或 ~/.lvis/agents/<name>/AGENTS.md 配置文件将合并为配置文件提示。返回摘要文本+工具调用计数。如果子代理在完成前达到其轮次预算，结果将被标记为未完成（附带部分输出），以便您决定是否继续。不要用作直接调用特定工具/插件的后备路径。如果目标工具可见，则直接调用；如果没有，请通过 request_plugin 激活它。",

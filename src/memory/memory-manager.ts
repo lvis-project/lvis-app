@@ -241,8 +241,11 @@ const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
 /**
  * Returns true when `id` is a valid session ID safe to use as a filename component.
  * Single source of truth for session ID validation across all call sites.
+ * Exported so the sub-agent resume entry point (SubAgentRunner.resume) can
+ * fail-closed on an unsafe `resumeId` BEFORE calling loadSessionMetadata (which
+ * throws on an invalid id) — reusing the SOT rather than re-deriving the regex.
  */
-function isValidSessionId(id: unknown): id is string {
+export function isValidSessionId(id: unknown): id is string {
   return typeof id === "string" && SESSION_ID_REGEX.test(id);
 }
 
