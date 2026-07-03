@@ -32,6 +32,10 @@ import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import { getKoreaDateKey } from "./utils/korea-date-key.js";
 import { isTurnStartEntry } from "./utils/classify-turn-entries.js";
 import { collectChatPreviewModel } from "./preview/preview-targets.js";
+import {
+  deriveSubAgentSpawnsFromEntries,
+  mergeSubAgentSpawns,
+} from "./subagents/derive-subagent-spawns.js";
 import { useWorkspaceTabs } from "./preview/workspace-tabs.js";
 import { useSidePanelWidth } from "./hooks/use-side-panel-width.js";
 import { normalizeBrowserNavigationUrl } from "./preview/url-safety.js";
@@ -146,26 +150,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     costEstimate, costBadgeClass, activeVendor,
   } = useChatContext();
 
-  // Sub-agent spawns by their originating tool_use id. Used so SubAgentCard
-  // renders inline next to the ToolGroupCard whose `agent_spawn` call started
-  // it, rather than stacking all spawns at the top of the chat (where users
-  // miss them entirely — see 2026-05-07 incident).
-  const spawnsByToolUseId = useMemo(() => {
-    const map = new Map<string, SubAgentSpawn[]>();
-    for (const spawn of subAgentSpawns) {
-      if (!spawn.toolUseId) continue;
-      const list = map.get(spawn.toolUseId);
-      if (list) list.push(spawn);
-      else map.set(spawn.toolUseId, [spawn]);
-    }
-    return map;
-  }, [subAgentSpawns]);
-
-  const orphanSpawns = useMemo(
-    () => subAgentSpawns.filter((s) => !s.toolUseId),
-    [subAgentSpawns],
-  );
-
   // Checkpoint view-mode — null = live, non-null = viewing a past checkpoint
   // slice. Owned at the composition root because it is read by useChatScroll
   // (auto-scroll suppression) + transcript slicing, and written by
@@ -184,6 +168,39 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const visibleEntries = useMemo(
     () => viewMode ? entries.slice(0, viewMode.slicedRangeEnd) : entries,
     [entries, viewMode],
+  );
+  // Sub-agent spawns shown inline + in the workspace SubAgentViewer. The live
+  // `subAgentSpawns` prop is populated ONLY from the in-flight agent-spawn
+  // event stream, so a LOADED past session would show nothing. Mirror how
+  // preview/file targets are derived from loaded entries: reconstruct spawns
+  // from the persisted `agent_spawn` tool calls and merge them under the live
+  // list (live wins per run — richer streamed data; derived fills history).
+  const derivedSubAgentSpawns = useMemo(
+    () => deriveSubAgentSpawnsFromEntries(visibleEntries),
+    [visibleEntries],
+  );
+  const mergedSubAgentSpawns = useMemo(
+    () => mergeSubAgentSpawns(subAgentSpawns, derivedSubAgentSpawns),
+    [subAgentSpawns, derivedSubAgentSpawns],
+  );
+  // Sub-agent spawns by their originating tool_use id. Used so SubAgentCard
+  // renders inline next to the ToolGroupCard whose `agent_spawn` call started
+  // it, rather than stacking all spawns at the top of the chat (where users
+  // miss them entirely — see 2026-05-07 incident).
+  const spawnsByToolUseId = useMemo(() => {
+    const map = new Map<string, SubAgentSpawn[]>();
+    for (const spawn of mergedSubAgentSpawns) {
+      if (!spawn.toolUseId) continue;
+      const list = map.get(spawn.toolUseId);
+      if (list) list.push(spawn);
+      else map.set(spawn.toolUseId, [spawn]);
+    }
+    return map;
+  }, [mergedSubAgentSpawns]);
+
+  const orphanSpawns = useMemo(
+    () => mergedSubAgentSpawns.filter((s) => !s.toolUseId),
+    [mergedSubAgentSpawns],
   );
   const previewModel = useMemo(
     () => collectChatPreviewModel({ entries: visibleEntries, attachments }),
@@ -770,7 +787,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           selectedId={selectedPreviewId}
           onSelect={setSelectedPreviewId}
           workspaceTabs={workspaceTabs}
-          subAgentSpawns={subAgentSpawns}
+          subAgentSpawns={mergedSubAgentSpawns}
           width={sidePanelWidth}
           onWidthChange={setSidePanelWidth}
           onWidthCommit={commitSidePanelWidth}
@@ -795,7 +812,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             selectedId={selectedPreviewId}
             onSelect={setSelectedPreviewId}
             workspaceTabs={workspaceTabs}
-            subAgentSpawns={subAgentSpawns}
+            subAgentSpawns={mergedSubAgentSpawns}
             width={sidePanelWidth}
             onWidthChange={setSidePanelWidth}
             onWidthCommit={commitSidePanelWidth}
