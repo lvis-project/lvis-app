@@ -50,6 +50,21 @@ describe("buildSandboxAuditEntry", () => {
     expect(entry.tool).toEqual(VALID_TOOL);
   });
 
+  it("preserves tool trust tuple fields when present", () => {
+    const tool: SandboxAuditEntry["tool"] = {
+      ...VALID_TOOL,
+      source: "plugin",
+      trustOrigin: "plugin-emitted",
+      approvalCacheKey: "plugin_send:scope-a",
+    };
+    const entry = buildSandboxAuditEntry({
+      tool,
+      sandbox: VALID_SANDBOX,
+      reviewer: VALID_REVIEWER,
+    });
+    expect(entry.tool).toEqual(tool);
+  });
+
   it("preserves all sandbox fields including events array", () => {
     const sandboxWithEvents: SandboxAuditEntry["sandbox"] = {
       kind: "asrt",

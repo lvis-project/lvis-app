@@ -151,7 +151,9 @@ export async function installAsrtWindowsSandbox(): Promise<SandboxWindowsInstall
   const { installWindowsSandbox, verifyWindowsWfpEgress } = await import(
     "@anthropic-ai/sandbox-runtime"
   );
-  const result = await installWindowsSandbox({
+  // ASRT 0.0.63 installWindowsSandbox is synchronous and may show a UAC prompt.
+  // Keep that visible; only the follow-up WFP verification below is awaited.
+  const result = installWindowsSandbox({
     proxyPortRange: DEFAULT_WINDOWS_PROXY_PORT_RANGE,
   });
   if ((result as AsrtWindowsInstallCancelledLike).cancelled) {
