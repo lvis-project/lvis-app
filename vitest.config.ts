@@ -19,6 +19,9 @@ const baseExclude = [
   ...(process.env.M4_E2E === "1"
     ? ["test/e2e/agent-hub/**", "test/e2e/ui/**", "test/e2e/window/**"]
     : ["test/e2e/**"]),
+  // Screenshot-capture harness is also a Playwright suite (own config under
+  // test/screenshots/playwright.config.ts) — vitest must never collect it.
+  "test/screenshots/**",
 ];
 const rendererTestGlobs = [
   `test/renderer/${testFileGlob}`,
