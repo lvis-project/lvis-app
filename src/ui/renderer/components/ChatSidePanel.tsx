@@ -70,6 +70,7 @@ import { PtyTerminalView } from "./PtyTerminalView.js";
 import { SideChatView } from "./SideChatView.js";
 import { VerticalSplitLayout } from "./VerticalSplitLayout.js";
 import { useVerticalSplit } from "../hooks/use-vertical-split.js";
+import { useAddProjectFolder } from "../hooks/use-add-project-folder.js";
 import { SubAgentCard, type SubAgentSpawn } from "./SubAgentCard.js";
 import { groupSubAgentSessions } from "../subagents/group-subagent-sessions.js";
 
@@ -751,14 +752,17 @@ function ProjectRootsBrowser({
   // Directories whose listing hit MAX_DIR_ENTRIES (main returns `truncated`), so
   // the browser can flag that only a prefix of the folder is shown.
   const [truncatedPaths, setTruncatedPaths] = useState<Set<string>>(new Set());
-  // A picked folder whose adjacency warnings must be acknowledged before the
-  // main process (workspace.pickRoot gate) will persist it into the read scope.
-  // `ackToken` binds the confirmation to the exact dialog-picked path the main
-  // process holds — the renderer echoes the token, never a path, so it can't
-  // widen the read scope to a directory the native picker never returned.
-  const [pendingWarning, setPendingWarning] = useState<
-    { path: string; warnings: string[]; ackToken: string } | null
-  >(null);
+  // "Add a project folder" (pickRoot + adjacency-warning acknowledgement) is
+  // the SAME shared flow the empty-state composer's ComposerProjectSelector
+  // uses — see use-add-project-folder.ts. Kept as one implementation so the
+  // ack-token state machine cannot drift between the two entry points.
+  const {
+    pendingWarning,
+    addFolder: pickProjectFolder,
+    confirmPendingFolder: confirmPendingFolderShared,
+    cancelPendingFolder,
+    setPendingWarning,
+  } = useAddProjectFolder();
   // True while a folder drag hovers the roots panel — drives the drop-zone ring.
   const [dragOver, setDragOver] = useState(false);
 
@@ -1005,14 +1009,9 @@ function ProjectRootsBrowser({
   };
 
   const addFolder = useCallback(async () => {
-    const res = await window.lvis.workspace.pickRoot();
-    if (!res.ok) return;
-    if (res.requiresAcknowledgement && res.pendingPath && res.ackToken) {
-      setPendingWarning({ path: res.pendingPath, warnings: res.warnings ?? [], ackToken: res.ackToken });
-      return;
-    }
-    if (res.roots) applyRoots(res.roots, res.added ?? null);
-  }, [applyRoots]);
+    const result = await pickProjectFolder();
+    if (result) applyRoots(result.roots, result.added);
+  }, [applyRoots, pickProjectFolder]);
 
   // ⌘O / Ctrl+O opens the folder picker when focus is within the panel (scoped —
   // no global shortcut pollution).
@@ -1083,14 +1082,8 @@ function ProjectRootsBrowser({
   };
 
   const confirmPendingFolder = async () => {
-    const pending = pendingWarning;
-    if (!pending) return;
-    // Second, explicit confirmation — echo the one-time token (never a path).
-    // Main persists the token-bound dialog path and still hard-refuses a
-    // sensitive/root path even when acknowledged.
-    const res = await window.lvis.workspace.pickRoot({ ackToken: pending.ackToken });
-    setPendingWarning(null);
-    if (res.ok && res.roots) applyRoots(res.roots, res.added ?? null);
+    const result = await confirmPendingFolderShared();
+    if (result) applyRoots(result.roots, result.added);
   };
 
   const activeRootIsDefault = Boolean(
@@ -1431,7 +1424,7 @@ function ProjectRootsBrowser({
               size="sm"
               variant="ghost"
               data-testid="chat-side-panel-root-warning-cancel"
-              onClick={() => setPendingWarning(null)}
+              onClick={cancelPendingFolder}
             >
               {t("common.cancel")}
             </Button>
