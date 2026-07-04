@@ -40,8 +40,8 @@ const REQUIRED_TOKEN_KEYS: ReadonlyArray<keyof BundleTokens> = [
 const HSL_TRIPLE_RE = /^\d+(?:\.\d+)?\s+\d+(?:\.\d+)?%\s+\d+(?:\.\d+)?%/;
 
 describe("bundle registry", () => {
-  it("exports exactly 14 bundles", () => {
-    expect(BUNDLES).toHaveLength(14);
+  it("exports exactly 16 bundles", () => {
+    expect(BUNDLES).toHaveLength(16);
   });
 
   it("all bundle IDs are unique", () => {
@@ -53,9 +53,9 @@ describe("bundle registry", () => {
     expect(findBundle(DEFAULT_BUNDLE_ID)).toBeDefined();
   });
 
-  it("starts fresh installs on the Cherry Blossom light bundle", () => {
-    expect(DEFAULT_BUNDLE_ID).toBe("cherry-blossom");
-    expect(BUNDLES[0].id).toBe("cherry-blossom");
+  it("starts fresh installs on the Moonstone light bundle", () => {
+    expect(DEFAULT_BUNDLE_ID).toBe("moonstone");
+    expect(BUNDLES[0].id).toBe("moonstone");
     expect(findBundle(DEFAULT_BUNDLE_ID)?.shell).toBe("light");
   });
 
