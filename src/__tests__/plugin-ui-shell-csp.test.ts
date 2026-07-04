@@ -51,12 +51,41 @@ function extractCsp(html: string): string {
 
 function extractScripts(html: string): Array<{ raw: string; attrs: string; body: string }> {
   const out: Array<{ raw: string; attrs: string; body: string }> = [];
-  const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
-    out.push({ raw: m[0], attrs: m[1], body: m[2] });
+  let offset = 0;
+  const lower = html.toLowerCase();
+  while (offset < html.length) {
+    const open = lower.indexOf("<script", offset);
+    if (open < 0) break;
+    const attrsStart = open + "<script".length;
+    const openEnd = html.indexOf(">", attrsStart);
+    if (openEnd < 0) break;
+    const closeStart = findScriptCloseTag(html, openEnd + 1);
+    if (closeStart < 0) break;
+    const closeEnd = html.indexOf(">", closeStart);
+    if (closeEnd < 0) break;
+    out.push({
+      raw: html.slice(open, closeEnd + 1),
+      attrs: html.slice(attrsStart, openEnd),
+      body: html.slice(openEnd + 1, closeStart),
+    });
+    offset = closeEnd + 1;
   }
   return out;
+}
+
+function findScriptCloseTag(html: string, from: number): number {
+  const lower = html.toLowerCase();
+  let cursor = from;
+  while (cursor < html.length) {
+    const candidate = lower.indexOf("</script", cursor);
+    if (candidate < 0) return -1;
+    const afterName = lower[candidate + "</script".length];
+    if (afterName === undefined || afterName === ">" || /\s/.test(afterName)) {
+      return candidate;
+    }
+    cursor = candidate + 1;
+  }
+  return -1;
 }
 
 describe("plugin-ui-shell — CSP-safe external bootstrap", () => {

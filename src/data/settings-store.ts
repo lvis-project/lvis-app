@@ -608,7 +608,6 @@ export class SettingsService {
 
   private migrateSecretsMode(): void {
     if (process.platform === "win32") return;
-    if (!existsSync(this.secretsPath)) return;
     let fd: number | null = null;
     try {
       fd = openSync(this.secretsPath, "r");
@@ -617,6 +616,7 @@ export class SettingsService {
         fchmodSync(fd, 0o600);
       }
     } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
       log.warn("secrets mode migration failed: %s", (err as Error).message);
     } finally {
       if (fd !== null) {
@@ -826,19 +826,19 @@ export class SettingsService {
     await this.saveSettings();
   }
 
-  /** 비밀 값(API 키 등)을 암호화하여 저장 */
+  /** Encrypt and store a secret value such as an API key. */
   async setSecret(key: string, value: string): Promise<void> {
     const secrets = this.loadSecrets();
     if (safeStorage.isEncryptionAvailable()) {
       secrets[key] = safeStorage.encryptString(value).toString("base64");
     } else {
-      // 암호화 불가 환경 — 평문 저장 (개발 환경 등)
+      // Encryption may be unavailable in development or headless environments.
       secrets[key] = `plain:${value}`;
     }
     await this.saveSecrets(secrets);
   }
 
-  /** 저장된 비밀 값을 복호화하여 반환 */
+  /** Decrypt and return a stored secret value. */
   getSecret(key: string): string | null {
     const secrets = this.loadSecrets();
     const stored = secrets[key];
@@ -887,11 +887,10 @@ export class SettingsService {
     return deleted;
   }
 
-  // Copilot review fix: 기존 hasApiKey() 는 `llm.apiKey` 단일 키만 검사했으나
-  // 실제 IPC handler (`lvis:settings:has-api-key`) 는 vendor 별 `llm.apiKey.<v>`
-  // 형식으로 직접 getSecret 을 호출한다. 이 메서드는 어디서도 호출되지 않아
-  // dead code 였고, 미래 caller 가 잘못 사용하면 항상 false 를 반환했을 것이다.
-  // 통일된 API key 검사는 `getSecret(\`llm.apiKey.\${vendor}\`)` 로 직접 수행하라.
+  // Historical note: hasApiKey() only checked the single `llm.apiKey` key,
+  // while the IPC handler uses vendor-specific `llm.apiKey.<vendor>` secrets.
+  // Keep callers on the explicit `getSecret(...)` path so future vendor checks
+  // cannot accidentally return false for configured credentials.
 
   // --- private helpers ---
 

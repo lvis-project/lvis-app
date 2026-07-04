@@ -1,36 +1,40 @@
 # Phase2 Track B Closure Report
 
-This English page is the canonical default entry for `blueprints/phase2-track-b-closure-report.md`. The preserved Korean source is available at [ko/blueprints/phase2-track-b-closure-report.md](../ko/blueprints/phase2-track-b-closure-report.md).
+Status: Active English default. The Korean archive keeps earlier review history and original discussion, but this page must be usable on its own.
 
-## Purpose
+Korean archive: [docs/ko mirror](../ko/blueprints/phase2-track-b-closure-report.md).
 
-Blueprints are implementation planning records. Default English pages summarize the current status and link to the Korean historical source.
+## What This Page Owns
 
-## When To Use This Page
+This page owns closure evidence for the marketplace and plugin-runtime workstream. Use it as the first review surface when changing this area; use the archive for background, not as a substitute for current English guidance.
 
-Use this page to recover context for an implementation area without making the Korean archive the default entry point.
+## Current Operating Contract
 
-## Current Contract
+- English is the default review and contributor language for this app surface.
+- The document must name the behavior that still matters today, the code or test locations that enforce it, and the conditions that make the note stale.
+- Source files and tests are authoritative when this prose and implementation disagree.
+- Korean-only material stays in the mirrored archive unless it is translated or summarized here.
 
-- English is the default language for app documentation, UI-facing examples, contributor guidance, and release operations.
-- Korean material is retained under the mirrored `docs/ko` path for historical context, Korean review, and local product memory.
-- If this page describes behavior that is enforced by code, the source files and tests remain the source of truth. Update both when the contract changes.
-- Do not move Korean-only content back into the default documentation path; translate or summarize it here and keep the original mirror linked.
+## Implementation Anchors
 
-## Maintenance Checklist
+- `docs/architecture/README.md`
+- `src/core/`
+- `src/ui/renderer/`
+- `src/plugins/`
 
-- Mark whether the plan is active, implemented, or historical.
-- Link to current source files when available.
-- Do not treat old plan language as current product truth without verification.
-- Prefer concise current status over long stale detail.
+## Update Checklist
+
+- State whether the document is active, implemented, superseded, or historical before adding new detail.
+- Keep links relative to the current file depth; mirrored files under `docs/ko` need different paths from default docs.
+- Add or update tests when a documented behavior is enforced by code.
+- Remove template language and stale plan wording instead of carrying it forward.
 
 ## Related Entry Points
 
-- [Documentation Home](../README.md)
-- [Architecture Overview](../architecture/README.md)
-- [Plugin Development Guide](../guides/plugin-development.md)
-- [Korean Mirror](../ko/blueprints/phase2-track-b-closure-report.md)
+- [LVIS Project Documentation](../README.md)
+- [Blueprints](./README.md)
+- [Getting Started](../guides/getting-started.md)
 
-## Update Notes
+## Review Notes
 
-When updating this document, keep the English default useful on its own. The Korean mirror should preserve original review history, but reviewers should not need to open it just to understand the current app contract.
+This English page should let a reviewer understand scope, risk, and validation without opening the Korean archive. If the archive contains rationale that still matters, translate the relevant part into this page and keep the archive link as provenance.

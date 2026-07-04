@@ -1,36 +1,40 @@
 # 2026 05 12 Plugin Theme Unification
 
-This English page is the canonical default entry for `architecture/proposals/2026-05-12-plugin-theme-unification.md`. The preserved Korean source is available at [ko/architecture/proposals/2026-05-12-plugin-theme-unification.md](../../ko/architecture/proposals/2026-05-12-plugin-theme-unification.md).
+Status: Active English default. The Korean archive keeps earlier review history and original discussion, but this page must be usable on its own.
 
-## Purpose
+Korean archive: [docs/ko mirror](../../ko/architecture/proposals/2026-05-12-plugin-theme-unification.md).
 
-Architecture notes describe host boundaries, process ownership, permission seams, plugin contracts, and runtime data flow for the desktop app.
+## What This Page Owns
 
-## When To Use This Page
+This page owns the path for host theme tokens to reach plugin UI surfaces without duplicating private renderer CSS. Use it as the first review surface when changing this area; use the archive for background, not as a substitute for current English guidance.
 
-Use this page when changing main-process services, renderer surfaces, plugin runtime contracts, storage layouts, or cross-process IPC.
+## Current Operating Contract
 
-## Current Contract
+- English is the default review and contributor language for this app surface.
+- The document must name the behavior that still matters today, the code or test locations that enforce it, and the conditions that make the note stale.
+- Source files and tests are authoritative when this prose and implementation disagree.
+- Korean-only material stays in the mirrored archive unless it is translated or summarized here.
 
-- English is the default language for app documentation, UI-facing examples, contributor guidance, and release operations.
-- Korean material is retained under the mirrored `docs/ko` path for historical context, Korean review, and local product memory.
-- If this page describes behavior that is enforced by code, the source files and tests remain the source of truth. Update both when the contract changes.
-- Do not move Korean-only content back into the default documentation path; translate or summarize it here and keep the original mirror linked.
+## Implementation Anchors
 
-## Maintenance Checklist
+- `src/ui/renderer/`
+- `src/plugins/`
+- `src/permissions/`
+- `src/main/notification-service.ts`
 
-- Preserve the host as the policy owner for permissions and audit.
-- Keep renderer and plugin code behind explicit preload or HostApi contracts.
-- Document storage and migration effects before changing paths.
-- Update tests that encode architecture contracts.
+## Update Checklist
+
+- State whether the document is active, implemented, superseded, or historical before adding new detail.
+- Keep links relative to the current file depth; mirrored files under `docs/ko` need different paths from default docs.
+- Add or update tests when a documented behavior is enforced by code.
+- Remove template language and stale plan wording instead of carrying it forward.
 
 ## Related Entry Points
 
-- [Documentation Home](../README.md)
-- [Architecture Overview](../architecture/README.md)
-- [Plugin Development Guide](../guides/plugin-development.md)
-- [Korean Mirror](../../ko/architecture/proposals/2026-05-12-plugin-theme-unification.md)
+- [LVIS Project Documentation](../../README.md)
+- [Architecture](../README.md)
+- [Getting Started](../../guides/getting-started.md)
 
-## Update Notes
+## Review Notes
 
-When updating this document, keep the English default useful on its own. The Korean mirror should preserve original review history, but reviewers should not need to open it just to understand the current app contract.
+This English page should let a reviewer understand scope, risk, and validation without opening the Korean archive. If the archive contains rationale that still matters, translate the relevant part into this page and keep the archive link as provenance.

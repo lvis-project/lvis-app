@@ -2,7 +2,7 @@
 
 
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, rmSync, statSync, renameSync, watch, type FSWatcher } from "node:fs";
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync, unlinkSync, rmSync, renameSync, watch, type FSWatcher } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, resolve, basename } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
@@ -23,6 +23,86 @@ export const MAX_TOOL_RESULT_ARTIFACT_BYTES = 5_000_000;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+interface FileSnapshot {
+  content: string;
+  mtime: Date;
+  mtimeMs: number;
+  size: number;
+  tooLarge: boolean;
+}
+
+function isMissingPathError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+function readUtf8FileIfPresent(path: string): string | null {
+  try {
+    return readFileSync(path, "utf-8");
+  } catch (err) {
+    if (isMissingPathError(err)) return null;
+    throw err;
+  }
+}
+
+function readUtf8FileSnapshotIfPresent(path: string, maxBytes = Number.POSITIVE_INFINITY): FileSnapshot | null {
+  let fd: number | null = null;
+  try {
+    fd = openSync(path, "r");
+    const stat = fstatSync(fd);
+    if (stat.size > maxBytes) {
+      return { content: "", mtime: stat.mtime, mtimeMs: stat.mtimeMs, size: stat.size, tooLarge: true };
+    }
+    return {
+      content: readFileSync(fd, "utf-8"),
+      mtime: stat.mtime,
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      tooLarge: false,
+    };
+  } catch (err) {
+    if (isMissingPathError(err)) return null;
+    throw err;
+  } finally {
+    if (fd !== null) {
+      try { closeSync(fd); } catch { /* ignore */ }
+    }
+  }
+}
+
+function statPathIfPresent(path: string): Omit<FileSnapshot, "content" | "tooLarge"> | null {
+  let fd: number | null = null;
+  try {
+    fd = openSync(path, "r");
+    const stat = fstatSync(fd);
+    return { mtime: stat.mtime, mtimeMs: stat.mtimeMs, size: stat.size };
+  } catch (err) {
+    if (isMissingPathError(err)) return null;
+    throw err;
+  } finally {
+    if (fd !== null) {
+      try { closeSync(fd); } catch { /* ignore */ }
+    }
+  }
+}
+
+function readdirIfPresent(path: string): string[] {
+  try {
+    return readdirSync(path);
+  } catch (err) {
+    if (isMissingPathError(err)) return [];
+    throw err;
+  }
+}
+
+function unlinkIfPresent(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch (err) {
+    if (!isMissingPathError(err)) throw err;
+  }
 }
 
 export interface MemoryManagerOptions {
@@ -545,11 +625,10 @@ export class MemoryManager {
   searchSessions(query: string, options: Pick<ListSessionsOptions, "kind" | "routineId" | "projectRoot" | "includeUnscoped"> = {}): SessionSearchEntry[] {
     // Require at least 2 chars to prevent accidental full-dump via empty/trivial query.
     if (query.trim().length < 2) return [];
-    if (!existsSync(this.sessionsDir)) return [];
     const lower = query.toLowerCase();
     const results: SessionSearchEntry[] = [];
     const UUID_RE = /^[0-9a-f-]{8,}$/i;
-    const files = readdirSync(this.sessionsDir).filter((f) => f.endsWith(".jsonl"));
+    const files = readdirIfPresent(this.sessionsDir).filter((f) => f.endsWith(".jsonl"));
     for (const file of files) {
       if (results.length >= 50) break;
       const stem = file.replace(".jsonl", "");
@@ -558,13 +637,12 @@ export class MemoryManager {
       const metadata = this.loadSessionMetadata(stem);
       if (!matchesSessionScope(metadata, options)) continue;
       const filePath = join(this.sessionsDir, file);
-      const stat = statSync(filePath);
-      // Skip oversized files — unbounded readFileSync is a DoS vector.
-        if (stat.size > MAX_SESSION_FILE_BYTES) continue;
-      const timestamp = stat.mtime.toISOString();
       try {
-        const raw = readFileSync(filePath, "utf-8");
-        const lines = raw.trim().split("\n").filter(Boolean);
+        const snapshot = readUtf8FileSnapshotIfPresent(filePath, MAX_SESSION_FILE_BYTES);
+        // Skip oversized files because unbounded reads are a DoS vector.
+        if (!snapshot || snapshot.tooLarge) continue;
+        const timestamp = snapshot.mtime.toISOString();
+        const lines = snapshot.content.trim().split("\n").filter(Boolean);
         for (const line of lines) {
           if (results.length >= 50) break;
           let msg: unknown;
@@ -644,7 +722,7 @@ export class MemoryManager {
     };
   }
 
-  /** memories/MEMORY.md 업데이트 */
+  /** Update memories/MEMORY.md. */
   async updateMemoryIndex(content: string): Promise<void> {
     const targetPath = join(this.memoryDir, "MEMORY.md");
     await withFileLock(targetPath, async () => {
@@ -657,7 +735,7 @@ export class MemoryManager {
     const targetPath = join(this.memoryDir, "MEMORY.md");
     let didUpdate = false;
     await withFileLock(targetPath, async () => {
-      const current = existsSync(targetPath) ? readFileSync(targetPath, "utf-8") : "";
+      const current = readUtf8FileIfPresent(targetPath) ?? "";
       if (current !== expectedContent) return;
       writeFileSync(targetPath, nextContent, "utf-8");
       didUpdate = true;
@@ -669,27 +747,25 @@ export class MemoryManager {
   async updateMemoryIndexSections(sections: MemoryIndexSectionsPatch): Promise<void> {
     const targetPath = join(this.memoryDir, "MEMORY.md");
     await withFileLock(targetPath, async () => {
-      const current = existsSync(targetPath)
-        ? readFileSync(targetPath, "utf-8")
-        : getDefaultMemoryIndex();
+      const current = readUtf8FileIfPresent(targetPath) ?? getDefaultMemoryIndex();
       writeFileSync(targetPath, this.patchMemoryIndexSections(current, sections), "utf-8");
     });
     this.memoryIndex = this.readMemoryIndex();
   }
 
-  /** 기억 삭제 */
+  /** Delete a saved memory note. */
   async deleteMemory(filename: string): Promise<void> {
     const safeFilename = this.validateDeletableMemoryFilename(filename);
     const path = join(this.memoryDir, safeFilename);
     const indexPath = join(this.memoryDir, "MEMORY.md");
     await withFileLock(indexPath, async () => {
-      if (existsSync(path)) unlinkSync(path);
+      unlinkIfPresent(path);
       this.removeMemoryIndexEntryLocked(safeFilename, indexPath);
     });
     this.memoryIndex = this.readMemoryIndex();
   }
 
-  /** AGENTS.md 업데이트 */
+  /** Update AGENTS.md. */
   async updateAgentsMd(content: string): Promise<void> {
     const targetPath = join(this.lvisDir, "AGENTS.md");
     await withFileLock(targetPath, async () => {
@@ -698,7 +774,7 @@ export class MemoryManager {
     this.agentsMd = content;
   }
 
-  /** user-preferences.md 업데이트 */
+  /** Update user-preferences.md. */
   async updateUserPreferences(content: string): Promise<void> {
     const targetPath = join(this.lvisDir, "user-preferences.md");
     await withFileLock(targetPath, async () => {
@@ -716,7 +792,7 @@ export class MemoryManager {
     const targetPath = join(this.lvisDir, "user-preferences.md");
     let didWrite = false;
     await withFileLock(targetPath, async () => {
-      const current = existsSync(targetPath) ? readFileSync(targetPath, "utf-8") : "";
+      const current = readUtf8FileIfPresent(targetPath) ?? "";
       if (current !== expectedContent) return;
       writeFileSync(targetPath, nextContent, "utf-8");
       this.userPreferences = nextContent;
@@ -728,7 +804,7 @@ export class MemoryManager {
     return didWrite;
   }
 
-  /** ~/.lvis/ 경로 반환 */
+  /** Return the ~/.lvis directory path. */
   getDir(): string {
     return this.lvisDir;
   }
@@ -737,7 +813,7 @@ export class MemoryManager {
 
   // ─── Session Persistence (~/.lvis/sessions/) ─
 
-  /** 세션 저장 — JSONL 형식 */
+  /** Save a session in JSONL format. */
   async saveSession(sessionId: string, messages: unknown[]): Promise<void> {
     if (!isValidSessionId(sessionId)) {
       throw new Error(`saveSession: invalid sessionId "${sessionId}"`);
@@ -775,8 +851,9 @@ export class MemoryManager {
   loadCheckpointSnapshot(sessionId: string, compactNum: number): unknown[] | null {
     if (!isValidSessionId(sessionId)) return null;
     const snapshotPath = join(this.checkpointsDir, sessionId, `${compactNum}.jsonl`);
-    if (!existsSync(snapshotPath)) return null;
-    const lines = readFileSync(snapshotPath, "utf-8").trim().split("\n");
+    const raw = readUtf8FileIfPresent(snapshotPath);
+    if (raw === null) return null;
+    const lines = raw.trim().split("\n");
     const messages: unknown[] = [];
     for (const line of lines.filter(Boolean)) {
       try {
@@ -788,12 +865,13 @@ export class MemoryManager {
     return messages;
   }
 
-  /** 세션 복원 */
+  /** Load a persisted session. */
   loadSession(sessionId: string): unknown[] | null {
     if (!isValidSessionId(sessionId)) return null;
     const path = join(this.sessionsDir, `${sessionId}.jsonl`);
-    if (!existsSync(path)) return null;
-    const lines = readFileSync(path, "utf-8").trim().split("\n");
+    const raw = readUtf8FileIfPresent(path);
+    if (raw === null) return null;
+    const lines = raw.trim().split("\n");
     const messages: unknown[] = [];
     for (const line of lines.filter(Boolean)) {
       try {
@@ -841,10 +919,11 @@ export class MemoryManager {
       return null;
     }
     const paths = this.toolResultArtifactPaths(sessionId, toolUseId);
-    if (!existsSync(paths.contentPath) || !existsSync(paths.metaPath)) return null;
     try {
-      const content = readFileSync(paths.contentPath, "utf-8");
-      const meta = JSON.parse(readFileSync(paths.metaPath, "utf-8")) as Record<string, unknown>;
+      const content = readUtf8FileIfPresent(paths.contentPath);
+      const rawMeta = readUtf8FileIfPresent(paths.metaPath);
+      if (content === null || rawMeta === null) return null;
+      const meta = JSON.parse(rawMeta) as Record<string, unknown>;
       if (meta.toolUseId !== toolUseId) return null;
       const truncated = normalizeTruncatedInfo(meta.truncated);
       const sha256 = typeof meta.sha256 === "string" ? meta.sha256 : "";
@@ -919,9 +998,10 @@ export class MemoryManager {
       throw new Error(`loadSessionMetadata: invalid sessionId "${sessionId}"`);
     }
     const path = join(this.sessionsDir, `${sessionId}.meta.json`);
-    if (!existsSync(path)) return null;
     try {
-      const parsed = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+      const raw = readUtf8FileIfPresent(path);
+      if (raw === null) return null;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
       if (!parsed || typeof parsed !== "object") return null;
       return normalizeSessionMetadata(parsed);
     } catch (err) {
@@ -936,9 +1016,10 @@ export class MemoryManager {
 
   loadMainActiveSessionState(): MainActiveSessionState | null {
     const path = join(this.sessionsDir, ACTIVE_SESSION_STATE_FILE);
-    if (!existsSync(path)) return null;
     try {
-      const parsed = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+      const raw = readUtf8FileIfPresent(path);
+      if (raw === null) return null;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
       const mode = parsed.mainActiveMode;
       if (mode !== "resume" && mode !== "fresh") return null;
       const id = parsed.mainActiveSessionId;
@@ -1001,15 +1082,15 @@ export class MemoryManager {
     });
   }
 
-  /** 세션 목록 */
+  /** List persisted sessions. */
   listSessions(input: number | ListSessionsOptions = Number.POSITIVE_INFINITY): SessionListEntry[] {
     const options: ListSessionsOptions = typeof input === "number" ? { limit: input } : input;
-    if (!existsSync(this.sessionsDir)) return [];
     const limit = options.limit ?? Number.POSITIVE_INFINITY;
-    return readdirSync(this.sessionsDir)
+    return readdirIfPresent(this.sessionsDir)
       .filter((f) => f.endsWith(".jsonl"))
-      .map((f) => {
-        const stat = statSync(join(this.sessionsDir, f));
+      .flatMap((f) => {
+        const stat = statPathIfPresent(join(this.sessionsDir, f));
+        if (!stat) return [];
         return {
           id: f.replace(".jsonl", ""),
           modifiedAt: stat.mtime,
@@ -1051,17 +1132,17 @@ export class MemoryManager {
   }
 
   listSessionsPage(options: ListSessionsOptions = {}): SessionListEntry[] {
-    if (!existsSync(this.sessionsDir)) return [];
     const limit = Number.isFinite(options.limit)
       ? Math.max(0, Math.floor(options.limit ?? 0))
       : Number.POSITIVE_INFINITY;
     const beforeTime = options.before?.getTime();
     const beforeId = options.beforeId;
     const afterTime = options.after?.getTime();
-    return readdirSync(this.sessionsDir)
+    return readdirIfPresent(this.sessionsDir)
       .filter((f) => f.endsWith(".jsonl"))
-      .map((f) => {
-        const stat = statSync(join(this.sessionsDir, f));
+      .flatMap((f) => {
+        const stat = statPathIfPresent(join(this.sessionsDir, f));
+        if (!stat) return [];
         return {
           id: f.replace(".jsonl", ""),
           modifiedAt: stat.mtime,
@@ -1140,11 +1221,12 @@ export class MemoryManager {
   }
 
   /**
-   * 세션 삭제 — jsonl + metadata + 같은 session 의 compact archive/snapshot/sidecar 동시 제거.
+   * Delete a session: JSONL, metadata, and sibling compact archives,
+   * snapshots, sidecars, and diff-cache state.
    *
-   * Compact pipeline 이 oversize 메시지를
-   * `sessions/<sessionId>/truncated/` 와 `sessions/.checkpoints/<sessionId>/`
-   * 에 격리하므로, 세션 삭제 시 transcript 조각이 orphan 으로 남지 않게 함께 정리.
+   * The compact pipeline stores oversized message fragments under
+   * `sessions/<sessionId>/truncated/` and `sessions/.checkpoints/<sessionId>/`.
+   * Remove those with the transcript so no orphaned fragments remain.
    */
   deleteSession(sessionId: string): void {
     if (!isValidSessionId(sessionId)) {
@@ -1152,32 +1234,26 @@ export class MemoryManager {
       return;
     }
     const jsonlPath = join(this.sessionsDir, `${sessionId}.jsonl`);
-    if (existsSync(jsonlPath)) unlinkSync(jsonlPath);
+    unlinkIfPresent(jsonlPath);
     const metaPath = join(this.sessionsDir, `${sessionId}.meta.json`);
-    if (existsSync(metaPath)) unlinkSync(metaPath);
+    unlinkIfPresent(metaPath);
     const sessionDir = join(this.sessionsDir, sessionId);
-    if (existsSync(sessionDir)) {
-      try {
-        rmSync(sessionDir, { recursive: true, force: true });
-      } catch (err) {
-        log.warn(`deleteSession: failed to remove session dir ${sessionDir}: ${(err as Error).message}`);
-      }
+    try {
+      rmSync(sessionDir, { recursive: true, force: true });
+    } catch (err) {
+      log.warn(`deleteSession: failed to remove session dir ${sessionDir}: ${(err as Error).message}`);
     }
     const checkpointSnapshotDir = join(this.checkpointsDir, sessionId);
-    if (existsSync(checkpointSnapshotDir)) {
-      try {
-        rmSync(checkpointSnapshotDir, { recursive: true, force: true });
-      } catch (err) {
-        log.warn(`deleteSession: failed to remove checkpoint snapshot dir ${checkpointSnapshotDir}: ${(err as Error).message}`);
-      }
+    try {
+      rmSync(checkpointSnapshotDir, { recursive: true, force: true });
+    } catch (err) {
+      log.warn(`deleteSession: failed to remove checkpoint snapshot dir ${checkpointSnapshotDir}: ${(err as Error).message}`);
     }
     const diffCacheDir = join(this.lvisDir, "diff-cache", sessionId);
-    if (existsSync(diffCacheDir)) {
-      try {
-        rmSync(diffCacheDir, { recursive: true, force: true });
-      } catch (err) {
-        log.warn(`deleteSession: failed to remove diff cache dir ${diffCacheDir}: ${(err as Error).message}`);
-      }
+    try {
+      rmSync(diffCacheDir, { recursive: true, force: true });
+    } catch (err) {
+      log.warn(`deleteSession: failed to remove diff cache dir ${diffCacheDir}: ${(err as Error).message}`);
     }
   }
 
@@ -1313,9 +1389,10 @@ export class MemoryManager {
 
   private cleanupToolResultArtifacts(sessionId: string, keepArtifactKeys: Set<string>): void {
     const dir = this.toolResultArtifactsDir(sessionId);
-    if (!existsSync(dir)) return;
+    const entries = readdirIfPresent(dir);
+    if (entries.length === 0) return;
     const checkpointKeys = this.loadCheckpointToolResultArtifactKeys(sessionId);
-    for (const entry of readdirSync(dir)) {
+    for (const entry of entries) {
       const key = entry.replace(/\.(txt|json)$/u, "");
       if (keepArtifactKeys.has(key) || checkpointKeys.has(key)) continue;
       try {
@@ -1329,12 +1406,13 @@ export class MemoryManager {
   private loadCheckpointToolResultArtifactKeys(sessionId: string): Set<string> {
     const keys = new Set<string>();
     const dir = join(this.checkpointsDir, sessionId);
-    if (!existsSync(dir)) return keys;
-    for (const entry of readdirSync(dir)) {
+    for (const entry of readdirIfPresent(dir)) {
       if (!entry.endsWith(".jsonl")) continue;
       const path = join(dir, entry);
       try {
-        const lines = readFileSync(path, "utf-8").trim().split("\n").filter(Boolean);
+        const raw = readUtf8FileIfPresent(path);
+        if (raw === null) continue;
+        const lines = raw.trim().split("\n").filter(Boolean);
         for (const line of lines) {
           let parsed: unknown;
           try {
@@ -1382,14 +1460,13 @@ export class MemoryManager {
 
   private readFile(name: string): string {
     const path = join(this.lvisDir, name);
-    if (!existsSync(path)) return "";
-    return readFileSync(path, "utf-8");
+    return readUtf8FileIfPresent(path) ?? "";
   }
 
   private readMemoryIndex(): string {
     const path = join(this.memoryDir, "MEMORY.md");
-    if (!existsSync(path)) return "";
-    return this.truncateMemoryIndex(readFileSync(path, "utf-8"));
+    const raw = readUtf8FileIfPresent(path);
+    return raw === null ? "" : this.truncateMemoryIndex(raw);
   }
 
   private watchDirectoryForPersistentContext(dir: string, filenames: Set<string>): void {
@@ -1445,7 +1522,7 @@ export class MemoryManager {
 
   private getFileMtimeMs(path: string): number {
     try {
-      return existsSync(path) ? statSync(path).mtimeMs : -1;
+      return statPathIfPresent(path)?.mtimeMs ?? -1;
     } catch {
       return -1;
     }
@@ -1477,14 +1554,14 @@ export class MemoryManager {
   }
 
   private readMarkdownEntries(dir: string, options: (ProjectScopedMemoryOptions & { excludeMarkedMemory?: boolean }) = {}): NoteEntry[] {
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir)
+    return readdirIfPresent(dir)
       .filter((f) => f.endsWith(".md"))
       .flatMap((filename) => {
         const path = join(dir, filename);
         if (filename.toLowerCase() === "memory.md") return [];
-        const stat = statSync(path);
-        const rawContent = readFileSync(path, "utf-8");
+        const snapshot = readUtf8FileSnapshotIfPresent(path);
+        if (!snapshot || snapshot.tooLarge) return [];
+        const rawContent = snapshot.content;
         if (options?.excludeMarkedMemory && this.hasMemoryMarker(rawContent)) return [];
         const project = this.parseMemoryProject(rawContent);
         if (!this.matchesMemoryProject(project, options)) return [];
@@ -1494,7 +1571,7 @@ export class MemoryManager {
           filename,
           title: titleMatch?.[1] ?? filename.replace(".md", ""),
           content,
-          updatedAt: stat.mtime.toISOString(),
+          updatedAt: snapshot.mtime.toISOString(),
           ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
           ...(project.projectName ? { projectName: project.projectName } : {}),
         }];
@@ -1570,9 +1647,7 @@ export class MemoryManager {
     const safeTitle = title.replace(/[\r\n\[\]]/g, " ").trim() || filename.replace(".md", "");
     const excerpt = content.replace(/\s+/g, " ").trim().slice(0, 140);
     const line = `- [${safeTitle}](./${filename}) — ${excerpt}`;
-    const existing = existsSync(targetPath)
-      ? readFileSync(targetPath, "utf-8")
-      : getDefaultMemoryIndex();
+    const existing = readUtf8FileIfPresent(targetPath) ?? getDefaultMemoryIndex();
     const lines = existing.split(/\r?\n/);
     const linkNeedle = `](./${filename})`;
     const idx = lines.findIndex((l) => l.includes(linkNeedle));
@@ -1646,11 +1721,11 @@ export class MemoryManager {
   }
 
   private removeMemoryIndexEntryLocked(filename: string, targetPath: string): void {
-    if (!existsSync(targetPath)) {
+    const existing = readUtf8FileIfPresent(targetPath);
+    if (existing === null) {
       this.memoryIndex = "";
       return;
     }
-    const existing = readFileSync(targetPath, "utf-8");
     const linkNeedle = `](./${filename})`;
     const lines = existing.split(/\r?\n/).filter((line) => !line.includes(linkNeedle));
     writeFileSync(targetPath, lines.join("\n"), "utf-8");
@@ -1712,7 +1787,8 @@ export class MemoryManager {
   private slugify(title: string): string {
     return title
       .toLowerCase()
-      .replace(/[^a-z0-9가-힣\s-]/g, "")
+      // Keep Hangul in user-authored memory titles while the source remains ASCII.
+      .replace(/[^a-z0-9\uac00-\ud7a3\s-]/g, "")
       .replace(/\s+/g, "-")
       .replace(/-+/g, "-")
       .slice(0, 60) || "untitled";

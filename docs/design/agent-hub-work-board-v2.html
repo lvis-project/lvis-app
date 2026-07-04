@@ -17,22 +17,25 @@
 <body>
   <main>
     <h1>Agent Hub Work Board V2</h1>
-    <p>This English page is the canonical default entry for <code>docs/design/agent-hub-work-board-v2.html</code>. The preserved Korean design artifact is available at <a href="../ko/design/agent-hub-work-board-v2.html">ko/design/agent-hub-work-board-v2.html</a>.</p>
+    <p>This English design artifact refines the work-board information hierarchy and run detail states. The Korean archive is available at <a href="../ko/design/agent-hub-work-board-v2.html">docs/ko mirror</a>.</p>
     <section class="panel">
-      <h2>Purpose</h2>
-      <p>Design artifacts define screen-level contracts, interaction states, and visual QA expectations for app surfaces.</p>
-      <h2>Current Contract</h2>
+      <h2>Screen Contract</h2>
       <ul>
-        <li>Default design documentation is English-first and must be understandable without opening the Korean mirror.</li>
-        <li>Renderer changes should preserve workflow, accessibility, and test contracts.</li>
-        <li>Historical Korean mockup detail remains linked for review continuity.</li>
+        <li>The artifact must be understandable as the default review surface without opening the archive.</li>
+        <li>Workflow-critical states must be explicit: empty, loading, active, error, success, and permission-blocked where applicable.</li>
+        <li>Renderer changes should preserve accessibility labels, keyboard behavior, and test hooks unless the owning test is updated.</li>
       </ul>
-      <h2>Maintenance Checklist</h2>
+      <h2>Implementation Anchors</h2>
       <ul>
-        <li>Preserve test hooks and accessibility labels that tests rely on.</li>
-        <li>Keep interaction states explicit.</li>
-        <li>Avoid decorative-only changes without a workflow reason.</li>
-        <li>Update screenshots or HTML artifacts when UI contracts change.</li>
+        <li><code>src/ui/renderer/components/</code></li>
+        <li><code>src/ui/renderer/tabs/</code></li>
+        <li><code>src/ui/renderer/__tests__/</code></li>
+      </ul>
+      <h2>Update Checklist</h2>
+      <ul>
+        <li>Update this artifact when layout, state naming, or primary actions change.</li>
+        <li>Keep screenshots, HTML mockups, and component tests aligned.</li>
+        <li>Do not use decorative-only changes to mask missing workflow states.</li>
       </ul>
     </section>
   </main>

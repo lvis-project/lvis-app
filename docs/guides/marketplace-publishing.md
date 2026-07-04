@@ -1,36 +1,39 @@
 # Marketplace Publishing
 
-This English page is the canonical default entry for `guides/marketplace-publishing.md`. The preserved Korean source is available at [ko/guides/marketplace-publishing.md](../ko/guides/marketplace-publishing.md).
+Status: Active English default. The Korean archive keeps earlier review history and original discussion, but this page must be usable on its own.
 
-## Purpose
+Korean archive: [docs/ko mirror](../ko/guides/marketplace-publishing.md).
 
-Guides are operator and contributor runbooks. They should describe the concrete commands, expected state, and verification evidence for app work.
+## What This Page Owns
 
-## When To Use This Page
+This page owns marketplace package expectations, compatibility metadata, receipts, signatures, and rollback behavior. Use it as the first review surface when changing this area; use the archive for background, not as a substitute for current English guidance.
 
-Use this page when onboarding contributors, publishing plugins, testing marketplace flows, or setting up Windows development.
+## Current Operating Contract
 
-## Current Contract
+- English is the default review and contributor language for this app surface.
+- The document must name the behavior that still matters today, the code or test locations that enforce it, and the conditions that make the note stale.
+- Source files and tests are authoritative when this prose and implementation disagree.
+- Korean-only material stays in the mirrored archive unless it is translated or summarized here.
 
-- English is the default language for app documentation, UI-facing examples, contributor guidance, and release operations.
-- Korean material is retained under the mirrored `docs/ko` path for historical context, Korean review, and local product memory.
-- If this page describes behavior that is enforced by code, the source files and tests remain the source of truth. Update both when the contract changes.
-- Do not move Korean-only content back into the default documentation path; translate or summarize it here and keep the original mirror linked.
+## Implementation Anchors
 
-## Maintenance Checklist
+- `package.json`
+- `src/plugins/`
+- `src/main/`
+- `src/ui/renderer/`
 
-- Prefer exact commands over narrative.
-- Call out required environment variables and secrets without storing values.
-- Keep verification steps current with package scripts.
-- Link to the Korean mirror for historical context.
+## Update Checklist
+
+- State whether the document is active, implemented, superseded, or historical before adding new detail.
+- Keep links relative to the current file depth; mirrored files under `docs/ko` need different paths from default docs.
+- Add or update tests when a documented behavior is enforced by code.
+- Remove template language and stale plan wording instead of carrying it forward.
 
 ## Related Entry Points
 
-- [Documentation Home](../README.md)
-- [Architecture Overview](../architecture/README.md)
-- [Plugin Development Guide](../guides/plugin-development.md)
-- [Korean Mirror](../ko/guides/marketplace-publishing.md)
+- [LVIS Project Documentation](../README.md)
+- [Getting Started](./getting-started.md)
 
-## Update Notes
+## Review Notes
 
-When updating this document, keep the English default useful on its own. The Korean mirror should preserve original review history, but reviewers should not need to open it just to understand the current app contract.
+This English page should let a reviewer understand scope, risk, and validation without opening the Korean archive. If the archive contains rationale that still matters, translate the relevant part into this page and keep the archive link as provenance.
