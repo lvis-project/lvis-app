@@ -34,7 +34,19 @@ for (const [key, entry] of Object.entries(scenarios)) {
     continue;
   }
 
-  test(`capture: ${key}`, async ({ app, mainWindow }) => {
+  // Scenarios that need real plugin UIs declare `plugins: [...]`. Bind the
+  // per-scenario install list to the fixture option via a nested describe so
+  // `test.use()` (which must be called at describe/file scope, not inside a
+  // test body) applies only to this key's Electron launch.
+  test.describe(() => {
+    if (entry.plugins && entry.plugins.length > 0) {
+      test.use({ installPlugins: entry.plugins });
+    }
+    if (entry.keepReviewer) {
+      test.use({ keepReviewer: true });
+    }
+
+    test(`capture: ${key}`, async ({ app, mainWindow }) => {
     if (!entry.steps) {
       throw new Error(`scenario "${key}" has neither "skip" nor "steps" — matrix.ts entry is incomplete`);
     }
@@ -66,5 +78,6 @@ for (const [key, entry] of Object.entries(scenarios)) {
       await expect(target as ReturnType<typeof mainWindow.locator>).toBeVisible({ timeout: 10_000 });
     }
     await target.screenshot({ path: path.join(OUT_DIR, `${key}.png`) });
+    });
   });
 }
