@@ -54,12 +54,6 @@ async function openWorkMode(page: Page): Promise<void> {
   await page.locator('[data-testid="chat-view-root"]').first().waitFor({ state: 'visible', timeout: 15_000 });
 }
 
-async function typeComposerMessage(page: Page, text: string): Promise<void> {
-  const composer = page.locator('[data-testid="composer-textarea"]').first();
-  await composer.waitFor({ state: 'visible', timeout: 15_000 });
-  await composer.fill(text);
-}
-
 /**
  * Open a seeded plugin's sidebar panel via the composer command popover, then
  * wait for its UI bundle to render inside the plugin webview.

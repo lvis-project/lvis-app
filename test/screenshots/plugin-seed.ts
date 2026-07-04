@@ -174,12 +174,12 @@ export async function seedRealPlugins(
   if (disableReviewer) {
     const lvisHomeSettingsPath = path.join(lvisHomeForTest, 'settings.json');
     let lvisHomeSettings: Record<string, unknown> = {};
-    if (fs.existsSync(lvisHomeSettingsPath)) {
-      try {
-        lvisHomeSettings = JSON.parse(fs.readFileSync(lvisHomeSettingsPath, 'utf-8')) as Record<string, unknown>;
-      } catch {
-        lvisHomeSettings = {};
-      }
+    try {
+      // Read directly and treat ENOENT like malformed JSON — avoids the
+      // exists-then-read TOCTOU race (CodeQL js/file-system-race).
+      lvisHomeSettings = JSON.parse(fs.readFileSync(lvisHomeSettingsPath, 'utf-8')) as Record<string, unknown>;
+    } catch {
+      lvisHomeSettings = {};
     }
     const existingPerms =
       (lvisHomeSettings.permissions as Record<string, unknown> | undefined) ?? {};
