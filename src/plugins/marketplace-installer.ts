@@ -99,14 +99,9 @@ export interface MarketplaceInstallerOptions {
    * ignored and replaced by a fresh download.
    */
   expectedArtifactSha256?: string;
-  /**
-   * Optional granular progress callback. Fired at natural phase boundaries
-   * during download → verify → persist. The `registering` event fires just
-   * before the final atomic rename so callers can show a "등록 중…" label.
-   * When omitted the installer runs silently (backward-compatible).
-   *
-   * Note: `downloading` events are NOT fired on cache hits (`fromCache=true`).
-   */
+
+
+
   onProgress?: (event: InstallerProgressEvent) => void;
 }
 

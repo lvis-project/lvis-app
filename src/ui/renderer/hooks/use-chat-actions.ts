@@ -52,15 +52,9 @@ export function useChatActions(opts: {
     try { await api.chatAbort(); } catch { /* no-op */ }
   }, [api]);
 
-  /**
-   * "guide" — non-interrupting mid-stream direction adjustment. Returns
-   * the IPC result so the caller can preserve the user's typed text on
-   * rejection (no-active-turn race, queue-full, too-long). The engine
-   * consumes a queued text at the next round boundary and (when no boundary
-   * arrives within round-cap) extends the turn by one round so the guide
-   * always lands BEFORE end-turn — per the "방향지시는 end-turn 전에
-   * 영향을 미치는 거" user spec.
-   */
+
+
+
   const handleGuide = useCallback(async (
     text: string,
   ): Promise<{ ok: true } | { ok: false; error: string }> => {

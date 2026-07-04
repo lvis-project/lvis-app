@@ -88,7 +88,7 @@ export const PERMISSIONS = {
   hookTrustList: "lvis:permissions:hook-trust-list",
   manifestViolation: "lvis:permissions:manifest-violation",
   // Read-only: OS sandbox capability for the current platform — drives the
-  // honest, platform-aware "OS 도구 샌드박스" toggle description in PermissionsTab.
+
   sandboxCapability: "lvis:permissions:sandbox-capability",
   // Read-only: Windows srt-win install readiness (group + WFP state) + the
   // verbatim ASRT install instructions. Drives the win32 consent panel in

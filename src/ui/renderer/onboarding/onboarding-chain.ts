@@ -1,73 +1,7 @@
-/**
- * Z onboarding chain — state machine (pure, deterministic).
- *
- * Models the first-boot funnel as an explicit finite-state machine so
- * the App.tsx wiring is just a single `useReducer` plus side-effect
- * effects. Pure because the unit test pins every transition without
- * mounting React.
- *
- * Stages (2026-05-20 redesign — `welcome` stage removed; MemorySeed
- * now precedes a personalized welcome card that reads the seeded
- * 호칭/자기소개):
- *   idle                — initial state. The async boot probe in App.tsx
- *                         fires exactly one of `probe-start` → showcase
- *                         (fresh boot) or `probe-skip` → done (returning
- *                         user). Starting at `idle` means the showcase
- *                         Dialog only mounts after the probe classifies
- *                         the boot, so a stale `probe-skip` arriving late
- *                         can never collapse a freshly-shown showcase.
- *   showcase            — ScenarioShowcase mounted (intro preview cards).
- *   login               — LoginModal mounted (waiting for vendor key / skip).
- *   memory              — MemorySeedDialog mounted (호칭 + 자기소개).
- *                         Now FIRST after login so the personalized
- *                         welcome card downstream can address the user
- *                         by their chosen 호칭.
- *   personalized_welcome — PersonalizedWelcome card mounted. Greets the
- *                         user by the 호칭 they just typed and confirms
- *                         the next phase (tour).
- *   tour                — SpotlightTour active (7-step first-boot scenario).
- *   plugins             — PluginShowcase mounted (per-plugin descriptions).
- *   done                — chain complete; chat empty-state visible.
- *
- * Chain context (Option A — 2026-05-19):
- *   `selectedScenarioId` carries the ScenarioShowcase card the user
- *   chose to "start with" (e.g. "meeting" / "docs" / "work" /
- *   "multi-agent"). Downstream stages (MemorySeed recommendations,
- *   PluginShowcase ordering, intro placeholder) read it via the
- *   exposed state so the chain is personalised by the user's first
- *   click. `null` means the user used the grid's direct
- *   "로그인하여 LVIS 시작하기" CTA without previewing a card.
- *
- *   `memorySeed` carries the 호칭 + 자기소개 the user typed into the
- *   MemorySeedDialog so the downstream `personalized_welcome` stage
- *   can address the user by name without re-reading the DOM.
- *
- * Events:
- *   probe-skip                  — boot probe found an existing key (skip whole chain).
- *   probe-start                 — boot probe says first-boot; mount Showcase.
- *   showcase-start              — user pressed "로그인하여 LVIS 시작하기" inside
- *                                 the showcase. Carries the picked `scenarioId`
- *                                 from an inline preview, or `null` from the
- *                                 grid's direct-login CTA.
- *   login-success               — LoginModal onSuccess fired.
- *   login-skip                  — LoginModal closed without success.
- *   memory-finish               — MemorySeed onDismissed fired (success or skip).
- *                                 Optionally carries the typed 호칭 / 자기소개
- *                                 so the personalized welcome card can read it.
- *   personalized-welcome-accept — user pressed "예, 시작할게요 →" in the
- *                                 PersonalizedWelcome card.
- *   tour-finish                 — SpotlightTour completed all steps.
- *   tour-skip                   — SpotlightTour dismissed early.
- *   plugins-close               — PluginShowcase closed (or skipped).
- *
- * `showcase-skip` was removed 2026-05-20 — the showcase no longer offers a
- * dismiss-style skip path. The user either previews one of the 4 cards or
- * advances through the grid's direct-login CTA.
- *
- * The reducer never returns to a prior stage — strict forward
- * progress — so a stale onSuccess event from a re-mounted LoginModal
- * cannot reanimate the chain.
- */
+
+
+
+
 
 export type OnboardingChainStage =
   | "idle"
@@ -115,10 +49,9 @@ export interface OnboardingChainState {
    * `null` when no card was picked (direct-login CTA or returning user).
    */
   selectedScenarioId: string | null;
-  /**
-   * 호칭 + 자기소개 captured by the MemorySeed wizard. Threaded into
-   * the PersonalizedWelcome card so it can address the user by name.
-   */
+
+
+
   memorySeed: OnboardingMemorySeed;
   /**
    * Why the chain reached `done` — `"chain"` (full funnel incl. tour) vs
@@ -149,14 +82,9 @@ export type OnboardingChainEvent =
   | { type: "tour-finish" }
   | { type: "tour-skip" }
   | { type: "plugins-close" }
-  /**
-   * 2026-05-20 — Settings → 로그아웃. 모든 인증 상태를 초기화한 뒤
-   * 첫 부팅 화면(ScenarioShowcase) 으로 복귀하기 위한 reducer event.
-   * 모든 stage → `idle` 로 collapse 한다. 다음 useEffect 의 boot probe
-   * 가 `probe-start` 를 발사해 ScenarioShowcase 가 재진입한다.
-   * `selectedScenarioId` + `memorySeed` 도 같이 초기화한다 — 로그아웃은
-   * 사용자의 *모든* 첫 부팅 상태를 잊는 행위이기 때문.
-   */
+
+
+
   | { type: "logout-reset" };
 
 /**
@@ -231,10 +159,8 @@ export function onboardingChainReducer(
   event: OnboardingChainEvent,
 ): OnboardingChainState {
   const stage = nextOnboardingStage(state.stage, event);
-  // 2026-05-20 — 로그아웃은 chain context 전체를 초기화한다. selectedScenarioId
-  // 와 memorySeed 가 이전 boot 의 흔적을 남기면 재진입한 ScenarioShowcase /
-  // MemorySeed 가 "이미 채워진" 상태로 mount 돼서 사용자가 fresh boot UX 를
-  // 받지 못함.
+
+
   if (event.type === "logout-reset") {
     return {
       stage,

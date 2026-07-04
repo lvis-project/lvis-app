@@ -41,7 +41,7 @@ export function runEarlyBootEnv(): void {
 
   registerPluginAssetProtocolScheme(protocol);
 
-  // WSL 환경 대응
+
   if (process.platform === "linux" && process.env.WSL_DISTRO_NAME) {
     app.commandLine.appendSwitch("enable-features", "UseOzonePlatform");
     if (process.env.WAYLAND_DISPLAY) {

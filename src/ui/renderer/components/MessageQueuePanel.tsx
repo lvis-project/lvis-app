@@ -1,24 +1,7 @@
-/**
- * MessageQueuePanel — composer 위 in-flow 큐 패널.
- *
- * SessionTodoPanel 의 시각 패턴 (border-dashed strip) 미러링하되 색만
- * 다름: warning (TODO) ↔ info (큐). 두 영역이 동시 노출되어도 시각 충돌 X.
- *
- * 표시 조건: store.size() > 0 일 때만. 큐 비면 panel 자체가 사라져
- * idle 상태에서 noise 추가 안 됨.
- *
- * 행별 액션:
- *  - 체크박스 클릭: 선택 토글 (⌘⏎ 대상 지정)
- *  - [↑ 즉시] 버튼: 그 1 개만 즉시 inject (LLM abort + 다른 항목 잔존)
- *  - [✕] 버튼: 그 1 개만 큐에서 제거
- *
- * 키보드:
- *  - ↑/↓: 큐 행 이동
- *  - Space/Enter: 현재 행 선택 토글
- *  - Delete/Backspace: 현재 행 제거
- *
- * Spec: docs/blueprints/composer-redesign-message-queue.md
- */
+
+
+
+
 
 import { useSyncExternalStore, useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { ChevronDown, ChevronRight, MessageSquarePlus, ArrowUp, X, Pencil } from "lucide-react";
@@ -28,7 +11,7 @@ import { useTranslation } from "../../../i18n/react.js";
 
 interface MessageQueuePanelProps {
   store: MessageQueueStore;
-  /** 행별 [↑ 즉시] click — caller (ChatView) 가 LLM abort + inject 처리. */
+
   onSendNow: (item: MessageQueueItem) => void;
 }
 
@@ -123,7 +106,7 @@ interface MessageQueueRowProps {
   onToggle: () => void;
   onSendNow: () => void;
   onRemove: () => void;
-  /** 텍스트 수정 — Enter / blur 로 저장. 빈 텍스트 또는 cap 초과 시 throw. */
+
   onEdit: (newText: string) => void;
   onMoveFocus: (delta: 1 | -1) => void;
 }
@@ -157,7 +140,7 @@ function MessageQueueRow({
   const commit = useCallback(() => {
     const next = draft.trim();
     if (next.length === 0) {
-      // 빈 텍스트 → 제거 의도
+
       setEditing(false);
       onRemove();
       return;

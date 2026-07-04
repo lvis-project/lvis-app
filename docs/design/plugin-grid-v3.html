@@ -1,327 +1,43 @@
-<!DOCTYPE html>
-<html lang="ko">
+<!doctype html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>LVIS Plugin Grid v3 — monochrome line icons</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>
-  body { background: #0a0e1a; color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  :root {
-    --bg: #0a0e1a;
-    --fg: #e6edf3;
-    --muted: #1a2030;
-    --muted-fg: #8b949e;
-    --border: #2a3245;
-    --primary: #2f81f7;
-    --primary-soft: #1f6feb22;
-    --bubble: #11162a;
-    --plugin-icon-bg: #1a2030;
-    --icon-stroke: #cdd9e5;
-  }
-  .pointer::after {
-    content: "";
-    position: absolute;
-    bottom: -7px;
-    left: 32px;
-    width: 14px;
-    height: 14px;
-    background: var(--bubble);
-    border-right: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-    transform: rotate(45deg);
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .install-overlay {
-    position: absolute;
-    inset: 0;
-    background: rgba(10, 14, 26, 0.62);
-    border-radius: 50%;
-    z-index: 1;
-  }
-  .install-spinner {
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    border-top-color: #58a6ff;
-    border-right-color: #58a6ff;
-    animation: spin 1.0s linear infinite;
-    position: absolute;
-    inset: 0;
-  }
-  @keyframes cellPulse { 0%, 100% { opacity: 0.85; } 50% { opacity: 1; } }
-  .cell-installing { animation: cellPulse 1.6s ease-in-out infinite; }
-  .scrollbar-thin::-webkit-scrollbar { width: 8px; }
-  .scrollbar-thin::-webkit-scrollbar-track { background: #0d1325; border-radius: 4px; }
-  .scrollbar-thin::-webkit-scrollbar-thumb { background: #2a3245; border-radius: 4px; }
-  .plugin-cell { transition: all 120ms ease; }
-  .plugin-cell:hover { background: var(--muted); transform: translateY(-1px); }
-  .plugin-icon {
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--plugin-icon-bg);
-    box-shadow: 0 1px 0 #2a3245 inset;
-    color: var(--icon-stroke);
-    position: relative;
-  }
-  .plugin-icon-add { background: transparent; border: 1px dashed #4a5468; color: #6b7488; }
-  .plugin-cell:hover .plugin-icon { background: #1f6feb22; color: #58a6ff; }
-  .plugin-icon svg { width: 20px; height: 20px; stroke: currentColor; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-  .plugin-icon-add svg { width: 18px; height: 18px; }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Plugin Grid V3</title>
+  <style>
+    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f7f8fb; color: #20242c; }
+    main { max-width: 860px; margin: 0 auto; padding: 56px 24px; line-height: 1.6; }
+    h1 { margin: 0 0 12px; font-size: 32px; letter-spacing: 0; }
+    h2 { margin-top: 28px; font-size: 18px; }
+    a { color: #2457c5; }
+    code { background: #edf1f7; padding: 2px 5px; border-radius: 4px; }
+    .panel { border: 1px solid #d8dfeb; background: white; border-radius: 8px; padding: 18px; }
+  </style>
 </head>
-<body class="p-8 min-h-screen">
-<div class="max-w-5xl mx-auto space-y-10">
-  <header class="border-b border-[#2a3245] pb-4">
-    <h1 class="text-2xl font-semibold">플러그인 Grid v3 — monochrome line icons</h1>
-    <p class="text-sm text-[#8b949e] mt-1">Lucide-style stroke-only 아이콘 통일. 컬러 없이 단색 (#cdd9e5), hover 시 primary 색 강조. 5×2 grid + installing overlay 유지.</p>
-  </header>
-
-  <!-- ─────────────────────────────────────────────────────────── -->
-  <section>
-    <h2 class="text-base font-semibold mb-2">시나리오 1 — 일반 (8 active + 1 installing + "+" = 10 cells)</h2>
-
-    <div class="relative h-[260px]">
-      <div class="rounded-lg border border-[#2a3245] bg-[#11162a] p-3 absolute inset-x-0 bottom-0">
-        <div class="flex items-center gap-2 mb-3">
-          <div class="h-7 w-7 rounded-full border-2 border-[#2f81f7] flex items-center justify-center text-[8px] text-[#8b949e]">3k</div>
-          <button class="h-7 w-7 rounded border border-[#2a3245] flex items-center justify-center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b949e" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button>
-          <button class="h-7 w-7 rounded border border-[#2f81f7] bg-[#1f6feb22] flex items-center justify-center" id="trigger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></button>
-          <button class="h-7 w-7 rounded border border-[#2a3245] flex items-center justify-center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b949e" stroke-width="2"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></svg></button>
-        </div>
-        <div class="rounded border border-[#2a3245] bg-[#0a0e1a] px-3 py-2 text-sm text-[#8b949e]">메시지 입력...</div>
-      </div>
-
-      <div class="pointer absolute left-[80px] bottom-[88px] w-[460px] rounded-xl border border-[#2a3245] bg-[#11162a] p-4 shadow-2xl">
-        <div class="grid grid-cols-5 gap-3">
-          <!-- Meeting (mic) -->
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2">
-            <span class="plugin-icon">
-              <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-            </span>
-            <span class="text-[11px] truncate max-w-full">Meeting</span>
-          </button>
-          <!-- PageIndex (file-text) -->
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2">
-            <span class="plugin-icon">
-              <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-            </span>
-            <span class="text-[11px] truncate max-w-full">PageIndex</span>
-          </button>
-          <!-- MS Graph (network) -->
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2">
-            <span class="plugin-icon">
-              <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="7" x2="5" y2="17"/><line x1="12" y1="7" x2="19" y2="17"/><line x1="7" y1="19" x2="17" y2="19"/></svg>
-            </span>
-            <span class="text-[11px] truncate max-w-full">MS Graph</span>
-          </button>
-          <!-- External API (zap) -->
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2">
-            <span class="plugin-icon">
-              <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            </span>
-            <span class="text-[11px] truncate max-w-full">External API</span>
-          </button>
-          <!-- Agent Hub (cpu) -->
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2">
-            <span class="plugin-icon">
-              <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
-            </span>
-            <span class="text-[11px] truncate max-w-full">Agent Hub</span>
-          </button>
-          <!-- WorkProactive (briefcase) -->
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2">
-            <span class="plugin-icon">
-              <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
-            </span>
-            <span class="text-[11px] truncate max-w-full">WorkProactive</span>
-          </button>
-          <!-- Template (copy) -->
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2">
-            <span class="plugin-icon">
-              <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            </span>
-            <span class="text-[11px] truncate max-w-full">Template</span>
-          </button>
-          <!-- Installing — Calendar plugin (info visible + spinner overlay) -->
-          <div class="plugin-cell cell-installing flex flex-col items-center gap-1.5 rounded-lg p-2 cursor-default" title="Calendar 설치 중...">
-            <span class="plugin-icon">
-              <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-              <span class="install-overlay"></span>
-              <span class="install-spinner"></span>
-            </span>
-            <span class="text-[11px] truncate max-w-full text-[#8b949e]">Calendar</span>
-          </div>
-          <!-- Web (globe) -->
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2">
-            <span class="plugin-icon">
-              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-            </span>
-            <span class="text-[11px] truncate max-w-full">Web</span>
-          </button>
-          <!-- "+" 추가 -->
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2" title="마켓플레이스 (새 탭)">
-            <span class="plugin-icon plugin-icon-add">
-              <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            </span>
-            <span class="text-[11px] text-[#8b949e] truncate max-w-full">추가</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ─────────────────────────────────────────────────────────── -->
-  <section>
-    <h2 class="text-base font-semibold mb-2">시나리오 2 — 다수 + 스크롤 (15 plugins)</h2>
-
-    <div class="relative h-[280px]">
-      <div class="rounded-lg border border-[#2a3245] bg-[#11162a] p-3 absolute inset-x-0 bottom-0">
-        <div class="flex items-center gap-2 mb-3">
-          <div class="h-7 w-7 rounded-full border-2 border-[#2f81f7]"></div>
-          <button class="h-7 w-7 rounded border border-[#2a3245]"></button>
-          <button class="h-7 w-7 rounded border border-[#2f81f7] bg-[#1f6feb22]"></button>
-          <button class="h-7 w-7 rounded border border-[#2a3245]"></button>
-        </div>
-        <div class="rounded border border-[#2a3245] bg-[#0a0e1a] px-3 py-2 text-sm text-[#8b949e]">메시지 입력...</div>
-      </div>
-
-      <div class="pointer absolute left-[80px] bottom-[88px] w-[460px] rounded-xl border border-[#2a3245] bg-[#11162a] p-4 shadow-2xl">
-        <div class="grid grid-cols-5 gap-3 max-h-[220px] overflow-y-auto scrollbar-thin pr-1">
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2"><span class="plugin-icon"><svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></span><span class="text-[11px]">Meeting</span></button>
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2"><span class="plugin-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/></svg></span><span class="text-[11px]">PageIndex</span></button>
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2"><span class="plugin-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="7" x2="5" y2="17"/><line x1="12" y1="7" x2="19" y2="17"/></svg></span><span class="text-[11px]">MS Graph</span></button>
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2"><span class="plugin-icon"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span><span class="text-[11px]">External API</span></button>
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2"><span class="plugin-icon"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg></span><span class="text-[11px]">Agent Hub</span></button>
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2"><span class="plugin-icon"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span><span class="text-[11px]">WP</span></button>
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2"><span class="plugin-icon"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span><span class="text-[11px]">Template</span></button>
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2"><span class="plugin-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span><span class="text-[11px]">Web</span></button>
-          <div class="plugin-cell cell-installing flex flex-col items-center gap-1.5 rounded-lg p-2 cursor-default" title="Calendar 설치 중...">
-            <span class="plugin-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span class="install-overlay"></span><span class="install-spinner"></span></span>
-            <span class="text-[11px] text-[#8b949e]">Calendar</span>
-          </div>
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2"><span class="plugin-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span><span class="text-[11px]">Analytics</span></button>
-          <!-- past 10 → scroll -->
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2"><span class="plugin-icon"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span><span class="text-[11px]">Notes</span></button>
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2"><span class="plugin-icon"><svg viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2a10 10 0 1 0 0 20 5 5 0 0 0 5-5c0-1.7-1.3-3-3-3h-1.5c-.8 0-1.5-.7-1.5-1.5s.7-1.5 1.5-1.5H15a4 4 0 0 0 4-4 7 7 0 0 0-7-5z"/></svg></span><span class="text-[11px]">Design</span></button>
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2"><span class="plugin-icon"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span><span class="text-[11px]">DevTool</span></button>
-          <div class="plugin-cell cell-installing flex flex-col items-center gap-1.5 rounded-lg p-2 cursor-default" title="Search 설치 중...">
-            <span class="plugin-icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span class="install-overlay"></span><span class="install-spinner"></span></span>
-            <span class="text-[11px] text-[#8b949e]">Search</span>
-          </div>
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2"><span class="plugin-icon"><svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></span><span class="text-[11px]">Notifier</span></button>
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2" title="마켓플레이스 (새 탭)"><span class="plugin-icon plugin-icon-add"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span><span class="text-[11px] text-[#8b949e]">추가</span></button>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ─────────────────────────────────────────────────────────── -->
-  <section>
-    <h2 class="text-base font-semibold mb-2">시나리오 3 — 빈 상태</h2>
-
-    <div class="relative h-[260px]">
-      <div class="rounded-lg border border-[#2a3245] bg-[#11162a] p-3 absolute inset-x-0 bottom-0">
-        <div class="flex items-center gap-2 mb-3">
-          <div class="h-7 w-7 rounded-full border-2 border-[#2f81f7]"></div>
-          <button class="h-7 w-7 rounded border border-[#2a3245]"></button>
-          <button class="h-7 w-7 rounded border border-[#2f81f7] bg-[#1f6feb22]"></button>
-          <button class="h-7 w-7 rounded border border-[#2a3245]"></button>
-        </div>
-        <div class="rounded border border-[#2a3245] bg-[#0a0e1a] px-3 py-2 text-sm text-[#8b949e]">메시지 입력...</div>
-      </div>
-      <div class="pointer absolute left-[80px] bottom-[88px] w-[460px] rounded-xl border border-[#2a3245] bg-[#11162a] p-4 shadow-2xl">
-        <div class="py-6 text-center text-[#8b949e]">
-          <div class="mb-3 flex justify-center">
-            <span class="plugin-icon plugin-icon-add">
-              <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            </span>
-          </div>
-          <p class="text-sm mb-1">플러그인이 없습니다</p>
-          <p class="text-xs">마켓플레이스에서 설치해보세요</p>
-          <button class="mt-3 inline-flex items-center gap-1 rounded-md border border-[#2f81f7] bg-[#1f6feb22] px-3 py-1.5 text-xs text-[#58a6ff]">
-            마켓플레이스 열기
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-          </button>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ─────────────────────────────────────────────────────────── -->
-  <section>
-    <h2 class="text-base font-semibold mb-2">설치 중 cell — 비교</h2>
-    <div class="flex gap-6 items-start">
-      <div class="text-center">
-        <div class="rounded-xl border border-[#2a3245] bg-[#11162a] p-4">
-          <div class="plugin-cell cell-installing flex flex-col items-center gap-1.5 rounded-lg p-2 cursor-default w-[80px]">
-            <span class="plugin-icon">
-              <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-              <span class="install-overlay"></span>
-              <span class="install-spinner"></span>
-            </span>
-            <span class="text-[11px] truncate max-w-full text-[#8b949e]">Calendar</span>
-          </div>
-        </div>
-        <p class="text-xs text-[#8b949e] mt-2">설치 중</p>
-      </div>
-      <div class="text-center">
-        <div class="rounded-xl border border-[#2a3245] bg-[#11162a] p-4">
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2 w-[80px]">
-            <span class="plugin-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
-            <span class="text-[11px] truncate max-w-full">Calendar</span>
-          </button>
-        </div>
-        <p class="text-xs text-[#8b949e] mt-2">설치 완료 (hover 가능)</p>
-      </div>
-      <div class="text-center">
-        <div class="rounded-xl border border-[#2a3245] bg-[#11162a] p-4">
-          <button class="plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2 w-[80px]" title="마켓플레이스">
-            <span class="plugin-icon plugin-icon-add"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>
-            <span class="text-[11px] text-[#8b949e]">추가</span>
-          </button>
-        </div>
-        <p class="text-xs text-[#8b949e] mt-2">"+" 추가</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- ─────────────────────────────────────────────────────────── -->
-  <section class="border-t border-[#2a3245] pt-4">
-    <h2 class="text-base font-semibold mb-3">아이콘 매핑 가이드</h2>
-    <p class="text-sm text-[#8b949e] mb-3">플러그인 manifest 의 <code>iconKey</code> 필드 (또는 <code>id</code> hash) 로 Lucide 아이콘 매핑. 매니페스트가 SVG/이미지 path 직접 제공하면 그것을 사용 (역시 monochrome 권장).</p>
-    <table class="text-sm w-full">
-      <thead class="text-left text-[#8b949e]">
-        <tr><th class="py-1 pr-3">Plugin ID</th><th class="py-1 pr-3">Lucide icon</th><th class="py-1">의미</th></tr>
-      </thead>
-      <tbody>
-        <tr class="border-t border-[#2a3245]"><td class="py-1.5 pr-3"><code>meeting</code></td><td class="py-1.5 pr-3">mic</td><td class="py-1.5">회의 녹음</td></tr>
-        <tr class="border-t border-[#2a3245]"><td class="py-1.5 pr-3"><code>pageindex</code></td><td class="py-1.5 pr-3">file-text</td><td class="py-1.5">문서 인덱싱</td></tr>
-        <tr class="border-t border-[#2a3245]"><td class="py-1.5 pr-3"><code>ms-graph</code></td><td class="py-1.5 pr-3">network / share-2</td><td class="py-1.5">Microsoft Graph</td></tr>
-        <tr class="border-t border-[#2a3245]"><td class="py-1.5 pr-3"><code>ext-api</code></td><td class="py-1.5 pr-3">zap</td><td class="py-1.5">External API</td></tr>
-        <tr class="border-t border-[#2a3245]"><td class="py-1.5 pr-3"><code>agent-hub</code></td><td class="py-1.5 pr-3">cpu</td><td class="py-1.5">에이전트 허브</td></tr>
-        <tr class="border-t border-[#2a3245]"><td class="py-1.5 pr-3"><code>work-assistant</code></td><td class="py-1.5 pr-3">briefcase</td><td class="py-1.5">업무 제안</td></tr>
-        <tr class="border-t border-[#2a3245]"><td class="py-1.5 pr-3"><code>template</code></td><td class="py-1.5 pr-3">copy</td><td class="py-1.5">템플릿</td></tr>
-        <tr class="border-t border-[#2a3245]"><td class="py-1.5 pr-3">unknown / fallback</td><td class="py-1.5 pr-3">plug</td><td class="py-1.5">미지정 플러그인</td></tr>
-      </tbody>
-    </table>
-  </section>
-
-  <!-- ─────────────────────────────────────────────────────────── -->
-  <section class="border-t border-[#2a3245] pt-4">
-    <h2 class="text-base font-semibold mb-3">디자인 정책 v3 (변경된 것만)</h2>
-    <ul class="text-sm space-y-1.5 text-[#cdd9e5]">
-      <li>• <strong>아이콘 스타일</strong>: Lucide stroke-only (1.6px), color <code>#cdd9e5</code> (--icon-stroke), hover 시 <code>#58a6ff</code> (primary).</li>
-      <li>• <strong>크기</strong>: 20×20 SVG, 44×44 원형 컨테이너 안 중앙 정렬 (compact).</li>
-      <li>• <strong>fallback 아이콘</strong>: 매니페스트가 iconKey 매핑 없으면 <code>plug</code> 아이콘.</li>
-      <li>• <strong>나머지</strong>: v2 와 동일 (5×2 grid, 10셀 후 scroll, installing overlay, "+" 외부 마켓플레이스).</li>
-    </ul>
-  </section>
-
-</div>
+<body>
+  <main>
+    <h1>Plugin Grid V3</h1>
+    <p>This English design artifact defines plugin browsing density, install and update affordances, state labels, and empty states. The Korean archive is available at <a href="../ko/design/plugin-grid-v3.html">docs/ko mirror</a>.</p>
+    <section class="panel">
+      <h2>Screen Contract</h2>
+      <ul>
+        <li>The artifact must be understandable as the default review surface without opening the archive.</li>
+        <li>Workflow-critical states must be explicit: empty, loading, active, error, success, and permission-blocked where applicable.</li>
+        <li>Renderer changes should preserve accessibility labels, keyboard behavior, and test hooks unless the owning test is updated.</li>
+      </ul>
+      <h2>Implementation Anchors</h2>
+      <ul>
+        <li><code>src/ui/renderer/components/</code></li>
+        <li><code>src/ui/renderer/tabs/</code></li>
+        <li><code>src/ui/renderer/__tests__/</code></li>
+      </ul>
+      <h2>Update Checklist</h2>
+      <ul>
+        <li>Update this artifact when layout, state naming, or primary actions change.</li>
+        <li>Keep screenshots, HTML mockups, and component tests aligned.</li>
+        <li>Do not use decorative-only changes to mask missing workflow states.</li>
+      </ul>
+    </section>
+  </main>
 </body>
 </html>

@@ -1,29 +1,7 @@
-/**
- * Issue #690 P4 — natural-language approval intent chip.
- *
- * What this renders:
- *   When the user has typed an approval/rejection phrase in the chat
- *   composer AND exactly ONE deferred-queue entry is pending, this
- *   chip surfaces above the composer with the matched intent and two
- *   buttons: [허용] / [거절]. Clicking either calls
- *   `permission.deferredResolve` with `approvalSource: "natural-language"`,
- *   and the audit row records static natural-language provenance.
- *
- * What this DOES NOT do:
- *   - Auto-resolve. The user must click. The matcher only suggests;
- *     a stray "허용" typed into chat never approves a pending entry
- *     unsupervised.
- *   - Resolve when multiple entries pend. Ambiguous targeting would
- *     be a footgun (#690 spec: 1회성 승인 — single target). The user
- *     must use the DeferredQueuePanel for multi-entry triage.
- *   - Trigger on text shorter than 1 char, longer than the matcher's
- *     cap (24 chars), or with sentence breaks / question marks — that's
- *     enforced inside {@link detectApprovalIntent}.
- *
- * Bind: this component subscribes to `permission.deferredList` /
- * `permission.onDeferredPending` itself; ChatView only passes the
- * draft text down.
- */
+
+
+
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { X as XIcon } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";

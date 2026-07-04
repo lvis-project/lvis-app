@@ -80,7 +80,7 @@ export async function runTurn(
     self.deps.sessionTodoStore?.clearIfPending?.(effectiveSessionId);
     self.deps.skillOverlay?.clear(effectiveSessionId);
 
-    // §4.5.2 step 1 — REQUEST_ENTRY (main process 도달 시점)
+
     self.tracer.step("REQUEST_ENTRY", { inputLen: turnInput.length, inputOrigin });
     if (!self.provider) {
       const err = t("be_conversationLoop.llmProviderNotConfigured");
@@ -103,7 +103,7 @@ export async function runTurn(
     const turnSignal = ac.signal;
 
 
-    // §4.3 Step 1-2: 분류 + 라우팅
+
     // §4.5.2 step 2 — KEYWORD_CLASSIFY
     const classification = self.deps.keywordEngine.classify(turnInput);
     self.tracer.step("KEYWORD_CLASSIFY", { type: classification.type });
@@ -306,7 +306,7 @@ export async function runTurn(
       // pluginRuntimeToolDelegate). Clearing session B never wipes session A's
       // activation because the Map is keyed per sessionId.
       result = await sessionContext.run({ sessionId: effectiveSessionId }, () =>
-        queryLoop(self, 
+        queryLoop(self,
           systemPrompt,
           scope,
           callbacksForLoop,

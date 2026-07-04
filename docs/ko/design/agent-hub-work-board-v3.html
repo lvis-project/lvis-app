@@ -1,0 +1,1342 @@
+<!DOCTYPE html>
+<!--
+  Agent Hub Plugin UI v3 — 다크 baseline 시각 참조.
+
+  이 파일은 디자인 의도(레이아웃·간격·hierarchy)의 SoT입니다. 색상은
+  다크 테마 baseline 으로 고정돼 있고, 실제 plugin runtime 은
+  `lvis-plugin-agent-hub/src/ui/styles/work-board-panel.css` 에서
+  host SDK 토큰(`var(--lvis-*)`)을 소비하므로 light/dark 가 호스트
+  테마에 자동 맞춰집니다. 색상 매핑은 runtime CSS 파일 헤더 참조.
+-->
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LVIS Agent Hub Plugin UI v3 — 3-row compact layout</title>
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --panel: #11162a;
+    --panel-2: #0d1424;
+    --muted: #1a2030;
+    --border: #2a3245;
+    --fg: #e6edf3;
+    --fg-soft: #cdd9e5;
+    --fg-muted: #8b949e;
+    --primary: #2f81f7;
+    --primary-bright: #58a6ff;
+    --green: #10b981;
+    --orange: #f59e0b;
+    --red: #f78166;
+    --purple: #a78bfa;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 12% 0%, rgba(47, 129, 247, 0.18), transparent 34rem),
+      radial-gradient(circle at 88% 8%, rgba(167, 139, 250, 0.10), transparent 30rem),
+      var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .page { width: min(1440px, calc(100vw - 48px)); margin: 0 auto; padding: 28px 0 44px; }
+  .hero { display: grid; grid-template-columns: 1fr 360px; gap: 20px; align-items: start; border-bottom: 1px solid var(--border); padding-bottom: 24px; }
+  .eyebrow { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  h1, h2, h3, h4, p { margin: 0; }
+  h1 { font-size: 32px; line-height: 1.1; letter-spacing: -0.03em; }
+  h2 { font-size: 18px; letter-spacing: -0.01em; }
+  h3 { font-size: 14px; letter-spacing: -0.01em; }
+  h4 { font-size: 12px; }
+  p { color: var(--fg-soft); line-height: 1.55; }
+  .hero-copy { max-width: 830px; margin-top: 10px; color: var(--fg-muted); font-size: 14px; }
+
+  .panel {
+    background: linear-gradient(180deg, rgba(17, 22, 42, 0.98), rgba(13, 20, 36, 0.96));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 18px 52px rgba(0, 0, 0, 0.24);
+  }
+
+  .subpanel {
+    background: rgba(10, 14, 26, 0.62);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: rgba(26, 32, 48, 0.72);
+    color: var(--fg-soft);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .chip-blue { border-color: rgba(47, 129, 247, 0.55); background: rgba(31, 111, 235, 0.15); color: #93c5fd; }
+  .chip-green { border-color: rgba(16, 185, 129, 0.45); background: rgba(16, 185, 129, 0.13); color: #6ee7b7; }
+  .chip-orange { border-color: rgba(245, 158, 11, 0.45); background: rgba(245, 158, 11, 0.14); color: #fcd34d; }
+  .chip-red { border-color: rgba(247, 129, 102, 0.45); background: rgba(247, 129, 102, 0.13); color: #fca5a5; }
+  .chip-purple { border-color: rgba(167, 139, 250, 0.45); background: rgba(167, 139, 250, 0.14); color: #d8b4fe; }
+  .label { color: var(--fg-muted); font-size: 10px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase; }
+
+  .plugin-note { padding: 16px; }
+  .plugin-note .rows { display: grid; gap: 10px; margin-top: 12px; }
+  .note-row { display: flex; gap: 10px; color: var(--fg-soft); font-size: 12px; line-height: 1.45; }
+  .note-dot { width: 7px; height: 7px; margin-top: 5px; border-radius: 999px; background: var(--primary-bright); box-shadow: 0 0 0 4px rgba(88, 166, 255, 0.1); flex: 0 0 auto; }
+
+  /* Scenario rail */
+  .scenario-rail {
+    margin: 24px 0;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+  .rail-step { position: relative; padding: 12px; min-height: 110px; overflow: hidden; }
+  .rail-step::before {
+    content: ""; position: absolute; left: 12px; right: 12px; bottom: 10px; height: 3px; border-radius: 999px;
+    background: linear-gradient(90deg, var(--primary), rgba(88, 166, 255, 0.18));
+  }
+  .rail-number {
+    width: 30px; height: 30px; display: grid; place-items: center;
+    border-radius: 10px; background: rgba(31, 111, 235, 0.18);
+    border: 1px solid rgba(47, 129, 247, 0.55); color: #bfdbfe; font-size: 12px; font-weight: 800;
+  }
+  .rail-step h3 { margin-top: 10px; font-size: 13px; }
+  .rail-step p { margin-top: 6px; color: var(--fg-muted); font-size: 11px; line-height: 1.4; }
+
+  /* Storyboard */
+  .storyboard { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+  .shot { padding: 16px; }
+  .shot.full { grid-column: 1 / -1; }
+  .shot-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+  .shot-title { display: flex; gap: 10px; align-items: flex-start; }
+  .shot-index {
+    width: 38px; height: 38px; display: grid; place-items: center;
+    border-radius: 13px; background: rgba(31, 111, 235, 0.18);
+    border: 1px solid rgba(47, 129, 247, 0.55); color: #dbeafe; font-weight: 800;
+  }
+  .shot h2 { margin-top: 1px; }
+  .shot-caption { margin-top: 4px; color: var(--fg-muted); font-size: 12px; }
+
+  /* Plugin window — NO sidebar */
+  .plugin-window {
+    border-radius: 18px; overflow: hidden;
+    border: 1px solid var(--border);
+    background: rgba(10, 14, 26, 0.86);
+    min-height: 520px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    display: grid;
+    grid-template-rows: 38px auto 1fr;
+  }
+
+  .titlebar {
+    height: 38px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px;
+    background: #11162a; border-bottom: 1px solid var(--border);
+    color: var(--fg-muted); font-size: 11px;
+  }
+  .traffic { display: flex; gap: 7px; align-items: center; }
+  .dot { width: 9px; height: 9px; border-radius: 999px; background: #4a5568; }
+  .dot.red { background: #f87171; }
+  .dot.yellow { background: #fbbf24; }
+  .dot.green { background: #34d399; }
+  .plugin-badge { color: #bfdbfe; background: rgba(31, 111, 235, 0.18); border: 1px solid rgba(47, 129, 247, 0.38); border-radius: 999px; padding: 4px 8px; }
+
+  /* Top app bar */
+  .appbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(17,22,42,0.7), rgba(13,20,36,0.4));
+  }
+  .brand-mini { display: flex; align-items: center; gap: 10px; }
+  .brand-icon {
+    width: 30px; height: 30px; display: grid; place-items: center;
+    border-radius: 9px;
+    background: rgba(31, 111, 235, 0.18); border: 1px solid rgba(47, 129, 247, 0.45);
+    color: var(--primary-bright); font-weight: 800; font-size: 12px;
+  }
+  .brand-meta { display: flex; flex-direction: column; gap: 1px; }
+  .brand-meta strong { font-size: 13px; color: var(--fg); }
+  .brand-meta span { font-size: 10px; color: var(--fg-muted); }
+
+  .pill-toggle {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: rgba(10, 14, 26, 0.78);
+    gap: 2px;
+  }
+  .pill-toggle button {
+    appearance: none; border: 0; cursor: default;
+    padding: 7px 16px;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--fg-muted);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    font-family: inherit;
+  }
+  .pill-toggle button.active {
+    background: linear-gradient(180deg, #2f81f7, #1f6feb);
+    color: white;
+    box-shadow: 0 6px 14px rgba(47,129,247,0.28);
+  }
+  .pill-toggle.disabled button { opacity: 0.45; }
+
+  .gear {
+    width: 32px; height: 32px;
+    display: grid; place-items: center;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(26, 32, 48, 0.72);
+    color: var(--fg-soft);
+    font-size: 14px;
+  }
+  .gear.disabled { opacity: 0.4; }
+
+  /* Content area */
+  .content { padding: 16px; }
+  .content-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+  .content-top p { margin-top: 3px; font-size: 12px; color: var(--fg-muted); }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+
+  .button {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    border: 1px solid rgba(47, 129, 247, 0.7);
+    background: linear-gradient(180deg, #2f81f7, #1f6feb);
+    color: white;
+    font-weight: 700;
+    border-radius: 10px;
+    padding: 10px 13px;
+    font-size: 13px;
+    box-shadow: 0 12px 28px rgba(47, 129, 247, 0.22);
+  }
+  .ghost-button { background: rgba(26, 32, 48, 0.88); border-color: var(--border); color: var(--fg-soft); box-shadow: none; }
+
+  /* Auth lifecycle (S0-S2) */
+  .lifecycle { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .lifecycle-step {
+    display: grid;
+    grid-template-columns: 36px 1fr auto;
+    gap: 12px; align-items: center;
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: rgba(10, 14, 26, 0.62);
+  }
+  .lifecycle-step.current {
+    border-color: rgba(47, 129, 247, 0.6);
+    background: rgba(31, 111, 235, 0.10);
+    box-shadow: 0 8px 20px rgba(47,129,247,0.18) inset;
+  }
+  .lifecycle-step.done { opacity: 0.62; }
+  .lifecycle-step .step-num {
+    width: 30px; height: 30px; display: grid; place-items: center;
+    border-radius: 9px; background: rgba(26,32,48,0.85); border: 1px solid var(--border);
+    font-weight: 800; font-size: 12px; color: var(--fg-soft);
+  }
+  .lifecycle-step.current .step-num { background: rgba(31, 111, 235, 0.22); border-color: rgba(47, 129, 247, 0.55); color: #dbeafe; }
+  .lifecycle-step.done .step-num { background: rgba(16, 185, 129, 0.18); border-color: rgba(16, 185, 129, 0.45); color: #6ee7b7; }
+  .lifecycle-step .step-body strong { display: block; font-size: 13px; color: var(--fg); }
+  .lifecycle-step .step-body span { display: block; font-size: 11px; color: var(--fg-muted); margin-top: 3px; }
+  .lifecycle-detail {
+    margin-top: 8px; padding: 12px; border-radius: 10px;
+    border: 1px dashed rgba(88, 166, 255, 0.42);
+    background: rgba(31, 111, 235, 0.06);
+    font-size: 12px; color: var(--fg-soft); line-height: 1.55;
+  }
+
+  .lock {
+    width: 44px; height: 44px; display: grid; place-items: center;
+    border-radius: 12px;
+    background: rgba(31, 111, 235, 0.18); border: 1px solid rgba(47, 129, 247, 0.52);
+    color: var(--primary-bright); font-size: 22px;
+  }
+  .spinner {
+    width: 28px; height: 28px; border-radius: 999px;
+    border: 3px solid rgba(88, 166, 255, 0.18);
+    border-top-color: var(--primary-bright);
+  }
+  .sync-row { display: grid; grid-template-columns: 110px 1fr 62px; align-items: center; gap: 10px; padding: 8px 0; font-size: 12px; }
+  .sync-row + .sync-row { border-top: 1px solid var(--border); }
+  .bar { height: 8px; border-radius: 999px; background: rgba(42, 50, 69, 0.74); overflow: hidden; }
+  .fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--primary), var(--primary-bright)); }
+
+  /* === v3 — 3-row compact layouts === */
+  .row-grid {
+    display: grid;
+    grid-template-columns: 1.45fr 0.55fr;
+    gap: 12px;
+    align-items: stretch;
+  }
+  .row-grid > article { display: flex; flex-direction: column; }
+  .side-col { display: grid; gap: 12px; align-content: start; }
+
+  /* 내부 스크롤 — 모든 카드 list/grid 영역 공용 */
+  .scroll-area {
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(42,50,69,0.74) transparent;
+    flex: 1; min-height: 0;
+  }
+  .scroll-area::-webkit-scrollbar { width: 6px; }
+  .scroll-area::-webkit-scrollbar-thumb { background: rgba(42,50,69,0.74); border-radius: 999px; }
+  .scroll-area::-webkit-scrollbar-track { background: transparent; }
+  .scroll-cap {
+    margin-top: 6px;
+    text-align: right;
+    font-size: 10px;
+    color: var(--fg-muted);
+    letter-spacing: 0.04em;
+  }
+
+  .card { padding: 12px; }
+  .card-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
+
+  /* LLM 메시지 카드 */
+  .llm-card {
+    border: 1px solid rgba(167, 139, 250, 0.4);
+    background: linear-gradient(160deg, rgba(167,139,250,0.10), rgba(31,111,235,0.06));
+  }
+  .llm-card .summary-text {
+    color: #e2e8f0; line-height: 1.7; font-size: 12.5px;
+    white-space: pre-line;
+  }
+  .llm-card .llm-foot {
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px dashed rgba(167,139,250,0.3);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 10px; color: var(--fg-muted);
+  }
+
+  /* 오늘 일정 (compact list, 마이워크 + 팀보드 공용) */
+  .calendar-list { display: grid; gap: 8px; }
+  .calendar-item { display: grid; grid-template-columns: 42px 1fr; gap: 8px; font-size: 11px; }
+  .calendar-item time { color: var(--fg-muted); text-align: right; padding-top: 2px; }
+  .cal-card {
+    padding: 8px 10px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: rgba(26, 32, 48, 0.78);
+    font-size: 11px;
+    color: var(--fg-soft);
+  }
+  .cal-card.hi { border-color: var(--primary); background: rgba(31,111,235,0.10); }
+  .cal-meta { display: block; color: var(--fg-muted); margin-top: 2px; font-size: 10px; }
+  .cal-attendees { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .ts-avatars { display: flex; }
+  .ts-avatar {
+    width: 18px; height: 18px;
+    border-radius: 999px;
+    display: grid; place-items: center;
+    background: rgba(31,111,235,0.16); border: 1px solid var(--border);
+    color: #bfdbfe; font-size: 9px; font-weight: 800;
+    margin-left: -4px;
+  }
+  .ts-avatars .ts-avatar:first-child { margin-left: 0; }
+  .cal-attendees .meta { color: var(--fg-muted); font-size: 10px; }
+
+  /* 승인 요청 — 컴팩트 */
+  .approval-card {
+    border: 1px solid rgba(247, 129, 102, 0.45);
+    background: linear-gradient(160deg, rgba(247,129,102,0.10), rgba(245,158,11,0.04));
+  }
+  .approval-card .card-title h3 { font-size: 13px; }
+  .approval-row {
+    display: grid;
+    grid-template-columns: 22px 1fr 12px;
+    gap: 8px;
+    align-items: center;
+    padding: 8px;
+    border-radius: 9px;
+    border: 1px solid rgba(247, 129, 102, 0.32);
+    background: rgba(10, 14, 26, 0.62);
+    margin-top: 6px;
+    cursor: pointer;
+  }
+  .approval-row:first-of-type { margin-top: 0; }
+  .approval-row:hover { border-color: rgba(247, 129, 102, 0.6); background: rgba(247, 129, 102, 0.08); }
+  .approval-chev { color: var(--fg-muted); font-size: 14px; line-height: 1; }
+  .approval-actions {
+    margin-top: auto;
+    padding-top: 12px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    border-top: 1px dashed rgba(247, 129, 102, 0.32);
+  }
+  .approval-foot {
+    grid-column: 1 / -1;
+    font-size: 10px;
+    color: var(--fg-muted);
+    margin-bottom: 2px;
+  }
+  .approval-foot b { color: #fca5a5; font-weight: 700; }
+  .approval-actions .req-btn { width: 100%; padding: 7px 10px; font-size: 11px; }
+
+  /* 컨펌 모달 mockup */
+  .confirm-modal-mock {
+    position: relative;
+    margin: 14px auto 0;
+    max-width: 420px;
+    border: 1px solid rgba(247, 129, 102, 0.55);
+    background: linear-gradient(180deg, rgba(17,22,42,0.98), rgba(13,20,36,0.98));
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.55), 0 0 0 5px rgba(10,14,26,0.6);
+  }
+  .confirm-modal-mock::before {
+    content: "Modal mockup · 항목 클릭 시 띄움";
+    position: absolute; top: -22px; left: 0;
+    font-size: 10px; color: var(--fg-muted); letter-spacing: 0.05em;
+  }
+  .modal-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
+  .modal-head-icon {
+    width: 32px; height: 32px;
+    display: grid; place-items: center;
+    border-radius: 9px;
+    background: rgba(247,129,102,0.18); border: 1px solid rgba(247,129,102,0.45);
+    color: #fca5a5; font-weight: 800;
+  }
+  .modal-head h3 { font-size: 15px; color: var(--fg); margin-bottom: 3px; }
+  .modal-head p { font-size: 11.5px; color: var(--fg-muted); }
+  .modal-body {
+    margin: 8px 0 12px;
+    padding: 10px;
+    border-radius: 9px;
+    background: rgba(10,14,26,0.55);
+    border: 1px solid var(--border);
+    font-size: 11.5px;
+    color: var(--fg-soft);
+    line-height: 1.55;
+  }
+  .modal-body b { color: var(--fg); font-weight: 700; }
+  .modal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .modal-actions button { padding: 9px; border-radius: 8px; font-size: 12px; font-weight: 700; font-family: inherit; }
+  .modal-actions .deny { background: rgba(26,32,48,0.78); border: 1px solid var(--border); color: var(--fg-soft); }
+  .modal-actions .primary { background: linear-gradient(180deg, #2f81f7, #1f6feb); border: 1px solid rgba(47,129,247,0.7); color: white; }
+
+  /* 팀 업무 요약 head 카운트 뱃지 */
+  .summary-head .head-count {
+    margin-left: auto;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: rgba(10,14,26,0.55);
+    border: 1px solid var(--border);
+  }
+  .summary-block.win .head-count { color: #d8b4fe; border-color: rgba(167,139,250,0.4); }
+  .summary-block.risk .head-count { color: #fca5a5; border-color: rgba(247,129,102,0.4); }
+  .approval-row .req-icon {
+    width: 22px; height: 22px; display: grid; place-items: center;
+    border-radius: 7px;
+    background: rgba(247,129,102,0.18); border: 1px solid rgba(247,129,102,0.45);
+    color: #fca5a5; font-weight: 800; font-size: 11px;
+  }
+  .approval-row .req-body strong { font-size: 11.5px; color: var(--fg); display: block; }
+  .approval-row .req-body span { display: block; font-size: 10px; color: var(--fg-muted); margin-top: 2px; }
+  .req-actions { display: flex; gap: 6px; margin-top: 6px; }
+  .req-btn {
+    flex: 1;
+    border: 1px solid rgba(47, 129, 247, 0.6);
+    background: linear-gradient(180deg, #2f81f7, #1f6feb);
+    color: white; font-weight: 700;
+    border-radius: 7px;
+    padding: 4px 8px;
+    font-size: 10px;
+    font-family: inherit;
+  }
+  .req-btn.deny { background: rgba(26,32,48,0.78); border-color: var(--border); color: var(--fg-soft); }
+
+  /* 주간업무 */
+  .week-row { display: grid; grid-template-columns: 122px 1fr 62px; align-items: center; gap: 10px; margin-top: 10px; font-size: 11px; }
+  .gantt { height: 24px; border-radius: 8px; background-color: #0a0e1a; background-image: linear-gradient(to right, rgba(42, 50, 69, 0.78) 1px, transparent 1px); background-size: 20% 100%; position: relative; overflow: hidden; }
+  .gantt span { position: absolute; top: 8px; height: 8px; border-radius: 999px; background: var(--primary); box-shadow: 0 0 18px rgba(47,129,247,0.18); }
+
+  /* 태스크 한 라인 row (마이워크 내 보드 / 팀 보드 list 공용) */
+  .task-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(17, 22, 42, 0.78);
+    margin-top: 8px;
+  }
+  .task-row:first-of-type { margin-top: 0; }
+  .task-row.in-progress { border-color: rgba(47, 129, 247, 0.45); background: rgba(31, 111, 235, 0.08); }
+  .task-row .task-title { font-size: 12px; color: var(--fg); }
+  .task-row .task-meta { font-size: 10px; color: var(--fg-muted); margin-top: 2px; }
+
+  /* === 팀 통합 대시보드: 전체 KPI + 팀원 mini rows 합본 === */
+  .team-combo { padding: 14px; }
+  .team-combo .combo-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .team-combo .combo-head h3 { font-size: 14px; }
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .kpi-cell {
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(17, 22, 42, 0.82);
+    text-align: center;
+  }
+  .kpi-cell .kpi-num { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
+  .kpi-cell .kpi-label { margin-top: 5px; font-size: 10px; color: var(--fg-muted); letter-spacing: 0.05em; text-transform: uppercase; }
+  .kpi-cell.in { border-color: rgba(47,129,247,0.42); background: rgba(31,111,235,0.10); }
+  .kpi-cell.in .kpi-num { color: #93c5fd; }
+  .kpi-cell.up { border-color: rgba(245,158,11,0.42); background: rgba(245,158,11,0.10); }
+  .kpi-cell.up .kpi-num { color: #fcd34d; }
+  .kpi-cell.dn { border-color: rgba(16,185,129,0.42); background: rgba(16,185,129,0.10); }
+  .kpi-cell.dn .kpi-num { color: #6ee7b7; }
+  .kpi-cell.rk { border-color: rgba(247,129,102,0.45); background: rgba(247,129,102,0.10); }
+  .kpi-cell.rk .kpi-num { color: #fca5a5; }
+
+  .members-divider {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--fg-muted); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+    margin: 4px 0 8px;
+  }
+  .members-divider::before, .members-divider::after {
+    content: ""; flex: 1; height: 1px; background: var(--border);
+  }
+  .members-divider .pager { display: flex; gap: 6px; align-items: center; text-transform: none; letter-spacing: 0; }
+  .pager-btn {
+    width: 22px; height: 22px;
+    display: grid; place-items: center;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: rgba(26,32,48,0.72);
+    color: var(--fg-soft); font-size: 11px;
+    font-family: inherit;
+  }
+  .pager-btn.disabled { opacity: 0.35; }
+
+  .member-row {
+    display: grid;
+    grid-template-columns: 22px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 7px 9px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: rgba(10,14,26,0.55);
+    margin-top: 6px;
+  }
+  .member-row:first-of-type { margin-top: 0; }
+  .member-row .avatar {
+    width: 22px; height: 22px; border-radius: 999px;
+    display: grid; place-items: center;
+    background: rgba(31,111,235,0.16); border: 1px solid var(--border);
+    color: #bfdbfe; font-size: 10px; font-weight: 800;
+  }
+  .member-row .mem-name { font-size: 11.5px; color: var(--fg); font-weight: 600; }
+  .member-row .mem-role { font-size: 10px; color: var(--fg-muted); margin-left: 6px; }
+  .member-row .mem-counts {
+    display: flex; gap: 4px;
+  }
+  .mc-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-size: 10px;
+    border: 1px solid var(--border);
+    background: rgba(26,32,48,0.72);
+    color: var(--fg-soft);
+  }
+  .mc-pill b { font-weight: 800; font-size: 11px; }
+  .mc-pill.in { border-color: rgba(47,129,247,0.42); background: rgba(31,111,235,0.10); color: #93c5fd; }
+  .mc-pill.up { border-color: rgba(245,158,11,0.42); background: rgba(245,158,11,0.10); color: #fcd34d; }
+  .mc-pill.dn { border-color: rgba(16,185,129,0.42); background: rgba(16,185,129,0.10); color: #6ee7b7; }
+  .mc-pill.rk { border-color: rgba(247,129,102,0.45); background: rgba(247,129,102,0.10); color: #fca5a5; }
+  .mc-pill.rk.zero { color: var(--fg-muted); border-color: var(--border); background: rgba(26,32,48,0.55); }
+
+  /* === 팀 업무 요약 (이전 형태 복원: 2 컬럼 paragraph) === */
+  .summary-card { padding: 14px; }
+  .summary-card h3 { font-size: 14px; margin-bottom: 10px; }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .summary-block {
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: rgba(10,14,26,0.55);
+  }
+  .summary-block.win { border-left: 3px solid var(--purple); }
+  .summary-block.risk { border-left: 3px solid var(--red); }
+  .summary-head {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px;
+    font-size: 13px; font-weight: 700;
+  }
+  .summary-head .head-dot {
+    width: 9px; height: 9px; border-radius: 999px; flex: 0 0 auto;
+  }
+  .summary-block.win .head-dot { background: var(--purple); box-shadow: 0 0 0 4px rgba(167,139,250,0.18); }
+  .summary-block.risk .head-dot { background: var(--red); box-shadow: 0 0 0 4px rgba(247,129,102,0.18); }
+  .summary-block.win .summary-head { color: #d8b4fe; }
+  .summary-block.risk .summary-head { color: #fca5a5; }
+  .summary-body {
+    color: var(--fg-soft);
+    font-size: 12.5px;
+    line-height: 1.7;
+  }
+  .summary-body b { color: var(--fg); font-weight: 700; }
+
+  /* Empty/recovery states (S5) */
+  .empty-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .empty-card { padding: 14px; min-height: 130px; display: flex; flex-direction: column; justify-content: space-between; }
+  .empty-icon { width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center; background: rgba(26,32,48,0.9); border: 1px solid var(--border); color: var(--primary-bright); }
+  .callout {
+    position: relative;
+    border: 1px dashed rgba(88, 166, 255, 0.52);
+    background: rgba(31, 111, 235, 0.08);
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .discussion { margin-top: 26px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .discussion .panel { padding: 18px; }
+  ul { margin: 12px 0 0; padding-left: 20px; color: var(--fg-soft); font-size: 13px; line-height: 1.65; }
+  li + li { margin-top: 4px; }
+
+  .changelog { border: 1px solid rgba(110,231,183,0.45); background: rgba(16,185,129,0.06); }
+  .changelog ul { color: var(--fg-soft); }
+
+  @media (max-width: 1180px) {
+    .hero, .storyboard, .discussion { grid-template-columns: 1fr; }
+    .scenario-rail { grid-template-columns: repeat(2, 1fr); }
+    .row-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="hero">
+    <div>
+      <div class="eyebrow">
+        <span class="chip chip-blue">DESIGN MOCK · v3</span>
+        <span class="chip chip-green">3-row compact layout</span>
+        <span class="chip chip-purple">통합 대시보드 · 리스크 통합</span>
+        <span class="chip">Static HTML · docs/design only</span>
+      </div>
+      <h1>Agent Hub Plugin UI v3 — 4줄 → 3줄 압축 + 리스크 통합</h1>
+      <p class="hero-copy">
+        v2.1 의 4줄 콘텐츠를 <strong>3줄로 압축</strong>했습니다. 마이워크는 Row 1 = LLM 분석 + 승인 요청 / Row 2~3 = 좌측 stack(주간업무 + 내 보드 동일 폭) + 우측 오늘 일정 세로 stretch 구조,
+        팀보드는 <strong>팀 업무 요약을 최상단</strong>(Row 1, 2컬럼 narrative) → 좌측 stack(통합 대시보드 + 팀 보드/list 동일 폭) + 우측 오늘 팀원 전체 일정(세로 stretch) 의 3줄 구조입니다.
+        리스크는 <strong>전체 KPI / 팀원 / 이슈·리스크 paragraph</strong> 모두에 일관 색상으로 노출됩니다.
+      </p>
+    </div>
+    <aside class="panel plugin-note changelog">
+      <div class="label">v3 changelog (compounded)</div>
+      <div class="rows">
+        <div class="note-row"><span class="note-dot" style="background:#6ee7b7"></span><span><strong>마이워크 3줄</strong>: Row 1 = LLM + 승인 요청. Row 2~3 좌측 = 주간업무 + 내 보드(동일 폭 1.45fr). Row 2~3 우측 = 오늘 일정(세로 stretch, 두 줄 높이).</span></div>
+        <div class="note-row"><span class="note-dot" style="background:#6ee7b7"></span><span><strong>팀보드 3줄</strong>: Row 1 = 팀 업무 요약(최상단). Row 2~3 좌측 = 통합 대시보드(KPI + 팀원 inline) + 팀 보드/list(동일 폭 1.45fr). Row 2~3 우측 = 오늘 팀원 일정(세로 stretch).</span></div>
+        <div class="note-row"><span class="note-dot" style="background:#fca5a5"></span><span><strong>리스크 통합</strong>: KPI 4 cell · 팀원 mini 4 pill · 요약 head 카운팅 뱃지 — 빨간 톤 일관.</span></div>
+        <div class="note-row"><span class="note-dot" style="background:#fcd34d"></span><span><strong>승인 요청 v2</strong>: 항목 인라인 버튼 제거 → chevron + 카드 하단 빈 여백에 거절/승인 footer. 항목 클릭 → 컨펌 모달.</span></div>
+        <div class="note-row"><span class="note-dot" style="background:#fcd34d"></span><span><strong>row stretch + 내부 스크롤</strong>: 6개 영역 (주간업무/오늘 일정/내 보드/팀원/팀 일정/팀보드 list) 각각 max-height + thin scrollbar.</span></div>
+        <div class="note-row"><span class="note-dot" style="background:#fcd34d"></span><span><strong>팀 업무 요약</strong>: 주요 성과 / 이슈·리스크 head 에 카운팅 뱃지 추가 (8 / 2).</span></div>
+        <div class="note-row"><span class="note-dot" style="background:#d8b4fe"></span><span><strong>컨펌 모달 mockup</strong>: S3 storyboard 하단에 별도 패널로 추가 — 항목 클릭 시 띄우는 형태.</span></div>
+      </div>
+    </aside>
+  </header>
+
+  <nav class="scenario-rail" aria-label="Agent Hub plugin scenario rail v3">
+    <section class="panel rail-step">
+      <div class="rail-number">S0–S2</div>
+      <h3>인증 라이프사이클 (통합)</h3>
+      <p>한 창에서 진입 → 외부 로그인 대기 → 콜백/동기화 까지 상태 전이</p>
+    </section>
+    <section class="panel rail-step">
+      <div class="rail-number">S3</div>
+      <h3>마이워크 (3줄)</h3>
+      <p>LLM + 승인 → 주간업무·내 보드 + 오늘 일정(세로 stretch)</p>
+    </section>
+    <section class="panel rail-step">
+      <div class="rail-number">S4</div>
+      <h3>팀보드 (3줄)</h3>
+      <p>통합 대시보드 + 오늘 팀 일정 → 팀 업무 요약 → 팀 보드/list</p>
+    </section>
+    <section class="panel rail-step">
+      <div class="rail-number">S5</div>
+      <h3>예외/빈 상태</h3>
+      <p>명시적 recovery UI · 빈 보드 · sync 실패 카드</p>
+    </section>
+  </nav>
+
+  <main class="storyboard">
+    <!-- ===================== S0–S2 unified ===================== -->
+    <section class="panel shot full">
+      <div class="shot-header">
+        <div class="shot-title">
+          <div class="shot-index">S0–S2</div>
+          <div>
+            <h2>인증 라이프사이클 — 한 창 안에서의 상태 전이</h2>
+            <p class="shot-caption">Plugin window 는 닫히지 않고, 내부 카드들이 entry → waiting → syncing 순서로 점진적으로 활성화됩니다. 상단 알약 토글은 인증 완료 전까지 비활성.</p>
+          </div>
+        </div>
+        <span class="chip chip-blue">Single window · progressive state</span>
+      </div>
+
+      <div class="plugin-window">
+        <div class="titlebar">
+          <div class="traffic"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span><span>lvis://plugin/agent-hub</span></div>
+          <span class="plugin-badge">Agent Hub Plugin UI · auth lifecycle</span>
+        </div>
+        <div class="appbar">
+          <div class="brand-mini">
+            <div class="brand-icon">AH</div>
+            <div class="brand-meta">
+              <strong>Agent Hub</strong>
+              <span>auth: syncing · 김민준</span>
+            </div>
+          </div>
+          <div class="pill-toggle disabled" aria-label="마이워크/팀보드 토글 (비활성)">
+            <button>마이워크</button>
+            <button>팀보드</button>
+          </div>
+          <div class="gear disabled" aria-label="설정 (비활성)">⚙</div>
+        </div>
+        <section class="content">
+          <div class="content-top">
+            <div>
+              <h2>Agent Hub 연결 중</h2>
+              <p>인증 단계가 진행되는 동안 보드 토글과 설정은 잠시 비활성화됩니다.</p>
+            </div>
+            <div class="toolbar">
+              <span class="chip chip-green">step 3/3 · 동기화 중</span>
+              <span class="chip">compact viewport</span>
+            </div>
+          </div>
+          <div class="lifecycle">
+            <div class="lifecycle-step done">
+              <div class="step-num">✓</div>
+              <div class="step-body">
+                <strong>S0 · 플러그인 진입</strong>
+                <span>로그인 CTA 노출 → 사용자가 "웹에서 로그인 시작" 클릭</span>
+              </div>
+              <span class="chip chip-green">완료</span>
+            </div>
+            <div class="lifecycle-step done">
+              <div class="step-num">✓</div>
+              <div class="step-body">
+                <strong>S1 · 외부 브라우저 로그인 대기</strong>
+                <span>플러그인은 닫히지 않고 callback 신호 대기 (waiting state)</span>
+              </div>
+              <span class="chip chip-green">완료</span>
+            </div>
+            <div class="lifecycle-step current">
+              <div class="step-num"><div class="spinner" style="width:18px;height:18px;border-width:2px"></div></div>
+              <div class="step-body">
+                <strong>S2 · 콜백 수신 / 소스 동기화</strong>
+                <span>auth changed 신호 수신 후 Agent Hub / MS Graph 순차 갱신</span>
+              </div>
+              <span class="chip chip-blue">진행</span>
+            </div>
+            <div class="lifecycle-detail">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                <div class="lock" style="width:32px;height:32px;font-size:16px">⌁</div>
+                <div>
+                  <strong style="color:var(--fg)">김민준님 계정으로 연결되었습니다</strong>
+                  <div style="color:var(--fg-muted);font-size:11px;margin-top:2px">인증이 끝나면 토글과 설정이 활성화되고 마이워크 보드로 진입합니다.</div>
+                </div>
+              </div>
+              <div class="sync-row"><span class="chip chip-blue">Agent Hub</span><div class="bar"><div class="fill" style="width:100%"></div></div><span style="color:#6ee7b7">완료</span></div>
+              <div class="sync-row"><span class="chip">MS Graph</span><div class="bar"><div class="fill" style="width:78%"></div></div><span style="color:#fcd34d">읽는 중</span></div>
+              <p style="margin-top:8px;font-size:11px;color:var(--fg-muted)">※ 회의록(Meeting plugin)은 Agent Hub 보드 표면에 노출되지 않습니다.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- ===================== S3 My Work — 3 rows ===================== -->
+    <section class="panel shot full">
+      <div class="shot-header">
+        <div class="shot-title">
+          <div class="shot-index">S3</div>
+          <div>
+            <h2>S3 · 마이워크 (3줄)</h2>
+            <p class="shot-caption">Row 1 = LLM 오늘의 주요업무 + 승인 요청. Row 2~3 좌측 = 주간업무 + 내 보드(동일 폭). Row 2~3 우측 = 오늘 일정(세로 stretch).</p>
+          </div>
+        </div>
+        <span class="chip chip-blue">Toggle: 마이워크 · 3 rows</span>
+      </div>
+
+      <div class="plugin-window">
+        <div class="titlebar">
+          <div class="traffic"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span><span>lvis://plugin/agent-hub/my-work</span></div>
+          <span class="plugin-badge">Agent Hub Plugin UI · My Work</span>
+        </div>
+        <div class="appbar">
+          <div class="brand-mini">
+            <div class="brand-icon">AH</div>
+            <div class="brand-meta">
+              <strong>Agent Hub</strong>
+              <span>김민준 · MS Graph · Agent Hub 연결됨</span>
+            </div>
+          </div>
+          <div class="pill-toggle" aria-label="마이워크/팀보드 토글">
+            <button class="active">마이워크</button>
+            <button>팀보드</button>
+          </div>
+          <div class="gear" aria-label="설정">⚙</div>
+        </div>
+        <section class="content">
+          <div class="content-top">
+            <div>
+              <h2>좋은 아침입니다, 민준님</h2>
+              <p>오늘은 집중 업무 3건, 회의 4건, 리뷰 필요 2건이 감지되었습니다.</p>
+            </div>
+            <div class="toolbar"><span class="chip chip-blue">새로고침 09:35</span><span class="chip">Asia/Seoul · 2026.05.04</span></div>
+          </div>
+
+          <!-- Row 1: LLM 오늘의 주요업무 + 승인 요청 (AH-2: 승인 2건 있는 상태) -->
+          <div class="row-grid">
+            <article class="subpanel card llm-card">
+              <div class="card-title">
+                <h3>오늘의 주요업무</h3>
+                <span class="chip chip-purple">LLM 분석</span>
+              </div>
+              <p class="summary-text">민준님, 오늘은 plugin v3 목업 리뷰가 11시에 잡혀 있어 오전 시간을 그 결정에 우선 배치하시는 것을 권합니다.
+어제 닫지 못한 callback UX 문구는 준호님이 14시까지 정리하기로 했으니 점심 직후 한 번 확인해주시면 좋겠습니다.
+주간업무 상으로는 "팀 보드 grouping" 만 정상 페이스이고, "웹 로그인 copy" 가 일정 대비 살짝 늦으니 오후에 주의를 모아주세요.
+오늘 회의 4건 중 16:30 팀장님 브리핑 초안은 risk 한 줄, action 한 줄로 압축해 두면 회의 시간에 의사결정만 남길 수 있습니다.
+승인 대기 2건 중 외부 공유 1건은 만료 7일이라 위험도가 낮으니 먼저 처리해도 무방해 보입니다.</p>
+              <div class="llm-foot">
+                <span>도구 호출: <b style="color:#d8b4fe">tasks_today · calendar_today · approval_pending · weekly_summary</b></span>
+                <span>09:35 갱신</span>
+              </div>
+            </article>
+
+            <article class="subpanel card approval-card">
+              <div class="card-title">
+                <h3>승인 요청 <span class="chip chip-red" style="margin-left:4px">2</span></h3>
+                <span class="chip">agent action</span>
+              </div>
+              <div class="approval-row">
+                <div class="req-icon">!</div>
+                <div class="req-body">
+                  <strong>외부 공유 링크 생성</strong>
+                  <span>Briefing summary · 만료 7일</span>
+                </div>
+                <span class="approval-chev">›</span>
+              </div>
+              <div class="approval-row">
+                <div class="req-icon">⌁</div>
+                <div class="req-body">
+                  <strong>일정 일괄 수정</strong>
+                  <span>MS Graph · 3개 미팅 변경</span>
+                </div>
+                <span class="approval-chev">›</span>
+              </div>
+              <div class="approval-actions">
+                <span class="approval-foot">우선 처리: <b>외부 공유 링크 생성</b> · 컨펌 모달에서 결정</span>
+                <button class="req-btn deny">거절</button>
+                <button class="req-btn">승인</button>
+              </div>
+            </article>
+          </div>
+
+          <!-- AH-2: 승인 0건 상태 — LLM 카드 full-width (grid-column: 1 / -1) -->
+          <div style="margin-top:10px">
+            <div class="label" style="margin-bottom:8px">AH-2 · 승인 0건 상태 — LLM full width</div>
+            <div class="row-grid">
+              <div style="grid-column:1/-1;display:flex;flex-direction:column">
+                <article class="subpanel card llm-card">
+                  <div class="card-title">
+                    <h3>오늘의 주요업무</h3>
+                    <span class="chip chip-purple">LLM 분석</span>
+                  </div>
+                  <p class="summary-text">오늘은 대기 중인 승인 요청이 없습니다. 주간업무 3건과 오후 회의 2건에 집중하세요.</p>
+                  <div class="llm-foot">
+                    <span>도구 호출: <b style="color:#d8b4fe">tasks_today · calendar_today · approval_pending · weekly_summary</b></span>
+                    <span>09:35 갱신</span>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </div>
+
+          <!-- Row 2~3: 좌측 stack(주간업무 + 내 보드, 동일 폭) + 우측 오늘 일정(세로 stretch) -->
+          <div class="mywork-stack" style="display:grid; grid-template-columns:1.45fr 0.55fr; grid-template-rows:auto auto; gap:12px; margin-top:12px">
+            <!-- Row 2 좌: 주간업무 -->
+            <article class="subpanel card" style="grid-column:1; grid-row:1">
+              <div class="card-title"><h3>주간업무</h3><div class="toolbar"><span class="chip">월</span><span class="chip">화</span><span class="chip chip-blue">수</span><span class="chip">목</span><span class="chip">금</span></div></div>
+              <div class="scroll-area" style="max-height:180px;padding-right:4px">
+                <div class="week-row" style="margin-top:0"><span>플러그인 v3 목업</span><div class="gantt"><span style="left:20%;width:40%;background:var(--primary)"></span></div><span class="chip chip-blue">진행</span></div>
+                <div class="week-row"><span>웹 로그인 copy</span><div class="gantt"><span style="left:40%;width:35%;background:var(--orange)"></span></div><span class="chip chip-orange">주의</span></div>
+                <div class="week-row"><span>팀 보드 grouping</span><div class="gantt"><span style="left:10%;width:60%;background:var(--green)"></span></div><span class="chip chip-green">정상</span></div>
+                <div class="week-row"><span>Agent Hub API 연동</span><div class="gantt"><span style="left:30%;width:45%;background:var(--primary)"></span></div><span class="chip chip-blue">진행</span></div>
+                <div class="week-row"><span>회의 요약 fine-tune</span><div class="gantt"><span style="left:55%;width:30%;background:var(--green)"></span></div><span class="chip chip-green">정상</span></div>
+                <div class="week-row"><span>승인 컨펌 모달 spec</span><div class="gantt"><span style="left:60%;width:25%;background:var(--orange)"></span></div><span class="chip chip-orange">주의</span></div>
+              </div>
+              <div class="scroll-cap">scrollable · 6 / 12</div>
+            </article>
+
+            <!-- Row 2~3 우: 오늘 일정 (세로 stretch — 두 줄 높이) -->
+            <article class="subpanel card" style="grid-column:2; grid-row:1 / span 2">
+              <div class="card-title"><h3>오늘 일정</h3><span class="chip">Outlook</span></div>
+              <div class="calendar-list scroll-area" style="max-height:420px;padding-right:4px">
+                <div class="calendar-item"><time>09:30</time><div class="cal-card">Agent Hub daily sync<span class="cal-meta">30분 · 보드 IA 확인</span></div></div>
+                <div class="calendar-item"><time>11:00</time><div class="cal-card hi">디자인 리뷰: Plugin UI v3<span class="cal-meta">결정 필요 4개</span></div></div>
+                <div class="calendar-item"><time>13:00</time><div class="cal-card">점심 1on1 — 하린<span class="cal-meta">30분 · 분기 OKR</span></div></div>
+                <div class="calendar-item"><time>14:00</time><div class="cal-card">callback retry contract 검토<span class="cal-meta">30분 · 준호</span></div></div>
+                <div class="calendar-item"><time>15:00</time><div class="cal-card">QA 회귀 케이스 — 지수<span class="cal-meta">30분 · v3 plugin</span></div></div>
+                <div class="calendar-item"><time>16:30</time><div class="cal-card">팀장님 주간 브리핑<span class="cal-meta">15분 · risk/action</span></div></div>
+                <div class="calendar-item"><time>17:30</time><div class="cal-card">a11y 패턴 스펙 백업<span class="cal-meta">선택적 · 서연</span></div></div>
+              </div>
+              <div class="scroll-cap">scrollable · 7 / 7</div>
+            </article>
+
+            <!-- Row 3 좌: 내 보드 (주간업무와 동일 폭 1.45fr) -->
+            <article class="subpanel card" style="grid-column:1; grid-row:2">
+              <div class="card-title"><h3>내 보드</h3><span class="chip">개인 담당 9</span></div>
+              <div class="scroll-area" style="max-height:200px;padding-right:4px">
+                <div class="task-row in-progress" style="margin-top:0">
+                  <span class="chip chip-red">P0</span>
+                  <div>
+                    <div class="task-title">Agent Hub plugin UI v3 storyboard 정리</div>
+                    <div class="task-meta">진행 중 · 마감 오늘 · 디자인 리뷰 11:00</div>
+                  </div>
+                  <span class="chip chip-blue">진행</span>
+                </div>
+                <div class="task-row">
+                  <span class="chip chip-red">P0</span>
+                  <div>
+                    <div class="task-title">디자인 리뷰 질문 4개 정리</div>
+                    <div class="task-meta">예정 · 11:00 회의 직전까지</div>
+                  </div>
+                  <span class="chip">예정</span>
+                </div>
+                <div class="task-row">
+                  <span class="chip chip-orange">P1</span>
+                  <div>
+                    <div class="task-title">웹 로그인 대기 copy 최종 검토</div>
+                    <div class="task-meta">진행 중 · owner 준호 · 14:00 까지</div>
+                  </div>
+                  <span class="chip chip-orange">주의</span>
+                </div>
+                <div class="task-row">
+                  <span class="chip chip-orange">P1</span>
+                  <div>
+                    <div class="task-title">알약 토글 키보드 a11y 패턴 RFC 작성</div>
+                    <div class="task-meta">예정 · WAI-ARIA tabs vs radio 비교</div>
+                  </div>
+                  <span class="chip">예정</span>
+                </div>
+                <div class="task-row">
+                  <span class="chip">P2</span>
+                  <div>
+                    <div class="task-title">팀 통합 대시보드 카운트 source 검토</div>
+                    <div class="task-meta">진행 중 · Agent Hub API contract 확정 후</div>
+                  </div>
+                  <span class="chip chip-blue">진행</span>
+                </div>
+                <div class="task-row">
+                  <span class="chip chip-green">완</span>
+                  <div>
+                    <div class="task-title">v2.1 → v3 changelog 정리</div>
+                    <div class="task-meta">완료 · 어제 18:40</div>
+                  </div>
+                  <span class="chip chip-green">완료</span>
+                </div>
+              </div>
+              <div class="scroll-cap">scrollable · 6 / 9</div>
+            </article>
+          </div>
+        </section>
+      </div>
+
+      <!-- 컨펌 모달 mockup — 항목 클릭 시 표시되는 형태 -->
+      <div class="confirm-modal-mock">
+        <div class="modal-head">
+          <div class="modal-head-icon">!</div>
+          <div>
+            <h3>외부 공유 링크 생성을 승인하시겠습니까?</h3>
+            <p>요청한 에이전트: Briefing summary · 09:32</p>
+          </div>
+        </div>
+        <div class="modal-body">
+          <b>weekly-brief-2026w18.md</b> 를 외부에서 접근 가능한 링크로 공개합니다. 만료 7일, 다운로드 차단,
+          링크 회수 가능. 정책상 P1 등급 (조직 외 일시 공유) 으로 분류됩니다.
+        </div>
+        <div class="modal-actions">
+          <button class="deny">거절</button>
+          <button class="primary">승인</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== S4 Team Board — 3 rows ===================== -->
+    <section class="panel shot full">
+      <div class="shot-header">
+        <div class="shot-title">
+          <div class="shot-index">S4</div>
+          <div>
+            <h2>S4 · 팀보드 (3줄)</h2>
+            <p class="shot-caption">Row 1 = 팀 업무 요약(최상단). Row 2~3 좌측 = 통합 대시보드 + 팀 보드/list(동일 폭). Row 2~3 우측 = 오늘 팀원 전체 일정(세로 stretch).</p>
+          </div>
+        </div>
+        <span class="chip chip-green">Toggle: 팀보드 · 3 rows</span>
+      </div>
+
+      <div class="plugin-window">
+        <div class="titlebar">
+          <div class="traffic"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span><span>lvis://plugin/agent-hub/team-board</span></div>
+          <span class="plugin-badge">Agent Hub Plugin UI · Team Board</span>
+        </div>
+        <div class="appbar">
+          <div class="brand-mini">
+            <div class="brand-icon">AH</div>
+            <div class="brand-meta">
+              <strong>Agent Hub</strong>
+              <span>LVIS Platform 팀 · 13명</span>
+            </div>
+          </div>
+          <div class="pill-toggle" aria-label="마이워크/팀보드 토글">
+            <button>마이워크</button>
+            <button class="active">팀보드</button>
+          </div>
+          <div class="gear" aria-label="설정">⚙</div>
+        </div>
+        <section class="content">
+          <div class="content-top">
+            <div>
+              <h2>팀 보드</h2>
+              <p>팀 업무 요약(최상단) → 좌측 stack(통합 대시보드 + 팀 보드/list) + 우측 오늘 팀원 일정(세로 stretch) 의 3줄 흐름.</p>
+            </div>
+            <div class="toolbar"><span class="chip chip-green">팀 건강도 안정</span><span class="chip">13명</span></div>
+          </div>
+
+          <!-- Row 1: 팀 업무 요약 (최상단 narrative — 주요 성과 / 이슈·리스크) -->
+          <article class="subpanel summary-card">
+            <h3>팀 업무 요약</h3>
+            <div class="summary-grid">
+              <div class="summary-block win">
+                <div class="summary-head"><span class="head-dot"></span>주요 성과<span class="head-count">8</span></div>
+                <p class="summary-body">엔지니어링 진행 속도가 매우 빠릅니다. <b>핵심 API 통합이 85% 완료</b>되어 예정보다 이틀 앞서 진행되고 있습니다. 대시보드의 UI 개선 작업이 모든 멤버 브랜치에 걸쳐 동기화되었으며, plugin v3 목업의 3-row 압축 합의가 오전 데일리에서 마무리되었습니다. 이번 주 완료 21건 중 절반이 보드 IA 정리 흐름에서 나왔습니다.</p>
+              </div>
+              <div class="summary-block risk">
+                <div class="summary-head"><span class="head-dot"></span>이슈 / 리스크<span class="head-count">2</span></div>
+                <p class="summary-body">보안 패치 v2.4 검토 대기열이 늘어나고 있습니다. <b>준호님과 우진님의 리뷰 부하가 최대치</b>에 도달하여, 오후 4시까지 해결되지 않으면 금요일 스테이징 배포가 지연될 수 있습니다. callback recovery copy 결정도 14:00 마감으로 묶여 있어, 두 건이 동시에 미해결되면 주간 마감 라인이 동시에 흔들립니다.</p>
+              </div>
+            </div>
+          </article>
+
+          <!-- Row 2~3: 좌측 stack(통합 대시보드 + 팀 보드/list) + 우측 오늘 팀원 일정(세로 stretch) -->
+          <div class="team-stack" style="display:grid; grid-template-columns:1.45fr 0.55fr; grid-template-rows:auto auto; gap:12px; margin-top:12px">
+            <article class="subpanel team-combo" style="grid-column:1; grid-row:1">
+              <div class="combo-head">
+                <h3>팀 통합 대시보드</h3>
+                <span class="chip chip-blue">전 팀 13명</span>
+              </div>
+              <div class="kpi-grid">
+                <div class="kpi-cell in"><div class="kpi-num">14</div><div class="kpi-label">진행 중</div></div>
+                <div class="kpi-cell up"><div class="kpi-num">7</div><div class="kpi-label">예정</div></div>
+                <div class="kpi-cell dn"><div class="kpi-num">21</div><div class="kpi-label">완료 (이번주)</div></div>
+                <div class="kpi-cell rk"><div class="kpi-num">2</div><div class="kpi-label">리스크</div></div>
+              </div>
+              <div class="members-divider">
+                <span>팀원별 · 13명</span>
+              </div>
+              <div class="scroll-area" style="max-height:200px;padding-right:4px">
+                <div class="member-row" style="margin-top:0">
+                  <div class="avatar">서</div>
+                  <div><span class="mem-name">서연</span><span class="mem-role">· FE</span></div>
+                  <div class="mem-counts">
+                    <span class="mc-pill in"><b>3</b>진행</span>
+                    <span class="mc-pill up"><b>2</b>예정</span>
+                    <span class="mc-pill dn"><b>5</b>완료</span>
+                    <span class="mc-pill rk zero"><b>0</b>리스크</span>
+                  </div>
+                </div>
+                <div class="member-row">
+                  <div class="avatar">준</div>
+                  <div><span class="mem-name">준호</span><span class="mem-role">· BE</span></div>
+                  <div class="mem-counts">
+                    <span class="mc-pill in"><b>4</b>진행</span>
+                    <span class="mc-pill up"><b>1</b>예정</span>
+                    <span class="mc-pill dn"><b>3</b>완료</span>
+                    <span class="mc-pill rk"><b>1</b>리스크</span>
+                  </div>
+                </div>
+                <div class="member-row">
+                  <div class="avatar">하</div>
+                  <div><span class="mem-name">하린</span><span class="mem-role">· PM</span></div>
+                  <div class="mem-counts">
+                    <span class="mc-pill in"><b>2</b>진행</span>
+                    <span class="mc-pill up"><b>3</b>예정</span>
+                    <span class="mc-pill dn"><b>6</b>완료</span>
+                    <span class="mc-pill rk zero"><b>0</b>리스크</span>
+                  </div>
+                </div>
+                <div class="member-row">
+                  <div class="avatar">우</div>
+                  <div><span class="mem-name">우진</span><span class="mem-role">· BE</span></div>
+                  <div class="mem-counts">
+                    <span class="mc-pill in"><b>3</b>진행</span>
+                    <span class="mc-pill up"><b>0</b>예정</span>
+                    <span class="mc-pill dn"><b>2</b>완료</span>
+                    <span class="mc-pill rk"><b>1</b>리스크</span>
+                  </div>
+                </div>
+                <div class="member-row">
+                  <div class="avatar">지</div>
+                  <div><span class="mem-name">지수</span><span class="mem-role">· QA</span></div>
+                  <div class="mem-counts">
+                    <span class="mc-pill in"><b>1</b>진행</span>
+                    <span class="mc-pill up"><b>1</b>예정</span>
+                    <span class="mc-pill dn"><b>4</b>완료</span>
+                    <span class="mc-pill rk zero"><b>0</b>리스크</span>
+                  </div>
+                </div>
+                <div class="member-row">
+                  <div class="avatar">가</div>
+                  <div><span class="mem-name">가연</span><span class="mem-role">· Sec</span></div>
+                  <div class="mem-counts">
+                    <span class="mc-pill in"><b>1</b>진행</span>
+                    <span class="mc-pill up"><b>0</b>예정</span>
+                    <span class="mc-pill dn"><b>1</b>완료</span>
+                    <span class="mc-pill rk zero"><b>0</b>리스크</span>
+                  </div>
+                </div>
+              </div>
+              <div class="scroll-cap">scrollable · 6 / 13</div>
+            </article>
+
+            <article class="subpanel card" style="grid-column:2; grid-row:1 / span 2">
+              <div class="card-title"><h3>오늘 팀원 전체 일정</h3><span class="chip">Outlook</span></div>
+              <div class="calendar-list scroll-area" style="max-height:520px;padding-right:4px">
+                <div class="calendar-item"><time>09:30</time>
+                  <div class="cal-card">Agent Hub daily sync<span class="cal-meta">30분 · 보드 IA 확인</span>
+                    <div class="cal-attendees">
+                      <div class="ts-avatars" title="민준, 서연, 준호, 하린 외 9명"><span class="ts-avatar">민</span><span class="ts-avatar">서</span><span class="ts-avatar">준</span><span class="ts-avatar" aria-label="외 10명">+10</span></div>
+                      <span class="meta">13명 참석 · 30분</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="calendar-item"><time>11:00</time>
+                  <div class="cal-card hi">디자인 리뷰: Plugin UI v3<span class="cal-meta">결정 필요 4개</span>
+                    <div class="cal-attendees">
+                      <div class="ts-avatars"><span class="ts-avatar">민</span><span class="ts-avatar">서</span><span class="ts-avatar">하</span></div>
+                      <span class="meta">3명 참석 · 60분</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="calendar-item"><time>13:00</time>
+                  <div class="cal-card">QA 리뷰 — 지수<span class="cal-meta">30분 · 회귀 케이스</span>
+                    <div class="cal-attendees">
+                      <div class="ts-avatars"><span class="ts-avatar">지</span><span class="ts-avatar">민</span></div>
+                      <span class="meta">2명 참석 · 30분</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="calendar-item"><time>14:00</time>
+                  <div class="cal-card">callback retry contract 검토<span class="cal-meta">30분 · 준호/우진</span>
+                    <div class="cal-attendees">
+                      <div class="ts-avatars"><span class="ts-avatar">준</span><span class="ts-avatar">우</span></div>
+                      <span class="meta">2명 참석 · 30분</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="calendar-item"><time>15:30</time>
+                  <div class="cal-card">보안 패치 v2.4 리뷰<span class="cal-meta">45분 · 가연/준호</span>
+                    <div class="cal-attendees">
+                      <div class="ts-avatars"><span class="ts-avatar">가</span><span class="ts-avatar">준</span><span class="ts-avatar">우</span></div>
+                      <span class="meta">3명 참석 · 45분</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="calendar-item"><time>16:30</time>
+                  <div class="cal-card">팀장님 주간 브리핑<span class="cal-meta">15분 · risk/action</span>
+                    <div class="cal-attendees">
+                      <div class="ts-avatars"><span class="ts-avatar">민</span><span class="ts-avatar">팀</span></div>
+                      <span class="meta">전 팀 · 15분</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="scroll-cap">scrollable · 6 / 9</div>
+            </article>
+
+            <!-- Row 3 좌: 팀 보드/list (오늘 팀원 일정과 같은 stack 안, 통합 대시보드 아래) -->
+            <article class="subpanel card" style="grid-column:1; grid-row:2">
+              <div class="card-title"><h3>팀 보드 / list</h3><div class="toolbar"><span class="chip chip-blue">Board</span><span class="chip">List</span></div></div>
+            <div class="scroll-area" style="max-height:200px;padding-right:4px">
+              <div class="task-row in-progress" style="margin-top:0">
+                <span class="chip chip-blue">진행</span>
+                <div>
+                  <div class="task-title">Plugin UI v3 목업 리뷰</div>
+                  <div class="task-meta">owner 민준 · 마감 오늘 · 디자인 리뷰 11:00 연계</div>
+                </div>
+                <span class="chip">P0</span>
+              </div>
+              <div class="task-row">
+                <span class="chip chip-orange">주의</span>
+                <div>
+                  <div class="task-title">웹 로그인 대기 문구 확인</div>
+                  <div class="task-meta">owner 준호 · 마감 14:00 · callback retry 종속</div>
+                </div>
+                <span class="chip">P0</span>
+              </div>
+              <div class="task-row">
+                <span class="chip chip-red">리스크</span>
+                <div>
+                  <div class="task-title">보안 패치 v2.4 검토 부하 분산</div>
+                  <div class="task-meta">owner 가연 · 마감 16:00 · 미해결 시 금요 배포 지연</div>
+                </div>
+                <span class="chip">P0</span>
+              </div>
+              <div class="task-row">
+                <span class="chip chip-green">정상</span>
+                <div>
+                  <div class="task-title">알약 토글 a11y 키보드 패턴</div>
+                  <div class="task-meta">owner 서연 · 마감 내일 · WAI-ARIA tabs 패턴 후보</div>
+                </div>
+                <span class="chip">P1</span>
+              </div>
+              <div class="task-row">
+                <span class="chip chip-blue">진행</span>
+                <div>
+                  <div class="task-title">callback retry contract 정리</div>
+                  <div class="task-meta">owner 준호 · 마감 오늘 · 14:00 검토</div>
+                </div>
+                <span class="chip">P0</span>
+              </div>
+              <div class="task-row">
+                <span class="chip">예정</span>
+                <div>
+                  <div class="task-title">팀 통합 대시보드 카운트 source 결정</div>
+                  <div class="task-meta">owner 하린 · 마감 내일 · API contract 후</div>
+                </div>
+                <span class="chip">P1</span>
+              </div>
+            </div>
+            <div class="scroll-cap">scrollable · 6 / 14</div>
+            </article>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- ===================== S5 Exception/Empty ===================== -->
+    <section class="panel shot full">
+      <div class="shot-header">
+        <div class="shot-title">
+          <div class="shot-index">S5</div>
+          <div>
+            <h2>S5 · 예외 / 빈 상태</h2>
+            <p class="shot-caption">v2 합의 그대로. 토글과 톱니는 유지되고, content 영역만 명시적 상태 카드로 대체.</p>
+          </div>
+        </div>
+        <span class="chip chip-red">Recovery states</span>
+      </div>
+
+      <div class="plugin-window">
+        <div class="titlebar">
+          <div class="traffic"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span><span>lvis://plugin/agent-hub/states</span></div>
+          <span class="plugin-badge">Agent Hub Plugin UI · exception/empty</span>
+        </div>
+        <div class="appbar">
+          <div class="brand-mini">
+            <div class="brand-icon">AH</div>
+            <div class="brand-meta">
+              <strong>Agent Hub</strong>
+              <span>partial sync · 일부 source 실패</span>
+            </div>
+          </div>
+          <div class="pill-toggle" aria-label="마이워크/팀보드 토글">
+            <button class="active">마이워크</button>
+            <button>팀보드</button>
+          </div>
+          <div class="gear" aria-label="설정">⚙</div>
+        </div>
+        <section class="content">
+          <div class="content-top">
+            <div>
+              <h2>일부 데이터를 가져오지 못했습니다</h2>
+              <p>mock fallback 이 아니라 사용자가 실제로 볼 수 있는 명시적 상태 카드입니다.</p>
+            </div>
+            <div class="toolbar"><span class="chip chip-red">error examples</span><span class="chip chip-orange">partial sync</span></div>
+          </div>
+          <div class="empty-grid">
+            <article class="subpanel empty-card">
+              <div>
+                <div class="empty-icon">!</div>
+                <h3 style="margin-top:10px">로그인 callback 시간 초과</h3>
+                <p style="font-size:11px;margin-top:6px">브라우저 로그인이 완료되지 않았거나 플러그인이 신호를 받지 못했습니다.</p>
+              </div>
+              <div><span class="button ghost-button" style="font-size:11px;padding:8px;margin-top:10px">로그인 다시 시도</span></div>
+            </article>
+            <article class="subpanel empty-card">
+              <div>
+                <div class="empty-icon">∅</div>
+                <h3 style="margin-top:10px">오늘 일정 없음</h3>
+                <p style="font-size:11px;margin-top:6px">MS Graph 일정이 비어 있습니다. 대신 내 보드의 마감 임박 업무를 먼저 보여줍니다.</p>
+              </div>
+              <span class="chip">empty calendar</span>
+            </article>
+            <article class="subpanel empty-card">
+              <div>
+                <div class="empty-icon">↻</div>
+                <h3 style="margin-top:10px">Agent Hub 동기화 실패</h3>
+                <p style="font-size:11px;margin-top:6px">팀 보드 데이터를 가져오지 못했습니다. 마이워크 view 는 캐시된 일정으로 표시합니다.</p>
+              </div>
+              <span class="chip chip-orange">partial sync</span>
+            </article>
+          </div>
+          <div class="callout" style="margin-top:14px">
+            <h3>Recovery copy principle</h3>
+            <p style="font-size:12px;margin-top:5px">사용자는 "무엇이 실패했는지", "현재 어떤 데이터가 보이는지", "다음으로 무엇을 누르면 되는지"를 플러그인 창 안에서 바로 알아야 합니다.</p>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <section class="discussion">
+    <article class="panel">
+      <h2>v3 합의 필요 항목</h2>
+      <ul>
+        <li>마이워크 우측 사이드 컬럼의 폭(0.55fr) 이 compact viewport 에서 충분한지 — 더 좁히고 그 폭 만큼 LLM 카드를 늘릴지.</li>
+        <li>승인 요청이 0건일 때: 카드 자체를 숨길지, 빈 상태로 남길지("대기 중인 승인 없음").</li>
+        <li>팀원 mini row 의 리스크 0건 표시: 중성 회색(현재) vs 아예 미노출.</li>
+        <li>팀 통합 대시보드 페이지네이션을 ‹ › 버튼 대신 가로 swipe 인지 / dot indicator 인지.</li>
+        <li>팀 업무 요약 paragraph 의 길이 정책: 최대 N줄 truncation 후 "더 보기"인지, 자유 길이인지.</li>
+        <li>오늘 팀원 전체 일정 카드의 참석자 avatar 최대 노출 수(현재 4) + "+9명" overflow 처리.</li>
+      </ul>
+    </article>
+    <article class="panel">
+      <h2>Scope notes · 구현으로 오해하지 말 것</h2>
+      <ul>
+        <li>이 파일은 정적 docs/design artifact 이며 runtime/source/plugin 파일을 변경하지 않는다.</li>
+        <li>3-row 압축은 IA 합의 산출물이며 실제 grid template / breakpoint 는 컴포넌트 구현 시 별도 결정.</li>
+        <li>팀원 mini row 의 카운트 데이터 모델은 추후 Agent Hub API contract 확정 후 결정 (per-member aggregate).</li>
+        <li>플러그인 버전 bump 는 필요 없다. docs/design 전용 변경이다.</li>
+      </ul>
+    </article>
+  </section>
+</div>
+</body>
+</html>

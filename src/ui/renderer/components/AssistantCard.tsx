@@ -29,7 +29,7 @@ function AssistantCardImpl({
   const [showReasonBox, setShowReasonBox] = useState(false);
   const [reasonDraft, setReasonDraft] = useState("");
   // Issue #911 — host-emitted system notice (context-error / stream-error)
-  // gets destructive styling + a "시스템 알림" header so the user can
+
   // distinguish a real LLM reply from an error banner masquerading as one.
   const isSystemNotice = entry.systemNotice !== undefined;
   const systemNoticeLabel =
@@ -49,9 +49,8 @@ function AssistantCardImpl({
   const hasRenderableText = markdownText.trim().length > 0;
   const hasHeaderTitle = title.trim().length > 0;
   const showHeader = actions !== undefined || isSystemNotice || (entry.streaming && hasHeaderTitle);
-  // chars/4 token estimate 제거 (2026-05-07): TurnActionBar 의 TokenCostBadge
-  // 가 provider-reported 값을 단일 source 로 표시. 카드 헤더의 ~tok 배지는
-  // 한국어 2-3× under-estimate 거짓 정보였음.
+
+
   if (entry.streaming && !isSystemNotice && !hasRenderableText) {
     return null;
   }

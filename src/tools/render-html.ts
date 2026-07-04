@@ -1,28 +1,7 @@
-/**
- * render_html — 대화형 HTML 렌더링 툴 (네트워크 차단, 스크립트 허용).
- *
- * LLM이 작성한 HTML을 별도 Electron BrowserWindow로 표시한다.
- * 보안 모델 (다중 방어):
- *   1) 프로세스 격리: main 프로세스가 payload를 전용 BrowserWindow(별도
- *      webContents / 별도 OS 프로세스)로 로드한다. HTML 안의 무한 루프·heavy
- *      compute가 발생해도 메인 UI는 영향을 받지 않는다.
- *   2) 원천 격리 옵션: BrowserWindow webPreferences="contextIsolation=true,
- *      sandbox=true, nodeIntegration=false" — Node API 미노출, opaque origin.
- *   3) 네비게이션 차단: preview window의 will-navigate와 setWindowOpenHandler를
- *      잠가 data: 로딩 이후 모든 외부 이동을 거부한다.
- *   4) CSP <meta>: default-src 'none' 으로 모든 네트워크 요청(fetch / XHR /
- *      WebSocket / <img src=http> / <script src=http> / font / form submit)을
- *      원천 차단. script-src 'unsafe-inline' 'unsafe-eval' 만 허용해 인라인
- *      <script> · on* 핸들러 · Function/eval 기반 계산이 동작한다.
- *   5) 서버 sanitize: <iframe>/<object>/<embed>/<frame>/<meta http-equiv=
- *      refresh>/<script src>/<a href=외부URL> 등을 선제 제거. CSP/webview
- *      훅으로 커버 가능한 것도 defense-in-depth 차원에서 중복 차단.
- *
- * 허용: inline CSS, data: URI 이미지/폰트, 인라인 <script>, on* 이벤트 핸들러,
- *        <input>/<button>/<canvas>/<svg> 동적 조작.
- * 불가: 네트워크 fetch, 외부 스크립트/스타일/이미지/폰트 로드, 부모 문서 접근,
- *        top-level navigation, form submit, <a> 외부 링크 이동.
- */
+
+
+
+
 import { createDynamicTool, type Tool } from "./base.js";
 import { t } from "../i18n/index.js";
 

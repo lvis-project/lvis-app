@@ -1,20 +1,7 @@
-/**
- * LVIS App — Electron Main Process Entry
- *
- * 슬림 엔트리. 부팅 오케스트레이션만 담당하고 모든 로직은 boot.ts,
- * ipc-bridge.ts, 그리고 src/main/* 헬퍼 모듈로 위임한다. §4.1 Client
- * Architecture 준수.
- *
- * 이 파일이 소유하는 것 (여기 밖으로 옮기면 안 됨):
- *   - single-instance lock gate + `app.whenReady()` + `main()` 오케스트레이션
- *   - top-level protocol 등록 (`setAsDefaultProtocolClient`)
- *   - app 이벤트 리스너 (open-url / second-instance / web-contents-created /
- *     child-process-gone / window-all-closed / activate / before-quit)
- *
- * 나머지 (창/메뉴/트레이/딥링크/스플래시/부트-환경/종료 정리)는 모두
- * src/main/* 모듈로 추출되어 있으며, 여기서는 그 setup 함수들을 import 해서
- * 호출만 한다.
- */
+
+
+
+
 import { app } from "electron";
 import { resolve } from "node:path";
 import { t } from "./i18n/index.js";
@@ -112,7 +99,7 @@ async function main() {
   });
   setWindowManager(windowManager);
 
-  // §4.2 Step 8: window 생성 (splash 표시) — bootstrap이 mainWindow를 필요로 함
+
   createWindow();
 
   updateSplashStatus(t("be_main.splashCheckingCerts"));
@@ -124,7 +111,7 @@ async function main() {
   // still runs until the first explicit update lands.
   updateSplashStatus(t("be_main.splashLoadingSettings"));
 
-  // §4.2 Boot Sequence (mainWindow 전달 — PythonRuntimeBootstrapper IPC 사용)
+
   const services = await bootstrap(projectRoot, getMainWindow()!, () => getMainWindow());
   setServices(services);
 

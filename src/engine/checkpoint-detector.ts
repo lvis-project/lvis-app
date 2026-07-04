@@ -1,14 +1,13 @@
-/**
- * Checkpoint Detector — assistant final answer 끝에 LLM 이 직접 결정해
- * 삽입한 `<title>...</title>` + `[checkpoint]` 마커를 추출하고 cleaned
- * text (마커 제거된 본문) 를 반환한다.
- */
+
+
+
+
 
 export interface DetectorResult {
   cleanedText: string;
-  /** 10-20자 트림된 신규 세션 제목. 추출 실패 시 null. */
+
   newTitle: string | null;
-  /** `[checkpoint]` 마커 발견 여부 — LLM 이 turn 종료를 결정한 신호. */
+
   checkpointSuggested: boolean;
 }
 
@@ -20,8 +19,8 @@ const TITLE_MAX = 20;
 export function detectFromStream(rawText: string): DetectorResult {
   const checkpointSuggested = rawText.includes(CHECKPOINT_MARKER);
 
-  // 다중 <title> 태그가 있으면 마지막 것만 마커로 사용. 앞쪽 블록은
-  // 사용자 인용일 수 있어 보존.
+
+
   let lastMatch: RegExpExecArray | null = null;
   let match: RegExpExecArray | null;
   const re = new RegExp(TITLE_PATTERN.source, "gi");

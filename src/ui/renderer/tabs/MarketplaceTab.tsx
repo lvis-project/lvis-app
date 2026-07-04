@@ -57,7 +57,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   // #1098/#1279 — plugin installs that need explicit pre-install disclosure.
   const [installDialogTarget, setInstallDialogTarget] = useState<MarketplaceItem | null>(null);
 
-  // URL has an explicit "저장" button — typing only updates a local draft;
+
   // the parent setter (and marketplace endpoint switchover) fire when Save
   // is pressed. Re-sync the draft if the parent value changes externally
   // (cross-window broadcast, initial load).
@@ -97,13 +97,13 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     return () => window.removeEventListener("beforeunload", handler);
   }, [urlDraft, baseUrl, apiKeyInput]);
 
-  // API key + private network sit behind a "고급 옵션" collapse since most
+
   // users keep the default endpoint with no auth.
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // Connection health pill for the primary CTA. Polls `pingMarketplace`
   // once on mount (and whenever the saved baseUrl changes) so the user
-  // sees an at-a-glance status next to the "마켓플레이스 열기" button.
+
   const [pingState, setPingState] = useState<
     | { phase: "loading" }
     | { phase: "result"; configured: boolean; online: boolean }
@@ -231,7 +231,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       {/* ── Primary onboarding CTA ────────────────────────────
           Big violet-gradient launcher to the marketplace web UI plus a
           tiny status dot. Most users only need this row; the connection
-          / auth knobs sit behind the "고급 옵션" collapse below so the
+          / auth knobs sit behind the advanced-options collapse below so the
           surface stays decluttered. */}
       <div
         className="flex flex-col items-center gap-3 rounded-xl border border-primary/(--opacity-muted) bg-gradient-to-br from-primary/(--opacity-subtle) via-primary/(--opacity-faint) to-transparent px-4 py-6 text-center"
@@ -337,10 +337,10 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
         </ScrollArea>
       </SettingsSection>
 
-      {/* ── 고급 옵션 ──────────────────────────────────────────
+      {/* ── Advanced options ───────────────────────────────────
           Moved to the bottom of the Marketplace tab so the primary
-          surface (CTA → 패키지 인벤토리) is what most users see first.
-          The entire "서버 연결" surface (URL editor + warning banner +
+          surface (CTA -> package inventory) is what most users see first.
+          The entire server-connection surface (URL editor + warning banner +
           API key + private-network toggle) lives behind this collapse.
           Default-deployment users never have to interact with it. */}
       <SettingsSection
@@ -365,7 +365,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
             </div>
 
             {/* URL — draft state means typing doesn't churn the marketplace
-                endpoint on every keystroke; "저장" is disabled when draft
+                endpoint on every keystroke; Save is disabled when draft
                 equals the committed value. */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">{t("marketplaceTab.serverUrlLabel")}</Label>

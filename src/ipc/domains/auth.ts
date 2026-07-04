@@ -1,56 +1,7 @@
-/**
- * Auth domain IPC handlers (#893).
- *
- * Mockup login flow. Hard-coded demo credentials (`demo` / `demo123`) gate
- * an env-var-sourced API key handoff into the encrypted secret store. The
- * mockup is intentionally minimal — production SSO/OAuth is out of scope
- * for this PR and lives in the plugin-owned auth path.
- *
- * Top-level login (#893):
- *   The renderer no longer sends a `vendor` — Login wraps vendor selection.
- *   The backend reads captured `LVIS_DEMO_VENDOR` (default `"azure-foundry"`) via
- *   `getDemoActiveVendor()`, persists the matching key, applies the full
- *   vendor config (baseUrl / model / vertex), and flips top-level settings
- *   `authMode = "login"` + `provider = <vendor>` in a single patch so the
- *   UI lands on the now-active vendor with manual fields hidden.
- *
- * Error contract (CLAUDE.md):
- *   - IPC `error` codes are kebab-case English (machine-readable).
- *   - User-facing Korean text is the renderer's responsibility — never
- *     embedded in the IPC payload.
- *
- * Production gate (PR #894 review B1):
- *   - Demo credentials live in `LVIS_DEMO_*` env vars captured at boot,
- *     then scrubbed from `process.env`. In packaged builds, the handler
- *     refuses to register unless `isDemoEnabled()` (i.e. a non-empty
- *     captured `LVIS_DEMO_KEY_*` set) was true at boot.
- *   - This prevents a shipped binary from accepting the literal `demo` /
- *     `demo123` mockup credentials and persisting an attacker-controlled
- *     "demo" key under `llm.apiKey.<vendor>`.
- *
- * Step 2/3 error handling (v0.2.1 hotfix):
- *   - Step 2 `llm-key-issuing` wraps `settingsService.setSecret` +
- *     `settingsService.patch` in try/catch and returns
- *     `{ ok: false, error: "llm-key-issuing-failed" }` on disk/Keychain
- *     failures. Without this the IPC promise rejected and the renderer
- *     surfaced the generic "로그인 처리 중 오류" toast with no actionable
- *     hint about Keychain/disk permission.
- *   - Step 3 `sandbox-preparing` rollback inner — `replaceLlm` /
- *     `setSecret` / `deleteSecret` are wrapped in try/catch so a partial
- *     rollback failure still returns `reviewer-rewire-failed` to the
- *     renderer (preserving the IPC contract) instead of throwing.
- *
- * Credential override:
- *   `LVIS_DEMO_USER` / `LVIS_DEMO_PASS` — let local dev rotate the demo
- *   credentials without rebuilding. Production builds rely on the defaults.
- *
- * Key sourcing:
- *   `LVIS_DEMO_KEY_<VENDOR_UPPER_WITH_UNDERSCORES>` — when present, the
- *   handler stores its value under `llm.apiKey.<vendor>` via
- *   `settingsService.setSecret(...)`. When absent, the handler returns
- *   `error: "no-demo-key"` so the renderer can fall through to manual
- *   entry without silently appearing to succeed.
- */
+
+
+
+
 import { ipcMain } from "electron";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";

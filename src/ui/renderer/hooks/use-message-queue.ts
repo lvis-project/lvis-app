@@ -57,9 +57,9 @@ export function useMessageQueue({
 }: UseMessageQueueParams): UseMessageQueueResult {
   const { t } = useTranslation();
 
-  // per-ChatView message-queue store. session 변경 시 자동 비움.
+
   const messageQueueStore = useMemo(() => new MessageQueueStore(), []);
-  // queue-auto inject in-flight 플래그 — done event re-entrancy 방지.
+
   const queueAutoInflightRef = useRef(false);
 
   // dev/e2e runtime test hook — Playwright launches production-built renderer
@@ -82,22 +82,14 @@ export function useMessageQueue({
     messageQueueStore.clear();
   }, [currentSessionId, messageQueueStore]);
 
-  // 자연 인입 (true mid-turn brake-point) — 엔진의 onGuide
-  // (round-boundary inject) 메커니즘 위임. tool_end event 발생 시 큐 dump:
-  // 엔진이 다음 assistant round 시작 직전에 user message 로 합류시킴.
-  // 이전 implementation (streaming false 전이 시 onAsk = abort+restart) 의
-  // 한계 — 매 turn 종료까지 기다림 — 해소. spec §"메세지 큐 시맨틱" 의
-  // brake-point 정의 ("tool result 도착 직후 = 다음 assistant 호출 직전")
-  // 와 동일.
+
+
   //
-  // streaming false 전이는 fallback (tool-less turn — LLM 이 도구 안 쓰고
-  // 직접 텍스트만 응답한 경우) 으로 유지. tool_end 가 없으니 turn 끝에
-  // onGuide 호출.
+
+
   //
-  // brake-point 에서 큐 flush 시도. 실패 시 — re-add 는 무한 loop 위험
-  // (no-active-turn 직후 brake 가 다시 fire → 다시 drop → 영구 stuck) 라
-  // 메시지를 다시 큐에 넣지 않고 **사용자 가시 에러로 surface** 한다.
-  // 단순 console.warn 은 큐가 silent 로 사라지는 회귀였음 (#849).
+
+
   const flushQueueViaGuide = useCallback(() => {
     if (messageQueueStore.size() === 0) return;
     const taken = messageQueueStore.takeAll();

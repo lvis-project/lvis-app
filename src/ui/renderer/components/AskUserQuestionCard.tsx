@@ -1,26 +1,7 @@
-/**
- * AskUserQuestionCard — inline chat-side multi-question prompt for the
- * `ask_user_question` LLM tool.
- *
- * Flow:
- *   - 1 question  → render the question form, then a single "보내기" submit.
- *   - 2–4 questions → paginate through each question with a 다음/이전 nav,
- *     then a final confirm page that lists every answer for review.
- *   - "건너뛰기" at any step dismisses the entire card; the gate sees
- *     `dismissed: true` and the LLM gets `dismissed:true` in its
- *     tool_result so it can fall back to defaults.
- *
- * Card surface (compact, in-stream):
- *   - Single-line `placeholder` Input for free-text answer (no Textarea
- *     to avoid the prior popup's vertical bloat).
- *   - 추천 / 대안 badges are rendered by the UI based on the model's
- *     `recommendedIndex` / `altIndices`. Models do NOT inline these
- *     markers in the choice label itself, which lets the 20-char anchor
- *     apply to the actual answer text.
- *   - The 20-char anchors on `choices[].label` and `placeholder` are
- *     advisory only here — the prompt enforces; the UI renders whatever
- *     the model produces and trusts upstream validation.
- */
+
+
+
+
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card.js";
@@ -44,12 +25,9 @@ export interface AskUserQuestionItem {
    */
   altIndices?: number[];
   allowFreeText: boolean;
-  /**
-   * Multi-select mode. When true, clicking a choice toggles its membership
-   * in a selection set instead of single-picking; submission waits for an
-   * explicit 보내기. Response carries `choices: string[]` rather than the
-   * single `choice: string`.
-   */
+
+
+
   allowMultiple?: boolean;
   /**
    * Single-line placeholder for the free-text input. Korean ≤ 20 chars

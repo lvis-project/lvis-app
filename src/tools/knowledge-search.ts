@@ -1,52 +1,26 @@
-/**
- * Knowledge Search Tool — LLM agentic 검색 루프
- *
- * 청사진 §1 C1: 검색 주체는 LVIS agentic 루프.
- *   Local indexer는 데이터 소스일 뿐 `search()`가 없음.
- *   → LVIS가 OpenAI function calling 4개 도구를 노출하여 LLM이 직접 트리를 탐색.
- *
- * 청사진 §6.1: `lvis-app/src/tools/knowledge-search.ts`
- * 청사진 §10 S5: LLM Agentic 검색 시나리오
- * 청사진 §11 리스크: LLM agentic 토큰 폭발 → top-5 + depth ≤3 하드 캡
- *
- * 4 tools를 ToolRegistry에 등록:
- *   1. knowledge_search(query, topK?)        — HybridRetriever 호출, top 결과 반환
- *   2. document_list()                        — 인덱싱된 문서 목록
- *   3. document_structure(docId)              — local index tree (agentic)
- *   4. document_page_content(docId, pages)    — 특정 페이지 내용 (agentic)
- *
- * LLM은 knowledge_search로 후보 chunk를 받고, document_structure /
- * document_page_content를 function calling으로 호출하여 트리를 탐색하며
- * 정확한 페이지를 찾음 (depth ≤ 3 hard cap — 청사진 §11).
- *
- * Depth 카운팅은 ConversationLoop의 tool_call 카운터에 위임 (이 파일 외부 책임).
- * 본 모듈은 도구 정의만 제공한다.
- *
- * 각 도구는 {@link createDynamicTool}로 생성되어 {@link Tool} 계약을
- * 만족한다. 도구별 execute()는 `ToolResult { output, isError, metadata? }`
- * 형태를 반환하며, 결과는 JSON 문자열로 직렬화되어 LLM에 전달된다.
- */
+
+
+
+
 
 import { createDynamicTool, type Tool } from "./base.js";
 import type { HybridRetriever, HybridResult } from "../main/hybrid-retriever.js";
 import { t } from "../i18n/index.js";
 
-// ─── 외부 의존 인터페이스 (Agent 4가 구현) ─────────
 
-/**
- * knowledge-search-tool이 요구하는 문서 메타 조회 클라이언트.
- * Local Indexer worker client가 이 shape을
- * 만족해야 한다 (16 엔드포인트 중 /documents, /structure, /page-content).
- */
+
+
+
+
 export interface KnowledgeWorkerClient {
-  /** GET /documents — 인덱싱된 모든 문서 메타 */
+
   listDocuments(): Promise<
     Array<{
       docId: string;
       docName: string;
-      /** "pdf" | "docx" | "pptx" | "xlsx" | "md" 등 */
+
       type: string;
-      /** 선택적 추가 메타 */
+
       pageCount?: number;
       updatedAt?: string;
     }>
@@ -55,10 +29,9 @@ export interface KnowledgeWorkerClient {
   /** GET /structure — local index tree structure */
   getStructure(docId: string): Promise<unknown>;
 
-  /**
-   * GET /page-content — 특정 페이지 범위의 본문.
-   * pages는 local indexer 관행에 따라 "5" / "5-7" / "1,3,5-7" 같은 표현식.
-   */
+
+
+
   getPageContent(
     docId: string,
     pages: string,
@@ -68,21 +41,19 @@ export interface KnowledgeWorkerClient {
 export interface KnowledgeSearchToolDeps {
   hybridRetriever: HybridRetriever;
   workerClient: KnowledgeWorkerClient;
-  /** knowledge_search 기본 topK (기본 5, 청사진 §11 하드 캡 준수) */
+
   defaultTopK?: number;
-  /** knowledge_search 최대 topK (기본 10) */
+
   maxTopK?: number;
-  /** snippet 자르기 길이 (기본 200자) */
+
   snippetMaxChars?: number;
 }
 
-// ─── knowledge_search 반환 shape ───────────────────
 
-/**
- * LLM에 JSON으로 주입될 단일 검색 결과.
- * rawText 전체 대신 snippet(≤200자)만 보냄 → 토큰 절약.
- * 상세가 필요하면 LLM이 document_page_content를 후속 호출.
- */
+
+
+
+
 export interface KnowledgeSearchResultItem {
   chunkId: string;
   docId: string;
@@ -93,12 +64,11 @@ export interface KnowledgeSearchResultItem {
   sources: Array<"bm25" | "vec" | "cloud">;
 }
 
-// ─── 팩토리 ──────────────────────────────────────────
 
-/**
- * 4개 LLM tool 정의를 생성하여 반환.
- * ToolRegistry.register 로 등록해야 LLM이 function calling 가능.
- */
+
+
+
+
 export function createKnowledgeSearchTools(
   deps: KnowledgeSearchToolDeps,
 ): Tool[] {
@@ -293,7 +263,7 @@ export function createKnowledgeSearchTools(
   ];
 }
 
-// ─── 유틸 ────────────────────────────────────────────
+
 
 function truncate(text: string, maxChars: number): string {
   if (!text) return "";
