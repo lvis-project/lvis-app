@@ -286,6 +286,20 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (!resolved.authorized || !resolved.project) return PROJECT_NOT_ALLOWED;
     const { project } = resolved;
     conversationLoop.newConversation("main", project);
+    // Persist the resolved project identity to the new session's metadata at
+    // creation — mirroring startRoutineConversation. Without this, a main
+    // session's projectRoot/projectName only landed post-turn (markMainActive
+    // AfterTurn), so the Insights "프로젝트별 대화" group-by (which reads
+    // listSessions metadata) fell back to "프로젝트 없음" for the default
+    // project. Writing metadata here makes every new main session groupable by
+    // its project immediately. Full-overwrite is safe: the session is brand new.
+    if (project.projectRoot || project.projectName) {
+      await memoryManager.saveSessionMetadata(conversationLoop.getSessionId(), {
+        sessionKind: "main",
+        ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
+        ...(project.projectName ? { projectName: project.projectName } : {}),
+      });
+    }
     await memoryManager.markMainActiveFresh();
     return { ok: true };
   });

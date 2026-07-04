@@ -7,6 +7,7 @@ import type { LvisApi } from "../types.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import { CalendarFallback, LazyCalendar } from "./LazyCalendar.js";
+import { groupSessionsByProject, type ProjectSessionGroup } from "../utils/insights-project-groups.js";
 
 export interface StarredItem {
   id: string;
@@ -43,11 +44,6 @@ interface HeatmapCell {
   level?: number;
 }
 
-interface ProjectSessionGroup {
-  name: string;
-  sessions: SessionSummary[];
-}
-
 const KOREA_DATE_KEY_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeZone: "Asia/Seoul",
   year: "numeric",
@@ -76,17 +72,6 @@ function formatCost(value: number | undefined): string {
 
 function formatSessionTime(value: string): string {
   return new Date(value).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-}
-
-function pathBasename(value: string | undefined): string | undefined {
-  const cleaned = value?.trim();
-  if (!cleaned) return undefined;
-  const parts = cleaned.split(/[\\/]+/).filter(Boolean);
-  return parts.at(-1) ?? cleaned;
-}
-
-function projectLabelForSession(session: SessionSummary): string | undefined {
-  return session.projectName?.trim() || pathBasename(session.projectRoot);
 }
 
 function usageForDate(summary: unknown, dateKey: string): UsageTotals | null {
@@ -162,16 +147,10 @@ export function StarredView({
     return Array.from(keys).map(dateFromKey);
   }, [sessions, starred]);
 
-  const projectSessionGroups = useMemo<ProjectSessionGroup[]>(() => {
-    const groups = new Map<string, SessionSummary[]>();
-    for (const session of [...sessionsForDay].sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt))) {
-      const label = projectLabelForSession(session) ?? t("starredView.projectFallback");
-      const list = groups.get(label) ?? [];
-      list.push(session);
-      groups.set(label, list);
-    }
-    return Array.from(groups.entries()).map(([name, groupedSessions]) => ({ name, sessions: groupedSessions }));
-  }, [sessionsForDay, t]);
+  const projectSessionGroups = useMemo<ProjectSessionGroup[]>(
+    () => groupSessionsByProject(sessionsForDay, t("starredView.projectFallback")),
+    [sessionsForDay, t],
+  );
 
   const heatmapCells = useMemo(() => buildYearHeatmap(selectedYear, yearlyUsageByDate), [selectedYear, yearlyUsageByDate]);
 
