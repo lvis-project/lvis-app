@@ -49,6 +49,7 @@ import {
   resetAndResume,
   branchFromCheckpoint,
   startRoutineConversation,
+  type SessionProjectContext,
 } from "./turn/session.js";
 import { manualCompact, runPreflightGuard, applyBoundaryToSession } from "./turn/compaction.js";
 import { GUIDE_MAX_ENTRIES, GUIDE_MAX_CHARS } from "./turn/guidance-limits.js";
@@ -79,6 +80,9 @@ export class ConversationLoop {
   sessionKind: SessionKind = "main";
   sessionRoutineId: string | null = null;
   sessionRoutineTitle: string | null = null;
+  sessionProjectRoot: string | null = null;
+  sessionProjectName: string | null = null;
+  sessionProjectIsDefault = false;
   /**
    * #811 m2 — the sessionId the `SessionStart` lifecycle event last fired for.
    * SessionStart must fire ONCE per session (not per turn): runTurn fires it on
@@ -409,8 +413,8 @@ export class ConversationLoop {
   }
 
   /** 대화 이력 초기화 (새 대화) — §4.5.7 */
-  newConversation(kind: SessionKind = "main"): void {
-    newConversation(this, kind);
+  newConversation(kind: SessionKind = "main", project?: SessionProjectContext): void {
+    newConversation(this, kind, project ?? (kind === "main" ? this.deps.getDefaultProject?.() : undefined));
   }
 
   addSessionAdditionalDirectory(path: string): void {
@@ -491,6 +495,41 @@ export class ConversationLoop {
 
   getSessionKind(): SessionKind {
     return this.sessionKind;
+  }
+
+  getSessionProjectRoot(): string | null {
+    return this.sessionProjectRoot;
+  }
+
+  getSessionProjectName(): string | null {
+    return this.sessionProjectName;
+  }
+
+  getSessionProjectContext(): SessionProjectContext {
+    return {
+      ...(this.sessionProjectRoot ? { projectRoot: this.sessionProjectRoot } : {}),
+      ...(this.sessionProjectName ? { projectName: this.sessionProjectName } : {}),
+    };
+  }
+
+  getSessionMemoryProjectContext(): SessionProjectContext & { includeUnscoped?: boolean } {
+    return {
+      ...this.getSessionProjectContext(),
+      ...(this.sessionProjectIsDefault ? { includeUnscoped: true } : {}),
+    };
+  }
+
+  /**
+   * Re-create the tracer keyed on the CURRENT `sessionId`. `tracer` is created
+   * at field-init against the constructor UUID; any code path that rebinds
+   * `sessionId` after construction (SubAgentRunner assigns the addressable
+   * childSessionId directly, without going through `newConversation`) must call
+   * this so dev traces are written under the live id. `newConversation` /
+   * `loadSession` already re-init the tracer inline; this is the equivalent
+   * seam for direct `sessionId` assignment.
+   */
+  rebindTracer(): void {
+    this.tracer = createTracer(this.sessionId);
   }
 
   getSessionRoutineTitle(): string | null {
@@ -598,6 +637,8 @@ export class ConversationLoop {
       sessionKind: this.sessionKind,
       ...(this.sessionRoutineId ? { routineId: this.sessionRoutineId } : {}),
       ...(this.sessionRoutineTitle ? { routineTitle: this.sessionRoutineTitle } : {}),
+      ...(this.sessionProjectRoot ? { projectRoot: this.sessionProjectRoot } : {}),
+      ...(this.sessionProjectName ? { projectName: this.sessionProjectName } : {}),
     };
   }
 
@@ -675,7 +716,7 @@ export class ConversationLoop {
        * C3(a): hard cap on assistant rounds for this turn. When set,
        * queryLoop terminates cleanly between rounds once the cap is hit
        * regardless of tool_use chains the LLM still wants to run. Used by
-       * SubAgentRunner to enforce the agent_spawn `maxTurns` parameter at
+       * SubAgentRunner to enforce the host-assigned `maxRounds` budget at
        * the loop boundary instead of using user-cancel semantics.
        */
       maxRounds?: number;

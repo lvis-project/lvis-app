@@ -123,8 +123,13 @@ export async function dispatchReviewerForHeadless(
     },
     { defer: "medium-high", abortSignal },
   );
+  // V3 SOT — PermissionManager owns the verdict→decision mapping; the pipeline
+  // only wires the human-facing message + deferred-queue metadata around it.
+  // The review-status telemetry is derived from the resolved decision so the
+  // auto-approve disclosure and the audit decision share one source.
+  const decision = permissionManager.resolveReviewerDecision(reviewer.verdict, "headless");
   emitPermissionReview(callbacks, {
-    status: reviewer.verdict.level === "low" ? "auto_approved" : "needs_approval",
+    status: decision.decision === "allow" ? "auto_approved" : "needs_approval",
     toolName,
     toolCategory: category,
     source,
@@ -133,17 +138,14 @@ export async function dispatchReviewerForHeadless(
     reason: reviewer.verdict.reason,
     ...(approvalPurpose ? { approvalPurpose } : {}),
   });
-  if (reviewer.verdict.level !== "low") {
+  if (decision.decision !== "allow") {
     return {
       allowed: false,
       message:
         t("be_executor.permHoldReviewer", { toolName, source, reason: reviewer.verdict.reason }) +
         (reviewer.deferredId ? ` (deferredId=${reviewer.deferredId})` : ""),
       permissionResult: {
-        decision: "deny",
-        reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
-        layer: 5,
-        reviewer: { route: "headless", verdict: reviewer.verdict },
+        ...decision,
         ...(reviewer.deferredId
           ? { deferred: { queueId: reviewer.deferredId, reviewerVerdict: reviewer.verdict } }
           : {}),
@@ -152,12 +154,7 @@ export async function dispatchReviewerForHeadless(
   }
   return {
     allowed: true,
-    permissionResult: {
-      decision: "allow",
-      reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
-      layer: 5,
-      reviewer: { route: "headless", verdict: reviewer.verdict },
-    },
+    permissionResult: decision,
   };
 }
 
@@ -258,8 +255,23 @@ export async function dispatchReviewerForInteractiveAuto(
     throw err;
   }
 
+  // V3 SOT — PermissionManager owns the verdict→decision mapping.
+  //
+  // LOW → allow; foreground non-LOW verdict → `ask` (route to the user
+  // approval modal) rather than silently hard-denying. The user is the
+  // authority: the ToolApprovalDialog renders the reviewer verdict (HIGH
+  // forces a session-only grant requiring NL justification), so a HIGH-risk
+  // action ASKS and only executes on an explicit user allow. Pre-fix the
+  // non-LOW branch returned "deny" with a "no approval popup was opened"
+  // reason, which — with plugin tool categories removed (host-classifies-risk
+  // incomplete) — silently blocked every plugin tool that defaulted to
+  // category "write". deny-by-default is preserved: a deny-once at the modal
+  // yields a blocked tool result; only allow lets the effect run.
+  const decision = mgr.resolveReviewerDecision(reviewer.verdict, "foreground-auto");
+  // Review-status telemetry derived from the resolved decision so the
+  // auto-approve disclosure and the audit decision share one source.
   emitPermissionReview(callbacks, {
-    status: reviewer.verdict.level === "low" ? "auto_approved" : "needs_approval",
+    status: decision.decision === "allow" ? "auto_approved" : "needs_approval",
     toolName,
     toolCategory: category,
     source,
@@ -269,28 +281,5 @@ export async function dispatchReviewerForInteractiveAuto(
     ...(approvalPurpose ? { approvalPurpose } : {}),
   });
 
-  if (reviewer.verdict.level === "low") {
-    return {
-      decision: "allow",
-      reason: `reviewer low: ${reviewer.verdict.reason}`,
-      layer: 5,
-      reviewer: { route: "foreground-auto", verdict: reviewer.verdict },
-    };
-  }
-  // Foreground non-LOW verdict → route to the user approval modal rather
-  // than silently hard-denying. The user is the authority: the
-  // ToolApprovalDialog renders the reviewer verdict (HIGH forces a
-  // session-only grant requiring NL justification), so a HIGH-risk action
-  // ASKS and only executes on an explicit user allow. Pre-fix this branch
-  // returned "deny" with a "no approval popup was opened" reason, which —
-  // with plugin tool categories removed (host-classifies-risk incomplete) —
-  // silently blocked every plugin tool that defaulted to category "write".
-  // deny-by-default is preserved: a deny-once at the modal yields a blocked
-  // tool result; only allow lets the effect run.
-  return {
-    decision: "ask",
-    reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
-    layer: 5,
-    reviewer: { route: "foreground-auto", verdict: reviewer.verdict },
-  };
+  return decision;
 }

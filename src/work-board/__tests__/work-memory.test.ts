@@ -14,6 +14,7 @@ import {
   MEMORY_LINE_CAP,
   type MemoryStorage,
 } from "../work-memory.js";
+import { projectMemoryPath } from "./board-test-fixtures.js";
 
 /** In-memory MemoryStorage backed by a plain map. */
 function memStorage(seed?: Record<string, string>): MemoryStorage & { files: Record<string, string> } {
@@ -77,5 +78,33 @@ describe("work-memory", () => {
     const ctx = await renderWorkContext(s, 12);
     expect(ctx.split("\n").length).toBeLessThanOrEqual(12);
     expect(ctx).toContain("## 사용자");
+  });
+
+  it("keeps project memory separate from the legacy global memory files", async () => {
+    const s = memStorage({ [MEMORY_FILE]: "# 업무 흐름 메모리\n\nglobal-only\n" });
+
+    await appendMemory(s, "project-only", { projectRoot: "C:\\workspace\\alpha" });
+    const ctx = await renderWorkContext(s, 40, { projectRoot: "C:\\workspace\\alpha" });
+    const projectPath = projectMemoryPath(s.files);
+
+    expect(s.files[MEMORY_FILE]).toContain("global-only");
+    expect(s.files[MEMORY_FILE]).not.toContain("project-only");
+    expect(projectPath).toBeDefined();
+    expect(s.files[projectPath!]).toContain("project-only");
+    expect(ctx).toContain("project-only");
+    expect(ctx).not.toContain("global-only");
+  });
+
+  it("lets the default workspace project include legacy unscoped work memory for migration", async () => {
+    const s = memStorage({ [MEMORY_FILE]: "# 업무 흐름 메모리\n\nlegacy-default\n" });
+    await appendMemory(s, "default-project", { projectRoot: "C:\\workspace\\default", includeUnscoped: true });
+
+    const ctx = await renderWorkContext(s, 80, {
+      projectRoot: "C:\\workspace\\default",
+      includeUnscoped: true,
+    });
+
+    expect(ctx).toContain("legacy-default");
+    expect(ctx).toContain("default-project");
   });
 });

@@ -218,6 +218,7 @@ export const CHANNELS = {
   usage: {
     summary: "lvis:usage:summary",
     range: "lvis:usage:range",
+    dailySummary: "lvis:usage:daily-summary",
     exportCsv: "lvis:usage:export-csv",
   },
   // ── preload-swept channel groups (C11: #1409 + #1411) ──────────────────────
@@ -334,6 +335,15 @@ export const CHANNELS = {
     pickRoot: "lvis:workspace:pick-root",
     listRoots: "lvis:workspace:list-roots",
     listDir: "lvis:workspace:list-dir",
+    removeRoot: "lvis:workspace:remove-root",
+    reveal: "lvis:workspace:reveal",
+    // Drag-drop add-root, step 1 (#1458). A dropped folder path is renderer-NAMED
+    // (resolved in preload via webUtils.getPathForFile), so this handler re-runs
+    // the SAME Layer-0 hard-deny + is-a-directory checks and — on success — mints
+    // the one-time, MAIN-OWNED ack token that pickRoot({ackToken}) later consumes.
+    // INTERNAL: deliberately absent from PUBLIC_CHANNELS so an external origin can
+    // never propose a read-scope-widening path (fail-closed default).
+    dropPrepare: "lvis:workspace:drop-prepare",
   },
   // ── Interactive PTY terminal (#1444, workspace rail) ──────────────────────
   // ALL INTERNAL: deliberately absent from PUBLIC_CHANNELS / CHANNEL_GESTURE /
@@ -351,6 +361,26 @@ export const CHANNELS = {
     data: "lvis:terminal:data", // event   main→renderer (pty output chunk)
     exit: "lvis:terminal:exit", // event   main→renderer (pty exited)
   },
+  // ── Side chat (workspace rail) — 2nd, independently-streaming chat session ──
+  // ALL INTERNAL: deliberately absent from PUBLIC_CHANNELS / CHANNEL_GESTURE /
+  // EXTERNAL_MUTATION_CHANNELS. Side chat drives a SECOND ConversationLoop that
+  // runs arbitrary tools just like the main chat, so it must be unreachable from
+  // any external origin (local-api / cli / plugin frame) — the fail-closed
+  // default (isPublicChannel === false) enforces that. Each invoke additionally
+  // gates on validateSender so a non-host frame is rejected. The `stream` /
+  // `fallback` events are a DEDICATED channel pair (not `chat.stream`): the main
+  // renderer's `onChatStream` subscriber never receives side-chat frames and vice
+  // versa, so the two streams stay isolated by wire channel (No-Fallback: the
+  // main path is never asked which session a frame belongs to).
+  sidechat: {
+    send: "lvis:sidechat:send", // invoke renderer→main → TurnResult | { ok:false }
+    new: "lvis:sidechat:new", // invoke → { ok, sessionId }
+    load: "lvis:sidechat:load", // invoke (sessionId) → { ok, messages }
+    list: "lvis:sidechat:list", // invoke → session list (side-chat store)
+    abort: "lvis:sidechat:abort", // invoke → { ok }
+    stream: "lvis:sidechat:stream", // event main→renderer ({ streamId, ...frame })
+    fallback: "lvis:sidechat:fallback", // event main→renderer (provider fallback)
+  },
 } as const;
 
 type ValuesOf<T> = T[keyof T];
@@ -367,7 +397,7 @@ export type ChannelName = ValuesOf<{
  * classification, or a public channel's payload shape) changes in a way an
  * external SDK/CLI must react to. Read-first callers pin this.
  */
-export const CONTRACT_VERSION = "1.0.0";
+export const CONTRACT_VERSION = "1.2.0";
 
 /**
  * The versioned allowlist of channels an external surface (SDK / CLI / local

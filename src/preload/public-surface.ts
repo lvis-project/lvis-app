@@ -39,8 +39,8 @@ export function buildPublicSurface() {
         : {}),
     }),
   chatGuide: async (input: string) => ipcRenderer.invoke(CHANNELS.chat.guide, input),
-  chatNew: async () => ipcRenderer.invoke(CHANNELS.chat.new),
-  chatSessions: async (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) =>
+  chatNew: async (opts?: { projectRoot?: string; projectName?: string }) => ipcRenderer.invoke(CHANNELS.chat.new, opts),
+  chatSessions: async (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) =>
     ipcRenderer.invoke(CHANNELS.chat.sessions, opts) as Promise<{
       current: string;
       sessions: Array<{
@@ -51,6 +51,8 @@ export function buildPublicSurface() {
         routineId?: string;
         routineTitle?: string;
         routineFiredAt?: string;
+        projectRoot?: string;
+        projectName?: string;
         branchedFromCompactNum?: number;
         branchedAt?: string;
       }>;
@@ -63,6 +65,8 @@ export function buildPublicSurface() {
       sessionKind: "main" | "routine";
       routineId?: string;
       routineTitle?: string;
+      projectRoot?: string;
+      projectName?: string;
       messages: SerializedHistoryMessage[];
     }>,
   chatMainActiveState: async () =>
@@ -79,6 +83,8 @@ export function buildPublicSurface() {
       routineId?: string;
       routineTitle?: string;
       routineFiredAt?: string;
+      projectRoot?: string;
+      projectName?: string;
       messages: SerializedHistoryMessage[];
       /** Chars in the rolling summary preamble applied to this session. 0 = no preamble. */
       preambleChars?: number;

@@ -48,7 +48,10 @@ import type {
   WorkItemListFilter,
   WorkItemStatusStored,
   WorkItemChangedEventPayload,
+  WorkItemGetResult,
+  WorkItemResolved,
 } from "../../main/work-board-store.js";
+import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
 
 /** Shared "store not constructed at boot" envelope for the mutating channels. */
 const NO_STORE = { ok: false, error: "no-store" as const };
@@ -56,6 +59,47 @@ const NO_STORE = { ok: false, error: "no-store" as const };
 const NO_ENGINE = { ok: false, error: "no-engine" as const };
 /** Shared "reporter not constructed at boot" envelope for `generate-report`. */
 const NO_REPORTER = { ok: false, error: "no-reporter" as const };
+const UNAUTHORIZED_PROJECT_ROOT = "__lvis_unauthorized_project_root__";
+const PROJECT_NOT_ALLOWED_REASON = "project root is not authorized";
+
+function normalizeProjectListFilter(filter?: WorkItemListFilter): WorkItemListFilter {
+  const resolved = resolveAuthorizedWorkspaceProject(filter?.projectRoot);
+  if (!resolved.authorized || !resolved.project) {
+    return {
+      ...filter,
+      projectRoot: UNAUTHORIZED_PROJECT_ROOT,
+      includeUnscoped: false,
+    };
+  }
+  return {
+    ...filter,
+    projectRoot: resolved.project.projectRoot,
+    includeUnscoped: resolved.project.isDefault === true,
+  };
+}
+
+function normalizeCreateInputProject(input: WorkItemCreateInput):
+  | { ok: true; input: WorkItemCreateInput }
+  | { ok: false; result: { status: "invalid"; reason: string } } {
+  const resolved = resolveAuthorizedWorkspaceProject(input?.projectRoot, input?.projectName);
+  if (!resolved.authorized || !resolved.project) {
+    return { ok: false, result: { status: "invalid", reason: PROJECT_NOT_ALLOWED_REASON } };
+  }
+  return {
+    ok: true,
+    input: {
+      ...input,
+      projectRoot: resolved.project.projectRoot,
+      projectName: resolved.project.projectName,
+    },
+  };
+}
+
+function isAuthorizedStoredWorkItem(item: WorkItemResolved): boolean {
+  if (!item.projectRoot) return true;
+  const resolved = resolveAuthorizedWorkspaceProject(item.projectRoot, item.projectName);
+  return resolved.authorized && resolved.project !== null;
+}
 
 export function registerWorkBoardHandlers(deps: IpcDeps): void {
   const { workBoardStore, workBoardEngine, workBoardReport, auditLogger, getMainWindow, getAppWindows } = deps;
@@ -80,6 +124,13 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
     }
   };
 
+  const loadAuthorizedItem = async (id: number): Promise<WorkItemGetResult> => {
+    if (!workBoardStore) return { status: "not_found", itemId: id };
+    const result = await workBoardStore.get(id);
+    if (result.status !== "found") return result;
+    return isAuthorizedStoredWorkItem(result.item) ? result : { status: "not_found", itemId: id };
+  };
+
   // ─── List ────────────────────────────────────────
   ipcMain.handle(WORK_BOARD.list, async (e, filter?: WorkItemListFilter) => {
     if (!validateSender(e)) {
@@ -87,7 +138,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardStore) return NO_STORE;
-    return workBoardStore.list(filter);
+    return workBoardStore.list(normalizeProjectListFilter(filter));
   });
 
   // ─── Get ─────────────────────────────────────────
@@ -97,7 +148,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardStore) return NO_STORE;
-    return workBoardStore.get(id);
+    return loadAuthorizedItem(id);
   });
 
   // ─── Add ─────────────────────────────────────────
@@ -107,7 +158,9 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardStore) return NO_STORE;
-    const result = await workBoardStore.create(input);
+    const normalized = normalizeCreateInputProject(input);
+    if (!normalized.ok) return normalized.result;
+    const result = await workBoardStore.create(normalized.input);
     if (result.status === "created") broadcastItemChanged(result.itemId, "created");
     return result;
   });
@@ -119,6 +172,8 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardStore) return NO_STORE;
+    const existing = await loadAuthorizedItem(id);
+    if (existing.status !== "found") return existing;
     const result = await workBoardStore.update(id, patch);
     if (result.status === "updated") broadcastItemChanged(result.itemId, "updated");
     return result;
@@ -131,6 +186,8 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardStore) return NO_STORE;
+    const existing = await loadAuthorizedItem(id);
+    if (existing.status !== "found") return existing;
     const result = await workBoardStore.transition(id, to);
     if (result.status === "transitioned") broadcastItemChanged(result.itemId, "transitioned");
     return result;
@@ -143,6 +200,8 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardStore) return NO_STORE;
+    const existing = await loadAuthorizedItem(id);
+    if (existing.status !== "found") return existing;
     const result = await workBoardStore.complete(id);
     if (result.status === "completed") broadcastItemChanged(result.itemId, "completed");
     return result;
@@ -155,6 +214,8 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardStore) return NO_STORE;
+    const existing = await loadAuthorizedItem(id);
+    if (existing.status !== "found") return existing;
     const result = await workBoardStore.reopen(id);
     if (result.status === "reopened") broadcastItemChanged(result.itemId, "reopened");
     return result;
@@ -167,6 +228,8 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardStore) return NO_STORE;
+    const existing = await loadAuthorizedItem(id);
+    if (existing.status !== "found") return existing;
     const result = await workBoardStore.remove(id);
     if (result.status === "deleted") broadcastItemChanged(result.itemId, "removed");
     return result;
@@ -185,6 +248,9 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardEngine) return NO_ENGINE;
+    if (!workBoardStore) return { status: "error", reason: "no-store" } satisfies WorkItemRunResult;
+    const existing = await loadAuthorizedItem(id);
+    if (existing.status !== "found") return { status: "not_found" } satisfies WorkItemRunResult;
 
     const windows = (): Array<import("electron").BrowserWindow | null | undefined> =>
       getAppWindows?.() ?? [getMainWindow()];
@@ -227,7 +293,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
     async (
       e,
       kind: "daily" | "weekly",
-      input?: { date?: string; weekIso?: string; weekOffset?: number },
+      input?: { date?: string; weekIso?: string; weekOffset?: number; projectRoot?: string; includeUnscoped?: boolean },
     ) => {
       if (!validateSender(e)) {
         auditUnauthorized(auditLogger, WORK_BOARD.generateReport, e);
@@ -235,7 +301,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       }
       if (!workBoardReport) return NO_REPORTER;
       try {
-        return await workBoardReport.generate(kind === "weekly" ? "weekly" : "daily", input);
+        return await workBoardReport.generate(kind === "weekly" ? "weekly" : "daily", normalizeProjectListFilter(input));
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         return { status: "error" as const, kind, reason };
@@ -255,6 +321,9 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
     // (sessions/<itemId>/<runId>.jsonl), so validate it against path traversal
     // BEFORE the read — engine run ids are UUIDs. Anything else → empty.
     if (typeof runId !== "string" || !/^[A-Za-z0-9_-]+$/.test(runId)) return { events: [] };
+    if (!workBoardStore) return { events: [] };
+    const existing = await loadAuthorizedItem(itemId);
+    if (existing.status !== "found") return { events: [] };
     const storage = createDirStorage(openFeatureNamespace("work-board").dir);
     return { events: await readRunTranscript(storage, itemId, runId) };
   });

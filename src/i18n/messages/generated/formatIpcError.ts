@@ -1,5 +1,8 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/format-ipc-error.ts. Do not edit by hand.
 export const en = {
+  "formatIpcError.invalidPath": "That path is not valid.",
+  "formatIpcError.cannotRemoveDefaultRoot": "The default project folder can't be removed.",
+  "formatIpcError.notAnAdditionalRoot": "That folder isn't a removable project folder.",
   "formatIpcError.userKeyboardRequired": "This permission change can only be performed from active user input.",
   "formatIpcError.unauthorized": "You are not authorized.",
   "formatIpcError.missingInputOrigin": "The origin information of the request is missing.",
@@ -26,6 +29,10 @@ export const en = {
   "formatIpcError.invalidEventType": "The event type is not allowed.",
   "formatIpcError.invalidIndex": "Invalid index value.",
   "formatIpcError.indexOutOfRange": "The index is out of range.",
+  "formatIpcError.invalidSessionId": "The session id is invalid.",
+  "formatIpcError.sessionNotFound": "The session could not be found.",
+  "formatIpcError.sideChatUnavailable": "Side chat is unavailable.",
+  "formatIpcError.projectNotAllowed": "This project is not allowed.",
   "formatIpcError.invalidText": "Invalid text input.",
   "formatIpcError.emptyText": "The text is empty.",
   "formatIpcError.empty": "The value is empty.",
@@ -121,6 +128,9 @@ export const en = {
   "formatIpcError.errorSuffix": " has occurred.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
+  "formatIpcError.invalidPath": "경로가 올바르지 않습니다.",
+  "formatIpcError.cannotRemoveDefaultRoot": "기본 프로젝트 폴더는 제거할 수 없습니다.",
+  "formatIpcError.notAnAdditionalRoot": "제거할 수 있는 프로젝트 폴더가 아닙니다.",
   "formatIpcError.userKeyboardRequired": "이 권한 변경은 활성 사용자 입력에서만 실행할 수 있습니다.",
   "formatIpcError.unauthorized": "권한이 없습니다.",
   "formatIpcError.missingInputOrigin": "요청의 출처 정보가 누락되었습니다.",
@@ -147,6 +157,10 @@ export const ko: Record<keyof typeof en, string> = {
   "formatIpcError.invalidEventType": "허용되지 않은 이벤트 타입입니다.",
   "formatIpcError.invalidIndex": "잘못된 인덱스 값입니다.",
   "formatIpcError.indexOutOfRange": "인덱스가 범위를 벗어났습니다.",
+  "formatIpcError.invalidSessionId": "세션 ID가 올바르지 않습니다.",
+  "formatIpcError.sessionNotFound": "세션을 찾을 수 없습니다.",
+  "formatIpcError.sideChatUnavailable": "사이드 채팅을 사용할 수 없습니다.",
+  "formatIpcError.projectNotAllowed": "허용되지 않은 프로젝트입니다.",
   "formatIpcError.invalidText": "잘못된 텍스트 입력입니다.",
   "formatIpcError.emptyText": "텍스트가 비어 있습니다.",
   "formatIpcError.empty": "값이 비어 있습니다.",

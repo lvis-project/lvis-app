@@ -70,6 +70,30 @@ test.describe("workspace rail redesign", () => {
     await expect(page.getByTestId("chat-side-panel-tab-browser")).toBeVisible();
   });
 
+  test("chat mode at its side-panel window width docks (no modal blur)", async () => {
+    // Regression guard for the chat-mode modal-blur bug: chat mode collapses the
+    // sidebar to the icon rail and its OS window reserves the base width + the
+    // 448px side panel (≈908px) when the panel opens. After the collapsed-sidebar
+    // padding the chat-view-root sits just under the OLD 900px docking threshold,
+    // so the panel wrongly rendered as a backdrop-blur modal drawer that blocked
+    // the main chat. The threshold is now derived from the panel width + a
+    // transcript floor, so this width docks — the transcript and the panel stay
+    // interactive side by side, matching work mode.
+    // Switch to chat mode (collapses the sidebar rail — the geometry the bug
+    // manifests in) and open the panel first; the mode/panel IPC resizes the OS
+    // window, so pin the container width LAST so it is the final authority.
+    await page.getByTestId("app-mode-chat").click();
+    await page.getByTestId("chat-side-panel-toggle").click();
+    await page.setViewportSize({ width: 908, height: 840 });
+
+    // Docked, not a modal drawer: no drawer sheet, no backdrop blur.
+    await expect(page.getByTestId("chat-side-panel")).toBeVisible();
+    await expect(page.getByTestId("workspace-rail-drawer")).toHaveCount(0);
+    await expect(page.getByTestId("workspace-rail-drawer-backdrop")).toHaveCount(0);
+    // Docked variant exposes the drag handle (the modal drawer drops it).
+    await expect(page.getByTestId("chat-side-panel-width-splitter")).toBeVisible();
+  });
+
   test("narrow viewport falls back to the modal drawer", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
     await page.getByTestId("chat-side-panel-toggle").click();

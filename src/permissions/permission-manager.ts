@@ -31,7 +31,10 @@ import {
   type RiskVerdict,
   type ToolInvocationContext,
 } from "./reviewer/risk-classifier.js";
-import { resolveReviewerSandboxCapability } from "./sandbox-capability.js";
+import {
+  resolveReviewerSandboxCacheState,
+  type ReviewerSandboxCacheState,
+} from "./sandbox-capability.js";
 import type { PermissionEvaluationContext } from "./evaluation-context.js";
 import type { VerdictCache } from "./reviewer/verdict-cache.js";
 import type { DeferredQueue } from "./reviewer/deferred-queue.js";
@@ -41,9 +44,24 @@ import { t } from "../i18n/index.js";
 import { lookupApproval, canonicalStringify } from "./user-approval-store.js";
 import { buildSandboxAuditEntry } from "../audit/sandbox-audit.js";
 import { emitSandboxAudit } from "../audit/sandbox-audit-sink.js";
+import { maskSensitiveData } from "../audit/dlp-filter.js";
+import { isSensitivePath } from "./sensitive-paths.js";
+import { isPathAllowed } from "./allowed-directories.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto" | "allow";
+
+/**
+ * P2 graduated grant tier. A persisted "Allow always" grant carries a tier so
+ * a grant made on a read tool ("read") does NOT silently authorize a later
+ * write/shell/network/meta invocation of the same pattern, while a grant made
+ * on a write/shell/network/meta tool ("write") covers everything. This makes a
+ * grant category-aware instead of the previous flat, all-or-nothing behaviour.
+ *
+ * The ranking is monotone (read < write): a grant is only ever upgraded, never
+ * downgraded, and the covered set widens with the tier.
+ */
+export type GrantTier = "read" | "write";
 
 export interface PermissionRule {
   /** 도구 이름 패턴 (glob: "memory_*", "mcp_*", "*") */
@@ -52,7 +70,23 @@ export interface PermissionRule {
   action: "allow" | "deny";
   /** 적용 소스 제한 (없으면 전체 적용) */
   source?: ToolSource;
+  /**
+   * P2 graduated grant tier for `action: "allow"` rules. Absent = legacy
+   * untiered grant, grandfathered to write-tier (most permissive — preserves a
+   * user's previously saved "Allow always"). Ignored for `action: "deny"`.
+   */
+  tier?: GrantTier;
 }
+
+/**
+ * Layer 5 reviewer routing lane. Distinguishes the two automatic-approval
+ * lanes that {@link PermissionManager.resolveReviewerDecision} translates a
+ * verdict for: `headless` (background/routine turns — non-low denies) and
+ * `foreground-auto` (interactive auto-review opt-in — non-low asks). Shared by
+ * the `reviewer.route` marker and the reviewer-dispatch callsites so the lane
+ * union has a single source of truth.
+ */
+export type ReviewerLane = "foreground-auto" | "headless";
 
 export interface PermissionCheckResult {
   decision: PermissionDecision;
@@ -64,7 +98,7 @@ export interface PermissionCheckResult {
    * overlay-trigger, strict, and low-trust MCP asks are hard user-approval gates.
    */
   reviewer?: {
-    route: "foreground-auto" | "headless";
+    route: ReviewerLane;
     verdict?: RiskVerdict;
   };
   /**
@@ -115,6 +149,17 @@ export interface PermissionCheckContext {
    * authorize a later call with a broader argument scope.
    */
   approvalCacheKey?: string;
+  /**
+   * Tool-author `decisionOverride` for `meta`-category builtin tools, carried
+   * from the executor so the "override" branch of {@link categoryBasedDecision}
+   * owns the re-elevation decision (V1 SOT). `"ask"` (e.g. agent_spawn) elevates
+   * the override-`allow` to a per-invocation `forceModal` ask in every mode
+   * except `allow` (the allow-all opt-in); `"always-allow-with-audit"` is
+   * short-circuited before checkDetailed runs and never reaches here. Non-meta
+   * callers pass `undefined` (current behaviour — the override branch keeps its
+   * `allow`).
+   */
+  decisionOverride?: "ask" | "always-allow-with-audit";
 }
 
 /**
@@ -168,7 +213,7 @@ export interface ReviewerDispatchInput {
    */
   ownerPluginSandboxRoot?: string;
   /**
-   * worker-egress PR1 — originating external MCP stdio server id (from
+   * Originating external MCP stdio server id (from
    * `Tool.mcpServerId`). Threaded so the reviewer reports the GENUINE asrt
    * capability for a server whose worker was actually ASRT-wrapped (and so the
    * verdict cache scopes by the real substrate). Omitted for non-MCP calls.
@@ -208,6 +253,29 @@ export interface ReviewerDispatchResult {
 export type ReviewerDeferPolicy = "none" | "high" | "medium-high";
 
 // RejectResponse interface and MAX_REVIEWER_RETRIES deferred to follow-up.
+
+function sameReviewerSandboxCacheState(
+  a: ReviewerSandboxCacheState,
+  b: ReviewerSandboxCacheState,
+): boolean {
+  const ac = a.capability;
+  const bc = b.capability;
+  return (
+    a.source === b.source &&
+    a.substrate === b.substrate &&
+    a.wrapped === b.wrapped &&
+    a.mcpServerId === b.mcpServerId &&
+    a.pluginId === b.pluginId &&
+    a.workerId === b.workerId &&
+    ac.kind === bc.kind &&
+    ac.confidence === bc.confidence &&
+    ac.reason === bc.reason &&
+    ac.platform === bc.platform &&
+    ac.confines?.filesystem === bc.confines?.filesystem &&
+    ac.confines?.process === bc.confines?.process &&
+    ac.confines?.network === bc.confines?.network
+  );
+}
 // LLM caller retry wiring lives in conversation-loop.ts scope.
 // Tracked in follow-up issue for "LLM caller retry wiring" with
 // max 2 retry / counter scope / args-change-reset contract.
@@ -215,7 +283,13 @@ export type ReviewerDeferPolicy = "none" | "high" | "medium-high";
 export class PermissionManager {
   private rules: PermissionRule[] = [];
   private mode: ExecutionMode = "default";
-  private readonly alwaysAllowed = new Set<string>();
+  /**
+   * P2 — "Allow always" grants keyed by pattern → highest granted {@link
+   * GrantTier}. Was a flat `Set<string>` (category-blind). The Map structurally
+   * enforces the "1 grant, highest tier" invariant so a re-grant can only widen
+   * coverage (monotone), never desynchronize.
+   */
+  private readonly alwaysAllowed = new Map<string, GrantTier>();
   /** MCP approval.toolPermissionMode 등 per-tool 실행 모드 override */
   private readonly toolModeOverrides = new Map<string, ExecutionMode>();
   /** 영구 규칙 저장 경로 (~/.lvis/permissions.json) */
@@ -315,6 +389,114 @@ export class PermissionManager {
       this.verdictCache !== null &&
       this.deferredQueue !== null
     );
+  }
+
+  /**
+   * Permission SOT V3 — map a reviewer {@link RiskVerdict} to the layer-5
+   * allow/deny/ask decision. This is the single source of truth for the
+   * verdict→decision translation; the pipeline reviewer-dispatch lanes must
+   * call this rather than branching on `verdict.level` inline, so the
+   * execution layer can never loosen a verdict on its own.
+   *
+   * Rules (behavior-neutral move from `reviewer-dispatch.ts`):
+   *  - headless lane: `low` → allow(layer 5); non-low (medium/high) → deny(layer 5).
+   *  - foreground-auto lane: `low` → allow(layer 5); non-low → ask(layer 5).
+   *
+   * The returned result carries the reviewer route + verdict marker. The
+   * pipeline still owns the human-facing `message`, deferred-queue append,
+   * and i18n assembly — this method only decides allow/deny/ask.
+   */
+  resolveReviewerDecision(
+    verdict: RiskVerdict,
+    lane: ReviewerLane,
+  ): PermissionCheckResult {
+    const isLow = verdict.level === "low";
+    if (lane === "headless") {
+      if (isLow) {
+        return {
+          decision: "allow",
+          reason: `reviewer ${verdict.level}: ${verdict.reason}`,
+          layer: 5,
+          reviewer: { route: "headless", verdict },
+        };
+      }
+      return {
+        decision: "deny",
+        reason: `reviewer ${verdict.level}: ${verdict.reason}`,
+        layer: 5,
+        reviewer: { route: "headless", verdict },
+      };
+    }
+    // foreground-auto lane
+    if (isLow) {
+      return {
+        decision: "allow",
+        reason: `reviewer low: ${verdict.reason}`,
+        layer: 5,
+        reviewer: { route: "foreground-auto", verdict },
+      };
+    }
+    return {
+      decision: "ask",
+      reason: `reviewer ${verdict.level}: ${verdict.reason}`,
+      layer: 5,
+      reviewer: { route: "foreground-auto", verdict },
+    };
+  }
+
+  /**
+   * Permission SOT V2 — evaluate the Layer 0 (sensitive-path hard-block) and
+   * Layer 1 (allowed-directories) path-scope predicates over a set of
+   * already-canonicalized targets. This is the single source of truth for the
+   * path-scope predicate: the executor calls this instead of invoking
+   * `isSensitivePath` / `isPathAllowed` inline, so "is this path sensitive /
+   * out-of-directory" is answered in one place.
+   *
+   * Predicate ONLY (behavior-neutral move from `executor.ts`). It returns raw
+   * hits, NOT a {@link PermissionCheckResult}: the executor still owns the
+   * layer-0 deny (message + audit + return) and the layer-1 out-of-directory
+   * approval modal + scope mutation, and just drives them off these hits. The
+   * audit `layer` field values are unchanged (sensitive = 0, out-of-dir = 1).
+   *
+   * Frozen-canonical contract: `canonicalTargets[].canonicalPath` MUST already
+   * be realpath'd + case-folded by the caller. This method performs NO realpath
+   * I/O — it is a pure predicate over the supplied strings. `allowedDirectories`
+   * is supplied per-call so the executor can re-evaluate after each directory
+   * grant widens the scope.
+   *
+   * Static because the path-scope predicate is stateless and MUST run on every
+   * tool call regardless of whether a PermissionManager instance is wired (the
+   * executor's `permissionManager` is optional; the Layer 0/1 hard-block and
+   * out-of-directory prompt fire even without one).
+   *
+   *  - `sensitiveHit`: the first target matching a Layer 0 sensitive-path
+   *    pattern, or `null`.
+   *  - `outOfAllowed`: the first target NOT covered by `allowedDirectories`,
+   *    or `null`.
+   */
+  static checkPathScope(args: {
+    canonicalTargets: readonly { filePath: string; canonicalPath: string }[];
+    allowedDirectories: readonly string[];
+  }): {
+    sensitiveHit: { filePath: string; pattern: string } | null;
+    outOfAllowed: { filePath: string; canonicalPath: string } | null;
+  } {
+    let sensitiveHit: { filePath: string; pattern: string } | null = null;
+    for (const target of args.canonicalTargets) {
+      const pattern = isSensitivePath(target.canonicalPath);
+      if (pattern) {
+        sensitiveHit = { filePath: target.filePath, pattern };
+        break;
+      }
+    }
+    let outOfAllowed: { filePath: string; canonicalPath: string } | null = null;
+    for (const target of args.canonicalTargets) {
+      if (!isPathAllowed(target.canonicalPath, { directories: args.allowedDirectories })) {
+        outOfAllowed = { filePath: target.filePath, canonicalPath: target.canonicalPath };
+        break;
+      }
+    }
+    return { sensitiveHit, outOfAllowed };
   }
 
   /**
@@ -454,19 +636,33 @@ export class PermissionManager {
   /**
    * 도구 이름(패턴)을 영구 allow 규칙으로 추가.
    * permissions.json 저장이 성공한 뒤에만 인메모리 allow cache를 갱신한다.
+   *
+   * P2 — `tier` records how broadly the grant applies. It defaults to `"write"`
+   * so the non-executor callers (slash `/allow`, the PermissionsTab addRule IPC)
+   * keep their category-blind grant (grandfather). The executor passes
+   * {@link requiredTier}(invocationCategory) so a grant made on a read tool is
+   * read-tier. Re-granting is monotone: the tier is only ever upgraded (read→
+   * write), never downgraded — a downgrade must go through {@link removeRule}.
    */
-  async addAlwaysAllowedPersist(pattern: string): Promise<void> {
-    // 영구: rules 배열에 allow 규칙 추가 (중복 방지)
+  async addAlwaysAllowedPersist(pattern: string, tier: GrantTier = "write"): Promise<void> {
+    // 영구: rules 배열에 allow 규칙 추가/승격 (중복 방지 + monotone tier)
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
-      const exists = file.rules.some(
+      const existing = file.rules.find(
         (r) => r.action === "allow" && r.pattern === pattern && !r.source,
       );
-      if (!exists) {
-        file.rules.push({ pattern, action: "allow" });
+      if (existing) {
+        // Upgrade only — never downgrade a saved grant. A legacy/absent tier
+        // grandfathers to write, so a "read" re-grant onto it is a no-op.
+        if (tierRank(tier) > tierRank(normalizeTier(existing.tier))) {
+          existing.tier = tier;
+        }
+      } else {
+        file.rules.push({ pattern, action: "allow", tier });
       }
     });
-    // 인메모리: durable write 성공 후 alwaysAllowed Set (checkDetailed layer 5)
-    this.alwaysAllowed.add(pattern);
+    // 인메모리: durable write 성공 후 alwaysAllowed Map (checkDetailed layer 5).
+    // maxTier keeps the invariant that the Map holds the highest granted tier.
+    this.alwaysAllowed.set(pattern, maxTier(this.alwaysAllowed.get(pattern), tier));
     this.broadcastConfigChanged?.();
     // Cluster review M1 — rule change aborts outstanding bearers so plugins
     // re-resolve their keys under the new policy. An allow rule going wider
@@ -546,9 +742,38 @@ export class PermissionManager {
           this.rules.unshift(rule); // deny는 최우선
         } else {
           this.rules.push(rule);
-          // allow 규칙은 alwaysAllowed Set에도 반영
-          if (!rule.source) this.alwaysAllowed.add(rule.pattern);
+          // allow 규칙은 alwaysAllowed Map에도 반영 (P2: tier 보존).
+          // normalizeTier grandfathers a legacy/absent tier to write; maxTier
+          // keeps the highest tier if the pattern is hydrated more than once.
+          if (!rule.source) {
+            this.alwaysAllowed.set(
+              rule.pattern,
+              maxTier(this.alwaysAllowed.get(rule.pattern), normalizeTier(rule.tier)),
+            );
+          }
         }
+      } else if (rule.action === "allow" && !rule.source) {
+        // Dup-hit tier reconciliation — MINOR-2 insurance. The surviving rule
+        // may be a boot default with no explicit tier (e.g. conversation.ts
+        // setRules pre-seeds web_search/web_fetch). setRules does NOT populate
+        // alwaysAllowed, so the Map has no entry for that pattern. A persisted
+        // tiered file rule hitting this dedup branch would otherwise lose its
+        // tier silently: the Map update is skipped and the surviving rule's
+        // tier stays undefined (= write-tier via layer-3's normalizeTier,
+        // over-permitting relative to a user-explicit read-tier grant).
+        //
+        // Fix: compute merged = maxTier(Map.get, normalizeTier(file.tier)).
+        // This takes the Map's current view (from an earlier non-dup load or a
+        // prior call) as the "existing" baseline, NOT the surviving rule's
+        // implicit write-tier, so the user's explicit persisted tier wins when
+        // the Map is empty. Set both the Map and the surviving rule's tier to
+        // merged so layer-3 and layer-5 remain consistent.
+        const merged = maxTier(this.alwaysAllowed.get(rule.pattern), normalizeTier(rule.tier));
+        this.alwaysAllowed.set(rule.pattern, merged);
+        const surviving = this.rules.find(
+          (r) => r.pattern === rule.pattern && r.action === "allow" && r.source === rule.source,
+        );
+        if (surviving) surviving.tier = merged;
       }
     }
   }
@@ -658,21 +883,78 @@ export class PermissionManager {
     }
 
     // 3. Allow rules
+    let result: PermissionCheckResult | undefined;
     for (const rule of this.rules) {
       if (rule.action !== "allow") continue;
       if (rule.source && rule.source !== source) continue;
       if (globMatch(allowTarget, rule.pattern)) {
-        return { decision: "allow", reason: t("be_permissionManager.allowRuleReason", { pattern: rule.pattern }), layer: 3 };
+        // P2 tier gate — a read-tier grant must not cover a
+        // write/shell/network/meta invocation. Untiered/legacy rules default to
+        // "write" (grandfather = the pre-P2 all-or-nothing behaviour).
+        //
+        // This gate MUST mirror the layer-5 gate below. loadRulesFromFile
+        // rehydrates a persisted "Allow always" grant into BOTH this.rules
+        // (evaluated HERE, first) AND alwaysAllowed (layer-5). A tier gate
+        // applied only at layer-5 would therefore be silently defeated by this
+        // layer-3 shadow on the first app restart.
+        if (!grantCovers(normalizeTier(rule.tier), resolvedCategory)) continue;
+        result = { decision: "allow", reason: t("be_permissionManager.allowRuleReason", { pattern: rule.pattern }), layer: 3 };
+        break;
       }
     }
 
     // 5. Always-allowed (사용자 이전 승인)
-    if (this.alwaysAllowed.has(allowTarget)) {
-      return { decision: "allow", reason: t("be_permissionManager.userPermanentApproval"), layer: 5 };
+    if (result === undefined) {
+      const grantTier = this.alwaysAllowed.get(allowTarget);
+      // P2 tier gate — see the layer-3 mirror above. A read-tier grant covers
+      // only read invocations; write-tier covers everything.
+      if (grantTier !== undefined && grantCovers(grantTier, resolvedCategory)) {
+        result = { decision: "allow", reason: t("be_permissionManager.userPermanentApproval"), layer: 5 };
+      }
     }
 
-    // 6. Layer 3 — Category × Source × Trust via registry descriptor
-    return this.categoryBasedDecision(trust, resolvedCategory, context);
+    // 6. Category × Source × Trust via registry descriptor
+    if (result === undefined) {
+      result = this.categoryBasedDecision(trust, resolvedCategory, context);
+    }
+
+    // Permission policy V1 SOT — per-invocation `decisionOverride="ask"` gate.
+    //
+    // A `meta`-category builtin tool that declares `decisionOverride: "ask"`
+    // (e.g. agent_spawn) must show an approval modal on EVERY invocation,
+    // regardless of which layer produced the current `allow` verdict:
+    //
+    //   layer 3 (allow rule)    — user added agent_spawn to their allow-list
+    //   layer 5 (alwaysAllowed) — user clicked "Allow always" on the modal
+    //   layer 6 (override case) — the normal first-invocation path
+    //
+    // The post-guard is layer-agnostic: layers 3/5/6 all fall through to it.
+    // The previous override-branch-only approach silently bypassed layer-3/5
+    // hits because those paths returned early before categoryBasedDecision ran.
+    //
+    // Allow-all invariant: `mode !== "allow"` is NOT dead code here — unlike
+    // inside the override branch (where strict/allow early-returns narrow the
+    // mode), at this point in checkDetailed the mode is not narrowed. Allow
+    // mode can reach here via the layer-3 allow-rule loop. The guard must stay
+    // so that an explicit allow-all opt-in still auto-allows agent_spawn with
+    // no prompt, matching the allow-all invariant.
+    //
+    // Strict mode: already returned ask at layer 2 before this point, so
+    // `result.decision` is never `allow` under strict and the guard never fires.
+    if (
+      result.decision === "allow" &&
+      context.decisionOverride === "ask" &&
+      this.mode !== "allow"
+    ) {
+      return {
+        decision: "ask",
+        reason: t("be_executor.metaToolAskOverrideReason"),
+        layer: 6,
+        forceModal: true,
+      };
+    }
+
+    return result;
   }
 
   /**
@@ -725,31 +1007,6 @@ export class PermissionManager {
       pluginId: input.pluginId,
       workerId: input.workerId,
     };
-    // Include the sandbox capability in the cache scope so a change to OS
-    // isolation invalidates stale verdicts produced under different sandbox
-    // assumptions. Substrate-aware (same resolver the reviewer consults): a
-    // plugin/MCP verdict cached under the unwrapped-worker "none" substrate
-    // must not collide with the host-shell "asrt" substrate once the gate is
-    // ON. The ASRT sandbox publishes its capability at boot via
-    // setActiveSandboxCapability; the host-shell path then sees the active
-    // kind/confidence while non-wrapped substrates stay "none".
-    const sandboxScope = resolveReviewerSandboxCapability(
-      input.source,
-      toolName,
-      input.mcpServerId,
-      input.workerId,
-      input.pluginId,
-    );
-    const cacheCtx = {
-      allowedDirectories: input.allowedDirectories,
-      scope: {
-        ...(routineScope ?? {}),
-        reviewer: this.reviewerCacheScope,
-        sandboxKind: sandboxScope.kind,
-        sandboxConfidence: sandboxScope.confidence,
-      },
-    };
-
     // ── User-approval memory hit ──────────────────────────────────────────
     // Check the user-approval store before consulting the LLM classifier.
     // A memory hit for a non-revoked approval bypasses the LLM call and
@@ -765,6 +1022,35 @@ export class PermissionManager {
       input.approvalCacheKey,
     ).catch(() => null); // storage failure must not block tool execution
 
+    const readSandboxCacheState = (): ReviewerSandboxCacheState =>
+      resolveReviewerSandboxCacheState(
+        input.source,
+        toolName,
+        input.mcpServerId,
+        input.workerId,
+        input.pluginId,
+      );
+    const buildCacheContext = (sandboxCacheState: ReviewerSandboxCacheState) => {
+      const sandboxScope = sandboxCacheState.capability;
+      return {
+        allowedDirectories: input.allowedDirectories,
+        scope: {
+          ...(routineScope ?? {}),
+          reviewer: this.reviewerCacheScope,
+          sandboxKind: sandboxScope.kind,
+          sandboxConfidence: sandboxScope.confidence,
+        },
+        sandboxWrapState: sandboxCacheState,
+      };
+    };
+
+    // Include the sandbox capability in the cache scope so a change to OS
+    // isolation invalidates stale verdicts produced under different sandbox
+    // assumptions. Capture this live state immediately before cache lookup:
+    // no await may sit between wrap-state sampling and cache lookup, or a
+    // worker un-wrap could replay a verdict relaxed under stale confinement.
+    const sandboxCacheState = readSandboxCacheState();
+    const cacheCtx = buildCacheContext(sandboxCacheState);
     const cacheResult = cache.lookup(lookupKey, cacheCtx);
     let verdict: RiskVerdict;
     let ruleVerdictForAudit: RiskVerdict["level"] | null = null;
@@ -774,7 +1060,10 @@ export class PermissionManager {
       nlJustification: string | null;
       verdictAtApproval: UserApprovalVerdict | null;
     } | null = null;
-    const buildReviewerContext = (): ToolInvocationContext => ({
+    let sandboxStateForAudit = sandboxCacheState;
+    const buildReviewerContext = (
+      reviewerSandboxState: ReviewerSandboxCacheState = sandboxCacheState,
+    ): ToolInvocationContext => ({
       toolName,
       source: input.source,
       category: input.category,
@@ -790,13 +1079,7 @@ export class PermissionManager {
       // effect — except a genuinely ASRT-wrapped external MCP worker
       // (keyed on input.mcpServerId) or plugin worker (keyed on
       // input.pluginId/input.workerId). See the resolver invariant.
-      sandboxCapability: resolveReviewerSandboxCapability(
-        input.source,
-        toolName,
-        input.mcpServerId,
-        input.workerId,
-        input.pluginId,
-      ),
+      sandboxCapability: reviewerSandboxState.capability,
       ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
       ...(input.writesToOwnSandbox !== undefined
         ? { writesToOwnSandbox: input.writesToOwnSandbox }
@@ -886,8 +1169,23 @@ export class PermissionManager {
           ruleVerdictForAudit = verdict.level;
           llmVerdictForAudit = null;
         }
-        // Persist for next time (HIGH cached too — re-deny is fast).
-        await cache.store(lookupKey, cacheCtx, verdict);
+        const postReviewSandboxState = readSandboxCacheState();
+        if (!sameReviewerSandboxCacheState(sandboxCacheState, postReviewSandboxState)) {
+          sandboxStateForAudit = postReviewSandboxState;
+          const freshRuleVerdict = new RuleBasedRiskClassifier().classify(
+            buildReviewerContext(postReviewSandboxState),
+          );
+          ruleVerdictForAudit = freshRuleVerdict.level;
+          verdict = {
+            level: "high",
+            reason: "reviewer sandbox state changed during classification — fail-safe re-review required",
+          };
+        } else {
+          // Persist for next time (HIGH cached too — re-deny is fast). The
+          // verdict is stored only if the live wrap state still matches the
+          // reviewer context that produced it.
+          await cache.store(lookupKey, cacheCtx, verdict);
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         verdict = { level: "high", reason: `reviewer error — ${message}` };
@@ -900,22 +1198,18 @@ export class PermissionManager {
     // Emit a sandbox audit entry for every dispatchReviewer call so the
     // audit log captures reviewer composition signals + user-approval provenance.
     // Failures are swallowed so audit never blocks tool execution.
-    // Record the SUBSTRATE-aware capability the reviewer actually saw (not the
-    // process-global) so the audit honestly reflects the isolation in force for
-    // THIS call's execution substrate (incl. a wrapped MCP worker — PR1).
-    const sandboxCap = resolveReviewerSandboxCapability(
-      input.source,
-      toolName,
-      input.mcpServerId,
-      input.workerId,
-      input.pluginId,
-    );
+    // Record the SUBSTRATE-aware capability used for the final reviewer verdict
+    // (not the process-global) so the audit honestly reflects this call's
+    // execution substrate.
+    const sandboxCap = sandboxStateForAudit.capability;
     const auditEntry = buildSandboxAuditEntry({
       tool: {
         name: toolName,
-        // args already DLP-redacted by caller (ReviewerDispatchInput.finalInput)
-        args: JSON.stringify(input.finalInput),
+        // emitSandboxAudit's sink trusts callers to pass DLP-redacted fields.
+        args: maskSensitiveData(JSON.stringify(input.finalInput)).masked,
         source: input.source,
+        trustOrigin: input.trustOrigin,
+        ...(input.approvalCacheKey ? { approvalCacheKey: input.approvalCacheKey } : {}),
       },
       sandbox: {
         kind: sandboxCap.kind,
@@ -929,7 +1223,15 @@ export class PermissionManager {
         llmVerdict: llmVerdictForAudit,
         finalVerdict: verdict.level,
         compositionRulesTriggered: [],
-        userApprovalUsed,
+        userApprovalUsed: userApprovalUsed
+          ? {
+              ...userApprovalUsed,
+              nlJustification:
+                userApprovalUsed.nlJustification === null
+                  ? null
+                  : maskSensitiveData(userApprovalUsed.nlJustification).masked,
+            }
+          : null,
       },
     });
     emitSandboxAudit(auditEntry).catch(() => {
@@ -1072,7 +1374,11 @@ export class PermissionManager {
           reviewer: { route: "headless" },
         };
       case "override":
-        // meta category — executor handles via tool.decisionOverride
+        // meta category — returns `allow` (the registry override sentinel).
+        // The per-invocation `decisionOverride="ask"` re-elevation is handled
+        // by the post-computation guard at the bottom of `checkDetailed`, which
+        // is layer-agnostic (covers layer-3 allow-rule and layer-5 alwaysAllowed
+        // hits too, not just this branch). See the post-guard comment there.
         return {
           decision: "allow",
           reason: t("be_permissionManager.metaToolDecisionOverride", { category }),
@@ -1112,6 +1418,55 @@ export class PermissionManager {
 }
 
 // ─── Helpers ────────────────────────────────────────
+
+// ── P2 graduated grant tier helpers ──────────────────
+const TIER_RANK: Record<GrantTier, number> = { read: 0, write: 1 };
+
+/** Ordinal rank of a grant tier (read=0 < write=1). */
+export function tierRank(tier: GrantTier): number {
+  return TIER_RANK[tier];
+}
+
+/**
+ * The grant tier a category requires to be auto-allowed by a prior
+ * "Allow always" grant. `read` → read-tier; `write`/`shell`/`network`/`meta`
+ * → write-tier. `meta` deliberately requires write so that a read-tier grant
+ * cannot silently short-circuit a meta tool (e.g. agent_spawn).
+ *
+ * This is the single source of truth for the category→tier mapping; the
+ * executor imports it when stamping the tier onto a new grant so the grant-time
+ * tier and the check-time coverage predicate can never diverge.
+ */
+export function requiredTier(category: ToolCategory): GrantTier {
+  return category === "read" ? "read" : "write";
+}
+
+/**
+ * Does a `granted` tier cover an invocation of `category`? A write grant covers
+ * every category; a read grant covers only read invocations.
+ */
+export function grantCovers(granted: GrantTier, category: ToolCategory): boolean {
+  return tierRank(granted) >= tierRank(requiredTier(category));
+}
+
+/**
+ * External-boundary normalization for a persisted `tier` field. permissions.json
+ * is a user-editable file; an absent or corrupt `tier` denotes a legacy /
+ * untiered grant, which grandfathers to write-tier (most permissive — preserves
+ * the user's saved "Allow always"). Normalizing to read-tier instead would
+ * silently break saved grants (weakening) and is forbidden. This is the only
+ * sanctioned fallback in P2 — it lives at the file boundary, not between
+ * internal callers.
+ */
+export function normalizeTier(tier: unknown): GrantTier {
+  return tier === "read" ? "read" : "write";
+}
+
+/** Monotone merge — the higher-ranked of two tiers (undefined = take `b`). */
+function maxTier(a: GrantTier | undefined, b: GrantTier): GrantTier {
+  if (a === undefined) return b;
+  return tierRank(a) >= tierRank(b) ? a : b;
+}
 
 function normalizeApprovalCacheKey(key: string | undefined): string | null {
   if (!key) return null;

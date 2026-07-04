@@ -200,6 +200,17 @@ export type TurnStopReason =
   | "interrupted"
   | "context-error"
   | "stream-error"
+  // The turn used up its round budget (queryLoop `effectiveMaxRounds`, set by
+  // a sub-agent's host-assigned `maxRounds` or the global MAX_TOOL_ROUNDS)
+  // before the LLM produced a natural end_turn. The returned text is the
+  // PARTIAL work so far — the task did not finish. Distinct from `interrupted`
+  // (user-initiated) and `max_tokens` (single-answer output cap): this is a
+  // host-imposed round budget. Sub-agents surface it to the parent as an
+  // `incomplete` result (see SubAgentSpawnResult); the main chat surfaces it
+  // as a "send a new message to continue" affordance (the persistent loop
+  // resumes on the next user message). turn_summary / notification gates treat
+  // it like a completed turn (real partial output + usage), NOT like an error.
+  | "round-cap"
   // #811 m2 — a trusted UserPromptSubmit hook (or its fail-closed dispatch)
   // REFUSED the prompt before queryLoop ran. The turn never reached the LLM.
   | "blocked";
@@ -308,6 +319,15 @@ export interface ConversationLoopDeps {
   additionalDirectories?: readonly string[];
   /** Live reader for foreground settings-backed additional directories. */
   getAdditionalDirectories?: () => readonly string[];
+  /** Runtime predicate for the app-managed default workspace project root. */
+  isDefaultProjectRoot?: (projectRoot: string) => boolean;
+  /** Default project for main conversations when the user has not selected one. */
+  getDefaultProject?: () => { projectRoot?: string; projectName?: string; isDefault?: boolean };
+  /** Re-authorize and canonicalize a stored or renderer-supplied project root. */
+  authorizeProject?: (
+    projectRoot: string,
+    projectName?: string,
+  ) => { projectRoot: string; projectName?: string; isDefault?: boolean } | null;
   /**
    * Script hooks. Boot owns discovery/trust and injects the manager;
    * the executor only invokes the already-trusted generic hook contract.

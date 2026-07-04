@@ -242,8 +242,8 @@ function assertNodePtyBinary(context) {
     }
   }
   // POSIX: node-pty forks its `spawn-helper` to set the controlling TTY; it MUST
-  // be present + executable. Windows uses conpty.dll bundled in the addon — no
-  // separate helper — so this check is POSIX-only.
+  // be present + executable. Windows is covered above by the conpty.node and
+  // conpty_console_list.node addon checks — no separate helper is expected.
   if (platform !== "win32") {
     const helper = join(ptyRoot, "spawn-helper");
     if (!existsSync(helper)) {

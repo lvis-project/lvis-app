@@ -55,6 +55,10 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-event-type": "formatIpcError.invalidEventType",
   "invalid-index": "formatIpcError.invalidIndex",
   "index-out-of-range": "formatIpcError.indexOutOfRange",
+  "invalid-session-id": "formatIpcError.invalidSessionId",
+  "session-not-found": "formatIpcError.sessionNotFound",
+  "side-chat-unavailable": "formatIpcError.sideChatUnavailable",
+  "project-not-allowed": "formatIpcError.projectNotAllowed",
   "invalid-text": "formatIpcError.invalidText",
   "empty-text": "formatIpcError.emptyText",
   "empty": "formatIpcError.empty",
@@ -72,6 +76,10 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // token was never issued / already consumed / past its TTL.
   "ack-unknown": "formatIpcError.ackUnknown",
   "ack-expired": "formatIpcError.ackExpired",
+  // Workspace root remove (workspace.ts): removeRoot.
+  "invalid-path": "formatIpcError.invalidPath",
+  "cannot-remove-default": "formatIpcError.cannotRemoveDefaultRoot",
+  "not-an-additional-root": "formatIpcError.notAnAdditionalRoot",
 
   // ── Args / canonicalization ──
   "args-not-object": "formatIpcError.argsNotObject",

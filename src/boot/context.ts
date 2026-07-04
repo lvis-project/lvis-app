@@ -147,6 +147,8 @@ export interface BootContext {
   routineEngine: RoutineEngine;
   postTurnHookChain: PostTurnHookChain;
   conversationLoop: ConversationLoop;
+  /** Side-chat (workspace rail) — 2nd loop with isolated `~/.lvis/side-chat/` store. */
+  sideChatConversationLoop: ConversationLoop;
   preferenceRefreshService: PreferenceRefreshService;
   workBoardEngine: WorkBoardEngine;
   workBoardReporter: WorkBoardReporter;

@@ -1,19 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import type React from "react";
-import { BookMarked, CalendarDays, Clock3, FileText, Repeat2, Search, Star, X } from "lucide-react";
+import { BookMarked, Clock3, FileText, Repeat2, Search, Star, X } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Badge } from "../../../components/ui/badge.js";
-import { Popover, PopoverTrigger } from "../../../components/ui/popover.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { RoutineRecord } from "../../../shared/routines-types.js";
 import type { StarredItem } from "../hooks/use-starred.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import { useMemorySearch } from "../hooks/use-memory-search.js";
 import type { LvisApi } from "../types.js";
+import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { highlightText } from "../utils/html-preview.js";
-import { SessionCalendarPopover } from "./SessionCalendarPopover.js";
-import { preloadCalendar } from "./LazyCalendar.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 
@@ -33,6 +31,7 @@ export interface UnifiedSearchPanelProps {
   conversationMatches: number[];
   currentConversationMatch: number;
   sessions: SessionSummary[];
+  project?: ProjectIdentity;
   starred: StarredItem[];
   onChangeQuery: (value: string) => void;
   onToggleCase: () => void;
@@ -44,19 +43,6 @@ export interface UnifiedSearchPanelProps {
   onLoadSession: (sessionId: string) => void | boolean | Promise<void | boolean>;
   onOpenMemoryView: () => void;
   onOpenRoutinesView: () => void;
-  /**
-   * Optional — called when the user picks a date in the embedded calendar that
-   * has messages in the CURRENT session. Receives the entry index of the first
-   * message on that day. Parent (App.tsx / ChatView caller) is responsible for
-   * scrolling. When omitted, the in-session jump UI is suppressed.
-   */
-  onJumpToEntry?: (entryIndex: number) => void;
-  /** Optional — called when the calendar popover opens to refresh `sessions`. */
-  onRefreshSessions?: () => void | Promise<void>;
-  /** Current session id, forwarded to the calendar for highlighting + jump. */
-  currentSessionId?: string;
-  /** True while a turn is streaming — disables jumps to OTHER sessions. */
-  streaming?: boolean;
 }
 
 function includesQuery(text: string, query: string, caseSensitive: boolean): boolean {
@@ -98,6 +84,7 @@ export function UnifiedSearchPanel({
   conversationMatches,
   currentConversationMatch,
   sessions,
+  project,
   starred,
   onChangeQuery,
   onToggleCase,
@@ -109,27 +96,8 @@ export function UnifiedSearchPanel({
   onLoadSession,
   onOpenMemoryView,
   onOpenRoutinesView,
-  onJumpToEntry,
-  onRefreshSessions,
-  currentSessionId,
-  streaming = false,
 }: UnifiedSearchPanelProps) {
   const { t } = useTranslation();
-  const [calendarOpen, setCalendarOpen] = useState(false);
-  // Only user + assistant entries carry `createdAt` (reasoning entries are
-  // never stamped). Excluding reasoning from the mapper avoids passing dead
-  // `{idx, createdAt: undefined}` rows that the popover would skip anyway.
-  const currentSessionEntries = useMemo(
-    () =>
-      entries.map((entry, idx) => ({
-        idx,
-        createdAt:
-          entry.kind === "assistant" || entry.kind === "user"
-            ? entry.createdAt
-            : undefined,
-      })),
-    [entries],
-  );
   const [routines, setRoutines] = useState<RoutineRecord[]>([]);
   const [routinesLoading, setRoutinesLoading] = useState(false);
   const {
@@ -138,7 +106,7 @@ export function UnifiedSearchPanel({
     sessionResults,
     loading: memoryLoading,
     reset: resetMemorySearch,
-  } = useMemorySearch(api);
+  } = useMemorySearch(api, project);
 
   const trimmedQuery = query.trim();
 
@@ -239,12 +207,14 @@ export function UnifiedSearchPanel({
 
   return (
     <div
-      className={`border-b bg-card/(--opacity-solid) px-3 shadow-sm backdrop-blur transition-[padding] ${
-        open ? "py-2" : "py-1.5"
+      className={`absolute left-1/2 top-3 z-[70] w-[min(48rem,calc(100%-1.5rem))] -translate-x-1/2 rounded-md border bg-card/(--opacity-solid) p-3 shadow-2xl backdrop-blur ${
+        open ? "" : "py-1.5"
       }`}
       data-testid="unified-search-panel"
+      role="dialog"
+      aria-modal="false"
     >
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
+      <div className="flex w-full flex-col gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <Input
@@ -284,45 +254,6 @@ export function UnifiedSearchPanel({
           >
             Aa
           </Button>
-          {/* Calendar shortcut — reuses SessionCalendarPopover so the visual
-              behavior matches the inline SessionDateNavigator (highlighted
-              current session + in-session day jump + legacy session warning).
-              Restored after the popover dropped out of the search bar during
-              PR #654 (search overlay consolidation). */}
-          <Popover
-            open={calendarOpen}
-            onOpenChange={(next) => {
-              setCalendarOpen(next);
-              if (next) {
-                void preloadCalendar();
-                void onRefreshSessions?.();
-              }
-            }}
-          >
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                title={t("unifiedSearchPanel.calendarTitle")}
-                aria-label={t("unifiedSearchPanel.calendarAriaLabel")}
-              >
-                <CalendarDays className="h-3.5 w-3.5" />
-              </Button>
-            </PopoverTrigger>
-            <SessionCalendarPopover
-              sessions={sessions}
-              currentSessionId={currentSessionId}
-              streaming={streaming}
-              currentSessionEntries={currentSessionEntries}
-              onLoadSession={onLoadSession}
-              onJumpToEntry={onJumpToEntry}
-              onRefreshSessions={onRefreshSessions}
-              onOpenChange={setCalendarOpen}
-              align="end"
-            />
-          </Popover>
           <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={handleClose} title={t("unifiedSearchPanel.closeTitle")}>
             <X className="h-3.5 w-3.5" />
           </Button>
@@ -330,7 +261,7 @@ export function UnifiedSearchPanel({
 
         {open && (
           <div
-            className="max-h-[min(42dvh,360px)] overflow-y-auto rounded-md border bg-background/(--opacity-solid)"
+            className="max-h-[min(48dvh,380px)] overflow-y-auto rounded-md border bg-background/(--opacity-solid)"
             data-testid="unified-search-results"
           >
             <SearchSection

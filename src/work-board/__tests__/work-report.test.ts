@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest";
 import { createWorkBoardReporter } from "../work-report.js";
 import { MEMORY_FILE } from "../work-memory.js";
-import { okListReader } from "./board-test-fixtures.js";
+import { okListReader, projectMemoryPath, projectReportPath } from "./board-test-fixtures.js";
 import type { WorkBoardStorage } from "../storage.js";
 import type {
   WorkItem,
@@ -94,6 +94,31 @@ describe("work-report — daily", () => {
     expect(storage.files[MEMORY_FILE]).toContain("2026-06-16:");
   });
 
+  it("uses project-scoped work memory for project reports", async () => {
+    const { callLlm, calls } = llmRecorder();
+    const storage = memStorage();
+    storage.files[MEMORY_FILE] = "# 업무 흐름 메모리\n\nglobal-report-leak\n";
+    const reporter = createWorkBoardReporter({
+      store: okListReader([item({ id: 1, projectRoot: "C:\\workspace\\alpha", projectName: "alpha" })]),
+      storage,
+      callLlm,
+      now: () => NOW,
+    });
+
+    const r = await reporter.generateDaily({ projectRoot: "C:\\workspace\\alpha" });
+    const projectPath = projectMemoryPath(storage.files);
+    const reportPath = projectReportPath(storage.files, "daily");
+
+    expect(r.status).toBe("ok");
+    expect(calls[0]?.prompt).not.toContain("global-report-leak");
+    expect(storage.files["reports/daily/2026-06-16.md"]).toBeUndefined();
+    expect(reportPath).toBeDefined();
+    expect(storage.files[reportPath!]).toBe("# 리포트\n내용");
+    expect(storage.files[MEMORY_FILE]).not.toContain("2026-06-16:");
+    expect(projectPath).toBeDefined();
+    expect(storage.files[projectPath!]).toContain("2026-06-16:");
+  });
+
   it("propagates an LLM failure (No-Fallback — no stub report)", async () => {
     const failing = async () => {
       throw new Error("provider down");
@@ -135,6 +160,27 @@ describe("work-report — weekly", () => {
     expect(calls).toHaveLength(1);
     if (r.status === "ok") {
       expect(storage.files[`reports/weekly/${r.period}.md`]).toBe("# 리포트\n내용");
+    }
+  });
+
+  it("writes project weekly reports under a project namespace", async () => {
+    const { callLlm } = llmRecorder();
+    const storage = memStorage();
+    const reporter = createWorkBoardReporter({
+      store: okListReader([item({ id: 1, projectRoot: "C:\\workspace\\alpha", projectName: "alpha" })]),
+      storage,
+      callLlm,
+      now: () => NOW,
+    });
+
+    const r = await reporter.generateWeekly({ projectRoot: "C:\\workspace\\alpha" });
+    const reportPath = projectReportPath(storage.files, "weekly");
+
+    expect(r.status).toBe("ok");
+    expect(reportPath).toBeDefined();
+    if (r.status === "ok") {
+      expect(storage.files[`reports/weekly/${r.period}.md`]).toBeUndefined();
+      expect(storage.files[reportPath!]).toBe("# 리포트\n내용");
     }
   });
 });

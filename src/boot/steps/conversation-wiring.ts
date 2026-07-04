@@ -19,9 +19,12 @@ import {
   createPostTurnHookChain,
   createConversationLoop,
   createRoutineConversationLoop,
+  createSideChatConversationLoop,
   createCallLlm,
   createCallLlmForPlugin,
 } from "../conversation.js";
+import { MemoryManager } from "../../memory/memory-manager.js";
+import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import { registerPluginNotifications } from "../plugins.js";
 import { registerPluginEventBridge } from "./ipc-bridge.js";
 import { readPermissionSettings } from "../../permissions/permission-settings-store.js";
@@ -159,6 +162,37 @@ export function wireConversation(ctx: BootContext): void {
     llmFetch,
   });
 
+  // Side-chat (workspace rail) — a SECOND ConversationLoop with an ISOLATED
+  // MemoryManager rooted at `~/.lvis/side-chat/`. The dir path is resolved
+  // through openFeatureNamespace (storage-namespace SOT) rather than a raw
+  // join, so side-chat data lives in its own domain directory and can be
+  // cleared/backed-up as a unit. The loop shares the same settingsService
+  // (model inheritance) and permissionManager/approvalGate (permission
+  // inheritance) as the main chat but never mixes sessions with it — the
+  // isolated store guarantees `chat.sessions` (main) never lists a side-chat
+  // session. Its own history/sessionId keep the two streams fully independent.
+  const sideChatMemoryManager = new MemoryManager({
+    lvisDir: openFeatureNamespace("side-chat").dir,
+  });
+  sideChatMemoryManager.load();
+  const sideChatConversationLoop = createSideChatConversationLoop({
+    settingsService,
+    keywordEngine,
+    routeEngine,
+    toolRegistry,
+    permissionManager,
+    approvalGate,
+    hookRunner,
+    scriptHookManager,
+    bashAstValidator,
+    pluginRuntime,
+    auditLogger: bootAuditLogger,
+    llmFetch,
+    sideChatMemoryManager,
+    getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
+  });
+  ctx.sideChatConversationLoop = sideChatConversationLoop;
+
   // Late-binding 주입 — ConversationLoop 생성 직후.
   lateBinding.conversationLoopRef.fn = conversationLoop;
   lateBinding.llmCallerRef.fn = createCallLlm(conversationLoop);
@@ -172,6 +206,18 @@ export function wireConversation(ctx: BootContext): void {
     isIdleRefreshEnabled: () => settingsService.get("features")?.idlePreferenceRefresh ?? true,
   });
   preferenceRefreshService.start();
+
+  // Sub-agent runs persist to an ISOLATED MemoryManager rooted at
+  // `~/.lvis/subagent/` (resolved via openFeatureNamespace, the storage-
+  // namespace SOT — no hand-rolled mkdir/mode bits). Reusing the main
+  // `memoryManager` here is exactly what leaked orphan sub-agent JSONL into
+  // the main `~/.lvis/sessions/` list; a dedicated store keeps sub-agent
+  // transcripts out of `chat.sessions` and gives same-instance resume its own
+  // addressable namespace. Mirrors the sideChatMemoryManager wiring above.
+  const subAgentMemoryManager = new MemoryManager({
+    lvisDir: openFeatureNamespace("subagent").dir,
+  });
+  subAgentMemoryManager.load();
 
   // Workflow system tools — late bindings now that ConversationLoop exists.
   // SubAgentRunner reuses the parent loop's deps (LLM, registry, gates) but
@@ -195,6 +241,7 @@ export function wireConversation(ctx: BootContext): void {
       llmFetch,
     },
     toolRegistry,
+    subAgentMemoryManager,
   });
   // skill_load no longer mutates conversation history. The body is registered
   // into SkillOverlay for the current user-turn window and read by
@@ -221,12 +268,12 @@ export function wireConversation(ctx: BootContext): void {
       });
     },
     // Self-improvement (Hermes): after a run completes, append a one-line
-    // learning to the work-board MEMORY.md. appendMemory enforces the hard
-    // line cap; the engine fires this swallow-on-error so it never fails a run.
-    onRunComplete: ({ itemId, title }) =>
+    // learning to the item's project work memory. appendMemory enforces the
+    // hard line cap; the engine fires this swallow-on-error so it never fails a run.
+    onRunComplete: ({ itemId, title, projectRoot }) =>
       appendMemory(workBoardStorage, [
         `${new Date().toISOString().slice(0, 10)}: 자율 실행 완료 — #${itemId} ${title}`,
-      ]),
+      ], projectRoot ? { projectRoot } : undefined),
     // Persist each run's plan+execute conversation to sessions/<id>/<runId>.jsonl
     // so run context survives restart and accumulates across re-runs.
     transcriptStorage: workBoardStorage,

@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { LvisApi } from "../types.js";
 import type { AskUserQuestionRequest } from "../components/AskUserQuestionCard.js";
-import type { SubAgentSpawn, SubAgentTurn } from "../components/SubAgentCard.js";
+import type { SubAgentSpawn } from "../components/SubAgentCard.js";
 import type { SkillBadgeProps } from "../components/SkillBadge.js";
 
 /**
@@ -42,23 +42,22 @@ export function useWorkflowTools(api: LvisApi) {
     const unsubSpawn = api.onAgentSpawnEvent?.((event) => {
       setSubAgentSpawns((prev) => {
         const existingIdx = prev.findIndex((s) => s.spawnId === event.spawnId);
-        const baseTurn: SubAgentTurn = {
-          turn: event.turn ?? 0,
-          text: event.text ?? "",
-          toolCallCount: event.toolCallCount ?? 0,
-        };
         if (event.type === "start") {
           if (existingIdx >= 0) return prev;
           const fresh: SubAgentSpawn = {
             spawnId: event.spawnId,
             title: event.title ?? "(sub-agent)",
             status: "running",
-            turns: [],
+            entries: [],
             toolCallCount: 0,
             toolUseId: event.toolUseId,
+            childSessionId: event.childSessionId,
           };
           return [...prev, fresh];
         }
+        // `activity` / `done` / `error` may arrive before `start` (or after a
+        // reload cleared the live list). Synthesize the spawn from what the
+        // event carries. `entries` is a full-snapshot replace, never a delta.
         if (existingIdx < 0) {
           const synthetic: SubAgentSpawn = {
             spawnId: event.spawnId,
@@ -69,33 +68,50 @@ export function useWorkflowTools(api: LvisApi) {
                 : event.type === "error"
                   ? "error"
                   : "running",
-            turns: event.type === "turn" ? [baseTurn] : [],
+            entries: event.entries ?? [],
             toolCallCount: event.toolCallCount ?? 0,
             summary: event.summary,
             errorMessage: event.message,
             toolUseId: event.toolUseId,
+            childSessionId: event.childSessionId,
           };
           return [...prev, synthetic];
         }
         const next = [...prev];
         const existing = next[existingIdx];
-        if (event.type === "turn") {
+        // `childSessionId` (the resume JOIN KEY) may first arrive on a later
+        // phase (the original spawn only learns it on `done`). Only overwrite
+        // when the event carries a value so a known id is never clobbered with
+        // undefined on a phase that omits it.
+        const childSessionIdPatch = event.childSessionId
+          ? { childSessionId: event.childSessionId }
+          : {};
+        if (event.type === "activity") {
           next[existingIdx] = {
             ...existing,
-            turns: [...existing.turns, baseTurn],
+            // Full snapshot replace — the accumulator forwards the whole child
+            // transcript each time, so overwriting (not appending) is correct
+            // and idempotent against re-emitted events.
+            ...(event.entries ? { entries: event.entries } : {}),
+            toolCallCount: event.toolCallCount ?? existing.toolCallCount,
+            ...childSessionIdPatch,
           };
         } else if (event.type === "done") {
           next[existingIdx] = {
             ...existing,
             status: "done",
             summary: event.summary,
+            ...(event.entries ? { entries: event.entries } : {}),
             toolCallCount: event.toolCallCount ?? existing.toolCallCount,
+            ...childSessionIdPatch,
           };
         } else if (event.type === "error") {
           next[existingIdx] = {
             ...existing,
             status: "error",
             errorMessage: event.message,
+            ...(event.entries ? { entries: event.entries } : {}),
+            ...childSessionIdPatch,
           };
         }
         return next;

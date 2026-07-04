@@ -46,12 +46,14 @@ export async function handleCommand(
       case "remember": {
         if (!args.trim()) { result = t("be_conversationLoop.cmdRememberUsage"); break; }
         const title = args.slice(0, 40).replace(/\n/g, " ");
-        await self.deps.memoryManager.saveMemory(title, args);
+        await self.deps.memoryManager.saveMemory(title, args, self.getSessionProjectContext?.());
         result = t("be_conversationLoop.cmdRememberSaved", { title });
         break;
       }
       case "memory": {
-        const memories = self.deps.memoryManager.listMemoryEntries();
+        const memories = self.deps.memoryManager.listMemoryEntries(
+          self.getSessionMemoryProjectContext?.() ?? self.getSessionProjectContext?.(),
+        );
         result = memories.length === 0
           ? t("be_conversationLoop.cmdMemoryEmpty")
           : memories.map((n) => `- ${n.title} (${n.filename})`).join("\n");

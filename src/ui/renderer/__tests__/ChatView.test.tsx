@@ -200,6 +200,54 @@ describe("ChatView", () => {
     });
   });
 
+  it("centers the empty chat composer dock in work mode", async () => {
+    const { container } = await renderApp({ hasApiKey: true });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("LVIS 에이전트가 준비되었습니다");
+      const dock = container.querySelector('[data-testid="session-todo-dock"]');
+      expect(dock).not.toBeNull();
+      expect(dock).toHaveClass("mx-auto");
+      expect(dock).toHaveClass("max-w-[58rem]");
+    });
+  });
+
+  it("keeps an active conversation composer on the full-width chat-mode dock", async () => {
+    const { container } = await renderApp({
+      hasApiKey: true,
+      history: {
+        sessionId: "sess-active-dock",
+        messages: [
+          { index: 0, role: "user", content: "활성 대화 질문" },
+          { index: 1, role: "assistant", content: "활성 대화 답변" },
+        ],
+      },
+      mainActiveState: {
+        mainActiveSessionId: "sess-active-dock",
+        mainActiveMode: "resume",
+        updatedAt: "2026-05-16T00:00:00.000Z",
+      },
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("활성 대화 답변");
+    });
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="app-mode-chat"]')!);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="app-mode-chat"]')?.getAttribute("aria-pressed")).toBe("true");
+      const dock = container.querySelector('[data-testid="session-todo-dock"]');
+      expect(dock).not.toBeNull();
+      expect(dock).toHaveClass("w-full");
+      expect(dock).toHaveClass("max-w-full");
+      expect(dock).not.toHaveClass("mx-auto");
+      expect(dock).not.toHaveClass("max-w-[58rem]");
+    });
+  });
+
   it("renders assistant text after stream text_delta event", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await act(async () => {
@@ -820,16 +868,6 @@ describe("ChatView", () => {
       expect(container.textContent).toContain("current session probe");
     });
 
-    const dayButton = container.querySelector('[data-testid="session-date-navigator"] button') as HTMLButtonElement | null;
-    expect(dayButton).toBeTruthy();
-    await act(async () => {
-      fireEvent.click(dayButton!);
-    });
-
-    await waitFor(() => {
-      expect(document.body.textContent).toContain("다른 대화");
-    });
-
     const sessionButton = Array.from(document.querySelectorAll("button")).find((button) =>
       button.textContent?.includes("다른 대화"),
     ) as HTMLButtonElement | undefined;
@@ -938,6 +976,91 @@ describe("ChatView", () => {
       expect(container.textContent).toContain("report.md");
     });
     expect(container.querySelector('[data-testid="input-action-bar"]')).not.toBeNull();
+  });
+
+  it("shows sub-agents from a loaded past session (derived from agent_spawn entries) in the viewer + inline", async () => {
+    const now = new Date().toISOString();
+    const { container } = await renderApp({
+      currentSession: "subagent-session",
+      mainActiveState: {
+        mainActiveSessionId: "subagent-session",
+        mainActiveMode: "resume",
+        updatedAt: now,
+      },
+      history: {
+        sessionId: "subagent-session",
+        messages: [
+          { index: 0, role: "user", content: "서브에이전트 히스토리 확인" },
+          {
+            index: 1,
+            role: "assistant",
+            content: "",
+            thought: "검색 서브에이전트를 실행합니다.",
+            toolCalls: [
+              {
+                id: "spawn-tool-1",
+                name: "agent_spawn",
+                input: { title: "인덱서 조사", instructions: "관련 파일을 찾아줘" },
+              },
+            ],
+          },
+          {
+            index: 2,
+            role: "tool_result",
+            toolUseId: "spawn-tool-1",
+            toolName: "agent_spawn",
+            content: JSON.stringify({ summary: "관련 파일 3개 확인", toolCallCount: 4, turnCount: 2 }),
+          },
+          { index: 3, role: "assistant", content: "서브에이전트 실행이 완료되었습니다." },
+        ],
+      },
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("서브에이전트 실행이 완료되었습니다.");
+    });
+
+    // The loaded session's agent_spawn tool call is derived into a spawn even
+    // though the live agent-spawn event stream never replayed. Past-turn
+    // WorkGroups start collapsed, so expand it to reveal the inline completion
+    // CHIP (PR3: the lightweight inline surface — full transcript lives in the
+    // sub-agent tab, not inline) that renders next to its tool group.
+    const workGroupToggle = await waitFor(() => {
+      const button = container.querySelector('[data-testid="work-group"] button') as HTMLButtonElement | null;
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    await act(async () => {
+      fireEvent.click(workGroupToggle);
+    });
+    await waitFor(() => {
+      const inlineChips = container.querySelectorAll('[data-testid="sub-agent-spawn-chip"]');
+      expect(inlineChips.length).toBeGreaterThan(0);
+      expect(container.textContent).toContain("인덱서 조사");
+    });
+
+    // Open the workspace rail and its sub-agent tab — the viewer must be
+    // NON-empty (previously showed the "no sub-agents" empty state on load).
+    const openButton = await waitFor(() => {
+      const button = container.querySelector('[data-testid="chat-side-panel-toggle"]') as HTMLButtonElement | null;
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    await act(async () => {
+      fireEvent.click(openButton);
+    });
+    const subagentLauncher = await waitFor(() => {
+      const button = container.querySelector('[data-testid="chat-side-panel-launcher-subagent"]') as HTMLButtonElement | null;
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    await act(async () => {
+      fireEvent.click(subagentLauncher!);
+    });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="chat-side-panel-subagent-viewer"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="chat-side-panel-subagent-empty"]')).toBeNull();
+    });
   });
 
   it("clears draft attachment preview artifacts when switching sessions", async () => {
@@ -1617,66 +1740,10 @@ describe("ChatView", () => {
     await submitChatMessage(container, "새 질문");
 
     await waitFor(() => {
-      expect(container.querySelectorAll('[data-testid="session-date-navigator"]')).toHaveLength(1);
       expect(container.querySelector('[data-session-marker-id="old-yesterday"]')).toBeNull();
       expect(container.textContent).not.toContain("이전 질문");
       expect(container.textContent).not.toContain("이전 답변");
     });
-  });
-
-  it("loads the exact selected session from the calendar session list", async () => {
-    const scrollSpy = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
-    const now = new Date().toISOString();
-    const { container, api } = await renderApp({
-      currentSession: "current",
-      sessions: [
-        { id: "current", modifiedAt: now, title: "현재 대화" },
-        { id: "other-session", modifiedAt: now, title: "다른 대화" },
-      ],
-      history: {
-        sessionId: "current",
-        messages: [],
-      },
-      historyBySession: {
-        "other-session": {
-          messages: [
-            { index: 0, role: "user", content: "다른 질문" },
-            { index: 1, role: "assistant", content: "다른 답변" },
-          ],
-        },
-      },
-    });
-
-    const dayButton = container.querySelector('[data-testid="session-date-navigator"] button') as HTMLButtonElement | null;
-    expect(dayButton).toBeTruthy();
-
-    await act(async () => {
-      fireEvent.click(dayButton!);
-    });
-    await waitFor(() => {
-      expect(document.body.textContent).toContain("다른 대화");
-    });
-
-    const sessionButton = Array.from(document.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("다른 대화"),
-    ) as HTMLButtonElement | undefined;
-    expect(sessionButton).toBeTruthy();
-
-    await act(async () => {
-      fireEvent.click(sessionButton!);
-    });
-
-    await waitFor(() => {
-      expect(api.chatSessionResume).toHaveBeenCalledWith("other-session");
-      expect(api.chatSessionHistory).toHaveBeenCalledWith("other-session");
-    });
-    const scrolledToMarker = scrollSpy.mock.calls.some(([arg]) =>
-      typeof arg === "object" &&
-      arg !== null &&
-      "block" in arg &&
-      (arg as ScrollIntoViewOptions).block === "start",
-    );
-    expect(scrolledToMarker).toBe(false);
   });
 
   it("auto-continues after branching from a checkpoint when the branch ends with a user turn", async () => {

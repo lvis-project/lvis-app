@@ -3,11 +3,9 @@
  * inside the chat UI. All callers MUST go through these helpers so the
  * timezone, locale, and 2-digit padding stay consistent across surfaces.
  *
- * Why centralized: TurnActionBar and SessionCalendarPopover previously each
- * inlined `toLocaleTimeString("ko-KR", {...})`, but with different `timeZone`
- * options — TurnActionBar used the OS local zone while SessionCalendarPopover
- * pinned to "Asia/Seoul". A user traveling outside KST saw two different
- * hour values for the same message. (Critic R2 / Code-reviewer R2 finding.)
+ * Why centralized: older chat time surfaces inlined `toLocaleTimeString`
+ * with different `timeZone` options. A user traveling outside KST saw two
+ * different hour values for the same message. (Critic R2 / Code-reviewer R2.)
  */
 
 /**

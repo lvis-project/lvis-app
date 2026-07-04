@@ -52,8 +52,25 @@ import type {
   OpenHtmlPreviewWindowResult,
 } from "../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../shared/session-todo.js";
+import type { StreamEvent, ChatEntry } from "../lib/chat-stream-state.js";
+import type { SerializedHistoryMessage } from "../shared/chat-history.js";
+import type { TurnResult } from "../engine/conversation-loop.js";
 
 export type LvisInitialThemePayload = Readonly<InitialThemePrime>;
+
+type MemoryProjectOptions = { projectRoot?: string; projectName?: string; includeUnscoped?: boolean };
+
+function invokeWithOptionalMemoryOptions<T>(channel: string, opts?: MemoryProjectOptions): Promise<T> {
+  return opts === undefined
+    ? ipcRenderer.invoke(channel) as Promise<T>
+    : ipcRenderer.invoke(channel, opts) as Promise<T>;
+}
+
+function invokeMemorySearch<T>(channel: string, query: string, opts?: MemoryProjectOptions): Promise<T> {
+  return opts === undefined
+    ? ipcRenderer.invoke(channel, query) as Promise<T>
+    : ipcRenderer.invoke(channel, query, opts) as Promise<T>;
+}
 
 export function readInitialThemeArg(): LvisInitialThemePayload | null {
   try {
@@ -229,6 +246,10 @@ export function buildInternalApiSurface() {
   setMarketplaceApiKey: async (apiKey: string) => ipcRenderer.invoke(CHANNELS.settings.marketplaceSetApiKey, apiKey),
   hasMarketplaceApiKey: async () => ipcRenderer.invoke(CHANNELS.settings.marketplaceHasApiKey) as Promise<boolean>,
   deleteMarketplaceApiKey: async () => ipcRenderer.invoke(CHANNELS.settings.marketplaceDeleteApiKey),
+  // ─── Internal Usage Insights ─────────────────────
+  // This can trigger a provider-backed LLM call, so it is intentionally kept
+  // out of the externally-parity-safe public surface and local API allowlist.
+  getUsageDailySummary: async (input: unknown) => ipcRenderer.invoke(CHANNELS.usage.dailySummary, input),
   // #893 — top-level mockup credential login. Hard-coded `demo`/`demo123`
   // (env override via `LVIS_DEMO_USER` / `LVIS_DEMO_PASS`). Vendor is no
   // longer sent by the renderer; the backend picks via `LVIS_DEMO_VENDOR`
@@ -367,6 +388,48 @@ export function buildInternalApiSurface() {
       };
       ipcRenderer.on(CHANNELS.terminal.exit, listener);
       return () => ipcRenderer.removeListener(CHANNELS.terminal.exit, listener);
+    },
+  },
+  // ─── Side chat (workspace rail) ──────────────────────
+  // A second, independently-streaming chat session. send/new/load/list/abort
+  // are invokes; onStream/onFallback subscribe to the DEDICATED
+  // CHANNELS.sidechat.{stream,fallback} events (NOT chat.stream) and return an
+  // unsubscribe fn (the onChatStream pattern). All channels are INTERNAL — an
+  // external origin can never reach them (fail-closed isPublicChannel).
+  sideChat: {
+    send: async (input: string, attachments?: unknown[]) =>
+      ipcRenderer.invoke(CHANNELS.sidechat.send, { input, attachments }) as Promise<
+        | { ok: true; result: TurnResult }
+        | { ok: false; error: string }
+      >,
+    new: async () =>
+      ipcRenderer.invoke(CHANNELS.sidechat.new) as Promise<
+        | { ok: true; sessionId: string }
+        | { ok: false; error: string }
+      >,
+    load: async (sessionId: string) =>
+      ipcRenderer.invoke(CHANNELS.sidechat.load, sessionId) as Promise<
+        | { ok: true; sessionId: string; messages: SerializedHistoryMessage[] }
+        | { ok: false; error: string; messages: SerializedHistoryMessage[] }
+      >,
+    list: async () =>
+      ipcRenderer.invoke(CHANNELS.sidechat.list) as Promise<{
+        current: string | null;
+        sessions: Array<{ id: string; modifiedAt: string; title: string }>;
+      }>,
+    abort: async () =>
+      ipcRenderer.invoke(CHANNELS.sidechat.abort) as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
+    onStream: (handler: (event: StreamEvent) => void) => {
+      const listener = (_event: unknown, payload: StreamEvent) => handler(payload);
+      ipcRenderer.on(CHANNELS.sidechat.stream, listener);
+      return () => ipcRenderer.removeListener(CHANNELS.sidechat.stream, listener);
+    },
+    onFallback: (handler: (payload: { from: string; to: string }) => void) => {
+      const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+      ipcRenderer.on(CHANNELS.sidechat.fallback, listener);
+      return () => ipcRenderer.removeListener(CHANNELS.sidechat.fallback, listener);
     },
   },
   /**
@@ -574,17 +637,23 @@ export function buildInternalApiSurface() {
 
 
   // ─── Memory ──────────────────────────────────────
-  memoryListEntries: async () => ipcRenderer.invoke(CHANNELS.memory.entriesList),
-  memorySaveEntry: async (title: string, content: string) => ipcRenderer.invoke(CHANNELS.memory.entriesSave, title, content),
+  memoryListEntries: async (opts?: MemoryProjectOptions) =>
+    invokeWithOptionalMemoryOptions(CHANNELS.memory.entriesList, opts),
+  memorySaveEntry: async (title: string, content: string, opts?: MemoryProjectOptions) =>
+    ipcRenderer.invoke(CHANNELS.memory.entriesSave, title, content, opts),
   memoryDeleteEntry: async (filename: string) => ipcRenderer.invoke(CHANNELS.memory.entriesDelete, filename),
-  memorySearchEntries: async (query: string) => ipcRenderer.invoke(CHANNELS.memory.entriesSearch, query),
-  memoryGetIndex: async () => ipcRenderer.invoke(CHANNELS.memory.indexGet) as Promise<string>,
+  memorySearchEntries: async (query: string, opts?: MemoryProjectOptions) =>
+    invokeMemorySearch(CHANNELS.memory.entriesSearch, query, opts),
+  memoryGetIndex: async (opts?: MemoryProjectOptions) =>
+    invokeWithOptionalMemoryOptions<string>(CHANNELS.memory.indexGet, opts),
   memoryUpdateIndexIfUnchanged: async (expectedContent: string, nextContent: string) =>
     ipcRenderer.invoke(CHANNELS.memory.indexUpdateIfUnchanged, expectedContent, nextContent) as Promise<boolean>,
   memoryUpdateIndexSections: async (sections: { urgentMemory?: string; references?: string }) =>
     ipcRenderer.invoke(CHANNELS.memory.indexSectionsUpdate, sections),
-  memoryListSessions: async () => ipcRenderer.invoke(CHANNELS.memory.sessionsList),
-  memorySearchSessions: async (query: string) => ipcRenderer.invoke(CHANNELS.memory.sessionsSearch, query),
+  memoryListSessions: async (opts?: MemoryProjectOptions) =>
+    invokeWithOptionalMemoryOptions(CHANNELS.memory.sessionsList, opts),
+  memorySearchSessions: async (query: string, opts?: MemoryProjectOptions) =>
+    invokeMemorySearch(CHANNELS.memory.sessionsSearch, query, opts),
   memoryGetAgentsMd: async () => ipcRenderer.invoke(CHANNELS.memory.agentsMdGet) as Promise<string>,
   memoryUpdateAgentsMd: async (content: string) => ipcRenderer.invoke(CHANNELS.memory.agentsMdUpdate, content),
   memoryGetUserPrefs: async () => ipcRenderer.invoke(CHANNELS.memory.userPrefsGet) as Promise<string>,
@@ -1346,7 +1415,7 @@ export function buildInternalApiSurface() {
   // an empty-period envelope, an error envelope (LLM failure), or no-reporter.
   generateWorkBoardReport: async (
     kind: "daily" | "weekly",
-    input?: { date?: string; weekIso?: string; weekOffset?: number },
+    input?: { date?: string; weekIso?: string; weekOffset?: number; projectRoot?: string; includeUnscoped?: boolean },
   ) =>
     ipcRenderer.invoke(WORK_BOARD.generateReport, kind, input) as Promise<
       | import("../shared/work-board-types.js").WorkBoardReportResult
@@ -1437,14 +1506,15 @@ export function buildInternalApiSurface() {
   onAgentSpawnEvent: (
     handler: (event: {
       spawnId: string;
-      type: "start" | "turn" | "done" | "error";
+      type: "start" | "activity" | "done" | "error";
       title?: string;
-      turn?: number;
-      text?: string;
+      entries?: ChatEntry[];
       summary?: string;
       toolCallCount?: number;
       message?: string;
       toolUseId?: string;
+      // JOIN KEY for the unified resume transcript (mirrors `AgentSpawnEvent`).
+      childSessionId?: string;
     }) => void,
   ) => {
     const listener = (_e: unknown, ev: Parameters<typeof handler>[0]) => handler(ev);
@@ -1744,6 +1814,14 @@ export function buildLvisNamespaceExtras() {
       ipcRenderer.invoke(CHANNELS.workspace.pickRoot, opts),
     listDir: (dirPath: string) =>
       ipcRenderer.invoke(CHANNELS.workspace.listDir, dirPath),
+    removeRoot: (dirPath: string) =>
+      ipcRenderer.invoke(CHANNELS.workspace.removeRoot, dirPath),
+    reveal: (targetPath: string) =>
+      ipcRenderer.invoke(CHANNELS.workspace.reveal, targetPath),
+    // Drag-drop add-root, step 1 (#1458): submit a renderer-resolved dropped
+    // folder path for Layer-0 + is-a-dir validation and a main-owned ack token.
+    dropPrepare: (droppedPath: string) =>
+      ipcRenderer.invoke(CHANNELS.workspace.dropPrepare, droppedPath),
   },
   };
 }
