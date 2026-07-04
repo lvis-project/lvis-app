@@ -35,3 +35,11 @@ export function memTranscriptStorage(): TranscriptStorage & { files: Record<stri
     mkdir: async () => {},
   };
 }
+
+export function projectMemoryPath(files: Record<string, string>): string | undefined {
+  return Object.keys(files).find((key) => key.startsWith("memories/projects/") && key.endsWith("/MEMORY.md"));
+}
+
+export function projectReportPath(files: Record<string, string>, kind: "daily" | "weekly"): string | undefined {
+  return Object.keys(files).find((key) => key.startsWith("reports/projects/") && key.includes(`/${kind}/`));
+}

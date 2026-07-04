@@ -136,7 +136,9 @@ async function setupHandlers(loop: ReturnType<typeof makeConversationLoop>) {
   handlers.clear();
   vi.clearAllMocks();
   const { registerChatHandlers } = await import("../chat.js");
-  registerChatHandlers(makeMinimalDeps(loop) as any);
+  const deps = makeMinimalDeps(loop);
+  registerChatHandlers(deps as any);
+  return deps;
 }
 
 function invoke(channel: string, ...args: unknown[]): unknown {
@@ -239,5 +241,22 @@ describe("lvis:llm:ping", () => {
     const result = await invoke("lvis:llm:ping");
     expect(result).toMatchObject({ configured: true, online: true });
     expect(loop.pingProvider).toHaveBeenCalledOnce();
+  });
+});
+
+describe("lvis:memory:index:get project options", () => {
+  it("keeps no-arg MEMORY.md reads global and scopes only explicit project reads", async () => {
+    const loop = makeConversationLoop(SESSION_ID);
+    const deps = await setupHandlers(loop);
+
+    await invoke("lvis:memory:index:get");
+    await invoke("lvis:memory:index:get", { projectRoot: process.cwd(), projectName: "workspace" });
+
+    expect(deps.memoryManager.getMemoryIndex).toHaveBeenNthCalledWith(1, {});
+    expect(deps.memoryManager.getMemoryIndex).toHaveBeenNthCalledWith(2, {
+      projectRoot: process.cwd(),
+      projectName: "workspace",
+      includeUnscoped: true,
+    });
   });
 });

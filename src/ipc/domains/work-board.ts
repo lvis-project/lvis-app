@@ -62,13 +62,19 @@ const NO_REPORTER = { ok: false, error: "no-reporter" as const };
 const UNAUTHORIZED_PROJECT_ROOT = "__lvis_unauthorized_project_root__";
 const PROJECT_NOT_ALLOWED_REASON = "project root is not authorized";
 
-function normalizeProjectListFilter(filter?: WorkItemListFilter): WorkItemListFilter | undefined {
-  if (!filter?.projectRoot) return filter;
-  const resolved = resolveAuthorizedWorkspaceProject(filter.projectRoot);
+function normalizeProjectListFilter(filter?: WorkItemListFilter): WorkItemListFilter {
+  const resolved = resolveAuthorizedWorkspaceProject(filter?.projectRoot);
+  if (!resolved.authorized || !resolved.project) {
+    return {
+      ...filter,
+      projectRoot: UNAUTHORIZED_PROJECT_ROOT,
+      includeUnscoped: false,
+    };
+  }
   return {
     ...filter,
-    projectRoot: resolved.authorized && resolved.project ? resolved.project.projectRoot : UNAUTHORIZED_PROJECT_ROOT,
-    includeUnscoped: resolved.authorized && resolved.project?.isDefault === true && filter.includeUnscoped === true,
+    projectRoot: resolved.project.projectRoot,
+    includeUnscoped: resolved.project.isDefault === true,
   };
 }
 

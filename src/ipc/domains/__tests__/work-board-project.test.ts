@@ -35,6 +35,7 @@ vi.mock("../../gated.js", () => ({
 let oldHome: string | undefined;
 let oldCwd: string;
 let root: string;
+let workspace: string;
 
 function registeredHandler<T extends (...args: unknown[]) => unknown>(channel: string): T {
   const handler = ipc.handlers.get(channel);
@@ -60,7 +61,7 @@ beforeEach(() => {
   oldHome = process.env.LVIS_HOME;
   oldCwd = process.cwd();
   root = mkdtempSync(join(tmpdir(), "lvis-work-board-project-"));
-  const workspace = join(root, "workspace");
+  workspace = join(root, "workspace");
   mkdirSync(workspace, { recursive: true });
   process.env.LVIS_HOME = root;
   process.chdir(workspace);
@@ -76,6 +77,35 @@ afterEach(() => {
 });
 
 describe("work-board project authorization", () => {
+  it("defaults missing list and report filters to the app-managed workspace project", async () => {
+    const list = vi.fn(async () => ({ status: "ok", items: [] }));
+    const generate = vi.fn(async () => ({
+      status: "empty",
+      kind: "daily",
+      period: "2026-07-04",
+      reason: "no-items",
+    }));
+    registerWorkBoardHandlers({
+      workBoardStore: { list },
+      workBoardReport: { generate },
+      auditLogger: { log: vi.fn() },
+      getMainWindow: () => null,
+      getAppWindows: () => [],
+    } as unknown as IpcDeps);
+
+    await registeredHandler(WORK_BOARD.list)({});
+    await registeredHandler(WORK_BOARD.generateReport)({}, "daily", undefined);
+
+    expect(list).toHaveBeenCalledWith({
+      projectRoot: workspace,
+      includeUnscoped: true,
+    });
+    expect(generate).toHaveBeenCalledWith("daily", {
+      projectRoot: workspace,
+      includeUnscoped: true,
+    });
+  });
+
   it("does not expose or mutate items from unauthorized stored project roots", async () => {
     const item = deniedItem(join(root, "denied-project"));
     const store = {
