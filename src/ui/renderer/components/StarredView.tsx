@@ -58,6 +58,12 @@ function formatCost(value: number | undefined): string {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(Math.max(0, value ?? 0));
 }
 
+function usageForDate(summary: unknown, dateKey: string): UsageTotals | null {
+  const shaped = summary as { today?: UsageTotals; trend?: Array<UsageTotals & { date?: string }> } | null | undefined;
+  const trendForDate = shaped?.trend?.find((point) => point.date === dateKey);
+  return trendForDate ?? shaped?.today ?? null;
+}
+
 export function StarredView({
   api,
   starred,
@@ -98,8 +104,7 @@ export function StarredView({
     }
     void getUsageRange({ dateFrom: selectedKey, dateTo: selectedKey }).then((summary) => {
       if (cancelled) return;
-      const today = (summary as { today?: UsageTotals })?.today;
-      setDailyUsage(today ?? null);
+      setDailyUsage(usageForDate(summary, selectedKey));
     }).catch(() => {
       if (!cancelled) setDailyUsage(null);
     });

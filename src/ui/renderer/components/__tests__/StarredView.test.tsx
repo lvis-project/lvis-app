@@ -4,13 +4,28 @@ import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { StarredView } from "../StarredView.js";
 
+const KOREA_DATE_KEY_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Seoul",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+function koreaDateKey(date: Date): string {
+  const parts = KOREA_DATE_KEY_FORMATTER.formatToParts(date);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
 describe("StarredView", () => {
   it("renders an LLM-generated daily summary when the usage summary API is available", async () => {
     const now = new Date().toISOString();
+    const selectedKey = koreaDateKey(new Date(now));
     const api = {
       starredRemove: vi.fn(async () => ({ ok: true })),
       getUsageRange: vi.fn(async () => ({
-        today: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 120, cost: 0.001 },
+        today: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 },
+        trend: [{ date: selectedKey, inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 120, cost: 0.001 }],
       })),
       getUsageDailySummary: vi.fn(async () => ({ ok: true, summary: "오늘은 프로젝트 흐름을 정리했습니다.", generatedAt: now })),
     } as unknown as Parameters<typeof StarredView>[0]["api"];
