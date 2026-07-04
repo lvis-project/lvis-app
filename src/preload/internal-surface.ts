@@ -58,6 +58,20 @@ import type { TurnResult } from "../engine/conversation-loop.js";
 
 export type LvisInitialThemePayload = Readonly<InitialThemePrime>;
 
+type MemoryProjectOptions = { projectRoot?: string; projectName?: string; includeUnscoped?: boolean };
+
+function invokeWithOptionalMemoryOptions<T>(channel: string, opts?: MemoryProjectOptions): Promise<T> {
+  return opts === undefined
+    ? ipcRenderer.invoke(channel) as Promise<T>
+    : ipcRenderer.invoke(channel, opts) as Promise<T>;
+}
+
+function invokeMemorySearch<T>(channel: string, query: string, opts?: MemoryProjectOptions): Promise<T> {
+  return opts === undefined
+    ? ipcRenderer.invoke(channel, query) as Promise<T>
+    : ipcRenderer.invoke(channel, query, opts) as Promise<T>;
+}
+
 export function readInitialThemeArg(): LvisInitialThemePayload | null {
   try {
     // `findLast` (vs `find`) defends against accidental duplicate arg
@@ -619,23 +633,23 @@ export function buildInternalApiSurface() {
 
 
   // ─── Memory ──────────────────────────────────────
-  memoryListEntries: async (opts?: { projectRoot?: string; projectName?: string; includeUnscoped?: boolean }) =>
-    ipcRenderer.invoke(CHANNELS.memory.entriesList, opts),
-  memorySaveEntry: async (title: string, content: string, opts?: { projectRoot?: string; projectName?: string; includeUnscoped?: boolean }) =>
+  memoryListEntries: async (opts?: MemoryProjectOptions) =>
+    invokeWithOptionalMemoryOptions(CHANNELS.memory.entriesList, opts),
+  memorySaveEntry: async (title: string, content: string, opts?: MemoryProjectOptions) =>
     ipcRenderer.invoke(CHANNELS.memory.entriesSave, title, content, opts),
   memoryDeleteEntry: async (filename: string) => ipcRenderer.invoke(CHANNELS.memory.entriesDelete, filename),
-  memorySearchEntries: async (query: string, opts?: { projectRoot?: string; projectName?: string; includeUnscoped?: boolean }) =>
-    ipcRenderer.invoke(CHANNELS.memory.entriesSearch, query, opts),
-  memoryGetIndex: async (opts?: { projectRoot?: string; projectName?: string; includeUnscoped?: boolean }) =>
-    ipcRenderer.invoke(CHANNELS.memory.indexGet, opts) as Promise<string>,
+  memorySearchEntries: async (query: string, opts?: MemoryProjectOptions) =>
+    invokeMemorySearch(CHANNELS.memory.entriesSearch, query, opts),
+  memoryGetIndex: async (opts?: MemoryProjectOptions) =>
+    invokeWithOptionalMemoryOptions<string>(CHANNELS.memory.indexGet, opts),
   memoryUpdateIndexIfUnchanged: async (expectedContent: string, nextContent: string) =>
     ipcRenderer.invoke(CHANNELS.memory.indexUpdateIfUnchanged, expectedContent, nextContent) as Promise<boolean>,
   memoryUpdateIndexSections: async (sections: { urgentMemory?: string; references?: string }) =>
     ipcRenderer.invoke(CHANNELS.memory.indexSectionsUpdate, sections),
-  memoryListSessions: async (opts?: { projectRoot?: string; projectName?: string; includeUnscoped?: boolean }) =>
-    ipcRenderer.invoke(CHANNELS.memory.sessionsList, opts),
-  memorySearchSessions: async (query: string, opts?: { projectRoot?: string; projectName?: string; includeUnscoped?: boolean }) =>
-    ipcRenderer.invoke(CHANNELS.memory.sessionsSearch, query, opts),
+  memoryListSessions: async (opts?: MemoryProjectOptions) =>
+    invokeWithOptionalMemoryOptions(CHANNELS.memory.sessionsList, opts),
+  memorySearchSessions: async (query: string, opts?: MemoryProjectOptions) =>
+    invokeMemorySearch(CHANNELS.memory.sessionsSearch, query, opts),
   memoryGetAgentsMd: async () => ipcRenderer.invoke(CHANNELS.memory.agentsMdGet) as Promise<string>,
   memoryUpdateAgentsMd: async (content: string) => ipcRenderer.invoke(CHANNELS.memory.agentsMdUpdate, content),
   memoryGetUserPrefs: async () => ipcRenderer.invoke(CHANNELS.memory.userPrefsGet) as Promise<string>,
