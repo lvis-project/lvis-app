@@ -397,6 +397,25 @@ describe("lvis:chat active main state", () => {
     expect(deps.memoryManager.markMainActiveFresh).toHaveBeenCalledTimes(1);
   });
 
+  it("persists the resolved project identity to the new main session's metadata at creation", async () => {
+    // Regression (Insights "프로젝트별 대화" showed 프로젝트 없음): a new main
+    // session must carry its project metadata from creation — not only
+    // post-turn — so the by-project group-by can join it immediately. The
+    // default project resolves to an authorized identity with a projectRoot.
+    const loop = makeConversationLoop("session-active", []);
+    const deps = await setupHandlers(loop);
+
+    await invoke("lvis:chat:new");
+
+    expect(deps.memoryManager.saveSessionMetadata).toHaveBeenCalledTimes(1);
+    const [savedId, savedMeta] = (deps.memoryManager.saveSessionMetadata as any).mock.calls[0];
+    expect(savedId).toBe("session-active");
+    expect(savedMeta).toMatchObject({ sessionKind: "main" });
+    expect(typeof savedMeta.projectRoot).toBe("string");
+    expect((savedMeta.projectRoot as string).length).toBeGreaterThan(0);
+    expect(savedMeta.projectName).toBe("default");
+  });
+
   it("marks explicit main session resume but ignores routine session resume", async () => {
     const mainLoop = makeConversationLoop("session-main", []);
     mainLoop.resetAndResume.mockReturnValue({ ok: true });
