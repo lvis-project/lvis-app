@@ -858,7 +858,8 @@ export function Sidebar({
             isActive={activeView === "insights" || activeView === "starred"}
             onClick={() => onSelect("insights")}
             collapsed={compact}
-            data-testid="sidebar-insights"
+            data-testid="sidebar-starred"
+            data-viewkey="insights"
           />
         </div>
 

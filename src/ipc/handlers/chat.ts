@@ -244,7 +244,12 @@ export async function markMainActiveAfterTurn(deps: IpcDeps, input: string): Pro
   const { conversationLoop, memoryManager } = deps;
   if (conversationLoop.getSessionKind() !== "main") return;
   if (conversationLoop.getHistory().length > 0) {
-    const project = conversationLoop.getSessionProjectContext();
+    const project = typeof conversationLoop.getSessionProjectContext === "function"
+      ? conversationLoop.getSessionProjectContext()
+      : {
+          projectRoot: typeof conversationLoop.getSessionProjectRoot === "function" ? conversationLoop.getSessionProjectRoot() ?? undefined : undefined,
+          projectName: typeof conversationLoop.getSessionProjectName === "function" ? conversationLoop.getSessionProjectName() ?? undefined : undefined,
+        };
     if (project.projectRoot || project.projectName) {
       const existing = memoryManager.loadSessionMetadata(conversationLoop.getSessionId()) ?? {};
       await memoryManager.saveSessionMetadata(conversationLoop.getSessionId(), {
