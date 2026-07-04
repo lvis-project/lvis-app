@@ -43,6 +43,7 @@ import {
   resolvePersonaRolePrompt,
   sanitizeOutgoingInput,
   markMainActiveAfterTurn,
+  parseChatSessionProjectPayload,
 } from "../handlers/chat.js";
 const log = createLogger("chat");
 
@@ -237,16 +238,16 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return { ok: true };
   });
 
-  ipcMain.handle(CHANNELS.chat.new, async (e) => {
+  ipcMain.handle(CHANNELS.chat.new, async (e, rawProject?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.new, e); return UNAUTHORIZED_FRAME; }
-    conversationLoop.newConversation();
+    conversationLoop.newConversation("main", parseChatSessionProjectPayload(rawProject));
     await memoryManager.markMainActiveFresh();
     return { ok: true };
   });
 
   // PUBLIC lvis:chat:sessions — read-only; sender guard optional. On rejection
   // returns the same shape (active id + empty list) as before; logic delegated.
-  ipcMain.handle(CHANNELS.chat.sessions, (e, opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown; kind?: unknown; routineId?: unknown }) => {
+  ipcMain.handle(CHANNELS.chat.sessions, (e, opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown; kind?: unknown; routineId?: unknown; projectRoot?: unknown }) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.chat.sessions, e);
       return { current: conversationLoop.getSessionId(), sessions: [] };
@@ -358,6 +359,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
       ...(currentMeta?.routineId ? { routineId: currentMeta.routineId } : {}),
       ...(currentMeta?.routineTitle ? { routineTitle: currentMeta.routineTitle } : {}),
       ...(currentMeta?.routineFiredAt ? { routineFiredAt: currentMeta.routineFiredAt } : {}),
+      ...(currentMeta?.projectRoot ? { projectRoot: currentMeta.projectRoot } : {}),
+      ...(currentMeta?.projectName ? { projectName: currentMeta.projectName } : {}),
       ...(currentMeta?.summaryPreamble ? { summaryPreamble: currentMeta.summaryPreamble } : {}),
     });
     const loaded = conversationLoop.loadSession(newId);

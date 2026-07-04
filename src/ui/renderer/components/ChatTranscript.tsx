@@ -29,6 +29,7 @@ export interface ChatTranscriptProps {
   hasApiKey: boolean | null;
   hasAskQuestions: boolean;
   suggestedRepliesActive: boolean;
+  compactDateNavigator?: boolean;
   transcriptEntries: React.ReactNode;
   chatEndRef: RefObject<HTMLDivElement | null>;
 }
@@ -57,29 +58,31 @@ export function ChatTranscript({
   hasApiKey,
   hasAskQuestions,
   suggestedRepliesActive,
+  compactDateNavigator = false,
   transcriptEntries,
   chatEndRef,
 }: ChatTranscriptProps) {
   const { t } = useTranslation();
   return (
     <ScrollArea type="always" className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className={`min-w-0 overflow-x-hidden space-y-4 py-5 ${readingColumnClass}`}>
-      {/* Today's date badge stays a selector for explicit session loads only.
-          currentSessionEntries enables in-session day jumping via
-          SessionCalendarPopover Step 4 — pass entries with createdAt + index.
-          Reasoning entries never carry createdAt (only user + assistant get
-          stamped in historyToEntries / appendUserEntry / finalizeStreamingAssistant),
-          so they're excluded from the mapper rather than passed with undefined. */}
-      <SessionDateNavigator
-        dateKey={activeDayKey}
-        sessionMarkerId={currentSessionId}
-        sessions={sessions}
-        currentSessionId={currentSessionId}
-        streaming={streaming}
-        currentSessionEntries={navigatorCurrentSessionEntries}
-        onJumpToEntry={onJumpToEntry}
-        onLoadSession={onLoadSession}
-        onRefreshSessions={onRefreshSessions}
-      />
+      {/* Today's date selector is no longer a visible chat-top chip in compact
+          chat chrome; the visible calendar surfaces live in search/Insights.
+          Keep the legacy node mounted but hidden so existing session-jump
+          contracts remain stable while callers migrate to those surfaces. */}
+      <div className={compactDateNavigator ? "hidden" : undefined} aria-hidden={compactDateNavigator || undefined}>
+        <SessionDateNavigator
+          dateKey={activeDayKey}
+          sessionMarkerId={currentSessionId}
+          sessions={sessions}
+          currentSessionId={currentSessionId}
+          streaming={streaming}
+          variant={compactDateNavigator ? "compact" : "divider"}
+          currentSessionEntries={navigatorCurrentSessionEntries}
+          onJumpToEntry={onJumpToEntry}
+          onLoadSession={onLoadSession}
+          onRefreshSessions={onRefreshSessions}
+        />
+      </div>
       {/* Workflow tools (S1+S2): skill badges + sub-agents + ask-user inline.
           SessionTodoPanel is intentionally NOT here — it sits above the input
           cluster (see below the ScrollArea) so it stays visible regardless of
@@ -102,7 +105,11 @@ export function ChatTranscript({
           "준비되었습니다" copy so the user never sees a "로그인된 척" race
           where the empty state paints before the boot probe resolves
           (#1014 tracer: Stage B). */}
-      {visibleEntries.length === 0 && hasApiKey === true && !hasAskQuestions && !suggestedRepliesActive && <div className="py-12 text-center text-sm text-muted-foreground lvis-anim-fade-in">{t("chatView.emptyState")}</div>}
+      {visibleEntries.length === 0 && hasApiKey === true && !hasAskQuestions && !suggestedRepliesActive && (
+        <div className={compactDateNavigator ? "sr-only" : "py-12 text-center text-sm text-muted-foreground lvis-anim-fade-in"}>
+          {t("chatView.emptyState")}
+        </div>
+      )}
       {transcriptEntries}
       <div ref={chatEndRef} />
     </div></ScrollArea>

@@ -306,6 +306,25 @@ export type UsageSummaryShape = {
   generatedAt: string;
 };
 
+export type UsageDailySummaryInput = {
+  date: string;
+  locale?: string;
+  sessions?: Array<{
+    title?: string;
+    preview?: string;
+    projectName?: string;
+  }>;
+  starred?: Array<{
+    role?: string;
+    text?: string;
+  }>;
+  usage?: Partial<UsageTotals> | null;
+};
+
+export type UsageDailySummaryResult =
+  | { ok: true; summary: string; generatedAt: string }
+  | { ok: false; error: string };
+
 
 export type PluginMarketplaceActionResult =
   | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
@@ -653,11 +672,11 @@ export type LvisApi = {
     personaPromptId?: string,
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
-  chatNew: () => Promise<{ ok: true }>;
-  chatSessions: (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; routineFiredAt?: string; branchedFromCompactNum?: number }> }>;
+  chatNew: (opts?: { projectRoot?: string; projectName?: string }) => Promise<{ ok: true }>;
+  chatSessions: (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; routineFiredAt?: string; projectRoot?: string; projectName?: string; branchedFromCompactNum?: number }> }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
-  chatGetHistory: () => Promise<{ sessionId: string; sessionTitle?: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; messages: SerializedHistoryMessage[] }>;
+  chatGetHistory: () => Promise<{ sessionId: string; sessionTitle?: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; projectRoot?: string; projectName?: string; messages: SerializedHistoryMessage[] }>;
   chatMainActiveState: () => Promise<{ mainActiveSessionId: string | null; mainActiveMode: "resume" | "fresh"; updatedAt: string } | null>;
   chatSessionHistory: (sessionId: string) => Promise<{
     ok: boolean;
@@ -666,6 +685,8 @@ export type LvisApi = {
     routineId?: string;
     routineTitle?: string;
     routineFiredAt?: string;
+    projectRoot?: string;
+    projectName?: string;
     messages: SerializedHistoryMessage[];
     /** Chars in the rolling summary preamble applied to this session. 0 = no preamble. */
     preambleChars?: number;
@@ -1018,6 +1039,7 @@ export type LvisApi = {
   onViewActivate: (h: (k: string) => void) => () => void;
   getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;
   getUsageRange: (opts: { dateFrom: string; dateTo: string }) => Promise<UsageSummaryShape>;
+  getUsageDailySummary: (input: UsageDailySummaryInput) => Promise<UsageDailySummaryResult>;
   exportUsageCsv: (rows: Array<Record<string, string | number>>) => Promise<{ ok: boolean; filePath?: string; canceled?: boolean }>;
   plugins: {
     getPerfStats: () => Promise<Record<string, PluginPerfStats>>;

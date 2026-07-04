@@ -53,10 +53,12 @@ function untrustedEvent(): IpcMainInvokeEvent {
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 const mockAuditLogger = { log: vi.fn(), search: vi.fn(), getStats: vi.fn() };
+const mockGenerateText = vi.fn(async () => "AI daily summary");
 
 function makeMinimalDeps() {
   return {
     auditLogger: mockAuditLogger,
+    conversationLoop: { generateText: mockGenerateText },
     getMainWindow: () => null,
     // rest unused by usage domain
   } as unknown as import("../types.js").IpcDeps;
@@ -105,6 +107,44 @@ describe("lvis:usage:range", () => {
     const opts = { dateFrom: "2026-01-01", dateTo: "2026-01-31" };
     await invoke("lvis:usage:range", trustedEvent(), opts);
     expect(getUsageRange).toHaveBeenCalledWith(opts);
+  });
+});
+
+describe("lvis:usage:daily-summary", () => {
+  it("is registered", () => {
+    expect(handlers.has("lvis:usage:daily-summary")).toBe(true);
+  });
+
+  it("rejects unauthorized sender", async () => {
+    const result = await invoke("lvis:usage:daily-summary", untrustedEvent(), { date: "2026-07-04" });
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+  });
+
+  it("generates a constrained LLM daily summary from insight payload", async () => {
+    const result = await invoke("lvis:usage:daily-summary", trustedEvent(), {
+      date: "2026-07-04",
+      locale: "ko-KR",
+      sessions: [{ title: "프로젝트 작업" }],
+      starred: [{ role: "assistant", text: "중요한 결정" }],
+      usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cost: 0.001 },
+    }) as { ok: boolean; summary?: string };
+
+    expect(result).toMatchObject({ ok: true, summary: "AI daily summary" });
+    expect(mockGenerateText).toHaveBeenCalledWith(
+      expect.stringContaining("\"date\":\"2026-07-04\""),
+      expect.stringContaining("LVIS Insights"),
+    );
+    expect(mockGenerateText).toHaveBeenCalledWith(
+      expect.stringContaining("\"totalTokens\":120"),
+      expect.any(String),
+    );
+  });
+
+  it("returns a fail-closed result when the LLM summary call fails", async () => {
+    mockGenerateText.mockRejectedValueOnce(new Error("LLM provider not configured"));
+    const result = await invoke("lvis:usage:daily-summary", trustedEvent(), { date: "2026-07-04" });
+
+    expect(result).toEqual({ ok: false, error: "LLM provider not configured" });
   });
 });
 

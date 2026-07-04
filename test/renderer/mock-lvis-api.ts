@@ -467,6 +467,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     getRecentNotes: vi.fn(async () => []),
 
     getUsageSummary: vi.fn(async () => usage),
+    getUsageDailySummary: vi.fn(async () => ({ ok: false, error: "mock-unavailable" })),
     getAppInfo: vi.fn(async () => appInfo),
     // Routine v2 API
     listRoutinesV2: vi.fn(async () => []),

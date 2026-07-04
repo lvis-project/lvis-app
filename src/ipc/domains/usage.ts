@@ -6,7 +6,7 @@ import { ipcMain } from "electron";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
-import { handleUsageSummary, handleUsageRange } from "../handlers/usage.js";
+import { handleUsageSummary, handleUsageRange, handleUsageDailySummary, type UsageDailySummaryInput } from "../handlers/usage.js";
 
 export function registerUsageHandlers(deps: IpcDeps): void {
   const { auditLogger } = deps;
@@ -18,6 +18,11 @@ export function registerUsageHandlers(deps: IpcDeps): void {
   ipcMain.handle(CHANNELS.usage.range, async (e, opts: { dateFrom: string; dateTo: string }) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.usage.range, e); return UNAUTHORIZED_FRAME; }
     return handleUsageRange(opts);
+  });
+
+  ipcMain.handle(CHANNELS.usage.dailySummary, async (e, input: UsageDailySummaryInput) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.usage.dailySummary, e); return UNAUTHORIZED_FRAME; }
+    return handleUsageDailySummary(deps.conversationLoop, input);
   });
 
   ipcMain.handle(CHANNELS.usage.exportCsv, async (e, rows: Array<Record<string, string | number>>) => {

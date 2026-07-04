@@ -200,6 +200,54 @@ describe("ChatView", () => {
     });
   });
 
+  it("centers the empty chat composer dock in work mode", async () => {
+    const { container } = await renderApp({ hasApiKey: true });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("LVIS 에이전트가 준비되었습니다");
+      const dock = container.querySelector('[data-testid="session-todo-dock"]');
+      expect(dock).not.toBeNull();
+      expect(dock).toHaveClass("mx-auto");
+      expect(dock).toHaveClass("max-w-[58rem]");
+    });
+  });
+
+  it("keeps an active conversation composer on the full-width chat-mode dock", async () => {
+    const { container } = await renderApp({
+      hasApiKey: true,
+      history: {
+        sessionId: "sess-active-dock",
+        messages: [
+          { index: 0, role: "user", content: "활성 대화 질문" },
+          { index: 1, role: "assistant", content: "활성 대화 답변" },
+        ],
+      },
+      mainActiveState: {
+        mainActiveSessionId: "sess-active-dock",
+        mainActiveMode: "resume",
+        updatedAt: "2026-05-16T00:00:00.000Z",
+      },
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("활성 대화 답변");
+    });
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="app-mode-chat"]')!);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="app-mode-chat"]')?.getAttribute("aria-pressed")).toBe("true");
+      const dock = container.querySelector('[data-testid="session-todo-dock"]');
+      expect(dock).not.toBeNull();
+      expect(dock).toHaveClass("w-full");
+      expect(dock).toHaveClass("max-w-full");
+      expect(dock).not.toHaveClass("mx-auto");
+      expect(dock).not.toHaveClass("max-w-[58rem]");
+    });
+  });
+
   it("renders assistant text after stream text_delta event", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await act(async () => {

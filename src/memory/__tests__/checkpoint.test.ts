@@ -85,6 +85,30 @@ describe("appendCheckpoint", () => {
   });
 });
 
+describe("project metadata", () => {
+  it("persists project identity and filters session lists by projectRoot", async () => {
+    await mm.saveSession(SESSION_A, [{ role: "user", content: "project a" }]);
+    await mm.saveSession(SESSION_B, [{ role: "user", content: "project b" }]);
+    await mm.saveSessionMetadata(SESSION_A, {
+      sessionKind: "main",
+      projectRoot: "C:\\workspace\\alpha",
+      projectName: "alpha",
+    });
+    await mm.saveSessionMetadata(SESSION_B, {
+      sessionKind: "main",
+      projectRoot: "C:\\workspace\\beta",
+      projectName: "beta",
+    });
+
+    expect(mm.loadSessionMetadata(SESSION_A)).toMatchObject({
+      projectRoot: "C:\\workspace\\alpha",
+      projectName: "alpha",
+    });
+    expect(mm.listSessionsPage({ kind: "main", projectRoot: "C:\\workspace\\alpha" }).map((s) => s.id))
+      .toEqual([SESSION_A]);
+  });
+});
+
 // ── 2. setSummaryPreamble ─────────────────────────────────────────────────────
 
 describe("setSummaryPreamble", () => {

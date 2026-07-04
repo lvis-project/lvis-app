@@ -1,10 +1,13 @@
-import { Suspense } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import {
+  CalendarDays,
   Database,
   Download,
+  Folder,
   Home,
   KanbanSquare,
   KeyRound,
+  MessageSquareText,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -21,6 +24,7 @@ import { useTranslation } from "../../../i18n/react.js";
 import { getPluginViewLabel, toViewKey } from "../api-client.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
 import type { PluginUiExtension } from "../types.js";
+import type { SessionSummary } from "../hooks/use-sessions.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -62,6 +66,14 @@ export interface SidebarProps {
   onToggleCurrentSessionStar: () => void | Promise<void>;
   /** Export the current session — fourth button in the cluster strip. */
   onExport: (format: "markdown" | "json") => void | Promise<void>;
+  /** Recent main-chat sessions shown under the current project group. */
+  sessions?: SessionSummary[];
+  /** Active chat session id for project conversation selection state. */
+  currentSessionId?: string;
+  /** Load a selected session from the project conversation list. */
+  onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
+  /** Start a new main-chat session scoped to the selected project root. */
+  onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
 }
 
 // ─── Platform bridge (darwin traffic-light line) ───────────────────────────────
@@ -301,6 +313,218 @@ function SectionDivider({ collapsed, label }: { collapsed: boolean; label?: stri
   );
 }
 
+// ─── Project sessions ───────────────────────────────────────────────────────
+
+const PROJECT_SESSION_LIMIT = 6;
+
+interface WorkspaceProject {
+  root: string;
+  name: string;
+  isDefault: boolean;
+}
+
+function basename(path: string): string {
+  const normalized = path.replace(/[\\/]+$/, "");
+  const parts = normalized.split(/[\\/]+/);
+  return parts[parts.length - 1] || path;
+}
+
+function formatRelativeSessionTime(modifiedAt: string, t: ReturnType<typeof useTranslation>["t"]): string {
+  const ms = Date.now() - new Date(modifiedAt).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 1) return t("sidebar.justNow");
+  if (minutes < 60) return t("sidebar.minutesAgo", { count: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return t("sidebar.hoursAgo", { count: hours });
+  const days = Math.floor(hours / 24);
+  return t("sidebar.daysAgo", { count: days });
+}
+
+function projectTestId(root: string, fallback: string): string {
+  const safe = (root || fallback).replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return safe || "default";
+}
+
+function uniqueWorkspaceProjects(defaultRoot: string | undefined, roots: Array<{ path: string; isDefault: boolean }>, fallbackName: string): WorkspaceProject[] {
+  const byRoot = new Map<string, WorkspaceProject>();
+  const add = (path: string | undefined, isDefault: boolean) => {
+    if (!path) return;
+    const root = path.trim();
+    if (!root || byRoot.has(root)) return;
+    byRoot.set(root, {
+      root,
+      name: basename(root) || fallbackName,
+      isDefault,
+    });
+  };
+  add(defaultRoot, true);
+  for (const root of roots) add(root.path, root.isDefault);
+  return Array.from(byRoot.values());
+}
+
+function useWorkspaceProjects(): WorkspaceProject[] {
+  const { t } = useTranslation();
+  const [projects, setProjects] = useState<WorkspaceProject[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.lvis?.workspace?.listRoots?.().then((result) => {
+      if (cancelled || !result?.ok) return;
+      const roots = Array.isArray(result.roots) ? result.roots : [];
+      setProjects(uniqueWorkspaceProjects(result.defaultRoot, roots, t("sidebar.currentProject")));
+    }).catch(() => {
+      // Keep the localized fallback; the sidebar must remain usable without the workspace bridge.
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
+
+  return projects;
+}
+
+function ProjectSessionList({
+  collapsed,
+  sessions,
+  currentSessionId,
+  streaming,
+  onLoadSession,
+  onNewChatForProject,
+}: {
+  collapsed: boolean;
+  sessions: SessionSummary[];
+  currentSessionId?: string;
+  streaming: boolean;
+  onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
+  onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const workspaceProjects = useWorkspaceProjects();
+  const mainSessions = useMemo(
+    () => sessions.filter((session) => session.sessionKind === "main"),
+    [sessions],
+  );
+  const projects = useMemo(() => {
+    const knownProjects = workspaceProjects.length > 0
+      ? workspaceProjects
+      : [{
+          root: "",
+          name: t("sidebar.currentProject"),
+          isDefault: true,
+        }];
+    const knownRoots = new Set(knownProjects.map((project) => project.root).filter(Boolean));
+    const unknownProjects = new Map<string, WorkspaceProject>();
+    for (const session of mainSessions) {
+      if (!session.projectRoot || knownRoots.has(session.projectRoot)) continue;
+      unknownProjects.set(session.projectRoot, {
+        root: session.projectRoot,
+        name: session.projectName || basename(session.projectRoot),
+        isDefault: false,
+      });
+    }
+    return [...knownProjects, ...unknownProjects.values()];
+  }, [mainSessions, t, workspaceProjects]);
+  const defaultProjectRoot = projects.find((project) => project.isDefault)?.root ?? projects[0]?.root ?? "";
+  const sessionsByProject = useMemo(
+    () => projects.map((project) => {
+      const projectSessions = mainSessions.filter((session) => {
+        const root = session.projectRoot ?? defaultProjectRoot;
+        return root === project.root;
+      });
+      return {
+        project,
+        recent: projectSessions.slice(0, PROJECT_SESSION_LIMIT),
+        overflow: Math.max(0, projectSessions.length - PROJECT_SESSION_LIMIT),
+      };
+    }),
+    [defaultProjectRoot, mainSessions, projects],
+  );
+
+  if (collapsed) {
+    return (
+      <NavItem
+        viewKey="project"
+        label={t("sidebar.projectsLabel")}
+        icon={<Folder className="h-4 w-4" />}
+        isActive={false}
+        onClick={() => {}}
+        collapsed
+        data-testid="sidebar-current-project"
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-1" data-testid="sidebar-projects">
+      {sessionsByProject.map(({ project, recent, overflow }, index) => (
+        <div key={project.root || "default-project"} className="space-y-1">
+          <button
+            type="button"
+            disabled={streaming}
+            className={[
+              "flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] font-medium text-foreground transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              streaming ? "cursor-not-allowed opacity-50" : "hover:bg-muted",
+            ].join(" ")}
+            title={t("sidebar.newProjectChat", { project: project.name })}
+            data-testid={index === 0 ? "sidebar-current-project" : `sidebar-project-${projectTestId(project.root, project.name)}`}
+            onClick={() => void onNewChatForProject?.({
+              ...(project.root ? { projectRoot: project.root } : {}),
+              projectName: project.name,
+            })}
+          >
+            <Folder className="h-4 w-4 shrink-0 text-primary" />
+            <span className="min-w-0 flex-1 truncate">{project.name}</span>
+            <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          </button>
+          <div className="ml-4 border-l border-border/(--opacity-half) pl-2">
+            {recent.length > 0 ? recent.map((session) => {
+              const active = session.id === currentSessionId;
+              const time = formatRelativeSessionTime(session.modifiedAt, t);
+              return (
+                <button
+                  type="button"
+                  key={session.id}
+                  disabled={streaming && !active}
+                  aria-current={active ? "page" : undefined}
+                  className={[
+                    "group flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    active
+                      ? "bg-primary/(--opacity-subtle) text-primary"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                    streaming && !active ? "cursor-not-allowed opacity-50" : "",
+                  ].filter(Boolean).join(" ")}
+                  data-testid={`sidebar-session-${session.id}`}
+                  onClick={() => void onLoadSession?.(session.id)}
+                >
+                  <MessageSquareText className="h-3.5 w-3.5 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">{session.title}</span>
+                  {time ? (
+                    <span className="shrink-0 text-[10px] text-muted-foreground/(--opacity-intense)">
+                      {time}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            }) : (
+              <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                {t("sidebar.noProjectSessions")}
+              </div>
+            )}
+            {overflow > 0 ? (
+              <div className="px-2 pt-1 text-[10px] text-muted-foreground">
+                {t("sidebar.moreSessions", { count: overflow })}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── ClusterStrip ──────────────────────────────────────────────────────────
 //
 // The horizontal button cluster that sits ON the OS traffic-light LINE, RIGHT
@@ -447,6 +671,7 @@ export function Sidebar({
   hasApiKey,
   onOpenSettings,
   onNewChat,
+  onNewChatForProject,
   streaming,
   onOpenMarketplace,
   marketplaceUrlReady = false,
@@ -456,6 +681,9 @@ export function Sidebar({
   isCurrentSessionStarred,
   onToggleCurrentSessionStar,
   onExport,
+  sessions = [],
+  currentSessionId,
+  onLoadSession,
 }: SidebarProps) {
   const { t } = useTranslation();
 
@@ -624,20 +852,22 @@ export function Sidebar({
             data-testid="sidebar-memory"
           />
           <NavItem
-            viewKey="starred"
-            label={t("mainToolbar.starred")}
-            icon={<Star className="h-4 w-4" />}
-            isActive={activeView === "starred"}
-            onClick={() => onSelect("starred")}
+            viewKey="insights"
+            label={t("mainToolbar.insights")}
+            icon={<CalendarDays className="h-4 w-4" />}
+            isActive={activeView === "insights" || activeView === "starred"}
+            onClick={() => onSelect("insights")}
             collapsed={compact}
-            data-testid="sidebar-starred"
+            data-testid="sidebar-insights"
           />
         </div>
 
-        {/* PLUGINS group — scrollable flex-1 */}
-        {pluginViews.length > 0 && (
+        {/* PLUGINS + PROJECTS group — scrollable flex-1 */}
+        {(
           <>
-            <SectionDivider collapsed={compact} label={compact ? undefined : t("sidebar.pluginsLabel")} />
+            {pluginViews.length > 0 ? (
+              <SectionDivider collapsed={compact} label={compact ? undefined : t("sidebar.pluginsLabel")} />
+            ) : null}
             <ScrollArea className="flex-1 min-h-0">
               <div className={`px-2 py-1 space-y-0.5 ${compact ? "flex flex-col items-center" : ""}`}>
                 {pluginViews.map((view) => {
@@ -656,13 +886,23 @@ export function Sidebar({
                     />
                   );
                 })}
+                <div className={compact ? "pt-1" : pluginViews.length > 0 ? "pt-2" : ""}>
+                  {!compact ? (
+                    <SectionDivider collapsed={false} label={t("sidebar.projectsLabel")} />
+                  ) : null}
+                  <ProjectSessionList
+                    collapsed={compact}
+                    sessions={sessions}
+                    currentSessionId={currentSessionId}
+                    streaming={streaming}
+                    onLoadSession={onLoadSession}
+                    onNewChatForProject={onNewChatForProject}
+                  />
+                </div>
               </div>
             </ScrollArea>
           </>
         )}
-
-        {/* Spacer when no plugin list (keeps footer pinned) */}
-        {pluginViews.length === 0 && <div className="flex-1" />}
       </div>
 
       {/* ── Footer — Home + Marketplace + Settings ───────────────────── */}
