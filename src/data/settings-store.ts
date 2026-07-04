@@ -6,7 +6,9 @@ import {
   SIDE_PANEL_DEFAULT_WIDTH,
   SIDE_PANEL_MIN_WIDTH,
   SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
+  SIDEBAR_DEFAULT_WIDTH,
   clampSidePanelSplitPercent,
+  clampSidebarWidth,
 } from "../shared/side-panel.js";
 import {
   sanitizePluginConfig,
@@ -366,6 +368,13 @@ export interface SystemSettings {
    */
   sidePanelWidth?: number;
   /**
+   * Persisted width (px) of the primary (left) navigation sidebar card, set by
+   * the inner-edge drag handle. Durable shell-layout preference; clamped to
+   * [SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH] at drag time in the renderer.
+   * Default 232 (matches the historical expanded rail padding reserve).
+   */
+  sidebarWidth?: number;
+  /**
    * Persisted TOP-pane percent of the workspace-rail vertical (list↕viewer)
    * split, one field per tab kind whose body is a list-over-viewer layout
    * (file-browser / preview / subagent). Clamped to the
@@ -550,6 +559,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     // LVIS_LOCAL_API=1). #1409/#1436.
     localApiServer: false,
     sidePanelWidth: SIDE_PANEL_DEFAULT_WIDTH,
+    sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
     sidePanelSplitFilePercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
     sidePanelSplitPreviewPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
     sidePanelSplitSubagentPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
@@ -782,6 +792,15 @@ export class SettingsService {
         log.warn(
           `system.sidePanelWidth patch ignored (received ${JSON.stringify(rawSidePanelWidth)}), keeping %s`,
           this.settings.system.sidePanelWidth,
+        );
+      }
+      const rawSidebarWidth = partial.system.sidebarWidth;
+      if (typeof rawSidebarWidth === "number" && Number.isFinite(rawSidebarWidth)) {
+        next.sidebarWidth = clampSidebarWidth(rawSidebarWidth);
+      } else if (rawSidebarWidth !== undefined) {
+        log.warn(
+          `system.sidebarWidth patch ignored (received ${JSON.stringify(rawSidebarWidth)}), keeping %s`,
+          this.settings.system.sidebarWidth,
         );
       }
       // Per-tab vertical split percents — each normalized independently through
@@ -1333,6 +1352,7 @@ function normalizeSystem(input: unknown): SystemSettings {
     appMode?: unknown;
     localApiServer?: unknown;
     sidePanelWidth?: unknown;
+    sidebarWidth?: unknown;
   } & Record<(typeof SIDE_PANEL_SPLIT_KEYS)[number], unknown>;
   // Each field is normalized independently: a missing/invalid field falls
   // back to its default while a valid sibling is preserved (mirrors the
@@ -1376,6 +1396,15 @@ function normalizeSystem(input: unknown): SystemSettings {
     log.warn(
       `system.sidePanelWidth invalid (received ${JSON.stringify(rawSidePanelWidth)}), using default %s`,
       SIDE_PANEL_DEFAULT_WIDTH,
+    );
+  }
+  const rawSidebarWidth = obj.sidebarWidth;
+  if (typeof rawSidebarWidth === "number" && Number.isFinite(rawSidebarWidth)) {
+    result.sidebarWidth = clampSidebarWidth(rawSidebarWidth);
+  } else if (rawSidebarWidth !== undefined) {
+    log.warn(
+      `system.sidebarWidth invalid (received ${JSON.stringify(rawSidebarWidth)}), using default %s`,
+      SIDEBAR_DEFAULT_WIDTH,
     );
   }
   for (const key of SIDE_PANEL_SPLIT_KEYS) {
