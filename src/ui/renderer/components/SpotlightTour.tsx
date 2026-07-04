@@ -1,36 +1,7 @@
-/**
- * Tutorial-C — `SpotlightTour` component.
- *
- * Renders the O-V2 Spotlight onboarding pattern from
- * `/tmp/login-lvis/index.html` §"Onb V2 — Spotlight (toggle B)":
- *   - A full-viewport 78% black overlay darkens the chat surface.
- *   - One anchor element is "spotlit" via a violet ring + glow drawn at
- *     its bounding rect.
- *   - A floating card sits beneath the anchor (or centred when the anchor
- *     is missing) with a `<step> / <total>` badge, title, body, dot
- *     pagination, "건너뛰기" (skip) and "다음 →" (next) actions.
- *
- * Keyboard contract:
- *   - `Esc`        → dismiss (calls `tour.dismiss`).
- *   - `→` / `Enter`→ advance to the next step. Final step "다음" calls
- *                    `tour.markComplete` and closes the tour.
- *   - `←`          → go back one step.
- *   - `1`..`9`     → jump to step N (when N ≤ steps.length). Out-of-range
- *                    keystrokes are ignored.
- *
- * State persistence: the component subscribes to `lvis:tour:start`
- * (`api.tour.onStart`) on mount; the host fans the event out to every
- * window. Completion / dismissal calls `api.tour.markComplete` /
- * `api.tour.dismiss`. The store at `~/.lvis/onboarding/tour-state.json`
- * is the authoritative source — the component never caches state across
- * mounts.
- *
- * Accessibility:
- *   - `role="dialog"` + `aria-modal="true"` on the card.
- *   - `aria-labelledby` points at the title, `aria-describedby` at body.
- *   - `<kbd>` chips emit `aria-label="shortcut: <label>"` so a SR reads
- *     "shortcut: Cmd plus K" rather than the literal glyph.
- */
+
+
+
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import {
@@ -90,13 +61,9 @@ export interface SpotlightTourProps {
    * real first plugin task without a dead-end UX transition.
    */
   onComplete?: (scenarioId: string) => void;
-  /**
-   * Z onboarding chain — fires when the user dismisses the tour
-   * BEFORE reaching the last step (Esc, backdrop click, "건너뛰기").
-   * The chain reducer uses this to still advance to the
-   * PluginShowcase stage so an early-skip user is not stranded on
-   * a half-finished chain.
-   */
+
+
+
   onDismiss?: (scenarioId: string) => void;
 }
 
@@ -297,10 +264,10 @@ export function SpotlightTour({
   // mounted, ignore the incoming broadcast instead of calling
   // `setActiveScenarioId` again. The downstream `useEffect [activeScenarioId]`
   // resets `stepIndex` to 0 and clears `dismissedRef`, so re-setting the
-  // same id visibly re-mounts the tour at step 0 — the "스팟하이라이트
-  // 시퀀스가 2번 노출" symptom. The chain side-effect in App.tsx already
+
+
   // carries an idempotency ref; this is defense-in-depth so external
-  // callers (⌘+Shift+/ help shortcut, PluginShowcase 둘러보기) also can't
+
   // re-mount the active tour.
   const activeScenarioIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -399,7 +366,7 @@ export function SpotlightTour({
       setActiveScenarioId(null);
       // Z onboarding chain — notify the host so the chain reducer
       // can still advance to PluginShowcase even when the user
-      // dismissed the tour early (Esc / backdrop / "건너뛰기").
+
       try {
         onDismiss?.(id);
       } catch {
@@ -460,8 +427,8 @@ export function SpotlightTour({
   // U8 — Interactive auto-advance. When the current step declares a
   // `completionTrigger`, attach a listener that fires `handleNext` the
   // moment the user performs the matching action. This is what makes
-  // the tour "쫓아다닌다" (follow the user) — typing in the composer or
-  // pressing ⌘+K advances the tour without the user clicking "다음".
+
+
   const triggerForStep: CompletionTrigger | undefined =
     scenario?.steps[stepIndex]?.completionTrigger;
   useEffect(() => {

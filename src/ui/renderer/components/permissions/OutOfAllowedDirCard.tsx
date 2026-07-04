@@ -1,24 +1,7 @@
-/**
- * Out-of-allowed-dir approval card.
- *
- * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 1.
- *
- * Renderer routes here when `ApprovalRequest.kind === "out-of-allowed-dir"`.
- * UX rules (security review M3 strengthening):
- *
- *   1. Three-button choice — "한 번만 허용" / "디렉토리 영구 추가" / "거부".
- *   2. "디렉토리 영구 추가" requires re-typed confirmation (phishing
- *      defense): user must re-type the suggested-parent directory path
- *      before the persist button is enabled.
- *   3. Adjacency warnings rendered as a red banner with explicit opt-in.
- *   4. Auto-suggest leaf-parent only — never the broadest common-prefix.
- *
- * Layered IPC: this component does NOT directly write settings. The
- * "디렉토리 영구 추가" choice is surfaced as
- * `choice: "allow-always" + rememberPattern: <suggestedParent>` so the
- * existing approval-respond pipeline carries the persist intent back to main,
- * where the permission-rule dispatcher validates and persists the directory.
- */
+
+
+
+
 import { useEffect, useState } from "react";
 import { Badge } from "../../../../components/ui/badge.js";
 import { Button } from "../../../../components/ui/button.js";

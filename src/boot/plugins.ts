@@ -1,15 +1,7 @@
-/**
- * Plugin orchestration helpers.
- *
- * - buildPluginConfigOverrides: 범용 API key 주입
- * - registerManifestEventSubscriptions / buildManifestEventHints: event hint helpers
- * - registerPluginNotifications: OS 알림 (manifest.notificationEvents)
- *
- * Tool registration is NOT here — every plugin registers through
- * `PluginLoopbackManager` (each plugin runs as an in-process MCP server), wired
- * in `boot/steps/plugin-runtime.ts`. The legacy `pluginToolsForRegistration`
- * adapter was removed in the MCP-alignment legacy-removal flag-day.
- */
+
+
+
+
 import { Notification } from "electron";
 import type { BrowserWindow } from "electron";
 import type { PluginRuntime } from "../plugins/runtime.js";

@@ -7,7 +7,7 @@
 // overlayItemsRef Map for items that persist after dismiss.
 //
 // Two source variants:
-//   - routine: primary action opens the exact routine conversation ("결과 보기")
+
 //     — only shown when routineSessionId is present (notification-only routines hide the button)
 //   - plugin (insertion-type): primary action deferred to onPluginPrimaryAction prop
 
@@ -34,7 +34,7 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
 
   if (active.source.kind === "routine") {
     const { routineId, firedAt } = active.source;
-    // Only show "결과 보기" when there is a routine conversation session.
+
     const hasSession = !!active.routineSessionId;
     return (
       <div

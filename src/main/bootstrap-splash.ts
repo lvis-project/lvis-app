@@ -36,11 +36,9 @@ export async function waitForMinimumBootstrapSplash() {
   }
 }
 
-/**
- * Bootstrap 동안 렌더러에 표시할 임시 splash HTML.
- * 실 index.html은 IPC 핸들러 등록 후에 로드된다 — 초기 useEffect IPC 호출이
- * 핸들러보다 앞서는 race 방지 (§M-race fix).
- */
+
+
+
 export const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8"><title>LVIS</title>
 <style>

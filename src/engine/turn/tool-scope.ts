@@ -33,7 +33,7 @@ export function rebuildToolSchemas(toolRegistry: ToolRegistry, scope: ToolScope)
           inputSchema: s.input_schema as ToolSchema["inputSchema"],
         });
       } catch (err) {
-        log.warn(`rebuildToolSchemas: tool '${s.name}' schema 변환 실패, 건너뜀: %s`, err);
+      log.warn(`rebuildToolSchemas: tool '${s.name}' schema conversion failed, skipping: %s`, err);
       }
     }
     return result;

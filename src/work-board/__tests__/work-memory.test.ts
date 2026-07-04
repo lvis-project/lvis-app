@@ -36,16 +36,16 @@ describe("work-memory", () => {
     expect(await readOrSeedUser(s)).toBe(USER_MD_SEED);
     expect(s.files[USER_FILE]).toBe(USER_MD_SEED);
 
-    s.files[USER_FILE] = "# 사용자 프로필\n- 역할: PM\n";
+    s.files[USER_FILE] = "# User Profile\n- Role: PM\n";
     // Second read returns the edit — the seed is never re-applied.
-    expect(await readOrSeedUser(s)).toBe("# 사용자 프로필\n- 역할: PM\n");
+    expect(await readOrSeedUser(s)).toBe("# User Profile\n- Role: PM\n");
   });
 
   it("appends body lines under a preserved header", async () => {
     const s = memStorage();
     await appendMemory(s, ["line A", "line B"]);
     const out = await readMemory(s);
-    expect(out).toContain("# 업무 흐름 메모리"); // header kept
+    expect(out).toContain("# Work Flow Memory"); // header kept
     expect(out).toContain("line A");
     expect(out).toContain("line B");
     expect(s.files[MEMORY_FILE]).toBeDefined();
@@ -66,7 +66,7 @@ describe("work-memory", () => {
     const out = await readMemory(s);
     const lines = out.split("\n").filter((l) => l.trim().length > 0);
     expect(lines.length).toBeLessThanOrEqual(MEMORY_LINE_CAP);
-    expect(out).toContain("# 업무 흐름 메모리"); // header survives
+    expect(out).toContain("# Work Flow Memory"); // header survives
     // Oldest entries dropped (FIFO); newest retained.
     expect(out).not.toContain("entry-0");
     expect(out).toContain(`entry-${MEMORY_LINE_CAP + 49}`);
@@ -77,11 +77,11 @@ describe("work-memory", () => {
     await appendMemory(s, Array.from({ length: 100 }, (_, i) => `m-${i}`));
     const ctx = await renderWorkContext(s, 12);
     expect(ctx.split("\n").length).toBeLessThanOrEqual(12);
-    expect(ctx).toContain("## 사용자");
+    expect(ctx).toContain("## User");
   });
 
   it("keeps project memory separate from the legacy global memory files", async () => {
-    const s = memStorage({ [MEMORY_FILE]: "# 업무 흐름 메모리\n\nglobal-only\n" });
+    const s = memStorage({ [MEMORY_FILE]: "# Work Flow Memory\n\nglobal-only\n" });
 
     await appendMemory(s, "project-only", { projectRoot: "C:\\workspace\\alpha" });
     const ctx = await renderWorkContext(s, 40, { projectRoot: "C:\\workspace\\alpha" });
@@ -96,7 +96,7 @@ describe("work-memory", () => {
   });
 
   it("lets the default workspace project include legacy unscoped work memory for migration", async () => {
-    const s = memStorage({ [MEMORY_FILE]: "# 업무 흐름 메모리\n\nlegacy-default\n" });
+    const s = memStorage({ [MEMORY_FILE]: "# Work Flow Memory\n\nlegacy-default\n" });
     await appendMemory(s, "default-project", { projectRoot: "C:\\workspace\\default", includeUnscoped: true });
 
     const ctx = await renderWorkContext(s, 80, {

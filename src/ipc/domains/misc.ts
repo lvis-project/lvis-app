@@ -155,7 +155,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   });
 
   // ─── App info ────────────────────────────────────
-  // Read-only host metadata for the Settings "일반" tab dashboard. Returns:
+
   //   - `version`: LVIS package.json version (single source of truth).
   //     Resolved via `shared/app-version.ts` so dev and packaged use the
   //     same logic that the bootstrap splash already relies on. We avoid
@@ -163,9 +163,9 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   //     `electron dist/src/main/main.js`) it returns the Electron binary
   //     version instead of the LVIS project version.
   //   - `electronVersion` / `nodeVersion` / `chromeVersion` / `v8Version`:
-  //     stack info from `process.versions` (visible in 시스템 섹션).
+
   //   - `platform` / `arch` / `userDataPath`: host environment used by the
-  //     OS label and 데이터 경로 row.
+
   // Read-only and idempotent; no sender guard required (mirrors
   // `lvis:settings:get` / `lvis:audit:stats`).
   ipcMain.handle(CHANNELS.app.info, async () => {

@@ -116,8 +116,8 @@ describe("plugin-ui-shell — CSP-safe external bootstrap", () => {
     // any *recoverable* failure; their presence is what makes the failure
     // mode visible instead of silent.
     expect(shellJs).toContain("lvisPlugin bridge missing");
-    expect(shellJs).toContain("Plugin UI 로딩 실패");
-    expect(shellJs).toContain("entry 조회 실패");
+    expect(shellJs).toContain("Plugin UI failed to load");
+    expect(shellJs).toContain("entry lookup failed");
     // Sanity: the bootstrap must still call the bridge entry-resolver.
     expect(shellJs).toMatch(/lvisPlugin\.getEntryUrl/);
     // File-backed entries must not be imported as file:// or blob: modules:

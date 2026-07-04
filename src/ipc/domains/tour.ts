@@ -1,22 +1,7 @@
-/**
- * Tour domain IPC handlers.
- *
- * Channels:
- *   `lvis:tour:get-state`       — read current tour state from
- *                                 `~/.lvis/onboarding/tour-state.json`.
- *   `lvis:tour:mark-complete`   — mark a scenario as completed.
- *   `lvis:tour:dismiss`         — record a dismissal (ESC / 건너뛰기).
- *   `lvis:tour:start`           — fan-out to every open window asking
- *                                 the renderer to launch a scenario.
- *
- * Error contract (project CLAUDE.md): kebab-case English `error` code +
- * English `message`. The renderer is responsible for translating to
- * Korean for the user.
- *
- * Storage namespace: `~/.lvis/onboarding/` per Storage Namespace per
- * Feature (project CLAUDE.md). The tour-state-store enforces 0o700
- * directory + 0o600 file modes.
- */
+
+
+
+
 import { ipcMain } from "electron";
 import { join } from "node:path";
 import {
@@ -36,13 +21,9 @@ import {
 } from "../../main/tour-state-store.js";
 import type { IpcDeps } from "../types.js";
 
-/**
- * Tutorial-X4 — onboarding context size cap. The renderer-synthesized
- * markdown should be a short, single-page hint (호칭 + installed plugins
- * + last tour). 4 KB is a generous ceiling — anything larger is almost
- * certainly a renderer bug, and we refuse rather than letting the system
- * prompt balloon.
- */
+
+
+
 const ONBOARDING_CONTEXT_MAX_BYTES = 4 * 1024;
 
 const log = createLogger("tour-ipc");
@@ -213,7 +194,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
   // (boot/conversation.ts) reads this file each turn and injects it as
   // section id=9.86 "User Onboarding Context" when non-empty. Renderer
   // calls this once after MemorySeedDialog dismissal with a brief markdown
-  // block (호칭 + installed plugins + last tour). Empty `content` is
+
   // treated as "clear" (write empty string) — keeps the file present so a
   // future read short-circuits cleanly.
   ipcMain.handle(

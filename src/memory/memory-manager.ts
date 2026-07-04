@@ -1,17 +1,7 @@
-/**
- * Memory Manager — 파일 기반 기억 구조
- *
- * ~/.lvis/ 파일 기반 메모리 시스템.
- * - AGENTS.md: 프로젝트·조직 컨텍스트 (관리자 배포 가능)
- * - user-preferences.md: 사용자 개인 선호
- * - memories/MEMORY.md: 부팅 시 적극 주입되는 메모리 인덱스
- * - memories/: 사용자 축적 기억
- * - sessions/: 대화 세션 JSONL *
- * 설계 원칙:
- * - 단순함 우선: 별도 기억 엔진·승격·만료 로직 없음
- * - 사용자 제어: 직접 확인·편집·삭제 가능
- * - 세션 독립: 파일은 영속, 인메모리는 휘발
- */
+
+
+
+
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, rmSync, statSync, renameSync, watch, type FSWatcher } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, resolve, basename } from "node:path";
@@ -36,7 +26,7 @@ function escapeRegExp(value: string): string {
 }
 
 export interface MemoryManagerOptions {
-  /** lvisHome() 기본, 테스트 시 override */
+
   lvisDir?: string;
 }
 
@@ -121,21 +111,14 @@ export interface SessionListEntry {
   branchedAt?: string;
 }
 
-/**
- * Checkpoint trigger reasons.
- * - "auto-compact": token preflight 가 LLM compact 를 실행
- * - "manual":      user explicitly triggered a checkpoint (e.g. /compact command)
- */
+
+
+
 export type CheckpointTrigger = "auto-compact" | "manual";
 
-/**
- * A checkpoint record written into a session's metadata when context is compacted.
- * Stores enough information to reconstruct the chain and resume with prior context.
- *
- * `summary` 는 `renderBoundaryAsPreamble()` 결과 (12-section structured)
- * 또는 raw fallback. 전체 `CompactBoundary` 객체는 module boundary (memory ⊥ engine)
- * 준수상 *in-memory only* — `MessageMeta.boundary` 에 frozen reference 로 보존됨.
- */
+
+
+
 export interface Checkpoint {
   /** Unique checkpoint identifier (any non-empty string; typically a UUID) */
   id: string;
@@ -394,9 +377,8 @@ function normalizeCheckpoint(raw: unknown): Checkpoint | null {
   if (r.summary !== null && typeof r.summary !== "string") return null;
   const msgCount = r.messageCountAtTrigger;
   if (typeof msgCount !== "number" || msgCount < 0 || !Number.isInteger(msgCount)) return null;
-  // `compactNum` 은 numbered checkpoint chain 의 #N. load 시 누락되면
-  // chain 깨짐 → 신규 record 만 set 되도록 optional 유지하되 정상 read.
-  // >= 0 허용 — enterViewMode/branchFromCheckpoint 가 compactNum=0 checkpoint 검색.
+
+
   const compactNum =
     typeof r.compactNum === "number" && r.compactNum >= 0 && Number.isInteger(r.compactNum)
       ? r.compactNum
@@ -486,7 +468,7 @@ export class MemoryManager {
   private get checkpointsDir(): string {
     return join(this.sessionsDir, ".checkpoints");
   }
-  // 부팅 시 로드되어 캐시되는 영속 기억
+
   private agentsMd: string = "";
   private memoryIndex: string = "";
   private userPreferences: string = "";
@@ -498,7 +480,7 @@ export class MemoryManager {
     this.ensureStructure();
   }
 
-  /** 부팅 시 호출 — 영속 기억을 메모리에 로드 */
+
   load(): void {
     this.agentsMd = this.readFile("AGENTS.md");
     this.memoryIndex = this.readMemoryIndex();
@@ -534,7 +516,7 @@ export class MemoryManager {
     this.persistentContextFileState.clear();
   }
 
-  // ─── Read API (SystemPromptBuilder에서 사용) ──────
+
 
   getAgentsMd(): string {
     return this.agentsMd;
@@ -549,17 +531,17 @@ export class MemoryManager {
     return this.userPreferences;
   }
 
-  /** memories/ 전체 목록 반환 */
+
   listMemoryEntries(options: ProjectScopedMemoryOptions = {}): NoteEntry[] {
     return this.readMarkdownEntries(this.memoryDir, options);
   }
 
-  /** memories/ 키워드 검색 — Agent Loop에서 on-demand 참조. Cap 50. */
+
   searchMemoryEntries(query: string, options: ProjectScopedMemoryOptions = {}): NoteEntry[] {
     return this.searchEntries(this.listMemoryEntries(options), query);
   }
 
-  /** sessions/ 키워드 검색 — 메모리 검색 패널용. Cap 50. */
+
   searchSessions(query: string, options: Pick<ListSessionsOptions, "kind" | "routineId" | "projectRoot" | "includeUnscoped"> = {}): SessionSearchEntry[] {
     // Require at least 2 chars to prevent accidental full-dump via empty/trivial query.
     if (query.trim().length < 2) return [];
@@ -613,12 +595,12 @@ export class MemoryManager {
     return results;
   }
 
-  /** memories/ 전체를 하나의 문자열로 — SystemPromptBuilder에서 사용 */
+
   getMemoryContext(options: ProjectScopedMemoryOptions = {}): string {
     return this.buildMarkdownContext(this.listMemoryEntries(options));
   }
 
-  /** sessions/ 최근 목록 — 검색 전에도 항목을 확인할 수 있도록 최근 세션을 노출한다. */
+
   listSessionEntries(limit = 50, options: Pick<ListSessionsOptions, "kind" | "routineId" | "projectRoot" | "includeUnscoped"> = {}): SessionSearchEntry[] {
     const UUID_RE = /^[0-9a-f-]{8,}$/i;
     return this.listSessions({ ...options, limit })
@@ -632,9 +614,9 @@ export class MemoryManager {
       }));
   }
 
-  // ─── Write API ("이거 기억해" 명령) ───────────────
 
-  /** 기억 저장 — 사용자가 "기억해" 하면 memories/에 저장 */
+
+
   async saveMemory(title: string, content: string, project: ProjectScopedMemoryOptions = {}): Promise<NoteEntry> {
     const filename = this.memoryFilenameForTitle(title);
     const projectRoot = normalizeMetadataString(project.projectRoot, MAX_PROJECT_ROOT_CHARS);

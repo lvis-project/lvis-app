@@ -318,10 +318,8 @@ export function buildInternalApiSurface() {
       ipcRenderer.on(CHANNELS.auth.progress, listener);
       return () => ipcRenderer.removeListener(CHANNELS.auth.progress, listener);
     },
-    // 2026-05-20 — Settings 가 별도 BrowserWindow 로 mount 되기 때문에 main
-    // window 의 onboarding chain / LoginModal 에 직접 dispatch 하지 못한다.
-    // `broadcast*` 는 main 에서 모든 window 로 fan-out 하는 cue, `on*` 은
-    // main window 의 App.tsx 가 subscribe 하는 listener. payload 가 없다.
+
+
     broadcastLogoutReset: async () =>
       ipcRenderer.invoke(CHANNELS.auth.logoutBroadcast) as Promise<
         | { ok: true }
@@ -482,9 +480,8 @@ export function buildInternalApiSurface() {
         | { ok: true }
         | { ok: false; error: "not-armed" | "unauthorized-frame" }
       >,
-    // 2026-05-20 — Settings 의 로그아웃 path. .env.demo 파일 + process.env
-    // LVIS_DEMO_* + captured demo state 를 한 번에 비워 다음 `status` 호출이
-    // `activated=false` 를 반환하도록 한다.
+
+
     clearDemo: async () =>
       ipcRenderer.invoke(CHANNELS.demo.clear) as Promise<
         | { ok: true }
@@ -579,7 +576,7 @@ export function buildInternalApiSurface() {
   },
   // Tutorial-X4 — Onboarding Context writer. Called once by the renderer
   // after the Memory Seed wizard dismisses with a short markdown block
-  // (호칭 + 자기소개 + installed plugin slugs). The host writes the file
+
   // under `~/.lvis/onboarding/onboarding-context.md`; the SystemPromptBuilder
   // then injects it as section id=9.86 "User Onboarding Context" on each
   // subsequent turn until the user clears it.
@@ -633,7 +630,7 @@ export function buildInternalApiSurface() {
     ipcRenderer.invoke(CHANNELS.host.pluginThemeNotify, payload),
 
   // Plugin-owned OAuth removed host-owned provider auth IPC bridges.
-  // 플러그인이 자체 인증을 소유한다.
+
 
 
   // ─── Memory ──────────────────────────────────────
@@ -811,7 +808,7 @@ export function buildInternalApiSurface() {
   // a permanent badge next to the Home button so the user always sees the
   // current state, not a transient toast. The two action commands are
   // user-gated — `downloadAppUpdate` is only called from a badge click,
-  // never automatically (사용자 명시 클릭 전엔 절대 다운로드 금지).
+
   // UpdateState type imported from the SoT at src/shared/update-state.ts
   // so adding a new variant only needs editing that one file.
   onAppUpdateState: (

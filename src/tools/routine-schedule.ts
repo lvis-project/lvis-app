@@ -4,9 +4,9 @@
  * (persisted to `~/.lvis/routine/routines.json`) and fires via the RoutinesScheduler.
  *
  * NOTE: This tool registers a *routine* (a future-firing self-trigger).
- * It is NOT a calendar / 일정 조회 tool — calendar event queries are served by
+ * It is NOT a calendar-event lookup tool — calendar event queries are served by
  * the ms-graph plugin. Naming intentionally puts "routine" first to avoid the
- * "schedule" verb colliding with "캘린더 일정" requests in LLM tool selection.
+ * "schedule" verb colliding with calendar-event requests in LLM tool selection.
  *
  * Execution modes:
  *   - "llm-session"       → starts a ConversationLoop with prePrompt
@@ -18,16 +18,16 @@
  *   3. Natural language: LLM fills the structured fields after parsing user intent
  *
  * Examples
- *   매일 오전 9시 데일리 리포트:
+ *   Daily report at 09:00 every morning:
  *     { execution:"llm-session", schedule:{ at:"2026-05-09T09:00:00+09:00",
- *       repeat:{kind:"daily"} }, prePrompt:"오늘의 데일리 리포트 작성", title:"데일리 리포트" }
+ *       repeat:{kind:"daily"} }, prePrompt:"Write today's daily report", title:"Daily report" }
  *
- *   매주 월요일 9시 업무 정리:
+ *   Weekly work summary at 09:00 every Monday:
  *     { execution:"llm-session", schedule:{ at:"...", repeat:{kind:"weekly"} }, ... }
  *
- *   크론 표현식 직접:
+ *   Direct cron expression:
  *     { execution:"notification-only", schedule:{ repeat:{kind:"cron",
- *       expression:"0 9 * * 1"} }, notificationTitle:"월요일 알림" }
+ *       expression:"0 9 * * 1"} }, notificationTitle:"Monday reminder" }
  */
 import { t } from "../i18n/index.js";
 import { createDynamicTool, type Tool } from "./base.js";

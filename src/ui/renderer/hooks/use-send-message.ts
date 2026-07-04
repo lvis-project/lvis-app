@@ -122,10 +122,8 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       }
       // Renderer only performs UX-level shortcuts for typed composer input.
       // Main owns the authoritative trust-origin classification.
-      // queue-auto path 는 slash command 분기 우회 — 큐에 누적된 /compact,
-      // /load 가 silent execute 되는 회귀 차단 (Round 3 critic C1-NEW).
-      // 큐는 단순 user message inject 로만 동작 — slash command literal 은
-      // LLM 에 plain text 로 전달.
+
+
       if (mode === "default" && opts?.inputOrigin !== "queue-auto") {
         if (await handleCompactCommand(trimmed)) {
           if (debugStreamEnabled) debugLog("handleAsk", "skip:compact-command-handled");
@@ -163,9 +161,8 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         ? composeImportedTriggerOutgoing(trimmed)
         : composeOutgoing(trimmed);
       const outgoing = composed.text;
-      // queue-auto path 는 큐 schema (텍스트 only) 라 사용자가 별도로 추가한
-      // 첨부 파일이 따라가면 mental model 위배 + silent corruption (Round 3
-      // code-reviewer CRITICAL). queue-auto 시 attachments 강제 빈 배열.
+
+
       let outgoingAttachments = opts?.inputOrigin === "queue-auto" ? [] : composed.attachments;
       // Vendor vision capability gate. The composer accepts images
       // regardless of the active model so the user can switch models
@@ -203,9 +200,8 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
             : mode === "trigger-import"
               ? "plugin-emitted"
               : "user-keyboard",
-          // queue-auto path 는 user gesture 없이 IPC stream context 에서
-          // 발생하므로 userIntent 전달 안 함 (validator 가 userActivation
-          // 검사 우회).
+
+
           opts?.inputOrigin === "queue-auto"
             ? undefined
             : mode === "default" ? userIntent : undefined,

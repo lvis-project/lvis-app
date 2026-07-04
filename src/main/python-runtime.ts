@@ -26,7 +26,7 @@ import { trackManagedChildProcess } from "./managed-child-processes.js";
 import { resolveBundledUvBinaryPath } from "./uv-runtime.js";
 const log = createLogger("python-runtime");
 
-// ─── 타입 ────────────────────────────────────────────
+
 
 export type BootstrapPhase =
   | "pending"
@@ -53,7 +53,7 @@ interface ReadySentinel {
   pythonVersion: string;
 }
 
-// ─── 상수 ────────────────────────────────────────────
+
 
 const LVIS_RUNTIME_DIR = path.join(lvisHome(), "runtime");
 const UV_STDERR_TAIL_LIMIT_CHARS = 12_000;
@@ -62,7 +62,7 @@ const UV_STDERR_TAIL_LIMIT_CHARS = 12_000;
 // (issue #713) when ~/.lvis and %LOCALAPPDATA% live on different drives via
 // junction / OneDrive redirect / profile migration.
 
-// requirements.lock 위치: 설치된 플러그인 manifest 디렉토리 또는 명시 선언.
+
 const LOCK_FILE_RESOURCE_NAME = "python-requirements.lock";
 const runtimeSetupLocks = new Map<string, Promise<RuntimeResult>>();
 
@@ -139,10 +139,9 @@ export class PythonRuntimeBootstrapper {
     return path.join(this.venvDir(), ".ready");
   }
 
-  /**
-   * Python 런타임이 준비될 때까지 기다린다.
-   * .ready sentinel이 있으면 즉시 resolve (두 번째 이후 부팅 < 50ms).
-   */
+
+
+
   async ensureReady(mainWindow: BrowserWindow): Promise<RuntimeResult> {
     this.mainWindow = mainWindow;
     this.getCurrentUvTarget();
@@ -243,7 +242,7 @@ export class PythonRuntimeBootstrapper {
   private async setupIfStillNeeded(result: RuntimeResult): Promise<RuntimeResult> {
     if (!this.options.forceSetup && await this.checkSentinel()) {
       this.sendStatus({ phase: "ready", msg: t("be_pythonRuntime.statusReadyCached"), pct: 100 });
-      await this.log("[python-runtime] .ready sentinel 확인 — skip setup");
+      await this.log("[python-runtime] .ready sentinel found — skip setup");
       return result;
     }
 
@@ -304,7 +303,7 @@ export class PythonRuntimeBootstrapper {
     // Step 6: sentinel 기록
     const uvVersionStr = uvVersion.trim().split("\n")[0] ?? "unknown";
     await this.writeSentinel(uvVersionStr, pythonVersion);
-    await this.log(`[python-runtime] .ready sentinel 기록 완료 — python: ${pythonVersion}`);
+    await this.log(`[python-runtime] .ready sentinel written — python: ${pythonVersion}`);
 
     this.sendStatus({ phase: "ready", msg: t("be_pythonRuntime.statusReady"), pct: 100 });
   }

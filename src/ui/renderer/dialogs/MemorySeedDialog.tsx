@@ -1,33 +1,7 @@
-/**
- * MemorySeedDialog (Tutorial-B / O-X2 시안) — first-boot Memory Seed wizard.
- *
- * Replaces the legacy OnboardingDialog (#893) on the first-boot surface.
- * The wizard captures (a) the user's preferred 호칭 and (b) a one-line
- * self-introduction, persists both into `~/.lvis/memories/MEMORY.md`
- * Urgent Memory section via `api.memoryUpdateIndexSections`, then chains
- * into the SpotlightTour by broadcasting `api.tour.start("first-boot-essentials")`.
- *
- * Design contract (mockup `O-X2 Memory Seed` in `/tmp/login-lvis/index.html`):
- *   - Brand header ✦ "LVIS — 기억을 시작합니다"
- *   - LVIS welcome card explaining MEMORY.md
- *   - Name input + 2-line self-intro textarea
- *   - Live "✨ 분석 결과" gradient card with recommended-plugin chips
- *     (driven by `inferRecommendedPlugins`)
- *   - "기억하고 시작하기" CTA (violet→blue gradient) and "건너뛰기" ghost
- *
- * Storage:
- *   - Self-intro + 호칭 → MEMORY.md Urgent Memory section (single
- *     deterministic line; persists across reboots via MemoryManager.load()).
- *   - `features.onboardingCompleted = true` always flips on dismissal so
- *     the wizard never re-renders. Re-entry is handled by ⌘+Shift+/ which
- *     fires `api.tour.start` (the same SpotlightTour scenario this wizard
- *     auto-launches on submit).
- *
- * Error contract: every IPC call is best-effort with try/catch — disk
- * failures must never trap the user on the first-boot dialog. The English
- * IPC error codes from the host are intentionally swallowed because the
- * UX requirement is "always advance to the chat surface".
- */
+
+
+
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Dialog, DialogContent } from "../../../components/ui/dialog.js";
@@ -52,12 +26,9 @@ export interface MemorySeedDialogProps {
    */
   api: Pick<LvisApi, "memoryUpdateIndexSections" | "tour" | "updateSettings"> & {
     tutorialInstallPlugin?: LvisApi["tutorialInstallPlugin"];
-    /**
-     * Tutorial-X4 — optional onboarding-context writer. When wired the
-     * wizard writes a short markdown synth (호칭 + 자기소개 + clicked
-     * install requests) so the SystemPromptBuilder injects it as section
-     * id=9.86 on every subsequent turn. Omitted in tests/fixtures.
-     */
+
+
+
     onboardingContextSet?: LvisApi["onboardingContextSet"];
   };
   /** Called after dismissal (Submit or Skip). Flips `features.onboardingCompleted`. */
@@ -113,17 +84,9 @@ export function composeUrgentMemorySeed(name: string, intro: string): string {
   return lines.join("\n");
 }
 
-/**
- * Tutorial-X4 — compose the markdown block the host writes to
- * `~/.lvis/onboarding/onboarding-context.md`. The SystemPromptBuilder
- * picks this up as section id=9.86 so the LLM's first post-onboarding
- * turn can greet the user by 호칭, reference their 자기소개, and suggest
- * tasks bound to the plugins the user just chose to install.
- *
- * Pure for unit testability — caller composes from the same state the
- * Memory Seed wizard collected. Returns "" when nothing useful would be
- * emitted so the system-prompt section silently drops out.
- */
+
+
+
 export function composeOnboardingContext(
   name: string,
   intro: string,
@@ -278,7 +241,7 @@ export function MemorySeedDialog({
         />
 
         <div className="px-6 pb-6 space-y-3">
-          {/* LVIS welcome message card — MEMORY.md 첫 항목 안내 */}
+
           <div className="rounded-lg bg-[hsl(var(--muted))] px-3 py-3 text-[12.5px] leading-relaxed">
             <b>{t("memorySeedDialog.cardHeading")}</b>
             <br />

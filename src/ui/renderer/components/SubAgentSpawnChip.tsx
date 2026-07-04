@@ -1,19 +1,7 @@
-/**
- * SubAgentSpawnChip — lightweight main-chat completion notice for a sub-agent
- * spawn, attached beneath the `agent_spawn` tool row in the main transcript.
- *
- * The design (PR3) makes the `agent_spawn` tool call the SOLE inline surface:
- *   - INPUT  — the task (rendered by the normal ToolGroupCard row).
- *   - OUTPUT — this chip: a compact "완료 / 실패" notice + turn/tool counts.
- *   - DETAIL — the full child transcript (tool + reasoning + assistant timeline)
- *              lives in the sub-agent tab (SubAgentViewer), rendered through the
- *              shared TranscriptRenderer.
- *
- * The previous inline `SubAgentCard` (a second full expandable transcript wedged
- * into the main flow) is removed: it duplicated the tab's content and, being
- * stacked, reproduced the 2026-05-07 "user misses it at the top" regression. The
- * chip is a one-line notice, not a transcript.
- */
+
+
+
+
 import { Bot, CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import type { SubAgentSpawn } from "./SubAgentCard.js";
@@ -57,7 +45,7 @@ export function SubAgentSpawnChip({ spawn }: { spawn: SubAgentSpawn }) {
       )}
       {/* Detail affordance: the full child transcript lives in the sub-agent
           tab. We label it here so the user knows where to look, matching the
-          "자세히 → 탭" spec intent without prop-drilling tab-focus state through
+          detail-tab spec intent without prop-drilling tab-focus state through
           the whole transcript render tree. */}
       <span className="shrink-0 opacity-60" data-testid="sub-agent-chip-detail-hint">
         {t("subAgentCard.detailInTab")}

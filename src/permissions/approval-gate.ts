@@ -1,16 +1,7 @@
-/**
- * Approval Gate — §6.3 Layer 3 + §8 Agent Approval System
- *
- * Main process 서비스. "ask" 판정이 발생하면 렌더러에 요청을 보내고
- * 사용자 응답이 돌아올 때까지 ConversationLoop turn을 블로킹.
- *
- * - 동시 복수 요청: Map으로 격리 (requestId 키).
- * - 타임아웃: 기본 5분 → deny-once 반환.
- * - requireExplicit: PolicyFile.requireExplicitApproval을 그대로 렌더러로 전달,
- *   dismiss/Escape 동작을 renderer에서 분기.
- * - §A2: webContents 소멸 체크 + send 예외 처리 → deny-once + pending 정리.
- * - §S8: AuditLogger DI — requested/decided/timeout/send-failed 4개 phase 기록.
- */
+
+
+
+
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { WebContents } from "electron";
 import { t } from "../i18n/index.js";
@@ -28,10 +19,10 @@ import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import type { ApprovalPurposeSuggestion } from "../shared/permission-review-status.js";
 
 // ─── Args DLP masking ────────────────────────────────
-// Approval 모달에 전달되는 tool args 내 민감정보(API key, 이메일, 전화번호,
-// 주민등록번호, 신용카드 등)를 UI 표시용으로만 마스킹한다. 원본 args 는
-// executor 가 별도로 보유한 toolUse.input 을 그대로 사용하므로 실행 경로에는
-// 영향이 없다.
+
+
+
+
 function maskArgsForDisplay(value: unknown, detections: Set<string>): unknown {
   if (typeof value === "string") {
     const { masked, detections: hits } = maskSensitiveData(value);
@@ -60,7 +51,7 @@ function maskApprovalPurposeForDisplay(
   return { ...purpose, text: masked };
 }
 
-// ─── 공개 타입 ────────────────────────────────────────
+
 
 /**
  * Permission mode hint passed alongside an ApprovalRequest. Drives the
@@ -105,7 +96,7 @@ export interface ApprovalRequest {
   /** Manifest-declared plugin approval scope for agent-action requests. */
   approvalScope?: string;
   createdAt: number;
-  /** PolicyFile.requireExplicitApproval — renderer가 dismiss 동작을 분기하는 데 사용 */
+
   requireExplicit: boolean;
   /**
    * Permission policy P2.5 — Layer 1 directory-confirm payload. Present iff
@@ -206,7 +197,7 @@ export type ApprovalChoice =
 export interface ApprovalDecision {
   requestId: string;
   choice: ApprovalChoice;
-  /** allow-always / deny-always 일 때 영구화 패턴 (기본: 도구 이름 exact) */
+
   rememberPattern?: string;
   /**
    * One-shot structured content captured by renderer-only approval surfaces.
@@ -228,12 +219,12 @@ export interface ApprovalDecision {
   hmac?: string;
 }
 
-// ─── IPC 채널 이름 (안정 상수) ────────────────────────
+
 
 export const IPC_APPROVAL_REQUEST = "lvis:approval:request";
 export const IPC_APPROVAL_RESPOND = "lvis:approval:respond";
 
-// ─── Pending 항목 ────────────────────────────────────
+
 
 interface PendingEntry {
   resolve: (decision: ApprovalDecision) => void;

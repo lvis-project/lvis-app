@@ -69,7 +69,7 @@ function getFirstTaskProposals(): readonly FirstTaskProposal[] {
     },
     {
       // The marketplace package slug is `lvis-plugin-work-assistant`
-      // (the published repo name); the user-facing brand is 업무 도우미.
+
       // The installed-plugin set is keyed by the bare manifest id, so
       // pluginId here is the manifest id (not the slug) for the lookup.
       pluginId: "work-assistant",

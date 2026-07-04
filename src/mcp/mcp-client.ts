@@ -1,31 +1,7 @@
-/**
- * MCP Client — §9.5 Transports (stdio + Streamable HTTP)
- *
- * JSON-RPC 2.0 기반 MCP 서버 연결. Transport 전략 패턴으로 stdio와
- * Streamable HTTP (spec revision 2025-03-26) 를 지원한다.
- *
- * 프로토콜 핸드셰이크 (transport 무관):
- *   1. → initialize (client capabilities)
- *   2. ← ServerCapabilities response
- *   3. → notifications/initialized
- *   4. → tools/list
- *   5. ← tool schemas
- *   6. → tools/call (runtime)
- *
- * Transport 선택:
- *   - `stdio`: subprocess + Content-Length framed JSON-RPC on stdin/stdout.
- *   - `http` : POST JSON-RPC to a single URL. Response is either
- *              `application/json` (single response) or `text/event-stream`
- *              (streaming — last `message` event carries the response).
- *              URL은 NetworkGuard(Tier A2)로 사전 검증해 SSRF 차단.
- *
- * 안전 원칙:
- * - MCP 서버 crash가 호스트 앱을 crash하지 않음 (프로세스/요청 격리)
- * - 모든 연결/호출은 McpGovernance를 통해 사전 검증
- * - HTTP transport는 NetworkGuard를 통과하지 못하면 `network guard:` 접두사
- *   NetworkGuardError 로 거부
- * - 도구는 mcp_{prefix}_{name} 네임스페이스로 ToolRegistry에 등록
- */
+
+
+
+
 import { spawn, type ChildProcess } from "node:child_process";
 import type {
   McpHttpServerConfig,
@@ -262,7 +238,7 @@ const MCP_APPS_UI_EXTENSION = "io.modelcontextprotocol/ui";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.mcpRequestDefaultMs;
 const MAX_REQUEST_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.mcpRequestMaxMs;
-const HANDSHAKE_TIMEOUT_MS = 10_000; // discover / initialize / tools/list 핸드셰이크용
+const HANDSHAKE_TIMEOUT_MS = 10_000;
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
 const MAX_BUFFERED_RESPONSES = 128;
 /**
@@ -325,7 +301,7 @@ interface PendingRequest {
 export class McpClient {
   private nextRequestId = 1;
   private readonly pendingRequests = new Map<number, PendingRequest>();
-  /** 응답이 pending 등록 전에 도착한 경우를 위한 버퍼 (race condition 대응) */
+
   private readonly bufferedResponses = new Map<number, JsonRpcResponse>();
   private healthTimer: NodeJS.Timeout | null = null;
   private transport: McpTransport | null = null;
@@ -384,9 +360,9 @@ export class McpClient {
 
   // ─── Lifecycle ──────────────────────────────────────
 
-  /** 서버 연결 + 핸드셰이크 + 도구 등록 */
+
   async connect(): Promise<void> {
-    // Layer 1-2: 거버넌스 검증
+
     const validation = this.governance.validateServer(this.config);
     if (!validation.valid) {
       this.state.status = "error";
@@ -438,7 +414,7 @@ export class McpClient {
             server: `${discover.serverInfo.name}@${discover.serverInfo.version}`,
             apps: this.appsUiAdvertised,
           },
-          `${this.config.id} RC discover 완료`,
+      `${this.config.id} RC discovery completed`,
         );
       } catch (err) {
         // Documented dual-era exception (design §0): an EXTERNAL pre-RC server
@@ -466,7 +442,7 @@ export class McpClient {
             server: `${initResult.serverInfo.name}@${initResult.serverInfo.version}`,
             era: "legacy",
           },
-          `${this.config.id} legacy initialize 완료 (dual-era exception)`,
+      `${this.config.id} legacy initialize completed (dual-era exception)`,
         );
       }
 
@@ -498,7 +474,7 @@ export class McpClient {
       this.startHealthCheck();
 
       log.info(
-        `${this.config.id} 연결 완료: ${this.state.registeredTools.length}개 도구 등록`,
+      `${this.config.id} connected: ${this.state.registeredTools.length} tools registered`,
       );
     } catch (err) {
       this.state.status = "error";
@@ -524,7 +500,7 @@ export class McpClient {
 
     this.state.status = "disconnected";
     this.state.lastError = undefined;
-    log.info(`${this.config.id} 연결 해제 완료`);
+    log.info(`${this.config.id} disconnected`);
   }
 
   // ─── Tool Execution ─────────────────────────────────
@@ -886,7 +862,7 @@ export class McpClient {
   }
 
   private handleTransportClose(reason: string): void {
-    if (this.state.status === "disconnected") return; // 정상 종료
+    if (this.state.status === "disconnected") return; // normal shutdown
 
     this.state.status = "error";
     this.state.lastError = reason;
@@ -1022,7 +998,7 @@ export class McpClient {
   private checkHealth(): void {
     const transport = this.transport;
     if (!transport || !transport.isAlive()) {
-      log.warn(`${this.config.id} health check 실패: transport 비활성`);
+      log.warn(`${this.config.id} health check failed: transport inactive`);
       this.handleTransportClose(t("be_mcpClient.healthCheckTransportInactive"));
       return;
     }
@@ -1343,7 +1319,7 @@ class StdioTransport implements McpTransport {
       try {
         this.handleStdout(chunk);
       } catch (err) {
-        log.error(`${this.config.id} stdout 처리 오류: %s`, err);
+      log.error(`${this.config.id} stdout processing error: %s`, err);
       }
     });
 
@@ -1356,7 +1332,7 @@ class StdioTransport implements McpTransport {
     });
 
     this.process.on("exit", (code, signal) => {
-      log.warn(`${this.config.id} 프로세스 종료: code=${code}, signal=${signal}`);
+      log.warn(`${this.config.id} process exited: code=${code}, signal=${signal}`);
       // Fire ASRT cleanup on ANY child termination,
       // including unexpected crashes/kills. The idempotent one-shot helper ensures
       // this and the explicit close() path do not double-run the cleanup.
@@ -1367,7 +1343,7 @@ class StdioTransport implements McpTransport {
     });
 
     this.process.on("error", (err) => {
-      log.error(`${this.config.id} 프로세스 오류: %s`, err.message);
+      log.error(`${this.config.id} process error: %s`, err.message);
       // Same idempotent cleanup for the error path (spawn failure, broken pipe).
       this.runAsrtCleanupOnce();
       this.closeHandler?.(t("be_mcpClient.processError", { message: err.message }));
@@ -1412,7 +1388,7 @@ class StdioTransport implements McpTransport {
         const parsed = JSON.parse(messageStr) as JsonRpcResponse;
         this.messageHandler?.(parsed);
       } catch {
-        log.warn(`${this.config.id} JSON 파싱 실패: %s`, messageStr.slice(0, 200));
+        log.warn(`${this.config.id} JSON parse failed: %s`, messageStr.slice(0, 200));
       }
     }
   }
@@ -1607,7 +1583,7 @@ class HttpTransport implements McpTransport {
       // Fire-and-forget stream reader — messages arrive asynchronously
       // through the normal `onMessage` path, matching stdio semantics.
       void this.consumeSse(response, controller).catch((err) => {
-        log.warn(`${this.config.id} SSE 읽기 오류: %s`, err);
+        log.warn(`${this.config.id} SSE read error: %s`, err);
         // A failed SSE stream means the transport is effectively dead;
         // pending requests would otherwise only time out individually.
         // Signal the client so it can reject everything and transition to
@@ -1717,7 +1693,7 @@ class HttpTransport implements McpTransport {
       const parsed = JSON.parse(payload) as JsonRpcResponse;
       this.messageHandler?.(parsed);
     } catch {
-      log.warn(`${this.config.id} SSE JSON 파싱 실패: %s`, payload.slice(0, 200));
+        log.warn(`${this.config.id} SSE JSON parse failed: %s`, payload.slice(0, 200));
     }
   }
 }

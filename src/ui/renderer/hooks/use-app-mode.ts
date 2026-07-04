@@ -54,7 +54,7 @@ export function useAppMode(api: Api): UseAppModeResult {
   // the effect below): work expands it, chat collapses it — a per-transition
   // default, NOT a lock.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readInitialAppMode() === "chat");
-  // The 도구 활동 (Tool Activity) panel defaults to its collapsed rail: on a
+
   // fresh launch the full expanded card should not auto-show — the user opens it
   // on demand. (Only rendered in work mode; see the appMode gate at its mount.)
   const [actionPanelOpen, setActionPanelOpen] = useState(false);

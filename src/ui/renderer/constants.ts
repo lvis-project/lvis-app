@@ -136,8 +136,8 @@ export function budgetToEffortIndex(budget: number): number {
 }
 
 // Ordered most-restrictive → least-restrictive so the policy picker reads as a
-// single descending-strictness axis: 전체 확인(strict) → 쓰기 확인(default) →
-// 자동 검증(auto, LLM reviewer) → 모두 허용(allow). The reviewer engine is
+
+
 // auto-wired from this mode (handleModeChange), so this is the only permission
 // axis the user sets.
 export const EXEC_MODE_OPTIONS: { value: ExecMode; readonly label: string; readonly description: string }[] = [

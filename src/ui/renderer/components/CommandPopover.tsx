@@ -10,7 +10,7 @@ export type { QuickAction } from "./command-actions.js";
 const LazyCommandPopoverPanel = lazy(() => import("./CommandPopoverPanel.js"));
 
 export interface CommandPopoverProps {
-  /** Quick-action items (홈, 루틴, 설정, 새 대화, plugin views …) */
+
   actions: QuickAction[];
   /** Called when a slash command is selected; receives the command string with a trailing space e.g. "/help " */
   onInsert: (cmd: string) => void;
