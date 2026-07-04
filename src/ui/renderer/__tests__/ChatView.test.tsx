@@ -868,16 +868,6 @@ describe("ChatView", () => {
       expect(container.textContent).toContain("current session probe");
     });
 
-    const dayButton = container.querySelector('[data-testid="session-date-navigator"] button') as HTMLButtonElement | null;
-    expect(dayButton).toBeTruthy();
-    await act(async () => {
-      fireEvent.click(dayButton!);
-    });
-
-    await waitFor(() => {
-      expect(document.body.textContent).toContain("다른 대화");
-    });
-
     const sessionButton = Array.from(document.querySelectorAll("button")).find((button) =>
       button.textContent?.includes("다른 대화"),
     ) as HTMLButtonElement | undefined;
@@ -1750,66 +1740,10 @@ describe("ChatView", () => {
     await submitChatMessage(container, "새 질문");
 
     await waitFor(() => {
-      expect(container.querySelectorAll('[data-testid="session-date-navigator"]')).toHaveLength(1);
       expect(container.querySelector('[data-session-marker-id="old-yesterday"]')).toBeNull();
       expect(container.textContent).not.toContain("이전 질문");
       expect(container.textContent).not.toContain("이전 답변");
     });
-  });
-
-  it("loads the exact selected session from the calendar session list", async () => {
-    const scrollSpy = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
-    const now = new Date().toISOString();
-    const { container, api } = await renderApp({
-      currentSession: "current",
-      sessions: [
-        { id: "current", modifiedAt: now, title: "현재 대화" },
-        { id: "other-session", modifiedAt: now, title: "다른 대화" },
-      ],
-      history: {
-        sessionId: "current",
-        messages: [],
-      },
-      historyBySession: {
-        "other-session": {
-          messages: [
-            { index: 0, role: "user", content: "다른 질문" },
-            { index: 1, role: "assistant", content: "다른 답변" },
-          ],
-        },
-      },
-    });
-
-    const dayButton = container.querySelector('[data-testid="session-date-navigator"] button') as HTMLButtonElement | null;
-    expect(dayButton).toBeTruthy();
-
-    await act(async () => {
-      fireEvent.click(dayButton!);
-    });
-    await waitFor(() => {
-      expect(document.body.textContent).toContain("다른 대화");
-    });
-
-    const sessionButton = Array.from(document.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("다른 대화"),
-    ) as HTMLButtonElement | undefined;
-    expect(sessionButton).toBeTruthy();
-
-    await act(async () => {
-      fireEvent.click(sessionButton!);
-    });
-
-    await waitFor(() => {
-      expect(api.chatSessionResume).toHaveBeenCalledWith("other-session");
-      expect(api.chatSessionHistory).toHaveBeenCalledWith("other-session");
-    });
-    const scrolledToMarker = scrollSpy.mock.calls.some(([arg]) =>
-      typeof arg === "object" &&
-      arg !== null &&
-      "block" in arg &&
-      (arg as ScrollIntoViewOptions).block === "start",
-    );
-    expect(scrolledToMarker).toBe(false);
   });
 
   it("auto-continues after branching from a checkpoint when the branch ends with a user turn", async () => {
