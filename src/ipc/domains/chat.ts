@@ -43,8 +43,50 @@ import {
   resolvePersonaRolePrompt,
   sanitizeOutgoingInput,
   markMainActiveAfterTurn,
+  resolveChatNewProjectPayload,
 } from "../handlers/chat.js";
+import { getDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
+import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
 const log = createLogger("chat");
+const MAX_MEMORY_PROJECT_ROOT_CHARS = 2_048;
+const MAX_MEMORY_PROJECT_NAME_CHARS = 120;
+const PROJECT_NOT_ALLOWED = { ok: false, error: "project-not-allowed" } as const;
+
+interface MemoryProjectOptions {
+  projectRoot?: string;
+  projectName?: string;
+  includeUnscoped?: boolean;
+}
+
+type MemoryProjectOptionsResolution =
+  | { ok: true; options: MemoryProjectOptions }
+  | { ok: false; error: "project-not-allowed" };
+
+function normalizeMemoryProjectString(value: unknown, maxChars: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.slice(0, maxChars) : undefined;
+}
+
+function parseMemoryProjectOptions(raw: unknown): MemoryProjectOptionsResolution {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: true, options: {} };
+  }
+  const record = raw as Record<string, unknown>;
+  const projectRoot = normalizeMemoryProjectString(record.projectRoot, MAX_MEMORY_PROJECT_ROOT_CHARS);
+  const projectName = normalizeMemoryProjectString(record.projectName, MAX_MEMORY_PROJECT_NAME_CHARS);
+  const resolved = resolveAuthorizedWorkspaceProject(projectRoot, projectName);
+  if (!resolved.authorized || !resolved.project) return PROJECT_NOT_ALLOWED;
+  return {
+    ok: true,
+    options: {
+      projectRoot: resolved.project.projectRoot,
+      projectName: resolved.project.projectName,
+      ...(resolved.project.isDefault === true ? { includeUnscoped: true } : {}),
+      ...(record.includeUnscoped === true && resolved.project.isDefault === true ? { includeUnscoped: true } : {}),
+    },
+  };
+}
 
 /**
  * Stable signature of EVERY vendor block's configured `baseUrl` (order-stable
@@ -237,16 +279,20 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return { ok: true };
   });
 
-  ipcMain.handle(CHANNELS.chat.new, async (e) => {
+  ipcMain.handle(CHANNELS.chat.new, async (e, rawProject?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.new, e); return UNAUTHORIZED_FRAME; }
-    conversationLoop.newConversation();
+    const parsed = resolveChatNewProjectPayload(rawProject, getDefaultWorkspaceRoot());
+    const resolved = resolveAuthorizedWorkspaceProject(parsed.projectRoot, parsed.projectName);
+    if (!resolved.authorized || !resolved.project) return PROJECT_NOT_ALLOWED;
+    const { project } = resolved;
+    conversationLoop.newConversation("main", project);
     await memoryManager.markMainActiveFresh();
     return { ok: true };
   });
 
   // PUBLIC lvis:chat:sessions — read-only; sender guard optional. On rejection
   // returns the same shape (active id + empty list) as before; logic delegated.
-  ipcMain.handle(CHANNELS.chat.sessions, (e, opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown; kind?: unknown; routineId?: unknown }) => {
+  ipcMain.handle(CHANNELS.chat.sessions, (e, opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown; kind?: unknown; routineId?: unknown; projectRoot?: unknown }) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.chat.sessions, e);
       return { current: conversationLoop.getSessionId(), sessions: [] };
@@ -358,6 +404,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
       ...(currentMeta?.routineId ? { routineId: currentMeta.routineId } : {}),
       ...(currentMeta?.routineTitle ? { routineTitle: currentMeta.routineTitle } : {}),
       ...(currentMeta?.routineFiredAt ? { routineFiredAt: currentMeta.routineFiredAt } : {}),
+      ...(currentMeta?.projectRoot ? { projectRoot: currentMeta.projectRoot } : {}),
+      ...(currentMeta?.projectName ? { projectName: currentMeta.projectName } : {}),
       ...(currentMeta?.summaryPreamble ? { summaryPreamble: currentMeta.summaryPreamble } : {}),
     });
     const loaded = conversationLoop.loadSession(newId);
@@ -559,32 +607,42 @@ export function registerChatHandlers(deps: IpcDeps): void {
   });
 
   // ─── Memory ─────────────────────────────────────
-  ipcMain.handle(CHANNELS.memory.entriesList, (e) => {
+  ipcMain.handle(CHANNELS.memory.entriesList, (e, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesList, e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.listMemoryEntries();
+    const project = parseMemoryProjectOptions(opts);
+    if (!project.ok) return [];
+    return memoryManager.listMemoryEntries(project.options);
   });
-  ipcMain.handle(CHANNELS.memory.entriesSave, async (e, title: string, content: string) => {
+  ipcMain.handle(CHANNELS.memory.entriesSave, async (e, title: string, content: string, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesSave, e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.saveMemory(title, content);
+    const project = parseMemoryProjectOptions(opts);
+    if (!project.ok) return PROJECT_NOT_ALLOWED;
+    return memoryManager.saveMemory(title, content, project.options);
   });
   ipcMain.handle(CHANNELS.memory.entriesDelete, async (e, filename: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesDelete, e); return UNAUTHORIZED_FRAME; }
     await memoryManager.deleteMemory(filename);
     return undefined;
   });
-  ipcMain.handle(CHANNELS.memory.entriesSearch, (e, query: string) => {
+  ipcMain.handle(CHANNELS.memory.entriesSearch, (e, query: string, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesSearch, e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.searchMemoryEntries(query).map((note) => ({
+    const project = parseMemoryProjectOptions(opts);
+    if (!project.ok) return [];
+    return memoryManager.searchMemoryEntries(query, project.options).map((note) => ({
       filename: note.filename,
       title: note.title,
       content: note.content,
       excerpt: note.content.replace(/^#\s+.+(?:\r?\n)+/, "").trim(),
       updatedAt: note.updatedAt ?? new Date().toISOString(),
+      ...(note.projectRoot ? { projectRoot: note.projectRoot } : {}),
+      ...(note.projectName ? { projectName: note.projectName } : {}),
     }));
   });
-  ipcMain.handle(CHANNELS.memory.indexGet, (e) => {
+  ipcMain.handle(CHANNELS.memory.indexGet, (e, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.indexGet, e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.getMemoryIndex();
+    const project = parseMemoryProjectOptions(opts);
+    if (!project.ok) return "";
+    return memoryManager.getMemoryIndex(project.options);
   });
   ipcMain.handle(CHANNELS.memory.indexUpdateIfUnchanged, async (e, expectedContent: string, nextContent: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.indexUpdateIfUnchanged, e); return UNAUTHORIZED_FRAME; }
@@ -608,13 +666,17 @@ export function registerChatHandlers(deps: IpcDeps): void {
     });
     return { ok: true };
   });
-  ipcMain.handle(CHANNELS.memory.sessionsList, (e) => {
+  ipcMain.handle(CHANNELS.memory.sessionsList, (e, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.sessionsList, e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.listSessionEntries();
+    const project = parseMemoryProjectOptions(opts);
+    if (!project.ok) return [];
+    return memoryManager.listSessionEntries(50, project.options);
   });
-  ipcMain.handle(CHANNELS.memory.sessionsSearch, (e, query: string) => {
+  ipcMain.handle(CHANNELS.memory.sessionsSearch, (e, query: string, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.sessionsSearch, e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.searchSessions(query);
+    const project = parseMemoryProjectOptions(opts);
+    if (!project.ok) return [];
+    return memoryManager.searchSessions(query, project.options);
   });
   ipcMain.handle(CHANNELS.memory.agentsMdGet, (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.agentsMdGet, e); return UNAUTHORIZED_FRAME; }

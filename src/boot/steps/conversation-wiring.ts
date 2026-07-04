@@ -268,12 +268,12 @@ export function wireConversation(ctx: BootContext): void {
       });
     },
     // Self-improvement (Hermes): after a run completes, append a one-line
-    // learning to the work-board MEMORY.md. appendMemory enforces the hard
-    // line cap; the engine fires this swallow-on-error so it never fails a run.
-    onRunComplete: ({ itemId, title }) =>
+    // learning to the item's project work memory. appendMemory enforces the
+    // hard line cap; the engine fires this swallow-on-error so it never fails a run.
+    onRunComplete: ({ itemId, title, projectRoot }) =>
       appendMemory(workBoardStorage, [
         `${new Date().toISOString().slice(0, 10)}: 자율 실행 완료 — #${itemId} ${title}`,
-      ]),
+      ], projectRoot ? { projectRoot } : undefined),
     // Persist each run's plan+execute conversation to sessions/<id>/<runId>.jsonl
     // so run context survives restart and accumulates across re-runs.
     transcriptStorage: workBoardStorage,
