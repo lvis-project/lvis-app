@@ -56,7 +56,7 @@ const dialogContentVariants = cva(
   [
     "fixed left-[50%] top-[50%] z-50 grid translate-x-[-50%] translate-y-[-50%] gap-4",
     "w-[calc(100vw-32px)] max-h-[90dvh] overflow-y-auto",
-    "border border-action-view/30 bg-card text-card-foreground shadow-lg rounded-lg",
+    "border border-action-view/30 bg-card text-card-foreground shadow-e3 rounded-lg",
     "p-6 duration-200",
   ].join(" "),
   {
