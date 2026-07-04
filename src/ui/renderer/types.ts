@@ -225,6 +225,8 @@ export type AppSettings = {
     appMode?: "chat" | "work";
     /** Persisted docked side-panel width (px). SOT: `SystemSettings`. */
     sidePanelWidth?: number;
+    /** Persisted primary navigation sidebar width (px). SOT: `SystemSettings`. */
+    sidebarWidth?: number;
     /**
      * Persisted TOP-pane percent of the workspace-rail vertical (list↕viewer)
      * split, per tab kind (file-browser / preview / subagent). Browser excluded.
