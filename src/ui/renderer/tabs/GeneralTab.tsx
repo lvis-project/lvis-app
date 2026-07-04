@@ -1,16 +1,7 @@
-/**
- * GeneralTab — 설정 "일반" 화면.
- *
- * Three sections render on a single page:
- *   A. 계정          — vendor + authMode + MEMORY.md 자기소개 미리보기
- *   B. 워크스페이스   — plugin / tool / agent / skill / role counts + 마켓플레이스 상태
- *   C. 시스템        — OS + app version + ~/.lvis/ 경로
- *
- * Counts are aggregated through `useWorkspaceStats` (which only calls
- * existing IPC channels). System metadata comes from the new
- * `lvis:app:info` IPC so the renderer never duplicates the canonical
- * electron `app.getVersion()` / `process.platform` values.
- */
+
+
+
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Badge } from "../../../components/ui/badge.js";
@@ -50,13 +41,9 @@ export interface GeneralTabProps {
    * to deep-link into the detail tab when the user clicks a count card.
    */
   onNavigate: (tab: SettingsTab) => void;
-  /**
-   * 2026-05-20 — 로그아웃 / 데모 자격증명 재입력 surfaces. host App.tsx 가
-   * `onLogout` 으로 onboarding chain reducer 에 `logout-reset` 을 dispatch
-   * 하고, `onReactivateDemo` 로 settings dialog 를 닫은 뒤 LoginModal 의
-   * activation page 를 직접 mount 한다. 두 callback 은 *optional* 이라
-   * 기존 호출 사이트 (SettingsContent unit test 등) 가 깨지지 않는다.
-   */
+
+
+
   onLogout?: () => void;
   onReactivateDemo?: () => void;
 }
@@ -72,9 +59,9 @@ interface AppInfo {
   userDataPath: string;
 }
 
-/** Extract the user's preferred 호칭 from MEMORY.md / user-preferences.md. */
+
 function extractHonorific(userPrefsMd: string): string | null {
-  // Match the lines MemorySeedDialog writes: "사용자 호칭: <name>" / "호칭: <name>".
+
   const m = userPrefsMd.match(/(?:사용자\s*)?호칭\s*[:：]\s*(.+)/);
   return m ? m[1].trim().split(/\s+/)[0] : null;
 }
@@ -206,21 +193,13 @@ export function GeneralTab({
     void navigator.clipboard?.writeText(appInfo.userDataPath);
   }, [appInfo]);
 
-  // 2026-05-20 — 로그아웃 / 데모 자격증명 재입력 surfaces.
+
   //
-  // 로그아웃 흐름 (Deliverable 1):
-  //   1. 사용자 confirm dialog 동의 →
-  //   2. `lvis:settings:delete-api-key` 로 active vendor 의 secret 삭제
-  //      (다른 vendor key 는 보존 — multi-vendor 사용자가 잃을 자산 없음)
-  //   3. `lvis:demo:clear` 로 .env.demo + LVIS_DEMO_* + main capture 비움
-  //   4. `lvis:settings:update` 로 features.onboardingCompleted=false 회귀
-  //   5. App.tsx 의 onLogout callback 으로 onboarding chain reducer 에
-  //      `logout-reset` dispatch → 첫 부팅 ScenarioShowcase 재진입
+
+
   //
-  // 재입력 흐름 (Deliverable 2):
-  //   1. App.tsx 의 onReactivateDemo callback 으로 Settings dialog 닫고
-  //      LoginModal 을 `forceActivation=true` 로 mount
-  //   2. 사용자가 새 활성 코드 paste → 기존 lvis:demo:activate path 그대로
+
+
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
@@ -288,7 +267,7 @@ export function GeneralTab({
         description={t("generalTab.pageDescription")}
       />
 
-      {/* ── 계정 ──────────────────────────────────── */}
+
       <SettingsSection
         title={t("generalTab.accountTitle")}
         description={t("generalTab.accountDescription")}
@@ -340,13 +319,9 @@ export function GeneralTab({
         </div>
       </SettingsSection>
 
-      {/* ── 인증 관리 ───────────────────────────────── */}
-      {/* 2026-05-20: PR #1044 onboarding UX 재설계가 activation 입력 필드를
-          first-boot LoginModal fullscreen page 로 옮기면서 첫 활성 이후
-          *재입력 path* 가 사라졌다. 두 surface 로 복원:
-            · 데모 자격증명 재입력 — LoginModal activation page 직접 mount
-            · 로그아웃 — 모든 인증 + 데모 + onboarding state 초기화 →
-              첫 부팅 ScenarioShowcase 재진입 */}
+
+
+
       <SettingsSection
         title={t("generalTab.authManagementTitle")}
         description={t("generalTab.authManagementDescription")}
@@ -416,7 +391,7 @@ export function GeneralTab({
         </DialogContent>
       </Dialog>
 
-      {/* ── 워크스페이스 통계 ─────────────────────────── */}
+
       <SettingsSection
         title={t("generalTab.workspaceTitle")}
         description={t("generalTab.workspaceDescription")}
@@ -483,7 +458,7 @@ export function GeneralTab({
           />
         </div>
 
-        {/* 마켓플레이스 상태 */}
+
         <button
           type="button"
           onClick={() => onNavigate("marketplace")}

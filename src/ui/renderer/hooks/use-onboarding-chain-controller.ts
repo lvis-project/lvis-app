@@ -85,10 +85,8 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
   // populates from the MemorySeed wizard inputs. No separate state.
   const memorySeedNickname = chainState.memorySeed.nickname;
   const memorySeedIntroduction = chainState.memorySeed.introduction;
-  // 2026-05-20 — Settings → "데모 자격증명 재입력" 클릭 시 main window 가
-  // LoginModal 을 forceActivation=true 로 mount 하도록 하는 flag.
-  // `lvis:auth:reactivate-demo` broadcast 가 도착하면 true 로 flip 되고,
-  // LoginModal 이 close 되면 false 로 reset.
+
+
   const [reactivationOpen, setReactivationOpen] = useState(false);
   // Z chain — `tourCompleted` gates the PostTourFirstTask proposal. It is
   // true ONLY once the user finished the full funnel (PluginShowcase closed
@@ -128,7 +126,7 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
         // the moment the chain advances to `done`. Without this the
         // boot probe only dispatched chain events; `hasApiKey` stayed
         // `null` until the user opened+saved Settings, producing the
-        // "로그인된 척" race (#1014 tracer Stage B).
+
         void checkApiKey();
         const settings = await api.getSettings();
         if (cancelled) return;
@@ -197,7 +195,7 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
   // double-invoked dev-mode effects (mount → cleanup → mount) cannot
   // broadcast `tour.start` twice — without the guard the second mount
   // re-fires the IPC, which re-enters the SpotlightTour subscriber and
-  // visibly resets the scenario to step 0 ("스팟하이라이트 시퀀스가 2번 노출"
+
   // — user report 2026-05-19). The ref also protects against incidental
   // re-renders that change `api` / `markOnboardingCompleted` while
   // `chainStage === "tour"` stays pinned.
@@ -212,7 +210,7 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
       } catch {
         // tour.start failure is non-fatal — user can still reach the
         // PluginShowcase via the SpotlightTour onComplete callback path
-        // by pressing 다음 from within the tour.
+
       }
       return;
     }
@@ -222,23 +220,19 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
     }
   }, [api, chainStage, markOnboardingCompleted]);
 
-  // 2026-05-20 — Settings 의 로그아웃 / 데모 자격증명 재입력 broadcast 수신.
+
   //
-  // 로그아웃 cue:
-  //   1. chain reducer 에 `logout-reset` dispatch → 모든 stage 가 `idle` 로 collapse
-  //   2. boot-probe ref 를 리셋해 onboardingCompleted=false 가 다시 평가됨
+
+
   //   3. side-effect ref (`chainTourBroadcastRef`, `chainCompletionPersistedRef`)
-  //      도 reset 해서 재진입 chain 의 tour broadcast / completion persist 가
-  //      한 번씩 다시 동작 가능하게 됨
-  //   4. `hasApiKey` 를 다시 평가
+
+
   //
-  // 재입력 cue:
-  //   LoginModal 을 `forceActivation=true` 로 mount.
+
+
   useEffect(() => {
-    // 일부 test fixture 가 `api.auth` 의 broadcast 메서드를 mock 하지 않으므로
-    // optional chaining 으로 graceful degradation. production preload 는 항상
-    // 두 메서드를 정의하고, undefined 일 때는 listener 만 비활성 (전체 effect 가
-    // throw 하지 않는다).
+
+
     const unsubLogout = api.auth?.onLogoutReset?.(() => {
       dispatchChain({ type: "logout-reset" });
       chainTourBroadcastRef.current = false;
@@ -288,7 +282,7 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
   }, [api]);
 
   // Mask `hasApiKey === false` while the onboarding chain is still in
-  // progress so the "Claude API 키 설정 필요" empty state never paints
+
   // underneath the Z chain dialogs. The chain itself is the canonical
   // first-boot CTA; surfacing a competing empty state below it leaks
   // through the Radix Dialog backdrop and confuses the user (the bug
@@ -301,7 +295,7 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
   // `hasApiKey` to a concrete boolean. Any other state — chain still
   // running, or probe still pending — returns `null` so downstream
   // empty-state branches stay in their loading shape. This prevents the
-  // "로그인된 척" race where chain advanced to `done` but `hasApiKey`
+
   // hadn't been populated yet, letting `hasApiKey !== false` falsely
   // paint the ready-state empty prompt.
   const effectiveHasApiKey: boolean | null =

@@ -1,22 +1,7 @@
-/**
- * SOT IPC error → Korean i18n mapper (issue #830).
- *
- * Renderer-side counterpart to the "IPC layer = English, UI layer = Korean"
- * convention (CLAUDE.md "IPC Error Message Language Convention"). All
- * renderer callers that receive an IPC `{ok:false, error, message}`
- * envelope should pipe it through this helper instead of writing per-
- * callsite formatters that drift and miss new codes.
- *
- * Design:
- * - `COMMON_IPC_ERROR_MESSAGES` carries default Korean mappings for codes
- *   shared across multiple IPC domains (intent gate, payload validation,
- *   permission manager state).
- * - Per-context overrides ride on the `codeMap` option (e.g. revoke
- *   uses "유효하지 않은 승인 키" but generic `invalid-key` callers get
- *   "유효하지 않은 키").
- * - Dynamic code patterns (e.g. `reviewer-rewire-failed:<detail>`) are
- *   handled by the caller *before* invoking this helper.
- */
+
+
+
+
 
 import { t } from "../../i18n/runtime.js";
 
@@ -25,7 +10,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "user-keyboard-required": "formatIpcError.userKeyboardRequired",
   "unauthorized": "formatIpcError.unauthorized",
   // "unauthorized-frame" lives below in the frame-trust gate section with a
-  // more actionable Korean message ("창을 새로고침하거나..."). Single key.
+
   "missing-input-origin": "formatIpcError.missingInputOrigin",
   "cross-plugin-call-denied": "formatIpcError.crossPluginCallDenied",
   "missing-plugin-envelope": "formatIpcError.missingPluginEnvelope",
@@ -135,12 +120,12 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // Plugin↔app minimum-version gate (install + load). The English IPC message
   // carries the concrete versions ("plugin requires LVIS >= X, current Y");
   // callsites that have the structured {required,current} fields render the
-  // parameterized Korean copy ("이 플러그인은 LVIS X 이상이 필요합니다…") via
+
   // their own formatter. This generic key is the fallback for callers that
   // surface the bare code.
   "incompatible-app-version": "formatIpcError.incompatibleAppVersion",
   // Frame-trust gate (used by chat.ts + plugins.ts pluginConfigError helper).
-  // The plain "unauthorized" entry above already maps to "권한이 없습니다." but
+
   // "unauthorized-frame" carries a distinct semantic (the *frame/window* failed
   // the trust check, not the user's role) that the user can act on differently:
   // refresh the window or restart the app. Keep both keys with distinct
@@ -171,13 +156,12 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "reviewer-rewire-failed": "formatIpcError.reviewerRewireFailed",
   // v0.2.1 hotfix — Step 2 (llm-key-issuing) try/catch surfaces this
   // when setSecret / patch fails (disk full, Keychain locked, etc.).
-  // The "sandbox 준비 중" transcript fail in the user-reported repro
-  // was previously bubbling through as the generic "로그인 처리 중
-  // 오류" toast because the IPC promise rejected unhandled.
+
+
   "llm-key-issuing-failed": "formatIpcError.llmKeyIssuingFailed",
   // ── Demo activation (lvis:demo:activate — 2026-05-19) ──
   // The LoginModal carries its own activationErrorMessage() that prefers
-  // a longer "활성 코드..." string with paste instructions. These default
+
   // mappings exist for callers that surface IPC errors generically via
   // formatIpcError() (e.g. inline error toasts).
   "invalid-code": "formatIpcError.invalidCode",
@@ -187,7 +171,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "not-armed": "formatIpcError.notArmed",
   // Build-embedded activation key absent (lvis:demo:activate-embedded).
   "no-embedded-code": "formatIpcError.noEmbeddedCode",
-  // 2026-05-20 — Settings 로그아웃 path (`lvis:demo:clear`) 의 디스크 삭제 실패.
+
   "clear-failed": "formatIpcError.clearFailed",
   // ── Tutorial-C — tour:{start,mark-complete,dismiss} validation ──
   "invalid-scenario-id": "formatIpcError.invalidScenarioId",
@@ -211,17 +195,13 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
 };
 
 export interface FormatIpcErrorOptions {
-  /**
-   * Per-context code overrides (merged on top of common defaults). Use when
-   * the same error code carries a domain-specific nuance — e.g. revoke
-   * mapping `invalid-key` → "유효하지 않은 승인 키입니다."
-   */
+
+
+
   codeMap?: Record<string, string>;
-  /**
-   * Optional Korean prefix for unrecognized codes (e.g. "리뷰어 오류").
-   * Applied only when neither codeMap nor common defaults resolved a
-   * mapping; the prefix is joined with the backend message or raw code.
-   */
+
+
+
   fallbackContext?: string;
 }
 

@@ -1,69 +1,39 @@
-# 비전 & 골 (Vision & Goals)
+# Vision
 
-LVIS 프로젝트가 추구하는 비전과 목표를 정의하는 문서입니다.  
-배경과 철학이 궁금하다면 [구현 철학](./philosophy.md)을 먼저 읽어보세요.
+Status: Active English default. The Korean archive keeps earlier review history and original discussion, but this page must be usable on its own.
 
----
+Korean archive: [docs/ko mirror](../ko/vision/README.md).
 
-## 비전 (Vision)
+## What This Page Owns
 
-> **"모든 사용자가 자신만의 AI 비서를 가진다."**
+This page owns the product vision index and how principles relate to architecture, code, and tests. Use it as the first review surface when changing this area; use the archive for background, not as a substitute for current English guidance.
 
-LVIS 는 개인에게는 일상 업무를 위한 맞춤 비서로,  
-조직에게는 그 동력을 이끌어내는 에이전트 플랫폼으로 자리잡는 것을 목표로 합니다.
+## Current Operating Contract
 
-마치 아이언맨의 J.A.R.V.I.S.처럼 — 내 컴퓨터에 상주하면서 나를 잘 알고, 지시한 목표를 위해 지치지 않고 돕는 존재입니다.
+- English is the default review and contributor language for this app surface.
+- The document must name the behavior that still matters today, the code or test locations that enforce it, and the conditions that make the note stale.
+- Source files and tests are authoritative when this prose and implementation disagree.
+- Korean-only material stays in the mirrored archive unless it is translated or summarized here.
 
----
+## Implementation Anchors
 
-## 목표 (Goals)
+- `docs/architecture/README.md`
+- `src/engine/`
+- `src/memory/`
+- `src/permissions/`
 
-- [x] 문서 저장소 구축 및 프로젝트 컨텍스트 정리
-- [ ] 퍼스널 에이전트 시스템 설계 및 프로토타입
-- [ ] LLM 기반 업무 자동화 (출장·품의·보고 등 반복 업무)
-- [ ] 에이전트 투 에이전트(A2A) 협업 구조 구현
-- [ ] 에이전트 허브: 다양한 업무 에이전트 연결 및 조율
-- [ ] 기업 프로세스(LLM 등)와의 통합
+## Update Checklist
 
----
+- State whether the document is active, implemented, superseded, or historical before adding new detail.
+- Keep links relative to the current file depth; mirrored files under `docs/ko` need different paths from default docs.
+- Add or update tests when a documented behavior is enforced by code.
+- Remove template language and stale plan wording instead of carrying it forward.
 
-## 핵심 가치 (Core Values)
+## Related Entry Points
 
-### 명시적 가치
+- [LVIS Project Documentation](../README.md)
+- [Getting Started](../guides/getting-started.md)
 
-| 가치 | 설명 |
-|------|------|
-| **생산성** | 반복적이고 마찰이 많은 업무를 AI가 대신 처리 |
-| **개인화** | 사용자의 맥락과 기억을 축적해 점점 더 유용해지는 비서 |
-| **통합** | 회사 시스템·규정·도구와 연결되어 실무 흐름에 녹아듦 |
-| **확장성** | 퍼스널 에이전트 → 에이전트 네트워크 → 엔터프라이즈 허브 |
+## Review Notes
 
-### 암묵적 가치 (설계 전반에서 발굴)
-
-| 가치 | 설명 | 근거 |
-|------|------|------|
-| **선제성** | 사용자가 묻기 전에 먼저 제안·정리 | Overlay Trigger Surface |
-| **거버넌스** | 보안·감사·정책이 1등 시민 — 통제된 환경에서의 AI | L5 전담 레이어, LLM 제어 환경 |
-| **점진적 신뢰** | 에이전트 자율성을 단계적으로 확대 | Agent Approval System, Feature Flag 점진 배포 |
-| **로컬 주권** | 사용자 데이터·맥락이 개인 PC에 상주 | 설치형 로컬 기반, Memory(AGENTS.md + MEMORY.md) |
-
----
-
-## 로드맵 (Roadmap)
-
-| 단계 | 목표 | 상태 |
-|------|------|------|
-| Phase 1 | 문서 저장소 구축 및 프로젝트 방향 정립 | ✅ 완료 |
-| Phase 2 | 아키텍처 설계 (5-Layer, LLD, Query Loop, Tool System) | ✅ 완료 ([v4 Final](../architecture/architecture.md)) |
-| Phase 3 | 퍼스널 에이전트 시스템 프로토타입 (Electron + Rust + LLM) | ⏳ 예정 |
-| Phase 4 | LLM 연동 및 기업 업무 자동화 | ⏳ 예정 |
-| Phase 5 | 에이전트 허브 & 에이전트 투 에이전트 | ⏳ 예정 |
-| Phase 6 | 엔터프라이즈 롤아웃 (Feature Flag 기반 점진 배포) | ⏳ 예정 |
-
----
-
-## 관련 문서
-
-- [구현 철학](./philosophy.md)
-- [아키텍처](../architecture/architecture.md)
-- [실행 가이드](../guides/getting-started.md)
+This English page should let a reviewer understand scope, risk, and validation without opening the Korean archive. If the archive contains rationale that still matters, translate the relevant part into this page and keep the archive link as provenance.

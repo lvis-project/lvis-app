@@ -107,8 +107,8 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs, forceOp
         </span>
         {/*
           Single-step intermediate entries still render the WorkGroup header
-          (this `{stepCount}단계` line + the chevron) for parity with multi-
-          step turns — a uniform "작업 N단계" affordance is more discoverable
+          (this `{stepCount}` line + the chevron) for parity with multi-step
+          turns; a uniform multi-step affordance is more discoverable
           than collapsing single-step turns into inline rendering, which would
           remove the expand/collapse UI for half the chat history. Reviewed
           in #565; intentional, not a candidate for inline rendering.

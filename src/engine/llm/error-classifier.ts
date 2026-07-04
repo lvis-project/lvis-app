@@ -1,6 +1,6 @@
-/**
- * Provider Error Classifier — LLM 오류를 사용자 친화적 메시지로 변환
- */
+
+
+
 
 import { t } from "../../i18n/index.js";
 
@@ -29,11 +29,8 @@ export function classifyProviderError(raw: string): ClassifiedError {
     };
   }
 
-  // Order matters: rate-limit FIRST. OpenAI 의 "Request too large for ...
-  // Limit 200,000, Requested 271,630" (TPM 초과) 메시지가 context-length
-  // 패턴의 "too many tokens" 에 잘못 매치되면 원인 분리가 흐려진다.
-  // reactive auto-compact 여부는 provider error diagnostics 의
-  // rate_limit_exceeded + tokens-per-minute code path 에서 결정한다.
+
+
   if (/rate_limit|429|too many requests|requests per minute|tokens per minute|tpm|rpm|request too large|too large for/.test(lower)) {
     return {
       category: "rate-limit",

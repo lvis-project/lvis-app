@@ -77,11 +77,11 @@ function preserveSettingsScrollPosition(): () => void {
 
 export function PermissionsTab() {
   const { t } = useTranslation();
-  // ── 로딩 상태 ─────────────────────────────────────
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ── 인라인 배너 (alert 대체 — §F9) ───────────────
+
   const [banner, setBanner] = useState<{ type: "error" | "warn"; msg: string } | null>(null);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -142,7 +142,7 @@ export function PermissionsTab() {
   const [windowsInstallBusy, setWindowsInstallBusy] = useState(false);
   const [windowsInstallCancelled, setWindowsInstallCancelled] = useState(false);
 
-  // ── 초기 fetch (탭 진입 시) ───────────────────────
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);

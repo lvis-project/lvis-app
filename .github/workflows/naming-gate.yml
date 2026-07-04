@@ -32,7 +32,7 @@ jobs:
           # path makes the `head -30 "$file"` prefix-justification check fail
           # spuriously (the file is gone) — e.g. removing a legacy `fake-*.ts`.
           git diff --name-only --diff-filter=d "$base_sha"...HEAD \
-            | grep -Ev '^(docs/blueprints/|\.github/|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.|.*\.lock|.*lock\.json|CHANGELOG)' \
+            | grep -Ev '^(docs/blueprints/|docs/ko/|\.github/|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.|.*\.lock|.*lock\.json|CHANGELOG)' \
             | grep -E '\.(ts|tsx|py|js|mjs|cjs|md)$' > /tmp/changed.txt || true
           echo "changed files:"
           cat /tmp/changed.txt

@@ -69,7 +69,7 @@ export function useApproval() {
         return;
       }
       inFlightRef.current = true;
-      // shift 먼저 — respond 완료 전에 다음 항목 표시
+
       setQueue((q) => approvalQueueReducer(q, { type: "shift" }));
       try {
         await window.lvis.approval.respond({

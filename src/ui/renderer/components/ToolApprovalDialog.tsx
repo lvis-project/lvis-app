@@ -384,7 +384,7 @@ export function ToolApprovalDialog({
   }, [request, finalVerdict, nlJustification, onDecide, isMcpElicitation]);
 
   // The primary Approve button grants for the scope selected in the radio
-  // group: "이 세션만" → durable session grant, "영구 허용" → persistent.
+
   // HIGH verdict forces session (no persistent grant for HIGH-risk actions).
   // This is the durable choice that the memory store records.
   const approvalIsOneShot = isMcpElicitation || isExternalOriginAgentAction;
@@ -401,7 +401,7 @@ export function ToolApprovalDialog({
     [hasElicitationSchema, elicitationParse.supported, elicitationContent],
   );
 
-  // 키보드 단축키 (disabled for HIGH when NL field empty)
+
   useEffect(() => {
     if (!open || !request) return;
     const handler = (e: KeyboardEvent) => {

@@ -26,7 +26,7 @@ export type { QuickAction } from "./command-actions.js";
 const LazySlashPickerPanel = lazy(() => import("./SlashPickerPanel.js"));
 
 export interface SlashPickerProps {
-  /** View shortcuts (홈/루틴/설정/새 대화 + 플러그인 뷰). */
+
   actions: QuickAction[];
   /** Installed plugins — surfaced as their own category. */
   plugins: PluginEntry[];

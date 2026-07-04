@@ -1,16 +1,13 @@
-/**
- * Permissions Store — ~/.lvis/permissions.json 비동기 직렬 읽기/쓰기
- *
- * in-process async mutex + cross-process proper-lockfile 이중 잠금.
- * 키: 파일 절대경로 → 직렬화된 Promise 체인 (in-process).
- * proper-lockfile: 여러 Electron 인스턴스 동시 실행 시 race 방지 (cross-process).
- */
+
+
+
+
 import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { PermissionRule, ExecutionMode } from "./permission-manager.js";
 import { withFileLock } from "../lib/with-file-lock.js";
 
-// ─── 파일 형태 ────────────────────────────────────────
+
 
 export interface PermissionsFile {
   version: 1;
@@ -30,7 +27,7 @@ async function withPermissionsLock<T>(
   const key = resolve(filePath);
   const prev = permissionsLocks.get(key) ?? Promise.resolve();
   const next = prev.then(() => fn());
-  // 다음 대기자는 이번 턴 완료 여부에 관계없이 체이닝
+
   permissionsLocks.set(key, next.then(() => undefined, () => undefined));
   return next;
 }
@@ -69,7 +66,7 @@ export async function updatePermissionsFile(
       await mutator(file);
       file.updatedAt = new Date().toISOString();
       await mkdir(dirname(filePath), { recursive: true });
-      // §S4: 0o600 — owner read/write only (world-readable 방지)
+
       const fd = await open(filePath, "w", 0o600);
       try {
         await fd.writeFile(`${JSON.stringify(file, null, 2)}\n`, "utf-8");

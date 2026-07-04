@@ -1,15 +1,7 @@
-/**
- * CheckpointDivider — auto compact / manual checkpoint 표시 horizontal divider.
- *
- * Status 별 visual variant:
- *   - SUMMARIZED          → 📦 정상 요약 (blue/slate)
- *   - CONTENT_TRUNCATED   → ✂️ 부분 절단됨 (yellow) — LLM 호출 skip
- *   - NOOP                → ✓ 불필요 (gray) — small history
- *   - REDUCED_INSUFFICIENT_FORCED → ⚠️ 강제 절단됨 (red) — last-resort raw drop
- *
- * Action buttons (view / branch) are only rendered for SUMMARIZED + FORCED
- *   (둘 다 boundary 가 truthy 인 경로). NOOP / CONTENT_TRUNCATED 에선 숨김.
- */
+
+
+
+
 
 import type { CheckpointTrigger } from "../../../lib/chat-stream-state.js";
 import { useTranslation } from "../../../i18n/react.js";
@@ -88,9 +80,9 @@ export function CheckpointDivider({
   messageCount: number;
   /** Compact sequence number — enables view/branch action buttons. */
   compactNum?: number;
-  /** Compact 결과 status. status variant 가 trigger variant 보다 우선. */
+
   compactStatus?: CompactStatus;
-  /** Per-message truncation 원본 디렉토리 — banner footnote 에 표시. */
+
   truncatedDir?: string;
   /** Enter view-mode for this checkpoint. */
   onEnterView?: (compactNum: number) => void | Promise<void>;
@@ -98,13 +90,12 @@ export function CheckpointDivider({
   onBranchFrom?: (compactNum: number) => void | Promise<void>;
 }) {
   const { t } = useTranslation();
-  // Status 가 명시되면 status variant 우선, 아니면 trigger variant.
+
   const variant: Variant = compactStatus !== undefined
     ? STATUS_VARIANTS[compactStatus]
     : TRIGGER_VARIANTS[trigger ?? "default"];
-  // Action buttons: SUMMARIZED 또는 REDUCED_INSUFFICIENT_FORCED (boundary 가
-  // truthy 한 경로) + compactNum 있을 때만 노출. NOOP / CONTENT_TRUNCATED 는
-  // boundary 가 없어 view/branch 불가.
+
+
   const hasBoundary = compactStatus === undefined
     || compactStatus === "summarized"
     || compactStatus === "reduced_insufficient_forced";

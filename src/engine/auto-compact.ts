@@ -1,14 +1,7 @@
-/**
- * Auto-Compact — LVIS token-based context management
- *
- * 대화가 길어지면 히스토리 토큰이 컨텍스트 윈도우를 초과.
- * 자동으로 오래된 메시지를 요약하여 공간 확보.
- *
- * 핵심 원칙:
- * - tool_use/tool_result 쌍은 절대 분리하지 않음
- * - 최근 N개 메시지는 보존 (DEFAULT_CONFIG.preserveRecentMessages = 12)
- * - 요약은 파일 참조, 진행 중인 작업, 핵심 결정을 보존
- */
+
+
+
+
 import type { GenericMessage, LLMVendor } from "./llm/types.js";
 import { serializeMessageForEstimation } from "./llm/types.js";
 import { lookupPricing, effectiveContextWindow } from "../shared/pricing-data.js";
@@ -59,35 +52,17 @@ export function getModelUsableContext(vendor: LLMVendor, model: string): number 
   return getUsableContext(getModelContextWindow(vendor, model));
 }
 
-/**
- * Token preflight trigger (절대 token count). Same-session checkpoint
- * compaction starts at 80% of the model-specific usable context budget.
- * 호출자: queryLoop 의 step 5/6 사이.
- *
- * **Dev override**: `LVIS_DEV_PREFLIGHT_OVERRIDE` 환경변수가 양의 정수면 그
- * 값을 그대로 사용. 실제 200K context 를 채우지 않고도 compact 시나리오 (130%
- * deadlock, FORCED path 등) 를 손쉽게 재현 가능. production NODE_ENV 에서는
- * 무시 — bypass 위험 차단.
- *
- * Example: `LVIS_DEV_PREFLIGHT_OVERRIDE=5000 bun run start` 로 실행하면
- * preflight 가 5K tokens 로 떨어져 짧은 대화만으로도 auto compact 트리거 가능.
- *
- * @example
- * // 200K Sonnet → usable 160K → 80% × 160K = 128K trigger
- * estimateMessagesTokens(history) >= getModelPreflightThreshold("claude", "claude-sonnet-4-6");
- */
+
+
+
 export function getModelPreflightThreshold(vendor: LLMVendor, model: string): number {
   // Priority: runtime override (UI slider) > env var (LVIS_DEV_PREFLIGHT_OVERRIDE) > computed.
   if (_runtimePreflightOverride !== null) return _runtimePreflightOverride;
   const devOverride = readDevPreflightOverride();
   if (devOverride !== null) return devOverride;
   const windowThreshold = getPreflightThreshold(getModelContextWindow(vendor, model));
-  // Issue #900 #3: small-tier 모델 (nano 200K TPM, mini 2M TPM 등) 은
-  // contextWindow 보다 *분당 처리량 (TPM)* 한도가 훨씬 작음 — 단발 input 이
-  // window 안이라도 TPM 초과로 429. preflight 가 TPM*0.8 도 같이 보고
-  // *min* 으로 compact trigger — 사용자 영상의 271K nano 사고 prevention.
-  // 0.8 safety margin: 대화 history 외에 system prompt / tool schemas /
-  // pageindex 가 추가로 들어가 실제 전송 size 는 estimate 보다 큼.
+
+
   const pricing = lookupPricing(vendor, model);
   if (typeof pricing.tpmDefault === "number" && pricing.tpmDefault > 0) {
     const tpmThreshold = Math.floor(pricing.tpmDefault * 0.8);
@@ -105,10 +80,10 @@ function readDevPreflightOverride(): number | null {
   if (!raw) return null;
   const n = Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n <= 0) return null;
-  // 첫 read 시 한 번만 log — 매 호출 spam 방지.
+
   if (_devOverrideWarnedValue !== n) {
     // eslint-disable-next-line no-console
-    console.warn(`[lvis] dev preflight override active: LVIS_DEV_PREFLIGHT_OVERRIDE=${n} tokens (production NODE_ENV 에서는 무시됨)`);
+    console.warn(`[lvis] dev preflight override active: LVIS_DEV_PREFLIGHT_OVERRIDE=${n} tokens (ignored in production NODE_ENV)`);
     _devOverrideWarnedValue = n;
   }
   return n;
