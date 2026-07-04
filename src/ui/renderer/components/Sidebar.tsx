@@ -1,9 +1,9 @@
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
-  Database,
   Download,
   Folder,
+  FolderOpen,
   Home,
   KanbanSquare,
   KeyRound,
@@ -15,8 +15,10 @@ import {
   Search,
   ShoppingBag,
   Star,
+  Trash2,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../../components/ui/dropdown-menu.js";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "../../../components/ui/context-menu.js";
 import { Button } from "../../../components/ui/button.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -27,6 +29,12 @@ import type { PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { projectBasename, projectRootEquals, workspaceRootsToProjects } from "../../../shared/project-identity.js";
+import {
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  clampSidebarWidth,
+} from "../../../shared/side-panel.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -60,6 +68,14 @@ export interface SidebarProps {
   collapsed: boolean;
   /** Toggle the rail — the leading cluster button next to the traffic lights. */
   onToggleCollapse: () => void;
+  /** Expanded card width (px). Ignored while collapsed (fixed icon rail). */
+  width?: number;
+  /** Per-move drag update of the sidebar width (state only). */
+  onWidthChange?: (px: number) => void;
+  /** Drag-end / keyboard commit of the sidebar width (persist). */
+  onWidthCommit?: (px: number) => void;
+  /** Double-click reset to the default width. */
+  onWidthReset?: () => void;
   /** Open the unified search overlay — second button in the cluster strip. */
   onOpenUnifiedSearch: () => void;
   /** Whether the current session is starred — drives the cluster star fill. */
@@ -78,6 +94,8 @@ export interface SidebarProps {
   onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
   /** Start a new main-chat session scoped to the selected project root. */
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
+  /** Re-fetch the workspace project list (after a context-menu mutation e.g. remove). */
+  onRefreshProjects?: () => void | Promise<void>;
 }
 
 // ─── Platform bridge (darwin traffic-light line) ───────────────────────────────
@@ -366,6 +384,7 @@ function ProjectSessionList({
   streaming,
   onLoadSession,
   onNewChatForProject,
+  onRefreshProjects,
   projects: projectsProp,
 }: {
   collapsed: boolean;
@@ -374,9 +393,28 @@ function ProjectSessionList({
   streaming: boolean;
   onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
+  onRefreshProjects?: () => void | Promise<void>;
   projects?: ProjectIdentity[];
 }) {
   const { t } = useTranslation();
+  // Reveal the project folder in the OS file manager (real capability:
+  // workspace.reveal). No-op for the default project's empty root.
+  const revealProject = (projectRoot: string) => {
+    if (!projectRoot) return;
+    void window.lvis?.workspace?.reveal?.(projectRoot);
+  };
+  // Remove a picked (non-default) project from the workspace root list (real
+  // capability: workspace.removeRoot). The default/base-directory project is
+  // not removable — its menu omits this item. Refresh the sidebar list on
+  // success so the removed project disappears immediately.
+  const removeProject = (project: ProjectIdentity) => {
+    if (!project.projectRoot || project.isDefault) return;
+    void Promise.resolve(window.lvis?.workspace?.removeRoot?.(project.projectRoot))
+      .then(() => onRefreshProjects?.())
+      .catch(() => {
+        // Non-fatal: the list simply keeps the project until the next refresh.
+      });
+  };
   const fallbackProjects = useWorkspaceProjects();
   const workspaceProjects = projectsProp ?? fallbackProjects;
   const mainSessions = useMemo(
@@ -436,6 +474,11 @@ function ProjectSessionList({
     <div className="space-y-1" data-testid="sidebar-projects">
       {sessionsByProject.map(({ project, recent, overflow }, index) => (
         <div key={project.projectRoot || "default-project"} className="space-y-1">
+          {/* Right-click a project row → context menu of REAL project actions
+              (new chat here, reveal folder, remove picked project). The default
+              project omits reveal/remove — its root is app-managed. */}
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
           <button
             type="button"
             disabled={streaming}
@@ -455,6 +498,42 @@ function ProjectSessionList({
             <span className="min-w-0 flex-1 truncate">{project.projectName}</span>
             <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           </button>
+            </ContextMenuTrigger>
+            <ContextMenuContent className="min-w-[11rem]" data-testid="sidebar-project-context-menu">
+              <ContextMenuItem
+                data-testid="sidebar-project-menu-new-chat"
+                onSelect={() => void onNewChatForProject?.({
+                  ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
+                  projectName: project.projectName,
+                })}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t("sidebar.projectMenuNewChat")}
+              </ContextMenuItem>
+              {project.projectRoot ? (
+                <ContextMenuItem
+                  data-testid="sidebar-project-menu-reveal"
+                  onSelect={() => revealProject(project.projectRoot)}
+                >
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  {t("sidebar.projectMenuReveal")}
+                </ContextMenuItem>
+              ) : null}
+              {project.projectRoot && !project.isDefault ? (
+                <>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    data-testid="sidebar-project-menu-remove"
+                    className="text-destructive focus:text-destructive"
+                    onSelect={() => removeProject(project)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {t("sidebar.projectMenuRemove")}
+                  </ContextMenuItem>
+                </>
+              ) : null}
+            </ContextMenuContent>
+          </ContextMenu>
           <div className="ml-4 border-l border-border/(--opacity-half) pl-2">
             {recent.length > 0 ? recent.map((session) => {
               const active = session.id === currentSessionId;
@@ -638,6 +717,111 @@ function ClusterStrip({
   );
 }
 
+// ─── SidebarResizeHandle ─────────────────────────────────────────────────────
+//
+// Drag-to-resize grip on the sidebar card's INNER (right) edge. Mirrors the
+// VerticalSplitLayout separator pattern (pointer-capture drag + window-level
+// move/up listeners + keyboard steps) but on the horizontal axis. The width is
+// owned by the shell (SystemSettings.sidebarWidth) — this control only reports
+// per-move (`onWidthChange`) and drag-end / keyboard / double-click
+// (`onWidthCommit` / `onReset`) deltas UP. a11y: role="separator" +
+// aria-orientation="vertical" + arrow-key steps + Home/End to the bounds.
+const SIDEBAR_KEY_STEP = 16;
+
+function SidebarResizeHandle({
+  width,
+  onWidthChange,
+  onWidthCommit,
+  onReset,
+  ariaLabel,
+}: {
+  width: number;
+  onWidthChange: (px: number) => void;
+  onWidthCommit: (px: number) => void;
+  onReset: () => void;
+  ariaLabel: string;
+}) {
+  const cleanupRef = useRef<(() => void) | null>(null);
+  // Latest drag width, read by the drag-end closure so the committed value is
+  // exact even if React state lags a frame.
+  const liveRef = useRef(width);
+  useEffect(() => {
+    liveRef.current = width;
+  }, [width]);
+  // Release any in-flight pointer capture on unmount so a drag crossing an
+  // unmount boundary leaks no window listeners.
+  useEffect(() => () => cleanupRef.current?.(), []);
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={ariaLabel}
+      aria-valuenow={Math.round(width)}
+      aria-valuemin={SIDEBAR_MIN_WIDTH}
+      aria-valuemax={SIDEBAR_MAX_WIDTH}
+      tabIndex={0}
+      data-testid="sidebar-resize-handle"
+      // Full-height 8px hit strip pinned just inside the card's right edge (the
+      // card is overflow-hidden, so the strip stays inside); the visible line is
+      // a thin 2px rule at the right, tinted on hover/focus.
+      className="group absolute inset-y-0 right-0 z-40 flex w-2 cursor-col-resize touch-none select-none justify-end outline-none"
+      style={{
+        // @ts-expect-error — Electron-specific CSS extension (keep clickable over the drag band)
+        WebkitAppRegion: "no-drag",
+      }}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        cleanupRef.current?.();
+        const startX = event.clientX;
+        const startWidth = width;
+        const apply = (clientX: number) => {
+          const next = clampSidebarWidth(startWidth + (clientX - startX));
+          liveRef.current = next;
+          onWidthChange(next);
+        };
+        const onMove = (moveEvent: PointerEvent) => apply(moveEvent.clientX);
+        const cleanup = () => {
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", cleanup);
+          window.removeEventListener("pointercancel", cleanup);
+          cleanupRef.current = null;
+          onWidthCommit(liveRef.current);
+        };
+        cleanupRef.current = cleanup;
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", cleanup);
+        window.addEventListener("pointercancel", cleanup);
+      }}
+      onDoubleClick={(event) => {
+        event.preventDefault();
+        onReset();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          onWidthCommit(clampSidebarWidth(width - SIDEBAR_KEY_STEP));
+        } else if (event.key === "ArrowRight") {
+          event.preventDefault();
+          onWidthCommit(clampSidebarWidth(width + SIDEBAR_KEY_STEP));
+        } else if (event.key === "Home") {
+          event.preventDefault();
+          onWidthCommit(SIDEBAR_MIN_WIDTH);
+        } else if (event.key === "End") {
+          event.preventDefault();
+          onWidthCommit(SIDEBAR_MAX_WIDTH);
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          onReset();
+        }
+      }}
+    >
+      <span className="h-full w-0.5 rounded-full bg-transparent transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
+    </div>
+  );
+}
+
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
 export function Sidebar({
@@ -654,6 +838,10 @@ export function Sidebar({
   marketplaceUrlReady = false,
   collapsed,
   onToggleCollapse,
+  width = SIDEBAR_DEFAULT_WIDTH,
+  onWidthChange,
+  onWidthCommit,
+  onWidthReset,
   onOpenUnifiedSearch,
   isCurrentSessionStarred,
   onToggleCurrentSessionStar,
@@ -662,8 +850,10 @@ export function Sidebar({
   projects,
   currentSessionId,
   onLoadSession,
+  onRefreshProjects,
 }: SidebarProps) {
   const { t } = useTranslation();
+  const resizable = !collapsed && Boolean(onWidthChange && onWidthCommit && onWidthReset);
 
   // The collapsed rail shows icons only; `compact` mirrors `collapsed`. There is
   // no hover-expand — the card is a consistent floating panel in every mode.
@@ -715,7 +905,11 @@ export function Sidebar({
         data-testid="sidebar-card"
         data-surface={collapsed ? "bare" : "card"}
         className={[
-          "flex min-h-0 flex-col transition-[width] duration-[var(--motion-base)] ease-[var(--motion-ease-out)] motion-reduce:transition-none",
+          "flex min-h-0 flex-col motion-reduce:transition-none",
+          // While resizable the width is driven by inline style (drag-live), so
+          // suppress the width tween — it would lag the pointer. Collapse/expand
+          // still animates the width.
+          resizable ? "" : "transition-[width] duration-[var(--motion-base)] ease-[var(--motion-ease-out)]",
           collapsed
             ? // Bare region: width hugs its widest child (the cluster strip,
               // ≈144px); no surface tokens — transparent, on the band. `items-start`
@@ -725,13 +919,27 @@ export function Sidebar({
               // — itself `flex-1` — fills top-to-bottom in chat mode instead of
               // hugging content height.
               "w-auto items-start flex-1 min-h-0"
-            : // Expanded: `flex-1 min-h-0` stretches the card to the aside's
-              // bottom (matching the full-height aside + the collapsed rail's
-              // flex-1 body), so the surface reaches near the window bottom
-              // instead of collapsing to content height.
-              "lvis-surface-raised w-56 flex-1 min-h-0 overflow-hidden rounded-2xl bg-card",
+            : // Expanded: `relative` anchors the inner-edge resize handle;
+              // `flex-1 min-h-0` stretches the card to the aside's bottom so the
+              // surface reaches near the window bottom instead of collapsing to
+              // content height. Width comes from the inline style below (durable,
+              // user-resized) instead of the former fixed `w-56`.
+              "lvis-surface-raised relative flex-1 min-h-0 overflow-hidden rounded-2xl bg-card",
         ].join(" ")}
+        style={collapsed ? undefined : { width: `${width}px` }}
       >
+        {/* ── Inner-edge drag-to-resize handle (expanded only). Adjusts the
+            durable sidebar width between SIDEBAR_MIN_WIDTH/MAX; double-click or
+            Enter resets to default. Anchored to the card's right edge. */}
+        {resizable ? (
+          <SidebarResizeHandle
+            width={width}
+            onWidthChange={onWidthChange!}
+            onWidthCommit={onWidthCommit!}
+            onReset={onWidthReset!}
+            ariaLabel={t("sidebar.resizeHandleAriaLabel")}
+          />
+        ) : null}
         {/* ── Cluster strip — [펼침/닫힘 toggle] → [검색] → [즐겨찾기] → [내보내기],
             ~8px gaps, each h-7 w-7. Sits on the traffic-light line. When the card
             is expanded this is the card's top strip; when collapsed it stands bare
@@ -820,15 +1028,11 @@ export function Sidebar({
             collapsed={compact}
             data-testid="sidebar-routines"
           />
-          <NavItem
-            viewKey="memory"
-            label={t("mainToolbar.memory")}
-            icon={<Database className="h-4 w-4" />}
-            isActive={activeView === "memory"}
-            onClick={() => onSelect("memory")}
-            collapsed={compact}
-            data-testid="sidebar-memory"
-          />
+          {/* 메모리 panel intentionally removed from the sidebar surface
+              (2026-07 shell refinement). MEMORY.md remains viewable + editable
+              in Settings → 역할/메모리 (RolesTab memory section); the "memory"
+              view itself stays routable (MainContent + UnifiedSearch deep-link)
+              so no navigation breaks. */}
           <NavItem
             viewKey="insights"
             label={t("mainToolbar.insights")}
@@ -877,6 +1081,7 @@ export function Sidebar({
                     streaming={streaming}
                     onLoadSession={onLoadSession}
                     onNewChatForProject={onNewChatForProject}
+                    onRefreshProjects={onRefreshProjects}
                   />
                 </div>
               </div>

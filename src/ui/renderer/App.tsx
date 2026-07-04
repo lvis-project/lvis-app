@@ -14,6 +14,7 @@ import { summarizePluginReadiness } from "./onboarding/first-run-readiness.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { useAppMode } from "./hooks/use-app-mode.js";
+import { useSidebarWidth } from "./hooks/use-sidebar-width.js";
 import { useRoutineOverlay } from "./hooks/use-routine-overlay.js";
 import { useSendMessage } from "./hooks/use-send-message.js";
 import { usePluginViewRouting } from "./hooks/use-plugin-view-routing.js";
@@ -166,6 +167,10 @@ export function App() {
     actionPanelOpen, setActionPanelOpen,
     sidePanelOpen, setSidePanelOpen,
   } = useAppMode(api);
+  // Durable expanded-width of the primary navigation sidebar (drag-to-resize on
+  // its inner edge). Persists via SystemSettings.sidebarWidth; drives both the
+  // sidebar card width and the <main> left-padding reserve in AppShell.
+  const { sidebarWidth, setSidebarWidth, commitSidebarWidth, resetSidebarWidth } = useSidebarWidth(api);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [workspaceProjects, setWorkspaceProjects] = useState<ProjectIdentity[]>([]);
@@ -272,21 +277,22 @@ export function App() {
     setAttachments([]);
   }, [currentSessionId]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void window.lvis?.workspace?.listRoots?.().then((result) => {
-      if (cancelled || !result?.ok) return;
+  const refreshWorkspaceProjects = useCallback(async () => {
+    try {
+      const result = await window.lvis?.workspace?.listRoots?.();
+      if (!result?.ok) return;
       const roots = Array.isArray(result.roots) ? result.roots : [];
       const projects = workspaceRootsToProjects(result.defaultRoot, roots, t("sidebar.currentProject"));
       setWorkspaceProjects(projects);
       setActiveProject((current) => current ?? defaultProjectFromProjects(projects));
-    }).catch(() => {
+    } catch {
       // The backend still defaults chat creation to the anchored workspace root.
-    });
-    return () => {
-      cancelled = true;
-    };
+    }
   }, [t]);
+
+  useEffect(() => {
+    void refreshWorkspaceProjects();
+  }, [refreshWorkspaceProjects]);
 
   const resolveKnownProject = useCallback((project: ProjectIdentity | undefined): ProjectIdentity | undefined => {
     if (!project) return undefined;
@@ -691,6 +697,10 @@ export function App() {
         appMode={appMode}
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebarCollapse={() => setSidebarCollapsed((v) => !v)}
+        sidebarWidth={sidebarWidth}
+        onSidebarWidthChange={setSidebarWidth}
+        onSidebarWidthCommit={commitSidebarWidth}
+        onSidebarWidthReset={resetSidebarWidth}
         activeView={activeView}
         streaming={streaming}
         hasApiKey={effectiveHasApiKey}
@@ -703,6 +713,7 @@ export function App() {
         onOpenSettings={onOpenSettings}
         onNewChat={onNewChat}
         onNewChatForProject={onNewChatForProject}
+        onRefreshProjects={refreshWorkspaceProjects}
         workspaceProjects={workspaceProjects}
         activeProject={activeProject ?? defaultWorkspaceProject}
         onOpenMarketplace={onOpenMarketplace}
