@@ -160,6 +160,15 @@ describe("preload — plugin webview asset URLs", () => {
     expect(typeof api["captureUserKeyboardIntent"]).toBe("function");
   });
 
+  it("keeps provider-backed usage daily summary out of the public preload surface", async () => {
+    const { buildPublicSurface } = await import("../preload/public-surface.js");
+    const publicApi = buildPublicSurface() as Record<string, unknown>;
+
+    expect(typeof publicApi["getUsageSummary"]).toBe("function");
+    expect(typeof publicApi["getUsageRange"]).toBe("function");
+    expect(publicApi["getUsageDailySummary"]).toBeUndefined();
+  });
+
   it("exposes settings updated subscription through preload", async () => {
     const api = await loadLvisApi();
     const handler = vi.fn();

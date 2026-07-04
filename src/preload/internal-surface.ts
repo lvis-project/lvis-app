@@ -58,6 +58,20 @@ import type { TurnResult } from "../engine/conversation-loop.js";
 
 export type LvisInitialThemePayload = Readonly<InitialThemePrime>;
 
+type MemoryProjectOptions = { projectRoot?: string; projectName?: string; includeUnscoped?: boolean };
+
+function invokeWithOptionalMemoryOptions<T>(channel: string, opts?: MemoryProjectOptions): Promise<T> {
+  return opts === undefined
+    ? ipcRenderer.invoke(channel) as Promise<T>
+    : ipcRenderer.invoke(channel, opts) as Promise<T>;
+}
+
+function invokeMemorySearch<T>(channel: string, query: string, opts?: MemoryProjectOptions): Promise<T> {
+  return opts === undefined
+    ? ipcRenderer.invoke(channel, query) as Promise<T>
+    : ipcRenderer.invoke(channel, query, opts) as Promise<T>;
+}
+
 export function readInitialThemeArg(): LvisInitialThemePayload | null {
   try {
     // `findLast` (vs `find`) defends against accidental duplicate arg
@@ -232,6 +246,10 @@ export function buildInternalApiSurface() {
   setMarketplaceApiKey: async (apiKey: string) => ipcRenderer.invoke(CHANNELS.settings.marketplaceSetApiKey, apiKey),
   hasMarketplaceApiKey: async () => ipcRenderer.invoke(CHANNELS.settings.marketplaceHasApiKey) as Promise<boolean>,
   deleteMarketplaceApiKey: async () => ipcRenderer.invoke(CHANNELS.settings.marketplaceDeleteApiKey),
+  // ─── Internal Usage Insights ─────────────────────
+  // This can trigger a provider-backed LLM call, so it is intentionally kept
+  // out of the externally-parity-safe public surface and local API allowlist.
+  getUsageDailySummary: async (input: unknown) => ipcRenderer.invoke(CHANNELS.usage.dailySummary, input),
   // #893 — top-level mockup credential login. Hard-coded `demo`/`demo123`
   // (env override via `LVIS_DEMO_USER` / `LVIS_DEMO_PASS`). Vendor is no
   // longer sent by the renderer; the backend picks via `LVIS_DEMO_VENDOR`
@@ -619,17 +637,23 @@ export function buildInternalApiSurface() {
 
 
   // ─── Memory ──────────────────────────────────────
-  memoryListEntries: async () => ipcRenderer.invoke(CHANNELS.memory.entriesList),
-  memorySaveEntry: async (title: string, content: string) => ipcRenderer.invoke(CHANNELS.memory.entriesSave, title, content),
+  memoryListEntries: async (opts?: MemoryProjectOptions) =>
+    invokeWithOptionalMemoryOptions(CHANNELS.memory.entriesList, opts),
+  memorySaveEntry: async (title: string, content: string, opts?: MemoryProjectOptions) =>
+    ipcRenderer.invoke(CHANNELS.memory.entriesSave, title, content, opts),
   memoryDeleteEntry: async (filename: string) => ipcRenderer.invoke(CHANNELS.memory.entriesDelete, filename),
-  memorySearchEntries: async (query: string) => ipcRenderer.invoke(CHANNELS.memory.entriesSearch, query),
-  memoryGetIndex: async () => ipcRenderer.invoke(CHANNELS.memory.indexGet) as Promise<string>,
+  memorySearchEntries: async (query: string, opts?: MemoryProjectOptions) =>
+    invokeMemorySearch(CHANNELS.memory.entriesSearch, query, opts),
+  memoryGetIndex: async (opts?: MemoryProjectOptions) =>
+    invokeWithOptionalMemoryOptions<string>(CHANNELS.memory.indexGet, opts),
   memoryUpdateIndexIfUnchanged: async (expectedContent: string, nextContent: string) =>
     ipcRenderer.invoke(CHANNELS.memory.indexUpdateIfUnchanged, expectedContent, nextContent) as Promise<boolean>,
   memoryUpdateIndexSections: async (sections: { urgentMemory?: string; references?: string }) =>
     ipcRenderer.invoke(CHANNELS.memory.indexSectionsUpdate, sections),
-  memoryListSessions: async () => ipcRenderer.invoke(CHANNELS.memory.sessionsList),
-  memorySearchSessions: async (query: string) => ipcRenderer.invoke(CHANNELS.memory.sessionsSearch, query),
+  memoryListSessions: async (opts?: MemoryProjectOptions) =>
+    invokeWithOptionalMemoryOptions(CHANNELS.memory.sessionsList, opts),
+  memorySearchSessions: async (query: string, opts?: MemoryProjectOptions) =>
+    invokeMemorySearch(CHANNELS.memory.sessionsSearch, query, opts),
   memoryGetAgentsMd: async () => ipcRenderer.invoke(CHANNELS.memory.agentsMdGet) as Promise<string>,
   memoryUpdateAgentsMd: async (content: string) => ipcRenderer.invoke(CHANNELS.memory.agentsMdUpdate, content),
   memoryGetUserPrefs: async () => ipcRenderer.invoke(CHANNELS.memory.userPrefsGet) as Promise<string>,
@@ -1391,7 +1415,7 @@ export function buildInternalApiSurface() {
   // an empty-period envelope, an error envelope (LLM failure), or no-reporter.
   generateWorkBoardReport: async (
     kind: "daily" | "weekly",
-    input?: { date?: string; weekIso?: string; weekOffset?: number },
+    input?: { date?: string; weekIso?: string; weekOffset?: number; projectRoot?: string; includeUnscoped?: boolean },
   ) =>
     ipcRenderer.invoke(WORK_BOARD.generateReport, kind, input) as Promise<
       | import("../shared/work-board-types.js").WorkBoardReportResult

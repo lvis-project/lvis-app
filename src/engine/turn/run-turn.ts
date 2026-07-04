@@ -398,6 +398,7 @@ export async function runTurn(
     if (self.deps.postTurnHookChain) {
       const hookResult = await self.deps.postTurnHookChain.run({
         sessionId: self.sessionId,
+        ...self.getSessionProjectContext(),
         messages: self.history.getMessages(),
         input,
         output: result.text,
