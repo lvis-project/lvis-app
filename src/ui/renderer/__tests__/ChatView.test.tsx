@@ -212,6 +212,25 @@ describe("ChatView", () => {
     });
   });
 
+  it("renders the keyless empty state through the SAME centered composer layout (no legacy fork)", async () => {
+    // Unified keyless layout: with NO API key the empty work-mode chat must use
+    // the same raised/centered composer dock as the keyed state — the no-key
+    // card is only an overlay on top, never a separate legacy composer path.
+    const { container } = await renderApp({ hasApiKey: false });
+
+    await waitFor(() => {
+      // The key-required card overlays the shared layout.
+      expect(container.textContent).toContain("API 키 설정 필요");
+      // The composer dock is the SAME centered dock as the keyed empty state.
+      const dock = container.querySelector('[data-testid="session-todo-dock"]');
+      expect(dock).not.toBeNull();
+      expect(dock).toHaveClass("mx-auto");
+      expect(dock).toHaveClass("max-w-[58rem]");
+      // Composer is present (shared component) but its send is disabled.
+      expect(container.querySelector('[data-testid="composer-textarea"]')).not.toBeNull();
+    });
+  });
+
   it("keeps an active conversation composer on the full-width chat-mode dock", async () => {
     const { container } = await renderApp({
       hasApiKey: true,

@@ -162,11 +162,17 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     () => viewMode ? entries.slice(0, viewMode.slicedRangeEnd) : entries,
     [entries, viewMode],
   );
+  // Empty-state centered composer applies to BOTH the keyed and the keyless
+  // (no-API-key) state — the layout is unified so the no-key state is only an
+  // overlaid key-required card + disabled send on top of the SAME raised
+  // composer, never a separate legacy fork. `hasApiKey === null` (still probing
+  // at boot) is excluded so the centered layout does not flash before the probe
+  // resolves (mirrors the ChatTranscript empty-state suppression, #1014).
   const emptyComposerCentered =
     appMode === "work" &&
     hasAskQuestions === false &&
     visibleEntries.length === 0 &&
-    hasApiKey === true &&
+    hasApiKey !== null &&
     !suggestedRepliesActive &&
     viewMode === null;
   const dockColumnClass = emptyComposerCentered
