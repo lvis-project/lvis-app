@@ -1146,7 +1146,7 @@ function ReportsSection({ api, project }: { api: LvisApi; project?: ProjectIdent
         if (mountedRef.current) setGenerating(null);
       }
     },
-    [api],
+    [api, project],
   );
 
   return (
