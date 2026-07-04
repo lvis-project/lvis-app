@@ -150,7 +150,6 @@ export function buildPublicSurface() {
   // ─── Usage Observability ─────────────────────────
   getUsageSummary: async (days?: number) => ipcRenderer.invoke(CHANNELS.usage.summary, days),
   getUsageRange: async (opts: { dateFrom: string; dateTo: string }) => ipcRenderer.invoke(CHANNELS.usage.range, opts),
-  getUsageDailySummary: async (input: unknown) => ipcRenderer.invoke(CHANNELS.usage.dailySummary, input),
   exportUsageCsv: async (rows: Array<Record<string, string | number>>) => ipcRenderer.invoke(CHANNELS.usage.exportCsv, rows),
   };
 }

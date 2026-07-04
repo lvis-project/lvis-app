@@ -28,6 +28,15 @@ import { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { SessionTodoStore } from "../main/session-todo-store.js";
 import { isDefaultWorkspaceRoot } from "../main/default-workspace-root.js";
+import {
+  defaultWorkspaceProject,
+  resolveAuthorizedWorkspaceProject,
+} from "../main/project-root-authorization.js";
+
+function authorizeWorkspaceProjectRoot(projectRoot: string, projectName?: string) {
+  const resolved = resolveAuthorizedWorkspaceProject(projectRoot, projectName);
+  return resolved.authorized ? resolved.project : null;
+}
 
 /**
  * Tutorial-X4 — read the user-onboarding-context markdown file synth-
@@ -184,6 +193,11 @@ export interface ConversationDeps {
   additionalDirectories?: readonly string[];
   getAdditionalDirectories?: () => readonly string[];
   isDefaultProjectRoot?: (projectRoot: string) => boolean;
+  getDefaultProject?: () => { projectRoot?: string; projectName?: string; isDefault?: boolean };
+  authorizeProject?: (
+    projectRoot: string,
+    projectName?: string,
+  ) => { projectRoot: string; projectName?: string; isDefault?: boolean } | null;
   /**
    * Fan-out hook for permission config mutations. Boot wires this from
    * `ipc/domains/permissions.ts:broadcastPermissionConfigChanged` so the
@@ -241,6 +255,8 @@ export type RoutineConversationLoopDeps = Pick<
   | "llmFetch"
   | "auditLogger"
   | "isDefaultProjectRoot"
+  | "getDefaultProject"
+  | "authorizeProject"
 >;
 
 export function createRoutineConversationLoop(
@@ -304,6 +320,8 @@ export function createRoutineConversationLoop(
     auditLogger: deps.auditLogger,
     llmFetch: deps.llmFetch,
     isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
+    getDefaultProject: deps.getDefaultProject ?? defaultWorkspaceProject,
+    authorizeProject: deps.authorizeProject ?? authorizeWorkspaceProjectRoot,
     allowedPluginIds,
     forcedActivePluginIds,
     ...(forcedActiveToolNames.size > 0 ? { forcedActiveToolNames } : {}),
@@ -357,6 +375,11 @@ export type SideChatConversationLoopDeps = Pick<
   /** Shared settings service — reads `additionalDirectories` at each turn. */
   getAdditionalDirectories?: () => readonly string[];
   isDefaultProjectRoot?: (projectRoot: string) => boolean;
+  getDefaultProject?: () => { projectRoot?: string; projectName?: string; isDefault?: boolean };
+  authorizeProject?: (
+    projectRoot: string,
+    projectName?: string,
+  ) => { projectRoot: string; projectName?: string; isDefault?: boolean } | null;
 };
 
 export function createSideChatConversationLoop(
@@ -395,6 +418,8 @@ export function createSideChatConversationLoop(
     auditLogger: deps.auditLogger,
     llmFetch: deps.llmFetch,
     isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
+    getDefaultProject: deps.getDefaultProject ?? defaultWorkspaceProject,
+    authorizeProject: deps.authorizeProject ?? authorizeWorkspaceProjectRoot,
     ...(deps.getAdditionalDirectories
       ? { getAdditionalDirectories: deps.getAdditionalDirectories }
       : {}),
@@ -404,7 +429,7 @@ export function createSideChatConversationLoop(
 
 export function createConversationLoop(deps: ConversationDeps): ConversationLoop {
   // §4.5: ConversationLoop
-  return new ConversationLoop({
+  const loop = new ConversationLoop({
     settingsService: deps.settingsService,
     systemPromptBuilder: deps.systemPromptBuilder,
     keywordEngine: deps.keywordEngine,
@@ -423,6 +448,8 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     additionalDirectories: deps.additionalDirectories,
     getAdditionalDirectories: deps.getAdditionalDirectories,
     isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
+    getDefaultProject: deps.getDefaultProject ?? defaultWorkspaceProject,
+    authorizeProject: deps.authorizeProject ?? authorizeWorkspaceProjectRoot,
     // Option C — request_plugin 메타 툴 pluginId 검증용.
     pluginRuntime: deps.pluginRuntime,
     skillOverlay: deps.skillOverlay,
@@ -432,6 +459,8 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     rewireReviewerAgent: deps.rewireReviewerAgent,
     llmFetch: deps.llmFetch,
   });
+  loop.newConversation("main");
+  return loop;
 }
 
 /**

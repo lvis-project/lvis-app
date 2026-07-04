@@ -57,6 +57,8 @@ describe("MemoryManager.searchMemoryEntries", () => {
 
     expect(mm.searchMemoryEntries("secret", { projectRoot: "C:\\workspace\\alpha" }).map((entry) => entry.title))
       .toEqual(["Alpha Note"]);
+    expect(mm.searchMemoryEntries("secret", { projectRoot: "c:/workspace/alpha/" }).map((entry) => entry.title))
+      .toEqual(["Alpha Note"]);
     expect(mm.listMemoryEntries({ projectRoot: "C:\\workspace\\alpha", includeUnscoped: true }).map((entry) => entry.title))
       .toEqual(expect.arrayContaining(["Legacy Note", "Alpha Note"]));
     expect(mm.getMemoryContext({ projectRoot: "C:\\workspace\\alpha" })).toContain("alpha secret");
@@ -331,7 +333,7 @@ describe("MemoryManager.listSessionEntries", () => {
 
     const sessions = mm.listSessions();
     expect(sessions[0].id).toBe(sessionId);
-    expect(sessions[0].preview).toContain("미리보기를 생략");
+    expect(sessions[0].preview).toMatch(/미리보기를 생략|preview skipped/);
   });
 
   it("defaults list/search APIs to main sessions and requires explicit routine scope", async () => {

@@ -414,7 +414,7 @@ export class ConversationLoop {
 
   /** 대화 이력 초기화 (새 대화) — §4.5.7 */
   newConversation(kind: SessionKind = "main", project?: SessionProjectContext): void {
-    newConversation(this, kind, project);
+    newConversation(this, kind, project ?? (kind === "main" ? this.deps.getDefaultProject?.() : undefined));
   }
 
   addSessionAdditionalDirectory(path: string): void {

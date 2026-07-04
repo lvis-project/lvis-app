@@ -59,7 +59,7 @@ import {
 } from "../ipc/handlers/chat.js";
 import { handlePluginCards, handleMarketplaceList } from "../ipc/handlers/plugins.js";
 import { handleGetMode, handleSetPermissionMode } from "../ipc/handlers/permissions.js";
-import { handleUsageSummary, handleUsageRange, handleUsageDailySummary } from "../ipc/handlers/usage.js";
+import { handleUsageSummary, handleUsageRange } from "../ipc/handlers/usage.js";
 
 /** Rejection: the channel is not part of the externally-exposable subset. */
 export const LOCAL_API_CHANNEL_NOT_PUBLIC = "channel-not-public";
@@ -218,8 +218,6 @@ export function createLocalApi(deps: LocalApiDeps): LocalApi {
         return handleUsageSummary(args as Parameters<typeof handleUsageSummary>[0]);
       case CHANNELS.usage.range:
         return handleUsageRange(args as Parameters<typeof handleUsageRange>[0]);
-      case CHANNELS.usage.dailySummary:
-        return handleUsageDailySummary(ipc.conversationLoop, args);
       default: {
         // Exhaustiveness guard — every PublicChannel must be routed above.
         const _exhaustive: never = channel;

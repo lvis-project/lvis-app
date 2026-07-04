@@ -26,6 +26,7 @@ import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import type { SessionKind } from "../../memory/memory-manager.js";
 import { projectBasename } from "../../shared/project-identity.js";
+import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
 import {
   runStreamedTurn,
   STREAM_TURN_OPTIONS,
@@ -361,9 +362,16 @@ export function handleChatSessions(
     ? opts?.kind as SessionKind | "all"
     : "main";
   const routineId = typeof opts?.routineId === "string" ? opts.routineId : undefined;
-  const projectRoot = normalizeProjectString(opts?.projectRoot, MAX_PROJECT_ROOT_CHARS);
+  const requestedProjectRoot = normalizeProjectString(opts?.projectRoot, MAX_PROJECT_ROOT_CHARS);
+  const resolvedProject = requestedProjectRoot ? resolveAuthorizedWorkspaceProject(requestedProjectRoot) : undefined;
+  const projectRoot = resolvedProject
+    ? resolvedProject.authorized && resolvedProject.project
+      ? resolvedProject.project.projectRoot
+      : "__lvis_unauthorized_project_root__"
+    : undefined;
+  const includeUnscoped = resolvedProject?.authorized === true && resolvedProject.project?.isDefault === true;
   const sessions = memoryManager
-    .listSessionsPage({ kind, ...(routineId ? { routineId } : {}), ...(projectRoot ? { projectRoot } : {}), limit, ...(before ? { before } : {}), ...(beforeId ? { beforeId } : {}), ...(after ? { after } : {}) })
+    .listSessionsPage({ kind, ...(routineId ? { routineId } : {}), ...(projectRoot ? { projectRoot } : {}), ...(includeUnscoped ? { includeUnscoped: true } : {}), limit, ...(before ? { before } : {}), ...(beforeId ? { beforeId } : {}), ...(after ? { after } : {}) })
     .map((s) => ({
       id: s.id,
       modifiedAt: s.modifiedAt.toISOString(),

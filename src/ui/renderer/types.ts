@@ -677,7 +677,9 @@ export type LvisApi = {
     personaPromptId?: string,
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
-  chatNew: (opts?: { projectRoot?: string; projectName?: string }) => Promise<{ ok: true }>;
+  chatNew: (opts?: { projectRoot?: string; projectName?: string }) => Promise<
+    { ok: true } | { ok: false; error: string }
+  >;
   chatSessions: (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; routineFiredAt?: string; projectRoot?: string; projectName?: string; branchedFromCompactNum?: number }> }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;

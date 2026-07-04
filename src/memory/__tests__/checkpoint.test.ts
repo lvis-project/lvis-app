@@ -104,7 +104,7 @@ describe("project metadata", () => {
       projectRoot: "C:\\workspace\\alpha",
       projectName: "alpha",
     });
-    expect(mm.listSessionsPage({ kind: "main", projectRoot: "C:\\workspace\\alpha" }).map((s) => s.id))
+    expect(mm.listSessionsPage({ kind: "main", projectRoot: "c:/workspace/alpha/" }).map((s) => s.id))
       .toEqual([SESSION_A]);
   });
 
