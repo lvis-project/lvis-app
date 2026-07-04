@@ -146,6 +146,16 @@ describe("lvis:usage:daily-summary", () => {
 
     expect(result).toEqual({ ok: false, error: "LLM provider not configured" });
   });
+
+  it("normalizes malformed payloads instead of rejecting the IPC handler", async () => {
+    const result = await invoke("lvis:usage:daily-summary", trustedEvent(), undefined) as { ok: boolean; summary?: string };
+
+    expect(result).toMatchObject({ ok: true, summary: "AI daily summary" });
+    expect(mockGenerateText).toHaveBeenCalledWith(
+      expect.stringContaining("\"date\":\"unknown\""),
+      expect.any(String),
+    );
+  });
 });
 
 describe("lvis:usage:export-csv", () => {
