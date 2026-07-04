@@ -25,7 +25,6 @@ import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import type { SessionKind } from "../../memory/memory-manager.js";
-import { projectBasename } from "../../shared/project-identity.js";
 import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
 import {
   runStreamedTurn,
@@ -68,10 +67,14 @@ export function parseChatSessionProjectPayload(raw: unknown): ChatSessionProject
 
 export function defaultWorkspaceProjectPayload(defaultWorkspaceRoot = process.cwd()): ChatSessionProjectPayload {
   const projectRoot = normalizeProjectString(defaultWorkspaceRoot, MAX_PROJECT_ROOT_CHARS);
-  const defaultName = normalizeProjectString(projectRoot ? projectBasename(projectRoot) : undefined, MAX_PROJECT_NAME_CHARS) ?? "workspace";
+  // Default/base-directory project is labeled "default" (not the workspace
+  // folder basename) so the sidebar + insights never surface a confusing folder
+  // name. The authoritative resolution (resolveAuthorizedWorkspaceProject →
+  // defaultWorkspaceProject) also uses this literal; kept in sync here for the
+  // request-payload path.
   return {
     ...(projectRoot ? { projectRoot } : {}),
-    projectName: defaultName,
+    projectName: "default",
   };
 }
 

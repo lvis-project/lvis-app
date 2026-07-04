@@ -94,7 +94,11 @@ describe("Sidebar project sessions", () => {
     const { getByTestId, getByText, restore } = renderSidebar();
     try {
       await waitFor(() => {
-        expect(getByTestId("sidebar-current-project").textContent).toContain("lvis-app");
+        // The default/base-directory project is labeled by the localized
+        // fallback ("현재 프로젝트"), not the workspace folder basename — the
+        // 2026-07 default-project-naming refinement (avoids surfacing a
+        // confusing folder name like "lvis-app"/"workspace" as the project).
+        expect(getByTestId("sidebar-current-project").textContent).toContain("현재 프로젝트");
       });
       expect(getByText("전체 동기화로 상태 파악")).toBeTruthy();
       expect(getByText("사이드 패널 개선")).toBeTruthy();
