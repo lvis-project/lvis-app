@@ -134,9 +134,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const readingColumnClass = blogLayout
     ? "mx-auto w-full max-w-[58rem] px-6 lg:px-8"
     : "w-full max-w-full px-4";
-  const dockColumnClass = blogLayout
-    ? "mx-auto w-full max-w-[58rem] min-w-0"
-    : "w-full max-w-full min-w-0";
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
@@ -169,6 +166,18 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     () => viewMode ? entries.slice(0, viewMode.slicedRangeEnd) : entries,
     [entries, viewMode],
   );
+  const emptyComposerCentered =
+    appMode === "work" &&
+    hasAskQuestions === false &&
+    visibleEntries.length === 0 &&
+    hasApiKey === true &&
+    !suggestedRepliesActive &&
+    viewMode === null;
+  const dockColumnClass = emptyComposerCentered
+    ? "mx-auto w-full max-w-[58rem] min-w-0"
+    : blogLayout
+      ? "mx-auto w-full max-w-[58rem] min-w-0"
+      : "w-full max-w-full min-w-0";
   // Sub-agent spawns shown inline + in the workspace SubAgentViewer. The live
   // `subAgentSpawns` prop is populated ONLY from the in-flight agent-spawn
   // event stream, so a LOADED past session would show nothing. Mirror how
@@ -679,6 +688,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         hasApiKey={hasApiKey}
         hasAskQuestions={hasAskQuestions}
         suggestedRepliesActive={suggestedRepliesActive}
+        compactDateNavigator
         transcriptEntries={transcriptEntries}
         chatEndRef={chatEndRef}
       />
@@ -742,6 +752,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           distinct surface on its own. */}
       <ChatComposerDock
         dockColumnClass={dockColumnClass}
+        centered={emptyComposerCentered}
         workflowApi={workflowApi}
         api={api}
         currentSessionId={currentSessionId}

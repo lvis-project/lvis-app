@@ -183,12 +183,13 @@ export function MainContent(props: MainContentProps): ReactNode {
     );
   }
 
-  if (activeView === "starred") {
+  if (activeView === "insights" || activeView === "starred") {
     return (
       <MainPaneShell backToHome onBack={props.onActivateHome}>
         <StarredView
           api={api}
           starred={props.starred}
+          sessions={props.sessions}
           currentSessionId={props.currentSessionId}
           refreshStarred={props.refreshStarred}
           onJumpToSession={props.onJumpToSession}

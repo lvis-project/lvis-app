@@ -24,6 +24,8 @@ type InputStatusRow = React.ComponentProps<typeof InputActionBar>["statusRow"];
 
 export interface ChatComposerDockProps {
   dockColumnClass: string;
+  /** Empty work-mode conversation: visually lift the composer into the first screen. */
+  centered?: boolean;
   workflowApi: LvisApi;
   api: LvisApi;
   currentSessionId: string;
@@ -75,6 +77,7 @@ export interface ChatComposerDockProps {
  */
 export function ChatComposerDock({
   dockColumnClass,
+  centered = false,
   workflowApi,
   api,
   currentSessionId,
@@ -117,7 +120,13 @@ export function ChatComposerDock({
   onResolveAskQuestion,
 }: ChatComposerDockProps) {
   return (
-    <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible">
+    <div
+      className={[
+        "relative z-30 w-full max-w-full min-w-0 overflow-visible transition-[margin,transform] duration-300 ease-out motion-reduce:transition-none",
+        centered ? "mb-[clamp(9rem,32vh,20rem)]" : "mb-0",
+      ].join(" ")}
+      data-composer-placement={centered ? "center" : "bottom"}
+    >
       <div className={dockColumnClass} data-testid="session-todo-dock">
         <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
         <MessageQueuePanel

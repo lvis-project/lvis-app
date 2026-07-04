@@ -74,6 +74,7 @@ export type SessionKind = "main" | "routine" | "subagent";
 export interface ListSessionsOptions {
   kind?: SessionKind | "all";
   routineId?: string;
+  projectRoot?: string;
   limit?: number;
   before?: Date;
   beforeId?: string;
@@ -95,6 +96,10 @@ export interface SessionListEntry {
   routineId?: string;
   routineTitle?: string;
   routineFiredAt?: string;
+  /** Workspace/project root this conversation belongs to. */
+  projectRoot?: string;
+  /** Human-readable workspace/project label captured when the session was created. */
+  projectName?: string;
   /**
    * Checkpoint/fork provenance only. This is not a chronological previous
    * session pointer and must not drive automatic previous-session loading.
@@ -158,6 +163,10 @@ export interface SessionMetadata {
   routineId?: string;
   routineTitle?: string;
   routineFiredAt?: string;
+  /** Workspace/project root this conversation belongs to. */
+  projectRoot?: string;
+  /** Human-readable workspace/project label captured when the session was created. */
+  projectName?: string;
   /** Checkpoint/fork provenance parent, not a chronological previous session. */
   parentSessionId?: string;
   /**
@@ -230,6 +239,8 @@ function getDefaultUserPrefs(): string {
 const MAX_SESSION_FILE_BYTES = 5_000_000;
 /** Max length of summaryPreamble stored in session metadata (~2000 tokens). */
 const MAX_SUMMARY_PREAMBLE_CHARS = 8_000;
+const MAX_PROJECT_ROOT_CHARS = 2_048;
+const MAX_PROJECT_NAME_CHARS = 120;
 const ACTIVE_SESSION_STATE_FILE = ".active-session.json";
 
 /**
@@ -334,14 +345,21 @@ function normalizeSessionKind(value: unknown): SessionKind {
   return "main";
 }
 
+function normalizeMetadataString(value: unknown, maxChars: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.slice(0, maxChars) : undefined;
+}
+
 function matchesSessionScope(
   metadata: SessionMetadata | null,
-  options: Pick<ListSessionsOptions, "kind" | "routineId">,
+  options: Pick<ListSessionsOptions, "kind" | "routineId" | "projectRoot">,
 ): boolean {
   const kind = options.kind ?? "main";
   const sessionKind = metadata?.sessionKind ?? normalizeSessionKind(undefined);
   if (kind !== "all" && sessionKind !== kind) return false;
   if (options.routineId !== undefined && metadata?.routineId !== options.routineId) return false;
+  if (options.projectRoot !== undefined && metadata?.projectRoot !== options.projectRoot) return false;
   return true;
 }
 
@@ -397,6 +415,8 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     : undefined;
   const rawBranchedAt = typeof raw.branchedAt === "string" ? raw.branchedAt : undefined;
   const routineId = typeof raw.routineId === "string" ? raw.routineId : undefined;
+  const projectRoot = normalizeMetadataString(raw.projectRoot, MAX_PROJECT_ROOT_CHARS);
+  const projectName = normalizeMetadataString(raw.projectName, MAX_PROJECT_NAME_CHARS);
   // Sub-agent resume metadata (PR-B). Only string[] of strings survives for
   // sourceTools; non-negative integers for the counters. Invalid shapes drop to
   // undefined rather than corrupting the frozen permission scope on resume.
@@ -416,6 +436,8 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     routineId,
     routineTitle: typeof raw.routineTitle === "string" ? raw.routineTitle : undefined,
     routineFiredAt: typeof raw.routineFiredAt === "string" ? raw.routineFiredAt : undefined,
+    projectRoot,
+    projectName,
     parentSessionId: isValidSessionId(raw.parentSessionId) ? raw.parentSessionId : undefined,
     // Defense-in-depth: cap on read in case file was written without truncation.
     summaryPreamble: rawPreamble !== undefined
@@ -868,6 +890,8 @@ export class MemoryManager {
     safe = {
       ...safe,
       sessionKind: normalizeSessionKind(safe.sessionKind),
+      projectRoot: normalizeMetadataString(safe.projectRoot, MAX_PROJECT_ROOT_CHARS),
+      projectName: normalizeMetadataString(safe.projectName, MAX_PROJECT_NAME_CHARS),
     };
     // Cap stored title to 20 chars.
     if (safe.title !== undefined && safe.title.length > 20) {
@@ -1004,6 +1028,8 @@ export class MemoryManager {
           routineId: metadata?.routineId,
           routineTitle: metadata?.routineTitle,
           routineFiredAt: metadata?.routineFiredAt,
+          ...(metadata?.projectRoot ? { projectRoot: metadata.projectRoot } : {}),
+          ...(metadata?.projectName ? { projectName: metadata.projectName } : {}),
           // Branch provenance — already loaded from metadata, no extra disk IO
           ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
           ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
@@ -1064,6 +1090,8 @@ export class MemoryManager {
           routineId: metadata?.routineId,
           routineTitle: metadata?.routineTitle,
           routineFiredAt: metadata?.routineFiredAt,
+          ...(metadata?.projectRoot ? { projectRoot: metadata.projectRoot } : {}),
+          ...(metadata?.projectName ? { projectName: metadata.projectName } : {}),
           // Branch provenance — already loaded from metadata above, no extra disk IO
           ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
           ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),

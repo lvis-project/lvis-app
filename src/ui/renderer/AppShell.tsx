@@ -50,6 +50,7 @@ export function AppShell({
   pluginAuthStatuses,
   onOpenSettings,
   onNewChat,
+  onNewChatForProject,
   onOpenMarketplace,
   marketplaceUrlReady,
   onOpenUnifiedSearch,
@@ -111,6 +112,7 @@ export function AppShell({
   pluginAuthStatuses: SidebarProps["pluginAuthStatuses"];
   onOpenSettings: (tab?: string) => void;
   onNewChat: () => void;
+  onNewChatForProject: SidebarProps["onNewChatForProject"];
   onOpenMarketplace: () => void;
   marketplaceUrlReady: boolean;
   onOpenUnifiedSearch: () => void;
@@ -186,9 +188,17 @@ export function AppShell({
         onSelect={onSelectView}
         pluginViews={pluginViews}
         pluginAuthStatuses={pluginAuthStatuses}
+        sessions={sessions}
+        currentSessionId={currentSessionId}
+        onLoadSession={async (sessionId) => {
+          const loaded = await onSearchLoadSession(sessionId);
+          if (loaded !== false) setActiveView("home");
+          return loaded;
+        }}
         hasApiKey={hasApiKey}
         onOpenSettings={() => onOpenSettings()}
         onNewChat={onNewChat}
+        onNewChatForProject={onNewChatForProject}
         streaming={streaming}
         onOpenMarketplace={onOpenMarketplace}
         marketplaceUrlReady={marketplaceUrlReady}
