@@ -46,8 +46,16 @@ function trustedEvent(): IpcMainInvokeEvent {
   return null as unknown as IpcMainInvokeEvent; // null = trusted (test ergonomics)
 }
 
+function hostRendererEvent(): IpcMainInvokeEvent {
+  return { senderFrame: { url: "file:///C:/Users/ikcha/workspace/lvis-project/lvis-app/dist/src/index.html" } } as unknown as IpcMainInvokeEvent;
+}
+
 function untrustedEvent(): IpcMainInvokeEvent {
   return { senderFrame: { url: "https://evil.example.com/" } } as unknown as IpcMainInvokeEvent;
+}
+
+function pluginShellEvent(): IpcMainInvokeEvent {
+  return { senderFrame: { url: "file:///C:/Users/ikcha/workspace/lvis-project/lvis-app/dist/src/plugin-ui-shell.html" } } as unknown as IpcMainInvokeEvent;
 }
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -120,8 +128,14 @@ describe("lvis:usage:daily-summary", () => {
     expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
   });
 
+  it("rejects plugin shell frames even though they are local file URLs", async () => {
+    const result = await invoke("lvis:usage:daily-summary", pluginShellEvent(), { date: "2026-07-04" });
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(mockGenerateText).not.toHaveBeenCalled();
+  });
+
   it("generates a constrained LLM daily summary from insight payload", async () => {
-    const result = await invoke("lvis:usage:daily-summary", trustedEvent(), {
+    const result = await invoke("lvis:usage:daily-summary", hostRendererEvent(), {
       date: "2026-07-04",
       locale: "ko-KR",
       sessions: [{ title: "프로젝트 작업" }],
@@ -140,15 +154,34 @@ describe("lvis:usage:daily-summary", () => {
     );
   });
 
+  it("redacts sensitive renderer text before sending the daily summary prompt to the LLM", async () => {
+    const result = await invoke("lvis:usage:daily-summary", hostRendererEvent(), {
+      date: "2026-07-04",
+      locale: "ko-KR",
+      sessions: [{ title: "Call foo.bar@example.com", projectName: "010-1234-5678 launch" }],
+      starred: [{ role: "assistant", text: "Card 4111 1111 1111 1111 was pasted" }],
+      usage: { totalTokens: 120 },
+    }) as { ok: boolean };
+
+    expect(result.ok).toBe(true);
+    const prompt = mockGenerateText.mock.calls.at(-1)?.[0] as string;
+    expect(prompt).not.toContain("foo.bar@example.com");
+    expect(prompt).not.toContain("010-1234-5678");
+    expect(prompt).not.toContain("4111 1111 1111 1111");
+    expect(prompt).toContain("[REDACTED:EMAIL]");
+    expect(prompt).toContain("[REDACTED:PHONE]");
+    expect(prompt).toContain("[REDACTED:CC]");
+  });
+
   it("returns a fail-closed result when the LLM summary call fails", async () => {
     mockGenerateText.mockRejectedValueOnce(new Error("LLM provider not configured"));
-    const result = await invoke("lvis:usage:daily-summary", trustedEvent(), { date: "2026-07-04" });
+    const result = await invoke("lvis:usage:daily-summary", hostRendererEvent(), { date: "2026-07-04" });
 
     expect(result).toEqual({ ok: false, error: "LLM provider not configured" });
   });
 
   it("normalizes malformed payloads instead of rejecting the IPC handler", async () => {
-    const result = await invoke("lvis:usage:daily-summary", trustedEvent(), undefined) as { ok: boolean; summary?: string };
+    const result = await invoke("lvis:usage:daily-summary", hostRendererEvent(), undefined) as { ok: boolean; summary?: string };
 
     expect(result).toMatchObject({ ok: true, summary: "AI daily summary" });
     expect(mockGenerateText).toHaveBeenCalledWith(

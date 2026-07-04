@@ -7,6 +7,7 @@
  * `domains/usage.ts`. The engine `usage-stats` module is lazily imported here
  * exactly as before to keep it out of the boot-time graph.
  */
+import { redactForLLM } from "../../audit/dlp-filter.js";
 
 /** PUBLIC `lvis:usage:summary` — rolling usage summary over `days` (default 60). */
 export async function handleUsageSummary(days?: number) {
@@ -52,19 +53,26 @@ const MAX_SUMMARY_CHARS = 900;
 function cleanText(value: unknown, max = MAX_FIELD_CHARS): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.replace(/\s+/g, " ").trim();
-  return trimmed ? trimmed.slice(0, max) : undefined;
+  if (!trimmed) return undefined;
+  const redacted = redactForLLM(trimmed, "insights-daily-summary").redacted.trim();
+  return redacted ? redacted.slice(0, max) : undefined;
 }
 
 function cleanItems(items: unknown): UsageDailySummaryItem[] {
   if (!Array.isArray(items)) return [];
   return items.slice(0, MAX_SUMMARY_ITEMS).map((item) => {
     const raw = item && typeof item === "object" ? item as Record<string, unknown> : {};
+    const title = cleanText(raw.title);
+    const preview = cleanText(raw.preview);
+    const text = cleanText(raw.text);
+    const role = cleanText(raw.role, 48);
+    const projectName = cleanText(raw.projectName, 80);
     return {
-      ...(cleanText(raw.title) ? { title: cleanText(raw.title) } : {}),
-      ...(cleanText(raw.preview) ? { preview: cleanText(raw.preview) } : {}),
-      ...(cleanText(raw.text) ? { text: cleanText(raw.text) } : {}),
-      ...(cleanText(raw.role, 48) ? { role: cleanText(raw.role, 48) } : {}),
-      ...(cleanText(raw.projectName, 80) ? { projectName: cleanText(raw.projectName, 80) } : {}),
+      ...(title ? { title } : {}),
+      ...(preview ? { preview } : {}),
+      ...(text ? { text } : {}),
+      ...(role ? { role } : {}),
+      ...(projectName ? { projectName } : {}),
     };
   }).filter((item) => item.title || item.preview || item.text);
 }
