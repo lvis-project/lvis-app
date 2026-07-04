@@ -27,9 +27,7 @@ import { type AskUserQuestionRequest } from "./components/AskUserQuestionCard.js
 import type { LvisApi } from "./types.js";
 import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
-import type { SessionSummary } from "./hooks/use-sessions.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
-import { getKoreaDateKey } from "./utils/korea-date-key.js";
 import { isTurnStartEntry } from "./utils/classify-turn-entries.js";
 import { collectChatPreviewModel } from "./preview/preview-targets.js";
 import {
@@ -97,9 +95,7 @@ export interface ChatViewProps {
   onOpenApprovalQueue?: () => void;
   currentSessionKind?: "main" | "routine";
   currentSessionTitle?: string;
-  sessions?: SessionSummary[];
   onLoadSession?: (sessionId: string) => void | boolean | Promise<void | boolean>;
-  onRefreshSessions?: () => void | Promise<void>;
   /** Quick-action items for CommandPopover (빠른 실행 section) */
   commandActions: QuickAction[];
   /** Controlled open state for CommandPopover */
@@ -123,7 +119,7 @@ export interface ChatViewProps {
   blogLayout?: boolean;
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -329,23 +325,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     [visibleEntries],
   );
 
-  // Calendar's in-session day jump indexer — derived from visibleEntries with
-  // only user + assistant entries (the only kinds that carry createdAt).
-  // Memoized so that stream-delta re-renders of ChatView don't rebuild the
-  // map on every keystroke (which would re-mount the calendar tree behind the
-  // closed popover at ~100Hz on long sessions).
-  const navigatorCurrentSessionEntries = useMemo(
-    () =>
-      visibleEntries.map((entry, idx) => ({
-        idx,
-        createdAt:
-          entry.kind === "assistant" || entry.kind === "user"
-            ? entry.createdAt
-            : undefined,
-      })),
-    [visibleEntries],
-  );
-
   // turn_summary entry 의 turnStart 별 lookup. 각 turn 의 final assistant
   // 와 WorkGroup 이 같은 turn 의 token / duration 정보를 inline 으로 가져와
   // 표시한다. turn_summary entry 자체는 standalone 렌더링 되지 않는다.
@@ -399,7 +378,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     [spawnsByToolUseId],
   );
 
-  const { scrollViewportRef, showJumpToBottom, scrollChatToBottom, handleJumpToEntry } = useChatScroll({
+  const { scrollViewportRef, showJumpToBottom, scrollChatToBottom } = useChatScroll({
     entries,
     currentSessionId,
     chatEndRef,
@@ -408,10 +387,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     searchMatches,
     searchIdx,
   });
-
-  const handleCalendarSessionSelect = useCallback(async (sessionId: string) => {
-    await onLoadSession?.(sessionId);
-  }, [onLoadSession]);
 
   // Checkpoint view-mode handlers + fork-success toast (depends on the scroll
   // hook's scrollChatToBottom).
@@ -491,8 +466,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   // that row) renders the % / cost detail on hover/click.
   const onOpenModelSettings = useCallback(() => onOpenSettings("llm"), [onOpenSettings]);
   const onOpenInputPermissions = useCallback(() => onOpenSettings("permissions"), [onOpenSettings]);
-
-  const activeDayKey = getKoreaDateKey(new Date());
 
   // No auto-scroll needed for floating panel — it is positioned outside
   // the scroll viewport so it is always visible regardless of scroll position.
@@ -674,21 +647,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       <ChatTranscript
         scrollViewportRef={scrollViewportRef}
         readingColumnClass={readingColumnClass}
-        activeDayKey={activeDayKey}
-        currentSessionId={currentSessionId}
-        sessions={sessions}
-        streaming={streaming}
-        navigatorCurrentSessionEntries={navigatorCurrentSessionEntries}
-        onJumpToEntry={handleJumpToEntry}
-        onLoadSession={handleCalendarSessionSelect}
-        onRefreshSessions={onRefreshSessions}
         loadedSkills={loadedSkills}
         orphanSpawns={orphanSpawns}
         visibleEntries={visibleEntries}
         hasApiKey={hasApiKey}
         hasAskQuestions={hasAskQuestions}
         suggestedRepliesActive={suggestedRepliesActive}
-        compactDateNavigator
         transcriptEntries={transcriptEntries}
         chatEndRef={chatEndRef}
       />
