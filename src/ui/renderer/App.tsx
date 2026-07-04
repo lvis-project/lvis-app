@@ -170,7 +170,7 @@ export function App() {
   // Durable expanded-width of the primary navigation sidebar (drag-to-resize on
   // its inner edge). Persists via SystemSettings.sidebarWidth; drives both the
   // sidebar card width and the <main> left-padding reserve in AppShell.
-  const { sidebarWidth, setSidebarWidth, commitSidebarWidth, resetSidebarWidth } = useSidebarWidth(api);
+  const { sidebarWidth, setSidebarWidth, commitSidebarWidth } = useSidebarWidth(api);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [workspaceProjects, setWorkspaceProjects] = useState<ProjectIdentity[]>([]);
@@ -700,7 +700,6 @@ export function App() {
         sidebarWidth={sidebarWidth}
         onSidebarWidthChange={setSidebarWidth}
         onSidebarWidthCommit={commitSidebarWidth}
-        onSidebarWidthReset={resetSidebarWidth}
         activeView={activeView}
         streaming={streaming}
         hasApiKey={effectiveHasApiKey}

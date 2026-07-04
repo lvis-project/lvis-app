@@ -40,7 +40,6 @@ export function AppShell({
   sidebarWidth,
   onSidebarWidthChange,
   onSidebarWidthCommit,
-  onSidebarWidthReset,
   // toolbar
   activeView,
   streaming,
@@ -111,10 +110,9 @@ export function AppShell({
   sidebarWidth: number;
   /** Per-move drag update (state only). */
   onSidebarWidthChange: (px: number) => void;
-  /** Drag-end / keyboard commit (persist). */
+  /** Drag-end / keyboard commit (persist). Also backs the resize bar's
+   *  double-click reset (Sidebar commits SIDEBAR_DEFAULT_WIDTH through this). */
   onSidebarWidthCommit: (px: number) => void;
-  /** Double-click reset to the default width. */
-  onSidebarWidthReset: () => void;
   activeView: string;
   streaming: boolean;
   hasApiKey: MainToolbarProps["hasApiKey"];
@@ -225,7 +223,6 @@ export function AppShell({
         width={sidebarWidth}
         onWidthChange={onSidebarWidthChange}
         onWidthCommit={onSidebarWidthCommit}
-        onWidthReset={onSidebarWidthReset}
         onOpenUnifiedSearch={onOpenUnifiedSearch}
         isCurrentSessionStarred={isCurrentSessionStarred}
         onToggleCurrentSessionStar={onToggleCurrentSessionStar}

@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { EdgeResizeBar } from "./EdgeResizeBar.js";
 import {
   CalendarDays,
   Download,
@@ -33,7 +34,6 @@ import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
-  clampSidebarWidth,
 } from "../../../shared/side-panel.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -72,10 +72,9 @@ export interface SidebarProps {
   width?: number;
   /** Per-move drag update of the sidebar width (state only). */
   onWidthChange?: (px: number) => void;
-  /** Drag-end / keyboard commit of the sidebar width (persist). */
+  /** Drag-end / keyboard commit of the sidebar width (persist). Also drives
+   *  the resize bar's double-click reset (commits SIDEBAR_DEFAULT_WIDTH). */
   onWidthCommit?: (px: number) => void;
-  /** Double-click reset to the default width. */
-  onWidthReset?: () => void;
   /** Open the unified search overlay — second button in the cluster strip. */
   onOpenUnifiedSearch: () => void;
   /** Whether the current session is starred — drives the cluster star fill. */
@@ -717,111 +716,6 @@ function ClusterStrip({
   );
 }
 
-// ─── SidebarResizeHandle ─────────────────────────────────────────────────────
-//
-// Drag-to-resize grip on the sidebar card's INNER (right) edge. Mirrors the
-// VerticalSplitLayout separator pattern (pointer-capture drag + window-level
-// move/up listeners + keyboard steps) but on the horizontal axis. The width is
-// owned by the shell (SystemSettings.sidebarWidth) — this control only reports
-// per-move (`onWidthChange`) and drag-end / keyboard / double-click
-// (`onWidthCommit` / `onReset`) deltas UP. a11y: role="separator" +
-// aria-orientation="vertical" + arrow-key steps + Home/End to the bounds.
-const SIDEBAR_KEY_STEP = 16;
-
-function SidebarResizeHandle({
-  width,
-  onWidthChange,
-  onWidthCommit,
-  onReset,
-  ariaLabel,
-}: {
-  width: number;
-  onWidthChange: (px: number) => void;
-  onWidthCommit: (px: number) => void;
-  onReset: () => void;
-  ariaLabel: string;
-}) {
-  const cleanupRef = useRef<(() => void) | null>(null);
-  // Latest drag width, read by the drag-end closure so the committed value is
-  // exact even if React state lags a frame.
-  const liveRef = useRef(width);
-  useEffect(() => {
-    liveRef.current = width;
-  }, [width]);
-  // Release any in-flight pointer capture on unmount so a drag crossing an
-  // unmount boundary leaks no window listeners.
-  useEffect(() => () => cleanupRef.current?.(), []);
-
-  return (
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label={ariaLabel}
-      aria-valuenow={Math.round(width)}
-      aria-valuemin={SIDEBAR_MIN_WIDTH}
-      aria-valuemax={SIDEBAR_MAX_WIDTH}
-      tabIndex={0}
-      data-testid="sidebar-resize-handle"
-      // Full-height 8px hit strip pinned just inside the card's right edge (the
-      // card is overflow-hidden, so the strip stays inside); the visible line is
-      // a thin 2px rule at the right, tinted on hover/focus.
-      className="group absolute inset-y-0 right-0 z-40 flex w-2 cursor-col-resize touch-none select-none justify-end outline-none"
-      style={{
-        // @ts-expect-error — Electron-specific CSS extension (keep clickable over the drag band)
-        WebkitAppRegion: "no-drag",
-      }}
-      onPointerDown={(event) => {
-        event.preventDefault();
-        event.currentTarget.setPointerCapture?.(event.pointerId);
-        cleanupRef.current?.();
-        const startX = event.clientX;
-        const startWidth = width;
-        const apply = (clientX: number) => {
-          const next = clampSidebarWidth(startWidth + (clientX - startX));
-          liveRef.current = next;
-          onWidthChange(next);
-        };
-        const onMove = (moveEvent: PointerEvent) => apply(moveEvent.clientX);
-        const cleanup = () => {
-          window.removeEventListener("pointermove", onMove);
-          window.removeEventListener("pointerup", cleanup);
-          window.removeEventListener("pointercancel", cleanup);
-          cleanupRef.current = null;
-          onWidthCommit(liveRef.current);
-        };
-        cleanupRef.current = cleanup;
-        window.addEventListener("pointermove", onMove);
-        window.addEventListener("pointerup", cleanup);
-        window.addEventListener("pointercancel", cleanup);
-      }}
-      onDoubleClick={(event) => {
-        event.preventDefault();
-        onReset();
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "ArrowLeft") {
-          event.preventDefault();
-          onWidthCommit(clampSidebarWidth(width - SIDEBAR_KEY_STEP));
-        } else if (event.key === "ArrowRight") {
-          event.preventDefault();
-          onWidthCommit(clampSidebarWidth(width + SIDEBAR_KEY_STEP));
-        } else if (event.key === "Home") {
-          event.preventDefault();
-          onWidthCommit(SIDEBAR_MIN_WIDTH);
-        } else if (event.key === "End") {
-          event.preventDefault();
-          onWidthCommit(SIDEBAR_MAX_WIDTH);
-        } else if (event.key === "Enter") {
-          event.preventDefault();
-          onReset();
-        }
-      }}
-    >
-      <span className="h-full w-0.5 rounded-full bg-transparent transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
-    </div>
-  );
-}
-
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
 export function Sidebar({
@@ -841,7 +735,6 @@ export function Sidebar({
   width = SIDEBAR_DEFAULT_WIDTH,
   onWidthChange,
   onWidthCommit,
-  onWidthReset,
   onOpenUnifiedSearch,
   isCurrentSessionStarred,
   onToggleCurrentSessionStar,
@@ -853,7 +746,11 @@ export function Sidebar({
   onRefreshProjects,
 }: SidebarProps) {
   const { t } = useTranslation();
-  const resizable = !collapsed && Boolean(onWidthChange && onWidthCommit && onWidthReset);
+  const resizable = !collapsed && Boolean(onWidthChange && onWidthCommit);
+  // Card element ref — EdgeResizeBar applies the live drag width directly to
+  // this node's style (rAF-coalesced) so dragging never re-renders the whole
+  // Sidebar tree, mirroring ChatSidePanel's drag-perf pattern.
+  const cardRef = useRef<HTMLDivElement | null>(null);
 
   // The collapsed rail shows icons only; `compact` mirrors `collapsed`. There is
   // no hover-expand — the card is a consistent floating panel in every mode.
@@ -902,6 +799,7 @@ export function Sidebar({
           icon-rail surface so nav stays reachable. The width tween animates the
           surface in/out; the cluster strip itself never unmounts. */}
       <div
+        ref={cardRef}
         data-testid="sidebar-card"
         data-surface={collapsed ? "bare" : "card"}
         className={[
@@ -928,16 +826,26 @@ export function Sidebar({
         ].join(" ")}
         style={collapsed ? undefined : { width: `${width}px` }}
       >
-        {/* ── Inner-edge drag-to-resize handle (expanded only). Adjusts the
-            durable sidebar width between SIDEBAR_MIN_WIDTH/MAX; double-click or
-            Enter resets to default. Anchored to the card's right edge. */}
+        {/* ── Inner-edge drag-to-resize bar (expanded only) — the SAME shared
+            EdgeResizeBar + useEdgeResize primitive the right ChatSidePanel uses,
+            so drag feel / hit geometry / keyboard / double-click-reset are one
+            code path across both panels. `variant="inset"` keeps the strip
+            inside the card (it is overflow-hidden, unlike the side panel's
+            aside). Adjusts the durable sidebar width between
+            SIDEBAR_MIN_WIDTH/MAX; double-click resets to the default. */}
         {resizable ? (
-          <SidebarResizeHandle
+          <EdgeResizeBar
             width={width}
+            edge="end"
+            variant="inset"
             onWidthChange={onWidthChange!}
             onWidthCommit={onWidthCommit!}
-            onReset={onWidthReset!}
+            min={SIDEBAR_MIN_WIDTH}
+            max={SIDEBAR_MAX_WIDTH}
+            resetWidth={SIDEBAR_DEFAULT_WIDTH}
+            applyElementRef={cardRef}
             ariaLabel={t("sidebar.resizeHandleAriaLabel")}
+            data-testid="sidebar-resize-handle"
           />
         ) : null}
         {/* ── Cluster strip — [펼침/닫힘 toggle] → [검색] → [즐겨찾기] → [내보내기],
