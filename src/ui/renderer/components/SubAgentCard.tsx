@@ -1,19 +1,7 @@
-/**
- * SubAgentCard — chat-side card showing a sub-agent spawn lifecycle.
- *
- * Updates from the spawn lifecycle stream (`lvis:agent-spawn:event`):
- *   start → running → (tool/reasoning/assistant activity) … → done | error
- *
- * The sub-agent runs its own {@link ConversationLoop} whose per-round activity
- * (tool calls, reasoning, assistant text, permission reviews) is forwarded as
- * `ChatEntry[]` and rendered through the SHARED {@link TranscriptRenderer} — the
- * SAME renderer the main chat uses. This is the "루프 동일" unification: the
- * sub-agent transcript is visually identical to a main-chat transcript, only
- * read-only (no edit / fork / star / feedback actions).
- *
- * Each card auto-collapses after `done`. The header shows the title + status
- * badge; the expandable body is the full transcript.
- */
+
+
+
+
 import { useState } from "react";
 import { Bot, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";

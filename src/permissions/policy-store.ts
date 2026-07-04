@@ -1,23 +1,7 @@
-/**
- * Policy Store — ~/.lvis/policy.json + admin-dir merge (§C2)
- *
- * 병합 순서 (나중 값이 우선):
- *  1. defaults: { version:1, requireExplicitApproval: true, managed: false }
- *  2. userPath:  ~/.lvis/policy.json
- *  3. adminPath: 플랫폼별 OS 관리자 위치 (존재 시에만)
- *
- * admin-dir 파일이 존재하면:
- *  - admin 값이 user 값을 override.
- *  - admin의 managed=true → 최종 managed가 항상 true.
- *  - savePolicy() 호출 시 admin-dir 파일 존재 여부를 먼저 체크하여 throw.
- *
- * ACL 강제는 하지 않는다 — OS 수준 쓰기 방지는 IT/MDM 담당.
- * admin-dir 파일의 부재가 기본 상황 (개발자 머신 / 해외망).
- *
- * async-mutex 패턴: permissions-store.ts 와 동일.
- *
- * TODO: Windows (certutil), Linux (/etc/lvis) admin-dir 검증 강화.
- */
+
+
+
+
 import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { t } from "../i18n/index.js";
@@ -25,14 +9,13 @@ import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("policy-store");
 
-// ─── 기본 경로 ────────────────────────────────────────
+
 
 const DEFAULT_USER_POLICY_PATH = resolve(lvisHome(), "policy.json");
 
-/**
- * 플랫폼별 admin-dir policy 경로.
- * 일반 사용자가 수정할 수 없는 OS 관리자 위치.
- */
+
+
+
 export function getAdminPolicyPath(): string {
   switch (process.platform) {
     case "darwin":
@@ -42,35 +25,35 @@ export function getAdminPolicyPath(): string {
     case "linux":
       return "/etc/lvis/policy.json";
     default:
-      // 미지원 플랫폼: 존재하지 않는 경로 → 항상 null 반환 (soft skip)
+
       return "/nonexistent/lvis/policy.json";
   }
 }
 
-// ─── 파일 형태 ────────────────────────────────────────
+
 
 export interface PolicyFile {
   version: 1;
-  /** true = 모달 dismiss 차단, false = outside/Escape → deny-once */
+
   requireExplicitApproval: boolean;
-  /** true = IT 설정, 사용자 UI에서 변경 불가 */
+
   managed: boolean;
   updatedAt: string;
 }
 
-/**
- * loadPolicy() 반환 형태 — source tracking 추가.
- */
+
+
+
 export interface LoadedPolicy extends PolicyFile {
-  /** 어디서 왔는지 추적 */
+
   source: "defaults" | "user" | "admin" | "merged";
-  /** admin이 override한 필드 이름 리스트 (merged일 때만 의미 있음) */
+
   adminOverrides?: string[];
-  /** admin-dir 경로 (source가 "admin" 또는 "merged"일 때 설정됨) */
+
   adminPath?: string;
 }
 
-// ─── lenient default (파일 없을 때) ─────────────────
+
 
 function defaultPolicy(): PolicyFile {
   return {
@@ -81,7 +64,7 @@ function defaultPolicy(): PolicyFile {
   };
 }
 
-// ─── in-process async mutex (permissions-store.ts 와 동일 패턴) ─────────
+
 
 const policyLocks = new Map<string, Promise<void>>();
 
@@ -103,7 +86,7 @@ async function readPolicyFile(filePath: string): Promise<PolicyFile | null> {
     const raw = await readFile(filePath, "utf-8");
     const parsed = JSON.parse(raw) as PolicyFile;
     if (parsed.version !== 1) {
-      // major version 불일치 → fallback (에러 로그만)
+
       log.error(`version mismatch in ${filePath}: expected 1, got ${parsed.version} — ignoring`);
       return null;
     }

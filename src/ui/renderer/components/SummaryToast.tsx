@@ -1,10 +1,7 @@
-/**
- * SummaryToast — checkpoint 직후에 표시되는 *이전 컨텍스트 요약* 카드.
- *
- * Layout: LLM 응답 카드와 같은 폭을 유지하되 기본은 접힌 상태다.
- * compact 결과는 checkpoint 근거로 남겨야 하지만 긴 요약이 대화 본문을
- * 밀어내면 안 되므로 사용자가 필요할 때만 펼친다.
- */
+
+
+
+
 import ReactMarkdown from "react-markdown";
 import { useTranslation } from "../../../i18n/react.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";

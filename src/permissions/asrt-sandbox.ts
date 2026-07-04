@@ -1,66 +1,7 @@
-/**
- * Anthropic Sandbox Runtime (ASRT) host adapter.
- *
- * This module wires LVIS process sandboxing onto
- * `@anthropic-ai/sandbox-runtime`. It is gated DEFAULT-OFF: nothing runs through
- * it until boot opts in (Settings → 권한 'OS 도구 샌드박스' or
- * `LVIS_SANDBOX_ENABLED=1`) and `initializeAsrtSandbox` succeeds. Do not add
- * behavior that runs at import time.
- *
- * ASRT does NOT spawn the workload. It validates a config (zod), starts its
- * proxy/helper machinery on `initialize`, and `wrapWith*Argv` returns the
- * `{ argv, env }` the HOST must spawn itself. The bundled vendor binaries
- * (Linux seccomp loader, Windows srt-win) live under
- * `node_modules/@anthropic-ai/sandbox-runtime/vendor/**` and are executed as
- * separate processes — packaging must `asarUnpack` that glob (see
- * `package.json` build.asarUnpack) or the binaries cannot exec from an asar.
- *
- * ─────────────────────────────────────────────────────────────────────────────
- * NETWORK ENFORCEMENT MODEL — READ BEFORE EDITING (ASRT shared-config constraint)
- * ASRT's runtime egress decision lives in `filterNetworkRequest()`
- * (dist/sandbox/sandbox-manager.js). The proxy filter closures are bound as
- * `filter: (port, host) => filterNetworkRequest(port, host, sandboxAskCallback)`
- * and that function reads ONLY the module-level SHARED `config`:
- *     for (const d of config.network.deniedDomains) …   // deny first
- *     for (const d of config.network.allowedDomains) …  // then allow
- *     if (!sandboxAskCallback || config.network.strictAllowlist) return false; // strict ⇒ hard-deny
- * The SHARED `config` is assigned ONLY by `initialize()` (`config = runtimeConfig`)
- * and `updateConfig()` (`config = structuredClone(...)`).
- *
- * The `customConfig` argument to `wrapWithSandboxArgv(command, binShell,
- * customConfig)` is NEVER consulted by `filterNetworkRequest` — it only decides
- * whether to route the command through the proxy (`hasNetworkConfig`) and scopes
- * credential `injectHosts`. So a per-command `customConfig.network` cannot
- * enforce egress; it is INERT for allow/deny. Therefore network egress is
- * enforced by setting the SHARED config (allowedDomains UNION + strictAllowlist)
- * at {@link initializeAsrtSandbox} / {@link updateAsrtSandboxConfig}, NOT per
- * wrap. Per-command `customConfig` carries ONLY the filesystem jail, which IS
- * enforced (macOS bakes it into the seatbelt profile per wrap; Linux into the
- * bwrap binds).
- *
- * TRADE-OFF (honest): the enforced model is a UNION allow-list — strictAllowlist
- * + the union of every loaded plugin's `manifest.networkAccess.allowedDomains`
- * (∪ an optional trusted host baseline). A sandboxed worker can therefore reach
- * any domain declared by ANY loaded plugin, not only its own. This is acceptable
- * under LVIS's 1st-party plugin trust model. TRUE per-worker network isolation
- * would require a future ASRT with per-process proxies / distinct egress auth
- * tokens; the current single shared proxy + single shared config cannot express it.
- * Do NOT claim per-worker network isolation.
- * ─────────────────────────────────────────────────────────────────────────────
- *
- * ─────────────────────────────────────────────────────────────────────────────
- * ESM-in-Electron note: ASRT is ESM-only (`"type": "module"`). The LVIS main
- * process is built by esbuild as a single ESM bundle. A top-level *static*
- * `import` of the package would inline its source into the main bundle, which
- * breaks ASRT's filesystem-relative resolution of its own vendor binaries (the
- * same failure mode pino hit — see scripts/build-main-esbuild.mjs `external`).
- * To keep ASRT a real `node_modules` entry that resolves its vendor dir at
- * runtime — and to keep this module genuinely dormant — the runtime values are
- * pulled in via a dynamic `await import(...)`. Only `import type` is used at the
- * top level; type-only imports are erased by the compiler and never reach the
- * emitted bundle.
- * ─────────────────────────────────────────────────────────────────────────────
- */
+
+
+
+
 
 import { homedir } from "node:os";
 import { join } from "node:path";

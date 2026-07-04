@@ -1,30 +1,7 @@
-/**
- * PluginShowcase (Z onboarding chain step 6) — installed-plugin tour.
- *
- * Mounted right after `SpotlightTour` completes (`tourCompleted=true`).
- * Surfaces a short carded explanation of every installed plugin so the
- * user understands what each plugin *does* before being dropped into
- * an empty chat surface. 2026-05-20 redesign — each card now has a
- * "펼쳐보기 ↓" toggle that *inline-expands* a short list of the plugin's
- * onboarding scenarios. The previous "둘러보기" button dispatched
- * `api.tour.start` (external navigation) and visibly retriggered the
- * SpotlightTour on top of the showcase — the new inline expansion path
- * removes that double-tour artefact.
- *
- * A separate "끝내기 →" footer button closes the entire showcase and
- * marks onboarding complete.
- *
- * Catalog model:
- *   - The component receives the installed-plugin id list as a prop and
- *     filters the static `PLUGIN_DESCRIPTIONS` table to the intersection.
- *     Plugins without an entry render a generic fallback card so the
- *     user is never shown an empty surface even on a non-standard install.
- *   - The static descriptions are intentionally short (1 sentence each)
- *     to fit the 460×840 narrow window without scroll-shenanigans.
- *
- * The component is presentational only — install/uninstall lifecycle is
- * not its concern; it just reflects the host's current pluginCards list.
- */
+
+
+
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Dialog, DialogContent } from "../../../components/ui/dialog.js";
@@ -46,7 +23,7 @@ export interface PluginShowcaseProps {
    */
   installedPluginIds: readonly string[];
   api: PluginShowcaseApi;
-  /** Called when the user closes the showcase (끝내기 / skip / close). */
+
   onClose: () => void;
   /**
    * ScenarioShowcase carry (Option A) — when set, the matching plugin
@@ -270,7 +247,7 @@ export function PluginShowcase({
   prioritizedScenarioId = null,
 }: PluginShowcaseProps) {
   // `api` was previously used to fire `api.tour.start` from the
-  // "둘러보기 →" button. 2026-05-20 redesign — that path is removed in
+
   // favour of inline scenario expansion (no external navigation), so
   // the prop is intentionally unused. Kept on the public interface so
   // existing call sites compile without changes.
@@ -286,7 +263,7 @@ export function PluginShowcase({
     [installedPluginIds, prioritizedPluginId],
   );
 
-  // 2026-05-20: inline scenario expansion. Each card has a "펼쳐보기 ↓"
+
   // toggle; the expanded set lives in local state so toggling one card
   // doesn't affect the others. Closing the showcase resets the set.
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());

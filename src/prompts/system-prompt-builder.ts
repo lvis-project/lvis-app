@@ -1,9 +1,7 @@
-/**
- * System Prompt Builder — prompt source assembly
- *
- * LLM에 전송되는 시스템 프롬프트를 매 턴마다 조립.
- * 여러 컨텍스트 소스에서 정보를 수집하여 하나의 프롬프트로 결합.
- */
+
+
+
+
 import { hostname, platform, userInfo } from "node:os";
 import type { ActiveRolePrompt } from "../data/role-presets.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
@@ -442,7 +440,7 @@ export class SystemPromptBuilder {
   private initSources(deps: SystemPromptBuilderDeps): void {
     const { memoryManager, toolRegistry } = deps;
 
-    // ① Role Definition (정적)
+
     this.sources.push({
       id: 1,
       name: "Role Definition",
@@ -467,7 +465,7 @@ export class SystemPromptBuilder {
       },
     });
 
-    // ② AGENTS.md (파일 변경 시)
+
     this.sources.push({
       id: 2,
       name: "AGENTS.md",
@@ -699,13 +697,13 @@ export class SystemPromptBuilder {
         if (prefs) parts.push(`<user-preferences>\n${prefs}\n</user-preferences>`);
         if (memoryIndex) parts.push(`<lvis-memory-index>\n${memoryIndex}\n</lvis-memory-index>`);
         if (notes) parts.push(`<user-memory>\n${notes}\n</user-memory>`);
-        
+
         // 인덱싱된 문서 요약 정보 추가 (ConversationLoop에서 주입)
         if (this.indexedDocsContext) {
           const docsContext = this.indexedDocsContext;
           parts.push(`<indexed-knowledge>\n${docsContext}\n</indexed-knowledge>`);
         }
-        
+
         return parts.join("\n\n");
       },
     });

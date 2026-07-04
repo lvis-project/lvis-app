@@ -41,7 +41,7 @@ export type PluginUiExtensionView = {
     entry?: string;
     exportName?: string;
     page?: string;
-    /** kind="action" 전용 dispatch target — host 가 api.callPluginMethod 로 호출. */
+
     tool?: string;
     /**
      * Detached-window geometry hints. Applied only when the host opens this

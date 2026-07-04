@@ -1,51 +1,13 @@
-/**
- * Tutorial-C — default Spotlight tour scenarios.
- *
- * A "scenario" is a sequence of `TourStep` cards rendered by the
- * `SpotlightTour` component. The Onb V2 mockup (`/tmp/login-lvis/index.html`,
- * "Onb V2 — Spotlight (toggle B)") demonstrates the visual contract:
- *   - The viewport is darkened by a 78% black overlay.
- *   - One target element (`anchorSelector`) is "spotlit" via a violet ring
- *     + glow drawn around its bounding rect.
- *   - A floating card sits anchored to the target, containing a step badge
- *     (`step / total`), title, body copy, dot pagination, a
- *     "건너뛰기" (skip) action, and a "다음 →" (next) action.
- *
- * Step-ordering rules (mockup §"Onb V2"):
- *   1. The first scenario MUST be `first-boot-essentials` — surfaces the
- *      three things a new LVIS user has to know before they can be
- *      productive: free-form Korean input, approval gating, and the
- *      ⌘K command palette.
- *   2. Each step pins to a stable DOM `data-tour-anchor` attribute so
- *      renderer refactors don't silently break the tour. Anchors live on
- *      the Composer textarea, the InputActionBar action chip cluster, and
- *      the command palette toggle.
- *   3. `body` is plain text — the component renders kbd hints out-of-band
- *      via `keyHint` so a screen-reader can announce "Cmd plus K" rather
- *      than reading the literal kbd glyph string.
- *
- * The scenarios live in the renderer (not in the host) because they only
- * reference renderer DOM anchors; the host has no business knowing the
- * shape of the Composer toolbar. The host-side `~/.lvis/onboarding/`
- * store only persists scenario *ids* — it does not see step bodies, which
- * keeps the storage namespace minimal.
- */
+
+
+
+
 
 import { t } from "../../../i18n/runtime.js";
 
-/**
- * U8 — Auto-advance trigger declaration. When a step declares a
- * `completionTrigger`, the SpotlightTour attaches a listener for the
- * matching DOM event and advances to the next step the moment the user
- * performs the action. Without a trigger the user must click "다음 →"
- * manually.
- *
- * Variants:
- *   - { kind: "keypress"; combo: "⌘+K" }   — global hotkey detection.
- *   - { kind: "input"; selector }          — typing in the matching element.
- *   - { kind: "click"; selector }          — clicking the matching element.
- *   - { kind: "manual" }                   — explicit "다음 →" only (default).
- */
+
+
+
 export type CompletionTrigger =
   | { kind: "keypress"; combo: "⌘+K" | "⌘+?" | "⌘+Enter" }
   | { kind: "input"; selector: string }
@@ -72,13 +34,9 @@ export interface TourStep {
    * `"shortcut: <label>"` so screen-readers announce them properly.
    */
   keyHint?: string[];
-  /**
-   * U8 — Interactive auto-advance trigger. When omitted or `kind: "manual"`,
-   * the user must click "다음 →" to proceed. With any other variant the
-   * tour advances automatically the moment the user performs the
-   * declared action (e.g. types in the composer, presses ⌘+K, clicks a
-   * button). The user can still skip via "다음 →" if they prefer.
-   */
+
+
+
   completionTrigger?: CompletionTrigger;
 }
 
@@ -224,7 +182,7 @@ function buildDocSearchTour(): TourScenario {
 
 function buildWorkAssistantTour(): TourScenario {
   // Renamed from `proactive-work-tour` to align with the canonical
-  // 업무 도우미 brand. Plugin tour-anchors live in lvis-plugin-work-assistant
+
   // (package repo) and use the manifest id (work-assistant) on their DOM
   // attributes — the test/e2e fixture pins `manifest.id="work-assistant"`.
   return {

@@ -32,20 +32,20 @@ const PROJECT_MEMORIES_DIR = "memories/projects";
 export const MEMORY_LINE_CAP = 200;
 
 /** Seed contents for `USER.md` on first run. User-editable thereafter. */
-export const USER_MD_SEED = `# 사용자 프로필
+export const USER_MD_SEED = `# User Profile
 
-> 이 파일은 개인 업무 보드가 사용자의 업무 흐름을 이해하기 위한 메모입니다.
-> 자유롭게 수정하세요. 자동으로 덮어쓰지 않습니다.
+> This file helps the personal Work Board understand your work flow.
+> Edit it freely. LVIS will not overwrite it automatically.
 
-- 역할:
-- 주요 업무 영역:
-- 반복 업무:
+- Role:
+- Main work areas:
+- Recurring work:
 `;
 
-const MEMORY_MD_HEADER = `# 업무 흐름 메모리
+const MEMORY_MD_HEADER = `# Work Flow Memory
 
-> 보드 활동에서 학습된 업무 패턴(반복 주제, 처리량, 마감 지연 경향).
-> 하드 라인 캡 적용 — 오래된 줄부터 제거되며 자동 요약/압축은 하지 않습니다.
+> Work patterns learned from board activity: recurring topics, throughput, and deadline-slip tendencies.
+> A hard line cap is enforced: oldest lines are removed first, with no automatic summarization or compaction.
 `;
 
 /**
@@ -154,7 +154,7 @@ export async function renderWorkContext(
   if (!options?.projectRoot) {
     const user = (await readOrSeedUser(storage)).trim();
     const memory = (await readMemory(storage)).trim();
-    const block = `## 사용자\n${user}\n\n## 업무 흐름 메모리\n${memory}`;
+    const block = `## User\n${user}\n\n## Work Flow Memory\n${memory}`;
     const lines = block.split("\n");
     return lines.length <= maxLines ? block : lines.slice(0, maxLines).join("\n");
   }
@@ -162,13 +162,13 @@ export async function renderWorkContext(
   const blocks: string[] = [];
   if (options.includeUnscoped === true) {
     blocks.push(
-      `## 사용자\n${(await readOrSeedUser(storage)).trim()}`,
-      `## 기존 업무 흐름 메모리\n${(await readMemory(storage)).trim()}`,
+      `## User\n${(await readOrSeedUser(storage)).trim()}`,
+      `## Existing Work Flow Memory\n${(await readMemory(storage)).trim()}`,
     );
   }
   blocks.push(
-    `## 프로젝트 사용자\n${(await readOrSeedUserAt(storage, paths.dir, paths.userFile)).trim()}`,
-    `## 프로젝트 업무 흐름 메모리\n${(await readMemoryAt(storage, paths.memoryFile)).trim()}`,
+    `## Project User\n${(await readOrSeedUserAt(storage, paths.dir, paths.userFile)).trim()}`,
+    `## Project Work Flow Memory\n${(await readMemoryAt(storage, paths.memoryFile)).trim()}`,
   );
   const block = blocks.join("\n\n");
   const lines = block.split("\n");

@@ -1,15 +1,7 @@
-/**
- * Dev domain IPC — only registered when !app.isPackaged.
- *
- * Channels:
- *   lvis:dev:setPreflightOverride  → engine 의 runtime preflight override 설정
- *   lvis:dev:getPreflightStatus    → 현재 override 값 + computed 기본값 조회
- *
- * Dev UI (renderer) 의 floating panel 이 호출해서 LLM compact 트리거 임계를
- * 실시간으로 조절. `registerDevHandlers` 는 boot 에서 `getIsPackaged()` 가
- * false 일 때만 호출됨 (`src/ipc/index.ts`). Defense-in-depth 로 핸들러
- * 안에서 한 번 더 확인 + main-frame sender validation.
- */
+
+
+
+
 import { ipcMain } from "electron";
 import {
   setRuntimePreflightOverride,

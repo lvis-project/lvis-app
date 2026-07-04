@@ -1,9 +1,7 @@
-/**
- * LLM Provider 범용 인터페이스 — 멀티 벤더 지원
- *
- * Claude, OpenAI, Gemini, Copilot(GitHub Models)
- * 벤더별 tool calling 포맷 차이를 추상화.
- */
+
+
+
+
 
 // ─── Vendor ─────────────────────────────────────────
 
@@ -52,7 +50,7 @@ export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = Object.freeze(
   ) as Record<LLMVendor, string>,
 );
 
-// ─── 범용 메시지 ────────────────────────────────────
+
 
 /**
  * Optional per-message metadata for lifecycle bookkeeping (auto-compact, mark-stale,
@@ -85,44 +83,25 @@ export interface MessageMeta {
     mcpServerId?: string;
     uiPayload?: import("../../mcp/types.js").McpUiPayload;
   };
-  /**
-   * Tool-result stubbing + LLM compact 양쪽의 단일 marker — set 시 의미:
-   *   - tool_result message: provider send / session save serialization 시
-   *     content 를 stub 으로 변환해야 함 (memory verbatim, serialization stub)
-   *   - user-role boundary message: LLM compact 가 생성한 경계 (compactBoundary 와 paired)
-   */
+
+
+
   compactedAt?: string;
   /** Compact boundary marker (idempotency + revert anchor) */
   compactBoundary?: boolean;
-  /** 경계 marker의 경우, 요약 대상이 된 메시지 수 */
+
   removedCount?: number;
   /** Compact boundary #N in the numbered checkpoint chain. */
   compactNum?: number;
-  /** Tool-result stubbing 면제 — skill 도구 출력 또는 사용자 명시 lock. structured-compact 의 pinnedArtifacts 와 paired. */
+
   lock?: boolean;
-  /**
-   * provider/session serialization 직전 stub 화가 적용되어 content 가 이미 placeholder 인 경우 true.
-   * 이중 변환 방지 idempotency guard. memoryManager.saveSession 시 보존되어야 함.
-   * string-prefix 체크 대신 이 flag 를 사용함으로써 도구 출력이 우연히 stub prefix 로 시작하는
-   * false-positive 방지.
-   */
+
+
+
   serializedStub?: boolean;
-  /**
-   * System notice marker (Issue #911).
-   *
-   * Set on assistant messages that are *system notifications* rather than
-   * real LLM output — e.g. "context exceeded, retry next turn" or
-   * "provider stream error". The UI uses this marker to render the
-   * message with destructive styling (red border + warning icon + "시스템
-   * 알림" label) so the user can distinguish it from normal assistant
-   * replies. Persisted to jsonl so reloads preserve the styling.
-   *
-   * Why not a new `role: "system"`: every vendor adapter + serializer +
-   * UI path would need to handle the new variant. A meta marker on
-   * existing `role: "assistant"` is the minimal-change form and keeps
-   * the message inside the same turn-pair invariant that the rest of the
-   * system already respects.
-   */
+
+
+
   systemNotice?: "context-error" | "stream-error" | "interrupted";
   /**
    * Tool-result generic size cap marker (Issue #902).
@@ -161,11 +140,9 @@ export interface MessageMeta {
    * re-resolves the current prompt body from `PersonaPromptStore`.
    */
   activePersonaPrompt?: { id: string; name: string };
-  /**
-   * Compact boundary 의 opaque-state slot. type-only import 로 cycle 회피.
-   * 단일 source of truth: src/engine/structured-compact.ts:CompactBoundary.
-   * prompt slot / checkpoint storage / history[0] view 가 같은 frozen reference.
-   */
+
+
+
   boundary?: import("../structured-compact.js").CompactBoundary;
   /**
    * Wall-clock when the message was generated (Date.now() epoch ms). Stamped

@@ -1,18 +1,7 @@
-/**
- * MCP Manager — §9.5 Multi-Server Lifecycle
- *
- * 여러 MCP 서버 연결을 관리:
- * - loadFromConfig(): MCP 서버 설정 로드
- * - connectAll(): 승인된 서버 일괄 연결
- * - disconnectAll(): 전체 종료
- * - killSwitch(serverId): 즉시 연결 해제 + 도구 제거 (§10.1)
- * - getConfigs(): 저장된 서버 설정 목록 반환 (renderer-safe DTO)
- * - addConfig(config): 설정 파일에 서버 추가 + 연결 시도
- * - removeConfig(id): 설정 파일에서 서버 제거 + 연결 해제
- *
- * 설정 위치: ~/.lvis/mcp/servers.json. 같은 ~/.lvis/mcp/ 아래에
- * marketplace install 도 들어간다 (~/.lvis/mcp/<slug>/).
- */
+
+
+
+
 import { randomBytes } from "node:crypto";
 import { readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -89,7 +78,7 @@ export class McpManager {
     ];
 
     if (candidatePaths.length === 0) {
-      log.info("MCP 서버 설정 파일 없음: %s", this.configPath);
+      log.info("MCP server config file missing: %s", this.configPath);
       return [];
     }
 
@@ -100,7 +89,7 @@ export class McpManager {
           if (path === candidatePaths[candidatePaths.length - 1]) {
             return [];
           }
-          log.warn(`빈 설정 파일 감지, 다음 후보로 폴백: ${path}`);
+      log.warn(`Empty config file detected, falling back to next candidate: ${path}`);
           continue;
         }
         const parsed = JSON.parse(raw) as { servers?: McpServerConfig[] };
@@ -111,10 +100,10 @@ export class McpManager {
           }
           return s;
         });
-        log.info(`${servers.length}개 MCP 서버 설정 로드`);
+      log.info(`${servers.length} MCP server configs loaded`);
         return servers;
       } catch (err) {
-        log.error({ err }, "설정 파일 파싱 실패");
+      log.error({ err }, "Config file parse failed");
       }
     }
 
@@ -141,12 +130,12 @@ export class McpManager {
       } else {
         const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
         failed.push({ id: configs[i].id, error: message });
-        log.warn(`서버 연결 실패 (${configs[i].id}): %s`, message);
+      log.warn(`Server connection failed (${configs[i].id}): %s`, message);
       }
     }
 
     log.info(
-      `연결 결과: ${connected.length}개 성공, ${failed.length}개 실패`,
+      `Connection result: ${connected.length} succeeded, ${failed.length} failed`,
     );
     return { connected, failed };
   }
@@ -156,7 +145,7 @@ export class McpManager {
     // 이미 연결된 서버는 건너뛰기
     const existing = this.clients.get(config.id);
     if (existing && existing.getState().status === "connected" && !opts.force) {
-      log.info(`${config.id}: 이미 연결됨 — 건너뛰기`);
+      log.info(`${config.id}: already connected — skipping`);
       return;
     }
 
@@ -218,13 +207,13 @@ export class McpManager {
     for (const [id, client] of this.clients) {
       promises.push(
         client.disconnect().catch((err) => {
-          log.error(`${id} 종료 실패: %s`, err);
+      log.error(`${id} shutdown failed: %s`, err);
         }),
       );
     }
     await Promise.all(promises);
     this.clients.clear();
-    log.info("모든 MCP 서버 연결 해제 완료");
+    log.info("All MCP servers disconnected");
   }
 
   /**
@@ -265,7 +254,7 @@ export class McpManager {
    * 진행 중인 요청은 에러로 reject됨.
    */
   async killSwitch(serverId: string): Promise<void> {
-    log.warn(`Kill Switch 실행: ${serverId}`);
+    log.warn(`Kill switch executing: ${serverId}`);
 
     const client = this.clients.get(serverId);
     if (client) {
@@ -282,7 +271,7 @@ export class McpManager {
       input: JSON.stringify({ serverId }),
     });
 
-    log.warn(`Kill Switch 완료: ${serverId} — 모든 도구 해제됨`);
+    log.warn(`Kill switch completed: ${serverId} — all tools unregistered`);
   }
 
   // ─── Query ──────────────────────────────────────────
@@ -371,7 +360,7 @@ export class McpManager {
         return { connected: true };
       } catch (err) {
         const warning = err instanceof Error ? err.message : String(err);
-        log.warn(`서버 추가 후 연결 실패 (${normalizedId}): %s`, err);
+      log.warn(`Connection after server add failed (${normalizedId}): %s`, err);
         return { connected: false, warning };
       }
     });
@@ -432,7 +421,7 @@ export class McpManager {
     const existingClient = this.clients.get(id);
     if (existingClient) {
       await existingClient.disconnect().catch((err) => {
-        log.warn(`setApiKey: 기존 클라이언트 연결 해제 실패 (${id}): %s`, err);
+      log.warn(`setApiKey: existing client disconnect failed (${id}): %s`, err);
       });
       this.clients.delete(id);
     }
@@ -452,7 +441,7 @@ export class McpManager {
       // MEDIUM: scrub secrets from warning before surfacing to caller
       const rawMsg = err instanceof Error ? err.message : String(err);
       const warning = scrubSecrets(rawMsg);
-      log.warn(`API 키 설정 후 연결 실패 (${id}): %s`, warning);
+      log.warn(`Connection after API key set failed (${id}): %s`, warning);
       // MEDIUM: audit log on failure
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
@@ -491,7 +480,7 @@ export class McpManager {
       const client = this.clients.get(serverId);
       if (client) {
         await client.disconnect().catch((e) =>
-          log.warn(`removeConfig disconnect 실패 (${serverId}): %s`, e),
+      log.warn(`removeConfig disconnect failed (${serverId}): %s`, e),
         );
         this.clients.delete(serverId);
       }

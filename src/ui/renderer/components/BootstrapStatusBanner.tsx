@@ -1,9 +1,9 @@
 // Managed bootstrap status banner.
 //
 // Renders one of three states based on the IPC event from the host:
-//   - start    → "플러그인 설치 중…" (no dismiss; host will emit terminal soon)
+
 //   - complete with failed[] → red banner listing failures, dismissable
-//   - complete with skippedReason → amber banner ("마켓플레이스 미설정")
+
 //   - error    → red banner with the host-supplied message
 //   - complete clean → silent (return null) — most users see nothing
 //

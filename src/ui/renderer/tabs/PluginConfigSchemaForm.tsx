@@ -1,31 +1,7 @@
-/**
- * §9.2 Track B — auto-rendered settings form for plugins that declare a
- * `configSchema` in their manifest.
- *
- * Mapping rule:
- *   string                       → <Input type="text" />
- *   string + format:"secret"     → masked <Input type="password" /> stored
- *                                  via lvis.pluginConfig.setSecret (NEVER
- *                                  in cleartext pluginConfigs)
- *   string + enum:[...]          → <NativeSelect>
- *   number / integer             → <Input type="number" />
- *   boolean                      → <Checkbox> toggle
- *   array of string              → tag-style multi input (comma split)
- *
- * Save semantics (post-2026-05-16 UX overhaul):
- *   - Checkbox (boolean) + NativeSelect (enum) — apply on change with a
- *     200ms trailing debounce. Rapid toggles collapse into a single
- *     `pluginConfig.set` (which triggers a plugin restart), so user gets
- *     immediate feel without restart spam.
- *   - Text / number / array inputs — edit a local draft and only persist
- *     when the section "변경사항 저장" button is clicked.
- *   - Secret fields — per-field 저장 button on a separate IPC path
- *     (`pluginConfig.setSecret`). Never enters the cleartext draft.
- *
- * The form falls back gracefully when a property type is unknown — the
- * field is rendered as a read-only display so the user is not silently
- * locked out of declared settings.
- */
+
+
+
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
@@ -429,7 +405,7 @@ export function PluginConfigSchemaForm({
         </div>
       )}
       {/* No bottom batch button — text/number/array/secret fields each have
-          their own inline "저장" button; toggle/enum still auto-save. */}
+          their own inline Save button; toggle/enum still auto-save. */}
     </div>
   );
 }
