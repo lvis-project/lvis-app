@@ -1,36 +1,38 @@
 # Network Restricted Eval
 
-This English page is the canonical default entry for `research/network-restricted-eval.md`. The preserved Korean source is available at [ko/research/network-restricted-eval.md](../ko/research/network-restricted-eval.md).
+Status: Active English default. The Korean archive keeps earlier review history and original discussion, but this page must be usable on its own.
 
-## Purpose
+Korean archive: [docs/ko mirror](../ko/research/network-restricted-eval.md).
 
-Research pages capture implementation options, constraints, and decisions that informed current app behavior.
+## What This Page Owns
 
-## When To Use This Page
+This page owns expected behavior when network access is denied, proxied, unavailable, or policy-restricted. Use it as the first review surface when changing this area; use the archive for background, not as a substitute for current English guidance.
 
-Use this page before re-opening a technical decision or replacing a runtime boundary.
+## Current Operating Contract
 
-## Current Contract
+- English is the default review and contributor language for this app surface.
+- The document must name the behavior that still matters today, the code or test locations that enforce it, and the conditions that make the note stale.
+- Source files and tests are authoritative when this prose and implementation disagree.
+- Korean-only material stays in the mirrored archive unless it is translated or summarized here.
 
-- English is the default language for app documentation, UI-facing examples, contributor guidance, and release operations.
-- Korean material is retained under the mirrored `docs/ko` path for historical context, Korean review, and local product memory.
-- If this page describes behavior that is enforced by code, the source files and tests remain the source of truth. Update both when the contract changes.
-- Do not move Korean-only content back into the default documentation path; translate or summarize it here and keep the original mirror linked.
+## Implementation Anchors
 
-## Maintenance Checklist
+- `src/core/network-guard.ts`
+- `src/permissions/sandbox-capability.ts`
+- `src/mcp/`
 
-- Separate observed facts from recommendations.
-- Keep security and platform assumptions explicit.
-- Point to current source files when research has been implemented.
-- Move stale or superseded claims to the Korean mirror only if they are historical.
+## Update Checklist
+
+- State whether the document is active, implemented, superseded, or historical before adding new detail.
+- Keep links relative to the current file depth; mirrored files under `docs/ko` need different paths from default docs.
+- Add or update tests when a documented behavior is enforced by code.
+- Remove template language and stale plan wording instead of carrying it forward.
 
 ## Related Entry Points
 
-- [Documentation Home](../README.md)
-- [Architecture Overview](../architecture/README.md)
-- [Plugin Development Guide](../guides/plugin-development.md)
-- [Korean Mirror](../ko/research/network-restricted-eval.md)
+- [LVIS Project Documentation](../README.md)
+- [Getting Started](../guides/getting-started.md)
 
-## Update Notes
+## Review Notes
 
-When updating this document, keep the English default useful on its own. The Korean mirror should preserve original review history, but reviewers should not need to open it just to understand the current app contract.
+This English page should let a reviewer understand scope, risk, and validation without opening the Korean archive. If the archive contains rationale that still matters, translate the relevant part into this page and keep the archive link as provenance.

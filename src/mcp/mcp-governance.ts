@@ -119,7 +119,7 @@ export class McpGovernance {
     }
   }
 
-  /** 정책 주기적 갱신 시작 (IT admin이 정책 업데이트 시 반영) */
+  /** Start periodic policy refresh so IT-admin updates take effect. */
   startPolicyRefresh(onRevoked?: (revokedIds: string[]) => void | Promise<void>): void {
     if (this.refreshTimer) return;
     const interval = this.policy.globalRules.policyRefreshIntervalMs;
@@ -149,19 +149,19 @@ export class McpGovernance {
     }
   }
 
-  // ─── Layer 1: 서버 설치 검증 ─────────────────────
+  // ─── Layer 1: Server Install Validation ─────────────────────
 
   /**
-   * 서버 설정을 정책에 대해 검증.
-   * 실패 시 어떤 Layer에서 차단되었는지 반환.
+   * Validate a server config against policy.
+   * Returns the layer that blocked the request when validation fails.
    */
   validateServer(config: McpServerConfig): ValidationResult {
-    // L0: 정책 존재 확인
+    // L0: policy presence
     if (!this.policy) {
       return { valid: false, reason: t("be_mcpGovernance.policyNotLoaded"), layer: 0 };
     }
 
-    // L1-a: 서버 승인 상태 확인 (deny-by-default)
+    // L1-a: server approval state (deny-by-default)
     const approval = this.findApproval(config.id);
     if (!approval) {
       return { valid: false, reason: t("be_mcpGovernance.unapprovedServer", { id: config.id }), layer: 1 };
@@ -173,18 +173,18 @@ export class McpGovernance {
       return { valid: false, reason: t("be_mcpGovernance.pendingServer", { id: config.id }), layer: 1 };
     }
 
-    // L1-b: 전역 서버 수 제한
+    // L1-b: global server count limit
     const activeCount = this.policy.servers.filter((s) => s.status === "approved").length;
     if (activeCount > this.policy.globalRules.maxServersTotal) {
       return { valid: false, reason: t("be_mcpGovernance.maxServersExceeded", { activeCount, maxServersTotal: this.policy.globalRules.maxServersTotal }), layer: 1 };
     }
 
-    // L1-c: Transport 검증
+    // L1-c: transport validation
     if (config.transport !== approval.transport) {
       return { valid: false, reason: t("be_mcpGovernance.transportMismatch", { configTransport: config.transport, approvedTransport: approval.transport }), layer: 1 };
     }
 
-    // L1-d: stdio — 명령어 검증
+    // L1-d: stdio command validation
     if (config.transport === "stdio") {
       const cmdResult = this.validateStdioCommand(config, approval);
       if (!cmdResult.valid) return cmdResult;
@@ -192,7 +192,7 @@ export class McpGovernance {
       if (!apiKeyEnvResult.valid) return apiKeyEnvResult;
     }
 
-    // L1-e: HTTP / SSE / WebSocket — URL 검증
+    // L1-e: HTTP / SSE / WebSocket URL validation
     if (
       config.transport === "http" ||
       config.transport === "sse" ||
@@ -201,8 +201,8 @@ export class McpGovernance {
       const urlResult = this.validateUrl(config, approval);
       if (!urlResult.valid) return urlResult;
 
-      // L1-f: Streamable HTTP 전용 — https 강제 (localhost/loopback 제외).
-      //       사설망 IP 검사는 NetworkGuard(Tier A2)에 위임.
+      // L1-f: Streamable HTTP only — enforce HTTPS except localhost/loopback.
+      //       Private-network IP checks are delegated to NetworkGuard (Tier A2).
       if (config.transport === "http") {
         const httpResult = this.validateHttpScheme(config.url);
         if (!httpResult.valid) return httpResult;
@@ -226,20 +226,20 @@ export class McpGovernance {
       }
     }
 
-    // L2: 연결 보안 검증
+    // L2: connection security validation
     const connResult = this.validateConnectionSecurity(config, approval);
     if (!connResult.valid) return connResult;
 
     return { valid: true };
   }
 
-  // ─── Layer 3: 도구 등록 검증 ─────────────────────
+  // ─── Layer 3: Tool Registration Validation ─────────────────────
 
   /**
-   * MCP 서버가 등록하려는 도구 스키마를 검증.
-   * - 네임스페이스 강제: mcp_{prefix}_{toolName}
-   * - 기존 도구 shadowing 방지
-   * - 최대 도구 수 제한
+   * Validate tool schemas an MCP server wants to register.
+   * - Enforce namespace: mcp_{prefix}_{toolName}
+   * - Prevent existing tool shadowing
+   * - Enforce max tool count
    */
   validateToolRegistration(
     serverId: string,
@@ -251,30 +251,30 @@ export class McpGovernance {
       return { valid: false, reason: t("be_mcpGovernance.unapprovedServerToolRegistration", { serverId }), layer: 3 };
     }
 
-    // 능력 제한: tools 허용 여부
+    // Capability gate: whether tools are allowed.
     if (!approval.allowedCapabilities.includes("tools")) {
       return { valid: false, reason: t("be_mcpGovernance.noToolRegistrationPermission", { serverId }), layer: 3 };
     }
 
-    // 최대 도구 수
+    // Max tool count.
     if (tools.length > approval.maxTools) {
       return { valid: false, reason: t("be_mcpGovernance.toolCountExceeded", { toolCount: tools.length, maxTools: approval.maxTools, serverId }), layer: 3 };
     }
 
-    // 네임스페이스 + shadowing 검증
+    // Namespace and shadowing validation.
     const requiredPrefix = `mcp_${approval.toolNamePrefix}_`;
     for (const tool of tools) {
-      // 네임스페이스 강제
+      // Namespace enforcement.
       const namespacedName = tool.name.startsWith(requiredPrefix)
         ? tool.name
         : `${requiredPrefix}${tool.name}`;
 
-      // 기존 도구 shadowing 방지
+      // Prevent existing tool shadowing.
       if (existingToolNames.has(namespacedName)) {
         return { valid: false, reason: t("be_mcpGovernance.toolNameConflict", { namespacedName }), layer: 3 };
       }
 
-      // builtin/plugin 도구 shadowing 차단
+      // Block builtin/plugin tool shadowing.
       const baseNames = [
         "agent_list",
         "agent_spawn",
@@ -368,9 +368,9 @@ export class McpGovernance {
     return toolName.startsWith(prefix) ? toolName : `${prefix}${toolName}`;
   }
 
-  // ─── 조회 ────────────────────────────────────────
+  // ─── Queries ────────────────────────────────────────
 
-  /** 서버의 승인 정보 조회 */
+  /** Return approval information for a server. */
   getApproval(serverId: string): McpServerApproval | undefined {
     return this.findApproval(serverId);
   }
@@ -395,7 +395,7 @@ export class McpGovernance {
       };
     }
 
-    // 인수 검증 (위험 패턴 차단)
+    // Argument validation blocks known dangerous patterns.
     const dangerousArgs = ["--no-sandbox", "--disable-security", "eval(", "$(", "`"];
     for (const arg of config.args ?? []) {
       if (dangerousArgs.some((d) => arg.includes(d))) {
@@ -668,16 +668,16 @@ export class McpGovernance {
   }
 }
 
-// ─── Helpers ────────────────────────────────────────
-
-
 function matchUrlPattern(pattern: string, url: string): boolean {
   try {
     const hostname = new URL(url).hostname;
-    const regexStr = "^" + pattern.replace(/\./g, "\\.").replace(/\*/g, ".*") + "$";
+    const regexStr = "^" + pattern.split("*").map(escapeRegexLiteral).join(".*") + "$";
     return new RegExp(regexStr, "i").test(hostname);
   } catch {
-
     return url.includes(pattern.replace(/\*/g, ""));
   }
+}
+
+function escapeRegexLiteral(value: string): string {
+  return value.replace(/[\\^$+?.()|[\]{}]/g, "\\$&");
 }

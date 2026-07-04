@@ -8,6 +8,7 @@ import {
   chmodSync,
   closeSync,
   constants as fsConstants,
+  fstatSync,
   mkdirSync,
   existsSync,
   openSync,
@@ -32,12 +33,16 @@ import type { PermissionAuditEntry, PermissionAuditEntryInput } from "./audit-sc
 import { lvisHome } from "../shared/lvis-home.js";
 
 function readLastNonEmptyLineSync(filePath: string): string {
-  if (!existsSync(filePath)) return GENESIS_MARKER;
-  const { size } = statSync(filePath);
-  if (size === 0) return GENESIS_MARKER;
-
-  const fd = openSync(filePath, "r");
+  let fd: number;
   try {
+    fd = openSync(filePath, "r");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return GENESIS_MARKER;
+    throw err;
+  }
+  try {
+    const { size } = fstatSync(fd);
+    if (size === 0) return GENESIS_MARKER;
     const one = Buffer.allocUnsafe(1);
     let end = size;
     while (end > 0) {
