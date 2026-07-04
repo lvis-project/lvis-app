@@ -1,20 +1,22 @@
 import type { ThemeBundle } from "./types.js";
 
 /**
- * Marketplace — a quiet, professional light shell in the Vercel mold.
+ * Gallery — a quiet white gallery: ink typography on off-white, hairline frames
+ * (inspired by the marketplace.lvisai.xyz reference).
  *
  * Canvas is a near-white #fafafa with pure-white cards, near-black ink text,
- * and a single restrained #e5e5e5 hairline. The primary is the ink itself, so
- * controls read as calm monochrome with color reserved for status + charts.
- * Depth is carried entirely by the surface ladder + soft layered shadows.
+ * and a single restrained #e5e5e5 hairline frame. The primary is the ink
+ * itself, so controls read as calm monochrome with color reserved for status +
+ * charts. Depth is carried entirely by the surface ladder + soft layered
+ * shadows.
  *
  * Description is a plain literal (not a `t()` key) so this bundle ships without
  * touching the generated locale catalogs.
  */
-export const marketplaceBundle: ThemeBundle = {
-  id: "marketplace",
-  name: "Marketplace",
-  description: "Quiet near-black ink on off-white — a professional, Vercel-like light shell.",
+export const galleryBundle: ThemeBundle = {
+  id: "gallery",
+  name: "Gallery",
+  description: "A quiet white gallery — ink typography on off-white, framed by hairlines.",
   shell: "light",
   highContrast: false,
   tokens: {

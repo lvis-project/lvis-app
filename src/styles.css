@@ -1520,8 +1520,8 @@
     color-scheme: light;
   }
 
-  /* ── 15. marketplace ── light + quiet near-black ink (Vercel-like) ───── */
-  :root[data-theme-bundle="marketplace"] {
+  /* ── 15. gallery ── light + quiet near-black ink, hairline frames ────── */
+  :root[data-theme-bundle="gallery"] {
     --ui-line:                  0 0% 40%;
     --background:               0 0% 98%;     /* #fafafa canvas */
     --foreground:               0 0% 11%;     /* oklch(.205) ≈ #1c1c1c ink */
@@ -1587,8 +1587,8 @@
     color-scheme: light;
   }
 
-  /* ── 16. antigravity ── light + soft periwinkle (antigravity.google) ─── */
-  :root[data-theme-bundle="antigravity"] {
+  /* ── 16. moonstone ── light + soft periwinkle sheen (default) ────────── */
+  :root[data-theme-bundle="moonstone"] {
     --ui-line:                  228 12% 40%;
     --background:               0 0% 100%;     /* pure white canvas */
     --foreground:               225 12% 8%;    /* #121317 ink */
@@ -1652,13 +1652,13 @@
     --shadow-e2:                0 2px 6px hsl(var(--overlay) / 0.06), 0 6px 16px hsl(var(--overlay) / 0.07);
     --shadow-e3:                0 10px 30px hsl(var(--overlay) / 0.1), 0 3px 8px hsl(var(--overlay) / 0.06);
     --shadow-e4:                0 20px 56px hsl(var(--overlay) / 0.14), 0 6px 16px hsl(var(--overlay) / 0.08);
-    /* Pill-leaning radius for the antigravity look. */
+    /* Pill-leaning radius for the moonstone look. */
     --radius:                   0.75rem;
     color-scheme: light;
   }
 
-  /* ── Default (no bundle set) → antigravity tokens for pre-hydration ────
-   * Mirrors :root[data-theme-bundle="antigravity"] above so cold-boot frame-0
+  /* ── Default (no bundle set) → moonstone tokens for pre-hydration ──────
+   * Mirrors :root[data-theme-bundle="moonstone"] above so cold-boot frame-0
    * paints the default bundle before ThemeProvider writes data-theme-bundle. */
   :root {
     --ui-line:                  228 12% 40%;
