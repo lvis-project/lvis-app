@@ -5,7 +5,7 @@
  * fragment files in this directory (`<namespace>.ts`, each exporting `en`/`ko`
  * objects) and merges them here.
  *
- * Fragments: 182
+ * Fragments: 183
  */
 import { en as en_actionPanel, ko as ko_actionPanel } from "./actionPanel.js";
 import { en as en_app, ko as ko_app } from "./app.js";
@@ -87,6 +87,7 @@ import { en as en_commandPopoverPanel, ko as ko_commandPopoverPanel } from "./co
 import { en as en_compactedToolResult, ko as ko_compactedToolResult } from "./compactedToolResult.js";
 import { en as en_composer, ko as ko_composer } from "./composer.js";
 import { en as en_composerPlaceholder, ko as ko_composerPlaceholder } from "./composerPlaceholder.js";
+import { en as en_composerProjectSelector, ko as ko_composerProjectSelector } from "./composerProjectSelector.js";
 import { en as en_constants, ko as ko_constants } from "./constants.js";
 import { en as en_customTitleBar, ko as ko_customTitleBar } from "./customTitleBar.js";
 import { en as en_defaultTourScenarios, ko as ko_defaultTourScenarios } from "./defaultTourScenarios.js";
@@ -271,6 +272,7 @@ export const generatedEn: Record<string, string> = {
   ...en_compactedToolResult,
   ...en_composer,
   ...en_composerPlaceholder,
+  ...en_composerProjectSelector,
   ...en_constants,
   ...en_customTitleBar,
   ...en_defaultTourScenarios,
@@ -456,6 +458,7 @@ export const generatedKo: Record<string, string> = {
   ...ko_compactedToolResult,
   ...ko_composer,
   ...ko_composerPlaceholder,
+  ...ko_composerProjectSelector,
   ...ko_constants,
   ...ko_customTitleBar,
   ...ko_defaultTourScenarios,
