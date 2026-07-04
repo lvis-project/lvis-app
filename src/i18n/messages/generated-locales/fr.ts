@@ -1173,6 +1173,7 @@ export const frMessages: Record<string, string> = {
   "formatIpcError.invalidSessionId": "L'identifiant de session est invalide.",
   "formatIpcError.sessionNotFound": "La session est introuvable.",
   "formatIpcError.sideChatUnavailable": "Le chat latéral n'est pas disponible.",
+  "formatIpcError.projectNotAllowed": "Ce projet n'est pas autorisé.",
   "formatIpcError.installFailed": "L'installation du plugin a échoué.",
   "formatIpcError.invalidAction": "L'action n'est pas autorisée.",
   "formatIpcError.invalidArgs": "Arguments d'outil non valides.",

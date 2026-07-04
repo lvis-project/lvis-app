@@ -19,6 +19,7 @@ import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
+import { projectRootEquals } from "../shared/project-identity.js";
 import {
   buildToolResultStrippedStub,
   buildToolResultTruncatedStub,
@@ -372,7 +373,7 @@ function matchesSessionScope(
   if (options.routineId !== undefined && metadata?.routineId !== options.routineId) return false;
   if (
     options.projectRoot !== undefined &&
-    metadata?.projectRoot !== options.projectRoot &&
+    !projectRootEquals(metadata?.projectRoot, options.projectRoot) &&
     !(options.includeUnscoped === true && metadata?.projectRoot === undefined)
   ) return false;
   return true;
@@ -1552,7 +1553,7 @@ export class MemoryManager {
 
   private matchesMemoryProject(project: ProjectScopedMemoryOptions, options: ProjectScopedMemoryOptions): boolean {
     if (!options.projectRoot) return true;
-    return project.projectRoot === options.projectRoot || (options.includeUnscoped === true && !project.projectRoot);
+    return projectRootEquals(project.projectRoot, options.projectRoot) || (options.includeUnscoped === true && !project.projectRoot);
   }
 
   private migrateLegacyFile(legacyName: string, currentName: string): void {

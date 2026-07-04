@@ -233,7 +233,7 @@ describe("WorkBoardStore — project scope", () => {
         throw new Error("setup failed");
       }
 
-      const alphaOnly = await store.list({ projectRoot: "C:\\workspace\\alpha" });
+      const alphaOnly = await store.list({ projectRoot: "c:/workspace/alpha/" });
       expect(alphaOnly.status).toBe("ok");
       if (alphaOnly.status !== "ok") throw new Error("unreachable");
       expect(alphaOnly.items.map((item) => item.title)).toEqual(["alpha"]);

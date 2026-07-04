@@ -1173,6 +1173,7 @@ export const deMessages: Record<string, string> = {
   "formatIpcError.invalidSessionId": "Die Sitzungs-ID ist ungültig.",
   "formatIpcError.sessionNotFound": "Die Sitzung wurde nicht gefunden.",
   "formatIpcError.sideChatUnavailable": "Seiten-Chat ist nicht verfügbar.",
+  "formatIpcError.projectNotAllowed": "Dieses Projekt ist nicht erlaubt.",
   "formatIpcError.installFailed": "Die Plugin-Installation ist fehlgeschlagen.",
   "formatIpcError.invalidAction": "Die Aktion ist nicht zulässig.",
   "formatIpcError.invalidArgs": "Ungültige Toolargumente.",

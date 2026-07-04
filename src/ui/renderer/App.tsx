@@ -51,6 +51,7 @@ import type { ProjectIdentity } from "../../shared/project-identity.js";
 import {
   defaultProjectFromProjects,
   projectIdentityFromPayload,
+  projectRootEquals,
   workspaceRootsToProjects,
 } from "../../shared/project-identity.js";
 
@@ -289,7 +290,7 @@ export function App() {
 
   const resolveKnownProject = useCallback((project: ProjectIdentity | undefined): ProjectIdentity | undefined => {
     if (!project) return undefined;
-    return workspaceProjects.find((candidate) => candidate.projectRoot === project.projectRoot) ?? project;
+    return workspaceProjects.find((candidate) => projectRootEquals(candidate.projectRoot, project.projectRoot)) ?? project;
   }, [workspaceProjects]);
 
   useEffect(() => {
@@ -703,6 +704,7 @@ export function App() {
         onNewChat={onNewChat}
         onNewChatForProject={onNewChatForProject}
         workspaceProjects={workspaceProjects}
+        activeProject={activeProject ?? defaultWorkspaceProject}
         onOpenMarketplace={onOpenMarketplace}
         marketplaceUrlReady={marketplaceUrlReady}
         onOpenUnifiedSearch={() => { searchOpenOverlay(); }}

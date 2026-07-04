@@ -397,7 +397,7 @@ export type ChannelName = ValuesOf<{
  * classification, or a public channel's payload shape) changes in a way an
  * external SDK/CLI must react to. Read-first callers pin this.
  */
-export const CONTRACT_VERSION = "1.1.0";
+export const CONTRACT_VERSION = "1.2.0";
 
 /**
  * The versioned allowlist of channels an external surface (SDK / CLI / local
@@ -405,7 +405,7 @@ export const CONTRACT_VERSION = "1.1.0";
  *   - chat send + session list/history/get-history (renderer-parity reads + send)
  *   - plugin status/list + marketplace list
  *   - permission mode (READ only — mutation stays internal + gesture-gated)
- *   - usage summary/range/daily-summary
+ *   - usage summary/range
  *
  * Fail-closed: anything NOT in this list is internal. The gesture-gated
  * mutating channels (permission/policy/sandbox-install) MUST never appear here
@@ -421,7 +421,6 @@ export const PUBLIC_CHANNELS = [
   PERMISSIONS.getMode,
   CHANNELS.usage.summary,
   CHANNELS.usage.range,
-  CHANNELS.usage.dailySummary,
 ] as const;
 
 /** A channel that is part of the externally-exposable public subset. */
@@ -453,7 +452,6 @@ export const CHANNEL_GESTURE: Record<string, "required" | "none"> = {
   [PERMISSIONS.getMode]: "none",
   [CHANNELS.usage.summary]: "none",
   [CHANNELS.usage.range]: "none",
-  [CHANNELS.usage.dailySummary]: "none",
   // ── mutating gesture-gated (permission / policy / sandbox-install) ──
   [PERMISSIONS.setMode]: "required",
   [PERMISSIONS.addRule]: "required",

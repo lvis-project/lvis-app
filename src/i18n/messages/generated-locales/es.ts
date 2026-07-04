@@ -1173,6 +1173,7 @@ export const esMessages: Record<string, string> = {
   "formatIpcError.invalidSessionId": "El id de sesión no es válido.",
   "formatIpcError.sessionNotFound": "No se encontró la sesión.",
   "formatIpcError.sideChatUnavailable": "El chat lateral no está disponible.",
+  "formatIpcError.projectNotAllowed": "Este proyecto no está permitido.",
   "formatIpcError.installFailed": "La instalación del complemento falló.",
   "formatIpcError.invalidAction": "La acción no está permitida.",
   "formatIpcError.invalidArgs": "Argumentos de herramienta no válidos.",

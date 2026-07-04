@@ -72,7 +72,7 @@ describe("local-api dispatch — public read routing", () => {
     expect(result).toEqual({ ok: true, data: { current: "session-1", sessions: [] } });
   });
 
-  it("routes usage daily summary to the public handler", async () => {
+  it("keeps usage daily summary internal because it can trigger an LLM call", async () => {
     const generateText = vi.fn(async () => "요약 완료");
     const api = createLocalApi(
       makeDeps({
@@ -90,11 +90,8 @@ describe("local-api dispatch — public read routing", () => {
       args: { date: "2026-07-04", locale: "ko-KR", usage: { totalTokens: 120 } },
     });
 
-    expect(generateText).toHaveBeenCalledWith(
-      expect.stringContaining("\"date\":\"2026-07-04\""),
-      expect.stringContaining("LVIS Insights"),
-    );
-    expect(result).toMatchObject({ ok: true, data: { ok: true, summary: "요약 완료" } });
+    expect(generateText).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: false, error: LOCAL_API_CHANNEL_NOT_PUBLIC });
   });
 });
 

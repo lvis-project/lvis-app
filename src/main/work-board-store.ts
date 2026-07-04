@@ -32,6 +32,7 @@ import {
   type BoardFile,
 } from "../work-board/board-shared.js";
 import { appendActivity } from "../work-board/activity-log.js";
+import { projectRootEquals } from "../shared/project-identity.js";
 
 const log = createLogger("lvis");
 
@@ -294,7 +295,7 @@ export class WorkBoardStore {
       .map((item) => decorate(cloneItem(item), nowMs))
       .sort((a, b) => b.id - a.id);
     if (projectRoot) {
-      rows = rows.filter((r) => r.projectRoot === projectRoot || (filter.includeUnscoped === true && !r.projectRoot));
+      rows = rows.filter((r) => projectRootEquals(r.projectRoot, projectRoot) || (filter.includeUnscoped === true && !r.projectRoot));
     }
     if (filter.status) {
       rows = rows.filter((r) => r.status_resolved === filter.status);

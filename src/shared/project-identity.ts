@@ -27,6 +27,22 @@ export function normalizeProjectName(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+export function projectRootKey(value: unknown): string | undefined {
+  const root = normalizeProjectRoot(value);
+  if (!root) return undefined;
+  const hadWindowsSeparator = root.includes("\\");
+  let normalized = root.replace(/\\/g, "/").replace(/\/+$/g, "");
+  if (normalized.length === 0) normalized = "/";
+  const isWindowsRoot = /^[a-zA-Z]:(?:\/|$)/.test(normalized) || /^\/\/[^/]+\/[^/]+/.test(normalized) || hadWindowsSeparator;
+  return isWindowsRoot ? normalized.toLowerCase() : normalized;
+}
+
+export function projectRootEquals(left: unknown, right: unknown): boolean {
+  const leftKey = projectRootKey(left);
+  const rightKey = projectRootKey(right);
+  return leftKey !== undefined && rightKey !== undefined && leftKey === rightKey;
+}
+
 export function projectIdentityFromRoot(
   projectRoot: string,
   fallbackName: string,
@@ -61,8 +77,9 @@ export function workspaceRootsToProjects(
   const byRoot = new Map<string, ProjectIdentity>();
   const add = (path: string | undefined, isDefault: boolean) => {
     const root = normalizeProjectRoot(path);
-    if (!root || byRoot.has(root)) return;
-    byRoot.set(root, projectIdentityFromRoot(root, fallbackName, isDefault));
+    const key = projectRootKey(root);
+    if (!root || !key || byRoot.has(key)) return;
+    byRoot.set(key, projectIdentityFromRoot(root, fallbackName, isDefault));
   };
   add(defaultRoot, true);
   for (const root of roots) add(root.path, root.isDefault);

@@ -246,6 +246,10 @@ export function buildInternalApiSurface() {
   setMarketplaceApiKey: async (apiKey: string) => ipcRenderer.invoke(CHANNELS.settings.marketplaceSetApiKey, apiKey),
   hasMarketplaceApiKey: async () => ipcRenderer.invoke(CHANNELS.settings.marketplaceHasApiKey) as Promise<boolean>,
   deleteMarketplaceApiKey: async () => ipcRenderer.invoke(CHANNELS.settings.marketplaceDeleteApiKey),
+  // ─── Internal Usage Insights ─────────────────────
+  // This can trigger a provider-backed LLM call, so it is intentionally kept
+  // out of the externally-parity-safe public surface and local API allowlist.
+  getUsageDailySummary: async (input: unknown) => ipcRenderer.invoke(CHANNELS.usage.dailySummary, input),
   // #893 — top-level mockup credential login. Hard-coded `demo`/`demo123`
   // (env override via `LVIS_DEMO_USER` / `LVIS_DEMO_PASS`). Vendor is no
   // longer sent by the renderer; the backend picks via `LVIS_DEMO_VENDOR`

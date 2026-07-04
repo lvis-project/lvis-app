@@ -1173,6 +1173,7 @@ export const zhMessages: Record<string, string> = {
   "formatIpcError.invalidSessionId": "会话 ID 无效。",
   "formatIpcError.sessionNotFound": "找不到会话。",
   "formatIpcError.sideChatUnavailable": "侧边聊天不可用。",
+  "formatIpcError.projectNotAllowed": "不允许使用此项目。",
   "formatIpcError.installFailed": "插件安装失败。",
   "formatIpcError.invalidAction": "该操作是不允许的。",
   "formatIpcError.invalidArgs": "无效的工具参数。",
