@@ -71,6 +71,31 @@ describe("local-api dispatch — public read routing", () => {
     expect(listSessionsPage).toHaveBeenCalledTimes(1);
     expect(result).toEqual({ ok: true, data: { current: "session-1", sessions: [] } });
   });
+
+  it("routes usage daily summary to the public handler", async () => {
+    const generateText = vi.fn(async () => "요약 완료");
+    const api = createLocalApi(
+      makeDeps({
+        conversationLoop: {
+          getSessionId: () => "session-1",
+          permissionManager: { getMode: () => "default" },
+          generateText,
+        },
+      }),
+    );
+
+    const result = await api.dispatch({
+      channel: CHANNELS.usage.dailySummary,
+      origin: "local-api",
+      args: { date: "2026-07-04", locale: "ko-KR", usage: { totalTokens: 120 } },
+    });
+
+    expect(generateText).toHaveBeenCalledWith(
+      expect.stringContaining("\"date\":\"2026-07-04\""),
+      expect.stringContaining("LVIS Insights"),
+    );
+    expect(result).toMatchObject({ ok: true, data: { ok: true, summary: "요약 완료" } });
+  });
 });
 
 describe("local-api dispatch — gesture-gated mutating channels are blocked", () => {
