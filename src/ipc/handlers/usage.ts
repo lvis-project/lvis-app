@@ -73,13 +73,26 @@ function cleanNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
-function buildDailySummaryPrompt(input: UsageDailySummaryInput): string {
-  const sessions = cleanItems(input.sessions);
-  const starred = cleanItems(input.starred);
-  const usage = input.usage && typeof input.usage === "object" ? input.usage : {};
+function normalizeDailySummaryInput(input: unknown): UsageDailySummaryInput {
+  if (!input || typeof input !== "object") return { date: "unknown" };
+  const raw = input as Record<string, unknown>;
+  return {
+    date: typeof raw.date === "string" ? raw.date : "unknown",
+    ...(typeof raw.locale === "string" ? { locale: raw.locale } : {}),
+    ...(Array.isArray(raw.sessions) ? { sessions: raw.sessions as UsageDailySummaryItem[] } : {}),
+    ...(Array.isArray(raw.starred) ? { starred: raw.starred as UsageDailySummaryItem[] } : {}),
+    ...(raw.usage && typeof raw.usage === "object" ? { usage: raw.usage as UsageDailySummaryInput["usage"] } : {}),
+  };
+}
+
+function buildDailySummaryPrompt(input: unknown): string {
+  const normalized = normalizeDailySummaryInput(input);
+  const sessions = cleanItems(normalized.sessions);
+  const starred = cleanItems(normalized.starred);
+  const usage = normalized.usage && typeof normalized.usage === "object" ? normalized.usage : {};
   const payload = {
-    date: /^\d{4}-\d{2}-\d{2}$/.test(input.date) ? input.date : "unknown",
-    locale: cleanText(input.locale, 32) ?? "ko-KR",
+    date: /^\d{4}-\d{2}-\d{2}$/.test(normalized.date) ? normalized.date : "unknown",
+    locale: cleanText(normalized.locale, 32) ?? "ko-KR",
     sessions,
     starred,
     usage: {
@@ -99,10 +112,10 @@ function buildDailySummaryPrompt(input: UsageDailySummaryInput): string {
 
 export async function handleUsageDailySummary(
   conversationLoop: { generateText: (prompt: string, systemPrompt?: string, abortSignal?: AbortSignal) => Promise<string> },
-  input: UsageDailySummaryInput,
+  input: unknown,
 ): Promise<UsageDailySummaryResult> {
-  const prompt = buildDailySummaryPrompt(input);
   try {
+    const prompt = buildDailySummaryPrompt(input);
     const summary = (await conversationLoop.generateText(
       prompt,
       "You are LVIS Insights. Produce a concise, factual daily work summary from structured app telemetry only.",
