@@ -2,45 +2,61 @@
  * SubAgentCard — chat-side card showing a sub-agent spawn lifecycle.
  *
  * Updates from the spawn lifecycle stream (`lvis:agent-spawn:event`):
- *   start → running → turn (n) … → done | error
+ *   start → running → (tool/reasoning/assistant activity) … → done | error
  *
- * Each card auto-collapses after `done`. The expandable section shows the
- * per-turn snippets and final summary so the user can audit what the
- * sub-agent did.
+ * The sub-agent runs its own {@link ConversationLoop} whose per-round activity
+ * (tool calls, reasoning, assistant text, permission reviews) is forwarded as
+ * `ChatEntry[]` and rendered through the SHARED {@link TranscriptRenderer} — the
+ * SAME renderer the main chat uses. This is the "루프 동일" unification: the
+ * sub-agent transcript is visually identical to a main-chat transcript, only
+ * read-only (no edit / fork / star / feedback actions).
+ *
+ * Each card auto-collapses after `done`. The header shows the title + status
+ * badge; the expandable body is the full transcript.
  */
 import { useState } from "react";
 import { Bot, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
 import { useTranslation } from "../../../i18n/react.js";
-
-export interface SubAgentTurn {
-  turn: number;
-  text: string;
-  toolCallCount: number;
-}
+import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+import { TranscriptRenderer } from "./TranscriptRenderer.js";
 
 export interface SubAgentSpawn {
   spawnId: string;
   title: string;
   status: "running" | "done" | "error";
-  turns: SubAgentTurn[];
+  /**
+   * Full sub-agent transcript as `ChatEntry[]` — the same model the main chat
+   * renders. Populated live from forwarded child-loop activity, and rebuilt
+   * from the persisted `agent_spawn` tool result on session reload (symmetric
+   * live-vs-load rendering). Empty until the first child round produces output.
+   */
+  entries: ChatEntry[];
   summary?: string;
   toolCallCount: number;
   errorMessage?: string;
   /**
    * The originating `agent_spawn` tool_use id. Set on `start` event and
-   * preserved across turn/done/error updates. Used by ChatView to inline
-   * the spawn card next to the ToolGroupCard that contains the matching
-   * tool entry, instead of stacking all spawns above the chat flow.
+   * preserved across activity/done/error updates. Used by ChatView to attach
+   * the spawn to the ToolGroupCard that contains the matching tool entry (the
+   * completion chip lives on that tool row; the full transcript lives in the
+   * sub-agent tab).
    */
   toolUseId?: string;
+  /**
+   * The addressable sub-agent session id — the JOIN KEY that unifies a spawn
+   * and its resume(s) into one transcript in the sub-agent viewer. A resume is
+   * a distinct spawn (own `spawnId`/`toolUseId`) but shares this value with the
+   * original, so `groupSubAgentSessions` concatenates their segments. Absent on
+   * legacy sessions / clean-complete originals → the spawn stays a solo group.
+   */
+  childSessionId?: string;
 }
 
 /**
  * L2: cap the displayed title so a long attacker-supplied value does not
  * blow up the chat layout. The full value is preserved in the card's
- * tooltip-equivalent (the summary section), so legitimate long titles are
- * still discoverable.
+ * tooltip (title attribute), so legitimate long titles are still discoverable.
  */
 const TITLE_DISPLAY_CAP = 80;
 function clipTitle(value: string): string {
@@ -67,7 +83,7 @@ export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
         <Bot className="h-3 w-3" />
         <span className="min-w-0 truncate font-medium" title={spawn.title}>{displayTitle}</span>
         <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
-          {t("subAgentCard.turnCount", { count: String(spawn.turns.length) })}
+          {t("subAgentCard.toolCalls", { count: String(spawn.toolCallCount) })}
         </Badge>
         {spawn.status === "running" ? (
           <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin" />
@@ -81,28 +97,18 @@ export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
         )}
       </button>
       {open && (
-        <div className="min-w-0 space-y-1 border-t px-3 py-1.5">
-          {spawn.turns.map((turn) => (
-            <div key={turn.turn} className="min-w-0 rounded border border-dashed/50 px-2 py-1">
-              <div className="text-[10px] uppercase opacity-60">
-                {t("subAgentCard.turnHeading", { turn: String(turn.turn) })}
-              </div>
-              {turn.text && (
-                <div className="mt-1 whitespace-pre-wrap break-words text-[11px] opacity-80 [overflow-wrap:anywhere]">
-                  {turn.text}
-                </div>
-              )}
-            </div>
-          ))}
-          {spawn.summary && (
-            <div className="min-w-0 rounded border bg-background/(--opacity-medium) px-2 py-1">
-              <div className="text-[10px] uppercase opacity-60">{t("subAgentCard.summaryLabel")}</div>
-              <div className="mt-1 whitespace-pre-wrap break-words text-[11px] [overflow-wrap:anywhere]">
-                {spawn.summary}
-              </div>
-              <div className="mt-1 text-[10px] opacity-60">
-                {t("subAgentCard.toolCalls", { count: String(spawn.toolCallCount) })}
-              </div>
+        <div className="min-w-0 space-y-1 border-t px-3 py-2" data-testid="sub-agent-card-transcript">
+          {spawn.entries.length > 0 ? (
+            <TranscriptRenderer
+              entries={spawn.entries}
+              streaming={spawn.status === "running"}
+              currentSessionId={spawn.spawnId}
+            />
+          ) : (
+            <div className="py-1 text-[11px] opacity-60">
+              {spawn.status === "running"
+                ? t("subAgentCard.statusRunning")
+                : t("subAgentCard.summaryLabel")}
             </div>
           )}
           {spawn.errorMessage && (

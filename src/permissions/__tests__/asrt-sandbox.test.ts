@@ -35,6 +35,7 @@ import {
   DEFAULT_WINDOWS_PROXY_PORT_RANGE,
   buildSandboxConfig,
   getDefaultSensitiveReadDenyPaths,
+  getDefaultSensitiveWriteDenyPaths,
   registerWorkerUnixSocketDir,
   unregisterWorkerUnixSocketDir,
 } from "../asrt-sandbox.js";
@@ -782,6 +783,27 @@ describe("asrt-sandbox — sensitive read deny-list (host-secret hardening)", ()
       (p) => p === join(FAKE_LVIS_HOME, "secrets"),
     ).length;
     expect(occurrences).toBe(1);
+  });
+
+  it("buildSandboxConfig unions the sensitive write deny-list into filesystem.denyWrite", () => {
+    const config = buildSandboxConfig({ allowedDomains: [], strictAllowlist: true });
+    const sensitive = getDefaultSensitiveWriteDenyPaths();
+    for (const p of sensitive) {
+      expect(config.filesystem.denyWrite).toContain(p);
+    }
+    expect(config.filesystem.denyWrite).toContain(join(homedir(), ".config"));
+    expect(config.filesystem.denyWrite).toContain(join(homedir(), ".ssh"));
+  });
+
+  it("buildSandboxConfig keeps caller-supplied denyWrite AND adds the sensitive write floor", () => {
+    const extra = join(tmpdir(), "caller-supplied-write-deny-xyz");
+    const config = buildSandboxConfig({ allowedDomains: [], denyWrite: [extra] });
+    expect(config.filesystem.denyWrite).toContain(extra);
+    expect(config.filesystem.denyWrite).toContain(join(homedir(), ".config"));
+
+    const dup = join(homedir(), ".config");
+    const dupConfig = buildSandboxConfig({ allowedDomains: [], denyWrite: [dup] });
+    expect(dupConfig.filesystem.denyWrite.filter((p) => p === dup)).toHaveLength(1);
   });
 
   it("default-OFF: computing the deny-list / config does NOT activate the sandbox gate", () => {

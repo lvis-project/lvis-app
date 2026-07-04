@@ -32,18 +32,17 @@ import type {
 import { trustFromSource } from "./types.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { runWithCeiling } from "./executor-ceiling.js";
-import type { PermissionManager, PermissionCheckResult } from "../permissions/permission-manager.js";
+import { PermissionManager, requiredTier, type PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
 import {
   buildPermissionEvaluationContext,
   type PermissionEvaluationContext,
 } from "../permissions/evaluation-context.js";
-import { isSensitivePath, canonicalizePathForMatch, caseFoldForMatch } from "../permissions/sensitive-paths.js";
+import { canonicalizePathForMatch, caseFoldForMatch } from "../permissions/sensitive-paths.js";
 import {
   buildAllowedScope,
   buildRuntimeAllowedDirectories,
   isFilesystemRootPath,
-  isPathAllowed,
   pickClosestParent,
   validateDirectoryAddition,
 } from "../permissions/allowed-directories.js";
@@ -865,7 +864,7 @@ export class ToolExecutor {
           // plugin/MCP or in-process builtin call honestly shows "none" rather
           // than the process-global "asrt" that only the host-shell path earns
           // — and the GENUINE asrt for an ASRT-wrapped external MCP worker
-          // (worker-egress PR1), keyed on its specific server id.
+          // keyed on its specific server id.
           sandboxCapability: resolveReviewerSandboxCapability(
             source,
             toolUse.name,
@@ -1168,9 +1167,16 @@ export class ToolExecutor {
       filePath,
       canonicalPath: caseFoldForMatch(canonicalizePathForMatch(filePath)),
     }));
-    const sensitiveTarget = canonicalTargets
-      .map((target) => ({ ...target, pattern: isSensitivePath(target.canonicalPath) }))
-      .find((target) => target.pattern);
+    // Layer 0/1 path-scope predicate lives in PermissionManager (SOT V2).
+    // The executor keeps canonicalization (above) + the layer-0 deny and
+    // layer-1 modal wiring below; PM only answers "which target is sensitive
+    // / out-of-allowed". Static call so this runs even when no
+    // PermissionManager instance is wired (the Layer 0/1 hard-block and
+    // out-of-directory prompt are not gated on `this.permissionManager`).
+    const sensitiveTarget = PermissionManager.checkPathScope({
+      canonicalTargets,
+      allowedDirectories: invocationAllowedScope.directories,
+    }).sensitiveHit;
     const targetFilePath = canonicalTargets[0]?.filePath;
     const sensitivePathPattern = sensitiveTarget?.pattern ?? null;
 
@@ -1221,9 +1227,13 @@ export class ToolExecutor {
     // from SDK manifest authority metadata by plugin-tool-adapter.
     if (canonicalTargets.length > 0) {
       while (true) {
-        const outOfAllowedTarget = canonicalTargets.find(
-          (target) => !isPathAllowed(target.canonicalPath, invocationAllowedScope),
-        );
+        // Re-run the Layer 1 predicate each iteration: applyApprovedDirectory
+        // widens `invocationAllowedScope` after a grant, so the scope must be
+        // re-supplied to PermissionManager.checkPathScope (SOT V2).
+        const outOfAllowedTarget = PermissionManager.checkPathScope({
+          canonicalTargets,
+          allowedDirectories: invocationAllowedScope.directories,
+        }).outOfAllowed;
         if (!outOfAllowedTarget) break;
         const dirLayerResult: PermissionCheckResult = {
           decision: "ask",
@@ -1288,29 +1298,20 @@ export class ToolExecutor {
       : undefined;
     const isAlwaysAllowMeta = metaOverride === "always-allow-with-audit";
     if (this.permissionManager && !isAlwaysAllowMeta) {
+      // Permission policy V1 SOT — the meta `decisionOverride="ask"` re-elevation
+      // (agent_spawn: elevate the registry's override-`allow` to a per-invocation
+      // `forceModal` ask, except under allow-all mode) now lives inside
+      // categoryBasedDecision's "override" branch. The executor only CARRIES the
+      // override into the check context; it never rewrites the verdict or
+      // re-consults getMode(). The allow-all invariant (mode==="allow" → no
+      // prompt, meta included) is single-sourced in PermissionManager.
       permissionResult = this.permissionManager.checkDetailed(
         toolUse.name,
         source,
         invocationCategory,
         overlayTriggerOrigin,
-        invocationPermissionContext,
+        { ...invocationPermissionContext, decisionOverride: metaOverride },
       );
-      // Permission policy — meta tools with decisionOverride="ask" force the approval
-      // modal regardless of the registry descriptor's "override" lane.
-      // The override means "skip automatic approval lanes"; the registry already
-      // returns "allow" for `meta` (override sentinel) so we must elevate
-      // to ask here when the tool author marked it sensitive.
-      if (metaOverride === "ask" && permissionResult.decision === "allow") {
-        permissionResult = {
-          decision: "ask",
-          reason: t("be_executor.metaToolAskOverrideReason"),
-          layer: 6,
-          // The tool author asked to be confirmed on EVERY invocation. Mark
-          // the ask so the Store B memory-skip below never auto-allows it from
-          // a prior session/persistent grant.
-          forceModal: true,
-        };
-      }
       // ── Plugin-read auto-allow ↔ sandbox-fs-containment coupling ──────────
       //
       // The merged read-relaxation coupling (the block immediately below) only
@@ -1712,7 +1713,7 @@ export class ToolExecutor {
       }
       // ── Store B: explicit-approval memory skip (foreground only) ──────────
       // checkDetailed (sync) consults Store A — durable glob rules + the
-      // alwaysAllowed Set (Layers 3/5). It cannot see Store B, the exact-tuple
+      // alwaysAllowed Map (Layers 3/5). It cannot see Store B, the exact-tuple
       // user-approval memory written by ToolApprovalDialog for DURABLE
       // choices only (allow-session / allow-always; allow-once never
       // records). Pre-fix, choosing "allow this session" still
@@ -1790,7 +1791,7 @@ export class ToolExecutor {
             // Substrate-aware: plugin/MCP + in-process builtins show "none"
             // (their effects are not ASRT-wrapped); only bash/powershell may
             // show the active "asrt" when the gate is ON — plus a genuinely
-            // ASRT-wrapped external MCP worker (worker-egress PR1), keyed on id.
+            // ASRT-wrapped external MCP worker, keyed on id.
             sandboxCapability: resolveReviewerSandboxCapability(
               source,
               toolUse.name,
@@ -1873,7 +1874,15 @@ export class ToolExecutor {
           // allow-always: 영구 허용 규칙 추가
           if (decision.choice === "allow-always" && this.permissionManager) {
             const pattern = approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
-            await this.permissionManager.addAlwaysAllowedPersist(pattern);
+            // P2 — stamp the grant tier from the final resolved category so an
+            // "Allow always" on a read tool grants read-tier (still asks on a
+            // later write of the same pattern) while a write/shell/network/meta
+            // tool grants write-tier (covers everything). requiredTier is the
+            // shared SOT for the category→tier mapping.
+            await this.permissionManager.addAlwaysAllowedPersist(
+              pattern,
+              requiredTier(invocationCategory),
+            );
           }
           permissionResult = {
             decision: "allow",

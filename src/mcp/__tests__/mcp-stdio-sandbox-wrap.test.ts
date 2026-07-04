@@ -1,5 +1,5 @@
 /**
- * MCP stdio worker ASRT-wrap wiring (worker-egress PR1).
+ * MCP stdio worker ASRT-wrap wiring.
  *
  * Confines EXTERNAL MCP stdio servers (the ones StdioTransport spawns) under the
  * ASRT sandbox: filesystem jail (write-confined to the host-derived per-server
@@ -230,7 +230,7 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     expect(options.filesystem.denyRead).toContain(join(homedir(), ".ssh"));
     expect(options.filesystem.denyRead).toContain(join(homedir(), ".aws"));
     // The worker wrap also applies the CENTRALIZED sensitive write DENY-LIST.
-    // Per-command denyWrite replaces the boot floor, so #1449 requires this to
+    // Per-command denyWrite replaces the boot array, so #1449 requires this to
     // be restated wherever wrapWorkerCommand carries a filesystem jail.
     const sensitiveWrite = getDefaultSensitiveWriteDenyPaths();
     expect(options.filesystem.denyWrite).toEqual(sensitiveWrite);

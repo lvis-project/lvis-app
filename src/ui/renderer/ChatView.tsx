@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../..
 import { isDebugStreamEnabled } from "../../lib/debug-stream.js";
 import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import { ViewModeBanner, type ViewModeState } from "./components/ViewModeBanner.js";
-import { SubAgentCard } from "./components/SubAgentCard.js";
+import { SubAgentSpawnChip } from "./components/SubAgentSpawnChip.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { type StatusBarProps } from "./components/StatusBar.js";
 import { ChatSidePanel } from "./components/ChatSidePanel.js";
@@ -27,11 +27,13 @@ import { type AskUserQuestionRequest } from "./components/AskUserQuestionCard.js
 import type { LvisApi } from "./types.js";
 import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
-import type { SessionSummary } from "./hooks/use-sessions.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
-import { getKoreaDateKey } from "./utils/korea-date-key.js";
 import { isTurnStartEntry } from "./utils/classify-turn-entries.js";
 import { collectChatPreviewModel } from "./preview/preview-targets.js";
+import {
+  deriveSubAgentSpawnsFromEntries,
+  mergeSubAgentSpawns,
+} from "./subagents/derive-subagent-spawns.js";
 import { useWorkspaceTabs } from "./preview/workspace-tabs.js";
 import { useSidePanelWidth } from "./hooks/use-side-panel-width.js";
 import { normalizeBrowserNavigationUrl } from "./preview/url-safety.js";
@@ -44,7 +46,7 @@ import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useCheckpointView } from "./hooks/use-checkpoint-view.js";
 import { useMessageQueue } from "./hooks/use-message-queue.js";
 import { useAttachmentPicker } from "./hooks/use-attachment-picker.js";
-import { useTranscriptEntries, type TurnSummary } from "./hooks/use-transcript-entries.js";
+import { TranscriptRenderer, type TurnSummary } from "./components/TranscriptRenderer.js";
 import { ChatTranscript } from "./components/ChatTranscript.js";
 import { ChatComposerDock } from "./components/ChatComposerDock.js";
 
@@ -93,9 +95,7 @@ export interface ChatViewProps {
   onOpenApprovalQueue?: () => void;
   currentSessionKind?: "main" | "routine";
   currentSessionTitle?: string;
-  sessions?: SessionSummary[];
   onLoadSession?: (sessionId: string) => void | boolean | Promise<void | boolean>;
-  onRefreshSessions?: () => void | Promise<void>;
   /** Quick-action items for CommandPopover (빠른 실행 section) */
   commandActions: QuickAction[];
   /** Controlled open state for CommandPopover */
@@ -119,7 +119,7 @@ export interface ChatViewProps {
   blogLayout?: boolean;
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -130,9 +130,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const readingColumnClass = blogLayout
     ? "mx-auto w-full max-w-[58rem] px-6 lg:px-8"
     : "w-full max-w-full px-4";
-  const dockColumnClass = blogLayout
-    ? "mx-auto w-full max-w-[58rem] min-w-0"
-    : "w-full max-w-full min-w-0";
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
@@ -145,26 +142,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass, activeVendor,
   } = useChatContext();
-
-  // Sub-agent spawns by their originating tool_use id. Used so SubAgentCard
-  // renders inline next to the ToolGroupCard whose `agent_spawn` call started
-  // it, rather than stacking all spawns at the top of the chat (where users
-  // miss them entirely — see 2026-05-07 incident).
-  const spawnsByToolUseId = useMemo(() => {
-    const map = new Map<string, SubAgentSpawn[]>();
-    for (const spawn of subAgentSpawns) {
-      if (!spawn.toolUseId) continue;
-      const list = map.get(spawn.toolUseId);
-      if (list) list.push(spawn);
-      else map.set(spawn.toolUseId, [spawn]);
-    }
-    return map;
-  }, [subAgentSpawns]);
-
-  const orphanSpawns = useMemo(
-    () => subAgentSpawns.filter((s) => !s.toolUseId),
-    [subAgentSpawns],
-  );
 
   // Checkpoint view-mode — null = live, non-null = viewing a past checkpoint
   // slice. Owned at the composition root because it is read by useChatScroll
@@ -184,6 +161,51 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const visibleEntries = useMemo(
     () => viewMode ? entries.slice(0, viewMode.slicedRangeEnd) : entries,
     [entries, viewMode],
+  );
+  const emptyComposerCentered =
+    appMode === "work" &&
+    hasAskQuestions === false &&
+    visibleEntries.length === 0 &&
+    hasApiKey === true &&
+    !suggestedRepliesActive &&
+    viewMode === null;
+  const dockColumnClass = emptyComposerCentered
+    ? "mx-auto w-full max-w-[58rem] min-w-0"
+    : blogLayout
+      ? "mx-auto w-full max-w-[58rem] min-w-0"
+      : "w-full max-w-full min-w-0";
+  // Sub-agent spawns shown inline + in the workspace SubAgentViewer. The live
+  // `subAgentSpawns` prop is populated ONLY from the in-flight agent-spawn
+  // event stream, so a LOADED past session would show nothing. Mirror how
+  // preview/file targets are derived from loaded entries: reconstruct spawns
+  // from the persisted `agent_spawn` tool calls and merge them under the live
+  // list (live wins per run — richer streamed data; derived fills history).
+  const derivedSubAgentSpawns = useMemo(
+    () => deriveSubAgentSpawnsFromEntries(visibleEntries),
+    [visibleEntries],
+  );
+  const mergedSubAgentSpawns = useMemo(
+    () => mergeSubAgentSpawns(subAgentSpawns, derivedSubAgentSpawns),
+    [subAgentSpawns, derivedSubAgentSpawns],
+  );
+  // Sub-agent spawns by their originating tool_use id. Used so SubAgentCard
+  // renders inline next to the ToolGroupCard whose `agent_spawn` call started
+  // it, rather than stacking all spawns at the top of the chat (where users
+  // miss them entirely — see 2026-05-07 incident).
+  const spawnsByToolUseId = useMemo(() => {
+    const map = new Map<string, SubAgentSpawn[]>();
+    for (const spawn of mergedSubAgentSpawns) {
+      if (!spawn.toolUseId) continue;
+      const list = map.get(spawn.toolUseId);
+      if (list) list.push(spawn);
+      else map.set(spawn.toolUseId, [spawn]);
+    }
+    return map;
+  }, [mergedSubAgentSpawns]);
+
+  const orphanSpawns = useMemo(
+    () => mergedSubAgentSpawns.filter((s) => !s.toolUseId),
+    [mergedSubAgentSpawns],
   );
   const previewModel = useMemo(
     () => collectChatPreviewModel({ entries: visibleEntries, attachments }),
@@ -303,23 +325,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     [visibleEntries],
   );
 
-  // Calendar's in-session day jump indexer — derived from visibleEntries with
-  // only user + assistant entries (the only kinds that carry createdAt).
-  // Memoized so that stream-delta re-renders of ChatView don't rebuild the
-  // map on every keystroke (which would re-mount the calendar tree behind the
-  // closed popover at ~100Hz on long sessions).
-  const navigatorCurrentSessionEntries = useMemo(
-    () =>
-      visibleEntries.map((entry, idx) => ({
-        idx,
-        createdAt:
-          entry.kind === "assistant" || entry.kind === "user"
-            ? entry.createdAt
-            : undefined,
-      })),
-    [visibleEntries],
-  );
-
   // turn_summary entry 의 turnStart 별 lookup. 각 turn 의 final assistant
   // 와 WorkGroup 이 같은 turn 의 token / duration 정보를 inline 으로 가져와
   // 표시한다. turn_summary entry 자체는 standalone 렌더링 되지 않는다.
@@ -349,6 +354,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     return map;
   }, [visibleEntries]);
 
+  // Inline surface for a spawn attached to its `agent_spawn` tool row: a
+  // LIGHTWEIGHT completion chip only (status + counts + "detail in tab"). The
+  // full child transcript (tool/reasoning/assistant timeline) is rendered in the
+  // sub-agent tab via the shared TranscriptRenderer — NOT inline. This replaces
+  // the former full inline SubAgentCard, which duplicated the tab and stacked
+  // (2026-05-07 "missed at top" regression class).
   const renderSpawnsForGroup = useCallback(
     (group: { tools: { toolUseId: string }[] }) => {
       const seen = new Set<string>();
@@ -359,7 +370,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         for (const spawn of list) {
           if (seen.has(spawn.spawnId)) continue;
           seen.add(spawn.spawnId);
-          nodes.push(<SubAgentCard key={spawn.spawnId} spawn={spawn} />);
+          nodes.push(<SubAgentSpawnChip key={spawn.spawnId} spawn={spawn} />);
         }
       }
       return nodes;
@@ -367,7 +378,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     [spawnsByToolUseId],
   );
 
-  const { scrollViewportRef, showJumpToBottom, scrollChatToBottom, handleJumpToEntry } = useChatScroll({
+  const { scrollViewportRef, showJumpToBottom, scrollChatToBottom } = useChatScroll({
     entries,
     currentSessionId,
     chatEndRef,
@@ -376,10 +387,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     searchMatches,
     searchIdx,
   });
-
-  const handleCalendarSessionSelect = useCallback(async (sessionId: string) => {
-    await onLoadSession?.(sessionId);
-  }, [onLoadSession]);
 
   // Checkpoint view-mode handlers + fork-success toast (depends on the scroll
   // hook's scrollChatToBottom).
@@ -460,8 +467,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const onOpenModelSettings = useCallback(() => onOpenSettings("llm"), [onOpenSettings]);
   const onOpenInputPermissions = useCallback(() => onOpenSettings("permissions"), [onOpenSettings]);
 
-  const activeDayKey = getKoreaDateKey(new Date());
-
   // No auto-scroll needed for floating panel — it is positioned outside
   // the scroll viewport so it is always visible regardless of scroll position.
 
@@ -488,33 +493,33 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     return () => window.removeEventListener("keydown", handler);
   }, [streaming, onAbort]);
 
-  const transcriptEntries = useTranscriptEntries({
-    visibleEntries,
-    streaming,
-    currentSessionId,
-    viewMode,
-    editingEntryIdx,
-    editBusy,
-    setEditingEntryIdx,
-    searchOpen,
-    searchMatches,
-    searchMatchSet,
-    searchIdx,
-    searchHighlight,
-    isEntryStarred,
-    onEditSave,
-    onFork,
-    onToggleStar,
-    onRetryEffort,
-    onFeedback,
-    activeVendor,
-    debugStreamEnabled,
-    spawnsByToolUseId,
-    renderSpawnsForGroup,
-    turnSummaryByTurnStart,
-    handleEnterView,
-    handleBranchFrom,
-  });
+  // Main chat renders through the shared TranscriptRenderer with every
+  // capability cluster fully populated, so the transcript is byte-identical to
+  // the pre-extraction inline useMemo. Side-chat / sub-agent sources (PR2/PR3)
+  // omit clusters to opt out of edit / search / spawns / actions.
+  const transcriptEntries = (
+    <TranscriptRenderer
+      entries={visibleEntries}
+      streaming={streaming}
+      currentSessionId={currentSessionId}
+      viewMode={viewMode}
+      edit={{ editingEntryIdx, editBusy, setEditingEntryIdx, onEditSave }}
+      search={{ searchOpen, searchMatches, searchMatchSet, searchIdx, searchHighlight }}
+      spawns={{ spawnsByToolUseId, renderSpawnsForGroup }}
+      actions={{
+        isEntryStarred,
+        onFork,
+        onToggleStar,
+        onRetryEffort,
+        onFeedback,
+        handleEnterView,
+        handleBranchFrom,
+      }}
+      turnSummaryByTurnStart={turnSummaryByTurnStart}
+      activeVendor={activeVendor}
+      debugStreamEnabled={debugStreamEnabled}
+    />
+  );
 
   return (
     <div
@@ -642,14 +647,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       <ChatTranscript
         scrollViewportRef={scrollViewportRef}
         readingColumnClass={readingColumnClass}
-        activeDayKey={activeDayKey}
-        currentSessionId={currentSessionId}
-        sessions={sessions}
-        streaming={streaming}
-        navigatorCurrentSessionEntries={navigatorCurrentSessionEntries}
-        onJumpToEntry={handleJumpToEntry}
-        onLoadSession={handleCalendarSessionSelect}
-        onRefreshSessions={onRefreshSessions}
         loadedSkills={loadedSkills}
         orphanSpawns={orphanSpawns}
         visibleEntries={visibleEntries}
@@ -719,6 +716,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           distinct surface on its own. */}
       <ChatComposerDock
         dockColumnClass={dockColumnClass}
+        centered={emptyComposerCentered}
         workflowApi={workflowApi}
         api={api}
         currentSessionId={currentSessionId}
@@ -770,6 +768,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           selectedId={selectedPreviewId}
           onSelect={setSelectedPreviewId}
           workspaceTabs={workspaceTabs}
+          subAgentSpawns={mergedSubAgentSpawns}
           width={sidePanelWidth}
           onWidthChange={setSidePanelWidth}
           onWidthCommit={commitSidePanelWidth}
@@ -794,6 +793,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             selectedId={selectedPreviewId}
             onSelect={setSelectedPreviewId}
             workspaceTabs={workspaceTabs}
+            subAgentSpawns={mergedSubAgentSpawns}
             width={sidePanelWidth}
             onWidthChange={setSidePanelWidth}
             onWidthCommit={commitSidePanelWidth}

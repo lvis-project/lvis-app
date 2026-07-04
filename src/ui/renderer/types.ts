@@ -3,7 +3,7 @@
 
 import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { Locale } from "../../i18n/locale.js";
-import type { StreamEvent } from "../../lib/chat-stream-state.js";
+import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../mcp/types.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
@@ -225,6 +225,14 @@ export type AppSettings = {
     appMode?: "chat" | "work";
     /** Persisted docked side-panel width (px). SOT: `SystemSettings`. */
     sidePanelWidth?: number;
+    /**
+     * Persisted TOP-pane percent of the workspace-rail vertical (list↕viewer)
+     * split, per tab kind (file-browser / preview / subagent). Browser excluded.
+     * SOT: `SystemSettings` in settings-store.
+     */
+    sidePanelSplitFilePercent?: number;
+    sidePanelSplitPreviewPercent?: number;
+    sidePanelSplitSubagentPercent?: number;
   };
   /** Experimental feature flags — all default false. */
   features?: {
@@ -298,6 +306,30 @@ export type UsageSummaryShape = {
   generatedAt: string;
 };
 
+export type UsageDailySummaryInput = {
+  date: string;
+  locale?: string;
+  sessions?: Array<{
+    title?: string;
+    preview?: string;
+    projectName?: string;
+  }>;
+  starred?: Array<{
+    role?: string;
+    text?: string;
+  }>;
+  usage?: Partial<UsageTotals> | null;
+};
+
+export type UsageDailySummaryResult =
+  | { ok: true; summary: string; generatedAt: string }
+  | { ok: false; error: string };
+
+export type ProjectQueryOptions = {
+  projectRoot?: string;
+  projectName?: string;
+  includeUnscoped?: boolean;
+};
 
 export type PluginMarketplaceActionResult =
   | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
@@ -443,6 +475,32 @@ export type LvisApi = {
     onExit: (
       handler: (payload: { tabId: string; exitCode: number; signal?: number }) => void,
     ) => () => void;
+  };
+  /**
+   * Side chat (workspace rail) — a second, independently-streaming chat session
+   * driven by a dedicated ConversationLoop in main. `onStream` / `onFallback`
+   * subscribe to the DEDICATED CHANNELS.sidechat.{stream,fallback} events (never
+   * the main chat.stream), so a main-chat stream frame never reaches this
+   * subscriber and vice versa. Optional so test fixtures casting a partial
+   * object to LvisApi keep compiling — production preload always defines it.
+   */
+  sideChat?: {
+    send: (input: string, attachments?: unknown[]) => Promise<
+      | { ok: true; result: unknown }
+      | { ok: false; error: string }
+    >;
+    new: () => Promise<{ ok: true; sessionId: string } | { ok: false; error: string }>;
+    load: (sessionId: string) => Promise<
+      | { ok: true; sessionId: string; messages: SerializedHistoryMessage[] }
+      | { ok: false; error: string; messages: SerializedHistoryMessage[] }
+    >;
+    list: () => Promise<{
+      current: string | null;
+      sessions: Array<{ id: string; modifiedAt: string; title: string }>;
+    }>;
+    abort: () => Promise<{ ok: true } | { ok: false; error: string }>;
+    onStream: (handler: (event: StreamEvent) => void) => () => void;
+    onFallback: (handler: (payload: { from: string; to: string }) => void) => () => void;
   };
   /**
    * Demo activation bridge. `status` exposes only the captured activation
@@ -619,11 +677,13 @@ export type LvisApi = {
     personaPromptId?: string,
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
-  chatNew: () => Promise<{ ok: true }>;
-  chatSessions: (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; routineFiredAt?: string; branchedFromCompactNum?: number }> }>;
+  chatNew: (opts?: { projectRoot?: string; projectName?: string }) => Promise<
+    { ok: true } | { ok: false; error: string }
+  >;
+  chatSessions: (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; routineFiredAt?: string; projectRoot?: string; projectName?: string; branchedFromCompactNum?: number }> }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
-  chatGetHistory: () => Promise<{ sessionId: string; sessionTitle?: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; messages: SerializedHistoryMessage[] }>;
+  chatGetHistory: () => Promise<{ sessionId: string; sessionTitle?: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; projectRoot?: string; projectName?: string; messages: SerializedHistoryMessage[] }>;
   chatMainActiveState: () => Promise<{ mainActiveSessionId: string | null; mainActiveMode: "resume" | "fresh"; updatedAt: string } | null>;
   chatSessionHistory: (sessionId: string) => Promise<{
     ok: boolean;
@@ -632,6 +692,8 @@ export type LvisApi = {
     routineId?: string;
     routineTitle?: string;
     routineFiredAt?: string;
+    projectRoot?: string;
+    projectName?: string;
     messages: SerializedHistoryMessage[];
     /** Chars in the rolling summary preamble applied to this session. 0 = no preamble. */
     preambleChars?: number;
@@ -673,15 +735,15 @@ export type LvisApi = {
   starredList: () => Promise<Array<{ id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string }>>;
   starredAdd: (entry: { sessionId?: string; messageIndex: number; role: string; text: string }) => Promise<{ ok: boolean; entry?: { id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string } }>;
   starredRemove: (opts: { id?: string; sessionId?: string; messageIndex?: number }) => Promise<{ ok: boolean }>;
-  memoryListEntries: () => Promise<Array<{ filename: string; title: string; content: string; updatedAt?: string }>>;
-  memorySaveEntry: (t: string, c: string) => Promise<unknown>;
+  memoryListEntries: (opts?: ProjectQueryOptions) => Promise<Array<{ filename: string; title: string; content: string; updatedAt?: string; projectRoot?: string; projectName?: string }>>;
+  memorySaveEntry: (t: string, c: string, opts?: ProjectQueryOptions) => Promise<unknown>;
   memoryDeleteEntry: (f: string) => Promise<void>;
-  memorySearchEntries: (q: string) => Promise<Array<{ filename?: string; title: string; content?: string; excerpt: string; updatedAt: string }>>;
-  memoryGetIndex: () => Promise<string>;
+  memorySearchEntries: (q: string, opts?: ProjectQueryOptions) => Promise<Array<{ filename?: string; title: string; content?: string; excerpt: string; updatedAt: string; projectRoot?: string; projectName?: string }>>;
+  memoryGetIndex: (opts?: ProjectQueryOptions) => Promise<string>;
   memoryUpdateIndexIfUnchanged: (expectedContent: string, nextContent: string) => Promise<boolean>;
   memoryUpdateIndexSections: (sections: { urgentMemory?: string; references?: string }) => Promise<unknown>;
-  memoryListSessions: () => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
-  memorySearchSessions: (q: string) => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
+  memoryListSessions: (opts?: ProjectQueryOptions) => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
+  memorySearchSessions: (q: string, opts?: ProjectQueryOptions) => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
   memoryGetAgentsMd: () => Promise<string>;
   memoryUpdateAgentsMd: (content: string) => Promise<unknown>;
   memoryGetUserPrefs: () => Promise<string>;
@@ -850,7 +912,7 @@ export type LvisApi = {
   // state + activity log + learned memory.
   generateWorkBoardReport?: (
     kind: "daily" | "weekly",
-    input?: { date?: string; weekIso?: string; weekOffset?: number },
+    input?: { date?: string; weekIso?: string; weekOffset?: number; projectRoot?: string; includeUnscoped?: boolean },
   ) => Promise<
     | import("../../shared/work-board-types.js").WorkBoardReportResult
     | { ok: false; error: string }
@@ -984,6 +1046,7 @@ export type LvisApi = {
   onViewActivate: (h: (k: string) => void) => () => void;
   getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;
   getUsageRange: (opts: { dateFrom: string; dateTo: string }) => Promise<UsageSummaryShape>;
+  getUsageDailySummary: (input: UsageDailySummaryInput) => Promise<UsageDailySummaryResult>;
   exportUsageCsv: (rows: Array<Record<string, string | number>>) => Promise<{ ok: boolean; filePath?: string; canceled?: boolean }>;
   plugins: {
     getPerfStats: () => Promise<Record<string, PluginPerfStats>>;
@@ -1028,16 +1091,23 @@ export type LvisApi = {
     }) => void,
   ) => () => void;
   onAgentSpawnEvent: (
+    // Structurally mirrors `AgentSpawnEvent` in `tools/agent-spawn.ts`. The
+    // renderer can't import that module (it pulls Node built-ins), so the shape
+    // is duplicated here; both reference the pure `ChatEntry` model from
+    // `lib/chat-stream-state.ts`. `entries` is the FULL child transcript
+    // snapshot (idempotent replace on activity/done).
     h: (event: {
       spawnId: string;
-      type: "start" | "turn" | "done" | "error";
+      type: "start" | "activity" | "done" | "error";
       title?: string;
-      turn?: number;
-      text?: string;
+      entries?: ChatEntry[];
       summary?: string;
       toolCallCount?: number;
       message?: string;
       toolUseId?: string;
+      // JOIN KEY for unifying a spawn + its resumes into one transcript (see
+      // `AgentSpawnEvent.childSessionId` in `tools/agent-spawn.ts`).
+      childSessionId?: string;
     }) => void,
   ) => () => void;
   onSkillLoaded: (
@@ -1672,6 +1742,46 @@ export interface LvisWorkspaceApi {
     error?: "unauthorized" | "path-not-allowed" | "sensitive-path" | "not-a-dir" | "read-failed";
     message?: string;
   }>;
+  /** Remove an additional project root from the read allow-list. Never the default root. */
+  removeRoot: (path: string) => Promise<{
+    ok: boolean;
+    removed?: string;
+    roots?: Array<{ path: string; isDefault: boolean }>;
+    error?: "unauthorized" | "invalid-path" | "not-an-additional-root" | "cannot-remove-default";
+    message?: string;
+  }>;
+  /** Reveal a scope-revalidated file/folder in the OS file manager (location only, never opens it). */
+  reveal: (path: string) => Promise<{
+    ok: boolean;
+    error?: "unauthorized" | "path-not-allowed" | "sensitive-path" | "not-found";
+    message?: string;
+  }>;
+  /**
+   * Drag-drop add-root, step 1 (#1458). Submit a renderer-resolved dropped folder
+   * path (from `window.lvisDrop.resolveDroppedPaths`) for Layer-0 hard-deny +
+   * is-a-directory validation. On success returns a one-time ack token bound to
+   * the now-main-owned path — confirm the add via `pickRoot({ ackToken })`.
+   */
+  dropPrepare: (path: string) => Promise<{
+    ok: boolean;
+    error?: string;
+    warnings?: string[];
+    /** Validated main-owned path awaiting acknowledgement — display only. */
+    pendingPath?: string;
+    /** One-time token bound to the path — confirm by echoing it via `pickRoot`. */
+    ackToken?: string;
+  }>;
+}
+
+/**
+ * Drop-path resolution bridge (#1458). Exposed as its own preload world. Resolves
+ * dropped `File` objects to filesystem paths via `webUtils.getPathForFile` — the
+ * ONLY context that can, since a `File` cannot cross IPC. The returned paths are
+ * renderer-NAMED candidates that grant no capability; the main-process
+ * `workspace.dropPrepare` gate makes the read-scope decision.
+ */
+export interface LvisDropApi {
+  resolveDroppedPaths: (files: FileList | readonly File[]) => string[];
 }
 
 export interface LvisUiApi {
@@ -1687,6 +1797,7 @@ declare global {
   interface Window {
     lvisApi: LvisApi;
     lvisHost: LvisHostApi;
+    lvisDrop: LvisDropApi;
     lvis: {
       permission: LvisPermissionApi;
       approval: LvisApprovalApi;

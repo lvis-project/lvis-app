@@ -23,8 +23,9 @@
  * `agent-spawn.ts` is a thin caller over the same runner.
  *
  * Session isolation: each phase spawns with `originSessionId:
- * "work-board:<itemId>"`, so the runner persists the child under
- * `work-board:<itemId>::<uuid>` — the work-board-namespaced isolated session
+ * "work-board:<itemId>"`, so the runner persists the child in the isolated
+ * `~/.lvis/subagent/` namespace under a regex-valid `sub-<originTag>-<uuid>` id
+ * (where `originTag` is a short hash of the origin id) — the isolated session
  * the design calls for. The execute child's `childSessionId` is stored back on
  * the item (`runSessionId`) for audit/trace linking.
  *
@@ -48,8 +49,68 @@ import {
   type TranscriptStorage,
   type RunTranscriptWriter,
 } from "../work-board/run-transcript.js";
+import type { SubAgentActivityUpdate } from "../engine/subagent-runner.js";
 
 const log = createLogger("work-board-engine");
+
+/**
+ * Map a sub-agent activity snapshot to the work-board transcript's per-turn
+ * shape (`turn` = 1-based COMPLETED assistant round count, `text` = latest
+ * assistant text). The board records a coarse per-turn plan/exec narrative — it
+ * does not render the full ChatEntry timeline (that surface is the chat's
+ * sub-agent tab), so it consumes the same `onActivity` snapshot but flattens it
+ * to the turn text.
+ *
+ * `turn === 0` means no assistant round has completed yet — the snapshot only
+ * holds in-flight tool_start/permission_review/streaming entries. Such a frame
+ * carries no board-relevant turn narrative, so the caller drops it (see
+ * `makeTurnRecorder`).
+ */
+function activityToTurn(u: SubAgentActivityUpdate): { turn: number; text: string } {
+  let turn = 0;
+  let text = "";
+  for (const entry of u.entries) {
+    if (entry.kind === "assistant" && entry.streaming !== true) {
+      turn += 1;
+      if (entry.text) text = entry.text;
+    }
+  }
+  return { turn, text };
+}
+
+/**
+ * Build the per-phase `onActivity` handler that emits + records ONE turn event
+ * per newly-completed assistant round.
+ *
+ * WHY this guard exists: `onActivity` fires on EVERY child-loop callback
+ * (tool_start / tool_end / permission_review / assistant_round) so the sub-agent
+ * TAB can live-render the full ChatEntry timeline. The board, however, wants
+ * only the coarse per-turn narrative. Forwarding raw `activityToTurn` on every
+ * callback floods the board two ways: (1) every pre-first-round tool/permission
+ * frame maps to a blank `{turn:0, text:""}`, and (2) every extra callback WITHIN
+ * a round re-emits the SAME `{turn:N, text}` — and `record()` APPENDS to the
+ * JSONL transcript, so the dupes accumulate on disk (and flood the live
+ * `runProgress` IPC channel).
+ *
+ * The guard collapses that back to the pre-transcript-migration semantics: skip
+ * `turn === 0` (no completed round) and skip any turn already forwarded — one
+ * event per new completed round, no blanks, no dupes. The handler holds its own
+ * per-phase `lastTurn` (created fresh for plan and for execute), so each phase's
+ * turn count restarts from 1.
+ */
+function makeTurnRecorder(
+  onTurn: (turn: number, text: string) => void,
+): (u: SubAgentActivityUpdate) => void {
+  let lastTurn = 0;
+  return (u) => {
+    const { turn, text } = activityToTurn(u);
+    // No completed assistant round yet (turn 0), or this round was already
+    // forwarded — nothing new to narrate for the board.
+    if (turn <= lastTurn) return;
+    lastTurn = turn;
+    onTurn(turn, text);
+  };
+}
 
 /**
  * Read-only tool surface for the PLAN phase. The plan agent investigates the
@@ -104,9 +165,10 @@ export interface WorkBoardEngineDeps {
    * Optional post-run learning hook (Hermes self-improvement pillar). Called
    * fire-and-forget AFTER a run reaches `completed` and is persisted; a throw
    * here must never fail the already-succeeded run, so the engine swallows
-   * rejections. boot wires this to append a one-line learning to `MEMORY.md`.
+   * rejections. boot wires this to append a one-line learning to the item's
+   * project work memory.
    */
-  onRunComplete?: (info: { itemId: number; title: string }) => void | Promise<void>;
+  onRunComplete?: (info: { itemId: number; title: string; projectRoot?: string; projectName?: string }) => void | Promise<void>;
 }
 
 export interface RunItemOptions {
@@ -149,14 +211,24 @@ export interface WorkBoardEngine {
 }
 
 /**
- * Turn cap for the PLAN phase. Planning is "investigate briefly → produce a
- * plan", not open-ended work — a low cap forces fast convergence and prevents
- * the runaway loop / context blow-up observed when a plan agent kept re-asking
- * an unanswerable clarifying question (autonomous runs have no answer channel)
- * or retried an erroring tool. The spawn returns its best plan-so-far when the
- * cap is hit, so the run always reaches the approval gate.
+ * Host-assigned round budget for the PLAN phase. Planning is "investigate
+ * briefly → produce a plan", not open-ended work — a bounded budget forces
+ * convergence and prevents the runaway loop / context blow-up observed when a
+ * plan agent kept re-asking an unanswerable clarifying question (autonomous
+ * runs have no answer channel) or retried an erroring tool. The spawn returns
+ * its best plan-so-far when the budget is hit, so the run always reaches the
+ * approval gate.
+ *
+ * Set to 20 (was 6): 6 was the source of the "sub-agent stops at 6 rounds"
+ * report — investigation of a non-trivial item (a few read-only tool calls +
+ * reasoning + writing the plan) legitimately needs more than 6 assistant
+ * rounds, so 6 caused premature round-caps that truncated real plans. 20
+ * matches the `default`/`execute` standard-work budget while staying well
+ * under the 30 ceiling. This is a HOST policy value (a fixed-shape internal
+ * phase), passed as `maxRounds` — the LLM cannot influence it (the
+ * `agent_spawn` tool no longer exposes a round knob).
  */
-const PLAN_MAX_TURNS = 6;
+const PLAN_ROUND_BUDGET = 20;
 
 /** Build the PLAN-phase task prompt from the item's title + detail. */
 function buildPlanPrompt(item: WorkItem): string {
@@ -365,13 +437,13 @@ export function createWorkBoardEngine(
           originSessionId,
           profileMode: "plan",
           profileModel: profile?.model,
-          maxTurns: PLAN_MAX_TURNS,
+          maxRounds: PLAN_ROUND_BUDGET,
         },
         {
-          onTurn: (u) => {
-            emit({ itemId, phase: "planning", turn: u.turn, text: u.text });
-            record({ phase: "planning", kind: "turn", turn: u.turn, text: u.text });
-          },
+          onActivity: makeTurnRecorder((turn, text) => {
+            emit({ itemId, phase: "planning", turn, text });
+            record({ phase: "planning", kind: "turn", turn, text });
+          }),
           onError: (message) => emit({ itemId, phase: "error", message }),
         },
       );
@@ -435,10 +507,10 @@ export function createWorkBoardEngine(
           profileModel: profile?.model,
         },
         {
-          onTurn: (u) => {
-            emit({ itemId, phase: "executing", turn: u.turn, text: u.text });
-            record({ phase: "executing", kind: "turn", turn: u.turn, text: u.text });
-          },
+          onActivity: makeTurnRecorder((turn, text) => {
+            emit({ itemId, phase: "executing", turn, text });
+            record({ phase: "executing", kind: "turn", turn, text });
+          }),
           onError: (message) => emit({ itemId, phase: "error", message }),
         },
       );
@@ -481,7 +553,14 @@ export function createWorkBoardEngine(
         // captured by the promise chain (not just an async rejection) — the
         // swallow guarantee must hold for any hook implementation.
         void Promise.resolve()
-          .then(() => onRunComplete({ itemId, title: item.title }))
+          .then(() =>
+            onRunComplete({
+              itemId,
+              title: item.title,
+              ...(item.projectRoot ? { projectRoot: item.projectRoot } : {}),
+              ...(item.projectName ? { projectName: item.projectName } : {}),
+            }),
+          )
           .catch((e) =>
             log.warn("runItem onRunComplete failed (id=%d): %s", itemId, (e as Error).message),
           );

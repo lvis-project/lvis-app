@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../../../i18n/runtime.js";
 import type { LvisApi } from "../types.js";
+import type { ProjectIdentity } from "../../../shared/project-identity.js";
 
 export interface NoteResult {
   title: string;
@@ -14,6 +15,15 @@ export interface SessionResult {
   title?: string;
   matchedMessage: string;
   timestamp: string;
+}
+
+function memoryProjectOptions(project: ProjectIdentity | undefined) {
+  if (!project?.projectRoot) return undefined;
+  return {
+    projectRoot: project.projectRoot,
+    projectName: project.projectName,
+    includeUnscoped: project.isDefault === true,
+  };
 }
 
 function stripTopHeading(content: string): string {
@@ -31,13 +41,38 @@ function memoryIndexResult(content: string | undefined, query = ""): NoteResult[
   }];
 }
 
+function memoryGetIndex(api: LvisApi, project: ProjectIdentity | undefined) {
+  const opts = memoryProjectOptions(project);
+  return opts ? api.memoryGetIndex(opts) : api.memoryGetIndex();
+}
+
+function memoryListEntries(api: LvisApi, project: ProjectIdentity | undefined) {
+  const opts = memoryProjectOptions(project);
+  return opts ? api.memoryListEntries(opts) : api.memoryListEntries();
+}
+
+function memoryListSessions(api: LvisApi, project: ProjectIdentity | undefined) {
+  const opts = memoryProjectOptions(project);
+  return opts ? api.memoryListSessions(opts) : api.memoryListSessions();
+}
+
+function memorySearchEntries(api: LvisApi, query: string, project: ProjectIdentity | undefined) {
+  const opts = memoryProjectOptions(project);
+  return opts ? api.memorySearchEntries(query, opts) : api.memorySearchEntries(query);
+}
+
+function memorySearchSessions(api: LvisApi, query: string, project: ProjectIdentity | undefined) {
+  const opts = memoryProjectOptions(project);
+  return opts ? api.memorySearchSessions(query, opts) : api.memorySearchSessions(query);
+}
+
 /**
  * Memory search hook.
  *
  * Debounces query (200 ms), fires IPC calls, guards post-unmount setState
  * with aliveRef pattern.
  */
-export function useMemorySearch(api: LvisApi) {
+export function useMemorySearch(api: LvisApi, project?: ProjectIdentity) {
   const [query, setQuery] = useState("");
   const [noteCatalog, setNoteCatalog] = useState<NoteResult[]>([]);
   const [sessionCatalog, setSessionCatalog] = useState<SessionResult[]>([]);
@@ -45,6 +80,7 @@ export function useMemorySearch(api: LvisApi) {
   const [sessionResults, setSessionResults] = useState<SessionResult[]>([]);
   const [loading, setLoading] = useState(false);
   const aliveRef = useRef(true);
+  const projectKey = `${project?.projectRoot ?? ""}\0${project?.projectName ?? ""}\0${project?.isDefault === true ? "default" : ""}`;
 
   useEffect(() => {
     aliveRef.current = true;
@@ -58,9 +94,9 @@ export function useMemorySearch(api: LvisApi) {
       setLoading(true);
       try {
         const [memoryIndex, notes, sessions] = await Promise.all([
-          api.memoryGetIndex(),
-          api.memoryListEntries(),
-          api.memoryListSessions(),
+          memoryGetIndex(api, project),
+          memoryListEntries(api, project),
+          memoryListSessions(api, project),
         ]);
         if (!aliveRef.current) return;
         const mappedNotes = (notes ?? []).map((note) => ({
@@ -84,7 +120,7 @@ export function useMemorySearch(api: LvisApi) {
         if (aliveRef.current) setLoading(false);
       }
     })();
-  }, [api]);
+  }, [api, project, projectKey]);
 
   useEffect(() => {
     if (query.trim() === "") {
@@ -98,9 +134,9 @@ export function useMemorySearch(api: LvisApi) {
       setLoading(true);
       try {
         const [memoryIndex, notes, sessions] = await Promise.all([
-          api.memoryGetIndex(),
-          api.memorySearchEntries(query),
-          api.memorySearchSessions(query),
+          memoryGetIndex(api, project),
+          memorySearchEntries(api, query, project),
+          memorySearchSessions(api, query, project),
         ]);
         if (!aliveRef.current) return;
         setNoteResults([
@@ -117,7 +153,7 @@ export function useMemorySearch(api: LvisApi) {
       }
     }, 200);
     return () => clearTimeout(timer);
-  }, [query, api, noteCatalog, sessionCatalog]);
+  }, [query, api, noteCatalog, sessionCatalog, project, projectKey]);
 
   const reset = useCallback(() => {
     setQuery("");

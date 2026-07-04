@@ -467,12 +467,17 @@ describe("agent_spawn tool", () => {
     const tool = createAgentSpawnTool({
       getRunner: () => ({
         spawn: async (input, callbacks) => {
-          callbacks?.onTurn?.({ turn: 1, text: "hello", toolCallCount: 0 });
+          callbacks?.onActivity?.({
+            entries: [{ kind: "assistant", text: "hello", streaming: false }],
+            toolCallCount: 0,
+          });
           return {
             summary: "done-text",
             toolCallCount: 0,
             turnCount: 1,
             childSessionId: "child-1",
+            entries: [{ kind: "assistant", text: "done-text", streaming: false }],
+            ok: true,
           };
         },
       }) as never,
@@ -488,9 +493,68 @@ describe("agent_spawn tool", () => {
     const parsed = JSON.parse(r.output);
     expect(parsed.summary).toBe("done-text");
     expect(parsed.toolCallCount).toBe(0);
+    // PR3: the child transcript is embedded in the tool result for persistence
+    // parity (derive-subagent-spawns reads `entries` on reload).
+    expect(Array.isArray(parsed.entries)).toBe(true);
+    expect(parsed.entries).toHaveLength(1);
+    expect(parsed.entries[0]).toEqual({ kind: "assistant", text: "done-text", streaming: false });
     const types = events.map((e) => e.type);
     expect(types).toContain("start");
+    // PR3: activity events carry the live ChatEntry[] snapshot.
+    expect(types).toContain("activity");
     expect(types).toContain("done");
+  });
+
+  it("embeds the child entries snapshot on the done event and activity events", async () => {
+    const spawnEvents: Array<{ type: string; entries?: unknown[] }> = [];
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        spawn: async (input, callbacks) => {
+          callbacks?.onActivity?.({
+            entries: [
+              {
+                kind: "tool_group",
+                groupId: "g",
+                groupIds: ["g"],
+                status: "done",
+                tools: [
+                  { toolUseId: "c1", name: "read_file", displayOrder: 0, status: "done", result: "x" },
+                ],
+              },
+            ],
+            toolCallCount: 1,
+          });
+          return {
+            summary: "final",
+            toolCallCount: 1,
+            turnCount: 1,
+            childSessionId: "child-1",
+            entries: [
+              {
+                kind: "tool_group",
+                groupId: "g",
+                groupIds: ["g"],
+                status: "done",
+                tools: [
+                  { toolUseId: "c1", name: "read_file", displayOrder: 0, status: "done", result: "x" },
+                ],
+              },
+              { kind: "assistant", text: "final", streaming: false },
+            ],
+            ok: true,
+          };
+        },
+      }) as never,
+      emit: (e) => {
+        spawnEvents.push({ type: e.type, entries: e.entries as unknown[] | undefined });
+      },
+    });
+    const r = await tool.execute({ title: "t", instructions: "do" }, ctx());
+    expect(r.isError).toBe(false);
+    const activity = spawnEvents.find((e) => e.type === "activity");
+    expect(activity?.entries).toHaveLength(1);
+    const done = spawnEvents.find((e) => e.type === "done");
+    expect(done?.entries).toHaveLength(2);
   });
 
   it("loads agent profile instructions and default tools when agentName is provided", async () => {
@@ -515,6 +579,8 @@ describe("agent_spawn tool", () => {
               toolCallCount: 0,
               turnCount: 1,
               childSessionId: "child-1",
+              entries: [],
+              ok: true,
             };
           },
         }) as never,

@@ -3,9 +3,11 @@
  * (turn-cap enforcement, sourceTools allowlist, recursive spawn refusal):
  *
  *   1. C3(a) maxRounds bound — the runner must stop emitting LLM rounds
- *      once `maxTurns` is reached, even if the fake provider would happily
- *      keep streaming. The new `maxRounds` plumb-through in queryLoop is
- *      the loop-boundary defense for this.
+ *      once the host-assigned `maxRounds` budget is reached, even if the fake
+ *      provider would happily keep streaming. The `maxRounds` plumb-through in
+ *      queryLoop is the loop-boundary defense for this. When the budget is hit
+ *      with work still pending, the runner marks the result `incomplete` and
+ *      forwards stopReason "round-cap" (cut-off resume signal).
  *
  *   2. sourceTools allowlist — a sub-agent that requests a tool not in
  *      `sourceTools` must receive a "tool not found" result. Validates
@@ -15,8 +17,14 @@
  *      must receive the "cannot be invoked from a sub-agent" error,
  *      regardless of whether the registry strip succeeded.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ConversationLoop } from "../conversation-loop.js";
+import { MemoryManager } from "../../memory/memory-manager.js";
+import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { KeywordEngine } from "../../core/keyword-engine.js";
@@ -55,6 +63,25 @@ class ScriptedProvider implements LLMProvider {
   }
 }
 
+/**
+ * Minimal fake for the ISOLATED subagent MemoryManager (`~/.lvis/subagent/`).
+ * SubAgentRunner now composes the child loop with this store instead of the
+ * parent's main-chat MemoryManager, so every construction must supply it.
+ * A no-op saveSession is enough for the behavioral suites here; the
+ * persistence-routing suite below uses a REAL MemoryManager on a temp home.
+ */
+function fakeSubAgentMemoryManager() {
+  return {
+    saveSession: () => Promise.resolve(),
+    // PR-B: spawn() persists resume metadata via saveSessionMetadata into the
+    // isolated subagent store — the behavioral suites use a no-op here (the
+    // round-trip is pinned by the PR-B suite against a REAL MemoryManager).
+    saveSessionMetadata: () => Promise.resolve(),
+    listSessions: () => [],
+    load: () => undefined,
+  } as unknown as ConstructorParameters<typeof SubAgentRunner>[0]["subAgentMemoryManager"];
+}
+
 function buildLoopDeps(toolRegistry: ToolRegistry) {
   const keywordEngine = new KeywordEngine();
   const routeEngine = new RouteEngine({ toolRegistry });
@@ -82,7 +109,7 @@ function buildLoopDeps(toolRegistry: ToolRegistry) {
 // ─── 1) maxRounds bound ───────────────────────────────
 
 describe("SubAgentRunner — maxRounds bound", () => {
-  it("terminates after `maxTurns` assistant rounds even if provider keeps emitting tool calls", async () => {
+  it("terminates after the host-assigned `maxRounds` budget even if provider keeps emitting tool calls, and flags the cut-off run incomplete", async () => {
     const toolRegistry = new ToolRegistry();
     const execSpy = vi.fn(async () => ({ output: "ok", isError: false }));
     toolRegistry.register(
@@ -112,6 +139,7 @@ describe("SubAgentRunner — maxRounds bound", () => {
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
       toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
     });
     // Inject the fake provider into the child loop too — runner constructs
     // a fresh ConversationLoop per spawn, so we patch the prototype.
@@ -132,7 +160,7 @@ describe("SubAgentRunner — maxRounds bound", () => {
         title: "test",
         instructions: "do",
         sourceTools: ["noop"],
-        maxTurns: 2,
+        maxRounds: 2,
       });
       // R2-CR-2: tighten — `<=2` would also pass on a regression that bails
       // out at 0 or 1 rounds. The provider script emits 5 valid tool_use
@@ -145,6 +173,59 @@ describe("SubAgentRunner — maxRounds bound", () => {
       // since the provider emits a single tool_call per round). A regression
       // that early-terminates would invoke the executor 0 or 1 times only.
       expect(execSpy).toHaveBeenCalledTimes(2);
+      // Cut-off resume signal: the provider still wanted to keep calling tools
+      // when the budget was hit, so this run stopped on its round budget with
+      // work pending. The runner must surface that as a SUCCESSFUL-but-
+      // incomplete result (ok=true, incomplete=true) forwarding stopReason
+      // "round-cap" — NOT a failed spawn — so the parent can decide to continue.
+      expect(result.ok).toBe(true);
+      expect(result.incomplete).toBe(true);
+      expect(result.stopReason).toBe("round-cap");
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+    }
+  });
+
+  it("does NOT flag a clean end_turn completion as incomplete", async () => {
+    const toolRegistry = new ToolRegistry();
+    // Provider ends naturally on round 1, well within the budget.
+    const provider = new ScriptedProvider([
+      [
+        { type: "text_delta", text: "final answer" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { refreshProvider: () => void },
+        "refreshProvider",
+      )
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+    try {
+      const result = await runner.spawn({
+        title: "clean",
+        instructions: "do",
+        maxRounds: 5,
+      });
+      expect(result.ok).toBe(true);
+      expect(result.stopReason).toBe("end_turn");
+      // Cut-off resume signal must be OFF: a finished turn is not incomplete.
+      expect(result.incomplete).toBeFalsy();
+      expect(result.summary).toContain("final answer");
     } finally {
       hasProviderSpy.mockRestore();
       refreshProviderSpy.mockRestore();
@@ -182,6 +263,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
       toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
     });
 
     // Build the scoped view via the runner's registry filter and assert it
@@ -233,7 +315,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       ],
     ]);
     const parentDeps = buildLoopDeps(toolRegistry);
-    const runner = new SubAgentRunner({ parentDeps, toolRegistry });
+    const runner = new SubAgentRunner({ parentDeps, toolRegistry, subAgentMemoryManager: fakeSubAgentMemoryManager() });
     const hasProviderSpy = vi
       .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
       .mockReturnValue(true);
@@ -248,7 +330,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
         title: "team schedule",
         instructions: "오늘 팀 스케줄 조회",
         sourceTools: [scheduleToolName],
-        maxTurns: 2,
+        maxRounds: 2,
       });
 
       expect(provider.observedToolNames[0]).toEqual([scheduleToolName]);
@@ -300,7 +382,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
-    const runner = new SubAgentRunner({ parentDeps: buildLoopDeps(toolRegistry), toolRegistry });
+    const runner = new SubAgentRunner({ parentDeps: buildLoopDeps(toolRegistry), toolRegistry, subAgentMemoryManager: fakeSubAgentMemoryManager() });
     const hasProviderSpy = vi
       .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
       .mockReturnValue(true);
@@ -315,7 +397,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
         title: "indexer",
         instructions: "scan",
         sourceTools: [toolName],
-        maxTurns: 2,
+        maxRounds: 2,
       });
 
       // Exposed to the child (sourceTools is not isPluginEnabled-filtered)…
@@ -360,6 +442,8 @@ describe("agent_spawn — recursive call refusal", () => {
           toolCallCount: 0,
           turnCount: 1,
           childSessionId: "c",
+          entries: [],
+          ok: true,
         }),
       }) as never,
       emit: () => undefined,
@@ -508,6 +592,7 @@ describe("SubAgentRunner — unknown mode audit warn", () => {
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
       toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
     });
     const hasProviderSpy = vi
       .spyOn(
@@ -531,7 +616,7 @@ describe("SubAgentRunner — unknown mode audit warn", () => {
         title: "t",
         instructions: "do",
         profileMode: "supervise", // not a member of AGENT_MODES
-        maxTurns: 1,
+        maxRounds: 1,
       });
       const logged = warnSpy.mock.calls.map((c) => c.join(" ")).join("\n");
       expect(logged).toMatch(/unknown mode/i);
@@ -539,6 +624,365 @@ describe("SubAgentRunner — unknown mode audit warn", () => {
       hasProviderSpy.mockRestore();
       refreshProviderSpy.mockRestore();
       warnSpy.mockRestore();
+    }
+  });
+});
+
+// ─── PR-A: session namespace isolation + regex-valid id ───────────────
+//
+// The orphan/pollution bug: the child loop used to persist under its bare
+// constructor UUID into the parent's main-chat MemoryManager, so sub-agent
+// JSONL landed in `~/.lvis/sessions/` and leaked into the main session list;
+// the returned childSessionId (`origin::uuid`) failed SESSION_ID_REGEX and was
+// addressable by nobody. This suite pins the fix end-to-end against REAL
+// MemoryManagers on a temp LVIS_HOME.
+
+// Mirror MemoryManager's SESSION_ID_REGEX exactly (not exported).
+const SESSION_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
+
+describe("SubAgentRunner — subagent session namespace isolation (PR-A)", () => {
+  let tmpHome: string;
+  let prevLvisHome: string | undefined;
+
+  beforeEach(() => {
+    prevLvisHome = process.env.LVIS_HOME;
+    tmpHome = mkdtempSync(join(tmpdir(), "lvis-subagent-test-"));
+    process.env.LVIS_HOME = tmpHome;
+  });
+
+  afterEach(() => {
+    if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
+    else process.env.LVIS_HOME = prevLvisHome;
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("persists the child JSONL under ~/.lvis/subagent/, keeps it out of the main session list, and returns a regex-valid childSessionId", async () => {
+    const toolRegistry = new ToolRegistry();
+    // Provider ends cleanly on round 1 so the child's fallback persistence path
+    // (postTurnHookChain undefined) writes exactly one session JSONL.
+    const provider = new ScriptedProvider([
+      [
+        { type: "text_delta", text: "child answer" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    // REAL stores rooted at the temp home. Main = ~/.lvis/sessions/;
+    // subagent = ~/.lvis/subagent/sessions/ (via openFeatureNamespace).
+    const mainMemoryManager = new MemoryManager({ lvisDir: tmpHome });
+    mainMemoryManager.load();
+    const subAgentMemoryManager = new MemoryManager({
+      lvisDir: openFeatureNamespace("subagent").dir,
+    });
+    subAgentMemoryManager.load();
+
+    const parentDeps = buildLoopDeps(toolRegistry);
+    // Point the PARENT deps at the real main store so a regression that reused
+    // the parent MemoryManager would visibly pollute the main session list.
+    (parentDeps as { memoryManager: unknown }).memoryManager = mainMemoryManager;
+
+    const runner = new SubAgentRunner({
+      parentDeps,
+      toolRegistry,
+      subAgentMemoryManager,
+    });
+
+    const hasProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { refreshProvider: () => void }, "refreshProvider")
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+
+    try {
+      const result = await runner.spawn({
+        title: "isolated",
+        instructions: "do",
+        originSessionId: "abc123-DEF-should:be::sanitized",
+        maxRounds: 3,
+      });
+
+      // 1) The returned childSessionId is regex-valid (loadSession/saveSession
+      //    both reject anything else). The old `::` form failed this.
+      expect(result.childSessionId).toMatch(SESSION_ID_REGEX);
+      // It also carries the sanitized-origin + sub- prefix shape.
+      expect(result.childSessionId.startsWith("sub-")).toBe(true);
+
+      // 2) The child JSONL lives in the SUBAGENT namespace…
+      const subSessionsDir = join(tmpHome, "subagent", "sessions");
+      expect(existsSync(join(subSessionsDir, `${result.childSessionId}.jsonl`))).toBe(true);
+
+      // 3) …and NOT in the main sessions dir.
+      const mainSessionsDir = join(tmpHome, "sessions");
+      const mainFiles = existsSync(mainSessionsDir)
+        ? readdirSync(mainSessionsDir).filter((f) => f.endsWith(".jsonl"))
+        : [];
+      expect(mainFiles).toEqual([]);
+
+      // 4) The main listSessions no longer surfaces the sub-agent session.
+      expect(mainMemoryManager.listSessions()).toEqual([]);
+      // The isolated store DOES see it (addressable for future resume). PR-B
+      // tags it `sessionKind: "subagent"`, so it is scoped out of the default
+      // "main" listing and surfaces under the "subagent" (or "all") kind.
+      const subIds = subAgentMemoryManager
+        .listSessions({ kind: "subagent" })
+        .map((s) => s.id);
+      expect(subIds).toContain(result.childSessionId);
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+    }
+  });
+
+  it("sanitizes an origin session id to the id charset (no `::`, no leaked separators)", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new ScriptedProvider([
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const subAgentMemoryManager = new MemoryManager({
+      lvisDir: openFeatureNamespace("subagent").dir,
+    });
+    subAgentMemoryManager.load();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager,
+    });
+    const hasProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { refreshProvider: () => void }, "refreshProvider")
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+    try {
+      const result = await runner.spawn({
+        title: "sanitize",
+        instructions: "do",
+        originSessionId: "a::b//c..d",
+        maxRounds: 1,
+      });
+      expect(result.childSessionId).toMatch(SESSION_ID_REGEX);
+      expect(result.childSessionId).not.toContain("::");
+      expect(result.childSessionId).not.toContain("/");
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+    }
+  });
+});
+
+// ─── PR-B: resume metadata + "subagent" SessionKind + review-nit fold ─────────
+//
+// Metadata-only foundation for same-instance resume (PR-C). Pins that a spawn:
+//   1. tags its persisted session `sessionKind: "subagent"`,
+//   2. round-trips the resume fields (sourceTools/profileModel/profileMode/
+//      resumeCount/cumulativeRounds) through saveSessionMetadata,
+//   3. builds a child id whose origin tag is a HASH of the origin id (info-leak
+//      NIT fold) — not a raw slice — while staying regex-valid,
+//   4. re-inits the tracer on the rebound childSessionId (dev-trace NIT fold).
+
+describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () => {
+  let tmpHome: string;
+  let prevLvisHome: string | undefined;
+
+  beforeEach(() => {
+    prevLvisHome = process.env.LVIS_HOME;
+    tmpHome = mkdtempSync(join(tmpdir(), "lvis-subagent-prb-"));
+    process.env.LVIS_HOME = tmpHome;
+  });
+
+  afterEach(() => {
+    if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
+    else process.env.LVIS_HOME = prevLvisHome;
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  function makeCleanProvider(): ScriptedProvider {
+    return new ScriptedProvider([
+      [
+        { type: "text_delta", text: "child answer" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+  }
+
+  function spawnWith(
+    provider: ScriptedProvider,
+    subAgentMemoryManager: MemoryManager,
+    input: Parameters<SubAgentRunner["spawn"]>[0],
+  ) {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(
+      createDynamicTool({
+        name: "noop",
+        description: "no-op tool",
+        source: "builtin",
+        category: "read",
+        isReadOnly: () => true,
+        jsonSchema: { type: "object", properties: {} },
+        execute: async () => ({ output: "ok", isError: false }),
+      }),
+    );
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager,
+    });
+    const hasProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { refreshProvider: () => void }, "refreshProvider")
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+    return {
+      run: () => runner.spawn(input),
+      restore: () => {
+        hasProviderSpy.mockRestore();
+        refreshProviderSpy.mockRestore();
+      },
+    };
+  }
+
+  it("tags the persisted sub-agent session `sessionKind: \"subagent\"` and round-trips the resume metadata fields", async () => {
+    const subAgentMemoryManager = new MemoryManager({
+      lvisDir: openFeatureNamespace("subagent").dir,
+    });
+    subAgentMemoryManager.load();
+    const { run, restore } = spawnWith(makeCleanProvider(), subAgentMemoryManager, {
+      title: "meta",
+      instructions: "do",
+      originSessionId: "origin-XYZ",
+      sourceTools: ["noop"],
+      profileModel: "high",
+      profileMode: "execute",
+      maxRounds: 3,
+    });
+    try {
+      const result = await run();
+      // Re-read the persisted metadata from the SAME isolated store — this is
+      // the exact round-trip PR-C's resume relies on.
+      const meta = subAgentMemoryManager.loadSessionMetadata(result.childSessionId);
+      expect(meta).not.toBeNull();
+      expect(meta?.sessionKind).toBe("subagent");
+      // The frozen scoped tool surface. `sourceTools: ["noop"]` resolves to a
+      // one-tool registry, so the persisted allowlist is exactly ["noop"].
+      expect(meta?.sourceTools).toEqual(["noop"]);
+      expect(meta?.profileModel).toBe("high");
+      expect(meta?.profileMode).toBe("execute");
+      // resumeCount inits to 0 (no resume yet). cumulativeRounds now records the
+      // spawn's OWN round count (PR-C Commit 2 fix: previously left at 0, which
+      // made the resume-chain ceiling inaccurate). A clean 1-round spawn → 1.
+      expect(meta?.resumeCount).toBe(0);
+      expect(meta?.cumulativeRounds).toBe(result.turnCount);
+      // The session surfaces in the isolated store's listing as a subagent.
+      const listed = subAgentMemoryManager
+        .listSessions({ kind: "subagent" })
+        .find((s) => s.id === result.childSessionId);
+      expect(listed?.sessionKind).toBe("subagent");
+    } finally {
+      restore();
+    }
+  });
+
+  it("omits profileModel/profileMode from metadata when the spawn did not supply them", async () => {
+    const subAgentMemoryManager = new MemoryManager({
+      lvisDir: openFeatureNamespace("subagent").dir,
+    });
+    subAgentMemoryManager.load();
+    const { run, restore } = spawnWith(makeCleanProvider(), subAgentMemoryManager, {
+      title: "meta-min",
+      instructions: "do",
+      originSessionId: "origin-min",
+      maxRounds: 1,
+    });
+    try {
+      const result = await run();
+      const meta = subAgentMemoryManager.loadSessionMetadata(result.childSessionId);
+      expect(meta?.sessionKind).toBe("subagent");
+      expect(meta?.profileModel).toBeUndefined();
+      expect(meta?.profileMode).toBeUndefined();
+      expect(meta?.resumeCount).toBe(0);
+      // cumulativeRounds records the spawn's own round count (PR-C Commit 2 fix).
+      expect(meta?.cumulativeRounds).toBe(result.turnCount);
+      // sourceTools falls back to the full (blocklist-stripped) parent surface,
+      // which for this registry is the single "noop" tool.
+      expect(meta?.sourceTools).toEqual(["noop"]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("derives the origin tag from a HASH of the origin id (not a raw slice) and keeps the id regex-valid", async () => {
+    const subAgentMemoryManager = new MemoryManager({
+      lvisDir: openFeatureNamespace("subagent").dir,
+    });
+    subAgentMemoryManager.load();
+    // A raw-slice implementation would embed the first 8 alphanumerics of the
+    // origin ("abcdefgh") verbatim in the child id. The hash fold must NOT.
+    const origin = "abcdefgh-IJKL-should-not-appear-verbatim";
+    const { run, restore } = spawnWith(makeCleanProvider(), subAgentMemoryManager, {
+      title: "hash",
+      instructions: "do",
+      originSessionId: origin,
+      maxRounds: 1,
+    });
+    try {
+      const result = await run();
+      expect(result.childSessionId).toMatch(SESSION_ID_REGEX);
+      expect(result.childSessionId.startsWith("sub-")).toBe(true);
+      // The raw-slice fossil ("abcdefgh") must not correlate the child filename
+      // to the parent session id.
+      expect(result.childSessionId).not.toContain("abcdefgh");
+      // The tag is the deterministic short sha256 of the origin id.
+      const expectedTag = createHash("sha256").update(origin).digest("hex").slice(0, 8);
+      expect(result.childSessionId.startsWith(`sub-${expectedTag}-`)).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it("re-inits the tracer on the rebound childSessionId so dev traces key on the addressable id (not the stale constructor UUID)", async () => {
+    const prevTrace = process.env.LVIS_TRACE;
+    process.env.LVIS_TRACE = "1"; // force-enable FileTracer regardless of NODE_ENV
+    const subAgentMemoryManager = new MemoryManager({
+      lvisDir: openFeatureNamespace("subagent").dir,
+    });
+    subAgentMemoryManager.load();
+    const { run, restore } = spawnWith(makeCleanProvider(), subAgentMemoryManager, {
+      title: "trace",
+      instructions: "do",
+      originSessionId: "origin-trace",
+      maxRounds: 1,
+    });
+    try {
+      const result = await run();
+      // The tracer writes ~/.lvis/traces/<sessionId>.jsonl on the first turn
+      // step (TURN_ORCHESTRATE). With the tracer rebound, the file is named
+      // after the childSessionId; a stale-UUID tracer would produce a
+      // UUID-named file and no <childSessionId>.jsonl.
+      const tracesDir = join(tmpHome, "traces");
+      const traceFiles = existsSync(tracesDir)
+        ? readdirSync(tracesDir).filter((f) => f.endsWith(".jsonl"))
+        : [];
+      expect(traceFiles).toContain(`${result.childSessionId}.jsonl`);
+      // No trace file may be keyed on a bare constructor UUID (the stale-id bug).
+      const uuidNamed = traceFiles.filter((f) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/.test(f),
+      );
+      expect(uuidNamed).toEqual([]);
+    } finally {
+      restore();
+      if (prevTrace === undefined) delete process.env.LVIS_TRACE;
+      else process.env.LVIS_TRACE = prevTrace;
     }
   });
 });

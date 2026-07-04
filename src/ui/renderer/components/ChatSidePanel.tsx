@@ -1,13 +1,16 @@
-import { createElement, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { createElement, memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
+import { cn } from "../../../lib/utils.js";
 import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
 import {
   WORKSPACE_TAB_LAUNCHER,
   matchesLauncherShortcut,
 } from "./command-actions.js";
 import {
+  Bot,
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
   Code2,
   Copy,
   ExternalLink,
@@ -19,6 +22,8 @@ import {
   Globe,
   Image,
   LayoutGrid,
+  Loader2,
+  MessageSquare,
   PanelRightClose,
   Pin,
   Plug,
@@ -26,6 +31,7 @@ import {
   Search,
   Table,
   Terminal,
+  Trash2,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -39,6 +45,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../../components/ui/dropdown-menu.js";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "../../../components/ui/context-menu.js";
+import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { wrapRenderHtmlInlineFrameDocument } from "../../../shared/render-html-preview.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../shared/side-browser.js";
@@ -46,11 +60,17 @@ import { SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
 import { normalizeBrowserNavigationUrl } from "../preview/url-safety.js";
+import { formatIpcError } from "../format-ipc-error.js";
 import { PreviewContent } from "../preview/preview-renderers.js";
 import { FileEditDiff } from "./FileEditDiff.js";
 import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
 import { McpAppView } from "./McpAppView.js";
 import { PtyTerminalView } from "./PtyTerminalView.js";
+import { SideChatView } from "./SideChatView.js";
+import { VerticalSplitLayout } from "./VerticalSplitLayout.js";
+import { useVerticalSplit } from "../hooks/use-vertical-split.js";
+import { SubAgentCard, type SubAgentSpawn } from "./SubAgentCard.js";
+import { groupSubAgentSessions } from "../subagents/group-subagent-sessions.js";
 
 interface FileTreeNode {
   id: string;
@@ -62,8 +82,6 @@ interface FileTreeNode {
 
 const FILE_TARGET_KINDS = new Set<ChatPreviewTarget["kind"]>(["file", "diff", "image"]);
 const BROWSER_TARGET_KINDS = new Set<ChatPreviewTarget["kind"]>(["html", "url"]);
-const FILE_TREE_MIN_PERCENT = 22;
-const FILE_TREE_MAX_PERCENT = 72;
 /** Pointer travel (px) that promotes a tab press into a horizontal pan. */
 const TAB_DRAG_THRESHOLD_PX = 6;
 
@@ -102,6 +120,10 @@ function tabIcon(kind: WorkspaceTabKind): LucideIcon {
       return Terminal;
     case "preview":
       return Table;
+    case "subagent":
+      return Bot;
+    case "side-chat":
+      return MessageSquare;
   }
 }
 
@@ -496,7 +518,23 @@ function BrowserDocumentViewer({ target }: { target: Extract<ChatPreviewTarget, 
   );
 }
 
-function UrlDocumentViewer({ api, target }: { api: LvisApi; target: Extract<ChatPreviewTarget, { kind: "url" }> }) {
+function UrlDocumentViewer({
+  api,
+  target,
+  showHeader = true,
+}: {
+  api: LvisApi;
+  target: Extract<ChatPreviewTarget, { kind: "url" }>;
+  /**
+   * Render the viewer's own URL/open-external header band. Default true. The
+   * BrowserWorkspace tab passes false because the tab already owns a single
+   * address bar above the webview — rendering the header here too produced the
+   * duplicate-address-bar nesting (#11). This toggles ONLY the header <div>; the
+   * webview node's key/position is invariant so the Electron guest is never
+   * remounted when the flag changes.
+   */
+  showHeader?: boolean;
+}) {
   const { t } = useTranslation();
   // Single URL-safety SOT (rejects non-http(s) + credential-laden urls). This is
   // the viewer boundary the url-safety header documents — it must not diverge
@@ -518,25 +556,27 @@ function UrlDocumentViewer({ api, target }: { api: LvisApi; target: Extract<Chat
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background" data-testid="chat-side-panel-url-viewer">
-      <div className="flex min-h-9 shrink-0 items-center gap-2 border-b bg-muted/(--opacity-muted) px-2 text-[11px] text-muted-foreground">
-        <Globe className="h-3.5 w-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{url}</span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7 shrink-0"
-              onClick={() => void api.openExternalUrl(url)}
-              aria-label={t("chatPreviewRail.openUrl")}
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("chatPreviewRail.openUrl")}</TooltipContent>
-        </Tooltip>
-      </div>
+      {showHeader ? (
+        <div className="flex min-h-9 shrink-0 items-center gap-2 border-b bg-muted/(--opacity-muted) px-2 text-[11px] text-muted-foreground">
+          <Globe className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{url}</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7 shrink-0"
+                onClick={() => void api.openExternalUrl(url)}
+                aria-label={t("chatPreviewRail.openUrl")}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("chatPreviewRail.openUrl")}</TooltipContent>
+          </Tooltip>
+        </div>
+      ) : null}
       {createElement("webview", {
         "data-testid": "chat-side-panel-browser-webview",
         src: url,
@@ -606,6 +646,82 @@ function fileBasename(path: string): string {
   return segments[segments.length - 1] ?? path;
 }
 
+/**
+ * Is `candidate` `root` itself or a descendant of it? Boundary-safe and
+ * platform-agnostic: a bare `startsWith(root)` would let `/foo` falsely match
+ * `/foobar`, so the character right after the prefix MUST be a path separator
+ * (`/` or `\` — the renderer receives platform-native paths from main).
+ */
+function isPathWithinRoot(root: string, candidate: string): boolean {
+  if (candidate === root) return true;
+  return candidate.startsWith(root) && /[/\\]/.test(candidate.charAt(root.length));
+}
+
+/**
+ * Relative path of `full` under `root` (renderer-side string math — no node:path
+ * in the renderer). Falls back to the basename for the root itself and to the
+ * absolute path when `full` is not a descendant of `root` (boundary-checked, so
+ * `/foobar` is NOT treated as being under `/foo`).
+ */
+function toRelativePath(root: string | null, full: string): string {
+  if (!root) return full;
+  if (full === root) return fileBasename(full);
+  if (!isPathWithinRoot(root, full)) return full;
+  return full.slice(root.length).replace(/^[/\\]+/, "") || full;
+}
+
+/** Platform hint for the reveal label (Finder on macOS, Explorer elsewhere). */
+const IS_MAC_LIKE =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+
+/**
+ * Extension → row icon. `File` is the legitimate domain default for an unknown
+ * extension (not a papering-over fallback).
+ */
+function fileIcon(name: string): LucideIcon {
+  const dot = name.lastIndexOf(".");
+  const ext = dot >= 0 ? name.slice(dot).toLowerCase() : "";
+  switch (ext) {
+    case ".md":
+    case ".txt":
+    case ".rst":
+      return FileText;
+    case ".ts":
+    case ".tsx":
+    case ".js":
+    case ".jsx":
+    case ".py":
+    case ".go":
+    case ".rs":
+      return FileCode;
+    case ".json":
+    case ".yaml":
+    case ".yml":
+    case ".toml":
+      return Code2;
+    case ".png":
+    case ".jpg":
+    case ".jpeg":
+    case ".gif":
+    case ".svg":
+    case ".webp":
+      return Image;
+    case ".csv":
+    case ".tsv":
+    case ".xlsx":
+      return Table;
+    case ".html":
+    case ".htm":
+      return Globe;
+    case ".sh":
+    case ".zsh":
+    case ".bash":
+      return Terminal;
+    default:
+      return File;
+  }
+}
+
 type WorkspaceDirEntry = { name: string; path: string; type: "file" | "directory" };
 
 /**
@@ -635,6 +751,9 @@ function ProjectRootsBrowser({
   // effect would refire every render → an infinite render→IPC loop.
   const [attemptedPaths, setAttemptedPaths] = useState<Set<string>>(new Set());
   const [errorByPath, setErrorByPath] = useState<Record<string, string>>({});
+  // Directories whose listing hit MAX_DIR_ENTRIES (main returns `truncated`), so
+  // the browser can flag that only a prefix of the folder is shown.
+  const [truncatedPaths, setTruncatedPaths] = useState<Set<string>>(new Set());
   // A picked folder whose adjacency warnings must be acknowledged before the
   // main process (workspace.pickRoot gate) will persist it into the read scope.
   // `ackToken` binds the confirmation to the exact dialog-picked path the main
@@ -643,6 +762,28 @@ function ProjectRootsBrowser({
   const [pendingWarning, setPendingWarning] = useState<
     { path: string; warnings: string[]; ackToken: string } | null
   >(null);
+  // True while a folder drag hovers the roots panel — drives the drop-zone ring.
+  const [dragOver, setDragOver] = useState(false);
+
+  // Roving-tabindex active row (the single treeitem with tabIndex=0). Distinct
+  // from `selectedPath` (the OPENED file, drives bg-accent) — this is keyboard
+  // focus, not the opened file.
+  const [activeItemPath, setActiveItemPath] = useState<string | null>(null);
+  // path -> row element, for imperative focus moves (roving tabindex).
+  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  // Set true just before a keyboard-driven setActiveItemPath so the post-render
+  // effect calls .focus(); prevents stealing focus on mount / mouse clicks.
+  const pendingFocusRef = useRef(false);
+  // Type-ahead buffer with a 500ms reset window.
+  const typeaheadRef = useRef<{ buffer: string; timer: ReturnType<typeof setTimeout> | null }>({
+    buffer: "",
+    timer: null,
+  });
+  // Inline failure surface for the mutating ops (removeRoot / reveal). Cleared
+  // when a new op starts or the user dismisses it — a failed op no longer
+  // swallows its error result silently.
+  const [opError, setOpError] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   const loadDir = useCallback(async (path: string) => {
     setLoadingPaths((prev) => new Set(prev).add(path));
@@ -650,6 +791,16 @@ function ProjectRootsBrowser({
       const res = await window.lvis.workspace.listDir(path);
       if (res.ok && res.entries) {
         setChildrenByPath((prev) => ({ ...prev, [path]: res.entries ?? [] }));
+        setTruncatedPaths((prev) => {
+          const has = prev.has(path);
+          if (res.truncated && !has) return new Set(prev).add(path);
+          if (!res.truncated && has) {
+            const next = new Set(prev);
+            next.delete(path);
+            return next;
+          }
+          return prev;
+        });
         setErrorByPath((prev) => {
           if (!(path in prev)) return prev;
           const next = { ...prev };
@@ -729,7 +880,134 @@ function ProjectRootsBrowser({
     });
   };
 
-  const addFolder = async () => {
+  // Flattened pre-order list of the CURRENTLY VISIBLE nodes (expanded subtrees
+  // only). Rendering stays recursive; this memo backs keyboard navigation only.
+  const flatNodes = useMemo<
+    Array<{ path: string; name: string; isDir: boolean; depth: number; parentPath: string }>
+  >(() => {
+    if (!activeRoot) return [];
+    const out: Array<{ path: string; name: string; isDir: boolean; depth: number; parentPath: string }> = [];
+    const walk = (parentPath: string, depth: number) => {
+      const siblings = childrenByPath[parentPath] ?? [];
+      for (const entry of siblings) {
+        const isDir = entry.type === "directory";
+        out.push({ path: entry.path, name: entry.name, isDir, depth, parentPath });
+        if (isDir && expanded.has(entry.path)) walk(entry.path, depth + 1);
+      }
+    };
+    walk(activeRoot, 0);
+    return out;
+  }, [activeRoot, childrenByPath, expanded]);
+
+  // Clamp the roving pointer when the tree changes (collapse / reload / switch).
+  useEffect(() => {
+    if (flatNodes.length === 0) {
+      if (activeItemPath !== null) setActiveItemPath(null);
+      return;
+    }
+    if (!activeItemPath || !flatNodes.some((n) => n.path === activeItemPath)) {
+      setActiveItemPath(flatNodes[0].path);
+    }
+  }, [flatNodes, activeItemPath]);
+
+  // Move DOM focus only for keyboard-driven changes (roving tabindex).
+  useEffect(() => {
+    if (!pendingFocusRef.current) return;
+    pendingFocusRef.current = false;
+    if (activeItemPath) itemRefs.current.get(activeItemPath)?.focus();
+  }, [activeItemPath]);
+
+  // Clear the type-ahead timer on unmount.
+  useEffect(
+    () => () => {
+      if (typeaheadRef.current.timer) clearTimeout(typeaheadRef.current.timer);
+    },
+    [],
+  );
+
+  const focusPath = useCallback((path: string | null) => {
+    if (!path) return;
+    pendingFocusRef.current = true;
+    setActiveItemPath(path);
+  }, []);
+
+  const runTypeahead = (char: string, curIdx: number) => {
+    const ta = typeaheadRef.current;
+    if (ta.timer) clearTimeout(ta.timer);
+    ta.buffer += char.toLowerCase();
+    ta.timer = setTimeout(() => {
+      ta.buffer = "";
+      ta.timer = null;
+    }, 500);
+    const n = flatNodes.length;
+    // Single-char buffer starts the search at the NEXT node (cycles repeats);
+    // multi-char refines from the current node.
+    const startOffset = ta.buffer.length === 1 ? 1 : 0;
+    for (let i = 0; i < n; i++) {
+      const cand = flatNodes[(curIdx + startOffset + i) % n];
+      if (cand.name.toLowerCase().startsWith(ta.buffer)) {
+        focusPath(cand.path);
+        return;
+      }
+    }
+  };
+
+  const onTreeKeyDown = (e: ReactKeyboardEvent) => {
+    if (flatNodes.length === 0) return;
+    const idx = flatNodes.findIndex((n) => n.path === activeItemPath);
+    const i = idx >= 0 ? idx : 0;
+    const cur = flatNodes[i];
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        focusPath(flatNodes[Math.min(i + 1, flatNodes.length - 1)].path);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        focusPath(flatNodes[Math.max(i - 1, 0)].path);
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        if (cur.isDir) {
+          if (!expanded.has(cur.path)) {
+            toggleFolder(cur.path); // collapsed -> expand (also lazy-loads)
+          } else {
+            const child = flatNodes[i + 1]; // expanded -> first child (if loaded)
+            if (child && child.parentPath === cur.path) focusPath(child.path);
+          }
+        }
+        break;
+      case "ArrowLeft":
+        e.preventDefault();
+        if (cur.isDir && expanded.has(cur.path)) {
+          toggleFolder(cur.path); // expanded -> collapse
+        } else if (cur.parentPath !== activeRoot) {
+          focusPath(cur.parentPath); // else -> parent (activeRoot isn't a treeitem)
+        }
+        break;
+      case "Enter":
+      case " ":
+        e.preventDefault();
+        if (cur.isDir) toggleFolder(cur.path);
+        else onOpenFile(cur.path);
+        break;
+      case "Home":
+        e.preventDefault();
+        focusPath(flatNodes[0].path);
+        break;
+      case "End":
+        e.preventDefault();
+        focusPath(flatNodes[flatNodes.length - 1].path);
+        break;
+      default:
+        if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          runTypeahead(e.key, i);
+        }
+    }
+  };
+
+  const addFolder = useCallback(async () => {
     const res = await window.lvis.workspace.pickRoot();
     if (!res.ok) return;
     if (res.requiresAcknowledgement && res.pendingPath && res.ackToken) {
@@ -737,6 +1015,74 @@ function ProjectRootsBrowser({
       return;
     }
     if (res.roots) applyRoots(res.roots, res.added ?? null);
+  }, [applyRoots]);
+
+  // ⌘O / Ctrl+O opens the folder picker when focus is within the panel (scoped —
+  // no global shortcut pollution).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "o" || e.key === "O")) {
+        const root = rootRef.current;
+        if (root && root.contains(document.activeElement)) {
+          e.preventDefault();
+          void addFolder();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [addFolder]);
+
+  // Surface a mutating-op IPC failure inline. `path-not-allowed` / `sensitive-path`
+  // are the workspace-specific reveal codes absent from the shared IPC map, so
+  // map them to the same "outside allowed folders" copy the file preview uses.
+  const formatOpError = useCallback(
+    (error: string | undefined, message: string | undefined) =>
+      formatIpcError(error, message, {
+        codeMap: {
+          "path-not-allowed": t("chatPreviewRail.fileErrorNotAllowed"),
+          "sensitive-path": t("chatPreviewRail.fileErrorNotAllowed"),
+        },
+      }),
+    [t],
+  );
+
+  // Drag-drop add-root (#1458). A dropped folder path is renderer-NAMED — the
+  // preload webUtils bridge turns the dropped File into a candidate path, which
+  // main-side dropPrepare re-validates (Layer-0 hard-deny + is-a-directory)
+  // before minting a MAIN-OWNED ack token. A drop ALWAYS routes through the same
+  // acknowledgement panel the native warned-pick uses (the OS dialog never
+  // vouched for the path, so the explicit user ack is that missing vouch), and
+  // confirmPendingFolder echoes the token — never the path — to pickRoot. So the
+  // drop can never widen the read scope without the user confirming.
+  const handleFolderDrop = useCallback(
+    async (files: FileList) => {
+      setOpError(null);
+      const paths = window.lvisDrop.resolveDroppedPaths(files);
+      const dropped = paths[0]; // first dropped item only — no multi-add fan-out
+      if (!dropped) return; // non-file drag (text/url) or unresolvable — no-op
+      const res = await window.lvis.workspace.dropPrepare(dropped);
+      if (!res.ok) {
+        setOpError(formatOpError(res.error, undefined));
+        return;
+      }
+      if (res.pendingPath && res.ackToken) {
+        setPendingWarning({
+          path: res.pendingPath,
+          warnings: res.warnings ?? [],
+          ackToken: res.ackToken,
+        });
+      }
+    },
+    [formatOpError],
+  );
+
+  // Reveal a file/folder in the OS file manager. Re-validated in main; surfaces
+  // any failure inline instead of swallowing the result.
+  const revealEntry = async (path: string) => {
+    setOpError(null);
+    const res = await window.lvis.workspace.reveal(path);
+    if (!res.ok) setOpError(formatOpError(res.error, res.message));
   };
 
   const confirmPendingFolder = async () => {
@@ -750,43 +1096,230 @@ function ProjectRootsBrowser({
     if (res.ok && res.roots) applyRoots(res.roots, res.added ?? null);
   };
 
-  const renderEntries = (path: string, depth: number): ReactElement => (
+  const activeRootIsDefault = Boolean(
+    activeRoot && roots.find((r) => r.path === activeRoot)?.isDefault,
+  );
+
+  // Remove the active root from the read allow-list. Non-destructive (files are
+  // untouched — only the Layer-1 read scope narrows); main refuses to remove the
+  // default root or any path not already in `additionalDirectories`.
+  const removeActiveRoot = async () => {
+    if (!activeRoot || activeRootIsDefault) return;
+    const removedRoot = activeRoot;
+    setOpError(null);
+    const res = await window.lvis.workspace.removeRoot(removedRoot);
+    if (!res.ok) {
+      setOpError(formatOpError(res.error, res.message));
+      return;
+    }
+    if (!res.roots) return;
+    // Drop cached children/expansion for the removed subtree so a re-add reloads.
+    // Boundary-safe + cross-platform: `isPathWithinRoot` matches on a full
+    // segment (so `/foo` won't purge `/foobar`) and both `/` and `\` separators.
+    setChildrenByPath((prev) => {
+      const next: Record<string, WorkspaceDirEntry[]> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        if (isPathWithinRoot(removedRoot, key)) continue;
+        next[key] = value;
+      }
+      return next;
+    });
+    applyRoots(res.roots, res.roots[0]?.path ?? null);
+  };
+
+  // Re-list a folder whose previous listDir FAILED. A user gesture, so it clears
+  // the attempted mark (the render-loop guard) before reloading.
+  const retryDir = (path: string) => {
+    setAttemptedPaths((prev) => {
+      if (!prev.has(path)) return prev;
+      const next = new Set(prev);
+      next.delete(path);
+      return next;
+    });
+    setErrorByPath((prev) => {
+      if (!(path in prev)) return prev;
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+    void loadDir(path);
+  };
+
+  const renderEntries = (path: string, depth: number): ReactElement => {
+    const entries = childrenByPath[path] ?? [];
+    const childPad = 8 + depth * 12;
+    // Child-folder listing states (the active root's own loading/error is handled
+    // one level up so the role=tree wrapper is always present).
+    if (depth > 0 && loadingPaths.has(path) && entries.length === 0) {
+      return (
+        <div
+          role="presentation"
+          className="flex h-7 items-center gap-1 text-[11px] text-muted-foreground"
+          style={{ paddingLeft: childPad }}
+          data-testid="chat-side-panel-fs-child-loading"
+        >
+          {t("chatPreviewRail.filePreviewLoading")}
+        </div>
+      );
+    }
+    if (depth > 0 && errorByPath[path]) {
+      return (
+        <button
+          type="button"
+          className="flex h-7 w-full items-center gap-1 text-left text-[11px] text-destructive hover:underline"
+          style={{ paddingLeft: childPad }}
+          data-testid="chat-side-panel-fs-child-error"
+          onClick={() => retryDir(path)}
+        >
+          {t("chatPreviewRail.dirLoadError")} · {t("common.retry")}
+        </button>
+      );
+    }
+    if (entries.length === 0 && attemptedPaths.has(path) && !loadingPaths.has(path) && !errorByPath[path]) {
+      return (
+        <div
+          role="presentation"
+          className="flex h-7 items-center text-[11px] italic text-muted-foreground"
+          style={{ paddingLeft: childPad }}
+          data-testid="chat-side-panel-fs-empty"
+        >
+          {t("chatPreviewRail.dirEmpty")}
+        </div>
+      );
+    }
+    return (
     <>
-      {(childrenByPath[path] ?? []).map((entry) => {
+      {entries.map((entry, index) => {
         const isDir = entry.type === "directory";
         const isOpen = expanded.has(entry.path);
-        const active = !isDir && entry.path === selectedPath;
+        const opened = !isDir && entry.path === selectedPath;
+        const isActiveItem = entry.path === activeItemPath;
         return (
-          <div key={entry.path} role="treeitem" aria-expanded={isDir ? isOpen : undefined}>
-            <button
-              type="button"
-              data-testid={isDir ? "chat-side-panel-fs-folder" : "chat-side-panel-fs-file"}
-              className={`flex h-7 w-full min-w-0 items-center gap-1 rounded-md pr-2 text-left text-xs hover:bg-muted/(--opacity-muted) ${
-                active ? "bg-accent text-accent-foreground" : ""
-              }`}
-              style={{ paddingLeft: 8 + depth * 12 }}
-              onClick={() => (isDir ? toggleFolder(entry.path) : onOpenFile(entry.path))}
-            >
-              {isDir ? (
-                isOpen ? (
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                ) : (
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                )
-              ) : (
-                <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              )}
-              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-            </button>
-            {isDir && isOpen ? renderEntries(entry.path, depth + 1) : null}
+          <div key={entry.path}>
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <div
+                  ref={(el) => {
+                    if (el) itemRefs.current.set(entry.path, el);
+                    else itemRefs.current.delete(entry.path);
+                  }}
+                  role="treeitem"
+                  aria-expanded={isDir ? isOpen : undefined}
+                  // APG tree pattern: aria-selected reflects SELECTION (the
+                  // opened file), not roving keyboard focus. Focus is carried
+                  // separately by the roving tabindex below, so a screen reader
+                  // announces the opened file — not merely the arrow-key cursor
+                  // position — as "selected". Non-opened rows omit the attribute.
+                  aria-selected={opened ? true : undefined}
+                  aria-level={depth + 1}
+                  aria-setsize={entries.length}
+                  aria-posinset={index + 1}
+                  tabIndex={isActiveItem ? 0 : -1}
+                  data-testid={isDir ? "chat-side-panel-fs-folder" : "chat-side-panel-fs-file"}
+                  className={`flex h-7 w-full min-w-0 cursor-pointer items-center gap-1 rounded-md pr-2 text-left text-xs outline-none hover:bg-muted/(--opacity-muted) focus-visible:ring-1 focus-visible:ring-ring ${
+                    opened ? "bg-accent text-accent-foreground" : ""
+                  }`}
+                  style={{ paddingLeft: 8 + depth * 12 }}
+                  onClick={() => {
+                    setActiveItemPath(entry.path);
+                    if (isDir) toggleFolder(entry.path);
+                    else onOpenFile(entry.path);
+                  }}
+                >
+                  {isDir ? (
+                    isOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    )
+                  ) : (
+                    createElement(fileIcon(entry.name), {
+                      className: "h-3.5 w-3.5 shrink-0 text-muted-foreground",
+                    })
+                  )}
+                  <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="min-w-[11rem]" data-testid="chat-side-panel-fs-context-menu">
+                <ContextMenuItem
+                  data-testid="chat-side-panel-fs-ctx-open"
+                  onSelect={() => (isDir ? toggleFolder(entry.path) : onOpenFile(entry.path))}
+                >
+                  {isDir ? <Folder className="h-3.5 w-3.5" /> : <File className="h-3.5 w-3.5" />}
+                  {t("chatPreviewRail.ctxOpen")}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  data-testid="chat-side-panel-fs-ctx-reveal"
+                  onSelect={() => void revealEntry(entry.path)}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  {t(IS_MAC_LIKE ? "chatPreviewRail.revealInFinder" : "chatPreviewRail.revealInExplorer")}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  data-testid="chat-side-panel-fs-ctx-copy-path"
+                  onSelect={() => void navigator.clipboard?.writeText(entry.path)}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  {t("chatPreviewRail.copyPath")}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  data-testid="chat-side-panel-fs-ctx-copy-rel"
+                  onSelect={() => void navigator.clipboard?.writeText(toRelativePath(activeRoot, entry.path))}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  {t("chatPreviewRail.copyRelativePath")}
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+            {isDir && isOpen ? <div role="group">{renderEntries(entry.path, depth + 1)}</div> : null}
           </div>
         );
       })}
+      {truncatedPaths.has(path) ? (
+        <div
+          role="presentation"
+          className="flex h-6 items-center text-[11px] italic text-muted-foreground"
+          style={{ paddingLeft: childPad }}
+          data-testid="chat-side-panel-fs-truncated"
+        >
+          {t("chatPreviewRail.dirTruncated")}
+        </div>
+      ) : null}
     </>
-  );
+    );
+  };
 
   return (
-    <div className="space-y-1" data-testid="chat-side-panel-project-roots">
+    // Drag-drop add-root (#1458): a dropped folder resolves to a renderer-named
+    // candidate path (preload webUtils bridge) that main-side dropPrepare
+    // hard-validates before an explicit ack — so it rides the #1448 ack tier
+    // rather than regressing it. Add-root also stays on the native picker (the
+    // FolderPlus button + ⌘/Ctrl+O), which the drop convenience sits on top of.
+    <div
+      ref={rootRef}
+      className={cn(
+        "space-y-1 rounded-md transition-colors",
+        dragOver && "ring-2 ring-primary/(--opacity-half) bg-primary/(--opacity-faint)",
+      )}
+      data-testid="chat-side-panel-project-roots"
+      onDragOver={(event) => {
+        // preventDefault is required or the browser navigates to the file.
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        if (!dragOver) setDragOver(true);
+      }}
+      onDragLeave={(event) => {
+        // Ignore leave events bubbling from children still inside the panel.
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setDragOver(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDragOver(false);
+        void handleFolderDrop(event.dataTransfer.files);
+      }}
+    >
       <div className="flex items-center gap-1">
         {roots.length > 1 ? (
           <select
@@ -823,7 +1356,58 @@ function ProjectRootsBrowser({
           </TooltipTrigger>
           <TooltipContent side="bottom">{t("chatPreviewRail.addProjectRoot")}</TooltipContent>
         </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              data-testid="chat-side-panel-collapse-all"
+              aria-label={t("chatPreviewRail.collapseAll")}
+              disabled={expanded.size === 0}
+              onClick={() => setExpanded(new Set())}
+            >
+              <ChevronsDownUp className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t("chatPreviewRail.collapseAll")}</TooltipContent>
+        </Tooltip>
+        {activeRoot && !activeRootIsDefault ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                data-testid="chat-side-panel-remove-root"
+                aria-label={t("chatPreviewRail.removeRoot")}
+                onClick={() => void removeActiveRoot()}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("chatPreviewRail.removeRoot")}</TooltipContent>
+          </Tooltip>
+        ) : null}
       </div>
+      {opError ? (
+        <div
+          role="alert"
+          data-testid="chat-side-panel-op-error"
+          className="flex items-start gap-1 rounded-md border border-destructive bg-destructive/(--opacity-muted) px-2 py-1 text-[11px] text-destructive"
+        >
+          <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{opError}</span>
+          <button
+            type="button"
+            className="shrink-0 rounded p-0.5 hover:bg-destructive/(--opacity-muted)"
+            aria-label={t("common.close")}
+            data-testid="chat-side-panel-op-error-dismiss"
+            onClick={() => setOpError(null)}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      ) : null}
       {pendingWarning ? (
         <div
           data-testid="chat-side-panel-root-warning"
@@ -861,14 +1445,30 @@ function ProjectRootsBrowser({
         loadingPaths.has(activeRoot) && !childrenByPath[activeRoot] ? (
           <div className="px-2 py-1 text-[11px] text-muted-foreground">{t("chatPreviewRail.filePreviewLoading")}</div>
         ) : errorByPath[activeRoot] ? (
-          <div className="px-2 py-1 text-[11px] text-destructive" data-testid="chat-side-panel-fs-error">
-            {t("chatPreviewRail.dirLoadError")}
-          </div>
+          <button
+            type="button"
+            className="flex w-full items-center gap-1 px-2 py-1 text-left text-[11px] text-destructive hover:underline"
+            data-testid="chat-side-panel-fs-error"
+            onClick={() => retryDir(activeRoot)}
+          >
+            {t("chatPreviewRail.dirLoadError")} · {t("common.retry")}
+          </button>
         ) : (
-          <div role="tree" aria-label={t("chatPreviewRail.projectRoots")}>{renderEntries(activeRoot, 0)}</div>
+          <div role="tree" aria-label={t("chatPreviewRail.projectRoots")} onKeyDown={onTreeKeyDown}>
+            {renderEntries(activeRoot, 0)}
+          </div>
         )
       ) : (
-        <div className="px-2 py-1 text-[11px] text-muted-foreground">{t("chatPreviewRail.projectRootsEmpty")}</div>
+        <div
+          className="flex flex-col items-start gap-2 px-2 py-3 text-[11px] text-muted-foreground"
+          data-testid="chat-side-panel-roots-empty"
+        >
+          <p>{t("chatPreviewRail.projectRootsEmpty")}</p>
+          <Button type="button" size="sm" variant="outline" onClick={() => void addFolder()}>
+            <FolderPlus className="h-3.5 w-3.5" />
+            {t("chatPreviewRail.addProjectRoot")}
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -891,12 +1491,21 @@ function FileBrowserWorkspace({
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
-  const [treePanePercent, setTreePanePercent] = useState(45);
+  const { topPercent, setTopPercent, commitTopPercent } = useVerticalSplit(api, "sidePanelSplitFilePercent");
   // A concrete filesystem file opened from the project-roots browser. Takes
   // precedence over the session-artifact selection in the detail pane.
   const [fsPath, setFsPath] = useState<string | null>(null);
-  const splitLayoutRef = useRef<HTMLDivElement | null>(null);
-  const resizeCleanupRef = useRef<(() => void) | null>(null);
+  // Which source the TOP pane shows (R3): the project directory tree or this
+  // chat's session artifacts. A segment toggle replaces the old vertical
+  // stacking that squeezed the session list into a sliver. This is a SOURCE
+  // switch on the horizontal axis — orthogonal to the top/bottom split axis
+  // above, so the two never fight.
+  const [fileSource, setFileSource] = useState<"directory" | "session">("directory");
+  const sessionFileCount = files.length;
+  const hasSessionFiles = sessionFileCount > 0;
+  // The session segment is disabled with zero files; snap back to directory so a
+  // previously-selected-but-now-empty session source can't strand an empty pane.
+  const effectiveSource = fileSource === "session" && hasSessionFiles ? "session" : "directory";
   const tree = useMemo(() => filterFileTree(buildFileTree(files), query), [files, query]);
   const filteredFiles = useMemo(
     () => files.filter((file) => matchesQuery(query, file.label, file.detail, file.path, file.sourceLabel)),
@@ -929,120 +1538,126 @@ function FileBrowserWorkspace({
     }
   }, [onSelect, selectedFile, selectedId]);
 
-  useEffect(() => () => resizeCleanupRef.current?.(), []);
-
-  const updateTreePaneFromClientY = (clientY: number) => {
-    const layout = splitLayoutRef.current;
-    if (!layout) return;
-    const rect = layout.getBoundingClientRect();
-    if (rect.height <= 0) return;
-    const next = ((clientY - rect.top) / rect.height) * 100;
-    setTreePanePercent(clampNumber(Math.round(next), FILE_TREE_MIN_PERCENT, FILE_TREE_MAX_PERCENT));
-  };
-
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-file-browser">
-      <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
-      <div
-        ref={splitLayoutRef}
-        className="grid min-h-0 w-full min-w-0 flex-1 overflow-hidden"
-        data-testid="chat-side-panel-file-split-layout"
-        style={{ gridTemplateRows: `${treePanePercent}% 0.75rem minmax(0, 1fr)` }}
-      >
-        <div className="min-h-0 space-y-2 overflow-auto border-b p-2" data-testid="chat-side-panel-file-tree">
-          <ProjectRootsBrowser
-            selectedPath={fsPath}
-            onOpenFile={(path) => {
-              setFsPath(path);
-            }}
-          />
-          <div className="border-t pt-1">
-            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {t("chatPreviewRail.sessionFilesSection")}
+      {/*
+        The search box filters ONLY the session-artifact list (filteredFiles /
+        tree); the Directory source (ProjectRootsBrowser) has no query wiring, so
+        showing it there is a dead affordance. Render it only for the Session
+        segment so there is no no-op search control.
+      */}
+      {effectiveSource === "session" ? (
+        <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
+      ) : null}
+      <VerticalSplitLayout
+        topPercent={topPercent}
+        onDragChange={setTopPercent}
+        onCommit={commitTopPercent}
+        ariaLabel={t("chatPreviewRail.resizeFilePanels")}
+        testId="chat-side-panel-file-split-layout"
+        separatorTestId="chat-side-panel-file-splitter"
+        top={
+          <div className="flex min-h-0 flex-col" data-testid="chat-side-panel-file-tree">
+            {/*
+              R3 segment toggle: pick the top pane's source (project directory
+              vs session artifacts) instead of stacking both. Only the chosen
+              source occupies the whole pane, so the session list is no longer
+              squeezed. The session segment is disabled when the chat has no
+              artifacts yet.
+            */}
+            <div
+              role="group"
+              aria-label={t("chatPreviewRail.fileSourceLabel")}
+              className="flex shrink-0 items-center gap-1 border-b px-1 py-0.5"
+              data-testid="chat-side-panel-file-source-segment"
+            >
+              <button
+                type="button"
+                aria-pressed={effectiveSource === "directory"}
+                data-testid="chat-side-panel-file-source-directory"
+                className={cn(
+                  "flex h-6 flex-1 items-center justify-center gap-1 rounded-md px-2 text-[11px] font-medium",
+                  effectiveSource === "directory"
+                    ? "bg-primary/(--opacity-subtle) text-primary"
+                    : "text-muted-foreground hover:bg-muted/(--opacity-muted) hover:text-foreground",
+                )}
+                onClick={() => setFileSource("directory")}
+              >
+                <Folder className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("chatPreviewRail.fileSourceDirectory")}
+              </button>
+              <button
+                type="button"
+                aria-pressed={effectiveSource === "session"}
+                disabled={!hasSessionFiles}
+                data-testid="chat-side-panel-file-source-session"
+                className={cn(
+                  "flex h-6 flex-1 items-center justify-center gap-1 rounded-md px-2 text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-(--opacity-half)",
+                  effectiveSource === "session"
+                    ? "bg-primary/(--opacity-subtle) text-primary"
+                    : "text-muted-foreground hover:bg-muted/(--opacity-muted) hover:text-foreground",
+                )}
+                onClick={() => setFileSource("session")}
+              >
+                <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("chatPreviewRail.fileSourceSession")}
+                <Badge variant="outline" className="px-1 py-0 text-[10px]" data-testid="chat-side-panel-file-source-session-count">
+                  {sessionFileCount}
+                </Badge>
+              </button>
             </div>
-            {hasFiles && tree.length > 0 ? (
-              <FileTreeRows
-                nodes={tree}
-                selectedFileId={fsPath ? undefined : selectedFile?.id}
-                onSelectFile={(file) => {
-                  setFsPath(null);
-                  if (file.previewTargetId) onSelect(file.previewTargetId);
-                }}
-              />
+            <div className="min-h-0 flex-1 overflow-auto p-2">
+              {effectiveSource === "directory" ? (
+                <ProjectRootsBrowser
+                  selectedPath={fsPath}
+                  onOpenFile={(path) => {
+                    setFsPath(path);
+                  }}
+                />
+              ) : hasFiles && tree.length > 0 ? (
+                <FileTreeRows
+                  nodes={tree}
+                  selectedFileId={fsPath ? undefined : selectedFile?.id}
+                  onSelectFile={(file) => {
+                    setFsPath(null);
+                    if (file.previewTargetId) onSelect(file.previewTargetId);
+                  }}
+                />
+              ) : (
+                <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>
+              )}
+            </div>
+          </div>
+        }
+        bottom={
+          <div className="min-h-0 p-3">
+            {fsTarget ? (
+              <div className="space-y-3">
+                <DetailHeader target={fsTarget} />
+                <PreviewBody api={api} sessionId={sessionId} target={fsTarget} />
+              </div>
+            ) : selectedFileTarget ? (
+              <div className="space-y-3">
+                <DetailHeader target={selectedFileTarget} />
+                <PreviewBody api={api} sessionId={sessionId} target={selectedFileTarget} />
+              </div>
+            ) : selectedFile ? (
+              <div className="space-y-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{selectedFile.label}</h3>
+                </div>
+                <div className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 font-mono text-[11px] [overflow-wrap:anywhere]">
+                  {selectedFile.path}
+                </div>
+                <div className="text-[11px] text-muted-foreground">{t("chatPreviewRail.pathOnlyHint")}</div>
+              </div>
             ) : (
-              <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>
+              <div className="text-xs text-muted-foreground">{t("chatPreviewRail.emptyState")}</div>
             )}
           </div>
-        </div>
-        <div
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label={t("chatPreviewRail.resizeFilePanels")}
-          tabIndex={0}
-          data-testid="chat-side-panel-file-splitter"
-          className="group flex cursor-row-resize touch-none select-none items-center px-2 outline-none"
-          onPointerDown={(event) => {
-            event.preventDefault();
-            event.currentTarget.setPointerCapture?.(event.pointerId);
-            resizeCleanupRef.current?.();
-            updateTreePaneFromClientY(event.clientY);
-            const onMove = (moveEvent: PointerEvent) => updateTreePaneFromClientY(moveEvent.clientY);
-            const cleanup = () => {
-              window.removeEventListener("pointermove", onMove);
-              window.removeEventListener("pointerup", cleanup);
-              window.removeEventListener("pointercancel", cleanup);
-              resizeCleanupRef.current = null;
-            };
-            resizeCleanupRef.current = cleanup;
-            window.addEventListener("pointermove", onMove);
-            window.addEventListener("pointerup", cleanup);
-            window.addEventListener("pointercancel", cleanup);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowUp") {
-              event.preventDefault();
-              setTreePanePercent((value) => clampNumber(value - 5, FILE_TREE_MIN_PERCENT, FILE_TREE_MAX_PERCENT));
-            } else if (event.key === "ArrowDown") {
-              event.preventDefault();
-              setTreePanePercent((value) => clampNumber(value + 5, FILE_TREE_MIN_PERCENT, FILE_TREE_MAX_PERCENT));
-            } else if (event.key === "Home") {
-              event.preventDefault();
-              setTreePanePercent(FILE_TREE_MIN_PERCENT);
-            } else if (event.key === "End") {
-              event.preventDefault();
-              setTreePanePercent(FILE_TREE_MAX_PERCENT);
-            }
-          }}
-        >
-          <span className="h-0.5 w-full rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
-        </div>
-        <div className="min-h-0 overflow-auto p-3">
-          {fsTarget ? (
-            <div className="space-y-3">
-              <DetailHeader target={fsTarget} />
-              <PreviewBody api={api} sessionId={sessionId} target={fsTarget} />
-            </div>
-          ) : selectedFileTarget ? (
-            <div className="space-y-3">
-              <DetailHeader target={selectedFileTarget} />
-              <PreviewBody api={api} sessionId={sessionId} target={selectedFileTarget} />
-            </div>
-          ) : selectedFile ? (
-            <div className="space-y-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{selectedFile.label}</h3>
-              </div>
-              <div className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 font-mono text-[11px] [overflow-wrap:anywhere]">
-                {selectedFile.path}
-              </div>
-              <div className="text-[11px] text-muted-foreground">{t("chatPreviewRail.pathOnlyHint")}</div>
-            </div>
-          ) : (
-            <div className="text-xs text-muted-foreground">{t("chatPreviewRail.emptyState")}</div>
-          )}
-        </div>
-      </div>
+        }
+      />
     </div>
   );
 }
@@ -1112,6 +1727,7 @@ function BrowserWorkspace({
   const [query, setQuery] = useState("");
   const [addressDraft, setAddressDraft] = useState("");
   const [addressError, setAddressError] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const filteredTargets = useMemo(
     () => targets.filter((target) => matchesQuery(query, target.title, target.subtitle, target.sourceLabel, target.kind === "url" ? target.url : undefined)),
     [targets, query],
@@ -1163,6 +1779,12 @@ function BrowserWorkspace({
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-browser-workspace">
+      {/*
+        Single address bar (#11): the browser tab owns ONE address row here and
+        the viewer's own header is suppressed (UrlDocumentViewer showHeader=false)
+        so there is no duplicate URL band nesting. The web-artifact list + search
+        moved out of the always-on stacked strip into the floating 🔍 Popover.
+      */}
       <form
         className="flex shrink-0 items-center gap-2 border-b px-3 py-2"
         onSubmit={(event) => {
@@ -1181,6 +1803,51 @@ function BrowserWorkspace({
           placeholder={t("chatPreviewRail.browserAddressPlaceholder")}
           className="h-8 min-w-0 flex-1 text-xs"
         />
+        <Popover open={searchOpen} onOpenChange={setSearchOpen}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  // Radix sets data-state=open on the trigger while the search
+                  // Popover is open; reflect that with an active tint so the
+                  // toggled state is visible (R2).
+                  className="h-8 w-8 shrink-0 data-[state=open]:bg-primary/(--opacity-subtle) data-[state=open]:text-primary"
+                  aria-label={t("chatPreviewRail.browserSearch")}
+                  data-testid="chat-side-panel-browser-search-trigger"
+                >
+                  <Search className="h-3.5 w-3.5" />
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>{t("chatPreviewRail.browserSearch")}</TooltipContent>
+          </Tooltip>
+          <PopoverContent
+            align="end"
+            className="w-72 p-0"
+            data-testid="chat-side-panel-browser-search-popover"
+          >
+            <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
+            <div className="max-h-64 overflow-auto p-2">
+              {filteredTargets.length > 0 ? (
+                <TargetRows
+                  targets={filteredTargets}
+                  selectedId={manualTarget ? undefined : selectedTarget?.id}
+                  rowTestId="chat-side-panel-browser-row"
+                  onSelect={(id) => {
+                    onManualUrlChange(tabId, null);
+                    onSelect(id);
+                    setSearchOpen(false);
+                  }}
+                />
+              ) : (
+                <EmptyState>{t("chatPreviewRail.noBrowserTargets")}</EmptyState>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -1202,31 +1869,175 @@ function BrowserWorkspace({
           {addressError}
         </div>
       ) : null}
-      <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
-      <div className="max-h-36 shrink-0 overflow-auto border-b p-2">
-        {filteredTargets.length > 0 ? (
-          <TargetRows
-            targets={filteredTargets}
-            selectedId={manualTarget ? undefined : selectedTarget?.id}
-            rowTestId="chat-side-panel-browser-row"
-            onSelect={(id) => {
-              onManualUrlChange(tabId, null);
-              onSelect(id);
-            }}
-          />
-        ) : (
-          <EmptyState>{t("chatPreviewRail.noBrowserTargets")}</EmptyState>
-        )}
-      </div>
       <div className="min-h-0 w-full min-w-0 flex-1 overflow-hidden">
         {displayedTarget?.kind === "html" ? (
           <BrowserDocumentViewer target={displayedTarget} />
         ) : displayedTarget?.kind === "url" ? (
-          <UrlDocumentViewer api={api} target={displayedTarget} />
+          <UrlDocumentViewer api={api} target={displayedTarget} showHeader={false} />
         ) : (
-          <div className="text-xs text-muted-foreground">{t("chatPreviewRail.noBrowserTargets")}</div>
+          <div className="p-4 text-xs text-muted-foreground">{t("chatPreviewRail.noBrowserTargets")}</div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Status tone for the sub-agent list row badge. */
+function subAgentStatusTone(status: SubAgentSpawn["status"]): string {
+  if (status === "error") return "text-destructive";
+  if (status === "done") return "text-muted-foreground";
+  return "text-warning";
+}
+
+/**
+ * One selectable row in the sub-agent list. Memoized so a live-updating spawn
+ * (its turn count / status ticks as the agent runs) only re-renders its OWN row,
+ * not every sibling — the list can hold many concurrent spawns.
+ */
+/** Localized status label, reusing the SubAgentCard status i18n keys. */
+function subAgentStatusLabel(status: SubAgentSpawn["status"], t: (key: string) => string): string {
+  if (status === "error") return t("subAgentCard.statusError");
+  if (status === "done") return t("subAgentCard.statusDone");
+  return t("subAgentCard.statusRunning");
+}
+
+const SubAgentRow = memo(function SubAgentRow({
+  spawn,
+  active,
+  onSelect,
+}: {
+  spawn: SubAgentSpawn;
+  active: boolean;
+  onSelect: (spawnId: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    // role="option": this row lives in a role="listbox"; aria-selected is valid
+    // only on a listbox option (not a bare button).
+    <button
+      type="button"
+      role="option"
+      data-testid="chat-side-panel-subagent-row"
+      aria-selected={active}
+      className={cn(
+        "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-muted/(--opacity-muted)",
+        active ? "bg-accent text-accent-foreground" : "",
+      )}
+      onClick={() => onSelect(spawn.spawnId)}
+    >
+      {spawn.status === "running" ? (
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-warning" aria-hidden="true" />
+      ) : (
+        <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      )}
+      <span className="min-w-0 flex-1 truncate font-medium" title={spawn.title}>
+        {spawn.title}
+      </span>
+      <span className={cn("shrink-0 text-[10px]", subAgentStatusTone(spawn.status))}>
+        {subAgentStatusLabel(spawn.status, t)}
+      </span>
+    </button>
+  );
+});
+
+/**
+ * Sub-agent viewer tab (R4). Top pane = the list of this chat's sub-agent spawns
+ * (live + completed); bottom pane = the SELECTED spawn's transcript/tool-activity
+ * via the shared SubAgentCard. Only the selected spawn is rendered in detail (not
+ * every card), and the list rows are memoized, so a chat that fanned out many
+ * agents stays cheap. The top↕bottom split persists via sidePanelSplitSubagentPercent.
+ */
+function SubAgentViewer({
+  api,
+  subAgentSpawns,
+}: {
+  api: LvisApi;
+  subAgentSpawns: SubAgentSpawn[];
+}) {
+  const { t } = useTranslation();
+  const { topPercent, setTopPercent, commitTopPercent } = useVerticalSplit(api, "sidePanelSplitSubagentPercent");
+  const [selectedSpawnId, setSelectedSpawnId] = useState<string | null>(null);
+  // Unify each spawn with its resume segments (JOIN KEY = childSessionId) into a
+  // single row with a concatenated transcript. The prop stays a FLAT list (one
+  // spawn source of truth prop-drilled from ChatView) — grouping is a viewer-only
+  // presentation concern applied here, so the inline chat cards are unaffected.
+  const groupedSpawns = useMemo(() => groupSubAgentSessions(subAgentSpawns), [subAgentSpawns]);
+  // Running spawns first (the user usually wants the live one), then completed.
+  const orderedSpawns = useMemo(() => {
+    const running = groupedSpawns.filter((spawn) => spawn.status === "running");
+    const rest = groupedSpawns.filter((spawn) => spawn.status !== "running");
+    return [...running, ...rest];
+  }, [groupedSpawns]);
+  // Pin the detail to the CHOSEN spawnId. The synchronous `?? orderedSpawns[0]`
+  // fallback only applies while nothing is chosen yet (no first-render flash);
+  // once a spawn resolves, `.find` keeps it, so a status flip that reorders the
+  // list (running→done reshuffles `orderedSpawns`) can never silently jump the
+  // viewed spawn out from under the user. The effect below persists the seed
+  // into `selectedSpawnId` so the row highlight (`active`) matches the detail.
+  const selectedSpawn = useMemo(
+    () => orderedSpawns.find((spawn) => spawn.spawnId === selectedSpawnId) ?? orderedSpawns[0] ?? null,
+    [orderedSpawns, selectedSpawnId],
+  );
+
+  useEffect(() => {
+    if (orderedSpawns.length === 0) {
+      if (selectedSpawnId !== null) setSelectedSpawnId(null);
+      return;
+    }
+    // Seed / re-pin only when the current selection is absent — never when it
+    // still resolves, so an in-place list reorder does not move the selection.
+    if (!selectedSpawnId || !orderedSpawns.some((spawn) => spawn.spawnId === selectedSpawnId)) {
+      setSelectedSpawnId(orderedSpawns[0].spawnId);
+    }
+  }, [orderedSpawns, selectedSpawnId]);
+
+  if (orderedSpawns.length === 0) {
+    return (
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-col items-center justify-center p-6 text-center" data-testid="chat-side-panel-subagent-empty">
+        <Bot className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+        <div className="mt-2 text-xs text-muted-foreground">{t("chatPreviewRail.subagentEmpty")}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-subagent-viewer">
+      <VerticalSplitLayout
+        topPercent={topPercent}
+        onDragChange={setTopPercent}
+        onCommit={commitTopPercent}
+        ariaLabel={t("chatPreviewRail.resizeSubagentPanels")}
+        testId="chat-side-panel-subagent-split-layout"
+        separatorTestId="chat-side-panel-subagent-splitter"
+        top={
+          // role="listbox" makes each row's aria-selected valid (it is only
+          // meaningful on option/row/tab/… children of a select container).
+          <div
+            role="listbox"
+            aria-label={t("chatPreviewRail.subagentListLabel")}
+            className="min-h-0 space-y-1 p-2"
+            data-testid="chat-side-panel-subagent-list"
+          >
+            {orderedSpawns.map((spawn) => (
+              <SubAgentRow
+                key={spawn.spawnId}
+                spawn={spawn}
+                active={spawn.spawnId === selectedSpawn?.spawnId}
+                onSelect={setSelectedSpawnId}
+              />
+            ))}
+          </div>
+        }
+        bottom={
+          <div className="min-h-0 p-3" data-testid="chat-side-panel-subagent-detail">
+            {selectedSpawn ? (
+              <SubAgentCard spawn={selectedSpawn} />
+            ) : (
+              <div className="text-xs text-muted-foreground">{t("chatPreviewRail.subagentSelectHint")}</div>
+            )}
+          </div>
+        }
+      />
     </div>
   );
 }
@@ -1314,28 +2125,40 @@ function ListDetailWorkspace({
   rowTestId: string;
   onSelect: (id: string) => void;
 }) {
+  const { topPercent, setTopPercent, commitTopPercent } = useVerticalSplit(api, "sidePanelSplitPreviewPercent");
+  const { t } = useTranslation();
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
       <SearchInput query={query} setQuery={setQuery} placeholder={placeholder} />
-      <div className="grid min-h-0 w-full min-w-0 flex-1 grid-rows-[minmax(10rem,0.85fr)_minmax(14rem,1.15fr)] overflow-hidden">
-        <div className="min-h-0 overflow-auto border-b p-2">
-          {rows.length > 0 ? (
-            <TargetRows targets={rows} selectedId={selectedTarget?.id} rowTestId={rowTestId} onSelect={onSelect} />
-          ) : (
-            <EmptyState>{emptyText}</EmptyState>
-          )}
-        </div>
-        <div className="min-h-0 overflow-auto p-3">
-          {selectedTarget ? (
-            <div className="space-y-3">
-              <DetailHeader target={selectedTarget} />
-              <PreviewBody api={api} sessionId={sessionId} target={selectedTarget} />
-            </div>
-          ) : (
-            <div className="text-xs text-muted-foreground">{emptyText}</div>
-          )}
-        </div>
-      </div>
+      <VerticalSplitLayout
+        topPercent={topPercent}
+        onDragChange={setTopPercent}
+        onCommit={commitTopPercent}
+        ariaLabel={t("chatPreviewRail.resizePreviewPanels")}
+        testId="chat-side-panel-preview-split-layout"
+        separatorTestId="chat-side-panel-preview-splitter"
+        top={
+          <div className="min-h-0 p-2">
+            {rows.length > 0 ? (
+              <TargetRows targets={rows} selectedId={selectedTarget?.id} rowTestId={rowTestId} onSelect={onSelect} />
+            ) : (
+              <EmptyState>{emptyText}</EmptyState>
+            )}
+          </div>
+        }
+        bottom={
+          <div className="min-h-0 p-3">
+            {selectedTarget ? (
+              <div className="space-y-3">
+                <DetailHeader target={selectedTarget} />
+                <PreviewBody api={api} sessionId={sessionId} target={selectedTarget} />
+              </div>
+            ) : (
+              <div className="text-xs text-muted-foreground">{emptyText}</div>
+            )}
+          </div>
+        }
+      />
     </div>
   );
 }
@@ -1350,6 +2173,10 @@ function tabLabelKey(kind: WorkspaceTabKind): string {
       return "chatPreviewRail.tab.terminal";
     case "preview":
       return "chatPreviewRail.tab.preview";
+    case "subagent":
+      return "chatPreviewRail.tab.subagent";
+    case "side-chat":
+      return "chatPreviewRail.tab.sideChat";
   }
 }
 
@@ -1363,19 +2190,30 @@ function tabTestId(kind: WorkspaceTabKind): string {
       return "chat-side-panel-tab-preview";
     case "terminal":
       return "chat-side-panel-tab-terminal";
+    case "subagent":
+      return "chat-side-panel-tab-subagent";
+    case "side-chat":
+      return "chat-side-panel-tab-side-chat";
   }
 }
 
 /**
- * Tab label: container tabs show `{kind} {ordinal}` (e.g. "Browser 2"); content
- * tabs show the item they point at (preview-target title, or the URL host).
+ * Tab label: container tabs show `{kind}` alone, appending the `{ordinal}` (e.g.
+ * "Browser 2") ONLY when `showOrdinal` is set — the caller sets it when 2+
+ * container tabs of the same kind coexist, so a lone tab reads "Browser" with no
+ * meaningless "1". Content tabs show the item they point at (preview-target
+ * title, or the URL host) and ignore the ordinal entirely.
  */
 function tabLabel(
   tab: WorkspaceTab,
   targetById: Map<string, ChatPreviewTarget>,
   t: (key: string) => string,
+  showOrdinal: boolean,
 ): string {
-  if (!tab.content) return `${t(tabLabelKey(tab.kind))} ${tab.ordinal}`;
+  if (!tab.content) {
+    const base = t(tabLabelKey(tab.kind));
+    return showOrdinal ? `${base} ${tab.ordinal}` : base;
+  }
   if (tab.content.source === "browser") {
     try {
       return new URL(tab.content.url).hostname || tab.content.url;
@@ -1592,6 +2430,12 @@ export interface ChatSidePanelProps {
    * level so tab state survives.
    */
   workspaceTabs: WorkspaceTabsStore;
+  /**
+   * This chat's sub-agent spawns (live + completed), sourced from ChatView's
+   * spawn stream. Drives the subagent viewer tab (R4). Prop-drilled rather than
+   * re-subscribed here so there is one spawn source of truth.
+   */
+  subAgentSpawns: SubAgentSpawn[];
   /** Docked panel width (px), owned by ChatView (useSidePanelWidth). */
   width: number;
   /** Drag-live width update — state only, no persist. */
@@ -1616,6 +2460,7 @@ export function ChatSidePanel({
   onSelect,
   onClose,
   workspaceTabs,
+  subAgentSpawns,
   width,
   onWidthChange,
   onWidthCommit,
@@ -1902,7 +2747,12 @@ export function ChatSidePanel({
             {tabs.map((tab) => {
               const Icon = tabIcon(tab.kind);
               const active = tab.id === activeTab?.id;
-              const label = tabLabel(tab, targetById, t);
+              // Ordinal disambiguates only when 2+ CONTAINER tabs (content: null)
+              // of this kind coexist; a lone container tab drops the "1".
+              const showOrdinal =
+                !tab.content &&
+                tabs.filter((other) => !other.content && other.kind === tab.kind).length > 1;
+              const label = tabLabel(tab, targetById, t, showOrdinal);
               const isEphemeral = tab.mode === "ephemeral";
               return (
                 // Layout wrapper only (role="presentation"): the pin/close
@@ -1987,6 +2837,13 @@ export function ChatSidePanel({
             />
           ) : activeTab.kind === "terminal" ? (
             <PtyTerminalView api={api} tabId={activeTab.id} />
+          ) : activeTab.kind === "subagent" ? (
+            <SubAgentViewer api={api} subAgentSpawns={subAgentSpawns} />
+          ) : activeTab.kind === "side-chat" ? (
+            // Side chat — a second, independently-streaming chat session driven
+            // by a dedicated ConversationLoop in main. The view subscribes to the
+            // DEDICATED side-chat IPC channel, fully isolated from the main chat.
+            <SideChatView api={api} />
           ) : (
             <PreviewWorkspace api={api} sessionId={sessionId} targets={previewTargets} selectedId={selectedId} onSelect={onSelect} />
           )}

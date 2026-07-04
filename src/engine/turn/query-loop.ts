@@ -221,12 +221,25 @@ export async function queryLoop(
         callbacks?.onError?.(
           t("be_conversationLoop.roundCapError", { max: effectiveMaxRounds }),
         );
+        // stopReason "round-cap" flags this as a BUDGET-hit termination, not a
+        // natural end_turn: the returned text is the partial work so far. The
+        // sub-agent runner reads this to mark its result `incomplete`, and the
+        // main-chat renderer / notification path can treat it as "cut off, can
+        // continue" rather than a finished answer. Return the last real
+        // assistant text verbatim (not a synthetic wrapper) so the partial
+        // output is preserved for the parent / a follow-up round.
+        const lastAssistantText =
+          self.history
+            .getMessages()
+            .filter((m) => m.role === "assistant")
+            .slice(-1)[0]?.content ?? "";
         return withServingIdentity({
-          text: allToolCalls.length > 0
-            ? `(round cap ${effectiveMaxRounds} reached — last assistant text: ${self.history.getMessages().filter((m) => m.role === "assistant").slice(-1)[0]?.content ?? ""})`
-            : `(round cap ${effectiveMaxRounds} reached without assistant output)`,
+          text: lastAssistantText.length > 0
+            ? lastAssistantText
+            : t("be_conversationLoop.roundCapError", { max: effectiveMaxRounds }),
           toolCalls: allToolCalls,
           usage: turnUsage,
+          stopReason: "round-cap",
         });
       }
       // Round-boundary guidance inject — drain any "guide" utterances
@@ -1053,5 +1066,10 @@ export async function queryLoop(
       }
     }
 
-    return withServingIdentity({ text: t("be_conversationLoop.toolRoundLimitExceeded"), toolCalls: allToolCalls, usage: turnUsage });
+    // Outer for-loop bound (MAX_TOOL_ROUNDS) exhausted — reachable when
+    // meta-tool refunds (`round--`) iterate the loop past 30 while
+    // assistantRoundsRun stays under the cap. Same class as the assistantRounds
+    // early-exit above: a budget-hit, not a natural end_turn — flag it so the
+    // sub-agent runner marks the result incomplete.
+    return withServingIdentity({ text: t("be_conversationLoop.toolRoundLimitExceeded"), toolCalls: allToolCalls, usage: turnUsage, stopReason: "round-cap" });
   }

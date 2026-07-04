@@ -20,7 +20,7 @@
  *   `wrapWorkerCommand(cmdline, { filesystem })` returns `{ argv, env }`; the
  *   host spawns `argv[0]` with `argv.slice(1)` — here through `pty.spawn` so the
  *   inner shell gets a real controlling TTY. Per-command `denyRead`/`denyWrite`
- *   REPLACE the shared boot floors in ASRT, so we RESTATE
+ *   REPLACE the shared boot arrays in ASRT, so we RESTATE
  *   `getDefaultSensitiveReadDenyPaths()` (else the shell regains read of
  *   `~/.ssh` / `~/.lvis/secrets` / …) AND `getDefaultSensitiveWriteDenyPaths()`
  *   (else the shell could WRITE `~/.zshrc` / `~/.ssh` / `~/.config` /
@@ -76,7 +76,7 @@ export type SpawnTerminalResult =
   | { ok: true; tabId: string; replayed: boolean }
   | {
       ok: false;
-      reason: "not-fs-contained" | "bad-request" | "spawn-failed" | "too-many-terminals";
+      reason: "not-shell-contained" | "bad-request" | "spawn-failed" | "too-many-terminals";
       message: string;
     };
 
@@ -210,7 +210,7 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
   if (!isAsrtSandboxActive() || !isActiveSandboxShellContained()) {
     return {
       ok: false,
-      reason: "not-fs-contained",
+      reason: "not-shell-contained",
       message:
         "Terminal requires the OS tool sandbox with filesystem and process isolation active " +
         "(Settings → Permissions). Unavailable on a degraded / disabled / " +
@@ -241,7 +241,7 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
 
   // Filesystem jail (mirrors worker-spawn): write = cwd ∪ authorized dirs;
   // read = jail ∪ cwd; denyRead = the RESTATED shared sensitive read floor (a
-  // per-command denyRead REPLACES ASRT's boot floor, so omit-it-and-leak).
+  // per-command denyRead REPLACES ASRT's boot array, so omit-it-and-leak).
   // denyWrite = the RESTATED sensitive WRITE floor (shell-rc / ~/.ssh / ~/.config
   // / LaunchAgents / cron persistence + the read floor): ASRT applies it as
   // denyWithinAllow with PRECEDENCE over allowWrite, so even if the write-jail
