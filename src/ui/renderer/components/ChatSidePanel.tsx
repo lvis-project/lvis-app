@@ -56,7 +56,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/
 import { useTranslation } from "../../../i18n/react.js";
 import { wrapRenderHtmlInlineFrameDocument } from "../../../shared/render-html-preview.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../shared/side-browser.js";
-import { SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
+import { SIDE_PANEL_DEFAULT_WIDTH, SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
+import { EdgeResizeBar } from "./EdgeResizeBar.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
 import { normalizeBrowserNavigationUrl } from "../preview/url-safety.js";
@@ -84,10 +85,6 @@ const FILE_TARGET_KINDS = new Set<ChatPreviewTarget["kind"]>(["file", "diff", "i
 const BROWSER_TARGET_KINDS = new Set<ChatPreviewTarget["kind"]>(["html", "url"]);
 /** Pointer travel (px) that promotes a tab press into a horizontal pan. */
 const TAB_DRAG_THRESHOLD_PX = 6;
-
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
 
 function targetIcon(kind: ChatPreviewTarget["kind"]) {
   switch (kind) {
@@ -2469,16 +2466,6 @@ export function ChatSidePanel({
 }: ChatSidePanelProps) {
   const { t } = useTranslation();
   const asideRef = useRef<HTMLElement | null>(null);
-  const resizeCleanupRef = useRef<(() => void) | null>(null);
-  // Latest width, read by the drag-end cleanup closure (non-reactive) so the
-  // persisted value is exact.
-  const widthRef = useRef(width);
-  useEffect(() => {
-    widthRef.current = width;
-  }, [width]);
-  // Release any in-flight pointer capture on unmount (mirrors the file-tree
-  // splitter cleanup) so a drag crossing an unmount boundary leaks no listeners.
-  useEffect(() => () => resizeCleanupRef.current?.(), []);
 
   // ─── Tab-bar horizontal scroll / drag-pan (diagnosis ②) ──────────────────
   const tabScrollElRef = useRef<HTMLDivElement | null>(null);
@@ -2545,18 +2532,13 @@ export function ChatSidePanel({
     }
   };
 
-  // Compute the clamped docked width for a pointer x, or null if the panel is
-  // not mounted. Pure — it never touches React state (see the drag handler).
-  const widthForClientX = (clientX: number): number | null => {
-    const el = asideRef.current;
-    if (!el) return null;
-    const rect = el.getBoundingClientRect();
-    // 12rem viewport margin == the max-w-[calc(100vw-12rem)] safety cap.
-    const max = Math.max(SIDE_PANEL_MIN_WIDTH, window.innerWidth - 192);
-    // Panel is right-docked: the right edge is fixed, dragging the left edge
-    // leftwards widens it.
-    return clampNumber(Math.round(rect.right - clientX), SIDE_PANEL_MIN_WIDTH, max);
-  };
+  // Dynamic max width — 12rem viewport margin == the max-w-[calc(100vw-12rem)]
+  // safety cap. Evaluated live (not memoized) so a window resize mid-drag is
+  // picked up by the next drag/keyboard interaction.
+  const resolveSidePanelMaxWidth = useCallback(
+    () => Math.max(SIDE_PANEL_MIN_WIDTH, window.innerWidth - 192),
+    [],
+  );
   const {
     tabs,
     activeTabId,
@@ -2640,83 +2622,43 @@ export function ChatSidePanel({
       ref={asideRef}
       data-testid="chat-side-panel"
       style={resizable ? { width: `${width}px` } : undefined}
-      className={`min-h-0 min-w-0 border-l border-border/(--opacity-strong) bg-background/(--opacity-solid) backdrop-blur ${className}`}
+      className={[
+        "min-h-0 min-w-0 backdrop-blur",
+        resizable
+          ? // Docked (resizable) variant — a FLOATING card, matching the left
+            // Sidebar's visual language: margin/gap off the canvas edges,
+            // rounded-2xl, shadow-e2, surface-raised bg, hairline border-subtle.
+            // Previously flush-docked (border-l, no radius, bg-background) —
+            // this reads as a distinct depth-tier surface instead of a seam.
+            // Rounding/clipping lives on the INNER chat-preview-rail wrapper
+            // (below), not this <aside> — the aside stays overflow-visible so
+            // the resize bar's straddled hit-strip and any content that
+            // intentionally overflows (tooltips, drag cursor) are unaffected.
+            "my-2 mr-2 rounded-2xl border border-border-subtle bg-card shadow-e2"
+          : // Narrow-screen drawer variant fills its WorkspaceRailDrawer sheet —
+            // no floating chrome (the sheet itself is already the surface).
+            "bg-background/(--opacity-solid)",
+        className,
+      ].join(" ")}
     >
       {resizable ? (
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={t("chatPreviewRail.resizePanel")}
-        aria-valuenow={Math.round(width)}
-        aria-valuemin={SIDE_PANEL_MIN_WIDTH}
-        aria-valuemax={Math.round(Math.max(SIDE_PANEL_MIN_WIDTH, window.innerWidth - 192))}
-        tabIndex={0}
-        data-testid="chat-side-panel-width-splitter"
-        className="group absolute inset-y-0 left-0 z-50 flex w-2 -translate-x-1/2 cursor-col-resize touch-none select-none items-center justify-center outline-none"
-        onPointerDown={(event) => {
-          event.preventDefault();
-          event.currentTarget.setPointerCapture?.(event.pointerId);
-          resizeCleanupRef.current?.();
-          const el = asideRef.current;
-          let raf = 0;
-          // A drag applies width straight to the panel DOM (coalesced via rAF)
-          // and records it in widthRef — NOT React state — so a pointermove does
-          // not re-render the whole ChatView tree every frame. The final width is
-          // pushed to React state + persisted once on release.
-          const apply = (clientX: number) => {
-            const next = widthForClientX(clientX);
-            if (next == null) return;
-            widthRef.current = next;
-            if (raf) return;
-            raf = requestAnimationFrame(() => {
-              raf = 0;
-              if (el) el.style.width = `${widthRef.current}px`;
-            });
-          };
-          apply(event.clientX);
-          const onMove = (moveEvent: PointerEvent) => apply(moveEvent.clientX);
-          const cleanup = () => {
-            window.removeEventListener("pointermove", onMove);
-            window.removeEventListener("pointerup", cleanup);
-            window.removeEventListener("pointercancel", cleanup);
-            if (raf) cancelAnimationFrame(raf);
-            resizeCleanupRef.current = null;
-            onWidthChange(widthRef.current);
-            onWidthCommit(widthRef.current);
-          };
-          resizeCleanupRef.current = cleanup;
-          window.addEventListener("pointermove", onMove);
-          window.addEventListener("pointerup", cleanup);
-          window.addEventListener("pointercancel", cleanup);
-        }}
-        onKeyDown={(event) => {
-          const max = Math.max(SIDE_PANEL_MIN_WIDTH, window.innerWidth - 192);
-          const STEP = 16;
-          if (event.key === "ArrowLeft") {
-            event.preventDefault();
-            const v = clampNumber(width + STEP, SIDE_PANEL_MIN_WIDTH, max);
-            onWidthChange(v);
-            onWidthCommit(v);
-          } else if (event.key === "ArrowRight") {
-            event.preventDefault();
-            const v = clampNumber(width - STEP, SIDE_PANEL_MIN_WIDTH, max);
-            onWidthChange(v);
-            onWidthCommit(v);
-          } else if (event.key === "Home") {
-            event.preventDefault();
-            onWidthChange(SIDE_PANEL_MIN_WIDTH);
-            onWidthCommit(SIDE_PANEL_MIN_WIDTH);
-          } else if (event.key === "End") {
-            event.preventDefault();
-            onWidthChange(max);
-            onWidthCommit(max);
-          }
-        }}
-      >
-        <span className="h-full w-0.5 rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
-      </div>
+        <EdgeResizeBar
+          width={width}
+          edge="start"
+          onWidthChange={onWidthChange}
+          onWidthCommit={onWidthCommit}
+          min={SIDE_PANEL_MIN_WIDTH}
+          max={resolveSidePanelMaxWidth}
+          resetWidth={SIDE_PANEL_DEFAULT_WIDTH}
+          applyElementRef={asideRef}
+          ariaLabel={t("chatPreviewRail.resizePanel")}
+          data-testid="chat-side-panel-width-splitter"
+        />
       ) : null}
-      <div data-testid="chat-preview-rail" className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
+      <div
+        data-testid="chat-preview-rail"
+        className={`flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden ${resizable ? "rounded-2xl" : ""}`}
+      >
         <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
           <PanelRightClose className="h-4 w-4 text-muted-foreground" />
           <div className="min-w-0 flex-1">
