@@ -1,6 +1,6 @@
 # LVIS Observability Guide
 
-> Covers: Audit log · Plugin perf · LLM cost · DLP stats  
+> Covers: Audit log · Plugin perf · LLM cost · DLP stats
 > Sprint: Observability X-D (PR #113–#116)
 
 ---
@@ -63,7 +63,7 @@ Stats are **in-memory, per-session** — reset on app restart.
 | `lastCall` | UTC timestamp of most recent call |
 | `errorRate` | `errors / calls` — UI threshold: green <1%, amber 1–5%, red >5% |
 
-Collection point: `src/plugins/runtime.ts`.  
+Collection point: `src/plugins/runtime.ts`.
 IPC: `lvis:plugins:perf-stats` → `Record<pluginId, PluginPerfStats>`.
 
 > **Persistence gap**: Current implementation holds stats in memory only. If cross-session trends are needed, plan a `~/.lvis/perf/` write path in a future sprint.
