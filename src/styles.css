@@ -65,6 +65,34 @@
    */
   --color-ui-line: hsl(var(--ui-line));
 
+  /* ─── Depth: surface ladder ────────────────────────────────────────────
+   * Per-bundle surface elevation ladder. Each rung is a distinct lightness so
+   * layered chrome separates by tone alone (no border required). Bound here so
+   * `bg-surface`, `bg-surface-sunken`, `bg-surface-raised`, `bg-surface-overlay`
+   * resolve to the active bundle's ladder. Source triples live in every
+   * `:root[data-theme-bundle]` block below (and the pre-hydration `:root`).
+   */
+  --color-surface-sunken: hsl(var(--surface-sunken));
+  --color-surface: hsl(var(--surface));
+  --color-surface-raised: hsl(var(--surface-raised));
+  --color-surface-overlay: hsl(var(--surface-overlay));
+
+  /* Border split — hairline vs. assertive edge. `border-border-subtle` /
+   * `border-border-strong` sit either side of the existing `--border`. */
+  --color-border-subtle: hsl(var(--border-subtle));
+  --color-border-strong: hsl(var(--border-strong));
+
+  /* ─── Depth: elevation shadows (e1..e4) ────────────────────────────────
+   * The anti-flat core. Each bundle supplies its own umbra/penumbra stack
+   * (light shells: soft layered greys; dark shells: deeper drop + an inset
+   * top-edge highlight so raised surfaces catch light). Consumed as
+   * `shadow-e1` … `shadow-e4`. Source values live per-bundle below.
+   */
+  --shadow-e1: var(--shadow-e1);
+  --shadow-e2: var(--shadow-e2);
+  --shadow-e3: var(--shadow-e3);
+  --shadow-e4: var(--shadow-e4);
+
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
@@ -608,6 +636,16 @@
     --action-view:              262 83% 58%;
     --action-branch:            25 95% 53%;
     --action-compact:           262 83% 58%;
+    --surface-sunken:           222.2 84% 3.5%;
+    --surface:                  222.2 84% 7%;
+    --surface-raised:           222 44% 11%;
+    --surface-overlay:          220 40% 14%;
+    --border-subtle:            217 33% 14%;
+    --border-strong:            217 30% 26%;
+    --shadow-e1:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 1px 2px hsl(var(--overlay) / 0.5), 0 1px 1px hsl(var(--overlay) / 0.4);
+    --shadow-e2:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 2px 4px hsl(var(--overlay) / 0.5), 0 4px 10px hsl(var(--overlay) / 0.4);
+    --shadow-e3:                inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 8px 24px hsl(var(--overlay) / 0.5), 0 2px 6px hsl(var(--overlay) / 0.4);
+    --shadow-e4:                inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 16px 48px hsl(var(--overlay) / 0.6), 0 4px 12px hsl(var(--overlay) / 0.45);
     color-scheme: dark;
   }
 
@@ -665,6 +703,16 @@
     --action-view:              290 80% 60%;
     --action-branch:            25 95% 53%;
     --action-compact:           290 80% 60%;
+    --surface-sunken:           222.2 84% 3.5%;
+    --surface:                  222.2 84% 7%;
+    --surface-raised:           250 30% 12%;
+    --surface-overlay:          250 28% 15%;
+    --border-subtle:            217 33% 14%;
+    --border-strong:            270 24% 28%;
+    --shadow-e1:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 1px 2px hsl(var(--overlay) / 0.5), 0 1px 1px hsl(var(--overlay) / 0.4);
+    --shadow-e2:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 2px 4px hsl(var(--overlay) / 0.5), 0 4px 10px hsl(var(--overlay) / 0.4);
+    --shadow-e3:                inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 8px 24px hsl(var(--overlay) / 0.5), 0 2px 6px hsl(var(--overlay) / 0.4);
+    --shadow-e4:                inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 16px 48px hsl(var(--overlay) / 0.6), 0 4px 12px hsl(var(--overlay) / 0.45);
     color-scheme: dark;
   }
 
@@ -722,6 +770,16 @@
     --action-view:              170 70% 35%;
     --action-branch:            25 95% 53%;
     --action-compact:           170 70% 35%;
+    --surface-sunken:           210 40% 96%;
+    --surface:                  0 0% 100%;
+    --surface-raised:           0 0% 100%;
+    --surface-overlay:          0 0% 100%;
+    --border-subtle:            214 32% 94%;
+    --border-strong:            214 26% 82%;
+    --shadow-e1:                0 1px 2px hsl(var(--overlay) / 0.06), 0 1px 1px hsl(var(--overlay) / 0.04);
+    --shadow-e2:                0 2px 4px hsl(var(--overlay) / 0.06), 0 4px 12px hsl(var(--overlay) / 0.06);
+    --shadow-e3:                0 8px 24px hsl(var(--overlay) / 0.1), 0 2px 6px hsl(var(--overlay) / 0.06);
+    --shadow-e4:                0 16px 48px hsl(var(--overlay) / 0.14), 0 4px 12px hsl(var(--overlay) / 0.08);
     color-scheme: light;
   }
 
@@ -779,6 +837,16 @@
     --action-view:              263 70% 50%;
     --action-branch:            25 95% 53%;
     --action-compact:           263 70% 50%;
+    --surface-sunken:           40 22% 88%;
+    --surface:                  40 35% 96%;
+    --surface-raised:           40 40% 98%;
+    --surface-overlay:          0 0% 100%;
+    --border-subtle:            30 16% 82%;
+    --border-strong:            30 14% 68%;
+    --shadow-e1:                0 1px 2px hsl(var(--overlay) / 0.06), 0 1px 1px hsl(var(--overlay) / 0.04);
+    --shadow-e2:                0 2px 4px hsl(var(--overlay) / 0.06), 0 4px 12px hsl(var(--overlay) / 0.06);
+    --shadow-e3:                0 8px 24px hsl(var(--overlay) / 0.1), 0 2px 6px hsl(var(--overlay) / 0.06);
+    --shadow-e4:                0 16px 48px hsl(var(--overlay) / 0.14), 0 4px 12px hsl(var(--overlay) / 0.08);
     color-scheme: light;
   }
 
@@ -836,6 +904,16 @@
     --action-view:              263 70% 50%;
     --action-branch:            25 95% 53%;
     --action-compact:           263 70% 50%;
+    --surface-sunken:           0 0% 11%;
+    --surface:                  30 8% 20%;
+    --surface-raised:           33 10% 24%;
+    --surface-overlay:          35 12% 28%;
+    --border-subtle:            25 8% 24%;
+    --border-strong:            25 10% 38%;
+    --shadow-e1:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 1px 2px hsl(var(--overlay) / 0.5), 0 1px 1px hsl(var(--overlay) / 0.4);
+    --shadow-e2:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 2px 4px hsl(var(--overlay) / 0.5), 0 4px 10px hsl(var(--overlay) / 0.4);
+    --shadow-e3:                inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 8px 24px hsl(var(--overlay) / 0.5), 0 2px 6px hsl(var(--overlay) / 0.4);
+    --shadow-e4:                inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 16px 48px hsl(var(--overlay) / 0.6), 0 4px 12px hsl(var(--overlay) / 0.45);
     color-scheme: dark;
   }
 
@@ -893,6 +971,16 @@
     --action-view:              60 100% 50%;
     --action-branch:            60 100% 50%;
     --action-compact:           60 100% 50%;
+    --surface-sunken:           0 0% 0%;
+    --surface:                  0 0% 0%;
+    --surface-raised:           0 0% 8%;
+    --surface-overlay:          0 0% 12%;
+    --border-subtle:            0 0% 100%;
+    --border-strong:            0 0% 100%;
+    --shadow-e1:                inset 0 0 0 1px hsl(0 0% 100% / 0.5), 0 1px 2px hsl(var(--overlay) / 0.6);
+    --shadow-e2:                inset 0 0 0 1px hsl(0 0% 100% / 0.6), 0 2px 6px hsl(var(--overlay) / 0.7);
+    --shadow-e3:                inset 0 0 0 1px hsl(0 0% 100% / 0.7), 0 8px 24px hsl(var(--overlay) / 0.7);
+    --shadow-e4:                inset 0 0 0 1px hsl(0 0% 100% / 0.8), 0 16px 48px hsl(var(--overlay) / 0.8);
     color-scheme: dark;
   }
 
@@ -950,6 +1038,16 @@
     --action-view:              267 84% 81%;
     --action-branch:            23 92% 75%;
     --action-compact:           217 92% 76%;
+    --surface-sunken:           240 23% 9%;
+    --surface:                  240 23% 12%;
+    --surface-raised:           240 21% 16%;
+    --surface-overlay:          234 13% 24%;
+    --border-subtle:            234 13% 22%;
+    --border-strong:            234 13% 38%;
+    --shadow-e1:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 1px 2px hsl(var(--overlay) / 0.5), 0 1px 1px hsl(var(--overlay) / 0.4);
+    --shadow-e2:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 2px 4px hsl(var(--overlay) / 0.5), 0 4px 10px hsl(var(--overlay) / 0.4);
+    --shadow-e3:                inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 8px 24px hsl(var(--overlay) / 0.5), 0 2px 6px hsl(var(--overlay) / 0.4);
+    --shadow-e4:                inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 16px 48px hsl(var(--overlay) / 0.6), 0 4px 12px hsl(var(--overlay) / 0.45);
     color-scheme: dark;
   }
 
@@ -1007,6 +1105,16 @@
     --action-view:              266 85% 58%;
     --action-branch:            22 99% 52%;
     --action-compact:           220 91% 54%;
+    --surface-sunken:           220 20% 90%;
+    --surface:                  220 22% 92%;
+    --surface-raised:           220 23% 96%;
+    --surface-overlay:          0 0% 100%;
+    --border-subtle:            225 14% 84%;
+    --border-strong:            225 14% 70%;
+    --shadow-e1:                0 1px 2px hsl(var(--overlay) / 0.06), 0 1px 1px hsl(var(--overlay) / 0.04);
+    --shadow-e2:                0 2px 4px hsl(var(--overlay) / 0.06), 0 4px 12px hsl(var(--overlay) / 0.06);
+    --shadow-e3:                0 8px 24px hsl(var(--overlay) / 0.1), 0 2px 6px hsl(var(--overlay) / 0.06);
+    --shadow-e4:                0 16px 48px hsl(var(--overlay) / 0.14), 0 4px 12px hsl(var(--overlay) / 0.08);
     color-scheme: light;
   }
 
@@ -1064,6 +1172,16 @@
     --action-view:              210 34% 63%;
     --action-branch:            14 51% 63%;
     --action-compact:           193 43% 67%;
+    --surface-sunken:           220 16% 18%;
+    --surface:                  222 16% 28%;
+    --surface-raised:           220 17% 33%;
+    --surface-overlay:          220 16% 37%;
+    --border-subtle:            220 16% 32%;
+    --border-strong:            220 16% 46%;
+    --shadow-e1:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 1px 2px hsl(var(--overlay) / 0.5), 0 1px 1px hsl(var(--overlay) / 0.4);
+    --shadow-e2:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 2px 4px hsl(var(--overlay) / 0.5), 0 4px 10px hsl(var(--overlay) / 0.4);
+    --shadow-e3:                inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 8px 24px hsl(var(--overlay) / 0.5), 0 2px 6px hsl(var(--overlay) / 0.4);
+    --shadow-e4:                inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 16px 48px hsl(var(--overlay) / 0.6), 0 4px 12px hsl(var(--overlay) / 0.45);
     color-scheme: dark;
   }
 
@@ -1121,6 +1239,16 @@
     --action-view:              339 41% 68%;
     --action-branch:            24 99% 55%;
     --action-compact:           175 15% 58%;
+    --surface-sunken:           195 7% 9%;
+    --surface:                  0 0% 16%;
+    --surface-raised:           18 6% 20%;
+    --surface-overlay:          18 6% 24%;
+    --border-subtle:            20 8% 22%;
+    --border-strong:            20 8% 38%;
+    --shadow-e1:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 1px 2px hsl(var(--overlay) / 0.5), 0 1px 1px hsl(var(--overlay) / 0.4);
+    --shadow-e2:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 2px 4px hsl(var(--overlay) / 0.5), 0 4px 10px hsl(var(--overlay) / 0.4);
+    --shadow-e3:                inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 8px 24px hsl(var(--overlay) / 0.5), 0 2px 6px hsl(var(--overlay) / 0.4);
+    --shadow-e4:                inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 16px 48px hsl(var(--overlay) / 0.6), 0 4px 12px hsl(var(--overlay) / 0.45);
     color-scheme: dark;
   }
 
@@ -1178,6 +1306,16 @@
     --action-view:              237 43% 60%;
     --action-branch:            18 80% 44%;
     --action-compact:           205 69% 49%;
+    --surface-sunken:           46 45% 90%;
+    --surface:                  44 87% 94%;
+    --surface-raised:           44 80% 97%;
+    --surface-overlay:          46 42% 88%;
+    --border-subtle:            46 42% 84%;
+    --border-strong:            46 34% 70%;
+    --shadow-e1:                0 1px 2px hsl(var(--overlay) / 0.06), 0 1px 1px hsl(var(--overlay) / 0.04);
+    --shadow-e2:                0 2px 4px hsl(var(--overlay) / 0.06), 0 4px 12px hsl(var(--overlay) / 0.06);
+    --shadow-e3:                0 8px 24px hsl(var(--overlay) / 0.1), 0 2px 6px hsl(var(--overlay) / 0.06);
+    --shadow-e4:                0 16px 48px hsl(var(--overlay) / 0.14), 0 4px 12px hsl(var(--overlay) / 0.08);
     color-scheme: light;
   }
 
@@ -1235,6 +1373,16 @@
     --action-view:              267 57% 78%;
     --action-branch:            35 88% 72%;
     --action-compact:           189 43% 73%;
+    --surface-sunken:           249 22% 9%;
+    --surface:                  247 23% 15%;
+    --surface-raised:           248 22% 19%;
+    --surface-overlay:          248 25% 22%;
+    --border-subtle:            248 15% 24%;
+    --border-strong:            248 13% 40%;
+    --shadow-e1:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 1px 2px hsl(var(--overlay) / 0.5), 0 1px 1px hsl(var(--overlay) / 0.4);
+    --shadow-e2:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 2px 4px hsl(var(--overlay) / 0.5), 0 4px 10px hsl(var(--overlay) / 0.4);
+    --shadow-e3:                inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 8px 24px hsl(var(--overlay) / 0.5), 0 2px 6px hsl(var(--overlay) / 0.4);
+    --shadow-e4:                inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 16px 48px hsl(var(--overlay) / 0.6), 0 4px 12px hsl(var(--overlay) / 0.45);
     color-scheme: dark;
   }
 
@@ -1292,6 +1440,16 @@
     --action-view:              174 65% 45%;
     --action-branch:            38 86% 62%;
     --action-compact:           260 45% 68%;
+    --surface-sunken:           24 8% 5%;
+    --surface:                  24 7% 12%;
+    --surface-raised:           26 8% 16%;
+    --surface-overlay:          28 8% 20%;
+    --border-subtle:            28 7% 18%;
+    --border-strong:            28 7% 34%;
+    --shadow-e1:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 1px 2px hsl(var(--overlay) / 0.5), 0 1px 1px hsl(var(--overlay) / 0.4);
+    --shadow-e2:                inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 2px 4px hsl(var(--overlay) / 0.5), 0 4px 10px hsl(var(--overlay) / 0.4);
+    --shadow-e3:                inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 8px 24px hsl(var(--overlay) / 0.5), 0 2px 6px hsl(var(--overlay) / 0.4);
+    --shadow-e4:                inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 16px 48px hsl(var(--overlay) / 0.6), 0 4px 12px hsl(var(--overlay) / 0.45);
     color-scheme: dark;
   }
 
@@ -1349,63 +1507,223 @@
     --action-view:              291 82% 42%;
     --action-branch:            35 92% 43%;
     --action-compact:           343 78% 44%;
+    --surface-sunken:           342 45% 96%;
+    --surface:                  345 70% 98%;
+    --surface-raised:           0 0% 100%;
+    --surface-overlay:          0 0% 100%;
+    --border-subtle:            340 34% 92%;
+    --border-strong:            340 28% 76%;
+    --shadow-e1:                0 1px 2px hsl(var(--overlay) / 0.06), 0 1px 1px hsl(var(--overlay) / 0.04);
+    --shadow-e2:                0 2px 4px hsl(var(--overlay) / 0.06), 0 4px 12px hsl(var(--overlay) / 0.06);
+    --shadow-e3:                0 8px 24px hsl(var(--overlay) / 0.1), 0 2px 6px hsl(var(--overlay) / 0.06);
+    --shadow-e4:                0 16px 48px hsl(var(--overlay) / 0.14), 0 4px 12px hsl(var(--overlay) / 0.08);
     color-scheme: light;
   }
 
-  /* ── Default (no bundle set) → cherry-blossom tokens for pre-hydration ── */
-  :root {
-    --ui-line:                  343 52% 43%;
-    --background:               0 0% 100%;
-    --foreground:               342 26% 12%;
-    --card:                     345 70% 98%;
-    --card-foreground:          342 26% 12%;
+  /* ── 15. gallery ── light + quiet near-black ink, hairline frames ────── */
+  :root[data-theme-bundle="gallery"] {
+    --ui-line:                  0 0% 40%;
+    --background:               0 0% 98%;     /* #fafafa canvas */
+    --foreground:               0 0% 11%;     /* oklch(.205) ≈ #1c1c1c ink */
+    --card:                     0 0% 100%;    /* #fff */
+    --card-foreground:          0 0% 11%;
     --popover:                  0 0% 100%;
-    --popover-foreground:       342 26% 12%;
-    --primary:                  343 78% 44%;
-    --primary-foreground:       0 0% 100%;
-    --secondary:                348 72% 95%;
-    --secondary-foreground:     342 32% 18%;
-    --muted:                    342 45% 96%;
-    --muted-foreground:         340 18% 36%;
-    --accent:                   332 74% 92%;
-    --accent-foreground:        342 36% 16%;
-    --destructive:              355 78% 44%;
+    --popover-foreground:       0 0% 11%;
+    --primary:                  0 0% 11%;      /* near-black ink primary */
+    --primary-foreground:       0 0% 98%;
+    --secondary:                0 0% 96%;
+    --secondary-foreground:     0 0% 11%;
+    --muted:                    0 0% 96%;
+    --muted-foreground:         0 0% 43%;      /* #6d6d6d — clears WCAG AA 4.5 on muted */
+    --accent:                   0 0% 94%;
+    --accent-foreground:        0 0% 11%;
+    --destructive:              358 75% 49%;
     --destructive-foreground:   0 0% 100%;
-    --warning:                  35 92% 43%;
-    --warning-foreground:       342 26% 12%;
-    --success:                  150 52% 36%;
+    --warning:                  35 92% 40%;
+    --warning-foreground:       0 0% 100%;
+    --success:                  152 56% 34%;
     --success-foreground:       0 0% 100%;
-    --info:                     220 78% 48%;
+    --info:                     212 90% 44%;
     --info-foreground:          0 0% 100%;
-    --emphasis:                 41 91% 50%;
-    --emphasis-foreground:      342 26% 12%;
-    --border:                   340 30% 84%;
-    --input:                    340 30% 84%;
-    --ring:                     343 78% 44%;
-    --message-user-bg:          342 78% 86%;
-    --message-user-fg:          342 34% 14%;
+    --emphasis:                 40 96% 46%;
+    --emphasis-foreground:      0 0% 11%;
+    --border:                   0 0% 90%;      /* #e5e5e5 hairline */
+    --input:                    0 0% 90%;
+    --ring:                     0 0% 11%;
+    --message-user-bg:          0 0% 94%;
+    --message-user-fg:          0 0% 11%;
     --input-bar-bg:             0 0% 100%;
-    --overlay:                  342 36% 10%;
-    --hover-overlay:            342 26% 12%;
-    --focus-ring:               343 78% 44%;
-    --link-fg:                  291 82% 38%;
-    --selection-bg:             342 78% 86%;
-    --selection-fg:             342 34% 14%;
-    --scrollbar-thumb:          340 34% 62%;
-    --scrollbar-track:          342 45% 96%;
-    --kbd-bg:                   345 60% 97%;
-    --kbd-border:               340 30% 84%;
-    --code-bg:                  345 60% 98%;
-    --code-fg:                  342 26% 12%;
-    --code-border:              340 30% 84%;
-    --chart-1:                  343 78% 44%;
-    --chart-2:                  291 82% 42%;
-    --chart-3:                  150 52% 36%;
-    --chart-4:                  220 78% 48%;
-    --chart-5:                  41 91% 50%;
-    --action-view:              291 82% 42%;
-    --action-branch:            35 92% 43%;
-    --action-compact:           343 78% 44%;
+    --overlay:                  0 0% 4%;
+    --hover-overlay:            0 0% 11%;
+    --focus-ring:               0 0% 11%;
+    --link-fg:                  212 90% 44%;
+    --selection-bg:             0 0% 88%;
+    --selection-fg:             0 0% 11%;
+    --scrollbar-thumb:          0 0% 80%;
+    --scrollbar-track:          0 0% 96%;
+    --kbd-bg:                   0 0% 96%;
+    --kbd-border:               0 0% 88%;
+    --code-bg:                  0 0% 97%;
+    --code-fg:                  0 0% 11%;
+    --code-border:              0 0% 90%;
+    --chart-1:                  212 90% 44%;
+    --chart-2:                  152 56% 34%;
+    --chart-3:                  262 60% 55%;
+    --chart-4:                  25 90% 48%;
+    --chart-5:                  330 65% 50%;
+    --action-view:              262 60% 55%;
+    --action-branch:            25 90% 48%;
+    --action-compact:           212 90% 44%;
+    --surface-sunken:           0 0% 96%;
+    --surface:                  0 0% 100%;
+    --surface-raised:           0 0% 100%;
+    --surface-overlay:          0 0% 100%;
+    --border-subtle:            0 0% 93%;
+    --border-strong:            0 0% 82%;
+    --shadow-e1:                0 1px 2px hsl(var(--overlay) / 0.06), 0 1px 1px hsl(var(--overlay) / 0.04);
+    --shadow-e2:                0 2px 4px hsl(var(--overlay) / 0.06), 0 4px 12px hsl(var(--overlay) / 0.06);
+    --shadow-e3:                0 8px 24px hsl(var(--overlay) / 0.1), 0 2px 6px hsl(var(--overlay) / 0.06);
+    --shadow-e4:                0 16px 48px hsl(var(--overlay) / 0.14), 0 4px 12px hsl(var(--overlay) / 0.08);
+    color-scheme: light;
+  }
+
+  /* ── 16. moonstone ── light + soft periwinkle sheen (default) ────────── */
+  :root[data-theme-bundle="moonstone"] {
+    --ui-line:                  228 12% 40%;
+    --background:               0 0% 100%;     /* pure white canvas */
+    --foreground:               225 12% 8%;    /* #121317 ink */
+    --card:                     0 0% 100%;
+    --card-foreground:          225 12% 8%;
+    --popover:                  0 0% 100%;
+    --popover-foreground:       225 12% 8%;
+    --primary:                  225 12% 12%;   /* graphite ink primary */
+    --primary-foreground:       0 0% 100%;
+    --secondary:                228 30% 96%;   /* periwinkle wash */
+    --secondary-foreground:     225 12% 12%;
+    --muted:                    228 26% 96%;
+    --muted-foreground:         227 6% 29%;    /* #45474d */
+    --accent:                   225 33% 91%;   /* #dfe3ef selection tint */
+    --accent-foreground:        225 12% 12%;
+    --destructive:              358 70% 52%;
+    --destructive-foreground:   0 0% 100%;
+    --warning:                  35 88% 44%;
+    --warning-foreground:       0 0% 100%;
+    --success:                  152 52% 36%;
+    --success-foreground:       0 0% 100%;
+    --info:                     224 52% 58%;
+    --info-foreground:          0 0% 100%;
+    --emphasis:                 40 92% 48%;
+    --emphasis-foreground:      225 12% 8%;
+    --border:                   228 16% 90%;   /* rgba(33,34,38,.08)-ish hairline */
+    --input:                    228 16% 90%;
+    --ring:                     224 40% 66%;   /* periwinkle focus */
+    --message-user-bg:          225 33% 93%;   /* soft periwinkle bubble */
+    --message-user-fg:          225 14% 14%;
+    --input-bar-bg:             0 0% 100%;
+    --overlay:                  228 20% 8%;
+    --hover-overlay:            225 12% 12%;
+    --focus-ring:               224 44% 62%;
+    --link-fg:                  224 56% 52%;
+    --selection-bg:             225 33% 91%;   /* #dfe3ef */
+    --selection-fg:             225 14% 14%;
+    --scrollbar-thumb:          228 18% 80%;
+    --scrollbar-track:          228 26% 96%;
+    --kbd-bg:                   228 26% 96%;
+    --kbd-border:               228 16% 88%;
+    --code-bg:                  228 30% 97%;
+    --code-fg:                  225 12% 12%;
+    --code-border:              228 16% 90%;
+    --chart-1:                  224 52% 62%;   /* periwinkle */
+    --chart-2:                  152 52% 40%;
+    --chart-3:                  268 46% 62%;
+    --chart-4:                  28 82% 54%;
+    --chart-5:                  330 58% 58%;
+    --action-view:              268 46% 58%;
+    --action-branch:            28 82% 52%;
+    --action-compact:           224 52% 58%;
+    --surface-sunken:           228 30% 97%;
+    --surface:                  0 0% 100%;
+    --surface-raised:           0 0% 100%;
+    --surface-overlay:          0 0% 100%;
+    --border-subtle:            228 24% 94%;
+    --border-strong:            228 18% 84%;
+    /* Premium layered shadows — periwinkle-cool umbra, softly diffused. */
+    --shadow-e1:                0 1px 2px hsl(var(--overlay) / 0.05), 0 1px 3px hsl(var(--overlay) / 0.05);
+    --shadow-e2:                0 2px 6px hsl(var(--overlay) / 0.06), 0 6px 16px hsl(var(--overlay) / 0.07);
+    --shadow-e3:                0 10px 30px hsl(var(--overlay) / 0.1), 0 3px 8px hsl(var(--overlay) / 0.06);
+    --shadow-e4:                0 20px 56px hsl(var(--overlay) / 0.14), 0 6px 16px hsl(var(--overlay) / 0.08);
+    /* Pill-leaning radius for the moonstone look. */
+    --radius:                   0.75rem;
+    color-scheme: light;
+  }
+
+  /* ── Default (no bundle set) → moonstone tokens for pre-hydration ──────
+   * Mirrors :root[data-theme-bundle="moonstone"] above so cold-boot frame-0
+   * paints the default bundle before ThemeProvider writes data-theme-bundle. */
+  :root {
+    --ui-line:                  228 12% 40%;
+    --background:               0 0% 100%;
+    --foreground:               225 12% 8%;
+    --card:                     0 0% 100%;
+    --card-foreground:          225 12% 8%;
+    --popover:                  0 0% 100%;
+    --popover-foreground:       225 12% 8%;
+    --primary:                  225 12% 12%;
+    --primary-foreground:       0 0% 100%;
+    --secondary:                228 30% 96%;
+    --secondary-foreground:     225 12% 12%;
+    --muted:                    228 26% 96%;
+    --muted-foreground:         227 6% 29%;
+    --accent:                   225 33% 91%;
+    --accent-foreground:        225 12% 12%;
+    --destructive:              358 70% 52%;
+    --destructive-foreground:   0 0% 100%;
+    --warning:                  35 88% 44%;
+    --warning-foreground:       0 0% 100%;
+    --success:                  152 52% 36%;
+    --success-foreground:       0 0% 100%;
+    --info:                     224 52% 58%;
+    --info-foreground:          0 0% 100%;
+    --emphasis:                 40 92% 48%;
+    --emphasis-foreground:      225 12% 8%;
+    --border:                   228 16% 90%;
+    --input:                    228 16% 90%;
+    --ring:                     224 40% 66%;
+    --message-user-bg:          225 33% 93%;
+    --message-user-fg:          225 14% 14%;
+    --input-bar-bg:             0 0% 100%;
+    --overlay:                  228 20% 8%;
+    --hover-overlay:            225 12% 12%;
+    --focus-ring:               224 44% 62%;
+    --link-fg:                  224 56% 52%;
+    --selection-bg:             225 33% 91%;
+    --selection-fg:             225 14% 14%;
+    --scrollbar-thumb:          228 18% 80%;
+    --scrollbar-track:          228 26% 96%;
+    --kbd-bg:                   228 26% 96%;
+    --kbd-border:               228 16% 88%;
+    --code-bg:                  228 30% 97%;
+    --code-fg:                  225 12% 12%;
+    --code-border:              228 16% 90%;
+    --chart-1:                  224 52% 62%;
+    --chart-2:                  152 52% 40%;
+    --chart-3:                  268 46% 62%;
+    --chart-4:                  28 82% 54%;
+    --chart-5:                  330 58% 58%;
+    --action-view:              268 46% 58%;
+    --action-branch:            28 82% 52%;
+    --action-compact:           224 52% 58%;
+    --surface-sunken:           228 30% 97%;
+    --surface:                  0 0% 100%;
+    --surface-raised:           0 0% 100%;
+    --surface-overlay:          0 0% 100%;
+    --border-subtle:            228 24% 94%;
+    --border-strong:            228 18% 84%;
+    --shadow-e1:                0 1px 2px hsl(var(--overlay) / 0.05), 0 1px 3px hsl(var(--overlay) / 0.05);
+    --shadow-e2:                0 2px 6px hsl(var(--overlay) / 0.06), 0 6px 16px hsl(var(--overlay) / 0.07);
+    --shadow-e3:                0 10px 30px hsl(var(--overlay) / 0.1), 0 3px 8px hsl(var(--overlay) / 0.06);
+    --shadow-e4:                0 20px 56px hsl(var(--overlay) / 0.14), 0 6px 16px hsl(var(--overlay) / 0.08);
+    --radius:                   0.75rem;
     color-scheme: light;
   }
 
