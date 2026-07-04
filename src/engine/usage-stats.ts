@@ -150,22 +150,32 @@ function addTo(
   if (!costKnown) target.unknownCostTurns = (target.unknownCostTurns ?? 0) + 1;
 }
 
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
 function dateKey(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  return new Date(d.getTime() + KST_OFFSET_MS).toISOString().slice(0, 10);
 }
 
-/** ISO week starts Monday. */
-function weekStart(d: Date): Date {
-  const x = new Date(d);
+function shiftDateKey(key: string, days: number): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  if (!match) return key;
+  const shifted = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + days));
+  return shifted.toISOString().slice(0, 10);
+}
+
+/** KST-local week starts Monday. */
+function weekStartKey(d: Date): string {
+  const x = new Date(d.getTime() + KST_OFFSET_MS);
   x.setUTCHours(0, 0, 0, 0);
-  const day = x.getUTCDay(); // 0 Sun .. 6 Sat
+  const day = x.getUTCDay(); // 0 Sun .. 6 Sat in KST civil date
   const diff = (day === 0 ? 6 : day - 1);
   x.setUTCDate(x.getUTCDate() - diff);
-  return x;
+  return x.toISOString().slice(0, 10);
 }
 
-function monthStart(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+function monthStartKey(d: Date): string {
+  const x = new Date(d.getTime() + KST_OFFSET_MS);
+  return `${x.getUTCFullYear()}-${String(x.getUTCMonth() + 1).padStart(2, "0")}-01`;
 }
 
 /**
@@ -175,11 +185,12 @@ export function readAuditEntries(auditDir: string, days: number = 60): AuditTurn
   if (!existsSync(auditDir)) return [];
   const cutoff = new Date();
   cutoff.setUTCDate(cutoff.getUTCDate() - days);
-  const cutoffKey = dateKey(cutoff);
+  const cutoffDateKey = dateKey(cutoff);
+  const cutoffFileKey = shiftDateKey(cutoffDateKey, -1);
 
   const files = readdirSync(auditDir)
     .filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f))
-    .filter((f) => f.slice(0, 10) >= cutoffKey)
+    .filter((f) => f.slice(0, 10) >= cutoffFileKey)
     .sort();
 
   const out: AuditTurnEntry[] = [];
@@ -194,7 +205,8 @@ export function readAuditEntries(auditDir: string, days: number = 60): AuditTurn
       if (!line.trim()) continue;
       try {
         const entry = JSON.parse(line) as AuditTurnEntry;
-        if (entry.type === "turn") out.push(entry);
+        const ts = new Date(entry.timestamp);
+        if (entry.type === "turn" && !Number.isNaN(ts.getTime()) && dateKey(ts) >= cutoffDateKey) out.push(entry);
       } catch {
         // skip malformed
       }
@@ -211,8 +223,8 @@ export function computeUsageSummary(
   now: Date = new Date(),
 ): UsageSummary {
   const todayKey = dateKey(now);
-  const weekKey = dateKey(weekStart(now));
-  const monthKey = dateKey(monthStart(now));
+  const weekKey = weekStartKey(now);
+  const monthKey = monthStartKey(now);
 
   const today = emptyTotals();
   const thisWeek = emptyTotals();
@@ -320,7 +332,7 @@ export function getUsageRange(opts: UsageRangeOptions): UsageSummary {
     .filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f))
     .filter((f) => {
       const d = f.slice(0, 10);
-      return d >= opts.dateFrom && d <= opts.dateTo;
+      return d >= shiftDateKey(opts.dateFrom, -1) && d <= shiftDateKey(opts.dateTo, 1);
     })
     .sort();
 
@@ -344,7 +356,9 @@ export function getUsageRange(opts: UsageRangeOptions): UsageSummary {
   }
 
   const filtered = entries.filter((e) => {
-    const d = e.timestamp.slice(0, 10);
+    const ts = new Date(e.timestamp);
+    if (Number.isNaN(ts.getTime())) return false;
+    const d = dateKey(ts);
     return d >= opts.dateFrom && d <= opts.dateTo;
   });
 

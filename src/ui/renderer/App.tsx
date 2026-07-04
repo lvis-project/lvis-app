@@ -47,6 +47,13 @@ import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
+import type { ProjectIdentity } from "../../shared/project-identity.js";
+import {
+  defaultProjectFromProjects,
+  projectIdentityFromPayload,
+  projectRootEquals,
+  workspaceRootsToProjects,
+} from "../../shared/project-identity.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -161,6 +168,8 @@ export function App() {
   } = useAppMode(api);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
+  const [workspaceProjects, setWorkspaceProjects] = useState<ProjectIdentity[]>([]);
+  const [activeProject, setActiveProject] = useState<ProjectIdentity | undefined>(undefined);
 
   // Dev tools — Cmd/Ctrl+Shift+D toggles the floating panel.
   // Listener is only bound in dev mode (`window.__lvisDevMode === true`) so
@@ -243,6 +252,7 @@ export function App() {
   } = useStarred(api);
   const {
     currentSessionId, currentSessionKind, currentSessionTitle, sessions, refreshSessionId, refreshSessions,
+    currentSessionProject,
     handleLoadSession: sessionLoad, handleFork: sessionFork,
   } = useSessions(api, applyInitialSession);
   const attachmentSessionScopeRef = useRef<{ initialized: boolean; sessionId?: string }>({
@@ -261,6 +271,37 @@ export function App() {
     scope.sessionId = currentSessionId;
     setAttachments([]);
   }, [currentSessionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.lvis?.workspace?.listRoots?.().then((result) => {
+      if (cancelled || !result?.ok) return;
+      const roots = Array.isArray(result.roots) ? result.roots : [];
+      const projects = workspaceRootsToProjects(result.defaultRoot, roots, t("sidebar.currentProject"));
+      setWorkspaceProjects(projects);
+      setActiveProject((current) => current ?? defaultProjectFromProjects(projects));
+    }).catch(() => {
+      // The backend still defaults chat creation to the anchored workspace root.
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
+
+  const resolveKnownProject = useCallback((project: ProjectIdentity | undefined): ProjectIdentity | undefined => {
+    if (!project) return undefined;
+    return workspaceProjects.find((candidate) => projectRootEquals(candidate.projectRoot, project.projectRoot)) ?? project;
+  }, [workspaceProjects]);
+
+  useEffect(() => {
+    const sessionProject = projectIdentityFromPayload(currentSessionProject);
+    if (sessionProject) setActiveProject(resolveKnownProject(sessionProject));
+  }, [currentSessionProject, resolveKnownProject]);
+
+  const defaultWorkspaceProject = useMemo(
+    () => defaultProjectFromProjects(workspaceProjects),
+    [workspaceProjects],
+  );
 
   const handleOpenRoutineSession = useCallback(
     async (sessionId: string) => {
@@ -524,15 +565,19 @@ export function App() {
     [llmVendor, llmModel],
   );
 
-  const handleNewChat = useCallback(async () => {
+  const handleNewChat = useCallback(async (project?: { projectRoot?: string; projectName?: string }) => {
     if (streaming) { console.warn("new chat blocked during streaming"); return; }
-    await api.chatNew();
+    const nextProject = resolveKnownProject(projectIdentityFromPayload(project)) ?? activeProject ?? defaultWorkspaceProject;
+    await api.chatNew(nextProject
+      ? { projectRoot: nextProject.projectRoot, projectName: nextProject.projectName }
+      : undefined);
+    if (nextProject) setActiveProject(nextProject);
     clearForNewChat();
     resetForNewSession();
     setActiveView("home");
     await refreshSessionId();
     await refreshSessions();
-  }, [api, streaming, refreshSessionId, refreshSessions, clearForNewChat, resetForNewSession]);
+  }, [activeProject, api, clearForNewChat, defaultWorkspaceProject, refreshSessionId, refreshSessions, resetForNewSession, resolveKnownProject, streaming]);
 
   // ─── Effects ──────────────────────────────────
   const toggleCommandPopover = useCallback(() => {
@@ -573,6 +618,9 @@ export function App() {
   );
 
   const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
+  const onNewChatForProject = useCallback((project: { projectRoot?: string; projectName?: string }) => {
+    void handleNewChat(project);
+  }, [handleNewChat]);
   const handleMarketplaceAnnouncementDismiss = useCallback(
     (id: number) => {
       dismissMarketplaceAnnouncement(id).catch((err) => {
@@ -654,6 +702,9 @@ export function App() {
         pluginAuthStatuses={pluginAuthStatuses}
         onOpenSettings={onOpenSettings}
         onNewChat={onNewChat}
+        onNewChatForProject={onNewChatForProject}
+        workspaceProjects={workspaceProjects}
+        activeProject={activeProject ?? defaultWorkspaceProject}
         onOpenMarketplace={onOpenMarketplace}
         marketplaceUrlReady={marketplaceUrlReady}
         onOpenUnifiedSearch={() => { searchOpenOverlay(); }}
@@ -692,7 +743,6 @@ export function App() {
         onSearchClose={searchCloseOverlay}
         onSearchLoadSession={handleLoadSessionAndRefresh}
         setActiveView={setActiveView}
-        onRefreshSessions={refreshSessions}
         sidePanelOpen={sidePanelOpen}
         onToggleSidePanel={handleToggleSidePanel}
       >
@@ -729,10 +779,10 @@ export function App() {
             currentSessionKind={currentSessionKind}
             currentSessionTitle={currentSessionTitle}
             sessions={sessions}
+            activeProject={activeProject ?? defaultWorkspaceProject}
             refreshStarred={refreshStarred}
             onActivateHome={() => setActiveView("home")}
             onJumpToSession={handleLoadSessionAndRefresh}
-            onRefreshSessions={refreshSessions}
             chatContextValue={chatContextValue}
             onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
             /* opts 의 inputOrigin / injectHint 가 그대로 handleAsk 4번째

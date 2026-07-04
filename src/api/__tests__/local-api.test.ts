@@ -71,6 +71,28 @@ describe("local-api dispatch — public read routing", () => {
     expect(listSessionsPage).toHaveBeenCalledTimes(1);
     expect(result).toEqual({ ok: true, data: { current: "session-1", sessions: [] } });
   });
+
+  it("keeps usage daily summary internal because it can trigger an LLM call", async () => {
+    const generateText = vi.fn(async () => "요약 완료");
+    const api = createLocalApi(
+      makeDeps({
+        conversationLoop: {
+          getSessionId: () => "session-1",
+          permissionManager: { getMode: () => "default" },
+          generateText,
+        },
+      }),
+    );
+
+    const result = await api.dispatch({
+      channel: CHANNELS.usage.dailySummary,
+      origin: "local-api",
+      args: { date: "2026-07-04", locale: "ko-KR", usage: { totalTokens: 120 } },
+    });
+
+    expect(generateText).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: false, error: LOCAL_API_CHANNEL_NOT_PUBLIC });
+  });
 });
 
 describe("local-api dispatch — gesture-gated mutating channels are blocked", () => {

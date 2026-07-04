@@ -319,6 +319,15 @@ export interface ConversationLoopDeps {
   additionalDirectories?: readonly string[];
   /** Live reader for foreground settings-backed additional directories. */
   getAdditionalDirectories?: () => readonly string[];
+  /** Runtime predicate for the app-managed default workspace project root. */
+  isDefaultProjectRoot?: (projectRoot: string) => boolean;
+  /** Default project for main conversations when the user has not selected one. */
+  getDefaultProject?: () => { projectRoot?: string; projectName?: string; isDefault?: boolean };
+  /** Re-authorize and canonicalize a stored or renderer-supplied project root. */
+  authorizeProject?: (
+    projectRoot: string,
+    projectName?: string,
+  ) => { projectRoot: string; projectName?: string; isDefault?: boolean } | null;
   /**
    * Script hooks. Boot owns discovery/trust and injects the manager;
    * the executor only invokes the already-trusted generic hook contract.
