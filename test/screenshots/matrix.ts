@@ -26,6 +26,20 @@ export interface ScenarioEntry {
   topic: string;
   /** Element to crop the capture to. Full-window screenshot if omitted. */
   locator?: string;
+  /**
+   * Manifest ids of REAL plugins to side-load before launch (e.g.
+   * `['local-indexer']`). Their built `dist/` UI bundle is copied from the
+   * sibling `../lvis-plugin-<id>/` repo so the actual plugin UI renders — see
+   * `plugin-seed.ts` / `fixtures.ts`. Omit for host-only scenarios.
+   */
+  plugins?: readonly string[];
+  /**
+   * Keep the LLM permission reviewer ON for this scenario (default: it is
+   * disabled whenever `plugins` is set, so panel mount-time read tools don't
+   * pop the approval modal). Set true only for `plugin-permission-grant`, whose
+   * capture target IS that approval modal.
+   */
+  keepReviewer?: boolean;
   /** Navigate/seed steps run before capture. Required unless `skip` is set. */
   steps?: (ctx: ScenarioContext) => Promise<void>;
   /** Honest skip reason. Mutually exclusive with `steps`. */
@@ -44,6 +58,63 @@ async function typeComposerMessage(page: Page, text: string): Promise<void> {
   const composer = page.locator('[data-testid="composer-textarea"]').first();
   await composer.waitFor({ state: 'visible', timeout: 15_000 });
   await composer.fill(text);
+}
+
+/**
+ * Open a seeded plugin's sidebar panel via the composer command popover, then
+ * wait for its UI bundle to render inside the plugin webview.
+ *
+ * Navigation reflects the CURRENT app (#1311 removed the standalone plugin-grid
+ * button from the input area — plugins now live inside the slash / command
+ * popover, see SlashPickerPanel.tsx): Ctrl/Cmd+K opens the popover →
+ * `slash-picker-cat-plugin` category → the plugin's row (matched by its
+ * manifest displayName label) → `onSelectPlugin(viewKey)`. In WORK mode (the
+ * harness default) `handleViewSelect` opens the panel INLINE via `setActiveView`
+ * (chat mode would detach into a separate window), so the webview mounts inside
+ * mainWindow and is screenshottable.
+ *
+ * The plugin UI loads inside an Electron <webview> (plugin-ui-host.tsx) whose
+ * guest content is the plugin's real bundle served over `lvis-plugin://asset`.
+ * Playwright cannot pierce a <webview>'s guest document with `.locator`, so we
+ * wait for the <webview> element to attach + finish loading and give the guest
+ * a settle beat, then screenshot the host panel region (which contains it).
+ *
+ * @param label the plugin's manifest `ui[].displayName` (its row label in the
+ *   picker), e.g. "미팅" for meeting or "업무 도우미" for work-assistant.
+ */
+async function openPluginPanel(page: Page, label: string): Promise<void> {
+  await openWorkMode(page);
+
+  // Open the command popover (Ctrl/Cmd+K). The composer must be focused first
+  // so the global shortcut is in scope.
+  const composer = page.locator('[data-testid="composer-textarea"]').first();
+  await composer.waitFor({ state: 'visible', timeout: 15_000 });
+  await composer.click();
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.press(`${mod}+k`);
+
+  const picker = page.locator('[data-testid="slash-picker"]').first();
+  await picker.waitFor({ state: 'visible', timeout: 15_000 });
+
+  // Drill into the "plugin" category, then click the plugin's row by its label.
+  const pluginCat = page.locator('[data-testid="slash-picker-cat-plugin"]').first();
+  await pluginCat.waitFor({ state: 'visible', timeout: 15_000 });
+  await pluginCat.click();
+
+  const pluginGroup = page.locator('[data-testid="slash-group-plugin"]').first();
+  await pluginGroup.waitFor({ state: 'visible', timeout: 15_000 });
+  const row = pluginGroup.locator('[cmdk-item]').filter({ hasText: label }).first();
+  await row.waitFor({ state: 'visible', timeout: 15_000 });
+  await row.click();
+
+  // The plugin panel host mounts a <webview>. Wait for it to attach + finish
+  // its first load; the guest bundle then renders its own DOM inside.
+  const webview = page.locator('webview').first();
+  await webview.waitFor({ state: 'visible', timeout: 30_000 });
+  // Give the guest bundle a settle beat to paint its initial (empty-state) UI
+  // after did-finish-load. No host-observable signal crosses the <webview>
+  // boundary, so a fixed settle is the pragmatic wait here.
+  await page.waitForTimeout(2_500);
 }
 
 export const scenarios: Record<string, ScenarioEntry> = {
@@ -114,39 +185,70 @@ export const scenarios: Record<string, ScenarioEntry> = {
   },
   'chat-plugin-panel': {
     topic: 'chat',
-    skip:
-      'Plugin panel content is the plugin\'s own bundled UI (loaded via manifest `ui[].entry`). ' +
-      'The shared E2E plugin seeder (test/e2e/ui/fixtures.ts seedRepositoryPlugins) stubs this ' +
-      'with inert placeholder text ("E2E Plugin UI") — capturing it would produce a misleading ' +
-      'screenshot, not a real one. Needs the actual plugin repo\'s built UI bundle side-loaded.',
+    plugins: ['work-assistant'],
+    steps: async ({ page }) => {
+      // A real plugin's own bundled panel UI rendered inside the host, loaded via
+      // manifest `ui[].entry` from the REAL lvis-plugin-work-assistant dist (not
+      // the E2E "E2E Plugin UI" stub). Shows the work-assistant "스마트 감지"
+      // detector-toggle panel — the plugin's actual UI bundle in a webview.
+      await openPluginPanel(page, '업무 도우미');
+    },
   },
 
   // ---- plugin common ----------------------------------------------------
   'plugin-permission-grant': {
     topic: 'plugins',
-    skip:
-      'First-activation permission grant dialog fires from a real plugin\'s manifest-declared ' +
-      'capabilities at first tool call. Same plugin-UI-stub limitation as chat-plugin-panel.',
+    plugins: ['meeting'],
+    keepReviewer: true,
+    locator: '[data-testid="tool-approval-dialog"]',
+    steps: async ({ page }) => {
+      // With the reviewer left ON (keepReviewer), the real meeting panel's
+      // mount-time `meeting_list_preps` read call is deferred to the host's
+      // "Approve Tool Execution" permission modal — the plugin-first-tool-call
+      // permission grant this docs key depicts. Navigate to the panel; the modal
+      // appears over it. (openPluginPanel's own webview wait still succeeds — the
+      // webview attaches under the modal — then we assert the modal.)
+      await openPluginPanel(page, '미팅');
+      await page
+        .locator('[data-testid="tool-approval-dialog"]')
+        .first()
+        .waitFor({ state: 'visible', timeout: 20_000 });
+    },
   },
 
   // ---- local-indexer ------------------------------------------------
+  // local-indexer's REAL bundle IS side-loadable (its manifest + dist copy in
+  // via plugin-seed.ts and the plugin *loads*), but its compiled hostPlugin
+  // `start()` hard-throws "localIndexerPlugin: pythonExecutable이 설정되지
+  // 않았습니다" without a provisioned Python interpreter (host
+  // PythonRuntimeBootstrapper.ensureReady() is not run in this test env, and the
+  // bundle requires the kiwi/FTS5 Python worker even to expose its UI provider).
+  // The runtime tears the plugin down after the start failure, so no UI provider
+  // registers and the panel is unreachable. Provisioning a real Python runtime +
+  // native deps (kiwipiepy, FTS5) is heavy and out of scope for a screenshot
+  // harness. Verified: dist/src/main/main.js:~178046 (runStartWithTimeout →
+  // localIndexerPlugin start throw). Kept skipped honestly.
   'local-indexer-home': {
     topic: 'local-indexer',
     skip:
-      'Plugin UI screen — needs the real lvis-plugin-local-indexer built UI bundle, not the ' +
-      'E2E stub. Out of scope until a sibling checkout of that repo is wired as a seed source.',
+      'Real lvis-plugin-local-indexer bundle loads but its start() hard-throws without a ' +
+      'provisioned Python interpreter (pythonExecutable not set — PythonRuntimeBootstrapper ' +
+      'is not run in this harness), so the plugin is torn down and its UI provider never ' +
+      'registers. Needs a real Python worker (kiwi/FTS5) — out of scope for a screenshot harness.',
   },
   'local-indexer-indexing': {
     topic: 'local-indexer',
-    skip: 'Same as local-indexer-home, plus requires a live indexing job in progress.',
+    skip: 'Same Python-runtime blocker as local-indexer-home, plus requires a live indexing job.',
   },
   'local-indexer-add-folder': {
     topic: 'local-indexer',
-    skip: 'Same as local-indexer-home.',
+    skip: 'Same Python-runtime blocker as local-indexer-home.',
   },
   'local-indexer-search': {
     topic: 'local-indexer',
-    skip: 'Same as local-indexer-home, plus requires a real search result with LLM-authored citations.',
+    skip:
+      'Same Python-runtime blocker as local-indexer-home, plus requires a real search result ' +
+      'with LLM-authored citations.',
   },
   'local-indexer-search-2': {
     topic: 'local-indexer',
@@ -164,13 +266,24 @@ export const scenarios: Record<string, ScenarioEntry> = {
   // ---- meeting ------------------------------------------------
   'meeting-upcoming': {
     topic: 'meeting',
-    skip:
-      'Plugin UI screen (lvis-plugin-meeting) — needs the real built UI bundle, plus a seeded ' +
-      'upcoming-calendar-event fixture. Out of scope for this harness (see local-indexer-home).',
+    plugins: ['meeting'],
+    steps: async ({ page }) => {
+      // Real lvis-plugin-meeting UI. The panel's default tab ("예정 회의" /
+      // upcoming) renders its empty-state (no seeded calendar events — that
+      // would need ms-graph). Honest: this captures the upcoming-meeting panel
+      // in its no-events state, not a populated agenda.
+      await openPluginPanel(page, '미팅');
+    },
   },
   'meeting-minutes': {
     topic: 'meeting',
-    skip: 'Plugin UI screen requiring a completed recording + generated minutes. Same limitation.',
+    skip:
+      'The real lvis-plugin-meeting panel loads and is captured by meeting-upcoming, but the ' +
+      '"회의록" (minutes) tab and a populated minutes body live INSIDE the plugin <webview> guest ' +
+      'DOM (Playwright cannot click through a <webview> to switch its internal tab) AND require a ' +
+      'completed STT recording + generated minutes to populate — infeasible to seed (see ' +
+      'meeting-record-stt). Capturing the default tab under this key would be a misleading duplicate ' +
+      'of meeting-upcoming.',
   },
   'meeting-minutes-2': { topic: 'meeting', skip: 'Same as meeting-minutes.' },
   'meeting-minutes-3': { topic: 'meeting', skip: 'Same as meeting-minutes.' },
@@ -185,7 +298,13 @@ export const scenarios: Record<string, ScenarioEntry> = {
   // ---- ms-graph (Outlook) ------------------------------------------------
   'outlook-login-trigger': {
     topic: 'ms-graph',
-    skip: 'Plugin UI screen requiring the real ms-graph/outlook plugin bundle (not in this workspace\'s seed set).',
+    skip:
+      'The real lvis-plugin-ms-graph bundle IS side-loadable, but its manifest declares ' +
+      '`auth.loginTool: msgraph_auth`, so selecting the Outlook panel while unauthed goes ' +
+      'straight to the live Microsoft OAuth window (use-plugin-view-routing.ts handleViewSelect ' +
+      'calls loginTool on select for auth plugins) rather than rendering an inline pre-login ' +
+      'panel. Reaching a stable, non-OAuth trigger state needs a real/mocked auth session — ' +
+      'out of scope (see outlook-login-window).',
   },
   'outlook-login-window': {
     topic: 'ms-graph',
@@ -203,7 +322,11 @@ export const scenarios: Record<string, ScenarioEntry> = {
   // ---- meeting (recording) ------------------------------------------------
   'meeting-record': {
     topic: 'meeting',
-    skip: 'Plugin UI mini-widget for a live recording session. Plugin UI bundle out of scope.',
+    skip:
+      'The live-recording mini-widget is a separate detached BrowserWindow the meeting plugin ' +
+      'opens only after meeting_start begins a session (needs an active audio device / injected ' +
+      'PCM chunks); its waveform/transcript render is meaningless without a real audio source. ' +
+      'The real meeting panel itself is captured by meeting-upcoming.',
   },
   'meeting-record-stt': {
     topic: 'meeting',
@@ -211,28 +334,48 @@ export const scenarios: Record<string, ScenarioEntry> = {
   },
 
   // ---- work-assistant ------------------------------------------------
+  // These six keys are NOT plugin-panel screens — they are host-rendered
+  // notification cards (OS toast + host overlay) emitted when a work-assistant
+  // detector fires (work_assistant.alert.<intent>, see the plugin's
+  // notificationEvents + decision/*-detector.ts). Firing a detector needs real
+  // external signals (ms-graph email.new / calendar.event.conflict.detected /
+  // meeting.summary.created events) — the work-assistant src has NO dev/test
+  // trigger tool to synthesize them (verified: no demo/mock/seed IPC path in
+  // lvis-plugin-work-assistant/src). The plugin's own detector-toggle PANEL does
+  // render with the real bundle and is captured under chat-plugin-panel; these
+  // card states remain unreachable without a live upstream event source.
   'work-assistant-conflict': {
     topic: 'work-assistant',
-    skip: 'Plugin UI screen (lvis-plugin-work-assistant) requiring seeded calendar-conflict data + real bundle.',
+    skip:
+      'Host-rendered notification card (work_assistant.alert.calendar-conflict-prep), not a plugin ' +
+      'panel. Fires only on a real calendar.event.conflict.detected signal from ms-graph; no ' +
+      'dev/test trigger exists in the work-assistant plugin to synthesize it.',
   },
-  'work-assistant-conflict-2': { topic: 'work-assistant', skip: 'Same as work-assistant-conflict.' },
+  'work-assistant-conflict-2': { topic: 'work-assistant', skip: 'Same as work-assistant-conflict — host card needing a live external signal.' },
   'work-assistant-reminder': {
     topic: 'work-assistant',
-    skip: 'Plugin UI screen requiring a scheduled reminder trigger + real bundle.',
+    skip:
+      'Host-rendered reminder notification card, not a plugin panel. Needs a real scheduled/upstream ' +
+      'trigger (ms-graph/meeting event); no dev/test synthesizer exists in the plugin.',
   },
-  'work-assistant-reminder-2': { topic: 'work-assistant', skip: 'Same as work-assistant-reminder.' },
+  'work-assistant-reminder-2': { topic: 'work-assistant', skip: 'Same as work-assistant-reminder — host card needing a live external signal.' },
   'work-assistant-meeting-end-trigger': {
     topic: 'work-assistant',
-    skip: 'Plugin UI screen requiring a live meeting-end trigger + real bundle.',
+    skip:
+      'Host-rendered meeting-end notification card, not a plugin panel. Fires on a real ' +
+      'meeting.summary.created / meeting.ended event from the meeting plugin; no dev/test trigger exists.',
   },
-  'work-assistant-meeting-end-trigger-2': { topic: 'work-assistant', skip: 'Same as work-assistant-meeting-end-trigger.' },
+  'work-assistant-meeting-end-trigger-2': { topic: 'work-assistant', skip: 'Same as work-assistant-meeting-end-trigger — host card needing a live external signal.' },
 
   // ---- agent-hub plugin (host sidebar) ------------------------------------------------
   'agent-hub-my-work': {
     topic: 'agent-hub-plugin',
-    skip: 'Plugin UI screen (lvis-plugin-agent-hub) requiring the real built UI bundle + seeded task board data.',
+    skip:
+      'No agent-hub plugin bundle exists in this workspace — there is no lvis-plugin-agent-hub ' +
+      'repo, and no plugin.json anywhere declares a ui extension named my-work / team-board / ' +
+      'agent-hub (verified by scanning every lvis-plugin-*/plugin.json). Nothing to side-load.',
   },
-  'agent-hub-team-board': { topic: 'agent-hub-plugin', skip: 'Same as agent-hub-my-work.' },
+  'agent-hub-team-board': { topic: 'agent-hub-plugin', skip: 'Same as agent-hub-my-work — no agent-hub bundle exists.' },
 
   // ---- settings (not in the docs shot list by app- prefix, but part of the smoke subset) ----
   // Not a docs-site key — included as an extra smoke-subset target proving the
