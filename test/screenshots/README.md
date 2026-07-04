@@ -165,6 +165,6 @@ so was explicitly out of scope for this task.
 This branch (`feat/ui-depth-tokens`) changes `src/styles.css` / theme bundles /
 shadcn primitives. This harness does not touch any of those files — it just
 needs `bun run build` run first so the current theme is compiled into the
-bundle before capture (the plugin-panel captures show the antigravity default).
+bundle before capture (the plugin-panel captures show the moonstone default).
 Re-run the full matrix (`node scripts/capture-screenshots.mjs`) after any theme
 change to refresh the PNGs against the final theme.

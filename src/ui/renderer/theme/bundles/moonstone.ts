@@ -1,20 +1,22 @@
 import type { ThemeBundle } from "./types.js";
 
 /**
- * Antigravity — the default light shell, modelled on antigravity.google.
+ * Moonstone (문스톤) — the default light shell: a weightless white canvas with a
+ * soft periwinkle sheen (inspired by the antigravity.google reference).
  *
  * Pure-white canvas, near-black #121317 ink, and a soft periwinkle accent
- * family (#b7bfd9 tints for fills/focus, #dfe3ef selection). Radius leans
- * pill-ward (0.75rem, set in the CSS block) and depth is carried by premium,
- * softly-diffused layered shadows so surfaces feel lifted, not flat.
+ * family (#b7bfd9 tints for fills/focus, #dfe3ef selection) — the blue glow of
+ * a moonstone gem drifting across white. Radius leans pill-ward (0.75rem, set
+ * in the CSS block) and depth is carried by premium, softly-diffused layered
+ * shadows so surfaces feel lifted, not flat.
  *
  * Description is a plain literal (not a `t()` key) so this bundle ships without
  * touching the generated locale catalogs.
  */
-export const antigravityBundle: ThemeBundle = {
-  id: "antigravity",
-  name: "Antigravity",
-  description: "Pure white with a soft periwinkle accent and premium layered depth.",
+export const moonstoneBundle: ThemeBundle = {
+  id: "moonstone",
+  name: "Moonstone",
+  description: "Weightless white with a soft periwinkle sheen — the blue glow of a moonstone gem.",
   shell: "light",
   highContrast: false,
   tokens: {

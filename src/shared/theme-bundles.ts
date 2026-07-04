@@ -15,8 +15,8 @@
  */
 
 export const BUNDLE_IDS = [
-  "antigravity",
-  "marketplace",
+  "moonstone",
+  "gallery",
   "cherry-blossom",
   "tokyo-night",
   "midnight",
@@ -35,4 +35,4 @@ export const BUNDLE_IDS = [
 
 export type BundleId = (typeof BUNDLE_IDS)[number];
 
-export const DEFAULT_BUNDLE_ID: BundleId = "antigravity";
+export const DEFAULT_BUNDLE_ID: BundleId = "moonstone";

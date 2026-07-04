@@ -6,8 +6,8 @@
  */
 import type { ThemeBundle } from "./types.js";
 import type { BundleId } from "../../../../shared/theme-bundles.js";
-import { antigravityBundle } from "./antigravity.js";
-import { marketplaceBundle } from "./marketplace.js";
+import { moonstoneBundle } from "./moonstone.js";
+import { galleryBundle } from "./gallery.js";
 import { cherryBlossomBundle } from "./cherry-blossom.js";
 import { tokyoNightBundle } from "./tokyo-night.js";
 import { midnightBundle } from "./midnight.js";
@@ -33,8 +33,8 @@ export { BUNDLE_IDS } from "../../../../shared/theme-bundles.js";
 // uses an id not declared in theme-bundles.ts. No runtime guard needed.
 /** Ordered list of all built-in bundles (display order in AppearanceTab). */
 export const BUNDLES = [
-  antigravityBundle,
-  marketplaceBundle,
+  moonstoneBundle,
+  galleryBundle,
   cherryBlossomBundle,
   tokyoNightBundle,
   midnightBundle,
