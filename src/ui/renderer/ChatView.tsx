@@ -28,6 +28,7 @@ import type { LvisApi } from "./types.js";
 import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
+import type { ProjectIdentity } from "../../shared/project-identity.js";
 import { isTurnStartEntry } from "./utils/classify-turn-entries.js";
 import { collectChatPreviewModel } from "./preview/preview-targets.js";
 import {
@@ -117,9 +118,18 @@ export interface ChatViewProps {
   onSidePanelOpenChange?: (open: boolean) => void;
   /** Constrain transcript and composer to a centered reading column. */
   blogLayout?: boolean;
+  /** Active project — drives the empty-state composer's project selector trigger label. */
+  activeProject?: ProjectIdentity;
+  /** Full known project list — the SAME source Sidebar's project group reads
+   *  from, so the composer selector never drifts from the sidebar's list. */
+  workspaceProjects?: ProjectIdentity[];
+  /** Switch the active project — the SAME handler wired to the sidebar's project rows. */
+  onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
+  /** Re-fetch the workspace project list (e.g. after adding a project folder). */
+  onRefreshProjects?: () => void | Promise<void>;
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -180,6 +190,16 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     : blogLayout
       ? "mx-auto w-full max-w-[58rem] min-w-0"
       : "w-full max-w-full min-w-0";
+  // Empty-state composer project selector — open state is owned here (not
+  // inside ComposerProjectSelector) so it can be force-closed the instant the
+  // composer transitions off the centered layout (first message sent). A
+  // dropdown left open while its trigger's surrounding layout animates away
+  // would look broken; closing it here lets the dropdown's own exit
+  // animation run in lockstep with the composer's descent.
+  const [projectSelectorOpen, setProjectSelectorOpen] = useState(false);
+  useEffect(() => {
+    if (!emptyComposerCentered) setProjectSelectorOpen(false);
+  }, [emptyComposerCentered]);
   // Sub-agent spawns shown inline + in the workspace SubAgentViewer. The live
   // `subAgentSpawns` prop is populated ONLY from the in-flight agent-spawn
   // event stream, so a LOADED past session would show nothing. Mirror how
@@ -763,6 +783,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         onOpenApprovalQueue={onOpenApprovalQueue}
         askQuestions={askQuestions}
         onResolveAskQuestion={onResolveAskQuestion}
+        activeProject={activeProject}
+        workspaceProjects={workspaceProjects}
+        onNewChatForProject={onNewChatForProject}
+        onRefreshProjects={onRefreshProjects}
+        projectSelectorOpen={projectSelectorOpen}
+        onProjectSelectorOpenChange={setProjectSelectorOpen}
       />
       </div>
       {previewRailVisible && !isNarrow ? (

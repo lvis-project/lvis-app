@@ -790,6 +790,9 @@ export function App() {
             currentSessionTitle={currentSessionTitle}
             sessions={sessions}
             activeProject={activeProject ?? defaultWorkspaceProject}
+            workspaceProjects={workspaceProjects}
+            onNewChatForProject={onNewChatForProject}
+            onRefreshProjects={refreshWorkspaceProjects}
             refreshStarred={refreshStarred}
             onActivateHome={() => setActiveView("home")}
             onJumpToSession={handleLoadSessionAndRefresh}

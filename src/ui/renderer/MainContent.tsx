@@ -36,6 +36,17 @@ export interface MainContentProps {
   currentSessionTitle?: string;
   sessions: SessionSummary[];
   activeProject?: ProjectIdentity;
+  /** Full known project list — the SAME source Sidebar's project group reads
+   *  from, threaded here so the empty-state composer's project selector
+   *  (ComposerProjectSelector) shares one SOT with the sidebar. */
+  workspaceProjects?: ProjectIdentity[];
+  /** Switch the active project / start a new chat scoped to it — the SAME
+   *  handler wired to the sidebar's project rows. */
+  onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
+  /** Re-fetch the workspace project list (e.g. after adding a project folder
+   *  from the composer selector) — the same refresh the sidebar's context
+   *  menu already uses. */
+  onRefreshProjects?: () => void | Promise<void>;
   refreshStarred: () => void;
   // navigation
   appMode: AppMode;
@@ -155,6 +166,10 @@ function HomeChatPane(props: MainContentProps) {
         sidePanelOpen={props.sidePanelOpen}
         onSidePanelOpenChange={props.onSidePanelOpenChange}
         blogLayout={props.appMode === "work"}
+        activeProject={props.activeProject}
+        workspaceProjects={props.workspaceProjects}
+        onNewChatForProject={props.onNewChatForProject}
+        onRefreshProjects={props.onRefreshProjects}
       />
     </ChatContextProvider>
   );
