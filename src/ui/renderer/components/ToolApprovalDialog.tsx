@@ -300,6 +300,10 @@ export function ToolApprovalDialog({
   }, [request?.id, suggestedPurpose, elicitationFields]);
 
   const finalVerdict = request?.reviewerVerdict?.level ?? riskLevelForCategory(request?.toolCategory ?? "meta");
+  const isExternalOriginAgentAction =
+    request?.category === "agent-action" &&
+    request.kind === "agent-action" &&
+    (request.trustOrigin === "local-api" || request.trustOrigin === "cli");
 
   // HIGH verdict → focus NL field when dialog opens.
   useEffect(() => {
@@ -383,8 +387,9 @@ export function ToolApprovalDialog({
   // group: "이 세션만" → durable session grant, "영구 허용" → persistent.
   // HIGH verdict forces session (no persistent grant for HIGH-risk actions).
   // This is the durable choice that the memory store records.
+  const approvalIsOneShot = isMcpElicitation || isExternalOriginAgentAction;
   const primaryApproveChoice: ApprovalChoice =
-    isMcpElicitation
+    approvalIsOneShot
       ? "allow-once"
       : (finalVerdict !== "high" && scopeChoice === "persistent"
           ? "allow-always"
@@ -685,7 +690,7 @@ export function ToolApprovalDialog({
           </div>
 
           {/* Scope selector — LOW/MEDIUM only (HIGH is always session) */}
-          {finalVerdict !== "high" && !isMcpElicitation && (
+          {finalVerdict !== "high" && !approvalIsOneShot && (
             <div className="mt-3">
               <p className="mb-1.5 text-xs font-semibold">{tHook("toolApprovalDialog.approvalScope")}</p>
               <RadioGroup
@@ -706,7 +711,7 @@ export function ToolApprovalDialog({
           )}
 
           <div className="mt-4 flex flex-wrap justify-end gap-2 border-t pt-3">
-            {!isMcpElicitation && (
+            {!approvalIsOneShot && (
               <Button
                 size="sm"
                 variant="outline"
@@ -724,7 +729,7 @@ export function ToolApprovalDialog({
             >
               {tHook("toolApprovalDialog.denyOnce")}
             </Button>
-            {!isMcpElicitation && (
+            {!approvalIsOneShot && (
               <Button
                 size="sm"
                 variant="outline"
@@ -745,7 +750,7 @@ export function ToolApprovalDialog({
               aria-describedby={approveDisabled ? "nl-justification-hint" : undefined}
               data-testid="approve-button"
             >
-              {tHook("toolApprovalDialog.allow")}
+              {approvalIsOneShot ? tHook("toolApprovalDialog.allowOnce") : tHook("toolApprovalDialog.allow")}
             </Button>
             <span id="nl-justification-hint" className="sr-only">
               {tHook("toolApprovalDialog.highRiskNlRequired")}
