@@ -227,7 +227,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
     async (
       e,
       kind: "daily" | "weekly",
-      input?: { date?: string; weekIso?: string; weekOffset?: number },
+      input?: { date?: string; weekIso?: string; weekOffset?: number; projectRoot?: string; includeUnscoped?: boolean },
     ) => {
       if (!validateSender(e)) {
         auditUnauthorized(auditLogger, WORK_BOARD.generateReport, e);

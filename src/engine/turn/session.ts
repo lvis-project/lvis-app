@@ -14,6 +14,7 @@ import { createTracer } from "../../observability/conversation-trace.js";
 import { latestPersistedContextTokens } from "./context-carrier.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
 import { createLogger } from "../../lib/logger.js";
+import { projectBasename } from "../../shared/project-identity.js";
 
 const log = createLogger("lvis");
 
@@ -22,6 +23,7 @@ const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
 export interface SessionProjectContext {
   projectRoot?: string;
   projectName?: string;
+  isDefault?: boolean;
 }
 
 function isSafeSessionId(sessionId: unknown): sessionId is string {
@@ -35,8 +37,22 @@ function normalizeProjectString(value: unknown): string | null {
 }
 
 function applyProjectContext(self: ConversationLoop, project?: SessionProjectContext): void {
-  self.sessionProjectRoot = normalizeProjectString(project?.projectRoot);
-  self.sessionProjectName = normalizeProjectString(project?.projectName);
+  const projectRoot = normalizeProjectString(project?.projectRoot);
+  const projectName = normalizeProjectString(project?.projectName);
+  const projectIsDefault = projectRoot
+    ? project?.isDefault === true || self.deps.isDefaultProjectRoot?.(projectRoot) === true
+    : false;
+  self.sessionProjectRoot = projectRoot;
+  self.sessionProjectName = projectName;
+  self.sessionProjectIsDefault = projectIsDefault;
+  self.sessionAdditionalDirectories = projectRoot ? [projectRoot] : [];
+  self.deps.systemPromptBuilder.setProjectContext?.(projectRoot
+    ? {
+        projectRoot,
+        projectName: projectName ?? projectBasename(projectRoot),
+        ...(projectIsDefault ? { isDefault: true } : {}),
+      }
+    : null);
 }
 
 function currentProjectContext(self: ConversationLoop): SessionProjectContext {
@@ -67,10 +83,10 @@ export function newConversation(
     self.sessionKind = kind;
     self.sessionRoutineId = null;
     self.sessionRoutineTitle = null;
+    self.sessionAdditionalDirectories = [];
     applyProjectContext(self, project);
     // #811 m2 — new session ⇒ SessionStart must re-fire on the next turn.
     self.sessionStartFiredFor = null;
-    self.sessionAdditionalDirectories = [];
     self.turnAdditionalDirectories = [];
     self.history.clear();
     self.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
@@ -125,8 +141,11 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
     self.sessionKind = sessionMeta?.sessionKind ?? "main";
     self.sessionRoutineId = sessionMeta?.routineId ?? null;
     self.sessionRoutineTitle = sessionMeta?.routineTitle ?? null;
-    self.sessionProjectRoot = sessionMeta?.projectRoot ?? null;
-    self.sessionProjectName = sessionMeta?.projectName ?? null;
+    self.sessionAdditionalDirectories = [];
+    applyProjectContext(self, {
+      ...(sessionMeta?.projectRoot ? { projectRoot: sessionMeta.projectRoot } : {}),
+      ...(sessionMeta?.projectName ? { projectName: sessionMeta.projectName } : {}),
+    });
     self.history.clear();
     self.history.restore(normalized.messages);
     self.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
@@ -138,7 +157,6 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
     self.sessionToolSearches = 0;
     self.sessionActivatedPluginIds.clear();
     self.lastTurnToolNames = null;
-    self.sessionAdditionalDirectories = [];
     self.turnAdditionalDirectories = [];
     // Use max compactNum across all checkpoints (monotonic guarantee).
     // Using array length would produce a stale value when normalizeCheckpoint drops

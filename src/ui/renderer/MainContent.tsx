@@ -15,6 +15,7 @@ import { PageShell } from "./components/PageShell.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import type { AppMode } from "./MainToolbar.js";
+import type { ProjectIdentity } from "../../shared/project-identity.js";
 
 type Api = ReturnType<typeof getApi>;
 type PluginView = Parameters<typeof PluginUiHostView>[0]["view"];
@@ -34,6 +35,7 @@ export interface MainContentProps {
   currentSessionKind: "main" | "routine";
   currentSessionTitle?: string;
   sessions: SessionSummary[];
+  activeProject?: ProjectIdentity;
   refreshStarred: () => void;
   // navigation
   appMode: AppMode;
@@ -170,6 +172,7 @@ export function MainContent(props: MainContentProps): ReactNode {
       <MainPaneShell backToHome onBack={props.onActivateHome}>
         <MemorySearchPanel
           api={api}
+          project={props.activeProject}
           onOpenSession={async (sessionId) => {
             const loaded = await props.onJumpToSession(sessionId);
             if (loaded !== false) props.onActivateHome();
@@ -228,7 +231,7 @@ export function MainContent(props: MainContentProps): ReactNode {
   if (activeView === "work-board") {
     return (
       <MainPaneShell backToHome onBack={props.onActivateHome}>
-        <WorkBoardPanel api={api} />
+        <WorkBoardPanel api={api} project={props.activeProject} />
       </MainPaneShell>
     );
   }

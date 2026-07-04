@@ -319,6 +319,8 @@ export interface ConversationLoopDeps {
   additionalDirectories?: readonly string[];
   /** Live reader for foreground settings-backed additional directories. */
   getAdditionalDirectories?: () => readonly string[];
+  /** Runtime predicate for the app-managed default workspace project root. */
+  isDefaultProjectRoot?: (projectRoot: string) => boolean;
   /**
    * Script hooks. Boot owns discovery/trust and injects the manager;
    * the executor only invokes the already-trusted generic hook contract.

@@ -51,6 +51,7 @@ export function AppShell({
   onOpenSettings,
   onNewChat,
   onNewChatForProject,
+  workspaceProjects,
   onOpenMarketplace,
   marketplaceUrlReady,
   onOpenUnifiedSearch,
@@ -112,6 +113,7 @@ export function AppShell({
   onOpenSettings: (tab?: string) => void;
   onNewChat: () => void;
   onNewChatForProject: SidebarProps["onNewChatForProject"];
+  workspaceProjects?: SidebarProps["projects"];
   onOpenMarketplace: () => void;
   marketplaceUrlReady: boolean;
   onOpenUnifiedSearch: () => void;
@@ -197,6 +199,7 @@ export function AppShell({
         onOpenSettings={() => onOpenSettings()}
         onNewChat={onNewChat}
         onNewChatForProject={onNewChatForProject}
+        projects={workspaceProjects}
         streaming={streaming}
         onOpenMarketplace={onOpenMarketplace}
         marketplaceUrlReady={marketplaceUrlReady}

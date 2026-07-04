@@ -27,6 +27,7 @@ import { HookRunner } from "../hooks/hook-runner.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { SessionTodoStore } from "../main/session-todo-store.js";
+import { isDefaultWorkspaceRoot } from "../main/default-workspace-root.js";
 
 /**
  * Tutorial-X4 — read the user-onboarding-context markdown file synth-
@@ -182,6 +183,7 @@ export interface ConversationDeps {
   pluginRuntime: PluginRuntime;
   additionalDirectories?: readonly string[];
   getAdditionalDirectories?: () => readonly string[];
+  isDefaultProjectRoot?: (projectRoot: string) => boolean;
   /**
    * Fan-out hook for permission config mutations. Boot wires this from
    * `ipc/domains/permissions.ts:broadcastPermissionConfigChanged` so the
@@ -238,6 +240,7 @@ export type RoutineConversationLoopDeps = Pick<
   | "pluginRuntime"
   | "llmFetch"
   | "auditLogger"
+  | "isDefaultProjectRoot"
 >;
 
 export function createRoutineConversationLoop(
@@ -300,6 +303,7 @@ export function createRoutineConversationLoop(
     pluginRuntime: deps.pluginRuntime,
     auditLogger: deps.auditLogger,
     llmFetch: deps.llmFetch,
+    isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
     allowedPluginIds,
     forcedActivePluginIds,
     ...(forcedActiveToolNames.size > 0 ? { forcedActiveToolNames } : {}),
@@ -352,6 +356,7 @@ export type SideChatConversationLoopDeps = Pick<
   sideChatMemoryManager: MemoryManager;
   /** Shared settings service — reads `additionalDirectories` at each turn. */
   getAdditionalDirectories?: () => readonly string[];
+  isDefaultProjectRoot?: (projectRoot: string) => boolean;
 };
 
 export function createSideChatConversationLoop(
@@ -389,6 +394,7 @@ export function createSideChatConversationLoop(
     postTurnHookChain,
     auditLogger: deps.auditLogger,
     llmFetch: deps.llmFetch,
+    isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
     ...(deps.getAdditionalDirectories
       ? { getAdditionalDirectories: deps.getAdditionalDirectories }
       : {}),
@@ -416,6 +422,7 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     scriptHookManager: deps.scriptHookManager,
     additionalDirectories: deps.additionalDirectories,
     getAdditionalDirectories: deps.getAdditionalDirectories,
+    isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
     // Option C — request_plugin 메타 툴 pluginId 검증용.
     pluginRuntime: deps.pluginRuntime,
     skillOverlay: deps.skillOverlay,
