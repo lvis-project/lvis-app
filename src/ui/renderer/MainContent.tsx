@@ -39,7 +39,6 @@ export interface MainContentProps {
   appMode: AppMode;
   onActivateHome: () => void;
   onJumpToSession: (sessionId: string) => void | boolean | Promise<void | boolean>;
-  onRefreshSessions: () => void | Promise<void>;
   // chat
   chatContextValue: ChatContextValue;
   onAsk: (
@@ -142,9 +141,7 @@ function HomeChatPane(props: MainContentProps) {
         onOpenApprovalQueue={props.onOpenApprovalQueue}
         currentSessionKind={props.currentSessionKind}
         currentSessionTitle={props.currentSessionTitle}
-        sessions={props.sessions}
         onLoadSession={props.onJumpToSession}
-        onRefreshSessions={props.onRefreshSessions}
         commandActions={props.commandActions}
         commandPopoverOpen={props.commandPopoverOpen}
         onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}

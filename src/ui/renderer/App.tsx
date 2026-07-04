@@ -696,7 +696,6 @@ export function App() {
         onSearchClose={searchCloseOverlay}
         onSearchLoadSession={handleLoadSessionAndRefresh}
         setActiveView={setActiveView}
-        onRefreshSessions={refreshSessions}
         sidePanelOpen={sidePanelOpen}
         onToggleSidePanel={handleToggleSidePanel}
       >
@@ -736,7 +735,6 @@ export function App() {
             refreshStarred={refreshStarred}
             onActivateHome={() => setActiveView("home")}
             onJumpToSession={handleLoadSessionAndRefresh}
-            onRefreshSessions={refreshSessions}
             chatContextValue={chatContextValue}
             onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
             /* opts 의 inputOrigin / injectHint 가 그대로 handleAsk 4번째

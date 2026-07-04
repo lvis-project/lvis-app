@@ -56,6 +56,12 @@ describe("StarredView", () => {
     );
 
     expect(await findByText("오늘은 프로젝트 흐름을 정리했습니다.")).toBeTruthy();
+    expect(await findByText("토큰 히트맵")).toBeTruthy();
+    expect(await findByText("프로젝트별 대화")).toBeTruthy();
+    expect(await findByText("workspace")).toBeTruthy();
+    await waitFor(() => {
+      expect(document.body.querySelector(`[aria-label="${selectedKey}: 토큰 120개"]`)).toBeTruthy();
+    });
     await waitFor(() => {
       expect((api as { getUsageDailySummary: ReturnType<typeof vi.fn> }).getUsageDailySummary).toHaveBeenCalledWith(
         expect.objectContaining({

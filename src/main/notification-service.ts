@@ -14,7 +14,8 @@
  * `services.notificationService.fire(...)`.
  *
  * Routing:
- *   - Window focused & not minimized → in-app toast via
+ *   - Turn end while LVIS is foreground → suppressed; the user already sees it.
+ *   - Other focused, non-minimized notifications → in-app toast via
  *     `lvis:notification:toast` IPC (renderer status bar slot).
  *   - Otherwise → OS Notification (silent: !urgent).
  *
@@ -351,6 +352,18 @@ export class NotificationService {
     // app is ready or inside a vitest run.
     if (this.isTestEnv() || !this.isReady()) return;
 
+    // #1482 — turn-end is a background-only cue. When the user is already in
+    // LVIS, the conversation itself is the completion signal; do not surface a
+    // composer/status toast, and do not consume the cooldown slot.
+    const win = this.getMainWindow();
+    const mainAlive = win !== null && !win.isDestroyed() && !win.isMinimized();
+    const anyFocused = this.isAnyWindowFocused();
+    const focusGateActive = !opts.bypassFocusGate && mainAlive && anyFocused;
+    if (opts.kind === "turn-end" && focusGateActive) {
+      this.auditSuppressed(opts.kind, 0, "foreground");
+      return;
+    }
+
     // Per-kind cooldown — defense against runaway turn loops or approval
     // bursts. Suppressed events MUST still go through the audit logger so we
     // can detect spam in field telemetry. routine and ask-user have a 0 ms
@@ -415,10 +428,6 @@ export class NotificationService {
     // *receive* an in-app toast". A minimized main is treated as not-alive
     // because the user can't see the in-app toast — we want the OS path
     // instead. A destroyed main (mid-teardown) is also not-alive.
-    const win = this.getMainWindow();
-    const mainAlive = win !== null && !win.isDestroyed() && !win.isMinimized();
-    const anyFocused = this.isAnyWindowFocused();
-    const focusGateActive = !opts.bypassFocusGate && mainAlive && anyFocused;
     const gate: "os" | "in-app" = focusGateActive ? "in-app" : "os";
 
     if (focusGateActive && win) {
@@ -532,7 +541,11 @@ export class NotificationService {
    * Audit a cooldown-suppressed fire. Must NEVER silently drop — a missing
    * audit trail hides runaway-loop bugs.
    */
-  private auditSuppressed(kind: NotificationKind, elapsedMs: number): void {
+  private auditSuppressed(
+    kind: NotificationKind,
+    elapsedMs: number,
+    reason: "cooldown" | "foreground" = "cooldown",
+  ): void {
     if (!this.auditLogger) return;
     try {
       this.auditLogger.log({
@@ -542,7 +555,7 @@ export class NotificationService {
         input: JSON.stringify({
           event: "notification.suppressed",
           kind,
-          reason: "cooldown",
+          reason,
           elapsedMs,
         }),
       });
