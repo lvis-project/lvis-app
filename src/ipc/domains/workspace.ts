@@ -45,6 +45,7 @@ import {
   caseFoldForMatch,
   isSensitivePath,
 } from "../../permissions/sensitive-paths.js";
+import { getDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
 
 /** Max directory entries returned per lazy listing (bounds huge dirs). */
 const MAX_DIR_ENTRIES = 1_000;
@@ -197,13 +198,13 @@ export interface WorkspaceRevealResult {
 }
 
 function currentScope(): { cwd: string; extraAllowed: string[] } {
-  const cwd = process.cwd();
+  const cwd = getDefaultWorkspaceRoot();
   const additional = readPermissionSettings().permissions.additionalDirectories;
   return { cwd, extraAllowed: buildRuntimeAllowedDirectories(additional) };
 }
 
 function computeRoots(): WorkspaceRoot[] {
-  const defaultRoot = process.cwd();
+  const defaultRoot = getDefaultWorkspaceRoot();
   const additional = readPermissionSettings().permissions.additionalDirectories;
   const canonicalAdds = sanitizeRuntimeAllowedDirectories(additional);
   const seen = new Set<string>([defaultRoot]);
@@ -289,7 +290,7 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
       auditUnauthorized(auditLogger, CHANNELS.workspace.listRoots, e);
       return { ok: false, error: "unauthorized" };
     }
-    return { ok: true, defaultRoot: process.cwd(), roots: computeRoots() };
+    return { ok: true, defaultRoot: getDefaultWorkspaceRoot(), roots: computeRoots() };
   });
 
   ipcMain.handle(
@@ -441,7 +442,7 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
         return { ok: false, error: "invalid-path", message: "path must be a non-empty string" };
       }
       const targetCanon = caseFoldForMatch(canonicalizePathForMatch(resolvePath(rawPath)));
-      const defaultCanon = caseFoldForMatch(canonicalizePathForMatch(process.cwd()));
+      const defaultCanon = caseFoldForMatch(canonicalizePathForMatch(getDefaultWorkspaceRoot()));
       if (targetCanon === defaultCanon) {
         return { ok: false, error: "cannot-remove-default", message: "default root cannot be removed" };
       }

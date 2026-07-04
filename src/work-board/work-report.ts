@@ -29,6 +29,7 @@ import type {
   WorkItemListResult,
   WorkItemResolved,
   WorkBoardReportKind,
+  WorkItemListFilter,
 } from "../shared/work-board-types.js";
 
 /** Host one-shot LLM caller — shape of `createCallLlm(conversationLoop)`. */
@@ -38,7 +39,7 @@ export interface CallLlm {
 
 /** Narrow board reader the reports need (satisfied by WorkBoardStore). */
 export interface ReportBoardReader {
-  list(): Promise<WorkItemListResult>;
+  list(filter?: WorkItemListFilter): Promise<WorkItemListResult>;
 }
 
 /** Storage slice for writing report markdown (write auto-creates parents). */
@@ -59,6 +60,8 @@ export type ReportResult =
 export interface DailyReportInput {
   /** Override the target day (`YYYY-MM-DD`, KST). Default: today KST. */
   date?: string;
+  projectRoot?: string;
+  includeUnscoped?: boolean;
 }
 
 export interface WeeklyReportInput {
@@ -66,6 +69,8 @@ export interface WeeklyReportInput {
   weekIso?: string;
   /** Sunday-week offset relative to now (0 = this week, -1 = last week). */
   weekOffset?: number;
+  projectRoot?: string;
+  includeUnscoped?: boolean;
 }
 
 /** Host event emitted after a report is generated (slim notification pointer). */
@@ -125,8 +130,10 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
   const report: ReportStorage = storage;
   const nowMs = (): number => (deps.now ? deps.now() : Date.now());
 
-  async function items(): Promise<WorkItemResolved[]> {
-    const listed = await store.list();
+  async function items(input?: { projectRoot?: string; includeUnscoped?: boolean }): Promise<WorkItemResolved[]> {
+    const listed = await store.list(input?.projectRoot
+      ? { projectRoot: input.projectRoot, includeUnscoped: input.includeUnscoped === true }
+      : undefined);
     // Discriminated envelope: a non-ok list means the board is unreadable — the
     // report cannot be built, so the callers below treat [] as "empty".
     return listed.status === "ok" ? listed.items : [];
@@ -139,7 +146,7 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
       return { status: "empty", kind: "daily", period, reason: "invalid date — expected YYYY-MM-DD" };
     }
 
-    const all = await items();
+    const all = await items(input);
     if (all.length === 0) {
       return { status: "empty", kind: "daily", period, reason: "보드에 작업 항목이 없습니다." };
     }
@@ -150,7 +157,9 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
     const createdToday = all.filter((i) => isWithin(i.created_at, bounds.startMs, bounds.endMs));
     const completedToday = all.filter((i) => isWithin(i.completed_at, bounds.startMs, bounds.endMs));
 
-    const recentActivity = await readActivity(activity, new Date(bounds.startMs).toISOString());
+    const visibleItemIds = new Set(all.map((item) => item.id));
+    const recentActivity = (await readActivity(activity, new Date(bounds.startMs).toISOString()))
+      .filter((event) => event.itemId === undefined || visibleItemIds.has(event.itemId));
     const workContext = await renderWorkContext(memory);
 
     const prompt =
@@ -203,14 +212,16 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
     const startMs = start.getTime();
     const endMs = end.getTime();
 
-    const all = await items();
+    const all = await items(input);
     const completedThisWeek = all.filter((i) => isWithin(i.completed_at, startMs, endMs));
     const createdThisWeek = all.filter((i) => isWithin(i.created_at, startMs, endMs));
     const inProgress = all.filter((i) => i.status_resolved === "in_progress");
     const planned = all.filter((i) => i.status_resolved === "planned");
     const overdue = all.filter((i) => i.status_resolved === "overdue");
 
-    const weekActivity = await readActivity(activity, start.toISOString());
+    const visibleItemIds = new Set(all.map((item) => item.id));
+    const weekActivity = (await readActivity(activity, start.toISOString()))
+      .filter((event) => event.itemId === undefined || visibleItemIds.has(event.itemId));
 
     if (completedThisWeek.length === 0 && createdThisWeek.length === 0 && weekActivity.length === 0) {
       return { status: "empty", kind: "weekly", period, reason: "이번 주 보드 활동이 없습니다." };

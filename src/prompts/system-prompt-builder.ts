@@ -15,6 +15,7 @@ import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import type { ProjectIdentity } from "../shared/project-identity.js";
 
 const log = createLogger("system-prompt");
 
@@ -151,6 +152,7 @@ export class SystemPromptBuilder {
     deferral?: boolean;
   } | null = null;
   private indexedDocsContext: string = "";
+  private projectContext: ProjectIdentity | null = null;
   /**
    * Per-turn origin source (e.g., `overlay:meeting-detection`) — set by
    * ConversationLoop before a turn. When this matches `overlay:*`, the
@@ -319,6 +321,10 @@ export class SystemPromptBuilder {
   /** 인덱싱된 문서 정보를 시스템 프롬프트에 동적으로 업데이트 */
   setIndexedDocsContext(context: string): void {
     this.indexedDocsContext = context;
+  }
+
+  setProjectContext(project: ProjectIdentity | null): void {
+    this.projectContext = project;
   }
 
   /**
@@ -680,8 +686,15 @@ export class SystemPromptBuilder {
       refresh: "on-change",
       build: () => {
         const prefs = memoryManager.getUserPreferences();
-        const memoryIndex = memoryManager.getMemoryIndex();
-        const notes = memoryManager.getMemoryContext();
+        const memoryScope = this.projectContext?.projectRoot
+          ? {
+              projectRoot: this.projectContext.projectRoot,
+              projectName: this.projectContext.projectName,
+              includeUnscoped: this.projectContext.isDefault === true,
+            }
+          : undefined;
+        const memoryIndex = memoryManager.getMemoryIndex(memoryScope);
+        const notes = memoryManager.getMemoryContext(memoryScope);
         const parts: string[] = [];
         if (prefs) parts.push(`<user-preferences>\n${prefs}\n</user-preferences>`);
         if (memoryIndex) parts.push(`<lvis-memory-index>\n${memoryIndex}\n</lvis-memory-index>`);

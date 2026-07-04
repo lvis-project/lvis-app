@@ -47,6 +47,12 @@ import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
+import type { ProjectIdentity } from "../../shared/project-identity.js";
+import {
+  defaultProjectFromProjects,
+  projectIdentityFromPayload,
+  workspaceRootsToProjects,
+} from "../../shared/project-identity.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -161,6 +167,8 @@ export function App() {
   } = useAppMode(api);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
+  const [workspaceProjects, setWorkspaceProjects] = useState<ProjectIdentity[]>([]);
+  const [activeProject, setActiveProject] = useState<ProjectIdentity | undefined>(undefined);
 
   // Dev tools — Cmd/Ctrl+Shift+D toggles the floating panel.
   // Listener is only bound in dev mode (`window.__lvisDevMode === true`) so
@@ -243,6 +251,7 @@ export function App() {
   } = useStarred(api);
   const {
     currentSessionId, currentSessionKind, currentSessionTitle, sessions, refreshSessionId, refreshSessions,
+    currentSessionProject,
     handleLoadSession: sessionLoad, handleFork: sessionFork,
   } = useSessions(api, applyInitialSession);
   const attachmentSessionScopeRef = useRef<{ initialized: boolean; sessionId?: string }>({
@@ -261,6 +270,37 @@ export function App() {
     scope.sessionId = currentSessionId;
     setAttachments([]);
   }, [currentSessionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.lvis?.workspace?.listRoots?.().then((result) => {
+      if (cancelled || !result?.ok) return;
+      const roots = Array.isArray(result.roots) ? result.roots : [];
+      const projects = workspaceRootsToProjects(result.defaultRoot, roots, t("sidebar.currentProject"));
+      setWorkspaceProjects(projects);
+      setActiveProject((current) => current ?? defaultProjectFromProjects(projects));
+    }).catch(() => {
+      // The backend still defaults chat creation to the anchored workspace root.
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
+
+  const resolveKnownProject = useCallback((project: ProjectIdentity | undefined): ProjectIdentity | undefined => {
+    if (!project) return undefined;
+    return workspaceProjects.find((candidate) => candidate.projectRoot === project.projectRoot) ?? project;
+  }, [workspaceProjects]);
+
+  useEffect(() => {
+    const sessionProject = projectIdentityFromPayload(currentSessionProject);
+    if (sessionProject) setActiveProject(resolveKnownProject(sessionProject));
+  }, [currentSessionProject, resolveKnownProject]);
+
+  const defaultWorkspaceProject = useMemo(
+    () => defaultProjectFromProjects(workspaceProjects),
+    [workspaceProjects],
+  );
 
   const handleOpenRoutineSession = useCallback(
     async (sessionId: string) => {
@@ -526,13 +566,17 @@ export function App() {
 
   const handleNewChat = useCallback(async (project?: { projectRoot?: string; projectName?: string }) => {
     if (streaming) { console.warn("new chat blocked during streaming"); return; }
-    await api.chatNew(project);
+    const nextProject = resolveKnownProject(projectIdentityFromPayload(project)) ?? activeProject ?? defaultWorkspaceProject;
+    await api.chatNew(nextProject
+      ? { projectRoot: nextProject.projectRoot, projectName: nextProject.projectName }
+      : undefined);
+    if (nextProject) setActiveProject(nextProject);
     clearForNewChat();
     resetForNewSession();
     setActiveView("home");
     await refreshSessionId();
     await refreshSessions();
-  }, [api, streaming, refreshSessionId, refreshSessions, clearForNewChat, resetForNewSession]);
+  }, [activeProject, api, clearForNewChat, defaultWorkspaceProject, refreshSessionId, refreshSessions, resetForNewSession, resolveKnownProject, streaming]);
 
   // ─── Effects ──────────────────────────────────
   const toggleCommandPopover = useCallback(() => {
@@ -658,6 +702,7 @@ export function App() {
         onOpenSettings={onOpenSettings}
         onNewChat={onNewChat}
         onNewChatForProject={onNewChatForProject}
+        workspaceProjects={workspaceProjects}
         onOpenMarketplace={onOpenMarketplace}
         marketplaceUrlReady={marketplaceUrlReady}
         onOpenUnifiedSearch={() => { searchOpenOverlay(); }}
@@ -732,6 +777,7 @@ export function App() {
             currentSessionKind={currentSessionKind}
             currentSessionTitle={currentSessionTitle}
             sessions={sessions}
+            activeProject={activeProject ?? defaultWorkspaceProject}
             refreshStarred={refreshStarred}
             onActivateHome={() => setActiveView("home")}
             onJumpToSession={handleLoadSessionAndRefresh}

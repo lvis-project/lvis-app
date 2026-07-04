@@ -107,6 +107,22 @@ describe("project metadata", () => {
     expect(mm.listSessionsPage({ kind: "main", projectRoot: "C:\\workspace\\alpha" }).map((s) => s.id))
       .toEqual([SESSION_A]);
   });
+
+  it("can include legacy unscoped sessions when listing the default project", async () => {
+    await mm.saveSession(SESSION_A, [{ role: "user", content: "legacy" }]);
+    await mm.saveSession(SESSION_B, [{ role: "user", content: "project b" }]);
+    await mm.saveSessionMetadata(SESSION_B, {
+      sessionKind: "main",
+      projectRoot: "C:\\workspace\\beta",
+      projectName: "beta",
+    });
+
+    expect(mm.listSessionsPage({
+      kind: "main",
+      projectRoot: "C:\\workspace\\default",
+      includeUnscoped: true,
+    }).map((s) => s.id)).toEqual([SESSION_A]);
+  });
 });
 
 // ── 2. setSummaryPreamble ─────────────────────────────────────────────────────

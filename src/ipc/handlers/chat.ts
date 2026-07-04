@@ -25,6 +25,7 @@ import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import type { SessionKind } from "../../memory/memory-manager.js";
+import { projectBasename } from "../../shared/project-identity.js";
 import {
   runStreamedTurn,
   STREAM_TURN_OPTIONS,
@@ -62,6 +63,21 @@ export function parseChatSessionProjectPayload(raw: unknown): ChatSessionProject
     ...(projectRoot ? { projectRoot } : {}),
     ...(projectName ? { projectName } : {}),
   };
+}
+
+export function defaultWorkspaceProjectPayload(defaultWorkspaceRoot = process.cwd()): ChatSessionProjectPayload {
+  const projectRoot = normalizeProjectString(defaultWorkspaceRoot, MAX_PROJECT_ROOT_CHARS);
+  const defaultName = normalizeProjectString(projectRoot ? projectBasename(projectRoot) : undefined, MAX_PROJECT_NAME_CHARS) ?? "workspace";
+  return {
+    ...(projectRoot ? { projectRoot } : {}),
+    projectName: defaultName,
+  };
+}
+
+export function resolveChatNewProjectPayload(raw: unknown, defaultWorkspaceRoot = process.cwd()): ChatSessionProjectPayload {
+  const parsed = parseChatSessionProjectPayload(raw);
+  if (parsed.projectRoot) return parsed;
+  return defaultWorkspaceProjectPayload(defaultWorkspaceRoot);
 }
 
 export function normalizePersonaPromptId(

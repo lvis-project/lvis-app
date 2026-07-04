@@ -43,9 +43,30 @@ import {
   resolvePersonaRolePrompt,
   sanitizeOutgoingInput,
   markMainActiveAfterTurn,
-  parseChatSessionProjectPayload,
+  resolveChatNewProjectPayload,
 } from "../handlers/chat.js";
+import { getDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
 const log = createLogger("chat");
+const MAX_MEMORY_PROJECT_ROOT_CHARS = 2_048;
+const MAX_MEMORY_PROJECT_NAME_CHARS = 120;
+
+function normalizeMemoryProjectString(value: unknown, maxChars: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.slice(0, maxChars) : undefined;
+}
+
+function parseMemoryProjectOptions(raw: unknown) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const record = raw as Record<string, unknown>;
+  const projectRoot = normalizeMemoryProjectString(record.projectRoot, MAX_MEMORY_PROJECT_ROOT_CHARS);
+  const projectName = normalizeMemoryProjectString(record.projectName, MAX_MEMORY_PROJECT_NAME_CHARS);
+  return {
+    ...(projectRoot ? { projectRoot } : {}),
+    ...(projectName ? { projectName } : {}),
+    ...(record.includeUnscoped === true ? { includeUnscoped: true } : {}),
+  };
+}
 
 /**
  * Stable signature of EVERY vendor block's configured `baseUrl` (order-stable
@@ -240,7 +261,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.chat.new, async (e, rawProject?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.new, e); return UNAUTHORIZED_FRAME; }
-    conversationLoop.newConversation("main", parseChatSessionProjectPayload(rawProject));
+    conversationLoop.newConversation("main", resolveChatNewProjectPayload(rawProject, getDefaultWorkspaceRoot()));
     await memoryManager.markMainActiveFresh();
     return { ok: true };
   });
@@ -562,32 +583,34 @@ export function registerChatHandlers(deps: IpcDeps): void {
   });
 
   // ─── Memory ─────────────────────────────────────
-  ipcMain.handle(CHANNELS.memory.entriesList, (e) => {
+  ipcMain.handle(CHANNELS.memory.entriesList, (e, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesList, e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.listMemoryEntries();
+    return memoryManager.listMemoryEntries(parseMemoryProjectOptions(opts));
   });
-  ipcMain.handle(CHANNELS.memory.entriesSave, async (e, title: string, content: string) => {
+  ipcMain.handle(CHANNELS.memory.entriesSave, async (e, title: string, content: string, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesSave, e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.saveMemory(title, content);
+    return memoryManager.saveMemory(title, content, parseMemoryProjectOptions(opts));
   });
   ipcMain.handle(CHANNELS.memory.entriesDelete, async (e, filename: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesDelete, e); return UNAUTHORIZED_FRAME; }
     await memoryManager.deleteMemory(filename);
     return undefined;
   });
-  ipcMain.handle(CHANNELS.memory.entriesSearch, (e, query: string) => {
+  ipcMain.handle(CHANNELS.memory.entriesSearch, (e, query: string, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesSearch, e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.searchMemoryEntries(query).map((note) => ({
+    return memoryManager.searchMemoryEntries(query, parseMemoryProjectOptions(opts)).map((note) => ({
       filename: note.filename,
       title: note.title,
       content: note.content,
       excerpt: note.content.replace(/^#\s+.+(?:\r?\n)+/, "").trim(),
       updatedAt: note.updatedAt ?? new Date().toISOString(),
+      ...(note.projectRoot ? { projectRoot: note.projectRoot } : {}),
+      ...(note.projectName ? { projectName: note.projectName } : {}),
     }));
   });
-  ipcMain.handle(CHANNELS.memory.indexGet, (e) => {
+  ipcMain.handle(CHANNELS.memory.indexGet, (e, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.indexGet, e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.getMemoryIndex();
+    return memoryManager.getMemoryIndex(parseMemoryProjectOptions(opts));
   });
   ipcMain.handle(CHANNELS.memory.indexUpdateIfUnchanged, async (e, expectedContent: string, nextContent: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.indexUpdateIfUnchanged, e); return UNAUTHORIZED_FRAME; }
@@ -611,13 +634,13 @@ export function registerChatHandlers(deps: IpcDeps): void {
     });
     return { ok: true };
   });
-  ipcMain.handle(CHANNELS.memory.sessionsList, (e) => {
+  ipcMain.handle(CHANNELS.memory.sessionsList, (e, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.sessionsList, e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.listSessionEntries();
+    return memoryManager.listSessionEntries(50, parseMemoryProjectOptions(opts));
   });
-  ipcMain.handle(CHANNELS.memory.sessionsSearch, (e, query: string) => {
+  ipcMain.handle(CHANNELS.memory.sessionsSearch, (e, query: string, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.sessionsSearch, e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.searchSessions(query);
+    return memoryManager.searchSessions(query, parseMemoryProjectOptions(opts));
   });
   ipcMain.handle(CHANNELS.memory.agentsMdGet, (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.agentsMdGet, e); return UNAUTHORIZED_FRAME; }

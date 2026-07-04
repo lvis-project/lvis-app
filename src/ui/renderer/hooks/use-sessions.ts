@@ -17,6 +17,18 @@ export interface SessionSummary {
   branchedFromCompactNum?: number;
 }
 
+export interface SessionProjectSummary {
+  projectRoot?: string;
+  projectName?: string;
+}
+
+function sessionProjectFromHistory(history: SessionProjectSummary): SessionProjectSummary {
+  return {
+    ...(history.projectRoot ? { projectRoot: history.projectRoot } : {}),
+    ...(history.projectName ? { projectName: history.projectName } : {}),
+  };
+}
+
 /**
  * Sessions hook.
  * Owns session list, current session id, load/fork actions. The streaming
@@ -34,6 +46,7 @@ export function useSessions(
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [currentSessionKind, setCurrentSessionKind] = useState<"main" | "routine">("main");
   const [currentSessionTitle, setCurrentSessionTitle] = useState<string | undefined>(undefined);
+  const [currentSessionProject, setCurrentSessionProject] = useState<SessionProjectSummary>({});
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const sessionReadTokenRef = useRef(0);
 
@@ -45,6 +58,7 @@ export function useSessions(
       setCurrentSessionId(h.sessionId);
       setCurrentSessionKind(h.sessionKind ?? "main");
       setCurrentSessionTitle(h.sessionTitle);
+      setCurrentSessionProject(sessionProjectFromHistory(h));
     } catch { /* ignore */ }
   }, [api]);
 
@@ -55,6 +69,7 @@ export function useSessions(
         setCurrentSessionId(current.sessionId);
         setCurrentSessionKind("main");
         setCurrentSessionTitle(undefined);
+        setCurrentSessionProject(sessionProjectFromHistory(current));
         applyInitialSession?.([]);
         return;
       }
@@ -65,6 +80,7 @@ export function useSessions(
       setCurrentSessionId(fresh.sessionId);
       setCurrentSessionKind("main");
       setCurrentSessionTitle(undefined);
+      setCurrentSessionProject(sessionProjectFromHistory(fresh));
       applyInitialSession?.([]);
     };
 
@@ -85,6 +101,7 @@ export function useSessions(
         setCurrentSessionId(h.sessionId);
         setCurrentSessionKind("main");
         setCurrentSessionTitle(h.sessionTitle);
+        setCurrentSessionProject(sessionProjectFromHistory(h));
         // The renderer state contract is: active in-memory stream entries and
         // persisted session replay both enter ChatView as ChatEntry[]. Hydrate
         // only the exact active main session so routine re-entry never replaces
@@ -107,6 +124,7 @@ export function useSessions(
       setCurrentSessionId(activeState.mainActiveSessionId);
       setCurrentSessionKind("main");
       setCurrentSessionTitle(persisted.sessionTitle);
+      setCurrentSessionProject(sessionProjectFromHistory(persisted));
       applyInitialSession?.(sessionHistoryToEntries(persisted));
     } catch { /* ignore */ }
   }, [api, applyInitialSession]);
@@ -143,6 +161,7 @@ export function useSessions(
         setCurrentSessionId(sessionId);
         setCurrentSessionKind(h.sessionKind ?? "main");
         setCurrentSessionTitle(h.sessionTitle);
+        setCurrentSessionProject(sessionProjectFromHistory(h));
         return true;
       } catch {
         return false;
@@ -178,6 +197,7 @@ export function useSessions(
     currentSessionId,
     currentSessionKind,
     currentSessionTitle,
+    currentSessionProject,
     setCurrentSessionId,
     sessions,
     refreshSessionId,
