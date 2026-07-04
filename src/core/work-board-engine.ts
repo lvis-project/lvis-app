@@ -165,9 +165,10 @@ export interface WorkBoardEngineDeps {
    * Optional post-run learning hook (Hermes self-improvement pillar). Called
    * fire-and-forget AFTER a run reaches `completed` and is persisted; a throw
    * here must never fail the already-succeeded run, so the engine swallows
-   * rejections. boot wires this to append a one-line learning to `MEMORY.md`.
+   * rejections. boot wires this to append a one-line learning to the item's
+   * project work memory.
    */
-  onRunComplete?: (info: { itemId: number; title: string }) => void | Promise<void>;
+  onRunComplete?: (info: { itemId: number; title: string; projectRoot?: string; projectName?: string }) => void | Promise<void>;
 }
 
 export interface RunItemOptions {
@@ -552,7 +553,14 @@ export function createWorkBoardEngine(
         // captured by the promise chain (not just an async rejection) — the
         // swallow guarantee must hold for any hook implementation.
         void Promise.resolve()
-          .then(() => onRunComplete({ itemId, title: item.title }))
+          .then(() =>
+            onRunComplete({
+              itemId,
+              title: item.title,
+              ...(item.projectRoot ? { projectRoot: item.projectRoot } : {}),
+              ...(item.projectName ? { projectName: item.projectName } : {}),
+            }),
+          )
           .catch((e) =>
             log.warn("runItem onRunComplete failed (id=%d): %s", itemId, (e as Error).message),
           );

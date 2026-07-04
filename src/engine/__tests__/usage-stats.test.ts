@@ -6,6 +6,7 @@ import {
   computeUsageSummary,
   readAuditEntries,
   computeMonthlyProjection,
+  getUsageRange,
   type AuditTurnEntry,
   type UsageTrendPoint
 } from "../usage-stats.js";
@@ -40,6 +41,21 @@ describe("usage-stats", () => {
     expect(summary.today.outputTokens).toBe(500_000);
     expect(summary.thisWeek.inputTokens).toBe(1_200_000);
     expect(summary.thisMonth.inputTokens).toBe(1_250_000);
+  });
+
+  it("uses KST calendar days for today and trend around UTC midnight", () => {
+    const now = new Date("2026-07-03T16:00:00Z"); // 2026-07-04 01:00 KST
+    const entries: AuditTurnEntry[] = [
+      turn({ timestamp: "2026-07-03T15:30:00Z", tokenUsage: { inputTokens: 100, outputTokens: 10 } }),
+      turn({ timestamp: "2026-07-03T14:30:00Z", tokenUsage: { inputTokens: 300, outputTokens: 30 } }),
+    ];
+
+    const summary = computeUsageSummary(entries, now);
+    expect(summary.today.inputTokens).toBe(100);
+    expect(summary.trend.map((point) => [point.date, point.inputTokens])).toEqual([
+      ["2026-07-03", 300],
+      ["2026-07-04", 100],
+    ]);
   });
 
   it("computes cost using pricing table — Claude Sonnet $3/$15 per 1M", () => {
@@ -535,6 +551,31 @@ describe("getUsageRange (via readAuditEntries + filter)", () => {
       expect(summary.trend[1].inputTokens).toBe(200);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads adjacent UTC audit files for a selected KST day", () => {
+    const home = mkdtempSync(join(tmpdir(), "usage-range-kst-home-"));
+    const originalHome = process.env.LVIS_HOME;
+    try {
+      process.env.LVIS_HOME = home;
+      const auditDir = join(home, "audit");
+      mkdirSync(auditDir, { recursive: true });
+      writeFileSync(join(auditDir, "2026-07-03.jsonl"), [
+        JSON.stringify({ timestamp: "2026-07-03T14:30:00Z", sessionId: "s1", type: "turn", route: "claude/claude-sonnet-4-6", tokenUsage: { inputTokens: 300, outputTokens: 30 } }),
+        JSON.stringify({ timestamp: "2026-07-03T15:30:00Z", sessionId: "s1", type: "turn", route: "claude/claude-sonnet-4-6", tokenUsage: { inputTokens: 100, outputTokens: 10 } }),
+      ].join("\n") + "\n", "utf-8");
+
+      const summary = getUsageRange({ dateFrom: "2026-07-04", dateTo: "2026-07-04" });
+      expect(summary.trend.map((point) => point.date)).toEqual(["2026-07-04"]);
+      expect(summary.trend[0].inputTokens).toBe(100);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.LVIS_HOME;
+      } else {
+        process.env.LVIS_HOME = originalHome;
+      }
+      rmSync(home, { recursive: true, force: true });
     }
   });
 });

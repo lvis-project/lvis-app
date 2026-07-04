@@ -75,6 +75,10 @@ export interface WorkItem {
   status: WorkItemStatusStored;
   priority: WorkItemPriority;
   due_at?: string;
+  /** Workspace/project root this work item belongs to. */
+  projectRoot?: string;
+  /** Human-readable workspace/project label captured when the item was created. */
+  projectName?: string;
   created_at: string;
   updated_at: string;
   completed_at?: string;
@@ -122,6 +126,10 @@ export interface WorkItemCreateInput {
   due_at?: string;
   /** Initial stored status. Omit → "planned". */
   status?: WorkItemStatusStored;
+  /** Workspace/project root this item belongs to. */
+  projectRoot?: string;
+  /** Human-readable workspace/project label captured when the item was created. */
+  projectName?: string;
 }
 
 /**
@@ -143,6 +151,10 @@ export interface WorkItemListFilter {
   priority?: WorkItemPriority;
   /** Keep only items whose `due_at` is on/before this ISO instant. */
   due_before?: string;
+  /** Keep only items that belong to this workspace/project root. */
+  projectRoot?: string;
+  /** Include legacy items without projectRoot when filtering by projectRoot. */
+  includeUnscoped?: boolean;
   limit?: number;
 }
 

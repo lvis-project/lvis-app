@@ -67,10 +67,16 @@ describe("UnifiedSearchPanel", () => {
   it("combines conversation, session, starred, routine, and memory results", async () => {
     render(<UnifiedSearchPanel {...defaultProps()} />);
 
+    const panel = screen.getByTestId("unified-search-panel");
+    expect(panel.getAttribute("role")).toBe("dialog");
+    expect(panel.getAttribute("aria-modal")).toBe("false");
+    expect(panel.className).toContain("absolute");
+    expect(panel.className).toContain("left-1/2");
     expect(screen.getByTestId("unified-search-input")).toBeTruthy();
     expect(screen.getByText("현재 대화")).toBeTruthy();
     expect(screen.getByText("대화 기록")).toBeTruthy();
     expect(screen.getByText("즐겨찾기")).toBeTruthy();
+    expect(screen.queryByLabelText("날짜 선택")).toBeNull();
 
     await waitFor(() => {
       expect(screen.getByText("루틴")).toBeTruthy();

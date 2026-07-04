@@ -29,6 +29,8 @@ const log = createLogger("post-turn");
 
 export interface PostTurnHookContext {
   sessionId: string;
+  projectRoot?: string;
+  projectName?: string;
   /** 현재 대화 이력 메시지 배열 */
   messages: GenericMessage[];
   input: string;
@@ -182,6 +184,10 @@ export class PostTurnHookChain {
               await this.deps.memoryManager.saveMemory(
                 t("be_postTurnHookChain.autoMemoryTitle", { title }),
                 t("be_postTurnHookChain.autoMemoryBody", { input: ctx.input, output: outputForHooks.slice(0, 500) }),
+                {
+                  ...(ctx.projectRoot ? { projectRoot: ctx.projectRoot } : {}),
+                  ...(ctx.projectName ? { projectName: ctx.projectName } : {}),
+                },
               );
               log.info(`memory-extraction: auto-saved note "${title}"`);
             }

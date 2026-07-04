@@ -218,6 +218,7 @@ export const CHANNELS = {
   usage: {
     summary: "lvis:usage:summary",
     range: "lvis:usage:range",
+    dailySummary: "lvis:usage:daily-summary",
     exportCsv: "lvis:usage:export-csv",
   },
   // ── preload-swept channel groups (C11: #1409 + #1411) ──────────────────────
@@ -396,7 +397,7 @@ export type ChannelName = ValuesOf<{
  * classification, or a public channel's payload shape) changes in a way an
  * external SDK/CLI must react to. Read-first callers pin this.
  */
-export const CONTRACT_VERSION = "1.0.0";
+export const CONTRACT_VERSION = "1.2.0";
 
 /**
  * The versioned allowlist of channels an external surface (SDK / CLI / local

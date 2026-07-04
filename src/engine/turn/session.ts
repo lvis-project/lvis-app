@@ -14,16 +14,72 @@ import { createTracer } from "../../observability/conversation-trace.js";
 import { latestPersistedContextTokens } from "./context-carrier.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
 import { createLogger } from "../../lib/logger.js";
+import { projectBasename } from "../../shared/project-identity.js";
 
 const log = createLogger("lvis");
 
 const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
 
+export interface SessionProjectContext {
+  projectRoot?: string;
+  projectName?: string;
+  isDefault?: boolean;
+}
+
 function isSafeSessionId(sessionId: unknown): sessionId is string {
   return typeof sessionId === "string" && SESSION_ID_REGEX.test(sessionId);
 }
 
-export function newConversation(self: ConversationLoop, kind: SessionKind = "main"): void {
+function normalizeProjectString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function applyProjectContext(self: ConversationLoop, project?: SessionProjectContext): void {
+  let projectRoot = normalizeProjectString(project?.projectRoot);
+  let projectName = normalizeProjectString(project?.projectName);
+  if (projectRoot && self.deps.authorizeProject) {
+    const authorized = self.deps.authorizeProject(projectRoot, projectName ?? undefined);
+    if (authorized) {
+      projectRoot = normalizeProjectString(authorized.projectRoot);
+      projectName = normalizeProjectString(authorized.projectName) ?? projectName;
+      project = { ...project, isDefault: authorized.isDefault };
+    } else {
+      const fallback = self.deps.getDefaultProject?.();
+      projectRoot = normalizeProjectString(fallback?.projectRoot);
+      projectName = normalizeProjectString(fallback?.projectName);
+      project = fallback;
+    }
+  }
+  const projectIsDefault = projectRoot
+    ? project?.isDefault === true || self.deps.isDefaultProjectRoot?.(projectRoot) === true
+    : false;
+  self.sessionProjectRoot = projectRoot;
+  self.sessionProjectName = projectName;
+  self.sessionProjectIsDefault = projectIsDefault;
+  self.sessionAdditionalDirectories = projectRoot ? [projectRoot] : [];
+  self.deps.systemPromptBuilder.setProjectContext?.(projectRoot
+    ? {
+        projectRoot,
+        projectName: projectName ?? projectBasename(projectRoot),
+        ...(projectIsDefault ? { isDefault: true } : {}),
+      }
+    : null);
+}
+
+function currentProjectContext(self: ConversationLoop): SessionProjectContext {
+  return {
+    ...(self.sessionProjectRoot ? { projectRoot: self.sessionProjectRoot } : {}),
+    ...(self.sessionProjectName ? { projectName: self.sessionProjectName } : {}),
+  };
+}
+
+export function newConversation(
+  self: ConversationLoop,
+  kind: SessionKind = "main",
+  project?: SessionProjectContext,
+): void {
     if (self.history.length > 0) {
       self.deps.memoryManager.saveSession(self.sessionId, self.history.getMessages()).catch((err: unknown) => {
         log.warn("newConversation saveSession failed: %s", (err as Error).message);
@@ -40,9 +96,10 @@ export function newConversation(self: ConversationLoop, kind: SessionKind = "mai
     self.sessionKind = kind;
     self.sessionRoutineId = null;
     self.sessionRoutineTitle = null;
+    self.sessionAdditionalDirectories = [];
+    applyProjectContext(self, project);
     // #811 m2 — new session ⇒ SessionStart must re-fire on the next turn.
     self.sessionStartFiredFor = null;
-    self.sessionAdditionalDirectories = [];
     self.turnAdditionalDirectories = [];
     self.history.clear();
     self.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
@@ -97,6 +154,11 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
     self.sessionKind = sessionMeta?.sessionKind ?? "main";
     self.sessionRoutineId = sessionMeta?.routineId ?? null;
     self.sessionRoutineTitle = sessionMeta?.routineTitle ?? null;
+    self.sessionAdditionalDirectories = [];
+    applyProjectContext(self, {
+      ...(sessionMeta?.projectRoot ? { projectRoot: sessionMeta.projectRoot } : {}),
+      ...(sessionMeta?.projectName ? { projectName: sessionMeta.projectName } : {}),
+    });
     self.history.clear();
     self.history.restore(normalized.messages);
     self.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
@@ -108,7 +170,6 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
     self.sessionToolSearches = 0;
     self.sessionActivatedPluginIds.clear();
     self.lastTurnToolNames = null;
-    self.sessionAdditionalDirectories = [];
     self.turnAdditionalDirectories = [];
     // Use max compactNum across all checkpoints (monotonic guarantee).
     // Using array length would produce a stale value when normalizeCheckpoint drops
@@ -155,7 +216,8 @@ export function resetAndResume(self: ConversationLoop, sessionId: string): {
   }
 
 export async function startRoutineConversation(self: ConversationLoop, routineId: string, routineTitle: string, routineFiredAt?: string): Promise<string> {
-    newConversation(self, "routine");
+    const project = currentProjectContext(self);
+    newConversation(self, "routine", project);
     self.sessionRoutineId = routineId;
     self.sessionRoutineTitle = routineTitle;
     await self.deps.memoryManager.saveSession(self.sessionId, []);
@@ -164,6 +226,7 @@ export async function startRoutineConversation(self: ConversationLoop, routineId
       routineId,
       routineTitle,
       ...(routineFiredAt ? { routineFiredAt } : {}),
+      ...project,
     });
     return self.sessionId;
   }
@@ -215,6 +278,7 @@ export async function branchFromCheckpoint(self: ConversationLoop, compactNum: n
       sessionKind: self.sessionKind,
       ...(self.sessionRoutineId ? { routineId: self.sessionRoutineId } : {}),
       ...(self.sessionRoutineTitle ? { routineTitle: self.sessionRoutineTitle } : {}),
+      ...currentProjectContext(self),
       parentSessionId: self.sessionId,
       ...(target.summary ? { summaryPreamble: target.summary } : {}),
       branchedFromCompactNum: compactNum,
