@@ -15,10 +15,18 @@ export interface AuthorizedProjectResolution {
   authorized: boolean;
 }
 
+/**
+ * Display label for the app-managed default/base-directory project. Kept as the
+ * literal "default" instead of the workspace folder's basename (which surfaced a
+ * confusing "workspace" label in the sidebar + insights). Non-default,
+ * user-picked projects still derive their name from the folder basename.
+ */
+export const DEFAULT_PROJECT_NAME = "default";
+
 export function defaultWorkspaceProject(defaultWorkspaceRoot = getDefaultWorkspaceRoot()): ProjectIdentity {
   return {
     projectRoot: defaultWorkspaceRoot,
-    projectName: projectBasename(defaultWorkspaceRoot) || "workspace",
+    projectName: DEFAULT_PROJECT_NAME,
     isDefault: true,
   };
 }
