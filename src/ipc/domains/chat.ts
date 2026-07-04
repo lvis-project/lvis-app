@@ -70,15 +70,7 @@ function normalizeMemoryProjectString(value: unknown, maxChars: number): string 
 
 function parseMemoryProjectOptions(raw: unknown): MemoryProjectOptionsResolution {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    const { project } = resolveAuthorizedWorkspaceProject(undefined);
-    return {
-      ok: true,
-      options: {
-        projectRoot: project?.projectRoot,
-        projectName: project?.projectName,
-        includeUnscoped: true,
-      },
-    };
+    return { ok: true, options: {} };
   }
   const record = raw as Record<string, unknown>;
   const projectRoot = normalizeMemoryProjectString(record.projectRoot, MAX_MEMORY_PROJECT_ROOT_CHARS);
