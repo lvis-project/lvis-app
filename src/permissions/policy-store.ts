@@ -93,7 +93,7 @@ async function readPolicyFile(filePath: string): Promise<PolicyFile | null> {
     return parsed;
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    // JSON parse error 등 — 에러 로그 + fallback
+    // JSON parse errors and similar read failures log and fall back.
     log.error(`failed to read ${filePath}: %s`, (err as Error).message);
     return null;
   }
@@ -102,16 +102,16 @@ async function readPolicyFile(filePath: string): Promise<PolicyFile | null> {
 // ─── Public API ──────────────────────────────────────
 
 /**
- * policy를 로드한다. admin-dir 파일이 있으면 user 파일보다 우선 merge.
+ * Load policy. When an admin-dir file exists, merge it with precedence over the user file.
  *
- * 반환값의 `source` 필드:
- *  - "defaults": 파일 없음 → 기본값
- *  - "user":     user 파일만 존재
- *  - "admin":    admin 파일만 존재 (또는 user 파일 없이 admin만)
- *  - "merged":   둘 다 존재, admin이 user를 override
+ * Returned `source` field:
+ *  - "defaults": no file exists, so defaults are used
+ *  - "user":     only the user file exists
+ *  - "admin":    only the admin file exists
+ *  - "merged":   both exist, with admin overriding user values
  *
- * @param userPath  사용자 policy 파일 경로 (기본: ~/.lvis/policy.json)
- * @param adminPath admin policy 파일 경로 (기본: getAdminPolicyPath())
+ * @param userPath  User policy file path (default: ~/.lvis/policy.json)
+ * @param adminPath Admin policy file path (default: getAdminPolicyPath())
  */
 export async function loadPolicy(
   userPath = DEFAULT_USER_POLICY_PATH,
@@ -122,22 +122,22 @@ export async function loadPolicy(
     readPolicyFile(adminPath),
   ]);
 
-  // case 1: 둘 다 없음 → defaults
+  // case 1: neither exists, so use defaults.
   if (!userFile && !adminFile) {
     return { ...defaultPolicy(), source: "defaults" };
   }
 
-  // case 2: user만 존재
+  // case 2: only the user file exists.
   if (userFile && !adminFile) {
     return { ...userFile, source: "user" };
   }
 
-  // case 3: admin만 존재 (user 없음)
+  // case 3: only the admin file exists.
   if (!userFile && adminFile) {
     return { ...adminFile, source: "admin", adminPath };
   }
 
-  // case 4: 둘 다 존재 → merge (admin wins)
+  // case 4: both exist, so merge with admin taking precedence.
   const base = { ...defaultPolicy(), ...userFile! };
   const overrides: string[] = [];
   const merged = { ...base };
@@ -167,13 +167,13 @@ export async function loadPolicy(
 }
 
 /**
- * policy를 디스크에 저장한다.
+ * Save policy to disk.
  *
- * 차단 조건 (우선순위):
- *  1. admin-dir 파일이 존재하면 항상 throw ("Policy is managed by IT (admin-dir file exists)")
- *  2. user 파일의 managed: true → throw ("IT 관리 정책은 사용자가 변경할 수 없습니다.")
+ * Blocking conditions, in priority order:
+ *  1. admin-dir file exists → always throw "Policy is managed by IT (admin-dir file exists)"
+ *  2. user file managed: true → throw the localized managed-policy error
  *
- * managed 플래그 자체는 patch로 변경 불가 — IT Admin API 전용.
+ * The managed flag itself cannot be changed via patch; it belongs to the IT Admin API.
  */
 export async function savePolicy(
   patch: Partial<Omit<PolicyFile, "version" | "managed" | "updatedAt">>,
@@ -181,7 +181,7 @@ export async function savePolicy(
   adminPath = getAdminPolicyPath(),
 ): Promise<PolicyFile> {
   return withPolicyLock(userPath, async () => {
-    // admin-dir 우선 체크
+    // Check admin-dir first.
     const adminFile = await readPolicyFile(adminPath);
     if (adminFile !== null) {
       throw new Error("Policy is managed by IT (admin-dir file exists)");
@@ -189,7 +189,7 @@ export async function savePolicy(
 
     const existing = await readPolicyFile(userPath);
 
-    // user managed: true 체크 (기존 B1 동작 유지)
+    // Check user managed: true, preserving the existing B1 behavior.
     if (existing?.managed === true) {
       throw new Error(t("be_policyStore.managedPolicyUserCannotChange"));
     }
@@ -199,7 +199,7 @@ export async function savePolicy(
       ...current,
       ...patch,
       version: 1,
-      managed: current.managed, // 사용자가 managed를 바꿀 수 없음
+      managed: current.managed, // Users cannot change managed.
       updatedAt: new Date().toISOString(),
     };
 

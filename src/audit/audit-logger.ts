@@ -267,7 +267,7 @@ export class AuditLogger {
         // Non-fatal — chmod failure must not block audit writes.
       }
     } catch {
-      // Audit 실패가 앱 동작을 차단하면 안 됨
+      // Audit failures must not block app behavior.
     }
   }
 

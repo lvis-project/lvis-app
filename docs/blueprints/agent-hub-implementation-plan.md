@@ -1,13 +1,36 @@
 # Agent Hub Implementation Plan
 
-This is the English default page for `docs/blueprints/agent-hub-implementation-plan.md`. The Korean source document is preserved at [docs/ko/blueprints/agent-hub-implementation-plan.md ](../ko/blueprints/agent-hub-implementation-plan.md).
+This English page is the canonical default entry for `blueprints/agent-hub-implementation-plan.md`. The preserved Korean source is available at [ko/blueprints/agent-hub-implementation-plan.md](../ko/blueprints/agent-hub-implementation-plan.md).
 
-## Status
+## Purpose
 
-- Category: blueprints
-- Default language: English
-- Korean mirror: ko/blueprints/agent-hub-implementation-plan.md
+Blueprints are implementation planning records. Default English pages summarize the current status and link to the Korean historical source.
 
-## Summary
+## When To Use This Page
 
-This page keeps the canonical documentation path English-first while retaining the original Korean document at the same mirrored path below `docs/ko`. Update this page with the English canonical content as the topic evolves; keep the Korean mirror linked when Korean-specific background or review history is still useful.
+Use this page to recover context for an implementation area without making the Korean archive the default entry point.
+
+## Current Contract
+
+- English is the default language for app documentation, UI-facing examples, contributor guidance, and release operations.
+- Korean material is retained under the mirrored `docs/ko` path for historical context, Korean review, and local product memory.
+- If this page describes behavior that is enforced by code, the source files and tests remain the source of truth. Update both when the contract changes.
+- Do not move Korean-only content back into the default documentation path; translate or summarize it here and keep the original mirror linked.
+
+## Maintenance Checklist
+
+- Mark whether the plan is active, implemented, or historical.
+- Link to current source files when available.
+- Do not treat old plan language as current product truth without verification.
+- Prefer concise current status over long stale detail.
+
+## Related Entry Points
+
+- [Documentation Home](../README.md)
+- [Architecture Overview](../architecture/README.md)
+- [Plugin Development Guide](../guides/plugin-development.md)
+- [Korean Mirror](../ko/blueprints/agent-hub-implementation-plan.md)
+
+## Update Notes
+
+When updating this document, keep the English default useful on its own. The Korean mirror should preserve original review history, but reviewers should not need to open it just to understand the current app contract.

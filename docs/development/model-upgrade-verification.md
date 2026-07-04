@@ -1,13 +1,36 @@
 # Model Upgrade Verification
 
-This is the English default page for `docs/development/model-upgrade-verification.md`. The Korean source document is preserved at [docs/ko/development/model-upgrade-verification.md ](../ko/development/model-upgrade-verification.md).
+This English page is the canonical default entry for `development/model-upgrade-verification.md`. The preserved Korean source is available at [ko/development/model-upgrade-verification.md](../ko/development/model-upgrade-verification.md).
 
-## Status
+## Purpose
 
-- Category: development
-- Default language: English
-- Korean mirror: ko/development/model-upgrade-verification.md
+Development notes capture maintenance policies, verification discipline, theme contracts, release flow, and cleanup rules for app contributors.
 
-## Summary
+## When To Use This Page
 
-This page keeps the canonical documentation path English-first while retaining the original Korean document at the same mirrored path below `docs/ko`. Update this page with the English canonical content as the topic evolves; keep the Korean mirror linked when Korean-specific background or review history is still useful.
+Use this page before changing shared development workflows, generated assets, test gates, or theme/design primitives.
+
+## Current Contract
+
+- English is the default language for app documentation, UI-facing examples, contributor guidance, and release operations.
+- Korean material is retained under the mirrored `docs/ko` path for historical context, Korean review, and local product memory.
+- If this page describes behavior that is enforced by code, the source files and tests remain the source of truth. Update both when the contract changes.
+- Do not move Korean-only content back into the default documentation path; translate or summarize it here and keep the original mirror linked.
+
+## Maintenance Checklist
+
+- Keep policy language enforceable by tests or CI where possible.
+- Avoid process labels that naming-gate blocks in production docs.
+- Separate current requirements from historical notes.
+- Update the corresponding app scripts or tests when policy changes.
+
+## Related Entry Points
+
+- [Documentation Home](../README.md)
+- [Architecture Overview](../architecture/README.md)
+- [Plugin Development Guide](../guides/plugin-development.md)
+- [Korean Mirror](../ko/development/model-upgrade-verification.md)
+
+## Update Notes
+
+When updating this document, keep the English default useful on its own. The Korean mirror should preserve original review history, but reviewers should not need to open it just to understand the current app contract.

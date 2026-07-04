@@ -133,20 +133,20 @@ The `SandboxRunner` interface abstracts per-OS tools and allows boot-time regist
 /**
  * Execution environment isolation capability descriptor.
  * Describes what is isolated (network, filesystem, processes).
- * 
+ *
  * V1 (chosen): narrow allowlist for simplicity + reviewer modelability
  * Forward path: hybrid (selective OCI fields) for v2 expansion
  */
 export interface SandboxCapabilityDescriptor {
   /** Is external network egress blocked? */
   networkBlocked: boolean;
-  
+
   /** Filesystem read whitelist (absolute paths). [] = inherit host. */
   fsReadPaths: string[];
-  
+
   /** Filesystem write whitelist (absolute paths). [] = inherit host. */
   fsWritePaths: string[];
-  
+
   /** Process/IPC isolation active? (boolean; expands to syscall set in v2) */
   processIsolated: boolean;
 }
@@ -154,7 +154,7 @@ export interface SandboxCapabilityDescriptor {
 /**
  * Single sandbox runner abstraction.
  * Each OS registers one primary runner.
- * 
+ *
  * The runner is responsible for:
  *   1. Executing cmd/args with the given capability constraints
  *   2. Reporting success/failure + exit code
@@ -164,7 +164,7 @@ export interface SandboxCapabilityDescriptor {
 export interface SandboxRunner {
   /**
    * Spawn a process inside the sandbox with given capabilities.
-   * 
+   *
    * @param cmd - executable path or shell command
    * @param args - command-line arguments (NOT interpreted for shell metacharacters)
    * @param capabilities - isolation constraints (networkBlocked, fs allowlists, etc.)
@@ -182,7 +182,7 @@ export interface SandboxRunner {
    * Detect whether this runner is available on the current platform.
    * Called at boot to validate runner registration.
    * If unavailable: boot sets kind="none", notifies user.
-   * 
+   *
    * @returns - { available: boolean, reason: string }
    */
   detect(): Promise<{ available: boolean; reason: string }>;
@@ -196,7 +196,7 @@ export interface SandboxedProcess {
   stdout: ReadableStream<string>;
   stderr: ReadableStream<string>;
   exitCode: Promise<number>;
-  
+
   /** Send SIGTERM to the sandboxed process. */
   abort(): Promise<void>;
 }
@@ -204,7 +204,7 @@ export interface SandboxedProcess {
 /**
  * Boot-time registration for per-OS sandbox runners.
  * One primary runner per platform — no fallback chain.
- * 
+ *
  * Example:
  *   registerSandboxRunner("linux", new BwrapRunner());
  *   registerSandboxRunner("darwin", new SandboxExecRunner());
@@ -320,9 +320,9 @@ export type SandboxKind =
 
 **Composition rule amendment** (line 36 of `permission-reviewer-framework.ts`):
 ```
-If executionSandbox.kind='none' OR confidence='assumed' OR kind='partial', 
+If executionSandbox.kind='none' OR confidence='assumed' OR kind='partial',
 the LLM MUST NOT downgrade a rule-based MEDIUM/HIGH verdict to LOW.
-If executionSandbox.kind='fs-only', the LLM MUST NOT downgrade HIGH to MEDIUM/LOW 
+If executionSandbox.kind='fs-only', the LLM MUST NOT downgrade HIGH to MEDIUM/LOW
 (fs isolation is meaningful but incomplete without process/network isolation).
 ```
 

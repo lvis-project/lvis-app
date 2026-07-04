@@ -292,7 +292,7 @@ export async function initPluginRuntime(
     })();
   });
 
-  // 범용 configOverrides + pythonExecutable 선언형 주입
+  // Generic configOverrides plus declarative pythonExecutable injection.
   const configOverrides = buildPluginConfigOverrides(settingsService);
   if (pythonPath) {
     configOverrides["*"] = {
