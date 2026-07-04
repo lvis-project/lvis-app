@@ -7,20 +7,24 @@ export interface UseSidebarWidthResult {
   sidebarWidth: number;
   /** Update width during a drag — state only, no IPC (per-move). */
   setSidebarWidth: (px: number) => void;
-  /** Persist width to host settings (drag-end / keyboard step / reset), no-op guarded. */
+  /** Persist width to host settings (drag-end / keyboard step / double-click
+   *  reset — the shared EdgeResizeBar commits its reset width through this
+   *  same setter), no-op guarded. */
   commitSidebarWidth: (px: number) => void;
-  /** Reset to the default width and persist (double-click on the handle). */
-  resetSidebarWidth: () => void;
 }
 
 /**
  * Owns the primary (left) navigation sidebar's expanded width. Mirrors
- * `useSidePanelWidth`: the width is a durable shell-layout preference persisted
- * via `SystemSettings.sidebarWidth` (mount seed via `getSettings()`, drag-end
+ * `useSidePanelWidth` exactly (same shape: width/setWidth/commitWidth) so both
+ * the left sidebar and the right ChatSidePanel drive the SAME
+ * `EdgeResizeBar`/`useEdgeResize` primitive through an identical hook contract.
+ * The width is a durable shell-layout preference persisted via
+ * `SystemSettings.sidebarWidth` (mount seed via `getSettings()`, drag-end
  * persist via `updateSettings()`). Per-move `setSidebarWidth` updates state
- * only; release / keyboard / reset call `commitSidebarWidth` (one guarded IPC
- * write). Values are clamped to [SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH] by the
- * shared `clampSidebarWidth`, matching the settings-store validation floor/ceil.
+ * only; release / keyboard / double-click-reset call `commitSidebarWidth` (one
+ * guarded IPC write). Values are clamped to [SIDEBAR_MIN_WIDTH,
+ * SIDEBAR_MAX_WIDTH] by the shared `clampSidebarWidth`, matching the
+ * settings-store validation floor/ceiling.
  */
 export function useSidebarWidth(api: LvisApi): UseSidebarWidthResult {
   const [sidebarWidth, setSidebarWidthState] = useState<number>(SIDEBAR_DEFAULT_WIDTH);
@@ -62,9 +66,5 @@ export function useSidebarWidth(api: LvisApi): UseSidebarWidthResult {
     [api],
   );
 
-  const resetSidebarWidth = useCallback(() => {
-    commitSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
-  }, [commitSidebarWidth]);
-
-  return { sidebarWidth, setSidebarWidth, commitSidebarWidth, resetSidebarWidth };
+  return { sidebarWidth, setSidebarWidth, commitSidebarWidth };
 }
