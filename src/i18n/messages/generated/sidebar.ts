@@ -17,6 +17,10 @@ export const en = {
   "sidebar.authRequiredAriaLabel": "Authentication required",
   "sidebar.exportMarkdown": "Markdown (.md)",
   "sidebar.exportJson": "JSON (.json)",
+  "sidebar.resizeHandleAriaLabel": "Resize sidebar",
+  "sidebar.projectMenuNewChat": "New chat in this project",
+  "sidebar.projectMenuReveal": "Reveal folder",
+  "sidebar.projectMenuRemove": "Remove project",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "sidebar.ariaLabel": "기본 탐색",
@@ -36,4 +40,8 @@ export const ko: Record<keyof typeof en, string> = {
   "sidebar.authRequiredAriaLabel": "인증 필요",
   "sidebar.exportMarkdown": "Markdown (.md)",
   "sidebar.exportJson": "JSON (.json)",
+  "sidebar.resizeHandleAriaLabel": "사이드바 크기 조절",
+  "sidebar.projectMenuNewChat": "이 프로젝트에서 새 대화",
+  "sidebar.projectMenuReveal": "폴더 열기",
+  "sidebar.projectMenuRemove": "프로젝트 제거",
 };
