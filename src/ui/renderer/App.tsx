@@ -524,9 +524,9 @@ export function App() {
     [llmVendor, llmModel],
   );
 
-  const handleNewChat = useCallback(async () => {
+  const handleNewChat = useCallback(async (project?: { projectRoot?: string; projectName?: string }) => {
     if (streaming) { console.warn("new chat blocked during streaming"); return; }
-    await api.chatNew();
+    await api.chatNew(project);
     clearForNewChat();
     resetForNewSession();
     setActiveView("home");
@@ -573,6 +573,9 @@ export function App() {
   );
 
   const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
+  const onNewChatForProject = useCallback((project: { projectRoot?: string; projectName?: string }) => {
+    void handleNewChat(project);
+  }, [handleNewChat]);
   const handleMarketplaceAnnouncementDismiss = useCallback(
     (id: number) => {
       dismissMarketplaceAnnouncement(id).catch((err) => {
@@ -654,6 +657,7 @@ export function App() {
         pluginAuthStatuses={pluginAuthStatuses}
         onOpenSettings={onOpenSettings}
         onNewChat={onNewChat}
+        onNewChatForProject={onNewChatForProject}
         onOpenMarketplace={onOpenMarketplace}
         marketplaceUrlReady={marketplaceUrlReady}
         onOpenUnifiedSearch={() => { searchOpenOverlay(); }}

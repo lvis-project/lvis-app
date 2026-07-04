@@ -11,6 +11,8 @@ export interface SessionSummary {
   routineId?: string;
   routineTitle?: string;
   routineFiredAt?: string;
+  projectRoot?: string;
+  projectName?: string;
   /** Compact number of the checkpoint this session was forked from. Only set on true checkpoint forks. */
   branchedFromCompactNum?: number;
 }

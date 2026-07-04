@@ -19,11 +19,38 @@ const log = createLogger("lvis");
 
 const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
 
+export interface SessionProjectContext {
+  projectRoot?: string;
+  projectName?: string;
+}
+
 function isSafeSessionId(sessionId: unknown): sessionId is string {
   return typeof sessionId === "string" && SESSION_ID_REGEX.test(sessionId);
 }
 
-export function newConversation(self: ConversationLoop, kind: SessionKind = "main"): void {
+function normalizeProjectString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function applyProjectContext(self: ConversationLoop, project?: SessionProjectContext): void {
+  self.sessionProjectRoot = normalizeProjectString(project?.projectRoot);
+  self.sessionProjectName = normalizeProjectString(project?.projectName);
+}
+
+function currentProjectContext(self: ConversationLoop): SessionProjectContext {
+  return {
+    ...(self.sessionProjectRoot ? { projectRoot: self.sessionProjectRoot } : {}),
+    ...(self.sessionProjectName ? { projectName: self.sessionProjectName } : {}),
+  };
+}
+
+export function newConversation(
+  self: ConversationLoop,
+  kind: SessionKind = "main",
+  project?: SessionProjectContext,
+): void {
     if (self.history.length > 0) {
       self.deps.memoryManager.saveSession(self.sessionId, self.history.getMessages()).catch((err: unknown) => {
         log.warn("newConversation saveSession failed: %s", (err as Error).message);
@@ -40,6 +67,7 @@ export function newConversation(self: ConversationLoop, kind: SessionKind = "mai
     self.sessionKind = kind;
     self.sessionRoutineId = null;
     self.sessionRoutineTitle = null;
+    applyProjectContext(self, project);
     // #811 m2 — new session ⇒ SessionStart must re-fire on the next turn.
     self.sessionStartFiredFor = null;
     self.sessionAdditionalDirectories = [];
@@ -97,6 +125,8 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
     self.sessionKind = sessionMeta?.sessionKind ?? "main";
     self.sessionRoutineId = sessionMeta?.routineId ?? null;
     self.sessionRoutineTitle = sessionMeta?.routineTitle ?? null;
+    self.sessionProjectRoot = sessionMeta?.projectRoot ?? null;
+    self.sessionProjectName = sessionMeta?.projectName ?? null;
     self.history.clear();
     self.history.restore(normalized.messages);
     self.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
@@ -155,7 +185,8 @@ export function resetAndResume(self: ConversationLoop, sessionId: string): {
   }
 
 export async function startRoutineConversation(self: ConversationLoop, routineId: string, routineTitle: string, routineFiredAt?: string): Promise<string> {
-    newConversation(self, "routine");
+    const project = currentProjectContext(self);
+    newConversation(self, "routine", project);
     self.sessionRoutineId = routineId;
     self.sessionRoutineTitle = routineTitle;
     await self.deps.memoryManager.saveSession(self.sessionId, []);
@@ -164,6 +195,7 @@ export async function startRoutineConversation(self: ConversationLoop, routineId
       routineId,
       routineTitle,
       ...(routineFiredAt ? { routineFiredAt } : {}),
+      ...project,
     });
     return self.sessionId;
   }
@@ -215,6 +247,7 @@ export async function branchFromCheckpoint(self: ConversationLoop, compactNum: n
       sessionKind: self.sessionKind,
       ...(self.sessionRoutineId ? { routineId: self.sessionRoutineId } : {}),
       ...(self.sessionRoutineTitle ? { routineTitle: self.sessionRoutineTitle } : {}),
+      ...currentProjectContext(self),
       parentSessionId: self.sessionId,
       ...(target.summary ? { summaryPreamble: target.summary } : {}),
       branchedFromCompactNum: compactNum,

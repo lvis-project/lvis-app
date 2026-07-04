@@ -218,6 +218,7 @@ export const CHANNELS = {
   usage: {
     summary: "lvis:usage:summary",
     range: "lvis:usage:range",
+    dailySummary: "lvis:usage:daily-summary",
     exportCsv: "lvis:usage:export-csv",
   },
   // ── preload-swept channel groups (C11: #1409 + #1411) ──────────────────────

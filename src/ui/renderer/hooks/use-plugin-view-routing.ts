@@ -114,7 +114,7 @@ export function usePluginViewRouting({
   );
 
   const openDetachedBuiltInView = useCallback(
-    async (viewKey: "work-board" | "routines" | "memory" | "starred"): Promise<boolean> => {
+    async (viewKey: "work-board" | "routines" | "memory" | "starred" | "insights"): Promise<boolean> => {
       const openDetached = api.window?.openDetached;
       if (!openDetached) {
         setErrorWithThought(t("app.errorCannotOpenNewWindow"));
@@ -281,7 +281,8 @@ export function usePluginViewRouting({
         (key === "work-board" ||
           key === "routines" ||
           key === "memory" ||
-          key === "starred")
+          key === "starred" ||
+          key === "insights")
       ) {
         void openDetachedBuiltInView(key);
         return;
