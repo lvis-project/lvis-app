@@ -52,7 +52,7 @@ describe("AppearanceTab — bundle card grid", () => {
 
   it("the default bundle card has aria-checked=true", () => {
     const { getByRole } = renderWithBundle();
-    const card = getByRole("radio", { name: /테마: Cherry Blossom/ });
+    const card = getByRole("radio", { name: /테마: Antigravity/ });
     expect(card.getAttribute("aria-checked")).toBe("true");
   });
 
