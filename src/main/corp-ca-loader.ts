@@ -3,7 +3,7 @@
 
 
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, statSync } from "node:fs";
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -40,17 +40,22 @@ const CORP_ROOT_CA_CN = process.env.LVIS_CORP_CA_CN ?? "Corporate Root CA";
 
 
 function readCacheIfFresh(): string | null {
+  let fd: number | null = null;
   try {
-    const st = statSync(CACHE_PATH);
+    fd = openSync(CACHE_PATH, "r");
+    const st = fstatSync(fd);
     const ageMs = Date.now() - st.mtimeMs;
     if (ageMs < CACHE_TTL_MS) {
-      const content = readFileSync(CACHE_PATH, "utf-8");
+      const content = readFileSync(fd, "utf-8");
       if (content.includes("-----BEGIN CERTIFICATE-----")) {
         return content;
       }
     }
   } catch {
-
+  } finally {
+    if (fd !== null) {
+      try { closeSync(fd); } catch { /* ignore */ }
+    }
   }
   return null;
 }
@@ -139,13 +144,14 @@ function countCerts(pem: string): number {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * 조직 Root CA PEM을 반환한다.
+ * Returns the configured corporate Root CA PEM.
  *
- * 1. cache (~/.lvis/certs/corp-ca.pem) 가 fresh하면 그대로 반환
- * 2. stale 또는 미존재 → 플랫폼별 추출 후 0o600으로 cache 저장
- * 3. 추출 실패 (해외망, MDM 미배포) → { pem: null, source: "none" }
+ * 1. Return the fresh cache (~/.lvis/certs/corp-ca.pem) when available.
+ * 2. Extract by platform when the cache is stale or missing, then write a
+ *    0o600 cache.
+ * 3. Return { pem: null, source: "none" } when extraction is unavailable.
  *
- * 실패 시 throw하지 않는다. caller가 결정.
+ * This does not throw on extraction failure; callers decide how to proceed.
  */
 export async function ensureCorporateCa(): Promise<CorporateCaResult> {
   const cachePath = CACHE_PATH;

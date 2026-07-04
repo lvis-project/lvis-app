@@ -1,8 +1,8 @@
 /**
  * corp-ca-loader unit tests — §17 C1
  *
- * child_process.execFile 와 node:fs 를 mock 해서 실제 keychain / 파일시스템
- * 없이 모든 경로를 검증한다.
+ * Mocks child_process.execFile and node:fs so every path can be tested without
+ * touching the real keychain or filesystem.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -11,12 +11,13 @@ vi.mock("node:child_process", () => ({
   execFile: vi.fn(),
 }));
 
-// ─── Mock node:fs (sync) — for statSync / readFileSync / mkdirSync ────────────
+// ─── Mock node:fs (sync) — for cache reads and directory creation ────────────
 vi.mock("node:fs", () => ({
-  statSync: vi.fn(),
-  readFileSync: vi.fn(),
+  closeSync: vi.fn(),
+  fstatSync: vi.fn(),
   mkdirSync: vi.fn(),
-  existsSync: vi.fn(),
+  openSync: vi.fn(),
+  readFileSync: vi.fn(),
 }));
 
 // ─── Mock node:fs/promises — for open() ──────────────────────────────────────
@@ -32,7 +33,9 @@ import * as fsMock from "node:fs";
 import * as fspMock from "node:fs/promises";
 
 const mockedExecFile = vi.mocked(cpMock.execFile);
-const mockedStatSync = vi.mocked(fsMock.statSync);
+const mockedCloseSync = vi.mocked(fsMock.closeSync);
+const mockedFstatSync = vi.mocked(fsMock.fstatSync);
+const mockedOpenSync = vi.mocked(fsMock.openSync);
 const mockedReadFileSync = vi.mocked(fsMock.readFileSync);
 const mockedMkdirSync = vi.mocked(fsMock.mkdirSync);
 const mockedOpen = vi.mocked(fspMock.open);
@@ -45,13 +48,13 @@ const SAMPLE_PEM = [
 ].join("\n") + "\n";
 
 // ─── Fresh mtime helper ───────────────────────────────────────────────────────
-function makeFreshStat(): ReturnType<typeof fsMock.statSync> {
-  return { mtimeMs: Date.now() - 1000 } as ReturnType<typeof fsMock.statSync>;
+function makeFreshStat(): ReturnType<typeof fsMock.fstatSync> {
+  return { mtimeMs: Date.now() - 1000 } as ReturnType<typeof fsMock.fstatSync>;
 }
 
-function makeStalestat(): ReturnType<typeof fsMock.statSync> {
+function makeStalestat(): ReturnType<typeof fsMock.fstatSync> {
   // 8 days ago — beyond 7-day TTL
-  return { mtimeMs: Date.now() - 8 * 24 * 60 * 60 * 1000 } as ReturnType<typeof fsMock.statSync>;
+  return { mtimeMs: Date.now() - 8 * 24 * 60 * 60 * 1000 } as ReturnType<typeof fsMock.fstatSync>;
 }
 
 function mockExecFileStdout(stdout: string): void {
@@ -81,8 +84,8 @@ describe("ensureCorporateCa", () => {
     // Mock process.platform to 'darwin' so extractByPlatform() calls extractMacos()
     // which invokes execSync — required for extraction tests to pass on Linux CI.
     Object.defineProperty(process, "platform", { value: "darwin", configurable: true, writable: true });
-    // default: statSync throws ENOENT (no cache)
-    mockedStatSync.mockImplementation(() => {
+    // default: openSync throws ENOENT (no cache)
+    mockedOpenSync.mockImplementation(() => {
       const err = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
       throw err;
     });
@@ -90,6 +93,7 @@ describe("ensureCorporateCa", () => {
     mockExecFileStdout("");
     // mkdirSync no-op
     mockedMkdirSync.mockReturnValue(undefined);
+    mockedCloseSync.mockReturnValue(undefined);
   });
 
   afterEach(() => {
@@ -135,7 +139,8 @@ describe("ensureCorporateCa", () => {
   });
 
   it("cache file fresh (mtime < 7d) → execFile NOT called, source: 'cache'", async () => {
-    mockedStatSync.mockReturnValue(makeFreshStat());
+    mockedOpenSync.mockReturnValue(42 as never);
+    mockedFstatSync.mockReturnValue(makeFreshStat());
     mockedReadFileSync.mockReturnValue(SAMPLE_PEM as never);
 
     const { ensureCorporateCa } = await import("../corp-ca-loader.js");
@@ -147,7 +152,8 @@ describe("ensureCorporateCa", () => {
   });
 
   it("cache file stale (mtime > 7d) → re-extracts, source: 'extracted'", async () => {
-    mockedStatSync.mockReturnValue(makeStalestat());
+    mockedOpenSync.mockReturnValue(42 as never);
+    mockedFstatSync.mockReturnValue(makeStalestat());
     // stale cache content (still valid PEM — but older than 7d)
     mockedReadFileSync.mockReturnValue(SAMPLE_PEM as never);
     // execFile returns fresh PEM

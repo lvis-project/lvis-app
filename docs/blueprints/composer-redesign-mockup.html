@@ -17,22 +17,26 @@
 <body>
   <main>
     <h1>Composer Redesign Mockup</h1>
-    <p>This English page is the canonical default entry for <code>docs/blueprints/composer-redesign-mockup.html</code>. The preserved Korean design artifact is available at <a href="../ko/blueprints/composer-redesign-mockup.html">ko/blueprints/composer-redesign-mockup.html</a>.</p>
+    <p>This English design artifact visualizes composer queue behavior, interrupt controls, and the shift between idle and busy chat input states. The Korean archive is available at <a href="../ko/blueprints/composer-redesign-mockup.html">docs/ko mirror</a>.</p>
     <section class="panel">
-      <h2>Purpose</h2>
-      <p>Blueprints are implementation planning records. Default English pages summarize the current status and link to the Korean historical source.</p>
-      <h2>Current Contract</h2>
+      <h2>Screen Contract</h2>
       <ul>
-        <li>Default design documentation is English-first and must be understandable without opening the Korean mirror.</li>
-        <li>Renderer changes should preserve workflow, accessibility, and test contracts.</li>
-        <li>Historical Korean mockup detail remains linked for review continuity.</li>
+        <li>The artifact must be understandable as the default review surface without opening the archive.</li>
+        <li>Workflow-critical states must be explicit: empty, loading, active, error, success, and permission-blocked where applicable.</li>
+        <li>Renderer changes should preserve accessibility labels, keyboard behavior, and test hooks unless the owning test is updated.</li>
       </ul>
-      <h2>Maintenance Checklist</h2>
+      <h2>Implementation Anchors</h2>
       <ul>
-        <li>Mark whether the plan is active, implemented, or historical.</li>
-        <li>Link to current source files when available.</li>
-        <li>Do not treat old plan language as current product truth without verification.</li>
-        <li>Prefer concise current status over long stale detail.</li>
+        <li><code>docs/architecture/README.md</code></li>
+        <li><code>src/core/</code></li>
+        <li><code>src/ui/renderer/</code></li>
+        <li><code>src/plugins/</code></li>
+      </ul>
+      <h2>Update Checklist</h2>
+      <ul>
+        <li>Update this artifact when layout, state naming, or primary actions change.</li>
+        <li>Keep screenshots, HTML mockups, and component tests aligned.</li>
+        <li>Do not use decorative-only changes to mask missing workflow states.</li>
       </ul>
     </section>
   </main>
