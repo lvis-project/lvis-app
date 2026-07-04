@@ -21,18 +21,18 @@ describe("chat project payloads", () => {
     expect(parseChatSessionProjectPayload({ projectScope: "none" })).toEqual({});
   });
 
-  it("defaults unscoped new chats to the workspace project", () => {
+  it("defaults unscoped new chats to the default project", () => {
     expect(resolveChatNewProjectPayload(undefined, "C:\\Users\\ikcha\\workspace")).toEqual({
       projectRoot: "C:\\Users\\ikcha\\workspace",
-      projectName: "workspace",
+      projectName: "default",
     });
     expect(resolveChatNewProjectPayload({ projectRoot: "  " }, "C:\\Users\\ikcha\\workspace")).toEqual({
       projectRoot: "C:\\Users\\ikcha\\workspace",
-      projectName: "workspace",
+      projectName: "default",
     });
     expect(resolveChatNewProjectPayload({ projectName: "loose-name" }, "C:\\Users\\ikcha\\workspace")).toEqual({
       projectRoot: "C:\\Users\\ikcha\\workspace",
-      projectName: "workspace",
+      projectName: "default",
     });
   });
 
@@ -46,9 +46,9 @@ describe("chat project payloads", () => {
     });
   });
 
-  it("derives a stable fallback project name when cwd has no basename", () => {
+  it("labels the default project with the stable 'default' literal", () => {
     expect(defaultWorkspaceProjectPayload("")).toEqual({
-      projectName: "workspace",
+      projectName: "default",
     });
   });
 });

@@ -50,14 +50,19 @@ export function projectIdentityFromRoot(
 ): ProjectIdentity {
   return {
     projectRoot,
-    projectName: projectBasename(projectRoot) || fallbackName,
+    // The DEFAULT/base-directory project is labeled by `fallbackName` (a stable
+    // "default" / localized "현재 프로젝트" label) rather than the folder
+    // basename of the user's workspace directory — deriving it from the folder
+    // name surfaced a confusing literal (e.g. "workspace") in the UI. Non-default
+    // (user-picked) projects keep their folder basename as the display name.
+    projectName: isDefault ? fallbackName : (projectBasename(projectRoot) || fallbackName),
     isDefault,
   };
 }
 
 export function projectIdentityFromPayload(
   payload: { projectRoot?: unknown; projectName?: unknown; isDefault?: unknown } | null | undefined,
-  fallbackName = "workspace",
+  fallbackName = "default",
 ): ProjectIdentity | undefined {
   const projectRoot = normalizeProjectRoot(payload?.projectRoot);
   const projectName = normalizeProjectName(payload?.projectName);
