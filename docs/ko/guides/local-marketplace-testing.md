@@ -98,7 +98,7 @@ lvis-project/
 ├── lvis-plugin-local-indexer/
 ├── lvis-plugin-email/
 ├── lvis-plugin-calendar/
-├── 
+├──
 ├── lvis-plugin-work-assistant/
 └── lvis-plugin-agent-hub/
 ```

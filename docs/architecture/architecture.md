@@ -1,13 +1,175 @@
 # LVIS Architecture Document
 
-This is the English default page for `docs/architecture/architecture.md`. The Korean source document is preserved at [docs/ko/architecture/architecture.md ](../ko/architecture/architecture.md).
+LVIS is a desktop agent platform for local-first, project-aware AI work. The app
+is built around one invariant: the host owns trust, storage, project identity,
+and tool execution; plugins and renderer surfaces request capabilities through
+explicit contracts.
 
-## Status
+Korean source history is preserved at
+[docs/ko/architecture/architecture.md](../ko/architecture/architecture.md).
 
-- Category: architecture
-- Default language: English
-- Korean mirror: ko/architecture/architecture.md
+## System Goals
 
-## Summary
+- Keep project context first-class across chat, memory, insights, work board,
+  audit, and tool permissions.
+- Let the user work from a desktop app without assuming that the process launch
+  directory is the project root.
+- Make the default workspace project the fallback when the user has not
+  explicitly selected a project.
+- Route every tool call through the same permission, audit, and execution path
+  regardless of whether the tool is builtin, plugin-provided, or MCP-provided.
+- Keep UI extension points powerful but bounded by host-owned APIs.
+- Preserve deterministic fallbacks for provider, network, or plugin failures.
 
-This page keeps the canonical documentation path English-first while retaining the original Korean document at the same mirrored path below `docs/ko`. Update this page with the English canonical content as the topic evolves; keep the Korean mirror linked when Korean-specific background or review history is still useful.
+## Layer Map
+
+| Layer | Scope | Primary Responsibilities |
+| --- | --- | --- |
+| User and desktop shell | Electron windows, tray, titlebar, settings, dialogs | Present the app, collect consent, and keep foreground/background behavior predictable. |
+| Renderer app | Chat, Insights, Projects, Work Board, plugin slots | Render state from host APIs, never bypass host policy, and keep app workflows ergonomic. |
+| Preload and IPC contracts | `src/preload`, `src/ipc`, shared channel constants | Expose narrow typed APIs from the main process to renderer code. |
+| Host services | conversation loop, memory manager, session store, work board, plugin runtime | Own durable state, project identity, LLM orchestration, plugin lifecycle, and execution policy. |
+| Tool execution and governance | Tool registry, executor, permissions, audit, sandbox helpers | Enforce one route for builtin/plugin/MCP tool calls and record decisions. |
+| External integrations | LLM providers, MCP servers, marketplace, web auth, local indexers | Connect to outside systems through host-owned adapters and explicit credentials. |
+
+## Process Boundaries
+
+The renderer is a presentation surface. It does not read arbitrary files, mutate
+settings directly, or execute tools. It calls preload APIs, which map to IPC
+handlers in the main process. The main process validates arguments, resolves
+current project context, and dispatches to host services.
+
+Plugin UI code runs inside host-created shells. The host resolves plugin asset
+URLs, applies theme tokens, and passes a bridge. Plugin code can request host
+operations only through declared capabilities and HostApi methods.
+
+MCP servers are treated as external tool providers. Their tools are normalized
+into the same registry and are subject to the same permission and audit
+requirements as other tools.
+
+## Project Identity
+
+Project identity is not inferred from `process.cwd()`. LVIS is a desktop app,
+so project scope comes from app state:
+
+- selected project in the sidebar or project header;
+- default workspace project when no explicit project is selected;
+- normalized session metadata (`projectRoot`, `projectName`) for persisted
+  conversations and insights;
+- per-project memory, work-board reports, and token usage aggregation.
+
+There should not be a durable "no project" session in the normal app path. If
+legacy metadata is missing a project, list and UI surfaces should normalize it
+to the default workspace project where possible.
+
+## Conversation Loop
+
+The conversation loop builds the system prompt, session history, project
+context, memory context, available tools, and provider configuration for each
+turn. It streams model output, collects tool calls, dispatches tool execution,
+and commits turn artifacts back to the session store.
+
+Important rules:
+
+- Project metadata must be attached before a new session is persisted.
+- Tool calls must not execute until the permission manager has resolved the
+  decision path.
+- Long histories are compacted through the structured compact path rather than
+  silent truncation.
+- Foreground turn-end notices stay out of the composer notification area; system
+  notifications are reserved for background or non-focused app state.
+
+## Memory
+
+Memory is host-owned and project-aware. User preferences, long-term memories,
+and work-board memory are read and written through storage seams, not renderer
+filesystem access. Korean natural-language triggers remain supported where they
+are part of runtime intent parsing, but default app-generated memory templates
+are English.
+
+Memory writes should preserve source provenance and avoid storing secrets,
+credentials, raw private data, or unsupported claims.
+
+## Insights
+
+Insights is the default home for calendar-based activity review:
+
+- calendar heatmap for token usage;
+- selected-day usage details;
+- daily LLM narrative with deterministic fallback;
+- starred items for the selected day;
+- conversation and project activity summaries.
+
+Daily narratives are generated through host IPC and must fail closed to the
+deterministic UI fallback when no provider is configured or generation fails.
+
+## Work Board
+
+The Work Board is a host domain, not only a plugin. It stores items, activity,
+reports, and work-flow memory under host-managed storage. Reports default to
+English prompts and English seeded examples. Per-project report paths use the
+normalized project key.
+
+The work board can still integrate with plugin and subagent flows, but the host
+owns storage, approvals, and audit.
+
+## Plugin Runtime
+
+Plugin installation and runtime behavior are governed by manifest declarations,
+capability checks, marketplace policy, and host APIs.
+
+Key boundaries:
+
+- plugin code cannot invent its own identity when calling HostApi;
+- installed plugin assets are loaded through host-approved URLs;
+- plugin tools must declare schemas and categories;
+- plugin UI can render in host slots but cannot bypass permission review;
+- marketplace metadata should not override local policy or managed-plugin rules.
+
+## Tool Governance
+
+All tool execution flows through the registry and executor:
+
+1. resolve the tool by name and source;
+2. validate input schema and declared category;
+3. build permission context from trust origin, project, headless state, and
+   policy mode;
+4. run hard gates before any reviewer or user prompt;
+5. ask the user or reviewer where policy requires it;
+6. execute through the controlled adapter;
+7. record audit and telemetry output.
+
+The source of a tool changes display and audit metadata; it does not create a
+separate policy bypass.
+
+## Security And Audit
+
+Security-sensitive areas are intentionally centralized:
+
+- `src/permissions` for policy and approval decisions;
+- `src/audit` for durable audit records;
+- `src/ipc` and `src/preload` for process boundary contracts;
+- `src/boot` for startup wiring and policy initialization;
+- tool executor and sandbox helpers for runtime enforcement.
+
+Changes spanning these areas require cross-cutting review. Documentation-only
+mirrors under `docs/ko` are excluded from naming-process gates because they
+preserve historical source text; production paths remain covered.
+
+## Documentation Language Policy
+
+English is the canonical default for app docs, generated examples, comments,
+logs, and user-facing fallback copy. Korean source documents are retained under
+the mirrored `docs/ko` path and linked from the default pages. Runtime Korean
+support remains in locale catalogs, intent parsing, and keyword matching where
+the app must understand Korean user input.
+
+## Verification Expectations
+
+Architecture changes should normally be verified with:
+
+- targeted tests for the changed contract;
+- `bun run typecheck`;
+- `bun run check:i18n-catalog` when UI copy or catalogs change;
+- `bun run test` for broad cross-cutting changes;
+- `git diff --check origin/main...HEAD` for PR-range whitespace checks.

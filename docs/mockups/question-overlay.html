@@ -5,15 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Question Overlay</title>
   <style>
-    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 760px; margin: 64px auto; padding: 0 24px; line-height: 1.6; color: #20242c; }
+    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f7f8fb; color: #20242c; }
+    main { max-width: 860px; margin: 0 auto; padding: 56px 24px; line-height: 1.6; }
+    h1 { margin: 0 0 12px; font-size: 32px; letter-spacing: 0; }
+    h2 { margin-top: 28px; font-size: 18px; }
     a { color: #2457c5; }
-    code { background: #f4f5f7; padding: 2px 5px; border-radius: 4px; }
+    code { background: #edf1f7; padding: 2px 5px; border-radius: 4px; }
+    .panel { border: 1px solid #d8dfeb; background: white; border-radius: 8px; padding: 18px; }
   </style>
 </head>
 <body>
-  <h1>Question Overlay</h1>
-  <p>This is the English default page for <code>docs/mockups/question-overlay.html</code>.</p>
-  <p>The original Korean design artifact is preserved at <a href="../ko/mockups/question-overlay.html">docs/ko/mockups/question-overlay.html</a>.</p>
-  <p>Keep this default path English-first when the design artifact is updated.</p>
+  <main>
+    <h1>Question Overlay</h1>
+    <p>This English page is the canonical default entry for <code>docs/mockups/question-overlay.html</code>. The preserved Korean design artifact is available at <a href="../ko/mockups/question-overlay.html">ko/mockups/question-overlay.html</a>.</p>
+    <section class="panel">
+      <h2>Purpose</h2>
+      <p>Design artifacts define screen-level contracts, interaction states, and visual QA expectations for app surfaces.</p>
+      <h2>Current Contract</h2>
+      <ul>
+        <li>Default design documentation is English-first and must be understandable without opening the Korean mirror.</li>
+        <li>Renderer changes should preserve workflow, accessibility, and test contracts.</li>
+        <li>Historical Korean mockup detail remains linked for review continuity.</li>
+      </ul>
+      <h2>Maintenance Checklist</h2>
+      <ul>
+        <li>Preserve test hooks and accessibility labels that tests rely on.</li>
+        <li>Keep interaction states explicit.</li>
+        <li>Avoid decorative-only changes without a workflow reason.</li>
+        <li>Update screenshots or HTML artifacts when UI contracts change.</li>
+      </ul>
+    </section>
+  </main>
 </body>
 </html>

@@ -101,7 +101,7 @@ export interface AppServices {
   /** A3 — structured audit logger (JSONL, ~/.lvis/audit/) */
   auditLogger: AuditLogger;
   postTurnHookChain: PostTurnHookChain;
-  /** B1: 승인 게이트 — mainWindow 준비 후 생성 */
+  /** B1: approval gate, created after mainWindow is ready. */
   approvalGate?: ApprovalGate;
   /** Rebuild Layer 5 reviewer bindings after persisted reviewer settings change. */
   rewireReviewerAgent?: () => void;
@@ -162,7 +162,7 @@ export interface AppServices {
   skillStore?: import("../main/skill-store.js").SkillStore;
   agentProfileStore?: import("../main/agent-profile-store.js").AgentProfileStore;
   personaPromptStore?: import("../main/persona-prompt-store.js").PersonaPromptStore;
-  /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
+  /** Rebuild OS notification handlers after plugin install or removal. */
   refreshPluginNotifications?: () => void;
   /** SoT — canonical plugin install/cache paths. */
   pluginPaths?: ReturnType<typeof import("../plugins/plugin-paths.js").resolvePluginPaths>;

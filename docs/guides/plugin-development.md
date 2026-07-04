@@ -1,13 +1,112 @@
 # Plugin Development Guide
 
-This is the English default page for `docs/guides/plugin-development.md`. The Korean source document is preserved at [docs/ko/guides/plugin-development.md ](../ko/guides/plugin-development.md).
+This guide describes how to build LVIS plugins against the current host
+runtime. Korean source history is preserved at
+[docs/ko/guides/plugin-development.md](../ko/guides/plugin-development.md).
 
-## Status
+## Plugin Model
 
-- Category: guides
-- Default language: English
-- Korean mirror: ko/guides/plugin-development.md
+An LVIS plugin is an installable package with a manifest, optional UI bundle,
+optional tools, optional settings schema, and declared host capabilities. The
+host owns installation, policy, loading, UI containment, and tool execution.
 
-## Summary
+Plugins should add workflow capability without assuming direct filesystem,
+network, or process access. Those operations must be declared and routed through
+host APIs or tool execution.
 
-This page keeps the canonical documentation path English-first while retaining the original Korean document at the same mirrored path below `docs/ko`. Update this page with the English canonical content as the topic evolves; keep the Korean mirror linked when Korean-specific background or review history is still useful.
+## Manifest Basics
+
+Every plugin package needs a `plugin.json` manifest. The manifest should include:
+
+- stable plugin id;
+- display name and version;
+- entry points for UI and runtime code;
+- tools and tool schemas;
+- required capabilities;
+- settings schema if configurable;
+- marketplace metadata if published.
+
+Tool categories and input schemas are part of the security contract. Missing or
+misleading categories can cause the host to deny execution.
+
+## HostApi Boundaries
+
+Plugin code receives a host bridge. It must use that bridge for operations such
+as:
+
+- reading declared preferences;
+- opening approved auth windows;
+- calling host methods;
+- requesting tool execution;
+- subscribing to allowed events;
+- rendering UI in declared slots.
+
+The caller plugin identity is bound by the host factory. Plugins must not pass
+or spoof another plugin id.
+
+## UI Plugins
+
+Plugin UI loads in a host-owned shell. The host resolves the plugin entry URL,
+pre-paints theme tokens, and calls the plugin mount function. A plugin UI should
+render within the provided root and use the bridge for host interaction.
+
+If the entry cannot load, the shell shows English fallback errors. A blank plugin
+surface is considered a regression.
+
+## Tool Plugins
+
+Plugin tools are normalized into the host tool registry. A tool definition must
+provide:
+
+- name;
+- description;
+- category;
+- input schema;
+- path fields where file access is possible;
+- execution handler;
+- required capabilities.
+
+Tools are executed only after permission resolution. The plugin runtime does not
+own the approval gate.
+
+## Settings
+
+Plugins may expose a settings schema. The renderer displays settings through the
+host settings UI and persists values through host storage. Secret values should
+use secret fields and should not be copied into logs, audit output, or docs.
+
+## Marketplace And Installation
+
+Marketplace installation should verify package metadata, manifest validity, and
+managed-plugin policy. Managed plugins cannot be removed or downgraded by normal
+user-installed plugin paths.
+
+Local development install paths are useful during plugin authoring, but
+production install flows should go through the marketplace or an approved local
+package source.
+
+## Auth Windows
+
+Plugins that need interactive login should use the host auth-window service.
+The host creates the partition, collects cookies or tokens according to policy,
+and clears the partition when requested. Plugins must not embed arbitrary auth
+flows in renderer code.
+
+## Testing Checklist
+
+Before publishing or merging a plugin change:
+
+- validate `plugin.json` with manifest tests;
+- run tool-schema lint where applicable;
+- verify settings schema rendering;
+- verify install, update, remove, and managed-plugin behavior;
+- verify permission prompts for write, shell, network, and out-of-directory
+  reads;
+- verify plugin UI error fallback and theme token application.
+
+## Language Policy
+
+Default plugin examples, docs, logs, and visible fallback copy should be English.
+Korean plugin docs may live under `docs/ko` or plugin-local localization files.
+Runtime Korean support should be implemented through locale catalogs or explicit
+keyword/intent support, not by making English default docs Korean-only.
