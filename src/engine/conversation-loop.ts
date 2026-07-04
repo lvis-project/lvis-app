@@ -82,6 +82,7 @@ export class ConversationLoop {
   sessionRoutineTitle: string | null = null;
   sessionProjectRoot: string | null = null;
   sessionProjectName: string | null = null;
+  sessionProjectIsDefault = false;
   /**
    * #811 m2 — the sessionId the `SessionStart` lifecycle event last fired for.
    * SessionStart must fire ONCE per session (not per turn): runTurn fires it on
@@ -508,6 +509,13 @@ export class ConversationLoop {
     return {
       ...(this.sessionProjectRoot ? { projectRoot: this.sessionProjectRoot } : {}),
       ...(this.sessionProjectName ? { projectName: this.sessionProjectName } : {}),
+    };
+  }
+
+  getSessionMemoryProjectContext(): SessionProjectContext & { includeUnscoped?: boolean } {
+    return {
+      ...this.getSessionProjectContext(),
+      ...(this.sessionProjectIsDefault ? { includeUnscoped: true } : {}),
     };
   }
 

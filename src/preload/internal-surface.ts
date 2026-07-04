@@ -619,17 +619,23 @@ export function buildInternalApiSurface() {
 
 
   // ─── Memory ──────────────────────────────────────
-  memoryListEntries: async () => ipcRenderer.invoke(CHANNELS.memory.entriesList),
-  memorySaveEntry: async (title: string, content: string) => ipcRenderer.invoke(CHANNELS.memory.entriesSave, title, content),
+  memoryListEntries: async (opts?: { projectRoot?: string; projectName?: string; includeUnscoped?: boolean }) =>
+    ipcRenderer.invoke(CHANNELS.memory.entriesList, opts),
+  memorySaveEntry: async (title: string, content: string, opts?: { projectRoot?: string; projectName?: string; includeUnscoped?: boolean }) =>
+    ipcRenderer.invoke(CHANNELS.memory.entriesSave, title, content, opts),
   memoryDeleteEntry: async (filename: string) => ipcRenderer.invoke(CHANNELS.memory.entriesDelete, filename),
-  memorySearchEntries: async (query: string) => ipcRenderer.invoke(CHANNELS.memory.entriesSearch, query),
-  memoryGetIndex: async () => ipcRenderer.invoke(CHANNELS.memory.indexGet) as Promise<string>,
+  memorySearchEntries: async (query: string, opts?: { projectRoot?: string; projectName?: string; includeUnscoped?: boolean }) =>
+    ipcRenderer.invoke(CHANNELS.memory.entriesSearch, query, opts),
+  memoryGetIndex: async (opts?: { projectRoot?: string; projectName?: string; includeUnscoped?: boolean }) =>
+    ipcRenderer.invoke(CHANNELS.memory.indexGet, opts) as Promise<string>,
   memoryUpdateIndexIfUnchanged: async (expectedContent: string, nextContent: string) =>
     ipcRenderer.invoke(CHANNELS.memory.indexUpdateIfUnchanged, expectedContent, nextContent) as Promise<boolean>,
   memoryUpdateIndexSections: async (sections: { urgentMemory?: string; references?: string }) =>
     ipcRenderer.invoke(CHANNELS.memory.indexSectionsUpdate, sections),
-  memoryListSessions: async () => ipcRenderer.invoke(CHANNELS.memory.sessionsList),
-  memorySearchSessions: async (query: string) => ipcRenderer.invoke(CHANNELS.memory.sessionsSearch, query),
+  memoryListSessions: async (opts?: { projectRoot?: string; projectName?: string; includeUnscoped?: boolean }) =>
+    ipcRenderer.invoke(CHANNELS.memory.sessionsList, opts),
+  memorySearchSessions: async (query: string, opts?: { projectRoot?: string; projectName?: string; includeUnscoped?: boolean }) =>
+    ipcRenderer.invoke(CHANNELS.memory.sessionsSearch, query, opts),
   memoryGetAgentsMd: async () => ipcRenderer.invoke(CHANNELS.memory.agentsMdGet) as Promise<string>,
   memoryUpdateAgentsMd: async (content: string) => ipcRenderer.invoke(CHANNELS.memory.agentsMdUpdate, content),
   memoryGetUserPrefs: async () => ipcRenderer.invoke(CHANNELS.memory.userPrefsGet) as Promise<string>,
@@ -1391,7 +1397,7 @@ export function buildInternalApiSurface() {
   // an empty-period envelope, an error envelope (LLM failure), or no-reporter.
   generateWorkBoardReport: async (
     kind: "daily" | "weekly",
-    input?: { date?: string; weekIso?: string; weekOffset?: number },
+    input?: { date?: string; weekIso?: string; weekOffset?: number; projectRoot?: string; includeUnscoped?: boolean },
   ) =>
     ipcRenderer.invoke(WORK_BOARD.generateReport, kind, input) as Promise<
       | import("../shared/work-board-types.js").WorkBoardReportResult

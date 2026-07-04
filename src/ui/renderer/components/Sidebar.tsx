@@ -25,6 +25,8 @@ import { getPluginViewLabel, toViewKey } from "../api-client.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
 import type { PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
+import type { ProjectIdentity } from "../../../shared/project-identity.js";
+import { projectBasename, workspaceRootsToProjects } from "../../../shared/project-identity.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -68,6 +70,8 @@ export interface SidebarProps {
   onExport: (format: "markdown" | "json") => void | Promise<void>;
   /** Recent main-chat sessions shown under the current project group. */
   sessions?: SessionSummary[];
+  /** Workspace projects from the App-level active project source of truth. */
+  projects?: ProjectIdentity[];
   /** Active chat session id for project conversation selection state. */
   currentSessionId?: string;
   /** Load a selected session from the project conversation list. */
@@ -317,18 +321,6 @@ function SectionDivider({ collapsed, label }: { collapsed: boolean; label?: stri
 
 const PROJECT_SESSION_LIMIT = 6;
 
-interface WorkspaceProject {
-  root: string;
-  name: string;
-  isDefault: boolean;
-}
-
-function basename(path: string): string {
-  const normalized = path.replace(/[\\/]+$/, "");
-  const parts = normalized.split(/[\\/]+/);
-  return parts[parts.length - 1] || path;
-}
-
 function formatRelativeSessionTime(modifiedAt: string, t: ReturnType<typeof useTranslation>["t"]): string {
   const ms = Date.now() - new Date(modifiedAt).getTime();
   if (!Number.isFinite(ms) || ms < 0) return "";
@@ -346,33 +338,16 @@ function projectTestId(root: string, fallback: string): string {
   return safe || "default";
 }
 
-function uniqueWorkspaceProjects(defaultRoot: string | undefined, roots: Array<{ path: string; isDefault: boolean }>, fallbackName: string): WorkspaceProject[] {
-  const byRoot = new Map<string, WorkspaceProject>();
-  const add = (path: string | undefined, isDefault: boolean) => {
-    if (!path) return;
-    const root = path.trim();
-    if (!root || byRoot.has(root)) return;
-    byRoot.set(root, {
-      root,
-      name: basename(root) || fallbackName,
-      isDefault,
-    });
-  };
-  add(defaultRoot, true);
-  for (const root of roots) add(root.path, root.isDefault);
-  return Array.from(byRoot.values());
-}
-
-function useWorkspaceProjects(): WorkspaceProject[] {
+function useWorkspaceProjects(): ProjectIdentity[] {
   const { t } = useTranslation();
-  const [projects, setProjects] = useState<WorkspaceProject[]>([]);
+  const [projects, setProjects] = useState<ProjectIdentity[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     void window.lvis?.workspace?.listRoots?.().then((result) => {
       if (cancelled || !result?.ok) return;
       const roots = Array.isArray(result.roots) ? result.roots : [];
-      setProjects(uniqueWorkspaceProjects(result.defaultRoot, roots, t("sidebar.currentProject")));
+      setProjects(workspaceRootsToProjects(result.defaultRoot, roots, t("sidebar.currentProject")));
     }).catch(() => {
       // Keep the localized fallback; the sidebar must remain usable without the workspace bridge.
     });
@@ -391,6 +366,7 @@ function ProjectSessionList({
   streaming,
   onLoadSession,
   onNewChatForProject,
+  projects: projectsProp,
 }: {
   collapsed: boolean;
   sessions: SessionSummary[];
@@ -398,9 +374,11 @@ function ProjectSessionList({
   streaming: boolean;
   onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
+  projects?: ProjectIdentity[];
 }) {
   const { t } = useTranslation();
-  const workspaceProjects = useWorkspaceProjects();
+  const fallbackProjects = useWorkspaceProjects();
+  const workspaceProjects = projectsProp ?? fallbackProjects;
   const mainSessions = useMemo(
     () => sessions.filter((session) => session.sessionKind === "main"),
     [sessions],
@@ -409,28 +387,28 @@ function ProjectSessionList({
     const knownProjects = workspaceProjects.length > 0
       ? workspaceProjects
       : [{
-          root: "",
-          name: t("sidebar.currentProject"),
+          projectRoot: "",
+          projectName: t("sidebar.currentProject"),
           isDefault: true,
         }];
-    const knownRoots = new Set(knownProjects.map((project) => project.root).filter(Boolean));
-    const unknownProjects = new Map<string, WorkspaceProject>();
+    const knownRoots = new Set(knownProjects.map((project) => project.projectRoot).filter(Boolean));
+    const unknownProjects = new Map<string, ProjectIdentity>();
     for (const session of mainSessions) {
       if (!session.projectRoot || knownRoots.has(session.projectRoot)) continue;
       unknownProjects.set(session.projectRoot, {
-        root: session.projectRoot,
-        name: session.projectName || basename(session.projectRoot),
+        projectRoot: session.projectRoot,
+        projectName: session.projectName || projectBasename(session.projectRoot),
         isDefault: false,
       });
     }
     return [...knownProjects, ...unknownProjects.values()];
   }, [mainSessions, t, workspaceProjects]);
-  const defaultProjectRoot = projects.find((project) => project.isDefault)?.root ?? projects[0]?.root ?? "";
+  const defaultProjectRoot = projects.find((project) => project.isDefault)?.projectRoot ?? projects[0]?.projectRoot ?? "";
   const sessionsByProject = useMemo(
     () => projects.map((project) => {
       const projectSessions = mainSessions.filter((session) => {
         const root = session.projectRoot ?? defaultProjectRoot;
-        return root === project.root;
+        return root === project.projectRoot;
       });
       return {
         project,
@@ -458,7 +436,7 @@ function ProjectSessionList({
   return (
     <div className="space-y-1" data-testid="sidebar-projects">
       {sessionsByProject.map(({ project, recent, overflow }, index) => (
-        <div key={project.root || "default-project"} className="space-y-1">
+        <div key={project.projectRoot || "default-project"} className="space-y-1">
           <button
             type="button"
             disabled={streaming}
@@ -467,15 +445,15 @@ function ProjectSessionList({
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               streaming ? "cursor-not-allowed opacity-50" : "hover:bg-muted",
             ].join(" ")}
-            title={t("sidebar.newProjectChat", { project: project.name })}
-            data-testid={index === 0 ? "sidebar-current-project" : `sidebar-project-${projectTestId(project.root, project.name)}`}
+            title={t("sidebar.newProjectChat", { project: project.projectName })}
+            data-testid={index === 0 ? "sidebar-current-project" : `sidebar-project-${projectTestId(project.projectRoot, project.projectName)}`}
             onClick={() => void onNewChatForProject?.({
-              ...(project.root ? { projectRoot: project.root } : {}),
-              projectName: project.name,
+              ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
+              projectName: project.projectName,
             })}
           >
             <Folder className="h-4 w-4 shrink-0 text-primary" />
-            <span className="min-w-0 flex-1 truncate">{project.name}</span>
+            <span className="min-w-0 flex-1 truncate">{project.projectName}</span>
             <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           </button>
           <div className="ml-4 border-l border-border/(--opacity-half) pl-2">
@@ -682,6 +660,7 @@ export function Sidebar({
   onToggleCurrentSessionStar,
   onExport,
   sessions = [],
+  projects,
   currentSessionId,
   onLoadSession,
 }: SidebarProps) {
@@ -894,6 +873,7 @@ export function Sidebar({
                   <ProjectSessionList
                     collapsed={compact}
                     sessions={sessions}
+                    projects={projects}
                     currentSessionId={currentSessionId}
                     streaming={streaming}
                     onLoadSession={onLoadSession}

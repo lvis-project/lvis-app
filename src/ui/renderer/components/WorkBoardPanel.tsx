@@ -47,9 +47,11 @@ import type {
   WorkItemUpdateInput,
 } from "../../../shared/work-board-types.js";
 import { MAX_ITEMS } from "../../../shared/work-board-types.js";
+import type { ProjectIdentity } from "../../../shared/project-identity.js";
 
 export interface WorkBoardPanelProps {
   api: LvisApi;
+  project?: ProjectIdentity;
 }
 
 const TITLE_MAX = 256;
@@ -554,6 +556,7 @@ function PriorityPicker({
 
 interface CreateDialogProps {
   api: LvisApi;
+  project?: ProjectIdentity;
   onClose: () => void;
   onCreated: () => void;
 }
@@ -564,7 +567,7 @@ function defaultDueIso(): string {
   return kstYmd(d);
 }
 
-export function WorkItemCreateDialog({ api, onClose, onCreated }: CreateDialogProps) {
+export function WorkItemCreateDialog({ api, project, onClose, onCreated }: CreateDialogProps) {
   const [title, setTitle] = useState("");
   const [detail, setDetail] = useState("");
   const [dueDate, setDueDate] = useState(defaultDueIso());
@@ -585,6 +588,10 @@ export function WorkItemCreateDialog({ api, onClose, onCreated }: CreateDialogPr
     // user picked, independent of OS timezone.
     if (!noDeadline && dueDate) input.due_at = `${dueDate}T00:00:00+09:00`;
     if (priority !== DEFAULT_PRIORITY) input.priority = priority;
+    if (project?.projectRoot) {
+      input.projectRoot = project.projectRoot;
+      input.projectName = project.projectName;
+    }
 
     setSubmitting(true);
     setError("");
@@ -1117,7 +1124,7 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
 // panel). `empty` (no activity) and `error` (LLM failure / no reporter) both
 // surface as a single discriminated result so the user always gets feedback.
 
-function ReportsSection({ api }: { api: LvisApi }) {
+function ReportsSection({ api, project }: { api: LvisApi; project?: ProjectIdentity }) {
   const [generating, setGenerating] = useState<"daily" | "weekly" | null>(null);
   const [result, setResult] = useState<
     WorkBoardReportResult | { ok: false; error: string } | null
@@ -1131,7 +1138,9 @@ function ReportsSection({ api }: { api: LvisApi }) {
       setGenerating(kind);
       setResult(null);
       try {
-        const r = await api.generateWorkBoardReport(kind);
+        const r = await api.generateWorkBoardReport(kind, project?.projectRoot
+          ? { projectRoot: project.projectRoot, includeUnscoped: project.isDefault === true }
+          : undefined);
         if (mountedRef.current) setResult(r);
       } finally {
         if (mountedRef.current) setGenerating(null);
@@ -1226,7 +1235,7 @@ function ReportResultBlock({
 
 // ─── Main Panel ─────────────────────────────────────────────────────────────────
 
-export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
+export function WorkBoardPanel({ api, project }: WorkBoardPanelProps) {
   const [items, setItems] = useState<WorkItemResolved[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -1238,7 +1247,12 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
     if (typeof api.listWorkBoard !== "function") return;
     setLoading(true);
     try {
-      const result = await api.listWorkBoard();
+      const result = await api.listWorkBoard(project?.projectRoot
+        ? {
+            projectRoot: project.projectRoot,
+            includeUnscoped: project.isDefault === true,
+          }
+        : undefined);
       if (!mountedRef.current) return;
       if ("status" in result && result.status === "ok") {
         setItems(result.items);
@@ -1248,7 +1262,7 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [api]);
+  }, [api, project]);
 
   useEffect(() => {
     void refresh();
@@ -1388,7 +1402,7 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
             />
           </div>
           <div className="border-t pt-4">
-            <ReportsSection api={api} />
+            <ReportsSection api={api} project={project} />
           </div>
         </div>
       </div>
@@ -1396,6 +1410,7 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
       {showCreate && (
         <WorkItemCreateDialog
           api={api}
+          project={project}
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);

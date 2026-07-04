@@ -44,6 +44,26 @@ describe("MemoryManager.searchMemoryEntries", () => {
     expect(results[0].title).toBe("기타 기억");
   });
 
+  it("scopes saved notes by projectRoot while keeping legacy notes for the default project", async () => {
+    await mm.saveMemory("Legacy Note", "shared baseline");
+    await mm.saveMemory("Alpha Note", "alpha secret", {
+      projectRoot: "C:\\workspace\\alpha",
+      projectName: "alpha",
+    });
+    await mm.saveMemory("Beta Note", "beta secret", {
+      projectRoot: "C:\\workspace\\beta",
+      projectName: "beta",
+    });
+
+    expect(mm.searchMemoryEntries("secret", { projectRoot: "C:\\workspace\\alpha" }).map((entry) => entry.title))
+      .toEqual(["Alpha Note"]);
+    expect(mm.listMemoryEntries({ projectRoot: "C:\\workspace\\alpha", includeUnscoped: true }).map((entry) => entry.title))
+      .toEqual(expect.arrayContaining(["Legacy Note", "Alpha Note"]));
+    expect(mm.getMemoryContext({ projectRoot: "C:\\workspace\\alpha" })).toContain("alpha secret");
+    expect(mm.getMemoryContext({ projectRoot: "C:\\workspace\\alpha" })).not.toContain("beta secret");
+    expect(mm.getMemoryIndex({ projectRoot: "C:\\workspace\\alpha" })).toBe("");
+  });
+
   it("caps results at 50", async () => {
     for (let i = 0; i < 60; i++) {
       await mm.saveMemory(`기억 ${i}`, "공통 키워드 hello");

@@ -325,6 +325,11 @@ export type UsageDailySummaryResult =
   | { ok: true; summary: string; generatedAt: string }
   | { ok: false; error: string };
 
+export type ProjectQueryOptions = {
+  projectRoot?: string;
+  projectName?: string;
+  includeUnscoped?: boolean;
+};
 
 export type PluginMarketplaceActionResult =
   | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
@@ -728,15 +733,15 @@ export type LvisApi = {
   starredList: () => Promise<Array<{ id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string }>>;
   starredAdd: (entry: { sessionId?: string; messageIndex: number; role: string; text: string }) => Promise<{ ok: boolean; entry?: { id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string } }>;
   starredRemove: (opts: { id?: string; sessionId?: string; messageIndex?: number }) => Promise<{ ok: boolean }>;
-  memoryListEntries: () => Promise<Array<{ filename: string; title: string; content: string; updatedAt?: string }>>;
-  memorySaveEntry: (t: string, c: string) => Promise<unknown>;
+  memoryListEntries: (opts?: ProjectQueryOptions) => Promise<Array<{ filename: string; title: string; content: string; updatedAt?: string; projectRoot?: string; projectName?: string }>>;
+  memorySaveEntry: (t: string, c: string, opts?: ProjectQueryOptions) => Promise<unknown>;
   memoryDeleteEntry: (f: string) => Promise<void>;
-  memorySearchEntries: (q: string) => Promise<Array<{ filename?: string; title: string; content?: string; excerpt: string; updatedAt: string }>>;
-  memoryGetIndex: () => Promise<string>;
+  memorySearchEntries: (q: string, opts?: ProjectQueryOptions) => Promise<Array<{ filename?: string; title: string; content?: string; excerpt: string; updatedAt: string; projectRoot?: string; projectName?: string }>>;
+  memoryGetIndex: (opts?: ProjectQueryOptions) => Promise<string>;
   memoryUpdateIndexIfUnchanged: (expectedContent: string, nextContent: string) => Promise<boolean>;
   memoryUpdateIndexSections: (sections: { urgentMemory?: string; references?: string }) => Promise<unknown>;
-  memoryListSessions: () => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
-  memorySearchSessions: (q: string) => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
+  memoryListSessions: (opts?: ProjectQueryOptions) => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
+  memorySearchSessions: (q: string, opts?: ProjectQueryOptions) => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
   memoryGetAgentsMd: () => Promise<string>;
   memoryUpdateAgentsMd: (content: string) => Promise<unknown>;
   memoryGetUserPrefs: () => Promise<string>;
@@ -905,7 +910,7 @@ export type LvisApi = {
   // state + activity log + learned memory.
   generateWorkBoardReport?: (
     kind: "daily" | "weekly",
-    input?: { date?: string; weekIso?: string; weekOffset?: number },
+    input?: { date?: string; weekIso?: string; weekOffset?: number; projectRoot?: string; includeUnscoped?: boolean },
   ) => Promise<
     | import("../../shared/work-board-types.js").WorkBoardReportResult
     | { ok: false; error: string }
