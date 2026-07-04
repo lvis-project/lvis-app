@@ -67,8 +67,8 @@ export function TurnActionBar({
     copyResetTimer.current = setTimeout(() => setCopied(false), 1500);
   };
 
-  // Centralized KST formatter — keeps wall-clock display consistent between
-  // TurnActionBar and SessionCalendarPopover regardless of OS timezone.
+  // Centralized KST formatter — keeps wall-clock display stable regardless of
+  // the host OS timezone.
   const timestampLabel = useMemo(() => formatHhMmKst(timestamp), [timestamp]);
 
   return (

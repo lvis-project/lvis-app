@@ -1,8 +1,9 @@
 /**
  * Work-flow memory for the host Work Board (Hermes "Memory" pillar).
  *
- * Two markdown files under `memories/` in the work-board namespace
- * (`~/.lvis/work-board/memories/`):
+ * Markdown files under `memories/` in the work-board namespace
+ * (`~/.lvis/work-board/memories/`), with per-project copies under
+ * `memories/projects/<project-key>/` when a project root is supplied:
  *   - `USER.md`   — who the user is (role, focus). Seeded once, never
  *                   auto-overwritten; the user edits it freely.
  *   - `MEMORY.md` — learned work-flow patterns (recurring topics, throughput,
@@ -17,10 +18,12 @@
  * host domain (architecture.md §10.0.3).
  */
 import type { WorkBoardStorage } from "./storage.js";
+import { workBoardProjectStorageKey } from "./project-storage.js";
 
 export const MEMORIES_DIR = "memories";
 export const USER_FILE = "memories/USER.md";
 export const MEMORY_FILE = "memories/MEMORY.md";
+const PROJECT_MEMORIES_DIR = "memories/projects";
 
 /**
  * Hard cap on `MEMORY.md` length. When an append would exceed this, the oldest
@@ -54,25 +57,53 @@ export type MemoryStorage = Pick<
   "readText" | "write" | "exists" | "mkdir"
 >;
 
+export interface WorkMemoryProjectOptions {
+  projectRoot?: string;
+  includeUnscoped?: boolean;
+}
+
+function projectMemoryDir(projectRoot: string | undefined): string | undefined {
+  const key = workBoardProjectStorageKey(projectRoot);
+  return key ? `${PROJECT_MEMORIES_DIR}/${key}` : undefined;
+}
+
+function memoryPaths(options?: WorkMemoryProjectOptions): { dir: string; userFile: string; memoryFile: string } {
+  const dir = projectMemoryDir(options?.projectRoot);
+  if (!dir) return { dir: MEMORIES_DIR, userFile: USER_FILE, memoryFile: MEMORY_FILE };
+  return {
+    dir,
+    userFile: `${dir}/USER.md`,
+    memoryFile: `${dir}/MEMORY.md`,
+  };
+}
+
+async function readOrSeedUserAt(storage: MemoryStorage, dir: string, userFile: string): Promise<string> {
+  if (await storage.exists(userFile)) {
+    return storage.readText(userFile);
+  }
+  await storage.mkdir(dir);
+  await storage.write(userFile, USER_MD_SEED);
+  return USER_MD_SEED;
+}
+
+async function readMemoryAt(storage: MemoryStorage, memoryFile: string): Promise<string> {
+  if (await storage.exists(memoryFile)) {
+    return storage.readText(memoryFile);
+  }
+  return MEMORY_MD_HEADER;
+}
+
 /**
  * Read `USER.md`, seeding it on first run. The seed is written once; subsequent
  * calls return whatever the user has since edited.
  */
 export async function readOrSeedUser(storage: MemoryStorage): Promise<string> {
-  if (await storage.exists(USER_FILE)) {
-    return storage.readText(USER_FILE);
-  }
-  await storage.mkdir(MEMORIES_DIR);
-  await storage.write(USER_FILE, USER_MD_SEED);
-  return USER_MD_SEED;
+  return readOrSeedUserAt(storage, MEMORIES_DIR, USER_FILE);
 }
 
 /** Read `MEMORY.md`, returning the header-only baseline when absent. */
 export async function readMemory(storage: MemoryStorage): Promise<string> {
-  if (await storage.exists(MEMORY_FILE)) {
-    return storage.readText(MEMORY_FILE);
-  }
-  return MEMORY_MD_HEADER;
+  return readMemoryAt(storage, MEMORY_FILE);
 }
 
 /**
@@ -83,6 +114,7 @@ export async function readMemory(storage: MemoryStorage): Promise<string> {
 export async function appendMemory(
   storage: MemoryStorage,
   lines: string | string[],
+  options?: WorkMemoryProjectOptions,
 ): Promise<void> {
   const incoming = (Array.isArray(lines) ? lines : [lines])
     .flatMap((l) => l.split("\n"))
@@ -90,7 +122,8 @@ export async function appendMemory(
     .filter((l) => l.length > 0);
   if (incoming.length === 0) return;
 
-  const existing = await readMemory(storage);
+  const paths = memoryPaths(options);
+  const existing = await readMemoryAt(storage, paths.memoryFile);
   const allLines = existing.split("\n");
   // Split off the header block so caps only ever evict learned body lines,
   // never the legend.
@@ -103,9 +136,9 @@ export async function appendMemory(
   const bodyCap = Math.max(0, MEMORY_LINE_CAP - headerLen);
   const capped = merged.length > bodyCap ? merged.slice(merged.length - bodyCap) : merged;
 
-  await storage.mkdir(MEMORIES_DIR);
+  await storage.mkdir(paths.dir);
   const out = [...head, "", ...capped].join("\n") + "\n";
-  await storage.write(MEMORY_FILE, out);
+  await storage.write(paths.memoryFile, out);
 }
 
 /**
@@ -116,10 +149,28 @@ export async function appendMemory(
 export async function renderWorkContext(
   storage: MemoryStorage,
   maxLines = 40,
+  options?: WorkMemoryProjectOptions,
 ): Promise<string> {
-  const user = (await readOrSeedUser(storage)).trim();
-  const memory = (await readMemory(storage)).trim();
-  const block = `## 사용자\n${user}\n\n## 업무 흐름 메모리\n${memory}`;
+  if (!options?.projectRoot) {
+    const user = (await readOrSeedUser(storage)).trim();
+    const memory = (await readMemory(storage)).trim();
+    const block = `## 사용자\n${user}\n\n## 업무 흐름 메모리\n${memory}`;
+    const lines = block.split("\n");
+    return lines.length <= maxLines ? block : lines.slice(0, maxLines).join("\n");
+  }
+  const paths = memoryPaths(options);
+  const blocks: string[] = [];
+  if (options.includeUnscoped === true) {
+    blocks.push(
+      `## 사용자\n${(await readOrSeedUser(storage)).trim()}`,
+      `## 기존 업무 흐름 메모리\n${(await readMemory(storage)).trim()}`,
+    );
+  }
+  blocks.push(
+    `## 프로젝트 사용자\n${(await readOrSeedUserAt(storage, paths.dir, paths.userFile)).trim()}`,
+    `## 프로젝트 업무 흐름 메모리\n${(await readMemoryAt(storage, paths.memoryFile)).trim()}`,
+  );
+  const block = blocks.join("\n\n");
   const lines = block.split("\n");
   if (lines.length <= maxLines) return block;
   return lines.slice(0, maxLines).join("\n");

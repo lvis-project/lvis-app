@@ -5,7 +5,7 @@
  * fragment files in this directory (`<namespace>.ts`, each exporting `en`/`ko`
  * objects) and merges them here.
  *
- * Fragments: 184
+ * Fragments: 182
  */
 import { en as en_actionPanel, ko as ko_actionPanel } from "./actionPanel.js";
 import { en as en_app, ko as ko_app } from "./app.js";
@@ -148,8 +148,6 @@ import { en as en_rosePine, ko as ko_rosePine } from "./rosePine.js";
 import { en as en_routinePanel, ko as ko_routinePanel } from "./routinePanel.js";
 import { en as en_savedToast, ko as ko_savedToast } from "./savedToast.js";
 import { en as en_scenarioShowcase, ko as ko_scenarioShowcase } from "./scenarioShowcase.js";
-import { en as en_sessionCalendarPopover, ko as ko_sessionCalendarPopover } from "./sessionCalendarPopover.js";
-import { en as en_sessionDateNavigator, ko as ko_sessionDateNavigator } from "./sessionDateNavigator.js";
 import { en as en_sessionResumeDivider, ko as ko_sessionResumeDivider } from "./sessionResumeDivider.js";
 import { en as en_sessionTodoPanel, ko as ko_sessionTodoPanel } from "./sessionTodoPanel.js";
 import { en as en_settingsContent, ko as ko_settingsContent } from "./settingsContent.js";
@@ -334,8 +332,6 @@ export const generatedEn: Record<string, string> = {
   ...en_routinePanel,
   ...en_savedToast,
   ...en_scenarioShowcase,
-  ...en_sessionCalendarPopover,
-  ...en_sessionDateNavigator,
   ...en_sessionResumeDivider,
   ...en_sessionTodoPanel,
   ...en_settingsContent,
@@ -521,8 +517,6 @@ export const generatedKo: Record<string, string> = {
   ...ko_routinePanel,
   ...ko_savedToast,
   ...ko_scenarioShowcase,
-  ...ko_sessionCalendarPopover,
-  ...ko_sessionDateNavigator,
   ...ko_sessionResumeDivider,
   ...ko_sessionTodoPanel,
   ...ko_settingsContent,

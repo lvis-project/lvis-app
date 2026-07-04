@@ -6,8 +6,9 @@
  * the board state + the period's activity-log events + the learned work-flow
  * memory, builds a Korean prompt, calls the host one-shot LLM
  * (`ConversationLoop.generateText` via `createCallLlm`), persists the markdown
- * under `~/.lvis/work-board/reports/{daily,weekly}/`, and appends a bounded
- * one-line summary to `MEMORY.md` (the self-improvement loop).
+ * under the work-board report namespace (project reports live under
+ * `reports/projects/<project-key>/{daily,weekly}/`), and appends a bounded
+ * one-line summary to work memory (the self-improvement loop).
  *
  * No-Fallback: an LLM failure surfaces (the report IS the deliverable, so a
  * canned-text stub would silently hide a provider outage). An empty board /
@@ -23,12 +24,14 @@ import {
   type MemoryStorage,
 } from "./work-memory.js";
 import { readActivity, type ActivityStorage } from "./activity-log.js";
+import { workBoardProjectStorageKey } from "./project-storage.js";
 import { isoWeekFor, kstDay, kstDayBounds, sundayWeekBoundsKst } from "./schedule.js";
 import type { WorkBoardStorage } from "./storage.js";
 import type {
   WorkItemListResult,
   WorkItemResolved,
   WorkBoardReportKind,
+  WorkItemListFilter,
 } from "../shared/work-board-types.js";
 
 /** Host one-shot LLM caller — shape of `createCallLlm(conversationLoop)`. */
@@ -38,7 +41,7 @@ export interface CallLlm {
 
 /** Narrow board reader the reports need (satisfied by WorkBoardStore). */
 export interface ReportBoardReader {
-  list(): Promise<WorkItemListResult>;
+  list(filter?: WorkItemListFilter): Promise<WorkItemListResult>;
 }
 
 /** Storage slice for writing report markdown (write auto-creates parents). */
@@ -59,6 +62,8 @@ export type ReportResult =
 export interface DailyReportInput {
   /** Override the target day (`YYYY-MM-DD`, KST). Default: today KST. */
   date?: string;
+  projectRoot?: string;
+  includeUnscoped?: boolean;
 }
 
 export interface WeeklyReportInput {
@@ -66,13 +71,18 @@ export interface WeeklyReportInput {
   weekIso?: string;
   /** Sunday-week offset relative to now (0 = this week, -1 = last week). */
   weekOffset?: number;
+  projectRoot?: string;
+  includeUnscoped?: boolean;
 }
+
+type ReportProjectOptions = Pick<DailyReportInput, "projectRoot" | "includeUnscoped">;
 
 /** Host event emitted after a report is generated (slim notification pointer). */
 export const REPORT_GENERATED_EVENT = "work_board.report.generated";
 
 const DAILY_DIR = "reports/daily";
 const WEEKLY_DIR = "reports/weekly";
+const PROJECT_REPORTS_DIR = "reports/projects";
 const DAILY_SYSTEM_PROMPT =
   "당신은 개인 업무 보드 비서입니다. 오늘 하루의 업무 진행 상황을 간결한 한국어 마크다운으로 정리합니다.";
 const WEEKLY_SYSTEM_PROMPT =
@@ -113,6 +123,12 @@ function bucket(label: string, items: WorkItemResolved[]): string {
   return `## ${label} (${items.length})\n${items.length ? items.map(lineFor).join("\n") : "- 없음"}`;
 }
 
+function reportDir(kind: ReportKind, projectRoot: string | undefined): string {
+  const key = workBoardProjectStorageKey(projectRoot);
+  if (!key) return kind === "daily" ? DAILY_DIR : WEEKLY_DIR;
+  return `${PROJECT_REPORTS_DIR}/${key}/${kind}`;
+}
+
 /**
  * Construct the reporter. The storage handle is sliced internally into the
  * memory / activity / report seams so callers pass exactly one
@@ -125,8 +141,10 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
   const report: ReportStorage = storage;
   const nowMs = (): number => (deps.now ? deps.now() : Date.now());
 
-  async function items(): Promise<WorkItemResolved[]> {
-    const listed = await store.list();
+  async function items(input?: { projectRoot?: string; includeUnscoped?: boolean }): Promise<WorkItemResolved[]> {
+    const listed = await store.list(input?.projectRoot
+      ? { projectRoot: input.projectRoot, includeUnscoped: input.includeUnscoped === true }
+      : undefined);
     // Discriminated envelope: a non-ok list means the board is unreadable — the
     // report cannot be built, so the callers below treat [] as "empty".
     return listed.status === "ok" ? listed.items : [];
@@ -139,7 +157,7 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
       return { status: "empty", kind: "daily", period, reason: "invalid date — expected YYYY-MM-DD" };
     }
 
-    const all = await items();
+    const all = await items(input);
     if (all.length === 0) {
       return { status: "empty", kind: "daily", period, reason: "보드에 작업 항목이 없습니다." };
     }
@@ -150,8 +168,14 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
     const createdToday = all.filter((i) => isWithin(i.created_at, bounds.startMs, bounds.endMs));
     const completedToday = all.filter((i) => isWithin(i.completed_at, bounds.startMs, bounds.endMs));
 
-    const recentActivity = await readActivity(activity, new Date(bounds.startMs).toISOString());
-    const workContext = await renderWorkContext(memory);
+    const visibleItemIds = new Set(all.map((item) => item.id));
+    const recentActivity = (await readActivity(activity, new Date(bounds.startMs).toISOString()))
+      .filter((event) => event.itemId === undefined || visibleItemIds.has(event.itemId));
+    const projectOptions: ReportProjectOptions = {
+      ...(input?.projectRoot ? { projectRoot: input.projectRoot } : {}),
+      ...(input?.includeUnscoped === true ? { includeUnscoped: true } : {}),
+    };
+    const workContext = await renderWorkContext(memory, 40, projectOptions);
 
     const prompt =
       [
@@ -174,11 +198,14 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
 
     const markdown = await callLlm(prompt, { maxTokens: 800, systemPrompt: DAILY_SYSTEM_PROMPT });
 
-    await report.mkdir(DAILY_DIR);
-    await report.write(`${DAILY_DIR}/${period}.md`, markdown);
-    await appendMemory(memory, [
-      `${period}: 완료 ${completedToday.length}건 · 신규 ${createdToday.length}건 · 진행 ${inProgress.length}건 · 지연 ${overdue.length}건`,
-    ]);
+    const dir = reportDir("daily", input?.projectRoot);
+    await report.mkdir(dir);
+    await report.write(`${dir}/${period}.md`, markdown);
+    await appendMemory(
+      memory,
+      [`${period}: 완료 ${completedToday.length}건 · 신규 ${createdToday.length}건 · 진행 ${inProgress.length}건 · 지연 ${overdue.length}건`],
+      projectOptions,
+    );
     deps.emit?.(REPORT_GENERATED_EVENT, { kind: "daily", period });
 
     return { status: "ok", kind: "daily", period, markdown };
@@ -203,20 +230,26 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
     const startMs = start.getTime();
     const endMs = end.getTime();
 
-    const all = await items();
+    const all = await items(input);
     const completedThisWeek = all.filter((i) => isWithin(i.completed_at, startMs, endMs));
     const createdThisWeek = all.filter((i) => isWithin(i.created_at, startMs, endMs));
     const inProgress = all.filter((i) => i.status_resolved === "in_progress");
     const planned = all.filter((i) => i.status_resolved === "planned");
     const overdue = all.filter((i) => i.status_resolved === "overdue");
 
-    const weekActivity = await readActivity(activity, start.toISOString());
+    const visibleItemIds = new Set(all.map((item) => item.id));
+    const weekActivity = (await readActivity(activity, start.toISOString()))
+      .filter((event) => event.itemId === undefined || visibleItemIds.has(event.itemId));
 
     if (completedThisWeek.length === 0 && createdThisWeek.length === 0 && weekActivity.length === 0) {
       return { status: "empty", kind: "weekly", period, reason: "이번 주 보드 활동이 없습니다." };
     }
 
-    const workContext = await renderWorkContext(memory);
+    const projectOptions: ReportProjectOptions = {
+      ...(input?.projectRoot ? { projectRoot: input.projectRoot } : {}),
+      ...(input?.includeUnscoped === true ? { includeUnscoped: true } : {}),
+    };
+    const workContext = await renderWorkContext(memory, 40, projectOptions);
     const prompt =
       [
         `# ${period} 주간보고 입력 (${start.toISOString().slice(0, 10)} ~ ${end.toISOString().slice(0, 10)})`,
@@ -236,11 +269,14 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
 
     const markdown = await callLlm(prompt, { maxTokens: 1000, systemPrompt: WEEKLY_SYSTEM_PROMPT });
 
-    await report.mkdir(WEEKLY_DIR);
-    await report.write(`${WEEKLY_DIR}/${period}.md`, markdown);
-    await appendMemory(memory, [
-      `${period}: 주간 완료 ${completedThisWeek.length}건 · 신규 ${createdThisWeek.length}건 · 지연 ${overdue.length}건`,
-    ]);
+    const dir = reportDir("weekly", input?.projectRoot);
+    await report.mkdir(dir);
+    await report.write(`${dir}/${period}.md`, markdown);
+    await appendMemory(
+      memory,
+      [`${period}: 주간 완료 ${completedThisWeek.length}건 · 신규 ${createdThisWeek.length}건 · 지연 ${overdue.length}건`],
+      projectOptions,
+    );
     deps.emit?.(REPORT_GENERATED_EVENT, { kind: "weekly", period });
 
     return { status: "ok", kind: "weekly", period, markdown };

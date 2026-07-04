@@ -58,6 +58,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-session-id": "formatIpcError.invalidSessionId",
   "session-not-found": "formatIpcError.sessionNotFound",
   "side-chat-unavailable": "formatIpcError.sideChatUnavailable",
+  "project-not-allowed": "formatIpcError.projectNotAllowed",
   "invalid-text": "formatIpcError.invalidText",
   "empty-text": "formatIpcError.emptyText",
   "empty": "formatIpcError.empty",

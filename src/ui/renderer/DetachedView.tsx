@@ -5,7 +5,7 @@
  * Renders a minimal shell: the B1 CustomTitleBar + the actual content view.
  *
  * Supported viewKeys:
- *   "routines", "memory", "starred",
+ *   "routines", "memory", "starred", "insights",
  *   "plugin:<pluginId>:<extensionId>"
  *
  * The snap-edge highlight (2px accent border on the main window) is handled
@@ -123,7 +123,7 @@ function DetachedContent({ viewKey }: ContentProps) {
     );
   }
 
-  if (viewKey === "starred") {
+  if (viewKey === "starred" || viewKey === "insights") {
     return (
       <StarredView
         api={api}

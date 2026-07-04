@@ -214,6 +214,44 @@ describe("WorkBoardStore — overdue projection", () => {
   });
 });
 
+describe("WorkBoardStore — project scope", () => {
+  it("persists project identity and filters list results by projectRoot", async () => {
+    const { store, cleanup } = tempBoard(fixedClock);
+    try {
+      const legacy = await store.create({ title: "legacy" });
+      const alpha = await store.create({
+        title: "alpha",
+        projectRoot: "C:\\workspace\\alpha",
+        projectName: "alpha",
+      });
+      const beta = await store.create({
+        title: "beta",
+        projectRoot: "C:\\workspace\\beta",
+        projectName: "beta",
+      });
+      if (legacy.status !== "created" || alpha.status !== "created" || beta.status !== "created") {
+        throw new Error("setup failed");
+      }
+
+      const alphaOnly = await store.list({ projectRoot: "c:/workspace/alpha/" });
+      expect(alphaOnly.status).toBe("ok");
+      if (alphaOnly.status !== "ok") throw new Error("unreachable");
+      expect(alphaOnly.items.map((item) => item.title)).toEqual(["alpha"]);
+      expect(alphaOnly.items[0].projectName).toBe("alpha");
+
+      const defaultWithLegacy = await store.list({
+        projectRoot: "C:\\workspace\\default",
+        includeUnscoped: true,
+      });
+      expect(defaultWithLegacy.status).toBe("ok");
+      if (defaultWithLegacy.status !== "ok") throw new Error("unreachable");
+      expect(defaultWithLegacy.items.map((item) => item.title)).toEqual(["legacy"]);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
 describe("WorkBoardStore — MAX_ITEMS cap", () => {
   it("rejects create once the board holds MAX_ITEMS items", async () => {
     const { store, cleanup } = tempBoard();
