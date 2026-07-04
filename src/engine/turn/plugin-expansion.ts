@@ -1,30 +1,26 @@
-/**
- * Option C — `request_plugin` 메타 툴 처리.
- *
- * LLM 이 tool_use 로 `request_plugin({pluginId})` 를 요청하면 실제 tool executor
- * 에 넘기지 않고 이 모듈이 scope 를 확장하거나 에러 결과를 합성한다.
- *
- * 순수 로직 — 호출자가 side-effect (history append, tool schema rebuild) 을 담당.
- */
+
+
+
+
 import type { ToolUseBlock } from "../../tools/executor.js";
 import { createLogger } from "../../lib/logger.js";
 import { t } from "../../i18n/index.js";
 const log = createLogger("lvis");
 
 export const REQUEST_PLUGIN_TOOL = "request_plugin";
-/** 턴당 request_plugin 허용 횟수. */
+
 export const MAX_PLUGIN_EXPANSION = 2;
-/** 세션당 request_plugin 누적 허용 횟수 (M2). */
+
 export const MAX_SESSION_PLUGIN_EXPANSION = 6;
 
 export interface PluginExpansionState {
-  /** 이번 턴에서 이미 성공한 request_plugin 횟수. */
+
   turnExpansions: number;
-  /** 세션 누적 성공 횟수. */
+
   sessionExpansions: number;
-  /** 이번 턴 scope 에 활성화된 plugin id (mutation 가능). */
+
   activePluginIds: Set<string>;
-  /** 실제 등록된 plugin id 목록 (런타임 질의 결과). */
+
   availablePluginIds: string[];
   /**
    * Session-scoped on-demand activation sink. When a registry-DISABLED plugin
@@ -41,24 +37,21 @@ export interface PluginExpansionState {
 }
 
 export interface PluginExpansionOutcome {
-  /** 합성된 tool_result 들 — 호출자가 history 에 append. */
+
   results: Array<{ tool_use_id: string; content: string; is_error: boolean }>;
-  /** request_plugin 이외의 실제 실행할 tool_use. */
+
   remaining: ToolUseBlock[];
-  /** 활성화에 성공한 pluginId 목록 — 호출자가 toolSchemas rebuild 신호로 사용. */
+
   activatedPluginIds: string[];
-  /** 갱신된 턴 카운터. */
+
   nextTurnExpansions: number;
-  /** 갱신된 세션 카운터. */
+
   nextSessionExpansions: number;
 }
 
-/**
- * tool_use 목록을 훑어 request_plugin 을 인터셉트하고 나머지는 통과시킨다.
- *
- * @param toolUses LLM 이 요청한 tool_use 블록들
- * @param state 현재 카운터 + active scope
- */
+
+
+
 export function handleRequestPlugin(
   toolUses: ToolUseBlock[],
   state: PluginExpansionState,

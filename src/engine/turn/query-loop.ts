@@ -28,10 +28,10 @@ import { createLogger } from "../../lib/logger.js";
 
 const log = createLogger("lvis");
 
-// 사용자가 *26 step* 작업에서 cap hit 으로 *조용히 끊긴* 사례 (2026-05-07) 후
-// 10 → 30 으로 상향. 사용자 task 의 자연 round 분포 (~13 rounds for 26 steps) 를
-// 수용하면서 *진정한 무한 루프* 는 여전히 차단. SubAgentRunner 는 자기 maxRounds
-// 로 clamp 하므로 영향 없음 (line 902 `Math.min`).
+
+
+
+
 const MAX_TOOL_ROUNDS = 30;
 /**
  * Hard cap on finish_reason=length CONTINUATIONS per logical assistant answer.
@@ -212,9 +212,8 @@ export async function queryLoop(
       // last text. This is the loop-boundary defense for agent_spawn
       // turn caps; abortCurrentTurn remains the user-cancel path.
       if (assistantRoundsRun >= effectiveMaxRounds) {
-        // EARLY-EXIT #1: round cap hit. 이 자리에서 *조용히* synthetic 텍스트
-        // 를 반환하면 사용자는 "왜 갑자기 끊겼지?" 의문. WARN 로그 + UI 콜백으로
-        // 명시적 신호.
+
+
         log.warn(
           `queryLoop: EARLY-EXIT(round-cap) — assistantRoundsRun=${assistantRoundsRun} effectiveMaxRounds=${effectiveMaxRounds} totalToolCalls=${allToolCalls.length}`,
         );

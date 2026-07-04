@@ -71,34 +71,27 @@ export interface TurnCallbacks {
      * UI CheckpointDivider uses this to choose the auto/manual label.
      */
     trigger?: "auto-compact" | "manual";
-    /**
-     * Rolling summary — `renderBoundaryAsPreamble()` 결과. 사용자 가시성용.
-     */
+
+
+
     summary?: string;
     /**
      * Compact sequence number — passed to CheckpointDivider to enable
      * view-mode and branch-from-checkpoint actions.
      */
     compactNum?: number;
-    /**
-     * Gemini-style status. Renderer 가 status 별로 다른 banner
-     * variant (색상/아이콘/메시지) 를 표시한다. SUMMARIZED 가 정상 경로,
-     * CONTENT_TRUNCATED / REDUCED_INSUFFICIENT_FORCED 는 fail-loud UX.
-     */
+
+
+
     compactStatus?: CompressionStatus;
-    /**
-     * Compact archive directory for per-message, reverse-budget, or forced drops.
-     * `~/.lvis/sessions/<sessionId>/truncated/` — 사용자가 banner footnote
-     * 에서 원본 archive 위치 확인 가능. plumb 누락 방지를 위해 명시 필드.
-     */
+
+
+
     truncatedDir?: string;
   }) => void;
-  /**
-   * Fired at the start of a pre-turn auto-compact (token preflight) so the
-   * renderer can show a "자동 압축 중..." indicator before the potentially
-   * long-running LLM compaction finishes. Complementary to `onCompactOccurred`
-   * which fires on completion.
-   */
+
+
+
   onCompactStarted?: (info: {
     triggerSource: CompactTriggerSource;
     estimatedBefore: number;
@@ -113,14 +106,9 @@ export interface TurnCallbacks {
   onRecoveryExhausted?: () => void;
   onFallback?: (from: string, to: string) => void;
   onLlmStatus?: (status: FallbackStatus) => void;
-  /**
-   * Fired once per round boundary when a "guide" utterance was queued via
-   * `ConversationLoop.queueGuidance` and is now being injected into history
-   * as a user message ahead of the next LLM stream. Renderer uses this to
-   * render an inline "방향 지시 적용됨" note in the transcript so the user
-   * has visible feedback that the queued guidance landed (vs silently
-   * affecting the next assistant turn).
-   */
+
+
+
   onGuidanceInjected?: (text: string) => void;
   /**
    * Fired once at turn end if any queued guide utterances never reached a
@@ -165,12 +153,9 @@ export interface TurnCallbacks {
      */
     freshInputTokens: number;
     tokensOut: number;
-    /**
-     * Cache breakdown — Anthropic prompt cache (read 90% 할인 / write 25% 가산).
-     * Vercel AI SDK v6 의 inputTokens 는 cached 포함 정규화이므로 이 두 값을
-     * 별도로 surface 해야 사용자가 fresh vs cached 비용 차이 인지 가능.
-     * LVIS invariant: surface raw context usage and fresh billable input separately.
-     */
+
+
+
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
     /**
@@ -241,13 +226,13 @@ export interface ConversationLoopDeps {
   broadcastPermissionConfigChanged?: () => void;
   permissionManager?: import("../../permissions/permission-manager.js").PermissionManager;
   routineEngine?: RoutineEngine;
-  /** Agent 5: turn 완료 시 idle scheduler에 대화 신호 전송 (§6.1) */
+
   idleScheduler?: IdleSchedulerService;
   /** Agent 6: post-turn hook chain (compact → saveSession → extractMemory → audit → idle-poke) */
   postTurnHookChain?: PostTurnHookChain;
-  /** Agent 6: Bash AST pre-validator — ToolExecutor Step 2.5에 주입 */
+
   bashAstValidator?: import("../../main/bash-ast-validator.js").BashAstValidator;
-  /** B1: 승인 게이트 — "ask" 결정 시 렌더러 모달로 round-trip */
+
   approvalGate?: import("../../permissions/approval-gate.js").ApprovalGate;
   /**
    * In-process hook runner used by focused unit tests and old internal
@@ -255,12 +240,9 @@ export interface ConversationLoopDeps {
    * scriptHookManager, not by hooks.json external loading.
    */
   hookRunner?: HookRunner;
-  /**
-   * Option C — plugin runtime reference used for:
-   *   - request_plugin 메타 툴 pluginId 유효성 검증
-   *   - inactive plugin 카탈로그 공급 (SystemPromptBuilder가 읽음)
-   * Omitted in lightweight unit tests; scope expansion becomes a no-op.
-   */
+
+
+
   pluginRuntime?: {
     listPluginIds(): string[];
     /**
@@ -378,13 +360,12 @@ export interface PreflightGuardOptions {
   forceReason?: "rate-limit";
 }
 
-/** Lazy Tool Scoping — 매 턴 LLM에 노출할 도구 집합 정의. */
+
 export interface ToolScope {
   activePluginIds: Set<string>;
-  /**
-   * Tool-Level Deferral — 개별적으로 preload/promote 된 plugin+mcp tool 이름.
-   * Builtins/meta-tools are loaded separately by `includeBuiltins`.
-   */
+
+
+
   activeToolNames: Set<string>;
   /** Tools loaded because this turn's text directly matched tool keywords. */
   preloadedToolNames: Set<string>;

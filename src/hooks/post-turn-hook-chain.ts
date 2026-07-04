@@ -1,18 +1,7 @@
-/**
- * Post-Turn Hook Chain — turn 완료 후 실행
- *
- * mark-stale → detect-checkpoint → saveSession → extractMemory → update-title → auditLog → mark-session-todo-for-clear → idle-poke 순차 실행.
- * 각 단계는 독립적이며 한 단계 실패가 다음을 차단하지 않음.
- *
- * mark-session-todo-for-clear: 이 턴이 완료한 session TO-DO 플랜이 전부
- * completed 이면 SessionTodoStore 에 *마킹만* 한다 (emit 없음 → 패널은 이 턴
- * 동안 그대로 보임). 실제 clear 는 다음 턴 시작에서 conversation-loop 의
- * `clearIfPending` 가 input-origin 무관하게 결정적으로 수행한다.
- *
- * Post-turn full compact is intentionally absent. Token preflight (`runPreflightGuard`,
- * conversation-loop.ts) handles LLM-based compaction before the next turn.
- * This hook chain handles tool-result stubbing and housekeeping only.
- */
+
+
+
+
 
 import { markStaleToolResults } from "../engine/auto-compact.js";
 import { detectFromStream, type DetectorResult } from "../engine/checkpoint-detector.js";
@@ -31,7 +20,7 @@ export interface PostTurnHookContext {
   sessionId: string;
   projectRoot?: string;
   projectName?: string;
-  /** 현재 대화 이력 메시지 배열 */
+
   messages: GenericMessage[];
   input: string;
   output: string;
@@ -92,9 +81,9 @@ export interface PostTurnHookChainDeps {
 }
 
 export interface PostTurnHookResult {
-  /** 컴팩션이 발생한 경우 새 메시지 배열. 없으면 null. */
+
   compactedMessages: GenericMessage[] | null;
-  /** detect-checkpoint 결과. output에 마커가 없으면 default 값. */
+
   detector: DetectorResult;
   /**
    * Canonical message array that this hook persisted for transcript replay.
@@ -106,18 +95,15 @@ export interface PostTurnHookResult {
 export class PostTurnHookChain {
   constructor(private readonly deps: PostTurnHookChainDeps) {}
 
-  /**
-   * 7단계 순차 실행. 각 단계는 독립적 try/catch.
-   *
-   * @returns PostTurnHookResult — compactedMessages (nullable) + detector result
-   */
+
+
+
   async run(ctx: PostTurnHookContext): Promise<PostTurnHookResult> {
     let compactedMessages: GenericMessage[] | null = null;
     let messagesForPersistence = ctx.messages;
 
-    // 1. markStaleToolResults (LLM-free, lazy, 항상).
-    // Token preflight (`runPreflightGuard`) 가 *next turn 진입 전* 구조적
-    // 압축을 usable context 80% 임계로 수행하므로 post-turn 추가 압축 불필요.
+
+
     try {
       const beforeMarkCount = ctx.messages.length;
       const { messages: afterMark, result: mr } = markStaleToolResults(ctx.messages);

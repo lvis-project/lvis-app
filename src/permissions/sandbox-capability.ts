@@ -504,8 +504,8 @@ export function resolveReviewerSandboxCacheState(
  * so the historical grep-stable strings are preserved.
  *
  * Labels for extended kinds:
- *   partial  → "⚠ OS 격리 부분적"
- *   fs-only  → "ℹ 파일시스템만 격리 (landlock)"
+ *   partial  → localized partial OS isolation label
+ *   fs-only  → localized filesystem-only isolation label
  */
 export function formatSandboxCapabilityForPrompt(capability: SandboxCapability): string {
   const kindLabel = (() => {

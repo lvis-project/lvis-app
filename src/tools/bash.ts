@@ -136,7 +136,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
 
     // §691: ASRT (Anthropic sandbox-runtime) spawn path. The sandbox is gated
     // at boot — `initializeAsrtSandbox` runs only when the user opted in
-    // (Settings → 권한 'OS 도구 샌드박스' or the LVIS_SANDBOX_ENABLED escape-hatch)
+
     // AND the platform supports it. `isAsrtSandboxActive()` reflects that single
     // boot-time decision; there is no runtime gate to re-evaluate here.
     //

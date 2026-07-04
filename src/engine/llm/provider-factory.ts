@@ -76,7 +76,7 @@ export function createProvider(config: ProviderConfig): LLMProvider {
   return new LazyVercelProvider(config);
 }
 
-/** 벤더별 API 키 시크릿 키 이름 */
+
 export function secretKeyFor(vendor: LLMVendor): string {
   return `llm.apiKey.${vendor}`;
 }

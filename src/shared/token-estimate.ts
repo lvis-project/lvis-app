@@ -11,11 +11,9 @@
  * moving the source here is import-transparent to the rest of the engine.
  */
 
-/**
- * 한글 음절 (가-힣 범위, U+AC00 ~ U+D7A3) 카운트 — Korean weighting helper.
- * Anthropic/OpenAI/Gemini 토크나이저 모두 한글을 1.5~2x 비율로 토큰화하므로
- * chars/4 공식이 한글 위주 대화에서는 underestimate. 50% 이상이면 1.3x 보정.
- */
+
+
+
 export function countHangul(text: string): number {
   let count = 0;
   for (let i = 0; i < text.length; i++) {
@@ -25,12 +23,9 @@ export function countHangul(text: string): number {
   return count;
 }
 
-/**
- * 텍스트의 토큰 수 추정 (simple length/4 + 1 heuristic) + 한글 가중치.
- *
- * 한글 비율 ≥ 50% 면 weight 1.3 적용 (mixed-language 코드+주석 등은 ratio < 50% → weight 1.0).
- * 보수적 fallback: 모르는 문자는 기본 4-char/token 가정.
- */
+
+
+
 export function estimateTokens(text: string): number {
   if (text.length === 0) return 1;
   const hangul = countHangul(text);

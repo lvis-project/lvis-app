@@ -1,20 +1,7 @@
-/**
- * WorkBoardPanel — native personal work board (kanban) for the host app.
- *
- * Native 3-column kanban over the WorkItem lifecycle:
- * 예정(planned) / 진행 중(in_progress) / 완료(completed).
- *
- * State source: `window.lvisApi` (passed in as `api`). The panel lists items
- * once on mount and then refreshes on every `onWorkBoardItemChanged` event so
- * the board stays live without polling. Create + detail editing happen through
- * a host shadcn `Dialog` built from the host design system (Card / Button /
- * Badge / Dialog + tailwind tokens).
- *
- * `status_resolved` carries the locally-derived `overdue` projection — an item
- * with status ∈ {planned, in_progress} whose `due_at` is in the past. We render
- * it as an overdue badge inside whichever lifecycle column the stored status
- * places it in.
- */
+
+
+
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, Play, XCircle } from "lucide-react";
 import ReactMarkdown from "react-markdown";

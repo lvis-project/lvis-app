@@ -54,7 +54,7 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
   // change. Re-reads the persisted `marketplace.cloudAllowPrivateNetwork`
   // value and pushes it into the live CloudMarketplaceFetcher so the
   // SSRF-guard bypass toggle takes effect on the next request (honoring the
-  // "즉시 적용" UX badge). No-op when the fetcher is the disabled variant —
+
   // a disabled marketplace has no live config to refresh.
   const refreshMarketplaceFetcherConfig = (): void => {
     if (!(marketplaceFetcher instanceof CloudMarketplaceFetcher)) return;

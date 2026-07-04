@@ -84,13 +84,11 @@ export function useContextBudget(params: {
   );
 
   // Issue #900 #1 — per-request TPM (Tokens Per Minute) projection.
-  // contextBudget 는 *cumulative* limit 이지만 OpenAI 의 작은-tier 모델
-  // 은 *분당 처리량* 한도가 별도로 작음 (예: nano = 200K TPM). 단발
-  // request input 이 *cumulative budget 14%* 라도 TPM 초과로 429. UI 는
-  // 두 metric 을 *별도* 표시해 사용자 mental model 분리.
+
+
   //
-  // tpmLimit 가 등록된 모델만 노출 (nano 등). 미등록 모델은 undefined →
-  // UI 가 표시 자체 안 함 (현재 ring 만 유지).
+
+
   const tpmLimit = useMemo(() => {
     const pricing = lookupPricing(llmVendor, llmModel);
     return typeof pricing.tpmDefault === "number" && pricing.tpmDefault > 0
@@ -120,7 +118,7 @@ export function useContextBudget(params: {
     tpmLimit,
     tpmPct,
     isTpmOverflow: typeof tpmPct === "number" && tpmPct >= 1,
-    // #912 — ring/binding request limit (TPM-bound 모델에선 tpmLimit, else contextBudget).
+
     effectiveBudget,
   };
 }

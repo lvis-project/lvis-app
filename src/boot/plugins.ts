@@ -1,15 +1,7 @@
-/**
- * Plugin orchestration helpers.
- *
- * - buildPluginConfigOverrides: 범용 API key 주입
- * - registerManifestEventSubscriptions / buildManifestEventHints: event hint helpers
- * - registerPluginNotifications: OS 알림 (manifest.notificationEvents)
- *
- * Tool registration is NOT here — every plugin registers through
- * `PluginLoopbackManager` (each plugin runs as an in-process MCP server), wired
- * in `boot/steps/plugin-runtime.ts`. The legacy `pluginToolsForRegistration`
- * adapter was removed in the MCP-alignment legacy-removal flag-day.
- */
+
+
+
+
 import { Notification } from "electron";
 import type { BrowserWindow } from "electron";
 import type { PluginRuntime } from "../plugins/runtime.js";
@@ -131,9 +123,9 @@ export function buildManifestEventHints(
 }
 
 /**
- * manifest.emittedEvents 선언 기반으로 renderer 이벤트 브릿지를 등록한다.
- * classifySubscription("public") 판정을 통과한 이벤트만 webContents.send 로 전달.
- * 플러그인 특정 리터럴 없음 — boot.ts에 plugin ID/event 하드코딩 금지.
+ * Register renderer event bridges from manifest.emittedEvents declarations.
+ * Only events that pass classifySubscription("public") are forwarded with webContents.send.
+ * Keep this plugin-agnostic: do not hardcode plugin IDs or event literals in boot.ts.
  */
 export function registerPluginEventBridge(
   pluginRuntime: PluginRuntime,
@@ -175,7 +167,7 @@ export function registerPluginEventBridge(
 }
 
 /**
- * manifest.notificationEvents 선언 기반으로 OS 알림을 등록한다.
+ * Register OS notifications from manifest.notificationEvents declarations.
  *
  * Routes every plugin emit through {@link NotificationService} (#841) so
  * plugin notifications inherit:
@@ -206,8 +198,8 @@ export function registerPluginNotifications(
   if (!Notification.isSupported()) return () => {};
 
   const registered: Array<{ type: string; handler: EventHandler }> = [];
-  // manifest는 JSON에서 읽으므로 런타임 검증 필요. 또한 여러 플러그인이 같은 이벤트를
-  // 알림으로 선언하면 한 번의 emit에 알림이 중복으로 뜨므로 event별로 1개만 등록.
+  // Manifests come from JSON, so runtime validation is required. Multiple plugins
+  // can declare the same event as a notification, so register only once per event.
   const registeredEvents = new Set<string>();
 
   for (const { manifest } of pluginRuntime.listPluginManifests()) {

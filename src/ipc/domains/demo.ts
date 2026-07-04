@@ -1,60 +1,7 @@
-/**
- * Demo activation IPC handler.
- *
- * Flow:
- *   1. The LoginModal renders an activation-input sub-state when the user
- *      clicks chip 1 ("데모 자격증명으로 30초 안에 체험"). The user pastes a
- *      `LVIS-DEMO:v1:<base64>` activation string distributed through an
- *      internal channel.
- *   2. The renderer calls `api.demo.activate(code)` over IPC.
- *   3. This handler decrypts the string into the original `.env.demo`
- *      plaintext, persists it to `~/.lvis/secrets/.env.demo` (0o600), and
- *      injects the parsed `KEY=VALUE` pairs into `process.env` so the
- *      existing `captureDemoCredentials()` machinery can pick them up.
- *   4. The handler calls `recaptureDemoCredentialsAfterActivation()` so the
- *      auth IPC handler's subsequent `loginMockup` call observes the
- *      freshly-injected demo keys instead of the empty boot-time capture.
- *   5. If activation was already effective at boot, the renderer proceeds
- *      with the existing `loginMockup` chain. First activation instead arms
- *      a relaunch; the renderer shows a 5s onboarding notice, then calls the
- *      relaunch IPC so Chromium boots with the new host resolver rules.
- *
- * Why a separate IPC handler (not folded into `auth.ts`):
- *   - The activation step is a *prerequisite* to `loginMockup`. Folding it
- *     into auth.ts would conflate "I have credentials, please log me in"
- *     with "I need to install credentials before logging in".
- *   - The packaged-build path calls this activation handler on first run.
- *     Subsequent boots load `~/.lvis/secrets/.env.demo` before capture; the
- *     renderer then calls `lvis:demo:status` and proceeds to auth directly.
- *     Auth remains downstream of activation; clean separation keeps the
- *     wiring honest.
- *
- * Error contract (CLAUDE.md):
- *   - IPC error codes are kebab-case English. Renderer translates to Korean.
- *   - `invalid-code` covers: bad prefix, corrupt base64, GCM auth tag
- *     mismatch (wrong passphrase, tampered ciphertext), empty payload.
- *   - `persist-failed` covers: filesystem write failures (permission,
- *     disk full, parent dir missing).
- *   - `no-vendor` covers: decrypted payload missing `LVIS_DEMO_VENDOR`.
- *   - `invalid-vendor` covers: decrypted payload has an unknown vendor.
- *   - `no-demo-key` covers: decrypted payload missing the active vendor key.
- *   - `missing-foundry-endpoint` covers: Azure Foundry payload endpoint
- *     missing.
- *   - `invalid-foundry-endpoint` covers: Azure Foundry payload endpoint
- *     rejected by the shared settings endpoint validator.
- *   - `missing-foundry-host-map` covers: Azure Foundry payload missing the
- *     private endpoint host map required for Electron host-resolver-rules.
- *   - `foundry-host-map-mismatch` covers: Azure Foundry endpoint host not
- *     present in `LVIS_DEMO_HOST_MAP`.
- *   - `invalid-foundry-host-map-target` covers: Azure Foundry endpoint host
- *     mapped outside the approved demo private endpoint subnet.
- *
- * Storage namespace (project CLAUDE.md "Storage Namespace per Feature"):
- *   The persisted `.env.demo` lives under `~/.lvis/secrets/` (cross-cutting
- *   secrets directory, not a per-feature namespace) because the payload IS
- *   a credentials artifact and lives alongside the encrypted secret store
- *   blob. Directory mode 0o700, file mode 0o600.
- */
+
+
+
+
 import { app, ipcMain } from "electron";
 import { promises as fs } from "node:fs";
 import { dirname } from "node:path";
@@ -91,21 +38,9 @@ import { DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE } from "../../../scripts/lib/dev
 
 const log = createLogger("demo-activation-ipc");
 
-/**
- * 2026-05-20 — cross-window logout / reactivate broadcast channels.
- *
- * Settings 가 별도 BrowserWindow 로 mount 되기 때문에 GeneralTab 의
- * "로그아웃" / "데모 자격증명 재입력" 클릭은 main window 의 onboarding chain
- * + LoginModal 에 도달하지 못한다. 두 채널 모두 *one-way main → renderer*
- * fan-out 이며 payload 가 없는 단순 trigger 이다.
- *
- *   `lvis:auth:logout-reset`            — main window 가 onboarding chain
- *                                         reducer 에 `logout-reset` event 를
- *                                         dispatch 하도록 cue.
- *   `lvis:auth:reactivate-demo`         — main window 가 LoginModal 을
- *                                         `forceActivation=true` 로 mount
- *                                         하도록 cue.
- */
+
+
+
 export const AUTH_LOGOUT_RESET_CHANNEL = CHANNELS.auth.logoutReset;
 export const AUTH_REACTIVATE_DEMO_CHANNEL = CHANNELS.auth.reactivateDemo;
 

@@ -17,13 +17,9 @@ export type TokenUsageSegment = {
   };
 };
 
-/**
- * Checkpoint trigger reason on `compact_notice` events.
- * - "auto-compact": token preflight 가 LLM compact 를 실행
- * - "manual":       사용자 명시 trigger (/compact)
- * Mirrors `CheckpointTrigger` in `memory/memory-manager.ts` but kept as a
- * string-literal union here so the renderer side has zero memory layer imports.
- */
+
+
+
 export type CheckpointTrigger = "auto-compact" | "manual";
 
 export const EMPTY_ASSISTANT_RESPONSE_TEXT = t("be_chatStreamState.emptyAssistantResponse");
@@ -58,12 +54,9 @@ export type StreamEvent = {
    *  refresh contextOverflowPct immediately; falls back to (lastKnown -
    *  freedTokens) when missing). */
   estimatedAfter?: number;
-  /**
-   * `compact_started` event fields — pre-turn auto-compact in progress.
-   * Renderer sets `isCompacting: true` on this event and clears it on
-   * `compact_notice` (completion). Allows showing a "자동 압축 중..." indicator
-   * during the blocking LLM compaction call.
-   */
+
+
+
   triggerSource?: "estimate" | "context-tokens" | "manual" | "force-recover" | "rate-limit";
   /**
    * `recovery_exhausted` event — emitted when force-recover budget is fully
@@ -80,11 +73,9 @@ export type StreamEvent = {
   summary?: string;
   /** Compact sequence number on `compact_notice` — enables view/branch actions. */
   compactNum?: number;
-  /**
-   * Compact 결과 분류. Renderer 가 status 별로 다른 banner
-   * variant 를 표시 ("summarized" / "content_truncated" / "noop" /
-   * "reduced_insufficient_forced"). `compact-status.ts` SOT.
-   */
+
+
+
   compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced";
   /** Truncation archive directory for original messages (CONTENT_TRUNCATED path). */
   truncatedDir?: string;
@@ -134,11 +125,9 @@ export type StreamEvent = {
    * the engine-projected next request input SOT.
    */
   freshInputTokens?: number;
-  /**
-   * Cache breakdown — Anthropic prompt cache (read 90% 할인 / write 25% 가산).
-   * Vercel AI SDK v6 가 inputTokens 를 cached 포함 정규화하므로 separately
-   * surface.
-   */
+
+
+
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   /** Provider/model that actually served the turn, after fallback resolution. */
@@ -222,17 +211,16 @@ export type ChatEntry =
       summary?: string;
       /** Compact sequence number — enables view/branch actions on CheckpointDivider. */
       compactNum?: number;
-      /**
-       * Compact 결과 분류. CheckpointDivider 가 status 별로
-       * 다른 visual variant (색상/아이콘/메시지) 를 표시한다.
-       */
+
+
+
       compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced";
       /** Truncation archive directory for original messages (CONTENT_TRUNCATED path). */
       truncatedDir?: string;
     }
   // Marker placed at the head of a resumed session when a rolling
-  // summaryPreamble is applied. Lets the user see "이전 대화 이어서 시작
-  // (요약 N자 적용)" rather than silently inheriting context from the prompt
+
+
   // builder. `preambleChars` is the actual character count after the
   // 8 000-char cap; renderer formats the label.
   | {
@@ -247,13 +235,13 @@ export type ChatEntry =
       tokensIn: number;
       source: "compact-estimate";
     }
-  // Overlay trigger that the user accepted ("확인하기"). The
+
   // trigger session ran in an isolated ConversationLoop; once imported,
   // its prompt enters the main chat loop, but the visible entry is only
   // an input provenance marker. Assistant output, tool groups, and
   // turn_summary entries continue through the normal chat renderer.
   // Rendering the prompt as a user-message bubble would be wrong on two axes:
-  //   1. The plugin authored that prompt, not the user — showing "나" /
+
   //      keyword-routing prefix misattributes authorship.
   //   2. The trigger session is intentionally distinct from chat —
   //      flattening it to user→assistant pair erases the overlay-trigger

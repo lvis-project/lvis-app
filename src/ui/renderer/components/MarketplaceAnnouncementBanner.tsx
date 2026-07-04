@@ -5,19 +5,9 @@ import type { MarketplaceAnnouncement } from "../../../shared/marketplace-announ
 import { MarqueeText } from "./MarqueeText.js";
 import { useTranslation } from "../../../i18n/react.js";
 
-/**
- * Renders the newest active announcement at the top of the app, matching the
- * look-and-feel of {@link MarketplaceUpdateBanner}. When more than one is
- * active, an "외 N건" count is appended; dismissing the visible one (X button)
- * persists its id and reveals the next.
- *
- * The level drives the color scheme using the project's semantic tokens:
- *   - info     → info (same family as the update banner)
- *   - warning  → warning/amber
- *   - critical → destructive
- *
- * Long title/body lines scroll via {@link MarqueeText} instead of truncating.
- */
+
+
+
 export function MarketplaceAnnouncementBanner({
   announcements,
   onDismiss,

@@ -305,8 +305,8 @@ export async function gateMutatingEffect(params: {
   // EVALUATED BEFORE the grant short-circuits below: a grant (allow-session /
   // allow-always) obtained while the user WATCHED in the foreground must NOT
   // later auto-allow the same descriptor in an unattended headless/routine run
-  // (CLAUDE.md: "Headless/routine 실행은 allow rule/auto mode 로 write/shell/network 를
-  // 우회하지 않는다"). In a headless context the gate ALWAYS throws, regardless of any
+  // (CLAUDE.md policy: headless/routine execution must not bypass write/shell/network
+  // gates through allow rules or auto mode). In a headless context the gate ALWAYS throws, regardless of any
   // prior foreground grant. Headless mutations remain gated by the pre-exec
   // headless lane.
   if (ctx.headless) {

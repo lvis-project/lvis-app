@@ -151,7 +151,7 @@ export function acceptSuggestedReply(
   _text: string,
   source: "best" | "chip" = "best",
 ): void {
-  // Composer 가 채워 넣은 후 호출. 추천은 1회성이므로 store 비움.
+
   if (snapshot === EMPTY_SNAPSHOT) return;
   recordSuggestedRepliesEvent(source === "best" ? "accepted-best" : "accepted-chip");
   snapshot = EMPTY_SNAPSHOT;
@@ -167,7 +167,7 @@ export function __resetSuggestedRepliesStoreForTests(): void {
   snapshot = EMPTY_SNAPSHOT;
   dismissLatch = false;
   priorActiveUnused = false;
-  // 구독자는 비우지 않음 — 활성 컴포넌트가 다시 subscribe 하므로.
+
 }
 
 let ipcWired = false;

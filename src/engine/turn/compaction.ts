@@ -23,11 +23,9 @@ import { createLogger } from "../../lib/logger.js";
 
 const log = createLogger("lvis");
 
-/**
- * 사용자가 반복적으로 context_error 유발 input 보낼 때 compact API 호출
- * 폭주 방어 (Issue #910 round-4 security MEDIUM). 3 회 연속 force-recover 는
- * compact 가 reduce 못 하는 pathological 상태이거나 adversarial input 신호.
- */
+
+
+
 const MAX_FORCE_RECOVER_PER_SESSION = 3;
 
 export async function manualCompact(self: ConversationLoop, callbacks?: Pick<TurnCallbacks, "onCompactOccurred" | "onCompactStarted">): Promise<{
@@ -71,7 +69,7 @@ export async function manualCompact(self: ConversationLoop, callbacks?: Pick<Tur
         toolSchemas,
       });
       // Mirror runPreflightGuard's pre-compact UX hint so slash-`/compact`
-      // also lights up the "자동 압축 중..." StatusBar indicator during the
+
       // potentially long-running LLM summarization.
       callbacks?.onCompactStarted?.({
         triggerSource: "manual",
@@ -105,7 +103,7 @@ export async function manualCompact(self: ConversationLoop, callbacks?: Pick<Tur
         };
       }
 
-      await applyBoundaryToSession(self, 
+      await applyBoundaryToSession(self,
         result,
         "manual",
         requestProjection.totalTokens,
@@ -123,7 +121,7 @@ export async function manualCompact(self: ConversationLoop, callbacks?: Pick<Tur
         tokensAfter: self.lastContextInputTokens,
       });
 
-      // 영속화 — manualCompact 완료 시점에 즉시 disk 반영.
+
       void Promise.resolve(
         self.deps.memoryManager?.saveSession(self.sessionId, self.history.getMessages()),
       ).catch((err: unknown) => {
@@ -163,19 +161,14 @@ export async function applyBoundaryToSession(
     trigger: "auto-compact" | "manual",
     estimatedBefore: number,
     callbacks: TurnCallbacks | undefined,
-    /** compact 직전 history 길이 — messageCountAtTrigger 에 기록 (origin count). */
+
     prevMessageCount: number,
     /** §C1: verbatim pre-compact messages — persisted as checkpoint snapshot for branchFromCheckpoint. */
     messagesBefore: import("../llm/types.js").GenericMessage[],
     projectionContext: RequestProjectionContext,
   ): Promise<void> {
-    // CONTENT_TRUNCATED 경로 — LLM summary boundary 는 없지만 reload/branch
-    // parity 를 위해 lightweight checkpoint carrier 를 삽입한다. Truncation 은
-    // 메시지를 stub 으로 대체하지 않고 in-place clip 이므로 boundary preamble
-    // 변경 불필요. 그러나 chain consistency 위해 compactNum 은 bump (M-Critic-2).
-    // cacheReadTokens/cacheWriteTokens 는 보존 — boundary 가 없으므로 provider
-    // cache prefix 가 여전히 유효 (M-Critic-4 fix). reset 하면 다음 turn 의
-    // 빌링이 부풀려진다.
+
+
     if (result.boundary === null) {
       self.compactNum += 1;
       let truncated = contentTruncatedHistoryWithContextCarrier({
@@ -363,7 +356,7 @@ export async function runPreflightGuard(
       return false;
     }
     if (!forceRecover && !forceRateLimit && !self.isAutoCompactEnabled()) {
-      log.debug("runPreflightGuard: skipped (autoCompact 설정 OFF)");
+    log.debug("runPreflightGuard: skipped (autoCompact setting OFF)");
       return false;
     }
     if (self.isCompacting) {
@@ -475,7 +468,7 @@ export async function runPreflightGuard(
       // 다음 prompt assembly 가 새 boundary 를 read 해야 함.
       // onCompactOccurred (compactNum 포함) 은 applyBoundaryToSession 안에서 단일 emit.
       // 여기서 두 번째 emit 을 제거해 CheckpointDivider 중복 방지.
-      await applyBoundaryToSession(self, 
+      await applyBoundaryToSession(self,
         compactResult,
         "auto-compact",
         estimated,
@@ -501,7 +494,7 @@ export async function runPreflightGuard(
     } catch (err) {
       // LLM compact 실패 시 turn 자체는 계속 진행 — compact 미적용 history 로 stream attempt.
       // context_error 도달 시 stream-collector 의 safety net 이 사용자 안내 처리.
-      log.warn(`preflight: LLM compact failed — ${(err as Error).message}. context_error safety net 으로 위임.`);
+      log.warn(`preflight: LLM compact failed — ${(err as Error).message}. Delegating to context_error safety net.`);
       return false;
     } finally {
       self.isCompacting = false;

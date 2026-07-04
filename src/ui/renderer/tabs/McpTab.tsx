@@ -16,7 +16,7 @@ import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 // ─── Helper types re-exported from renderer/types.ts ─
-// McpServerConfig / McpServerState 는 window.lvis.mcp 의 반환 타입
+
 
 type Transport = "stdio" | "http";
 

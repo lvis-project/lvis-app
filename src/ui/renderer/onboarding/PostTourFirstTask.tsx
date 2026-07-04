@@ -1,33 +1,7 @@
-/**
- * Tutorial-X5 — Post-tour first-task proposal card.
- *
- * Mounts unconditionally inside `App.tsx` but stays invisible until:
- *   (a) the SpotlightTour has fired a `complete` event (or the user
- *       dismissed it after the final step), AND
- *   (b) at least one installed plugin has a registered first-task
- *       proposal in `first-task-proposals.ts`.
- *
- * UX contract:
- *   - The card is a non-modal floating banner anchored bottom-right so
- *     the user can dismiss + continue chatting at any time. No backdrop.
- *   - The CTA pre-fills the chat composer via `api.composerSeedText` (or
- *     a fallback IPC) — the user explicitly presses Send. This keeps
- *     the tool-approval contract intact: LVIS never auto-invokes a
- *     plugin tool on behalf of the user during onboarding.
- *   - After dismissal (CTA accepted *or* "나중에"), the proposal is
- *     not re-shown for the rest of the session. The component tracks
- *     this in local state; a persisted flag is not needed because the
- *     proposal only applies to first-boot.
- *
- * Data sources:
- *   - `installedPluginIds` is passed in from App.tsx via the existing
- *     plugin runtime list (no new IPC) so the component is purely
- *     presentational.
- *   - `composerSeedText(text)` is the host's existing composer-set IPC;
- *     when not present (legacy/stub api), the card falls back to
- *     `navigator.clipboard.writeText` + a "텍스트 복사됨" microcopy so
- *     the user can paste it manually rather than getting stuck.
- */
+
+
+
+
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { cn } from "../../../lib/utils.js";

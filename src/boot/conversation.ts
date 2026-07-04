@@ -83,7 +83,7 @@ export function createSystemPromptBuilder(opts: {
   return new SystemPromptBuilder({
     memoryManager,
     toolRegistry,
-    // Option C — 비활성 plugin 카탈로그 공급.
+
     getPluginCards: () => pluginRuntime.listPluginCards(toolRegistry),
     getActivatablePluginIds,
     getAvailableSkills,
@@ -103,14 +103,14 @@ export async function createPermissionManager(): Promise<PermissionManager> {
   registerStandardCategories();
   // §6.3: PermissionManager (Layer 2-3)
   const permissionManager = new PermissionManager();
-  // 기본 allow 규칙: 조회성 도구 자동 허용
+
   permissionManager.setRules([
     { pattern: "skill_list", action: "allow" },
     { pattern: "agent_list", action: "allow" },
     { pattern: "web_search", action: "allow" },
     { pattern: "web_fetch", action: "allow" },
   ]);
-  // B1: 영구 규칙 파일 로드 (~/.lvis/permissions.json → 인메모리 병합)
+
   await permissionManager.loadRulesFromFile();
   return permissionManager;
 }
@@ -132,7 +132,7 @@ export function createPostTurnHookChain(opts: {
    */
   sessionTodoStore?: SessionTodoStore;
 }): { postTurnHookChain: PostTurnHookChain; auditLogger: AuditLogger } {
-  // §4.5 + Agent 6: PostTurnHookChain 조립
+
   const auditLogger = opts.auditLogger ?? new AuditLogger();
   const postTurnHookChain = new PostTurnHookChain({
     memoryManager: opts.memoryManager,
@@ -149,9 +149,8 @@ export async function createApprovalGate(
   auditLogger: AuditLogger,
   notificationService?: NotificationService,
 ): Promise<ApprovalGate> {
-  // B1: Policy 로드 후 ApprovalGate 생성 — mainWindow.webContents 준비 후
-  // §F7: bootAuditLogger 주입 → requested/decided/timeout/send-failed 4 phase 감사
-  // Issue #260: notificationService 주입 → 승인 트리거 시 OS/in-app notification
+
+
   const bootPolicy = await loadPolicy();
   return new ApprovalGate(
     mainWindow.webContents,
@@ -450,7 +449,7 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
     getDefaultProject: deps.getDefaultProject ?? defaultWorkspaceProject,
     authorizeProject: deps.authorizeProject ?? authorizeWorkspaceProjectRoot,
-    // Option C — request_plugin 메타 툴 pluginId 검증용.
+
     pluginRuntime: deps.pluginRuntime,
     skillOverlay: deps.skillOverlay,
     sessionTodoStore: deps.sessionTodoStore,

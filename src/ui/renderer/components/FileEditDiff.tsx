@@ -1,20 +1,7 @@
-/**
- * FileEditDiff — inline diff renderer for edit_file / apply_patch / write_file.
- * Used by ToolGroupCard for tools whose result carries before/after hunk data
- * via the `lvis.write_file` kind or via edit_file/apply_patch input fields.
- *
- * WriteFileSidecarDiff — sidecar IPC renderer for write_file when either side
- * exceeds WRITE_DIFF_PREVIEW_LIMIT. Fetches full before/after via IPC on demand.
- * Issue #749 — IPC channel: lvis:chat:get-write-diff → { before, after } | null
- * Mirrors CompactedToolResult's lazy-fetch pattern.
- *
- * States (WriteFileSidecarDiff):
- *   idle       — truncated badge + "전체 diff 보기" button (sidecar available)
- *   loading    — spinner, button disabled
- *   expanded   — full before/after diff hunks
- *   error      — inline error message with retry button
- *   normal     — no truncation, renders result block directly (pass-through)
- */
+
+
+
+
 
 import { useState, useEffect, useRef } from "react";
 import { ChevronDown, ChevronRight, FilePlus2, FilePenLine } from "lucide-react";

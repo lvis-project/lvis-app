@@ -3,13 +3,9 @@ import { Dialog as DialogPrimitive, VisuallyHidden } from "radix-ui";
 import { DialogOverlay } from "../../../components/ui/dialog.js";
 import { useTranslation } from "../../../i18n/react.js";
 
-/**
- * Narrow-screen fallback for the docked workspace rail (§6.10.8 부가-A). When
- * the ChatView container is too narrow to dock the panel beside the transcript,
- * the SAME ChatSidePanel renders inside a right-anchored modal sheet built on
- * Radix Dialog (focus trap, ESC, backdrop, aria-modal for free). The panel's
- * tab state is unaffected because the store lives at ChatView level.
- */
+
+
+
 export function WorkspaceRailDrawer({
   open,
   onOpenChange,

@@ -4,9 +4,9 @@ import { PageSection } from "./PageShell.js";
 export interface SettingsSectionProps {
   title: string;
   description?: ReactNode;
-  /** Optional small badge next to title (e.g. "즉시 적용"). */
+
   badge?: ReactNode;
-  /** Optional action node rendered top-right (e.g. a "재설정" button). */
+
   actions?: ReactNode;
   /** Optional id for anchor scroll. */
   id?: string;

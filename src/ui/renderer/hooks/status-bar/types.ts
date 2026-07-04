@@ -20,12 +20,9 @@ export interface NotificationToastMeta {
 export interface PersistentItem {
   id: string;
   severity: StatusBarSeverity;
-  /**
-   * Short label (left of dot) — e.g. "다음 루틴", or an emoji glyph. Optional
-   * when `dot` is true: dot-only producers (마켓플레이스 online ping) omit
-   * both `label` and `value` so the status bar shows nothing but the colored
-   * dot + tooltip.
-   */
+
+
+
   label?: string;
   /** Variable value (right of dot) — e.g. "04:42 KST". */
   value?: string;
@@ -36,13 +33,9 @@ export interface PersistentItem {
    * is the entire visual payload and the meaning lives in the `tooltip`.
    */
   dot?: boolean;
-  /**
-   * Screen-reader text. When `label` is an emoji glyph the SR would read its
-   * Unicode name ("wrench") which loses semantic meaning; producers supply a
-   * Korean phrase here (예: "도구 개수") that the StatusBar exposes via an
-   * sr-only span while the emoji span is `aria-hidden`. Optional — text
-   * labels can omit this and rely on `label` being read directly.
-   */
+
+
+
   a11yLabel?: string;
   /**
    * Optional click handler. When set, the StatusBar renders this item as a

@@ -146,7 +146,7 @@ export function useSessions(
     ): Promise<boolean> => {
       // Don't swap sessions mid-stream — ConversationLoop.runTurn() has no
       // concurrency guard, so replacing history while a turn is writing to it
-      // would race. The "기록" button is also disabled during streaming, but
+
       // keep this guard here too for programmatic callers (e.g. starred jump).
       if (streaming) return false;
       const token = ++sessionReadTokenRef.current;
