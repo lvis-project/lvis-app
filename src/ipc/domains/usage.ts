@@ -3,7 +3,7 @@
  * Covers: lvis:usage:*
  */
 import { ipcMain } from "electron";
-import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { handleUsageSummary, handleUsageRange, handleUsageDailySummary, type UsageDailySummaryInput } from "../handlers/usage.js";
@@ -21,7 +21,7 @@ export function registerUsageHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.usage.dailySummary, async (e, input: UsageDailySummaryInput) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.usage.dailySummary, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.usage.dailySummary, e); return UNAUTHORIZED_FRAME; }
     return handleUsageDailySummary(deps.conversationLoop, input);
   });
 
