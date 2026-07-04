@@ -306,6 +306,30 @@ export type UsageSummaryShape = {
   generatedAt: string;
 };
 
+export type UsageDailySummaryInput = {
+  date: string;
+  locale?: string;
+  sessions?: Array<{
+    title?: string;
+    preview?: string;
+    projectName?: string;
+  }>;
+  starred?: Array<{
+    role?: string;
+    text?: string;
+  }>;
+  usage?: Partial<UsageTotals> | null;
+};
+
+export type UsageDailySummaryResult =
+  | { ok: true; summary: string; generatedAt: string }
+  | { ok: false; error: string };
+
+export type ProjectQueryOptions = {
+  projectRoot?: string;
+  projectName?: string;
+  includeUnscoped?: boolean;
+};
 
 export type PluginMarketplaceActionResult =
   | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
@@ -653,11 +677,13 @@ export type LvisApi = {
     personaPromptId?: string,
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
-  chatNew: () => Promise<{ ok: true }>;
-  chatSessions: (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; routineFiredAt?: string; branchedFromCompactNum?: number }> }>;
+  chatNew: (opts?: { projectRoot?: string; projectName?: string }) => Promise<
+    { ok: true } | { ok: false; error: string }
+  >;
+  chatSessions: (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; routineFiredAt?: string; projectRoot?: string; projectName?: string; branchedFromCompactNum?: number }> }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
-  chatGetHistory: () => Promise<{ sessionId: string; sessionTitle?: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; messages: SerializedHistoryMessage[] }>;
+  chatGetHistory: () => Promise<{ sessionId: string; sessionTitle?: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; projectRoot?: string; projectName?: string; messages: SerializedHistoryMessage[] }>;
   chatMainActiveState: () => Promise<{ mainActiveSessionId: string | null; mainActiveMode: "resume" | "fresh"; updatedAt: string } | null>;
   chatSessionHistory: (sessionId: string) => Promise<{
     ok: boolean;
@@ -666,6 +692,8 @@ export type LvisApi = {
     routineId?: string;
     routineTitle?: string;
     routineFiredAt?: string;
+    projectRoot?: string;
+    projectName?: string;
     messages: SerializedHistoryMessage[];
     /** Chars in the rolling summary preamble applied to this session. 0 = no preamble. */
     preambleChars?: number;
@@ -707,15 +735,15 @@ export type LvisApi = {
   starredList: () => Promise<Array<{ id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string }>>;
   starredAdd: (entry: { sessionId?: string; messageIndex: number; role: string; text: string }) => Promise<{ ok: boolean; entry?: { id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string } }>;
   starredRemove: (opts: { id?: string; sessionId?: string; messageIndex?: number }) => Promise<{ ok: boolean }>;
-  memoryListEntries: () => Promise<Array<{ filename: string; title: string; content: string; updatedAt?: string }>>;
-  memorySaveEntry: (t: string, c: string) => Promise<unknown>;
+  memoryListEntries: (opts?: ProjectQueryOptions) => Promise<Array<{ filename: string; title: string; content: string; updatedAt?: string; projectRoot?: string; projectName?: string }>>;
+  memorySaveEntry: (t: string, c: string, opts?: ProjectQueryOptions) => Promise<unknown>;
   memoryDeleteEntry: (f: string) => Promise<void>;
-  memorySearchEntries: (q: string) => Promise<Array<{ filename?: string; title: string; content?: string; excerpt: string; updatedAt: string }>>;
-  memoryGetIndex: () => Promise<string>;
+  memorySearchEntries: (q: string, opts?: ProjectQueryOptions) => Promise<Array<{ filename?: string; title: string; content?: string; excerpt: string; updatedAt: string; projectRoot?: string; projectName?: string }>>;
+  memoryGetIndex: (opts?: ProjectQueryOptions) => Promise<string>;
   memoryUpdateIndexIfUnchanged: (expectedContent: string, nextContent: string) => Promise<boolean>;
   memoryUpdateIndexSections: (sections: { urgentMemory?: string; references?: string }) => Promise<unknown>;
-  memoryListSessions: () => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
-  memorySearchSessions: (q: string) => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
+  memoryListSessions: (opts?: ProjectQueryOptions) => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
+  memorySearchSessions: (q: string, opts?: ProjectQueryOptions) => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
   memoryGetAgentsMd: () => Promise<string>;
   memoryUpdateAgentsMd: (content: string) => Promise<unknown>;
   memoryGetUserPrefs: () => Promise<string>;
@@ -884,7 +912,7 @@ export type LvisApi = {
   // state + activity log + learned memory.
   generateWorkBoardReport?: (
     kind: "daily" | "weekly",
-    input?: { date?: string; weekIso?: string; weekOffset?: number },
+    input?: { date?: string; weekIso?: string; weekOffset?: number; projectRoot?: string; includeUnscoped?: boolean },
   ) => Promise<
     | import("../../shared/work-board-types.js").WorkBoardReportResult
     | { ok: false; error: string }
@@ -1018,6 +1046,7 @@ export type LvisApi = {
   onViewActivate: (h: (k: string) => void) => () => void;
   getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;
   getUsageRange: (opts: { dateFrom: string; dateTo: string }) => Promise<UsageSummaryShape>;
+  getUsageDailySummary: (input: UsageDailySummaryInput) => Promise<UsageDailySummaryResult>;
   exportUsageCsv: (rows: Array<Record<string, string | number>>) => Promise<{ ok: boolean; filePath?: string; canceled?: boolean }>;
   plugins: {
     getPerfStats: () => Promise<Record<string, PluginPerfStats>>;

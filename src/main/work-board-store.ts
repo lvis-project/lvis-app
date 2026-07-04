@@ -32,6 +32,7 @@ import {
   type BoardFile,
 } from "../work-board/board-shared.js";
 import { appendActivity } from "../work-board/activity-log.js";
+import { projectRootEquals } from "../shared/project-identity.js";
 
 const log = createLogger("lvis");
 
@@ -84,6 +85,8 @@ import {
 const MAX_TITLE_LENGTH = 512;
 /** Max detail length. */
 const MAX_DETAIL_LENGTH = 8192;
+const MAX_PROJECT_ROOT_LENGTH = 2048;
+const MAX_PROJECT_NAME_LENGTH = 120;
 
 // Resolved through the feature-namespace helper so `~/.lvis/work-board/` stays
 // the single source of truth for the board file location.
@@ -137,6 +140,12 @@ function isRunStatus(v: unknown): v is WorkItemRunStatus {
   return typeof v === "string" && VALID_RUN_STATUSES.includes(v as WorkItemRunStatus);
 }
 
+function normalizeOptionalString(value: unknown, max: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.slice(0, max) : undefined;
+}
+
 /**
  * Validate a record loaded from disk. Rejects tampered / corrupted entries so a
  * single bad record cannot poison a list / report read.
@@ -150,6 +159,8 @@ function isValidRecord(r: unknown): r is WorkItem {
   if (!isStatus(x.status)) return false;
   if (!isPriority(x.priority)) return false;
   if (x.due_at !== undefined && typeof x.due_at !== "string") return false;
+  if (x.projectRoot !== undefined && typeof x.projectRoot !== "string") return false;
+  if (x.projectName !== undefined && typeof x.projectName !== "string") return false;
   if (typeof x.created_at !== "string") return false;
   if (typeof x.updated_at !== "string") return false;
   if (x.completed_at !== undefined && typeof x.completed_at !== "string") return false;
@@ -278,10 +289,14 @@ export class WorkBoardStore {
     if (filter.limit !== undefined && (!Number.isFinite(filter.limit) || filter.limit < 0)) {
       return { status: "invalid", reason: "limit must be a non-negative number" };
     }
+    const projectRoot = normalizeOptionalString(filter.projectRoot, MAX_PROJECT_ROOT_LENGTH);
     const nowMs = this.now();
     let rows = this.cache.items
       .map((item) => decorate(cloneItem(item), nowMs))
       .sort((a, b) => b.id - a.id);
+    if (projectRoot) {
+      rows = rows.filter((r) => projectRootEquals(r.projectRoot, projectRoot) || (filter.includeUnscoped === true && !r.projectRoot));
+    }
     if (filter.status) {
       rows = rows.filter((r) => r.status_resolved === filter.status);
     }
@@ -333,6 +348,8 @@ export class WorkBoardStore {
     if (input.due_at !== undefined && Number.isNaN(Date.parse(input.due_at))) {
       return { status: "invalid", reason: "due_at is not a valid ISO timestamp" };
     }
+    const projectRoot = normalizeOptionalString(input.projectRoot, MAX_PROJECT_ROOT_LENGTH);
+    const projectName = normalizeOptionalString(input.projectName, MAX_PROJECT_NAME_LENGTH);
 
     return withFileLock(this.filePath, async () => {
       const board = await readFileOrEmpty(this.filePath);
@@ -352,6 +369,8 @@ export class WorkBoardStore {
         status,
         priority: input.priority ?? "medium",
         ...(input.due_at !== undefined ? { due_at: input.due_at } : {}),
+        ...(projectRoot ? { projectRoot } : {}),
+        ...(projectName ? { projectName } : {}),
         created_at: iso,
         updated_at: iso,
         ...(status === "completed" ? { completed_at: iso } : {}),

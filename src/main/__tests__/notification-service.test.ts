@@ -153,7 +153,7 @@ describe("NotificationService — routing decision", () => {
     factoryStub = makeNotificationFactoryStub();
   });
 
-  it("focused, non-minimized window → in-app toast IPC", () => {
+  it("focused, non-minimized system notification → in-app toast IPC", () => {
     const win = makeMockWindow({ focused: true, minimized: false });
     const svc = new NotificationService({
       getMainWindow: () => win as unknown as Electron.BrowserWindow,
@@ -164,16 +164,16 @@ describe("NotificationService — routing decision", () => {
       isAnyWindowFocused: () => true, // multi-window probe: main is focused
     });
     svc.fire({
-      kind: "turn-end",
-      title: "응답 완료",
+      kind: "system",
+      title: "동기화 완료",
       body: "hello world",
       contextRef: { sessionId: "s-1" },
     });
     expect(win.webContents.send).toHaveBeenCalledWith(
       IPC_NOTIFICATION_TOAST,
       expect.objectContaining({
-        kind: "turn-end",
-        title: "응답 완료",
+        kind: "system",
+        title: "동기화 완료",
         body: "hello world",
         contextRef: { sessionId: "s-1" },
       }),
@@ -182,10 +182,55 @@ describe("NotificationService — routing decision", () => {
     // Audit: gate=in-app
     const log = (auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(log.input).toContain('"gate":"in-app"');
-    expect(log.input).toContain('"kind":"turn-end"');
-    expect(log.input).toContain('"title":"응답 완료"');
+    expect(log.input).toContain('"kind":"system"');
+    expect(log.input).toContain('"title":"동기화 완료"');
     // Body MUST NOT appear in audit (PII).
     expect(log.input).not.toContain("hello world");
+  });
+
+  it("focused turn-end is suppressed without composer toast or cooldown consumption", () => {
+    const win = makeMockWindow({ focused: true, minimized: false });
+    let anyFocused = true;
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => anyFocused,
+    });
+    const perfBase = performance.now();
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase);
+
+    svc.fire({
+      kind: "turn-end",
+      title: "응답 완료",
+      body: "hello world",
+      contextRef: { sessionId: "s-1" },
+    });
+
+    expect(win.webContents.send).not.toHaveBeenCalled();
+    expect(factoryStub.calls.length).toBe(0);
+    const suppressedLog = (auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const suppressed = JSON.parse(suppressedLog.input);
+    expect(suppressed).toMatchObject({
+      event: "notification.suppressed",
+      kind: "turn-end",
+      reason: "foreground",
+    });
+    expect(suppressedLog.input).not.toContain("hello world");
+
+    anyFocused = false;
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase + 1_000);
+    svc.fire({
+      kind: "turn-end",
+      title: "응답 완료",
+      body: "hello world",
+      contextRef: { sessionId: "s-1" },
+    });
+
+    expect(factoryStub.calls.length).toBe(1);
+    vi.restoreAllMocks();
   });
 
   it("system notifications route through the same in-app toast path", () => {
@@ -560,11 +605,11 @@ describe("NotificationService — multi-window focus gate (#842)", () => {
       isTestEnv: () => false,
       isAnyWindowFocused: () => true, // an aux window holds focus
     });
-    svc.fire({ kind: "turn-end", title: "응답", body: "ok" });
+    svc.fire({ kind: "system", title: "응답", body: "ok" });
     expect(factoryStub.calls.length).toBe(0);
     expect(win.webContents.send).toHaveBeenCalledWith(
       IPC_NOTIFICATION_TOAST,
-      expect.objectContaining({ kind: "turn-end" }),
+      expect.objectContaining({ kind: "system" }),
     );
   });
 

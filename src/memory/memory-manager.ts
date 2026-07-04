@@ -19,6 +19,7 @@ import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
+import { projectRootEquals } from "../shared/project-identity.js";
 import {
   buildToolResultStrippedStub,
   buildToolResultTruncatedStub,
@@ -45,6 +46,14 @@ export interface NoteEntry {
   content: string;
   updatedAt?: string;
   excerpt?: string;
+  projectRoot?: string;
+  projectName?: string;
+}
+
+export interface ProjectScopedMemoryOptions {
+  projectRoot?: string;
+  projectName?: string;
+  includeUnscoped?: boolean;
 }
 
 export interface MemoryIndexSectionsPatch {
@@ -74,6 +83,8 @@ export type SessionKind = "main" | "routine" | "subagent";
 export interface ListSessionsOptions {
   kind?: SessionKind | "all";
   routineId?: string;
+  projectRoot?: string;
+  includeUnscoped?: boolean;
   limit?: number;
   before?: Date;
   beforeId?: string;
@@ -95,6 +106,10 @@ export interface SessionListEntry {
   routineId?: string;
   routineTitle?: string;
   routineFiredAt?: string;
+  /** Workspace/project root this conversation belongs to. */
+  projectRoot?: string;
+  /** Human-readable workspace/project label captured when the session was created. */
+  projectName?: string;
   /**
    * Checkpoint/fork provenance only. This is not a chronological previous
    * session pointer and must not drive automatic previous-session loading.
@@ -158,6 +173,10 @@ export interface SessionMetadata {
   routineId?: string;
   routineTitle?: string;
   routineFiredAt?: string;
+  /** Workspace/project root this conversation belongs to. */
+  projectRoot?: string;
+  /** Human-readable workspace/project label captured when the session was created. */
+  projectName?: string;
   /** Checkpoint/fork provenance parent, not a chronological previous session. */
   parentSessionId?: string;
   /**
@@ -214,6 +233,8 @@ export interface SessionMetadata {
 }
 
 const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
+const MEMORY_PROJECT_ROOT_PREFIX = "<!-- lvis:project-root:";
+const MEMORY_PROJECT_NAME_PREFIX = "<!-- lvis:project-name:";
 
 function getDefaultAgentsMd(): string {
   return t("be_memoryManager.defaultAgentsMd");
@@ -230,6 +251,8 @@ function getDefaultUserPrefs(): string {
 const MAX_SESSION_FILE_BYTES = 5_000_000;
 /** Max length of summaryPreamble stored in session metadata (~2000 tokens). */
 const MAX_SUMMARY_PREAMBLE_CHARS = 8_000;
+const MAX_PROJECT_ROOT_CHARS = 2_048;
+const MAX_PROJECT_NAME_CHARS = 120;
 const ACTIVE_SESSION_STATE_FILE = ".active-session.json";
 
 /**
@@ -334,14 +357,25 @@ function normalizeSessionKind(value: unknown): SessionKind {
   return "main";
 }
 
+function normalizeMetadataString(value: unknown, maxChars: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.slice(0, maxChars) : undefined;
+}
+
 function matchesSessionScope(
   metadata: SessionMetadata | null,
-  options: Pick<ListSessionsOptions, "kind" | "routineId">,
+  options: Pick<ListSessionsOptions, "kind" | "routineId" | "projectRoot" | "includeUnscoped">,
 ): boolean {
   const kind = options.kind ?? "main";
   const sessionKind = metadata?.sessionKind ?? normalizeSessionKind(undefined);
   if (kind !== "all" && sessionKind !== kind) return false;
   if (options.routineId !== undefined && metadata?.routineId !== options.routineId) return false;
+  if (
+    options.projectRoot !== undefined &&
+    !projectRootEquals(metadata?.projectRoot, options.projectRoot) &&
+    !(options.includeUnscoped === true && metadata?.projectRoot === undefined)
+  ) return false;
   return true;
 }
 
@@ -397,6 +431,8 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     : undefined;
   const rawBranchedAt = typeof raw.branchedAt === "string" ? raw.branchedAt : undefined;
   const routineId = typeof raw.routineId === "string" ? raw.routineId : undefined;
+  const projectRoot = normalizeMetadataString(raw.projectRoot, MAX_PROJECT_ROOT_CHARS);
+  const projectName = normalizeMetadataString(raw.projectName, MAX_PROJECT_NAME_CHARS);
   // Sub-agent resume metadata (PR-B). Only string[] of strings survives for
   // sourceTools; non-negative integers for the counters. Invalid shapes drop to
   // undefined rather than corrupting the frozen permission scope on resume.
@@ -416,6 +452,8 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     routineId,
     routineTitle: typeof raw.routineTitle === "string" ? raw.routineTitle : undefined,
     routineFiredAt: typeof raw.routineFiredAt === "string" ? raw.routineFiredAt : undefined,
+    projectRoot,
+    projectName,
     parentSessionId: isValidSessionId(raw.parentSessionId) ? raw.parentSessionId : undefined,
     // Defense-in-depth: cap on read in case file was written without truncation.
     summaryPreamble: rawPreamble !== undefined
@@ -502,7 +540,8 @@ export class MemoryManager {
     return this.agentsMd;
   }
 
-  getMemoryIndex(): string {
+  getMemoryIndex(options: ProjectScopedMemoryOptions = {}): string {
+    if (options.projectRoot) return "";
     return this.memoryIndex;
   }
 
@@ -511,17 +550,17 @@ export class MemoryManager {
   }
 
   /** memories/ 전체 목록 반환 */
-  listMemoryEntries(): NoteEntry[] {
-    return this.readMarkdownEntries(this.memoryDir);
+  listMemoryEntries(options: ProjectScopedMemoryOptions = {}): NoteEntry[] {
+    return this.readMarkdownEntries(this.memoryDir, options);
   }
 
   /** memories/ 키워드 검색 — Agent Loop에서 on-demand 참조. Cap 50. */
-  searchMemoryEntries(query: string): NoteEntry[] {
-    return this.searchEntries(this.listMemoryEntries(), query);
+  searchMemoryEntries(query: string, options: ProjectScopedMemoryOptions = {}): NoteEntry[] {
+    return this.searchEntries(this.listMemoryEntries(options), query);
   }
 
   /** sessions/ 키워드 검색 — 메모리 검색 패널용. Cap 50. */
-  searchSessions(query: string, options: Pick<ListSessionsOptions, "kind" | "routineId"> = {}): SessionSearchEntry[] {
+  searchSessions(query: string, options: Pick<ListSessionsOptions, "kind" | "routineId" | "projectRoot" | "includeUnscoped"> = {}): SessionSearchEntry[] {
     // Require at least 2 chars to prevent accidental full-dump via empty/trivial query.
     if (query.trim().length < 2) return [];
     if (!existsSync(this.sessionsDir)) return [];
@@ -575,12 +614,12 @@ export class MemoryManager {
   }
 
   /** memories/ 전체를 하나의 문자열로 — SystemPromptBuilder에서 사용 */
-  getMemoryContext(): string {
-    return this.buildMarkdownContext(this.listMemoryEntries());
+  getMemoryContext(options: ProjectScopedMemoryOptions = {}): string {
+    return this.buildMarkdownContext(this.listMemoryEntries(options));
   }
 
   /** sessions/ 최근 목록 — 검색 전에도 항목을 확인할 수 있도록 최근 세션을 노출한다. */
-  listSessionEntries(limit = 50, options: Pick<ListSessionsOptions, "kind" | "routineId"> = {}): SessionSearchEntry[] {
+  listSessionEntries(limit = 50, options: Pick<ListSessionsOptions, "kind" | "routineId" | "projectRoot" | "includeUnscoped"> = {}): SessionSearchEntry[] {
     const UUID_RE = /^[0-9a-f-]{8,}$/i;
     return this.listSessions({ ...options, limit })
       .filter((session) => UUID_RE.test(session.id))
@@ -596,10 +635,16 @@ export class MemoryManager {
   // ─── Write API ("이거 기억해" 명령) ───────────────
 
   /** 기억 저장 — 사용자가 "기억해" 하면 memories/에 저장 */
-  async saveMemory(title: string, content: string): Promise<NoteEntry> {
+  async saveMemory(title: string, content: string, project: ProjectScopedMemoryOptions = {}): Promise<NoteEntry> {
     const filename = this.memoryFilenameForTitle(title);
+    const projectRoot = normalizeMetadataString(project.projectRoot, MAX_PROJECT_ROOT_CHARS);
+    const projectName = normalizeMetadataString(project.projectName, MAX_PROJECT_NAME_CHARS);
     const visibleContent = `# ${title}\n\n${content}\n`;
-    const storedContent = `${MEMORY_MARKER}\n${visibleContent}`;
+    const projectMarkers = [
+      ...(projectRoot ? [`${MEMORY_PROJECT_ROOT_PREFIX} ${projectRoot} -->`] : []),
+      ...(projectName ? [`${MEMORY_PROJECT_NAME_PREFIX} ${projectName} -->`] : []),
+    ];
+    const storedContent = [MEMORY_MARKER, ...projectMarkers, visibleContent].join("\n");
     const targetPath = join(this.memoryDir, filename);
     const indexPath = join(this.memoryDir, "MEMORY.md");
     await withFileLock(indexPath, async () => {
@@ -607,7 +652,14 @@ export class MemoryManager {
       this.updateMemoryIndexLocked(indexPath, filename, title, content);
     });
     this.memoryIndex = this.readMemoryIndex();
-    return { filename, title, content: visibleContent, updatedAt: new Date().toISOString() };
+    return {
+      filename,
+      title,
+      content: visibleContent,
+      updatedAt: new Date().toISOString(),
+      ...(projectRoot ? { projectRoot } : {}),
+      ...(projectName ? { projectName } : {}),
+    };
   }
 
   /** memories/MEMORY.md 업데이트 */
@@ -868,6 +920,8 @@ export class MemoryManager {
     safe = {
       ...safe,
       sessionKind: normalizeSessionKind(safe.sessionKind),
+      projectRoot: normalizeMetadataString(safe.projectRoot, MAX_PROJECT_ROOT_CHARS),
+      projectName: normalizeMetadataString(safe.projectName, MAX_PROJECT_NAME_CHARS),
     };
     // Cap stored title to 20 chars.
     if (safe.title !== undefined && safe.title.length > 20) {
@@ -1004,6 +1058,8 @@ export class MemoryManager {
           routineId: metadata?.routineId,
           routineTitle: metadata?.routineTitle,
           routineFiredAt: metadata?.routineFiredAt,
+          ...(metadata?.projectRoot ? { projectRoot: metadata.projectRoot } : {}),
+          ...(metadata?.projectName ? { projectName: metadata.projectName } : {}),
           // Branch provenance — already loaded from metadata, no extra disk IO
           ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
           ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
@@ -1064,6 +1120,8 @@ export class MemoryManager {
           routineId: metadata?.routineId,
           routineTitle: metadata?.routineTitle,
           routineFiredAt: metadata?.routineFiredAt,
+          ...(metadata?.projectRoot ? { projectRoot: metadata.projectRoot } : {}),
+          ...(metadata?.projectName ? { projectName: metadata.projectName } : {}),
           // Branch provenance — already loaded from metadata above, no extra disk IO
           ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
           ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
@@ -1436,7 +1494,7 @@ export class MemoryManager {
       .join("\n\n---\n\n");
   }
 
-  private readMarkdownEntries(dir: string, options?: { excludeMarkedMemory?: boolean }): NoteEntry[] {
+  private readMarkdownEntries(dir: string, options: (ProjectScopedMemoryOptions & { excludeMarkedMemory?: boolean }) = {}): NoteEntry[] {
     if (!existsSync(dir)) return [];
     return readdirSync(dir)
       .filter((f) => f.endsWith(".md"))
@@ -1446,6 +1504,8 @@ export class MemoryManager {
         const stat = statSync(path);
         const rawContent = readFileSync(path, "utf-8");
         if (options?.excludeMarkedMemory && this.hasMemoryMarker(rawContent)) return [];
+        const project = this.parseMemoryProject(rawContent);
+        if (!this.matchesMemoryProject(project, options)) return [];
         const content = this.stripInternalMarkers(rawContent);
         const titleMatch = content.match(/^#\s+(.+)/m);
         return [{
@@ -1453,6 +1513,8 @@ export class MemoryManager {
           title: titleMatch?.[1] ?? filename.replace(".md", ""),
           content,
           updatedAt: stat.mtime.toISOString(),
+          ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
+          ...(project.projectName ? { projectName: project.projectName } : {}),
         }];
       })
       .sort((a, b) => new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime());
@@ -1472,7 +1534,26 @@ export class MemoryManager {
   }
 
   private stripInternalMarkers(content: string): string {
-    return content.replace(/^<!--\s*lvis:kind=memory\s*-->\r?\n?/, "");
+    return content
+      .replace(/^<!--\s*lvis:kind=memory\s*-->\r?\n?/, "")
+      .replace(/^<!--\s*lvis:project-root:[\s\S]*?-->\r?\n?/m, "")
+      .replace(/^<!--\s*lvis:project-name:[\s\S]*?-->\r?\n?/m, "");
+  }
+
+  private parseMemoryProject(content: string): ProjectScopedMemoryOptions {
+    const rootMatch = content.match(/^<!--\s*lvis:project-root:\s*([\s\S]*?)\s*-->/m);
+    const nameMatch = content.match(/^<!--\s*lvis:project-name:\s*([\s\S]*?)\s*-->/m);
+    const projectRoot = normalizeMetadataString(rootMatch?.[1], MAX_PROJECT_ROOT_CHARS);
+    const projectName = normalizeMetadataString(nameMatch?.[1], MAX_PROJECT_NAME_CHARS);
+    return {
+      ...(projectRoot ? { projectRoot } : {}),
+      ...(projectName ? { projectName } : {}),
+    };
+  }
+
+  private matchesMemoryProject(project: ProjectScopedMemoryOptions, options: ProjectScopedMemoryOptions): boolean {
+    if (!options.projectRoot) return true;
+    return projectRootEquals(project.projectRoot, options.projectRoot) || (options.includeUnscoped === true && !project.projectRoot);
   }
 
   private migrateLegacyFile(legacyName: string, currentName: string): void {

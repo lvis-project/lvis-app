@@ -6,6 +6,7 @@ import { useMemorySearch, type NoteResult, type SessionResult } from "../hooks/u
 import type { LvisApi } from "../types.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
+import type { ProjectIdentity } from "../../../shared/project-identity.js";
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -102,12 +103,13 @@ function SessionRow({
 
 export interface MemorySearchPanelProps {
   api: LvisApi;
+  project?: ProjectIdentity;
   onOpenSession?: (sessionId: string) => void | boolean | Promise<void | boolean>;
 }
 
-export function MemorySearchPanel({ api, onOpenSession }: MemorySearchPanelProps) {
+export function MemorySearchPanel({ api, project, onOpenSession }: MemorySearchPanelProps) {
   const { t } = useTranslation();
-  const { query, setQuery, noteResults, sessionResults, loading } = useMemorySearch(api);
+  const { query, setQuery, noteResults, sessionResults, loading } = useMemorySearch(api, project);
 
   return (
     <div className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">

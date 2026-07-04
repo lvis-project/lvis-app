@@ -15,6 +15,7 @@ import { PageShell } from "./components/PageShell.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import type { AppMode } from "./MainToolbar.js";
+import type { ProjectIdentity } from "../../shared/project-identity.js";
 
 type Api = ReturnType<typeof getApi>;
 type PluginView = Parameters<typeof PluginUiHostView>[0]["view"];
@@ -34,12 +35,12 @@ export interface MainContentProps {
   currentSessionKind: "main" | "routine";
   currentSessionTitle?: string;
   sessions: SessionSummary[];
+  activeProject?: ProjectIdentity;
   refreshStarred: () => void;
   // navigation
   appMode: AppMode;
   onActivateHome: () => void;
   onJumpToSession: (sessionId: string) => void | boolean | Promise<void | boolean>;
-  onRefreshSessions: () => void | Promise<void>;
   // chat
   chatContextValue: ChatContextValue;
   onAsk: (
@@ -142,9 +143,7 @@ function HomeChatPane(props: MainContentProps) {
         onOpenApprovalQueue={props.onOpenApprovalQueue}
         currentSessionKind={props.currentSessionKind}
         currentSessionTitle={props.currentSessionTitle}
-        sessions={props.sessions}
         onLoadSession={props.onJumpToSession}
-        onRefreshSessions={props.onRefreshSessions}
         commandActions={props.commandActions}
         commandPopoverOpen={props.commandPopoverOpen}
         onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}
@@ -173,6 +172,7 @@ export function MainContent(props: MainContentProps): ReactNode {
       <MainPaneShell backToHome onBack={props.onActivateHome}>
         <MemorySearchPanel
           api={api}
+          project={props.activeProject}
           onOpenSession={async (sessionId) => {
             const loaded = await props.onJumpToSession(sessionId);
             if (loaded !== false) props.onActivateHome();
@@ -183,12 +183,13 @@ export function MainContent(props: MainContentProps): ReactNode {
     );
   }
 
-  if (activeView === "starred") {
+  if (activeView === "insights" || activeView === "starred") {
     return (
       <MainPaneShell backToHome onBack={props.onActivateHome}>
         <StarredView
           api={api}
           starred={props.starred}
+          sessions={props.sessions}
           currentSessionId={props.currentSessionId}
           refreshStarred={props.refreshStarred}
           onJumpToSession={props.onJumpToSession}
@@ -230,7 +231,7 @@ export function MainContent(props: MainContentProps): ReactNode {
   if (activeView === "work-board") {
     return (
       <MainPaneShell backToHome onBack={props.onActivateHome}>
-        <WorkBoardPanel api={api} />
+        <WorkBoardPanel api={api} project={props.activeProject} />
       </MainPaneShell>
     );
   }
