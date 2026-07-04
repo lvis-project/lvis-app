@@ -37,8 +37,21 @@ function normalizeProjectString(value: unknown): string | null {
 }
 
 function applyProjectContext(self: ConversationLoop, project?: SessionProjectContext): void {
-  const projectRoot = normalizeProjectString(project?.projectRoot);
-  const projectName = normalizeProjectString(project?.projectName);
+  let projectRoot = normalizeProjectString(project?.projectRoot);
+  let projectName = normalizeProjectString(project?.projectName);
+  if (projectRoot && self.deps.authorizeProject) {
+    const authorized = self.deps.authorizeProject(projectRoot, projectName ?? undefined);
+    if (authorized) {
+      projectRoot = normalizeProjectString(authorized.projectRoot);
+      projectName = normalizeProjectString(authorized.projectName) ?? projectName;
+      project = { ...project, isDefault: authorized.isDefault };
+    } else {
+      const fallback = self.deps.getDefaultProject?.();
+      projectRoot = normalizeProjectString(fallback?.projectRoot);
+      projectName = normalizeProjectString(fallback?.projectName);
+      project = fallback;
+    }
+  }
   const projectIsDefault = projectRoot
     ? project?.isDefault === true || self.deps.isDefaultProjectRoot?.(projectRoot) === true
     : false;

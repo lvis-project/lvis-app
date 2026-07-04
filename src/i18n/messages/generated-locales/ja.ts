@@ -1173,6 +1173,7 @@ export const jaMessages: Record<string, string> = {
   "formatIpcError.invalidSessionId": "セッションIDが無効です。",
   "formatIpcError.sessionNotFound": "セッションが見つかりませんでした。",
   "formatIpcError.sideChatUnavailable": "サイドチャットは利用できません。",
+  "formatIpcError.projectNotAllowed": "このプロジェクトは許可されていません。",
   "formatIpcError.installFailed": "プラグインのインストールに失敗しました。",
   "formatIpcError.invalidAction": "その行為は許可されていません。",
   "formatIpcError.invalidArgs": "ツールの引数が無効です。",

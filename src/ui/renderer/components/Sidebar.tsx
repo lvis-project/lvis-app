@@ -26,7 +26,7 @@ import { pluginIconFor } from "../utils/plugin-icon.js";
 import type { PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
-import { projectBasename, workspaceRootsToProjects } from "../../../shared/project-identity.js";
+import { projectBasename, projectRootEquals, workspaceRootsToProjects } from "../../../shared/project-identity.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -391,10 +391,9 @@ function ProjectSessionList({
           projectName: t("sidebar.currentProject"),
           isDefault: true,
         }];
-    const knownRoots = new Set(knownProjects.map((project) => project.projectRoot).filter(Boolean));
     const unknownProjects = new Map<string, ProjectIdentity>();
     for (const session of mainSessions) {
-      if (!session.projectRoot || knownRoots.has(session.projectRoot)) continue;
+      if (!session.projectRoot || knownProjects.some((project) => projectRootEquals(project.projectRoot, session.projectRoot))) continue;
       unknownProjects.set(session.projectRoot, {
         projectRoot: session.projectRoot,
         projectName: session.projectName || projectBasename(session.projectRoot),
@@ -408,7 +407,7 @@ function ProjectSessionList({
     () => projects.map((project) => {
       const projectSessions = mainSessions.filter((session) => {
         const root = session.projectRoot ?? defaultProjectRoot;
-        return root === project.projectRoot;
+        return projectRootEquals(root, project.projectRoot) || root === project.projectRoot;
       });
       return {
         project,

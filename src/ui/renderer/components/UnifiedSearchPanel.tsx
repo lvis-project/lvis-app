@@ -10,6 +10,7 @@ import type { StarredItem } from "../hooks/use-starred.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import { useMemorySearch } from "../hooks/use-memory-search.js";
 import type { LvisApi } from "../types.js";
+import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { highlightText } from "../utils/html-preview.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
@@ -30,6 +31,7 @@ export interface UnifiedSearchPanelProps {
   conversationMatches: number[];
   currentConversationMatch: number;
   sessions: SessionSummary[];
+  project?: ProjectIdentity;
   starred: StarredItem[];
   onChangeQuery: (value: string) => void;
   onToggleCase: () => void;
@@ -82,6 +84,7 @@ export function UnifiedSearchPanel({
   conversationMatches,
   currentConversationMatch,
   sessions,
+  project,
   starred,
   onChangeQuery,
   onToggleCase,
@@ -103,7 +106,7 @@ export function UnifiedSearchPanel({
     sessionResults,
     loading: memoryLoading,
     reset: resetMemorySearch,
-  } = useMemorySearch(api);
+  } = useMemorySearch(api, project);
 
   const trimmedQuery = query.trim();
 

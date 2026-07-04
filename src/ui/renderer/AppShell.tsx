@@ -52,6 +52,7 @@ export function AppShell({
   onNewChat,
   onNewChatForProject,
   workspaceProjects,
+  activeProject,
   onOpenMarketplace,
   marketplaceUrlReady,
   onOpenUnifiedSearch,
@@ -114,6 +115,7 @@ export function AppShell({
   onNewChat: () => void;
   onNewChatForProject: SidebarProps["onNewChatForProject"];
   workspaceProjects?: SidebarProps["projects"];
+  activeProject?: USPProps["project"];
   onOpenMarketplace: () => void;
   marketplaceUrlReady: boolean;
   onOpenUnifiedSearch: () => void;
@@ -266,6 +268,7 @@ export function AppShell({
               conversationMatches={searchMatches}
               currentConversationMatch={searchIdx}
               sessions={sessions}
+              project={activeProject}
               starred={starred}
               onChangeQuery={onSearchChangeQuery}
               onToggleCase={onSearchToggleCase}
