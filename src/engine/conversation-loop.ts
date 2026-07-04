@@ -1,12 +1,7 @@
-/**
- * Conversation Query Loop — §4.5 핵심 에이전틱 사이클
- *
- * 사용자 입력 → KW분류 → 라우팅 → 컨텍스트 조립 → LLM 스트리밍
- * → tool_use 감지 → 도구 실행 → loop back → 응답 완료
- *
- * 벤더 추상화: LLMProvider 인터페이스를 통해 Claude/OpenAI/Gemini/Copilot 통일 처리.
- * LVIS 내부 turn-runtime contract 기반.
- */
+
+
+
+
 import { ConversationHistory } from "./conversation-history.js";
 import { ToolExecutor } from "../tools/executor.js";
 import { isActiveSandboxFilesystemContainedForPluginEffects } from "../permissions/sandbox-capability.js";
@@ -91,14 +86,12 @@ export class ConversationLoop {
    * re-announces its start.
    */
   sessionStartFiredFor: string | null = null;
-  /** K4: §4.5 11-step trace — dev 모드 활성, 프로덕션 no-op */
+
   tracer: ConversationTracer = createTracer(this.sessionId);
   cumulativeUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
-  /**
-   * 마지막 round 의 provider raw inputTokens. turn_summary.tokensIn 을 직접
-   * 채우는 값이 아니라, 턴 종료 context-fill SOT 를 provider 값으로 보정하기
-   * 위한 기준점이다.
-   */
+
+
+
   lastRoundProviderInputTokens = 0;
   /**
    * Engine request-input projection for the exact request submitted to the
@@ -117,17 +110,13 @@ export class ConversationLoop {
   lastContextInputProjectionTokens = 0;
   /** B4: current turn's AbortController — abortCurrentTurn() calls .abort() */
   currentAbortController: AbortController | null = null;
-  /**
-   * Lazy Tool Scoping — 직전 턴의 active plugin 집합.
-   * Keyword miss (type==="general") 시 fallback으로 재사용한다.
-   * null = 이전 턴 없음 → builtin-only scope.
-   */
+
+
+
   lastTurnScope: Set<string> | null = null;
-  /**
-   * Tool-Level Deferral — 직전 턴에 로드된 plugin/mcp tool 이름 집합.
-   * keyword-miss 후속 턴이 이미 promote/preload 된 도구를 계속 노출하도록
-   * carry-forward 한다. null = 이전 턴 없음.
-   */
+
+
+
   lastTurnToolNames: Set<string> | null = null;
   /** Session-wide total of request_plugin activations (cap MAX_SESSION_PLUGIN_EXPANSION). */
   sessionPluginExpansions = 0;
@@ -146,49 +135,27 @@ export class ConversationLoop {
   /** Session-wide total of tool_search promotions (cap MAX_TOOL_SEARCH_PER_SESSION). */
   sessionToolSearches = 0;
   sessionAdditionalDirectories: string[] = [];
-  /**
-   * Turn-scope additional allowed directories. Populated when the user
-   * chooses "이번 1회만" on an out-of-allowed-dir approval — kept alive
-   * across all tool calls inside the same `runTurn` so a multi-step
-   * agentic round (e.g. `bash ls` → `bash find` → `bash stat` on the
-   * same directory) does not re-prompt the user for the same path on
-   * every subsequent call. Cleared in `runTurn`'s finally so the grant
-   * does not survive into the next user message.
-   */
+
+
+
   turnAdditionalDirectories: string[] = [];
-  /**
-   * Single in-flight LLM compact lock per ConversationLoop.
-   * 같은 instance 에서 두 turn 이 동시에 compact trigger 시 두 번째는 skip (race 방지).
-   */
+
+
+
   isCompacting: boolean = false;
-  /** LLM compact 가 #N 번째인지 추적하는 numbered checkpoint counter. */
+
   compactNum: number = 0;
-  /**
-   * Issue #910 / #900 약속 정합 — `context_error` / `stream_error` 발생 직
-   * 후 user-facing 메시지가 "새 메시지를 보내면 자동 압축이 다시 시도됩니
-   * 다" 라고 약속. 그러나 기본 `runPreflightGuard` 는 provider-reported
-   * last input / estimateMessagesTokens 임계 기반인데, *Forbidden 시도는
-   * provider usage 에 기록 안 됨* + estimate 가 chars/4 으로 15-25% 과소 → 다음 turn
-   * preflight 가 미발동, compact 도 NOOP 반환 → 약속 깨짐. 이 flag 는
-   * 다음 turn 의 preflight 가 임계 무시 + preserve=0 으로 force trigger
-   * 하도록 한다. 성공/실패/NOOP 모두 finally 에서 clear.
-   */
+
+
+
   contextErrorPending: boolean = false;
-  /**
-   * Force-recover 반복 횟수 — DoS 방어 (security round-4 MED). 사용자가
-   * 반복적으로 context_error 유발 input 보내면 compact LLM API 호출이
-   * 누적 cost. `MAX_FORCE_RECOVER_PER_SESSION` 초과 시 force-recover 진입
-   * 차단 + user-facing 경고. 정상 사용자는 절대 도달하지 않는 임계 (3
-   * 회 연속 force-recover = 3 turn 연속 모델 한도 초과).
-   */
+
+
+
   contextErrorRecoveryCount: number = 0;
-  /**
-   * Issue #917 — budget 소진 후 compact API 호출을 완전 차단하는 persistent
-   * flag. `MAX_FORCE_RECOVER_PER_SESSION` 횟수를 모두 소진하면 true 로 설정되며,
-   * 이후 turn 에서 force-recover 뿐 아니라 *normal threshold compact 도*
-   * 차단한다 (compact 가 context 를 줄이지 못하는 구조적 실패가 입증됐으므로).
-   * 정상 turn (context_error 없이 완료) 이후 re-arm 가능하도록 reset.
-   */
+
+
+
   recoveryExhausted: boolean = false;
   /**
    * TPM reactive compact is an error-boundary recovery, not a normal threshold
@@ -237,15 +204,14 @@ export class ConversationLoop {
     this.refreshProvider();
   }
 
-  /** B1: PermissionManager 참조 — IPC bridge에서 mode 조회/변경에 사용 */
+
   get permissionManager(): import("../permissions/permission-manager.js").PermissionManager | undefined {
     return this.deps.permissionManager;
   }
 
-  /**
-   * HIGH: plugin disable 시 lastTurnScope에서 해당 pluginId 제거.
-   * boot.ts의 onDisable 콜백에서 호출된다.
-   */
+
+
+
   onPluginDisabled(pluginId: string): void {
     this.lastTurnScope?.delete(pluginId);
   }
@@ -291,7 +257,7 @@ export class ConversationLoop {
     return this.currentAbortController !== null;
   }
 
-  /** 설정 변경 시 Provider 재생성 — 벤더별 API 키 조회 */
+
   refreshProvider(): void {
     this.provider = buildProvider(this.deps);
   }
@@ -300,13 +266,9 @@ export class ConversationLoop {
     return this.provider !== null;
   }
 
-  /**
-   * 플러그인 callLlm용 범용 텍스트 생성.
-   * 독립적인 단발 LLM 호출 — 대화 히스토리와 무관.
-   *
-   * CTRL simplification: maxTokens 파라미터 제거. Vendor SDK 기본값 사용.
-   * 호출 측 시그니처는 SettingsService get("llm").vendors[provider].model 만 사용.
-   */
+
+
+
   async generateText(
     prompt: string,
     systemPrompt = t("be_conversationLoop.generateTextSystemPrompt"),
@@ -324,7 +286,7 @@ export class ConversationLoop {
     return pingProvider(this.provider, this.deps.settingsService, timeoutMs);
   }
 
-  /** 현재 벤더 이름 */
+
   getVendor(): string {
     return resolveVendorName(this.provider);
   }
@@ -412,7 +374,7 @@ export class ConversationLoop {
     return t("be_conversationLoop.rateLimitCompactMessage", { waitText });
   }
 
-  /** 대화 이력 초기화 (새 대화) — §4.5.7 */
+
   newConversation(kind: SessionKind = "main", project?: SessionProjectContext): void {
     newConversation(this, kind, project ?? (kind === "main" ? this.deps.getDefaultProject?.() : undefined));
   }
@@ -536,11 +498,9 @@ export class ConversationLoop {
     return this.sessionRoutineTitle;
   }
 
-  /**
-   * Checkpoint view-mode — 체크포인트 #compactNum 의 슬라이스 끝 인덱스를 반환.
-   * 렌더러가 visibleMessages = messages.slice(0, slicedRangeEnd) 로 view-mode 를 구현.
-   * 해당 compactNum 체크포인트가 없으면 null 반환.
-   */
+
+
+
   public enterViewMode(compactNum: number): { messageIndexAtCreation: number } | null {
     const checkpoints = this.deps.memoryManager.loadSessionMetadata(this.sessionId)?.checkpoints ?? [];
     const target = checkpoints.find((c) => c.compactNum === compactNum);
@@ -548,18 +508,16 @@ export class ConversationLoop {
     return { messageIndexAtCreation: target.messageCountAtTrigger };
   }
 
-  /**
-   * Checkpoint view-mode 종료 audit hook.
-   * 실제 engine 상태 변경 없음 (렌더러 state 만 reset). 추후 감사 로그 추가 가능.
-   */
+
+
+
   public exitViewMode(): void {
     // no-op: renderer-side state reset only
   }
 
-  /**
-   * Checkpoint branch — 체크포인트 #compactNum 지점에서 새 세션을 fork.
-   * history 를 slicing 하고 wire-serialize 후 disk 영속화. 새 sessionId 반환.
-   */
+
+
+
   public async branchFromCheckpoint(compactNum: number): Promise<{
     newSessionId: string;
     lastMessageRole: GenericMessage["role"] | null;
@@ -572,12 +530,12 @@ export class ConversationLoop {
     return this.sessionRoutineId;
   }
 
-  /** K4: 현재 tracer 의 JSONL 파일 경로 (활성 시). 뷰어 UI 가 읽기에 사용. */
+
   getTraceFilePath(): string | undefined {
     return this.tracer.filePath;
   }
 
-  /** K4: 테스트용 tracer 주입 — dev 모드 기본 동작을 override. */
+
   setTracer(tracer: ConversationTracer): void {
     this.tracer = tracer;
   }
@@ -642,7 +600,7 @@ export class ConversationLoop {
     };
   }
 
-  /** 세션 목록 조회 — §4.5.7 */
+
   listSessions(limit?: number): Array<{ id: string; modifiedAt: Date; title: string }> {
     return this.deps.memoryManager.listSessions(limit).map((session) => ({
       id: session.id,
@@ -651,7 +609,7 @@ export class ConversationLoop {
     }));
   }
 
-  /** 기존 세션 복원 — §4.5.7 */
+
   loadSession(sessionId: string): boolean {
     return loadSession(this, sessionId);
   }
@@ -673,14 +631,9 @@ export class ConversationLoop {
     return resetAndResume(this, sessionId);
   }
 
-  /**
-   * §4.5.4 — Manual compact trigger (`/compact` user command).
-   *
-   * 사용자가 명시적으로 trigger 한 강제 LLM compact 이므로 임계값 무시하고 진입 — 단 history 가
-   * preserveRecentTokens 보다 작으면 no-op (압축할 내용 없음).
-   *
-   * Per-loop lock — 동시 compact race 방지.
-   */
+
+
+
   async manualCompact(callbacks?: Pick<TurnCallbacks, "onCompactOccurred" | "onCompactStarted">): Promise<{
     compacted: boolean;
     compactedAt: string | null;
@@ -690,16 +643,9 @@ export class ConversationLoop {
     return manualCompact(this, callbacks);
   }
 
-  /**
-   * 한 턴 실행 — §4.5 Core Cycle
-   * @param abortSignal  B4: optional external abort signal; if omitted a fresh
-   *                     AbortController is created and stored in
-   *                     `currentAbortController` so `abortCurrentTurn()` works.
-   * @param options      `originSource` enables the Overlay Trigger Origin
-   *                     Guidance prompt section for this single turn. Set/
-   *                     cleared synchronously around `build()` so concurrent
-   *                     turns do not corrupt one another's guidance state.
-   */
+
+
+
   async runTurn(
     input: string,
     callbacks?: TurnCallbacks,
@@ -739,7 +685,7 @@ export class ConversationLoop {
   ): Promise<TurnResult> {
     return runTurn(this, input, callbacks, abortSignal, options);
   }
-  /** Tool registry → LLM 이 받는 ToolSchema 배열로 변환. scope 필터 반영. */
+
   rebuildToolSchemas(scope: ToolScope): ToolSchema[] {
     return rebuildToolSchemas(this.deps.toolRegistry, scope);
   }
@@ -766,25 +712,15 @@ export class ConversationLoop {
     return nextCarryForwardToolNames(this.deps, scope, toolCalls);
   }
 
-  /**
-   * DRY helper — boundary 적용 공통 경로.
-   *
-   * `runPreflightGuard` (auto) 와 `manualCompact` (manual) 가 동일 동작을 공유:
-   *   1. `compactNum` 증가
-   *   2. `history` 교체 (boundary stub + recentVerbatim)
-   *   3. `setSummaryPreamble` 로 prior-context summary 갱신
-   *   4. context-size trackers reset to `estimatedAfter`
-   *   5. checkpoint append + saveSessionMetadata 영속화
-   *   6. `callbacks.onCompactOccurred` surface (사용자 가시 compact_notice)
-   *
-   * Checkpoint storage 실패는 대화 차단 금지 — warn 후 계속.
-   */
+
+
+
   async applyBoundaryToSession(
     result: import("./structured-compact.js").CompactWithBoundaryResult,
     trigger: "auto-compact" | "manual",
     estimatedBefore: number,
     callbacks: TurnCallbacks | undefined,
-    /** compact 직전 history 길이 — messageCountAtTrigger 에 기록 (origin count). */
+
     prevMessageCount: number,
     /** §C1: verbatim pre-compact messages — persisted as checkpoint snapshot for branchFromCheckpoint. */
     messagesBefore: import("./llm/types.js").GenericMessage[],
@@ -793,24 +729,9 @@ export class ConversationLoop {
     return applyBoundaryToSession(this, result, trigger, estimatedBefore, callbacks, prevMessageCount, messagesBefore, projectionContext);
   }
 
-  /**
-   * Token preflight guard for same-session checkpoint compaction.
-   *
-   * step 5 (HISTORY_APPEND) 직후 호출 — request-input projection
-   * (system prompt + wire history + tool schemas) 이 getModelPreflightThreshold()
-   * 에 도달하면 차단형 await 로 `compactWithBoundary` 실행. 결과:
-   *   1. `compactNum` 증가
-   *   2. `history` 교체 (boundary stub + recentVerbatim)
-   *   3. `setSummaryPreamble` 로 prior-context summary 갱신
-   *   4. context-size trackers reset to `estimatedAfter`
-   *   5. `onCompactOccurred` 콜백 surface
-   *
-   * `isCompacting` lock per ConversationLoop instance. 동시 turn 에서
-   * token preflight race 시 두번째는 silent skip.
-   *
-   * Mid-loop reactive compact retry is intentionally absent — context_error 도달 시
-   * early-exit signal 만 전달하고 stream-collector 가 사용자 안내 처리.
-   */
+
+
+
   async runPreflightGuard(
     projectionContext: RequestProjectionContext,
     abortSignal?: AbortSignal,
@@ -821,20 +742,14 @@ export class ConversationLoop {
   }
 
   // ─── Private: Memory Extraction (§4.5.5 Hook 3) ───
-  // cycle 1 MED: extractMemory inline 로직 제거.
-  // PostTurnHookChain의 memory-extract hook이 단일 진실 소스이며,
-  // fallback 경로에서도 중복 추출을 수행하지 않는다.
+
+
 
   // ─── Private: Tool Scope Resolution (Lazy Tool Scoping) ───────────
 
-  /**
-   * 입력에서 활성 plugin 집합을 유도하여 ToolScope를 반환한다.
-   *
-   * - KeywordEngine.matchAllPluginIds() → 이번 턴 active plugin Set
-   * - 매치 없음(일반 대화) → lastTurnScope fallback, 그마저 없으면 빈 Set (builtin-only)
-   * - Builtins + MCP는 항상 포함 (host-side tool은 항시 사용 가능)
-   * - Plugin/MCP schemas are still loaded only by activeToolNames.
-   */
+
+
+
   resolveToolScope(input: string): ToolScope {
     return resolveToolScope(input, this.deps, {
       lastTurnScope: this.lastTurnScope,

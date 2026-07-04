@@ -1,28 +1,7 @@
-/**
- * TokenCostBadge — turn-aggregate 토큰/비용 토글 배지.
- *
- * 클릭하면 토큰 합계 ↔ 추정 비용 사이를 토글. hover 시 fresh / cache read /
- * cache write / output breakdown 을 tooltip 으로 노출. 데이터는 모두
- * provider 보고 값 (turn_summary entry → conversation-loop onTurnSummary).
- *
- * 토큰 수치 정의:
- *   - `freshInputTokens` = turn 전체 fresh input 합산 (cache read/write 제외).
- *     billing 가중치 (full input price) 가 그대로 적용되는 부분.
- *   - `tokensOut` = turn 전체 output 합산.
- *   - `cacheReadTokens`, `cacheWriteTokens` = turn 전체 cache 합산.
- *   - `tokensIn` = 턴 종료 시점의 projected context input. TokenProgressRing 과
- *     footer 가 같은 값을 보도록 하는 context-fill SOT 이며, 이 배지에서는
- *     tooltip 의 보조 정보로 노출한다.
- *
- * Headline = `freshInputTokens + tokensOut` — 사용자가 "이번 턴에 어떤 일이
- * 일어났나" 를 가장 잘 보여주는 단일 수치. 캐시 read 는 가중치가 1/10 이라
- * headline 에 더하면 직관에 어긋남 (e.g. 100k 캐시 hit 으로 "100k 토큰 사용"
- * 보이면 사용자가 비용을 과대 추정).
- *
- * `pricing` 이 없으면 cost 모드 토글은 비활성화하되 "미정" 을 visible
- * state 로 남긴다. 토큰-only 배지와 가격 미상 배지를 사용자가 구분해야
- * 비용 화면의 신뢰성이 유지된다.
- */
+
+
+
+
 import { memo, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -37,9 +16,9 @@ import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 export interface TokenCostBadgePricing {
   inputPer1M: number;
   outputPer1M: number;
-  /** Anthropic 기본: cache read = input 의 10%. 미지정 시 inputPer1M × 0.1. */
+
   cacheReadPer1M?: number;
-  /** Anthropic 기본: cache write = input 의 125%. 미지정 시 inputPer1M × 1.25. */
+
   cacheWritePer1M?: number;
 }
 

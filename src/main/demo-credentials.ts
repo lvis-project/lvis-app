@@ -58,8 +58,8 @@ export interface DemoVendorConfig {
   apiKey: string;
   baseUrl?: string;
   model?: string;
-  vertexProject?: string;  // vertex-ai 전용
-  vertexLocation?: string; // vertex-ai 전용
+  vertexProject?: string;
+  vertexLocation?: string;
 }
 
 interface DemoState {

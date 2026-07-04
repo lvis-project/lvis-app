@@ -105,13 +105,9 @@ export interface ToolExecutionContext {
    */
   ownerPluginSandboxRoot?: string;
   metadata: Record<string, unknown>;
-  /**
-   * Per-turn abort signal threaded down from `ConversationLoop.runTurn`.
-   * Long-blocking tools (e.g. `ask_user_question`) must honor this so the
-   * user's "중단" button can actually unblock the turn — without it, an
-   * un-answered question keeps the loop stuck for the full 5-minute gate
-   * timeout even after `abortCurrentTurn()` aborts the streaming step.
-   */
+
+
+
   abortSignal?: AbortSignal;
 }
 

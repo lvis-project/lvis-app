@@ -105,11 +105,9 @@ export function AppDialogs({
           dispatchChain({ type: "login-success" });
         }}
       />
-      {/* 2026-05-20 — Settings 의 "데모 자격증명 재입력" entry. onboarding
-          chain 과는 독립된 modal — 사용자가 이미 onboarding 을 끝낸
-          returning user 의 *자발적 재입력 path*. LoginModal 의 forceActivation
-          prop 으로 chip 1/2/3 surface 를 우회하고 곧장 activation 입력
-          page 를 mount 한다. */}
+
+
+
       <LoginModal
         api={api}
         open={reactivationOpen}
@@ -122,15 +120,9 @@ export function AppDialogs({
           onReactivationOpenChange(false);
         }}
       />
-      {/* Tutorial-B (O-X2) — Memory Seed Onboarding Wizard. 2026-05-20:
-          MemorySeed now mounts BEFORE the welcome card so the typed
-          호칭/자기소개 can personalize the welcome greeting that follows.
-          The chain reducer drives `open` from stage "memory" only;
-          `onDismissed` advances the chain to "personalized_welcome".
 
-          The wrapper below intentionally swallows MemorySeed's own
-          `startTour()` IPC so the chain-effect on stage="tour" remains
-          the single canonical broadcaster (preserves the #1029 fix). */}
+
+
       <MemorySeedDialog
         open={chainStage === "memory"}
         selectedScenarioId={selectedScenarioId}
@@ -155,7 +147,7 @@ export function AppDialogs({
           },
         } as typeof api}
         onDismissed={() => {
-          // Read the typed 호칭/자기소개 from the DOM at the dismissal
+
           // frame and feed them into the chain reducer so the
           // PersonalizedWelcome card can address the user by name.
           // The MemorySeed wizard's own write to MEMORY.md is unaffected
@@ -181,8 +173,8 @@ export function AppDialogs({
       />
       {/* PersonalizedWelcome (2026-05-20) — replaces WelcomeQuestion.
           Mounted after MemorySeed so the card greets the user by the
-          호칭 they just typed and references their 자기소개. Forced
-          choice — there is no skip; pressing "예, 시작할게요 →" is
+          nickname they just typed and references their self-introduction.
+          Forced choice — there is no skip; pressing the start button is
           the only path forward. The card also pings the LLM provider
           on mount and surfaces vendor/model/latency inline as a
           connection-confirmation cue. */}
@@ -244,9 +236,10 @@ export function AppDialogs({
         installedPluginIds={installedPluginIds}
         tourCompleted={tourCompleted}
       />
-      {/* v6: ApprovalQueueStatus floating chip 제거. 자연어 승인 칩
-          (DeferredApprovalChip) 은 ChatView 의 컴포저 바로 위에서 렌더된다.
-          Spec docs/blueprints/composer-redesign-message-queue.md "제거" 섹션. */}
+      {/* v6: ApprovalQueueStatus floating chip removed. The natural-language
+          approval chip (DeferredApprovalChip) renders just above ChatView's
+          composer. See the removal section in
+          docs/blueprints/composer-redesign-message-queue.md. */}
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}
       <SnapEdgeHighlight />

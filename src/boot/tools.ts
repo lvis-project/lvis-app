@@ -1,12 +1,7 @@
-/**
- * Boot §4.2 Step 4 — Builtin tool registration + §4.4 knowledge DI.
- *
- * - registerRequestPluginMetaTool: request_plugin meta tool
- * - registerToolSearchMetaTool: tool_search meta tool (tool-level deferral)
- * - registerBuiltinTools: web_search, web_fetch, workflow tools
- * - wireKnowledgeAndIdleScheduler: worker-client capability 탐지 → HybridRetriever,
- *   knowledge tools 등록, IdleScheduler 배선
- */
+
+
+
+
 import type { ToolRegistry } from "../tools/registry.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../tools/registry.js";
 import type { SettingsService } from "../data/settings-store.js";
@@ -226,8 +221,8 @@ export function parseSerperResponse(data: unknown): NormalizedSearchResult[] {
 }
 
 export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void {
-  // Option C — request_plugin 메타 툴 (항상 활성, scope filter 통과)
-  // 실제 scope 확장은 ConversationLoop.queryLoop이 가로챈다.
+
+
   toolRegistry.register(createDynamicTool({
     name: "request_plugin",
     description: t("be_tools.requestPluginDescription"),
@@ -254,9 +249,8 @@ export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void 
 }
 
 export function registerToolSearchMetaTool(toolRegistry: ToolRegistry): void {
-  // Tool-Level Deferral — tool_search 메타 툴. Statically registered and
-  // visible whenever builtins are in scope. execute는 no-op — 실제 promotion 은
-  // ConversationLoop.queryLoop 이 가로챈다 (request_plugin 과 동일 패턴).
+
+
   toolRegistry.register(createDynamicTool({
     name: TOOL_SEARCH_TOOL_NAME,
     description: t("be_tools.toolSearchDescription"),
@@ -342,7 +336,7 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
       // plugin's FolderAutoIndexer indexes eagerly in its background worker
       // process — so the scheduler is constructed without an index worker
       // client and only drives idle-state notifications.
-      // Electron powerMonitor lazy import — test 환경에서 electron 로드 회피
+
       try {
         const { powerMonitor } = await import("electron");
         idleScheduler = new IdleSchedulerService({

@@ -1,21 +1,7 @@
-/**
- * Permission Manager — tool-governance.md §4 Source-Aware Permission Model
- *
- * 통합 도구 거버넌스:
- * - 모든 도구(Builtin/Plugin/MCP)에 대해 source + trust 기반 판정
- * - Global strict mode is mode-first after immutable deny/overlay-trigger guards
- * - 감사 로그 연동을 위한 판정 사유 추적
- *
- * 판정 우선순위 (§4.1 + MCP per-tool override):
- * 1. deny 규칙
- * 2. MCP strict override
- * 3. overlay-trigger mutating origin guard
- * 4. global strict mode
- * 5. headless mutating reviewer lane
- * 6. allow 규칙
- * 7. 사용자 "항상 허용" 규칙
- * 8. Trust/category 기본 정책 (MCP auto 는 별도 우회 없이 여기로 합류)
- */
+
+
+
+
 import { resolve } from "node:path";
 import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } from "../tools/types.js";
 import { trustFromSource } from "../tools/types.js";
@@ -64,11 +50,11 @@ export type ExecutionMode = "default" | "strict" | "auto" | "allow";
 export type GrantTier = "read" | "write";
 
 export interface PermissionRule {
-  /** 도구 이름 패턴 (glob: "memory_*", "mcp_*", "*") */
+
   pattern: string;
-  /** 허용/차단 */
+
   action: "allow" | "deny";
-  /** 적용 소스 제한 (없으면 전체 적용) */
+
   source?: ToolSource;
   /**
    * P2 graduated grant tier for `action: "allow"` rules. Absent = legacy
@@ -91,7 +77,7 @@ export type ReviewerLane = "foreground-auto" | "headless";
 export interface PermissionCheckResult {
   decision: PermissionDecision;
   reason: string;
-  layer: number; // 어떤 단계에서 결정되었는지
+  layer: number;
   /**
    * Layer 5 reviewer routing marker. Only PermissionManager may set this.
    * Executor must not infer reviewer eligibility from `decision: "ask"` because
@@ -290,9 +276,9 @@ export class PermissionManager {
    * coverage (monotone), never desynchronize.
    */
   private readonly alwaysAllowed = new Map<string, GrantTier>();
-  /** MCP approval.toolPermissionMode 등 per-tool 실행 모드 override */
+
   private readonly toolModeOverrides = new Map<string, ExecutionMode>();
-  /** 영구 규칙 저장 경로 (~/.lvis/permissions.json) */
+
   private readonly permissionsFilePath: string;
   /** Permission policy P3 — reviewer agent dispatch components. Wired at boot. */
   private reviewerClassifier: RiskClassifier | null = null;

@@ -1,17 +1,7 @@
-/**
- * Corporate CA Loader — §17 정식 대응 (C1)
- *
- * 조직 프록시가 TLS 인터셉트를 수행하는 환경에서, Electron 번들 Node가
- * 커스텀 CA를 신뢰하지 않으면 api.openai.com 등 모든 외부 HTTPS 호출이
- * SELF_SIGNED_CERT_IN_CHAIN으로 실패한다. OS keychain에 이미 MDM으로
- * 설치된 CA를 런타임에 추출하여 Node의 undici / https / tls에 주입한다.
- *
- * 재사용 cache: ~/.lvis/certs/corp-ca.pem (다음 부팅 skip, 7일마다 refresh)
- *
- * TODO: Windows (win-ca / certutil) + Linux (/etc/ssl/certs) 구현.
- *   - Windows: `certutil -exportPFX -p "" Root "<CN>" tmp.pfx` or win-ca npm pkg
- *   - Linux:   /etc/ssl/certs/*RootCA*.pem or `update-ca-certificates` hook
- */
+
+
+
+
 import { execFile } from "node:child_process";
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { open } from "node:fs/promises";
@@ -25,13 +15,13 @@ const execFileAsync = promisify(execFile);
 // ─── Public types ─────────────────────────────────────────────────────────────
 
 export interface CorporateCaResult {
-  /** PEM 문자열. null이면 추출 실패 (해외망 또는 MDM 미배포). */
+
   pem: string | null;
-  /** cache 파일 경로 */
+
   path: string;
-  /** 데이터 출처 */
+
   source: "cache" | "extracted" | "none";
-  /** PEM 블록별 BEGIN 인덱스 (파싱 확인용) */
+
   certCount: number;
 }
 
@@ -39,17 +29,15 @@ export interface CorporateCaResult {
 
 const CACHE_DIR = join(lvisHome(), "certs");
 const CACHE_PATH = join(CACHE_DIR, "corp-ca.pem");
-/** 7일 (ms). 이 시간이 지나면 재추출. */
+
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-/**
- * macOS System.keychain에서 검색할 CN 이름.
- * 환경변수 LVIS_CORP_CA_CN 으로 오버라이드 가능 (기본값: "Corporate Root CA").
- * 조직 MDM이 배포한 root CA 하나만 추출하면 chain이 해결된다.
- */
+
+
+
 const CORP_ROOT_CA_CN = process.env.LVIS_CORP_CA_CN ?? "Corporate Root CA";
 
-// ─── Cache read (sync — startup 경로에서 호출됨) ──────────────────────────────
+
 
 function readCacheIfFresh(): string | null {
   try {
@@ -62,7 +50,7 @@ function readCacheIfFresh(): string | null {
       }
     }
   } catch {
-    // ENOENT 또는 stale — fall through to extraction
+
   }
   return null;
 }

@@ -53,12 +53,9 @@ export interface InputActionBarProps {
   // count lives on the in-composer chip).
   onAttach: () => void | Promise<void>;
   attachDisabled: boolean;
-  /**
-   * Why the attach button is disabled, used to surface a context-specific
-   * tooltip. Defaults to "limit" — useful when the caller only wires the
-   * 5-cap path. Pass "no-api-key" for auth gating so users see the actual
-   * blocker, not a misleading "한도 도달" message.
-   */
+
+
+
   attachDisabledReason?: "limit" | "no-api-key";
   // Leading — role preset (persona), placed before the ring.
   rolePresets: RolePreset[];
@@ -67,13 +64,13 @@ export interface InputActionBarProps {
   onSelectPreset: (id: string) => void;
 
   // Trailing — turn controls (merged from the former BottomActionRow).
-  /** LLM busy (streaming / 도구 실행) — toggles the inline cancel button. */
+
   isBusy: boolean;
-  /** Send button disabled — text 비고 첨부 없으면 true. */
+
   isSendDisabled: boolean;
   /** Send click (= Enter). intent capture lives in the caller. */
   onSend: () => void;
-  /** ESC cancel = LLM abort (큐 보존). Rendered only while busy. */
+
   onCancel: () => void;
   /** Thinking (extended reasoning) toggle + depth, before Send. */
   enableThinkingChat: boolean;
@@ -110,8 +107,8 @@ const PERMISSION_LABEL_KEYS: Record<PermissionModeVariant, string> = {
 };
 
 // Per-mode TEXT color (no pill/outline) — reuses the PermissionModeBadge color
-// tokens, rendered as bare text per the directive ("알약모양 말고 모델 명과
-// 동일하게 텍스트로 표기", "글씨 색으로 현재 상태 표현하고 아웃라인 없이").
+
+
 const PERMISSION_TEXT_COLOR: Record<PermissionModeVariant, string> = {
   default: "text-info",
   strict: "text-destructive",

@@ -13,7 +13,7 @@ interface RateBucket {
 }
 
 export class RateLimiter {
-  /** Trust별 분당 제한: high=무제한, medium=60, low=20 */
+
   private static LIMITS: Record<TrustLevel, number> = { high: Infinity, medium: 60, low: 20 };
   private readonly buckets = new Map<string, RateBucket>();
 

@@ -63,7 +63,7 @@ function TabSaveBar({
   );
 }
 
-// Settings-wide "저장되었습니다" toast plumbing now lives in
+
 // `./contexts/saved-toast.tsx` so PluginConfigTab can import the consumer
 // hook without forming a circular import with SettingsContent (which
 // itself imports PluginConfigTab in this file).
@@ -80,7 +80,7 @@ export function SettingsContent({
   const { t } = useTranslation();
   const [tab, setTab] = useState(() => normalizeSettingsTab(initialTab));
   const [pendingPermissions, setPendingPermissions] = useState(0);
-  // Floating "저장되었습니다" pulse — bumped on EVERY successful save in
+
   // the dialog. Tabs whose save runs through the orchestration hook hit
   // it via the wrapped `handleSaved` below; tabs with their own IPC
   // (PluginConfigTab / AppearanceTab / RolesTab / McpTab) call
@@ -108,9 +108,9 @@ export function SettingsContent({
   // Raycast) keep the modal open after Save so the user can verify the
   // change and edit a sibling tab; close lives on the Dialog X / Esc.
   const llmSave = useDebouncedSave(() => void s.save("llm"));
-  // #893 — login modal open state. Driven by the LlmTab "로그인" button.
+
   const [loginOpen, setLoginOpen] = useState(false);
-  // Demo-session activeness — drives the synthetic "데모 체험" entry in the LLM
+
   // provider dropdown. Hydrated from api.demo.status() on mount + after any
   // login (a successful login may be a demo activation).
   const [demoActive, setDemoActive] = useState(false);
@@ -123,7 +123,7 @@ export function SettingsContent({
   useEffect(() => {
     refreshDemoActive();
   }, [refreshDemoActive]);
-  // Picking "데모 체험" from the provider dropdown. If a demo session is already
+
   // hydrated, just restore the pointer (no modal). Otherwise open the login
   // modal, whose conversational variant auto-activates the build-embedded key.
   const handleSelectDemo = useCallback(async () => {
@@ -234,7 +234,7 @@ export function SettingsContent({
       // No gap: sidebar and content share a single border (right edge of
       // the sidebar) so the layout reads as two regions of the dialog,
       // not two stacked cards. Simplified per user direction
-      // "레이아웃을 단순화해".
+
       className="relative flex h-full min-h-0"
     >
       {/* Dialog-wide save feedback — anchored to the Tabs root (not the
@@ -251,10 +251,10 @@ export function SettingsContent({
           can sit below the nav list as a sibling (Radix TabsList only
           accepts TabsTrigger children). */}
       <div className="flex h-full w-48 shrink-0 flex-col border-r">
-      {/* Sidebar "설정" header. `pt-6` mirrors the right-pane stack
+      {/* Sidebar settings header. `pt-6` mirrors the right-pane stack
           (scroll pt-2 + TabsContent mt-2 + SettingsPageHeader pt-2 = 24)
           so the sidebar h2 baseline aligns with the right-pane h2 of
-          the active tab. `px-5` (20px) aligns the "설정" text-left with
+          the active tab. `px-5` (20px) aligns the settings text-left with
           the nav-trigger icon-left (TabsList p-2 + trigger px-3 = 20). */}
       <div className="px-5 pt-6 mb-6">
         <h2 data-testid="settings-sidebar-heading" className="text-xl font-semibold leading-9 tracking-normal">{t("settingsContent.sidebarHeading")}</h2>
@@ -375,16 +375,13 @@ export function SettingsContent({
               api={api}
               onNavigate={(nextTab) => setTab(normalizeSettingsTab(nextTab))}
               onLogout={() => {
-                // 2026-05-20 — Settings 는 별도 BrowserWindow 이므로 main window 의
-                // onboarding chain 에 직접 dispatch 못한다. Broadcast IPC 로 main
-                // window 에 cue 를 보내고, 본 Settings window 는 그대로 둔다
-                // (사용자가 닫기를 누르거나 main window 가 close 명령을 보낼 때까지).
+
+
                 void api.auth.broadcastLogoutReset?.();
               }}
               onReactivateDemo={() => {
-                // Settings dialog 를 명시적으로 닫고 main window 에 LoginModal
-                // 의 activation page 를 mount 하도록 cue 한다. window 가 detached
-                // 인 경우 close 후 main window 가 focus 를 받는다.
+
+
                 void api.auth.broadcastReactivateDemo?.();
                 void api.window?.closeDetached?.();
               }}
@@ -536,7 +533,7 @@ export function SettingsContent({
           void api.hasApiKey(provider).then((hasKey) => s.setHasKey(hasKey));
         });
         // A successful login may be a demo activation — refresh so the provider
-        // dropdown reflects the now-active "데모 체험" entry without a reload.
+
         refreshDemoActive();
         onSaved();
       }}

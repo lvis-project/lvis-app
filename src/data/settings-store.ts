@@ -142,13 +142,9 @@ export interface FeatureFlags {
    * configured LLM to refresh user-preferences.md. Default false: manual only.
    */
   idlePreferenceRefresh?: boolean;
-  /**
-   * #893 — Set to `true` after the user has dismissed the first-boot onboarding
-   * dialog (either via "API 키 입력" or "로그인"). Defaults to undefined / false
-   * so legacy installs see the dialog once on first launch after upgrade. The
-   * value is persisted to `~/.lvis/settings.json` via the standard settings
-   * patch flow — no separate disk file.
-   */
+
+
+
   onboardingCompleted?: boolean;
   /**
    * Permission policy — host-classifies-risk migration gate
@@ -221,7 +217,7 @@ export interface AppSettings {
   system: SystemSettings;
   /** Plugin settings reserved for non-trust UI preferences. Trust gates are host-owned. */
   plugins: PluginSettings;
-  /** 플러그인별 설정값 — pluginId → key/value 맵 */
+
   pluginConfigs: Record<string, PluginConfigRecord>;
   /** Experimental feature flags. All default false. */
   features?: FeatureFlags;
@@ -322,17 +318,9 @@ export interface WebViewSettings {
   preferredFlow: WebViewPreferredFlow;
 }
 
-/**
- * Window close-button behaviour.
- *
- * `hide-to-tray` (default) — `win.on("close")` calls `preventDefault()` and
- * hides the window, leaving the main process alive so the tray icon, routine
- * scheduler, and any plugin background work keep running. Quitting requires
- * the tray context menu's 종료 item or `Cmd/Ctrl+Q`.
- *
- * `quit` — the close button terminates the app the same way a regular Windows
- * app does. Users who don't want LVIS running in the background can pick this.
- */
+
+
+
 export type SystemCloseBehavior = "hide-to-tray" | "quit";
 
 /**
@@ -416,11 +404,9 @@ export interface TelemetrySettings {
   telemetryPromptAnswered?: boolean;
 }
 
-/**
- * §3 — Privacy tab. Default OFF.
- * piiRedactEnabled: 활성화 시 user draft 를 LLM 으로 보내기 전 DLPFilter 로
- *   이메일/전화/신용카드 등을 `[REDACTED:*]` 로 치환한다. 감사 로그에 건수 기록.
- */
+
+
+
 export interface PrivacySettings {
   piiRedactEnabled: boolean;
 }
@@ -513,7 +499,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     // points at the production tunnel so a fresh install lands on the live
     // catalog without any post-install configuration. Operators running a
     // local marketplace (http://localhost:8000) can override via Settings →
-    // 마켓플레이스 tab and re-enable the private-network allowance there.
+
     // No fallback to a local catalog file — the only way to populate the
     // host's plugin layout is through the marketplace API.
     backend: "real-cloud",
@@ -576,7 +562,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     // OS tool sandbox — STAGED rollout (macOS-first). Default ON on `darwin`
     // (the live-verified-active platform) and OFF on `linux`/`win32` until the
     // in-flight C/D-series sandbox QA is green; Linux/Windows users can still
-    // opt in via Settings → 권한 'OS 도구 샌드박스'. CONVERGENCE PLAN: the
+
     // Linux/Windows default flips to `true` once the C/D-series QA passes —
     // change this single expression to `true` then. (Computed from
     // `process.platform` at default-construction; `process.platform` is stable
@@ -617,18 +603,9 @@ export class SettingsService {
     }
   }
 
-  /**
-   * §7.x: Retroactive 0o600 enforcement.
-   * 신규 write에만 mode를 적용했으므로, 기존 설치에
-   * 남아있는 lvis-secrets.json (0o644 추정)을 owner-only로 내려준다.
-   *
-   * fd-based fstat+fchmod로 TOCTOU 방지. path 기반 chmod는
-   * 공격자가 stat→chmod window 사이에 파일을 symlink로 바꿔치기해 다른 파일의
-   * 퍼미션을 내릴 수 있다 (chmod follows symlinks on Linux). fd를 열면 파일
-   * 핸들이 해당 inode에 고정되므로 이 race를 차단.
-   *
-   * Windows에서는 POSIX mode가 무의미하므로 silent-skip.
-   */
+
+
+
   private migrateSecretsMode(): void {
     if (process.platform === "win32") return;
     if (!existsSync(this.secretsPath)) return;
@@ -719,7 +696,7 @@ export class SettingsService {
       // Accept `font: undefined`, missing field, or `font: null` — all three
       // mean "no font subfield patch in this call". Guard against `null` so
       // a defensive caller (or a malformed test fixture) cannot crash
-      // `fontPatch.family` access (PR #672 2차 critic minor N3).
+
       if (fontPatch !== undefined && fontPatch !== null && typeof fontPatch === "object") {
         const mergedFont: AppearanceFontSettings = { ...this.settings.appearance.font };
         if (typeof fontPatch.family === "string") {
@@ -1020,8 +997,8 @@ export class SettingsService {
   private async saveSecrets(secrets: Record<string, string>): Promise<void> {
     mkdirSync(dirname(this.secretsPath), { recursive: true });
     await withFileLock(this.secretsPath, async () => {
-      // Security A4 fix: 0o600 mode (owner only) — Linux 공용 PC에서 safeStorage unavailable 시
-      // 'plain:' prefix 평문 API 키가 other/group에 노출되는 것을 차단
+
+
       writeFileSync(this.secretsPath, JSON.stringify(secrets, null, 2), {
         encoding: "utf-8",
         mode: 0o600,

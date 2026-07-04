@@ -23,21 +23,17 @@ const log = createLogger("lvis");
 
 /** Name of the meta-tool. SOT is the registry; re-exported here for the loop. */
 export const TOOL_SEARCH_TOOL = TOOL_SEARCH_TOOL_NAME;
-/**
- * 턴당 tool_search 허용 횟수. request_plugin (2) 보다 넉넉 — tool_search 는
- * deferral 모드의 *주 발견 경로*라 한 턴에 여러 도구 묶음을 promote 할 수 있다.
- */
+
+
+
 export const MAX_TOOL_SEARCH_PER_TURN = 4;
-/** 세션당 tool_search 누적 허용 횟수. */
+
 export const MAX_TOOL_SEARCH_PER_SESSION = 20;
-/** 검색 1회가 promote 할 수 있는 최대 도구 수. Broad query TPM 폭증 방지. */
+
 export const MAX_TOOL_SEARCH_PROMOTIONS_PER_SEARCH = 3;
-/**
- * Catalog 매칭에 기여할 수 있는 최소 토큰 길이. 이보다 짧은 토큰 (예: 1글자
- * `m`, `a`) 은 `name.includes` / `description.includes` 로 거의 모든 카탈로그
- * 항목과 매치되어 over-promotion 을 유발하므로 점수화 단계에서 제외한다.
- * query tokenization 과 catalog scoring 양쪽에서 동일 SOT 로 강제한다.
- */
+
+
+
 export const MIN_CATALOG_MATCH_TOKEN_LENGTH = 2;
 
 /** Catalog entry the loop supplies (from `getToolCatalogForScope`). */
@@ -47,30 +43,30 @@ export interface ToolSearchCatalogEntry {
 }
 
 export interface ToolSearchState {
-  /** 이번 턴에서 이미 성공한 tool_search 횟수. */
+
   turnSearches: number;
-  /** 세션 누적 성공 횟수. */
+
   sessionSearches: number;
-  /** 이번 턴 scope 에 로드된 tool name (mutation 가능). */
+
   activeToolNames: Set<string>;
-  /** 현재 provider `tools[]`에 이미 노출된 full-schema tool names. */
+
   loadedToolNames?: Set<string>;
-  /** 현재 provider `tools[]`에 이미 노출된 full-schema tools. */
+
   loadedTools?: ToolSearchCatalogEntry[];
-  /** 현재 catalog (아직 로드되지 않은 in-scope plugin/mcp tool). */
+
   catalog: ToolSearchCatalogEntry[];
 }
 
 export interface ToolSearchOutcome {
-  /** 합성된 tool_result 들 — 호출자가 history 에 append. */
+
   results: Array<{ tool_use_id: string; content: string; is_error: boolean }>;
-  /** tool_search 이외의 실제 실행할 tool_use. */
+
   remaining: ToolUseBlock[];
-  /** promote 에 성공한 tool name 목록 — 호출자가 toolSchemas rebuild 신호로 사용. */
+
   promotedToolNames: string[];
-  /** 갱신된 턴 카운터. */
+
   nextTurnSearches: number;
-  /** 갱신된 세션 카운터. */
+
   nextSessionSearches: number;
 }
 
@@ -136,12 +132,9 @@ function scoreCatalogEntry(
  */
 export { scoreCatalogEntry as _scoreCatalogEntryForTest };
 
-/**
- * query 에 매치되는 catalog tool 을 점수화해 상위 N개만 반환한다.
- * Broad substring query 가 activeToolNames 를 대량 확장하지 못하도록
- * exact/name-token match 를 description hit 보다 강하게 두고 promotion
- * 수를 고정 상한으로 제한한다.
- */
+
+
+
 function matchCatalog(
   query: string,
   catalog: ToolSearchCatalogEntry[],
@@ -157,12 +150,9 @@ function matchCatalog(
     .map((candidate) => candidate.entry);
 }
 
-/**
- * tool_use 목록을 훑어 tool_search 를 인터셉트하고 나머지는 통과시킨다.
- *
- * @param toolUses LLM 이 요청한 tool_use 블록들
- * @param state 현재 카운터 + active tool set + catalog
- */
+
+
+
 export function handleToolSearch(
   toolUses: ToolUseBlock[],
   state: ToolSearchState,

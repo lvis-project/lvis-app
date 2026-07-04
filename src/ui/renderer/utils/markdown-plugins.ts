@@ -18,12 +18,9 @@ type MarkdownNode = {
   [key: string]: unknown;
 };
 
-/**
- * CommonMark leaves `**강조**로` as literal text because the closing marker is
- * followed by a Hangul postposition. Korean assistant prose naturally writes
- * that way, so normalize only still-literal text nodes after remark has parsed
- * the standard cases.
- */
+
+
+
 export function remarkKoreanAdjacentStrong() {
   return (tree: MarkdownNode) => {
     transformChildren(tree);

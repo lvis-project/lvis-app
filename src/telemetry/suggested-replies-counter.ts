@@ -1,22 +1,7 @@
-/**
- * Suggested Replies (PR-D) — anonymous in-process telemetry counters.
- *
- * Tracks the lifecycle of `<suggested_replies>` snapshots so operators can
- * tune the system prompt / trigger heuristic against acceptance / ignore
- * ratios (proposal §10 "추천 noisy 측정"). No PII, no network, no disk —
- * counters live in renderer memory and are sampled via the inspection IPC.
- *
- * Event semantics:
- *   shown          — a non-empty snapshot was pushed and rendered.
- *   accepted-best  — user pressed Tab → ghost text inserted.
- *   accepted-chip  — user clicked / Enter-focused a chip alternate.
- *   dismissed      — user hit Escape on an active snapshot.
- *   ignored        — a new turn arrived while a prior snapshot was still
- *                    active (best != null and never accepted/dismissed).
- *
- * Spec: `docs/architecture/proposals/suggested-replies-ghost-text.md` §10
- * + PR-D scope item 4.
- */
+
+
+
+
 
 export type SuggestedRepliesEvent =
   | "shown"

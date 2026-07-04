@@ -61,7 +61,7 @@ export interface RoutineEngineDeps {
  * this tag at the end of every routine turn.
  *
  * Tag absence means the LLM violated the system prompt format — returns the
- * explicit "[요약 형식 누락]" marker so users and developers immediately notice
+ * explicit "summary format missing" marker so users and developers immediately notice
  * the missing annotation rather than silently getting a truncated body.
  *
  * Caps extracted content at 200 codepoints (OverlayCard surface budget).

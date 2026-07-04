@@ -30,12 +30,9 @@ export interface LoginModalProps {
    * vendor) so the caller can refresh vendor-keyed UI state.
    */
   onSuccess?: (vendor: string, result: LoginMockupSuccess) => void;
-  /**
-   * 2026-05-20 — Settings 의 "데모 자격증명 재입력" entry. `true` 면 chip 1/2/3
-   * 선택 surface 를 건너뛰고 곧바로 activation 입력 페이지를 mount 한다.
-   * `false` (기본) 면 기존 1/2/3 forced-choice 화면. 첫 부팅 onboarding
-   * chain 은 항상 `false` 로 mount.
-   */
+
+
+
   forceActivation?: boolean;
 }
 

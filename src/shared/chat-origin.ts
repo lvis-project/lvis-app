@@ -3,10 +3,8 @@ export type ChatInputOrigin =
   | "plugin-emitted"
   | "llm-tool-arg"
   | "file-content"
-  // queue-auto: renderer-side message-queue 가 brake-point 에서 자동 인입.
-  // user-keyboard 와 동일한 trust boundary (사용자가 명시 입력한 텍스트가
-  // 큐에 누적된 것) 이지만 IPC stream context 에서 발생하므로 navigator.
-  // userActivation 검사는 우회. validator 가 별도 allow-list 처리.
+
+
   | "queue-auto";
 
 export type ChatSendInputOrigin = Extract<ChatInputOrigin, "user-keyboard" | "plugin-emitted" | "queue-auto">;

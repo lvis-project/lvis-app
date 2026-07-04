@@ -95,18 +95,9 @@ export interface ModelPricing {
   surchargeInputThreshold?: number;
   surchargeInputMultiplier?: number;
   surchargeOutputMultiplier?: number;
-  /**
-   * Conservative Tier-1 TPM (Tokens Per Minute) cap. 작은 tier 의 OpenAI
-   * 모델은 `contextWindow` 보다 *훨씬 작은* 분당 처리 한도 — 예: nano 는
-   * contextWindow 400K 이지만 Tier-1 TPM 200K. 단발 input 이 contextWindow
-   * 안이라도 TPM 초과로 reject 가능 (사용자 영상의 271K request 사례).
-   *
-   * `auto-compact.getModelPreflightThreshold` 가 이 값과 contextWindow
-   * 기반 임계의 *min* 을 사용 — TPM 인지 preflight 로 사용자 사고 prevent.
-   * 값은 *org Tier-1 보수적 default* — 더 큰 tier 는 over-compact 가능
-   * 하지만 *TPM hit 의 silent fail* 보다 안전 trade-off. 동적 header
-   * (`x-ratelimit-remaining-tokens`) 기반 update 는 별 cycle.
-   */
+
+
+
   tpmDefault?: number;
 }
 
@@ -135,28 +126,14 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
   // Pricing source: https://platform.openai.com/docs/pricing
   // Unknown variant pricing intentionally left at 0 — env override expected.
   openai: {
-    // gpt-5.4 family — OpenAI 공식 사양 (developers.openai.com/api/docs/models/gpt-5.4*,
-    // openai.com/api/pricing, 2026-05 시점 verify).
+
+
     //
-    // Long-context surcharge: gpt-5.4 / gpt-5.4-pro 의 1M-class window 는 input>272K
-    // 시 *세션 전체* 가 input 2x + output 1.5x 로 우상향 (flat full-session, NOT
-    // tiered — 272K 초과한 *순간* 모든 token 이 multiplier 적용). 본 테이블의
-    // inputPer1M/outputPer1M 은 standard tier (≤272K) 기준이고, 우상향 multiplier
-    // 는 surchargeInput{Threshold|Multiplier} / surchargeOutputMultiplier 필드로
-    // 자동 적용됨 — `computeCost` 의 openai/copilot/azure-foundry 분기 참조.
+
+
     //
-    // gpt-5.4-mini / nano 는 OpenAI spec 상 surcharge 없음 (400K 단일 tier).
-    // tpmDefault — issue #900 #3. *empirically grounded* values 만 등록.
-    // - nano 200K & mini 200K: 실제 provider 429 에 명시된 org Tier-1 한도.
-    //   nano "Limit 200000, Requested 271630" (사용자 영상 사고);
-    //   mini "Limit 200000, Requested 34223/34493" (2026-05 인덱서 turn 사고 —
-    //   400K window 안의 단발 input 이 분당 누적으로 200K TPM 초과). 둘 다
-    //   org Tier-1 보수적 default 로 정합 (window-only 면 preflight 가 288K 라
-    //   200K TPM 벽 전에 트리거되지 않음).
-    // - gpt-5.4 / gpt-5.4-pro: OpenAI 공식 Tier-1 TPM 미공개 (2026-05) + 1M-class
-    //   window 라 200K 가정 부적절 → 등록 안 함. window-only preflight 유지 (안전).
-    // 동적 `x-ratelimit-remaining-tokens` header parser 가 도입되면 본
-    // 정적 등록 자체가 deprecated 후보 — 별 cycle.
+
+
     "gpt-5.4":                     { inputPer1M: 2.5,  outputPer1M: 15,  cacheReadPer1M: 0.25,  contextWindow: 1_050_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5 },
     "gpt-5.4-mini":                { inputPer1M: 0.75, outputPer1M: 4.5, cacheReadPer1M: 0.075, contextWindow:   400_000, tpmDefault:    200_000 },
     "gpt-5.4-nano":                { inputPer1M: 0.2,  outputPer1M: 1.25, contextWindow:  400_000, tpmDefault:    200_000 },
@@ -210,13 +187,12 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
   // Billing rolls into Copilot subscription — list prices reported as 0.
   // Routing: github.ai/inference proxies these models.
   copilot: {
-    // gpt-5.4 family — pricing 0 (Copilot 구독 billing), contextWindow 는 모델 사양
-    // (developers.openai.com/api/docs/models/gpt-5.4*). issue #900: mini 의 1.05M
-    // 등록이 stale 이었음 — 공식 400K.
+
+
     "gpt-5.4":                     { inputPer1M: 0, outputPer1M: 0, contextWindow: 1_050_000 },
     "gpt-5.4-mini":                { inputPer1M: 0, outputPer1M: 0, contextWindow:   400_000 },
-    // nano/pro defensive add — Copilot 이 미래에 proxy 시 prefix-match fallback
-    // 으로 gpt-5.4 (1.05M) 잘못 매치 회피 (ralph round-1 architect WARN).
+
+
     "gpt-5.4-nano":                { inputPer1M: 0, outputPer1M: 0, contextWindow:   400_000 },
     "gpt-5.4-pro":                 { inputPer1M: 0, outputPer1M: 0, contextWindow: 1_100_000 },
     "gpt-5.3":                     { inputPer1M: 0, outputPer1M: 0, contextWindow:   400_000 },
@@ -378,19 +354,9 @@ export function effectiveContextWindow(pricing: ModelPricing): number {
   return pricing.contextWindow1MBeta ?? pricing.contextWindow;
 }
 
-/**
- * Per-turn token usage as fed to {@link computeCost}.
- *
- * IMPORTANT: `inputTokens` carries PROVIDER-RAW semantics, which differ:
- *   - Anthropic: `input_tokens` 는 fresh-only — cache 토큰은 별도 필드.
- *     총 effective input = input + cache_read + cache_write.
- *   - OpenAI / Azure / Gemini: `prompt_tokens` / `promptTokenCount` 는
- *     cached 를 이미 포함. cacheReadTokens 가 들어와도 prompt 안의
- *     *부분집합* 으로 읽어야 하며, 별도로 합산하면 double-count.
- *
- * Adapters MUST normalize their provider's shape into this convention
- * BEFORE calling computeCost.
- */
+
+
+
 export interface UsageForCost {
   inputTokens: number;
   outputTokens: number;
@@ -453,8 +419,8 @@ export function computeCost(
 
   switch (toPricingVendor(vendor)) {
     case "claude": {
-      // Anthropic raw shape — `input_tokens` 는 fresh-only, cache 가 가산.
-      // ratio 정책은 `anthropicCacheRates` 한 곳.
+
+
       const { read: cacheReadRate, write: cacheWriteRate } = anthropicCacheRates(pricing);
       return (
         per1M(input, pricing.inputPer1M) +
@@ -467,13 +433,13 @@ export function computeCost(
     case "copilot":
     case "azure-foundry":
     case "openai-compatible": {
-      // `prompt_tokens` 가 cached 를 이미 포함 — cacheRead 를 또 더하면
+
       // double-count. Instead split the provider-reported prompt tokens into
       // fresh + cached portions so OpenAI/Azure published cached-input rates
       // are visible in LVIS cost surfaces.
       //
-      // Long-context surcharge (gpt-5.4 / gpt-5.4-pro): input>threshold 시
-      // 세션 전체가 input × M_in + output × M_out 로 우상향. issue #900.
+
+
       const inSurcharge =
         typeof pricing.surchargeInputThreshold === "number"
         && input > pricing.surchargeInputThreshold;
@@ -490,9 +456,8 @@ export function computeCost(
     }
     case "gemini":
     case "vertex-ai": {
-      // `promptTokenCount` 가 cachedContentTokenCount 를 이미 포함. cache
-      // write 는 storage-per-hour 과금이라 turn-level cost 와 분리되어
-      // 이 함수에서 0 으로 둔다 (별도 cron 합산 예정).
+
+
       return per1M(input, pricing.inputPer1M) + per1M(output, pricing.outputPer1M);
     }
   }
