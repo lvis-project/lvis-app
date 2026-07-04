@@ -53,9 +53,9 @@ describe("bundle registry", () => {
     expect(findBundle(DEFAULT_BUNDLE_ID)).toBeDefined();
   });
 
-  it("starts fresh installs on the Antigravity light bundle", () => {
-    expect(DEFAULT_BUNDLE_ID).toBe("antigravity");
-    expect(BUNDLES[0].id).toBe("antigravity");
+  it("starts fresh installs on the Moonstone light bundle", () => {
+    expect(DEFAULT_BUNDLE_ID).toBe("moonstone");
+    expect(BUNDLES[0].id).toBe("moonstone");
     expect(findBundle(DEFAULT_BUNDLE_ID)?.shell).toBe("light");
   });
 
