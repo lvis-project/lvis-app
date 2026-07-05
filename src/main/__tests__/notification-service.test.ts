@@ -527,9 +527,10 @@ describe("NotificationService — per-kind rate limit (M4)", () => {
       notificationFactory: factoryStub.factory,
       isReady: () => true,
       isTestEnv: () => false,
+      isAnyWindowFocused: () => false,
     });
     const cooldownMs = __test.COOLDOWN_MS_BY_KIND["turn-end"]; // 30_000
-    const perfBase = performance.now();
+    const perfBase = 1_000_000;
     vi.spyOn(performance, "now").mockImplementation(() => perfBase);
     svc.fire({ kind: "turn-end", title: "a", body: "a" }); // fires
     vi.spyOn(performance, "now").mockImplementation(() => perfBase + cooldownMs); // exactly at boundary
