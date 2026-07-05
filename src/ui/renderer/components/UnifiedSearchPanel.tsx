@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type React from "react";
-import { BookMarked, Clock3, FileText, Repeat2, Search, Star, X } from "lucide-react";
+import { BookMarked, Clock3, FileText, Repeat2, Search, Pin, X } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Badge } from "../../../components/ui/badge.js";
@@ -311,7 +311,7 @@ export function UnifiedSearchPanel({
             <SearchSection
               title={t("unifiedSearchPanel.sectionStarred")}
               count={starredResults.length}
-              icon={<Star className="h-3.5 w-3.5" />}
+              icon={<Pin className="h-3.5 w-3.5" />}
             >
               {starredResults.map((item) => (
                 <SearchResultButton

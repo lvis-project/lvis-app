@@ -1,4 +1,4 @@
-import { Copy, Check, RefreshCw, GitBranch, Star, ThumbsUp, ThumbsDown } from "lucide-react";
+import { Copy, Check, RefreshCw, GitBranch, Pin, ThumbsUp, ThumbsDown } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
@@ -141,7 +141,7 @@ export function TurnActionBar({
               className="h-5 w-5 text-muted-foreground hover:text-foreground"
               onClick={actions.onToggleStar}
             >
-              <Star key={isStarred ? "on" : "off"} className={`h-3 w-3 ${isStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
+              <Pin key={isStarred ? "on" : "off"} className={`h-3 w-3 ${isStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{t("turnActionBar.starButton")}</TooltipContent>
