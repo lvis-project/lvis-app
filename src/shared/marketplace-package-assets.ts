@@ -11,6 +11,8 @@ export type MarketplacePackageAsset =
   | { type: "theme"; bundleId: BundleId }
   | { type: "language-pack"; locale: Locale };
 
+export type MarketplacePackageAssetType = MarketplacePackageAsset["type"];
+
 const BUNDLE_ID_SET = new Set<string>(BUNDLE_IDS);
 
 export function isThemeBundleId(value: unknown): value is BundleId {
@@ -38,7 +40,7 @@ function stringField(
 
 function normalizeAssetType(
   value: unknown,
-): MarketplacePackageAsset["type"] | undefined {
+): MarketplacePackageAssetType | undefined {
   if (value === "language") return "language-pack";
   if (
     isMarketplacePackageType(value) &&
@@ -47,6 +49,20 @@ function normalizeAssetType(
     return value;
   }
   return undefined;
+}
+
+export function marketplacePackageTypeForAsset(
+  asset: MarketplacePackageAsset,
+): MarketplacePackageAssetType {
+  return asset.type;
+}
+
+export function marketplacePackageSpecForAsset(
+  asset: MarketplacePackageAsset,
+): string {
+  if (asset.type === "provider") return `provider:${asset.providerId}`;
+  if (asset.type === "theme") return `theme:${asset.bundleId}`;
+  return `language-pack:${asset.locale}`;
 }
 
 function providerAsset(providerId: unknown): MarketplacePackageAsset | undefined {
