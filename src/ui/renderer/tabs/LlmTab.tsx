@@ -23,7 +23,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../../components/ui/dialog.js";
-import { REASONING_EFFORT_STEPS, VENDORS, budgetToEffortIndex } from "../constants.js";
+import {
+  REASONING_EFFORT_STEPS,
+  VENDORS,
+  budgetToEffortIndex,
+  getVendorOption,
+  visibleVendorsFor,
+  type VendorOption,
+} from "../constants.js";
 import { parseHostResolverMap } from "../../../shared/host-resolver-map.js";
 import { isRetiredLlmModel } from "../../../shared/llm-vendor-defaults.js";
 import type { LvisApi } from "../types.js";
@@ -52,6 +59,7 @@ interface ProviderSelectProps {
   triggerClassName?: string;
   triggerTestId?: string;
   placeholder?: string;
+  vendorOptions?: readonly VendorOption[];
 }
 
 function normalizeProviderSearch(value: string): string {
@@ -66,6 +74,7 @@ function ProviderSelect({
   triggerClassName,
   triggerTestId,
   placeholder,
+  vendorOptions = VENDORS,
 }: ProviderSelectProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -80,13 +89,13 @@ function ProviderSelect({
             searchText: `${DEMO_VENDOR_VALUE} ${demoLabel}`,
           }]
         : []),
-      ...VENDORS.map((vendor) => ({
+      ...vendorOptions.map((vendor) => ({
         id: vendor.id,
         label: vendor.label,
         searchText: `${vendor.id} ${vendor.label}`,
       })),
     ],
-    [demoLabel, includeDemo],
+    [demoLabel, includeDemo, vendorOptions],
   );
 
   const normalizedQuery = normalizeProviderSearch(query);
@@ -274,7 +283,7 @@ function ImmediateBadge() {
 }
 
 function getVendorInfo(vendorId: string): (typeof VENDORS)[number] {
-  return VENDORS.find((v) => v.id === vendorId) ?? VENDORS[0]!;
+  return getVendorOption(vendorId);
 }
 
 function modelOptionsFor(vendorId: string, selectedModel: string): string[] {
@@ -347,6 +356,7 @@ export function LlmTab(props: LlmTabProps) {
     ? trimmedModel
     : vendorInfo.defaultModel;
   const activeModelOptions = modelOptionsFor(vendor, activeModelValue);
+  const providerSelectOptions = useMemo(() => visibleVendorsFor([vendor]), [vendor]);
 
   // Relaunch confirmation dialog state for host map changes.
   const [relaunchConfirmOpen, setRelaunchConfirmOpen] = useState(false);
@@ -569,6 +579,7 @@ export function LlmTab(props: LlmTabProps) {
               triggerId="vendor-select"
               triggerClassName="w-full"
               placeholder={t("llmTab.vendorPlaceholder")}
+              vendorOptions={providerSelectOptions}
             />
           </div>
           {/* Provider detail form — disabled when authMode === "login". */}
@@ -853,6 +864,7 @@ export function LlmTab(props: LlmTabProps) {
                         setFallbackChain(next);
                       }}
                       triggerClassName="w-36 text-xs"
+                      vendorOptions={visibleVendorsFor([entry.provider])}
                     />
                     <Select
                       value={fallbackModelValue}

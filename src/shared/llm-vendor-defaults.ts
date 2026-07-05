@@ -63,7 +63,7 @@ export const OPENAI_COMPATIBLE_VENDOR_PRESETS: Readonly<
     apiKeyPlaceholder: "sk-or-...",
     baseUrl: "https://openrouter.ai/api/v1",
     defaultModel: "anthropic/claude-sonnet-4.6",
-    modelOptions: ["anthropic/claude-sonnet-4.6", "openai/gpt-5.4"],
+    modelOptions: ["anthropic/claude-sonnet-4.6", "openai/gpt-5.4", "openrouter/free"],
   },
   deepseek: {
     label: "DeepSeek",
@@ -314,6 +314,44 @@ export const LLM_VENDORS = [
 ] as const;
 
 export type LLMVendor = (typeof LLM_VENDORS)[number];
+
+/**
+ * Providers shown as the default in-app provider surface while the long-tail
+ * OpenAI-compatible presets move toward marketplace packages. The full
+ * `LLM_VENDORS` union intentionally remains broad for settings, secrets,
+ * legacy configs, and runtime compatibility during the migration.
+ */
+export const DEFAULT_VISIBLE_LLM_VENDOR_IDS = [
+  "openai",
+  "claude",
+  "gemini",
+  "openrouter",
+  "openai-compatible",
+] as const satisfies readonly LLMVendor[];
+
+export type DefaultVisibleLLMVendor =
+  (typeof DEFAULT_VISIBLE_LLM_VENDOR_IDS)[number];
+
+const DEFAULT_VISIBLE_LLM_VENDOR_ID_SET = new Set<string>(
+  DEFAULT_VISIBLE_LLM_VENDOR_IDS,
+);
+
+export type MarketplaceEligibleLLMVendor =
+  Exclude<LLMVendor, DefaultVisibleLLMVendor>;
+
+export const MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS = LLM_VENDORS.filter(
+  (vendor): vendor is MarketplaceEligibleLLMVendor =>
+    !DEFAULT_VISIBLE_LLM_VENDOR_ID_SET.has(vendor),
+);
+
+export function isDefaultVisibleLLMVendor(
+  vendor: unknown,
+): vendor is DefaultVisibleLLMVendor {
+  return (
+    typeof vendor === "string" &&
+    DEFAULT_VISIBLE_LLM_VENDOR_ID_SET.has(vendor)
+  );
+}
 
 /**
  * Canonical fallback vendor — used both as the seed for
