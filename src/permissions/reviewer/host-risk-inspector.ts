@@ -296,23 +296,12 @@ function extractShellCommand(input: Record<string, unknown>): string | null {
  * {@link tokenizeShell} SOT so this module and {@link BashAstValidator} agree
  * on what a leaf is.
  *
- * Tool-internal mini-languages: this classifier operates at the SHELL grammar
- * layer only. It does NOT model tool-internal languages (awk programs, perl
- * one-liners, etc.) that can write files or exec commands inside a single-quoted
- * string that is opaque to the shell tokenizer. Verbs whose tool-internal
- * language cannot be safely analysed without a dedicated parser are excluded
- * from READ_ONLY_COMMANDS so they fail closed as `shell`. `awk` is the primary
- * example (see its absence from READ_ONLY_COMMANDS above).
- *
- * KNOWN LIMITATION (pre-existing, tracked as follow-up): `sed`'s in-program
- * write (`w`, `s///w`) and exec (`e`, `r`) commands inside the sed-script
- * argument are NOT detected. Both the old and new code classify
- * `sed 's/a/b/w out' f` as `read`. A sed-script parser is out of scope for
- * this PR — fixing it would require parsing sed-program syntax and risks
- * noisy false-positive escalation of common read-only `sed 's/a/b/'` patterns.
- * The extra approval burden of dropping `sed` from READ_ONLY_COMMANDS (as was
- * done for `awk`) is not yet justified given sed's vastly more common read-only
- * usage; this trade-off will be re-evaluated in the follow-up issue.
+ * Tool-internal mini-languages: this classifier operates primarily at the
+ * SHELL grammar layer. It only models tool-internal languages where there is a
+ * small conservative scanner with bounded false positives. `sed` is covered
+ * for write/exec program forms (`w`/`W`/`r`/`R`/`e`, `s///w`, `s///e`, and
+ * script-file loading). `awk` is intentionally excluded from READ_ONLY_COMMANDS
+ * because safe classification would require a full awk-language parser.
  *
  * Tighten-only claim (precise): every `read→shell` transition introduced by
  * this change is a genuine tighten — a command that WAS safe to classify read
@@ -446,7 +435,208 @@ function hasMutatingFlag(verb: string, args: readonly string[]): boolean {
       }
     }
   }
+  if (verb === "sed" && hasMutatingSedProgram(args)) return true;
   return false;
+}
+
+function hasMutatingSedProgram(args: readonly string[]): boolean {
+  let expressionExpected = false;
+  let implicitScriptSeen = false;
+
+  for (const arg of args) {
+    if (expressionExpected) {
+      if (sedScriptHasWriteOrExec(arg)) return true;
+      expressionExpected = false;
+      continue;
+    }
+
+    if (arg === "-e" || arg === "--expression") {
+      expressionExpected = true;
+      continue;
+    }
+    if (arg.startsWith("--expression=")) {
+      if (sedScriptHasWriteOrExec(arg.slice("--expression=".length))) return true;
+      continue;
+    }
+    if (arg.startsWith("-e") && arg.length > 2) {
+      if (sedScriptHasWriteOrExec(arg.slice(2))) return true;
+      continue;
+    }
+
+    if (arg === "-f" || arg === "--file" || arg.startsWith("-f") || arg.startsWith("--file=")) {
+      return true;
+    }
+
+    if (arg === "--") {
+      implicitScriptSeen = false;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      continue;
+    }
+    if (!implicitScriptSeen) {
+      implicitScriptSeen = true;
+      if (sedScriptHasWriteOrExec(arg)) return true;
+    }
+  }
+
+  return expressionExpected;
+}
+
+function sedScriptHasWriteOrExec(script: string): boolean {
+  let i = 0;
+  while (i < script.length) {
+    i = skipSedSeparators(script, i);
+    if (i >= script.length) break;
+
+    const commandStart = skipSedAddresses(script, i);
+    if (commandStart < 0 || commandStart >= script.length) break;
+    i = commandStart;
+
+    if (script[i] === "!") {
+      i = skipSedWhitespace(script, i + 1);
+      if (i >= script.length) break;
+    }
+
+    const command = script[i];
+    if (command === "#") {
+      i = skipToSedLineEnd(script, i + 1);
+      continue;
+    }
+    if (command === "{") {
+      i += 1;
+      continue;
+    }
+    if (command === "}") {
+      i += 1;
+      continue;
+    }
+    if (command === "w" || command === "W" || command === "e" || command === "r" || command === "R") {
+      return true;
+    }
+    if (command === "s") {
+      const result = parseSedSubstitute(script, i);
+      if (result.mutating) return true;
+      i = result.next;
+      continue;
+    }
+
+    i = skipToNextSedCommand(script, i + 1);
+  }
+  return false;
+}
+
+function skipSedSeparators(script: string, i: number): number {
+  while (i < script.length) {
+    const ch = script[i];
+    if (ch === ";" || ch === "\n" || ch === "\r" || /\s/.test(ch)) {
+      i += 1;
+      continue;
+    }
+    break;
+  }
+  return i;
+}
+
+function skipSedWhitespace(script: string, i: number): number {
+  while (i < script.length && /\s/.test(script[i]!)) i += 1;
+  return i;
+}
+
+function skipSedAddresses(script: string, start: number): number {
+  let i = start;
+  for (let count = 0; count < 2; count += 1) {
+    i = skipSedWhitespace(script, i);
+    const next = skipSedAddress(script, i);
+    if (next === i) break;
+    i = skipSedWhitespace(script, next);
+    if (script[i] === ",") {
+      i += 1;
+      continue;
+    }
+    break;
+  }
+  return i;
+}
+
+function skipSedAddress(script: string, i: number): number {
+  const ch = script[i];
+  if (ch === undefined) return i;
+  if (/[0-9]/.test(ch)) {
+    i += 1;
+    while (i < script.length && /[0-9~+]/.test(script[i]!)) i += 1;
+    return i;
+  }
+  if ((ch === "+" || ch === "~") && /[0-9]/.test(script[i + 1] ?? "")) {
+    i += 2;
+    while (i < script.length && /[0-9]/.test(script[i]!)) i += 1;
+    return i;
+  }
+  if (ch === "$") return i + 1;
+  if (ch === "/") return skipSedDelimited(script, i + 1, "/");
+  if (ch === "\\" && i + 1 < script.length) {
+    return skipSedDelimited(script, i + 2, script[i + 1]!);
+  }
+  return i;
+}
+
+function parseSedSubstitute(script: string, start: number): { mutating: boolean; next: number } {
+  if (start + 1 >= script.length) return { mutating: false, next: start + 1 };
+  const delimiter = script[start + 1]!;
+  if (/\s/.test(delimiter)) return { mutating: false, next: start + 1 };
+  const patternEnd = skipSedDelimited(script, start + 2, delimiter);
+  if (patternEnd >= script.length) return { mutating: false, next: patternEnd };
+  const replacementEnd = skipSedDelimited(script, patternEnd, delimiter);
+  if (replacementEnd >= script.length) return { mutating: false, next: replacementEnd };
+
+  let i = replacementEnd;
+  while (i < script.length && script[i] !== ";" && script[i] !== "\n" && script[i] !== "\r") {
+    const flag = script[i]!;
+    if (flag === "w" || flag === "e") return { mutating: true, next: i + 1 };
+    i += 1;
+  }
+  return { mutating: false, next: i };
+}
+
+function skipSedDelimited(script: string, start: number, delimiter: string): number {
+  let escaped = false;
+  for (let i = start; i < script.length; i += 1) {
+    const ch = script[i]!;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === delimiter) return i + 1;
+  }
+  return script.length;
+}
+
+function skipToNextSedCommand(script: string, start: number): number {
+  let escaped = false;
+  for (let i = start; i < script.length; i += 1) {
+    const ch = script[i]!;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === ";" || ch === "\n" || ch === "\r") return i + 1;
+  }
+  return script.length;
+}
+
+function skipToSedLineEnd(script: string, start: number): number {
+  for (let i = start; i < script.length; i += 1) {
+    if (script[i] === "\n" || script[i] === "\r") return i + 1;
+  }
+  return script.length;
 }
 
 /** Reduce `/usr/bin/ls` → `ls`; leave bare verbs unchanged. */
