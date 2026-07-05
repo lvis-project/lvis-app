@@ -12,6 +12,7 @@ import { createLogger, closeFileLogSink } from "../lib/logger.js";
 import { logger as rootPinoLogger } from "../lib/logger.js";
 import { runShutdownRoutines } from "./shutdown-routines.js";
 import { stopLocalApiServer } from "./local-api-server.js";
+import { unregisterAllGlobalShortcuts } from "./global-shortcuts.js";
 import { forceKillManagedChildProcesses } from "./managed-child-processes.js";
 import { killAllTerminals } from "./terminal/pty-manager.js";
 import {
@@ -79,7 +80,14 @@ export async function runAppShutdownCleanup(options: {
   const cleanupTimeoutMs = resolveShutdownCleanupTimeoutMs();
   appShutdownCleanupPromise = (async () => {
     const result = await runCleanupWithHardTimeout(async (signal) => {
-      // Persist window state FIRST — it's a fast synchronous-ish operation
+      // E4 — release OS-level global shortcuts FIRST (fast, synchronous, cannot
+      // throw past its own internal try/catch) so a wedged or throwing later
+      // step can't leave accelerators bound after quit. Ordered ahead of
+      // persistAll() specifically because persistAll() can throw — if it did,
+      // an unregisterAll() placed after it would never run and the app would
+      // quit with the global accelerator still claimed OS-wide (critic M1).
+      unregisterAllGlobalShortcuts();
+      // Persist window state next — it's a fast synchronous-ish operation
       // and if any later async step (shutdown routines / plugin stopAll)
       // hangs past the cleanup deadline we still don't lose the user's
       // last window layout. The remaining steps honor the AbortSignal so

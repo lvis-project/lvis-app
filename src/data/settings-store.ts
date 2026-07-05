@@ -36,12 +36,19 @@ import {
 import { DEFAULT_LOCALE, normalizeLocale, type Locale } from "../i18n/index.js";
 import { DEFAULT_APP_MODE, normalizeAppMode, type InitialAppMode } from "../shared/initial-app-mode.js";
 import { DEFAULT_SIDEBAR_TAB, isSidebarTab, type SidebarTab } from "../shared/sidebar-tab.js";
+import {
+  normalizeAccelerator,
+  normalizeShortcuts,
+  type ShortcutSettings,
+  type ShortcutSettingsPatch,
+} from "../shared/shortcuts.js";
 import { projectRootKey } from "../shared/project-identity.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("settings");
 
 export type { LLMVendor, LLMVendorSettings };
 export { LLM_VENDORS };
+export type { ShortcutSettings, ShortcutSettingsPatch };
 
 /**
  * Single source of truth for the settings file path. Both `SettingsService`
@@ -219,6 +226,8 @@ export interface AppSettings {
   webView: WebViewSettings;
   /** Window close-button behaviour (hide-to-tray vs quit). */
   system: SystemSettings;
+  /** E4 — global keyboard shortcuts (show/hide window toggle). */
+  shortcuts: ShortcutSettings;
   /** Plugin settings reserved for non-trust UI preferences. Trust gates are host-owned. */
   plugins: PluginSettings;
 
@@ -341,6 +350,20 @@ export interface SystemSettings {
   closeBehavior: SystemCloseBehavior;
   /** Persisted workspace mode (chat vs work). Default "work". */
   appMode: SystemAppMode;
+  /**
+   * E4 — launch LVIS automatically at OS login. Applied via
+   * `app.setLoginItemSettings({ openAtLogin })` (see
+   * `src/main/startup-launch.ts`). Default `false`. No-op in dev (unpackaged)
+   * builds — the login item would point at the Electron dev binary.
+   */
+  launchAtStartup?: boolean;
+  /**
+   * E4 — when launching at startup, start hidden (tray only) instead of showing
+   * the main window. macOS: `openAsHidden`; Windows: a `--hidden` launch arg
+   * the boot path reads. Default `false`. Only meaningful when
+   * `launchAtStartup` is `true`.
+   */
+  launchMinimized?: boolean;
   /**
    * Opt-in loopback HTTP+SSE server for the CLI / automation surface
    * (#1409 external API, #1436 lifecycle wiring). Default OFF — the app
@@ -567,6 +590,14 @@ const DEFAULT_SETTINGS: AppSettings = {
     sidePanelSplitSubagentPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
     sidebarActiveTab: DEFAULT_SIDEBAR_TAB,
     pinnedProjectRoots: [],
+    // E4 — auto-launch defaults OFF (opt-in). Only applied on packaged builds.
+    launchAtStartup: false,
+    launchMinimized: false,
+  },
+  // E4 — global shortcuts default OFF with no accelerator chosen.
+  shortcuts: {
+    toggleWindow: null,
+    enabled: false,
   },
   plugins: {},
   pluginConfigs: {},
@@ -667,7 +698,10 @@ export class SettingsService {
   }
 
   async patch(
-    partial: Partial<Omit<AppSettings, "llm">> & { llm?: LLMSettingsPatch },
+    partial: Partial<Omit<AppSettings, "llm" | "shortcuts">> & {
+      llm?: LLMSettingsPatch;
+      shortcuts?: ShortcutSettingsPatch;
+    },
   ): Promise<AppSettings> {
     if (partial.llm) this.settings.llm = mergeLlmPatch(this.settings.llm, partial.llm);
     if (partial.chat) this.settings.chat = { ...this.settings.chat, ...partial.chat };
@@ -780,6 +814,26 @@ export class SettingsService {
           this.settings.system.localApiServer,
         );
       }
+      // E4 — launch-at-startup + launch-minimized booleans (same validate-at-
+      // boundary pattern as localApiServer: invalid → keep prior value).
+      const rawLaunchAtStartup = partial.system.launchAtStartup;
+      if (typeof rawLaunchAtStartup === "boolean") {
+        next.launchAtStartup = rawLaunchAtStartup;
+      } else if (rawLaunchAtStartup !== undefined) {
+        log.warn(
+          `system.launchAtStartup patch ignored (received ${JSON.stringify(rawLaunchAtStartup)}), keeping %s`,
+          this.settings.system.launchAtStartup,
+        );
+      }
+      const rawLaunchMinimized = partial.system.launchMinimized;
+      if (typeof rawLaunchMinimized === "boolean") {
+        next.launchMinimized = rawLaunchMinimized;
+      } else if (rawLaunchMinimized !== undefined) {
+        log.warn(
+          `system.launchMinimized patch ignored (received ${JSON.stringify(rawLaunchMinimized)}), keeping %s`,
+          this.settings.system.launchMinimized,
+        );
+      }
       const rawSidePanelWidth = partial.system.sidePanelWidth;
       if (typeof rawSidePanelWidth === "number" && Number.isFinite(rawSidePanelWidth)) {
         next.sidePanelWidth = Math.max(SIDE_PANEL_MIN_WIDTH, Math.round(rawSidePanelWidth));
@@ -831,6 +885,37 @@ export class SettingsService {
         );
       }
       this.settings.system = next;
+    }
+    if (partial.shortcuts) {
+      // Field-level validation: an invalid accelerator is dropped (previous
+      // value preserved) rather than clobbering the existing binding — mirrors
+      // the `system`/`appearance` per-field patch discipline. `enabled` is a
+      // plain boolean gate.
+      const nextShortcuts: ShortcutSettings = { ...this.settings.shortcuts };
+      const rawToggle = partial.shortcuts.toggleWindow;
+      if (rawToggle === null) {
+        nextShortcuts.toggleWindow = null;
+      } else if (rawToggle !== undefined) {
+        const accel = normalizeAccelerator(rawToggle);
+        if (accel !== null) {
+          nextShortcuts.toggleWindow = accel;
+        } else {
+          log.warn(
+            `shortcuts.toggleWindow patch ignored (received ${JSON.stringify(rawToggle)}), keeping %s`,
+            this.settings.shortcuts.toggleWindow,
+          );
+        }
+      }
+      const rawEnabled = partial.shortcuts.enabled;
+      if (typeof rawEnabled === "boolean") {
+        nextShortcuts.enabled = rawEnabled;
+      } else if (rawEnabled !== undefined) {
+        log.warn(
+          `shortcuts.enabled patch ignored (received ${JSON.stringify(rawEnabled)}), keeping %s`,
+          this.settings.shortcuts.enabled,
+        );
+      }
+      this.settings.shortcuts = nextShortcuts;
     }
     if (partial.pluginConfigs) {
       const sanitized: Record<string, PluginConfigRecord> = {};
@@ -1021,6 +1106,7 @@ export class SettingsService {
         appearance,
         webView: normalizeWebView(parsed.webView),
         system: normalizeSystem(parsed.system),
+        shortcuts: normalizeShortcuts(parsed.shortcuts, DEFAULT_SETTINGS.shortcuts),
         plugins: {},
         pluginConfigs: { ...DEFAULT_SETTINGS.pluginConfigs, ...pluginConfigs },
         features: { ...DEFAULT_SETTINGS.features, ...normalizeFeatureFlags(parsed.features) },
@@ -1389,6 +1475,8 @@ function normalizeSystem(input: unknown): SystemSettings {
     closeBehavior?: unknown;
     appMode?: unknown;
     localApiServer?: unknown;
+    launchAtStartup?: unknown;
+    launchMinimized?: unknown;
     sidePanelWidth?: unknown;
     sidebarWidth?: unknown;
     sidebarActiveTab?: unknown;
@@ -1427,6 +1515,24 @@ function normalizeSystem(input: unknown): SystemSettings {
     log.warn(
       `system.localApiServer invalid (received ${JSON.stringify(rawLocalApi)}), using default %s`,
       DEFAULT_SETTINGS.system.localApiServer,
+    );
+  }
+  const rawLaunchAtStartup = obj.launchAtStartup;
+  if (typeof rawLaunchAtStartup === "boolean") {
+    result.launchAtStartup = rawLaunchAtStartup;
+  } else if (rawLaunchAtStartup !== undefined) {
+    log.warn(
+      `system.launchAtStartup invalid (received ${JSON.stringify(rawLaunchAtStartup)}), using default %s`,
+      DEFAULT_SETTINGS.system.launchAtStartup,
+    );
+  }
+  const rawLaunchMinimized = obj.launchMinimized;
+  if (typeof rawLaunchMinimized === "boolean") {
+    result.launchMinimized = rawLaunchMinimized;
+  } else if (rawLaunchMinimized !== undefined) {
+    log.warn(
+      `system.launchMinimized invalid (received ${JSON.stringify(rawLaunchMinimized)}), using default %s`,
+      DEFAULT_SETTINGS.system.launchMinimized,
     );
   }
   const rawSidePanelWidth = obj.sidePanelWidth;
