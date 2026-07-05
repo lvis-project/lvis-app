@@ -1264,6 +1264,7 @@ export const frMessages: Record<string, string> = {
   "formatIpcError.importInvalidFileShape": "Ce fichier n'est pas une conversation exportée valide.",
   "formatIpcError.importEmptyMessages": "La conversation ne contient aucun message à importer.",
   "formatIpcError.importInvalidMessageShape": "La conversation contient un message non pris en charge ou mal formé.",
+  "formatIpcError.importTooManyMessages": "La conversation contient trop de messages pour être importée.",
   "formatIpcError.rateLimited": "Trop de demandes. Veuillez réessayer dans un instant.",
   "formatIpcError.removeFailed": "Échec de la suppression de la règle.",
   "formatIpcError.reviewerRewireFailed": "Échec de la connexion du modèle de révision des autorisations aux nouveaux paramètres. Les paramètres ont été rétablis à l'état précédent.",

@@ -1264,6 +1264,7 @@ export const jaMessages: Record<string, string> = {
   "formatIpcError.importInvalidFileShape": "エクスポートされた会話ファイルではありません。",
   "formatIpcError.importEmptyMessages": "インポートするメッセージがありません。",
   "formatIpcError.importInvalidMessageShape": "サポートされていない、または破損したメッセージが含まれています。",
+  "formatIpcError.importTooManyMessages": "メッセージ数が多すぎるため取り込めません。",
   "formatIpcError.rateLimited": "リクエストが多すぎます。しばらくしてからもう一度お試しください。",
   "formatIpcError.removeFailed": "ルールの削除に失敗しました。",
   "formatIpcError.reviewerRewireFailed": "権限レビューモデルを新しい設定に接続できませんでした。設定が前の状態に戻りました。",

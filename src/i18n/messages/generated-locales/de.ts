@@ -1264,6 +1264,7 @@ export const deMessages: Record<string, string> = {
   "formatIpcError.importInvalidFileShape": "Diese Datei ist keine gültige exportierte Konversation.",
   "formatIpcError.importEmptyMessages": "Die Konversation enthält keine Nachrichten zum Importieren.",
   "formatIpcError.importInvalidMessageShape": "Die Konversation enthält eine nicht unterstützte oder fehlerhafte Nachricht.",
+  "formatIpcError.importTooManyMessages": "Die Konversation enthält zu viele Nachrichten für den Import.",
   "formatIpcError.rateLimited": "Zu viele Anfragen. Bitte versuchen Sie es gleich noch einmal.",
   "formatIpcError.removeFailed": "Die Regel konnte nicht entfernt werden.",
   "formatIpcError.reviewerRewireFailed": "Das Berechtigungsüberprüfungsmodell konnte nicht mit den neuen Einstellungen verbunden werden. Die Einstellungen wurden auf den vorherigen Stand zurückgesetzt.",

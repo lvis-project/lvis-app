@@ -205,6 +205,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-file-shape": "formatIpcError.importInvalidFileShape",
   "empty-messages": "formatIpcError.importEmptyMessages",
   "invalid-message-shape": "formatIpcError.importInvalidMessageShape",
+  "too-many-messages": "formatIpcError.importTooManyMessages",
 };
 
 export interface FormatIpcErrorOptions {
