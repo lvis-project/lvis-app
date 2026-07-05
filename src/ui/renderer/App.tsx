@@ -282,7 +282,11 @@ export function App() {
       const result = await window.lvis?.workspace?.listRoots?.();
       if (!result?.ok) return;
       const roots = Array.isArray(result.roots) ? result.roots : [];
-      const projects = workspaceRootsToProjects(result.defaultRoot, roots, t("sidebar.currentProject"));
+      // fallbackName is only a safety net for a root with no resolvable
+      // basename — the default project is excluded from every display
+      // surface (composer selector, sidebar grouping, Insights), so its
+      // exact string value is never shown.
+      const projects = workspaceRootsToProjects(result.defaultRoot, roots, t("sidebar.projectsLabel"));
       setWorkspaceProjects(projects);
       setActiveProject((current) => current ?? defaultProjectFromProjects(projects));
     } catch {

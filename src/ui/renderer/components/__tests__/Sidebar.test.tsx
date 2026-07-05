@@ -90,20 +90,26 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
 }
 
 describe("Sidebar project sessions", () => {
-  it("renders the current project and recent conversations under the project group", async () => {
-    const { getByTestId, getByText, restore } = renderSidebar();
+  it("renders no-project conversations as a plain ungrouped list, and only real projects as groups", async () => {
+    const { getByTestId, getByText, queryByTestId, restore } = renderSidebar();
     try {
+      // "other-app" is a real (non-default) project — still rendered as its
+      // own named group with a project row.
       await waitFor(() => {
-        // The default/base-directory project is labeled by the localized
-        // fallback ("현재 프로젝트"), not the workspace folder basename — the
-        // 2026-07 default-project-naming refinement (avoids surfacing a
-        // confusing folder name like "lvis-app"/"workspace" as the project).
-        expect(getByTestId("sidebar-current-project").textContent).toContain("현재 프로젝트");
+        expect(getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-other-app").textContent).toContain("other-app");
       });
+      expect(getByText("다른 프로젝트 대화")).toBeTruthy();
+
+      // sess-1/sess-2 carry no projectRoot — they render in the plain
+      // ungrouped list, NOT wrapped in a fake "Current Project"/default
+      // group (2026-07 "remove Current Project labeling"). No such testid
+      // exists anymore.
+      expect(queryByTestId("sidebar-current-project")).toBeNull();
+      const unassigned = getByTestId("sidebar-unassigned-sessions");
+      expect(unassigned.textContent).toContain("전체 동기화로 상태 파악");
+      expect(unassigned.textContent).toContain("사이드 패널 개선");
       expect(getByText("전체 동기화로 상태 파악")).toBeTruthy();
       expect(getByText("사이드 패널 개선")).toBeTruthy();
-      expect(getByText("other-app")).toBeTruthy();
-      expect(getByText("다른 프로젝트 대화")).toBeTruthy();
       expect(getByTestId("sidebar-session-sess-1").getAttribute("aria-current")).toBe("page");
     } finally {
       restore();
