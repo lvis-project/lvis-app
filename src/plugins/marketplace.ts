@@ -50,6 +50,25 @@ function normalizeInstallPolicy(source: {
   return "user";
 }
 
+function normalizePluginLookupKey(value: string | null | undefined): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@[^/]+\//, "")
+    .replace(/@[^/@]+$/, "")
+    .replace(/^lvis-plugin-/, "")
+    .replace(/^plugin-/, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function catalogItemMatchesPluginId(item: PluginMarketplaceItem, pluginId: string): boolean {
+  const pluginKey = normalizePluginLookupKey(pluginId);
+  return [item.id, item.slug, item.name, item.packageName, item.packageSpec].some((value) =>
+    normalizePluginLookupKey(value) === pluginKey,
+  );
+}
+
 function shaOfManifest(manifest: unknown): string {
   return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
 }
@@ -836,7 +855,10 @@ export class PluginMarketplaceService {
     if (this.deploymentGuard) {
       const guardResult = await this.deploymentGuard.canUninstall(pluginId, "user");
       if (!guardResult.allowed) {
-        throw new Error(guardResult.reason ?? `Plugin uninstall denied: ${pluginId}`);
+        const isOrphanedAdminInstall = await this.canUserRemoveOrphanedAdminInstall(pluginId, guardResult.reason);
+        if (!isOrphanedAdminInstall) {
+          throw new Error(guardResult.reason ?? `Plugin uninstall denied: ${pluginId}`);
+        }
       }
     }
 
@@ -869,6 +891,33 @@ export class PluginMarketplaceService {
       await writePluginRegistry(this.registryPath, registry);
       return { pluginId, uninstalled: true as const };
     });
+  }
+
+  private async canUserRemoveOrphanedAdminInstall(
+    pluginId: string,
+    denialReason: string | undefined,
+  ): Promise<boolean> {
+    if (!denialReason?.includes('registry installSource="admin"')) return false;
+
+    const registry = await readPluginRegistry(this.registryPath);
+    const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
+    if (entry?.installSource !== "admin") return false;
+
+    let catalogPlugins: PluginMarketplaceItem[];
+    try {
+      catalogPlugins = await this.fetcher.listPlugins();
+    } catch (err) {
+      log.warn(
+        `uninstall: keeping admin guard for '${pluginId}' because marketplace catalog could not be checked: ${(err as Error).message}`,
+      );
+      return false;
+    }
+
+    const stillManagedByCatalog = catalogPlugins.some((item) => catalogItemMatchesPluginId(item, pluginId));
+    if (stillManagedByCatalog) return false;
+
+    log.warn(`uninstall: allowing orphaned admin plugin cleanup for '${pluginId}' after marketplace removal`);
+    return true;
   }
 
   /**
