@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { LvisApi } from "../types.js";
+import { DEFAULT_SIDEBAR_TAB, isSidebarTab, type SidebarTab } from "../../../shared/sidebar-tab.js";
 
-export type SidebarTab = "chats" | "projects";
-
-const DEFAULT_SIDEBAR_TAB: SidebarTab = "chats";
+export type { SidebarTab };
 
 export interface UseSidebarTabResult {
   /** Active sidebar tab ("chats" = ungrouped conversation list, "projects" = named-project groups). */
@@ -30,7 +29,7 @@ export function useSidebarTab(api: LvisApi): UseSidebarTabResult {
       .then((settings) => {
         if (cancelled) return;
         const tab = settings?.system?.sidebarActiveTab;
-        if (tab === "chats" || tab === "projects") setActiveTabState(tab);
+        if (isSidebarTab(tab)) setActiveTabState(tab);
       })
       .catch(() => {
         // Non-fatal: fall back to the default tab. The next switch persists.
