@@ -155,6 +155,21 @@ describe("installer smoke and packaging discipline", () => {
     expect(packageFootprint).toContain("required lazy renderer chunks missing from app.asar");
   });
 
+  it("packages only the default Electron locale in the desktop shell", () => {
+    const packageJson = JSON.parse(readRepoFile("package.json")) as {
+      build?: { electronLanguages?: string[] };
+    };
+    const packageFootprint = readRepoFile("scripts/check-package-footprint.mjs");
+
+    expect(packageJson.build?.electronLanguages).toEqual(["en-US"]);
+    expect(packageFootprint).toContain('DEFAULT_PACKAGED_ELECTRON_LANGUAGES = Object.freeze(["en-US"])');
+    expect(packageFootprint).toContain("desktop app must package only the default Electron language");
+    expect(packageFootprint).toContain("ship UI languages as marketplace language packs");
+    expect(packageFootprint).not.toContain('["en-US", "ko"]');
+    expect(packageFootprint).not.toContain('"ko.pak"');
+    expect(packageFootprint).not.toContain('"ko.lproj"');
+  });
+
   it("derives packaged runtime script footprint from the build asset SOT", () => {
     const packageFootprint = readRepoFile("scripts/check-package-footprint.mjs");
 
