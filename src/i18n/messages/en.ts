@@ -42,6 +42,7 @@ export const en = {
   "mainDialog.unauthorizedFrame": "Unauthorized frame.",
   "mainDialog.noPersonasAvailable": "No personas available",
   "mainDialog.exportConversationTitle": "Export conversation",
+  "mainDialog.importConversationTitle": "Import conversation",
 } as const;
 
 /**

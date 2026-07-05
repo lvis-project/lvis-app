@@ -694,6 +694,10 @@ export type LvisApi = {
   chatContinueLastUser: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
   chatRetryEffort: (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) => Promise<{ ok: boolean; error?: string }>;
   chatExport: (format: "markdown" | "json") => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
+  /** #1500 (E3) — reverse of chatExport. Always creates a brand-new session (never overwrites). */
+  chatImport: () => Promise<
+    { ok: true; sessionId: string; messageCount: number } | { ok: false; error?: string; canceled?: boolean }
+  >;
   chatCompact: () => Promise<{ compacted: boolean; compactedAt: string | null; summary: string; removedMessageCount: number }>;
   chatSessionResume: (sessionId: string) => Promise<{ ok: boolean; compacted: boolean; compactedAt: string | null; removedMessageCount: number }>;
   // Checkpoint view and explicit branch actions.

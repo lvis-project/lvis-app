@@ -35,4 +35,5 @@ export const zh: Record<SeedMessageKey, string> = {
   "mainDialog.unauthorizedFrame": "未经授权的框架。",
   "mainDialog.noPersonasAvailable": "没有可用的 persona",
   "mainDialog.exportConversationTitle": "导出会话",
+  "mainDialog.importConversationTitle": "导入会话",
 };

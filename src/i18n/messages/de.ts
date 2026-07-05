@@ -29,4 +29,5 @@ export const de: Record<SeedMessageKey, string> = {
   "mainDialog.unauthorizedFrame": "Nicht autorisierter Frame.",
   "mainDialog.noPersonasAvailable": "Keine Personas verfügbar",
   "mainDialog.exportConversationTitle": "Konversation exportieren",
+  "mainDialog.importConversationTitle": "Konversation importieren",
 };

@@ -35,4 +35,5 @@ export const ja: Record<SeedMessageKey, string> = {
   "mainDialog.unauthorizedFrame": "許可されていないフレームです。",
   "mainDialog.noPersonasAvailable": "利用可能な persona はありません",
   "mainDialog.exportConversationTitle": "会話をエクスポート",
+  "mainDialog.importConversationTitle": "会話をインポート",
 };

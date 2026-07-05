@@ -83,5 +83,19 @@ export function useChatActions(opts: {
     try { await api.chatExport(format); } catch (err) { console.warn("[lvis] export failed:", (err as Error).message); }
   }, [api]);
 
-  return { handleLoadSession, isEntryStarred, handleFork, handleToggleStar, handleAbort, handleGuide, handleFeedback, handleExport };
+  // #1500 (E3) — reverse of handleExport. Returns the new sessionId on
+  // success so the caller (App.tsx) can load it and refresh the sidebar,
+  // matching the export/import symmetry — import always yields a brand-new
+  // session, never overwrites the current one.
+  const handleImport = useCallback(async (): Promise<string | null> => {
+    try {
+      const result = await api.chatImport();
+      return result.ok ? result.sessionId : null;
+    } catch (err) {
+      console.warn("[lvis] import failed:", (err as Error).message);
+      return null;
+    }
+  }, [api]);
+
+  return { handleLoadSession, isEntryStarred, handleFork, handleToggleStar, handleAbort, handleGuide, handleFeedback, handleExport, handleImport };
 }
