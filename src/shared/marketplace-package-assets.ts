@@ -1,23 +1,26 @@
-import { isLocale, type Locale } from "../i18n/locale.js";
+import {
+  isMarketplaceEligibleLocale,
+  type MarketplaceEligibleLocale,
+} from "../i18n/locale.js";
 import {
   isMarketplacePackageType,
   type MarketplacePackageType,
 } from "./assistant-context.js";
-import { isLLMVendor, type LLMVendor } from "./llm-vendor-defaults.js";
-import { BUNDLE_IDS, type BundleId } from "./theme-bundles.js";
+import {
+  isMarketplaceEligibleLLMVendor,
+  type MarketplaceEligibleLLMVendor,
+} from "./llm-vendor-defaults.js";
+import {
+  isMarketplaceEligibleThemeBundleId,
+  type MarketplaceEligibleThemeBundleId,
+} from "./theme-bundles.js";
 
 export type MarketplacePackageAsset =
-  | { type: "provider"; providerId: LLMVendor }
-  | { type: "theme"; bundleId: BundleId }
-  | { type: "language-pack"; locale: Locale };
+  | { type: "provider"; providerId: MarketplaceEligibleLLMVendor }
+  | { type: "theme"; bundleId: MarketplaceEligibleThemeBundleId }
+  | { type: "language-pack"; locale: MarketplaceEligibleLocale };
 
 export type MarketplacePackageAssetType = MarketplacePackageAsset["type"];
-
-const BUNDLE_ID_SET = new Set<string>(BUNDLE_IDS);
-
-export function isThemeBundleId(value: unknown): value is BundleId {
-  return typeof value === "string" && BUNDLE_ID_SET.has(value);
-}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -66,19 +69,19 @@ export function marketplacePackageSpecForAsset(
 }
 
 function providerAsset(providerId: unknown): MarketplacePackageAsset | undefined {
-  return isLLMVendor(providerId)
+  return isMarketplaceEligibleLLMVendor(providerId)
     ? { type: "provider", providerId }
     : undefined;
 }
 
 function themeAsset(bundleId: unknown): MarketplacePackageAsset | undefined {
-  return isThemeBundleId(bundleId)
+  return isMarketplaceEligibleThemeBundleId(bundleId)
     ? { type: "theme", bundleId }
     : undefined;
 }
 
 function languagePackAsset(locale: unknown): MarketplacePackageAsset | undefined {
-  return isLocale(locale)
+  return isMarketplaceEligibleLocale(locale)
     ? { type: "language-pack", locale }
     : undefined;
 }
