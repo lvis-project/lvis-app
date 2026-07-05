@@ -1258,6 +1258,22 @@ export function buildInternalApiSurface() {
     getStats: async (lastDays: number) => ipcRenderer.invoke(CHANNELS.audit.stats, lastDays),
   },
 
+  // ─── Diagnostics bundle + crash list (#1499 E2) ──
+  diagnostics: {
+    /** Build a redacted diagnostics ZIP and save via native dialog. */
+    export: async (opts?: { dateFrom?: string; dateTo?: string; includeCrashDumps?: boolean }) =>
+      ipcRenderer.invoke(CHANNELS.diagnostics.export, opts),
+    /** List crash-dump metadata (filename/time/size). */
+    crashList: async () => ipcRenderer.invoke(CHANNELS.diagnostics.crashList),
+  },
+
+  // ─── Production log tail viewer (#1499 E2) ──
+  logs: {
+    /** Recent N redacted log lines, optional level filter. */
+    tail: async (args?: { lines?: number; level?: string }) =>
+      ipcRenderer.invoke(CHANNELS.logs.tail, args),
+  },
+
   // ─── Message feedback ────────────────────────────
   submitFeedback: async (payload: { sessionId: string; messageIndex: number; rating: "up" | "down"; reason?: string }) =>
     ipcRenderer.invoke(CHANNELS.feedback.submit, payload) as Promise<{ ok: boolean; error?: string }>,

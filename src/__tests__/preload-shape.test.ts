@@ -253,6 +253,10 @@ describe("preload contextBridge world shape lock", () => {
             "getPreflightStatus",
             "setPreflightOverride",
           ],
+          "diagnostics": [
+            "crashList",
+            "export",
+          ],
           "dismissRoutineV2": "function",
           "dismissTrigger": "function",
           "dlp": [
@@ -294,6 +298,9 @@ describe("preload contextBridge world shape lock", () => {
           "listSkills": "function",
           "listWorkBoard": "function",
           "loginMockup": "function",
+          "logs": [
+            "tail",
+          ],
           "mcp": [
             "addConfig",
             "getConfigPath",

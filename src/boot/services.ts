@@ -22,7 +22,9 @@ import { AuditService } from "../main/audit-service.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
 import { createLogger, initFileLogSink } from "../lib/logger.js";
-import { LOG_RETENTION_DAYS, LOG_MAX_BYTES } from "../lib/log-file-sink.js";
+import { LOG_RETENTION_DAYS, LOG_MAX_BYTES, pruneOldLogs } from "../lib/log-file-sink.js";
+import { lvisHome } from "../shared/lvis-home.js";
+import { join } from "node:path";
 const log = createLogger("lvis");
 
 /**
@@ -115,6 +117,22 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   // locale on fresh install) so dialog titles, native menus, tray, and
   // notifications render in the user's language. See src/i18n.
   await applyBootLocale(settingsService);
+
+  // #1499 E2: apply the user's diagnostics.logRetentionDays to the log tree.
+  // The file sink above pruned at LOG_RETENTION_DAYS (the SOT default) before
+  // settings were loaded — hoisted so early boot lines are captured. Now that
+  // settings exist, re-prune with the persisted retention so a user who tightened
+  // (or loosened) the window sees it honoured. Best-effort — a prune failure must
+  // never affect boot (logging is best-effort; pruneOldLogs already swallows I/O
+  // errors internally).
+  try {
+    const retentionDays = settingsService.get("diagnostics").logRetentionDays;
+    if (retentionDays !== LOG_RETENTION_DAYS) {
+      pruneOldLogs(join(lvisHome(), "logs"), retentionDays);
+    }
+  } catch {
+    /* non-fatal */
+  }
 
   // §14.2 Audit log rotation + retention — boot-time check + 1h interval
   const auditLogger = new AuditLogger();
