@@ -7,7 +7,7 @@ import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../mcp/types.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
-import type { LLMVendor } from "../../shared/llm-vendor-defaults.js";
+import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { BundleId } from "../../shared/theme-bundles.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { RolePreset } from "../../data/role-presets.js";
@@ -199,7 +199,7 @@ export type AppSettings = {
     /** Plugin update versions skipped until the marketplace publishes a newer version. */
     skippedPluginUpdates?: Record<string, string>;
     /** Marketplace-installed provider packages visible in the LLM picker. */
-    installedProviderIds?: LLMVendor[];
+    installedProviderIds?: MarketplaceEligibleLLMVendor[];
     /** Marketplace-installed theme bundles visible in Appearance. */
     installedThemeBundleIds?: BundleId[];
     /** Marketplace-installed language packs visible in Appearance. */

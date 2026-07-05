@@ -28,6 +28,7 @@ import { createLogger } from "../../lib/logger.js";
 import { readDiffSidecar, isSafeId } from "../../tools/write-diff-cache.js";
 import { isToolResultStubContent } from "../../shared/tool-result-stub.js";
 import type { LLMSettings } from "../../data/settings-store.js";
+import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
 import {
   runStreamedTurn,
   STREAM_TURN_OPTIONS,
@@ -647,7 +648,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.retryEffort, e); return UNAUTHORIZED_FRAME; }
     const prevLlm = settingsService.get("llm");
     const provider = prevLlm.provider;
-    const prevBlock = prevLlm.vendors[provider];
+    const prevBlock = getLlmVendorSettings(prevLlm.vendors, provider);
     const prevVendorBaseUrlSig = vendorBaseUrlSignature(prevLlm);
     await settingsService.patch({
       llm: {
