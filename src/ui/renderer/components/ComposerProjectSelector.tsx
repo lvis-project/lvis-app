@@ -62,7 +62,17 @@ export function ComposerProjectSelector({
   const { pendingWarning, addFolder, confirmPendingFolder, cancelPendingFolder } = useAddProjectFolder();
   const [busy, setBusy] = useState(false);
 
-  const label = activeProject?.projectName ?? t("sidebar.currentProject");
+  // The default/base-directory binding is never a "selected project" for
+  // display purposes — only an explicit (non-default) project counts.
+  // Matches antigravity/Claude Code/Codex convention: an imperative "Select
+  // project" CTA until the user actually picks one; the real directory name
+  // only appears once chosen. The default binding itself is untouched
+  // internally (still used for tool/file access) — this is display-only.
+  const hasRealSelection = Boolean(activeProject && activeProject.isDefault !== true);
+  const label = hasRealSelection ? activeProject!.projectName : t("composerProjectSelector.selectProjectPlaceholder");
+  // The default binding is not a pickable list entry — the dropdown only
+  // offers real, user-added projects (+ "Add new project").
+  const realProjects = projects.filter((project) => project.isDefault !== true);
 
   const handleSelect = (project: ProjectIdentity) => {
     onOpenChange(false);
@@ -114,9 +124,17 @@ export function ComposerProjectSelector({
           className="h-6 gap-1 rounded-full px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
           aria-label={t("composerProjectSelector.triggerAriaLabel")}
           data-testid="composer-project-selector-trigger"
+          data-selected={hasRealSelection ? "true" : "false"}
         >
-          <Folder className="h-3 w-3 shrink-0 text-primary" />
-          <span className="max-w-[12rem] truncate">{label}</span>
+          <Folder className={`h-3 w-3 shrink-0 ${hasRealSelection ? "text-primary" : "text-muted-foreground"}`} />
+          <span
+            className={[
+              "max-w-[12rem] truncate",
+              hasRealSelection ? "text-foreground" : "italic text-muted-foreground",
+            ].join(" ")}
+          >
+            {label}
+          </span>
           <ChevronDown className="h-3 w-3 shrink-0" />
         </Button>
       </DropdownMenuTrigger>
@@ -139,16 +157,18 @@ export function ComposerProjectSelector({
         className="w-64 origin-top transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none data-[state=closed]:pointer-events-none data-[state=closed]:opacity-0 data-[state=closed]:scale-95 data-[state=open]:opacity-100 data-[state=open]:scale-100"
         data-testid="composer-project-selector-menu"
       >
-        <div className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {t("composerProjectSelector.projectsHeading")}
-        </div>
-        {projects.map((project) => {
-          const isActive = projectRootEquals(project.projectRoot, activeProject?.projectRoot);
+        {realProjects.length > 0 ? (
+          <div className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {t("composerProjectSelector.projectsHeading")}
+          </div>
+        ) : null}
+        {realProjects.map((project) => {
+          const isActive = hasRealSelection && projectRootEquals(project.projectRoot, activeProject?.projectRoot);
           return (
             <DropdownMenuItem
-              key={project.projectRoot || "default-project"}
+              key={project.projectRoot}
               data-testid="composer-project-selector-item"
-              data-project-root={project.projectRoot || "default"}
+              data-project-root={project.projectRoot}
               className={isActive ? "bg-primary/(--opacity-subtle) text-primary" : undefined}
               onSelect={() => handleSelect(project)}
             >
@@ -157,7 +177,7 @@ export function ComposerProjectSelector({
             </DropdownMenuItem>
           );
         })}
-        <DropdownMenuSeparator />
+        {realProjects.length > 0 ? <DropdownMenuSeparator /> : null}
         {pendingWarning ? (
           <div
             data-testid="composer-project-selector-root-warning"
