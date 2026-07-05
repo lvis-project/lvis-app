@@ -10,12 +10,16 @@
  * Transport choice: NO pino worker transport. Worker transports resolve a
  * separate worker entry file, which breaks inside a packaged `app.asar` (the
  * PR #684 `ERR_MODULE_NOT_FOUND` regression class). Instead this uses
- * {@link SonicBoom} directly — in-process, sync-capable, packaging-safe.
- * `sonic-boom` is already installed as a pino transitive dependency.
+ * {@link SonicBoom} directly — in-process and packaging-safe. Writes here run
+ * in async-batched mode (`sync:false`), so a chunk is buffered and hits disk
+ * on the next flush, not synchronously at the call site; `destroy()` drains
+ * the buffer on shutdown. `sonic-boom` is a direct top-level dependency.
  *
  * Rotation strategy:
  *  - DATE files: filename carries `<YYYY-MM-DD>`, so a fresh app launch on a
- *    new day writes a new file (matches the AuditLogger daily-file convention).
+ *    new day writes a new file. This midnight-boundary-by-filename scheme is
+ *    intentionally the same convention the AuditLogger uses for its daily
+ *    files, so both log families age and prune on the same day boundary.
  *  - SIZE guard: an in-process byte counter (SonicBoom writes are async-batched,
  *    so the on-disk size lags) rolls to a `<date>.<seq>.log` file once the
  *    active file crosses {@link LOG_MAX_BYTES}.
@@ -23,10 +27,14 @@
  *    `lvis-<date>[.seq].log` older than {@link LOG_RETENTION_DAYS} is deleted.
  *
  * Directory / file mode follows the `~/.lvis/<feature>/` contract (0o700 dir,
- * 0o600 file). SonicBoom opens a raw path (not JSON) and is wired at boot before
- * the async openFeatureNamespace handle is convenient, so the same mode bits are
- * enforced here synchronously via mkdir(mode)+chmod (POSIX; no-op on Windows,
- * matching the feature-namespace helper's own Windows behaviour).
+ * 0o600 file) on POSIX. SonicBoom opens a raw path (not JSON) and is wired at
+ * boot before the async openFeatureNamespace handle is convenient, so the mode
+ * bits are applied here directly: the directory via mkdir(mode)+chmod, and the
+ * file via SonicBoom's `mode` option, which forwards to fs.open so the file is
+ * created 0o600 AT OPEN (no post-open chmod race). These bits are POSIX-only —
+ * on Windows fs ignores the mode argument, and confidentiality of the log file
+ * instead rests on the inherited ACL of the parent `%USERPROFILE%\.lvis` tree
+ * (matching the feature-namespace helper's own Windows behaviour).
  *
  * Secrets: this sink only DUPLICATES existing pino output to a file — it adds
  * no new log content. Security-auditable events remain the AuditLogger's
@@ -228,14 +236,17 @@ export function createLogFileSink(options: LogFileSinkOptions = {}): LogFileSink
     // mkdir:false — we already ensured the dir. sync:false — async batched
     // writes (pino default) keep the hot path off the event loop; a final
     // destroy() flush on shutdown drains the buffer.
-    const boom = new SonicBoom({ dest: filePath, mkdir: false, sync: false });
-    // Tighten mode to 0o600 once the fd exists (POSIX; no-op on Windows).
-    try {
-      chmodSync(filePath, FILE_MODE);
-    } catch {
-      /* file mode may already be correct, or Windows — ignore */
-    }
-    return boom;
+    //
+    // `mode: FILE_MODE` is forwarded by SonicBoom to fs.open's mode argument
+    // (verified in node_modules/sonic-boom/index.js: the `mode` opt threads
+    // straight into `fs.open(file, flags, mode, …)`), so the file is created
+    // with 0o600 AT OPEN. This replaces a post-construction `chmodSync`, which
+    // raced the async (`sync:false`) open — the fd did not yet exist, chmod
+    // threw ENOENT (silently caught), and the file kept its umask default
+    // (typically 0o644). Passing the mode to the constructor is atomic and
+    // deterministic. POSIX-only: Windows ignores the mode bits (file security
+    // there relies on the inherited %USERPROFILE% / ~/.lvis ACL).
+    return new SonicBoom({ dest: filePath, mkdir: false, sync: false, mode: FILE_MODE });
   };
 
   /** Seed activeBytes from any bytes already on disk for the current file. */

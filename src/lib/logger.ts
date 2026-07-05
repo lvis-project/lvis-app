@@ -115,6 +115,31 @@ const fileStream = {
 };
 
 /**
+ * Redaction paths for the pino logger. Defense-in-depth for the #1499 file
+ * sink: pino output is now PERSISTED to `~/.lvis/logs/`, so any structured
+ * field that a call site accidentally attaches carrying a credential would
+ * otherwise land on disk in cleartext. These paths censor the common secret
+ * key names both at the top level (`{ apiKey }`) and one level deep
+ * (`*.apiKey`, e.g. `{ provider: { token } }`). This does NOT replace the
+ * AuditLogger's own DLP — it is a blanket guard on the general app logger.
+ * `censor: "[redacted]"` keeps the key present (so the shape is still
+ * debuggable) while removing the value.
+ */
+const REDACT_PATHS = [
+  "*.apiKey",
+  "*.token",
+  "*.authorization",
+  "*.password",
+  "*.secret",
+  "apiKey",
+  "token",
+  "authorization",
+  "password",
+  "secret",
+];
+const redact = { paths: REDACT_PATHS, censor: "[redacted]" };
+
+/**
  * In test mode, keep the original single-transport logger untouched (tests
  * spy on console via `createLogger`, and the multistream would change the
  * pretty-print behaviour the format tests assert). In non-test mode, build the
@@ -123,9 +148,9 @@ const fileStream = {
  * identical to before while the file sink is dormant.
  */
 export const logger = isTest
-  ? pino({ level: LOG_LEVEL, transport })
+  ? pino({ level: LOG_LEVEL, redact, transport })
   : pino(
-      { level: LOG_LEVEL },
+      { level: LOG_LEVEL, redact },
       pino.multistream([
         { stream: consoleStream, level: LOG_LEVEL as pino.Level },
         { stream: fileStream as NodeJS.WritableStream, level: LOG_LEVEL as pino.Level },
