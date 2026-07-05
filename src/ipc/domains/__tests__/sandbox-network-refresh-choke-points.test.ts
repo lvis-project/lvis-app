@@ -1,7 +1,7 @@
 /**
  * ASRT sandbox live-refresh choke-point coverage.
  *
- * Three settings-write paths can change a vendor baseUrl and must all trigger
+ * Settings-write paths can change a vendor baseUrl and must all trigger
  * `refreshSandboxNetworkConfig` when they do:
  *
  *   1. lvis:settings:update  (settings.ts)
@@ -9,6 +9,10 @@
  *   3. lvis:chat:retry-effort (chat.ts — spreads prevBlock; guard fires if
  *      prevBlock.baseUrl differs from post-restore value, which is always a
  *      no-op in normal usage but the wiring is present for future-safety)
+ *   4. lvis:demo:activate-ollama (demo.ts — sets the local ollama baseUrl;
+ *      #1498). Coverage for this path lives in demo-activate.test.ts
+ *      ("...sandbox network refresh...") alongside the rest of the
+ *      activate-ollama assertions, not duplicated here.
  *
  * Each test asserts:
  *   - refreshSandboxNetworkConfig IS called when a vendor baseUrl changed.

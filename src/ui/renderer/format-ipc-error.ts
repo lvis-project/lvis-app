@@ -171,6 +171,12 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "not-armed": "formatIpcError.notArmed",
   // Build-embedded activation key absent (lvis:demo:activate-embedded).
   "no-embedded-code": "formatIpcError.noEmbeddedCode",
+  // #1498 — Azure Foundry endpoint unreachable (network-boundary failure
+  // during loginMockup's sandbox-preparing step) and local Ollama fallback
+  // (lvis:demo:activate-ollama) — the server that answered the login
+  // modal's probe is no longer reachable.
+  "endpoint-unreachable": "formatIpcError.endpointUnreachable",
+  "no-ollama": "formatIpcError.noOllama",
 
   "clear-failed": "formatIpcError.clearFailed",
   // ── Tutorial-C — tour:{start,mark-complete,dismiss} validation ──

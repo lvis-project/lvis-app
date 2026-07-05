@@ -142,6 +142,81 @@ describe("auth:login-mockup IPC handler (#893 top-level)", () => {
     expect(deps.refreshActiveLlmWildcard).toHaveBeenCalled();
   });
 
+  // #1498 — endpoint-unreachable classification. Azure Foundry's demo
+  // endpoint is internal-network-only; a rewire failure caused by a
+  // network-unreachable error (VPN/intranet not connected) should surface
+  // as `endpoint-unreachable` — a distinct, actionable code the renderer
+  // already maps to a Korean "check your VPN" message — instead of the
+  // generic `reviewer-rewire-failed`.
+  it("maps a network-unreachable rewire failure to endpoint-unreachable for azure-foundry", async () => {
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-demo";
+    process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY =
+      "https://example.openai.azure.com/openai/v1/";
+    process.env.LVIS_DEMO_HOST_MAP = "example.openai.azure.com=10.182.192.24";
+    const deps = makeDeps();
+    deps.rewireReviewerAgent
+      .mockImplementationOnce(() => {
+        throw new Error("fetch failed: ENOTFOUND example.openai.azure.com");
+      })
+      .mockImplementationOnce(() => undefined);
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    });
+
+    expect(result).toEqual({ ok: false, error: "endpoint-unreachable" });
+  });
+
+  it("keeps reviewer-rewire-failed for a non-network azure-foundry rewire error", async () => {
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-demo";
+    process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY =
+      "https://example.openai.azure.com/openai/v1/";
+    process.env.LVIS_DEMO_HOST_MAP = "example.openai.azure.com=10.182.192.24";
+    const deps = makeDeps();
+    deps.rewireReviewerAgent
+      .mockImplementationOnce(() => {
+        throw new Error("missing reviewer provider");
+      })
+      .mockImplementationOnce(() => undefined);
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    });
+
+    expect(result).toEqual({ ok: false, error: "reviewer-rewire-failed" });
+  });
+
+  it("keeps reviewer-rewire-failed for a non-azure-foundry vendor even on a network-shaped error", async () => {
+    // Scoping guard: only azure-foundry gets the network-boundary
+    // reinterpretation. Other vendors' rewire failures stay generic since
+    // they are not plausibly a VPN/intranet issue.
+    process.env.LVIS_DEMO_VENDOR = "claude";
+    process.env.LVIS_DEMO_KEY_CLAUDE = "sk-ant-demo";
+    const deps = makeDeps();
+    deps.rewireReviewerAgent
+      .mockImplementationOnce(() => {
+        throw new Error("fetch failed: ENOTFOUND api.anthropic.com");
+      })
+      .mockImplementationOnce(() => undefined);
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    });
+
+    expect(result).toEqual({ ok: false, error: "reviewer-rewire-failed" });
+  });
+
   it("restores the previous same-vendor API key when reviewer rewire fails", async () => {
     process.env.LVIS_DEMO_VENDOR = "openai";
     process.env.LVIS_DEMO_KEY_OPENAI = "sk-new-demo";
