@@ -126,6 +126,9 @@ export const en = {
   "formatIpcError.sessionMismatch": "The session does not match.",
   "formatIpcError.preferenceRefreshServiceUnavailable": "The settings refresh service is unavailable.",
   "formatIpcError.productionDisabled": "Not available in the production environment.",
+  "formatIpcError.exportFailed": "Failed to build the diagnostics bundle.",
+  "formatIpcError.crashListFailed": "Failed to read crash dumps.",
+  "formatIpcError.logsTailFailed": "Failed to read logs.",
   "formatIpcError.unknownError": "Unknown error",
   "formatIpcError.errorSuffix": " has occurred.",
 } as const;
@@ -256,6 +259,9 @@ export const ko: Record<keyof typeof en, string> = {
   "formatIpcError.sessionMismatch": "세션이 일치하지 않습니다.",
   "formatIpcError.preferenceRefreshServiceUnavailable": "설정 새로고침 서비스를 사용할 수 없습니다.",
   "formatIpcError.productionDisabled": "프로덕션 환경에서는 사용할 수 없습니다.",
+  "formatIpcError.exportFailed": "진단 번들 생성에 실패했습니다.",
+  "formatIpcError.crashListFailed": "크래시 덤프를 읽지 못했습니다.",
+  "formatIpcError.logsTailFailed": "로그를 읽지 못했습니다.",
   "formatIpcError.unknownError": "알 수 없는 오류",
   "formatIpcError.errorSuffix": "가 발생했습니다.",
 };

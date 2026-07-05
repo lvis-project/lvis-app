@@ -19,8 +19,11 @@ import {
   createLogFileSink,
   parseLogFileDate,
   pruneOldLogs,
+  capLogTree,
   LOG_RETENTION_DAYS,
   LOG_MAX_BYTES,
+  LOG_MAX_FILES_PER_DAY,
+  LOG_MAX_TOTAL_BYTES,
 } from "../log-file-sink.js";
 
 let logDir: string;
@@ -180,10 +183,13 @@ describe("createLogFileSink — size-based sequence rolling", () => {
     const sink = createLogFileSink({ dir: logDir, retentionDays: 7, maxBytes: 64 });
     try {
       const base = join(logDir, `lvis-${todayDateStr()}.log`);
-      // Rolling is byte-count based (in-process, not statSync). 200 writes ×
-      // 21 bytes = 4200 bytes >> the 64-byte ceiling → several rolls.
+      // Rolling is byte-count based (in-process, not statSync). 8 writes ×
+      // 21 bytes = 168 bytes >> the 64-byte ceiling → a few rolls. Kept well
+      // under LOG_MAX_FILES_PER_DAY (20) so the #1499 per-day count cap (which
+      // prunes oldest sequences, base included, once a day exceeds the limit)
+      // does not delete the base file this assertion still expects to survive.
       const line = "x".repeat(20) + "\n";
-      for (let i = 0; i < 200; i++) sink.write(line);
+      for (let i = 0; i < 8; i++) sink.write(line);
       // currentFile (in-process, race-free) already reflects the final roll.
       const finalFile = sink.currentFile;
       expect(finalFile).not.toBe(base);
@@ -269,5 +275,42 @@ describe("SOT constants", () => {
   it("exports the documented defaults", () => {
     expect(LOG_RETENTION_DAYS).toBe(7);
     expect(LOG_MAX_BYTES).toBe(10 * 1024 * 1024);
+    expect(LOG_MAX_FILES_PER_DAY).toBe(20);
+    expect(LOG_MAX_TOTAL_BYTES).toBe(200 * 1024 * 1024);
+  });
+});
+
+describe("capLogTree — per-day count + total-byte caps (#1499 E2)", () => {
+  it("deletes oldest sequences beyond the per-day file limit", () => {
+    // 5 sequence files for one day; cap at 2 → oldest 3 removed.
+    writeFileSync(join(logDir, "lvis-2025-06-01.log"), "a");
+    for (let i = 1; i <= 4; i++) writeFileSync(join(logDir, `lvis-2025-06-01.${i}.log`), "a");
+    const deleted = capLogTree(logDir, { maxFilesPerDay: 2, maxTotalBytes: Infinity });
+    expect(deleted.length).toBe(3);
+    // The two highest sequences survive.
+    const remaining = readdirSync(logDir).sort();
+    expect(remaining).toEqual(["lvis-2025-06-01.3.log", "lvis-2025-06-01.4.log"]);
+  });
+
+  it("deletes oldest files first to satisfy the total-byte cap", () => {
+    writeFileSync(join(logDir, "lvis-2025-06-01.log"), "x".repeat(100));
+    writeFileSync(join(logDir, "lvis-2025-06-02.log"), "x".repeat(100));
+    writeFileSync(join(logDir, "lvis-2025-06-03.log"), "x".repeat(100));
+    const deleted = capLogTree(logDir, { maxFilesPerDay: 999, maxTotalBytes: 150 });
+    // Oldest (06-01) removed until total ≤ 150.
+    expect(deleted).toContain("lvis-2025-06-01.log");
+    expect(existsSync(join(logDir, "lvis-2025-06-03.log"))).toBe(true);
+  });
+
+  it("never deletes keepFile", () => {
+    const keep = join(logDir, "lvis-2025-06-01.5.log");
+    writeFileSync(join(logDir, "lvis-2025-06-01.log"), "a");
+    for (let i = 1; i <= 5; i++) writeFileSync(join(logDir, `lvis-2025-06-01.${i}.log`), "a");
+    capLogTree(logDir, { maxFilesPerDay: 1, maxTotalBytes: Infinity, keepFile: keep });
+    expect(existsSync(keep)).toBe(true);
+  });
+
+  it("missing dir is graceful", () => {
+    expect(capLogTree(join(logDir, "nope"))).toEqual([]);
   });
 });
