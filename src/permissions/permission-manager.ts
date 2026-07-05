@@ -31,7 +31,11 @@ import { lookupApproval, canonicalStringify } from "./user-approval-store.js";
 import { buildSandboxAuditEntry } from "../audit/sandbox-audit.js";
 import { emitSandboxAudit } from "../audit/sandbox-audit-sink.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
-import { isSensitivePath } from "./sensitive-paths.js";
+import {
+  isSensitivePath,
+  canonicalizePathForMatch,
+  caseFoldForMatch,
+} from "./sensitive-paths.js";
 import { isPathAllowed } from "./allowed-directories.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
@@ -705,6 +709,73 @@ export class PermissionManager {
     // In both cases outstanding bearers should re-resolve under the new
     // policy rather than keep operating under the now-stale snapshot.
     this.revokeAllPluginAccess(`rule-removed:${action}:${pattern}`);
+  }
+
+  /**
+   * #1493 — prune path-scoped "Allow always" grants that live strictly under a
+   * removed workspace root.
+   *
+   * A grant made on a path-bearing tool (write_file / edit_file / …) is
+   * persisted with a pattern of the form `<toolName>:path:<absPath>` (see
+   * `approvalCacheKeyFor` + file-tools `approvalCacheKey`). `additionalDirectories`
+   * (the read allow-list) and `rules[].tier` (the graduated grants) are two
+   * INDEPENDENT grant surfaces: removing a workspace root shrinks the former but
+   * leaves the latter's path grants orphaned. On the SAME root being re-added
+   * they would silently revive, re-authorizing writes the user thought they had
+   * revoked. This closes that gap by revoking every allow rule whose pattern
+   * targets a path strictly under the removed root, in a single file rewrite.
+   *
+   * Matching is canonical/case-folded via the SAME helpers the sensitive-path
+   * and workspace scope guards use, so a trailing slash, `..`, symlink, or case
+   * variant of the stored path still resolves under the root. Only STRICT
+   * descendants are pruned — a grant on the root directory entry itself is left
+   * intact (removing a root does not imply the user disowned a grant on the
+   * folder they picked; it maps to the read-list entry, not a file under it).
+   *
+   * Non-path allow rules (plain tool-name globs like `web_fetch`) and deny rules
+   * are never touched. Returns the number of allow rules pruned so the caller
+   * (workspace.removeRoot) can surface it in the renderer toast.
+   */
+  async prunePathGrantsUnderRoot(root: string): Promise<number> {
+    const rootCanon = caseFoldForMatch(canonicalizePathForMatch(root));
+    const isUnderRoot = (pattern: string): boolean => {
+      const target = extractGrantPath(pattern);
+      if (target === null) return false;
+      const targetCanon = caseFoldForMatch(canonicalizePathForMatch(target));
+      // Strict descendant only — equal path (a grant on the root itself) is kept.
+      return isStrictPathDescendant(rootCanon, targetCanon);
+    };
+
+    // The persisted file is the SOT for path grants: addAlwaysAllowedPersist
+    // writes the allow rule to the file + the in-memory alwaysAllowed Map, but
+    // NOT to `this.rules` (that array is only hydrated from the file at boot via
+    // loadRulesFromFile). Scan the file, not `this.rules`, so a grant made this
+    // session is still pruned. Do the read + filter inside ONE
+    // updatePermissionsFile pass (atomic under the store lock) and collect the
+    // pruned patterns so in-memory state (rules + alwaysAllowed) is reconciled.
+    const prunedPatterns = new Set<string>();
+    await updatePermissionsFile(this.permissionsFilePath, (file) => {
+      file.rules = file.rules.filter((r) => {
+        if (r.action === "allow" && !r.source && isUnderRoot(r.pattern)) {
+          prunedPatterns.add(r.pattern);
+          return false;
+        }
+        return true;
+      });
+    });
+    if (prunedPatterns.size === 0) return 0;
+
+    // Reconcile in-memory caches with the persisted shrink (a boot-hydrated rule
+    // or a same-session Map entry for the pruned pattern must also drop).
+    this.rules = this.rules.filter(
+      (r) => !(r.action === "allow" && !r.source && prunedPatterns.has(r.pattern)),
+    );
+    for (const pattern of prunedPatterns) this.alwaysAllowed.delete(pattern);
+
+    this.broadcastConfigChanged?.();
+    // A revoke narrows policy — outstanding bearers must re-resolve under it.
+    this.revokeAllPluginAccess(`root-removed-prune:${root}`);
+    return prunedPatterns.size;
   }
 
   /**
@@ -1404,6 +1475,40 @@ export class PermissionManager {
 }
 
 // ─── Helpers ────────────────────────────────────────
+
+// ── #1493 path-grant prune helpers ───────────────────
+/**
+ * The marker `approvalCacheKeyFor` + file-tools use to embed a resolved path in
+ * a persisted grant pattern: `<toolName>:path:<absPath>`. Splitting on the FIRST
+ * occurrence is Windows-safe — the tool name never contains `:path:`, and the
+ * `<absPath>` tail keeps its own drive-letter colon (`C:\…`) intact.
+ */
+const GRANT_PATH_MARKER = ":path:";
+
+/**
+ * Extract the absolute path a path-scoped grant pattern targets, or `null` when
+ * the pattern is not a path grant (a plain tool-name glob like `web_fetch`).
+ */
+export function extractGrantPath(pattern: string): string | null {
+  const idx = pattern.indexOf(GRANT_PATH_MARKER);
+  if (idx < 0) return null;
+  const tail = pattern.slice(idx + GRANT_PATH_MARKER.length);
+  return tail.length > 0 ? tail : null;
+}
+
+/**
+ * True when `child` is a STRICT descendant of `parent` — both already
+ * canonicalized + case-folded. Equal paths return false (a grant on the root
+ * folder itself is not pruned). The separator guard prevents `/a/foo` from
+ * matching under `/a/fo`.
+ */
+export function isStrictPathDescendant(parent: string, child: string): boolean {
+  if (child === parent) return false;
+  const base = parent.endsWith("/") ? parent : `${parent}/`;
+  const normChild = child.replace(/\\/g, "/");
+  const normBase = base.replace(/\\/g, "/");
+  return normChild.startsWith(normBase);
+}
 
 // ── P2 graduated grant tier helpers ──────────────────
 const TIER_RANK: Record<GrantTier, number> = { read: 0, write: 1 };

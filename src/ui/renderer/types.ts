@@ -1730,6 +1730,12 @@ export interface LvisWorkspaceApi {
     ok: boolean;
     removed?: string;
     roots?: Array<{ path: string; isDefault: boolean }>;
+    /**
+     * #1493 — count of orphaned path-scoped grants pruned because they targeted
+     * a path strictly under the removed root. Non-zero counts are surfaced in
+     * the removal toast so the user knows saved grants were revoked too.
+     */
+    prunedGrants?: number;
     error?: "unauthorized" | "invalid-path" | "not-an-additional-root" | "cannot-remove-default";
     message?: string;
   }>;
