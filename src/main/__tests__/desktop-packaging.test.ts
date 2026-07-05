@@ -79,6 +79,22 @@ describe("desktop packaging", () => {
     });
   });
 
+  it("uses LVIS-branded icon assets for the one-click Windows installer", () => {
+    const pkg = readPackageJson();
+    expect(pkg.build.nsis).toMatchObject({
+      oneClick: true,
+      installerIcon: "build/installerIcon.ico",
+      installerHeaderIcon: "build/installerHeaderIcon.ico",
+    });
+
+    for (const asset of ["installerIcon.ico", "installerHeaderIcon.ico"]) {
+      const buffer = readFileSync(join(root, "build", asset));
+      expect(buffer.readUInt16LE(0)).toBe(0);
+      expect(buffer.readUInt16LE(2)).toBe(1);
+      expect(buffer.readUInt16LE(4)).toBeGreaterThanOrEqual(5);
+    }
+  });
+
   it("verifies Windows app-file removal and exposes retry/failure paths", () => {
     const script = readFileSync(join(root, "build", "installer.nsh"), "utf8");
 

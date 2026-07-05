@@ -355,6 +355,8 @@
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": true,
       "include": "build/installer.nsh",
+      "installerIcon": "build/installerIcon.ico",
+      "installerHeaderIcon": "build/installerHeaderIcon.ico",
       "uninstallDisplayName": "LVIS",
       "shortcutName": "LVIS",
       "artifactName": "${productName}-${version}-windows-${arch}-setup.${ext}"
