@@ -25,6 +25,7 @@ import { stripSuggestedReplies } from "../suggested-replies.js";
 import { GUIDE_JOINED_MAX_CHARS } from "./guidance-limits.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
+import { MAX_TOOL_CALLS_PER_ROUND } from "../../shared/subagent-policy.js";
 
 const log = createLogger("lvis");
 
@@ -54,11 +55,12 @@ const MAX_TOOL_SCHEMA_DROPS_PER_TURN = 5;
 /**
  * C3(a): per-round cap on the number of tool calls an assistant round can
  * issue. Pathological round-emitting many tool_use blocks at once would
- * otherwise execute every one in parallel before the maxRounds guard could
- * intervene. SubAgentRunner relies on this cap to keep a sub-agent's total
- * tool execution count bounded by `maxRounds * MAX_TOOL_CALLS_PER_ROUND`.
+ * otherwise execute every one before the maxRounds guard could intervene.
+ * Since `agent_spawn` is a tool call, this is also the model-facing sub-agent
+ * fan-out limit: at most 10 sub-agents can be requested in one assistant round.
+ * SubAgentRunner also relies on this cap to keep a sub-agent's total tool
+ * execution count bounded by `maxRounds * MAX_TOOL_CALLS_PER_ROUND`.
  */
-const MAX_TOOL_CALLS_PER_ROUND = 10;
 
 // Intra-turn tool-result stubbing — deep tool loops (e.g. indexer turns of
 // 11~19 rounds) otherwise resend the full accumulated tool_result history on
