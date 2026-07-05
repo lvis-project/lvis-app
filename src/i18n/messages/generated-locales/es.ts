@@ -12,6 +12,7 @@ export const esMessages: Record<string, string> = {
   "chatPreviewRail.copyPath": "Copiar ruta",
   "chatPreviewRail.copyRelativePath": "Copiar ruta relativa",
   "chatPreviewRail.removeRoot": "Quitar carpeta",
+  "chatPreviewRail.removeRootPruned": "Carpeta eliminada · {count} permiso(s) guardado(s) revocado(s)",
   "actionPanel.closeAriaLabel": "Cerrar panel de actividad de herramientas",
   "actionPanel.closeTooltip": "Cerrar panel de actividad de herramientas",
   "actionPanel.fetchedPagesTitle": "Fuentes web",

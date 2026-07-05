@@ -187,6 +187,14 @@ export interface WorkspaceRemoveRootResult {
   ok: boolean;
   removed?: string;
   roots?: WorkspaceRoot[];
+  /**
+   * #1493 — count of orphaned path-scoped "Allow always" grants pruned because
+   * they targeted a path strictly under the removed root (`rules[].tier` is an
+   * independent grant surface from `additionalDirectories`; without this they
+   * would silently revive on re-add). 0 when none matched. The renderer mentions
+   * a non-zero count in its removal toast (Korean via i18n).
+   */
+  prunedGrants?: number;
   error?: "unauthorized" | "invalid-path" | "not-an-additional-root" | "cannot-remove-default";
   message?: string;
 }
@@ -454,6 +462,48 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
         return { ok: false, error: "not-an-additional-root", message: "path is not a removable project root" };
       }
       await removeAllowedDirectoryPersist(match);
+      // #1493 — the read allow-list just shrank, but path-scoped #1481 tier
+      // grants (`rules[].tier` patterns of the form `<tool>:path:<absPath>`) for
+      // files UNDER the removed root are a SEPARATE grant surface: without this
+      // they stay orphaned and silently revive if the same root is re-added,
+      // re-authorizing writes the user thought they revoked. Prune them via the
+      // permission manager (the SOT that owns the rule list + persistence). The
+      // manager may not be wired yet (boot race / headless) — treat the prune as
+      // best-effort so removeRoot still succeeds; the read-list shrink is the
+      // primary, always-applied action.
+      let prunedGrants = 0;
+      // #1494 item-4 — redacted per-pattern provenance for the success audit.
+      // prunePathGrantsUnderRoot returns the pruned grant tuples; we keep the
+      // count derivable (`.length`) for the IPC response + renderer toast, but
+      // ALSO record which grants were revoked (tool name, tier, redacted path)
+      // so forensics can see exactly what a root removal disowned. The pattern
+      // list is audit-only — the IPC response still carries a bare number, so the
+      // renderer is unchanged (No-Fallback: no renderer-side type widening).
+      let prunedAudit: Array<{ tool: string; tier: string; path: string }> = [];
+      const pm = deps.conversationLoop?.permissionManager;
+      if (pm) {
+        try {
+          const prunedList = await pm.prunePathGrantsUnderRoot(match);
+          prunedGrants = prunedList.length;
+          prunedAudit = prunedList.map((g) => ({
+            tool: g.toolName,
+            tier: g.tier,
+            path: redactFsPath(g.path),
+          }));
+        } catch (err) {
+          // A prune failure must not fail the removal — log and continue.
+          auditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "workspace-remove-root",
+            type: "warn",
+            input: JSON.stringify({
+              channel: CHANNELS.workspace.removeRoot,
+              path: redactFsPath(match),
+              pruneError: err instanceof Error ? err.message : String(err),
+            }),
+          });
+        }
+      }
       auditLogger.log({
         timestamp: new Date().toISOString(),
         sessionId: "workspace-remove-root",
@@ -461,9 +511,13 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
         input: JSON.stringify({
           channel: CHANNELS.workspace.removeRoot,
           path: redactFsPath(match),
+          prunedGrants,
+          // Redacted per-pattern tuples (empty when nothing pruned). Audit-only;
+          // never returned to the renderer.
+          ...(prunedAudit.length > 0 ? { prunedPatterns: prunedAudit } : {}),
         }),
       });
-      return { ok: true, removed: match, roots: computeRoots() };
+      return { ok: true, removed: match, roots: computeRoots(), prunedGrants };
     },
   );
 

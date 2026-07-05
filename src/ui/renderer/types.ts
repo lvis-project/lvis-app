@@ -26,6 +26,7 @@ import type {
   OpenHtmlPreviewWindowResult,
 } from "../../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../../shared/session-todo.js";
+import type { SidebarTab } from "../../shared/sidebar-tab.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import type {
@@ -236,7 +237,7 @@ export type AppSettings = {
     sidePanelSplitPreviewPercent?: number;
     sidePanelSplitSubagentPercent?: number;
     /** Persisted active sidebar tab ("chats" | "projects"). SOT: `SystemSettings`. */
-    sidebarActiveTab?: "chats" | "projects";
+    sidebarActiveTab?: SidebarTab;
     /** Pinned project roots — sort to the top of the sidebar's Projects tab. SOT: `SystemSettings`. */
     pinnedProjectRoots?: string[];
   };
@@ -1729,6 +1730,12 @@ export interface LvisWorkspaceApi {
     ok: boolean;
     removed?: string;
     roots?: Array<{ path: string; isDefault: boolean }>;
+    /**
+     * #1493 — count of orphaned path-scoped grants pruned because they targeted
+     * a path strictly under the removed root. Non-zero counts are surfaced in
+     * the removal toast so the user knows saved grants were revoked too.
+     */
+    prunedGrants?: number;
     error?: "unauthorized" | "invalid-path" | "not-an-additional-root" | "cannot-remove-default";
     message?: string;
   }>;

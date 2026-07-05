@@ -12,6 +12,7 @@ export const jaMessages: Record<string, string> = {
   "chatPreviewRail.copyPath": "パスをコピー",
   "chatPreviewRail.copyRelativePath": "相対パスをコピー",
   "chatPreviewRail.removeRoot": "フォルダを削除",
+  "chatPreviewRail.removeRootPruned": "フォルダを削除 · 保存済みの権限 {count} 件も取り消し",
   "actionPanel.closeAriaLabel": "ツール活動パネルを閉じる",
   "actionPanel.closeTooltip": "ツール活動パネルを閉じる",
   "actionPanel.fetchedPagesTitle": "Webソース",
