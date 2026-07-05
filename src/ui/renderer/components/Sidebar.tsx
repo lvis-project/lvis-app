@@ -30,6 +30,7 @@ import { getPluginViewLabel, toViewKey } from "../api-client.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
 import { sortWithPinnedFirst } from "../utils/pinned-sort.js";
 import type { SidebarTab } from "../hooks/use-sidebar-tab.js";
+import { isSidebarTab } from "../../../shared/sidebar-tab.js";
 import type { PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
@@ -545,9 +546,22 @@ function ProjectSessionList({
   // otherwise unchanged).
   const namedProjects = useMemo(() => {
     const known = workspaceProjects.filter((project) => !project.isDefault);
+    // The default/base-directory root itself — sessions tagged with it must
+    // fold into the ungrouped list below, never synthesize a phantom named
+    // group here. Defense-in-depth alongside the read-path scrub in
+    // handleChatSessions (src/ipc/handlers/chat.ts): that chokepoint strips
+    // project metadata from legacy default-tagged sessions before they ever
+    // reach the renderer, but this guard keeps the "unknown project"
+    // fallback below correct on its own terms too, independent of what any
+    // particular caller supplies in `sessions`.
+    const defaultProjectRoot = workspaceProjects.find((project) => project.isDefault)?.projectRoot;
     const unknown = new Map<string, ProjectIdentity>();
     for (const session of mainSessions) {
-      if (!session.projectRoot || known.some((project) => projectRootEquals(project.projectRoot, session.projectRoot))) continue;
+      if (
+        !session.projectRoot
+        || known.some((project) => projectRootEquals(project.projectRoot, session.projectRoot))
+        || (defaultProjectRoot && projectRootEquals(defaultProjectRoot, session.projectRoot))
+      ) continue;
       unknown.set(session.projectRoot, {
         projectRoot: session.projectRoot,
         projectName: session.projectName || projectBasename(session.projectRoot),
@@ -574,8 +588,14 @@ function ProjectSessionList({
   );
   // Every conversation NOT scoped to a named project — no projectRoot at all
   // (the common case once "no explicit project" stops persisting default
-  // metadata), or a projectRoot that doesn't match any named project (legacy
-  // default-tagged sessions from before this refinement). Rendered as a
+  // metadata), or a projectRoot that doesn't match any named project.
+  // Sessions persisted BEFORE this refinement tagged every session with the
+  // default workspace root/"workspace" name (no isDefault guard); those no
+  // longer reach this component with that metadata at all — `handleChatSessions`
+  // (src/ipc/handlers/chat.ts) strips projectRoot/projectName at the read
+  // chokepoint whenever the stored root is the default workspace root, so a
+  // legacy session arrives here exactly like a normal "no explicit project"
+  // one (no projectRoot) rather than a phantom named group. Rendered as a
   // plain, ungrouped list — ChatGPT/Claude's "general chats" pattern — rather
   // than wrapped in a fake project header. Pinned conversations sort first.
   const ungroupedSessions = useMemo(() => {
@@ -744,7 +764,7 @@ function ProjectSessionList({
 
 /** Radix Tabs' onValueChange passes a bare `string` — narrow to `SidebarTab` before persisting. */
 function onActiveSidebarTabChangeGuard(value: string, onActiveTabChange: (tab: SidebarTab) => void): void {
-  if (value === "chats" || value === "projects") onActiveTabChange(value);
+  if (isSidebarTab(value)) onActiveTabChange(value);
 }
 
 // ─── ClusterStrip ──────────────────────────────────────────────────────────
