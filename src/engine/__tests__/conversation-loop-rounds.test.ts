@@ -11,6 +11,7 @@ import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { createReadToolResultChunkTool } from "../../tools/tool-result-chunk.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import { MAX_AGENT_SPAWNS_PER_ROUND } from "../../shared/subagent-policy.js";
 import { SessionTodoStore } from "../../main/session-todo-store.js";
 import { MemoryManager } from "../../memory/memory-manager.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
@@ -765,6 +766,8 @@ describe("ConversationLoop queryLoop", () => {
   // assistant history MUST have a matching tool_result block in the next
   // user turn, otherwise Anthropic + OpenAI strict APIs 400 the next request.
   it("R2-CR-1: per-round fan-out cap persists only the capped slice (10) so tool_use/tool_result counts match", async () => {
+    expect(MAX_AGENT_SPAWNS_PER_ROUND).toBe(10);
+
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(createDynamicTool({
       name: "noop",
@@ -821,20 +824,20 @@ describe("ConversationLoop queryLoop", () => {
       (m) => m.role === "assistant" && Array.isArray((m as { toolCalls?: unknown[] }).toolCalls),
     ) as { toolCalls: Array<{ id: string }> } | undefined;
     expect(assistantWithTools).toBeDefined();
-    // CRITICAL: assistant history must contain exactly 10 tool_use blocks.
-    expect(assistantWithTools!.toolCalls).toHaveLength(10);
+    // CRITICAL: assistant history must contain exactly the host fan-out cap.
+    expect(assistantWithTools!.toolCalls).toHaveLength(MAX_AGENT_SPAWNS_PER_ROUND);
 
     // CRITICAL: tool_result count in history must match the persisted
-    // tool_use count (10 ↔ 10). Any other ratio = next API request 400s.
+    // tool_use count. Any other ratio = next API request 400s.
     const toolResults = messages.filter((m) => m.role === "tool_result");
-    expect(toolResults).toHaveLength(10);
+    expect(toolResults).toHaveLength(MAX_AGENT_SPAWNS_PER_ROUND);
 
     // The persisted tool_use ids must be the first 10 (tu-0 .. tu-9), not
     // a later subset, and every persisted tool_use id has a matching
     // tool_result.toolUseId.
     const persistedIds = assistantWithTools!.toolCalls.map((tc) => tc.id);
     expect(persistedIds).toEqual(
-      Array.from({ length: 10 }).map((_, i) => `tu-${i}`),
+      Array.from({ length: MAX_AGENT_SPAWNS_PER_ROUND }).map((_, i) => `tu-${i}`),
     );
     const resultIds = toolResults.map(
       (m) => (m as { toolUseId: string }).toolUseId,
