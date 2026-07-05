@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
-import { LayoutGrid, ExternalLink, Plug } from "lucide-react";
+import { LayoutGrid, ExternalLink, Plug, Wrench } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -76,6 +76,8 @@ export interface PluginEntry {
    * first opening Settings (architecture.md §9.4a).
    */
   unauthed?: boolean;
+  /** True when this cell represents a failed plugin that should route to Doctor. */
+  doctorRequired?: boolean;
 }
 
 interface PluginGridButtonProps {
@@ -149,7 +151,12 @@ export function PluginGridButton({
     return () => ro.disconnect();
   }, [open]);
   const anyUnauthed = plugins.some((p) => p.unauthed);
-  const tooltipLabel = anyUnauthed ? t("pluginGridButton.tooltipUnauthed") : t("pluginGridButton.tooltip");
+  const anyDoctorRequired = plugins.some((p) => p.doctorRequired || p.loadStatus === "failed");
+  const tooltipLabel = anyDoctorRequired
+    ? t("pluginGridButton.tooltipDoctor")
+    : anyUnauthed
+      ? t("pluginGridButton.tooltipUnauthed")
+      : t("pluginGridButton.tooltip");
 
   const handleSelect = (viewKey: string) => {
     setOpen(false);
@@ -181,9 +188,9 @@ export function PluginGridButton({
   const triggerInner = (
     <span className="relative inline-flex h-3.5 w-3.5">
       <LayoutGrid className="h-3.5 w-3.5" />
-      {anyUnauthed && (
+      {(anyUnauthed || anyDoctorRequired) && (
         <span
-          aria-label={t("pluginGridButton.dotAriaLabel")}
+          aria-label={anyDoctorRequired ? t("pluginGridButton.doctorDotAriaLabel") : t("pluginGridButton.dotAriaLabel")}
           data-testid="plugin-grid-unauthed-dot"
           className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-destructive ring-1 ring-background"
         />
@@ -278,24 +285,34 @@ export function PluginGridButton({
               const preparationText = formatPreparationText(p.preparationStatus, t);
               const preparationTitle = formatPreparationTitle(p.preparationStatus, t);
               const Icon = pluginIconFor({ icon: p.icon, iconText: p.iconText });
+              const needsDoctor = p.doctorRequired || p.loadStatus === "failed";
 
               return (
                 <button
                   key={p.viewKey}
-                  className={`plugin-cell flex flex-col items-center gap-1 rounded-lg px-2 py-1 transition-all${isInstalling ? " cell-installing cursor-default" : " hover:bg-muted hover:-translate-y-0.5"}`}
+                  className={`plugin-cell flex flex-col items-center gap-1 rounded-lg px-2 py-1 transition-all${isInstalling ? " cell-installing cursor-default" : " hover:bg-muted hover:-translate-y-0.5"}${needsDoctor ? " ring-1 ring-destructive/(--opacity-muted)" : ""}`}
                   disabled={isInstalling}
                   onClick={() => !isInstalling && handleSelect(p.viewKey)}
                   data-viewkey={p.viewKey}
                   data-testid={`plugin-cell-${cellTestId}`}
                   data-unauthed={p.unauthed ? "true" : undefined}
+                  data-doctor-required={needsDoctor ? "true" : undefined}
                   aria-busy={isInstalling}
-                  aria-describedby={p.unauthed ? `${p.viewKey}-unauthed` : undefined}
+                  aria-describedby={
+                    needsDoctor
+                      ? `${p.viewKey}-doctor`
+                      : p.unauthed
+                        ? `${p.viewKey}-unauthed`
+                        : undefined
+                  }
                   title={
                     isInstalling && phaseLabel
                       ? preparationTitle
                         ? t("pluginGridButton.installingTitleWithPrep", { label: p.label, phaseLabel, preparationTitle })
                         : t("pluginGridButton.installingTitle", { label: p.label, phaseLabel })
-                      : p.unauthed
+                      : needsDoctor
+                        ? t("pluginGridButton.doctorTitle", { label: p.label })
+                        : p.unauthed
                         ? t("pluginGridButton.unauthedTitle", { label: p.label })
                         : undefined
                   }
@@ -331,9 +348,25 @@ export function PluginGridButton({
                         🔒
                       </span>
                     )}
+                    {needsDoctor && (
+                      <span
+                        id={`${p.viewKey}-doctor`}
+                        aria-label={t("pluginGridButton.doctorBadge")}
+                        className="absolute -right-0.5 -top-0.5 inline-flex items-center justify-center rounded-full bg-destructive p-0.5 text-destructive-foreground shadow"
+                      >
+                        <Wrench className="h-2.5 w-2.5" aria-hidden="true" />
+                      </span>
+                    )}
                   </span>
                   <span className="text-[11px] font-bold truncate max-w-[64px]">{p.label}</span>
-                  {preparationText && (
+                  {needsDoctor ? (
+                    <span
+                      className="max-w-[72px] truncate text-[9px] font-medium text-destructive"
+                      data-testid={`plugin-cell-${cellTestId}-doctor`}
+                    >
+                      {t("pluginGridButton.doctorNeeded")}
+                    </span>
+                  ) : preparationText && (
                     <span
                       className="max-w-[72px] truncate text-[9px] font-medium text-warning"
                       data-testid={`plugin-cell-${cellTestId}-preparation`}

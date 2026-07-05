@@ -10,6 +10,7 @@ import { AppShell } from "./AppShell.js";
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { getPluginInstallAliases } from "./utils/plugin-install-aliases.js";
+import { parsePluginDoctorViewKey, toPluginDoctorViewKey } from "./utils/plugin-doctor-view.js";
 import { summarizePluginReadiness } from "./onboarding/first-run-readiness.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
@@ -421,6 +422,11 @@ export function App() {
       };
     });
     const viewKeys = new Set(viewEntries.map((entry) => entry.viewKey));
+    const viewPluginIds = new Set(
+      viewEntries
+        .map((entry) => entry.pluginId)
+        .filter((pluginId): pluginId is string => typeof pluginId === "string" && pluginId.length > 0),
+    );
     const preparingCardEntries = pluginCards.flatMap((card) => {
       if (card.loadStatus !== "preparing") return [];
       return (card.uiExtensions ?? [])
@@ -441,8 +447,29 @@ export function App() {
         })
         .filter((entry): entry is PluginEntry => entry !== null);
     });
-    return [...viewEntries, ...preparingCardEntries];
+    const failedCardEntries = pluginCards.flatMap((card): PluginEntry[] => {
+      if (card.loadStatus !== "failed" || viewPluginIds.has(card.id)) return [];
+      return [{
+        viewKey: toPluginDoctorViewKey(card.id),
+        pluginId: card.id,
+        installAliases: getPluginInstallAliases(card.id, card.installAliases),
+        loadStatus: card.loadStatus,
+        label: card.name,
+        icon: card.icon,
+        iconText: card.iconText,
+        unauthed: false,
+        doctorRequired: true,
+      }];
+    });
+    return [...viewEntries, ...preparingCardEntries, ...failedCardEntries];
   }, [pluginViews, pluginAuthStatuses, pluginCards]);
+
+  const failedPluginCards = useMemo(() => {
+    const pluginIdsWithViews = new Set(pluginViews.map((view) => view.pluginId));
+    return pluginCards.filter((card) =>
+      card.loadStatus === "failed" && !pluginIdsWithViews.has(card.id)
+    );
+  }, [pluginCards, pluginViews]);
 
   const firstRunPluginSummary = useMemo(
     () => summarizePluginReadiness(pluginCards),
@@ -517,6 +544,21 @@ export function App() {
       return "settings";
     });
   }, [api, appMode]);
+
+  const handleViewSelectWithDoctor = useCallback((key: string) => {
+    const doctorPluginId = parsePluginDoctorViewKey(key);
+    if (doctorPluginId) {
+      const card = pluginCards.find((candidate) => candidate.id === doctorPluginId);
+      statusPushToast({
+        severity: "warning",
+        message: t("app.pluginDoctorRequiredToast", { label: card?.name ?? doctorPluginId }),
+        ttlMs: 10000,
+      });
+      onOpenSettings("plugin-config");
+      return;
+    }
+    handleViewSelect(key);
+  }, [handleViewSelect, onOpenSettings, pluginCards, statusPushToast, t]);
 
   const handleCloseInlineSettings = useCallback(() => {
     const target = settingsReturnViewRef.current;
@@ -717,8 +759,9 @@ export function App() {
         onToggleAppMode={setAppMode}
         onOpenDevTools={() => setDevToolsOpen((v) => !v)}
         appUpdate={appUpdate}
-        onSelectView={handleViewSelect}
+        onSelectView={handleViewSelectWithDoctor}
         pluginViews={pluginViews}
+        failedPluginCards={failedPluginCards}
         pluginAuthStatuses={pluginAuthStatuses}
         onOpenSettings={onOpenSettings}
         onNewChat={onNewChat}
@@ -833,7 +876,7 @@ export function App() {
             askQuestions={askQuestions}
             onResolveAskQuestion={dismissAskQuestion}
             plugins={pluginEntries}
-            onSelectPlugin={handleViewSelect}
+            onSelectPlugin={handleViewSelectWithDoctor}
             onOpenApprovalQueue={() => setDeferredQueueOpen(true)}
             commandActions={commandActions}
             commandPopoverOpen={commandPopoverOpen}

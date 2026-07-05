@@ -9,7 +9,7 @@ import { sanitizePluginConfig, sanitizePluginConfigKey } from "../../../shared/p
 import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { InstallInFlight, InstallPhase, InstallProgressPayload } from "../hooks/use-plugin-marketplace.js";
-import type { PluginCardSummary } from "../types.js";
+import type { MarketplaceItem, PluginCardSummary } from "../types.js";
 import { PluginAuthSection } from "../components/PluginAuthSection.js";
 import { usePluginAuthStatuses } from "../hooks/use-plugin-auth-status.js";
 import { PluginUninstallDialog } from "../dialogs/PluginUninstallDialog.js";
@@ -59,6 +59,63 @@ function formatBytes(bytes: number): string {
 
 function isRuntimeCallablePlugin(plugin: PluginCardSummary): boolean {
   return plugin.runtimeLoaded ?? (plugin.loadStatus === "loaded");
+}
+
+function getPluginDoctorInstallKey(plugin: PluginCardSummary): string {
+  return plugin.installAliases?.[0] ?? plugin.id;
+}
+
+function normalizePluginLookupKey(value: string | null | undefined): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@[^/]+\//, "")
+    .replace(/@[^/@]+$/, "")
+    .replace(/^lvis-plugin-/, "")
+    .replace(/^plugin-/, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function findPluginDoctorMarketplaceItem(
+  plugin: PluginCardSummary,
+  marketplace: MarketplaceItem[],
+): MarketplaceItem | null {
+  const literalKeys = new Set(
+    [plugin.id, ...(plugin.installAliases ?? [])]
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const normalizedKeys = new Set(
+    [plugin.id, plugin.name, ...(plugin.installAliases ?? [])]
+      .map((value) => normalizePluginLookupKey(value))
+      .filter(Boolean),
+  );
+
+  return marketplace.find((item) => {
+    if (item.pluginType && item.pluginType !== "plugin") return false;
+    if (literalKeys.has(item.id.trim().toLowerCase())) return true;
+    return [item.id, item.name, item.packageSpec].some((value) =>
+      normalizedKeys.has(normalizePluginLookupKey(value)),
+    );
+  }) ?? null;
+}
+
+async function resolvePluginDoctorInstallKey(plugin: PluginCardSummary): Promise<string> {
+  const fallback = getPluginDoctorInstallKey(plugin);
+  let api: ReturnType<typeof getApi>;
+  try {
+    api = getApi();
+  } catch {
+    return fallback;
+  }
+
+  try {
+    const marketplace = await api.listMarketplacePlugins();
+    return findPluginDoctorMarketplaceItem(plugin, marketplace)?.id ?? fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function clampProgressPct(value: unknown): number | null {
@@ -161,6 +218,7 @@ export function PluginConfigTab() {
   const [newValue, setNewValue] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [doctoringId, setDoctoringId] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ type: "error" | "success"; msg: string } | null>(null);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showBanner = useCallback((type: "error" | "success", msg: string) => {
@@ -193,6 +251,8 @@ export function PluginConfigTab() {
           if (preferred) return preferred.id;
         }
         if (current && cards.some((c) => c.id === current)) return current;
+        const failed = cards.find((card) => card.loadStatus === "failed");
+        if (failed) return failed.id;
         return cards.length > 0 ? cards[0].id : null;
       });
     } catch (e) {
@@ -450,6 +510,24 @@ export function PluginConfigTab() {
       setLocalInstalling(false);
     }
   }, [showBanner, refreshPlugins, t]);
+
+  const handleDoctorPlugin = useCallback(async (plugin: PluginCardSummary) => {
+    setDoctoringId(plugin.id);
+    try {
+      const installKey = await resolvePluginDoctorInstallKey(plugin);
+      const result = await getHostMarketplaceApi().installMarketplacePlugin(installKey);
+      if (!result.ok) {
+        showBanner("error", result.message ?? result.error ?? t("pluginConfigTab.errorDoctor"));
+        return;
+      }
+      await refreshPlugins({ preferInstallKey: result.pluginId || installKey });
+      showBanner("success", t("pluginConfigTab.successDoctor", { displayName: plugin.name }));
+    } catch (e) {
+      showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorDoctor"));
+    } finally {
+      setDoctoringId(null);
+    }
+  }, [refreshPlugins, showBanner, t]);
 
   const handleUninstall = useCallback(async (pluginId: string, displayName: string) => {
     setSaving(true);
@@ -726,6 +804,20 @@ export function PluginConfigTab() {
                         {selectedPlugin.loadStatus === "preparing" ? t("pluginConfigTab.statusPreparing") : t("pluginConfigTab.notRunnable")}
                       </span>
                     )}
+                    {selectedPlugin.loadStatus === "failed" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs px-2"
+                        data-testid={`plugin-config:doctor:${selectedPlugin.id}`}
+                        onClick={() => void handleDoctorPlugin(selectedPlugin)}
+                        disabled={doctoringId === selectedPlugin.id}
+                      >
+                        {doctoringId === selectedPlugin.id
+                          ? t("pluginConfigTab.phaseInstalling")
+                          : t("pluginConfigTab.doctorButton")}
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       variant="destructive"
@@ -740,6 +832,47 @@ export function PluginConfigTab() {
                 </div>
 
                 <PluginPreparationStatusPanel plugin={selectedPlugin} />
+
+                {selectedPlugin.loadStatus === "failed" && (
+                  <div
+                    data-testid={`plugin-config:doctor-panel:${selectedPlugin.id}`}
+                    className="rounded-md border border-destructive/(--opacity-muted) bg-destructive/(--opacity-subtle) px-3 py-2"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 space-y-0.5">
+                        <p className="text-xs font-medium text-destructive">
+                          {t("pluginConfigTab.doctorTitle")}
+                        </p>
+                        <p className="text-[11px] text-destructive/(--opacity-intense)">
+                          {t("pluginConfigTab.doctorDescription")}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 border-destructive/(--opacity-medium) px-2 text-xs text-destructive hover:bg-destructive/(--opacity-light)"
+                          onClick={() => void handleDoctorPlugin(selectedPlugin)}
+                          disabled={doctoringId === selectedPlugin.id}
+                        >
+                          {doctoringId === selectedPlugin.id
+                            ? t("pluginConfigTab.phaseInstalling")
+                            : t("pluginConfigTab.doctorButton")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="h-7 px-2 text-xs"
+                          data-testid={`plugin-config:doctor-remove:${selectedPlugin.id}`}
+                          onClick={() => setUninstallTarget(selectedPlugin)}
+                          disabled={saving}
+                        >
+                          {t("pluginConfigTab.uninstallButton")}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Auth section — only when manifest declares `auth`, the
                     runtime is callable, and the api bridge is available.
