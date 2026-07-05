@@ -349,7 +349,7 @@ export function App() {
   // Small adapter callbacks that bridge hook outputs to ChatView / MainToolbar.
   const {
     handleLoadSession, isEntryStarred, handleFork, handleToggleStar,
-    handleAbort, handleGuide, handleFeedback, handleExport,
+    handleAbort, handleGuide, handleFeedback, handleExport, handleImport,
   } = useChatActions({
     api, streaming, currentSessionId, entries, entryIndexToHistoryIndex,
     applyLoadedSession, truncateToEntry, sessionLoad, sessionFork,
@@ -363,6 +363,16 @@ export function App() {
     }
     return loaded;
   }, [handleLoadSession, refreshSessions]);
+
+  // #1500 (E3) — import always creates a brand-new session; on success,
+  // load it into the current view and refresh the sidebar (export/import
+  // symmetry: neither mutates the session currently open).
+  const handleImportAndLoad = useCallback(async () => {
+    const sessionId = await handleImport();
+    if (sessionId) {
+      await handleLoadSessionAndRefresh(sessionId);
+    }
+  }, [handleImport, handleLoadSessionAndRefresh]);
 
   useEffect(() => {
     const unsubscribe = api.window?.onLoadSessionInMain?.((sessionId) => {
@@ -742,6 +752,7 @@ export function App() {
         isProjectPinned={isProjectPinned}
         onToggleProjectPin={toggleProjectPin}
         onExport={handleExport}
+        onImport={handleImportAndLoad}
         bootstrapStatus={bootstrapStatus}
         onDismissBootstrapStatus={dismissBootstrapStatus}
         onRetryBootstrap={() => void retryBootstrap()}
