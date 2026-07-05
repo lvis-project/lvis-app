@@ -31,8 +31,12 @@ import {
   demoFoundryHostMapFingerprint,
   validateDemoFoundryHostMap,
 } from "../../main/demo-host-resolver.js";
+import { probeOllamaAvailable } from "../../main/ollama-probe.js";
 import { validateFoundryEndpoint } from "../../permissions/reviewer/provider-adapters.js";
-import { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
+import {
+  isLLMVendor,
+  OPENAI_COMPATIBLE_VENDOR_PRESETS,
+} from "../../shared/llm-vendor-defaults.js";
 import type { IpcDeps } from "../types.js";
 import { DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE } from "../../../scripts/lib/dev-electron-exit.mjs";
 
@@ -205,7 +209,13 @@ export function registerDemoHandlers(deps: IpcDeps): void {
     async (
       e,
     ): Promise<
-      | { ok: true; activated: boolean; vendor: string | null; autoActivatable: boolean }
+      | {
+          ok: true;
+          activated: boolean;
+          vendor: string | null;
+          autoActivatable: boolean;
+          ollamaAvailable: boolean;
+        }
       | { ok: false; error: "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
@@ -221,6 +231,16 @@ export function registerDemoHandlers(deps: IpcDeps): void {
         // embedded activation key, so the chip can run the activation
         // chain without mounting the manual paste input.
         autoActivatable: getEmbeddedActivationCode() !== null,
+        // #1498 — `ollamaAvailable` tells the renderer a local Ollama
+        // server answered the liveness probe just now, so the login modal
+        // can offer the "start with a local model" CTA. Probed fresh on
+        // every status call (no caching): cheap (~500ms worst case, only
+        // called once per login-modal open), and the user may start/stop
+        // their local Ollama server between checks — a stale cached
+        // `true` would offer a CTA that then fails, and a stale `false`
+        // would hide a now-available local model. Never shown as `true`
+        // when nothing is actually listening (no misleading CTA).
+        ollamaAvailable: await probeOllamaAvailable(),
       };
     },
   );
@@ -447,6 +467,63 @@ export function registerDemoHandlers(deps: IpcDeps): void {
         return { ok: false, error: "no-embedded-code" };
       }
       return performActivation(code, "embedded");
+    },
+  );
+
+  ipcMain.handle(
+    CHANNELS.demo.activateOllama,
+    async (
+      e,
+    ): Promise<
+      | { ok: true; vendor: "ollama" }
+      | { ok: false; error: "no-ollama" | "unauthorized-frame" }
+    > => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.demo.activateOllama, e);
+        return { ok: false, error: UNAUTHORIZED_FRAME.error };
+      }
+      // Re-probe rather than trust a status check the renderer ran earlier
+      // — the user could have stopped Ollama between opening the login
+      // modal and clicking the CTA. Fail closed with a distinct code so
+      // the renderer never silently configures a vendor that isn't there.
+      const available = await probeOllamaAvailable();
+      if (!available) {
+        return { ok: false, error: "no-ollama" };
+      }
+      const preset = OPENAI_COMPATIBLE_VENDOR_PRESETS.ollama;
+      // Ollama's local server does not authenticate requests, but the
+      // `settings.hasApiKey` gate (used across onboarding/chat to decide
+      // whether the app can send a turn) only checks secret-store
+      // presence. The preset's own `apiKeyPlaceholder` ("ollama") is the
+      // documented placeholder value users already see in Settings → LLM
+      // for this vendor, so storing it here is consistent, not a fake
+      // secret bypassing a real check.
+      await deps.settingsService.setSecret("llm.apiKey.ollama", preset.apiKeyPlaceholder);
+      await deps.settingsService.patch({
+        llm: {
+          authMode: "login",
+          provider: "ollama",
+          vendors: {
+            ollama: {
+              baseUrl: preset.baseUrl,
+              model: preset.defaultModel,
+            },
+          },
+        },
+      });
+      deps.conversationLoop?.refreshProvider?.();
+      deps.rewireReviewerAgent?.();
+      deps.refreshActiveLlmWildcard?.();
+      try {
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "auth",
+          type: "info",
+          input: "[demo-activation] activated vendor=ollama source=local-probe",
+        });
+      } catch { /* audit must not break IPC */ }
+      log.info("ollama activation succeeded");
+      return { ok: true, vendor: "ollama" };
     },
   );
 
