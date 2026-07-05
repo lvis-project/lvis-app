@@ -31,6 +31,13 @@ beforeEach(() => {
 
 afterEach(async () => {
   if (!existsSync(logDir)) return;
+  // Every test in this suite waits for its sink's file(s) to actually land on
+  // disk (waitForFile) before calling destroy(), so no fs.open should still be
+  // in flight here. This one extra macrotask tick is defense-in-depth only —
+  // destroy()'s boom.end() itself does not return a promise the caller can
+  // await, so give any trailing internal callback (e.g. the stream 'close'
+  // event) a chance to settle before rmSync runs.
+  await new Promise((r) => setTimeout(r, 0));
   // SonicBoom's end() closes the fd asynchronously (on the stream 'close'
   // event), so on Windows a just-destroyed sink can still hold a handle when
   // rmSync runs → ENOTEMPTY/EBUSY. Retry a few times with a short yield.
@@ -126,13 +133,18 @@ describe("pruneOldLogs — retention", () => {
 });
 
 describe("createLogFileSink — file creation + mode", () => {
-  it("creates today's base log file and prunes old files on attach", () => {
+  it("creates today's base log file and prunes old files on attach", async () => {
     writeFileSync(join(logDir, `lvis-${daysAgo(30)}.log`), "ancient\n");
     const sink = createLogFileSink({ dir: logDir, retentionDays: 7 });
     try {
       sink.write("hello\n");
-      expect(existsSync(sink.currentFile)).toBe(true);
+      // SonicBoom opens with sync:false, so the fd (and the file itself) lands
+      // on a LATER tick than write() returns — assert currentFile's path
+      // in-process first (race-free), then wait for the on-disk file before
+      // any existsSync/statSync assertion.
       expect(sink.currentFile).toBe(join(logDir, `lvis-${todayDateStr()}.log`));
+      await waitForFile(sink.currentFile);
+      expect(existsSync(sink.currentFile)).toBe(true);
       // Old file pruned at attach.
       expect(existsSync(join(logDir, `lvis-${daysAgo(30)}.log`))).toBe(false);
     } finally {
@@ -163,7 +175,7 @@ describe("createLogFileSink — file creation + mode", () => {
 });
 
 describe("createLogFileSink — size-based sequence rolling", () => {
-  it("rolls to a .seq file once the active file crosses maxBytes", () => {
+  it("rolls to a .seq file once the active file crosses maxBytes", async () => {
     // Small ceiling so a handful of writes trips the size guard.
     const sink = createLogFileSink({ dir: logDir, retentionDays: 7, maxBytes: 64 });
     try {
@@ -172,7 +184,18 @@ describe("createLogFileSink — size-based sequence rolling", () => {
       // 21 bytes = 4200 bytes >> the 64-byte ceiling → several rolls.
       const line = "x".repeat(20) + "\n";
       for (let i = 0; i < 200; i++) sink.write(line);
-      // Force the async SonicBoom buffer to disk before asserting.
+      // currentFile (in-process, race-free) already reflects the final roll.
+      const finalFile = sink.currentFile;
+      expect(finalFile).not.toBe(base);
+      // Wait for BOTH the base and the final rolled file to actually land on
+      // disk before destroy()/cleanup — each roll opens its new destination
+      // with sync:false, so the fd (and the file) appears on a later tick
+      // than write() returns. Destroying (or letting afterEach rmSync the
+      // temp dir) while an open is still in flight produces an ENOENT that
+      // surfaces asynchronously, uncaught, well after this test has finished
+      // (and gets misattributed to whatever test runs next).
+      await waitForFile(base);
+      await waitForFile(finalFile);
       sink.destroy();
       const files = listFiles().filter((f) => parseLogFileDate(f) === todayDateStr());
       // Base file plus at least one sequenced roll.
@@ -184,7 +207,7 @@ describe("createLogFileSink — size-based sequence rolling", () => {
     }
   });
 
-  it("resumes into a fresh sequence when today's base file is already oversized", () => {
+  it("resumes into a fresh sequence when today's base file is already oversized", async () => {
     // Pre-seed an oversized base file for today.
     const base = join(logDir, `lvis-${todayDateStr()}.log`);
     writeFileSync(base, "y".repeat(200));
@@ -194,6 +217,11 @@ describe("createLogFileSink — size-based sequence rolling", () => {
       // The active file must NOT be the oversized base — it should be a .1 seq.
       expect(sink.currentFile).not.toBe(base);
       expect(/\.\d+\.log$/.test(sink.currentFile)).toBe(true);
+      // Wait for the .1 file's async (sync:false) open to land before this
+      // test returns, so no in-flight fs.open survives into afterEach's
+      // rmSync of logDir (a late ENOENT there surfaces as an uncaught
+      // exception misattributed to a later test).
+      await waitForFile(sink.currentFile);
     } finally {
       sink.destroy();
     }
@@ -222,13 +250,15 @@ describe("createLogFileSink — size-based sequence rolling", () => {
       for (let i = 0; i < 6; i++) sink.write("b".repeat(9) + "\n"); // 10 bytes each
       expect(sink.currentFile).not.toBe(base);
       expect(/\.\d+\.log$/.test(sink.currentFile)).toBe(true);
-      // The original base bytes are preserved (append mode, not truncated).
-      expect(statSync(base).size).toBeGreaterThanOrEqual(60);
-      // Once flushed, the rolled .seq file lands on disk too.
+      // Wait for the rolled .seq file's async open to land BEFORE destroy()
+      // — destroying (or the afterEach rmSync) while the open is still in
+      // flight is exactly the ENOENT-after-teardown race this suite must
+      // avoid (see the two tests above for the same pattern).
       const rolledPath = sink.currentFile;
-      sink.destroy();
       await waitForFile(rolledPath);
       expect(existsSync(rolledPath)).toBe(true);
+      // The original base bytes are preserved (append mode, not truncated).
+      expect(statSync(base).size).toBeGreaterThanOrEqual(60);
     } finally {
       sink.destroy();
     }
