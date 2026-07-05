@@ -222,6 +222,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:chat:get-write-diff",
         "lvis:chat:guide",
         "lvis:chat:has-provider",
+        "lvis:chat:import",
         "lvis:chat:main-active-state",
         "lvis:chat:new",
         "lvis:chat:retry-effort",
