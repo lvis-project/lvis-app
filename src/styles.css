@@ -93,6 +93,18 @@
   --shadow-e3: var(--shadow-e3);
   --shadow-e4: var(--shadow-e4);
 
+  /* Spotlight ring halo — the primary-tinted glow the SpotlightTour draws
+   * around the anchored element. Composed from the active bundle's
+   * `--primary` + the named opacity scale so it re-tints with every bundle
+   * (the previous inline `hsl(var(--primary) / 0.7)` + raw `rgba(0,0,0,.6)`
+   * card shadow bypassed the ladder and did not adapt). `-reduced` is the
+   * prefers-reduced-motion variant — a tighter ring with no wide bloom. */
+  --shadow-spotlight:
+    0 0 0 4px hsl(var(--primary) / var(--opacity-stronger)),
+    0 0 30px hsl(var(--primary) / var(--opacity-medium));
+  --shadow-spotlight-reduced:
+    0 0 0 2px hsl(var(--primary) / var(--opacity-stronger));
+
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
