@@ -177,12 +177,15 @@ function ringStyle(
     left: rect.left - inset,
     width: rect.width + inset * 2,
     height: rect.height + inset * 2,
-    borderRadius: 8,
+    borderRadius: "var(--radius-md)",
     pointerEvents: "none",
+    // Halo composed from the active bundle's --primary + named opacity scale
+    // via --shadow-spotlight (see styles.css). Reduced-motion drops the wide
+    // bloom for the tighter ring so a vestibular user still sees the anchor.
     boxShadow: reduceMotion
-      ? "0 0 0 2px hsl(var(--primary) / 0.7)"
-      : "0 0 0 4px hsl(var(--primary) / 0.7), 0 0 30px hsl(var(--primary) / 0.4)",
-    border: "1px solid hsl(var(--primary) / 0.7)",
+      ? "var(--shadow-spotlight-reduced)"
+      : "var(--shadow-spotlight)",
+    border: "1px solid hsl(var(--primary) / var(--opacity-stronger))",
   };
 }
 
@@ -505,7 +508,8 @@ export function SpotlightTour({
         style={{
           position: "fixed",
           inset: 0,
-          background: "hsl(var(--overlay) / 0.78)",
+          // Matches the shared Dialog overlay ladder (bundle --overlay tone).
+          background: "hsl(var(--overlay) / var(--opacity-emphatic))",
           zIndex: 9000,
         }}
       />
@@ -538,14 +542,15 @@ export function SpotlightTour({
           zIndex: 9002,
           background: "hsl(var(--popover))",
           color: "hsl(var(--popover-foreground))",
-          border: "1px solid hsl(var(--primary) / 0.5)",
-          borderRadius: 12,
+          border: "1px solid hsl(var(--primary) / var(--opacity-half))",
+          borderRadius: "var(--radius-lg)",
           padding: 20,
           // F5 — under `prefers-reduced-motion: reduce`, drop the soft
-          // animated drop-shadow that the mockup uses to "float" the
-          // card; a vestibular-sensitive user still sees the card via
-          // the violet border + filled backdrop.
-          boxShadow: reduceMotion ? "none" : "0 20px 50px -10px rgba(0,0,0,0.6)",
+          // drop-shadow that "floats" the card; a vestibular-sensitive user
+          // still sees the card via the primary border + filled backdrop.
+          // Elevation now rides the bundle depth ladder (--shadow-e4) instead
+          // of a theme-blind `rgba(0,0,0,.6)` so it re-tints per bundle.
+          boxShadow: reduceMotion ? "none" : "var(--shadow-e4)",
         }}
       >
         <div
@@ -564,7 +569,7 @@ export function SpotlightTour({
               display: "inline-flex",
               width: 18,
               height: 18,
-              borderRadius: 9999,
+              borderRadius: "9999px",
               alignItems: "center",
               justifyContent: "center",
               background: "hsl(var(--primary))",
@@ -609,7 +614,7 @@ export function SpotlightTour({
                 style={{
                   background: "hsl(var(--kbd-bg))",
                   border: "1px solid hsl(var(--kbd-border))",
-                  borderRadius: 4,
+                  borderRadius: "var(--radius-sm)",
                   padding: "1px 6px",
                   color: "hsl(var(--popover-foreground))",
                 }}
@@ -639,7 +644,7 @@ export function SpotlightTour({
                   display: "inline-block",
                   width: 6,
                   height: 6,
-                  borderRadius: 9999,
+                  borderRadius: "9999px",
                   background:
                     i === stepIndex
                       ? "hsl(var(--primary))"
@@ -668,7 +673,7 @@ export function SpotlightTour({
             onClick={handleNext}
             className="text-[12px]"
             style={{
-              borderRadius: 6,
+              borderRadius: "var(--radius-md)",
               padding: "6px 12px",
               color: "hsl(var(--primary-foreground))",
               background: "hsl(var(--primary))",
