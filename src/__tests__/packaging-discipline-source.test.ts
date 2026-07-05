@@ -50,6 +50,27 @@ describe("installer smoke and packaging discipline", () => {
     expect(claude).toContain("adm-zip");
   });
 
+  it("declares sonic-boom as a runtime dependency (log-file-sink imports it unbundled)", () => {
+    // src/lib/log-file-sink.ts adds a top-level `import { SonicBoom } from
+    // "sonic-boom"` that the packaged main process resolves directly from
+    // app.asar (unbundled runtime code). Packaging Discipline (CLAUDE.md)
+    // requires it in `dependencies`, NOT `devDependencies` — otherwise
+    // electron-builder prunes it and the installed app crashes on first log
+    // write with ERR_MODULE_NOT_FOUND (the PR #684 regression class). Assert
+    // the dependency declaration so a future prune-to-devDep is caught here.
+    const packageJson = JSON.parse(readRepoFile("package.json")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    expect(packageJson.dependencies?.["sonic-boom"]).toBeDefined();
+    expect(packageJson.devDependencies?.["sonic-boom"]).toBeUndefined();
+
+    // And the import is actually present in the unbundled runtime source, so
+    // this guard tracks a real import rather than an orphaned dependency.
+    const sinkSource = readRepoFile("src/lib/log-file-sink.ts");
+    expect(sinkSource).toContain('from "sonic-boom"');
+  });
+
   it("keeps fast preview installer mode separate from size-optimized release artifacts", () => {
     const packageJson = readRepoFile("package.json");
     const buildInstallers = readRepoFile("scripts/build-installers.mjs");

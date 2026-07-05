@@ -77,6 +77,7 @@ export function AppShell({
   marketplaceUpdates,
   onDismissMarketplaceUpdates,
   onSkipMarketplaceUpdates,
+  onResolveMarketplaceUpdates,
   onUpdatePlugin,
   marketplaceAnnouncements,
   onDismissMarketplaceAnnouncement,
@@ -153,6 +154,7 @@ export function AppShell({
   marketplaceUpdates: UpdateBannerProps["updates"];
   onDismissMarketplaceUpdates: UpdateBannerProps["onDismiss"];
   onSkipMarketplaceUpdates: UpdateBannerProps["onSkip"];
+  onResolveMarketplaceUpdates: NonNullable<UpdateBannerProps["onResolved"]>;
   onUpdatePlugin: UpdateBannerProps["onUpdate"];
   marketplaceAnnouncements: AnnouncementBannerProps["announcements"];
   onDismissMarketplaceAnnouncement: AnnouncementBannerProps["onDismiss"];
@@ -285,6 +287,7 @@ export function AppShell({
               updates={marketplaceUpdates}
               onDismiss={onDismissMarketplaceUpdates}
               onSkip={onSkipMarketplaceUpdates}
+              onResolved={onResolveMarketplaceUpdates}
               onUpdate={onUpdatePlugin}
             />
             <MarketplaceAnnouncementBanner

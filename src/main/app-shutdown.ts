@@ -8,7 +8,7 @@
  * `src/main.ts`.
  */
 import { app } from "electron";
-import { createLogger } from "../lib/logger.js";
+import { createLogger, closeFileLogSink } from "../lib/logger.js";
 import { logger as rootPinoLogger } from "../lib/logger.js";
 import { runShutdownRoutines } from "./shutdown-routines.js";
 import { stopLocalApiServer } from "./local-api-server.js";
@@ -127,6 +127,12 @@ export async function runAppShutdownCleanup(options: {
       // Flush the logger so the diagnostic above (and any preceding warn
       // about which subsystem hung) makes it to disk before the process leaves.
       await flushLogger();
+      // LAST step: close the production log file sink. All shutdown-step
+      // logging (including the timeout diagnostic just flushed) has now been
+      // written, so it is safe to drain + close the file destination. Done
+      // here rather than on a `before-quit` listener so those shutdown lines
+      // are never dropped by an early sink close.
+      closeFileLogSink();
       setAppShutdownCompleted(true);
       if (options.exitOnTimeout) {
         app.exit(0);
@@ -137,10 +143,17 @@ export async function runAppShutdownCleanup(options: {
     if (result.status === "failed") {
       log.error("%s: shutdown cleanup failed: %s", options.reason, errorMessage(result.error));
       await flushLogger();
+      // LAST step (failed path): close the file sink after the failure
+      // diagnostic has been flushed. See the timed-out branch above.
+      closeFileLogSink();
       setAppShutdownCompleted(true);
       return "failed";
     }
 
+    // LAST step (happy path): flush any remaining buffered logs, then close
+    // the production log file sink after every shutdown step has logged.
+    await flushLogger();
+    closeFileLogSink();
     setAppShutdownCompleted(true);
     return "completed";
   })();
