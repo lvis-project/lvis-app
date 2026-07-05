@@ -25,6 +25,7 @@ import type { MarketplaceHttp } from "./marketplace-installer.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { MarketplaceAnnouncement } from "../shared/marketplace-announcements.js";
 import { isMarketplaceAnnouncementLevel } from "../shared/marketplace-announcements.js";
+import { isMarketplacePackageType } from "../shared/assistant-context.js";
 import { mapNetworkAccessGrant } from "../shared/network-access.js";
 import type {
   McpAuthMetadata,
@@ -549,16 +550,15 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     // The renderer uses pluginType to filter entries; install paths always
     // re-read authoritative package files from the verified signed zip.
     const pluginTypeRaw = row.plugin_type ?? row.pluginType;
-    if (pluginTypeRaw === "mcp") {
-      item.pluginType = "mcp";
+    const pluginType = isMarketplacePackageType(pluginTypeRaw)
+      ? pluginTypeRaw
+      : "plugin";
+    item.pluginType = pluginType;
+    if (pluginType === "mcp") {
       const runtime = parseMcpRuntimeSpec(row.runtime ?? row.mcpRuntime);
       if (runtime) item.mcpRuntime = runtime;
       const auth = this.mapMcpAuth(row.mcp_auth ?? row.mcpAuth, runtime);
       if (auth) item.mcpAuth = auth;
-    } else if (pluginTypeRaw === "agent" || pluginTypeRaw === "skill") {
-      item.pluginType = pluginTypeRaw;
-    } else {
-      item.pluginType = "plugin";
     }
 
     return item;

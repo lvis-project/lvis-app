@@ -48,7 +48,7 @@ describe("MarketplaceTab", () => {
     const { findByTestId, getByText } = render(<MarketplaceTab {...defaultProps(api)} />);
     const cta = await findByTestId("marketplace:cta:open");
     expect(cta.textContent).toContain("마켓플레이스 열기");
-    getByText("플러그인 · MCP · 에이전트 · 스킬을 둘러보세요");
+    getByText("플러그인 · MCP · 에이전트 · 스킬 · 프로바이더 · 테마 · 언어를 둘러보세요");
   });
 
   it("reflects the pingMarketplace status in the CTA status pill", async () => {
@@ -144,5 +144,50 @@ describe("MarketplaceTab", () => {
     await waitFor(() => expect(screen.getByTestId("plugin-install-network-access").textContent).toContain("Needs API access"));
     expect(screen.getByTestId("plugin-install-network-access").textContent).toContain("api.example.com");
     expect(screen.getByRole("button", { name: "설치" })).toBeTruthy();
+  });
+
+  it("shows provider/theme/language filters without routing them through plugin install", async () => {
+    const packages: MarketplaceItem[] = [
+      {
+        id: "openrouter-provider",
+        name: "OpenRouter Provider",
+        description: "Provider package",
+        packageSpec: "provider:openrouter",
+        installed: false,
+        enabled: false,
+        pluginType: "provider",
+      },
+      {
+        id: "moonstone-theme",
+        name: "Moonstone Theme",
+        description: "Theme package",
+        packageSpec: "theme:moonstone",
+        installed: false,
+        enabled: false,
+        pluginType: "theme",
+      },
+      {
+        id: "ko-language-pack",
+        name: "Korean Language Pack",
+        description: "Language package",
+        packageSpec: "language-pack:ko",
+        installed: false,
+        enabled: false,
+        pluginType: "language-pack",
+      },
+    ];
+    const api = marketplaceTabApi({
+      listMarketplacePlugins: vi.fn().mockResolvedValue(packages),
+    });
+    render(<MarketplaceTab {...defaultProps(api)} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Providers" }));
+
+    expect(await screen.findByText("OpenRouter Provider")).toBeTruthy();
+    expect(screen.queryByText("Moonstone Theme")).toBeNull();
+    const action = await screen.findByTestId("marketplace:action:openrouter-provider");
+    expect(action.textContent).toContain("준비 중");
+    expect((action as HTMLButtonElement).disabled).toBe(true);
+    expect(api.listMarketplacePlugins).toHaveBeenCalledOnce();
   });
 });

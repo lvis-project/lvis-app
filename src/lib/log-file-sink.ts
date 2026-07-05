@@ -49,14 +49,20 @@ import {
   unlinkSync,
 } from "node:fs";
 import { join } from "node:path";
-// Named import: sonic-boom's default-export typing resolves to a namespace,
-// not the constructor (a known quirk in its bundled .d.ts). The named
-// `SonicBoom` binds the class at type level and — because sonic-boom's CJS
-// `module.exports` also exposes `.SonicBoom` (verified at runtime) — the same
-// name is a valid runtime constructor under esModuleInterop.
-import { SonicBoom } from "sonic-boom";
+// sonic-boom is CommonJS (`module.exports = SonicBoom`). Electron's ESM loader
+// exposes that as the default export, not as a synthetic named export. Its
+// bundled .d.ts resolves the default import as a namespace in this tsconfig, so
+// keep the runtime import and constructor type separate.
+import sonicBoomDefault, {
+  type SonicBoom as SonicBoomInstance,
+  type SonicBoomOpts,
+} from "sonic-boom";
 import { lvisHome } from "../shared/lvis-home.js";
 import { LOG_RETENTION_DAYS } from "../shared/log-retention.js";
+
+const SonicBoomCtor = sonicBoomDefault as unknown as {
+  new (opts: SonicBoomOpts): SonicBoomInstance;
+};
 
 /**
  * Retention window (days) for `~/.lvis/logs/` files. Re-exported from the fs-free
@@ -379,7 +385,7 @@ export function createLogFileSink(options: LogFileSinkOptions = {}): LogFileSink
    */
   let activeBytes = 0;
 
-  const openBoom = (filePath: string): SonicBoom => {
+  const openBoom = (filePath: string): SonicBoomInstance => {
     // mkdir:false — we already ensured the dir. sync:false — async batched
     // writes (pino default) keep the hot path off the event loop; a final
     // destroy() flush on shutdown drains the buffer.
@@ -393,7 +399,7 @@ export function createLogFileSink(options: LogFileSinkOptions = {}): LogFileSink
     // (typically 0o644). Passing the mode to the constructor is atomic and
     // deterministic. POSIX-only: Windows ignores the mode bits (file security
     // there relies on the inherited %USERPROFILE% / ~/.lvis ACL).
-    const boom = new SonicBoom({ dest: filePath, mkdir: false, sync: false, mode: FILE_MODE });
+    const boom = new SonicBoomCtor({ dest: filePath, mkdir: false, sync: false, mode: FILE_MODE });
     // A REQUIRED 'error' listener, not defense-in-depth: SonicBoom is an
     // EventEmitter, and its own async `fs.open`/`fs.write` failures (disk
     // full, EACCES, a removed directory racing a deferred open) are reported
