@@ -18,14 +18,14 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "../theme/index.js";
-import { BUNDLES, VIOLET_PAIR_IDS } from "../theme/index.js";
+import { VIOLET_PAIR_IDS, visibleBundlesFor } from "../theme/index.js";
 import type { ThemeBundle } from "../theme/index.js";
 import type { CSSProperties } from "react";
 import { getApi } from "../api-client.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
-import { SUPPORTED_LOCALES, LOCALE_INFO } from "../../../i18n/index.js";
+import { LOCALE_INFO, visibleLocalesFor } from "../../../i18n/index.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 type WebViewPreferredFlow = "in-app" | "system-browser";
@@ -393,13 +393,14 @@ function FontFamilyCustomInput({
 function LanguageSection() {
   const { locale, setLocale, t } = useTranslation();
   const notifySaved = useNotifySaved();
+  const visibleLocales = visibleLocalesFor([locale]);
   return (
     <SettingsSection
       title={t("settings.appearance.language.title")}
       description={t("settings.appearance.language.description")}
     >
       <div role="radiogroup" aria-label={t("settings.appearance.language.title")} className="flex flex-wrap gap-2">
-        {SUPPORTED_LOCALES.map((code) => {
+        {visibleLocales.map((code) => {
           const selected = locale === code;
           return (
             <button
@@ -444,6 +445,7 @@ export function AppearanceTab() {
   const selectFollowSystem = (next: boolean) => { setFollowSystem(next); notifySaved(); };
 
   const isVioletPair = VIOLET_PAIR_IDS.includes(bundleId);
+  const visibleBundles = visibleBundlesFor([bundleId]);
   const activePreset = presetForStack(family);
   const customStack = activePreset === "custom" ? family : "";
 
@@ -467,7 +469,7 @@ export function AppearanceTab() {
           aria-label={t("appearanceTab.themeRadioGroupLabel")}
           className="grid grid-cols-2 gap-3 sm:grid-cols-3"
         >
-          {BUNDLES.map((bundle) => (
+          {visibleBundles.map((bundle) => (
             <BundleCard
               key={bundle.id}
               bundle={bundle}
