@@ -22,11 +22,19 @@ import { gruvboxDarkHardBundle } from "./gruvbox-dark-hard.js";
 import { solarizedLightBundle } from "./solarized-light.js";
 import { rosePineBundle } from "./rose-pine.js";
 import { executiveGraphiteBundle } from "./executive-graphite.js";
-import { DEFAULT_BUNDLE_ID as _SHARED_DEFAULT_BUNDLE_ID } from "../../../../shared/theme-bundles.js";
+import {
+  DEFAULT_BUNDLE_ID as _SHARED_DEFAULT_BUNDLE_ID,
+  DEFAULT_VISIBLE_THEME_BUNDLE_IDS,
+  MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS,
+} from "../../../../shared/theme-bundles.js";
 
 export type { ThemeBundle, BundleTokens } from "./types.js";
 // §C3: re-export shared bundle IDs so renderer callers can import from this single registry path.
-export { BUNDLE_IDS } from "../../../../shared/theme-bundles.js";
+export {
+  BUNDLE_IDS,
+  DEFAULT_VISIBLE_THEME_BUNDLE_IDS,
+  MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS,
+} from "../../../../shared/theme-bundles.js";
 
 // §C3: compile-time guard — `satisfies readonly ThemeBundle[]` ensures each entry's id is a
 // valid BundleId (ThemeBundle.id is typed as BundleId). TypeScript errors here if any bundle
@@ -71,4 +79,29 @@ export const DEFAULT_BUNDLE_ID = _SHARED_DEFAULT_BUNDLE_ID;
  */
 export function findBundle(id: string): ThemeBundle | undefined {
   return BUNDLES.find((b) => b.id === id);
+}
+
+function requireBundle(id: BundleId): ThemeBundle {
+  const bundle = findBundle(id);
+  if (!bundle) throw new Error(`Missing theme bundle metadata: ${id}`);
+  return bundle;
+}
+
+export const DEFAULT_VISIBLE_BUNDLES = DEFAULT_VISIBLE_THEME_BUNDLE_IDS.map(
+  requireBundle,
+);
+
+export const MARKETPLACE_THEME_BUNDLES = MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS.map(
+  requireBundle,
+);
+
+export function visibleBundlesFor(currentBundleIds: readonly string[] = []): ThemeBundle[] {
+  const visible = [...DEFAULT_VISIBLE_BUNDLES];
+  for (const bundleId of currentBundleIds) {
+    const bundle = findBundle(bundleId);
+    if (!bundle) continue;
+    if (visible.some((candidate) => candidate.id === bundle.id)) continue;
+    visible.push(bundle);
+  }
+  return visible;
 }

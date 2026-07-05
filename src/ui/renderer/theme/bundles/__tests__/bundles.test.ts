@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { BUNDLES, DEFAULT_BUNDLE_ID, findBundle } from "../index.js";
+import {
+  BUNDLES,
+  DEFAULT_BUNDLE_ID,
+  DEFAULT_VISIBLE_BUNDLES,
+  MARKETPLACE_THEME_BUNDLES,
+  findBundle,
+  visibleBundlesFor,
+} from "../index.js";
+import {
+  DEFAULT_VISIBLE_THEME_BUNDLE_IDS,
+  MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS,
+  isDefaultVisibleThemeBundleId,
+} from "../../../../../shared/theme-bundles.js";
 import type { BundleTokens } from "../types.js";
 
 /** All keys required in a BundleTokens object. */
@@ -57,6 +69,28 @@ describe("bundle registry", () => {
     expect(DEFAULT_BUNDLE_ID).toBe("moonstone");
     expect(BUNDLES[0].id).toBe("moonstone");
     expect(findBundle(DEFAULT_BUNDLE_ID)?.shell).toBe("light");
+  });
+
+  it("shows only the latest two themes in the default appearance surface", () => {
+    expect(DEFAULT_VISIBLE_THEME_BUNDLE_IDS).toEqual(["moonstone", "gallery"]);
+    expect(DEFAULT_VISIBLE_BUNDLES.map((bundle) => bundle.id)).toEqual([
+      "moonstone",
+      "gallery",
+    ]);
+    expect(MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS).toContain("tokyo-night");
+    expect(MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS).toContain("high-contrast");
+    expect(MARKETPLACE_THEME_BUNDLES.map((bundle) => bundle.id)).not.toContain("moonstone");
+    expect(MARKETPLACE_THEME_BUNDLES.map((bundle) => bundle.id)).not.toContain("gallery");
+    expect(isDefaultVisibleThemeBundleId("moonstone")).toBe(true);
+    expect(isDefaultVisibleThemeBundleId("tokyo-night")).toBe(false);
+  });
+
+  it("keeps a legacy marketplace-candidate theme visible when selected", () => {
+    expect(visibleBundlesFor(["forest"]).map((bundle) => bundle.id)).toEqual([
+      "moonstone",
+      "gallery",
+      "forest",
+    ]);
   });
 
   it("findBundle returns undefined for unknown id", () => {

@@ -668,7 +668,6 @@ const DEFAULT_SETTINGS: AppSettings = {
 export class SettingsService {
   private readonly settingsPath: string;
   private readonly secretsPath: string;
-  private readonly systemLocale: string | undefined;
   private settings: AppSettings;
 
   constructor(options: SettingsServiceOptions) {
@@ -676,7 +675,6 @@ export class SettingsService {
     mkdirSync(dir, { recursive: true });
     this.settingsPath = settingsFilePath(options.userDataPath);
     this.secretsPath = resolve(dir, "lvis-secrets.json");
-    this.systemLocale = options.systemLocale;
     this.migrateSecretsMode();
     const loaded = this.loadSettings() as AppSettings & { __needsV2WriteBack?: boolean };
     const needsWriteBack = loaded.__needsV2WriteBack === true;
@@ -1073,13 +1071,9 @@ export class SettingsService {
   private loadSettings(): AppSettings {
     if (!existsSync(this.settingsPath)) {
       const defaults = structuredClone(DEFAULT_SETTINGS);
-      // On a fresh install there is no user preference yet — seed the UI
-      // language from the host OS rather than hard-coding English.
-      // normalizeLocale coerces unsupported tags to the DEFAULT_LOCALE, so
-      // this is a legitimate external-boundary fallback, not a workaround.
-      if (this.systemLocale !== undefined) {
-        defaults.appearance.language = normalizeLocale(this.systemLocale);
-      }
+      // Fresh installs stay English-first while non-English language packs move
+      // toward marketplace delivery. Stored user choices are still preserved by
+      // the migration/read path below.
       return defaults;
     }
     try {

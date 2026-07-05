@@ -20,6 +20,25 @@ export type Locale = (typeof SUPPORTED_LOCALES)[number];
 export const DEFAULT_LOCALE: Locale = "en";
 
 /**
+ * Locales shown in the default in-app language picker while translated
+ * language packs move toward marketplace packages. The full `SUPPORTED_LOCALES`
+ * union remains broad so existing settings and lazy catalogs keep working
+ * during the migration.
+ */
+export const DEFAULT_VISIBLE_LOCALES = ["en"] as const satisfies readonly Locale[];
+
+export type DefaultVisibleLocale = (typeof DEFAULT_VISIBLE_LOCALES)[number];
+
+const DEFAULT_VISIBLE_LOCALE_SET = new Set<string>(DEFAULT_VISIBLE_LOCALES);
+
+export type MarketplaceEligibleLocale = Exclude<Locale, DefaultVisibleLocale>;
+
+export const MARKETPLACE_ELIGIBLE_LOCALES = SUPPORTED_LOCALES.filter(
+  (locale): locale is MarketplaceEligibleLocale =>
+    !DEFAULT_VISIBLE_LOCALE_SET.has(locale),
+);
+
+/**
  * Display metadata for the language picker. `nativeName` is shown to users in
  * their own language; `englishName` is a stable label for logs / fallback.
  */
@@ -38,6 +57,15 @@ export function isLocale(value: unknown): value is Locale {
   return typeof value === "string" && (SUPPORTED_LOCALES as readonly string[]).includes(value);
 }
 
+export function isDefaultVisibleLocale(
+  value: unknown,
+): value is DefaultVisibleLocale {
+  return (
+    typeof value === "string" &&
+    DEFAULT_VISIBLE_LOCALE_SET.has(value)
+  );
+}
+
 /**
  * Coerce an arbitrary value (settings field, env var, navigator.language, …)
  * into a supported locale, falling back to {@link DEFAULT_LOCALE}.
@@ -49,4 +77,14 @@ export function normalizeLocale(value: unknown): Locale {
   if (typeof value !== "string") return DEFAULT_LOCALE;
   const primary = value.toLowerCase().split(/[-_]/)[0];
   return isLocale(primary) ? primary : DEFAULT_LOCALE;
+}
+
+export function visibleLocalesFor(currentLocales: readonly unknown[] = []): Locale[] {
+  const visible: Locale[] = [...DEFAULT_VISIBLE_LOCALES];
+  for (const value of currentLocales) {
+    const locale = normalizeLocale(value);
+    if (visible.includes(locale)) continue;
+    visible.push(locale);
+  }
+  return visible;
 }

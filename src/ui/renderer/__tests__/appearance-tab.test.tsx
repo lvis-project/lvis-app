@@ -14,7 +14,10 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "../theme/ThemeProvider.js";
 import { AppearanceTab } from "../tabs/AppearanceTab.js";
-import { BUNDLES, DEFAULT_BUNDLE_ID } from "../theme/index.js";
+import {
+  DEFAULT_BUNDLE_ID,
+  DEFAULT_VISIBLE_BUNDLES,
+} from "../theme/index.js";
 
 afterEach(() => {
   document.documentElement.removeAttribute("data-theme-bundle");
@@ -34,20 +37,21 @@ function renderWithBundle(initialBundleId = DEFAULT_BUNDLE_ID) {
 }
 
 describe("AppearanceTab — bundle card grid", () => {
-  it("renders exactly one card per ThemeBundle", () => {
+  it("renders exactly one card per default visible ThemeBundle", () => {
     const { getAllByRole } = renderWithBundle();
     // All cards have role="radio" with aria-label "테마: <name>"
     const cards = getAllByRole("radio").filter((el) =>
       el.getAttribute("aria-label")?.startsWith("테마:"),
     );
-    expect(cards).toHaveLength(BUNDLES.length);
+    expect(cards).toHaveLength(DEFAULT_VISIBLE_BUNDLES.length);
   });
 
-  it("renders a card for each bundle in BUNDLES", () => {
-    const { getByRole } = renderWithBundle();
-    for (const bundle of BUNDLES) {
+  it("renders a card for each default visible bundle", () => {
+    const { getByRole, queryByRole } = renderWithBundle();
+    for (const bundle of DEFAULT_VISIBLE_BUNDLES) {
       expect(getByRole("radio", { name: `테마: ${bundle.name}` })).toBeTruthy();
     }
+    expect(queryByRole("radio", { name: /테마: Forest/ })).toBeNull();
   });
 
   it("the default bundle card has aria-checked=true", () => {
@@ -57,43 +61,47 @@ describe("AppearanceTab — bundle card grid", () => {
   });
 
   it("other cards have aria-checked=false initially", () => {
-    const { getByRole } = renderWithBundle("tokyo-night");
-    const forest = getByRole("radio", { name: /테마: Forest/ });
-    expect(forest.getAttribute("aria-checked")).toBe("false");
+    const { getByRole } = renderWithBundle();
+    const gallery = getByRole("radio", { name: /테마: Gallery/ });
+    expect(gallery.getAttribute("aria-checked")).toBe("false");
   });
 
   it("clicking a bundle card writes data-theme-bundle to <html>", async () => {
-    const { getByRole } = renderWithBundle("tokyo-night");
-    fireEvent.click(getByRole("radio", { name: /테마: Forest/ }));
+    const { getByRole } = renderWithBundle();
+    fireEvent.click(getByRole("radio", { name: /테마: Gallery/ }));
     await waitFor(() => {
-      expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("forest");
+      expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("gallery");
     });
   });
 
-  it("clicking violet-dark card writes data-theme-bundle=violet-dark", async () => {
-    const { getByRole } = renderWithBundle("tokyo-night");
-    fireEvent.click(getByRole("radio", { name: /테마: Violet Dark/ }));
+  it("keeps a selected marketplace-candidate theme in the picker", () => {
+    const { getByRole, queryByRole } = renderWithBundle("violet-dark");
+    const selected = getByRole("radio", { name: /테마: Violet Dark/ });
+    expect(selected.getAttribute("aria-checked")).toBe("true");
+    expect(queryByRole("radio", { name: /테마: Forest/ })).toBeNull();
+  });
+
+  it("clicking back to a default theme writes data-theme-bundle=gallery", async () => {
+    const { getByRole } = renderWithBundle("violet-dark");
+    fireEvent.click(getByRole("radio", { name: /테마: Gallery/ }));
     await waitFor(() => {
-      expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("violet-dark");
+      expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("gallery");
     });
   });
 
-  it("clicking high-contrast card writes data-theme-bundle=high-contrast", async () => {
-    const { getByRole } = renderWithBundle("tokyo-night");
-    fireEvent.click(getByRole("radio", { name: /테마: High Contrast/ }));
-    await waitFor(() => {
-      expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("high-contrast");
-    });
+  it("keeps high-contrast visible only when it is the selected legacy theme", () => {
+    const { getByRole } = renderWithBundle("high-contrast");
+    expect(getByRole("radio", { name: /테마: High Contrast/ }).getAttribute("aria-checked")).toBe("true");
   });
 
   it("selected card updates aria-checked after click", async () => {
-    const { getByRole } = renderWithBundle("tokyo-night");
-    const forest = getByRole("radio", { name: /테마: Forest/ });
-    fireEvent.click(forest);
+    const { getByRole, queryByRole } = renderWithBundle("tokyo-night");
+    const gallery = getByRole("radio", { name: /테마: Gallery/ });
+    fireEvent.click(gallery);
     await waitFor(() => {
-      expect(forest.getAttribute("aria-checked")).toBe("true");
+      expect(gallery.getAttribute("aria-checked")).toBe("true");
     });
-    expect(getByRole("radio", { name: /테마: Tokyo Night/ }).getAttribute("aria-checked")).toBe("false");
+    expect(queryByRole("radio", { name: /테마: Tokyo Night/ })).toBeNull();
   });
 });
 
@@ -104,8 +112,7 @@ describe("AppearanceTab — followSystem toggle (violet pair only)", () => {
   });
 
   it("followSystem toggle is shown when violet-light is active", async () => {
-    const { getByRole, getByTestId } = renderWithBundle("tokyo-night");
-    fireEvent.click(getByRole("radio", { name: /테마: Violet Light/ }));
+    const { getByTestId } = renderWithBundle("violet-light");
     await waitFor(() => {
       expect(getByTestId("follow-system-toggle")).toBeTruthy();
     });
@@ -120,8 +127,7 @@ describe("AppearanceTab — followSystem toggle (violet pair only)", () => {
   });
 
   it("high-contrast card has no followSystem toggle", async () => {
-    const { getByRole, queryByTestId } = renderWithBundle("tokyo-night");
-    fireEvent.click(getByRole("radio", { name: /테마: High Contrast/ }));
+    const { queryByTestId } = renderWithBundle("high-contrast");
     await waitFor(() => {
       expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("high-contrast");
     });

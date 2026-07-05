@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_LOCALE, SUPPORTED_LOCALES, isLocale, normalizeLocale } from "../locale.js";
+import {
+  DEFAULT_LOCALE,
+  DEFAULT_VISIBLE_LOCALES,
+  MARKETPLACE_ELIGIBLE_LOCALES,
+  SUPPORTED_LOCALES,
+  isDefaultVisibleLocale,
+  isLocale,
+  normalizeLocale,
+  visibleLocalesFor,
+} from "../locale.js";
 import {
   __resetLazyLocaleMessagesForTest,
   __setLocaleLoaderForTest,
@@ -49,6 +58,14 @@ describe("locale", () => {
     expect(isLocale("de")).toBe(true);
     expect(isLocale("it")).toBe(false);
     expect(isLocale(null)).toBe(false);
+  });
+
+  it("shows only English in the default language surface", () => {
+    expect(DEFAULT_VISIBLE_LOCALES).toEqual(["en"]);
+    expect(isDefaultVisibleLocale("en")).toBe(true);
+    expect(isDefaultVisibleLocale("ko")).toBe(false);
+    expect(MARKETPLACE_ELIGIBLE_LOCALES).toEqual(["ko", "ja", "zh", "es", "fr", "de"]);
+    expect(visibleLocalesFor(["ko-KR"])).toEqual(["en", "ko"]);
   });
 
   it("normalizeLocale coerces region tags and falls back to default", () => {
