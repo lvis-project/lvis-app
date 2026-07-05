@@ -9,8 +9,13 @@ import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUn
 import { CHANNELS } from "../../contract/app-contract.js";
 import { sendToWindow } from "../safe-send.js";
 import { normalizeLocale, setLocale, tryLoadLocaleMessages } from "../../i18n/index.js";
+import { reconcileGlobalShortcuts } from "../../main/global-shortcuts.js";
+import {
+  reconcileStartupLaunch,
+  notifyStartupLaunchFailureIfNeeded,
+} from "../../main/startup-launch.js";
 import type { IpcDeps } from "../types.js";
-import type { LLMSettings } from "../../data/settings-store.js";
+import type { LLMSettings, ShortcutSettings } from "../../data/settings-store.js";
 
 /** Minor-1: extracted helper — 6 handlers share identical 5-line broadcast. */
 async function broadcastSettingsSnapshot(deps: IpcDeps): Promise<void> {
@@ -43,6 +48,28 @@ function vendorBaseUrlSignature(llm: LLMSettings): string {
     .sort()
     .map((id) => `${id}=${vendors[id as keyof typeof vendors]?.baseUrl ?? ""}`);
   return entries.join("|");
+}
+
+/**
+ * E4 — stable signature of the shortcut + startup-launch inputs so the
+ * `settings.update` handler can detect when a patch actually changed them and
+ * only then re-register the global shortcut / re-sync the OS login item. Mirrors
+ * the `activeLlmIdentity` change-detection pattern used for reviewer rewiring.
+ */
+function shortcutStartupSignature(
+  shortcuts: ShortcutSettings,
+  system: { launchAtStartup?: boolean; launchMinimized?: boolean },
+): string {
+  // NOTE: only the two launch-* fields of `system` are covered here on purpose —
+  // they are the sole `system` inputs the OS reconcilers (login item + hidden
+  // start) consume. Other `system` fields must NOT gate the shortcut/startup
+  // reconcile, so they are deliberately excluded from this signature.
+  return JSON.stringify({
+    toggleWindow: shortcuts.toggleWindow,
+    enabled: shortcuts.enabled,
+    launchAtStartup: system.launchAtStartup ?? false,
+    launchMinimized: system.launchMinimized ?? false,
+  });
 }
 
 function activeLlmIdentity(llm: LLMSettings): string {
@@ -113,7 +140,40 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // closure that pushes the new value into the live fetcher instance.
     const prevAllowPrivate =
       settingsService.get("marketplace").cloudAllowPrivateNetwork ?? false;
+    // E4 — capture shortcut/startup signature so we only re-register on change.
+    const prevShortcutStartupSig = shortcutStartupSignature(
+      settingsService.get("shortcuts"),
+      settingsService.get("system"),
+    );
     const result = await settingsService.patch(partial);
+    // E4 (security M1 drift) — reconcile the OS-level global shortcut + login
+    // item when the shortcut/startup fields actually changed. Defined as a
+    // closure and invoked on BOTH the success path AND the reviewer-rewire
+    // failure early-return: the shortcuts/system fields are already persisted by
+    // the `patch` above, so a subsequent rewire failure must NOT skip syncing
+    // the OS state to what is now on disk. Idempotent + gated by the signature,
+    // so calling it once per handler invocation is correct on either path.
+    // Contract (side-effect ordering): only that it runs AFTER `patch` commits.
+    let reconciledShortcutStartup = false;
+    const reconcileShortcutStartupIfChanged = (): void => {
+      if (reconciledShortcutStartup) return;
+      reconciledShortcutStartup = true;
+      const newShortcuts = settingsService.get("shortcuts");
+      const newSystem = settingsService.get("system");
+      if (shortcutStartupSignature(newShortcuts, newSystem) === prevShortcutStartupSig) return;
+      // Registration failure is surfaced inside reconcileGlobalShortcuts
+      // (No-Fallback: notified, not swallowed).
+      reconcileGlobalShortcuts(newShortcuts);
+      const launchInput = {
+        launchAtStartup: newSystem.launchAtStartup ?? false,
+        launchMinimized: newSystem.launchMinimized ?? false,
+      };
+      // security M2 / critic M2 — a login-item registration that the OS did not
+      // apply is surfaced to the user, mirroring the shortcut-conflict path,
+      // instead of the `applied:false` result being silently dropped.
+      const launchState = reconcileStartupLaunch(launchInput);
+      notifyStartupLaunchFailureIfNeeded(launchInput, launchState);
+    };
     const newLlm = settingsService.get("llm");
     const newActiveLlmIdentity = activeLlmIdentity(newLlm);
     const newBaseUrl = newLlm.vendors?.["azure-foundry"]?.baseUrl ?? null;
@@ -147,6 +207,11 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
         }
         conversationLoop.refreshProvider();
         deps.refreshActiveLlmWildcard?.();
+        // security M1 drift — the shortcuts/system fields were already persisted
+        // by `patch`; reconcile the OS state to disk even though the reviewer
+        // rewire failed, so a combined patch doesn't leave the accelerator /
+        // login item out of sync with what the user just saved.
+        reconcileShortcutStartupIfChanged();
         await broadcastSettingsSnapshot(deps);
         return { ok: false, error: "reviewer-rewire-failed", message };
       }
@@ -165,6 +230,9 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (vendorBaseUrlSignature(newLlm) !== prevVendorBaseUrlSig) {
       deps.refreshSandboxNetworkConfig?.();
     }
+    // E4 — reconcile the OS-level global accelerator + login item to the newly
+    // persisted shortcut/startup fields (no-op when unchanged; see closure).
+    reconcileShortcutStartupIfChanged();
     await broadcastSettingsSnapshot(deps);
     return result;
   });

@@ -16,6 +16,11 @@ vi.mock("electron", () => ({
 }));
 
 import { SettingsService } from "../settings-store.js";
+import {
+  LOG_RETENTION_DAYS,
+  LOG_RETENTION_MIN_DAYS,
+  LOG_RETENTION_MAX_DAYS,
+} from "../../shared/log-retention.js";
 import { DEFAULT_BUNDLE_ID } from "../../shared/theme-bundles.js";
 import { setProcessPlatform } from "../../testing/process-platform.js";
 
@@ -470,7 +475,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
 
   it("defaults closeBehavior to 'hide-to-tray' on a fresh install", () => {
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [] });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [], launchAtStartup: false, launchMinimized: false });
   });
 
   it("applies default 'hide-to-tray' when system field is absent on disk (legacy settings.json)", () => {
@@ -480,16 +485,16 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [] });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [], launchAtStartup: false, launchMinimized: false });
   });
 
   it("round-trips a 'quit' preference across restart", async () => {
     const service = new SettingsService({ userDataPath });
     await service.patch({ system: { closeBehavior: "quit" } });
-    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [] });
+    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [], launchAtStartup: false, launchMinimized: false });
 
     const reloaded = new SettingsService({ userDataPath });
-    expect(reloaded.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [] });
+    expect(reloaded.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [], launchAtStartup: false, launchMinimized: false });
   });
 
   // Critic M1 — schema-invalid value on disk falls back to default for THIS
@@ -510,7 +515,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [] });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [], launchAtStartup: false, launchMinimized: false });
     expect(service.get("chat").systemPrompt).toBe("preserved-prompt");
     expect(service.get("chat").autoCompact).toBe(false);
     expect(service.get("marketplace").cloudBaseUrl).toBe("https://preserved.example");
@@ -523,7 +528,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [] });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [], launchAtStartup: false, launchMinimized: false });
   });
 
   // Critic N1 — patch-merge must NOT clobber a valid prior preference when
@@ -622,7 +627,7 @@ describe("SettingsService system — workspace appMode", () => {
     );
     const service = new SettingsService({ userDataPath });
     // closeBehavior preserved; appMode falls back to default — neither clobbers the other.
-    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [] });
+    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [], launchAtStartup: false, launchMinimized: false });
   });
 
   it("normalizes legacy 'action' appMode on disk to 'work'", () => {
@@ -632,7 +637,7 @@ describe("SettingsService system — workspace appMode", () => {
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [] });
+    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [], launchAtStartup: false, launchMinimized: false });
   });
 
   it("normalizes a legacy 'action' appMode patch to 'work'", async () => {
@@ -654,13 +659,13 @@ describe("SettingsService system — workspace appMode", () => {
     const service = new SettingsService({ userDataPath });
     await service.patch({ system: { closeBehavior: "quit" } });
     await service.patch({ system: { appMode: "chat" } });
-    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "chat", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [] });
+    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "chat", localApiServer: false, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [], launchAtStartup: false, launchMinimized: false });
   });
 
   it("round-trips a localApiServer=true preference across restart", async () => {
     const service = new SettingsService({ userDataPath });
     await service.patch({ system: { localApiServer: true } });
-    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: true, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [] });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work", localApiServer: true, sidePanelWidth: 448, sidebarWidth: 232, sidePanelSplitFilePercent: 45, sidePanelSplitPreviewPercent: 45, sidePanelSplitSubagentPercent: 45, sidebarActiveTab: "chats", pinnedProjectRoots: [], launchAtStartup: false, launchMinimized: false });
 
     const reloaded = new SettingsService({ userDataPath });
     expect(reloaded.get("system").localApiServer).toBe(true);
@@ -1121,5 +1126,132 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
     // the previously-patched font block.
     await s.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: null as unknown as { sizeScale: 1 | 1.125 } } });
     expect(s.get("appearance").font?.sizeScale).toBe(1.125);
+  });
+});
+
+describe("SettingsService E4 — shortcuts + launch-at-startup", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-e4-"));
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  it("defaults shortcuts OFF with no accelerator + launch flags false", () => {
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("shortcuts")).toEqual({ toggleWindow: null, enabled: false });
+    expect(s.get("system").launchAtStartup).toBe(false);
+    expect(s.get("system").launchMinimized).toBe(false);
+  });
+
+  it("persists a valid accelerator + enabled through patch", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ shortcuts: { toggleWindow: "CommandOrControl+Shift+Space", enabled: true } });
+    expect(s.get("shortcuts")).toEqual({
+      toggleWindow: "CommandOrControl+Shift+Space",
+      enabled: true,
+    });
+    // Reload from disk to confirm round-trip persistence.
+    const reloaded = new SettingsService({ userDataPath });
+    expect(reloaded.get("shortcuts").toggleWindow).toBe("CommandOrControl+Shift+Space");
+    expect(reloaded.get("shortcuts").enabled).toBe(true);
+  });
+
+  it("drops an invalid accelerator (lone modifier) but keeps the previous value", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ shortcuts: { toggleWindow: "Alt+F1", enabled: true } });
+    // Invalid: lone modifier — must be ignored, prior value preserved.
+    await s.patch({ shortcuts: { toggleWindow: "Shift" } });
+    expect(s.get("shortcuts").toggleWindow).toBe("Alt+F1");
+    // enabled sibling still patchable.
+    expect(s.get("shortcuts").enabled).toBe(true);
+  });
+
+  it("clears the accelerator when patched with null", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ shortcuts: { toggleWindow: "Alt+F1", enabled: true } });
+    await s.patch({ shortcuts: { toggleWindow: null } });
+    expect(s.get("shortcuts").toggleWindow).toBeNull();
+    expect(s.get("shortcuts").enabled).toBe(true);
+  });
+
+  it("persists launchAtStartup + launchMinimized booleans", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ system: { launchAtStartup: true, launchMinimized: true } });
+    expect(s.get("system").launchAtStartup).toBe(true);
+    expect(s.get("system").launchMinimized).toBe(true);
+    const reloaded = new SettingsService({ userDataPath });
+    expect(reloaded.get("system").launchAtStartup).toBe(true);
+    expect(reloaded.get("system").launchMinimized).toBe(true);
+  });
+
+  it("ignores a non-boolean launchAtStartup patch, keeping the prior value", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ system: { launchAtStartup: true } });
+    await s.patch({ system: { launchAtStartup: "yes" as unknown as boolean } });
+    expect(s.get("system").launchAtStartup).toBe(true);
+  });
+
+  it("normalizes a corrupt shortcuts block on load", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ shortcuts: { toggleWindow: 42, enabled: "nope" } }),
+      "utf-8",
+    );
+    const s = new SettingsService({ userDataPath });
+    // Corrupt fields fall back to defaults (No-Fallback at boundary).
+    expect(s.get("shortcuts")).toEqual({ toggleWindow: null, enabled: false });
+  });
+});
+
+describe("SettingsService diagnostics (#1499 E2)", () => {
+  let userDataPath: string;
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-diagnostics-"));
+  });
+  afterEach(() => {
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  it("defaults: includeCrashDumps false, logRetentionDays = LOG_RETENTION_DAYS SOT", () => {
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("diagnostics")).toEqual({
+      includeCrashDumps: false,
+      logRetentionDays: LOG_RETENTION_DAYS,
+    });
+  });
+
+  it("patch persists valid values", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ diagnostics: { includeCrashDumps: true, logRetentionDays: 30 } });
+    expect(s.get("diagnostics")).toEqual({ includeCrashDumps: true, logRetentionDays: 30 });
+  });
+
+  it("patch clamps out-of-range retention and drops non-boolean includeCrashDumps", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ diagnostics: { logRetentionDays: 99999 } });
+    expect(s.get("diagnostics").logRetentionDays).toBe(LOG_RETENTION_MAX_DAYS); // clamped to max
+    await s.patch({ diagnostics: { logRetentionDays: 0 } });
+    expect(s.get("diagnostics").logRetentionDays).toBe(LOG_RETENTION_MIN_DAYS); // clamped to min
+    await s.patch({ diagnostics: { includeCrashDumps: "yes" as never } });
+    expect(s.get("diagnostics").includeCrashDumps).toBe(false); // dropped → prior value kept
+  });
+
+  it("corrupt on-disk diagnostics falls back to defaults", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ diagnostics: { includeCrashDumps: 1, logRetentionDays: "seven" } }),
+      "utf-8",
+    );
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("diagnostics")).toEqual({
+      includeCrashDumps: false,
+      logRetentionDays: LOG_RETENTION_DAYS,
+    });
   });
 });

@@ -226,9 +226,16 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     hasMarketplaceApiKey: vi.fn(async () => false),
     deleteMarketplaceApiKey: vi.fn(async () => ({ ok: true })),
     demo: {
-      status: vi.fn(async () => ({ ok: true, activated: false, vendor: null, autoActivatable: false })),
+      status: vi.fn(async () => ({
+        ok: true,
+        activated: false,
+        vendor: null,
+        autoActivatable: false,
+        ollamaAvailable: false,
+      })),
       activate: vi.fn(async () => ({ ok: true, vendor: "azure-foundry" })),
       activateEmbedded: vi.fn(async () => ({ ok: false, error: "no-embedded-code" })),
+      activateOllama: vi.fn(async () => ({ ok: true, vendor: "ollama" })),
       relaunchAfterActivation: vi.fn(async () => ({ ok: true })),
       clearDemo: vi.fn(async () => ({ ok: true })),
     },

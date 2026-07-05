@@ -133,6 +133,25 @@ describe("preview:read-file handler", () => {
     expect(res).toMatchObject({ ok: false, error: "binary-file" });
   });
 
+  it("refuses a file over the text size cap (too-large, fail-closed)", async () => {
+    // The preview read shares read_file's MAX_TEXT_FILE_BYTES (2MB) cap — a file
+    // above it is refused BEFORE buffering so a huge file can't be pulled across
+    // the sandbox boundary for display. #1445 size-cap guard.
+    const big = join(root, "huge.txt");
+    writeFileSync(big, "a".repeat(2_000_001));
+    try {
+      const res = (await invoke(CHANNELS.preview.readFile, OK_FRAME, big)) as {
+        ok: boolean;
+        error?: string;
+        bytes?: number;
+      };
+      expect(res).toMatchObject({ ok: false, error: "too-large" });
+      expect(res.bytes).toBeGreaterThan(2_000_000);
+    } finally {
+      rmSync(big, { force: true });
+    }
+  });
+
   it("rejects a symlink whose real target escapes the allowed root", async () => {
     // A symlink INSIDE the allowed root that points OUT of it must not become a
     // read hole: the guard realpath's the link before the boundary check, so the
@@ -400,6 +419,63 @@ describe("workspace handlers", () => {
     };
     expect(res).toMatchObject({ ok: false, error: "unauthorized" });
     expect(removeAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+
+  it("#1493 removeRoot prunes path grants under the root and reports the count", async () => {
+    // Re-register the workspace handler with a deps carrying a stub permission
+    // manager so the prune path fires. #1494 item-4: prunePathGrantsUnderRoot now
+    // returns the pruned grant TUPLES (not a bare number); the handler derives
+    // prunedGrants:3 (length) for the renderer toast AND audits redacted
+    // per-pattern provenance.
+    const prunedTuples = [
+      { pattern: "write_file:path:/ws/a.md", toolName: "write_file", tier: "write" as const, path: "/ws/a.md" },
+      { pattern: "edit_file:path:/ws/b.ts", toolName: "edit_file", tier: "write" as const, path: "/ws/b.ts" },
+      { pattern: "delete_file:path:/ws/c.log", toolName: "delete_file", tier: "read" as const, path: "/ws/c.log" },
+    ];
+    const prune = vi.fn(async () => prunedTuples);
+    const auditLog = vi.fn();
+    const depsWithPm = {
+      auditLogger: { log: auditLog },
+      getMainWindow: () => null,
+      conversationLoop: { permissionManager: { prunePathGrantsUnderRoot: prune } },
+    } as never;
+    registerWorkspaceHandlers(depsWithPm);
+    try {
+      const res = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, root)) as {
+        ok: boolean;
+        prunedGrants?: number;
+      };
+      // IPC response shape unchanged — a bare count, never the pattern list.
+      expect(res).toMatchObject({ ok: true, prunedGrants: 3 });
+      expect(prune).toHaveBeenCalledWith(root);
+      // The success audit records redacted per-pattern tuples (tool/tier/path).
+      const infoEntry = auditLog.mock.calls
+        .map((c) => c[0] as { type: string; input: string })
+        .find((entry) => entry.type === "info" && entry.input.includes(CHANNELS.workspace.removeRoot));
+      expect(infoEntry).toBeTruthy();
+      const parsed = JSON.parse(infoEntry!.input) as {
+        prunedGrants: number;
+        prunedPatterns?: Array<{ tool: string; tier: string; path: string }>;
+      };
+      expect(parsed.prunedGrants).toBe(3);
+      expect(parsed.prunedPatterns).toHaveLength(3);
+      expect(parsed.prunedPatterns![0]).toMatchObject({ tool: "write_file", tier: "write" });
+      // Raw pattern strings must NOT leak into the response (renderer unchanged).
+      expect(JSON.stringify(res)).not.toContain("write_file:path:");
+    } finally {
+      // Restore the shared handler registration for later tests in this file.
+      registerWorkspaceHandlers(deps);
+    }
+  });
+
+  it("#1493 removeRoot still succeeds when no permission manager is wired (best-effort prune)", async () => {
+    // The shared `deps` has no conversationLoop → prune is skipped, prunedGrants:0.
+    const res = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, root)) as {
+      ok: boolean;
+      removed?: string;
+      prunedGrants?: number;
+    };
+    expect(res).toMatchObject({ ok: true, removed: root, prunedGrants: 0 });
   });
 
   it("reveal shows a scope-checked file's location and never the raw renderer path", async () => {

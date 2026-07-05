@@ -26,6 +26,7 @@ import type {
   OpenHtmlPreviewWindowResult,
 } from "../../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../../shared/session-todo.js";
+import type { SidebarTab } from "../../shared/sidebar-tab.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import type {
@@ -236,9 +237,20 @@ export type AppSettings = {
     sidePanelSplitPreviewPercent?: number;
     sidePanelSplitSubagentPercent?: number;
     /** Persisted active sidebar tab ("chats" | "projects"). SOT: `SystemSettings`. */
-    sidebarActiveTab?: "chats" | "projects";
+    sidebarActiveTab?: SidebarTab;
     /** Pinned project roots — sort to the top of the sidebar's Projects tab. SOT: `SystemSettings`. */
     pinnedProjectRoots?: string[];
+    /** E4 — auto-launch LVIS at OS login. SOT: `SystemSettings`. Default false. */
+    launchAtStartup?: boolean;
+    /** E4 — when launching at startup, start hidden in the tray. SOT: `SystemSettings`. Default false. */
+    launchMinimized?: boolean;
+  };
+  /** E4 — global keyboard shortcuts. SOT: `ShortcutSettings` in settings-store. */
+  shortcuts?: {
+    /** Accelerator for the show/hide window toggle, or null when unset. */
+    toggleWindow: string | null;
+    /** Master on/off for global shortcut registration. Default false. */
+    enabled: boolean;
   };
   /** Experimental feature flags — all default false. */
   features?: {
@@ -514,7 +526,13 @@ export type LvisApi = {
    */
   demo: {
     status: () => Promise<
-      | { ok: true; activated: boolean; vendor: string | null; autoActivatable: boolean }
+      | {
+          ok: true;
+          activated: boolean;
+          vendor: string | null;
+          autoActivatable: boolean;
+          ollamaAvailable: boolean;
+        }
       | { ok: false; error: "unauthorized-frame" }
     >;
     activate: (code: string) => Promise<
@@ -529,6 +547,16 @@ export type LvisApi = {
     activateEmbedded: () => Promise<
       | { ok: true; vendor: string; requiresRelaunch?: boolean }
       | { ok: false; error: "no-embedded-code" | "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "persist-failed" | "unauthorized-frame" }
+    >;
+    /**
+     * #1498 — local Ollama fallback. `status().ollamaAvailable` advertises
+     * a reachable local server; this re-probes before configuring the
+     * vendor so a server stopped between the status check and the click
+     * fails closed with `no-ollama`.
+     */
+    activateOllama: () => Promise<
+      | { ok: true; vendor: "ollama" }
+      | { ok: false; error: "no-ollama" | "unauthorized-frame" }
     >;
     relaunchAfterActivation: () => Promise<
       | { ok: true }
@@ -693,6 +721,10 @@ export type LvisApi = {
   chatContinueLastUser: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
   chatRetryEffort: (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) => Promise<{ ok: boolean; error?: string }>;
   chatExport: (format: "markdown" | "json") => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
+  /** #1500 (E3) — reverse of chatExport. Always creates a brand-new session (never overwrites). */
+  chatImport: () => Promise<
+    { ok: true; sessionId: string; messageCount: number } | { ok: false; error?: string; canceled?: boolean }
+  >;
   chatCompact: () => Promise<{ compacted: boolean; compactedAt: string | null; summary: string; removedMessageCount: number }>;
   chatSessionResume: (sessionId: string) => Promise<{ ok: boolean; compacted: boolean; compactedAt: string | null; removedMessageCount: number }>;
   // Checkpoint view and explicit branch actions.
@@ -1729,6 +1761,12 @@ export interface LvisWorkspaceApi {
     ok: boolean;
     removed?: string;
     roots?: Array<{ path: string; isDefault: boolean }>;
+    /**
+     * #1493 — count of orphaned path-scoped grants pruned because they targeted
+     * a path strictly under the removed root. Non-zero counts are surfaced in
+     * the removal toast so the user knows saved grants were revoked too.
+     */
+    prunedGrants?: number;
     error?: "unauthorized" | "invalid-path" | "not-an-additional-root" | "cannot-remove-default";
     message?: string;
   }>;

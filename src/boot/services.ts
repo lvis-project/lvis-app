@@ -21,8 +21,32 @@ import { BashAstValidator } from "../main/bash-ast-validator.js";
 import { AuditService } from "../main/audit-service.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
-import { createLogger } from "../lib/logger.js";
+import { createLogger, initFileLogSink } from "../lib/logger.js";
+import { LOG_RETENTION_DAYS, LOG_MAX_BYTES, reprunePersistedRetention } from "../lib/log-file-sink.js";
+import { lvisHome } from "../shared/lvis-home.js";
+import { join } from "node:path";
 const log = createLogger("lvis");
+
+/**
+ * Production log file sink signal (#1499 PR-0). The pino file destination is
+ * ATTACHED only for a packaged/production run — an unpackaged dev run keeps the
+ * console-only behaviour so `~/.lvis/logs/` is not polluted during development.
+ * `LVIS_LOG_FILE=1` force-enables it for local diagnosis of the file path.
+ *
+ * Mirrors logger.ts's isPackagedElectron detection: packaged Electron leaves
+ * `process.defaultApp` undefined; dev runs (`bun run start`) set LVIS_DEV=1.
+ */
+function shouldEnableFileLogSink(): boolean {
+  if (process.env.LVIS_LOG_FILE === "1") return true;
+  if (process.env.NODE_ENV === "production") return true;
+  const isElectron = !!(process as NodeJS.Process & { versions?: { electron?: string } }).versions
+    ?.electron;
+  const isPackaged =
+    isElectron &&
+    !(process as NodeJS.Process & { defaultApp?: boolean }).defaultApp &&
+    process.env.LVIS_DEV !== "1";
+  return isPackaged;
+}
 
 export interface CoreServices {
   pythonPath: string | undefined;
@@ -45,6 +69,26 @@ export async function applyBootLocale(
 }
 
 export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<CoreServices> {
+  // #1499 PR-0: production log file sink — attach FIRST, before any other core
+  // service. It depends only on `lvisHome()` (no SettingsService / locale), so
+  // hoisting it to the very top of bootstrap shrinks the window where early
+  // boot log lines (settings load, locale apply, audit start) would be lost to
+  // the console-only sink. Destination: `~/.lvis/logs/lvis-<date>.log`
+  // (0o700 dir + 0o600 file). createLogFileSink prunes files older than
+  // LOG_RETENTION_DAYS at attach time; the console stream is unaffected. Failure
+  // is swallowed inside initFileLogSink (logging is best-effort, never bricks
+  // boot). Teardown is the LAST step of runAppShutdownCleanup (see below), not a
+  // `before-quit` listener, so shutdown-step logs still reach the file.
+  if (shouldEnableFileLogSink()) {
+    const sink = initFileLogSink({
+      retentionDays: LOG_RETENTION_DAYS,
+      maxBytes: LOG_MAX_BYTES,
+    });
+    if (sink) {
+      log.info({ file: sink.currentFile }, "boot: production log file sink attached");
+    }
+  }
+
   // Python runtime coordination is app-owned, but runtime assets and plugin
   // dependencies are materialized lazily by plugin-level async prepare.
   const pythonRuntime = new PythonRuntimeBootstrapper();
@@ -74,6 +118,20 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   // notifications render in the user's language. See src/i18n.
   await applyBootLocale(settingsService);
 
+  // #1499 E2: apply the user's diagnostics.logRetentionDays to the log tree.
+  // The file sink pruned at LOG_RETENTION_DAYS (the SOT default) before settings
+  // were loaded — hoisted so early boot lines are captured. Now that settings
+  // exist, honour a tightened/loosened window (no-op if unchanged). Best-effort —
+  // reprunePersistedRetention never throws, so a prune failure can't affect boot.
+  try {
+    reprunePersistedRetention(
+      join(lvisHome(), "logs"),
+      settingsService.get("diagnostics").logRetentionDays,
+    );
+  } catch {
+    /* non-fatal */
+  }
+
   // §14.2 Audit log rotation + retention — boot-time check + 1h interval
   const auditLogger = new AuditLogger();
   const _runAuditMaintenance = () => {
@@ -93,8 +151,17 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   const memoryManager = new MemoryManager();
   memoryManager.load();
   memoryManager.startPersistentContextWatcher();
-  app.once("before-quit", () => memoryManager.stopPersistentContextWatcher());
+  app.once("before-quit", () => {
+    memoryManager.stopPersistentContextWatcher();
+    memoryManager.closeSearchIndex();
+  });
   log.info("boot: memory loaded from %s", memoryManager.getDir());
+  // #1500 (E3): FTS5 search index integrity check → rebuild-from-JSONL if
+  // corrupt/missing. No-Fallback — this is the only recovery path; search
+  // never falls back to a linear scan.
+  await memoryManager.verifyOrRebuildSearchIndex().catch((err: unknown) => {
+    log.warn("boot: search index verify/rebuild failed: %s", (err as Error).message);
+  });
 
   const keywordEngine = new KeywordEngine();
   const toolRegistry = new ToolRegistry();

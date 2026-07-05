@@ -29,6 +29,34 @@ const watchMode = process.argv.includes("--watch");
 // watcher restart to take effect. The dev flow (`bun run dev`) is
 // unaffected — run-electron.mjs injects `.env.demo` into process.env at
 // runtime, so the embedded-key path is primarily a packaged-build concern.
+//
+// #1498 — public/external distribution channel guard. `LVIS_DISTRIBUTION_CHANNEL`
+// defaults to "internal" (unset = internal, zero regression for every existing
+// build/CI/dev invocation). Only an EXPLICIT "public" value activates the
+// guard: embedding a demo activation key into a build destined for an external
+// channel would collapse the codec's 2-factor delivery model for an audience
+// outside the internal network boundary the threat model assumes (see
+// src/main/demo-embedded-activation.ts). Fail loud — same pattern as the
+// malformed-key guard below — rather than silently stripping the embed, so a
+// misconfigured public release pipeline is caught at build time, not by an
+// after-the-fact security review.
+const DISTRIBUTION_CHANNEL = (process.env.LVIS_DISTRIBUTION_CHANNEL ?? "internal").trim();
+function assertNoPublicEmbed() {
+  if (DISTRIBUTION_CHANNEL !== "public") return;
+  const hasExplicitEnv = Boolean(process.env.LVIS_EMBED_DEMO_ACTIVATION?.trim());
+  const hasEnvDemoFile = existsSync(resolve(repoRoot, ".env.demo"));
+  if (hasExplicitEnv || hasEnvDemoFile) {
+    process.stderr.write(
+      "[esbuild-main] LVIS_DISTRIBUTION_CHANNEL=public forbids an embedded demo " +
+        "activation key. Remove LVIS_EMBED_DEMO_ACTIVATION / .env.demo from this " +
+        "build's environment, or unset LVIS_DISTRIBUTION_CHANNEL for an internal " +
+        "build (see docs/development/release-process.md).\n",
+    );
+    process.exit(1);
+  }
+}
+assertNoPublicEmbed();
+
 const ACTIVATION_WIRE_RE = /^LVIS-DEMO:v1:[A-Za-z0-9_-]+$/;
 function resolveEmbeddedActivationCode() {
   const explicit = process.env.LVIS_EMBED_DEMO_ACTIVATION?.trim();
