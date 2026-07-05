@@ -26,6 +26,7 @@ import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import type { SessionKind } from "../../memory/memory-manager.js";
 import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
+import { isDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
 import {
   runStreamedTurn,
   STREAM_TURN_OPTIONS,
@@ -267,11 +268,14 @@ export async function markMainActiveAfterTurn(deps: IpcDeps, input: string): Pro
     // "No explicit project" sessions (the default/base-directory binding)
     // must NOT persist projectRoot/projectName into metadata — null project
     // fields are the normal state for them (2026-07 "remove Current Project
-    // labeling"). Duck-typed fallback defaults to `false` (persist) so a test
-    // double that predates this getter keeps its prior behavior.
-    const isDefaultProject = typeof conversationLoop.getSessionProjectIsDefault === "function"
-      ? conversationLoop.getSessionProjectIsDefault()
-      : false;
+    // labeling"). `getSessionProjectIsDefault` is a real, always-present
+    // method on ConversationLoop (called unconditionally elsewhere, e.g.
+    // handleChatGetHistory) — no duck-typing needed here; a prior
+    // duck-typed fallback defaulted to `false` (persist) for test doubles
+    // predating this getter, which is the WRONG safe direction (silently
+    // persisting default-project metadata risks the ghost-project-group
+    // class of bug), so it is removed rather than flipped.
+    const isDefaultProject = conversationLoop.getSessionProjectIsDefault();
     if (!isDefaultProject) {
       const project = typeof conversationLoop.getSessionProjectContext === "function"
         ? conversationLoop.getSessionProjectContext()
@@ -385,19 +389,33 @@ export function handleChatSessions(
   const includeUnscoped = resolvedProject?.authorized === true && resolvedProject.project?.isDefault === true;
   const sessions = memoryManager
     .listSessionsPage({ kind, ...(routineId ? { routineId } : {}), ...(projectRoot ? { projectRoot } : {}), ...(includeUnscoped ? { includeUnscoped: true } : {}), limit, ...(before ? { before } : {}), ...(beforeId ? { beforeId } : {}), ...(after ? { after } : {}) })
-    .map((s) => ({
-      id: s.id,
-      modifiedAt: s.modifiedAt.toISOString(),
-      title: s.title,
-      sessionKind: s.sessionKind,
-      ...(s.routineId ? { routineId: s.routineId } : {}),
-      ...(s.routineTitle ? { routineTitle: s.routineTitle } : {}),
-      ...(s.routineFiredAt ? { routineFiredAt: s.routineFiredAt } : {}),
-      ...(s.projectRoot ? { projectRoot: s.projectRoot } : {}),
-      ...(s.projectName ? { projectName: s.projectName } : {}),
-      ...(s.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: s.branchedFromCompactNum } : {}),
-      ...(s.branchedAt ? { branchedAt: s.branchedAt } : {}),
-    }));
+    .map((s) => {
+      // Scrub legacy default-tagged project metadata at the read chokepoint.
+      // Pre-PR, markMainActiveAfterTurn persisted projectRoot/projectName
+      // (= the default workspace root / "workspace") for EVERY session, no
+      // isDefault guard. Sidebar.tsx's namedProjects excludes the default
+      // root from the known-projects list, so a legacy session's default
+      // root falls into the "unknown project" fallback map and renders as
+      // its own ghost named group (sidebar AND Insights, since both read
+      // through this same handler). Stripping here — rather than patching
+      // every reader — heals both call sites from one chokepoint. Sessions
+      // written post-fix never carry default-root metadata in the first
+      // place, so this is a no-op for them.
+      const isLegacyDefaultTagged = Boolean(s.projectRoot) && isDefaultWorkspaceRoot(s.projectRoot!);
+      return {
+        id: s.id,
+        modifiedAt: s.modifiedAt.toISOString(),
+        title: s.title,
+        sessionKind: s.sessionKind,
+        ...(s.routineId ? { routineId: s.routineId } : {}),
+        ...(s.routineTitle ? { routineTitle: s.routineTitle } : {}),
+        ...(s.routineFiredAt ? { routineFiredAt: s.routineFiredAt } : {}),
+        ...(!isLegacyDefaultTagged && s.projectRoot ? { projectRoot: s.projectRoot } : {}),
+        ...(!isLegacyDefaultTagged && s.projectName ? { projectName: s.projectName } : {}),
+        ...(s.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: s.branchedFromCompactNum } : {}),
+        ...(s.branchedAt ? { branchedAt: s.branchedAt } : {}),
+      };
+    });
   return {
     current: conversationLoop.getSessionId(),
     sessions,
