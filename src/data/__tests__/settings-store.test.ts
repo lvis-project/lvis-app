@@ -540,6 +540,51 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
   });
 });
 
+// ─── System — pinned project roots (cluster review MINOR-2) ──────────────────
+
+describe("SettingsService system — pinned project roots", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-pinned-roots-"));
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  it("de-dupes case/slash-variant roots via projectRootKey, keeping the first-seen casing", async () => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({
+      system: {
+        pinnedProjectRoots: [
+          "C:\\workspace\\alpha",
+          "c:/workspace/alpha/",
+          "C:\\WORKSPACE\\ALPHA",
+          "C:\\workspace\\beta",
+        ],
+      },
+    });
+
+    expect(service.get("system").pinnedProjectRoots).toEqual([
+      "C:\\workspace\\alpha",
+      "C:\\workspace\\beta",
+    ]);
+  });
+
+  it("round-trips a de-duped pinned-roots list across restart", async () => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({
+      system: { pinnedProjectRoots: ["/ws/alpha", "/ws/alpha/", "/ws/beta"] },
+    });
+
+    const reloaded = new SettingsService({ userDataPath });
+    expect(reloaded.get("system").pinnedProjectRoots).toEqual(["/ws/alpha", "/ws/beta"]);
+  });
+});
+
 // ─── System — workspace appMode persistence ───────────────────────────────────
 
 describe("SettingsService system — workspace appMode", () => {

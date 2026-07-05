@@ -130,6 +130,12 @@ function makeConversationLoop(
     getSessionKind: vi.fn(() => "main"),
     getSessionRoutineId: vi.fn(() => null),
     getSessionRoutineTitle: vi.fn(() => null),
+    // markMainActiveAfterTurn calls this unconditionally (no duck-typing —
+    // it's a real, always-present ConversationLoop method). Defaults to
+    // `false` (not the default project) so the existing "persists project
+    // identity" expectations in this file keep working unchanged; override
+    // per-test via `loop.getSessionProjectIsDefault.mockReturnValue(true)`.
+    getSessionProjectIsDefault: vi.fn(() => false),
     getHistory: vi.fn(() => history),
     hasProvider: vi.fn(() => true),
     runTurn: vi.fn(),
