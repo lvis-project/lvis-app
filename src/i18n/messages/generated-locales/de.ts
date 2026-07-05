@@ -12,6 +12,7 @@ export const deMessages: Record<string, string> = {
   "chatPreviewRail.copyPath": "Pfad kopieren",
   "chatPreviewRail.copyRelativePath": "Relativen Pfad kopieren",
   "chatPreviewRail.removeRoot": "Ordner entfernen",
+  "chatPreviewRail.removeRootPruned": "Ordner entfernt · {count} gespeicherte Berechtigung(en) widerrufen",
   "actionPanel.closeAriaLabel": "Werkzeugaktivitätsbereich schließen",
   "actionPanel.closeTooltip": "Werkzeugaktivitätsbereich schließen",
   "actionPanel.fetchedPagesTitle": "Webquellen",
