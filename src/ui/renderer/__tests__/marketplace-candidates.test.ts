@@ -3,9 +3,25 @@ import {
   LOCAL_MARKETPLACE_CANDIDATES,
   mergeMarketplaceCandidates,
 } from "../marketplace-candidates.js";
+import { LOCAL_MARKETPLACE_ASSET_ENTRIES } from "../marketplace-asset-registry.js";
 import type { MarketplaceItem } from "../types.js";
 
 describe("local marketplace candidates", () => {
+  it("projects the marketplace asset registry into local catalog candidates", () => {
+    expect(LOCAL_MARKETPLACE_CANDIDATES.map((item) => item.packageSpec))
+      .toEqual(LOCAL_MARKETPLACE_ASSET_ENTRIES.map((entry) => entry.packageSpec));
+    for (const entry of LOCAL_MARKETPLACE_ASSET_ENTRIES) {
+      expect(LOCAL_MARKETPLACE_CANDIDATES.find((item) => item.packageSpec === entry.packageSpec))
+        .toMatchObject({
+          id: entry.id,
+          pluginType: entry.packageType,
+          packageAsset: entry.asset,
+          installed: false,
+          enabled: false,
+        });
+    }
+  });
+
   it("projects non-default providers into provider marketplace candidates", () => {
     const providers = LOCAL_MARKETPLACE_CANDIDATES
       .filter((item) => item.pluginType === "provider");
