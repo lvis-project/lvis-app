@@ -43,6 +43,7 @@ import {
   type ShortcutSettingsPatch,
 } from "../shared/shortcuts.js";
 import { projectRootKey } from "../shared/project-identity.js";
+import { LOG_RETENTION_DAYS, clampLogRetentionDays } from "../shared/log-retention.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("settings");
 
@@ -213,9 +214,10 @@ export interface FeatureFlags {
 /**
  * §E2 (#1499) Diagnostics bundle + production log retention settings.
  * - includeCrashDumps: include raw crash-dump binaries in the bundle (opt-in).
- * - logRetentionDays: retention window for `~/.lvis/logs/`. Connected to the
- *   log-file-sink SOT (`LOG_RETENTION_DAYS`) — this setting value drives the
- *   sink's boot-time prune (boot/services.ts). Default 7 (= LOG_RETENTION_DAYS).
+ * - logRetentionDays: retention window for `~/.lvis/logs/`. Default + clamp
+ *   bounds come from the fs-free SOT `src/shared/log-retention.ts`
+ *   (`LOG_RETENTION_DAYS`, which log-file-sink re-exports) — this setting value
+ *   drives the sink's boot-time prune (boot/services.ts).
  */
 export interface DiagnosticsSettings {
   /** Include raw crash-dump binaries in the exported bundle. Default false. */
@@ -588,10 +590,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   diagnostics: {
     // Raw crash-dump binaries excluded by default — metadata-only in the bundle.
     includeCrashDumps: false,
-    // Mirrors log-file-sink's LOG_RETENTION_DAYS SOT (7). Kept as a literal here
-    // to avoid importing the node:fs-bearing sink module into the settings store;
-    // the DEFAULT_LOG_RETENTION_DAYS re-check below asserts they stay in lockstep.
-    logRetentionDays: 7,
+    // From the fs-free retention SOT (src/shared/log-retention.ts), the same
+    // constant log-file-sink re-exports as LOG_RETENTION_DAYS — one literal, no
+    // drift between the boot-time prune window and this default.
+    logRetentionDays: LOG_RETENTION_DAYS,
   },
   appearance: {
     schemaVersion: 2,
@@ -1625,14 +1627,11 @@ function normalizeSystem(input: unknown): SystemSettings {
  * Missing or invalid fields are silently dropped, so each flag falls back to
  * its value in DEFAULT_SETTINGS.features.
  */
-/** Lower/upper bounds for the diagnostics log-retention window (days). */
-const DIAGNOSTICS_RETENTION_MIN = 1;
-const DIAGNOSTICS_RETENTION_MAX = 365;
-
 /**
  * Coerce on-disk / patch `diagnostics` block to DiagnosticsSettings.
  * Invalid fields fall back to DEFAULT_SETTINGS.diagnostics; logRetentionDays is
- * clamped to [1,365] (a non-integer or out-of-range value can never persist).
+ * clamped to [LOG_RETENTION_MIN_DAYS, LOG_RETENTION_MAX_DAYS] via the shared SOT
+ * (a non-integer or out-of-range value can never persist).
  */
 function normalizeDiagnostics(input: unknown): DiagnosticsSettings {
   const base = DEFAULT_SETTINGS.diagnostics;
@@ -1645,10 +1644,7 @@ function normalizeDiagnostics(input: unknown): DiagnosticsSettings {
     result.includeCrashDumps = obj.includeCrashDumps;
   }
   if (typeof obj.logRetentionDays === "number" && Number.isInteger(obj.logRetentionDays)) {
-    result.logRetentionDays = Math.min(
-      DIAGNOSTICS_RETENTION_MAX,
-      Math.max(DIAGNOSTICS_RETENTION_MIN, obj.logRetentionDays),
-    );
+    result.logRetentionDays = clampLogRetentionDays(obj.logRetentionDays);
   }
   return result;
 }

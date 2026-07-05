@@ -16,6 +16,11 @@ vi.mock("electron", () => ({
 }));
 
 import { SettingsService } from "../settings-store.js";
+import {
+  LOG_RETENTION_DAYS,
+  LOG_RETENTION_MIN_DAYS,
+  LOG_RETENTION_MAX_DAYS,
+} from "../../shared/log-retention.js";
 import { DEFAULT_BUNDLE_ID } from "../../shared/theme-bundles.js";
 import { setProcessPlatform } from "../../testing/process-platform.js";
 
@@ -1213,9 +1218,12 @@ describe("SettingsService diagnostics (#1499 E2)", () => {
     rmSync(userDataPath, { recursive: true, force: true });
   });
 
-  it("defaults: includeCrashDumps false, logRetentionDays 7 (LOG_RETENTION_DAYS SOT)", () => {
+  it("defaults: includeCrashDumps false, logRetentionDays = LOG_RETENTION_DAYS SOT", () => {
     const s = new SettingsService({ userDataPath });
-    expect(s.get("diagnostics")).toEqual({ includeCrashDumps: false, logRetentionDays: 7 });
+    expect(s.get("diagnostics")).toEqual({
+      includeCrashDumps: false,
+      logRetentionDays: LOG_RETENTION_DAYS,
+    });
   });
 
   it("patch persists valid values", async () => {
@@ -1227,9 +1235,9 @@ describe("SettingsService diagnostics (#1499 E2)", () => {
   it("patch clamps out-of-range retention and drops non-boolean includeCrashDumps", async () => {
     const s = new SettingsService({ userDataPath });
     await s.patch({ diagnostics: { logRetentionDays: 99999 } });
-    expect(s.get("diagnostics").logRetentionDays).toBe(365); // clamped to max
+    expect(s.get("diagnostics").logRetentionDays).toBe(LOG_RETENTION_MAX_DAYS); // clamped to max
     await s.patch({ diagnostics: { logRetentionDays: 0 } });
-    expect(s.get("diagnostics").logRetentionDays).toBe(1); // clamped to min
+    expect(s.get("diagnostics").logRetentionDays).toBe(LOG_RETENTION_MIN_DAYS); // clamped to min
     await s.patch({ diagnostics: { includeCrashDumps: "yes" as never } });
     expect(s.get("diagnostics").includeCrashDumps).toBe(false); // dropped → prior value kept
   });
@@ -1241,6 +1249,9 @@ describe("SettingsService diagnostics (#1499 E2)", () => {
       "utf-8",
     );
     const s = new SettingsService({ userDataPath });
-    expect(s.get("diagnostics")).toEqual({ includeCrashDumps: false, logRetentionDays: 7 });
+    expect(s.get("diagnostics")).toEqual({
+      includeCrashDumps: false,
+      logRetentionDays: LOG_RETENTION_DAYS,
+    });
   });
 });
