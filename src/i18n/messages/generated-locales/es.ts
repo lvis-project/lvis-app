@@ -1264,6 +1264,7 @@ export const esMessages: Record<string, string> = {
   "formatIpcError.importInvalidFileShape": "Este archivo no es una conversación exportada válida.",
   "formatIpcError.importEmptyMessages": "La conversación no tiene mensajes para importar.",
   "formatIpcError.importInvalidMessageShape": "La conversación contiene un mensaje no compatible o con formato incorrecto.",
+  "formatIpcError.importTooManyMessages": "La conversación tiene demasiados mensajes para importar.",
   "formatIpcError.rateLimited": "Demasiadas solicitudes. Inténtelo de nuevo en un momento.",
   "formatIpcError.removeFailed": "No se pudo eliminar la regla.",
   "formatIpcError.reviewerRewireFailed": "No se pudo conectar el modelo de revisión de permisos a la nueva configuración. La configuración se ha revertido al estado anterior.",
