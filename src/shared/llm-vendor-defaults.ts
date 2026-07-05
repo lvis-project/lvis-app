@@ -344,12 +344,25 @@ export const MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS = LLM_VENDORS.filter(
     !DEFAULT_VISIBLE_LLM_VENDOR_ID_SET.has(vendor),
 );
 
+const MARKETPLACE_ELIGIBLE_LLM_VENDOR_ID_SET = new Set<string>(
+  MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS,
+);
+
 export function isDefaultVisibleLLMVendor(
   vendor: unknown,
 ): vendor is DefaultVisibleLLMVendor {
   return (
     typeof vendor === "string" &&
     DEFAULT_VISIBLE_LLM_VENDOR_ID_SET.has(vendor)
+  );
+}
+
+export function isMarketplaceEligibleLLMVendor(
+  vendor: unknown,
+): vendor is MarketplaceEligibleLLMVendor {
+  return (
+    typeof vendor === "string" &&
+    MARKETPLACE_ELIGIBLE_LLM_VENDOR_ID_SET.has(vendor)
   );
 }
 

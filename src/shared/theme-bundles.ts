@@ -63,11 +63,24 @@ export const MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS = BUNDLE_IDS.filter(
     !DEFAULT_VISIBLE_THEME_BUNDLE_ID_SET.has(bundleId),
 );
 
+const MARKETPLACE_ELIGIBLE_THEME_BUNDLE_ID_SET = new Set<string>(
+  MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS,
+);
+
 export function isDefaultVisibleThemeBundleId(
   bundleId: unknown,
 ): bundleId is DefaultVisibleThemeBundleId {
   return (
     typeof bundleId === "string" &&
     DEFAULT_VISIBLE_THEME_BUNDLE_ID_SET.has(bundleId)
+  );
+}
+
+export function isMarketplaceEligibleThemeBundleId(
+  bundleId: unknown,
+): bundleId is MarketplaceEligibleThemeBundleId {
+  return (
+    typeof bundleId === "string" &&
+    MARKETPLACE_ELIGIBLE_THEME_BUNDLE_ID_SET.has(bundleId)
   );
 }
