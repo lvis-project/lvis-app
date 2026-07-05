@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, FolderOpen, MessageSquareText, RefreshCw, Star, X as XIcon } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, FolderOpen, MessageSquareText, Pin, RefreshCw, X as XIcon } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
@@ -300,7 +300,7 @@ export function StarredView({
           </section>
           <section className="rounded-md border bg-background p-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Star className="h-4 w-4 text-primary" />
+              <Pin className="h-4 w-4 text-primary" />
               {t("starredView.starredTitle")}
             </div>
             <p className="mt-3 text-2xl font-semibold text-foreground">{starredForDay.length}</p>
