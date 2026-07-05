@@ -18,6 +18,7 @@ import {
   DEFAULT_BUNDLE_ID,
   DEFAULT_VISIBLE_BUNDLES,
 } from "../theme/index.js";
+import { makeMockLvisApi } from "../../../../test/renderer/mock-lvis-api.js";
 
 afterEach(() => {
   document.documentElement.removeAttribute("data-theme-bundle");
@@ -25,6 +26,7 @@ afterEach(() => {
   Array.from(document.documentElement.classList)
     .filter((c) => c.startsWith("lvis-bundle-"))
     .forEach((c) => document.documentElement.classList.remove(c));
+  delete (window as unknown as Record<string, unknown>).lvisApi;
   vi.unstubAllGlobals();
 });
 
@@ -79,6 +81,24 @@ describe("AppearanceTab — bundle card grid", () => {
     const selected = getByRole("radio", { name: /테마: Violet Dark/ });
     expect(selected.getAttribute("aria-checked")).toBe("true");
     expect(queryByRole("radio", { name: /테마: Forest/ })).toBeNull();
+  });
+
+  it("shows marketplace-installed themes and language packs", async () => {
+    const { api } = makeMockLvisApi({
+      settings: {
+        marketplace: {
+          installedThemeBundleIds: ["tokyo-night"],
+          installedLanguagePacks: ["ko"],
+        },
+      },
+    });
+    (window as unknown as { lvisApi: unknown }).lvisApi = api;
+
+    const { getByRole, getByTestId } = renderWithBundle();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    expect(getByRole("radio", { name: /테마: Tokyo Night/ })).toBeTruthy();
+    expect(getByTestId("language-option-ko")).toBeTruthy();
   });
 
   it("clicking back to a default theme writes data-theme-bundle=gallery", async () => {

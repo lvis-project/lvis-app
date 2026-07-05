@@ -146,7 +146,7 @@ describe("MarketplaceTab", () => {
     expect(screen.getByRole("button", { name: "설치" })).toBeTruthy();
   });
 
-  it("shows provider/theme/language filters without routing them through plugin install", async () => {
+  it("installs provider/theme/language packages through marketplace settings", async () => {
     const packages: MarketplaceItem[] = [
       {
         id: "openrouter-provider",
@@ -156,6 +156,7 @@ describe("MarketplaceTab", () => {
         installed: false,
         enabled: false,
         pluginType: "provider",
+        packageAsset: { type: "provider", providerId: "openrouter" },
       },
       {
         id: "moonstone-theme",
@@ -165,6 +166,7 @@ describe("MarketplaceTab", () => {
         installed: false,
         enabled: false,
         pluginType: "theme",
+        packageAsset: { type: "theme", bundleId: "moonstone" },
       },
       {
         id: "ko-language-pack",
@@ -174,6 +176,7 @@ describe("MarketplaceTab", () => {
         installed: false,
         enabled: false,
         pluginType: "language-pack",
+        packageAsset: { type: "language-pack", locale: "ko" },
       },
     ];
     const api = marketplaceTabApi({
@@ -186,9 +189,15 @@ describe("MarketplaceTab", () => {
     expect(await screen.findByText("OpenRouter Provider")).toBeTruthy();
     expect(screen.queryByText("Moonstone Theme")).toBeNull();
     const action = await screen.findByTestId("marketplace:action:openrouter-provider");
-    expect(action.textContent).toContain("준비 중");
-    expect((action as HTMLButtonElement).disabled).toBe(true);
-    expect(api.listMarketplacePlugins).toHaveBeenCalledOnce();
+    expect(action.textContent).toContain("설치");
+    expect((action as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(action);
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        marketplace: { installedProviderIds: ["openrouter"] },
+      });
+    });
+    expect(api.listMarketplacePlugins).toHaveBeenCalled();
   });
 
   it("shows local provider/theme/language candidates when the remote catalog is empty", async () => {
@@ -200,8 +209,14 @@ describe("MarketplaceTab", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Providers" }));
     expect(await screen.findByText("Groq Provider")).toBeTruthy();
     const providerAction = await screen.findByTestId("marketplace:action:provider-groq");
-    expect(providerAction.textContent).toContain("준비 중");
-    expect((providerAction as HTMLButtonElement).disabled).toBe(true);
+    expect(providerAction.textContent).toContain("설치");
+    expect((providerAction as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(providerAction);
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        marketplace: { installedProviderIds: ["groq"] },
+      });
+    });
 
     fireEvent.click(await screen.findByRole("button", { name: "Themes" }));
     expect(await screen.findByText("Tokyo Night Theme")).toBeTruthy();

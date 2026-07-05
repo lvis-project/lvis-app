@@ -7,14 +7,16 @@ import type { MarketplaceItem } from "../types.js";
 
 describe("local marketplace candidates", () => {
   it("projects non-default providers into provider marketplace candidates", () => {
-    const providerSpecs = LOCAL_MARKETPLACE_CANDIDATES
-      .filter((item) => item.pluginType === "provider")
-      .map((item) => item.packageSpec);
+    const providers = LOCAL_MARKETPLACE_CANDIDATES
+      .filter((item) => item.pluginType === "provider");
+    const providerSpecs = providers.map((item) => item.packageSpec);
 
     expect(providerSpecs).toContain("provider:groq");
     expect(providerSpecs).toContain("provider:ollama");
     expect(providerSpecs).not.toContain("provider:openai");
     expect(providerSpecs).not.toContain("provider:openrouter");
+    expect(providers.find((item) => item.packageSpec === "provider:groq")?.packageAsset)
+      .toEqual({ type: "provider", providerId: "groq" });
   });
 
   it("projects non-default themes and locales into marketplace candidates", () => {
@@ -26,6 +28,10 @@ describe("local marketplace candidates", () => {
     expect(specs).not.toContain("theme:gallery");
     expect(specs).toContain("language-pack:ko");
     expect(specs).not.toContain("language-pack:en");
+    expect(LOCAL_MARKETPLACE_CANDIDATES.find((item) => item.packageSpec === "theme:tokyo-night")?.packageAsset)
+      .toEqual({ type: "theme", bundleId: "tokyo-night" });
+    expect(LOCAL_MARKETPLACE_CANDIDATES.find((item) => item.packageSpec === "language-pack:ko")?.packageAsset)
+      .toEqual({ type: "language-pack", locale: "ko" });
   });
 
   it("lets remote catalog rows override local candidates by package spec", () => {
@@ -41,8 +47,12 @@ describe("local marketplace candidates", () => {
 
     const merged = mergeMarketplaceCandidates([remoteGroq]);
 
-    expect(merged).toContain(remoteGroq);
     expect(merged.filter((item) => item.packageSpec === "provider:groq")).toHaveLength(1);
-    expect(merged.find((item) => item.packageSpec === "provider:groq")?.name).toBe("Remote Groq Provider");
+    expect(merged.find((item) => item.packageSpec === "provider:groq"))
+      .toMatchObject({
+        id: "remote-groq",
+        name: "Remote Groq Provider",
+        packageAsset: { type: "provider", providerId: "groq" },
+      });
   });
 });

@@ -26,14 +26,14 @@ import {
   type LLMVendor,
   type LLMVendorSettings,
 } from "../shared/llm-vendor-defaults.js";
-import { BUNDLE_IDS, DEFAULT_BUNDLE_ID } from "../shared/theme-bundles.js";
+import { BUNDLE_IDS, DEFAULT_BUNDLE_ID, type BundleId } from "../shared/theme-bundles.js";
 import {
   FONT_SIZE_SCALE_VALUES,
   type FontSizeScale,
   type AppearanceFontSettings,
   isValidFontFamilyOverride,
 } from "../shared/appearance-font.js";
-import { DEFAULT_LOCALE, normalizeLocale, type Locale } from "../i18n/index.js";
+import { DEFAULT_LOCALE, isLocale, normalizeLocale, type Locale } from "../i18n/index.js";
 import { DEFAULT_APP_MODE, normalizeAppMode, type InitialAppMode } from "../shared/initial-app-mode.js";
 import { DEFAULT_SIDEBAR_TAB, isSidebarTab, type SidebarTab } from "../shared/sidebar-tab.js";
 import {
@@ -531,6 +531,16 @@ export interface MarketplaceSettings {
    * the stored version; the next version surfaces again.
    */
   skippedPluginUpdates?: Record<string, string>;
+  /**
+   * Marketplace-installed provider packages. Defaults stay tiny; installed ids
+   * expand the provider picker without re-bundling every provider into the
+   * first-run surface.
+   */
+  installedProviderIds: LLMVendor[];
+  /** Marketplace-installed theme bundles shown in Appearance. */
+  installedThemeBundleIds: BundleId[];
+  /** Marketplace-installed language packs shown in the language picker. */
+  installedLanguagePacks: Locale[];
 }
 
 export interface SettingsServiceOptions {
@@ -571,6 +581,9 @@ const DEFAULT_SETTINGS: AppSettings = {
     backend: "real-cloud",
     cloudBaseUrl: "https://marketplace.lvisai.xyz",
     cloudAllowPrivateNetwork: false,
+    installedProviderIds: [],
+    installedThemeBundleIds: [],
+    installedLanguagePacks: [],
   },
   routine: {},
   privacy: {
@@ -731,7 +744,10 @@ export class SettingsService {
     if (partial.chat) this.settings.chat = { ...this.settings.chat, ...partial.chat };
     if (partial.webSearch) this.settings.webSearch = { ...this.settings.webSearch, ...partial.webSearch };
     if (partial.marketplace) {
-      this.settings.marketplace = { ...this.settings.marketplace, ...partial.marketplace };
+      this.settings.marketplace = normalizeMarketplace({
+        ...this.settings.marketplace,
+        ...partial.marketplace,
+      });
     }
     if (partial.routine) {
       this.settings.routine = { ...this.settings.routine, ...partial.routine };
@@ -1127,7 +1143,7 @@ export class SettingsService {
         llm,
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
         webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
-        marketplace: { ...DEFAULT_SETTINGS.marketplace, ...marketplaceParsed },
+        marketplace: normalizeMarketplace(marketplaceParsed),
         routine: normalizedRoutine,
         privacy: { ...DEFAULT_SETTINGS.privacy, ...parsed.privacy },
         updates: { ...DEFAULT_SETTINGS.updates, ...parsed.updates },
@@ -1232,6 +1248,48 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
     // `undefined` means "no mapping"; an explicit empty string clears the map.
     hostResolverMap: "hostResolverMap" in partial ? partial.hostResolverMap : base.hostResolverMap,
   };
+}
+
+function uniqueValidList<T extends string>(
+  values: unknown,
+  isValid: (value: unknown) => value is T,
+): T[] {
+  if (!Array.isArray(values)) return [];
+  const result: T[] = [];
+  for (const value of values) {
+    if (!isValid(value)) continue;
+    if (result.includes(value)) continue;
+    result.push(value);
+  }
+  return result;
+}
+
+function isBundleId(value: unknown): value is BundleId {
+  return typeof value === "string" && (BUNDLE_IDS as readonly string[]).includes(value);
+}
+
+function normalizeMarketplace(input: unknown): MarketplaceSettings {
+  const raw = input && typeof input === "object" && !Array.isArray(input)
+    ? (input as Partial<MarketplaceSettings>)
+    : {};
+  const merged: MarketplaceSettings = {
+    ...DEFAULT_SETTINGS.marketplace,
+    ...raw,
+    backend: "real-cloud",
+  };
+  if (typeof raw.cloudBaseUrl === "string") {
+    const trimmed = raw.cloudBaseUrl.trim();
+    merged.cloudBaseUrl = trimmed || DEFAULT_SETTINGS.marketplace.cloudBaseUrl;
+  } else {
+    merged.cloudBaseUrl = DEFAULT_SETTINGS.marketplace.cloudBaseUrl;
+  }
+  merged.cloudAllowPrivateNetwork = typeof raw.cloudAllowPrivateNetwork === "boolean"
+    ? raw.cloudAllowPrivateNetwork
+    : DEFAULT_SETTINGS.marketplace.cloudAllowPrivateNetwork;
+  merged.installedProviderIds = uniqueValidList(raw.installedProviderIds, isLLMVendor);
+  merged.installedThemeBundleIds = uniqueValidList(raw.installedThemeBundleIds, isBundleId);
+  merged.installedLanguagePacks = uniqueValidList(raw.installedLanguagePacks, isLocale);
+  return merged;
 }
 
 /**
