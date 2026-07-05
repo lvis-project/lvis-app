@@ -26,6 +26,7 @@ import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { MarketplaceAnnouncement } from "../shared/marketplace-announcements.js";
 import { isMarketplaceAnnouncementLevel } from "../shared/marketplace-announcements.js";
 import { isMarketplacePackageType } from "../shared/assistant-context.js";
+import { assetFromMarketplaceCatalogFields } from "../shared/marketplace-package-assets.js";
 import { mapNetworkAccessGrant } from "../shared/network-access.js";
 import type {
   McpAuthMetadata,
@@ -93,6 +94,24 @@ interface ServerCatalogRow {
   /** lvis-marketplace#52: "plugin" (default) | "mcp". */
   plugin_type?: string;
   pluginType?: string;
+  /** Provider/theme/language-pack target metadata for non-plugin packages. */
+  package_asset?: unknown;
+  packageAsset?: unknown;
+  asset?: unknown;
+  provider_id?: string;
+  providerId?: string;
+  vendor_id?: string;
+  vendorId?: string;
+  llm_vendor_id?: string;
+  llmVendorId?: string;
+  theme_bundle_id?: string;
+  themeBundleId?: string;
+  bundle_id?: string;
+  bundleId?: string;
+  locale?: string;
+  language_code?: string;
+  languageCode?: string;
+  language?: string;
   /** MCP runtime block when present (advisory copy; manifest is authoritative). */
   runtime?: unknown;
   mcpRuntime?: unknown;
@@ -554,6 +573,12 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
       ? pluginTypeRaw
       : "plugin";
     item.pluginType = pluginType;
+    const packageAsset = assetFromMarketplaceCatalogFields(
+      pluginType,
+      packageSpec,
+      row as Record<string, unknown>,
+    );
+    if (packageAsset) item.packageAsset = packageAsset;
     if (pluginType === "mcp") {
       const runtime = parseMcpRuntimeSpec(row.runtime ?? row.mcpRuntime);
       if (runtime) item.mcpRuntime = runtime;
