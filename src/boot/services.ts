@@ -21,8 +21,30 @@ import { BashAstValidator } from "../main/bash-ast-validator.js";
 import { AuditService } from "../main/audit-service.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
-import { createLogger } from "../lib/logger.js";
+import { createLogger, initFileLogSink, closeFileLogSink } from "../lib/logger.js";
+import { LOG_RETENTION_DAYS, LOG_MAX_BYTES } from "../lib/log-file-sink.js";
 const log = createLogger("lvis");
+
+/**
+ * Production log file sink signal (#1499 PR-0). The pino file destination is
+ * ATTACHED only for a packaged/production run — an unpackaged dev run keeps the
+ * console-only behaviour so `~/.lvis/logs/` is not polluted during development.
+ * `LVIS_LOG_FILE=1` force-enables it for local diagnosis of the file path.
+ *
+ * Mirrors logger.ts's isPackagedElectron detection: packaged Electron leaves
+ * `process.defaultApp` undefined; dev runs (`bun run start`) set LVIS_DEV=1.
+ */
+function shouldEnableFileLogSink(): boolean {
+  if (process.env.LVIS_LOG_FILE === "1") return true;
+  if (process.env.NODE_ENV === "production") return true;
+  const isElectron = !!(process as NodeJS.Process & { versions?: { electron?: string } }).versions
+    ?.electron;
+  const isPackaged =
+    isElectron &&
+    !(process as NodeJS.Process & { defaultApp?: boolean }).defaultApp &&
+    process.env.LVIS_DEV !== "1";
+  return isPackaged;
+}
 
 export interface CoreServices {
   pythonPath: string | undefined;
@@ -73,6 +95,22 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   // locale on fresh install) so dialog titles, native menus, tray, and
   // notifications render in the user's language. See src/i18n.
   await applyBootLocale(settingsService);
+
+  // #1499 PR-0: production log file sink. Attach the pino file destination
+  // (`~/.lvis/logs/lvis-<date>.log`, 0o700 dir + 0o600 file) so the packaged
+  // app has a readable log. createLogFileSink prunes files older than
+  // LOG_RETENTION_DAYS at attach time; the console stream is unaffected. Failure
+  // is swallowed inside initFileLogSink (logging is best-effort, never bricks boot).
+  if (shouldEnableFileLogSink()) {
+    const sink = initFileLogSink({
+      retentionDays: LOG_RETENTION_DAYS,
+      maxBytes: LOG_MAX_BYTES,
+    });
+    if (sink) {
+      log.info({ file: sink.currentFile }, "boot: production log file sink attached");
+      app.once("before-quit", () => closeFileLogSink());
+    }
+  }
 
   // §14.2 Audit log rotation + retention — boot-time check + 1h interval
   const auditLogger = new AuditLogger();
