@@ -61,6 +61,8 @@ export interface VendorOption extends VendorUiMeta {
   modelOptions: readonly string[];
 }
 
+type VendorOptionFor<T extends LLMVendor> = VendorOption & { id: T };
+
 const CORE_VENDOR_UI: Record<Exclude<LLMVendor, OpenAICompatiblePresetVendor>, VendorUiMeta> = {
   claude: { label: "Anthropic Claude", placeholder: "sk-ant-...", needsBaseUrl: false },
   openai: { label: "OpenAI", placeholder: "sk-...", needsBaseUrl: false },
@@ -112,25 +114,23 @@ export const ALL_VENDORS: VendorOption[] = LLM_VENDORS.map((id) => ({
   modelOptions: LLM_VENDOR_MODEL_OPTIONS[id],
 }));
 
-export const VENDORS: VendorOption[] = DEFAULT_VISIBLE_LLM_VENDOR_IDS.map((id) => {
+function requireVendorOption<T extends LLMVendor>(id: T): VendorOptionFor<T> {
   const option = ALL_VENDORS.find((vendor) => vendor.id === id);
-  if (!option) throw new Error(`Missing default visible LLM vendor metadata: ${id}`);
-  return option;
-});
+  if (!option) throw new Error(`Missing LLM vendor metadata: ${id}`);
+  return option as VendorOptionFor<T>;
+}
 
-export const MARKETPLACE_PROVIDER_VENDORS: VendorOption[] =
-  MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS.map((id) => {
-    const option = ALL_VENDORS.find((vendor) => vendor.id === id);
-    if (!option) throw new Error(`Missing marketplace LLM vendor metadata: ${id}`);
-    return option;
-  });
+export const VENDORS = DEFAULT_VISIBLE_LLM_VENDOR_IDS.map(requireVendorOption);
+
+export const MARKETPLACE_PROVIDER_VENDORS =
+  MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS.map(requireVendorOption);
 
 export function getVendorOption(vendorId: string): VendorOption {
   return ALL_VENDORS.find((vendor) => vendor.id === vendorId) ?? VENDORS[0]!;
 }
 
 export function visibleVendorsFor(currentVendorIds: readonly string[] = []): VendorOption[] {
-  const visible = [...VENDORS];
+  const visible: VendorOption[] = [...VENDORS];
   for (const vendorId of currentVendorIds) {
     if (!isLLMVendor(vendorId)) continue;
     if (visible.some((vendor) => vendor.id === vendorId)) continue;

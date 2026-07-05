@@ -149,24 +149,24 @@ describe("MarketplaceTab", () => {
   it("installs provider/theme/language packages through marketplace settings", async () => {
     const packages: MarketplaceItem[] = [
       {
-        id: "openrouter-provider",
-        name: "OpenRouter Provider",
+        id: "groq-provider",
+        name: "Groq Provider",
         description: "Provider package",
-        packageSpec: "provider:openrouter",
+        packageSpec: "provider:groq",
         installed: false,
         enabled: false,
         pluginType: "provider",
-        packageAsset: { type: "provider", providerId: "openrouter" },
+        packageAsset: { type: "provider", providerId: "groq" },
       },
       {
-        id: "moonstone-theme",
-        name: "Moonstone Theme",
+        id: "tokyo-night-theme",
+        name: "Tokyo Night Theme",
         description: "Theme package",
-        packageSpec: "theme:moonstone",
+        packageSpec: "theme:tokyo-night",
         installed: false,
         enabled: false,
         pluginType: "theme",
-        packageAsset: { type: "theme", bundleId: "moonstone" },
+        packageAsset: { type: "theme", bundleId: "tokyo-night" },
       },
       {
         id: "ko-language-pack",
@@ -186,15 +186,15 @@ describe("MarketplaceTab", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Providers" }));
 
-    expect(await screen.findByText("OpenRouter Provider")).toBeTruthy();
-    expect(screen.queryByText("Moonstone Theme")).toBeNull();
-    const action = await screen.findByTestId("marketplace:action:openrouter-provider");
+    expect(await screen.findByText("Groq Provider")).toBeTruthy();
+    expect(screen.queryByText("Tokyo Night Theme")).toBeNull();
+    const action = await screen.findByTestId("marketplace:action:groq-provider");
     expect(action.textContent).toContain("설치");
     expect((action as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(action);
     await waitFor(() => {
       expect(api.updateSettings).toHaveBeenCalledWith({
-        marketplace: { installedProviderIds: ["openrouter"] },
+        marketplace: { installedProviderIds: ["groq"] },
       });
     });
     expect(api.listMarketplacePlugins).toHaveBeenCalled();
