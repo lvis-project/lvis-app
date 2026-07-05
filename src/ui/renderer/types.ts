@@ -26,6 +26,7 @@ import type {
   OpenHtmlPreviewWindowResult,
 } from "../../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../../shared/session-todo.js";
+import type { SidebarTab } from "../../shared/sidebar-tab.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import type {
@@ -236,7 +237,7 @@ export type AppSettings = {
     sidePanelSplitPreviewPercent?: number;
     sidePanelSplitSubagentPercent?: number;
     /** Persisted active sidebar tab ("chats" | "projects"). SOT: `SystemSettings`. */
-    sidebarActiveTab?: "chats" | "projects";
+    sidebarActiveTab?: SidebarTab;
     /** Pinned project roots — sort to the top of the sidebar's Projects tab. SOT: `SystemSettings`. */
     pinnedProjectRoots?: string[];
   };
