@@ -423,11 +423,19 @@ describe("workspace handlers", () => {
 
   it("#1493 removeRoot prunes path grants under the root and reports the count", async () => {
     // Re-register the workspace handler with a deps carrying a stub permission
-    // manager so the prune path fires. prunePathGrantsUnderRoot returns 3 →
-    // handler surfaces prunedGrants:3 for the renderer toast.
-    const prune = vi.fn(async () => 3);
+    // manager so the prune path fires. #1494 item-4: prunePathGrantsUnderRoot now
+    // returns the pruned grant TUPLES (not a bare number); the handler derives
+    // prunedGrants:3 (length) for the renderer toast AND audits redacted
+    // per-pattern provenance.
+    const prunedTuples = [
+      { pattern: "write_file:path:/ws/a.md", toolName: "write_file", tier: "write" as const, path: "/ws/a.md" },
+      { pattern: "edit_file:path:/ws/b.ts", toolName: "edit_file", tier: "write" as const, path: "/ws/b.ts" },
+      { pattern: "delete_file:path:/ws/c.log", toolName: "delete_file", tier: "read" as const, path: "/ws/c.log" },
+    ];
+    const prune = vi.fn(async () => prunedTuples);
+    const auditLog = vi.fn();
     const depsWithPm = {
-      auditLogger: { log: vi.fn() },
+      auditLogger: { log: auditLog },
       getMainWindow: () => null,
       conversationLoop: { permissionManager: { prunePathGrantsUnderRoot: prune } },
     } as never;
@@ -437,8 +445,23 @@ describe("workspace handlers", () => {
         ok: boolean;
         prunedGrants?: number;
       };
+      // IPC response shape unchanged — a bare count, never the pattern list.
       expect(res).toMatchObject({ ok: true, prunedGrants: 3 });
       expect(prune).toHaveBeenCalledWith(root);
+      // The success audit records redacted per-pattern tuples (tool/tier/path).
+      const infoEntry = auditLog.mock.calls
+        .map((c) => c[0] as { type: string; input: string })
+        .find((entry) => entry.type === "info" && entry.input.includes(CHANNELS.workspace.removeRoot));
+      expect(infoEntry).toBeTruthy();
+      const parsed = JSON.parse(infoEntry!.input) as {
+        prunedGrants: number;
+        prunedPatterns?: Array<{ tool: string; tier: string; path: string }>;
+      };
+      expect(parsed.prunedGrants).toBe(3);
+      expect(parsed.prunedPatterns).toHaveLength(3);
+      expect(parsed.prunedPatterns![0]).toMatchObject({ tool: "write_file", tier: "write" });
+      // Raw pattern strings must NOT leak into the response (renderer unchanged).
+      expect(JSON.stringify(res)).not.toContain("write_file:path:");
     } finally {
       // Restore the shared handler registration for later tests in this file.
       registerWorkspaceHandlers(deps);

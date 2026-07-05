@@ -472,10 +472,24 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
       // best-effort so removeRoot still succeeds; the read-list shrink is the
       // primary, always-applied action.
       let prunedGrants = 0;
+      // #1494 item-4 — redacted per-pattern provenance for the success audit.
+      // prunePathGrantsUnderRoot returns the pruned grant tuples; we keep the
+      // count derivable (`.length`) for the IPC response + renderer toast, but
+      // ALSO record which grants were revoked (tool name, tier, redacted path)
+      // so forensics can see exactly what a root removal disowned. The pattern
+      // list is audit-only — the IPC response still carries a bare number, so the
+      // renderer is unchanged (No-Fallback: no renderer-side type widening).
+      let prunedAudit: Array<{ tool: string; tier: string; path: string }> = [];
       const pm = deps.conversationLoop?.permissionManager;
       if (pm) {
         try {
-          prunedGrants = await pm.prunePathGrantsUnderRoot(match);
+          const prunedList = await pm.prunePathGrantsUnderRoot(match);
+          prunedGrants = prunedList.length;
+          prunedAudit = prunedList.map((g) => ({
+            tool: g.toolName,
+            tier: g.tier,
+            path: redactFsPath(g.path),
+          }));
         } catch (err) {
           // A prune failure must not fail the removal — log and continue.
           auditLogger.log({
@@ -498,6 +512,9 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
           channel: CHANNELS.workspace.removeRoot,
           path: redactFsPath(match),
           prunedGrants,
+          // Redacted per-pattern tuples (empty when nothing pruned). Audit-only;
+          // never returned to the renderer.
+          ...(prunedAudit.length > 0 ? { prunedPatterns: prunedAudit } : {}),
         }),
       });
       return { ok: true, removed: match, roots: computeRoots(), prunedGrants };
