@@ -2164,7 +2164,7 @@ describe("ChatView", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true, cancelable: true }));
     });
     const input = await waitFor(() => {
-      const el = container.querySelector('input[placeholder="대화·세션·즐겨찾기·루틴·메모리 검색..."]') as HTMLInputElement | null;
+      const el = container.querySelector('input[placeholder="대화·세션·핀·루틴·메모리 검색..."]') as HTMLInputElement | null;
       expect(el).toBeTruthy();
       return el;
     });
