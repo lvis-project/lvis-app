@@ -163,6 +163,7 @@ export const deMessages: Record<string, string> = {
   "auditTab.bundleSectionTitle": "Diagnosepaket",
   "auditTab.bundleSectionDesc": "Ein ZIP mit maskierten Einstellungen, Audit-Verlauf, Protokollen und Absturzabbild-Metadaten. Geheimnisse und personenbezogene Daten werden maskiert.",
   "auditTab.bundleIncludeCrashDumps": "Absturzabbild-Binärdateien einschließen",
+  "auditTab.bundleCrashDumpWarning": "Absturzabbild-Binärdateien können unmaskierten Speicher (Token, Schlüssel, personenbezogene Daten) enthalten. Schließen Sie sie nur ein, wenn Sie sie mit vertrauenswürdigem Support teilen.",
   "auditTab.bundleExportButton": "Paket exportieren",
   "auditTab.bundleExporting": "Wird exportiert…",
   "auditTab.bundleExportSuccess": "Paket gespeichert ({bytes}).",

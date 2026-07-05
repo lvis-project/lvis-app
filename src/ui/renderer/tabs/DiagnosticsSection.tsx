@@ -40,6 +40,10 @@ interface DiagnosticsApi {
   logs: {
     tail: (args?: { lines?: number; level?: string }) => Promise<LogsTailResult>;
   };
+  getSettings: () => Promise<{ diagnostics?: { includeCrashDumps?: boolean } } | null | undefined>;
+  updateSettings: (partial: {
+    diagnostics?: { includeCrashDumps?: boolean };
+  }) => Promise<unknown>;
 }
 
 function api(): DiagnosticsApi {
@@ -83,6 +87,25 @@ export function DiagnosticsSection({ defaultDateFrom, defaultDateTo }: Diagnosti
    * other tab uses, so the diagnostics codes cannot drift from the shared set.
    */
   const mapError = useCallback((code: string): string => formatIpcError(code, undefined), []);
+
+  /**
+   * Toggle the crash-dump opt-in. The persisted setting is the AUTHORITATIVE
+   * SOT for the export handler (which only NARROWS by the renderer arg, never
+   * widens — security M2), so save the patch FIRST, then reflect it locally.
+   * Without this the checkbox was cosmetic — the handler always sent a defined
+   * boolean, so the persisted setting never governed (critic M1).
+   */
+  const handleToggleCrashDumps = useCallback(
+    async (next: boolean) => {
+      setIncludeCrashDumps(next);
+      try {
+        await api().updateSettings({ diagnostics: { includeCrashDumps: next } });
+      } catch {
+        /* best-effort persist — export still narrows against the stored value */
+      }
+    },
+    [],
+  );
 
   const handleExport = useCallback(async () => {
     setExporting(true);
@@ -133,6 +156,18 @@ export function DiagnosticsSection({ defaultDateFrom, defaultDateTo }: Diagnosti
   useEffect(() => {
     void refreshLogs();
     void refreshCrashes();
+    // Seed the checkbox from the persisted setting so it reflects the true SOT
+    // the export handler reads, not a hardcoded default (critic M1).
+    void (async () => {
+      try {
+        const settings = await api().getSettings();
+        if (typeof settings?.diagnostics?.includeCrashDumps === "boolean") {
+          setIncludeCrashDumps(settings.diagnostics.includeCrashDumps);
+        }
+      } catch {
+        /* fall back to the default-false initial state */
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -145,10 +180,13 @@ export function DiagnosticsSection({ defaultDateFrom, defaultDateTo }: Diagnosti
           <input
             type="checkbox"
             checked={includeCrashDumps}
-            onChange={(e) => setIncludeCrashDumps(e.target.checked)}
+            onChange={(e) => void handleToggleCrashDumps(e.target.checked)}
           />
           {t("auditTab.bundleIncludeCrashDumps")}
         </label>
+        {includeCrashDumps && (
+          <p className="text-[11px] text-warning">{t("auditTab.bundleCrashDumpWarning")}</p>
+        )}
         <div className="flex items-center gap-2">
           <Button size="sm" className="h-8" onClick={() => void handleExport()} disabled={exporting}>
             {exporting ? t("auditTab.bundleExporting") : t("auditTab.bundleExportButton")}

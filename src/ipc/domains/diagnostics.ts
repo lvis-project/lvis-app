@@ -4,8 +4,11 @@
  *
  * ALL INTERNAL — none appear in PUBLIC_CHANNELS, so an external origin
  * (local-api / cli / plugin frame) can never reach them (fail-closed default).
- * Each handler additionally calls validateSender and, on rejection, emits an
- * auditUnauthorized warn row + returns UNAUTHORIZED_FRAME.
+ * Each handler additionally calls validateHostRendererSender (NOT the base
+ * validateSender) — these channels expose host-wide state (settings snapshot,
+ * production logs, crash metadata), so a plugin-ui-shell frame is rejected even
+ * though it is also a file:// origin (#1499 E2 cluster-review security m1). On
+ * rejection each emits an auditUnauthorized warn row + returns UNAUTHORIZED_FRAME.
  *
  * IPC error convention: return codes are kebab-case English; the renderer maps
  * them to Korean (see AuditTab diagnostics section).
@@ -15,13 +18,13 @@ import { readFile } from "node:fs/promises";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { CHANNELS } from "../../contract/app-contract.js";
-import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import {
   buildDiagnosticsBundle,
   listCrashDumps,
   type CrashDumpMeta,
 } from "../../audit/diagnostics-bundle.js";
-import { redactForLLM } from "../../audit/dlp-filter.js";
+import { redactForLLM, redactFsPath } from "../../audit/dlp-filter.js";
 import { parseLogFileDate } from "../../lib/log-file-sink.js";
 import { getLvisAppVersion } from "../../shared/app-version.js";
 import { lvisHome } from "../../shared/lvis-home.js";
@@ -59,6 +62,13 @@ async function crashDumpsDir(): Promise<string> {
  * Read the last `lines` log lines from the most-recent log files, redacting each
  * with redactForLLM and applying the optional level filter. Newest file first;
  * reads only enough files to satisfy `lines`.
+ *
+ * KNOWN LIMITATION (accepted, #1499 E2 cluster-review NIT): this loads each
+ * needed file fully into memory before slicing to the tail. Files are bounded by
+ * the sink's LOG_MAX_BYTES (10 MB/file) and we stop reading once `lines` is
+ * satisfied, so worst-case memory is small and O(files-needed). A streaming
+ * reverse-read was judged not worth the complexity at this bound; revisit only
+ * if per-file caps grow.
  */
 async function tailLogs(lines: number, level: LogLevelFilter): Promise<string[]> {
   const dir = join(lvisHome(), "logs");
@@ -109,14 +119,19 @@ export function registerDiagnosticsHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     CHANNELS.diagnostics.export,
     async (e, opts?: { dateFrom?: string; dateTo?: string; includeCrashDumps?: boolean }) => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.diagnostics.export, e);
         return UNAUTHORIZED_FRAME;
       }
       try {
         const settings = settingsService.getAll();
+        // Persisted setting is AUTHORITATIVE; the renderer arg may only NARROW,
+        // never widen (#1499 E2 cluster-review security MAJOR M2). Crash dumps
+        // are only ever included when the persisted opt-in is true AND the caller
+        // did not explicitly opt out — a renderer that sends `true` can never
+        // force-include dumps the user's setting has disabled.
         const includeCrashDumps =
-          opts?.includeCrashDumps ?? settings.diagnostics.includeCrashDumps;
+          settings.diagnostics.includeCrashDumps === true && opts?.includeCrashDumps !== false;
         const buffer = await buildDiagnosticsBundle({
           settings,
           auditLogger,
@@ -143,6 +158,23 @@ export function registerDiagnosticsHandlers(deps: IpcDeps): void {
 
         const { writeFile } = await import("node:fs/promises");
         await writeFile(res.filePath, buffer);
+        // Forensic record of the export (#1499 E2 cluster-review security m2):
+        // a diagnostics bundle is a sanctioned exfiltration of redacted host
+        // state, so log WHO exported WHAT — the effective includeCrashDumps
+        // (post-M2 narrowing), the date window, byte size, and the destination
+        // path (redactFsPath strips the home dir / username).
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "diagnostics-export",
+          type: "diagnostics-export",
+          input: JSON.stringify({
+            includeCrashDumps,
+            dateFrom: opts?.dateFrom,
+            dateTo: opts?.dateTo,
+            bytes: buffer.length,
+            path: redactFsPath(res.filePath),
+          }),
+        });
         return { ok: true as const, path: res.filePath, bytes: buffer.length };
       } catch (err) {
         log.warn({ err }, "diagnostics export failed");
@@ -153,7 +185,7 @@ export function registerDiagnosticsHandlers(deps: IpcDeps): void {
 
   // ── lvis:diagnostics:crash-list ── crash-dump metadata (filename/time/size) ──
   ipcMain.handle(CHANNELS.diagnostics.crashList, async (e) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.diagnostics.crashList, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -170,7 +202,7 @@ export function registerDiagnosticsHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     CHANNELS.logs.tail,
     async (e, args?: { lines?: number; level?: string }) => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.logs.tail, e);
         return UNAUTHORIZED_FRAME;
       }

@@ -56,13 +56,16 @@ import { join } from "node:path";
 // name is a valid runtime constructor under esModuleInterop.
 import { SonicBoom } from "sonic-boom";
 import { lvisHome } from "../shared/lvis-home.js";
+import { LOG_RETENTION_DAYS } from "../shared/log-retention.js";
 
 /**
- * Retention window (days) for `~/.lvis/logs/` files. Single source of truth.
- * A later E2 change will make this configurable via `diagnostics.logRetentionDays`
- * (master plan §2(d)); until then this constant is the SOT and the default.
+ * Retention window (days) for `~/.lvis/logs/` files. Re-exported from the fs-free
+ * SOT {@link ../shared/log-retention.LOG_RETENTION_DAYS} so this sink and the
+ * settings store (`DEFAULT_SETTINGS.diagnostics.logRetentionDays`) share one
+ * literal — a drift between the boot-time prune window and the UI-reported value
+ * is impossible by construction (#1499 E2 cluster-review architect MAJOR).
  */
-export const LOG_RETENTION_DAYS = 7;
+export { LOG_RETENTION_DAYS } from "../shared/log-retention.js";
 
 /**
  * Per-file size ceiling (bytes) before the active log rolls to a new sequence
@@ -266,6 +269,25 @@ export function capLogTree(
       if (deleted.length > before) total -= f.size;
     }
   }
+  return deleted;
+}
+
+/**
+ * Re-prune the log tree with a persisted (user-configured) retention window at
+ * boot (#1499 E2). The sink already pruned at {@link LOG_RETENTION_DAYS} before
+ * settings loaded (hoisted so early boot lines are captured); once settings
+ * exist, honour a tightened/loosened window. No-op when `retentionDays` equals
+ * the default (the sink already applied it). Runs {@link capLogTree} after the
+ * date prune, mirroring the sink's own init sequence so both prune paths stay
+ * symmetric (architect NIT). Best-effort — never throws (both helpers swallow
+ * I/O errors), so a prune failure can never affect boot.
+ *
+ * Returns the list of files deleted by the date-retention pass (for tests).
+ */
+export function reprunePersistedRetention(dir: string, retentionDays: number): string[] {
+  if (retentionDays === LOG_RETENTION_DAYS) return [];
+  const deleted = pruneOldLogs(dir, retentionDays);
+  capLogTree(dir);
   return deleted;
 }
 

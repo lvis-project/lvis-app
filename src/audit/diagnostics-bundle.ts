@@ -4,10 +4,13 @@
  *
  * A production build has no console, so a support engineer needs a one-click
  * bundle of: what version/OS is running, a REDACTED settings snapshot, the
- * recent audit trail, the production log files, and crash-dump metadata. Every
- * byte that leaves this function passes a DLP gate here — this is the ONLY place
- * that assembles the bundle, so the redaction cannot be bypassed by a second
- * code path.
+ * recent audit trail, the production log files, and crash-dump metadata. This is
+ * the ONLY place that ASSEMBLES the bundle, so every free-text byte passes the
+ * DLP gate here and cannot be bypassed by a second assembly path. "Chokepoint"
+ * refers to bundle *assembly* — it does NOT mean this is the only redactor in
+ * the app: the free-text DLP here is layered (BOTH the PII class via
+ * redactForLLM AND the credential class via scrubSecretsForLLM), because the PII
+ * pass alone misses tokens/keys.
  *
  * DLP layers (all applied HERE, at the chokepoint):
  *   - settings   → {@link pickRedactedSettings}: a DENY-BY-DEFAULT allowlist.
@@ -15,13 +18,16 @@
  *                  newly-added secret field (a fresh apiKey/DSN/token) is absent
  *                  by construction — never leaked because someone forgot to add
  *                  it to a denylist.
- *   - audit      → {@link redactAuditPayload} (home-dir path fields) + line-level
- *                  {@link redactForLLM} over input/output (email/phone/SSN/CC).
- *   - logs       → line-level {@link redactForLLM}. The production log file also
- *                  carries MCP stderr (mcp-client pipes it into the app logger),
- *                  so covering the log lines here is the single point that
- *                  redacts MCP stderr in the bundle (no separate mcp-client
- *                  change needed — proven by test).
+ *   - audit      → {@link redactAuditPayload} (home-dir path fields) + a
+ *                  DOUBLE-APPLY over input/output: {@link redactForLLM} for the
+ *                  PII class (email/phone/SSN/CC) AND {@link scrubSecretsForLLM}
+ *                  for the credential class (bearer/`sk-…`/JWT/auth-header/token
+ *                  param). See {@link redactBundleText}.
+ *   - logs       → per-line DOUBLE-APPLY (same {@link redactBundleText}: PII +
+ *                  credential class). The production log file also carries MCP
+ *                  stderr (mcp-client pipes it into the app logger); mcp-client's
+ *                  own `scrubSecrets` wraps the SAME `scrubSecretsForLLM` SOT, so
+ *                  the credential class is covered both there and here.
  *   - crash dumps→ FILENAME + mtime + size metadata only, unless the caller
  *                  opts in via `includeCrashDumps` (settings.diagnostics).
  *
@@ -37,7 +43,7 @@ import { readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import AdmZip from "adm-zip";
-import { redactForLLM, redactAuditPayload } from "./dlp-filter.js";
+import { redactForLLM, redactAuditPayload, scrubSecretsForLLM } from "./dlp-filter.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { parseLogFileDate } from "../lib/log-file-sink.js";
 import type { AppSettings } from "../data/settings-store.js";
@@ -292,7 +298,7 @@ export async function buildDiagnosticsBundle(
     }
     const redacted = raw
       .split("\n")
-      .map((line) => (line.length > 0 ? redactForLLM(line).redacted : line))
+      .map((line) => (line.length > 0 ? redactBundleText(line) : line))
       .join("\n");
     if (addEntry(`logs/${fname}`, redacted)) anyLog = true;
   }
@@ -338,7 +344,12 @@ export async function buildDiagnosticsBundle(
   };
   zip.addFile("manifest.json", Buffer.from(JSON.stringify(manifest, null, 2), "utf-8"));
 
-  return zip.toBuffer();
+  // Async (thread-pool) deflate — adm-zip's toBufferPromise() compresses each
+  // entry via zlib's async path (getCompressedDataAsync), so the main process is
+  // NOT blocked while a large log tree is deflated up to MAX_BUNDLE_BYTES (50 MB).
+  // The synchronous zip.toBuffer() would stall the UI for the whole compression
+  // (#1499 E2 cluster-review architect MINOR).
+  return zip.toBufferPromise();
 }
 
 /**
@@ -349,7 +360,19 @@ export async function buildDiagnosticsBundle(
 function redactAuditEntry(entry: AuditEntry): Record<string, unknown> {
   const base = redactAuditPayload(entry) as Record<string, unknown>;
   const out = { ...base };
-  if (typeof out.input === "string") out.input = redactForLLM(out.input).redacted;
-  if (typeof out.output === "string") out.output = redactForLLM(out.output).redacted;
+  if (typeof out.input === "string") out.input = redactBundleText(out.input);
+  if (typeof out.output === "string") out.output = redactBundleText(out.output);
   return out;
+}
+
+/**
+ * DOUBLE-APPLY DLP for a single free-text span written into the bundle: the PII
+ * class via {@link redactForLLM} (email/phone/SSN/CC) AND the credential class
+ * via {@link scrubSecretsForLLM} (bearer/`sk-…`/JWT/auth-header/token-param).
+ * {@link redactForLLM} alone misses secrets, so both must run over every log
+ * line and audit input/output — this is the single chokepoint where both DLP
+ * classes are enforced (#1499 E2 cluster-review security MAJOR M1).
+ */
+function redactBundleText(text: string): string {
+  return scrubSecretsForLLM(redactForLLM(text).redacted);
 }

@@ -542,7 +542,12 @@ export const EXTERNAL_MUTATION_DENIED = "external-mutation-denied";
  * the C17 sweep replaces the inline literals at those sites with these consts.
  * `lvis:window:open-html-preview` is intentionally NOT listed — it is
  * registered in-tree by the `window` IPC domain and is already classified
- * (internal: registered-but-not-public) by the channel inventory.
+ * (internal: registered-but-not-public) by the channel inventory. For the SAME
+ * reason the #1499 E2 diagnostics channels (`lvis:diagnostics:export`,
+ * `lvis:diagnostics:crash-list`, `lvis:logs:tail`) are NOT listed here — they
+ * are registered in-tree by the `diagnostics` IPC domain and classified
+ * internal (registered-but-not-public) by the channel inventory; this map is
+ * ONLY for the out-of-tree host surfaces above.
  */
 export const INTERNAL_HOST_CHANNELS = {
   settingsWindow: [

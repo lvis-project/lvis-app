@@ -163,6 +163,7 @@ export const zhMessages: Record<string, string> = {
   "auditTab.bundleSectionTitle": "诊断包",
   "auditTab.bundleSectionDesc": "包含脱敏设置、审核记录、日志和崩溃转储元数据的 ZIP。密钥和个人信息会被脱敏。",
   "auditTab.bundleIncludeCrashDumps": "包含崩溃转储二进制文件",
+  "auditTab.bundleCrashDumpWarning": "崩溃转储二进制文件可能包含未脱敏的内存（令牌、密钥、个人信息）。仅在与可信支持人员共享时才包含它们。",
   "auditTab.bundleExportButton": "导出诊断包",
   "auditTab.bundleExporting": "导出中…",
   "auditTab.bundleExportSuccess": "已保存诊断包 ({bytes})。",

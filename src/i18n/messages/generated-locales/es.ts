@@ -163,6 +163,7 @@ export const esMessages: Record<string, string> = {
   "auditTab.bundleSectionTitle": "Paquete de diagnóstico",
   "auditTab.bundleSectionDesc": "Un ZIP con la configuración enmascarada, el registro de auditoría, los registros y los metadatos de volcados de fallos. Los secretos y la información personal se enmascaran.",
   "auditTab.bundleIncludeCrashDumps": "Incluir binarios de volcados de fallos",
+  "auditTab.bundleCrashDumpWarning": "Los binarios de volcados de fallos pueden contener memoria sin enmascarar (tokens, claves, datos personales). Inclúyalos solo cuando los comparta con soporte de confianza.",
   "auditTab.bundleExportButton": "Exportar paquete",
   "auditTab.bundleExporting": "Exportando…",
   "auditTab.bundleExportSuccess": "Paquete guardado ({bytes}).",

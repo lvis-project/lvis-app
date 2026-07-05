@@ -163,6 +163,7 @@ export const jaMessages: Record<string, string> = {
   "auditTab.bundleSectionTitle": "診断バンドル",
   "auditTab.bundleSectionDesc": "マスクされた設定・監査証跡・ログ・クラッシュダンプのメタデータを含む ZIP です。秘密情報と個人情報はマスクされます。",
   "auditTab.bundleIncludeCrashDumps": "クラッシュダンプのバイナリを含める",
+  "auditTab.bundleCrashDumpWarning": "クラッシュダンプのバイナリには、マスクされていないメモリ（トークン・キー・個人情報）が含まれる場合があります。信頼できるサポートと共有する場合にのみ含めてください。",
   "auditTab.bundleExportButton": "バンドルをエクスポート",
   "auditTab.bundleExporting": "エクスポート中…",
   "auditTab.bundleExportSuccess": "バンドルを保存しました ({bytes})。",

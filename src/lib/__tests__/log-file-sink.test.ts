@@ -20,11 +20,13 @@ import {
   parseLogFileDate,
   pruneOldLogs,
   capLogTree,
+  reprunePersistedRetention,
   LOG_RETENTION_DAYS,
   LOG_MAX_BYTES,
   LOG_MAX_FILES_PER_DAY,
   LOG_MAX_TOTAL_BYTES,
 } from "../log-file-sink.js";
+import { LOG_RETENTION_DAYS as SHARED_LOG_RETENTION_DAYS } from "../../shared/log-retention.js";
 
 let logDir: string;
 
@@ -155,6 +157,26 @@ describe("createLogFileSink — file creation + mode", () => {
     }
   });
 
+  it("runs capLogTree at init: an over-per-day-count tree is pruned on attach", async () => {
+    // Seed 22 sequence files for a recent (in-retention) day — above the
+    // LOG_MAX_FILES_PER_DAY cap of 20. createLogFileSink must invoke capLogTree
+    // at init (after the date-retention prune), so the oldest 2 are removed
+    // (#1499 E2 cluster-review critic gap: prove the init wiring, not just the
+    // capLogTree unit).
+    const day = daysAgo(1);
+    writeFileSync(join(logDir, `lvis-${day}.log`), "a");
+    for (let i = 1; i <= 21; i++) writeFileSync(join(logDir, `lvis-${day}.${i}.log`), "a");
+    const before = readdirSync(logDir).filter((f) => f.startsWith(`lvis-${day}`)).length;
+    expect(before).toBe(22);
+    const sink = createLogFileSink({ dir: logDir, retentionDays: 7 });
+    try {
+      const after = readdirSync(logDir).filter((f) => f.startsWith(`lvis-${day}`)).length;
+      expect(after).toBe(20); // capped to LOG_MAX_FILES_PER_DAY at init
+    } finally {
+      sink.destroy();
+    }
+  });
+
   it.runIf(process.platform !== "win32")(
     "enforces 0o600 on the log file (at open) and 0o700 on the directory",
     async () => {
@@ -273,7 +295,10 @@ describe("createLogFileSink — size-based sequence rolling", () => {
 
 describe("SOT constants", () => {
   it("exports the documented defaults", () => {
-    expect(LOG_RETENTION_DAYS).toBe(7);
+    // LOG_RETENTION_DAYS is re-exported from the shared SOT — assert lockstep
+    // with src/shared/log-retention.ts rather than pinning a literal, so the two
+    // can never drift (#1499 E2 cluster-review architect MAJOR).
+    expect(LOG_RETENTION_DAYS).toBe(SHARED_LOG_RETENTION_DAYS);
     expect(LOG_MAX_BYTES).toBe(10 * 1024 * 1024);
     expect(LOG_MAX_FILES_PER_DAY).toBe(20);
     expect(LOG_MAX_TOTAL_BYTES).toBe(200 * 1024 * 1024);
@@ -312,5 +337,35 @@ describe("capLogTree — per-day count + total-byte caps (#1499 E2)", () => {
 
   it("missing dir is graceful", () => {
     expect(capLogTree(join(logDir, "nope"))).toEqual([]);
+  });
+});
+
+describe("reprunePersistedRetention — boot re-prune (#1499 E2)", () => {
+  it("no-op when retention equals the default", () => {
+    writeFileSync(join(logDir, `lvis-${daysAgo(3)}.log`), "keep");
+    const deleted = reprunePersistedRetention(logDir, LOG_RETENTION_DAYS);
+    expect(deleted).toEqual([]);
+    expect(existsSync(join(logDir, `lvis-${daysAgo(3)}.log`))).toBe(true);
+  });
+
+  it("a tightened window (< default) prunes files older than the new window", () => {
+    // 3-day-old file survives the default (7) but not a tightened window of 2.
+    writeFileSync(join(logDir, `lvis-${daysAgo(3)}.log`), "old");
+    writeFileSync(join(logDir, `lvis-${daysAgo(1)}.log`), "recent");
+    const deleted = reprunePersistedRetention(logDir, 2);
+    expect(deleted).toContain(`lvis-${daysAgo(3)}.log`);
+    expect(existsSync(join(logDir, `lvis-${daysAgo(3)}.log`))).toBe(false);
+    expect(existsSync(join(logDir, `lvis-${daysAgo(1)}.log`))).toBe(true);
+  });
+
+  it("also re-runs capLogTree (per-day count cap) after the date prune", () => {
+    // A tightened window triggers the re-prune path; capLogTree must then cap an
+    // over-count day (symmetry with the sink's init sequence — architect NIT).
+    const day = daysAgo(1);
+    writeFileSync(join(logDir, `lvis-${day}.log`), "a");
+    for (let i = 1; i <= 21; i++) writeFileSync(join(logDir, `lvis-${day}.${i}.log`), "a");
+    reprunePersistedRetention(logDir, 5);
+    const remaining = readdirSync(logDir).filter((f) => f.startsWith(`lvis-${day}`)).length;
+    expect(remaining).toBe(LOG_MAX_FILES_PER_DAY);
   });
 });
