@@ -162,13 +162,7 @@
     "productName": "LVIS",
     "icon": "build/icon.png",
     "electronLanguages": [
-      "en-US",
-      "ko",
-      "ja",
-      "zh-CN",
-      "es",
-      "fr",
-      "de"
+      "en-US"
     ],
     "afterPack": "scripts/electron-after-pack.cjs",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
