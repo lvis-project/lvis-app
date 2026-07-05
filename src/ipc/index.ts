@@ -37,6 +37,7 @@ import { registerPluginsHandlers } from "./domains/plugins.js";
 import { registerPromptHandlers } from "./domains/prompts.js";
 import { registerUsageHandlers } from "./domains/usage.js";
 import { registerAuditHandlers } from "./domains/audit.js";
+import { registerDiagnosticsHandlers } from "./domains/diagnostics.js";
 import { registerPermissionsHandlers } from "./domains/permissions.js";
 import { registerWindowHandlers } from "./domains/window.js";
 import { registerMiscHandlers } from "./domains/misc.js";
@@ -81,6 +82,7 @@ export function registerIpcHandlers(
   registerPromptHandlers(deps);
   registerUsageHandlers(deps);
   registerAuditHandlers(deps);
+  registerDiagnosticsHandlers(deps);
   registerPermissionsHandlers(deps);
   registerWindowHandlers(deps);
   registerMiscHandlers(deps);

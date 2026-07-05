@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SETTINGS } from "../../../shared/ipc-channels.js";
+import { makeAppIpcInvoker } from "./test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
@@ -21,11 +22,9 @@ vi.mock("electron", () => ({
   },
 }));
 
-function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return Promise.resolve(fn({ frameId: 0, processId: 0, frame: { url: "lvis://app" } } as never, ...args));
-}
+// Shared fixture (test-helpers.ts) — no senderFrame set, so validateSender's
+// `!frame` early-allow applies, same as this file's former inline `invoke`.
+const invoke = makeAppIpcInvoker(handlers);
 
 function makeWindow() {
   return {
@@ -417,16 +416,34 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
     const windows: ReturnType<typeof makeWindow>[] = [];
     const rewire = vi.fn();
     const baseDeps = makeDeps(windows, undefined);
+    // Key-based mock (robust to call order — the handler reads several keys
+    // including E4's shortcuts/system). `llm` flips from null baseUrl to the new
+    // one once `patched` is set, reproducing the prev→new transition.
+    let patched = false;
     const deps = {
       ...baseDeps,
       settingsService: {
         ...baseDeps.settingsService,
-        get: vi.fn()
-          .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } })  // prevBaseUrl read (key: "llm")
-          .mockReturnValueOnce({ cloudAllowPrivateNetwork: false })  // prevAllowPrivate read (key: "marketplace")
-          .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: "https://proj.services.ai.azure.com" } } })  // newBaseUrl read (key: "llm")
-          .mockReturnValueOnce({ cloudAllowPrivateNetwork: false }),  // newAllowPrivate read (key: "marketplace")
-        patch: vi.fn(async (p: unknown) => p),
+        get: vi.fn((key: string) => {
+          if (key === "llm") {
+            return {
+              provider: "openai",
+              vendors: {
+                "azure-foundry": {
+                  baseUrl: patched ? "https://proj.services.ai.azure.com" : null,
+                },
+              },
+            };
+          }
+          if (key === "marketplace") return { cloudAllowPrivateNetwork: false };
+          if (key === "shortcuts") return { toggleWindow: null, enabled: false };
+          if (key === "system") return { launchAtStartup: false, launchMinimized: false };
+          return {};
+        }),
+        patch: vi.fn(async (p: unknown) => {
+          patched = true;
+          return p;
+        }),
       },
       rewireReviewerAgent: rewire,
     };
@@ -499,16 +516,24 @@ describe("settings:update triggers refreshMarketplaceFetcherConfig on allowPriva
     const windows: ReturnType<typeof makeWindow>[] = [];
     const refresh = vi.fn();
     const baseDeps = makeDeps(windows);
+    // Key-based mock (robust to call order — the handler also reads E4's
+    // shortcuts/system keys). marketplace flag flips false→true after patch.
+    let patched = false;
     const deps = {
       ...baseDeps,
       settingsService: {
         ...baseDeps.settingsService,
-        get: vi.fn()
-          .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } })  // prevBaseUrl
-          .mockReturnValueOnce({ cloudAllowPrivateNetwork: false })                                    // prevAllowPrivate
-          .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } })  // newBaseUrl
-          .mockReturnValueOnce({ cloudAllowPrivateNetwork: true }),                                    // newAllowPrivate
-        patch: vi.fn(async (p: unknown) => p),
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } };
+          if (key === "marketplace") return { cloudAllowPrivateNetwork: patched };
+          if (key === "shortcuts") return { toggleWindow: null, enabled: false };
+          if (key === "system") return { launchAtStartup: false, launchMinimized: false };
+          return {};
+        }),
+        patch: vi.fn(async (p: unknown) => {
+          patched = true;
+          return p;
+        }),
       },
       refreshMarketplaceFetcherConfig: refresh,
     };

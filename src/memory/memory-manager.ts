@@ -17,6 +17,7 @@ import {
   isToolResultStubContent,
   type ToolResultTruncatedInfo,
 } from "../shared/tool-result-stub.js";
+import { SessionSearchIndex, type IndexedSessionInput } from "./session-search-index.js";
 const log = createLogger("memory");
 
 export const MAX_TOOL_RESULT_ARTIFACT_BYTES = 5_000_000;
@@ -426,6 +427,33 @@ function normalizeMetadataString(value: unknown, maxChars: number): string | und
   return trimmed.length > 0 ? trimmed.slice(0, maxChars) : undefined;
 }
 
+/**
+ * Extracts every string-valued searchable field from a session's raw
+ * (already-parsed) message records into one newline-joined blob for FTS
+ * indexing. Covers the same `content: string` case the pre-#1500 linear
+ * scan matched (user/assistant/tool_result plain-string content) PLUS text
+ * parts of array `content` (multi-part user messages) — a strict superset,
+ * never a narrower match set, so this is a coverage improvement rather than
+ * a regression relative to the old scan.
+ */
+function extractSearchableContent(messages: unknown[]): string {
+  const parts: string[] = [];
+  for (const raw of messages) {
+    const message = raw as Record<string, unknown>;
+    const content = message?.content;
+    if (typeof content === "string") {
+      if (content.trim().length > 0) parts.push(content);
+    } else if (Array.isArray(content)) {
+      for (const block of content as Array<Record<string, unknown>>) {
+        if (block?.type === "text" && typeof block.text === "string" && block.text.trim().length > 0) {
+          parts.push(block.text);
+        }
+      }
+    }
+  }
+  return parts.join("\n");
+}
+
 function matchesSessionScope(
   metadata: SessionMetadata | null,
   options: Pick<ListSessionsOptions, "kind" | "routineId" | "projectRoot" | "includeUnscoped">,
@@ -540,6 +568,9 @@ export class MemoryManager {
   private readonly lvisDir: string;
   private readonly memoryDir: string;
   private readonly sessionsDir: string;
+  /** FTS5 cross-session search index (#1500) — one per MemoryManager instance,
+   *  keyed by this.lvisDir (never a global singleton; mirrors sessionsDir). */
+  private readonly searchIndex: SessionSearchIndex;
   private persistentContextWatchers: FSWatcher[] = [];
   private persistentContextReloadTimer: ReturnType<typeof setTimeout> | undefined;
   private persistentContextPollTimer: ReturnType<typeof setInterval> | undefined;
@@ -557,6 +588,7 @@ export class MemoryManager {
     this.lvisDir = resolve(options?.lvisDir ?? lvisHome());
     this.memoryDir = join(this.lvisDir, "memories");
     this.sessionsDir = join(this.lvisDir, "sessions");
+    this.searchIndex = new SessionSearchIndex(this.lvisDir);
     this.ensureStructure();
   }
 
@@ -596,6 +628,18 @@ export class MemoryManager {
     this.persistentContextFileState.clear();
   }
 
+  /**
+   * Closes the FTS5 search index's SQLite handle (#1500 / E3). The read
+   * (`searchSessions`) and write (`indexSessionForSearch`) paths already
+   * open→use→close per operation, so no persistent handle normally survives a
+   * call boundary — this is a defensive no-op safety net (idempotent, cheap)
+   * kept wired into `before-quit` alongside `stopPersistentContextWatcher()`
+   * in case a future long-lived-handle code path is added.
+   */
+  closeSearchIndex(): void {
+    this.searchIndex.close();
+  }
+
 
 
   getAgentsMd(): string {
@@ -622,55 +666,39 @@ export class MemoryManager {
   }
 
 
+  /**
+   * Cross-session search — SQLite FTS5-backed (#1500 / E3). Signature and
+   * return type (`SessionSearchEntry[]`) are unchanged from the pre-#1500
+   * JSONL linear scan; only the internal implementation moved to
+   * `this.searchIndex`. Opens the index on demand (sync — no persistent
+   * handle; see `indexSessionForSearch`), queries, then closes, so a search
+   * never leaves a handle open to block a later `rmSync(lvisDir)` on Windows.
+   * No-Fallback: if the index cannot be opened (corrupt/unavailable), this
+   * returns `[]` rather than silently reverting to a scan —
+   * `verifyOrRebuildSearchIndex()` (called once at boot) is the only repair
+   * path.
+   */
   searchSessions(query: string, options: Pick<ListSessionsOptions, "kind" | "routineId" | "projectRoot" | "includeUnscoped"> = {}): SessionSearchEntry[] {
-    // Require at least 2 chars to prevent accidental full-dump via empty/trivial query.
-    if (query.trim().length < 2) return [];
-    const lower = query.toLowerCase();
-    const results: SessionSearchEntry[] = [];
-    const UUID_RE = /^[0-9a-f-]{8,}$/i;
-    const files = readdirIfPresent(this.sessionsDir).filter((f) => f.endsWith(".jsonl"));
-    for (const file of files) {
-      if (results.length >= 50) break;
-      const stem = file.replace(".jsonl", "");
-      // Skip files whose stem is not UUID-shaped — prevents path-traversal info leak.
-      if (!UUID_RE.test(stem)) continue;
-      const metadata = this.loadSessionMetadata(stem);
-      if (!matchesSessionScope(metadata, options)) continue;
-      const filePath = join(this.sessionsDir, file);
-      try {
-        const snapshot = readUtf8FileSnapshotIfPresent(filePath, MAX_SESSION_FILE_BYTES);
-        // Skip oversized files because unbounded reads are a DoS vector.
-        if (!snapshot || snapshot.tooLarge) continue;
-        const timestamp = snapshot.mtime.toISOString();
-        const lines = snapshot.content.trim().split("\n").filter(Boolean);
-        for (const line of lines) {
-          if (results.length >= 50) break;
-          let msg: unknown;
-          try { msg = JSON.parse(line); } catch { continue; }
-          const content = (msg as Record<string, unknown>)?.content;
-          if (typeof content === "string") {
-            const idx = content.toLowerCase().indexOf(lower);
-            if (idx !== -1) {
-              // Excerpt: ±100 chars centred on match, max 200 chars total.
-              const start = Math.max(0, idx - 100);
-              const end = Math.min(content.length, idx + lower.length + 100);
-              const excerpt = content.slice(start, end);
-              results.push({
-                sessionId: stem,
-                title: this.readSessionSummary(stem).title,
-                matchedMessage: excerpt,
-                timestamp,
-                sessionKind: metadata?.sessionKind ?? normalizeSessionKind(undefined),
-              });
-              break; // one match per session
-            }
-          }
-        }
-      } catch {
-        // skip unreadable files
-      }
+    // Require at least 2 Unicode code points. The FTS5 trigram tokenizer can't
+    // MATCH a query under 3 code points, but SessionSearchIndex.query() serves a
+    // 2-code-point query via a LIKE substring fallback on the same table — this
+    // restores the old linear scan's 2-syllable Korean matching (`매출`, `분기`),
+    // the single most common query shape for a CJK-first product. Only genuinely
+    // trivial (empty / 1-char / whitespace) queries are rejected here, matching
+    // the pre-#1500 `< 2` floor. Length is measured in code points (not UTF-16
+    // units) so a 2-syllable Korean query counts as 2, not more.
+    if ([...query.trim()].length < 2) return [];
+    if (!this.searchIndex.open()) return [];
+    try {
+      return this.searchIndex.query(query, {
+        kind: options.kind,
+        routineId: options.routineId,
+        projectRoot: options.projectRoot,
+        includeUnscoped: options.includeUnscoped,
+      });
+    } finally {
+      this.searchIndex.close();
     }
-    return results;
   }
 
 
@@ -825,6 +853,118 @@ export class MemoryManager {
       writeFileSync(targetPath, lines, "utf-8");
       this.cleanupToolResultArtifacts(sessionId, prepared.keepArtifactKeys);
     });
+    this.indexSessionForSearch(sessionId, messages);
+  }
+
+  /**
+   * Saves a freshly-imported conversation (#1500 / E3) as a brand-new
+   * session — import is symmetric with `lvis:chat:export` but NEVER
+   * overwrites an existing session; callers must pass a freshly minted
+   * sessionId (e.g. `crypto.randomUUID()`), matching the `chat.fork`
+   * handler's new-session pattern.
+   */
+  async saveImportedSession(sessionId: string, messages: unknown[]): Promise<void> {
+    await this.saveSession(sessionId, messages);
+    await this.saveSessionMetadata(sessionId, { sessionKind: "main" });
+  }
+
+  /**
+   * Builds the FTS row input for one session from its messages + metadata,
+   * or `null` when the session has no searchable text (caller should drop any
+   * existing row instead of inserting an empty one). Pure — opens nothing.
+   *
+   * `timestamp` is sourced from the session JSONL's on-disk mtime (its actual
+   * last-modified time), NOT the index-write wall clock. The search UI renders
+   * this as the conversation's relative/absolute time; using index-time would
+   * make every session show as "just now" after a boot-time reindex/rebuild.
+   * Falls back to the current time only when the file mtime can't be read
+   * (e.g. a from-memory upsert of a session not yet flushed to disk).
+   */
+  private buildIndexInput(sessionId: string, messages: unknown[]): IndexedSessionInput | null {
+    const content = extractSearchableContent(messages);
+    if (!content) return null;
+    const metadata = this.loadSessionMetadata(sessionId);
+    const summary = this.readSessionSummary(sessionId);
+    const mtimeMs = this.getFileMtimeMs(join(this.sessionsDir, `${sessionId}.jsonl`));
+    const timestamp = mtimeMs >= 0 ? new Date(mtimeMs).toISOString() : new Date().toISOString();
+    return {
+      sessionId,
+      content,
+      timestamp,
+      sessionKind: metadata?.sessionKind ?? normalizeSessionKind(undefined),
+      ...(metadata?.routineId ? { routineId: metadata.routineId } : {}),
+      ...(metadata?.projectRoot ? { projectRoot: metadata.projectRoot } : {}),
+      ...(summary.title ? { title: summary.title } : {}),
+    };
+  }
+
+  /**
+   * Incrementally upserts one session's FTS row (#1500 / E3). Per-op
+   * open→upsert→close: the handle is NEVER held open across the call, so a
+   * caller that deletes `lvisDir` right after `saveSession` (every test's
+   * teardown; a domain-unit `rm -rf ~/.lvis/<feature>/`) is not blocked by an
+   * open SQLite/WAL handle on Windows (EPERM). Best-effort: failures are
+   * logged/swallowed inside `SessionSearchIndex` — the JSONL just written is
+   * the source of truth, so a transient index failure never blocks session
+   * persistence (No-Fallback applies to the *search path*, not to writes).
+   */
+  private indexSessionForSearch(sessionId: string, messages: unknown[]): void {
+    if (!this.searchIndex.open()) return;
+    try {
+      const input = this.buildIndexInput(sessionId, messages);
+      if (input) this.searchIndex.upsertSession(input);
+      else this.searchIndex.deleteSession(sessionId);
+    } finally {
+      this.searchIndex.close();
+    }
+  }
+
+  /**
+   * Boot-time integrity check → rebuild-from-JSONL recovery path (#1500 /
+   * E3, No-Fallback: this is the ONLY recovery path — search never falls
+   * back to a linear scan when the index is corrupt or missing). Safe to
+   * call every boot: a healthy index with rows already present is a no-op.
+   * Leaves the index CLOSED on exit (no persistent handle — see
+   * `indexSessionForSearch`); the sync `searchSessions` read path reopens on
+   * demand.
+   */
+  async verifyOrRebuildSearchIndex(): Promise<void> {
+    const opened = this.searchIndex.open();
+    const sessionFiles = readdirIfPresent(this.sessionsDir).filter((f) => f.endsWith(".jsonl"));
+    const needsRebuild = !opened || (this.searchIndex.rowCount() === 0 && sessionFiles.length > 0);
+    if (!needsRebuild) {
+      this.searchIndex.close();
+      return;
+    }
+    log.info("search index rebuild starting (%d session file(s))", sessionFiles.length);
+    if (opened) {
+      this.searchIndex.close();
+    }
+    await SessionSearchIndex.deleteFile(this.searchIndex.getDbPath());
+    if (!this.searchIndex.open()) {
+      log.warn("search index rebuild failed: could not reopen index after reset");
+      return;
+    }
+    try {
+      // No clear() here: deleteFile() above removed the DB file entirely and the
+      // reopen created a FRESH empty `sessions_fts` table (CREATE TABLE IF NOT
+      // EXISTS on a new file), so there is nothing to clear — the call was dead.
+      const UUID_RE = /^[0-9a-f-]{8,}$/i;
+      for (const file of sessionFiles) {
+        const stem = file.replace(".jsonl", "");
+        if (!UUID_RE.test(stem)) continue;
+        const messages = this.loadSession(stem);
+        if (!Array.isArray(messages)) continue;
+        // Keep the handle open across the whole rebuild loop (single
+        // open/close) rather than per-session — this is the one bulk path.
+        const input = this.buildIndexInput(stem, messages);
+        if (input) this.searchIndex.upsertSession(input);
+        else this.searchIndex.deleteSession(stem);
+      }
+      log.info("search index rebuild complete (%d row(s))", this.searchIndex.rowCount());
+    } finally {
+      this.searchIndex.close();
+    }
   }
 
   /**
@@ -991,6 +1131,15 @@ export class MemoryManager {
     await withFileLock(targetPath, async () => {
       writeFileSync(targetPath, JSON.stringify(safe, null, 2), "utf-8");
     });
+    // Metadata (sessionKind/routineId/projectRoot/title) is denormalized into
+    // the FTS row (#1500 / E3) — re-index whenever it changes, not just on
+    // saveSession, otherwise a metadata-only update (the common create-then-
+    // tag-metadata sequence) leaves the FTS row's scope fields stale and
+    // `searchSessions`'s kind/routineId/projectRoot filters silently misclassify it.
+    const messages = this.loadSession(sessionId);
+    if (Array.isArray(messages)) {
+      this.indexSessionForSearch(sessionId, messages);
+    }
   }
 
   loadSessionMetadata(sessionId: string): SessionMetadata | null {
@@ -1254,6 +1403,16 @@ export class MemoryManager {
       rmSync(diffCacheDir, { recursive: true, force: true });
     } catch (err) {
       log.warn(`deleteSession: failed to remove diff cache dir ${diffCacheDir}: ${(err as Error).message}`);
+    }
+    // Drop the session's FTS row too (#1500 / E3) — otherwise a deleted
+    // session lingers as an orphaned, still-searchable hit. Per-op
+    // open→delete→close (no persistent handle; mirrors indexSessionForSearch).
+    if (this.searchIndex.open()) {
+      try {
+        this.searchIndex.deleteSession(sessionId);
+      } finally {
+        this.searchIndex.close();
+      }
     }
   }
 

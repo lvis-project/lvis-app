@@ -458,7 +458,13 @@ export function buildInternalApiSurface() {
   demo: {
     status: async () =>
       ipcRenderer.invoke(CHANNELS.demo.status) as Promise<
-        | { ok: true; activated: boolean; vendor: string | null; autoActivatable: boolean }
+        | {
+            ok: true;
+            activated: boolean;
+            vendor: string | null;
+            autoActivatable: boolean;
+            ollamaAvailable: boolean;
+          }
         | { ok: false; error: "unauthorized-frame" }
       >,
     activate: async (code: string) =>
@@ -474,6 +480,16 @@ export function buildInternalApiSurface() {
       ipcRenderer.invoke(CHANNELS.demo.activateEmbedded) as Promise<
         | { ok: true; vendor: string; requiresRelaunch?: boolean }
         | { ok: false; error: "no-embedded-code" | "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "persist-failed" | "unauthorized-frame" }
+      >,
+    // #1498 — local Ollama fallback. `status.ollamaAvailable === true`
+    // advertises a reachable local server; this re-probes before
+    // configuring the vendor so a server stopped between the status check
+    // and the click fails closed with `no-ollama` instead of silently
+    // switching to a dead endpoint.
+    activateOllama: async () =>
+      ipcRenderer.invoke(CHANNELS.demo.activateOllama) as Promise<
+        | { ok: true; vendor: "ollama" }
+        | { ok: false; error: "no-ollama" | "unauthorized-frame" }
       >,
     relaunchAfterActivation: async () =>
       ipcRenderer.invoke(CHANNELS.demo.relaunchAfterActivation) as Promise<
@@ -1240,6 +1256,22 @@ export function buildInternalApiSurface() {
       offset?: number;
     }) => ipcRenderer.invoke(CHANNELS.audit.search, filter),
     getStats: async (lastDays: number) => ipcRenderer.invoke(CHANNELS.audit.stats, lastDays),
+  },
+
+  // ─── Diagnostics bundle + crash list (#1499 E2) ──
+  diagnostics: {
+    /** Build a redacted diagnostics ZIP and save via native dialog. */
+    export: async (opts?: { dateFrom?: string; dateTo?: string; includeCrashDumps?: boolean }) =>
+      ipcRenderer.invoke(CHANNELS.diagnostics.export, opts),
+    /** List crash-dump metadata (filename/time/size). */
+    crashList: async () => ipcRenderer.invoke(CHANNELS.diagnostics.crashList),
+  },
+
+  // ─── Production log tail viewer (#1499 E2) ──
+  logs: {
+    /** Recent N redacted log lines, optional level filter. */
+    tail: async (args?: { lines?: number; level?: string }) =>
+      ipcRenderer.invoke(CHANNELS.logs.tail, args),
   },
 
   // ─── Message feedback ────────────────────────────

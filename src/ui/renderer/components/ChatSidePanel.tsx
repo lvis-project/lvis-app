@@ -784,6 +784,10 @@ function ProjectRootsBrowser({
   // when a new op starts or the user dismisses it — a failed op no longer
   // swallows its error result silently.
   const [opError, setOpError] = useState<string | null>(null);
+  // #1493 — transient info surface: removeRoot may also prune orphaned
+  // path-scoped grants under the removed root. When it does, tell the user so
+  // the extra revocation isn't silent. Cleared on the next op or on dismiss.
+  const [opInfo, setOpInfo] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   const loadDir = useCallback(async (path: string) => {
@@ -1097,10 +1101,16 @@ function ProjectRootsBrowser({
     if (!activeRoot || activeRootIsDefault) return;
     const removedRoot = activeRoot;
     setOpError(null);
+    setOpInfo(null);
     const res = await window.lvis.workspace.removeRoot(removedRoot);
     if (!res.ok) {
       setOpError(formatOpError(res.error, res.message));
       return;
+    }
+    // Surface the extra revocation when path-scoped grants under the removed
+    // root were pruned, so the widened effect of "Remove folder" is visible.
+    if (res.prunedGrants && res.prunedGrants > 0) {
+      setOpInfo(t("chatPreviewRail.removeRootPruned", { count: res.prunedGrants }));
     }
     if (!res.roots) return;
     // Drop cached children/expansion for the removed subtree so a re-add reloads.
@@ -1393,6 +1403,24 @@ function ProjectRootsBrowser({
             aria-label={t("common.close")}
             data-testid="chat-side-panel-op-error-dismiss"
             onClick={() => setOpError(null)}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      ) : null}
+      {opInfo ? (
+        <div
+          role="status"
+          data-testid="chat-side-panel-op-info"
+          className="flex items-start gap-1 rounded-md border bg-muted/(--opacity-muted) px-2 py-1 text-[11px] text-muted-foreground"
+        >
+          <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{opInfo}</span>
+          <button
+            type="button"
+            className="shrink-0 rounded p-0.5 hover:bg-muted"
+            aria-label={t("common.close")}
+            data-testid="chat-side-panel-op-info-dismiss"
+            onClick={() => setOpInfo(null)}
           >
             <X className="h-3 w-3" />
           </button>

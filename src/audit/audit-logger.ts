@@ -102,7 +102,7 @@ export interface PluginInstallEscalationAudit {
 export interface AuditEntry {
   timestamp: string;
   sessionId: string;
-  type: "turn" | "tool_call" | "approval" | "warn" | "error" | "mcp_connect" | "mcp_apikey_set" | "kill_switch" | "dlp" | "info";
+  type: "turn" | "tool_call" | "approval" | "warn" | "error" | "mcp_connect" | "mcp_apikey_set" | "kill_switch" | "dlp" | "info" | "diagnostics-export";
   /** DLP hit payload — populated when type === "dlp" */
   dlp?: {
     byKind: Record<string, number>;

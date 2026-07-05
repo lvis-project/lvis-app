@@ -35,4 +35,36 @@ export const ja: Record<SeedMessageKey, string> = {
   "mainDialog.unauthorizedFrame": "許可されていないフレームです。",
   "mainDialog.noPersonasAvailable": "利用可能な persona はありません",
   "mainDialog.exportConversationTitle": "会話をエクスポート",
+  "mainDialog.importConversationTitle": "会話をインポート",
+
+  // ── E4 — 起動 / グローバルショートカット ─────────────────────────
+  "settingsContent.tabStartup": "起動",
+  "startupTab.title": "起動とショートカット",
+  "startupTab.description":
+    "ウィンドウの表示/非表示を切り替えるグローバルショートカットを設定し、ログイン時に LVIS を起動するか選択します。",
+  "startupTab.shortcutSectionTitle": "グローバルショートカット",
+  "startupTab.shortcutSectionDesc":
+    "どこからでも LVIS ウィンドウを表示または非表示にするシステム全体のキーの組み合わせです。",
+  "startupTab.shortcutEnabledLabel": "グローバルショートカットを有効化",
+  "startupTab.shortcutEnabledHint": "ショートカットをオペレーティングシステムに登録します。",
+  "startupTab.shortcutAcceleratorLabel": "ウィンドウ表示/非表示のショートカット",
+  "startupTab.shortcutRecord": "記録",
+  "startupTab.shortcutClear": "クリア",
+  "startupTab.shortcutCapturing": "キーの組み合わせを押してください…",
+  "startupTab.shortcutUnset": "未設定",
+  "startupTab.shortcutEnabledNoAccelerator":
+    "ショートカットは有効ですが、キーの組み合わせが設定されていません。記録して有効化してください。",
+  "startupTab.shortcutRegisterFailedTitle": "ショートカットの登録に失敗しました",
+  "startupTab.shortcutRegisterFailedBody":
+    "{accelerator} は他のアプリで使用中です。別の組み合わせを選択してください。",
+  "startupTab.launchSectionTitle": "起動時に自動実行",
+  "startupTab.launchSectionDesc":
+    "コンピューターにサインインしたときに LVIS を自動的に起動するかを設定します。",
+  "startupTab.launchAtStartupLabel": "ログイン時に LVIS を起動",
+  "startupTab.launchAtStartupHint": "サインイン後に LVIS を自動的に起動します。（インストール済みアプリのみ）",
+  "startupTab.launchMinimizedLabel": "トレイに隠して起動",
+  "startupTab.launchMinimizedHint": "ログイン時の起動でウィンドウを開かず、トレイに最小化した状態で起動します。",
+  "startupTab.launchRegisterFailedTitle": "起動時の自動実行を適用できませんでした",
+  "startupTab.launchRegisterFailedBody":
+    "このシステムでログイン時の自動起動を登録できませんでした。設定から再試行してください。",
 };
