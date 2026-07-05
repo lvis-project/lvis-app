@@ -11,21 +11,25 @@ import {
   MessageSquareText,
   PanelLeftClose,
   PanelLeftOpen,
+  Pin,
+  PinOff,
   Plus,
   Repeat2,
   Search,
   ShoppingBag,
-  Star,
   Trash2,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../../components/ui/dropdown-menu.js";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "../../../components/ui/context-menu.js";
 import { Button } from "../../../components/ui/button.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { getPluginViewLabel, toViewKey } from "../api-client.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
+import { sortWithPinnedFirst } from "../utils/pinned-sort.js";
+import type { SidebarTab } from "../hooks/use-sidebar-tab.js";
 import type { PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
@@ -95,6 +99,18 @@ export interface SidebarProps {
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
   /** Re-fetch the workspace project list (after a context-menu mutation e.g. remove). */
   onRefreshProjects?: () => void | Promise<void>;
+  /** Active sidebar tab ("chats" = ungrouped conversation list, "projects" = named-project groups). Persisted (SystemSettings). */
+  activeSidebarTab?: SidebarTab;
+  /** Switch the active sidebar tab — persists immediately. */
+  onActiveSidebarTabChange?: (tab: SidebarTab) => void;
+  /** Per-conversation pin state — reuses the existing starred-session mechanism (id truthy = pinned). */
+  isSessionStarred?: (sessionId: string) => string | null;
+  /** Toggle a conversation's pin state (any row, not just the active session). */
+  onToggleSessionStar?: (sessionId: string, title?: string) => void | Promise<void>;
+  /** True when the given project root is pinned — pinned projects sort to the top of the Projects tab. */
+  isProjectPinned?: (projectRoot: string | undefined) => boolean;
+  /** Pin/unpin a project — persists immediately (SystemSettings). */
+  onToggleProjectPin?: (projectRoot: string) => void;
 }
 
 // ─── Platform bridge (darwin traffic-light line) ───────────────────────────────
@@ -384,45 +400,81 @@ function useWorkspaceProjects(): ProjectIdentity[] {
  * A single conversation row — shared by both the per-project grouped list and
  * the ungrouped "no project" flat list below, so the two surfaces render
  * byte-identical session buttons.
+ *
+ * Structured as a `<div role group>` wrapping TWO sibling buttons (the main
+ * "load this session" click target + the pin toggle) rather than one button
+ * with a nested interactive child — nesting a real button inside a button is
+ * invalid HTML and would only ever fire the outer element's click handler.
+ * The `data-testid`/`aria-current`/click semantics stay on the inner "load"
+ * button, unchanged from the prior single-button structure.
  */
 function SessionRow({
   session,
   active,
   streaming,
   onLoadSession,
+  isPinned,
+  onTogglePin,
   t,
 }: {
   session: SessionSummary;
   active: boolean;
   streaming: boolean;
   onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
+  /** Truthy when this conversation is pinned — pinned rows sort to the top and show a persistent filled pin. */
+  isPinned?: boolean;
+  /** Toggle this conversation's pin — omitted entirely hides the pin affordance. */
+  onTogglePin?: () => void | Promise<void>;
   t: ReturnType<typeof useTranslation>["t"];
 }) {
   const time = formatRelativeSessionTime(session.modifiedAt, t);
+  const rowDisabled = streaming && !active;
   return (
-    <button
-      type="button"
-      disabled={streaming && !active}
-      aria-current={active ? "page" : undefined}
+    <div
       className={[
-        "group flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "group relative flex w-full min-w-0 items-center rounded-md transition-colors",
         active
           ? "bg-primary/(--opacity-subtle) text-primary"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",
-        streaming && !active ? "cursor-not-allowed opacity-50" : "",
+        rowDisabled ? "cursor-not-allowed opacity-50" : "",
       ].filter(Boolean).join(" ")}
-      data-testid={`sidebar-session-${session.id}`}
-      onClick={() => void onLoadSession?.(session.id)}
     >
-      <MessageSquareText className="h-3.5 w-3.5 shrink-0" />
-      <span className="min-w-0 flex-1 truncate">{session.title}</span>
-      {time ? (
-        <span className="shrink-0 text-[10px] text-muted-foreground/(--opacity-intense)">
+      <button
+        type="button"
+        disabled={rowDisabled}
+        aria-current={active ? "page" : undefined}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        data-testid={`sidebar-session-${session.id}`}
+        onClick={() => void onLoadSession?.(session.id)}
+      >
+        <MessageSquareText className="h-3.5 w-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{session.title}</span>
+      </button>
+      {time && !isPinned ? (
+        <span className="shrink-0 pr-2 text-[10px] text-muted-foreground/(--opacity-intense) group-hover:hidden">
           {time}
         </span>
       ) : null}
-    </button>
+      {onTogglePin ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            void onTogglePin();
+          }}
+          className={[
+            "mr-1 shrink-0 rounded p-1 hover:bg-muted-foreground/(--opacity-subtle) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            isPinned ? "flex text-primary" : "hidden group-hover:flex group-focus-within:flex",
+          ].join(" ")}
+          aria-label={isPinned ? t("sidebar.unpinConversation") : t("sidebar.pinConversation")}
+          title={isPinned ? t("sidebar.unpinConversation") : t("sidebar.pinConversation")}
+          aria-pressed={isPinned}
+          data-testid={`sidebar-session-pin-${session.id}`}
+        >
+          <Pin className={`h-3 w-3 ${isPinned ? "fill-current" : ""}`} />
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -435,6 +487,12 @@ function ProjectSessionList({
   onNewChatForProject,
   onRefreshProjects,
   projects: projectsProp,
+  activeTab,
+  onActiveTabChange,
+  isSessionStarred,
+  onToggleSessionStar,
+  isProjectPinned,
+  onToggleProjectPin,
 }: {
   collapsed: boolean;
   sessions: SessionSummary[];
@@ -444,6 +502,12 @@ function ProjectSessionList({
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
   onRefreshProjects?: () => void | Promise<void>;
   projects?: ProjectIdentity[];
+  activeTab: SidebarTab;
+  onActiveTabChange: (tab: SidebarTab) => void;
+  isSessionStarred?: (sessionId: string) => string | null;
+  onToggleSessionStar?: (sessionId: string, title?: string) => void | Promise<void>;
+  isProjectPinned?: (projectRoot: string | undefined) => boolean;
+  onToggleProjectPin?: (projectRoot: string) => void;
 }) {
   const { t } = useTranslation();
   // Reveal the project folder in the OS file manager (real capability:
@@ -463,6 +527,7 @@ function ProjectSessionList({
         // Non-fatal: the list simply keeps the project until the next refresh.
       });
   };
+  const isSessionPinned = (sessionId: string) => Boolean(isSessionStarred?.(sessionId));
   const fallbackProjects = useWorkspaceProjects();
   const workspaceProjects = projectsProp ?? fallbackProjects;
   const mainSessions = useMemo(
@@ -475,7 +540,9 @@ function ProjectSessionList({
   // conversation, not a synthetic "Current Project" bucket (2026-07 "remove
   // Current Project labeling" refinement). `workspaceProjects` still carries
   // the default entry (other internal consumers need it for execution
-  // context), so it is filtered out ONLY at this display boundary.
+  // context), so it is filtered out ONLY at this display boundary. Pinned
+  // projects sort to the top (stable — order among unpinned/pinned groups is
+  // otherwise unchanged).
   const namedProjects = useMemo(() => {
     const known = workspaceProjects.filter((project) => !project.isDefault);
     const unknown = new Map<string, ProjectIdentity>();
@@ -487,12 +554,14 @@ function ProjectSessionList({
         isDefault: false,
       });
     }
-    return [...known, ...unknown.values()];
-  }, [mainSessions, workspaceProjects]);
+    const combined = [...known, ...unknown.values()];
+    return sortWithPinnedFirst(combined, (project) => Boolean(isProjectPinned?.(project.projectRoot)));
+  }, [isProjectPinned, mainSessions, workspaceProjects]);
   const sessionsByProject = useMemo(
     () => namedProjects.map((project) => {
-      const projectSessions = mainSessions.filter(
-        (session) => session.projectRoot && projectRootEquals(session.projectRoot, project.projectRoot),
+      const projectSessions = sortWithPinnedFirst(
+        mainSessions.filter((session) => session.projectRoot && projectRootEquals(session.projectRoot, project.projectRoot)),
+        (session) => isSessionPinned(session.id),
       );
       return {
         project,
@@ -500,20 +569,22 @@ function ProjectSessionList({
         overflow: Math.max(0, projectSessions.length - PROJECT_SESSION_LIMIT),
       };
     }),
-    [mainSessions, namedProjects],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isSessionPinned is derived fresh each render from isSessionStarred (a stable-enough dep); listing it would require useCallback ceremony for no behavioral benefit.
+    [mainSessions, namedProjects, isSessionStarred],
   );
   // Every conversation NOT scoped to a named project — no projectRoot at all
   // (the common case once "no explicit project" stops persisting default
   // metadata), or a projectRoot that doesn't match any named project (legacy
   // default-tagged sessions from before this refinement). Rendered as a
   // plain, ungrouped list — ChatGPT/Claude's "general chats" pattern — rather
-  // than wrapped in a fake project header.
-  const ungroupedSessions = useMemo(
-    () => mainSessions.filter(
+  // than wrapped in a fake project header. Pinned conversations sort first.
+  const ungroupedSessions = useMemo(() => {
+    const plain = mainSessions.filter(
       (session) => !session.projectRoot || !namedProjects.some((project) => projectRootEquals(project.projectRoot, session.projectRoot)),
-    ),
-    [mainSessions, namedProjects],
-  );
+    );
+    return sortWithPinnedFirst(plain, (session) => isSessionPinned(session.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mainSessions, namedProjects, isSessionStarred]);
   const ungroupedRecent = ungroupedSessions.slice(0, PROJECT_SESSION_LIMIT);
   const ungroupedOverflow = Math.max(0, ungroupedSessions.length - PROJECT_SESSION_LIMIT);
 
@@ -534,117 +605,146 @@ function ProjectSessionList({
   const hasNamedProjects = sessionsByProject.length > 0;
   const hasUngroupedSessions = ungroupedSessions.length > 0;
 
+  const renderSessionRow = (session: SessionSummary) => (
+    <SessionRow
+      key={session.id}
+      session={session}
+      active={session.id === currentSessionId}
+      streaming={streaming}
+      onLoadSession={onLoadSession}
+      isPinned={isSessionPinned(session.id)}
+      onTogglePin={onToggleSessionStar ? () => onToggleSessionStar(session.id, session.title) : undefined}
+      t={t}
+    />
+  );
+
   return (
-    <div className="space-y-1" data-testid="sidebar-projects">
-      {sessionsByProject.map(({ project, recent, overflow }) => (
-        <div key={project.projectRoot} className="space-y-1">
-          {/* Right-click a project row → context menu of REAL project actions
-              (new chat here, reveal folder, remove project). */}
-          <ContextMenu>
-            <ContextMenuTrigger asChild>
-          <button
-            type="button"
-            disabled={streaming}
-            className={[
-              "flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] font-medium text-foreground transition-colors",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              streaming ? "cursor-not-allowed opacity-50" : "hover:bg-muted",
-            ].join(" ")}
-            title={t("sidebar.newProjectChat", { project: project.projectName })}
-            data-testid={`sidebar-project-${projectTestId(project.projectRoot, project.projectName)}`}
-            onClick={() => void onNewChatForProject?.({
-              ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
-              projectName: project.projectName,
-            })}
-          >
-            <Folder className="h-4 w-4 shrink-0 text-primary" />
-            <span className="min-w-0 flex-1 truncate">{project.projectName}</span>
-            <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          </button>
-            </ContextMenuTrigger>
-            <ContextMenuContent className="min-w-[11rem]" data-testid="sidebar-project-context-menu">
-              <ContextMenuItem
-                data-testid="sidebar-project-menu-new-chat"
-                onSelect={() => void onNewChatForProject?.({
-                  ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
-                  projectName: project.projectName,
-                })}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {t("sidebar.projectMenuNewChat")}
-              </ContextMenuItem>
-              <ContextMenuItem
-                data-testid="sidebar-project-menu-reveal"
-                onSelect={() => revealProject(project.projectRoot)}
-              >
-                <FolderOpen className="h-3.5 w-3.5" />
-                {t("sidebar.projectMenuReveal")}
-              </ContextMenuItem>
-              <ContextMenuSeparator />
-              <ContextMenuItem
-                data-testid="sidebar-project-menu-remove"
-                className="text-destructive focus:text-destructive"
-                onSelect={() => removeProject(project)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                {t("sidebar.projectMenuRemove")}
-              </ContextMenuItem>
-            </ContextMenuContent>
-          </ContextMenu>
-          <div className="ml-4 border-l border-border/(--opacity-half) pl-2">
-            {recent.length > 0 ? recent.map((session) => (
-              <SessionRow
-                key={session.id}
-                session={session}
-                active={session.id === currentSessionId}
-                streaming={streaming}
-                onLoadSession={onLoadSession}
-                t={t}
-              />
-            )) : (
-              <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
-                {t("sidebar.noProjectSessions")}
-              </div>
-            )}
-            {overflow > 0 ? (
+    <Tabs value={activeTab} onValueChange={(value) => onActiveSidebarTabChangeGuard(value, onActiveTabChange)} data-testid="sidebar-tabs">
+      <TabsList className="grid h-8 w-full grid-cols-2 rounded-md bg-muted p-0.5">
+        <TabsTrigger value="chats" className="h-7 rounded-sm px-1 text-[12px]" data-testid="sidebar-tab-chats">
+          {t("sidebar.chatsTab")}
+        </TabsTrigger>
+        <TabsTrigger value="projects" className="h-7 rounded-sm px-1 text-[12px]" data-testid="sidebar-tab-projects">
+          {t("sidebar.projectsTab")}
+        </TabsTrigger>
+      </TabsList>
+
+      {/* Chats tab — every conversation with no explicit project, a plain
+          ungrouped list (ChatGPT/Claude "general chats" pattern). */}
+      <TabsContent value="chats" className="mt-2 space-y-1" data-testid="sidebar-unassigned-sessions">
+        {hasUngroupedSessions ? (
+          <>
+            {ungroupedRecent.map(renderSessionRow)}
+            {ungroupedOverflow > 0 ? (
               <div className="px-2 pt-1 text-[10px] text-muted-foreground">
-                {t("sidebar.moreSessions", { count: overflow })}
+                {t("sidebar.moreSessions", { count: ungroupedOverflow })}
               </div>
             ) : null}
+          </>
+        ) : (
+          <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+            {t("sidebar.noProjectSessions")}
           </div>
-        </div>
-      ))}
-      {/* Conversations with no explicit project — a plain, ungrouped list
-          (ChatGPT/Claude "general chats" pattern), NOT wrapped in a fake
-          project header. Only separated from the named-project groups above
-          by a bare divider when both are present. */}
-      {hasUngroupedSessions ? (
-        <div className="space-y-1" data-testid="sidebar-unassigned-sessions">
-          {hasNamedProjects ? <SectionDivider collapsed={false} /> : null}
-          {ungroupedRecent.map((session) => (
-            <SessionRow
-              key={session.id}
-              session={session}
-              active={session.id === currentSessionId}
-              streaming={streaming}
-              onLoadSession={onLoadSession}
-              t={t}
-            />
-          ))}
-          {ungroupedOverflow > 0 ? (
-            <div className="px-2 pt-1 text-[10px] text-muted-foreground">
-              {t("sidebar.moreSessions", { count: ungroupedOverflow })}
+        )}
+      </TabsContent>
+
+      {/* Projects tab — named-project groups, each with its own nested
+          (pinned-first) conversation list. */}
+      <TabsContent value="projects" className="mt-2 space-y-1" data-testid="sidebar-projects">
+        {hasNamedProjects ? sessionsByProject.map(({ project, recent, overflow }) => {
+          const pinned = Boolean(isProjectPinned?.(project.projectRoot));
+          return (
+          <div key={project.projectRoot} className="space-y-1">
+            {/* Right-click a project row → context menu of REAL project actions
+                (new chat here, reveal folder, pin/unpin, remove project). */}
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+            <button
+              type="button"
+              disabled={streaming}
+              className={[
+                "flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] font-medium text-foreground transition-colors",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                streaming ? "cursor-not-allowed opacity-50" : "hover:bg-muted",
+              ].join(" ")}
+              title={t("sidebar.newProjectChat", { project: project.projectName })}
+              data-testid={`sidebar-project-${projectTestId(project.projectRoot, project.projectName)}`}
+              onClick={() => void onNewChatForProject?.({
+                ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
+                projectName: project.projectName,
+              })}
+            >
+              <Folder className="h-4 w-4 shrink-0 text-primary" />
+              {pinned ? <Pin className="h-3 w-3 shrink-0 fill-current text-primary" /> : null}
+              <span className="min-w-0 flex-1 truncate">{project.projectName}</span>
+              <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="min-w-[11rem]" data-testid="sidebar-project-context-menu">
+                <ContextMenuItem
+                  data-testid="sidebar-project-menu-new-chat"
+                  onSelect={() => void onNewChatForProject?.({
+                    ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
+                    projectName: project.projectName,
+                  })}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {t("sidebar.projectMenuNewChat")}
+                </ContextMenuItem>
+                {onToggleProjectPin ? (
+                  <ContextMenuItem
+                    data-testid="sidebar-project-menu-pin"
+                    onSelect={() => onToggleProjectPin(project.projectRoot)}
+                  >
+                    {pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+                    {pinned ? t("sidebar.unpinProject") : t("sidebar.pinProject")}
+                  </ContextMenuItem>
+                ) : null}
+                <ContextMenuItem
+                  data-testid="sidebar-project-menu-reveal"
+                  onSelect={() => revealProject(project.projectRoot)}
+                >
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  {t("sidebar.projectMenuReveal")}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  data-testid="sidebar-project-menu-remove"
+                  className="text-destructive focus:text-destructive"
+                  onSelect={() => removeProject(project)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {t("sidebar.projectMenuRemove")}
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+            <div className="ml-4 border-l border-border/(--opacity-half) pl-2">
+              {recent.length > 0 ? recent.map(renderSessionRow) : (
+                <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                  {t("sidebar.noProjectSessions")}
+                </div>
+              )}
+              {overflow > 0 ? (
+                <div className="px-2 pt-1 text-[10px] text-muted-foreground">
+                  {t("sidebar.moreSessions", { count: overflow })}
+                </div>
+              ) : null}
             </div>
-          ) : null}
-        </div>
-      ) : null}
-      {!hasNamedProjects && !hasUngroupedSessions ? (
-        <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
-          {t("sidebar.noProjectSessions")}
-        </div>
-      ) : null}
-    </div>
+          </div>
+          );
+        }) : (
+          <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+            {t("sidebar.noProjectSessions")}
+          </div>
+        )}
+      </TabsContent>
+    </Tabs>
   );
+}
+
+/** Radix Tabs' onValueChange passes a bare `string` — narrow to `SidebarTab` before persisting. */
+function onActiveSidebarTabChangeGuard(value: string, onActiveTabChange: (tab: SidebarTab) => void): void {
+  if (value === "chats" || value === "projects") onActiveTabChange(value);
 }
 
 // ─── ClusterStrip ──────────────────────────────────────────────────────────
@@ -732,7 +832,9 @@ function ClusterStrip({
         <TooltipContent side="bottom">{t("mainToolbar.unifiedSearch")}</TooltipContent>
       </Tooltip>
 
-      {/* 즐겨찾기 — current-session star. */}
+      {/* 핀 — current-session pin (reuses the existing starred-session
+          mechanism internally; user-facing icon/label are "pin", see the
+          2026-07 "즐겨찾기 → 핀" naming refinement). */}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -744,7 +846,7 @@ function ClusterStrip({
             aria-label={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
             aria-pressed={isCurrentSessionStarred}
           >
-            <Star key={isCurrentSessionStarred ? "on" : "off"} className={`h-4 w-4 ${isCurrentSessionStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
+            <Pin key={isCurrentSessionStarred ? "on" : "off"} className={`h-4 w-4 ${isCurrentSessionStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
           </Button>
         </TooltipTrigger>
         <TooltipContent side="bottom">{isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}</TooltipContent>
@@ -811,6 +913,12 @@ export function Sidebar({
   currentSessionId,
   onLoadSession,
   onRefreshProjects,
+  activeSidebarTab = "chats",
+  onActiveSidebarTabChange,
+  isSessionStarred,
+  onToggleSessionStar,
+  isProjectPinned,
+  onToggleProjectPin,
 }: SidebarProps) {
   const { t } = useTranslation();
   const resizable = !collapsed && Boolean(onWidthChange && onWidthCommit);
@@ -1026,7 +1134,12 @@ export function Sidebar({
             {pluginViews.length > 0 ? (
               <SectionDivider collapsed={compact} label={compact ? undefined : t("sidebar.pluginsLabel")} />
             ) : null}
-            <ScrollArea className="flex-1 min-h-0">
+            {/* Radix ScrollArea wraps viewport content in a `display: table` div,
+                which sizes to max-content — long unbreakable titles then blow the
+                content wider than the card and get HARD-clipped by the viewport,
+                so row-level `truncate` never produces its ellipsis. Force that
+                wrapper back to block so width is bounded and `…` can kick in. */}
+            <ScrollArea className="flex-1 min-h-0 [&_[data-radix-scroll-area-viewport]>div]:!block [&_[data-radix-scroll-area-viewport]>div]:!min-w-0">
               <div className={`px-2 py-1 space-y-0.5 ${compact ? "flex flex-col items-center" : ""}`}>
                 {pluginViews.map((view) => {
                   const viewKey = toViewKey(view);
@@ -1045,9 +1158,10 @@ export function Sidebar({
                   );
                 })}
                 <div className={compact ? "pt-1" : pluginViews.length > 0 ? "pt-2" : ""}>
-                  {!compact ? (
-                    <SectionDivider collapsed={false} label={t("sidebar.projectsLabel")} />
-                  ) : null}
+                  {/* No standalone "Projects" section divider here — the Chats/
+                      Projects TabsList inside ProjectSessionList already frames
+                      this section, so a redundant label above it would be
+                      confusing chrome (2026-07 sidebar-tabs refinement). */}
                   <ProjectSessionList
                     collapsed={compact}
                     sessions={sessions}
@@ -1057,6 +1171,12 @@ export function Sidebar({
                     onLoadSession={onLoadSession}
                     onNewChatForProject={onNewChatForProject}
                     onRefreshProjects={onRefreshProjects}
+                    activeTab={activeSidebarTab}
+                    onActiveTabChange={onActiveSidebarTabChange ?? (() => {})}
+                    isSessionStarred={isSessionStarred}
+                    onToggleSessionStar={onToggleSessionStar}
+                    isProjectPinned={isProjectPinned}
+                    onToggleProjectPin={onToggleProjectPin}
                   />
                 </div>
               </div>
