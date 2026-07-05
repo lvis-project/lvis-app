@@ -57,4 +57,7 @@ export const de: Record<SeedMessageKey, string> = {
   "startupTab.launchAtStartupHint": "LVIS nach der Anmeldung automatisch starten. (Nur installierte App.)",
   "startupTab.launchMinimizedLabel": "Versteckt im Infobereich starten",
   "startupTab.launchMinimizedHint": "Beim Start mit der Anmeldung minimiert im Infobereich starten, ohne ein Fenster zu öffnen.",
+  "startupTab.launchRegisterFailedTitle": "Start beim Anmelden konnte nicht angewendet werden",
+  "startupTab.launchRegisterFailedBody":
+    "LVIS konnte den Start bei der Anmeldung auf diesem System nicht registrieren. Öffne die Einstellungen, um es erneut zu versuchen.",
 };

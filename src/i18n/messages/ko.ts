@@ -65,4 +65,7 @@ export const ko: Record<SeedMessageKey, string> = {
   "startupTab.launchAtStartupHint": "로그인 후 LVIS 를 자동으로 시작합니다. (설치된 앱에서만 적용)",
   "startupTab.launchMinimizedLabel": "트레이에 숨겨서 시작",
   "startupTab.launchMinimizedHint": "자동 실행 시 창을 열지 않고 트레이에 최소화된 상태로 시작합니다.",
+  "startupTab.launchRegisterFailedTitle": "시작 시 자동 실행을 적용하지 못했습니다",
+  "startupTab.launchRegisterFailedBody":
+    "이 시스템에서 로그인 시 자동 실행을 등록하지 못했습니다. 설정에서 다시 시도하세요.",
 };

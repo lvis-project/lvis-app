@@ -63,4 +63,7 @@ export const zh: Record<SeedMessageKey, string> = {
   "startupTab.launchAtStartupHint": "登录后自动启动 LVIS。（仅限已安装的应用）",
   "startupTab.launchMinimizedLabel": "启动时隐藏到托盘",
   "startupTab.launchMinimizedHint": "在登录启动时，最小化到托盘启动而不打开窗口。",
+  "startupTab.launchRegisterFailedTitle": "无法应用开机自动启动",
+  "startupTab.launchRegisterFailedBody":
+    "LVIS 无法在此系统上注册登录时自动启动。请打开设置重试。",
 };

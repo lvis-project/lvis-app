@@ -20,6 +20,8 @@
  */
 import { app } from "electron";
 import { createLogger } from "../lib/logger.js";
+import { getServices } from "./app-state.js";
+import { t } from "../i18n/index.js";
 
 const log = createLogger("lvis");
 
@@ -150,8 +152,9 @@ export function readStartupLaunchState(
   const argvHidden = deps.argv().includes(HIDDEN_LAUNCH_ARG);
 
   if (platform === "win32") {
-    // Electron reports the persisted launch args under `executableWillLaunchAtLogin`
-    // is not available; use launchItems if present, else fall back to argv.
+    // Electron does not report `openAsHidden` on Windows, so "hidden" is
+    // derived from our own `--hidden` launch arg: prefer the persisted
+    // login-item args (`launchItems`) when present, else fall back to argv.
     const launchItems = (os as Electron.LoginItemSettings & {
       launchItems?: Array<{ args?: string[] }>;
     }).launchItems;
@@ -174,4 +177,46 @@ export function readStartupLaunchState(
     applied: platform === "darwin" || platform === "linux",
     reason: platform === "darwin" || platform === "linux" ? undefined : "platform-unsupported",
   };
+}
+
+/**
+ * E4 (security M2 / critic M2) — surface a `reconcileStartupLaunch` failure to
+ * the user, mirroring the global-shortcut conflict path so an auto-launch that
+ * silently failed to register can't happen. Called after every reconcile whose
+ * result the IPC / boot layer would otherwise drop.
+ *
+ * Only fires when the user actually ASKED for launch-at-startup
+ * (`input.launchAtStartup === true`) but the OS did not apply it
+ * (`state.applied === false`) for a genuine platform reason. The benign
+ * `dev-unpackaged` case is intentionally silent: we never register a login item
+ * in dev, so `applied:false` there is expected, not a failure (No-Fallback:
+ * report real failures, don't cry wolf on the deliberate dev skip). Disabling
+ * launch-at-startup can't "fail" in a user-visible way, so a false input never
+ * notifies.
+ */
+export function notifyStartupLaunchFailureIfNeeded(
+  input: StartupLaunchInput,
+  state: StartupLaunchState,
+  notify: (input: StartupLaunchInput, state: StartupLaunchState) => void = defaultNotifyStartupLaunchFailure,
+): void {
+  if (!input.launchAtStartup) return;
+  if (state.applied) return;
+  if (state.reason === "dev-unpackaged") return;
+  log.warn(
+    "startup-launch: launch-at-startup requested but not applied (reason=%s) — notifying user",
+    state.reason ?? "unknown",
+  );
+  notify(input, state);
+}
+
+function defaultNotifyStartupLaunchFailure(
+  _input: StartupLaunchInput,
+  _state: StartupLaunchState,
+): void {
+  const services = getServices();
+  services?.notificationService?.fire({
+    kind: "system",
+    title: t("startupTab.launchRegisterFailedTitle"),
+    body: t("startupTab.launchRegisterFailedBody"),
+  });
 }

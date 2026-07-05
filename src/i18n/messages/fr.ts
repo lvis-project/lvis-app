@@ -57,4 +57,7 @@ export const fr: Record<SeedMessageKey, string> = {
   "startupTab.launchAtStartupHint": "Démarrer LVIS automatiquement après votre connexion. (Application installée uniquement.)",
   "startupTab.launchMinimizedLabel": "Démarrer masqué dans la barre d'état",
   "startupTab.launchMinimizedHint": "Au lancement à la connexion, démarrer réduit dans la barre d'état sans ouvrir de fenêtre.",
+  "startupTab.launchRegisterFailedTitle": "Impossible d'appliquer le lancement au démarrage",
+  "startupTab.launchRegisterFailedBody":
+    "LVIS n'a pas pu s'enregistrer pour se lancer à la connexion sur ce système. Ouvrez les paramètres pour réessayer.",
 };
