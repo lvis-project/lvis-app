@@ -240,6 +240,17 @@ export type AppSettings = {
     sidebarActiveTab?: SidebarTab;
     /** Pinned project roots — sort to the top of the sidebar's Projects tab. SOT: `SystemSettings`. */
     pinnedProjectRoots?: string[];
+    /** E4 — auto-launch LVIS at OS login. SOT: `SystemSettings`. Default false. */
+    launchAtStartup?: boolean;
+    /** E4 — when launching at startup, start hidden in the tray. SOT: `SystemSettings`. Default false. */
+    launchMinimized?: boolean;
+  };
+  /** E4 — global keyboard shortcuts. SOT: `ShortcutSettings` in settings-store. */
+  shortcuts?: {
+    /** Accelerator for the show/hide window toggle, or null when unset. */
+    toggleWindow: string | null;
+    /** Master on/off for global shortcut registration. Default false. */
+    enabled: boolean;
   };
   /** Experimental feature flags — all default false. */
   features?: {
