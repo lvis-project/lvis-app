@@ -957,6 +957,65 @@ describe("ChatSidePanel", () => {
     await waitFor(() => expect(removeRoot).toHaveBeenCalledWith("/ws/proj"));
   });
 
+  it("#1494 surfaces the pruned-grants count in the op-info status and lets the user dismiss it", async () => {
+    // removeRoot reports prunedGrants:2 — the panel must show the i18n'd count in
+    // the `chat-side-panel-op-info` status node (the widened effect of "Remove
+    // folder" is made visible), and the dismiss control clears it.
+    stubRichWorkspace({
+      removeRoot: vi.fn(async () => ({
+        ok: true as const,
+        removed: "/ws/proj",
+        roots: [{ path: "/ws", isDefault: true }],
+        prunedGrants: 2,
+      })),
+    });
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const select = (await screen.findByTestId("chat-side-panel-root-select")) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "/ws/proj" } });
+    fireEvent.click(await screen.findByTestId("chat-side-panel-remove-root"));
+    // The op-info status renders the i18n'd count text. The renderer resolves to
+    // the active locale (ko in this harness → "폴더 제거됨 · 저장된 권한 2건 함께 해제"):
+    // assert the load-bearing count is interpolated and the revoke phrasing is
+    // present, locale-agnostically.
+    const info = await screen.findByTestId("chat-side-panel-op-info");
+    expect(info.getAttribute("role")).toBe("status");
+    expect(info.textContent).toContain("2");
+    // The i18n string must be resolved (not the raw key) and mention the revoke.
+    expect(info.textContent).not.toContain("removeRootPruned");
+    expect(info.textContent).toMatch(/해제|revoked|révoqué|widerrufen|取消|撤销/);
+    // Dismiss control clears the status.
+    fireEvent.click(screen.getByTestId("chat-side-panel-op-info-dismiss"));
+    await waitFor(() => expect(screen.queryByTestId("chat-side-panel-op-info")).toBeNull());
+  });
+
+  it("#1494 shows no op-info status when removeRoot pruned zero grants", async () => {
+    // prunedGrants:0 → no transient info surface (only non-zero counts warrant the
+    // extra disclosure). Guards against a "0 saved grants revoked" false alarm.
+    stubRichWorkspace({
+      removeRoot: vi.fn(async () => ({
+        ok: true as const,
+        removed: "/ws/proj",
+        roots: [{ path: "/ws", isDefault: true }],
+        prunedGrants: 0,
+      })),
+    });
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    const select = (await screen.findByTestId("chat-side-panel-root-select")) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "/ws/proj" } });
+    fireEvent.click(await screen.findByTestId("chat-side-panel-remove-root"));
+    // Wait for the root list to update, then assert the info node never appeared.
+    await waitFor(() =>
+      expect(screen.queryByTestId("chat-side-panel-remove-root")).toBeNull(),
+    );
+    expect(screen.queryByTestId("chat-side-panel-op-info")).toBeNull();
+  });
+
   it("collapse-all folds every open folder and disables itself when nothing is open", async () => {
     stubRichWorkspace();
     renderPanel(
