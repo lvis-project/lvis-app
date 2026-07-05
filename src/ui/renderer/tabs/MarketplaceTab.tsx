@@ -15,6 +15,7 @@ import {
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { PluginInstallDialog } from "../dialogs/PluginInstallDialog.js";
+import { mergeMarketplaceCandidates } from "../marketplace-candidates.js";
 import { useTranslation } from "../../../i18n/react.js";
 import {
   buildNetworkAccessAcknowledgement,
@@ -159,9 +160,11 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   const refreshPackages = useCallback(async () => {
     try {
       const items = await api.listMarketplacePlugins();
-      setPackages(items);
-      setPackageStatus(t("marketplaceTab.packageCount", { count: String(items.length) }));
+      const mergedItems = mergeMarketplaceCandidates(items);
+      setPackages(mergedItems);
+      setPackageStatus(t("marketplaceTab.packageCount", { count: String(mergedItems.length) }));
     } catch (err) {
+      setPackages(mergeMarketplaceCandidates([]));
       setPackageStatus(t("marketplaceTab.loadFailed", { message: (err as Error).message }));
     }
   }, [api, t]);
