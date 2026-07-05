@@ -24,11 +24,14 @@ export const LONG_TOAST_TTL_MS = 5000;
 
 import type { ExecMode } from "./types.js";
 import {
+  DEFAULT_VISIBLE_LLM_VENDOR_IDS,
   LLM_VENDOR_DEFAULTS,
   LLM_VENDOR_MODEL_OPTIONS,
   LLM_VENDORS,
+  MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS,
   OPENAI_COMPATIBLE_PRESET_VENDOR_IDS,
   OPENAI_COMPATIBLE_VENDOR_PRESETS,
+  isLLMVendor,
   type OpenAICompatiblePresetVendor,
   type LLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
@@ -45,11 +48,17 @@ export const SOURCE_BADGE: Record<string, string> = {
 // a compile error — keeps the dropdown in lockstep with the canonical
 // vendor list. `defaultModel` derives from LLM_VENDOR_DEFAULTS so the
 // model selector stays in sync with the data layer's seed values.
-interface VendorUiMeta {
+export interface VendorUiMeta {
   label: string;
   placeholder: string;
   needsBaseUrl: boolean;
   baseUrlPlaceholder?: string;
+}
+
+export interface VendorOption extends VendorUiMeta {
+  id: LLMVendor;
+  defaultModel: string;
+  modelOptions: readonly string[];
 }
 
 const CORE_VENDOR_UI: Record<Exclude<LLMVendor, OpenAICompatiblePresetVendor>, VendorUiMeta> = {
@@ -96,12 +105,40 @@ const VENDOR_UI: Record<LLMVendor, VendorUiMeta> = {
   ...PRESET_VENDOR_UI,
 };
 
-export const VENDORS = LLM_VENDORS.map((id) => ({
+export const ALL_VENDORS: VendorOption[] = LLM_VENDORS.map((id) => ({
   id,
   ...VENDOR_UI[id],
   defaultModel: LLM_VENDOR_DEFAULTS[id].model,
   modelOptions: LLM_VENDOR_MODEL_OPTIONS[id],
 }));
+
+export const VENDORS: VendorOption[] = DEFAULT_VISIBLE_LLM_VENDOR_IDS.map((id) => {
+  const option = ALL_VENDORS.find((vendor) => vendor.id === id);
+  if (!option) throw new Error(`Missing default visible LLM vendor metadata: ${id}`);
+  return option;
+});
+
+export const MARKETPLACE_PROVIDER_VENDORS: VendorOption[] =
+  MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS.map((id) => {
+    const option = ALL_VENDORS.find((vendor) => vendor.id === id);
+    if (!option) throw new Error(`Missing marketplace LLM vendor metadata: ${id}`);
+    return option;
+  });
+
+export function getVendorOption(vendorId: string): VendorOption {
+  return ALL_VENDORS.find((vendor) => vendor.id === vendorId) ?? VENDORS[0]!;
+}
+
+export function visibleVendorsFor(currentVendorIds: readonly string[] = []): VendorOption[] {
+  const visible = [...VENDORS];
+  for (const vendorId of currentVendorIds) {
+    if (!isLLMVendor(vendorId)) continue;
+    if (visible.some((vendor) => vendor.id === vendorId)) continue;
+    const option = getVendorOption(vendorId);
+    visible.push(option);
+  }
+  return visible;
+}
 
 export const WEB_PROVIDERS: { id: string; label: string; readonly placeholder: string; needsKey: boolean }[] = [
   { id: "duckduckgo", label: "DuckDuckGo", get placeholder() { return t("constants.webProviderDuckDuckGoPlaceholder"); }, needsKey: false },
