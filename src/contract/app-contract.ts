@@ -65,6 +65,9 @@ export const CHANNELS = {
     continueLastUser: "lvis:chat:continue-last-user",
     retryEffort: "lvis:chat:retry-effort",
     export: "lvis:chat:export",
+    // #1500 (E3): reverse of `export` — always creates a brand-new session,
+    // never overwrites. INTERNAL (mutating; not in PUBLIC_CHANNELS below).
+    import: "lvis:chat:import",
     enterCheckpointView: "lvis:chat:enter-checkpoint-view",
     exitCheckpointView: "lvis:chat:exit-checkpoint-view",
     branchFromCheckpoint: "lvis:chat:branch-from-checkpoint",
