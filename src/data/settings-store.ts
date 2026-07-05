@@ -19,13 +19,15 @@ import {
 import {
   DEFAULT_LLM_VENDOR,
   freshVendorBlocks,
+  getLlmVendorSettings,
   isLLMVendor,
   isMarketplaceEligibleLLMVendor,
-  LLM_VENDOR_DEFAULTS,
   LLM_VENDORS,
-  normalizeLlmVendorModel,
   type LLMVendor,
+  type LLMVendorSettingsMap,
   type LLMVendorSettings,
+  type MarketplaceEligibleLLMVendor,
+  normalizeLlmVendorModel,
 } from "../shared/llm-vendor-defaults.js";
 import {
   BUNDLE_IDS,
@@ -77,8 +79,10 @@ export function settingsFilePath(userDataPath: string): string {
  * LLM settings — single source of truth.
  *
  * - `provider` selects the active vendor.
- * - `vendors` holds a complete configuration block per vendor; switching
- *   `provider` never inherits stale values from another vendor's block.
+ * - `vendors` holds materialized configuration blocks only for default-visible
+ *   providers and providers the user actually touches. Runtime callers must
+ *   read through `getLlmVendorSettings()` so long-tail marketplace providers
+ *   can stay lazy until installed/selected.
  * - `streamSmoothing` is a client-side post-processor applied to streamed
  *   tokens regardless of vendor; UI lives under the Chat settings tab.
  * - `fallbackChain` references other vendors by id and is therefore
@@ -106,7 +110,7 @@ export interface LLMSettings {
    */
   authMode: "manual" | "login";
   provider: LLMVendor;
-  vendors: Record<LLMVendor, LLMVendorSettings>;
+  vendors: LLMVendorSettingsMap;
   streamSmoothing: "none" | "word" | "char";
   fallbackChain: Array<{ provider: LLMVendor; model: string }>;
   /**
@@ -126,7 +130,8 @@ export interface LLMSettings {
 
 /**
  * Patch shape for `SettingsService.patch()`. Vendor blocks are partial so
- * a UI save touching a single vendor doesn't have to send all six.
+ * a UI save touching a single vendor doesn't have to send every default or
+ * marketplace provider block.
  */
 export interface LLMSettingsPatch {
   authMode?: "manual" | "login";
@@ -547,7 +552,7 @@ export interface MarketplaceSettings {
    * expand the provider picker without re-bundling every provider into the
    * first-run surface.
    */
-  installedProviderIds: LLMVendor[];
+  installedProviderIds: MarketplaceEligibleLLMVendor[];
   /** Marketplace-installed theme bundles shown in Appearance. */
   installedThemeBundleIds: BundleId[];
   /** Marketplace-installed language packs shown in the language picker. */
@@ -1107,7 +1112,7 @@ export class SettingsService {
       const raw = readFileSync(this.settingsPath, "utf-8");
       const parsed = JSON.parse(raw) as any;
       const migratedLlm = migrateLegacyLlmAuthMode(parsed.llm);
-      const llm = mergeLlmPatch(DEFAULT_SETTINGS.llm, migratedLlm);
+      let llm = mergeLlmPatch(DEFAULT_SETTINGS.llm, migratedLlm);
       const marketplaceParsed: Record<string, unknown> = { ...(parsed.marketplace ?? {}) };
       // Migration: the marketplace cloud fields were renamed (the old "real"
       // prefix became vestigial once the mock backend was removed). Preserve
@@ -1149,12 +1154,23 @@ export class SettingsService {
         onDisk.schemaVersion !== 2 &&
         (typeof onDisk.theme === "string" || typeof onDisk.chatTheme === "string" || typeof onDisk.codeTheme === "string");
 
+      let marketplace = normalizeMarketplace(marketplaceParsed);
+      const prunedLlm = pruneLazyLlmVendorBlocks(
+        llm,
+        marketplace.installedProviderIds,
+      );
+      llm = prunedLlm.llm;
+      marketplace = {
+        ...marketplace,
+        installedProviderIds: prunedLlm.installedProviderIds,
+      };
+
       const appearance = normalizeAppearance(parsed.appearance);
       const result: AppSettings & { __needsV2WriteBack?: boolean } = {
         llm,
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
         webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
-        marketplace: normalizeMarketplace(marketplaceParsed),
+        marketplace,
         routine: normalizedRoutine,
         privacy: { ...DEFAULT_SETTINGS.privacy, ...parsed.privacy },
         updates: { ...DEFAULT_SETTINGS.updates, ...parsed.updates },
@@ -1208,30 +1224,38 @@ export class SettingsService {
 /**
  * Merge a partial LLM patch onto a base settings block. Per-vendor entries
  * inside `partial.vendors` are deep-merged with the corresponding existing
- * block so a UI save touching one vendor never overwrites another's config.
+ * block, materializing only the providers touched by the user or selected as
+ * active. The long-tail provider defaults live in `LLM_VENDOR_DEFAULTS` and
+ * are read through `getLlmVendorSettings()` instead of being persisted for
+ * every fresh install.
  *
  * Unknown vendor ids in `partial.vendors` are ignored — the active provider
  * must be one of LLM_VENDORS, validated below.
  */
 function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSettings {
-  const vendors: Record<LLMVendor, LLMVendorSettings> = { ...base.vendors };
+  const vendors: LLMVendorSettingsMap = { ...base.vendors };
   if (partial.vendors) {
-    for (const v of LLM_VENDORS) {
-      const incoming = partial.vendors[v];
+    for (const [vendorId, incoming] of Object.entries(partial.vendors)) {
+      if (!isLLMVendor(vendorId) || !incoming) continue;
+      const v = vendorId;
       // Spread carries explicit `undefined` keys through (e.g. clearing `seed`).
       // Omitting a key from the patch leaves the previous value intact —
       // omit ≠ clear by design.
-      if (incoming) vendors[v] = { ...vendors[v], ...incoming };
+      vendors[v] = getLlmVendorSettings(
+        {
+          ...vendors,
+          [v]: {
+            ...getLlmVendorSettings(vendors, v),
+            ...incoming,
+          },
+        },
+        v,
+      );
     }
   }
-  for (const v of LLM_VENDORS) {
-    const model = typeof vendors[v].model === "string"
-      ? vendors[v].model
-      : LLM_VENDOR_DEFAULTS[v].model;
-    vendors[v] = {
-      ...vendors[v],
-      model: normalizeLlmVendorModel(v, model),
-    };
+  for (const vendorId of Object.keys(vendors)) {
+    if (!isLLMVendor(vendorId)) continue;
+    vendors[vendorId] = getLlmVendorSettings(vendors, vendorId);
   }
   // Coerce stale on-disk `provider` (e.g. a since-removed vendor name) to the
   // base provider — `vendors[provider]` would otherwise be undefined and
@@ -1240,6 +1264,7 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
   const provider: LLMVendor = isLLMVendor(partial.provider)
     ? partial.provider
     : base.provider;
+  vendors[provider] = getLlmVendorSettings(vendors, provider);
   const authMode: "manual" | "login" =
     partial.authMode === "login" || partial.authMode === "manual"
       ? partial.authMode
@@ -1258,6 +1283,78 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
     fallbackChain,
     // `undefined` means "no mapping"; an explicit empty string clears the map.
     hostResolverMap: "hostResolverMap" in partial ? partial.hostResolverMap : base.hostResolverMap,
+  };
+}
+
+const LLM_VENDOR_SETTING_KEYS = [
+  "model",
+  "baseUrl",
+  "vertexProject",
+  "vertexLocation",
+  "enableThinking",
+  "thinkingBudgetTokens",
+] as const satisfies readonly (keyof LLMVendorSettings)[];
+
+function hasCustomLlmVendorSettings(
+  vendor: LLMVendor,
+  block: LLMVendorSettings,
+): boolean {
+  const normalized = getLlmVendorSettings({ [vendor]: block }, vendor);
+  const defaults = getLlmVendorSettings(undefined, vendor);
+  return LLM_VENDOR_SETTING_KEYS.some(
+    (key) => normalized[key] !== defaults[key],
+  );
+}
+
+function addUniqueMarketplaceProvider(
+  values: MarketplaceEligibleLLMVendor[],
+  vendor: LLMVendor,
+): MarketplaceEligibleLLMVendor[] {
+  if (!isMarketplaceEligibleLLMVendor(vendor)) return values;
+  return values.includes(vendor) ? values : [...values, vendor];
+}
+
+function pruneLazyLlmVendorBlocks(
+  llm: LLMSettings,
+  installedProviderIds: MarketplaceEligibleLLMVendor[],
+): {
+  llm: LLMSettings;
+  installedProviderIds: MarketplaceEligibleLLMVendor[];
+} {
+  const required = new Set<LLMVendor>(installedProviderIds);
+  required.add(llm.provider);
+  for (const entry of llm.fallbackChain) {
+    required.add(entry.provider);
+  }
+
+  const vendors: LLMVendorSettingsMap = {};
+  let inferredInstalledProviderIds = installedProviderIds;
+
+  for (const [vendorId, block] of Object.entries(llm.vendors)) {
+    if (!isLLMVendor(vendorId) || !block) continue;
+    const vendor = vendorId;
+    const normalized = getLlmVendorSettings({ [vendor]: block }, vendor);
+    const marketplaceOnly = isMarketplaceEligibleLLMVendor(vendor);
+    const custom = hasCustomLlmVendorSettings(vendor, normalized);
+    const keep = !marketplaceOnly || required.has(vendor) || custom;
+    if (!keep) continue;
+    vendors[vendor] = normalized;
+    if (marketplaceOnly && (required.has(vendor) || custom)) {
+      inferredInstalledProviderIds = addUniqueMarketplaceProvider(
+        inferredInstalledProviderIds,
+        vendor,
+      );
+    }
+  }
+
+  vendors[llm.provider] = getLlmVendorSettings(vendors, llm.provider);
+
+  return {
+    llm: {
+      ...llm,
+      vendors,
+    },
+    installedProviderIds: inferredInstalledProviderIds,
   };
 }
 

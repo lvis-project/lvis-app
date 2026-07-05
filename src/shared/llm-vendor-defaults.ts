@@ -1,7 +1,7 @@
 /**
  * Single source of truth for the LLM vendor list and per-vendor default
- * configuration block. Consumed by `data/settings-store.ts` (to seed
- * DEFAULT_SETTINGS.llm.vendors) and by the renderer's `VENDORS` constant
+ * configuration block. Consumed by `data/settings-store.ts` (to seed the
+ * default-visible LLM vendor blocks) and by the renderer's `VENDORS` constant
  * (for the model dropdown shown in the settings dialog).
  *
  * Pure, browser-safe — no Electron / Node imports.
@@ -374,16 +374,12 @@ export function isMarketplaceEligibleLLMVendor(
  * default elsewhere without updating the narrower would otherwise drift
  * silently.
  *
- * 2026-05-19 — flipped from `"claude"` to `"azure-foundry"` so the
- * default install lands on the internal organization demo target. The Z onboarding
- * chain ScenarioShowcase + LoginModal still let the user pick any vendor
- * during first-boot; this is purely the seed for `settings.json` writes
- * + every boundary-narrowing fallback. Production builds shipping with
- * `LVIS_DEMO_VENDOR` set continue to honor the env value via
- * `getDemoActiveVendor()` in `demo-credentials.ts` (env overrides the
- * default for the active session).
+ * Fresh installs stay on the default-visible provider surface. Internal demo
+ * builds still use `LVIS_DEMO_VENDOR` via `getDemoActiveVendor()` in
+ * `demo-credentials.ts`; that env override should not force marketplace-only
+ * providers into every user's first-run settings file.
  */
-export const DEFAULT_LLM_VENDOR: LLMVendor = "azure-foundry";
+export const DEFAULT_LLM_VENDOR: LLMVendor = "openai";
 
 /**
  * Runtime type guard — narrows `unknown` to `LLMVendor`. Use at every
@@ -393,9 +389,10 @@ export const DEFAULT_LLM_VENDOR: LLMVendor = "azure-foundry";
  * NOT need this — the type system carries the proof.
  *
  * Empty / non-string / unknown-string inputs return false. The set is
- * the same `LLM_VENDORS` constant used to seed `DEFAULT_SETTINGS.llm.
- * vendors`, so a `true` return is a hard guarantee that downstream
- * `vendors[v]` lookups won't hit `undefined`.
+ * the same `LLM_VENDORS` constant used by settings, secrets, provider
+ * factories, and marketplace package metadata. A `true` result proves the id
+ * is known; settings code must still tolerate missing `vendors[v]` entries
+ * because long-tail provider blocks are now materialized lazily.
  */
 export function isLLMVendor(v: unknown): v is LLMVendor {
   return (
@@ -443,6 +440,10 @@ export interface LLMVendorSettings {
   enableThinking: boolean;
   thinkingBudgetTokens: number;
 }
+
+export type LLMVendorSettingsMap = Partial<
+  Record<LLMVendor, LLMVendorSettings>
+>;
 
 const RETIRED_LLM_MODEL_IDS = new Set(["gpt-4o"]);
 
@@ -579,8 +580,42 @@ export const LLM_VENDOR_DEFAULTS: Readonly<Record<LLMVendor, LLMVendorSettings>>
     >,
   );
 
-export function freshVendorBlocks(): Record<LLMVendor, LLMVendorSettings> {
+export function getLlmVendorSettings(
+  vendors: LLMVendorSettingsMap | undefined,
+  vendor: LLMVendor,
+): LLMVendorSettings {
+  const defaults = LLM_VENDOR_DEFAULTS[vendor];
+  const stored = vendors?.[vendor];
+  const model =
+    typeof stored?.model === "string"
+      ? normalizeLlmVendorModel(vendor, stored.model)
+      : defaults.model;
+  return {
+    ...defaults,
+    ...stored,
+    model,
+    enableThinking:
+      typeof stored?.enableThinking === "boolean"
+        ? stored.enableThinking
+        : defaults.enableThinking,
+    thinkingBudgetTokens:
+      typeof stored?.thinkingBudgetTokens === "number" &&
+      Number.isFinite(stored.thinkingBudgetTokens)
+        ? stored.thinkingBudgetTokens
+        : defaults.thinkingBudgetTokens,
+  };
+}
+
+export function freshVendorBlocks(
+  vendorIds: readonly LLMVendor[] = DEFAULT_VISIBLE_LLM_VENDOR_IDS,
+): LLMVendorSettingsMap {
   return Object.fromEntries(
-    LLM_VENDORS.map((v) => [v, { ...LLM_VENDOR_DEFAULTS[v] }]),
+    vendorIds.map((v) => [v, getLlmVendorSettings(undefined, v)]),
+  ) as LLMVendorSettingsMap;
+}
+
+export function freshAllVendorBlocks(): Record<LLMVendor, LLMVendorSettings> {
+  return Object.fromEntries(
+    LLM_VENDORS.map((v) => [v, getLlmVendorSettings(undefined, v)]),
   ) as Record<LLMVendor, LLMVendorSettings>;
 }
