@@ -301,6 +301,54 @@ function useWebViewPreferredFlow(): {
   return { flow, setFlow };
 }
 
+function useMarketplaceAppearanceAssets(): {
+  themeBundleIds: readonly string[];
+  languagePacks: readonly string[];
+} {
+  const [themeBundleIds, setThemeBundleIds] = useState<readonly string[]>([]);
+  const [languagePacks, setLanguagePacks] = useState<readonly string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    const applyMarketplaceAssets = (settings: {
+      marketplace?: {
+        installedThemeBundleIds?: readonly string[];
+        installedLanguagePacks?: readonly string[];
+      };
+    }) => {
+      const marketplace = settings.marketplace;
+      setThemeBundleIds(Array.isArray(marketplace?.installedThemeBundleIds)
+        ? marketplace.installedThemeBundleIds
+        : []);
+      setLanguagePacks(Array.isArray(marketplace?.installedLanguagePacks)
+        ? marketplace.installedLanguagePacks
+        : []);
+    };
+
+    void (async () => {
+      try {
+        const api = getApi();
+        const settings = await api.getSettings();
+        if (cancelled) return;
+        applyMarketplaceAssets(settings);
+        unsubscribe = api.onSettingsUpdated((nextSettings) => {
+          if (cancelled) return;
+          applyMarketplaceAssets(nextSettings);
+        });
+      } catch {
+        /* defaults remain */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, []);
+
+  return { themeBundleIds, languagePacks };
+}
+
 /**
  * Free-form CSS font-family input with commit-on-blur semantics.
  *
@@ -390,10 +438,14 @@ function FontFamilyCustomInput({
  * change to every window). Option labels use each locale's native name so they
  * are recognizable regardless of the current language.
  */
-function LanguageSection() {
+function LanguageSection({
+  installedLocaleIds,
+}: {
+  installedLocaleIds: readonly string[];
+}) {
   const { locale, setLocale, t } = useTranslation();
   const notifySaved = useNotifySaved();
-  const visibleLocales = visibleLocalesFor([locale]);
+  const visibleLocales = visibleLocalesFor([locale, ...installedLocaleIds]);
   return (
     <SettingsSection
       title={t("settings.appearance.language.title")}
@@ -435,6 +487,7 @@ export function AppearanceTab() {
   const { bundleId, setBundle, followSystem, setFollowSystem } = useTheme();
   const { flow: webViewFlow, setFlow: setWebViewFlow } = useWebViewPreferredFlow();
   const { family, sizeScale, setFamily, setSizeScale } = useFontPreferences();
+  const marketplaceAssets = useMarketplaceAppearanceAssets();
   const notifySaved = useNotifySaved();
   // useTheme persists bundle + followSystem through its own ThemeProvider
   // (api.updateSettings inside ThemeProvider.tsx). The provider is a
@@ -445,7 +498,10 @@ export function AppearanceTab() {
   const selectFollowSystem = (next: boolean) => { setFollowSystem(next); notifySaved(); };
 
   const isVioletPair = VIOLET_PAIR_IDS.includes(bundleId);
-  const visibleBundles = visibleBundlesFor([bundleId]);
+  const visibleBundles = visibleBundlesFor([
+    bundleId,
+    ...marketplaceAssets.themeBundleIds,
+  ]);
   const activePreset = presetForStack(family);
   const customStack = activePreset === "custom" ? family : "";
 
@@ -457,7 +513,7 @@ export function AppearanceTab() {
       />
 
       {/* ── Language ──────────────────────────────────── */}
-      <LanguageSection />
+      <LanguageSection installedLocaleIds={marketplaceAssets.languagePacks} />
 
       {/* ── 테마 선택 ─────────────────────────────────── */}
       <SettingsSection

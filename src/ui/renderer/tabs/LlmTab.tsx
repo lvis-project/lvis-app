@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
@@ -356,7 +356,36 @@ export function LlmTab(props: LlmTabProps) {
     ? trimmedModel
     : vendorInfo.defaultModel;
   const activeModelOptions = modelOptionsFor(vendor, activeModelValue);
-  const providerSelectOptions = useMemo(() => visibleVendorsFor([vendor]), [vendor]);
+  const [marketplaceProviderIds, setMarketplaceProviderIds] = useState<readonly string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    const applyProviderIds = (settings: Awaited<ReturnType<LvisApi["getSettings"]>>) => {
+      const ids = settings.marketplace?.installedProviderIds;
+      setMarketplaceProviderIds(Array.isArray(ids) ? ids : []);
+    };
+    void (async () => {
+      try {
+        const settings = await api.getSettings();
+        if (cancelled) return;
+        applyProviderIds(settings);
+        unsubscribe = api.onSettingsUpdated((nextSettings) => {
+          if (cancelled) return;
+          applyProviderIds(nextSettings);
+        });
+      } catch {
+        /* defaults remain */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [api]);
+  const providerSelectOptions = useMemo(
+    () => visibleVendorsFor([vendor, ...marketplaceProviderIds]),
+    [marketplaceProviderIds, vendor],
+  );
 
   // Relaunch confirmation dialog state for host map changes.
   const [relaunchConfirmOpen, setRelaunchConfirmOpen] = useState(false);
@@ -864,7 +893,10 @@ export function LlmTab(props: LlmTabProps) {
                         setFallbackChain(next);
                       }}
                       triggerClassName="w-36 text-xs"
-                      vendorOptions={visibleVendorsFor([entry.provider])}
+                      vendorOptions={visibleVendorsFor([
+                        entry.provider,
+                        ...marketplaceProviderIds,
+                      ])}
                     />
                     <Select
                       value={fallbackModelValue}

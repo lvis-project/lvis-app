@@ -7,7 +7,8 @@ import { Label } from "../../../components/ui/label.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Store } from "lucide-react";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
-import type { LvisApi, MarketplaceItem } from "../types.js";
+import { isIpcErrorResult, type LvisApi, type MarketplaceItem } from "../types.js";
+import type { MarketplaceSettings } from "../../../data/settings-store.js";
 import {
   INSTALLABLE_MARKETPLACE_PACKAGE_TYPES,
   type MarketplacePackageType,
@@ -35,6 +36,74 @@ const PACKAGE_TYPE_LABELS: Record<MarketplacePackageType, string> = {
   theme: "Themes",
   "language-pack": "Languages",
 };
+
+type MarketplaceAssetInstallState = Pick<
+  MarketplaceSettings,
+  "installedProviderIds" | "installedThemeBundleIds" | "installedLanguagePacks"
+>;
+
+function installedAssetsFromMarketplace(
+  marketplace?: Partial<MarketplaceSettings>,
+): MarketplaceAssetInstallState {
+  return {
+    installedProviderIds: Array.isArray(marketplace?.installedProviderIds)
+      ? marketplace.installedProviderIds
+      : [],
+    installedThemeBundleIds: Array.isArray(marketplace?.installedThemeBundleIds)
+      ? marketplace.installedThemeBundleIds
+      : [],
+    installedLanguagePacks: Array.isArray(marketplace?.installedLanguagePacks)
+      ? marketplace.installedLanguagePacks
+      : [],
+  };
+}
+
+function isMarketplaceAssetPackage(item: MarketplaceItem): boolean {
+  const packageType = item.pluginType ?? "plugin";
+  return (
+    (packageType === "provider" ||
+      packageType === "theme" ||
+      packageType === "language-pack") &&
+    item.packageAsset?.type === packageType
+  );
+}
+
+function isMarketplaceAssetInstalled(
+  item: MarketplaceItem,
+  installed: MarketplaceAssetInstallState,
+): boolean {
+  const asset = item.packageAsset;
+  if (!asset) return false;
+  if (asset.type === "provider") {
+    return installed.installedProviderIds.includes(asset.providerId);
+  }
+  if (asset.type === "theme") {
+    return installed.installedThemeBundleIds.includes(asset.bundleId);
+  }
+  return installed.installedLanguagePacks.includes(asset.locale);
+}
+
+function withMarketplaceAssetInstallState(
+  items: readonly MarketplaceItem[],
+  installed: MarketplaceAssetInstallState,
+): MarketplaceItem[] {
+  return items.map((item) => {
+    if (!isMarketplaceAssetPackage(item)) return item;
+    return {
+      ...item,
+      installed: isMarketplaceAssetInstalled(item, installed),
+      enabled: isMarketplaceAssetInstalled(item, installed),
+    };
+  });
+}
+
+function addUnique<T>(values: readonly T[], value: T): T[] {
+  return values.includes(value) ? [...values] : [...values, value];
+}
+
+function removeValue<T>(values: readonly T[], value: T): T[] {
+  return values.filter((entry) => entry !== value);
+}
 
 function isInstallablePackageType(
   packageType: MarketplacePackageType,
@@ -159,12 +228,29 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
 
   const refreshPackages = useCallback(async () => {
     try {
-      const items = await api.listMarketplacePlugins();
-      const mergedItems = mergeMarketplaceCandidates(items);
+      const [items, settings] = await Promise.all([
+        api.listMarketplacePlugins(),
+        api.getSettings(),
+      ]);
+      const mergedItems = withMarketplaceAssetInstallState(
+        mergeMarketplaceCandidates(items),
+        installedAssetsFromMarketplace(settings.marketplace),
+      );
       setPackages(mergedItems);
       setPackageStatus(t("marketplaceTab.packageCount", { count: String(mergedItems.length) }));
     } catch (err) {
-      setPackages(mergeMarketplaceCandidates([]));
+      let installed: MarketplaceAssetInstallState = {
+        installedProviderIds: [],
+        installedThemeBundleIds: [],
+        installedLanguagePacks: [],
+      };
+      try {
+        const settings = await api.getSettings();
+        installed = installedAssetsFromMarketplace(settings.marketplace);
+      } catch {
+        /* keep empty install state */
+      }
+      setPackages(withMarketplaceAssetInstallState(mergeMarketplaceCandidates([]), installed));
       setPackageStatus(t("marketplaceTab.loadFailed", { message: (err as Error).message }));
     }
   }, [api, t]);
@@ -183,6 +269,36 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     return item.installPolicy === "admin" || hasNetworkAccessDisclosure(item.networkAccess);
   }, []);
 
+  const updateMarketplaceAssetInstall = useCallback(async (
+    item: MarketplaceItem,
+    install: boolean,
+  ) => {
+    const asset = item.packageAsset;
+    if (!asset) {
+      throw new Error("Marketplace package is missing asset metadata");
+    }
+    const settings = await api.getSettings();
+    const installed = installedAssetsFromMarketplace(settings.marketplace);
+    const marketplace: Partial<MarketplaceSettings> = {};
+    if (asset.type === "provider") {
+      marketplace.installedProviderIds = install
+        ? addUnique(installed.installedProviderIds, asset.providerId)
+        : removeValue(installed.installedProviderIds, asset.providerId);
+    } else if (asset.type === "theme") {
+      marketplace.installedThemeBundleIds = install
+        ? addUnique(installed.installedThemeBundleIds, asset.bundleId)
+        : removeValue(installed.installedThemeBundleIds, asset.bundleId);
+    } else {
+      marketplace.installedLanguagePacks = install
+        ? addUnique(installed.installedLanguagePacks, asset.locale)
+        : removeValue(installed.installedLanguagePacks, asset.locale);
+    }
+    const result = await api.updateSettings({ marketplace });
+    if (isIpcErrorResult(result)) {
+      throw new Error(result.message ?? result.error);
+    }
+  }, [api]);
+
   const installPackage = useCallback(async (
     item: MarketplaceItem,
     options: { networkAccessAcknowledged?: boolean } = {},
@@ -190,7 +306,9 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     const packageType = item.pluginType ?? "plugin";
     setWorkingSlug(item.id);
     try {
-      if (packageType === "mcp") {
+      if (isMarketplaceAssetPackage(item)) {
+        await updateMarketplaceAssetInstall(item, true);
+      } else if (packageType === "mcp") {
         const result = await api.installMcpFromMarketplace(item.id);
         if (!result.ok) throw new Error(result.message);
       } else if (packageType === "agent") {
@@ -215,13 +333,15 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     } finally {
       setWorkingSlug(null);
     }
-  }, [api, refreshPackages, t]);
+  }, [api, refreshPackages, t, updateMarketplaceAssetInstall]);
 
   const uninstallPackage = useCallback(async (item: MarketplaceItem) => {
     const packageType = item.pluginType ?? "plugin";
     setWorkingSlug(item.id);
     try {
-      if (packageType === "agent") {
+      if (isMarketplaceAssetPackage(item)) {
+        await updateMarketplaceAssetInstall(item, false);
+      } else if (packageType === "agent") {
         const result = await getHostMarketplaceApi().uninstallMarketplaceAgent?.(item.id);
         if (!result?.ok) throw new Error(result?.message ?? result?.error ?? "Agent uninstall API unavailable");
       } else if (packageType === "skill") {
@@ -237,7 +357,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     } finally {
       setWorkingSlug(null);
     }
-  }, [refreshPackages, t]);
+  }, [refreshPackages, t, updateMarketplaceAssetInstall]);
 
   const filterOptions: Array<{ value: "all" | MarketplacePackageType; label: string }> = [
     { value: "all", label: "All" },
@@ -322,8 +442,13 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
             ) : visiblePackages.map((item) => {
               const packageType = item.pluginType ?? "plugin";
               const isWorking = workingSlug === item.id;
-              const canInstall = isInstallablePackageType(packageType);
-              const canUninstall = item.installed && (packageType === "plugin" || packageType === "agent" || packageType === "skill");
+              const canInstall = isInstallablePackageType(packageType) || isMarketplaceAssetPackage(item);
+              const canUninstall = item.installed && (
+                packageType === "plugin" ||
+                packageType === "agent" ||
+                packageType === "skill" ||
+                isMarketplaceAssetPackage(item)
+              );
               const actionDisabled = isWorking || (item.installed ? !canUninstall : !canInstall);
               const actionLabel = isWorking
                 ? t("marketplaceTab.processingLabel")

@@ -59,6 +59,14 @@ const DEFAULT_SETTINGS = {
   llm: fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
   chat: { systemPrompt: "", autoCompact: true },
   webSearch: { provider: "none" },
+  marketplace: {
+    backend: "real-cloud",
+    cloudBaseUrl: "https://marketplace.example.com",
+    cloudAllowPrivateNetwork: false,
+    installedProviderIds: [],
+    installedThemeBundleIds: [],
+    installedLanguagePacks: [],
+  },
   routine: {},
   privacy: { piiRedactEnabled: false },
   // Z onboarding chain — mark the seed user as already past onboarding so

@@ -49,6 +49,9 @@ describe("SettingsService marketplace defaults", () => {
       backend: "real-cloud",
       cloudBaseUrl: "https://marketplace.lvisai.xyz",
       cloudAllowPrivateNetwork: false,
+      installedProviderIds: [],
+      installedThemeBundleIds: [],
+      installedLanguagePacks: [],
     });
   });
 
@@ -71,6 +74,45 @@ describe("SettingsService marketplace defaults", () => {
       backend: "real-cloud",
       cloudBaseUrl: "https://marketplace.lvis.local",
       cloudAllowPrivateNetwork: false,
+      installedProviderIds: [],
+      installedThemeBundleIds: [],
+      installedLanguagePacks: [],
+    });
+  });
+
+  it("persists only valid marketplace-installed provider/theme/language assets", async () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        marketplace: {
+          backend: "real-cloud",
+          installedProviderIds: ["groq", "missing-vendor", "groq"],
+          installedThemeBundleIds: ["tokyo-night", "missing-theme", "tokyo-night"],
+          installedLanguagePacks: ["ko", "it", "ko"],
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("marketplace")).toMatchObject({
+      installedProviderIds: ["groq"],
+      installedThemeBundleIds: ["tokyo-night"],
+      installedLanguagePacks: ["ko"],
+    });
+
+    await service.patch({
+      marketplace: {
+        installedProviderIds: ["ollama", "nope"] as never,
+        installedThemeBundleIds: ["high-contrast", "nope"] as never,
+        installedLanguagePacks: ["ja", "nope"] as never,
+      },
+    });
+
+    expect(service.get("marketplace")).toMatchObject({
+      installedProviderIds: ["ollama"],
+      installedThemeBundleIds: ["high-contrast"],
+      installedLanguagePacks: ["ja"],
     });
   });
 
