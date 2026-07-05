@@ -19,7 +19,7 @@ describe("Star flow (Phase 3 regression net)", () => {
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     const starBtn = await waitFor(() => {
-      const btn = container.querySelector('button[title="즐겨찾기"]');
+      const btn = container.querySelector('button[title="핀 고정"]');
       if (!btn) throw new Error("star button not found");
       return btn as HTMLButtonElement;
     });
@@ -46,7 +46,7 @@ describe("Star flow (Phase 3 regression net)", () => {
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     const starBtn = await waitFor(() => {
-      const btn = container.querySelector('button[title="즐겨찾기"]');
+      const btn = container.querySelector('button[title="핀 고정"]');
       if (!btn) throw new Error("star button not found");
       return btn as HTMLButtonElement;
     });
@@ -81,7 +81,7 @@ describe("Star flow (Phase 3 regression net)", () => {
 
     // Click again — now the entry is recognized as starred and this removes.
     const starBtn2 = await waitFor(() => {
-      const btn = container.querySelector('button[title="즐겨찾기"]');
+      const btn = container.querySelector('button[title="핀 고정"]');
       if (!btn) throw new Error("star button not found");
       return btn as HTMLButtonElement;
     });
@@ -92,7 +92,7 @@ describe("Star flow (Phase 3 regression net)", () => {
     await waitFor(() => expect(api.starredList.mock.calls.length).toBeGreaterThan(2));
 
     const starBtn3 = await waitFor(() => {
-      const btn = container.querySelector('button[title="즐겨찾기"]');
+      const btn = container.querySelector('button[title="핀 고정"]');
       if (!btn) throw new Error("star button not found");
       return btn as HTMLButtonElement;
     });

@@ -6,6 +6,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import path from "node:path";
+import os from "node:os";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 import { invokeRegisteredHandler } from "../../../__tests__/test-helpers.js";
 
@@ -37,6 +39,42 @@ vi.mock("../../../lib/logger.js", () => ({
 vi.mock("../../../shared/chat-history.js", () => ({
   serializeHistoryMessage: vi.fn((m: unknown, i: number) => ({ ...m as object, index: i })),
 }));
+// Authorize one extra explicit project (on top of whatever the real settings
+// file already grants) so the "explicit project persists metadata" test below
+// can exercise the REAL resolveAuthorizedWorkspaceProject/listAuthorizedWorkspaceProjects
+// path end-to-end instead of stubbing the authorization decision itself.
+// Preserves every other field via importOriginal — only additionalDirectories
+// is extended, so the default-only tests elsewhere in this file are unaffected.
+// Built via the real, OS-native `path.resolve` (not a hardcoded Windows-style
+// literal) so it round-trips identically through BOTH of the two independent
+// canonicalization systems this test's authorization path touches:
+// `sanitizeRuntimeAllowedDirectories`/`canonicalizePathForMatch` (real
+// `path.resolve()` + `realpathSync` — genuinely OS-native, correctly so,
+// since it backs real filesystem permission scoping) and
+// `projectRootEquals`/`projectRootKey` (pure string normalization). A
+// drive-letter literal like "C:\\workspace\\explicit-project" is absolute on
+// Windows but NOT on POSIX, so `path.resolve()` silently prefixes
+// `process.cwd()` to it on Linux — the two systems then disagree on the
+// canonical form and `resolveAuthorizedWorkspaceProject` fails to find the
+// entry, making the "explicit project persists metadata" assertion below
+// flip to 0 calls on Linux CI while passing on a Windows dev machine.
+const EXPLICIT_TEST_PROJECT_ROOT = path.resolve(os.tmpdir(), "lvis-explicit-project-fixture");
+vi.mock("../../../permissions/permission-settings-store.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../permissions/permission-settings-store.js")>();
+  return {
+    ...actual,
+    readPermissionSettings: vi.fn((...args: Parameters<typeof actual.readPermissionSettings>) => {
+      const real = actual.readPermissionSettings(...args);
+      return {
+        ...real,
+        permissions: {
+          ...real.permissions,
+          additionalDirectories: [...(real.permissions.additionalDirectories ?? []), EXPLICIT_TEST_PROJECT_ROOT],
+        },
+      };
+    }),
+  };
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -92,6 +130,12 @@ function makeConversationLoop(
     getSessionKind: vi.fn(() => "main"),
     getSessionRoutineId: vi.fn(() => null),
     getSessionRoutineTitle: vi.fn(() => null),
+    // markMainActiveAfterTurn calls this unconditionally (no duck-typing —
+    // it's a real, always-present ConversationLoop method). Defaults to
+    // `false` (not the default project) so the existing "persists project
+    // identity" expectations in this file keep working unchanged; override
+    // per-test via `loop.getSessionProjectIsDefault.mockReturnValue(true)`.
+    getSessionProjectIsDefault: vi.fn(() => false),
     getHistory: vi.fn(() => history),
     hasProvider: vi.fn(() => true),
     runTurn: vi.fn(),
@@ -395,6 +439,45 @@ describe("lvis:chat active main state", () => {
 
     expect(loop.newConversation).toHaveBeenCalled();
     expect(deps.memoryManager.markMainActiveFresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT persist project metadata for a plain new chat (no explicit project — the default binding)", async () => {
+    // 2026-07 "remove Current Project labeling": a session created with no
+    // explicit project runs against the default/base-directory binding
+    // internally (conversationLoop.newConversation still applies it for tool
+    // access — unaffected by this test) but must NOT be tagged with it in
+    // session metadata. "No project" (null fields) is the normal persisted
+    // state, so the sidebar renders it ungrouped and Insights buckets it
+    // under "No project" rather than a synthetic "default" label.
+    const loop = makeConversationLoop("session-active", []);
+    const deps = await setupHandlers(loop);
+
+    await invoke("lvis:chat:new");
+
+    expect(deps.memoryManager.saveSessionMetadata).not.toHaveBeenCalled();
+  });
+
+  it("persists the resolved project identity when the user explicitly selects a real project", async () => {
+    // Contrast case: an EXPLICIT (non-default) project selection still
+    // persists metadata at creation — mirrors startRoutineConversation — so
+    // the Insights "프로젝트별 대화" group-by can join it immediately without
+    // waiting for the first turn to complete.
+    const loop = makeConversationLoop("session-active", []);
+    const deps = await setupHandlers(loop);
+
+    await invoke("lvis:chat:new", { projectRoot: EXPLICIT_TEST_PROJECT_ROOT, projectName: "explicit-project" });
+
+    expect(deps.memoryManager.saveSessionMetadata).toHaveBeenCalledTimes(1);
+    const [savedId, savedMeta] = (deps.memoryManager.saveSessionMetadata as any).mock.calls[0];
+    expect(savedId).toBe("session-active");
+    // sanitizeRuntimeAllowedDirectories normalizes the authorized root's
+    // slash/case form — compare case/separator-insensitively rather than
+    // asserting the exact literal input string.
+    expect(savedMeta.sessionKind).toBe("main");
+    expect(savedMeta.projectName).toBe("explicit-project");
+    expect((savedMeta.projectRoot as string).toLowerCase().replace(/\\/g, "/")).toBe(
+      EXPLICIT_TEST_PROJECT_ROOT.toLowerCase().replace(/\\/g, "/"),
+    );
   });
 
   it("marks explicit main session resume but ignores routine session resume", async () => {

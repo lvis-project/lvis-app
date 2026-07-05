@@ -1,5 +1,5 @@
 import type React from "react";
-import type { RefObject } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { SessionTodoPanel } from "./SessionTodoPanel.js";
 import { MessageQueuePanel } from "./MessageQueuePanel.js";
 import { DeferredApprovalChip } from "./DeferredApprovalChip.js";
@@ -19,6 +19,8 @@ import type { ViewModeState } from "./ViewModeBanner.js";
 import type { RolePreset } from "../../../data/role-presets.js";
 import type { AppMode } from "../MainToolbar.js";
 import type { AskUserQuestionRequest } from "./AskUserQuestionCard.js";
+import { ComposerProjectSelector } from "./ComposerProjectSelector.js";
+import type { ProjectIdentity } from "../../../shared/project-identity.js";
 
 type InputStatusRow = React.ComponentProps<typeof InputActionBar>["statusRow"];
 
@@ -66,6 +68,19 @@ export interface ChatComposerDockProps {
   onOpenApprovalQueue?: () => void;
   askQuestions: AskUserQuestionRequest[];
   onResolveAskQuestion: (id: string) => void;
+  /** Active project — drives the empty-state project selector trigger label. */
+  activeProject?: ProjectIdentity;
+  /** Full known project list — same SOT the sidebar's project group reads from. */
+  workspaceProjects?: ProjectIdentity[];
+  /** Switch the active project — the same handler wired to the sidebar's project rows. */
+  onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
+  /** Re-fetch the workspace project list after adding a project folder. */
+  onRefreshProjects?: () => void | Promise<void>;
+  /** Controlled open state for the project selector dropdown — owned by
+   *  ChatView so it can be force-closed when the composer leaves the
+   *  centered layout. */
+  projectSelectorOpen: boolean;
+  onProjectSelectorOpenChange: (open: boolean) => void;
 }
 
 /**
@@ -118,7 +133,35 @@ export function ChatComposerDock({
   onOpenApprovalQueue,
   askQuestions,
   onResolveAskQuestion,
+  activeProject,
+  workspaceProjects,
+  onNewChatForProject,
+  onRefreshProjects,
+  projectSelectorOpen,
+  onProjectSelectorOpenChange,
 }: ChatComposerDockProps) {
+  // Linger the project-selector slot mounted for one composer-descent cycle
+  // after `centered` flips false (first message sent), so ComposerProjectSelector
+  // — including its own forceMount + data-state fade/scale-out — has time to
+  // finish its close transition instead of being cut off by an instant unmount.
+  // Matches the outer dock's own `duration-300` descent so both animations
+  // read as one coordinated motion. Reduced-motion users skip the linger
+  // entirely (no transition to wait out).
+  const [showProjectSelectorSlot, setShowProjectSelectorSlot] = useState(centered);
+  useEffect(() => {
+    if (centered) {
+      setShowProjectSelectorSlot(true);
+      return;
+    }
+    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    if (prefersReducedMotion) {
+      setShowProjectSelectorSlot(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShowProjectSelectorSlot(false), 300);
+    return () => window.clearTimeout(timer);
+  }, [centered]);
+
   return (
     <div
       className={[
@@ -153,6 +196,34 @@ export function ChatComposerDock({
               data-testid="composer-toast-dock"
             >
               <StatusBar {...statusBar} />
+            </div>
+          ) : null}
+          {/* Empty-state project selector — attached directly above the
+              composer card, in the same reserved toast-zone the StatusBar
+              uses. Rendered for the centered (empty-conversation) layout AND
+              for one descent cycle after it ends (`showProjectSelectorSlot`
+              lingers per the effect above), so the dropdown's own
+              forceMount+data-state close transition (see
+              ComposerProjectSelector) has time to play instead of being cut
+              off by an instant unmount when the composer drops to the
+              bottom-docked position. `open` is gated on `centered` directly
+              (not the lingering slot) so the dropdown starts closing the
+              INSTANT the transition begins, in lockstep with the composer's
+              own descent — the slot then unmounts once both animations
+              finish. */}
+          {showProjectSelectorSlot && onNewChatForProject ? (
+            <div
+              className="absolute left-0 top-0 z-20 transition-opacity duration-200 ease-out motion-reduce:transition-none"
+              data-testid="composer-project-selector-slot"
+            >
+              <ComposerProjectSelector
+                activeProject={activeProject}
+                projects={workspaceProjects ?? (activeProject ? [activeProject] : [])}
+                onSelectProject={onNewChatForProject}
+                onRefreshProjects={onRefreshProjects}
+                open={projectSelectorOpen && centered}
+                onOpenChange={onProjectSelectorOpenChange}
+              />
             </div>
           ) : null}
           <div className="lvis-surface-raised relative z-10 rounded-xl bg-input-bar overflow-hidden">

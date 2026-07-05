@@ -48,7 +48,7 @@ describe("MainToolbar", () => {
   it("no longer renders the search / star / export controls (they live in the sidebar cluster)", () => {
     renderWithProvider(defaultProps());
     expect(screen.queryByTitle("통합 검색 (Cmd/Ctrl+F)")).toBeNull();
-    expect(screen.queryByTitle("현재 세션 즐겨찾기")).toBeNull();
+    expect(screen.queryByTitle("현재 세션 핀 고정")).toBeNull();
     expect(screen.queryByTestId("toolbar-export")).toBeNull();
   });
 
