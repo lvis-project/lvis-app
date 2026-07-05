@@ -25,8 +25,8 @@ import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import type { SessionKind } from "../../memory/memory-manager.js";
-import { projectBasename } from "../../shared/project-identity.js";
 import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
+import { isDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
 import {
   runStreamedTurn,
   STREAM_TURN_OPTIONS,
@@ -68,10 +68,14 @@ export function parseChatSessionProjectPayload(raw: unknown): ChatSessionProject
 
 export function defaultWorkspaceProjectPayload(defaultWorkspaceRoot = process.cwd()): ChatSessionProjectPayload {
   const projectRoot = normalizeProjectString(defaultWorkspaceRoot, MAX_PROJECT_ROOT_CHARS);
-  const defaultName = normalizeProjectString(projectRoot ? projectBasename(projectRoot) : undefined, MAX_PROJECT_NAME_CHARS) ?? "workspace";
+  // Default/base-directory project is labeled "default" (not the workspace
+  // folder basename) so the sidebar + insights never surface a confusing folder
+  // name. The authoritative resolution (resolveAuthorizedWorkspaceProject →
+  // defaultWorkspaceProject) also uses this literal; kept in sync here for the
+  // request-payload path.
   return {
     ...(projectRoot ? { projectRoot } : {}),
-    projectName: defaultName,
+    projectName: "default",
   };
 }
 
@@ -261,19 +265,32 @@ export async function markMainActiveAfterTurn(deps: IpcDeps, input: string): Pro
   const { conversationLoop, memoryManager } = deps;
   if (conversationLoop.getSessionKind() !== "main") return;
   if (conversationLoop.getHistory().length > 0) {
-    const project = typeof conversationLoop.getSessionProjectContext === "function"
-      ? conversationLoop.getSessionProjectContext()
-      : {
-          projectRoot: typeof conversationLoop.getSessionProjectRoot === "function" ? conversationLoop.getSessionProjectRoot() ?? undefined : undefined,
-          projectName: typeof conversationLoop.getSessionProjectName === "function" ? conversationLoop.getSessionProjectName() ?? undefined : undefined,
-        };
-    if (project.projectRoot || project.projectName) {
-      const existing = memoryManager.loadSessionMetadata(conversationLoop.getSessionId()) ?? {};
-      await memoryManager.saveSessionMetadata(conversationLoop.getSessionId(), {
-        ...existing,
-        sessionKind: "main",
-        ...project,
-      });
+    // "No explicit project" sessions (the default/base-directory binding)
+    // must NOT persist projectRoot/projectName into metadata — null project
+    // fields are the normal state for them (2026-07 "remove Current Project
+    // labeling"). `getSessionProjectIsDefault` is a real, always-present
+    // method on ConversationLoop (called unconditionally elsewhere, e.g.
+    // handleChatGetHistory) — no duck-typing needed here; a prior
+    // duck-typed fallback defaulted to `false` (persist) for test doubles
+    // predating this getter, which is the WRONG safe direction (silently
+    // persisting default-project metadata risks the ghost-project-group
+    // class of bug), so it is removed rather than flipped.
+    const isDefaultProject = conversationLoop.getSessionProjectIsDefault();
+    if (!isDefaultProject) {
+      const project = typeof conversationLoop.getSessionProjectContext === "function"
+        ? conversationLoop.getSessionProjectContext()
+        : {
+            projectRoot: typeof conversationLoop.getSessionProjectRoot === "function" ? conversationLoop.getSessionProjectRoot() ?? undefined : undefined,
+            projectName: typeof conversationLoop.getSessionProjectName === "function" ? conversationLoop.getSessionProjectName() ?? undefined : undefined,
+          };
+      if (project.projectRoot || project.projectName) {
+        const existing = memoryManager.loadSessionMetadata(conversationLoop.getSessionId()) ?? {};
+        await memoryManager.saveSessionMetadata(conversationLoop.getSessionId(), {
+          ...existing,
+          sessionKind: "main",
+          ...project,
+        });
+      }
     }
     await memoryManager.markMainActiveResume(conversationLoop.getSessionId());
     return;
@@ -372,19 +389,33 @@ export function handleChatSessions(
   const includeUnscoped = resolvedProject?.authorized === true && resolvedProject.project?.isDefault === true;
   const sessions = memoryManager
     .listSessionsPage({ kind, ...(routineId ? { routineId } : {}), ...(projectRoot ? { projectRoot } : {}), ...(includeUnscoped ? { includeUnscoped: true } : {}), limit, ...(before ? { before } : {}), ...(beforeId ? { beforeId } : {}), ...(after ? { after } : {}) })
-    .map((s) => ({
-      id: s.id,
-      modifiedAt: s.modifiedAt.toISOString(),
-      title: s.title,
-      sessionKind: s.sessionKind,
-      ...(s.routineId ? { routineId: s.routineId } : {}),
-      ...(s.routineTitle ? { routineTitle: s.routineTitle } : {}),
-      ...(s.routineFiredAt ? { routineFiredAt: s.routineFiredAt } : {}),
-      ...(s.projectRoot ? { projectRoot: s.projectRoot } : {}),
-      ...(s.projectName ? { projectName: s.projectName } : {}),
-      ...(s.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: s.branchedFromCompactNum } : {}),
-      ...(s.branchedAt ? { branchedAt: s.branchedAt } : {}),
-    }));
+    .map((s) => {
+      // Scrub legacy default-tagged project metadata at the read chokepoint.
+      // Pre-PR, markMainActiveAfterTurn persisted projectRoot/projectName
+      // (= the default workspace root / "workspace") for EVERY session, no
+      // isDefault guard. Sidebar.tsx's namedProjects excludes the default
+      // root from the known-projects list, so a legacy session's default
+      // root falls into the "unknown project" fallback map and renders as
+      // its own ghost named group (sidebar AND Insights, since both read
+      // through this same handler). Stripping here — rather than patching
+      // every reader — heals both call sites from one chokepoint. Sessions
+      // written post-fix never carry default-root metadata in the first
+      // place, so this is a no-op for them.
+      const isLegacyDefaultTagged = Boolean(s.projectRoot) && isDefaultWorkspaceRoot(s.projectRoot!);
+      return {
+        id: s.id,
+        modifiedAt: s.modifiedAt.toISOString(),
+        title: s.title,
+        sessionKind: s.sessionKind,
+        ...(s.routineId ? { routineId: s.routineId } : {}),
+        ...(s.routineTitle ? { routineTitle: s.routineTitle } : {}),
+        ...(s.routineFiredAt ? { routineFiredAt: s.routineFiredAt } : {}),
+        ...(!isLegacyDefaultTagged && s.projectRoot ? { projectRoot: s.projectRoot } : {}),
+        ...(!isLegacyDefaultTagged && s.projectName ? { projectName: s.projectName } : {}),
+        ...(s.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: s.branchedFromCompactNum } : {}),
+        ...(s.branchedAt ? { branchedAt: s.branchedAt } : {}),
+      };
+    });
   return {
     current: conversationLoop.getSessionId(),
     sessions,
@@ -406,6 +437,14 @@ export function handleChatGetHistory(deps: IpcDeps) {
     ...(conversationLoop.getSessionRoutineTitle() ? { routineTitle: conversationLoop.getSessionRoutineTitle() } : {}),
     ...(conversationLoop.getSessionProjectRoot() ? { projectRoot: conversationLoop.getSessionProjectRoot() } : {}),
     ...(conversationLoop.getSessionProjectName() ? { projectName: conversationLoop.getSessionProjectName() } : {}),
+    // Live in-memory binding: ALWAYS resolved (default included), unlike the
+    // persisted session metadata which now omits project fields entirely for
+    // "no explicit project" sessions. The renderer needs this flag to tell
+    // "user explicitly picked this project" apart from "just the ambient
+    // default directory" when the composer/sidebar want to show the real name
+    // vs a "Select project" placeholder for the ACTIVE (not-yet-persisted)
+    // session.
+    ...(conversationLoop.getSessionProjectIsDefault() ? { projectIsDefault: true } : {}),
     messages: messages.map(serializeHistoryMessage),
   };
 }

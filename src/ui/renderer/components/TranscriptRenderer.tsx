@@ -2,7 +2,7 @@ import { Fragment, useMemo } from "react";
 import type React from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
-import { GitBranch, Pencil, Star } from "lucide-react";
+import { GitBranch, Pencil, Pin } from "lucide-react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import { debugLog } from "../../../lib/debug-stream.js";
@@ -263,7 +263,7 @@ export function TranscriptRenderer({
               </div>
             ) : null}
             {starActive ? (
-              <Star key="active" className="absolute right-2 top-2 h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" />
+              <Pin key="active" className="absolute right-2 top-2 h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" />
             ) : null}
             {/* Hide mutating actions in view-mode (read-only slice) and for
                 sources that omit the edit / action callbacks. */}
@@ -281,7 +281,7 @@ export function TranscriptRenderer({
                 ) : null}
                 {onToggleStar ? (
                   <Button type="button" variant="ghost" size="icon-xs" title={t("chatView.starButtonTitle")} onClick={() => void onToggleStar(idx)}>
-                    <Star key={starActive ? "on" : "off"} className={`h-3 w-3 ${starActive ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
+                    <Pin key={starActive ? "on" : "off"} className={`h-3 w-3 ${starActive ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
                   </Button>
                 ) : null}
               </div>

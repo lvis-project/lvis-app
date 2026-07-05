@@ -97,7 +97,7 @@ describe("StarredView", () => {
       />,
     );
 
-    fireEvent.click(getByTitle("해제"));
+    fireEvent.click(getByTitle("고정 해제"));
 
     await waitFor(() => expect((api as { starredRemove: ReturnType<typeof vi.fn> }).starredRemove).toHaveBeenCalledWith({ id: "s-42" }));
     await waitFor(() => expect(refreshStarred).toHaveBeenCalled());

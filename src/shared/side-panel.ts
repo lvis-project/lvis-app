@@ -13,6 +13,29 @@ export const SIDE_PANEL_MIN_WIDTH = 448;
 export const SIDE_PANEL_DEFAULT_WIDTH = 448;
 
 /**
+ * Primary (left) navigation sidebar width geometry. The sidebar is a floating
+ * card whose expanded width is user-adjustable via a drag handle on its inner
+ * edge; the value is persisted under `SystemSettings.sidebarWidth` (same durable
+ * shell-preference family as `sidePanelWidth`). The default 232px matches the
+ * historical `<main>` left-padding reserve (pl-[14.5rem]); the card itself is
+ * inset ~8px from the window edge, so the padding tracks `sidebarWidth`
+ * directly. Collapsed rail width is fixed and not covered by these bounds.
+ */
+export const SIDEBAR_MIN_WIDTH = 200;
+export const SIDEBAR_MAX_WIDTH = 480;
+export const SIDEBAR_DEFAULT_WIDTH = 232;
+
+/**
+ * Clamp a raw sidebar width (px) to [SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH] and
+ * round. Non-finite input falls back to the default so a bad measurement can
+ * never poison the persisted width.
+ */
+export function clampSidebarWidth(value: number): number {
+  if (!Number.isFinite(value)) return SIDEBAR_DEFAULT_WIDTH;
+  return Math.round(Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, value)));
+}
+
+/**
  * Vertical (top/bottom) split geometry for the workspace-rail tabs whose body is
  * a list-over-viewer layout (file-browser, preview, subagent). The percent is
  * the TOP pane's share of the tab body height; the bottom pane takes the rest.

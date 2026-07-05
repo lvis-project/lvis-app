@@ -37,6 +37,9 @@ export function AppShell({
   appMode,
   sidebarCollapsed,
   onToggleSidebarCollapse,
+  sidebarWidth,
+  onSidebarWidthChange,
+  onSidebarWidthCommit,
   // toolbar
   activeView,
   streaming,
@@ -51,6 +54,7 @@ export function AppShell({
   onOpenSettings,
   onNewChat,
   onNewChatForProject,
+  onRefreshProjects,
   workspaceProjects,
   activeProject,
   onOpenMarketplace,
@@ -59,6 +63,12 @@ export function AppShell({
   currentSessionId,
   isCurrentSessionStarred,
   onToggleCurrentSessionStar,
+  activeSidebarTab,
+  onActiveSidebarTabChange,
+  isSessionStarred,
+  onToggleSessionStar,
+  isProjectPinned,
+  onToggleProjectPin,
   onExport,
   // banners
   bootstrapStatus,
@@ -102,6 +112,13 @@ export function AppShell({
   appMode: MainToolbarProps["appMode"];
   sidebarCollapsed: boolean;
   onToggleSidebarCollapse: () => void;
+  /** Persisted expanded sidebar width (px). Drives the card width + main padding. */
+  sidebarWidth: number;
+  /** Per-move drag update (state only). */
+  onSidebarWidthChange: (px: number) => void;
+  /** Drag-end / keyboard commit (persist). Also backs the resize bar's
+   *  double-click reset (Sidebar commits SIDEBAR_DEFAULT_WIDTH through this). */
+  onSidebarWidthCommit: (px: number) => void;
   activeView: string;
   streaming: boolean;
   hasApiKey: MainToolbarProps["hasApiKey"];
@@ -114,6 +131,7 @@ export function AppShell({
   onOpenSettings: (tab?: string) => void;
   onNewChat: () => void;
   onNewChatForProject: SidebarProps["onNewChatForProject"];
+  onRefreshProjects: SidebarProps["onRefreshProjects"];
   workspaceProjects?: SidebarProps["projects"];
   activeProject?: USPProps["project"];
   onOpenMarketplace: () => void;
@@ -122,6 +140,12 @@ export function AppShell({
   currentSessionId: string;
   isCurrentSessionStarred: boolean;
   onToggleCurrentSessionStar: () => void | Promise<void>;
+  activeSidebarTab?: SidebarProps["activeSidebarTab"];
+  onActiveSidebarTabChange?: SidebarProps["onActiveSidebarTabChange"];
+  isSessionStarred?: SidebarProps["isSessionStarred"];
+  onToggleSessionStar?: SidebarProps["onToggleSessionStar"];
+  isProjectPinned?: SidebarProps["isProjectPinned"];
+  onToggleProjectPin?: SidebarProps["onToggleProjectPin"];
   onExport: SidebarProps["onExport"];
   bootstrapStatus: BootstrapBannerProps["status"];
   onDismissBootstrapStatus: BootstrapBannerProps["onDismiss"];
@@ -201,22 +225,38 @@ export function AppShell({
         onOpenSettings={() => onOpenSettings()}
         onNewChat={onNewChat}
         onNewChatForProject={onNewChatForProject}
+        onRefreshProjects={onRefreshProjects}
         projects={workspaceProjects}
         streaming={streaming}
         onOpenMarketplace={onOpenMarketplace}
         marketplaceUrlReady={marketplaceUrlReady}
         collapsed={sidebarCollapsed}
         onToggleCollapse={onToggleSidebarCollapse}
+        width={sidebarWidth}
+        onWidthChange={onSidebarWidthChange}
+        onWidthCommit={onSidebarWidthCommit}
         onOpenUnifiedSearch={onOpenUnifiedSearch}
         isCurrentSessionStarred={isCurrentSessionStarred}
         onToggleCurrentSessionStar={onToggleCurrentSessionStar}
+        activeSidebarTab={activeSidebarTab}
+        onActiveSidebarTabChange={onActiveSidebarTabChange}
+        isSessionStarred={isSessionStarred}
+        onToggleSessionStar={onToggleSessionStar}
+        isProjectPinned={isProjectPinned}
+        onToggleProjectPin={onToggleProjectPin}
         onExport={onExport}
       />
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <main
           className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-background transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
-            sidebarCollapsed ? "pl-[4rem]" : "pl-[14.5rem]"
+            sidebarCollapsed ? "pl-[4rem]" : ""
           }`}
+          // Expanded: reserve the sidebar card width + the ~8px right gap so the
+          // floating rail never occludes the canvas. Collapsed uses the fixed
+          // pl-[4rem] class above. Inline style so the durable, user-resized
+          // width (SystemSettings.sidebarWidth) drives the reserve directly —
+          // during a drag this tracks the live width for a seamless resize.
+          style={sidebarCollapsed ? undefined : { paddingLeft: `${sidebarWidth + 8}px` }}
         >
           {/* Floating notification stack — update/announcement banners are an
               OVERLAY, not in-flow content. They float over the canvas anchored
@@ -233,8 +273,12 @@ export function AppShell({
               single counted card, so the stack height stays bounded. */}
           <div
             className={`pointer-events-none absolute right-2 top-2 z-50 ml-auto flex max-w-md flex-col gap-2 transition-[left] duration-200 ease-out motion-reduce:transition-none [&>*]:pointer-events-auto [&>*]:m-0 ${
-              sidebarCollapsed ? "left-[4.5rem]" : "left-[15rem]"
+              sidebarCollapsed ? "left-[4.5rem]" : ""
             }`}
+            // Expanded: inset the banner stack past the resized sidebar card so a
+            // wide banner can never slide under the floating rail. Tracks
+            // sidebarWidth (+~16px gap) to stay just right of the card edge.
+            style={sidebarCollapsed ? undefined : { left: `${sidebarWidth + 16}px` }}
           >
             <BootstrapStatusBanner status={bootstrapStatus} onDismiss={onDismissBootstrapStatus} onRetry={onRetryBootstrap} />
             <MarketplaceUpdateBanner

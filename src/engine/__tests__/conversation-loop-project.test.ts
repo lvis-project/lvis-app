@@ -43,6 +43,11 @@ describe("ConversationLoop project identity", () => {
       projectName: "workspace",
       includeUnscoped: true,
     });
+    // getSessionProjectIsDefault() is the UI-facing signal (chat.new domain
+    // handler, markMainActiveAfterTurn) that a session's project binding is
+    // the ambient default rather than an explicit selection — 2026-07
+    // "remove Current Project labeling".
+    expect(loop.getSessionProjectIsDefault()).toBe(true);
   });
 
   it("does not include legacy unscoped memory for explicit non-default projects", () => {
@@ -62,6 +67,7 @@ describe("ConversationLoop project identity", () => {
       projectRoot: "C:\\workspace\\alpha",
       projectName: "alpha",
     });
+    expect(loop.getSessionProjectIsDefault()).toBe(false);
   });
 
   it("re-authorizes stored project roots on session resume before granting tool directories", () => {

@@ -225,6 +225,8 @@ export type AppSettings = {
     appMode?: "chat" | "work";
     /** Persisted docked side-panel width (px). SOT: `SystemSettings`. */
     sidePanelWidth?: number;
+    /** Persisted primary navigation sidebar width (px). SOT: `SystemSettings`. */
+    sidebarWidth?: number;
     /**
      * Persisted TOP-pane percent of the workspace-rail vertical (list↕viewer)
      * split, per tab kind (file-browser / preview / subagent). Browser excluded.
@@ -233,6 +235,10 @@ export type AppSettings = {
     sidePanelSplitFilePercent?: number;
     sidePanelSplitPreviewPercent?: number;
     sidePanelSplitSubagentPercent?: number;
+    /** Persisted active sidebar tab ("chats" | "projects"). SOT: `SystemSettings`. */
+    sidebarActiveTab?: "chats" | "projects";
+    /** Pinned project roots — sort to the top of the sidebar's Projects tab. SOT: `SystemSettings`. */
+    pinnedProjectRoots?: string[];
   };
   /** Experimental feature flags — all default false. */
   features?: {
@@ -667,7 +673,7 @@ export type LvisApi = {
   chatSessions: (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; routineFiredAt?: string; projectRoot?: string; projectName?: string; branchedFromCompactNum?: number }> }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
-  chatGetHistory: () => Promise<{ sessionId: string; sessionTitle?: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; projectRoot?: string; projectName?: string; messages: SerializedHistoryMessage[] }>;
+  chatGetHistory: () => Promise<{ sessionId: string; sessionTitle?: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; projectRoot?: string; projectName?: string; projectIsDefault?: boolean; messages: SerializedHistoryMessage[] }>;
   chatMainActiveState: () => Promise<{ mainActiveSessionId: string | null; mainActiveMode: "resume" | "fresh"; updatedAt: string } | null>;
   chatSessionHistory: (sessionId: string) => Promise<{
     ok: boolean;

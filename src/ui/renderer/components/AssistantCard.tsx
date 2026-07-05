@@ -1,4 +1,4 @@
-import { Loader2, Star, RefreshCw, GitBranch, ThumbsUp, ThumbsDown, AlertTriangle } from "lucide-react";
+import { Loader2, Pin, RefreshCw, GitBranch, ThumbsUp, ThumbsDown, AlertTriangle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { memo, useMemo, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
@@ -74,7 +74,7 @@ function AssistantCardImpl({
           {isSystemNotice ? <AlertTriangle className="h-3 w-3" /> : null}
           {title}
           {entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-          {isStarred ? <Star key="starred" className="h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" /> : null}
+          {isStarred ? <Pin key="starred" className="h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" /> : null}
           {actions && !entry.streaming ? (
             <div className={`ml-auto gap-1 ${isFinal !== false ? "flex" : "hidden group-hover:flex"}`}>
               {actions.onRetry && (
@@ -112,7 +112,7 @@ function AssistantCardImpl({
                   onClick={actions.onToggleStar}
                   title={t("assistantCard.starButton")}
                 >
-                  <Star key={isStarred ? "on" : "off"} className={`h-3 w-3 ${isStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
+                  <Pin key={isStarred ? "on" : "off"} className={`h-3 w-3 ${isStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
                 </Button>
               )}
             </div>
