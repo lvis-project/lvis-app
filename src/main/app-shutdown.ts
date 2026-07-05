@@ -12,6 +12,7 @@ import { createLogger } from "../lib/logger.js";
 import { logger as rootPinoLogger } from "../lib/logger.js";
 import { runShutdownRoutines } from "./shutdown-routines.js";
 import { stopLocalApiServer } from "./local-api-server.js";
+import { unregisterAllGlobalShortcuts } from "./global-shortcuts.js";
 import { forceKillManagedChildProcesses } from "./managed-child-processes.js";
 import { killAllTerminals } from "./terminal/pty-manager.js";
 import {
@@ -85,6 +86,9 @@ export async function runAppShutdownCleanup(options: {
       // last window layout. The remaining steps honor the AbortSignal so
       // they can break out of their inner loops when the deadline fires.
       getWindowManager()?.persistAll();
+      // E4 — release OS-level global shortcuts early (fast, synchronous) so a
+      // wedged later step can't leave accelerators bound after quit.
+      unregisterAllGlobalShortcuts();
       if (signal.aborted) return;
       // Stop the opt-in local API server EARLY — it's fast (destroys idle
       // sockets + ends live SSE streams) and blanks its on-disk discovery file

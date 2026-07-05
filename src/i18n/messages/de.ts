@@ -29,4 +29,32 @@ export const de: Record<SeedMessageKey, string> = {
   "mainDialog.unauthorizedFrame": "Nicht autorisierter Frame.",
   "mainDialog.noPersonasAvailable": "Keine Personas verfügbar",
   "mainDialog.exportConversationTitle": "Konversation exportieren",
+
+  // ── E4 — Start / globale Tastenkürzel ─────────────────────────────
+  "settingsContent.tabStartup": "Start",
+  "startupTab.title": "Start & Tastenkürzel",
+  "startupTab.description":
+    "Lege ein globales Tastenkürzel zum Ein-/Ausblenden des Fensters fest und wähle, ob LVIS beim Anmelden startet.",
+  "startupTab.shortcutSectionTitle": "Globales Tastenkürzel",
+  "startupTab.shortcutSectionDesc":
+    "Eine systemweite Tastenkombination, die das LVIS-Fenster von überall ein- oder ausblendet.",
+  "startupTab.shortcutEnabledLabel": "Globales Tastenkürzel aktivieren",
+  "startupTab.shortcutEnabledHint": "Das Tastenkürzel beim Betriebssystem registrieren.",
+  "startupTab.shortcutAcceleratorLabel": "Tastenkürzel zum Ein-/Ausblenden des Fensters",
+  "startupTab.shortcutRecord": "Aufnehmen",
+  "startupTab.shortcutClear": "Löschen",
+  "startupTab.shortcutCapturing": "Drücke eine Tastenkombination…",
+  "startupTab.shortcutUnset": "Nicht festgelegt",
+  "startupTab.shortcutEnabledNoAccelerator":
+    "Das Tastenkürzel ist aktiviert, aber keine Kombination festgelegt. Nimm eine auf, um es zu aktivieren.",
+  "startupTab.shortcutRegisterFailedTitle": "Registrierung des Tastenkürzels fehlgeschlagen",
+  "startupTab.shortcutRegisterFailedBody":
+    "{accelerator} wird bereits von einer anderen App verwendet. Wähle eine andere Kombination.",
+  "startupTab.launchSectionTitle": "Beim Start ausführen",
+  "startupTab.launchSectionDesc":
+    "Legt fest, ob LVIS automatisch startet, wenn du dich an deinem Computer anmeldest.",
+  "startupTab.launchAtStartupLabel": "LVIS beim Anmelden starten",
+  "startupTab.launchAtStartupHint": "LVIS nach der Anmeldung automatisch starten. (Nur installierte App.)",
+  "startupTab.launchMinimizedLabel": "Versteckt im Infobereich starten",
+  "startupTab.launchMinimizedHint": "Beim Start mit der Anmeldung minimiert im Infobereich starten, ohne ein Fenster zu öffnen.",
 };
