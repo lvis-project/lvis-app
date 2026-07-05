@@ -21,7 +21,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE } from "../../../../scripts/lib/dev-electron-exit.mjs";
-import { makeAppIpcInvoker } from "./test-helpers.js";
+import { makeAppIpcInvoker, makeAuthLoginMockupDeps } from "./test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const relaunchMock = vi.fn();
@@ -111,7 +111,13 @@ async function loadDemoModule() {
   const credsMod = await import("../../../main/demo-credentials.js");
   credsMod.resetDemoCredentialsForTesting();
   const demoMod = await import("../demo.js");
-  return { codec, credsMod, demoMod };
+  // #1498 — `lvis:demo:status` now probes local Ollama over the network.
+  // These tests are about the demo-activation stack, not Ollama, so pin
+  // the probe to `false` via its test seam (mirrors the embedded-key
+  // seam pattern) rather than exercising a real network call per test.
+  const ollamaProbeMod = await import("../../../main/ollama-probe.js");
+  ollamaProbeMod._setOllamaAvailableOverrideForTest(false);
+  return { codec, credsMod, demoMod, ollamaProbeMod };
 }
 
 describe("lvis:demo:activate — happy path", () => {
@@ -223,6 +229,7 @@ describe("lvis:demo:status", () => {
       activated: true,
       vendor: "azure-foundry",
       autoActivatable: false,
+      ollamaAvailable: false,
     });
   });
 
@@ -239,7 +246,7 @@ describe("lvis:demo:status", () => {
     demoMod.registerDemoHandlers(deps as never);
 
     const result = await invoke("lvis:demo:status");
-    expect(result).toEqual({ ok: true, activated: false, vendor: null, autoActivatable: false });
+    expect(result).toEqual({ ok: true, activated: false, vendor: null, autoActivatable: false, ollamaAvailable: false });
   });
 
   it("reports inactive when no demo credentials were captured at boot", async () => {
@@ -248,7 +255,7 @@ describe("lvis:demo:status", () => {
     demoMod.registerDemoHandlers(deps as never);
 
     const result = await invoke("lvis:demo:status");
-    expect(result).toEqual({ ok: true, activated: false, vendor: null, autoActivatable: false });
+    expect(result).toEqual({ ok: true, activated: false, vendor: null, autoActivatable: false, ollamaAvailable: false });
   });
 
   it("rejects an untrusted sender frame without leaking activation state", async () => {
@@ -693,6 +700,7 @@ describe("lvis:demo:clear", () => {
       activated: false,
       vendor: null,
       autoActivatable: false,
+      ollamaAvailable: false,
     });
 
     // Audit row for the clear event.
@@ -727,6 +735,7 @@ describe("lvis:demo:clear", () => {
       activated: true,
       vendor: "azure-foundry",
       autoActivatable: false,
+      ollamaAvailable: false,
     });
 
     expect(await invoke("lvis:demo:clear")).toEqual({ ok: true });
@@ -735,6 +744,7 @@ describe("lvis:demo:clear", () => {
       activated: false,
       vendor: null,
       autoActivatable: false,
+      ollamaAvailable: false,
     });
   });
 
@@ -928,5 +938,158 @@ describe("lvis:demo:status — autoActivatable", () => {
     } finally {
       embeddedMod._setEmbeddedActivationCodeForTest(undefined);
     }
+  });
+});
+
+describe("lvis:demo:status — ollamaAvailable (#1498)", () => {
+  it("reports ollamaAvailable=true when the local probe succeeds", async () => {
+    const { demoMod, ollamaProbeMod } = await loadDemoModule();
+    ollamaProbeMod._setOllamaAvailableOverrideForTest(true);
+    demoMod.registerDemoHandlers(makeDeps() as never);
+    const status = (await invoke("lvis:demo:status")) as {
+      ok: true;
+      ollamaAvailable: boolean;
+    };
+    expect(status.ollamaAvailable).toBe(true);
+  });
+
+  it("reports ollamaAvailable=false when the local probe fails", async () => {
+    const { demoMod, ollamaProbeMod } = await loadDemoModule();
+    ollamaProbeMod._setOllamaAvailableOverrideForTest(false);
+    demoMod.registerDemoHandlers(makeDeps() as never);
+    const status = (await invoke("lvis:demo:status")) as {
+      ok: true;
+      ollamaAvailable: boolean;
+    };
+    expect(status.ollamaAvailable).toBe(false);
+  });
+});
+
+describe("lvis:demo:status — ollama probe cache (#1498 security-MINOR)", () => {
+  it("collapses a burst of status calls within the TTL into a single probe", async () => {
+    const { demoMod, ollamaProbeMod } = await loadDemoModule();
+    // Spy on the underlying probe so we can count real invocations. The seam
+    // override alone would answer without letting us assert the coalescing.
+    const probeSpy = vi
+      .spyOn(ollamaProbeMod, "probeOllamaAvailable")
+      .mockResolvedValue(true);
+    demoMod.registerDemoHandlers(makeDeps() as never);
+
+    // Three back-to-back status calls (mimics the modal open + re-renders).
+    const [a, b, c] = await Promise.all([
+      invoke("lvis:demo:status"),
+      invoke("lvis:demo:status"),
+      invoke("lvis:demo:status"),
+    ]);
+    for (const r of [a, b, c]) {
+      expect((r as { ollamaAvailable: boolean }).ollamaAvailable).toBe(true);
+    }
+    // In-flight coalescing + short TTL means at most one real probe fired.
+    expect(probeSpy).toHaveBeenCalledOnce();
+
+    probeSpy.mockRestore();
+  });
+});
+
+describe("lvis:demo:activate-ollama (#1498)", () => {
+  it("configures the ollama vendor and returns ok when the probe finds a local server", async () => {
+    const { demoMod, ollamaProbeMod } = await loadDemoModule();
+    ollamaProbeMod._setOllamaAvailableOverrideForTest(true);
+    const deps = makeAuthLoginMockupDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:activate-ollama");
+    expect(result).toEqual({ ok: true, vendor: "ollama" });
+
+    expect(deps.settingsService.setSecret).toHaveBeenCalledWith(
+      "llm.apiKey.ollama",
+      "ollama",
+    );
+    expect(deps.settingsService.patch).toHaveBeenCalledWith({
+      llm: {
+        authMode: "login",
+        provider: "ollama",
+        vendors: {
+          ollama: {
+            baseUrl: "http://localhost:11434/v1",
+            model: "llama3.3",
+          },
+        },
+      },
+    });
+    expect(deps.conversationLoop.refreshProvider).toHaveBeenCalledOnce();
+    expect(deps.rewireReviewerAgent).toHaveBeenCalledOnce();
+    expect(deps.refreshActiveLlmWildcard).toHaveBeenCalledOnce();
+    // MAJOR — the patch set the ollama vendor baseUrl, and the ASRT shared
+    // network union is derived from ALL vendor baseUrls (settings.ts invariant).
+    // Any vendor baseUrl change must live-refresh the sandbox network config,
+    // matching the settings:update / login-mockup choke points. A missing call
+    // here would leave the sandbox denying egress to the just-configured local
+    // Ollama endpoint until the next full restart.
+    expect(deps.refreshSandboxNetworkConfig).toHaveBeenCalledOnce();
+    expect(deps.auditLogger.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "info",
+        input: expect.stringContaining("vendor=ollama"),
+      }),
+    );
+  });
+
+  it("leaves the ollama api-key gate satisfied so the login modal does not re-appear next boot", async () => {
+    // critic MINOR — the `settings:has-api-key` gate that decides whether the
+    // login modal re-mounts is exactly `getSecret("llm.apiKey.<vendor>") !==
+    // null`. Locking it here guards the regression where activate-ollama
+    // configured the vendor but never seeded the presence sentinel, so a
+    // subsequent boot would re-prompt for login despite a working local model.
+    const { demoMod, ollamaProbeMod } = await loadDemoModule();
+    ollamaProbeMod._setOllamaAvailableOverrideForTest(true);
+    const deps = makeAuthLoginMockupDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:activate-ollama");
+    expect(result).toEqual({ ok: true, vendor: "ollama" });
+
+    // Same predicate as the lvis:settings:has-api-key handler.
+    expect(deps.settingsService.getSecret("llm.apiKey.ollama")).not.toBeNull();
+  });
+
+  it("skips the sandbox network refresh when the probe fails closed", async () => {
+    const { demoMod, ollamaProbeMod } = await loadDemoModule();
+    ollamaProbeMod._setOllamaAvailableOverrideForTest(false);
+    const deps = makeAuthLoginMockupDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:activate-ollama");
+    expect(result).toEqual({ ok: false, error: "no-ollama" });
+    expect(deps.refreshSandboxNetworkConfig).not.toHaveBeenCalled();
+  });
+
+  it("fails closed with no-ollama when the server disappeared since the status check", async () => {
+    const { demoMod, ollamaProbeMod } = await loadDemoModule();
+    // Simulates: renderer called status() when a server WAS there, then
+    // the user stopped it before clicking the chip — the handler must
+    // re-probe rather than trust the earlier status.
+    ollamaProbeMod._setOllamaAvailableOverrideForTest(false);
+    const deps = makeAuthLoginMockupDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:activate-ollama");
+    expect(result).toEqual({ ok: false, error: "no-ollama" });
+    expect(deps.settingsService.setSecret).not.toHaveBeenCalled();
+    expect(deps.settingsService.patch).not.toHaveBeenCalled();
+  });
+
+  it("rejects an untrusted sender frame without configuring anything", async () => {
+    const { demoMod, ollamaProbeMod } = await loadDemoModule();
+    ollamaProbeMod._setOllamaAvailableOverrideForTest(true);
+    const deps = makeAuthLoginMockupDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invokeWithEvent(
+      "lvis:demo:activate-ollama",
+      { senderFrame: { url: "https://evil.example/app" } },
+    );
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(deps.settingsService.setSecret).not.toHaveBeenCalled();
   });
 });

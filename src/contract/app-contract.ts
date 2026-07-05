@@ -241,6 +241,7 @@ export const CHANNELS = {
     status: "lvis:demo:status",
     activate: "lvis:demo:activate",
     activateEmbedded: "lvis:demo:activate-embedded",
+    activateOllama: "lvis:demo:activate-ollama",
     relaunchAfterActivation: "lvis:demo:relaunch-after-activation",
     clear: "lvis:demo:clear",
   },

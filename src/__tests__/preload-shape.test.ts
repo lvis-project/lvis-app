@@ -245,6 +245,7 @@ describe("preload contextBridge world shape lock", () => {
           "demo": [
             "activate",
             "activateEmbedded",
+            "activateOllama",
             "clearDemo",
             "relaunchAfterActivation",
             "status",
