@@ -70,6 +70,7 @@ export function AppShell({
   isProjectPinned,
   onToggleProjectPin,
   onExport,
+  onImport,
   // banners
   bootstrapStatus,
   onDismissBootstrapStatus,
@@ -148,6 +149,7 @@ export function AppShell({
   isProjectPinned?: SidebarProps["isProjectPinned"];
   onToggleProjectPin?: SidebarProps["onToggleProjectPin"];
   onExport: SidebarProps["onExport"];
+  onImport: SidebarProps["onImport"];
   bootstrapStatus: BootstrapBannerProps["status"];
   onDismissBootstrapStatus: BootstrapBannerProps["onDismiss"];
   onRetryBootstrap: () => void;
@@ -247,6 +249,7 @@ export function AppShell({
         isProjectPinned={isProjectPinned}
         onToggleProjectPin={onToggleProjectPin}
         onExport={onExport}
+        onImport={onImport}
       />
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <main

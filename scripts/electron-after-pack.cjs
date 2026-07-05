@@ -261,11 +261,57 @@ function assertNodePtyBinary(context) {
   }
 }
 
+/**
+ * better-sqlite3 (#1500 / E3) ships a native `better_sqlite3.node` addon that
+ * the main process resolves unbundled from
+ * `app.asar.unpacked/node_modules/better-sqlite3` (the package.json `asarUnpack`
+ * glob). E3's cross-session FTS5 search index is its first runtime consumer, so
+ * a prune/asarUnpack regression would brick search at runtime with an
+ * `ERR_DLOPEN_FAILED` (or `bindings` failing to locate the addon inside the
+ * asar). Assert presence + non-empty so the BUILD fails loudly instead. The
+ * `require('bindings')(...)` resolver needs `bindings` + `file-uri-to-path`
+ * unpacked alongside the addon (also in the asarUnpack list); it walks the
+ * filesystem and cannot see paths inside `app.asar`. better-sqlite3 is compiled
+ * per-Electron-ABI by the postinstall `electron-rebuild`, so presence — not an
+ * ABI matrix — is the correct packaged invariant here.
+ */
+function assertBetterSqlite3Binary(context) {
+  const resourcesDir = electronResourcesDir(context);
+  const addon = join(
+    resourcesDir,
+    "app.asar.unpacked",
+    "node_modules",
+    "better-sqlite3",
+    "build",
+    "Release",
+    "better_sqlite3.node",
+  );
+  if (!existsSync(addon)) {
+    throw new Error(
+      `packaged better-sqlite3 native addon missing: ${addon} (asarUnpack of node_modules/better-sqlite3/** drifted?)`,
+    );
+  }
+  if (statSync(addon).size === 0) {
+    throw new Error(`packaged better-sqlite3 native addon is empty: ${addon}`);
+  }
+  // `bindings` (+ its `file-uri-to-path` dep) must be unpacked too — the
+  // resolver at better-sqlite3/lib/database.js walks the FS to find the addon.
+  for (const pkg of ["bindings", "file-uri-to-path"]) {
+    const pkgJson = join(resourcesDir, "app.asar.unpacked", "node_modules", pkg, "package.json");
+    if (!existsSync(pkgJson)) {
+      throw new Error(
+        `packaged better-sqlite3 resolver dep missing: ${pkgJson} (asarUnpack of node_modules/${pkg}/** drifted?)`,
+      );
+    }
+  }
+}
+
 module.exports = async function afterPack(context) {
   const keepWebgl = process.env.LVIS_KEEP_WEBGL === "1";
   assertBundledUvResource(context);
   assertSandboxVendorBinaries(context);
   assertNodePtyBinary(context);
+  assertBetterSqlite3Binary(context);
 
   if (context.electronPlatformName === "linux") {
     for (const file of LINUX_GPU_RUNTIME_FILES) {

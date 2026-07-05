@@ -18,6 +18,7 @@ import {
   Search,
   ShoppingBag,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../../components/ui/dropdown-menu.js";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "../../../components/ui/context-menu.js";
@@ -88,6 +89,9 @@ export interface SidebarProps {
   onToggleCurrentSessionStar: () => void | Promise<void>;
   /** Export the current session — fourth button in the cluster strip. */
   onExport: (format: "markdown" | "json") => void | Promise<void>;
+  /** #1500 (E3) — import a previously-exported JSON as a brand-new session.
+   *  Fifth button in the cluster strip, adjacent to export. */
+  onImport: () => void | Promise<void>;
   /** Recent main-chat sessions shown under the current project group. */
   sessions?: SessionSummary[];
   /** Workspace projects from the App-level active project source of truth. */
@@ -794,6 +798,7 @@ function ClusterStrip({
   isCurrentSessionStarred,
   onToggleCurrentSessionStar,
   onExport,
+  onImport,
 }: {
   collapsed: boolean;
   /** True on darwin — left-pad the first button past the OS traffic lights. */
@@ -803,6 +808,7 @@ function ClusterStrip({
   isCurrentSessionStarred: boolean;
   onToggleCurrentSessionStar: () => void | Promise<void>;
   onExport: (format: "markdown" | "json") => void | Promise<void>;
+  onImport: () => void | Promise<void>;
 }) {
   const { t } = useTranslation();
   return (
@@ -901,6 +907,24 @@ function ClusterStrip({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* 가져오기 — import a previously-exported JSON as a brand-new session (#1500 / E3). */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 aspect-square p-0 shrink-0"
+            onClick={() => void onImport()}
+            title={t("mainToolbar.import")}
+            aria-label={t("mainToolbar.import")}
+            data-testid="toolbar-import"
+          >
+            <Upload className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{t("mainToolbar.import")}</TooltipContent>
+      </Tooltip>
     </div>
   );
 }
@@ -928,6 +952,7 @@ export function Sidebar({
   isCurrentSessionStarred,
   onToggleCurrentSessionStar,
   onExport,
+  onImport,
   sessions = [],
   projects,
   currentSessionId,
@@ -1055,6 +1080,7 @@ export function Sidebar({
           isCurrentSessionStarred={isCurrentSessionStarred}
           onToggleCurrentSessionStar={onToggleCurrentSessionStar}
           onExport={onExport}
+          onImport={onImport}
         />
 
       {/* ── Card body — new chat + nav + footer. EXPANDED: inline within the card
