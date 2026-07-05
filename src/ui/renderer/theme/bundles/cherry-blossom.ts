@@ -1,18 +1,9 @@
 import type { ThemeBundle } from "./types.js";
 import { t } from "../../../../i18n/runtime.js";
 
-/**
- * Cherry Blossom (체리 블라썸) — the default light shell with a crisp petal
- * palette and LVIS loading-splash accents.
- *
- * Background: pure white per user request — the loading-splash gradient
- * (`#fdfafa → #ffdce4 → #ffb4c6 → #fff`) is intentionally NOT used as the
- * chat background to keep long reading sessions calm.
- * Accent:    refined cherry red — strong enough for controls, calmer than
- *            splash red for sustained UI use.
- * Secondary: blossom wash + darker magenta link/action accents.
- * Bubble:    pale petal pink with plum text, preserving contrast on white.
- */
+
+
+
 export const cherryBlossomBundle: ThemeBundle = {
   id: "cherry-blossom",
   name: "Cherry Blossom",

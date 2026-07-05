@@ -75,20 +75,20 @@ function sampleItems(nowMs: number): Array<{
   return [
     {
       input: {
-        title: "[예시] 주간 업무 보고서 초안 작성",
+        title: "[Sample] Draft the weekly work report",
         detail:
-          "이번 주 완료/진행 항목을 모아 주간 보고 초안을 만든다. 카드를 열고 '실행'을 누르면 에이전트가 계획을 세워 승인을 요청하고, 승인하면 초안을 자동 작성한다.",
+          "Collect this week's completed and in-progress items into a weekly report draft. Open the card and choose Run; the agent will plan, request approval, and draft the report after approval.",
         priority: "high",
         status: "planned",
-        // 약 20시간 뒤 — due-soon(24h) 알림 데모.
+        // Roughly 20 hours out: demonstrates the due-soon (24h) nudge.
         due_at: inHours(20),
       },
     },
     {
       input: {
-        title: "[예시] 경쟁 제품 리서치 정리",
+        title: "[Sample] Organize competitor research",
         detail:
-          "에이전트가 자료를 조사해 비교표 초안을 만드는 중입니다. 진행 중 칸에서 실시간 진행 상태를 확인할 수 있습니다.",
+          "The agent is researching sources and drafting a comparison table. The In Progress column shows the live execution state.",
         priority: "medium",
         status: "in_progress",
         due_at: inHours(3 * 24),
@@ -96,16 +96,16 @@ function sampleItems(nowMs: number): Array<{
     },
     {
       input: {
-        title: "[예시] 2분기 회고 핵심 정리",
-        detail: "승인 후 서브에이전트가 자율 실행하여 결과를 남긴 완료 항목 예시입니다.",
+        title: "[Sample] Summarize the Q2 retrospective",
+        detail: "A completed example where a subagent ran autonomously after approval and saved the result.",
         priority: "medium",
         status: "completed",
       },
       run: {
         plan:
-          "1) 2분기 완료 업무 목록 수집  2) 성과/이슈/배운 점 3개 축으로 분류  3) 다음 분기 액션 아이템 도출  4) 한 페이지로 요약",
+          "1) Collect completed Q2 work  2) Sort into wins/issues/lessons learned  3) Derive next-quarter action items  4) Summarize on one page",
         output:
-          "## 2분기 회고 요약\n\n**성과** — 핵심 기능 3건 출시, 응답 지연 28% 개선.\n**이슈** — 리뷰 사이클 지연이 반복 → 체크리스트 도입.\n**다음 분기** — (1) 자동화 커버리지 확대 (2) 온보딩 문서 정비 (3) 주간 회고 정례화.\n\n_이 결과는 예시 데이터입니다._",
+          "## Q2 Retrospective Summary\n\n**Wins** — Shipped three core features and reduced response latency by 28%.\n**Issues** — Review cycle delays repeated, so a checklist was introduced.\n**Next Quarter** — (1) Expand automation coverage (2) refresh onboarding docs (3) make weekly retrospectives routine.\n\n_This result is sample data._",
       },
     },
   ];

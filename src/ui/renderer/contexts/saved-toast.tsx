@@ -1,19 +1,9 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 
-/**
- * Settings-wide "저장되었습니다" notifier — every successful save in the
- * settings dialog (orchestrated tabs through useSettingsOrchestration's
- * onSaved wrapper, and own-IPC tabs like PluginConfigTab/AppearanceTab/
- * RolesTab/McpTab via direct `useNotifySaved()` calls) MUST hit this so
- * the user sees one consistent feedback signal regardless of which tab
- * triggered the write.
- *
- * Lives in its own file (not in SettingsContent) to avoid the circular
- * import that would otherwise form: SettingsContent imports tab components,
- * tab components import the notifier. Keeping the context here lets both
- * sides depend on the same neutral module.
- */
+
+
+
 const SavedToastContext = createContext<(() => void) | null>(null);
 
 export const SavedToastProvider = SavedToastContext.Provider;
@@ -38,17 +28,9 @@ export function useNotifySaved(): () => void {
   return cb;
 }
 
-/**
- * Floating "저장되었습니다" pill rendered at the top-center of the settings
- * dialog over the sidebar + right pane. Anchored to its `relative` parent
- * (NOT to a scroll container) so the pill stays visible no matter how far
- * the user has scrolled within a tab.
- *
- * `at` is treated as a change signal — every new value (re)opens the
- * toast for ~2.4s. Callers should pass a monotonically increasing counter
- * (not `Date.now()`) so back-to-back saves in the same millisecond still
- * re-fire the effect.
- */
+
+
+
 export function SavedToastFloating({ at }: { at: number | null }) {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);

@@ -231,8 +231,8 @@ export function App() {
   } = usePluginMarketplace(api);
 
   // Auth status for every plugin that declares `manifest.auth`
-  // (architecture.md §9.4a). Drives the 미인증 badge in both Settings →
-  // 플러그인 설정 (PluginConfigTab) and the chat-input plugin grid
+
+
   // (PluginGridButton). Hoisting to App.tsx means a single live-poll
   // + event-bridge subscription serves both surfaces — no duplicate
   // listeners, no stale-state divergence between the two views.

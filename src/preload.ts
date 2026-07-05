@@ -90,8 +90,8 @@ contextBridge.exposeInMainWorld("lvisHost", buildLvisHostWorld());
 contextBridge.exposeInMainWorld("lvisPlatform", buildLvisPlatformWorld());
 contextBridge.exposeInMainWorld("lvisWindow", buildLvisWindowWorld());
 
-// ─── lvis 네임스페이스 (B1: Approval Gate + Permission) ──
-// renderer에서 window.lvis.approval / window.lvis.permission으로 접근.
+
+
 // permission/approval/userApproval/policy/mcp are shared with lvisApi (same
 // object refs); the remaining namespaces come from the internal surface.
 // ─── Drop-path resolution bridge (webUtils.getPathForFile) ────────────────

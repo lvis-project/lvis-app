@@ -5,22 +5,9 @@ import type { InstallPolicy } from "./types.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("deployment-guard");
 
-/**
- * Plugin install policy guard — §9.6 / plugin-deployment-model.md §7.2-§7.3
- *
- * Managed 플러그인이 user actor에 의해 제거/비활성화되지 않도록 차단.
- *
- *   1. **Path-escape defense**: registry entry 의 manifestPath 가
- *      `pluginsRoot` 하위가 아니면 거부. registry.json 위변조로 외부 경로가
- *      등록되는 경우를 차단하는 가드 — managed 분류 신호가 아님 (모든 정상
- *      install 은 pluginsRoot 안에 거주).
- *   2. **Managed 분류**: registry 의 `installSource === "admin"` 또는
- *      manifest 의 `installPolicy === "admin"` 이면 managed. user actor 거부.
- *
- * Trust boundary (§7.3): main process 고정. `actor`는 main 내부 호출자만 결정.
- * IPC 핸들러에서 actor를 직접 받지 말 것 — UI는 항상 "user"로 고정, "it-admin"은
- * `ManagedPluginInstaller` 같은 내부 플로우에서만 사용.
- */
+
+
+
 
 export type Actor = "user" | "it-admin";
 

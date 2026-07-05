@@ -77,9 +77,8 @@ export interface ComposerProps {
   /** Open via OS default app — for the overlay's open button. */
   openExternal?: (path: string) => Promise<unknown>;
   onSend: (intent: UserKeyboardIntentSnapshot) => void;
-  // v6: onAbort / onGuide / streaming props 제거. 모든 액션 버튼이
-  // BottomActionRow 로 이전됐고 키보드 매핑 (ESC/⌘⏎/⌘K) 은 ChatView 레벨
-  // 핸들러로 통합. Composer 는 순수 textarea + Enter 만 책임.
+
+
   disabled?: boolean;
   placeholder?: string;
   onWarning?: (message: string) => void;
@@ -92,12 +91,9 @@ export interface ComposerProps {
    * Spec: `docs/architecture/proposals/suggested-replies-ghost-text.md` §6.2.
    */
   suggestedReplies?: SuggestedRepliesSnapshot;
-  /**
-   * View shortcuts (홈/루틴/설정 + plugin views) surfaced under the `shortcut`
-   * category of the inline "/" autocomplete menu. Same array the action-row
-   * SlashPicker receives. When omitted the inline menu still offers built-in
-   * slash commands.
-   */
+
+
+
   commandActions?: QuickAction[];
   /** Installed plugins surfaced under the inline menu's `plugin` category. */
   inlinePlugins?: PluginEntry[];
@@ -136,8 +132,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 ) {
   const { t } = useTranslation();
   const taRef = useRef<HTMLTextAreaElement | null>(null);
-  // IME composition state (e.g. 한글 조합 중). Spec §8: ImePreedit 중 → ghost
-  // hide, composition 끝나면 reappear. Tracked via React composition events
+
+
   // because `e.nativeEvent.isComposing` is only available inside keydown — the
   // ghost render path needs the value at render time, not just on key events.
   const [isComposing, setIsComposing] = useState(false);
@@ -460,14 +456,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       }
 
       if (e.key === "Enter" && !e.shiftKey) {
-        // v6: Cmd/Ctrl+Enter = 즉시 주입 (인터럽트) — ChatView document-level
-        // 핸들러가 처리. 여기서 onSend 호출하면 큐 추가가 먼저 일어나서 인터럽트
-        // 의미가 깨짐. modifier 있으면 노스킵 (preventDefault 만 — 줄바꿈 차단).
+
+
         if (e.metaKey || e.ctrlKey) {
           e.preventDefault();
           return;
         }
-        // 일반 Enter = onSend (idle = 전송, busy = 큐 추가).
+
         e.preventDefault();
         if (disabled) return;
         // PR-D dismiss memory: a new user message means we're transitioning
@@ -501,7 +496,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     !isComposing &&
     ghostBest !== null &&
     !(suggestedReplies?.isDismissed ?? false);
-  // Spec §3 line 42: "사용자가 1자 이상 입력 → ghost + chip row 즉시 hide".
+
   // Chip row hides as soon as the textarea has any text, mirroring the ghost.
   const chipAlternates =
     text.length === 0 && suggestedReplies && !suggestedReplies.isDismissed
@@ -603,19 +598,19 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             syncCaret();
           }}
           placeholder={placeholder ?? fallbackPlaceholder}
-          /* v6 layout: ~2 줄 시작 (min-h-[40px] = 2 lines @ leading-5),
-             자동 확장 후 ~6 줄에서 scroll. 기존 88px 는 4 줄+ 차지해 textarea 가
-             채팅 영역을 잡아먹는 문제 (issue: composer redesign) 해결. */
+
+
+
           className="min-w-0 flex-1 resize-none min-h-[40px] max-h-[144px] overflow-y-auto border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none text-xs placeholder:text-xs px-4 py-2"
         />
 
-        {/* v6: Send/Stop 버튼은 BottomActionRow 로 이전. input-bar 안에는
-            attachment chip + textarea 만. 키보드 (Enter/Shift+Enter/Ctrl+Enter)
-            는 textarea onKeyDown 에서 그대로 처리. */}
 
-        {/* Ghost text overlay — absolute on top of textarea, pointer-events-none
-            so caret + clicks fall through. Visible only when value 빈 + 추천
-            가능. Spec: docs/architecture/proposals/suggested-replies-ghost-text.md */}
+
+
+
+
+
+
         <SuggestedRepliesGhost text={ghostBest} visible={ghostVisible} />
       </div>
       {isFull ? (

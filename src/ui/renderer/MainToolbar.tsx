@@ -29,19 +29,9 @@ function NoDrag({ children, className }: { children: React.ReactNode; className?
   );
 }
 
-/**
- * App auto-update state mirrored from the main process via
- * `api.onAppUpdateState`. The badge next to Home renders one of four
- * affordances:
- *   idle         → not rendered (zero footprint)
- *   available    → "↓ v0.1.5" pill, click starts the user-gated download
- *   downloading  → spinner + percent, click is disabled
- *   downloaded   → "v0.1.5 적용" pill (success tint), click → quit & install
- *
- * Type is re-exported (not redeclared) from the cross-process SoT in
- * `src/shared/update-state.ts` so main / preload / renderer / this UI
- * stay in lockstep when a new variant is ever added.
- */
+
+
+
 import type { UpdateState } from "../../shared/update-state.js";
 export type AppUpdateBadgeState = UpdateState;
 
@@ -53,13 +43,9 @@ export type AppUpdateBadgeState = UpdateState;
  */
 export type AppMode = "chat" | "work";
 
-/**
- * Dev mode 감지 — preload (`src/preload.ts`) 가 `window.__lvisDevMode` 를
- * runtime 에 set. main process 가 `scripts/run-electron.mjs` 에서
- * NODE_ENV=development 설정한 결과를 reads. webpack build-time 치환에 의존
- * 안 함 (renderer build 가 default production 모드라서 build-time literal
- * 은 항상 false 가 됨).
- */
+
+
+
 function isDevMode(): boolean {
   return (window as unknown as { __lvisDevMode?: boolean }).__lvisDevMode === true;
 }
@@ -76,7 +62,7 @@ export interface MainToolbarProps {
   sidePanelOpen: boolean;
   /** Toggle the right-side work panel. */
   onToggleSidePanel: () => void;
-  /** Dev mode 만 사용 — clicking the wrench opens the floating DevToolsPanel. */
+
   onOpenDevTools?: () => void;
   /** Latest app-update state from the main process. */
   appUpdateState?: AppUpdateBadgeState;
@@ -124,8 +110,8 @@ export function MainToolbar({
 
       {/* ── App update badge — permanent (NOT a toast) until acted on; clicking
           maps to download (available) → install (downloaded). The download step
-          is the user's first explicit consent (사용자 명시 클릭 전엔 절대
-          다운로드 금지). */}
+          is the user's first explicit consent. Never download before the
+          user's explicit click. */}
       <NoDrag>
         <AppUpdateBadge
           state={appUpdateState}
@@ -192,11 +178,9 @@ export function MainToolbar({
   );
 }
 
-/**
- * Workspace mode segmented control — two compact segments ("채팅" / "업무").
- * The active segment is filled (`bg-primary` / `text-primary-foreground`); the
- * inactive segment is muted with an accent hover. Token classes only.
- */
+
+
+
 function AppModeToggle({ mode, onToggle }: { mode: AppMode; onToggle: (mode: AppMode) => void }) {
   const { t } = useTranslation();
   const segment = (value: AppMode, label: string, ariaLabel: string) => {

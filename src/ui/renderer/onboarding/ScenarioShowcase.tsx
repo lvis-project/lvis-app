@@ -1,16 +1,7 @@
-/**
- * ScenarioShowcase (Z onboarding chain step 1) — first-boot intro screen.
- *
- * The grid illustrates the canonical LVIS scenarios (meeting / docs /
- * work / multi-agent) as passive cards, then a primary
- * "로그인하여 LVIS 시작하기" button advances the onboarding chain to the
- * LoginModal. There is no skip path; closing the dialog is a no-op via
- * Radix until the user starts login.
- *
- * Storage namespace: this view does not persist anything itself.
- * `features.onboardingCompleted` is the canonical flag the parent
- * flips when the entire Z chain ends.
- */
+
+
+
+
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import {
@@ -22,11 +13,9 @@ import { useTranslation } from "../../../i18n/react.js";
 
 export interface ScenarioShowcaseProps {
   open: boolean;
-  /**
-   * Called when the user clicks "로그인하여 LVIS 시작하기" to advance the
-   * onboarding chain to the LoginModal. The argument is reserved for the
-   * downstream personalization carry and is always `null` from this grid.
-   */
+
+
+
   onStart: (scenarioId: string | null) => void;
 }
 

@@ -1,21 +1,7 @@
-/**
- * Permission Manager — tool-governance.md §4 Source-Aware Permission Model
- *
- * 통합 도구 거버넌스:
- * - 모든 도구(Builtin/Plugin/MCP)에 대해 source + trust 기반 판정
- * - Global strict mode is mode-first after immutable deny/overlay-trigger guards
- * - 감사 로그 연동을 위한 판정 사유 추적
- *
- * 판정 우선순위 (§4.1 + MCP per-tool override):
- * 1. deny 규칙
- * 2. MCP strict override
- * 3. overlay-trigger mutating origin guard
- * 4. global strict mode
- * 5. headless mutating reviewer lane
- * 6. allow 규칙
- * 7. 사용자 "항상 허용" 규칙
- * 8. Trust/category 기본 정책 (MCP auto 는 별도 우회 없이 여기로 합류)
- */
+
+
+
+
 import { resolve } from "node:path";
 import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } from "../tools/types.js";
 import { trustFromSource } from "../tools/types.js";
@@ -64,11 +50,11 @@ export type ExecutionMode = "default" | "strict" | "auto" | "allow";
 export type GrantTier = "read" | "write";
 
 export interface PermissionRule {
-  /** 도구 이름 패턴 (glob: "memory_*", "mcp_*", "*") */
+
   pattern: string;
-  /** 허용/차단 */
+
   action: "allow" | "deny";
-  /** 적용 소스 제한 (없으면 전체 적용) */
+
   source?: ToolSource;
   /**
    * P2 graduated grant tier for `action: "allow"` rules. Absent = legacy
@@ -91,7 +77,7 @@ export type ReviewerLane = "foreground-auto" | "headless";
 export interface PermissionCheckResult {
   decision: PermissionDecision;
   reason: string;
-  layer: number; // 어떤 단계에서 결정되었는지
+  layer: number;
   /**
    * Layer 5 reviewer routing marker. Only PermissionManager may set this.
    * Executor must not infer reviewer eligibility from `decision: "ask"` because
@@ -290,9 +276,9 @@ export class PermissionManager {
    * coverage (monotone), never desynchronize.
    */
   private readonly alwaysAllowed = new Map<string, GrantTier>();
-  /** MCP approval.toolPermissionMode 등 per-tool 실행 모드 override */
+
   private readonly toolModeOverrides = new Map<string, ExecutionMode>();
-  /** 영구 규칙 저장 경로 (~/.lvis/permissions.json) */
+
   private readonly permissionsFilePath: string;
   /** Permission policy P3 — reviewer agent dispatch components. Wired at boot. */
   private reviewerClassifier: RiskClassifier | null = null;
@@ -599,7 +585,7 @@ export class PermissionManager {
     return this.verdictCache;
   }
 
-  // ─── 설정 ────────────────────────────────────────
+  // ─── Settings ─────────────────────────────────────
 
   setMode(mode: ExecutionMode): void {
     this.mode = mode;
@@ -631,11 +617,11 @@ export class PermissionManager {
       .map((rule) => ({ pattern: rule.pattern }));
   }
 
-  // ─── 영구 규칙 관리 (B1) ─────────────────────────
+  // ─── Persistent Rule Management ─────────────────────────
 
   /**
-   * 도구 이름(패턴)을 영구 allow 규칙으로 추가.
-   * permissions.json 저장이 성공한 뒤에만 인메모리 allow cache를 갱신한다.
+   * Add a tool-name pattern as a persistent allow rule.
+   * Update the in-memory allow cache only after permissions.json is persisted.
    *
    * P2 — `tier` records how broadly the grant applies. It defaults to `"write"`
    * so the non-executor callers (slash `/allow`, the PermissionsTab addRule IPC)
@@ -645,7 +631,7 @@ export class PermissionManager {
    * write), never downgraded — a downgrade must go through {@link removeRule}.
    */
   async addAlwaysAllowedPersist(pattern: string, tier: GrantTier = "write"): Promise<void> {
-    // 영구: rules 배열에 allow 규칙 추가/승격 (중복 방지 + monotone tier)
+    // Persisted rule list: add or upgrade allow rules while preserving monotone tiers.
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
       const existing = file.rules.find(
         (r) => r.action === "allow" && r.pattern === pattern && !r.source,
@@ -660,7 +646,7 @@ export class PermissionManager {
         file.rules.push({ pattern, action: "allow", tier });
       }
     });
-    // 인메모리: durable write 성공 후 alwaysAllowed Map (checkDetailed layer 5).
+    // In-memory cache is updated only after the durable write succeeds.
     // maxTier keeps the invariant that the Map holds the highest granted tier.
     this.alwaysAllowed.set(pattern, maxTier(this.alwaysAllowed.get(pattern), tier));
     this.broadcastConfigChanged?.();
@@ -670,19 +656,19 @@ export class PermissionManager {
     this.revokeAllPluginAccess(`allow-rule-added:${pattern}`);
   }
 
-  /**
-   * 도구 이름(패턴)을 영구 deny 규칙으로 추가.
-   * 인메모리 rules 배열 + permissions.json 동시 업데이트.
+   /**
+   * Add a tool-name pattern as a persistent deny rule.
+   * Update the in-memory rules array and permissions.json together.
    */
   async addAlwaysDeniedPersist(pattern: string): Promise<void> {
-    // 인메모리: rules 배열 선두 삽입 (deny 최우선)
+    // In-memory: insert at the front of the rules array so deny has priority.
     const exists = this.rules.some(
       (r) => r.action === "deny" && r.pattern === pattern && !r.source,
     );
     if (!exists) {
       this.rules.unshift({ pattern, action: "deny" });
     }
-    // 영구
+    // Persistent file.
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
       const fileExists = file.rules.some(
         (r) => r.action === "deny" && r.pattern === pattern && !r.source,
@@ -699,15 +685,15 @@ export class PermissionManager {
   }
 
   /**
-   * 패턴 + 액션으로 영구 규칙 삭제.
+   * Remove a persistent rule by pattern and action.
    */
   async removeRule(pattern: string, action: "allow" | "deny"): Promise<void> {
-    // 인메모리
+    // In-memory.
     this.rules = this.rules.filter(
       (r) => !(r.pattern === pattern && r.action === action && !r.source),
     );
     if (action === "allow") this.alwaysAllowed.delete(pattern);
-    // 영구
+    // Persistent file.
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
       file.rules = file.rules.filter(
         (r) => !(r.pattern === pattern && r.action === action && !r.source),
@@ -722,27 +708,27 @@ export class PermissionManager {
   }
 
   /**
-   * 앱 부팅 시 호출. permissions.json → 인메모리 병합.
-   * 파일 없음 → no-op (정상).
+   * Called during app boot. Merges permissions.json into memory.
+   * Missing file is a normal no-op.
    */
   async loadRulesFromFile(): Promise<void> {
     const file = await readPermissionsFile(this.permissionsFilePath);
     if (!file) return;
 
-    // mode 동기화
+    // Sync mode.
     if (file.mode) this.mode = file.mode;
 
-    // rules 병합: 파일 규칙은 기존 인메모리 규칙 뒤에 추가 (중복 제거)
+    // Merge rules: add file rules after existing in-memory rules, deduplicated.
     for (const rule of file.rules) {
       const dup = this.rules.some(
         (r) => r.pattern === rule.pattern && r.action === rule.action && r.source === rule.source,
       );
       if (!dup) {
         if (rule.action === "deny") {
-          this.rules.unshift(rule); // deny는 최우선
+          this.rules.unshift(rule); // deny has highest priority.
         } else {
           this.rules.push(rule);
-          // allow 규칙은 alwaysAllowed Map에도 반영 (P2: tier 보존).
+          // Reflect allow rules in the alwaysAllowed Map as well (P2: preserve tier).
           // normalizeTier grandfathers a legacy/absent tier to write; maxTier
           // keeps the highest tier if the pattern is hydrated more than once.
           if (!rule.source) {
@@ -779,8 +765,8 @@ export class PermissionManager {
   }
 
   /**
-   * permissions.json에 저장된 규칙 목록 반환 (Settings UI용).
-   * 파일 없음 → 빈 배열.
+   * Return the rule list stored in permissions.json for the Settings UI.
+   * Missing file returns an empty array.
    */
   async listPersistedRules(): Promise<PermissionRule[]> {
     const file = await readPermissionsFile(this.permissionsFilePath);
@@ -788,9 +774,9 @@ export class PermissionManager {
   }
 
   /**
-   * mode를 permissions.json에 영구 저장한 뒤 인메모리 상태를 갱신.
-   * 감사 entry 는 호출자가 먼저 append 하므로, 파일 저장 실패 시 runtime
-   * mode 까지 바뀌지 않아야 한다.
+   * Persist mode to permissions.json before updating in-memory state.
+   * The caller appends the audit entry first, so if saving fails the runtime
+   * mode must not change either.
    */
   async setModePersist(mode: ExecutionMode): Promise<void> {
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
@@ -799,21 +785,21 @@ export class PermissionManager {
     this.mode = mode;
   }
 
-  // ─── 판정 (§4.1) ────────────────────────────────
+  // ─── Decision (§4.1) ──────────────────────────────
 
   /**
-   * 상세 판정 — 감사 로그용 사유 포함.
+   * Detailed decision with an audit-log reason.
    *
-   * `overlayTriggerOrigin` (예: `"overlay:meeting-detection"`) 가 set 이면
-   * 모든 write/shell/network 도구는 **사용자 영구 승인 (`allow-always`) /
-   * config allow rules / auto 모드** 와 무관하게 `ask` 로 강제됨.
-   * overlay trigger가 사용자 컨펌 없이 destructive 작업 자동 실행되는 것을
-   * 막는 차단막 — `<overlay-trigger-origin-guidance>` 시스템 프롬프트의 1차
-   * LLM-side 검토와 짝을 이루는 hard gate. read 도구는 영향 없음.
+   * When `overlayTriggerOrigin` is set (for example, `"overlay:meeting-detection"`),
+   * every write/shell/network tool is forced to `ask` regardless of user permanent
+   * approval (`allow-always`), config allow rules, or auto mode.
+   * This hard gate prevents an overlay trigger from automatically running
+   * destructive work without user confirmation, pairing with the first-pass
+   * LLM review from `<overlay-trigger-origin-guidance>`. Read tools are unaffected.
    *
-   * Permission policy — 5-axis category model. Layer 3 의 decisionFor() 가
-   * old trust-default 분기를 대체. `meta` category 는 descriptor 가 `"override"` 를
-   * 반환하므로 caller (executor) 의 decisionOverride 분기로 routing.
+   * Permission policy — 5-axis category model. Layer 3 decisionFor() replaces
+   * the old trust-default branch. `meta` category descriptors return `"override"`,
+   * so callers route through the executor's decisionOverride branch.
    */
   checkDetailed(
     toolName: string,
@@ -839,7 +825,7 @@ export class PermissionManager {
     const denyTargets = approvalCacheKey ? [toolName, approvalCacheKey] : [toolName];
     const allowTarget = approvalCacheKey ?? toolName;
 
-    // 1. Deny rules (최우선, 불변)
+    // 1. Deny rules (highest priority, immutable)
     for (const rule of this.rules) {
       if (rule.action !== "deny") continue;
       if (rule.source && rule.source !== source) continue;
@@ -853,9 +839,9 @@ export class PermissionManager {
       return { decision: "ask", reason: t("be_permissionManager.mcpServerStrictMode"), layer: 2 };
     }
 
-    // Overlay-trigger origin override — write/shell/network 도구는 cached
-    // allow rules / always-allowed / auto-mode 를 모두 우회하고
-    // 항상 사용자 컨펌을 받음. read 는 자동 실행 OK.
+    // Overlay-trigger origin override — write/shell/network tools bypass cached
+    // allow rules, always-allowed, and auto mode, then always ask the user.
+    // Read tools may still run automatically.
     if (isOverlayTrigger && isMutating) {
       return {
         decision: "ask",
@@ -903,7 +889,7 @@ export class PermissionManager {
       }
     }
 
-    // 5. Always-allowed (사용자 이전 승인)
+    // 5. Always-allowed (previous user approval)
     if (result === undefined) {
       const grantTier = this.alwaysAllowed.get(allowTarget);
       // P2 tier gate — see the layer-3 mirror above. A read-tier grant covers
@@ -1301,7 +1287,7 @@ export class PermissionManager {
     category: ToolCategory,
     context: PermissionCheckContext,
   ): PermissionCheckResult {
-    // strict 모드: 모든 것 ask (read 포함)
+    // Strict mode: ask for everything, including reads.
     if (this.mode === "strict") {
       return {
         decision: "ask",
@@ -1321,7 +1307,7 @@ export class PermissionManager {
       };
     }
 
-    // LOW trust (MCP): 항상 ask — manifest integrity guard 가 없는 동안 trust override
+    // LOW trust (MCP): always ask until the manifest integrity guard exists.
     if (trust === "low") {
       return {
         decision: "ask",

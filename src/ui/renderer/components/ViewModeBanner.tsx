@@ -1,13 +1,7 @@
-/**
- * ViewModeBanner — sticky top banner shown when the user is viewing a checkpoint slice.
- *
- * When the user clicks "이 시점 보기" on a CheckpointDivider, the chat
- * view slices messages to [0..slicedRangeEnd] and shows this banner at the top.
- * The banner is dismissible via "▶ 라이브 시점으로 복귀" which calls onExit.
- *
- * Design tokens: --action-view (violet) for the banner accent.
- * backdrop-blur(10px) so the chat content is partially visible underneath.
- */
+
+
+
+
 
 import { useTranslation } from "../../../i18n/react.js";
 

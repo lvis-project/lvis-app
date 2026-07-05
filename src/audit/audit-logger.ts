@@ -1,21 +1,14 @@
-/**
- * Audit Logger — §4.5.5 Post-Turn Audit Hook
- *
- * 매 턴마다 구조화된 JSON 로그를 기록.
- * 향후 Governance Layer (§14.2) Elasticsearch 연동 대비.
- * 현재는 ~/.lvis/audit/ 디렉토리에 JSONL 파일로 저장.
- *
- * Rotation: 파일 크기 초과(기본 10 MB) 또는 7일 경과 시
- *   `<date>.jsonl.YYYYMMDD.gz` 아카이브로 압축.
- * Retention: 30일(기본) 이후 아카이브 자동 삭제.
- * Race safety: withFileLock 으로 동시 write + rotate 경쟁 방지.
- */
+
+
+
+
 import {
   accessSync,
   appendFileSync,
   chmodSync,
   closeSync,
   constants as fsConstants,
+  fstatSync,
   mkdirSync,
   existsSync,
   openSync,
@@ -40,12 +33,16 @@ import type { PermissionAuditEntry, PermissionAuditEntryInput } from "./audit-sc
 import { lvisHome } from "../shared/lvis-home.js";
 
 function readLastNonEmptyLineSync(filePath: string): string {
-  if (!existsSync(filePath)) return GENESIS_MARKER;
-  const { size } = statSync(filePath);
-  if (size === 0) return GENESIS_MARKER;
-
-  const fd = openSync(filePath, "r");
+  let fd: number;
   try {
+    fd = openSync(filePath, "r");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return GENESIS_MARKER;
+    throw err;
+  }
+  try {
+    const { size } = fstatSync(fd);
+    if (size === 0) return GENESIS_MARKER;
     const one = Buffer.allocUnsafe(1);
     let end = size;
     while (end > 0) {
@@ -119,7 +116,7 @@ export interface AuditEntry {
   toolCalls?: Array<{
     name: string;
     isError: boolean;
-    /** tool-governance.md §8 통합 감사 스키마 확장 필드 */
+
     source?: string;
     trust?: string;
     executionTimeMs?: number;
@@ -253,8 +250,8 @@ export class AuditLogger {
     if (!existsSync(this.auditDir)) {
       mkdirSync(this.auditDir, { recursive: true, mode: 0o700 });
     }
-    // 일별 로그 파일 — UTC 기준 (issue #801). `sandbox-audit-sink.ts` 와 같은
-    // `toISOString().slice(0, 10)` 컨벤션 → 두 채널이 동일 UTC midnight 에 rotate.
+
+
     const date = new Date().toISOString().slice(0, 10);
     this.logFile = join(this.auditDir, `${date}.jsonl`);
     this.permissionAuditLogFile = join(this.auditDir, `${date}.permission-audit.jsonl`);
@@ -275,7 +272,7 @@ export class AuditLogger {
         // Non-fatal — chmod failure must not block audit writes.
       }
     } catch {
-      // Audit 실패가 앱 동작을 차단하면 안 됨
+      // Audit failures must not block app behavior.
     }
   }
 

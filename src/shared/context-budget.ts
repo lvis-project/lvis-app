@@ -33,22 +33,9 @@ export function getUsableContext(contextWindow: number): number {
   return Math.max(contextWindow - 40_000, Math.floor(contextWindow * 0.8));
 }
 
-/**
- * Token preflight trigger threshold — same-session checkpoint compaction.
- *
- * `getUsableContext()` 와 *별도 함수* — 의미가 다름:
- *   - `getUsableContext`  = 분모 (전체 컨텍스트 윈도우의 사용 가능 portion)
- *   - `getPreflightThreshold` = 트리거 (usable 의 80%, LLM compact 진입점)
- *
- * 두 함수가 같은 구조라도 분리해야 향후 임계 비율을 모델 출시/관측치 기반으로
- * 독립 조정 가능.
- *
- * Contract: automatic compact starts at 80% of the model-specific usable
- * context budget. Do not lower this by message count or model tier; the guard
- * also watches provider-reported prompt tokens to catch estimator drift.
- *
- * @returns 절대 token count (Math.floor(usable × pct)). 0 if input invalid.
- */
+
+
+
 export function getPreflightThreshold(contextWindow: number): number {
   if (!Number.isFinite(contextWindow) || contextWindow <= 0) return 0;
   const usable = getUsableContext(contextWindow);

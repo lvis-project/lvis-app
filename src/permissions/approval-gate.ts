@@ -1,16 +1,7 @@
-/**
- * Approval Gate — §6.3 Layer 3 + §8 Agent Approval System
- *
- * Main process 서비스. "ask" 판정이 발생하면 렌더러에 요청을 보내고
- * 사용자 응답이 돌아올 때까지 ConversationLoop turn을 블로킹.
- *
- * - 동시 복수 요청: Map으로 격리 (requestId 키).
- * - 타임아웃: 기본 5분 → deny-once 반환.
- * - requireExplicit: PolicyFile.requireExplicitApproval을 그대로 렌더러로 전달,
- *   dismiss/Escape 동작을 renderer에서 분기.
- * - §A2: webContents 소멸 체크 + send 예외 처리 → deny-once + pending 정리.
- * - §S8: AuditLogger DI — requested/decided/timeout/send-failed 4개 phase 기록.
- */
+
+
+
+
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { WebContents } from "electron";
 import { t } from "../i18n/index.js";
@@ -28,10 +19,10 @@ import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import type { ApprovalPurposeSuggestion } from "../shared/permission-review-status.js";
 
 // ─── Args DLP masking ────────────────────────────────
-// Approval 모달에 전달되는 tool args 내 민감정보(API key, 이메일, 전화번호,
-// 주민등록번호, 신용카드 등)를 UI 표시용으로만 마스킹한다. 원본 args 는
-// executor 가 별도로 보유한 toolUse.input 을 그대로 사용하므로 실행 경로에는
-// 영향이 없다.
+
+
+
+
 function maskArgsForDisplay(value: unknown, detections: Set<string>): unknown {
   if (typeof value === "string") {
     const { masked, detections: hits } = maskSensitiveData(value);
@@ -60,7 +51,7 @@ function maskApprovalPurposeForDisplay(
   return { ...purpose, text: masked };
 }
 
-// ─── 공개 타입 ────────────────────────────────────────
+
 
 /**
  * Permission mode hint passed alongside an ApprovalRequest. Drives the
@@ -105,7 +96,7 @@ export interface ApprovalRequest {
   /** Manifest-declared plugin approval scope for agent-action requests. */
   approvalScope?: string;
   createdAt: number;
-  /** PolicyFile.requireExplicitApproval — renderer가 dismiss 동작을 분기하는 데 사용 */
+
   requireExplicit: boolean;
   /**
    * Permission policy P2.5 — Layer 1 directory-confirm payload. Present iff
@@ -206,7 +197,7 @@ export type ApprovalChoice =
 export interface ApprovalDecision {
   requestId: string;
   choice: ApprovalChoice;
-  /** allow-always / deny-always 일 때 영구화 패턴 (기본: 도구 이름 exact) */
+
   rememberPattern?: string;
   /**
    * One-shot structured content captured by renderer-only approval surfaces.
@@ -228,12 +219,12 @@ export interface ApprovalDecision {
   hmac?: string;
 }
 
-// ─── IPC 채널 이름 (안정 상수) ────────────────────────
+
 
 export const IPC_APPROVAL_REQUEST = "lvis:approval:request";
 export const IPC_APPROVAL_RESPOND = "lvis:approval:respond";
 
-// ─── Pending 항목 ────────────────────────────────────
+
 
 interface PendingEntry {
   resolve: (decision: ApprovalDecision) => void;
@@ -313,11 +304,11 @@ function verifyApprovalIntegrity(
 export class ApprovalGate {
   private readonly pending = new Map<string, PendingEntry>();
   private readonly webContents: WebContents;
-  /** 타임아웃(ms). 기본 5분. */
+  /** Timeout in milliseconds. Defaults to five minutes. */
   private readonly timeoutMs: number;
-  /** 현재 활성 policy. setPolicy()로 런타임 교체 가능. */
+  /** Active policy, replaceable at runtime via setPolicy(). */
   private currentPolicy: PolicyFile;
-  /** §S8: 감사 로거 (optional — 미주입 시 silent) */
+  /** Audit logger for scenario S8; silent when not provided. */
   private readonly auditLogger?: AuditLogger;
   /**
    * Issue #260: optional NotificationService — when supplied, the gate fires
@@ -364,16 +355,16 @@ export class ApprovalGate {
   }
 
   /**
-   * 런타임 policy 교체 — lvis:policy:set IPC 핸들러에서 즉시 반영.
+   * Replace the runtime policy immediately from the lvis:policy:set IPC handler.
    */
   setPolicy(p: PolicyFile): void {
     this.currentPolicy = p;
   }
 
   /**
-   * 승인 요청을 렌더러로 전송하고 응답을 기다린다.
-   * ConversationLoop의 executeOne()에서 await하여 turn을 블로킹.
-   * requireExplicit 필드로 renderer dismiss 동작을 제어.
+   * Send an approval request to the renderer and wait for the response.
+   * ConversationLoop.executeOne() awaits this and blocks the turn.
+   * The requireExplicit field controls renderer dismiss behavior.
    */
   async requestAndWait(
     req: Omit<ApprovalRequest, "requireExplicit">,
@@ -383,7 +374,7 @@ export class ApprovalGate {
     // tool-execution approval surface. Non-execution surfaces
     // (out-of-allowed-dir directory confirm, agent-action/mode-change
     // config asks)
-    // have no sandbox row in their DOM and showing "격리: none" on a
+    // have no sandbox row in their DOM and showing "isolation: none" on a
     // config change is misleading because no tool will run.
     //
     // The injection guard checks BOTH `kind` AND `toolCategory`:
@@ -460,7 +451,7 @@ export class ApprovalGate {
       };
     }
 
-    // §A2: webContents 소멸 체크 — 렌더러가 이미 닫혔으면 즉시 deny-once
+    // §A2: webContents destruction check — deny once if the renderer is already closed.
     if (this.webContents.isDestroyed()) {
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
@@ -512,7 +503,7 @@ export class ApprovalGate {
     return new Promise<ApprovalDecision>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(fullReq.id);
-        // 타임아웃: deny-once로 처리 (보안 우선)
+        // Timeout: handle as deny-once for fail-safe behavior.
         // §S8 phase: timeout
         this.auditLogger?.log({
           timestamp: new Date().toISOString(),
@@ -543,10 +534,10 @@ export class ApprovalGate {
         expectedHmac,
       });
 
-      // 렌더러로 요청 발송 (main→renderer 단방향)
-      // UI 표시용으로 args 의 민감정보를 마스킹. 원본 args 는 executor
-      // 내부에 남아 tool 실행에는 그대로 사용됨.
-      // 마스킹된 payload 에 nonce+hmac 을 덧붙여 confused-deputy 방어.
+      // Send the request to the renderer (main→renderer one-way).
+      // Mask sensitive args for display; the original args stay inside the executor
+      // and are still used for tool execution.
+      // Attach nonce+hmac to the masked payload for confused-deputy defense.
       const dlpHits = new Set<string>();
       const maskedApprovalPurpose = signedReq.approvalPurpose
         ? maskApprovalPurposeForDisplay(signedReq.approvalPurpose, dlpHits)
@@ -564,7 +555,7 @@ export class ApprovalGate {
           output: `[approval:args-dlp-masked] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} detections=${[...dlpHits].join(",")}`,
         });
       }
-      // §F2: send 실패(webContents 소멸 race) 시 pending 정리 후 deny-once
+      // §F2: on send failure (webContents destruction race), clear pending and deny once.
       try {
         this.webContents.send(IPC_APPROVAL_REQUEST, maskedSignedReq);
       } catch (sendErr) {
@@ -583,8 +574,8 @@ export class ApprovalGate {
   }
 
   /**
-   * 렌더러 응답 수신 시 IPC 핸들러에서 호출.
-   * 매칭되는 pending 항목이 없으면 무시(이중 응답 안전).
+   * Called by the IPC handler when the renderer responds.
+   * Ignores unknown pending entries, making duplicate responses safe.
    */
   resolve(requestId: string, decision: ApprovalDecision): ApprovalDecision | null {
     const entry = this.pending.get(requestId);
@@ -659,7 +650,7 @@ export class ApprovalGate {
     };
   }
 
-  /** 정리: 앱 종료 시 모든 대기 중인 요청을 거부 */
+  /** Cleanup: deny every pending request during app shutdown. */
   disposeAll(): void {
     for (const [id, entry] of this.pending) {
       clearTimeout(entry.timer);
@@ -668,12 +659,12 @@ export class ApprovalGate {
     this.pending.clear();
   }
 
-  /** 현재 대기 중인 요청 수 (테스트용) */
+  /** Current pending request count (for tests). */
   get pendingCount(): number {
     return this.pending.size;
   }
 
-  /** 현재 적용 중인 policy 조회 (테스트용) */
+  /** Currently active policy (for tests). */
   get policy(): PolicyFile {
     return this.currentPolicy;
   }

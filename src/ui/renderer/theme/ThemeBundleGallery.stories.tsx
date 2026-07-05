@@ -3,15 +3,15 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { AssistantCard } from "../components/AssistantCard";
 import { BUNDLES, type ThemeBundle } from "./bundles/index";
 
-const markdownSample = `**서울 기준** 다음 7일(5/12-5/18) **예보에요. (최고/최저, 강수확률은 대략)**
+const markdownSample = `**Seoul baseline** next 7 days (5/12-5/18) **forecast. High/low and precipitation chance are approximate.**
 
-| 날짜 | 날씨 | 최고/최저 | 강수 |
+| Date | Weather | High/Low | Rain |
 | --- | --- | --- | --- |
-| 5/12(화) | 구름 조금 | 24° / 13° | 1% |
-| 5/13(수) | 맑음+부분구름 | 25° / 12° | 1% |
-| 5/14(목) | 대체로 맑음 | 30° / 16° | 1% |
+| 5/12 (Tue) | A few clouds | 24° / 13° | 1% |
+| 5/13 (Wed) | Sunny, partly cloudy | 25° / 12° | 1% |
+| 5/14 (Thu) | Mostly sunny | 30° / 16° | 1% |
 
-- 근거: **AccuWeather 10-day** 예보(서울)
+- Source: **AccuWeather 10-day** forecast (Seoul)
 
 \`\`\`ts
 const readable = theme.foreground !== theme.background;
