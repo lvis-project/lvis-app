@@ -36,3 +36,38 @@ export const BUNDLE_IDS = [
 export type BundleId = (typeof BUNDLE_IDS)[number];
 
 export const DEFAULT_BUNDLE_ID: BundleId = "moonstone";
+
+/**
+ * Themes shown in the default in-app appearance picker while older/community
+ * themes move toward marketplace packages. The full `BUNDLE_IDS` union remains
+ * broad for settings migration, plugin theme events, and backward-compatible
+ * validation during the marketplace migration.
+ */
+export const DEFAULT_VISIBLE_THEME_BUNDLE_IDS = [
+  "moonstone",
+  "gallery",
+] as const satisfies readonly BundleId[];
+
+export type DefaultVisibleThemeBundleId =
+  (typeof DEFAULT_VISIBLE_THEME_BUNDLE_IDS)[number];
+
+const DEFAULT_VISIBLE_THEME_BUNDLE_ID_SET = new Set<string>(
+  DEFAULT_VISIBLE_THEME_BUNDLE_IDS,
+);
+
+export type MarketplaceEligibleThemeBundleId =
+  Exclude<BundleId, DefaultVisibleThemeBundleId>;
+
+export const MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS = BUNDLE_IDS.filter(
+  (bundleId): bundleId is MarketplaceEligibleThemeBundleId =>
+    !DEFAULT_VISIBLE_THEME_BUNDLE_ID_SET.has(bundleId),
+);
+
+export function isDefaultVisibleThemeBundleId(
+  bundleId: unknown,
+): bundleId is DefaultVisibleThemeBundleId {
+  return (
+    typeof bundleId === "string" &&
+    DEFAULT_VISIBLE_THEME_BUNDLE_ID_SET.has(bundleId)
+  );
+}

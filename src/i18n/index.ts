@@ -6,11 +6,15 @@
  * Renderer React code additionally imports `./react.js` for the provider/hook.
  */
 export {
+  DEFAULT_VISIBLE_LOCALES,
   DEFAULT_LOCALE,
   LOCALE_INFO,
+  MARKETPLACE_ELIGIBLE_LOCALES,
   SUPPORTED_LOCALES,
+  isDefaultVisibleLocale,
   isLocale,
   normalizeLocale,
+  visibleLocalesFor,
   type Locale,
 } from "./locale.js";
 export { getLocale, onLocaleChange, setLocale, t } from "./runtime.js";
