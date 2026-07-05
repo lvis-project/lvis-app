@@ -18,6 +18,7 @@ import {
   Search,
   ShoppingBag,
   Trash2,
+  Wrench,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../../components/ui/dropdown-menu.js";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "../../../components/ui/context-menu.js";
@@ -27,11 +28,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { getPluginViewLabel, toViewKey } from "../api-client.js";
+import { toPluginDoctorViewKey } from "../utils/plugin-doctor-view.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
 import { sortWithPinnedFirst } from "../utils/pinned-sort.js";
 import type { SidebarTab } from "../hooks/use-sidebar-tab.js";
 import { isSidebarTab } from "../../../shared/sidebar-tab.js";
-import type { PluginUiExtension } from "../types.js";
+import type { PluginCardSummary, PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { projectBasename, projectRootEquals, workspaceRootsToProjects } from "../../../shared/project-identity.js";
@@ -49,6 +51,8 @@ export interface SidebarProps {
   onSelect: (viewKey: string) => void;
   /** Plugin views from usePluginMarketplace — same list passed to MainContent. */
   pluginViews: PluginUiExtension[];
+  /** Installed plugins that failed to load and therefore need Settings → Plugin Doctor. */
+  failedPluginCards?: PluginCardSummary[];
   /** Auth-status map: pluginId → { kind: "authed" | "unauthed" | ... }. */
   pluginAuthStatuses?: ReadonlyMap<string, { kind: string }>;
   /** Whether the user has an API key configured — drives the settings warning. */
@@ -188,6 +192,8 @@ interface NavItemProps {
   "data-testid"?: string;
   "data-viewkey"?: string;
   "data-tour-anchor"?: string;
+  title?: string;
+  tooltipLabel?: string;
   trailingSlot?: React.ReactNode;
 }
 
@@ -202,6 +208,8 @@ function NavItem({
   "data-testid": testId,
   "data-viewkey": dataViewKey,
   "data-tour-anchor": tourAnchor,
+  title,
+  tooltipLabel,
   trailingSlot,
 }: NavItemProps) {
   const toneStyle = NAV_TONE[tone];
@@ -211,6 +219,8 @@ function NavItem({
       type="button"
       onClick={onClick}
       aria-current={isActive ? "page" : undefined}
+      aria-label={title}
+      title={title}
       data-testid={testId}
       data-viewkey={dataViewKey}
       data-tour-anchor={tourAnchor}
@@ -235,6 +245,8 @@ function NavItem({
       type="button"
       onClick={onClick}
       aria-current={isActive ? "page" : undefined}
+      aria-label={title}
+      title={title}
       data-testid={testId}
       data-viewkey={dataViewKey}
       data-tour-anchor={tourAnchor}
@@ -266,12 +278,81 @@ function NavItem({
           {/* btn is already the collapsed square button element */}
           {btn}
         </TooltipTrigger>
-        <TooltipContent side="right">{label}</TooltipContent>
+        <TooltipContent side="right">{tooltipLabel ?? title ?? label}</TooltipContent>
       </Tooltip>
     );
   }
 
   return btn;
+}
+
+function FailedPluginNavItem({
+  plugin,
+  onSelect,
+  collapsed,
+}: {
+  plugin: PluginCardSummary;
+  onSelect: (key: string) => void;
+  collapsed: boolean;
+}) {
+  const { t } = useTranslation();
+  const viewKey = toPluginDoctorViewKey(plugin.id);
+  const label = plugin.name || plugin.id;
+  const title = t("sidebar.pluginDoctorRequiredTitle", { label });
+  const IconComponent = pluginIconFor({
+    icon: plugin.icon,
+    iconText: plugin.iconText,
+  });
+  const trailingSlot = (
+    <span
+      className="rounded-full bg-destructive/(--opacity-soft) px-1.5 py-px text-[9px] font-medium text-destructive"
+      aria-label={t("sidebar.pluginDoctorRequiredAriaLabel")}
+    >
+      {t("sidebar.pluginDoctorBadge")}
+    </span>
+  );
+  const icon = (
+    <span className="relative h-4 w-4">
+      <IconComponent className="h-4 w-4 text-destructive" />
+      <span className="absolute -right-1 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-destructive text-destructive-foreground">
+        <Wrench className="h-2 w-2" aria-hidden="true" />
+      </span>
+    </span>
+  );
+
+  return (
+    <Suspense
+      fallback={
+        <NavItem
+          viewKey={viewKey}
+          label={label}
+          icon={<Wrench className="h-4 w-4 text-destructive" />}
+          isActive={false}
+          onClick={() => onSelect(viewKey)}
+          collapsed={collapsed}
+          data-testid={`sidebar-${viewKey.replace(/:/g, "-")}`}
+          data-viewkey={viewKey}
+          title={title}
+          tooltipLabel={title}
+          trailingSlot={collapsed ? undefined : trailingSlot}
+        />
+      }
+    >
+      <NavItem
+        viewKey={viewKey}
+        label={label}
+        icon={icon}
+        isActive={false}
+        onClick={() => onSelect(viewKey)}
+        collapsed={collapsed}
+        data-testid={`sidebar-${viewKey.replace(/:/g, "-")}`}
+        data-viewkey={viewKey}
+        title={title}
+        tooltipLabel={title}
+        trailingSlot={collapsed ? undefined : trailingSlot}
+      />
+    </Suspense>
+  );
 }
 
 // ─── PluginNavItem ────────────────────────────────────────────────────────────
@@ -911,6 +992,7 @@ export function Sidebar({
   activeView,
   onSelect,
   pluginViews,
+  failedPluginCards = [],
   pluginAuthStatuses,
   hasApiKey,
   onOpenSettings,
@@ -950,6 +1032,7 @@ export function Sidebar({
   // The collapsed rail shows icons only; `compact` mirrors `collapsed`. There is
   // no hover-expand — the card is a consistent floating panel in every mode.
   const compact = collapsed;
+  const hasPluginEntries = pluginViews.length > 0 || failedPluginCards.length > 0;
   // On darwin the OS traffic lights (x:18,y:16) sit just left of the cluster
   // strip. The aside's top inset is tuned so the strip's buttons land on the
   // lights' line. Win/Linux + non-Electron have no OS lights to align against.
@@ -1151,7 +1234,7 @@ export function Sidebar({
         {/* PLUGINS + PROJECTS group — scrollable flex-1 */}
         {(
           <>
-            {pluginViews.length > 0 ? (
+            {hasPluginEntries ? (
               <SectionDivider collapsed={compact} label={compact ? undefined : t("sidebar.pluginsLabel")} />
             ) : null}
             {/* Radix ScrollArea wraps viewport content in a `display: table` div,
@@ -1177,6 +1260,14 @@ export function Sidebar({
                     />
                   );
                 })}
+                {failedPluginCards.map((plugin) => (
+                  <FailedPluginNavItem
+                    key={`doctor:${plugin.id}`}
+                    plugin={plugin}
+                    onSelect={onSelect}
+                    collapsed={compact}
+                  />
+                ))}
                 <div className={compact ? "pt-1" : pluginViews.length > 0 ? "pt-2" : ""}>
                   {/* No standalone "Projects" section divider here — the Chats/
                       Projects TabsList inside ProjectSessionList already frames

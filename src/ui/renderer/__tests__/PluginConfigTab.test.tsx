@@ -27,8 +27,14 @@ const mockUninstall = vi.fn(async () => ({
   error: "unauthorized-frame",
   message: "제거 권한이 없습니다.",
 }));
+const mockInstall = vi.fn(async () => ({
+  ok: true as const,
+  pluginId: "meeting",
+}));
 
 beforeEach(() => {
+  mockInstall.mockReset();
+  mockInstall.mockResolvedValue({ ok: true as const, pluginId: "meeting" });
   Object.defineProperty(window, "lvis", {
     value: {
       plugins: {
@@ -45,7 +51,7 @@ beforeEach(() => {
   Object.defineProperty(window, "lvisHost", {
     value: {
       takePluginMarketplaceApi: () => ({
-        installMarketplacePlugin: vi.fn(),
+        installMarketplacePlugin: mockInstall,
         uninstallMarketplacePlugin: mockUninstall,
       }),
     },
@@ -111,6 +117,162 @@ describe("PluginConfigTab", () => {
     });
 
     expect(screen.queryByText("설정이 저장되었습니다.")).toBeNull();
+  });
+
+  it("runs Doctor for a failed plugin and refreshes the plugin card", async () => {
+    const broken = {
+      id: "agent-hub",
+      name: "Agent Hub",
+      description: "Agent orchestration",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      installAliases: ["lvis-plugin-agent-hub"],
+      loadStatus: "failed" as const,
+    };
+    const repaired = {
+      ...broken,
+      loadStatus: "loaded" as const,
+    };
+    const cards = vi.fn()
+      .mockResolvedValueOnce([broken])
+      .mockResolvedValueOnce([repaired]);
+    mockInstall.mockResolvedValue({ ok: true as const, pluginId: "agent-hub" });
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "lvisHost", {
+      value: {
+        takePluginMarketplaceApi: () => ({
+          installMarketplacePlugin: mockInstall,
+          uninstallMarketplacePlugin: mockUninstall,
+        }),
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:agent-hub")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("plugin-config:doctor:agent-hub"));
+
+    await waitFor(() => {
+      expect(mockInstall).toHaveBeenCalledWith("lvis-plugin-agent-hub");
+      expect(cards).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("Agent Hub 복구 완료")).toBeInTheDocument();
+    });
+  });
+
+  it("resolves Doctor install id from marketplace when a failed plugin has no install alias", async () => {
+    const broken = {
+      id: "lge-api",
+      name: "LGE API",
+      description: "LGE API plugin",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      loadStatus: "failed" as const,
+    };
+    const repaired = {
+      ...broken,
+      loadStatus: "loaded" as const,
+    };
+    const cards = vi.fn()
+      .mockResolvedValueOnce([broken])
+      .mockResolvedValueOnce([repaired]);
+    const listMarketplacePlugins = vi.fn(async () => [
+      {
+        id: "lvis-plugin-lge-api",
+        name: "LGE API",
+        description: "LGE API plugin",
+        packageSpec: "@lvis/lvis-plugin-lge-api",
+        installed: false,
+        enabled: false,
+        pluginType: "plugin" as const,
+      },
+    ]);
+    mockInstall.mockResolvedValue({ ok: true as const, pluginId: "lge-api" });
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "lvisApi", {
+      value: {
+        listMarketplacePlugins,
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:lge-api")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("plugin-config:doctor:lge-api"));
+
+    await waitFor(() => {
+      expect(listMarketplacePlugins).toHaveBeenCalledOnce();
+      expect(mockInstall).toHaveBeenCalledWith("lvis-plugin-lge-api");
+      expect(cards).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("LGE API 복구 완료")).toBeInTheDocument();
+    });
+  });
+
+  it("opens uninstall from the Doctor panel even for a managed failed plugin", async () => {
+    const broken = {
+      id: "agent-hub",
+      name: "Agent Hub",
+      description: "Agent orchestration",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      isManaged: true,
+      installPolicy: "admin" as const,
+      loadStatus: "failed" as const,
+    };
+    const cards = vi.fn(async () => [broken]);
+    mockUninstall.mockResolvedValueOnce({ ok: true as const });
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:agent-hub")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("plugin-config:doctor-remove:agent-hub"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "제거" }));
+
+    await waitFor(() => {
+      expect(mockUninstall).toHaveBeenCalledWith("agent-hub");
+      expect(screen.getByText("Agent Hub 제거 완료")).toBeInTheDocument();
+    });
   });
 
   it("refreshes the settings plugin list when an install result event arrives", async () => {
