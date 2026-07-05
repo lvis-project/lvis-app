@@ -8,8 +8,13 @@ import {
   grantCovers,
   normalizeTier,
   tierRank,
+  extractGrantPath,
+  isStrictPathDescendant,
 } from "../permission-manager.js";
 import { updatePermissionsFile } from "../permissions-store.js";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // ─── Mock permissions-store ───────────────────────────
 // We mock the store module so tests don't touch the real filesystem.
@@ -777,5 +782,103 @@ describe("PermissionManager — P2 graduated grant tiers", () => {
     expect(r.decision).toBe("ask");
     expect(r.forceModal).toBe(true);
     expect(r.layer).toBe(6);
+  });
+});
+
+// ── #1493 prunePathGrantsUnderRoot + helpers ─────────────────────────────────
+// Real temp dirs so canonicalizePathForMatch (realpathSync) resolves the root
+// and the grant patterns' paths consistently. The store is still the module
+// mock above, so persistence stays in-memory.
+describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
+  let pm: PermissionManager;
+  let root: string;
+
+  beforeEach(() => {
+    mockStore.rules = [];
+    mockStore.mode = "default";
+    _mockLock = Promise.resolve();
+    pm = new PermissionManager("/tmp/test-permissions.json");
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), "lvis-prune-")));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+    vi.clearAllMocks();
+  });
+
+  it("prunes an allow grant whose path is strictly under the removed root", async () => {
+    const under = join(root, "sub", "note.md");
+    await pm.addAlwaysAllowedPersist(`write_file:path:${under}`, "write");
+    expect(mockStore.rules).toHaveLength(1);
+
+    const pruned = await pm.prunePathGrantsUnderRoot(root);
+    expect(pruned).toBe(1);
+    expect(mockStore.rules).toHaveLength(0);
+    // In-memory alwaysAllowed entry also cleared → the grant no longer allows.
+    expect(pm.checkDetailed(`write_file:path:${under}`, "builtin", "write").decision).toBe("ask");
+  });
+
+  it("keeps a grant on the root directory entry itself (strict descendant only)", async () => {
+    await pm.addAlwaysAllowedPersist(`read_file:path:${root}`, "read");
+    const pruned = await pm.prunePathGrantsUnderRoot(root);
+    expect(pruned).toBe(0);
+    expect(mockStore.rules).toHaveLength(1);
+  });
+
+  it("keeps a grant under a sibling root (no false path-prefix match)", async () => {
+    // `${root}-other` shares the `${root}` string prefix but is NOT a descendant
+    // — the separator-boundary guard must reject it.
+    const sibling = realpathSync.native(mkdtempSync(join(tmpdir(), "lvis-prune-sibling-")));
+    try {
+      const underSibling = join(sibling, "file.md");
+      await pm.addAlwaysAllowedPersist(`write_file:path:${underSibling}`, "write");
+      const pruned = await pm.prunePathGrantsUnderRoot(root);
+      expect(pruned).toBe(0);
+      expect(mockStore.rules).toHaveLength(1);
+    } finally {
+      rmSync(sibling, { recursive: true, force: true });
+    }
+  });
+
+  it("never prunes deny rules or non-path tool-name grants", async () => {
+    await pm.addAlwaysAllowedPersist("web_fetch", "read"); // plain tool-name glob
+    await pm.addAlwaysDeniedPersist(`write_file:path:${join(root, "x.md")}`); // deny under root
+    const pruned = await pm.prunePathGrantsUnderRoot(root);
+    expect(pruned).toBe(0);
+    expect(mockStore.rules).toHaveLength(2);
+  });
+
+  it("prunes multiple grants and reports the count", async () => {
+    await pm.addAlwaysAllowedPersist(`write_file:path:${join(root, "a.md")}`, "write");
+    await pm.addAlwaysAllowedPersist(`edit_file:path:${join(root, "deep", "b.ts")}`, "write");
+    await pm.addAlwaysAllowedPersist("web_fetch", "read"); // untouched
+    const pruned = await pm.prunePathGrantsUnderRoot(root);
+    expect(pruned).toBe(2);
+    expect(mockStore.rules).toHaveLength(1);
+    expect(mockStore.rules[0]!.pattern).toBe("web_fetch");
+  });
+
+  it("returns 0 when nothing matches (no persist side effect)", async () => {
+    await pm.addAlwaysAllowedPersist("web_fetch", "read");
+    const pruned = await pm.prunePathGrantsUnderRoot(root);
+    expect(pruned).toBe(0);
+    expect(mockStore.rules).toHaveLength(1);
+  });
+});
+
+describe("path-grant prune helpers (#1493)", () => {
+  it("extractGrantPath returns the path tail after the marker (Windows drive-safe)", () => {
+    expect(extractGrantPath("write_file:path:/home/ken/a.md")).toBe("/home/ken/a.md");
+    expect(extractGrantPath("write_file:path:C:\\Users\\ken\\a.md")).toBe("C:\\Users\\ken\\a.md");
+    expect(extractGrantPath("web_fetch")).toBeNull();
+    expect(extractGrantPath("write_file:path:")).toBeNull();
+  });
+
+  it("isStrictPathDescendant matches descendants, rejects self + sibling-prefix", () => {
+    expect(isStrictPathDescendant("/a/b", "/a/b/c")).toBe(true);
+    expect(isStrictPathDescendant("/a/b", "/a/b")).toBe(false); // self
+    expect(isStrictPathDescendant("/a/b", "/a/bc")).toBe(false); // sibling prefix
+    expect(isStrictPathDescendant("/a/b/", "/a/b/c")).toBe(true); // trailing-slash root
+    expect(isStrictPathDescendant("C:/a", "C:/a/b")).toBe(true);
   });
 });
