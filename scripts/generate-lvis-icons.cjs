@@ -16,6 +16,7 @@ const TRAY_ICON_BASE_SIZE = 18;
 const TRAY_ICON_SCALE_FACTORS = [1, 2];
 const TRAY_ICON_PADDING_RATIO = 0.12;
 const TRAY_ICON_STROKE_RATIO = 0.028;
+const WINDOWS_ICO_SIZES = [16, 32, 64, 128, 256];
 const GRADIENT_STOPS = [
   { at: 0, color: [255, 75, 46] },
   { at: 0.56, color: [255, 63, 110] },
@@ -448,6 +449,40 @@ function encodePng(width, height, rgba) {
   ]);
 }
 
+function encodeIco(sourceRgba, sourceSize, sizes) {
+  const images = sizes.map((size) => {
+    if (sourceSize % size !== 0) {
+      throw new Error(`ICO size ${size} must divide source size ${sourceSize}`);
+    }
+    return {
+      size,
+      png: encodePng(size, size, downsample(sourceRgba, sourceSize, sourceSize / size, size)),
+    };
+  });
+
+  const headerSize = 6 + images.length * 16;
+  const header = Buffer.alloc(headerSize);
+  header.writeUInt16LE(0, 0);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(images.length, 4);
+
+  let imageOffset = headerSize;
+  images.forEach((image, index) => {
+    const entryOffset = 6 + index * 16;
+    header[entryOffset] = image.size === 256 ? 0 : image.size;
+    header[entryOffset + 1] = image.size === 256 ? 0 : image.size;
+    header[entryOffset + 2] = 0;
+    header[entryOffset + 3] = 0;
+    header.writeUInt16LE(1, entryOffset + 4);
+    header.writeUInt16LE(32, entryOffset + 6);
+    header.writeUInt32LE(image.png.length, entryOffset + 8);
+    header.writeUInt32LE(imageOffset, entryOffset + 12);
+    imageOffset += image.png.length;
+  });
+
+  return Buffer.concat([header, ...images.map((image) => image.png)]);
+}
+
 function main() {
   mkdirSync(buildDir, { recursive: true });
 
@@ -457,8 +492,14 @@ function main() {
   const geometry = iconGeometry(viewBox);
   const svgPath = join(buildDir, "icon.svg");
   const pngPath = join(buildDir, "icon.png");
+  const installerIconPath = join(buildDir, "installerIcon.ico");
+  const installerHeaderIconPath = join(buildDir, "installerHeaderIcon.ico");
+  const iconRgba = rasterizeIcon(logoPath, geometry);
+  const installerIco = encodeIco(iconRgba, TARGET_SIZE, WINDOWS_ICO_SIZES);
   writeFileSync(svgPath, buildIconSvg(logoPath, geometry));
-  writeFileSync(pngPath, encodePng(TARGET_SIZE, TARGET_SIZE, rasterizeIcon(logoPath, geometry)));
+  writeFileSync(pngPath, encodePng(TARGET_SIZE, TARGET_SIZE, iconRgba));
+  writeFileSync(installerIconPath, installerIco);
+  writeFileSync(installerHeaderIconPath, installerIco);
   for (const scaleFactor of TRAY_ICON_SCALE_FACTORS) {
     const targetSize = TRAY_ICON_BASE_SIZE * scaleFactor;
     const suffix = scaleFactor === 1 ? "" : "@2x";
@@ -474,6 +515,8 @@ function main() {
 
   console.log(`Generated ${svgPath}`);
   console.log(`Generated ${pngPath}`);
+  console.log(`Generated ${installerIconPath}`);
+  console.log(`Generated ${installerHeaderIconPath}`);
   console.log(`Generated ${join(buildDir, "tray-icon.png")}`);
   console.log(`Generated ${join(buildDir, "tray-iconTemplate.png")}`);
 }

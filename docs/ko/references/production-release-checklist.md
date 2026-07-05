@@ -83,6 +83,23 @@ on the target OS instead of relying on cross-platform packaging. The publish
 job also attaches `LVIS-latest-*` stable alias assets for the website download
 links; do not publish a release that only has versioned `LVIS-X.Y.Z-*` assets.
 
+## Windows Installer Path
+
+Windows release path는 전체 payload를 포함한 오프라인 NSIS installer입니다.
+`oneClick`, per-user install, differential package metadata, `runAfterFinish`
+는 유지합니다. Installer는 `bun run build:icons`가 생성하는 LVIS-branded
+`build/installerIcon.ico`와 `build/installerHeaderIcon.ico`를 사용해야 합니다.
+
+제품 전략이 명시적으로 바뀌기 전에는 NSIS path에 online web bootstrapper를
+추가하지 않습니다. 압축된 `uv` payload 같은 runtime asset은 release build
+시점에 staging되어 installer에 포함됩니다. Marketplace, plugin, MCP artifact
+bootstrap은 signing, permission, network policy가 있는 앱 runtime 책임으로
+유지합니다.
+
+MSIX/AppX는 별도 packaging decision입니다. Update mechanism, signing
+certificate/Partner Center path, enterprise distribution 요구사항이 결정되기
+전에는 NSIS와 함께 배포하지 않습니다.
+
 ## Smoke-Test Checklist
 
 Perform on each platform artifact before uploading:
