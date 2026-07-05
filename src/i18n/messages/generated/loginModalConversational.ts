@@ -28,6 +28,7 @@ export const en = {
   "loginModalConversational.activErrPersistFailed": "Could not save the activation key. Please check disk space or permissions and try again.",
   "loginModalConversational.activErrUnauthorizedFrame": "Invalid request path. Please restart the app and try again.",
   "loginModalConversational.activErrNoEmbeddedKey": "This build does not include a built-in activation key. Please paste the activation key from your administrator.",
+  "loginModalConversational.activErrNoOllama": "No local Ollama server was found. Please start Ollama and try again.",
   "loginModalConversational.activErrActivationFailed": "Activation failed.",
 
   // Inline errors from useEffect / callbacks
@@ -64,6 +65,11 @@ export const en = {
   "loginModalConversational.chip3Title": "Organization SSO connection coming soon",
   "loginModalConversational.chip3Label": "Connect with organization SSO",
   "loginModalConversational.chip3Sub": "Coming soon",
+
+  // JSX — chip 4 (Ollama local model, #1498)
+  "loginModalConversational.chipOllamaLabel": "Start with a local model",
+  "loginModalConversational.chipOllamaSub": "Uses your local Ollama server",
+  "loginModalConversational.chipOllamaActivating": "Connecting to your local model…",
 
   // JSX — user turn bubble
   "loginModalConversational.userTurnText": "I'll use my activation key.",
@@ -114,6 +120,7 @@ export const ko: Record<keyof typeof en, string> = {
   "loginModalConversational.activErrPersistFailed": "활성화 키를 저장하지 못했어요. 디스크 공간 또는 권한을 확인한 뒤 다시 시도해 주세요.",
   "loginModalConversational.activErrUnauthorizedFrame": "잘못된 요청 경로입니다. 앱을 재시작한 뒤 다시 시도해 주세요.",
   "loginModalConversational.activErrNoEmbeddedKey": "이 빌드에는 내장 활성화 키가 없습니다. 관리자에게 받은 활성화 키를 붙여넣어 주세요.",
+  "loginModalConversational.activErrNoOllama": "로컬 Ollama 서버를 찾을 수 없어요. Ollama 를 실행한 뒤 다시 시도해 주세요.",
   "loginModalConversational.activErrActivationFailed": "활성화에 실패했습니다.",
 
   // Inline errors from useEffect / callbacks
@@ -150,6 +157,11 @@ export const ko: Record<keyof typeof en, string> = {
   "loginModalConversational.chip3Title": "조직 SSO 연결은 곧 지원 예정입니다",
   "loginModalConversational.chip3Label": "조직 SSO 로 연결",
   "loginModalConversational.chip3Sub": "곧 지원 예정",
+
+  // JSX — chip 4 (Ollama 로컬 모델, #1498)
+  "loginModalConversational.chipOllamaLabel": "로컬 모델로 시작",
+  "loginModalConversational.chipOllamaSub": "내 컴퓨터의 Ollama 서버 사용",
+  "loginModalConversational.chipOllamaActivating": "로컬 모델에 연결하는 중…",
 
   // JSX — user turn bubble
   "loginModalConversational.userTurnText": "활성화 키로 시작할게요.",
