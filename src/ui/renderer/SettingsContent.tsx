@@ -16,6 +16,7 @@ import {
   Puzzle,
   Store,
   LayoutDashboard,
+  Rocket,
 } from "lucide-react";
 import { SavedToastFloating, SavedToastProvider } from "./contexts/saved-toast.js";
 import type { LvisApi } from "./types.js";
@@ -32,6 +33,7 @@ import { McpTab } from "./tabs/McpTab.js";
 import { PluginConfigTab } from "./tabs/PluginConfigTab.js";
 import { MarketplaceTab } from "./tabs/MarketplaceTab.js";
 import { GeneralTab } from "./tabs/GeneralTab.js";
+import { StartupTab } from "./tabs/StartupTab.js";
 import { LoginModal } from "./components/LoginModal.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
 import { useDebouncedSave } from "./hooks/use-debounced-save.js";
@@ -286,6 +288,10 @@ export function SettingsContent({
           <Globe className={navIconCls} aria-hidden="true" />
           {t("settingsContent.tabWeb")}
         </TabsTrigger>
+        <TabsTrigger value="startup" className={sideTriggerCls}>
+          <Rocket className={navIconCls} aria-hidden="true" />
+          {t("settingsContent.tabStartup")}
+        </TabsTrigger>
         <TabsTrigger value="permissions" className={sideTriggerCls}>
           <Shield className={navIconCls} aria-hidden="true" />
           {t("settingsContent.tabPermissions")}
@@ -482,6 +488,7 @@ export function SettingsContent({
             />
           </TabsContent>
 
+          <TabsContent value="startup" className="flex-1 min-h-0 outline-none"><StartupTab /></TabsContent>
           <TabsContent value="permissions" className="flex-1 min-h-0 outline-none"><PermissionsTab /></TabsContent>
           <TabsContent value="roles" className="flex-1 min-h-0 outline-none"><RolesTab api={api} /></TabsContent>
           <TabsContent value="usage" className="flex-1 min-h-0 outline-none"><UsageDashboard api={api} /></TabsContent>

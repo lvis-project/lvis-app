@@ -39,6 +39,8 @@ import {
 } from "./main/main-window.js";
 import { detachedWindowOptionsForViewKey, refreshApplicationMenu } from "./main/app-menu.js";
 import { ensureTray, showOrCreateMainWindow } from "./main/app-tray.js";
+import { reconcileGlobalShortcuts } from "./main/global-shortcuts.js";
+import { reconcileStartupLaunch, readStartupLaunchState } from "./main/startup-launch.js";
 import { registerSettingsWindowHandlers } from "./main/settings-window.js";
 import { maybeStartLocalApiServer } from "./main/local-api-server.js";
 import { handleLvisUri, lvisDevLog } from "./main/lvis-deep-link.js";
@@ -181,11 +183,31 @@ async function main() {
   ensureTray();
   setRendererReloadReady(true);
 
+  // E4 — reconcile OS-level global shortcuts + login item from persisted
+  // settings once the tray + services exist. Registration failure is surfaced
+  // via NotificationService inside reconcileGlobalShortcuts (No-Fallback).
+  const initialSettings = services.settingsService.getAll();
+  reconcileGlobalShortcuts(initialSettings.shortcuts);
+  reconcileStartupLaunch({
+    launchAtStartup: initialSettings.system.launchAtStartup ?? false,
+    launchMinimized: initialSettings.system.launchMinimized ?? false,
+  });
+  // Detect a hidden (tray-only) auto-launch so the first window show is
+  // suppressed. macOS reports `wasOpenedAsHidden`; Windows uses the `--hidden`
+  // launch arg the login item carries.
+  const launchedHidden = readStartupLaunchState().wasOpenedAsHidden;
+
   // 실 UI 로드 — 이 시점부터 렌더러의 IPC 호출이 항상 handler와 매칭됨
   const mainWindow = getMainWindow();
   if (mainWindow) {
     if (!isPendingRendererReload()) await waitForMinimumBootstrapSplash();
     await loadMainInterface(mainWindow, isPendingRendererReload() ? "bootstrap-recovery" : "bootstrap-complete");
+    // Hidden auto-launch: loadMainInterface shows the window; hide it back so
+    // the app starts in the tray. A user-initiated launch (launchedHidden
+    // false) is unaffected.
+    if (launchedHidden && !mainWindow.isDestroyed()) {
+      mainWindow.hide();
+    }
   }
 
   // Process any lvis:// URI that arrived before services were ready.

@@ -9,8 +9,10 @@ import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUn
 import { CHANNELS } from "../../contract/app-contract.js";
 import { sendToWindow } from "../safe-send.js";
 import { normalizeLocale, setLocale, tryLoadLocaleMessages } from "../../i18n/index.js";
+import { reconcileGlobalShortcuts } from "../../main/global-shortcuts.js";
+import { reconcileStartupLaunch } from "../../main/startup-launch.js";
 import type { IpcDeps } from "../types.js";
-import type { LLMSettings } from "../../data/settings-store.js";
+import type { LLMSettings, ShortcutSettings } from "../../data/settings-store.js";
 
 /** Minor-1: extracted helper — 6 handlers share identical 5-line broadcast. */
 async function broadcastSettingsSnapshot(deps: IpcDeps): Promise<void> {
@@ -43,6 +45,24 @@ function vendorBaseUrlSignature(llm: LLMSettings): string {
     .sort()
     .map((id) => `${id}=${vendors[id as keyof typeof vendors]?.baseUrl ?? ""}`);
   return entries.join("|");
+}
+
+/**
+ * E4 — stable signature of the shortcut + startup-launch inputs so the
+ * `settings.update` handler can detect when a patch actually changed them and
+ * only then re-register the global shortcut / re-sync the OS login item. Mirrors
+ * the `activeLlmIdentity` change-detection pattern used for reviewer rewiring.
+ */
+function shortcutStartupSignature(
+  shortcuts: ShortcutSettings,
+  system: { launchAtStartup?: boolean; launchMinimized?: boolean },
+): string {
+  return JSON.stringify({
+    toggleWindow: shortcuts.toggleWindow,
+    enabled: shortcuts.enabled,
+    launchAtStartup: system.launchAtStartup ?? false,
+    launchMinimized: system.launchMinimized ?? false,
+  });
 }
 
 function activeLlmIdentity(llm: LLMSettings): string {
@@ -113,6 +133,11 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // closure that pushes the new value into the live fetcher instance.
     const prevAllowPrivate =
       settingsService.get("marketplace").cloudAllowPrivateNetwork ?? false;
+    // E4 — capture shortcut/startup signature so we only re-register on change.
+    const prevShortcutStartupSig = shortcutStartupSignature(
+      settingsService.get("shortcuts"),
+      settingsService.get("system"),
+    );
     const result = await settingsService.patch(partial);
     const newLlm = settingsService.get("llm");
     const newActiveLlmIdentity = activeLlmIdentity(newLlm);
@@ -164,6 +189,19 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // restart. No-op inside the closure when the sandbox gate is OFF.
     if (vendorBaseUrlSignature(newLlm) !== prevVendorBaseUrlSig) {
       deps.refreshSandboxNetworkConfig?.();
+    }
+    // E4 — when the shortcut block or launch-at-startup fields changed, re-run
+    // the OS-level reconcilers so the global accelerator + login item track the
+    // new settings. Registration failure is surfaced inside
+    // reconcileGlobalShortcuts (No-Fallback: notified, not swallowed).
+    const newShortcuts = settingsService.get("shortcuts");
+    const newSystem = settingsService.get("system");
+    if (shortcutStartupSignature(newShortcuts, newSystem) !== prevShortcutStartupSig) {
+      reconcileGlobalShortcuts(newShortcuts);
+      reconcileStartupLaunch({
+        launchAtStartup: newSystem.launchAtStartup ?? false,
+        launchMinimized: newSystem.launchMinimized ?? false,
+      });
     }
     await broadcastSettingsSnapshot(deps);
     return result;
