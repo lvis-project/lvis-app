@@ -57,6 +57,21 @@ function listFiles(): string[] {
   return readdirSync(logDir).sort();
 }
 
+/**
+ * Wait until `path` exists on disk. SonicBoom opens with `sync:false`, so the
+ * fd (and therefore the file) appears on a later tick than the sink's
+ * construction. Polling until existsSync is true makes mode/size assertions
+ * DETERMINISTIC instead of racing the async open (the old chmodSync-after-open
+ * approach raced it silently). Throws if the file never appears.
+ */
+async function waitForFile(path: string, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!existsSync(path)) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${path}`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 describe("parseLogFileDate", () => {
   it("parses base and sequenced log filenames", () => {
     expect(parseLogFileDate("lvis-2026-07-05.log")).toBe("2026-07-05");
@@ -126,11 +141,16 @@ describe("createLogFileSink — file creation + mode", () => {
   });
 
   it.runIf(process.platform !== "win32")(
-    "enforces 0o600 on the log file and 0o700 on the directory",
-    () => {
+    "enforces 0o600 on the log file (at open) and 0o700 on the directory",
+    async () => {
       const sink = createLogFileSink({ dir: logDir, retentionDays: 7 });
       try {
         sink.write("x\n");
+        // Wait for the async (`sync:false`) SonicBoom open to land the file
+        // before asserting its mode — otherwise statSync races the open. The
+        // mode is applied AT OPEN via the constructor's `mode` option, so once
+        // the file exists it already carries 0o600 (no post-open chmod window).
+        await waitForFile(sink.currentFile);
         const fileMode = statSync(sink.currentFile).mode & 0o777;
         const dirMode = statSync(logDir).mode & 0o777;
         expect(fileMode).toBe(0o600);
@@ -174,6 +194,41 @@ describe("createLogFileSink — size-based sequence rolling", () => {
       // The active file must NOT be the oversized base — it should be a .1 seq.
       expect(sink.currentFile).not.toBe(base);
       expect(/\.\d+\.log$/.test(sink.currentFile)).toBe(true);
+    } finally {
+      sink.destroy();
+    }
+  });
+
+  it("resumes an UNDER-cap same-day file and seeds the byte counter from its size", async () => {
+    // A partially-filled today file that is still UNDER the cap must be
+    // APPENDED to (not rolled), and the in-process byte counter must be seeded
+    // from the on-disk size so the roll trips accounting for the pre-existing
+    // bytes — not from zero. maxBytes=100, pre-seed 60 bytes: the base is
+    // reused (60 < 100), then writes past the remaining 40-byte headroom must
+    // cross the ceiling and roll, proving the counter started at 60, not 0.
+    const base = join(logDir, `lvis-${todayDateStr()}.log`);
+    writeFileSync(base, "a".repeat(60));
+    const sink = createLogFileSink({ dir: logDir, retentionDays: 7, maxBytes: 100 });
+    try {
+      // The active file resumes the under-cap base (seq 0), not a new sequence.
+      expect(sink.currentFile).toBe(base);
+      // The roll fires synchronously inside write() the moment the seeded
+      // counter (60) + accumulated chunk bytes crosses maxBytes (100). Assert
+      // on currentFile (in-process, race-free) rather than on-disk file
+      // presence — the rolled .seq file is opened with sync:false so its
+      // fd/inode lands on a later tick. 6 × 10 bytes = 60, so 60 + 60 = 120
+      // ≥ 100 → the active file must advance to a .seq. If the counter had
+      // been seeded to 0, 60 < 100 and currentFile would stay the base.
+      for (let i = 0; i < 6; i++) sink.write("b".repeat(9) + "\n"); // 10 bytes each
+      expect(sink.currentFile).not.toBe(base);
+      expect(/\.\d+\.log$/.test(sink.currentFile)).toBe(true);
+      // The original base bytes are preserved (append mode, not truncated).
+      expect(statSync(base).size).toBeGreaterThanOrEqual(60);
+      // Once flushed, the rolled .seq file lands on disk too.
+      const rolledPath = sink.currentFile;
+      sink.destroy();
+      await waitForFile(rolledPath);
+      expect(existsSync(rolledPath)).toBe(true);
     } finally {
       sink.destroy();
     }
