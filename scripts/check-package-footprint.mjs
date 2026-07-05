@@ -20,10 +20,11 @@ const root = resolve(__dirname, "..");
 const fallbackAppAsar = resolve(root, "release", "linux-arm64-unpacked", "resources", "app.asar");
 const maxAppAsarMb = Number(process.env.LVIS_MAX_APP_ASAR_MB ?? "100");
 const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
+const DEFAULT_PACKAGED_ELECTRON_LANGUAGES = Object.freeze(["en-US"]);
 
 function configuredElectronLanguages() {
   const languages = packageJson?.build?.electronLanguages;
-  if (!Array.isArray(languages) || languages.length === 0) return ["en-US", "ko"];
+  if (!Array.isArray(languages) || languages.length === 0) return [...DEFAULT_PACKAGED_ELECTRON_LANGUAGES];
   return languages.filter((language) => typeof language === "string" && language.length > 0);
 }
 
@@ -34,9 +35,21 @@ function macLocaleBundleNames(language) {
 }
 
 const configuredLanguages = configuredElectronLanguages();
-const requiredPakLocales = new Set(["en-US.pak", "ko.pak"]);
+const unexpectedConfiguredLanguages = configuredLanguages.filter(
+  (language) => !DEFAULT_PACKAGED_ELECTRON_LANGUAGES.includes(language),
+);
+const missingConfiguredLanguages = DEFAULT_PACKAGED_ELECTRON_LANGUAGES.filter(
+  (language) => !configuredLanguages.includes(language),
+);
+if (unexpectedConfiguredLanguages.length > 0 || missingConfiguredLanguages.length > 0) {
+  fail("desktop app must package only the default Electron language; ship UI languages as marketplace language packs", [
+    ...missingConfiguredLanguages.map((language) => `missing:${language}`),
+    ...unexpectedConfiguredLanguages.map((language) => `unexpected:${language}`),
+  ]);
+}
+const requiredPakLocales = new Set(DEFAULT_PACKAGED_ELECTRON_LANGUAGES.map((language) => `${language}.pak`));
 const allowedPakLocales = new Set(configuredLanguages.map((language) => `${language}.pak`));
-const requiredMacLocales = new Set(["en.lproj", "ko.lproj"]);
+const requiredMacLocales = new Set(DEFAULT_PACKAGED_ELECTRON_LANGUAGES.flatMap(macLocaleBundleNames));
 const allowedMacLocales = new Set(configuredLanguages.flatMap(macLocaleBundleNames));
 
 function fail(message, samples = []) {
