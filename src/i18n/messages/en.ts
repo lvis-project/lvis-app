@@ -70,6 +70,9 @@ export const en = {
   "startupTab.launchAtStartupHint": "Start LVIS automatically after you sign in. (Installed app only.)",
   "startupTab.launchMinimizedLabel": "Start hidden in the tray",
   "startupTab.launchMinimizedHint": "When launching at login, start minimized to the tray without opening a window.",
+  "startupTab.launchRegisterFailedTitle": "Launch at startup could not be applied",
+  "startupTab.launchRegisterFailedBody":
+    "LVIS could not register itself to launch at login on this system. Open Settings to try again.",
 } as const;
 
 /**
