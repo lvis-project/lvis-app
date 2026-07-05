@@ -21,7 +21,7 @@ import { BashAstValidator } from "../main/bash-ast-validator.js";
 import { AuditService } from "../main/audit-service.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
-import { createLogger, initFileLogSink, closeFileLogSink } from "../lib/logger.js";
+import { createLogger, initFileLogSink } from "../lib/logger.js";
 import { LOG_RETENTION_DAYS, LOG_MAX_BYTES } from "../lib/log-file-sink.js";
 const log = createLogger("lvis");
 
@@ -67,6 +67,26 @@ export async function applyBootLocale(
 }
 
 export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<CoreServices> {
+  // #1499 PR-0: production log file sink — attach FIRST, before any other core
+  // service. It depends only on `lvisHome()` (no SettingsService / locale), so
+  // hoisting it to the very top of bootstrap shrinks the window where early
+  // boot log lines (settings load, locale apply, audit start) would be lost to
+  // the console-only sink. Destination: `~/.lvis/logs/lvis-<date>.log`
+  // (0o700 dir + 0o600 file). createLogFileSink prunes files older than
+  // LOG_RETENTION_DAYS at attach time; the console stream is unaffected. Failure
+  // is swallowed inside initFileLogSink (logging is best-effort, never bricks
+  // boot). Teardown is the LAST step of runAppShutdownCleanup (see below), not a
+  // `before-quit` listener, so shutdown-step logs still reach the file.
+  if (shouldEnableFileLogSink()) {
+    const sink = initFileLogSink({
+      retentionDays: LOG_RETENTION_DAYS,
+      maxBytes: LOG_MAX_BYTES,
+    });
+    if (sink) {
+      log.info({ file: sink.currentFile }, "boot: production log file sink attached");
+    }
+  }
+
   // Python runtime coordination is app-owned, but runtime assets and plugin
   // dependencies are materialized lazily by plugin-level async prepare.
   const pythonRuntime = new PythonRuntimeBootstrapper();
@@ -95,22 +115,6 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   // locale on fresh install) so dialog titles, native menus, tray, and
   // notifications render in the user's language. See src/i18n.
   await applyBootLocale(settingsService);
-
-  // #1499 PR-0: production log file sink. Attach the pino file destination
-  // (`~/.lvis/logs/lvis-<date>.log`, 0o700 dir + 0o600 file) so the packaged
-  // app has a readable log. createLogFileSink prunes files older than
-  // LOG_RETENTION_DAYS at attach time; the console stream is unaffected. Failure
-  // is swallowed inside initFileLogSink (logging is best-effort, never bricks boot).
-  if (shouldEnableFileLogSink()) {
-    const sink = initFileLogSink({
-      retentionDays: LOG_RETENTION_DAYS,
-      maxBytes: LOG_MAX_BYTES,
-    });
-    if (sink) {
-      log.info({ file: sink.currentFile }, "boot: production log file sink attached");
-      app.once("before-quit", () => closeFileLogSink());
-    }
-  }
 
   // §14.2 Audit log rotation + retention — boot-time check + 1h interval
   const auditLogger = new AuditLogger();
