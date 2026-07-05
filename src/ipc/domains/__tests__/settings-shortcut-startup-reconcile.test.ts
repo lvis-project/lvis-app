@@ -20,6 +20,7 @@
  *    test fail.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { makeAppIpcInvoker } from "./test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
@@ -49,11 +50,9 @@ vi.mock("../../../main/startup-launch.js", () => ({
   notifyStartupLaunchFailureIfNeeded: (...a: unknown[]) => notifyStartupLaunchFailureIfNeeded(...a),
 }));
 
-function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return Promise.resolve(fn({ frameId: 0, processId: 0, frame: { url: "lvis://app" } } as never, ...args));
-}
+// Shared fixture (test-helpers.ts) — no senderFrame set, so validateSender's
+// `!frame` early-allow applies, same as this file's former inline `invoke`.
+const invoke = makeAppIpcInvoker(handlers);
 
 /**
  * Key-based settings mock. `shortcuts`/`system` flip to their "after" value once
