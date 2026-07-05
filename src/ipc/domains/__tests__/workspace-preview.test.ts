@@ -133,6 +133,25 @@ describe("preview:read-file handler", () => {
     expect(res).toMatchObject({ ok: false, error: "binary-file" });
   });
 
+  it("refuses a file over the text size cap (too-large, fail-closed)", async () => {
+    // The preview read shares read_file's MAX_TEXT_FILE_BYTES (2MB) cap — a file
+    // above it is refused BEFORE buffering so a huge file can't be pulled across
+    // the sandbox boundary for display. #1445 size-cap guard.
+    const big = join(root, "huge.txt");
+    writeFileSync(big, "a".repeat(2_000_001));
+    try {
+      const res = (await invoke(CHANNELS.preview.readFile, OK_FRAME, big)) as {
+        ok: boolean;
+        error?: string;
+        bytes?: number;
+      };
+      expect(res).toMatchObject({ ok: false, error: "too-large" });
+      expect(res.bytes).toBeGreaterThan(2_000_000);
+    } finally {
+      rmSync(big, { force: true });
+    }
+  });
+
   it("rejects a symlink whose real target escapes the allowed root", async () => {
     // A symlink INSIDE the allowed root that points OUT of it must not become a
     // read hole: the guard realpath's the link before the boundary check, so the
@@ -400,6 +419,40 @@ describe("workspace handlers", () => {
     };
     expect(res).toMatchObject({ ok: false, error: "unauthorized" });
     expect(removeAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+
+  it("#1493 removeRoot prunes path grants under the root and reports the count", async () => {
+    // Re-register the workspace handler with a deps carrying a stub permission
+    // manager so the prune path fires. prunePathGrantsUnderRoot returns 3 →
+    // handler surfaces prunedGrants:3 for the renderer toast.
+    const prune = vi.fn(async () => 3);
+    const depsWithPm = {
+      auditLogger: { log: vi.fn() },
+      getMainWindow: () => null,
+      conversationLoop: { permissionManager: { prunePathGrantsUnderRoot: prune } },
+    } as never;
+    registerWorkspaceHandlers(depsWithPm);
+    try {
+      const res = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, root)) as {
+        ok: boolean;
+        prunedGrants?: number;
+      };
+      expect(res).toMatchObject({ ok: true, prunedGrants: 3 });
+      expect(prune).toHaveBeenCalledWith(root);
+    } finally {
+      // Restore the shared handler registration for later tests in this file.
+      registerWorkspaceHandlers(deps);
+    }
+  });
+
+  it("#1493 removeRoot still succeeds when no permission manager is wired (best-effort prune)", async () => {
+    // The shared `deps` has no conversationLoop → prune is skipped, prunedGrants:0.
+    const res = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, root)) as {
+      ok: boolean;
+      removed?: string;
+      prunedGrants?: number;
+    };
+    expect(res).toMatchObject({ ok: true, removed: root, prunedGrants: 0 });
   });
 
   it("reveal shows a scope-checked file's location and never the raw renderer path", async () => {
