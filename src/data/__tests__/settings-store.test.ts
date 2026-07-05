@@ -809,12 +809,12 @@ describe("SettingsService system locale detection", () => {
     rmSync(userDataPath, { recursive: true, force: true });
   });
 
-  it("fresh install with systemLocale=ko-KR seeds language as 'ko'", () => {
+  it("fresh install with systemLocale=ko-KR keeps English as the default language", () => {
     const service = new SettingsService({ userDataPath, systemLocale: "ko-KR" });
-    expect(service.get("appearance").language).toBe("ko");
+    expect(service.get("appearance").language).toBe("en");
   });
 
-  it("fresh install with systemLocale=en-US seeds language as 'en'", () => {
+  it("fresh install with systemLocale=en-US keeps English as the default language", () => {
     const service = new SettingsService({ userDataPath, systemLocale: "en-US" });
     expect(service.get("appearance").language).toBe("en");
   });
