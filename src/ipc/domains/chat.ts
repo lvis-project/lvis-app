@@ -58,6 +58,12 @@ const PROJECT_NOT_ALLOWED = { ok: false, error: "project-not-allowed" } as const
 // the same size guard the session-search linear scan used to enforce
 // (MAX_SESSION_FILE_BYTES) as a DoS gate on the imported file itself.
 const MAX_SESSION_FILE_BYTES = 5_000_000;
+// Symmetric ceiling to the byte cap above: a JSON file can stay under 5 MB yet
+// still carry an absurd number of tiny messages (e.g. hundreds of thousands of
+// `{"role":"user","content":""}`), each of which becomes a persisted session
+// line + an FTS index row. Cap the message count so import cost is bounded on
+// BOTH axes (total bytes AND element count), not just bytes.
+const MAX_IMPORTED_MESSAGES = 100_000;
 
 const USER_CONTENT_PART_KEYS: Record<string, readonly string[]> = {
   text: ["type", "text"],
@@ -157,6 +163,11 @@ function validateImportedSessionJson(raw: unknown): ImportValidationResult {
   }
   if (r.messages.length === 0) {
     return { ok: false, messages: [], error: "empty-messages" };
+  }
+  // Element-count ceiling symmetric with the byte cap the handler enforces on
+  // the file itself — bounds import cost on the message-count axis too.
+  if (r.messages.length > MAX_IMPORTED_MESSAGES) {
+    return { ok: false, messages: [], error: "too-many-messages" };
   }
   for (const candidate of r.messages) {
     if (!isValidImportedMessage(candidate)) {
@@ -731,7 +742,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
   ipcMain.handle(CHANNELS.chat.import, async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.import, e); return UNAUTHORIZED_FRAME; }
     const { dialog } = await import("electron");
-    const { readFile, stat } = await import("node:fs/promises");
+    const { open } = await import("node:fs/promises");
     const win = getMainWindow();
     const dialogOptions = {
       title: t("mainDialog.importConversationTitle"),
@@ -744,21 +755,31 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (res.canceled || res.filePaths.length === 0) return { ok: false, canceled: true };
     const filePath = res.filePaths[0];
 
-    let stats: { size: number };
+    // TOCTOU-safe read (CodeQL js/file-system-race): open ONE fd, size-guard
+    // via fstat(fd), then read from that SAME fd. A separate stat()+readFile()
+    // pair races — the path could be swapped between the size check and the
+    // read (e.g. small→huge, or file→symlink to a device) so the cap is
+    // enforced against a different inode than the one read. Anchoring both the
+    // check and the read to a single fd closes that window.
+    let text: string;
+    let fileHandle: Awaited<ReturnType<typeof open>> | undefined;
     try {
-      stats = await stat(filePath);
+      fileHandle = await open(filePath, "r");
+      const stats = await fileHandle.stat();
+      // DoS guard — reject oversized files before ever reading/parsing them
+      // (same MAX_SESSION_FILE_BYTES cap memory-manager enforces on-disk).
+      if (stats.size > MAX_SESSION_FILE_BYTES) {
+        return { ok: false, error: "file-too-large" };
+      }
+      text = await fileHandle.readFile("utf-8");
     } catch {
       return { ok: false, error: "file-not-found" };
-    }
-    // DoS guard — reject oversized files before ever reading/parsing them
-    // (same MAX_SESSION_FILE_BYTES cap memory-manager enforces on-disk).
-    if (stats.size > MAX_SESSION_FILE_BYTES) {
-      return { ok: false, error: "file-too-large" };
+    } finally {
+      await fileHandle?.close().catch(() => {});
     }
 
     let raw: unknown;
     try {
-      const text = await readFile(filePath, "utf-8");
       raw = JSON.parse(text);
     } catch {
       return { ok: false, error: "invalid-json" };

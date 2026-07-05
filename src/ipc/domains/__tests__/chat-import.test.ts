@@ -36,14 +36,20 @@ vi.mock("electron", () => ({
   },
 }));
 
+// The handler now reads via a single fd (open → fstat → read → close) to close
+// the CodeQL js/file-system-race TOCTOU. Mock `open()` to return a FileHandle
+// whose stat()/readFile() are driven by the same mutable fsState.
 vi.mock("node:fs/promises", () => ({
-  stat: vi.fn(async () => {
+  open: vi.fn(async () => {
     if (fsState.statThrows) throw new Error("ENOENT");
-    return { size: fsState.size };
-  }),
-  readFile: vi.fn(async () => {
-    if (fsState.readThrows) throw new Error("EIO");
-    return fsState.text;
+    return {
+      stat: vi.fn(async () => ({ size: fsState.size })),
+      readFile: vi.fn(async () => {
+        if (fsState.readThrows) throw new Error("EIO");
+        return fsState.text;
+      }),
+      close: vi.fn(async () => {}),
+    };
   }),
 }));
 
@@ -211,12 +217,49 @@ describe("lvis:chat:import — rejection branches (fail-closed)", () => {
     await setup();
     setFile({
       ...validExport,
-      messages: [{ role: "user", content: "ok", __proto__: { polluted: true }, extra: 1 }],
+      messages: [{ role: "user", content: "ok", extra: 1 }],
     });
 
     const result = await invoke();
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-message-shape");
+  });
+
+  it("rejects a __proto__ pollution attempt via the REAL JSON.parse path", async () => {
+    await setup();
+    // Object-literal `__proto__` sets the prototype (not an own key) so it is a
+    // no-op that Object.keys never sees — the test must inject the payload as a
+    // raw JSON STRING, where `"__proto__"` becomes a genuine own enumerable key
+    // that the whitelist (hasOnlyKeys) actually has to reject. Setting
+    // fsState.text directly bypasses JSON.stringify (which would preserve the
+    // string key) — but we build the string explicitly to be unambiguous.
+    fsState.text =
+      '{"sessionId":"s","exportedAt":"2026-07-05T00:00:00.000Z",' +
+      '"messages":[{"role":"user","content":"ok","__proto__":{"polluted":true}}]}';
+    fsState.size = Buffer.byteLength(fsState.text);
+
+    // Prove the parsed object really carries "__proto__" as an OWN key (the
+    // real attack surface the object-literal version failed to exercise).
+    const parsed = JSON.parse(fsState.text);
+    expect(Object.prototype.hasOwnProperty.call(parsed.messages[0], "__proto__")).toBe(true);
+
+    const result = await invoke();
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("invalid-message-shape");
+    // And global prototype must remain unpolluted.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("rejects an import whose messages array exceeds MAX_IMPORTED_MESSAGES", async () => {
+    const deps = await setup();
+    // 100_000 is the cap; 100_001 tiny messages stay well under the 5 MB byte
+    // cap yet must be rejected on the element-count axis (symmetric DoS guard).
+    const many = Array.from({ length: 100_001 }, () => ({ role: "user", content: "x" }));
+    setFile({ ...validExport, messages: many });
+
+    const result = await invoke();
+    expect(result).toEqual({ ok: false, error: "too-many-messages" });
+    expect(deps.memoryManager.saveImportedSession).not.toHaveBeenCalled();
   });
 
   it("rejects a tool_result missing its required toolUseId", async () => {

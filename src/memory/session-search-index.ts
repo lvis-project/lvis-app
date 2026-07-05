@@ -56,9 +56,44 @@ function loadSqlite(): typeof BetterSqlite3 {
   return _sqliteCtor;
 }
 
+/** True only under the vitest test runner (VITEST is injected by vitest). */
+const IS_TEST_ENV = process.env.VITEST !== undefined;
+
+/**
+ * A native-addon load failure (e.g. an ABI/NODE_MODULE_VERSION mismatch — the
+ * better-sqlite3 binary compiled for Electron but loaded under node/bun) throws
+ * from `require("better-sqlite3")` inside {@link loadSqlite}. In production that
+ * is caught by {@link SessionSearchIndex.open} and degraded fail-closed to a
+ * `[]`-returning index (No-Fallback: never a linear scan). But in TESTS that
+ * same swallow turns a real "the native module can't even load" defect into a
+ * whole search suite that silently 0-hits — signal loss that once let an
+ * Electron-ABI CI binary pass local review. So we distinguish a *native-load*
+ * failure (module never loaded) from a *runtime* failure (a bad file / PRAGMA
+ * on an already-loaded module): the former re-throws under VITEST so the suite
+ * fails LOUDLY at the binding, while the latter stays swallowed so the
+ * corruption-recovery (`deleteFile` → `rebuild`) path is still exercised by its
+ * own tests. Heuristic: the addon is considered "loaded" once {@link loadSqlite}
+ * has cached the constructor.
+ */
+function isNativeLoadFailure(err: unknown): boolean {
+  if (_sqliteCtor) return false; // constructor already cached ⇒ not a load failure
+  const msg = (err as Error)?.message ?? "";
+  return (
+    /NODE_MODULE_VERSION|was compiled against|different Node\.js|\.node|Cannot find module 'better-sqlite3'|invalid ELF|dlopen|not a valid Win32/i.test(
+      msg,
+    )
+  );
+}
+
 export interface IndexedSessionInput {
   sessionId: string;
   content: string;
+  /**
+   * The session's actual last-modified time (ISO 8601), sourced by the caller
+   * from the session JSONL's on-disk mtime — NOT the index-write wall clock.
+   * The search UI renders this as the conversation's timestamp, so index-time
+   * would wrongly show old sessions as "just now" after a reindex/rebuild.
+   */
   timestamp: string;
   sessionKind: SessionKind;
   routineId?: string;
@@ -85,6 +120,21 @@ export interface SessionSearchIndexHit {
 const DEFAULT_LIMIT = 50;
 /** FTS5 snippet context size in tokens (approximates the old ±100 char excerpt). */
 const SNIPPET_TOKENS = 20;
+/**
+ * SQLite FTS5's trigram tokenizer physically cannot MATCH a query of fewer than
+ * 3 Unicode code points (a trigram is 3 code points). This is the floor at
+ * which the fast index path stops working. A query of exactly 2 code points —
+ * which for a CJK-first product is the single most common query shape (`매출`,
+ * `분기`, `회의`) — is served by the LIKE fallback below instead.
+ */
+const TRIGRAM_MIN_CODEPOINTS = 3;
+/** ESCAPE character for the LIKE fallback so a query's own `%`/`_` stay literal. */
+const LIKE_ESCAPE = "\\";
+
+/** Counts Unicode CODE POINTS (not UTF-16 units) — a Korean syllable is 1. */
+export function codePointLength(s: string): number {
+  return [...s].length;
+}
 
 /**
  * Escapes a raw user query into an FTS5 phrase (`"..."`) so operators like
@@ -94,6 +144,36 @@ const SNIPPET_TOKENS = 20;
  */
 export function escapeFtsQuery(raw: string): string {
   return `"${raw.replace(/"/g, '""')}"`;
+}
+
+/** ± context chars for the LIKE-branch excerpt (mirrors the old ±100 scan window). */
+const LIKE_EXCERPT_RADIUS = 100;
+
+/**
+ * Builds a ±{@link LIKE_EXCERPT_RADIUS}-char excerpt of `content` centred on the
+ * first case-insensitive occurrence of `needle` (LIKE branch — `snippet()` is
+ * MATCH-only so it can't be used here). Mirrors the old linear-scan excerpt.
+ * Falls back to a head slice when the needle isn't located (shouldn't happen —
+ * the row already matched the LIKE — but keeps the return bounded).
+ */
+export function excerptAroundMatch(content: string, needle: string): string {
+  const idx = content.toLowerCase().indexOf(needle.toLowerCase());
+  if (idx < 0) return content.slice(0, LIKE_EXCERPT_RADIUS * 2);
+  const start = Math.max(0, idx - LIKE_EXCERPT_RADIUS);
+  const end = Math.min(content.length, idx + needle.length + LIKE_EXCERPT_RADIUS);
+  const core = content.slice(start, end);
+  return `${start > 0 ? "…" : ""}${core}${end < content.length ? "…" : ""}`;
+}
+
+/**
+ * Escapes a raw query into the RHS of a `content LIKE ? ESCAPE '\\'` predicate.
+ * The three LIKE metacharacters (`%`, `_`, and the escape char itself) are
+ * prefixed with the ESCAPE char so a query containing them matches them
+ * literally (e.g. searching for the literal string `50%` must not wildcard).
+ * The caller wraps the result in `%…%` for a substring match.
+ */
+export function escapeLikePattern(raw: string): string {
+  return raw.replace(/[\\%_]/g, (ch) => `${LIKE_ESCAPE}${ch}`);
 }
 
 function ensureDirSync(dir: string): void {
@@ -174,8 +254,17 @@ export class SessionSearchIndex {
       this.db = db;
       try {
         chmodSync(this.dbPath, FILE_MODE);
-      } catch {
-        /* best effort — Windows ignores mode bits; pre-existing file may already be correct */
+      } catch (chmodErr) {
+        // Stays best-effort/non-fatal (Windows ignores mode bits; a pre-existing
+        // file may already be correct) — but on POSIX a real chmod failure means
+        // the DB file may be world-readable, so emit a debug signal instead of
+        // fully swallowing it. Not a warn: this is not itself a functional break.
+        if (process.platform !== "win32") {
+          log.debug(
+            "chmod 0o600 on index.db failed (file may be world-readable): %s",
+            (chmodErr as Error).message,
+          );
+        }
       }
       return true;
     } catch (err) {
@@ -189,6 +278,19 @@ export class SessionSearchIndex {
         }
       }
       this.db = null;
+      // Test-env hardening: a native-addon LOAD failure (ABI mismatch, missing
+      // binary) must NOT be swallowed under vitest — that is exactly the silent
+      // 0-hit signal loss an Electron-ABI CI binary once caused. Re-throw so the
+      // suite fails at the binding instead of every query returning []. Runtime
+      // failures (corrupt file / bad PRAGMA on a loaded module) stay swallowed so
+      // the deleteFile→rebuild recovery path is still testable.
+      if (IS_TEST_ENV && isNativeLoadFailure(err)) {
+        throw new Error(
+          `better-sqlite3 native module failed to load (ABI mismatch?) — search index cannot open. ` +
+            `In CI this means the addon was built for the wrong runtime (e.g. Electron ABI under a node/bun test). ` +
+            `Original: ${(err as Error).message}`,
+        );
+      }
       return false;
     }
   }
@@ -245,30 +347,63 @@ export class SessionSearchIndex {
     }
   }
 
-  /** Drops and recreates the FTS table (used by `MemoryManager` rebuild). */
-  clear(): void {
-    if (!this.db) return;
-    try {
-      this.db.exec("DELETE FROM sessions_fts;");
-    } catch (err) {
-      log.warn("clear failed: %s", (err as Error).message);
-    }
-  }
-
   /**
-   * Runs a MATCH query against the FTS table. `rawQuery` is escaped into a
-   * literal FTS5 phrase (see {@link escapeFtsQuery}) so user input can never
-   * be interpreted as FTS operators. Scope filters (`kind`/`routineId`/
-   * `projectRoot`) are applied as SQL WHERE clauses over the UNINDEXED
-   * columns. Returns `[]` (never throws, never scans) on any failure.
+   * Runs a query against the FTS table. HYBRID by query length (Unicode code
+   * points), so a CJK-first product does not silently regress on its most
+   * common query shape:
+   *
+   *  - **3+ code points** → FTS5 `MATCH` on the trigram index (fast path).
+   *    `rawQuery` is escaped into a literal FTS5 phrase (see
+   *    {@link escapeFtsQuery}) so user input can never be parsed as FTS
+   *    operators.
+   *  - **exactly 2 code points** → `content LIKE '%'||?||'%' ESCAPE '\\'` on the
+   *    SAME `sessions_fts` table. The trigram tokenizer physically cannot MATCH
+   *    a 2-code-point query (a trigram is 3), but the old JSONL linear scan did
+   *    a raw 2-char substring match — so Korean 2-syllable queries (`매출`,
+   *    `분기`, `회의`) that the old search found would silently return [] under a
+   *    MATCH-only implementation. This is NOT the No-Fallback linear-scan revival
+   *    the module header forbids: it is a different QUERY FORM against the exact
+   *    same index table (no JSONL re-read, no second index), so a 2-char query
+   *    is answered from the index like every other query. ASCII case-folding
+   *    (old `toLowerCase()` parity) is done with `lower()` on both sides;
+   *    `lower()` is ASCII-only in stock SQLite, which is fine — Korean has no
+   *    case, and the old scan's `toLowerCase()` only ever changed ASCII too.
+   *  - **fewer than 2 code points** → never reaches here (guarded upstream in
+   *    `MemoryManager.searchSessions`); returns [] defensively if it does.
+   *
+   * Scope filters (`kind`/`routineId`/`projectRoot`) are applied identically as
+   * SQL WHERE clauses over the UNINDEXED columns in both branches. Returns `[]`
+   * (never throws, never scans JSONL) on any failure.
    */
   query(rawQuery: string, options: SessionSearchIndexQueryOptions = {}): SessionSearchIndexHit[] {
     if (!this.db) return [];
+    const trimmed = rawQuery.trim();
+    const cpLen = codePointLength(trimmed);
+    if (cpLen < 2) return [];
     try {
       const kind = options.kind ?? "main";
       const limit = options.limit ?? DEFAULT_LIMIT;
-      const clauses = ["sessions_fts MATCH ?"];
-      const params: unknown[] = [escapeFtsQuery(rawQuery)];
+      const useLike = cpLen < TRIGRAM_MIN_CODEPOINTS; // exactly 2 code points
+
+      const clauses: string[] = [];
+      const params: unknown[] = [];
+      // Match predicate + the excerpt expression differ per branch; scope
+      // clauses that follow are identical.
+      let matchedMessageExpr: string;
+      if (useLike) {
+        // Substring match on content, case-insensitive for ASCII (lower()).
+        clauses.push("lower(content) LIKE lower(?) ESCAPE ?");
+        params.push(`%${escapeLikePattern(trimmed)}%`, LIKE_ESCAPE);
+        // snippet() is MATCH-only; for the LIKE branch return the raw content
+        // (caller/UI already truncates for display, and the JS excerpt below
+        // trims it centred on the match).
+        matchedMessageExpr = "content";
+      } else {
+        clauses.push("sessions_fts MATCH ?");
+        params.push(escapeFtsQuery(trimmed));
+        matchedMessageExpr = `snippet(sessions_fts, 1, '', '', '…', ${SNIPPET_TOKENS})`;
+      }
+
       if (kind !== "all") {
         clauses.push("sessionKind = ?");
         params.push(kind);
@@ -288,7 +423,7 @@ export class SessionSearchIndex {
       }
       const sql = `
         SELECT sessionId, title, timestamp, sessionKind,
-               snippet(sessions_fts, 1, '', '', '…', ${SNIPPET_TOKENS}) as matchedMessage
+               ${matchedMessageExpr} as matchedMessage
         FROM sessions_fts
         WHERE ${clauses.join(" AND ")}
         LIMIT ?
@@ -304,7 +439,9 @@ export class SessionSearchIndex {
       return rows.map((row) => ({
         sessionId: row.sessionId,
         ...(row.title ? { title: row.title } : {}),
-        matchedMessage: row.matchedMessage,
+        matchedMessage: useLike
+          ? excerptAroundMatch(row.matchedMessage, trimmed)
+          : row.matchedMessage,
         timestamp: row.timestamp,
         sessionKind: row.sessionKind,
       }));
