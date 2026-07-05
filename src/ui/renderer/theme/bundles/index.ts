@@ -81,10 +81,12 @@ export function findBundle(id: string): ThemeBundle | undefined {
   return BUNDLES.find((b) => b.id === id);
 }
 
-function requireBundle(id: BundleId): ThemeBundle {
+type ThemeBundleFor<T extends BundleId> = ThemeBundle & { id: T };
+
+function requireBundle<T extends BundleId>(id: T): ThemeBundleFor<T> {
   const bundle = findBundle(id);
   if (!bundle) throw new Error(`Missing theme bundle metadata: ${id}`);
-  return bundle;
+  return bundle as ThemeBundleFor<T>;
 }
 
 export const DEFAULT_VISIBLE_BUNDLES = DEFAULT_VISIBLE_THEME_BUNDLE_IDS.map(
@@ -96,7 +98,7 @@ export const MARKETPLACE_THEME_BUNDLES = MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS.m
 );
 
 export function visibleBundlesFor(currentBundleIds: readonly string[] = []): ThemeBundle[] {
-  const visible = [...DEFAULT_VISIBLE_BUNDLES];
+  const visible: ThemeBundle[] = [...DEFAULT_VISIBLE_BUNDLES];
   for (const bundleId of currentBundleIds) {
     const bundle = findBundle(bundleId);
     if (!bundle) continue;

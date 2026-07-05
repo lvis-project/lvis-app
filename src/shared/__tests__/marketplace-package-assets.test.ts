@@ -46,4 +46,23 @@ describe("marketplace package assets", () => {
     expect(parseMarketplacePackageAsset({ type: "language-pack", locale: "it" }))
       .toBeUndefined();
   });
+
+  it("rejects default-surface ids at the marketplace catalog boundary", () => {
+    expect(assetFromMarketplacePackageSpec("provider", "provider:openai"))
+      .toBeUndefined();
+    expect(assetFromMarketplacePackageSpec("provider", "provider:openrouter"))
+      .toBeUndefined();
+    expect(assetFromMarketplacePackageSpec("theme", "theme:moonstone"))
+      .toBeUndefined();
+    expect(assetFromMarketplacePackageSpec("theme", "theme:gallery"))
+      .toBeUndefined();
+    expect(assetFromMarketplacePackageSpec("language-pack", "language-pack:en"))
+      .toBeUndefined();
+    expect(parseMarketplacePackageAsset({ type: "provider", provider_id: "openai" }))
+      .toBeUndefined();
+    expect(parseMarketplacePackageAsset({ type: "theme", bundle_id: "moonstone" }))
+      .toBeUndefined();
+    expect(parseMarketplacePackageAsset({ type: "language-pack", locale: "en" }))
+      .toBeUndefined();
+  });
 });
