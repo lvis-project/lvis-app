@@ -36,6 +36,24 @@ function vendorBaseUrlSignature(llm: LLMSettings): string {
     .join("|");
 }
 
+/**
+ * #1498 — network-unreachable classification for the `sandbox-preparing`
+ * failure path. Same detection regex as `classifyProviderError`'s
+ * `"network"` category (`src/engine/llm/error-classifier.ts`) — reused
+ * rather than re-derived so the two call sites can't drift on what counts
+ * as "unreachable".
+ *
+ * Scoped to `azure-foundry` at the call site (not here): it is currently
+ * the only demo vendor with an internal-network-only endpoint, so it's the
+ * only vendor whose rewire failure is plausibly "VPN not connected" rather
+ * than a genuine configuration/credential problem. Other vendors keep the
+ * existing `reviewer-rewire-failed` code.
+ */
+function isEndpointUnreachableError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /fetch|econnrefused|enotfound|etimedout|timeout/i.test(message);
+}
+
 const log = createLogger("auth-ipc");
 
 const DEFAULT_DEMO_USER = "demo";
@@ -324,6 +342,18 @@ export function registerAuthHandlers(deps: IpcDeps): void {
         }
         deps.conversationLoop?.refreshProvider?.();
         deps.refreshActiveLlmWildcard?.();
+        // #1498 — Azure Foundry's endpoint is internal-network-only (the
+        // whole embedded-activation safety model depends on that boundary).
+        // A relaunch that still can't reach it (VPN/intranet not connected)
+        // previously surfaced as the generic `reviewer-rewire-failed`,
+        // which gave the user no actionable signal. The renderer already
+        // has a Korean "check your VPN" mapping for `endpoint-unreachable`
+        // (LoginModalConversational's `errorMessage`) — it just never had a
+        // producer. Scoped to azure-foundry: other vendors' rewire
+        // failures are not plausibly a network-boundary issue.
+        if (vendor === "azure-foundry" && isEndpointUnreachableError(err)) {
+          return { ok: false, error: "endpoint-unreachable" };
+        }
         return { ok: false, error: "reviewer-rewire-failed" };
       }
       deps.conversationLoop?.refreshProvider?.();
