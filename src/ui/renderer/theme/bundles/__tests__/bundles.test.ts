@@ -11,6 +11,7 @@ import {
   DEFAULT_VISIBLE_THEME_BUNDLE_IDS,
   MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS,
   isDefaultVisibleThemeBundleId,
+  isMarketplaceEligibleThemeBundleId,
 } from "../../../../../shared/theme-bundles.js";
 import type { BundleTokens } from "../types.js";
 
@@ -83,6 +84,9 @@ describe("bundle registry", () => {
     expect(MARKETPLACE_THEME_BUNDLES.map((bundle) => bundle.id)).not.toContain("gallery");
     expect(isDefaultVisibleThemeBundleId("moonstone")).toBe(true);
     expect(isDefaultVisibleThemeBundleId("tokyo-night")).toBe(false);
+    expect(isMarketplaceEligibleThemeBundleId("tokyo-night")).toBe(true);
+    expect(isMarketplaceEligibleThemeBundleId("moonstone")).toBe(false);
+    expect(isMarketplaceEligibleThemeBundleId("missing-theme")).toBe(false);
   });
 
   it("keeps a legacy marketplace-candidate theme visible when selected", () => {
