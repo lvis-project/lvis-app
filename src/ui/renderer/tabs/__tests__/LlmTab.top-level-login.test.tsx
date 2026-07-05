@@ -13,7 +13,7 @@
  */
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { LlmTab, type FallbackEntry } from "../LlmTab.js";
 import { ALL_VENDORS, VENDORS } from "../../constants.js";
@@ -158,6 +158,28 @@ describe("LlmTab — top-level login toggle UI", () => {
 
     expect(screen.getAllByText("Groq").length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText("DeepSeek")).toBeNull();
+  });
+
+  it("shows marketplace-installed providers even when they are not selected", async () => {
+    const api = llmTabApi();
+    (api.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      marketplace: {
+        installedProviderIds: ["groq"],
+      },
+    });
+    const { container } = render(<Harness initialAuthMode="manual" initialVendor="openai" api={api} />);
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    const vendorTrigger = container.querySelector("#vendor-select") as HTMLElement | null;
+    expect(vendorTrigger).not.toBeNull();
+
+    fireEvent.mouseDown(vendorTrigger!);
+    fireEvent.keyDown(vendorTrigger!, { key: "ArrowDown" });
+
+    const search = await screen.findByTestId("llm-tab:vendor-search");
+    fireEvent.change(search, { target: { value: "groq" } });
+
+    expect(screen.getByText("Groq")).toBeInTheDocument();
   });
 
   it("host-resolver map textarea is disabled in login mode", () => {

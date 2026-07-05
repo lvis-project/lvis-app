@@ -7,6 +7,8 @@ import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../mcp/types.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
+import type { LLMVendor } from "../../shared/llm-vendor-defaults.js";
+import type { BundleId } from "../../shared/theme-bundles.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { RolePreset } from "../../data/role-presets.js";
 import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
@@ -16,6 +18,7 @@ import type {
   AssistantSkillSummary,
   MarketplacePackageType,
 } from "../../shared/assistant-context.js";
+import type { MarketplacePackageAsset } from "../../shared/marketplace-package-assets.js";
 import type {
   AssistantContextMenuAction,
   AssistantContextMenuPayload,
@@ -59,6 +62,7 @@ export type MarketplaceItem = {
    */
   installPolicy?: "admin" | "user";
   pluginType?: MarketplacePackageType;
+  packageAsset?: MarketplacePackageAsset;
   mcpAuth?: {
     mode: "none" | "api-key" | "sso" | "oauth";
     transport?: "stdio" | "http";
@@ -194,6 +198,12 @@ export type AppSettings = {
     dismissedAnnouncementIds?: number[];
     /** Plugin update versions skipped until the marketplace publishes a newer version. */
     skippedPluginUpdates?: Record<string, string>;
+    /** Marketplace-installed provider packages visible in the LLM picker. */
+    installedProviderIds?: LLMVendor[];
+    /** Marketplace-installed theme bundles visible in Appearance. */
+    installedThemeBundleIds?: BundleId[];
+    /** Marketplace-installed language packs visible in Appearance. */
+    installedLanguagePacks?: Locale[];
   };
   updates?: {
     autoCheckEnabled?: boolean;
