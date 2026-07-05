@@ -1,20 +1,7 @@
-/**
- * ReasoningSlider — compact reasoning control for the composer status sub-row
- * (between the vendor·model cell and the online-status dot).
- *
- * The status row shows only a small TRIGGER (lightbulb + level + chevron). Clicking
- * it opens a popover that holds the actual 4-step slider — the row stays
- * uncluttered and the slider has room to be usable.
- *
- *   0 = 없음  (thinking off)
- *   1 = 낮음  (thinking on, 4k budget)
- *   2 = 중간  (thinking on, 10k budget)
- *   3 = 높음  (thinking on, 24k budget)
- *
- * On/off is host-owned (`enabled` / `onToggle`, persisted per-vendor). Depth is
- * self-contained: this reads/writes the active vendor's `thinkingBudgetTokens`
- * through the renderer api — the same self-contained pattern ThinkingButton used.
- */
+
+
+
+
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, Lightbulb } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";

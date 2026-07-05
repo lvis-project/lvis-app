@@ -58,7 +58,7 @@
   try {
     entry = await window.lvisPlugin.getEntryUrl();
   } catch (err) {
-    root.textContent = "[lvis] entry 조회 실패: " + (err?.message ?? String(err));
+    root.textContent = "[lvis] entry lookup failed: " + (err?.message ?? String(err));
     return;
   }
   // Pre-paint theme tokens BEFORE the plugin module loads. This is
@@ -100,14 +100,14 @@
       mod.default?.mount ??
       (typeof mod.default === "function" ? mod.default : null);
     if (typeof mountFn !== "function") {
-      throw new Error("플러그인 모듈에서 mount 함수를 찾을 수 없습니다.");
+      throw new Error("Plugin module does not export a mount function.");
     }
     await mountFn({ root, bridge: window.lvisPlugin });
   } catch (err) {
     root.style.color = "red";
     root.style.padding = "8px";
     root.style.fontSize = "12px";
-    root.textContent = "[lvis] Plugin UI 로딩 실패: " + (err?.message ?? String(err));
+    root.textContent = "[lvis] Plugin UI failed to load: " + (err?.message ?? String(err));
     console.error("[lvis:plugin-shell] mount failed", err);
   }
 })();

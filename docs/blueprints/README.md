@@ -1,38 +1,39 @@
-# Blueprints (역사적 Phase 아카이브)
+# Blueprints
 
-이 디렉토리의 문서는 LVIS 호스트 앱의 **과거 Phase 계획·종결 보고서·설계 제안** 입니다. 파일명에 `phase[N]-` / `autopilot-phase[N]-` / `track-[a|b]-closure-report` 같은 process-derived 접두사가 들어 있지만, 이는 의도된 *역사적 기록* 표기입니다 — 새 식별자 네이밍 룰(`feedback_naming_process_metadata.md`) 의 sweep 대상에서 명시적으로 제외됩니다.
+Status: Active English default. The Korean archive keeps earlier review history and original discussion, but this page must be usable on its own.
 
-## 현재 아키텍처는 어디에 있나
+Korean archive: [docs/ko mirror](../ko/blueprints/README.md).
 
-- 라이브 아키텍처 SOT: [`../architecture/architecture.md`](../architecture/architecture.md) (v4 Final)
-- 영역별 설계 문서: [`../architecture/`](../architecture/) (permission-policy-design, plugin-deployment-model, …)
-- Reference: [`../references/`](../references/)
+## What This Page Owns
 
-## 여기 파일들의 성격
+This page owns the blueprint index and the status language for active, implemented, superseded, or historical plans. Use it as the first review surface when changing this area; use the archive for background, not as a substitute for current English guidance.
 
-| 패턴 | 의미 |
-|------|------|
-| `phase[N]-closure-report.md` | 해당 Phase 종료 시점의 결정/배포 상태 동결 기록 |
-| `autopilot-phase[N]-*.md` | 자동 실행 sub-system 의 Phase 별 진행 노트 |
-| `phase[N]-*-plan.md` | 과거 시점에 잡았던 단계별 실행 계획 — 일부는 그대로, 일부는 후속 PR 로 대체됨 |
-| `*-redesign-*.md` / `*-design.md` | 특정 시점의 design 제안 (P-state 명시) |
+## Current Operating Contract
 
-## 룰 / 가드
+- English is the default review and contributor language for this app surface.
+- The document must name the behavior that still matters today, the code or test locations that enforce it, and the conditions that make the note stale.
+- Source files and tests are authoritative when this prose and implementation disagree.
+- Korean-only material stays in the mirrored archive unless it is translated or summarized here.
 
-- `feedback_naming_process_metadata.md` 의 process-metadata 식별자 sweep 은 **이 디렉토리 제외**.
-- `.github/workflows/naming-gate.yml` 의 grep 패턴에서 `docs/blueprints/` 가 명시적으로 skip 됩니다.
-- 새 phase-derived 파일을 추가하면 *역사적 기록* 의도가 명확해야 합니다. 살아있는 설계는 `docs/architecture/` 로.
+## Implementation Anchors
 
-## 인덱스 (작성 시점 순)
+- `docs/architecture/README.md`
+- `src/core/`
+- `src/ui/renderer/`
+- `src/plugins/`
 
-기록 순서는 git log 가 SOT. 빠른 lookup 만 제공:
+## Update Checklist
 
-- `autopilot-phase1-indexer.md` — 자동 인덱서 Phase 1 노트
-- `phase1.5-closure-report.md`
-- `phase2-track-b-closure-report.md`
-- `phase2-proper-marketplace-design.md`
-- `phase3-folder-refactor-plan.md`
-- `agent-hub-implementation-plan.md`
-- `composer-redesign-message-queue.md`
-- `composer-redesign-mockup.html`
-- `openharness-selective-borrow-plan.md`
+- State whether the document is active, implemented, superseded, or historical before adding new detail.
+- Keep links relative to the current file depth; mirrored files under `docs/ko` need different paths from default docs.
+- Add or update tests when a documented behavior is enforced by code.
+- Remove template language and stale plan wording instead of carrying it forward.
+
+## Related Entry Points
+
+- [LVIS Project Documentation](../README.md)
+- [Getting Started](../guides/getting-started.md)
+
+## Review Notes
+
+This English page should let a reviewer understand scope, risk, and validation without opening the Korean archive. If the archive contains rationale that still matters, translate the relevant part into this page and keep the archive link as provenance.

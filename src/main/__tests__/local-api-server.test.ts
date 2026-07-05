@@ -251,7 +251,7 @@ describe("local-api-server", () => {
       expect(buildExternalMutationApprover(undefined, () => {})).toBeUndefined();
     });
 
-    it("calls requestAndWait with category 'agent-action' + Korean reason; allow-once → true", async () => {
+    it("calls requestAndWait with category 'agent-action' + English reason; allow-once -> true", async () => {
       const requestAndWait = vi.fn(async () => ({ requestId: "r", choice: "allow-once" as const }));
       const approver = buildExternalMutationApprover(
         { requestAndWait } as unknown as ApprovalGate,
@@ -274,9 +274,9 @@ describe("local-api-server", () => {
       expect(req.toolCategory).toBe("meta");
       expect(req.trustOrigin).toBe("local-api");
       expect(req.args).toEqual({ mode: "auto" });
-      // Renderer-facing Korean reason (IPC-language convention).
+      // Renderer-facing English reason (global default-language convention).
       expect(typeof req.reason).toBe("string");
-      expect(req.reason as string).toMatch(/권한 모드/);
+      expect(req.reason as string).toMatch(/permission-mode change/);
       // The gate owns `requireExplicit` (derived from policy) — the caller must
       // NOT set it on the request (signature is Omit<ApprovalRequest,"requireExplicit">).
       expect(req.requireExplicit).toBeUndefined();

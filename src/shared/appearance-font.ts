@@ -27,19 +27,9 @@ export interface AppearanceFontSettings {
   sizeScale?: FontSizeScale;
 }
 
-/**
- * Allow Unicode letters/digits (Hangul, CJK, Latin, …), single space, commas,
- * hyphens, single/double quotes, and underscores in a user-supplied font-family
- * stack. The Unicode class is required because JS `\w` is ASCII-only — without
- * `\p{L}` Korean users typing `맑은 고딕, sans-serif` would be silently rejected
- * (PR #672 critic CRITICAL #3). Explicitly excludes every CSS injection
- * metachar (`;`, `{`, `}`, `(`, `)`, `:`, `<`, `>`, `\`, `` ` ``, `/`, `*`, `=`)
- * and embedded newlines/tabs (whitespace is narrowed to ASCII space) so the
- * value cannot break out of the `font-family` declaration.
- *
- * 200-char cap prevents a malicious or oversized settings.json from bloating
- * every CSS var lookup.
- */
+
+
+
 const _FONT_FAMILY_RE = /^[\p{L}\p{N} ,"'_-]+$/u;
 const _FONT_FAMILY_MAX = 200;
 

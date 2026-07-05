@@ -1,15 +1,7 @@
-/**
- * `ask_user_question` LLM tool — invites the assistant to surface 1–4
- * inline questions to the user before continuing. Renderer shows a single
- * AskUserQuestionCard that pages through every question, ends on a
- * confirmation step where the user can review answers, and returns all
- * responses at once. Blocks until the user confirms / dismisses or 5
- * minutes elapse.
- *
- * The conversation loop's per-turn AbortController flows in via
- * `ToolExecutionContext.abortSignal` so the user's 중단 button unblocks
- * the wait without sitting on the gate's timeout.
- */
+
+
+
+
 import { t } from "../i18n/index.js";
 import { createDynamicTool, type Tool } from "./base.js";
 import {

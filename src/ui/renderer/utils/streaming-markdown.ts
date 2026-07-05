@@ -5,7 +5,7 @@
 // `)` not yet emitted), the parser falls back to literal text — and remark-gfm
 // then autolinks the bare URL. The user sees:
 //
-//   [여기서 확인하세요](https://outlook.live.com/…%3D%3D&exvsurl=1&path=/calendar/item
+
 //
 // flash by as a giant base64-ish blob until the closing `)` arrives. For
 // long URLs (Microsoft Graph webLinks especially) this looks broken to a

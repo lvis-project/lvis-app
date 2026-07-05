@@ -20,24 +20,9 @@ interface Props {
    * Default is the full centered card.
    */
   compact?: boolean;
-  /**
-   * Optional reset hook — when provided, the fallback shows a "다시 시도"
-   * button that clears the boundary's error state and re-renders children.
-   * For inner boundaries this avoids the deterministic reload-into-same-crash
-   * loop where the fault is in the data the boundary's children depend on
-   * (e.g. stale plugin manifest still on disk after a reload). Caller can
-   * use this hook to ALSO clear the bad state (e.g. force a refresh of
-   * plugin cards, switch active view) before the retry happens.
-   *
-   * Receives the captured `Error` so callers can branch on error class
-   * (e.g. "manifest validation failed" → trigger plugin refresh; otherwise
-   * → just clear state). The error argument may be undefined if the
-   * boundary state was reset programmatically; callers can treat it as
-   * optional. onReset throwing is caught — see handleRetry.
-   *
-   * If `onReset` is omitted, the fallback only offers the full-window
-   * reload button (legacy behavior).
-   */
+
+
+
   onReset?: (error: Error | undefined) => void;
 }
 interface State { hasError: boolean; error: Error | undefined }

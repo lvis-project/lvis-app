@@ -1,9 +1,7 @@
-/**
- * Conversation History — §4.5.2 Step 3
- *
- * 인메모리 GenericMessage 배열 관리. LLM Provider에 전달되는 대화 이력.
- * 벤더 추상화: Anthropic.MessageParam 대신 GenericMessage 사용.
- */
+
+
+
+
 import type { GenericMessage } from "./llm/types.js";
 import { trimOversizedToolResult } from "../shared/tool-result-trim.js";
 

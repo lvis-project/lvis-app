@@ -1,23 +1,7 @@
-/**
- * Tool Executor — tool-governance.md §3 Single Choke Point
- *
- * 8-Step Pipeline (모든 도구 호출은 예외 없이 이 파이프라인을 통과):
- *
- * 1. Lookup       — ToolRegistry.findByName() + source/trust 확인
- * 2. PreHook      — HookRunner.preToolUse() — 입력 검사/변환
- * 3. Permission   — PermissionManager.checkDetailed(name, source, category, overlayTriggerOrigin)
- * 4. HookOverride — PreHook deny 결과 적용
- * 5. RateLimit    — Trust별 호출 빈도 제한
- * 6. Execute      — tool.execute(args)
- * 7. PostHook     — HookRunner.postToolUse() + DLP 검사
- * 8. Audit+Result — AuditLogger + 결과 반환
- *
- * 불변 규칙:
- * - 우회 불가: 모든 도구는 이 파이프라인을 거침
- * - 감사 필수: Step 8은 에러 시에도 항상 실행
- * - 순서 고정: 1→8 순차
- * - 실패 격리: Step 6 실패가 Step 8을 건너뛰지 않음
- */
+
+
+
+
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { resolve as pathResolve } from "node:path";
@@ -230,20 +214,13 @@ export interface ToolPermissionContext {
    * action before it can authorize anything.
    */
   explicitAuthorizationIntent?: string;
-  /**
-   * Invoked when the user selects "이번 1회만" (turn-scope grant) on an
-   * out-of-allowed-dir approval. The conversation loop is expected to
-   * remember `approvedDirectory` for the remaining tool calls inside the
-   * SAME `runTurn`, then drop it. Distinct from `onSessionDirectoryGrant`
-   * (whole conversation lifetime) and persisted rules (settings.json).
-   */
+
+
+
   onTurnDirectoryGrant?: (approvedDirectory: string) => void;
-  /**
-   * Invoked when the user selects "이번 세션 동안 허용" (session-scope
-   * grant). The conversation loop appends `approvedDirectory` to the
-   * session-wide allow list, surviving across user messages but cleared
-   * on `newConversation` / `loadSession`.
-   */
+
+
+
   onSessionDirectoryGrant?: (approvedDirectory: string) => void;
 }
 
@@ -609,17 +586,9 @@ export class ToolExecutor {
     );
   }
 
-  /** 복수 tool_use 순서 실행.
-   *
-   * `overlayTriggerOrigin` (예: `"overlay:meeting-detection"`) 가 set 이면
-   * 모든 write/shell/network 호출이 사용자 영구 승인을 우회해 ask 로 강제됨
-   * (PermissionManager.checkDetailed 의 새 가드). Overlay trigger가 자동
-   * 실행하는 destructive 작업 차단막.
-   *
-   * {@link ExecuteOptions} bundles pipeline concerns so adding a new
-   * concern doesn't ripple
-   * through every callsite.
-   */
+
+
+
   async executeAll(
     toolUses: ToolUseBlock[],
     opts: ExecuteOptions = {},
@@ -632,7 +601,7 @@ export class ToolExecutor {
     return results;
   }
 
-  /** 단일 도구 — 8단계 파이프라인 (Single Choke Point) */
+
   private async executeOne(
     toolUse: ToolUseBlock,
     groupId: string,
@@ -655,7 +624,7 @@ export class ToolExecutor {
     let source: ToolSource = "builtin";
     let trust: TrustLevel = "high";
 
-    // ── Step 1: Lookup + source/trust 확인 ──────────
+
     const tool = this.toolRegistry.findByName(toolUse.name);
     if (!tool) {
       const durationMs = Date.now() - startTime;
@@ -2187,14 +2156,14 @@ export class ToolExecutor {
       displayContent = dlpResult.masked;
       const dlpAuditInput = maskSensitiveData(JSON.stringify(finalInput)).masked;
       log.warn(
-        `민감 데이터 탐지 및 마스킹 — 도구: '${toolUse.name}', 패턴: ${dlpResult.detections.join(", ")}`,
+        `Sensitive data detected and masked — tool: '${toolUse.name}', patterns: ${dlpResult.detections.join(", ")}`,
       );
       this.auditLogger.log({
         timestamp: new Date().toISOString(),
         sessionId: sessionId ?? "unknown",
         type: "tool_call",
         input: dlpAuditInput.slice(0, 500),
-        output: `[DLP 마스킹 적용] 패턴: ${dlpResult.detections.join(", ")}`,
+          output: `[DLP masking applied] patterns: ${dlpResult.detections.join(", ")}`,
         toolCalls: [{
           name: toolUse.name,
           isError: false,
@@ -2202,7 +2171,7 @@ export class ToolExecutor {
           trust,
           executionTimeMs: Date.now() - startTime,
           permissionDecision: "dlp_masked",
-          permissionReason: `탐지된 패턴: ${dlpResult.detections.join(", ")}`,
+            permissionReason: `Detected patterns: ${dlpResult.detections.join(", ")}`,
         }],
       });
     }

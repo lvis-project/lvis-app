@@ -119,8 +119,8 @@ export interface SidebarProps {
 // their visual center sits at ≈y:22, ≈x:[18..76]). The floating card is anchored
 // at top-2 (8px) so the h-7 cluster strip's center lands on that line; the strip
 // carries a left clearance (≈76px) so its leftmost button starts at x≈84, just
-// RIGHT of the lights with no hover overlap. The cluster ([펼침/닫힘 toggle] →
-// [검색] → [즐겨찾기] → [내보내기]) is the card's top strip when expanded and pops
+
+
 // out bare in the band when collapsed.
 // Returns false when the preload bridge is absent (jsdom / Storybook / SSR) —
 // no native chrome to align against there.

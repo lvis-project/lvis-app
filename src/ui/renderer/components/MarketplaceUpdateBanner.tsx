@@ -13,16 +13,9 @@ import {
   hasNetworkAccessDisclosure,
 } from "../../../shared/network-access.js";
 
-/**
- * Renders a compact banner listing plugins with available updates.
- * Displayed at the top of the app when `marketplace:updates-available` fires.
- * Skipping persists the visible plugin versions until a newer version appears.
- *
- * "업데이트" button installs each pluginId in sequence via `onUpdate`
- * (the marketplace install endpoint replaces the existing version). After all
- * updates finish the banner clears locally; failures keep the banner visible
- * with the partial-failure message.
- */
+
+
+
 export function MarketplaceUpdateBanner({
   updates,
   onDismiss,

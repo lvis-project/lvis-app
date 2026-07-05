@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LVIS Settings Controls - shadcn Registry Baseline</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --background: #090b11;
+        --panel: #10141f;
+        --panel-2: #141a27;
+        --popover: #161d2a;
+        --foreground: #eef3ff;
+        --muted: #8b97aa;
+        --border: #293241;
+        --input: #202838;
+        --primary: #6ee7b7;
+        --primary-foreground: #04110d;
+        --accent: #91c9ff;
+        --warning: #f4c96a;
+        --radius: 8px;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          linear-gradient(180deg, rgba(20, 26, 39, 0.74), rgba(9, 11, 17, 0.92)),
+          var(--background);
+        color: var(--foreground);
+      }
+
+      main {
+        width: min(1180px, calc(100vw - 40px));
+        margin: 0 auto;
+        padding: 36px 0 44px;
+      }
+
+      header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 24px;
+        padding-bottom: 24px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 28px;
+        line-height: 1.15;
+        font-weight: 700;
+      }
+
+      h2 {
+        font-size: 15px;
+        line-height: 1.25;
+        font-weight: 650;
+      }
+
+      h3 {
+        font-size: 13px;
+        line-height: 1.2;
+        font-weight: 650;
+      }
+
+      p,
+      li {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      code {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: #0b0f17;
+        color: #dce7ff;
+        padding: 2px 6px;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 12px;
+      }
+
+      .badge-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      .badge {
+        border: 1px solid rgba(110, 231, 183, 0.36);
+        border-radius: 999px;
+        background: rgba(110, 231, 183, 0.1);
+        color: #c8f8e6;
+        padding: 5px 10px;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 230px minmax(0, 1fr);
+        gap: 18px;
+        padding-top: 24px;
+      }
+
+      .sidebar,
+      .surface,
+      .note {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: rgba(16, 20, 31, 0.92);
+      }
+
+      .sidebar {
+        padding: 12px;
+        align-self: start;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 34px;
+        border-radius: 7px;
+        padding: 0 10px;
+        color: #dce7ff;
+        font-size: 13px;
+      }
+
+      .nav-item.active {
+        background: rgba(110, 231, 183, 0.12);
+        color: #f7fffb;
+      }
+
+      .nav-count {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .surface {
+        overflow: hidden;
+      }
+
+      .surface-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        border-bottom: 1px solid var(--border);
+        padding: 18px 20px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        padding: 18px;
+      }
+
+      .panel {
+        min-height: 214px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--panel-2);
+        padding: 16px;
+      }
+
+      .panel-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+
+      .primitive {
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .field {
+        display: grid;
+        gap: 7px;
+        margin-top: 12px;
+      }
+
+      .field-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 38px;
+      }
+
+      label,
+      .label {
+        color: #dce7ff;
+        font-size: 13px;
+        font-weight: 580;
+      }
+
+      .hint {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .select-trigger,
+      .native-select {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-width: 180px;
+        height: 34px;
+        border: 1px solid var(--input);
+        border-radius: 8px;
+        background: rgba(32, 40, 56, 0.62);
+        color: var(--foreground);
+        padding: 0 10px;
+        font-size: 13px;
+      }
+
+      .native-select {
+        appearance: none;
+      }
+
+      .select-menu {
+        margin-top: 8px;
+        width: 218px;
+        border: 1px solid rgba(238, 243, 255, 0.12);
+        border-radius: 8px;
+        background: var(--popover);
+        box-shadow: 0 20px 48px rgba(0, 0, 0, 0.36);
+        padding: 6px;
+      }
+
+      .select-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 30px;
+        border-radius: 6px;
+        padding: 0 8px;
+        color: #dce7ff;
+        font-size: 13px;
+      }
+
+      .select-item.active {
+        background: rgba(145, 201, 255, 0.14);
+        color: #f3f8ff;
+      }
+
+      .checkbox,
+      .radio {
+        display: inline-grid;
+        place-items: center;
+        flex: 0 0 auto;
+        width: 16px;
+        height: 16px;
+        border: 1px solid var(--input);
+        background: rgba(32, 40, 56, 0.7);
+      }
+
+      .checkbox {
+        border-radius: 4px;
+      }
+
+      .checkbox.checked {
+        border-color: var(--primary);
+        background: var(--primary);
+        color: var(--primary-foreground);
+      }
+
+      .radio {
+        border-radius: 50%;
+      }
+
+      .radio.checked::after {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--primary);
+        content: "";
+      }
+
+      .checkmark {
+        width: 8px;
+        height: 5px;
+        border-left: 2px solid currentColor;
+        border-bottom: 2px solid currentColor;
+        transform: rotate(-45deg) translate(1px, -1px);
+      }
+
+      .option-row {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 30px;
+      }
+
+      .switch {
+        position: relative;
+        width: 32px;
+        height: 18px;
+        border-radius: 999px;
+        background: var(--primary);
+      }
+
+      .switch::after {
+        position: absolute;
+        top: 1px;
+        right: 1px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--background);
+        content: "";
+      }
+
+      .switch.off {
+        background: var(--input);
+      }
+
+      .switch.off::after {
+        right: auto;
+        left: 1px;
+        background: #dce7ff;
+      }
+
+      .slider {
+        position: relative;
+        display: flex;
+        align-items: center;
+        width: 100%;
+        height: 22px;
+      }
+
+      .slider-track {
+        width: 100%;
+        height: 4px;
+        border-radius: 999px;
+        background: #273143;
+        overflow: hidden;
+      }
+
+      .slider-range {
+        width: 62%;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--primary);
+      }
+
+      .slider-thumb {
+        position: absolute;
+        left: calc(62% - 6px);
+        width: 12px;
+        height: 12px;
+        border: 1px solid #9fd7ff;
+        border-radius: 50%;
+        background: #ffffff;
+        box-shadow: 0 0 0 6px rgba(145, 201, 255, 0.1);
+      }
+
+      .note {
+        margin-top: 18px;
+        padding: 16px 18px;
+      }
+
+      .note ul {
+        margin: 10px 0 0;
+        padding-left: 18px;
+      }
+
+      @media (max-width: 840px) {
+        main {
+          width: min(100vw - 24px, 720px);
+          padding-top: 24px;
+        }
+
+        header,
+        .surface-header,
+        .field-row {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .badge-row {
+          justify-content: flex-start;
+        }
+
+        .layout,
+        .grid {
+          grid-template-columns: 1fr;
+        }
+
+        .select-trigger,
+        .native-select,
+        .select-menu {
+          width: 100%;
+          min-width: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Settings controls registry baseline</h1>
+          <p>
+            Canonical visual board for PR #708. The production renderer should
+            compose these shadcn registry primitives from
+            <code>src/components/ui/</code>.
+          </p>
+        </div>
+        <div class="badge-row" aria-label="Verification notes">
+          <span class="badge">shadcn registry</span>
+          <span class="badge">Radix-backed</span>
+          <span class="badge">semantic tokens</span>
+        </div>
+      </header>
+
+      <section class="layout" aria-label="Settings control examples">
+        <aside class="sidebar">
+          <div class="nav-item active"><span>LLM</span><span class="nav-count">4</span></div>
+          <div class="nav-item"><span>Permissions</span><span class="nav-count">6</span></div>
+          <div class="nav-item"><span>Chat</span><span class="nav-count">3</span></div>
+          <div class="nav-item"><span>Marketplace</span><span class="nav-count">2</span></div>
+          <div class="nav-item"><span>Appearance</span><span class="nav-count">2</span></div>
+        </aside>
+
+        <div>
+          <section class="surface">
+            <div class="surface-header">
+              <div>
+                <h2>Renderer settings controls</h2>
+                <p>
+                  The board mirrors high-traffic settings surfaces so reviewers
+                  can see the expected control layer without launching Electron.
+                </p>
+              </div>
+              <code>components.json</code>
+            </div>
+
+            <div class="grid">
+              <article class="panel">
+                <div class="panel-title">
+                  <h3>Provider selection</h3>
+                  <span class="primitive">Select</span>
+                </div>
+                <div class="field">
+                  <label>Primary vendor</label>
+                  <div class="select-trigger" role="button" aria-expanded="true">
+                    <span>OpenAI</span><span>v</span>
+                  </div>
+                  <div class="select-menu" role="listbox">
+                    <div class="select-item active"><span>OpenAI</span><span>✓</span></div>
+                    <div class="select-item"><span>Anthropic</span></div>
+                    <div class="select-item"><span>Google</span></div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-title">
+                  <h3>Reviewer policy</h3>
+                  <span class="primitive">Checkbox / RadioGroup</span>
+                </div>
+                <div class="field">
+                  <div class="option-row">
+                    <span class="checkbox checked" aria-hidden="true"><span class="checkmark"></span></span>
+                    <span class="label">Require explicit approval</span>
+                  </div>
+                  <p class="hint">Checked state, focus ring, and disabled behavior come from the shared primitive.</p>
+                </div>
+                <div class="field">
+                  <div class="option-row">
+                    <span class="radio checked" aria-hidden="true"></span>
+                    <span class="label">Ask on medium risk</span>
+                  </div>
+                  <div class="option-row">
+                    <span class="radio" aria-hidden="true"></span>
+                    <span class="label">Auto-approve low risk</span>
+                  </div>
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-title">
+                  <h3>Reasoning budget</h3>
+                  <span class="primitive">Switch / Slider</span>
+                </div>
+                <div class="field-row">
+                  <div>
+                    <span class="label">Enable reasoning control</span>
+                    <p class="hint">Immediate on/off setting uses Switch.</p>
+                  </div>
+                  <span class="switch" aria-hidden="true"></span>
+                </div>
+                <div class="field">
+                  <label>Reviewer budget</label>
+                  <div class="slider" aria-hidden="true">
+                    <div class="slider-track"><div class="slider-range"></div></div>
+                    <span class="slider-thumb"></span>
+                  </div>
+                  <p class="hint">Numeric tuning uses the shared Slider primitive.</p>
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-title">
+                  <h3>Dense native choices</h3>
+                  <span class="primitive">NativeSelect</span>
+                </div>
+                <div class="field">
+                  <label>Audit filter</label>
+                  <select class="native-select" aria-label="Audit filter">
+                    <option>All events</option>
+                    <option>Approval decisions</option>
+                    <option>Blocked actions</option>
+                  </select>
+                  <p class="hint">
+                    NativeSelect is still canonical when compact platform
+                    behavior is the desired UI.
+                  </p>
+                </div>
+                <div class="field-row">
+                  <div>
+                    <span class="label">Follow system appearance</span>
+                    <p class="hint">Small binary setting in Appearance.</p>
+                  </div>
+                  <span class="switch off" aria-hidden="true"></span>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="note">
+            <h2>Review contract</h2>
+            <ul>
+              <li>Feature tabs own layout and behavior, not primitive styling.</li>
+              <li>Controls import from <code>src/components/ui/*</code>.</li>
+              <li>No local checkbox/select/switch/range/radio wrapper should reappear in renderer UI.</li>
+            </ul>
+          </section>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

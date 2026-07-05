@@ -713,14 +713,14 @@ export function createHostApiFactory(
       spawnWorker: (workerSpec) => {
         return spawnWorker({ ...workerSpec, pluginId });
       },
-      // ─── §B3 외부 URL viewer + host public preference read ────────────
-      // openExternalUrl: Settings → webView.preferredFlow 토글에 따라
+      // ─── §B3 External URL viewer + host public preference read ─────────
+      // openExternalUrl: follows the Settings → webView.preferredFlow toggle:
       //   "in-app"  → light BrowserWindow (link-window-service)
       //   "system-browser" → shell.openExternal
-      // 매 호출마다 settingsService 에서 다시 읽어 live update 반영.
+      // Reads from settingsService on every call so live updates are reflected.
       //
-      // getAppPreference: HOST_PUBLIC_PREFERENCE_KEYS allowlist 만 read 허용.
-      //   거부된 key 는 throw 하지 않고 undefined 반환 + 1회/key/session warn.
+      // getAppPreference: only HOST_PUBLIC_PREFERENCE_KEYS allowlist reads are allowed.
+      //   Denied keys return undefined instead of throwing and warn once per key/session.
       openExternalUrl: async (url: string): Promise<void> => {
         await routeExternalUrl({
           url,
@@ -734,12 +734,13 @@ export function createHostApiFactory(
       getAppPreference: <T = unknown>(key: string): T | undefined => {
         return readAppPreference(pluginId, key) as T | undefined;
       },
-      // ─── 외부 포털 interactive 인증 (쿠키 수집) ───────────────────
-      // `external-auth-consumer` capability 로 게이팅 — 쿠키는 민감 자산이므로
-      // 선언적 opt-in 없이는 호출 거부. 거부/허용 모두 AuditLogger 에 남긴다.
+      // ─── External portal interactive auth (cookie collection) ──────────
+      // Gated by the `external-auth-consumer` capability. Cookies are sensitive
+      // assets, so calls are rejected without declarative opt-in. Both denial
+      // and approval are recorded in AuditLogger.
       //
-      // 로그에는 origin + path 만 기록 — SAML/OAuth URL 에 담기는 민감 query
-      // (SAMLRequest, code, state, session id 등) 은 유출 방지 위해 제외.
+      // Logs record only origin + path. Sensitive SAML/OAuth query values
+      // (SAMLRequest, code, state, session id, etc.) are excluded to avoid leaks.
       openAuthWindow: (async (opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean }) => {
         const safeUrlForLog = (() => {
           try {
@@ -779,15 +780,15 @@ export function createHostApiFactory(
           });
         } catch { /* audit must not break host */ }
 
-        // 기본값은 plugin 별 비영속 partition. Electron 의 default session 을
-        // 쓰면 (a) 여러 BrowserWindow 간 쿠키가 공유되어 타 플러그인이
-        // 수집한 세션을 그대로 볼 수 있고 (b) 디스크에 영속화된다. 둘 다
-        // openAuthWindow 의 "호스트는 세션을 보관하지 않는다" 원칙 위반.
+        // Default to a per-plugin non-persistent partition. Using Electron's default
+        // session would (a) share cookies across BrowserWindow instances so other
+        // plugins could observe captured sessions, and (b) persist them to disk.
+        // Both violate openAuthWindow's "the host does not retain sessions" principle.
         //
-        // 플러그인이 명시적으로 지정한 persistPartition 은 반드시 자기
-        // 네임스페이스(`persist:plugin-auth:<pluginId>` 또는 그 하위 `:<sub>`)
-        // 여야 한다. 그렇지 않으면 plugin A 가 `plugin-auth:pluginB` 를 지정해
-        // plugin B 의 쿠키를 읽어가는 cross-plugin exfiltration 경로가 열린다.
+        // An explicitly requested persistPartition must stay inside the plugin's
+        // own namespace (`persist:plugin-auth:<pluginId>` or a `:<sub>` beneath it).
+        // Otherwise plugin A could request `plugin-auth:pluginB` and open a
+        // cross-plugin cookie exfiltration path.
         const encodedId = encodeURIComponent(pluginId);
         const defaultPartition = `plugin-auth:${encodedId}`;
         const allowedPersistBase = `persist:${defaultPartition}`;

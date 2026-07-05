@@ -1,50 +1,7 @@
-/**
- * IdleScheduler — 5-state 머신 + powerMonitor + P0~P4 우선순위 큐
- *
- * 청사진 §6.1 R5: LVIS idle/backoff scheduling model.
- * Document-indexer plugin idle-scheduler interface와 호환.
- *
- * ## 5-state 머신
- *   RUNNING        — 사용자 활동 중. 큐만 적재, 인덱싱 미실행.
- *   IDLE_SCAN      — 모든 idle 조건 충족. 큐 처리 진행.
- *   THROTTLED      — keystroke 감지. 인덱싱 느리게 (2000ms cooldown).
- *   PAUSED         — suspend/thermal critical/저배터리. 완전 정지.
- *   RESUME_DELAY   — resume 후 90초 대기, 이후 RUNNING 복귀 → 조건 재평가.
- *
- * ## 진입 조건 (→ IDLE_SCAN)
- *   - powerMonitor.getSystemIdleTime() ≥ 60s
- *   - CPU 5분 EMA < 40%
- *   - 마지막 대화 ≥ 30s 경과
- *   - onAC OR battery > 50%
- *
- * ## 종료 조건
- *   - keystroke 감지 → THROTTLED
- *   - 조건 미충족 → RUNNING
- *   - suspend/thermal-critical → PAUSED
- *
- * ## 우선순위 큐
- *   P0: 방금 연 문서 (real-time)
- *   P1: 최근 7일 접근 (real-time)
- *   P2: 중요 태그/파일 변경 감지 (FolderAutoIndexer 기본)
- *   P3: 배경 변경 감지
- *   P4: orphan cleanup (batch)
- *
- * ## Integration
- *   1. boot.ts: new IdleSchedulerService({ powerMonitor });   // workerClient optional
- *   2. boot.ts: idleScheduler.start();
- *   3. conversation-loop.ts runTurn() 말미: idleScheduler.signalConversation();
- *   4. preference-refresh-service: idleScheduler.addStateChangeListener(...) on IDLE_SCAN.
- *
- * The optional `workerClient` powered an indexing-defer queue (drain index
- * jobs during IDLE_SCAN). The local-indexer plugin now indexes eagerly in its
- * background worker process, so boot.ts constructs the scheduler without a
- * workerClient and the queue stays dormant; the remaining consumers use only
- * the idle-state machine (powerMonitor + signalConversation + state listeners).
- *
- * ## Testability
- *   powerMonitor는 IdleSchedulerOptions.powerMonitor로 주입받아 mock 가능.
- *   Electron runtime 외에서도 테스트할 수 있음.
- */
+
+
+
+
 
 import * as os from "node:os";
 import { clearIntervalSafe, clearTimeoutSafe } from "../lib/clear-timer.js";
@@ -62,7 +19,7 @@ export type IdleState =
 
 export type Priority = 0 | 1 | 2 | 3 | 4;
 
-/** Agent 4의 IdleSchedulerStub 인터페이스와 호환되는 job shape */
+
 export interface IndexJob {
   filePath: string;
   mode: string; // "auto" | "pdf" | "md" | "docx" | "pptx" | "xlsx" | "txt" | "html"
@@ -70,7 +27,7 @@ export interface IndexJob {
   enqueuedAt?: number;
 }
 
-/** WorkerClient의 최소 구독 서브셋 — 실제 인스턴스는 `Pick`으로 대입 가능 */
+
 export interface WorkerClientLite {
   enqueue(
     filePath: string,
@@ -88,26 +45,21 @@ export interface WorkerClientLite {
   }>;
 }
 
-/**
- * powerMonitor 인터페이스 — Electron electron.powerMonitor를 주입하거나
- * 테스트에서 FakePowerMonitor를 주입할 수 있도록 분리.
- *
- * `removeListener` / `off` are declared optional so callers can detach a single
- * handler without resorting to ad-hoc `as unknown as` probes; tests that don't
- * implement these can omit them safely.
- */
+
+
+
 export interface PowerMonitorLike {
-  /** systemIdleTime (초) */
+
   getSystemIdleTime(): number;
-  /** 배터리 전원 상태 */
+
   onBatteryPower?: boolean;
-  /** 이벤트 구독 */
+
   on(event: string, handler: (...args: unknown[]) => void): unknown;
-  /** 단일 핸들러 해제 (Node EventEmitter 호환). */
+
   removeListener?(event: string, handler: (...args: unknown[]) => void): unknown;
-  /** 단일 핸들러 해제 (newer EventEmitter API alias). */
+
   off?(event: string, handler: (...args: unknown[]) => void): unknown;
-  /** 이벤트 해제 */
+
   removeAllListeners(event?: string): unknown;
 }
 
@@ -129,24 +81,22 @@ export interface IdleSchedulerOptions {
    * machine runs for the remaining consumers.
    */
   workerClient?: WorkerClientLite;
-  /** Electron powerMonitor (test에서는 FakePowerMonitor) */
+
   powerMonitor?: PowerMonitorLike;
   idleThresholdSec?: number; // default 60
-  cpuEmaAlpha?: number; // default 0.1 (EMA 계수)
+  cpuEmaAlpha?: number;
   cpuEmaThreshold?: number; // default 0.40
   cpuSpikeThreshold?: number; // default 0.70
   conversationCooldownMs?: number; // default 30000
-  /**
-   * cycle 1 MED: keystroke 쿨다운을 대화 쿨다운과 분리.
-   * THROTTLED 상태에서 마지막 keystroke로부터 이 시간이 경과하면 IDLE_SCAN 재진입 조건 재평가.
-   * default 10000 (10s).
-   */
+
+
+
   keystrokeCooldownMs?: number;
   chunkCooldownMs?: number; // default 200
   throttledCooldownMs?: number; // default 2000
   resumeDelayMs?: number; // default 90000
   tickIntervalMs?: number; // default 1000
-  /** 로그 기록 (기본: log.info) */
+
   logger?: (message: string) => void;
 }
 
@@ -177,7 +127,7 @@ export class IdleSchedulerService {
   private readonly listeners: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
   private readonly stateChangeListeners = new Set<IdleStateChangeListener>();
 
-  // 파라미터 (기본값 확정)
+
   private readonly idleThresholdSec: number;
   private readonly cpuEmaAlpha: number;
   private readonly cpuEmaThreshold: number;
@@ -196,7 +146,7 @@ export class IdleSchedulerService {
     this.cpuEmaThreshold = opts.cpuEmaThreshold ?? 0.4;
     this.cpuSpikeThreshold = opts.cpuSpikeThreshold ?? 0.7;
     this.conversationCooldownMs = opts.conversationCooldownMs ?? 30_000;
-    // cycle 1 MED: keystroke 쿨다운을 대화 쿨다운과 분리 (기존: 재사용).
+
     this.keystrokeCooldownMs = opts.keystrokeCooldownMs ?? 10_000;
     this.chunkCooldownMs = opts.chunkCooldownMs ?? 200;
     this.throttledCooldownMs = opts.throttledCooldownMs ?? 2000;
@@ -206,13 +156,12 @@ export class IdleSchedulerService {
     this.prevCpuTimes = os.cpus();
   }
 
-  /**
-   * Agent 4의 `IdleSchedulerStub.enqueue`와 호환되는 엔트리 포인트.
-   * folderIndexer가 이 시그니처로 호출.
-   */
+
+
+
   enqueue(job: { filePath: string; mode: string; priority: number }): void {
     this.queue.push({ ...job, enqueuedAt: Date.now() });
-    // priority sort (P0 first), 동일 priority는 FIFO
+
     this.queue.sort((a, b) => {
       if (a.priority !== b.priority) return a.priority - b.priority;
       return (a.enqueuedAt ?? 0) - (b.enqueuedAt ?? 0);
@@ -228,7 +177,7 @@ export class IdleSchedulerService {
       this.subscribeListener(pm, "resume", () => this._transition("RESUME_DELAY", "resume"));
       this.subscribeListener(pm, "on-ac", () => this._reevaluate("on-ac"));
       this.subscribeListener(pm, "on-battery", () => this._reevaluate("on-battery"));
-      // thermal-state-change는 macOS only — try/catch
+
       try {
         this.subscribeListener(pm, "thermal-state-change", (...args: unknown[]) => {
           const thermalState = args[0];

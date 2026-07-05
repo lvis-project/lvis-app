@@ -396,7 +396,7 @@ export function PluginConfigTab() {
   // US-3c.1: build secretsPresent map for PluginConfigSchemaForm.
   // Batches a single IPC call per plugin selection to find which secret
   // fields already have a value in the keychain, so the masked input shows
-  // "**** (저장됨)" instead of the empty placeholder.
+
   const [secretsPresent, setSecretsPresent] = useState<Record<string, boolean>>({});
   useEffect(() => {
     if (!selectedId) {
@@ -893,10 +893,10 @@ export function PluginConfigTab() {
                   </div>
                 ) : (
                   <>
-                    {/* "환경변수" section — schema-less plugins use the raw
+                    {/* Environment variables section — schema-less plugins use the raw
                         key/value editor. Without an explicit heading the
-                        user can't tell what this list represents ("환경변수
-                        헤더 누락"), so anchor it visually with a label and
+                        user can't tell what this list represents (missing
+                        environment-variable header), so anchor it visually with a label and
                         a hint that the value box accepts JSON. The row
                         list caps at ~5 rows (220px ≈ row height × 5 +
                         gaps) and scrolls beyond that so a plugin with 20

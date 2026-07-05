@@ -72,10 +72,8 @@ export function wireConversation(ctx: BootContext): void {
     mainWindow,
   } = ctx;
 
-  // §7: Routine Engine — 루틴마다 독립된 ConversationLoop를 생성하는 factory를 주입.
-  // interactive 채팅의 ConversationLoop 인스턴스를 공유하면 세션 히스토리 오염 및
-  // concurrent IPC 채팅 턴과의 race condition이 발생한다. factory는 stateless deps만
-  // 캡처하므로 순환 의존 없이 즉시 바인딩할 수 있다.
+
+
   const routineLoopDeps = {
     settingsService,
     systemPromptBuilder,
@@ -193,7 +191,7 @@ export function wireConversation(ctx: BootContext): void {
   });
   ctx.sideChatConversationLoop = sideChatConversationLoop;
 
-  // Late-binding 주입 — ConversationLoop 생성 직후.
+
   lateBinding.conversationLoopRef.fn = conversationLoop;
   lateBinding.llmCallerRef.fn = createCallLlm(conversationLoop);
   lateBinding.pluginCallLlmRef.fn = createCallLlmForPlugin(conversationLoop, bootAuditLogger);
@@ -272,7 +270,7 @@ export function wireConversation(ctx: BootContext): void {
     // hard line cap; the engine fires this swallow-on-error so it never fails a run.
     onRunComplete: ({ itemId, title, projectRoot }) =>
       appendMemory(workBoardStorage, [
-        `${new Date().toISOString().slice(0, 10)}: 자율 실행 완료 — #${itemId} ${title}`,
+        `${new Date().toISOString().slice(0, 10)}: autonomous run completed — #${itemId} ${title}`,
       ], projectRoot ? { projectRoot } : undefined),
     // Persist each run's plan+execute conversation to sessions/<id>/<runId>.jsonl
     // so run context survives restart and accumulates across re-runs.

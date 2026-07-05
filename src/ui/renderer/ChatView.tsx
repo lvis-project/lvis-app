@@ -10,10 +10,10 @@ import { SubAgentSpawnChip } from "./components/SubAgentSpawnChip.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { type StatusBarProps } from "./components/StatusBar.js";
 import { ChatSidePanel } from "./components/ChatSidePanel.js";
-// TurnSummaryFooter 컴포넌트는 2026-05-07 폐기. 토큰 정보는 TurnActionBar 의
-// TokenCostBadge (provider-truth, 토글 + tooltip breakdown) 가 단일 source 로
-// 표시. 시간 정보는 WorkGroup 헤더의 ⏱ T 가 흡수. turn_summary entry 는
-// 데이터 carrier 로 history 에 남고, lookup 으로 두 surface 에 공급.
+
+
+
+
 import { getApi } from "./api-client.js";
 import { useChatContext } from "./context/ChatContext.js";
 import type { AppMode } from "./MainToolbar.js";
@@ -97,7 +97,7 @@ export interface ChatViewProps {
   currentSessionKind?: "main" | "routine";
   currentSessionTitle?: string;
   onLoadSession?: (sessionId: string) => void | boolean | Promise<void | boolean>;
-  /** Quick-action items for CommandPopover (빠른 실행 section) */
+
   commandActions: QuickAction[];
   /** Controlled open state for CommandPopover */
   commandPopoverOpen: boolean;
@@ -351,9 +351,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     [visibleEntries],
   );
 
-  // turn_summary entry 의 turnStart 별 lookup. 각 turn 의 final assistant
-  // 와 WorkGroup 이 같은 turn 의 token / duration 정보를 inline 으로 가져와
-  // 표시한다. turn_summary entry 자체는 standalone 렌더링 되지 않는다.
+
+
   const turnSummaryByTurnStart = useMemo(() => {
     const map = new Map<number, TurnSummary>();
     let curTurnStart = -1;

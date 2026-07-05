@@ -1,37 +1,28 @@
-/**
- * Conversation Trace — §4.5 11-step Debug Tracer (K4)
- *
- * Architecture §4.5.2 메시지 라이프사이클 11-step 경로를 dev 모드에서
- * timestamp + payload JSONL 로 수집한다. 프로덕션 모드에서는 no-op.
- *
- * 출력: `~/.lvis/traces/<session-id>.jsonl`
- * 활성화 조건:
- *   - `process.env.NODE_ENV !== "production"`, 또는
- *   - `process.env.LVIS_TRACE === "1"` (강제 활성화, sampling override)
- *
- * Renderer 뷰어: 기존 audit viewer 패턴(JSONL 스트리밍 readLine)을 그대로 재사용.
- */
+
+
+
+
 import { appendFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
 
-/** §4.5.2 11-step 경로 — canonical step 이름. */
+
 export type TraceStepName =
   | "REQUEST_ENTRY"         // 1. renderer → main IPC
   | "KEYWORD_CLASSIFY"      // 2. KeywordEngine.classify()
   | "ROUTE_RESOLVE"         // 3. RouteEngine.route()
-  | "TURN_ORCHESTRATE"      // 4. runTurn() 진입
-  | "HISTORY_APPEND"        // 5. user 메시지 append
-  | "PROMPT_ASSEMBLE"       // 6. system prompt 조립
-  | "LLM_STREAM"            // 7. provider.streamTurn 시작
-  | "LLM_STREAM_ERROR"      // 7b. provider.streamTurn 오류 구조화
-  | "TOOL_SCHEMA_REJECTED"  // 7c. provider 400(invalid_function_parameters) → 해당 tool drop 후 round 재시도
-  | "REASONING_ACCUMULATE"  // 8. reasoning_delta 누적 완료 (round 단위)
+  | "TURN_ORCHESTRATE"      // 4. Enter runTurn()
+  | "HISTORY_APPEND"        // 5. Append user message
+  | "PROMPT_ASSEMBLE"       // 6. Assemble system prompt
+  | "LLM_STREAM"            // 7. Start provider.streamTurn
+  | "LLM_STREAM_ERROR"      // 7b. Structure provider.streamTurn error
+  | "TOOL_SCHEMA_REJECTED"  // 7c. provider 400(invalid_function_parameters) -> drop tool and retry round
+  | "REASONING_ACCUMULATE"  // 8. Finish accumulating reasoning_delta for the round
   | "TOOL_EXECUTE"          // 9. ToolExecutor.executeAll
-  | "ROUND_COMMIT"          // 10. assistant_round 확정
+  | "ROUND_COMMIT"          // 10. Commit assistant_round
   | "POST_TURN"             // 11. PostTurnHookChain.run
   | "GUIDANCE_INJECTED"     // out-of-band — mid-stream "guide" utterance consumed at round boundary
-  | "LENGTH_CONTINUATION";  // out-of-band — finish_reason=length 잘림 → 부분 답변 verbatim 이어쓰기 (vLLM continue_final_message)
+  | "LENGTH_CONTINUATION";  // out-of-band — finish_reason=length truncation -> continue partial answer verbatim (vLLM continue_final_message)
 
 export interface TraceEntry {
   ts: string;

@@ -1,102 +1,39 @@
-# Tool Result `kind` Sentinels
+# Tool Result Kind Sentinels
 
-Some built-in tools return JSON payloads in their `output` field with a `kind`
-sentinel that the renderer uses to discriminate among visual treatments. This
-is a **cross-cutting contract** between `src/tools/*` (producers) and
-`src/ui/renderer/components/*` (consumers). Adding, renaming, or removing a
-sentinel requires updates on both sides in the same PR.
+Status: Active English default. The Korean archive keeps earlier review history and original discussion, but this page must be usable on its own.
 
-## Why a kind sentinel
+Korean archive: [docs/ko mirror](../ko/references/tool-result-kind-sentinels.md).
 
-Most tool results are plain text or JSON metadata that the renderer shows via
-`ToolPayloadBlock`. A small subset of tools produce **structured payloads
-intended for a custom UI**: an iframe preview, a unified diff card, etc. The
-renderer needs an unambiguous discriminator so it can pick the right component
-without guessing from path heuristics. The `kind` field is the discriminator,
-namespaced with the `lvis.` prefix to avoid collisions with downstream tooling
-or MCP server payloads.
+## What This Page Owns
 
-## Registered sentinels
+This page owns tool result sentinel kinds used by execution, transcript rendering, continuation, and persistence. Use it as the first review surface when changing this area; use the archive for background, not as a substitute for current English guidance.
 
-### `lvis.render_html`
+## Current Operating Contract
 
-| | |
-|---|---|
-| Producer | `src/tools/render-html.ts` — `render_html` tool |
-| Consumer | `src/ui/renderer/components/HtmlPreview.tsx` via `parseRenderHtmlResult` |
-| Parser | `src/ui/renderer/utils/html-preview.ts` |
+- English is the default review and contributor language for this app surface.
+- The document must name the behavior that still matters today, the code or test locations that enforce it, and the conditions that make the note stale.
+- Source files and tests are authoritative when this prose and implementation disagree.
+- Korean-only material stays in the mirrored archive unless it is translated or summarized here.
 
-```json
-{
-  "kind": "lvis.render_html",
-  "title": "선택적 제목",
-  "height": 360,
-  "html": "<!doctype html>...",
-  "warnings": ["removed <iframe>"]
-}
-```
+## Implementation Anchors
 
-Renderer mounts a `<webview>` with a CSP-restricted data: URL inside the
-`lvis-render-html` partition. JavaScript execution is opt-in via the
-`allowScripts` toggle when the payload contains `<script>` / `on*` handlers.
+- `src/tools/`
+- `src/engine/`
+- `src/permissions/`
+- `src/observability/`
 
-### `lvis.write_file`
+## Update Checklist
 
-| | |
-|---|---|
-| Producer | `src/tools/file-tools.ts` — `WriteFileTool` |
-| Consumer | `src/ui/renderer/components/FileEditDiff.tsx` via `extractFileEditDiff` |
-| Parser | `src/ui/renderer/utils/file-diff.ts` |
+- State whether the document is active, implemented, superseded, or historical before adding new detail.
+- Keep links relative to the current file depth; mirrored files under `docs/ko` need different paths from default docs.
+- Add or update tests when a documented behavior is enforced by code.
+- Remove template language and stale plan wording instead of carrying it forward.
 
-```json
-{
-  "kind": "lvis.write_file",
-  "path": "/abs/path/to/file.ts",
-  "bytes": 8421,
-  "isNewFile": false,
-  "truncated": false,
-  "before": "/* original UTF-8 contents */",
-  "after":  "/* contents now on disk */"
-}
-```
+## Related Entry Points
 
-Fields:
+- [LVIS Project Documentation](../README.md)
+- [Getting Started](../guides/getting-started.md)
 
-- `path` — absolute resolved path on disk.
-- `bytes` — full byte length of the new content (NOT the truncated preview).
-- `isNewFile` — true when the target did not exist before the write. When
-  true, `before` is absent (no prior content).
-- `truncated` — true when either the prior file or the new content exceeded
-  `WRITE_DIFF_PREVIEW_LIMIT` (4096 bytes per side). The `before` / `after`
-  fields then carry only a leading slice; the renderer surfaces a `truncated`
-  marker. See [issue #749] for the planned expand seam.
-- `before` — UTF-8 prior content, omitted entirely when `isNewFile` is true
-  OR when the prior file was binary / oversized.
-- `after` — UTF-8 new content (possibly truncated at the cap).
+## Review Notes
 
-Token budget: each side is capped at 4 KB (~1k tokens), giving a worst case
-of ~2k tokens added to LLM history per `write_file` call.
-
-## Adding a new sentinel
-
-1. Define the type in `src/ui/renderer/types.ts` (`RenderHtmlPayload`-style).
-2. Add a producer-side `kind` const in the tool that emits it. Choose a name
-   under the `lvis.` namespace.
-3. Add a parser util under `src/ui/renderer/utils/` that returns a typed
-   payload or `null` and tolerates unknown / non-JSON results without throwing.
-4. Wire the consumer into `ToolGroupCard` (both `SingleToolInline` and the
-   group path) following the `htmlPreviews` / `fileDiffs` patterns.
-5. Add unit tests for the parser (round-trip) + a renderer test for the
-   consumer.
-6. Update this document.
-
-## Anti-patterns
-
-- ❌ Discriminating on tool name + custom field shape — fragile when a tool's
-  result evolves. Use `kind`.
-- ❌ Using a non-namespaced sentinel like `"diff"` or `"html"` — collides
-  with MCP server payloads and external tool result conventions.
-- ❌ Including the full file contents unbounded — bloats LLM history without
-  a bounded contract. Always cap and emit `truncated: true`.
-
-[issue #749]: https://github.com/lvis-project/lvis-app/issues/749
+This English page should let a reviewer understand scope, risk, and validation without opening the Korean archive. If the archive contains rationale that still matters, translate the relevant part into this page and keep the archive link as provenance.

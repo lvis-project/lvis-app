@@ -322,10 +322,10 @@ export async function handleChatSend(
   const { input, attachments, inputOrigin, personaPromptId } = parsed.payload;
   const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId);
   if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
-  // queue-auto inputOrigin path 는 사용자 명시 입력 누적 의 자동 인입.
-  // user gesture context 밖 (IPC stream done event 트리거) 라 audit 추가
-  // 필요 — security forensics 에서 user-keyboard turn 과 구분 가능해야 함
-  // (critic Round 2 M2). guide 와 동일 패턴.
+  // queue-auto inputOrigin is automatic intake from accumulated explicit user input.
+  // It runs outside the user gesture context, triggered by the IPC stream-done event,
+  // so audit telemetry must distinguish it from user-keyboard turns
+  // (critic Round 2 M2), matching the guide path.
   if (inputOrigin === "queue-auto") {
     auditLogger.log({
       timestamp: new Date().toISOString(),

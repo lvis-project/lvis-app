@@ -37,12 +37,9 @@ export interface FallbackEntry {
   model: string;
 }
 
-/**
- * Synthetic dropdown value for the demo session. It is NOT a real VENDORS entry
- * (demo reuses azure-foundry under the hood with build-embedded credentials),
- * so it never touches settings.llm.vendors — it only represents "활성 demo" in
- * the provider picker.
- */
+
+
+
 const DEMO_VENDOR_VALUE = "__demo__";
 const VENDOR_SCROLL_THRESHOLD = 10;
 const VENDOR_SELECT_MAX_HEIGHT = "max-h-[386px]";
@@ -558,7 +555,7 @@ export function LlmTab(props: LlmTabProps) {
           )}
 
           {/* Provider selector — ALWAYS enabled (even in login/demo). It is the
-              single provider switcher, including the synthetic "데모 체험" entry;
+              single provider switcher, including the synthetic demo entry;
               only the detail fields below stay login-gated. */}
           <div className="space-y-2">
             <Label htmlFor="vendor-select" className="flex items-center gap-2">

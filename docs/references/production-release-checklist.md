@@ -88,32 +88,28 @@ links; do not publish a release that only has versioned `LVIS-X.Y.Z-*` assets.
 Perform on each platform artifact before uploading:
 
 - [ ] App launches to the splash screen and transitions to the main window
-- [ ] Settings → API 키 입력 → 대화 1 턴 성공
-- [ ] Local Indexer, Meeting, LVIS Microsoft 365 plugins list in 설정 → 플러그인
-- [ ] 자동 업데이트 설정 토글 동작 (default ON) — 설정 > 일반
-- [ ] 크래시 리포트 설정 토글 OFF → 덤프가 `~/.lvis/crash-dumps/` 에만 저장
-- [ ] 크래시 리포트 설정 ON + URL 입력 → 테스트 크래시 시 업로드 시도 확인
-- [ ] 텔레메트리 OFF 기본값, 대화 여러 턴 후 `endpoint` 에 요청 0건
-- [ ] 텔레메트리 ON → 일일 배치 POST 확인 (PII 없음 검증)
-- [ ] 오프라인 기동 → 앱 정상 부팅, 자동 업데이트는 조용히 실패
+- [ ] Settings -> API key entry -> one chat turn succeeds
+- [ ] Local Indexer, Meeting, and LVIS Microsoft 365 plugins are listed in Settings -> Plugins
+- [ ] Auto-update settings toggle works (default ON) in Settings -> General
+- [ ] Crash reporting OFF -> dumps are stored only in `~/.lvis/crash-dumps/`
+- [ ] Crash reporting ON + URL configured -> test crash attempts upload
+- [ ] Telemetry default OFF -> after several chat turns, `endpoint` receives zero requests
+- [ ] Telemetry ON -> daily batch POST is observed and verified to contain no PII
+- [ ] Offline startup -> app boots normally and auto-update fails quietly
 
 ## Rollback Procedure
 
-1. 새 버전에 블로커 발견 시 GitHub Release 즉시 `draft` 로 되돌림
-2. `latest.yml` (electron-updater metadata) 를 이전 버전으로 복구 — auto-update
-   가 방금 올린 버전을 받지 않도록 차단
-3. Slack `#lvis-release` 공지 + Sentry issue triage
-4. Hot-fix 브랜치 `hotfix/v<version>` 에서 수정 → 패치 bump → 재릴리스
+1. If a blocker is found in the new version, immediately move the GitHub Release back to `draft`
+2. Restore `latest.yml` (electron-updater metadata) to the previous version so auto-update does not receive the just-published build
+3. Announce in Slack `#lvis-release` and triage Sentry issues
+4. Fix from `hotfix/v<version>`, bump patch, and re-release
 
 ## Version Pinning Policy
 
-- Electron: 메이저 버전 고정 (`^`). 보안 패치만 주기적 bump.
-- electron-updater / electron-builder: minor 고정, patch 자동 (`~`).
-- Plugin native deps (better-sqlite3 등): electron-rebuild 재실행 필수 →
-  `bun install` postinstall 에서 처리됨.
-- Python 런타임: host-managed Python 플러그인의 lockfile content + OS/arch 로
-  shared env 를 고정. 릴리스마다 active plugin lockfile diff 와 패키징 자산
-  경계(uv 포함, venv/wheelhouse/model cache 제외)를 검토.
+- Electron: pin the major version (`^`) and periodically bump security patches.
+- electron-updater / electron-builder: pin minor, allow automatic patch updates (`~`).
+- Plugin native deps (for example `better-sqlite3`): rerun electron-rebuild; `bun install` handles this in postinstall.
+- Python runtime: pin shared envs by host-managed Python plugin lockfile content plus OS/arch. For every release, review the active plugin lockfile diff and packaged asset boundary (include uv, exclude venv/wheelhouse/model cache).
 
 ## Publish (Later — NOT part of scaffolding)
 
