@@ -25,8 +25,6 @@ const MAIN_ENTRY = resolve(HERE, '../../..', 'dist/src/main/main.js');
  * The download/verify/extract internals are explicitly out of E5 scope.
  */
 
-const UPDATE_EVENT = 'marketplace:updates-available';
-
 type StubUpdate = {
   pluginId: string;
   pluginName: string;
@@ -53,7 +51,7 @@ async function installStubInstallHandlers(
     ipcMain.removeHandler('lvis:plugins:install');
     ipcMain.handle('lvis:plugins:install', (_e: unknown, pluginId: string, options?: unknown) => {
       const expectedVersion =
-        options && typeof options === 'object' && options !== null
+        typeof options === 'object' && options !== null
           ? (options as { expectedVersion?: unknown }).expectedVersion
           : undefined;
       if (failing.has(pluginId)) {
