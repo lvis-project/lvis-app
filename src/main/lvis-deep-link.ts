@@ -34,6 +34,7 @@ import {
   getAppWindows,
   loadMainInterface,
   registerMainWindowPluginEventBridge,
+  showMainWindow,
 } from "./main-window.js";
 import { openSettingsWindow } from "./settings-window.js";
 
@@ -416,7 +417,12 @@ export async function handleLvisUri(url: string) {
         log.error({ err }, "failed to load index.html for lvis:// MCP login URI");
       }
     }
-    mainWindow?.focus();
+    // Fully surface the window (show + restore + focus + moveTop), not just
+    // focus(): a hidden auto-launch (launchMinimized) leaves an alive-but-hidden
+    // window, and a bare focus() would run the MCP-login dialog against an
+    // invisible parent. showMainWindow also covers the hide-to-tray case where
+    // the window is hidden (non-destroyed) when the deep link arrives.
+    if (mainWindow) showMainWindow(mainWindow);
     const win = mainWindow;
     if (!win) {
       log.warn(`handleLvisUri: no window available, aborting MCP login for ${mcpLoginParams.slug}`);
@@ -463,7 +469,12 @@ export async function handleLvisUri(url: string) {
       log.error({ err }, "failed to load index.html for lvis:// URI");
     }
   }
-  mainWindow?.focus();
+  // Fully surface the window (show + restore + focus + moveTop), not just
+  // focus(): a hidden auto-launch (launchMinimized) leaves an alive-but-hidden
+  // window, and a bare focus() would run the install/uninstall confirmation
+  // dialog against an invisible parent. showMainWindow also covers the
+  // hide-to-tray case where the window is hidden (non-destroyed) at arrival.
+  if (mainWindow) showMainWindow(mainWindow);
   const win = mainWindow;
   if (!win) {
     // createWindow() failed or was destroyed — abort rather than install silently.

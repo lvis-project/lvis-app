@@ -352,6 +352,25 @@ export function showMainWindow(win: BrowserWindow): void {
   win.moveTop();
 }
 
+/**
+ * E4 — toggle the main window's visibility, the action bound to the global
+ * show/hide accelerator. If the window is hidden or not focused, bring it
+ * forward (reuses {@link showMainWindow}); if it is already visible AND
+ * focused, hide it. The "focused" check makes the toggle feel right when the
+ * window is visible but behind other apps — the first press raises it, the
+ * second hides it. Returns the action taken so callers/tests can assert.
+ */
+export function toggleMainWindowVisibility(win: BrowserWindow): "shown" | "hidden" {
+  if (win.isDestroyed()) return "shown";
+  const visibleAndFocused = win.isVisible() && !win.isMinimized() && win.isFocused();
+  if (visibleAndFocused) {
+    win.hide();
+    return "hidden";
+  }
+  showMainWindow(win);
+  return "shown";
+}
+
 export function getAppWindows(): BrowserWindow[] {
   const seen = new Set<number>();
   const windows = [

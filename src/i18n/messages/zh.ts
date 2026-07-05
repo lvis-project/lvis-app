@@ -35,4 +35,35 @@ export const zh: Record<SeedMessageKey, string> = {
   "mainDialog.unauthorizedFrame": "未经授权的框架。",
   "mainDialog.noPersonasAvailable": "没有可用的 persona",
   "mainDialog.exportConversationTitle": "导出会话",
+
+  // ── E4 — 启动 / 全局快捷键 ────────────────────────────────────────
+  "settingsContent.tabStartup": "启动",
+  "startupTab.title": "启动与快捷键",
+  "startupTab.description":
+    "设置一个用于显示/隐藏窗口的全局快捷键，并选择 LVIS 是否在登录时启动。",
+  "startupTab.shortcutSectionTitle": "全局快捷键",
+  "startupTab.shortcutSectionDesc":
+    "一个系统级的组合键，可从任何位置显示或隐藏 LVIS 窗口。",
+  "startupTab.shortcutEnabledLabel": "启用全局快捷键",
+  "startupTab.shortcutEnabledHint": "将快捷键注册到操作系统。",
+  "startupTab.shortcutAcceleratorLabel": "显示/隐藏窗口快捷键",
+  "startupTab.shortcutRecord": "录制",
+  "startupTab.shortcutClear": "清除",
+  "startupTab.shortcutCapturing": "请按下组合键…",
+  "startupTab.shortcutUnset": "未设置",
+  "startupTab.shortcutEnabledNoAccelerator":
+    "快捷键已启用但未设置组合键。请录制一个以激活它。",
+  "startupTab.shortcutRegisterFailedTitle": "快捷键注册失败",
+  "startupTab.shortcutRegisterFailedBody":
+    "{accelerator} 已被其他应用占用。请选择其他组合。",
+  "startupTab.launchSectionTitle": "开机自动启动",
+  "startupTab.launchSectionDesc":
+    "控制在登录到计算机时是否自动启动 LVIS。",
+  "startupTab.launchAtStartupLabel": "登录时启动 LVIS",
+  "startupTab.launchAtStartupHint": "登录后自动启动 LVIS。（仅限已安装的应用）",
+  "startupTab.launchMinimizedLabel": "启动时隐藏到托盘",
+  "startupTab.launchMinimizedHint": "在登录启动时，最小化到托盘启动而不打开窗口。",
+  "startupTab.launchRegisterFailedTitle": "无法应用开机自动启动",
+  "startupTab.launchRegisterFailedBody":
+    "LVIS 无法在此系统上注册登录时自动启动。请打开设置重试。",
 };
