@@ -132,6 +132,7 @@ export const en = {
   "formatIpcError.importInvalidFileShape": "This file is not a valid exported conversation.",
   "formatIpcError.importEmptyMessages": "The conversation has no messages to import.",
   "formatIpcError.importInvalidMessageShape": "The conversation contains an unsupported or malformed message.",
+  "formatIpcError.importTooManyMessages": "The conversation has too many messages to import.",
   "formatIpcError.unknownError": "Unknown error",
   "formatIpcError.errorSuffix": " has occurred.",
 } as const;
@@ -268,6 +269,7 @@ export const ko: Record<keyof typeof en, string> = {
   "formatIpcError.importInvalidFileShape": "내보낸 대화 형식의 파일이 아닙니다.",
   "formatIpcError.importEmptyMessages": "가져올 메시지가 없습니다.",
   "formatIpcError.importInvalidMessageShape": "지원하지 않거나 손상된 메시지가 포함되어 있습니다.",
+  "formatIpcError.importTooManyMessages": "메시지 수가 너무 많아 가져올 수 없습니다.",
   "formatIpcError.unknownError": "알 수 없는 오류",
   "formatIpcError.errorSuffix": "가 발생했습니다.",
 };

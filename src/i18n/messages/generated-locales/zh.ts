@@ -1264,6 +1264,7 @@ export const zhMessages: Record<string, string> = {
   "formatIpcError.importInvalidFileShape": "此文件不是有效的导出会话。",
   "formatIpcError.importEmptyMessages": "没有可导入的消息。",
   "formatIpcError.importInvalidMessageShape": "会话包含不受支持或格式错误的消息。",
+  "formatIpcError.importTooManyMessages": "会话消息过多，无法导入。",
   "formatIpcError.rateLimited": "请求太多。请稍后重试。",
   "formatIpcError.removeFailed": "无法删除规则。",
   "formatIpcError.reviewerRewireFailed": "无法将权限审核模型连接到新设置。设置已恢复到之前的状态。",
