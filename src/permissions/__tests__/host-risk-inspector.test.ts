@@ -174,6 +174,45 @@ describe("M1 — mutating-flag cluster/glue detection (sed -i and related)", () 
 });
 
 // ---------------------------------------------------------------------------
+// M1b — sed in-program write/exec detection (#1473)
+// ---------------------------------------------------------------------------
+
+describe("M1b — sed script write/exec commands classify shell", () => {
+  it("keeps common read-only sed scripts classified as read", () => {
+    expect(isReadOnlyCommand("sed 's/where/there/' f")).toBe(true);
+    expect(isReadOnlyCommand("sed -n '1,10p' f")).toBe(true);
+    expect(isReadOnlyCommand("sed -e 's/a/b/g' f")).toBe(true);
+    expect(isReadOnlyCommand("sed '/pattern/p' f")).toBe(true);
+    expect(isReadOnlyCommand("sed 's/w/e/' f")).toBe(true);
+    expect(isReadOnlyCommand("sed 's/a/b/; p' f")).toBe(true);
+  });
+
+  it("classifies sed write commands as shell", () => {
+    expect(isReadOnlyCommand("sed -n 'w /tmp/out' f")).toBe(false);
+    expect(isReadOnlyCommand("sed 'W /tmp/out' f")).toBe(false);
+    expect(isReadOnlyCommand("sed 'p; w /tmp/out' f")).toBe(false);
+    expect(isReadOnlyCommand("sed '1,+3w /tmp/out' f")).toBe(false);
+    expect(isReadOnlyCommand("sed 's/a/b/w /tmp/out' f")).toBe(false);
+    expect(isReadOnlyCommand("sed -e 's/a/b/w /tmp/out' f")).toBe(false);
+    expect(isReadOnlyCommand("sed --expression='s/a/b/w /tmp/out' f")).toBe(false);
+  });
+
+  it("classifies sed exec/read-file commands as shell", () => {
+    expect(isReadOnlyCommand("sed '1e echo boom' f")).toBe(false);
+    expect(isReadOnlyCommand("sed 'e echo boom' f")).toBe(false);
+    expect(isReadOnlyCommand("sed 's/a/b/e' f")).toBe(false);
+    expect(isReadOnlyCommand("sed 'p; e echo boom' f")).toBe(false);
+    expect(isReadOnlyCommand("sed 'r /tmp/in' f")).toBe(false);
+    expect(isReadOnlyCommand("sed 'R /tmp/in' f")).toBe(false);
+  });
+
+  it("fails closed on sed script files because their program body is opaque", () => {
+    expect(isReadOnlyCommand("sed -f script.sed f")).toBe(false);
+    expect(isReadOnlyCommand("sed --file=script.sed f")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // M2 — git write-subcommand forms
 // ---------------------------------------------------------------------------
 
@@ -411,6 +450,9 @@ describe("M4 — differential / property test (tighten-only invariant)", () => {
     "sed -i 's/a/b/' f", "sed -i.bak 's/a/b/' f", "sed -ibak 's/a/b/' f",
     "sed -ni.bak 's/a/b/' f", "sed -ni 's/a/b/' f",
     "sed --in-place 's/a/b/' f", "sed --in-place=.bak 's/a/b/' f",
+    "sed -n 'w /tmp/out' f", "sed 's/a/b/w /tmp/out' f",
+    "sed 'W /tmp/out' f", "sed '1e echo boom' f", "sed 's/a/b/e' f",
+    "sed 'r /tmp/in' f", "sed -f script.sed f",
     "awk -iinplace '{p}' f", "awk -i inplace '{p}' f",
     // awk tool-internal mini-language: in-program >, |, system() are opaque to
     // shell tokenization but the verb exclusion keeps these as shell in new code.
@@ -501,6 +543,13 @@ describe("M4 — differential / property test (tighten-only invariant)", () => {
       { cmd: "sed -ni.bak 's/a/b/' f",    reason: "sed -ni.bak combined flags (cluster match)" },
       { cmd: "sed --in-place 's/a/b/' f", reason: "sed --in-place long flag" },
       { cmd: "sed --in-place=.bak 's/a/b/' f", reason: "sed --in-place= prefix match" },
+      { cmd: "sed -n 'w /tmp/out' f",      reason: "sed w command writes output file (#1473)" },
+      { cmd: "sed 's/a/b/w /tmp/out' f",  reason: "sed s///w flag writes output file (#1473)" },
+      { cmd: "sed 'W /tmp/out' f",         reason: "sed W command writes output file (#1473)" },
+      { cmd: "sed '1e echo boom' f",       reason: "GNU sed e command executes a program (#1473)" },
+      { cmd: "sed 's/a/b/e' f",            reason: "GNU sed s///e flag executes pattern space (#1473)" },
+      { cmd: "sed 'r /tmp/in' f",          reason: "sed r command reads an opaque file into output (#1473)" },
+      { cmd: "sed -f script.sed f",        reason: "sed script file body is opaque to the host classifier (#1473)" },
       { cmd: "awk -iinplace '{p}' f",     reason: "awk -iinplace glued gawk form (awk excluded from READ_ONLY_COMMANDS)" },
       { cmd: "awk -i inplace '{p}' f",   reason: "awk -i inplace separate tokens (awk excluded from READ_ONLY_COMMANDS)" },
       { cmd: "awk '{print $1}' f",       reason: "plain awk excluded from READ_ONLY_COMMANDS (tool-internal mini-language)" },
