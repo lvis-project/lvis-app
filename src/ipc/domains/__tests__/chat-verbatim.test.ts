@@ -6,6 +6,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import path from "node:path";
+import os from "node:os";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 import { invokeRegisteredHandler } from "../../../__tests__/test-helpers.js";
 
@@ -43,7 +45,20 @@ vi.mock("../../../shared/chat-history.js", () => ({
 // path end-to-end instead of stubbing the authorization decision itself.
 // Preserves every other field via importOriginal — only additionalDirectories
 // is extended, so the default-only tests elsewhere in this file are unaffected.
-const EXPLICIT_TEST_PROJECT_ROOT = "C:\\workspace\\explicit-project";
+// Built via the real, OS-native `path.resolve` (not a hardcoded Windows-style
+// literal) so it round-trips identically through BOTH of the two independent
+// canonicalization systems this test's authorization path touches:
+// `sanitizeRuntimeAllowedDirectories`/`canonicalizePathForMatch` (real
+// `path.resolve()` + `realpathSync` — genuinely OS-native, correctly so,
+// since it backs real filesystem permission scoping) and
+// `projectRootEquals`/`projectRootKey` (pure string normalization). A
+// drive-letter literal like "C:\\workspace\\explicit-project" is absolute on
+// Windows but NOT on POSIX, so `path.resolve()` silently prefixes
+// `process.cwd()` to it on Linux — the two systems then disagree on the
+// canonical form and `resolveAuthorizedWorkspaceProject` fails to find the
+// entry, making the "explicit project persists metadata" assertion below
+// flip to 0 calls on Linux CI while passing on a Windows dev machine.
+const EXPLICIT_TEST_PROJECT_ROOT = path.resolve(os.tmpdir(), "lvis-explicit-project-fixture");
 vi.mock("../../../permissions/permission-settings-store.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../permissions/permission-settings-store.js")>();
   return {
