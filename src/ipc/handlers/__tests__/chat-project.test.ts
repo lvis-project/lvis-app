@@ -86,6 +86,71 @@ describe("markMainActiveAfterTurn project metadata", () => {
     expect(saveSessionMetadata.mock.calls[0]?.[1]).not.toHaveProperty("projectScope");
     expect(markMainActiveResume).toHaveBeenCalledWith("session-1");
   });
+
+  it("does NOT persist project metadata when the session's project is the default binding (no explicit selection)", async () => {
+    // 2026-07 "remove Current Project labeling": a "no explicit project"
+    // session must keep null project fields in metadata even after a turn
+    // completes — getSessionProjectIsDefault() is the signal that
+    // distinguishes "just running against the ambient default directory"
+    // from "user explicitly picked this project".
+    const saveSessionMetadata = vi.fn(async () => {});
+    const markMainActiveResume = vi.fn(async () => {});
+    const deps = {
+      conversationLoop: {
+        getSessionKind: () => "main",
+        getHistory: () => [{ role: "user", content: "hello" }],
+        getSessionId: () => "session-1",
+        getSessionProjectIsDefault: () => true,
+        getSessionProjectContext: () => ({
+          projectRoot: "C:\\Users\\ikcha\\.lvis\\workspace",
+          projectName: "default",
+        }),
+      },
+      memoryManager: {
+        loadSessionMetadata: vi.fn(() => null),
+        saveSessionMetadata,
+        markMainActiveResume,
+        markMainActiveFresh: vi.fn(async () => {}),
+      },
+    } as unknown as IpcDeps;
+
+    await markMainActiveAfterTurn(deps, "hello");
+
+    expect(saveSessionMetadata).not.toHaveBeenCalled();
+    expect(markMainActiveResume).toHaveBeenCalledWith("session-1");
+  });
+
+  it("still persists project metadata for an explicit (non-default) project after a turn", async () => {
+    const saveSessionMetadata = vi.fn(async () => {});
+    const markMainActiveResume = vi.fn(async () => {});
+    const deps = {
+      conversationLoop: {
+        getSessionKind: () => "main",
+        getHistory: () => [{ role: "user", content: "hello" }],
+        getSessionId: () => "session-1",
+        getSessionProjectIsDefault: () => false,
+        getSessionProjectContext: () => ({
+          projectRoot: "C:\\workspace\\alpha",
+          projectName: "alpha",
+        }),
+      },
+      memoryManager: {
+        loadSessionMetadata: vi.fn(() => null),
+        saveSessionMetadata,
+        markMainActiveResume,
+        markMainActiveFresh: vi.fn(async () => {}),
+      },
+    } as unknown as IpcDeps;
+
+    await markMainActiveAfterTurn(deps, "hello");
+
+    expect(saveSessionMetadata).toHaveBeenCalledWith("session-1", {
+      sessionKind: "main",
+      projectRoot: "C:\\workspace\\alpha",
+      projectName: "alpha",
+    });
+    expect(markMainActiveResume).toHaveBeenCalledWith("session-1");
+  });
 });
 
 describe("handleChatSessions project filters", () => {

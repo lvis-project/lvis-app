@@ -48,14 +48,16 @@ export function projectIdentityFromRoot(
   fallbackName: string,
   isDefault = false,
 ): ProjectIdentity {
+  // No isDefault-branching: the earlier "avoid a literal folder name for the
+  // default project" special-case is dead weight now that isDefault projects
+  // are never surfaced as a selectable/displayed project at all (composer
+  // selector, sidebar grouping, and Insights all exclude/reclassify them — see
+  // 2026-07 "remove Current Project labeling" refinement). `fallbackName` is
+  // therefore only a safety net for the near-unreachable case of a root with
+  // no resolvable basename (e.g. a bare drive root).
   return {
     projectRoot,
-    // The DEFAULT/base-directory project is labeled by `fallbackName` (a stable
-    // "default" / localized "현재 프로젝트" label) rather than the folder
-    // basename of the user's workspace directory — deriving it from the folder
-    // name surfaced a confusing literal (e.g. "workspace") in the UI. Non-default
-    // (user-picked) projects keep their folder basename as the display name.
-    projectName: isDefault ? fallbackName : (projectBasename(projectRoot) || fallbackName),
+    projectName: projectBasename(projectRoot) || fallbackName,
     isDefault,
   };
 }

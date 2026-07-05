@@ -37,6 +37,29 @@ vi.mock("../../../lib/logger.js", () => ({
 vi.mock("../../../shared/chat-history.js", () => ({
   serializeHistoryMessage: vi.fn((m: unknown, i: number) => ({ ...m as object, index: i })),
 }));
+// Authorize one extra explicit project (on top of whatever the real settings
+// file already grants) so the "explicit project persists metadata" test below
+// can exercise the REAL resolveAuthorizedWorkspaceProject/listAuthorizedWorkspaceProjects
+// path end-to-end instead of stubbing the authorization decision itself.
+// Preserves every other field via importOriginal — only additionalDirectories
+// is extended, so the default-only tests elsewhere in this file are unaffected.
+const EXPLICIT_TEST_PROJECT_ROOT = "C:\\workspace\\explicit-project";
+vi.mock("../../../permissions/permission-settings-store.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../permissions/permission-settings-store.js")>();
+  return {
+    ...actual,
+    readPermissionSettings: vi.fn((...args: Parameters<typeof actual.readPermissionSettings>) => {
+      const real = actual.readPermissionSettings(...args);
+      return {
+        ...real,
+        permissions: {
+          ...real.permissions,
+          additionalDirectories: [...(real.permissions.additionalDirectories ?? []), EXPLICIT_TEST_PROJECT_ROOT],
+        },
+      };
+    }),
+  };
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -397,23 +420,43 @@ describe("lvis:chat active main state", () => {
     expect(deps.memoryManager.markMainActiveFresh).toHaveBeenCalledTimes(1);
   });
 
-  it("persists the resolved project identity to the new main session's metadata at creation", async () => {
-    // Regression (Insights "프로젝트별 대화" showed 프로젝트 없음): a new main
-    // session must carry its project metadata from creation — not only
-    // post-turn — so the by-project group-by can join it immediately. The
-    // default project resolves to an authorized identity with a projectRoot.
+  it("does NOT persist project metadata for a plain new chat (no explicit project — the default binding)", async () => {
+    // 2026-07 "remove Current Project labeling": a session created with no
+    // explicit project runs against the default/base-directory binding
+    // internally (conversationLoop.newConversation still applies it for tool
+    // access — unaffected by this test) but must NOT be tagged with it in
+    // session metadata. "No project" (null fields) is the normal persisted
+    // state, so the sidebar renders it ungrouped and Insights buckets it
+    // under "No project" rather than a synthetic "default" label.
     const loop = makeConversationLoop("session-active", []);
     const deps = await setupHandlers(loop);
 
     await invoke("lvis:chat:new");
 
+    expect(deps.memoryManager.saveSessionMetadata).not.toHaveBeenCalled();
+  });
+
+  it("persists the resolved project identity when the user explicitly selects a real project", async () => {
+    // Contrast case: an EXPLICIT (non-default) project selection still
+    // persists metadata at creation — mirrors startRoutineConversation — so
+    // the Insights "프로젝트별 대화" group-by can join it immediately without
+    // waiting for the first turn to complete.
+    const loop = makeConversationLoop("session-active", []);
+    const deps = await setupHandlers(loop);
+
+    await invoke("lvis:chat:new", { projectRoot: EXPLICIT_TEST_PROJECT_ROOT, projectName: "explicit-project" });
+
     expect(deps.memoryManager.saveSessionMetadata).toHaveBeenCalledTimes(1);
     const [savedId, savedMeta] = (deps.memoryManager.saveSessionMetadata as any).mock.calls[0];
     expect(savedId).toBe("session-active");
-    expect(savedMeta).toMatchObject({ sessionKind: "main" });
-    expect(typeof savedMeta.projectRoot).toBe("string");
-    expect((savedMeta.projectRoot as string).length).toBeGreaterThan(0);
-    expect(savedMeta.projectName).toBe("default");
+    // sanitizeRuntimeAllowedDirectories normalizes the authorized root's
+    // slash/case form — compare case/separator-insensitively rather than
+    // asserting the exact literal input string.
+    expect(savedMeta.sessionKind).toBe("main");
+    expect(savedMeta.projectName).toBe("explicit-project");
+    expect((savedMeta.projectRoot as string).toLowerCase().replace(/\\/g, "/")).toBe(
+      EXPLICIT_TEST_PROJECT_ROOT.toLowerCase().replace(/\\/g, "/"),
+    );
   });
 
   it("marks explicit main session resume but ignores routine session resume", async () => {

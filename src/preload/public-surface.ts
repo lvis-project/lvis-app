@@ -67,6 +67,9 @@ export function buildPublicSurface() {
       routineTitle?: string;
       projectRoot?: string;
       projectName?: string;
+      /** True when projectRoot/projectName reflect the ambient default
+       *  directory binding rather than an explicit project selection. */
+      projectIsDefault?: boolean;
       messages: SerializedHistoryMessage[];
     }>,
   chatMainActiveState: async () =>
