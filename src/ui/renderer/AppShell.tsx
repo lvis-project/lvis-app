@@ -63,6 +63,12 @@ export function AppShell({
   currentSessionId,
   isCurrentSessionStarred,
   onToggleCurrentSessionStar,
+  activeSidebarTab,
+  onActiveSidebarTabChange,
+  isSessionStarred,
+  onToggleSessionStar,
+  isProjectPinned,
+  onToggleProjectPin,
   onExport,
   // banners
   bootstrapStatus,
@@ -134,6 +140,12 @@ export function AppShell({
   currentSessionId: string;
   isCurrentSessionStarred: boolean;
   onToggleCurrentSessionStar: () => void | Promise<void>;
+  activeSidebarTab?: SidebarProps["activeSidebarTab"];
+  onActiveSidebarTabChange?: SidebarProps["onActiveSidebarTabChange"];
+  isSessionStarred?: SidebarProps["isSessionStarred"];
+  onToggleSessionStar?: SidebarProps["onToggleSessionStar"];
+  isProjectPinned?: SidebarProps["isProjectPinned"];
+  onToggleProjectPin?: SidebarProps["onToggleProjectPin"];
   onExport: SidebarProps["onExport"];
   bootstrapStatus: BootstrapBannerProps["status"];
   onDismissBootstrapStatus: BootstrapBannerProps["onDismiss"];
@@ -226,6 +238,12 @@ export function AppShell({
         onOpenUnifiedSearch={onOpenUnifiedSearch}
         isCurrentSessionStarred={isCurrentSessionStarred}
         onToggleCurrentSessionStar={onToggleCurrentSessionStar}
+        activeSidebarTab={activeSidebarTab}
+        onActiveSidebarTabChange={onActiveSidebarTabChange}
+        isSessionStarred={isSessionStarred}
+        onToggleSessionStar={onToggleSessionStar}
+        isProjectPinned={isProjectPinned}
+        onToggleProjectPin={onToggleProjectPin}
         onExport={onExport}
       />
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">

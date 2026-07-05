@@ -20,6 +20,12 @@ export const en = {
   "sidebar.projectMenuNewChat": "New chat in this project",
   "sidebar.projectMenuReveal": "Reveal folder",
   "sidebar.projectMenuRemove": "Remove project",
+  "sidebar.chatsTab": "Chats",
+  "sidebar.projectsTab": "Projects",
+  "sidebar.pinProject": "Pin project",
+  "sidebar.unpinProject": "Unpin project",
+  "sidebar.pinConversation": "Pin conversation",
+  "sidebar.unpinConversation": "Unpin conversation",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "sidebar.ariaLabel": "기본 탐색",
@@ -42,4 +48,10 @@ export const ko: Record<keyof typeof en, string> = {
   "sidebar.projectMenuNewChat": "이 프로젝트에서 새 대화",
   "sidebar.projectMenuReveal": "폴더 열기",
   "sidebar.projectMenuRemove": "프로젝트 제거",
+  "sidebar.chatsTab": "대화",
+  "sidebar.projectsTab": "프로젝트",
+  "sidebar.pinProject": "프로젝트 고정",
+  "sidebar.unpinProject": "프로젝트 고정 해제",
+  "sidebar.pinConversation": "대화 고정",
+  "sidebar.unpinConversation": "대화 고정 해제",
 };

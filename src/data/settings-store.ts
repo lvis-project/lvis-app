@@ -385,6 +385,19 @@ export interface SystemSettings {
   sidePanelSplitFilePercent?: number;
   sidePanelSplitPreviewPercent?: number;
   sidePanelSplitSubagentPercent?: number;
+  /**
+   * Persisted active sidebar tab ("chats" = the plain ungrouped conversation
+   * list, "projects" = named-project groups). Durable UI preference, same
+   * family as `appMode`/`sidebarWidth`. Default "chats".
+   */
+  sidebarActiveTab?: "chats" | "projects";
+  /**
+   * Pinned project roots — pinned projects sort to the top of the sidebar's
+   * Projects tab. A lightweight preference list (not a project-domain
+   * mutation), so it lives here rather than a dedicated IPC domain. Default
+   * empty. Normalized to a de-duplicated string array on read/write.
+   */
+  pinnedProjectRoots?: string[];
 }
 
 /**
@@ -563,6 +576,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     sidePanelSplitFilePercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
     sidePanelSplitPreviewPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
     sidePanelSplitSubagentPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
+    sidebarActiveTab: "chats",
+    pinnedProjectRoots: [],
   },
   plugins: {},
   pluginConfigs: {},
@@ -816,6 +831,24 @@ export class SettingsService {
             this.settings.system[key],
           );
         }
+      }
+      const rawSidebarActiveTab = partial.system.sidebarActiveTab;
+      if (typeof rawSidebarActiveTab === "string" && (VALID_SIDEBAR_TABS as readonly string[]).includes(rawSidebarActiveTab)) {
+        next.sidebarActiveTab = rawSidebarActiveTab as SystemSettings["sidebarActiveTab"];
+      } else if (rawSidebarActiveTab !== undefined) {
+        log.warn(
+          `system.sidebarActiveTab patch ignored (received ${JSON.stringify(rawSidebarActiveTab)}), keeping %s`,
+          this.settings.system.sidebarActiveTab,
+        );
+      }
+      const rawPinnedProjectRoots = partial.system.pinnedProjectRoots;
+      if (Array.isArray(rawPinnedProjectRoots)) {
+        next.pinnedProjectRoots = normalizePinnedProjectRoots(rawPinnedProjectRoots);
+      } else if (rawPinnedProjectRoots !== undefined) {
+        log.warn(
+          `system.pinnedProjectRoots patch ignored (received ${JSON.stringify(rawPinnedProjectRoots)}), keeping %s`,
+          this.settings.system.pinnedProjectRoots,
+        );
       }
       this.settings.system = next;
     }
@@ -1331,6 +1364,25 @@ function normalizeWebView(input: unknown): WebViewSettings {
 
 const VALID_CLOSE_BEHAVIORS: readonly SystemCloseBehavior[] = ["hide-to-tray", "quit"];
 
+const VALID_SIDEBAR_TABS: readonly NonNullable<SystemSettings["sidebarActiveTab"]>[] = ["chats", "projects"];
+
+const MAX_PINNED_PROJECT_ROOTS = 200;
+
+/** De-duplicates, trims, and caps a pinned-project-roots list on both the patch and normalize paths. */
+function normalizePinnedProjectRoots(raw: unknown[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (trimmed.length === 0 || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+    if (out.length >= MAX_PINNED_PROJECT_ROOTS) break;
+  }
+  return out;
+}
+
 /**
  * The per-tab-kind vertical-split percent keys, iterated identically in the
  * update-patch and normalize paths so a new split-bearing tab kind is added in
@@ -1353,6 +1405,8 @@ function normalizeSystem(input: unknown): SystemSettings {
     localApiServer?: unknown;
     sidePanelWidth?: unknown;
     sidebarWidth?: unknown;
+    sidebarActiveTab?: unknown;
+    pinnedProjectRoots?: unknown;
   } & Record<(typeof SIDE_PANEL_SPLIT_KEYS)[number], unknown>;
   // Each field is normalized independently: a missing/invalid field falls
   // back to its default while a valid sibling is preserved (mirrors the
@@ -1417,6 +1471,24 @@ function normalizeSystem(input: unknown): SystemSettings {
         SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
       );
     }
+  }
+  const rawSidebarActiveTab = obj.sidebarActiveTab;
+  if (typeof rawSidebarActiveTab === "string" && (VALID_SIDEBAR_TABS as readonly string[]).includes(rawSidebarActiveTab)) {
+    result.sidebarActiveTab = rawSidebarActiveTab as SystemSettings["sidebarActiveTab"];
+  } else if (rawSidebarActiveTab !== undefined) {
+    log.warn(
+      `system.sidebarActiveTab invalid (received ${JSON.stringify(rawSidebarActiveTab)}), using default %s`,
+      DEFAULT_SETTINGS.system.sidebarActiveTab,
+    );
+  }
+  const rawPinnedProjectRoots = obj.pinnedProjectRoots;
+  if (Array.isArray(rawPinnedProjectRoots)) {
+    result.pinnedProjectRoots = normalizePinnedProjectRoots(rawPinnedProjectRoots);
+  } else if (rawPinnedProjectRoots !== undefined) {
+    log.warn(
+      `system.pinnedProjectRoots invalid (received ${JSON.stringify(rawPinnedProjectRoots)}), using default %s`,
+      DEFAULT_SETTINGS.system.pinnedProjectRoots,
+    );
   }
   return result;
 }

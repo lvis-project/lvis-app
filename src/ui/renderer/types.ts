@@ -235,6 +235,10 @@ export type AppSettings = {
     sidePanelSplitFilePercent?: number;
     sidePanelSplitPreviewPercent?: number;
     sidePanelSplitSubagentPercent?: number;
+    /** Persisted active sidebar tab ("chats" | "projects"). SOT: `SystemSettings`. */
+    sidebarActiveTab?: "chats" | "projects";
+    /** Pinned project roots — sort to the top of the sidebar's Projects tab. SOT: `SystemSettings`. */
+    pinnedProjectRoots?: string[];
   };
   /** Experimental feature flags — all default false. */
   features?: {
