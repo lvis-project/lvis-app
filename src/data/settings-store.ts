@@ -35,6 +35,8 @@ import {
 } from "../shared/appearance-font.js";
 import { DEFAULT_LOCALE, normalizeLocale, type Locale } from "../i18n/index.js";
 import { DEFAULT_APP_MODE, normalizeAppMode, type InitialAppMode } from "../shared/initial-app-mode.js";
+import { DEFAULT_SIDEBAR_TAB, isSidebarTab, type SidebarTab } from "../shared/sidebar-tab.js";
+import { projectRootKey } from "../shared/project-identity.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("settings");
 
@@ -388,9 +390,10 @@ export interface SystemSettings {
   /**
    * Persisted active sidebar tab ("chats" = the plain ungrouped conversation
    * list, "projects" = named-project groups). Durable UI preference, same
-   * family as `appMode`/`sidebarWidth`. Default "chats".
+   * family as `appMode`/`sidebarWidth`. Default "chats". SoT for the value
+   * set: `../shared/sidebar-tab.js`.
    */
-  sidebarActiveTab?: "chats" | "projects";
+  sidebarActiveTab?: SidebarTab;
   /**
    * Pinned project roots — pinned projects sort to the top of the sidebar's
    * Projects tab. A lightweight preference list (not a project-domain
@@ -576,7 +579,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     sidePanelSplitFilePercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
     sidePanelSplitPreviewPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
     sidePanelSplitSubagentPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
-    sidebarActiveTab: "chats",
+    sidebarActiveTab: DEFAULT_SIDEBAR_TAB,
     pinnedProjectRoots: [],
   },
   plugins: {},
@@ -833,8 +836,8 @@ export class SettingsService {
         }
       }
       const rawSidebarActiveTab = partial.system.sidebarActiveTab;
-      if (typeof rawSidebarActiveTab === "string" && (VALID_SIDEBAR_TABS as readonly string[]).includes(rawSidebarActiveTab)) {
-        next.sidebarActiveTab = rawSidebarActiveTab as SystemSettings["sidebarActiveTab"];
+      if (isSidebarTab(rawSidebarActiveTab)) {
+        next.sidebarActiveTab = rawSidebarActiveTab;
       } else if (rawSidebarActiveTab !== undefined) {
         log.warn(
           `system.sidebarActiveTab patch ignored (received ${JSON.stringify(rawSidebarActiveTab)}), keeping %s`,
@@ -1364,19 +1367,26 @@ function normalizeWebView(input: unknown): WebViewSettings {
 
 const VALID_CLOSE_BEHAVIORS: readonly SystemCloseBehavior[] = ["hide-to-tray", "quit"];
 
-const VALID_SIDEBAR_TABS: readonly NonNullable<SystemSettings["sidebarActiveTab"]>[] = ["chats", "projects"];
-
 const MAX_PINNED_PROJECT_ROOTS = 200;
 
-/** De-duplicates, trims, and caps a pinned-project-roots list on both the patch and normalize paths. */
+/**
+ * De-duplicates, trims, and caps a pinned-project-roots list on both the
+ * patch and normalize paths. De-dup keys on `projectRootKey` (the same
+ * case/slash-insensitive root-identity SoT the sidebar's pin lookup uses via
+ * `projectRootEquals`) rather than raw string equality, so e.g.
+ * "C:\\ws\\alpha" and "c:/ws/alpha/" are recognized as the same pinned root
+ * instead of accumulating as separate list entries.
+ */
 function normalizePinnedProjectRoots(raw: unknown[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const entry of raw) {
     if (typeof entry !== "string") continue;
     const trimmed = entry.trim();
-    if (trimmed.length === 0 || seen.has(trimmed)) continue;
-    seen.add(trimmed);
+    if (trimmed.length === 0) continue;
+    const key = projectRootKey(trimmed) ?? trimmed;
+    if (seen.has(key)) continue;
+    seen.add(key);
     out.push(trimmed);
     if (out.length >= MAX_PINNED_PROJECT_ROOTS) break;
   }
@@ -1473,8 +1483,8 @@ function normalizeSystem(input: unknown): SystemSettings {
     }
   }
   const rawSidebarActiveTab = obj.sidebarActiveTab;
-  if (typeof rawSidebarActiveTab === "string" && (VALID_SIDEBAR_TABS as readonly string[]).includes(rawSidebarActiveTab)) {
-    result.sidebarActiveTab = rawSidebarActiveTab as SystemSettings["sidebarActiveTab"];
+  if (isSidebarTab(rawSidebarActiveTab)) {
+    result.sidebarActiveTab = rawSidebarActiveTab;
   } else if (rawSidebarActiveTab !== undefined) {
     log.warn(
       `system.sidebarActiveTab invalid (received ${JSON.stringify(rawSidebarActiveTab)}), using default %s`,
