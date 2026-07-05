@@ -6,6 +6,10 @@ import { fireEvent, render, waitFor } from "@testing-library/react";
 import { ComposerProjectSelector } from "../ComposerProjectSelector.js";
 import type { ProjectIdentity } from "../../../../shared/project-identity.js";
 
+// PROJECTS[0] is the default/base-directory binding — never shown as a
+// selectable or "selected" project (2026-07 "remove Current Project
+// labeling"). Only PROJECTS[1] ("alpha", a real user-added project) counts
+// as an explicit selection.
 const PROJECTS: ProjectIdentity[] = [
   { projectRoot: "C:\\Users\\ikcha\\.lvis\\workspace", projectName: "default", isDefault: true },
   { projectRoot: "C:\\work\\alpha", projectName: "alpha" },
@@ -46,29 +50,67 @@ function openMenu(trigger: HTMLElement) {
 }
 
 describe("ComposerProjectSelector", () => {
-  it("shows the active project's name on the trigger", () => {
+  it("shows a muted 'Select project' placeholder CTA when no explicit project is active (default binding)", () => {
     const restore = installWorkspaceMock();
     try {
-      const { getByTestId } = render(<Harness />);
-      expect(getByTestId("composer-project-selector-trigger").textContent).toContain("default");
+      const { getByTestId } = render(<Harness activeProject={PROJECTS[0]} />);
+      const trigger = getByTestId("composer-project-selector-trigger");
+      // PROJECTS[0] is the default/base-directory binding — never surfaced as
+      // a selected project name, even though it is a populated ProjectIdentity.
+      expect(trigger.textContent).not.toContain("default");
+      // Test runtime defaults to the ko locale (see other tests' Korean
+      // strings in this codebase's suites) — "프로젝트 선택" is
+      // composerProjectSelector.selectProjectPlaceholder's ko value.
+      expect(trigger.textContent).toContain("프로젝트 선택");
+      expect(trigger.getAttribute("data-selected")).toBe("false");
     } finally {
       restore();
     }
   });
 
-  it("opens a downward (side=bottom) menu listing every known project", async () => {
+  it("shows a muted 'Select project' placeholder when no project is active at all (undefined)", () => {
     const restore = installWorkspaceMock();
     try {
-      const { getByTestId, getAllByTestId } = render(<Harness />);
+      const { getByTestId } = render(<Harness activeProject={undefined} />);
+      const trigger = getByTestId("composer-project-selector-trigger");
+      // Test runtime defaults to the ko locale (see other tests' Korean
+      // strings in this codebase's suites) — "프로젝트 선택" is
+      // composerProjectSelector.selectProjectPlaceholder's ko value.
+      expect(trigger.textContent).toContain("프로젝트 선택");
+      expect(trigger.getAttribute("data-selected")).toBe("false");
+    } finally {
+      restore();
+    }
+  });
+
+  it("shows the real project name once an explicit (non-default) project is active", () => {
+    const restore = installWorkspaceMock();
+    try {
+      const { getByTestId } = render(<Harness activeProject={PROJECTS[1]} />);
+      const trigger = getByTestId("composer-project-selector-trigger");
+      expect(trigger.textContent).toContain("alpha");
+      expect(trigger.textContent).not.toContain("Select project");
+      expect(trigger.getAttribute("data-selected")).toBe("true");
+    } finally {
+      restore();
+    }
+  });
+
+  it("opens a downward (side=bottom) menu listing only real (non-default) projects", async () => {
+    const restore = installWorkspaceMock();
+    try {
+      const { getByTestId, getAllByTestId, queryAllByTestId } = render(<Harness />);
       openMenu(getByTestId("composer-project-selector-trigger"));
       await waitFor(() => {
         const menu = getByTestId("composer-project-selector-menu");
         expect(menu).toBeTruthy();
         expect(menu.getAttribute("data-side")).toBe("bottom");
       });
+      // The default binding (PROJECTS[0]) is never a pickable list entry.
       const items = getAllByTestId("composer-project-selector-item");
-      expect(items).toHaveLength(2);
-      expect(items.map((item) => item.textContent)).toEqual(["default", "alpha"]);
+      expect(items).toHaveLength(1);
+      expect(items.map((item) => item.textContent)).toEqual(["alpha"]);
+      expect(queryAllByTestId("composer-project-selector-item").some((item) => item.textContent?.includes("default"))).toBe(false);
     } finally {
       restore();
     }
@@ -85,8 +127,7 @@ describe("ComposerProjectSelector", () => {
       await waitFor(() => expect(getByTestId("composer-project-selector-menu")).toBeTruthy());
 
       const items = getAllByTestId("composer-project-selector-item");
-      // alpha is the second (non-default) project row.
-      fireEvent.click(items[items.length - 1]!);
+      fireEvent.click(items[0]!);
 
       expect(onSelectProject).toHaveBeenCalledWith({ projectRoot: "C:\\work\\alpha", projectName: "alpha" });
       await waitFor(() => {
