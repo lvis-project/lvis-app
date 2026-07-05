@@ -38,6 +38,10 @@ export const MARKETPLACE_ELIGIBLE_LOCALES = SUPPORTED_LOCALES.filter(
     !DEFAULT_VISIBLE_LOCALE_SET.has(locale),
 );
 
+const MARKETPLACE_ELIGIBLE_LOCALE_SET = new Set<string>(
+  MARKETPLACE_ELIGIBLE_LOCALES,
+);
+
 /**
  * Display metadata for the language picker. `nativeName` is shown to users in
  * their own language; `englishName` is a stable label for logs / fallback.
@@ -63,6 +67,15 @@ export function isDefaultVisibleLocale(
   return (
     typeof value === "string" &&
     DEFAULT_VISIBLE_LOCALE_SET.has(value)
+  );
+}
+
+export function isMarketplaceEligibleLocale(
+  value: unknown,
+): value is MarketplaceEligibleLocale {
+  return (
+    typeof value === "string" &&
+    MARKETPLACE_ELIGIBLE_LOCALE_SET.has(value)
   );
 }
 

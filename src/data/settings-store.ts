@@ -20,20 +20,31 @@ import {
   DEFAULT_LLM_VENDOR,
   freshVendorBlocks,
   isLLMVendor,
+  isMarketplaceEligibleLLMVendor,
   LLM_VENDOR_DEFAULTS,
   LLM_VENDORS,
   normalizeLlmVendorModel,
   type LLMVendor,
   type LLMVendorSettings,
 } from "../shared/llm-vendor-defaults.js";
-import { BUNDLE_IDS, DEFAULT_BUNDLE_ID, type BundleId } from "../shared/theme-bundles.js";
+import {
+  BUNDLE_IDS,
+  DEFAULT_BUNDLE_ID,
+  isMarketplaceEligibleThemeBundleId,
+  type BundleId,
+} from "../shared/theme-bundles.js";
 import {
   FONT_SIZE_SCALE_VALUES,
   type FontSizeScale,
   type AppearanceFontSettings,
   isValidFontFamilyOverride,
 } from "../shared/appearance-font.js";
-import { DEFAULT_LOCALE, isLocale, normalizeLocale, type Locale } from "../i18n/index.js";
+import {
+  DEFAULT_LOCALE,
+  isMarketplaceEligibleLocale,
+  normalizeLocale,
+  type Locale,
+} from "../i18n/index.js";
 import { DEFAULT_APP_MODE, normalizeAppMode, type InitialAppMode } from "../shared/initial-app-mode.js";
 import { DEFAULT_SIDEBAR_TAB, isSidebarTab, type SidebarTab } from "../shared/sidebar-tab.js";
 import {
@@ -1264,10 +1275,6 @@ function uniqueValidList<T extends string>(
   return result;
 }
 
-function isBundleId(value: unknown): value is BundleId {
-  return typeof value === "string" && (BUNDLE_IDS as readonly string[]).includes(value);
-}
-
 function normalizeMarketplace(input: unknown): MarketplaceSettings {
   const raw = input && typeof input === "object" && !Array.isArray(input)
     ? (input as Partial<MarketplaceSettings>)
@@ -1286,9 +1293,18 @@ function normalizeMarketplace(input: unknown): MarketplaceSettings {
   merged.cloudAllowPrivateNetwork = typeof raw.cloudAllowPrivateNetwork === "boolean"
     ? raw.cloudAllowPrivateNetwork
     : DEFAULT_SETTINGS.marketplace.cloudAllowPrivateNetwork;
-  merged.installedProviderIds = uniqueValidList(raw.installedProviderIds, isLLMVendor);
-  merged.installedThemeBundleIds = uniqueValidList(raw.installedThemeBundleIds, isBundleId);
-  merged.installedLanguagePacks = uniqueValidList(raw.installedLanguagePacks, isLocale);
+  merged.installedProviderIds = uniqueValidList(
+    raw.installedProviderIds,
+    isMarketplaceEligibleLLMVendor,
+  );
+  merged.installedThemeBundleIds = uniqueValidList(
+    raw.installedThemeBundleIds,
+    isMarketplaceEligibleThemeBundleId,
+  );
+  merged.installedLanguagePacks = uniqueValidList(
+    raw.installedLanguagePacks,
+    isMarketplaceEligibleLocale,
+  );
   return merged;
 }
 

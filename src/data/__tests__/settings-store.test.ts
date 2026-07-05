@@ -86,9 +86,15 @@ describe("SettingsService marketplace defaults", () => {
       JSON.stringify({
         marketplace: {
           backend: "real-cloud",
-          installedProviderIds: ["groq", "missing-vendor", "groq"],
-          installedThemeBundleIds: ["tokyo-night", "missing-theme", "tokyo-night"],
-          installedLanguagePacks: ["ko", "it", "ko"],
+          installedProviderIds: ["openrouter", "groq", "missing-vendor", "openai", "groq"],
+          installedThemeBundleIds: [
+            "moonstone",
+            "tokyo-night",
+            "missing-theme",
+            "gallery",
+            "tokyo-night",
+          ],
+          installedLanguagePacks: ["en", "ko", "it", "ko"],
         },
       }),
       "utf-8",
@@ -103,9 +109,9 @@ describe("SettingsService marketplace defaults", () => {
 
     await service.patch({
       marketplace: {
-        installedProviderIds: ["ollama", "nope"] as never,
-        installedThemeBundleIds: ["high-contrast", "nope"] as never,
-        installedLanguagePacks: ["ja", "nope"] as never,
+        installedProviderIds: ["ollama", "openai", "nope"] as never,
+        installedThemeBundleIds: ["high-contrast", "moonstone", "nope"] as never,
+        installedLanguagePacks: ["ja", "en", "nope"] as never,
       },
     });
 
