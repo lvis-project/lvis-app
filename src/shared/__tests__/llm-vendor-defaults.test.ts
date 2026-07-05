@@ -8,6 +8,7 @@ import {
   MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS,
   freshVendorBlocks,
   isDefaultVisibleLLMVendor,
+  isMarketplaceEligibleLLMVendor,
   isRetiredLlmModel,
   normalizeLlmVendorModel,
 } from "../llm-vendor-defaults.js";
@@ -94,6 +95,9 @@ describe("LLM vendor defaults", () => {
     expect(MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS).toContain("azure-foundry");
     expect(MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS).toContain("groq");
     expect(MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS).toContain("ollama");
+    expect(isMarketplaceEligibleLLMVendor("groq")).toBe(true);
+    expect(isMarketplaceEligibleLLMVendor("openrouter")).toBe(false);
+    expect(isMarketplaceEligibleLLMVendor("unknown-vendor")).toBe(false);
   });
 
   it("uses gpt-5.4-mini as the OpenAI default model", () => {

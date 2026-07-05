@@ -6,6 +6,7 @@ import {
   SUPPORTED_LOCALES,
   isDefaultVisibleLocale,
   isLocale,
+  isMarketplaceEligibleLocale,
   normalizeLocale,
   visibleLocalesFor,
 } from "../locale.js";
@@ -65,6 +66,9 @@ describe("locale", () => {
     expect(isDefaultVisibleLocale("en")).toBe(true);
     expect(isDefaultVisibleLocale("ko")).toBe(false);
     expect(MARKETPLACE_ELIGIBLE_LOCALES).toEqual(["ko", "ja", "zh", "es", "fr", "de"]);
+    expect(isMarketplaceEligibleLocale("ko")).toBe(true);
+    expect(isMarketplaceEligibleLocale("en")).toBe(false);
+    expect(isMarketplaceEligibleLocale("it")).toBe(false);
     expect(visibleLocalesFor(["ko-KR"])).toEqual(["en", "ko"]);
   });
 
