@@ -8,7 +8,10 @@ import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Store } from "lucide-react";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { LvisApi, MarketplaceItem } from "../types.js";
-import type { MarketplacePackageType } from "../../../shared/assistant-context.js";
+import {
+  INSTALLABLE_MARKETPLACE_PACKAGE_TYPES,
+  type MarketplacePackageType,
+} from "../../../shared/assistant-context.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { PluginInstallDialog } from "../dialogs/PluginInstallDialog.js";
@@ -17,6 +20,26 @@ import {
   buildNetworkAccessAcknowledgement,
   hasNetworkAccessDisclosure,
 } from "../../../shared/network-access.js";
+
+const INSTALLABLE_PACKAGE_TYPE_SET = new Set<MarketplacePackageType>(
+  INSTALLABLE_MARKETPLACE_PACKAGE_TYPES,
+);
+
+const PACKAGE_TYPE_LABELS: Record<MarketplacePackageType, string> = {
+  plugin: "Plugins",
+  mcp: "MCP",
+  agent: "Agents",
+  skill: "Skills",
+  provider: "Providers",
+  theme: "Themes",
+  "language-pack": "Languages",
+};
+
+function isInstallablePackageType(
+  packageType: MarketplacePackageType,
+): packageType is (typeof INSTALLABLE_MARKETPLACE_PACKAGE_TYPES)[number] {
+  return INSTALLABLE_PACKAGE_TYPE_SET.has(packageType);
+}
 
 export interface MarketplaceTabProps {
   api: LvisApi;
@@ -215,10 +238,13 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
 
   const filterOptions: Array<{ value: "all" | MarketplacePackageType; label: string }> = [
     { value: "all", label: "All" },
-    { value: "plugin", label: "Plugins" },
-    { value: "mcp", label: "MCP" },
-    { value: "agent", label: "Agents" },
-    { value: "skill", label: "Skills" },
+    { value: "plugin", label: PACKAGE_TYPE_LABELS.plugin },
+    { value: "mcp", label: PACKAGE_TYPE_LABELS.mcp },
+    { value: "agent", label: PACKAGE_TYPE_LABELS.agent },
+    { value: "skill", label: PACKAGE_TYPE_LABELS.skill },
+    { value: "provider", label: PACKAGE_TYPE_LABELS.provider },
+    { value: "theme", label: PACKAGE_TYPE_LABELS.theme },
+    { value: "language-pack", label: PACKAGE_TYPE_LABELS["language-pack"] },
   ];
 
   return (
@@ -293,7 +319,21 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
             ) : visiblePackages.map((item) => {
               const packageType = item.pluginType ?? "plugin";
               const isWorking = workingSlug === item.id;
+              const canInstall = isInstallablePackageType(packageType);
               const canUninstall = item.installed && (packageType === "plugin" || packageType === "agent" || packageType === "skill");
+              const actionDisabled = isWorking || (item.installed ? !canUninstall : !canInstall);
+              const actionLabel = isWorking
+                ? t("marketplaceTab.processingLabel")
+                : item.installed
+                  ? t("marketplaceTab.removeButton")
+                  : canInstall
+                    ? t("marketplaceTab.installButton")
+                    : t("marketplaceTab.comingSoon");
+              const unavailableTitle = canInstall
+                ? undefined
+                : t("marketplaceTab.packageInstallUnavailableTitle", {
+                  label: PACKAGE_TYPE_LABELS[packageType],
+                });
               return (
                 <div key={`${packageType}:${item.id}`} className="flex items-start justify-between gap-3 p-2">
                   <div className="min-w-0">
@@ -313,7 +353,8 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                     variant={item.installed ? "outline" : "default"}
                     className="h-7 shrink-0 px-2 text-xs"
                     data-testid={`marketplace:action:${item.id}`}
-                    disabled={isWorking || (item.installed && !canUninstall)}
+                    disabled={actionDisabled}
+                    title={unavailableTitle}
                     onClick={() => {
                       if (item.installed) {
                         void uninstallPackage(item);
@@ -328,7 +369,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                       void installPackage(item);
                     }}
                   >
-                    {isWorking ? t("marketplaceTab.processingLabel") : item.installed ? t("marketplaceTab.removeButton") : t("marketplaceTab.installButton")}
+                    {actionLabel}
                   </Button>
                 </div>
               );

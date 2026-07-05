@@ -418,26 +418,35 @@ export class PluginMarketplaceService {
     ]);
     const items: MarketplaceListItem[] = [];
     for (const plugin of plugins) {
-      const entry = registry.plugins.find((x) => x.id === plugin.id);
-      const agentEntry = plugin.pluginType === "agent"
+      const packageType = plugin.pluginType ?? "plugin";
+      const entry = packageType === "plugin" || packageType === "mcp"
+        ? registry.plugins.find((x) => x.id === plugin.id)
+        : undefined;
+      const agentEntry = packageType === "agent"
         ? agentRegistry.agents.find((x) => x.id === plugin.id || x.id === plugin.slug)
         : undefined;
-      const skillEntry = plugin.pluginType === "skill"
+      const skillEntry = packageType === "skill"
         ? skillRegistry.skills.find((x) => x.id === plugin.id || x.id === plugin.slug)
         : undefined;
-      const installed = plugin.pluginType === "agent"
+      const installed = packageType === "agent"
         ? !!agentEntry
-        : plugin.pluginType === "skill"
+        : packageType === "skill"
           ? !!skillEntry
-          : !!entry;
-      const enabled = plugin.pluginType === "agent"
+          : packageType === "plugin" || packageType === "mcp"
+            ? !!entry
+            : false;
+      const enabled = packageType === "agent"
         ? agentEntry?.enabled !== false
-        : plugin.pluginType === "skill"
+        : packageType === "skill"
           ? skillEntry?.enabled !== false
-          : entry?.enabled !== false;
-      const isManaged = plugin.pluginType === "agent" || plugin.pluginType === "skill"
+          : packageType === "plugin" || packageType === "mcp"
+            ? entry?.enabled !== false
+            : false;
+      const isManaged = packageType === "agent" || packageType === "skill"
         ? false
-        : await this.resolveIsManaged(plugin, entry?.manifestPath);
+        : packageType === "plugin" || packageType === "mcp"
+          ? await this.resolveIsManaged(plugin, entry?.manifestPath)
+          : false;
       items.push({
         ...plugin,
         installed,
@@ -564,6 +573,11 @@ export class PluginMarketplaceService {
     const plugin = catalogSnapshot.find((x) => x.id === pluginId || x.slug === pluginId);
     if (!plugin) {
       throw new Error(`Plugin not found in marketplace: ${pluginId}`);
+    }
+    if ((plugin.pluginType ?? "plugin") !== "plugin") {
+      throw new Error(
+        `Marketplace package "${pluginId}" is a ${plugin.pluginType} entry, not a plugin package`,
+      );
     }
 
     // §7.2 canInstall — admin-policy catalog entries block user actor installs.
@@ -936,6 +950,11 @@ export class PluginMarketplaceService {
       const plugin = plugins.find((x) => x.id === pluginId);
       if (!plugin) {
         throw new Error(`Plugin not found in marketplace: ${pluginId}`);
+      }
+      if ((plugin.pluginType ?? "plugin") !== "plugin") {
+        throw new Error(
+          `Marketplace package "${pluginId}" is a ${plugin.pluginType} entry, not a plugin package`,
+        );
       }
       assertNetworkAccessAcknowledgement({
         plugin,

@@ -1,3 +1,5 @@
+import type { MarketplacePackageType } from "../shared/assistant-context.js";
+
 export type InstallPolicy = "admin" | "user";
 
 
@@ -643,11 +645,11 @@ export interface PluginMarketplaceItem {
   /** S14: dependency capabilities this plugin requires. */
   requires?: RequiresSpec;
   /**
-   * lvis-marketplace#52/#456 — catalog entries are regular plugins, MCP
-   * servers, agent profiles, or skills. Defaults to `"plugin"` when the
-   * server omits the field (back-compat with pre-#52 catalogs).
+   * Catalog package kind. Defaults to `"plugin"` when the server omits the
+   * field (back-compat with pre-#52 catalogs). Provider/theme/language-pack
+   * entries are discoverable before their installers are enabled.
    */
-  pluginType?: "plugin" | "mcp" | "agent" | "skill";
+  pluginType?: MarketplacePackageType;
   /**
    * MCP runtime block — present when `pluginType === "mcp"` and the
    * server has the schema extension. The host materializes this into

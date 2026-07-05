@@ -221,6 +221,50 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     });
   });
 
+  it("listPlugins() passes through non-plugin marketplace package kinds", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse({
+        plugins: [
+          {
+            id: "openrouter-provider",
+            display_name: "OpenRouter",
+            description: "Provider package",
+            package_spec: "@lvis/openrouter-provider@1.0.0",
+            package_name: "@lvis/openrouter-provider",
+            plugin_type: "provider",
+          },
+          {
+            id: "moonstone-theme",
+            display_name: "Moonstone",
+            description: "Theme package",
+            package_spec: "@lvis/moonstone-theme@1.0.0",
+            package_name: "@lvis/moonstone-theme",
+            plugin_type: "theme",
+          },
+          {
+            id: "ko-language-pack",
+            display_name: "Korean",
+            description: "Language package",
+            package_spec: "@lvis/ko-language-pack@1.0.0",
+            package_name: "@lvis/ko-language-pack",
+            plugin_type: "language-pack",
+          },
+        ],
+      }),
+    );
+
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com/",
+    });
+    const plugins = await fetcher.listPlugins();
+
+    expect(plugins.map((plugin) => plugin.pluginType)).toEqual([
+      "provider",
+      "theme",
+      "language-pack",
+    ]);
+  });
+
   it("getPluginDetail() returns null on 404", async () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse({ error: "not found" }, { status: 404, ok: false }),
