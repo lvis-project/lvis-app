@@ -104,6 +104,25 @@ partial asset 삭제 후 workflow re-run 방식도 가능하지만, **electron-b
 - **electron-builder publish race (resolved v0.2.3+)** — 과거 matrix publish 경로의 historic incident. 현재는 single publish job 이므로 운영 한계가 아니라 legacy 복구 참고만 유지.
 - **Tag dereference 주의** — annotated tag 의 `git ls-remote` 결과는 *tag object SHA*. commit SHA 보려면 `refs/tags/vX.Y.Z^{}`.
 
+## 공개/외부 빌드 — 임베디드 데모 활성화 키 금지 (#1498)
+
+`scripts/build-main-esbuild.mjs` 는 `LVIS_EMBED_DEMO_ACTIVATION` env 또는 gitignored
+repo-root `.env.demo` 로부터 데모 활성화 키를 빌드타임에 번들에 임베드할 수 있다 (사내
+Azure Foundry 데모 endpoint 로 무입력 인증). 이 안전 모델은 그 endpoint 가 사내망에서만
+도달 가능(host-resolver-rules)하다는 전제에 전적으로 의존한다 — 외부 audience 가 받는
+빌드에 같은 키를 임베드하면 codec 의 2-factor 전달 모델이 1-factor 로 붕괴한다.
+
+- `LVIS_DISTRIBUTION_CHANNEL` 이 이 신호의 SOT. 미설정 시 기본값 `internal` — 기존
+  사내/CI/dev 빌드는 전부 무회귀.
+- `LVIS_DISTRIBUTION_CHANNEL=public` 인 상태에서 `LVIS_EMBED_DEMO_ACTIVATION` 또는
+  repo-root `.env.demo` 가 환경에 존재하면 embed 해석 이전에 즉시 빌드 fail
+  (`process.exit(1)`).
+- 공개/외부 릴리스 파이프라인은 `LVIS_DISTRIBUTION_CHANNEL=public` 을 설정하고 두 embed
+  소스 모두 제공하지 않아야 한다. 우회 옵션 없음 — silent downgrade 후 계속 진행하지
+  않고 항상 빌드를 막는다.
+- 구현: `scripts/build-main-esbuild.mjs` 의 `assertNoPublicEmbed`. Threat model 은
+  `src/main/demo-embedded-activation.ts` 참조.
+
 ## 자주 발생하는 함정
 
 - **multi-repo workspace 의 shell cwd drift** — `cd` 가 Bash session 에서 persist. release 작업 중 다른 sibling repo (예: dev-tools) 로 우연히 이동하면 `git remote set-url` 같은 명령이 잘못된 repo 에 적용. 모든 git 명령은 `git -C <abs-path>` 형태로 격리.

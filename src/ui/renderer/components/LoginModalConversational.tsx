@@ -95,6 +95,23 @@ function activationErrorMessage(code: string): string {
 }
 
 /**
+ * #1498 — Ollama activation IPC error codes. Separate from
+ * `activationErrorMessage` because the only failure mode is "the local
+ * server that was reachable a moment ago is gone now" — a narrower surface
+ * than the demo-key validation errors above.
+ */
+function ollamaErrorMessage(code: string): string {
+  switch (code) {
+    case "no-ollama":
+      return t("loginModalConversational.activErrNoOllama");
+    case "unauthorized-frame":
+      return t("loginModalConversational.activErrUnauthorizedFrame");
+    default:
+      return t("loginModalConversational.activErrActivationFailed");
+  }
+}
+
+/**
  * Type-on checklist lines for the auth progress (F2 fallback). Rendered
  * after the demo chip is selected when the live IPC progress is not yet
  * active — the steps reveal one at a time with a short stagger so the
@@ -168,6 +185,14 @@ export function LoginModalConversational({
   const [activationRelaunching, setActivationRelaunching] = useState(false);
   const [checkingDemoStatus, setCheckingDemoStatus] = useState(false);
 
+  // #1498 — local Ollama fallback chip. `ollamaAvailable` gates whether the
+  // chip renders at all (never shown when nothing answered the probe — an
+  // unconditional CTA would be misleading). Probed once per modal open
+  // alongside the demo-status check's own timing; `ollamaActivating` blocks
+  // the chip while its own IPC roundtrip is in flight.
+  const [ollamaAvailable, setOllamaAvailable] = useState(false);
+  const [ollamaActivating, setOllamaActivating] = useState(false);
+
   // Reset the conversational flow on every open so a re-entry starts
 
   useEffect(() => {
@@ -183,8 +208,36 @@ export function LoginModalConversational({
       setActivationNotice(null);
       setActivating(false);
       setActivationRelaunching(false);
+      setOllamaAvailable(false);
+      setOllamaActivating(false);
     }
   }, [open]);
+
+  // #1498 — probe Ollama availability whenever the modal opens so the chip
+  // stack reflects the current machine state without requiring the user to
+  // click chip 1 first. A fresh probe every open (no caching) mirrors the
+  // `demo.status()` freshness contract — the user may start/stop their
+  // local Ollama server between app launches.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const status = await api.demo.status();
+        if (!cancelled && status.ok) {
+          setOllamaAvailable(status.ollamaAvailable);
+        }
+      } catch (err) {
+        // Best-effort — a failed probe just keeps the chip hidden, it must
+        // never surface as a login-blocking error.
+        // eslint-disable-next-line no-console
+        console.error("demo.status IPC failed (ollama probe)", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, api]);
 
   useEffect(() => {
     if (!activationRelaunching) return;
@@ -303,6 +356,40 @@ export function LoginModalConversational({
       setActivating(false);
     }
   }, [api, activating, submitting, activationRelaunching, runAuthMockup]);
+
+  /**
+   * #1498 — local Ollama fallback chip. No credentials, no activation-key
+   * paste, no relaunch: the vendor is configured directly (preset baseUrl +
+   * default model + `hasApiKey` gate placeholder) and, on success, hands
+   * off to `onSuccess` exactly like a completed login. Re-probes inside
+   * the IPC handler itself, so a server the user stopped between opening
+   * the modal and clicking the chip fails closed with `no-ollama` instead
+   * of silently configuring a dead endpoint.
+   */
+  const activateOllamaChip = useCallback(async () => {
+    if (ollamaActivating || submitting || activating || activationRelaunching) return;
+    setError(null);
+    setOllamaActivating(true);
+    try {
+      const result = await api.demo.activateOllama();
+      if (result.ok) {
+        onSuccess?.(result.vendor, {
+          ok: true,
+          vendor: result.vendor,
+          fieldsApplied: ["apiKey", "baseUrl", "model"],
+        });
+        onOpenChange(false);
+        return;
+      }
+      setError(ollamaErrorMessage(result.error));
+    } catch (err) {
+      setError(t("loginModalConversational.activErrProcessError"));
+      // eslint-disable-next-line no-console
+      console.error("demo.activateOllama IPC failed", err);
+    } finally {
+      setOllamaActivating(false);
+    }
+  }, [api, ollamaActivating, submitting, activating, activationRelaunching, onSuccess, onOpenChange]);
 
   /**
    * Demo chip handler. Fresh installs open the activation-input sub-state;
@@ -461,11 +548,16 @@ export function LoginModalConversational({
         // chip 3 is a disabled placeholder; swallow the keystroke so it
         // does not bubble to the wider App keyboard handlers.
         e.preventDefault();
+      } else if (e.key === "4" && ollamaAvailable) {
+        // #1498 — chip 4 only exists (and only responds to the keystroke)
+        // when the Ollama probe found a local server.
+        e.preventDefault();
+        void activateOllamaChip();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, activateDemoChip, api, onOpenChange]);
+  }, [open, activateDemoChip, api, onOpenChange, ollamaAvailable, activateOllamaChip]);
 
   const isLastChecklistLine =
     checklistRevealed > 0 && checklistRevealed <= CHECKLIST_LINES.length;
@@ -586,6 +678,41 @@ export function LoginModalConversational({
               </span>
             </span>
           </button>
+          {/* #1498 — Ollama local-model fallback. Only rendered when the
+              main-process probe confirmed a local server is actually
+              reachable (`ollamaAvailable`) — never shown unconditionally,
+              since an always-visible CTA that then fails would mislead
+              off-network / no-key users into thinking local models are
+              always available. */}
+          {ollamaAvailable && (
+            <button
+              type="button"
+              data-testid="login-modal:chip-ollama"
+              onClick={() => void activateOllamaChip()}
+              disabled={
+                submitting ||
+                activating ||
+                activationRelaunching ||
+                checkingDemoStatus ||
+                activationOpen ||
+                ollamaActivating
+              }
+              className="flex w-full items-center gap-2 rounded-lg border border-border-subtle bg-secondary px-3 py-2.5 text-left text-[12px] text-secondary-foreground transition-colors hover:bg-muted disabled:opacity-60"
+            >
+              <span aria-hidden="true">🖥️</span>
+              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
+                4
+              </span>
+              <span className="min-w-0 flex-1">
+                {ollamaActivating
+                  ? t("loginModalConversational.chipOllamaActivating")
+                  : t("loginModalConversational.chipOllamaLabel")}
+                <span className="ml-1.5 text-[10px] text-muted-foreground">
+                  {t("loginModalConversational.chipOllamaSub")}
+                </span>
+              </span>
+            </button>
+          )}
         </div>
 
         {/* F2 — User-side bubble + assistant follow-up + type-on
@@ -819,7 +946,7 @@ export function LoginModalConversational({
           >
             {t("loginModalConversational.footerHintPre")}<kbd className="rounded border border-border bg-muted px-1 font-mono">1</kbd>
             ~
-            <kbd className="rounded border border-border bg-muted px-1 font-mono">3</kbd>
+            <kbd className="rounded border border-border bg-muted px-1 font-mono">{ollamaAvailable ? "4" : "3"}</kbd>
             {t("loginModalConversational.footerHintPost")}
           </p>
         </div>
