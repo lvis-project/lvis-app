@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isIpcErrorResult, type AppSettings, type DeepPartial, type LvisApi } from "../types.js";
-import { VENDORS } from "../constants.js";
+import { ALL_VENDORS, getVendorOption, type VendorOption } from "../constants.js";
 import { formatIpcError } from "../format-ipc-error.js";
 import type { FallbackEntry } from "../tabs/LlmTab.js";
 import { t } from "../../../i18n/runtime.js";
@@ -108,7 +108,7 @@ export interface SettingsOrchestrationState {
 
 
   save: (tab: string) => Promise<boolean>;
-  vendorInfo: (typeof VENDORS)[number];
+  vendorInfo: VendorOption;
 }
 
 export function useSettingsOrchestration(
@@ -171,7 +171,7 @@ export function useSettingsOrchestration(
     setAuthModeState(mode);
   }, [invalidateLlmDraftSaves]);
 
-  const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
+  const vendorInfo = getVendorOption(vendor);
 
   // Load all settings on mount. (Before the BrowserWindow conversion this
   // was gated on `open`; that's now always true while the window exists.)
@@ -237,7 +237,7 @@ export function useSettingsOrchestration(
   // Re-hydrate every vendor-specific field when the active vendor changes.
   useEffect(() => {
     if (!settingsLoaded) return;
-    if (!VENDORS.some((x) => x.id === vendor)) return;
+    if (!ALL_VENDORS.some((x) => x.id === vendor)) return;
     if (hydratedVendorRef.current === vendor) {
       hydratedVendorRef.current = null;
       return;

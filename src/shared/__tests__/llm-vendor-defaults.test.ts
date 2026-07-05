@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
+  DEFAULT_VISIBLE_LLM_VENDOR_IDS,
   isLLMVendor,
   LLM_VENDORS,
   LLM_VENDOR_DEFAULTS,
   LLM_VENDOR_MODEL_OPTIONS,
+  MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS,
   freshVendorBlocks,
+  isDefaultVisibleLLMVendor,
   isRetiredLlmModel,
   normalizeLlmVendorModel,
 } from "../llm-vendor-defaults.js";
@@ -74,8 +77,31 @@ describe("LLM vendor defaults", () => {
     expect(isLLMVendor("lmstudio")).toBe(true);
   });
 
+  it("keeps only five providers in the default visible surface", () => {
+    expect(DEFAULT_VISIBLE_LLM_VENDOR_IDS).toEqual([
+      "openai",
+      "claude",
+      "gemini",
+      "openrouter",
+      "openai-compatible",
+    ]);
+    expect(DEFAULT_VISIBLE_LLM_VENDOR_IDS).toHaveLength(5);
+    for (const vendor of DEFAULT_VISIBLE_LLM_VENDOR_IDS) {
+      expect(isLLMVendor(vendor)).toBe(true);
+      expect(isDefaultVisibleLLMVendor(vendor)).toBe(true);
+      expect(MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS).not.toContain(vendor);
+    }
+    expect(MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS).toContain("azure-foundry");
+    expect(MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS).toContain("groq");
+    expect(MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS).toContain("ollama");
+  });
+
   it("uses gpt-5.4-mini as the OpenAI default model", () => {
     expect(LLM_VENDOR_DEFAULTS.openai.model).toBe("gpt-5.4-mini");
+  });
+
+  it("offers the OpenRouter free router as an explicit selectable model", () => {
+    expect(LLM_VENDOR_MODEL_OPTIONS.openrouter).toContain("openrouter/free");
   });
 
   it("does not offer gpt-4o in user-selectable LLM model options", () => {

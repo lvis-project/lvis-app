@@ -16,7 +16,7 @@ import { describe, it, expect, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { LlmTab, type FallbackEntry } from "../LlmTab.js";
-import { VENDORS } from "../../constants.js";
+import { ALL_VENDORS, VENDORS } from "../../constants.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
 type HarnessApi = Parameters<typeof LlmTab>[0]["api"];
@@ -125,7 +125,7 @@ describe("LlmTab — top-level login toggle UI", () => {
     expect(container.querySelector('[data-testid="llm-tab:login-section"]')).toBeNull();
   });
 
-  it("renders a searchable scroll-constrained provider dropdown", async () => {
+  it("renders a searchable default provider dropdown", async () => {
     const { container } = render(<Harness initialAuthMode="manual" />);
     const vendorTrigger = container.querySelector("#vendor-select") as HTMLElement | null;
     expect(vendorTrigger).not.toBeNull();
@@ -135,11 +135,29 @@ describe("LlmTab — top-level login toggle UI", () => {
 
     const search = await screen.findByTestId("llm-tab:vendor-search");
     expect(search).toHaveAttribute("placeholder", "공급자 검색...");
-    expect(screen.getByTestId("llm-tab:vendor-content")).toHaveClass("max-h-[386px]");
+    expect(screen.getByTestId("llm-tab:vendor-content")).not.toHaveClass("max-h-[386px]");
 
     fireEvent.change(search, { target: { value: "openrouter" } });
     expect(screen.getByText("OpenRouter")).toBeInTheDocument();
     expect(screen.queryByText("Google Gemini")).toBeNull();
+
+    fireEvent.change(search, { target: { value: "groq" } });
+    expect(screen.queryByText("Groq")).toBeNull();
+  });
+
+  it("preserves a legacy marketplace-candidate provider when it is already selected", async () => {
+    const { container } = render(<Harness initialAuthMode="manual" initialVendor="groq" />);
+    const vendorTrigger = container.querySelector("#vendor-select") as HTMLElement | null;
+    expect(vendorTrigger).not.toBeNull();
+
+    fireEvent.mouseDown(vendorTrigger!);
+    fireEvent.keyDown(vendorTrigger!, { key: "ArrowDown" });
+
+    const search = await screen.findByTestId("llm-tab:vendor-search");
+    fireEvent.change(search, { target: { value: "groq" } });
+
+    expect(screen.getAllByText("Groq").length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText("DeepSeek")).toBeNull();
   });
 
   it("host-resolver map textarea is disabled in login mode", () => {
@@ -373,7 +391,7 @@ describe("LlmTab — top-level login toggle UI", () => {
     const label = container.querySelector('[data-testid="llm-tab:api-key-label"]');
     expect(label).not.toBeNull();
     // No vendor name leaked — neither the fallback first vendor nor any other.
-    for (const v of VENDORS) {
+    for (const v of ALL_VENDORS) {
       expect(label?.textContent ?? "").not.toContain(v.label);
     }
   });
