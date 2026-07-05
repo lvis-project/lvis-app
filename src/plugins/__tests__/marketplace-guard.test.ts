@@ -113,6 +113,21 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
     await expect(service.install("does-not-exist")).rejects.toThrow(/not found in marketplace/);
   });
 
+  it("install() rejects non-plugin marketplace package kinds before artifact install", async () => {
+    await writeCatalogEntries([
+      {
+        ...makeCatalogEntry("openrouter-provider", "user"),
+        pluginType: "provider",
+      },
+    ]);
+    await writeEmptyRegistry();
+    const service = makeService();
+
+    await expect(service.install("openrouter-provider")).rejects.toThrow(
+      /provider entry, not a plugin package/,
+    );
+  });
+
   it("list() exposes isManaged=true for admin-policy catalog entries", async () => {
     await writeCatalog("admin");
     await writeEmptyRegistry();
@@ -132,6 +147,31 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
 
     const items = await service.list();
     expect(items[0].isManaged).toBe(false);
+  });
+
+  it("list() keeps non-installable marketplace package kinds out of the plugin registry state", async () => {
+    await writeCatalogEntries([
+      {
+        ...makeCatalogEntry("openrouter-provider", "admin"),
+        pluginType: "provider",
+      },
+    ]);
+    await writeTestPluginRegistry(
+      { registryPath },
+      [{ id: "openrouter-provider", manifestPath: "openrouter-provider/plugin.json", enabled: true }],
+    );
+    const service = makeService();
+
+    const items = await service.list();
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      id: "openrouter-provider",
+      pluginType: "provider",
+      installed: false,
+      enabled: false,
+      isManaged: false,
+    });
   });
 
   it("uninstall() allows cleanup for admin-installed plugins removed from the marketplace catalog", async () => {
