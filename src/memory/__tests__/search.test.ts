@@ -17,6 +17,7 @@ beforeEach(() => {
 
 afterEach(() => {
   mm.stopPersistentContextWatcher();
+  mm.closeSearchIndex();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -223,12 +224,13 @@ describe("MemoryManager.searchSessions", () => {
     expect(results).toEqual([]);
   });
 
-  it("returns empty array for query shorter than 2 chars", async () => {
+  it("returns empty array for query shorter than 3 chars (FTS5 trigram floor)", async () => {
     await mm.saveSession("a1b2c3d4-e5f6-7890-abcd-ef1234567890", [
       { role: "user", content: "hello world" },
     ]);
     expect(mm.searchSessions("")).toEqual([]);
     expect(mm.searchSessions("h")).toEqual([]);
+    expect(mm.searchSessions("he")).toEqual([]);
     expect(mm.searchSessions("  ")).toEqual([]);
   });
 
@@ -292,6 +294,87 @@ describe("MemoryManager.searchSessions", () => {
     }
     const results = mm.searchSessions("hello");
     expect(results.length).toBe(50);
+  });
+});
+
+// ── FTS5 index behaviors (#1500 / E3) ────────────────────────────────────
+describe("MemoryManager.searchSessions — FTS5 escape + injection safety", () => {
+  it("treats FTS5 operators in the query as literal text (no syntax error)", async () => {
+    const id = "10000000-0000-4000-8000-000000000001";
+    await mm.saveSession(id, [{ role: "user", content: "deploy AND rollback plan" }]);
+    // `AND` is an FTS5 operator; escaping forces a literal phrase match so the
+    // query is neither a syntax error nor a boolean AND across the corpus.
+    const results = mm.searchSessions("deploy AND rollback");
+    expect(results.map((r) => r.sessionId)).toEqual([id]);
+  });
+
+  it("does not throw on an unterminated double-quote in the query", async () => {
+    const id = "10000000-0000-4000-8000-000000000002";
+    await mm.saveSession(id, [{ role: "user", content: 'he said "hello there" loudly' }]);
+    // A raw `"hello` would be an unterminated FTS5 phrase; escaping doubles the
+    // quote so it is matched literally and the call returns rather than crashes.
+    expect(() => mm.searchSessions('"hello')).not.toThrow();
+    const results = mm.searchSessions('"hello there"');
+    expect(results.map((r) => r.sessionId)).toEqual([id]);
+  });
+
+  it("matches a substring inside an unbroken token (trigram tokenizer)", async () => {
+    const id = "10000000-0000-4000-8000-000000000003";
+    // A URL is one unbroken token; a whole-token tokenizer would miss `example`
+    // inside it. Trigram restores the old substring (indexOf) semantics.
+    await mm.saveSession(id, [{ role: "user", content: "see https://example.com/path" }]);
+    expect(mm.searchSessions("example").map((r) => r.sessionId)).toEqual([id]);
+  });
+
+  it("indexes text parts of array (multi-part) user content", async () => {
+    const id = "10000000-0000-4000-8000-000000000004";
+    await mm.saveSession(id, [
+      { role: "user", content: [{ type: "text", text: "multipart needle here" }] },
+    ]);
+    expect(mm.searchSessions("needle").map((r) => r.sessionId)).toEqual([id]);
+  });
+});
+
+describe("MemoryManager.searchSessions — index maintenance", () => {
+  it("removes a deleted session's row from the search index (no orphan hit)", async () => {
+    const id = "20000000-0000-4000-8000-000000000001";
+    await mm.saveSession(id, [{ role: "user", content: "ephemeral keyword body" }]);
+    expect(mm.searchSessions("ephemeral").map((r) => r.sessionId)).toEqual([id]);
+
+    mm.deleteSession(id);
+    expect(mm.searchSessions("ephemeral")).toEqual([]);
+  });
+
+  it("re-indexes on metadata-only update so scope filters stay correct", async () => {
+    const id = "20000000-0000-4000-8000-000000000002";
+    await mm.saveSession(id, [{ role: "user", content: "scoped keyword content" }]);
+    // Tag it as a routine session AFTER the initial save (create-then-tag).
+    await mm.saveSessionMetadata(id, { sessionKind: "routine", routineId: "r-1" });
+    // Default (main-kind) search must NOT see it; routine-scoped search must.
+    expect(mm.searchSessions("scoped")).toEqual([]);
+    expect(mm.searchSessions("scoped", { kind: "routine" }).map((r) => r.sessionId)).toEqual([id]);
+  });
+
+  it("rebuilds the index from JSONL after the DB file is corrupted", async () => {
+    const id = "20000000-0000-4000-8000-000000000003";
+    await mm.saveSession(id, [{ role: "user", content: "durable rebuild keyword" }]);
+    expect(mm.searchSessions("durable").map((r) => r.sessionId)).toEqual([id]);
+
+    // Corrupt the on-disk index (overwrite with junk) — search should now miss.
+    const dbPath = join(dir, "search", "index.db");
+    writeFileSync(dbPath, "not a sqlite database at all", "utf-8");
+    // Boot integrity check must detect corruption and rebuild from the JSONL SOT.
+    await mm.verifyOrRebuildSearchIndex();
+    expect(mm.searchSessions("durable").map((r) => r.sessionId)).toEqual([id]);
+  });
+
+  it("rebuilds a missing index from existing session files at boot", async () => {
+    const id = "20000000-0000-4000-8000-000000000004";
+    await mm.saveSession(id, [{ role: "user", content: "cold boot keyword" }]);
+    // Simulate a first boot with no index: delete the whole search dir.
+    rmSync(join(dir, "search"), { recursive: true, force: true });
+    await mm.verifyOrRebuildSearchIndex();
+    expect(mm.searchSessions("cold").map((r) => r.sessionId)).toEqual([id]);
   });
 });
 
