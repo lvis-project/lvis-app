@@ -236,10 +236,12 @@ export class SessionSearchIndex {
         // unbroken run (e.g. a URL, a code identifier, or a CJK compound) —
         // a real regression relative to the old behavior, not an edge case.
         // Trigram restores substring semantics on the SAME FTS5 engine (no
-        // second index, no LIKE-based fallback — see the No-Fallback note
-        // above). Case-insensitive by default, matching the old
-        // `toLowerCase()` comparison. Trade-off: queries under 3 unicode
-        // characters never match any row (SQLite FTS5 trigram floor).
+        // second index). Case-insensitive by default, matching the old
+        // `toLowerCase()` comparison. Trade-off: the trigram tokenizer
+        // cannot serve queries under 3 unicode codepoints, so 2-codepoint
+        // queries (common 2-syllable Korean nouns) are served by the bound
+        // LIKE branch in `query()` against this same table; only queries
+        // under 2 codepoints never match. See the `query()` JSDoc.
         `CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts USING fts5(
           sessionId UNINDEXED,
           content,
