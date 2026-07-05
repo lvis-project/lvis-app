@@ -13,6 +13,7 @@ export {
   SUPPORTED_LOCALES,
   isDefaultVisibleLocale,
   isLocale,
+  isMarketplaceEligibleLocale,
   normalizeLocale,
   visibleLocalesFor,
   type Locale,
