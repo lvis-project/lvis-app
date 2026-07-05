@@ -171,6 +171,12 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "not-armed": "formatIpcError.notArmed",
   // Build-embedded activation key absent (lvis:demo:activate-embedded).
   "no-embedded-code": "formatIpcError.noEmbeddedCode",
+  // #1498 — Azure Foundry endpoint unreachable (network-boundary failure
+  // during loginMockup's sandbox-preparing step) and local Ollama fallback
+  // (lvis:demo:activate-ollama) — the server that answered the login
+  // modal's probe is no longer reachable.
+  "endpoint-unreachable": "formatIpcError.endpointUnreachable",
+  "no-ollama": "formatIpcError.noOllama",
 
   "clear-failed": "formatIpcError.clearFailed",
   // ── Tutorial-C — tour:{start,mark-complete,dismiss} validation ──
@@ -192,6 +198,18 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "session-mismatch": "formatIpcError.sessionMismatch",
   "preference-refresh-service-unavailable": "formatIpcError.preferenceRefreshServiceUnavailable",
   "production-disabled": "formatIpcError.productionDisabled",
+  // ── Diagnostics bundle + log tail + crash list (#1499 E2) ──
+  "export-failed": "formatIpcError.exportFailed",
+  "crash-list-failed": "formatIpcError.crashListFailed",
+  "logs-tail-failed": "formatIpcError.logsTailFailed",
+  // ── Conversation import (lvis:chat:import — #1500 / E3) ──
+  "file-not-found": "formatIpcError.importFileNotFound",
+  "file-too-large": "formatIpcError.importFileTooLarge",
+  "invalid-json": "formatIpcError.importInvalidJson",
+  "invalid-file-shape": "formatIpcError.importInvalidFileShape",
+  "empty-messages": "formatIpcError.importEmptyMessages",
+  "invalid-message-shape": "formatIpcError.importInvalidMessageShape",
+  "too-many-messages": "formatIpcError.importTooManyMessages",
 };
 
 export interface FormatIpcErrorOptions {

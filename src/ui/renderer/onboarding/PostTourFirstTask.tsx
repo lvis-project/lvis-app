@@ -86,8 +86,8 @@ export function PostTourFirstTask({
       data-plugin-id={proposal.pluginId}
       className={cn(
         "pointer-events-auto fixed bottom-6 right-6 z-[9000]",
-        "w-[360px] max-w-[calc(100vw-2rem)] rounded-xl border bg-card p-4 shadow-2xl",
-        "border-[hsl(var(--p-purple-500)/0.4)]",
+        "w-[360px] max-w-[calc(100vw-2rem)] rounded-xl border bg-card p-4 shadow-e4",
+        "border-[hsl(var(--p-purple-500)/var(--opacity-medium))]",
       )}
       role="dialog"
       aria-label={t("postTourFirstTask.ariaLabel")}

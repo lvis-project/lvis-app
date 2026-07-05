@@ -8,6 +8,7 @@ import type { AuditEntry } from "../../../audit/audit-logger.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { DiagnosticsSection } from "./DiagnosticsSection.js";
 
 interface AuditStats {
   totalByType: Record<string, number>;
@@ -326,6 +327,9 @@ export function AuditTab() {
             </div>
           )}
         </SettingsSection>
+
+        {/* ── Diagnostics (#1499 E2): bundle export + log tail + crash list ── */}
+        <DiagnosticsSection defaultDateFrom={dateFrom} defaultDateTo={dateTo} />
       </div>
     </div>
   );

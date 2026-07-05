@@ -71,6 +71,7 @@ export function AppShell({
   isProjectPinned,
   onToggleProjectPin,
   onExport,
+  onImport,
   // banners
   bootstrapStatus,
   onDismissBootstrapStatus,
@@ -78,6 +79,7 @@ export function AppShell({
   marketplaceUpdates,
   onDismissMarketplaceUpdates,
   onSkipMarketplaceUpdates,
+  onResolveMarketplaceUpdates,
   onUpdatePlugin,
   marketplaceAnnouncements,
   onDismissMarketplaceAnnouncement,
@@ -149,12 +151,14 @@ export function AppShell({
   isProjectPinned?: SidebarProps["isProjectPinned"];
   onToggleProjectPin?: SidebarProps["onToggleProjectPin"];
   onExport: SidebarProps["onExport"];
+  onImport: SidebarProps["onImport"];
   bootstrapStatus: BootstrapBannerProps["status"];
   onDismissBootstrapStatus: BootstrapBannerProps["onDismiss"];
   onRetryBootstrap: () => void;
   marketplaceUpdates: UpdateBannerProps["updates"];
   onDismissMarketplaceUpdates: UpdateBannerProps["onDismiss"];
   onSkipMarketplaceUpdates: UpdateBannerProps["onSkip"];
+  onResolveMarketplaceUpdates: NonNullable<UpdateBannerProps["onResolved"]>;
   onUpdatePlugin: UpdateBannerProps["onUpdate"];
   marketplaceAnnouncements: AnnouncementBannerProps["announcements"];
   onDismissMarketplaceAnnouncement: AnnouncementBannerProps["onDismiss"];
@@ -248,6 +252,7 @@ export function AppShell({
         isProjectPinned={isProjectPinned}
         onToggleProjectPin={onToggleProjectPin}
         onExport={onExport}
+        onImport={onImport}
       />
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <main
@@ -288,6 +293,7 @@ export function AppShell({
               updates={marketplaceUpdates}
               onDismiss={onDismissMarketplaceUpdates}
               onSkip={onSkipMarketplaceUpdates}
+              onResolved={onResolveMarketplaceUpdates}
               onUpdate={onUpdatePlugin}
             />
             <MarketplaceAnnouncementBanner

@@ -6,10 +6,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
 } from "../../../components/ui/dialog.js";
 import { Button } from "../../../components/ui/button.js";
+import { OnboardingHeader } from "../onboarding/OnboardingCard.js";
 import type { LoginModalProps } from "./LoginModal.js";
 import { t } from "../../../i18n/runtime.js";
 
@@ -96,6 +95,23 @@ function activationErrorMessage(code: string): string {
 }
 
 /**
+ * #1498 — Ollama activation IPC error codes. Separate from
+ * `activationErrorMessage` because the only failure mode is "the local
+ * server that was reachable a moment ago is gone now" — a narrower surface
+ * than the demo-key validation errors above.
+ */
+function ollamaErrorMessage(code: string): string {
+  switch (code) {
+    case "no-ollama":
+      return t("loginModalConversational.activErrNoOllama");
+    case "unauthorized-frame":
+      return t("loginModalConversational.activErrUnauthorizedFrame");
+    default:
+      return t("loginModalConversational.activErrActivationFailed");
+  }
+}
+
+/**
  * Type-on checklist lines for the auth progress (F2 fallback). Rendered
  * after the demo chip is selected when the live IPC progress is not yet
  * active — the steps reveal one at a time with a short stagger so the
@@ -169,6 +185,14 @@ export function LoginModalConversational({
   const [activationRelaunching, setActivationRelaunching] = useState(false);
   const [checkingDemoStatus, setCheckingDemoStatus] = useState(false);
 
+  // #1498 — local Ollama fallback chip. `ollamaAvailable` gates whether the
+  // chip renders at all (never shown when nothing answered the probe — an
+  // unconditional CTA would be misleading). Probed once per modal open
+  // alongside the demo-status check's own timing; `ollamaActivating` blocks
+  // the chip while its own IPC roundtrip is in flight.
+  const [ollamaAvailable, setOllamaAvailable] = useState(false);
+  const [ollamaActivating, setOllamaActivating] = useState(false);
+
   // Reset the conversational flow on every open so a re-entry starts
 
   useEffect(() => {
@@ -184,8 +208,36 @@ export function LoginModalConversational({
       setActivationNotice(null);
       setActivating(false);
       setActivationRelaunching(false);
+      setOllamaAvailable(false);
+      setOllamaActivating(false);
     }
   }, [open]);
+
+  // #1498 — probe Ollama availability whenever the modal opens so the chip
+  // stack reflects the current machine state without requiring the user to
+  // click chip 1 first. A fresh probe every open (no caching) mirrors the
+  // `demo.status()` freshness contract — the user may start/stop their
+  // local Ollama server between app launches.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const status = await api.demo.status();
+        if (!cancelled && status.ok) {
+          setOllamaAvailable(status.ollamaAvailable);
+        }
+      } catch (err) {
+        // Best-effort — a failed probe just keeps the chip hidden, it must
+        // never surface as a login-blocking error.
+        // eslint-disable-next-line no-console
+        console.error("demo.status IPC failed (ollama probe)", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, api]);
 
   useEffect(() => {
     if (!activationRelaunching) return;
@@ -304,6 +356,40 @@ export function LoginModalConversational({
       setActivating(false);
     }
   }, [api, activating, submitting, activationRelaunching, runAuthMockup]);
+
+  /**
+   * #1498 — local Ollama fallback chip. No credentials, no activation-key
+   * paste, no relaunch: the vendor is configured directly (preset baseUrl +
+   * default model + `hasApiKey` gate placeholder) and, on success, hands
+   * off to `onSuccess` exactly like a completed login. Re-probes inside
+   * the IPC handler itself, so a server the user stopped between opening
+   * the modal and clicking the chip fails closed with `no-ollama` instead
+   * of silently configuring a dead endpoint.
+   */
+  const activateOllamaChip = useCallback(async () => {
+    if (ollamaActivating || submitting || activating || activationRelaunching) return;
+    setError(null);
+    setOllamaActivating(true);
+    try {
+      const result = await api.demo.activateOllama();
+      if (result.ok) {
+        onSuccess?.(result.vendor, {
+          ok: true,
+          vendor: result.vendor,
+          fieldsApplied: ["apiKey", "baseUrl", "model"],
+        });
+        onOpenChange(false);
+        return;
+      }
+      setError(ollamaErrorMessage(result.error));
+    } catch (err) {
+      setError(t("loginModalConversational.activErrProcessError"));
+      // eslint-disable-next-line no-console
+      console.error("demo.activateOllama IPC failed", err);
+    } finally {
+      setOllamaActivating(false);
+    }
+  }, [api, ollamaActivating, submitting, activating, activationRelaunching, onSuccess, onOpenChange]);
 
   /**
    * Demo chip handler. Fresh installs open the activation-input sub-state;
@@ -462,11 +548,16 @@ export function LoginModalConversational({
         // chip 3 is a disabled placeholder; swallow the keystroke so it
         // does not bubble to the wider App keyboard handlers.
         e.preventDefault();
+      } else if (e.key === "4" && ollamaAvailable) {
+        // #1498 — chip 4 only exists (and only responds to the keystroke)
+        // when the Ollama probe found a local server.
+        e.preventDefault();
+        void activateOllamaChip();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, activateDemoChip, api, onOpenChange]);
+  }, [open, activateDemoChip, api, onOpenChange, ollamaAvailable, activateOllamaChip]);
 
   const isLastChecklistLine =
     checklistRevealed > 0 && checklistRevealed <= CHECKLIST_LINES.length;
@@ -483,40 +574,43 @@ export function LoginModalConversational({
 
   return (
     <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-      <DialogContent size="sm" data-testid="login-modal" data-variant="conversational">
-        <DialogHeader>
-          <DialogTitle>{t("loginModalConversational.dialogTitle")}</DialogTitle>
-        </DialogHeader>
+      <DialogContent
+        size="sm"
+        data-testid="login-modal"
+        data-variant="conversational"
+        className="p-0 overflow-hidden"
+      >
+        {/* E7 — common look-and-feel (Warp login reference): a centered
+            brand wordmark header (shared OnboardingHeader scaffold used by
+            every other onboarding chain surface) over a single-column,
+            minimal-copy body with stacked full-width CTAs. The former
+            chat-transcript chrome (system status row + assistant/user
+            bubbles) is folded into the shared surface tokens so the modal
+            reads as one member of the onboarding family rather than a
+            bespoke screen. Flow + IPC are unchanged. */}
+        <OnboardingHeader
+          size="lg"
+          title={t("loginModalConversational.dialogTitle")}
+          description={t("loginModalConversational.sessionStart")}
+        />
 
-        {/* System line — quiet status row that frames the modal as a
-            chat session rather than a credential form. Uses the
-            success token so it adapts to every bundle. */}
-        <div className="flex items-center gap-2 border-b border-border/(--opacity-strong) pb-2 text-[11px] text-muted-foreground">
-          <span className="inline-block size-1.5 rounded-full bg-success" aria-hidden="true" />
-          <span>{t("loginModalConversational.sessionStart")}</span>
-        </div>
-
-        {/* Assistant message — greeting + intent disambiguation. */}
-        <div className="flex gap-2 pt-2">
-          <div
-            className="grid size-7 shrink-0 place-items-center rounded-md bg-primary text-[11px] text-primary-foreground"
-            aria-hidden="true"
+        <div className="px-6 pb-6 space-y-4">
+          {/* Intro line — big-headline + minimal-copy hierarchy. */}
+          <p
+            data-testid="login-modal:greeting"
+            className="text-[12.5px] leading-relaxed text-muted-foreground"
           >
-            ✦
-          </div>
-          <div className="space-y-1.5">
-            <p className="rounded-lg rounded-tl-sm bg-muted px-3 py-2 text-[12.5px] leading-relaxed text-foreground">
-              {t("loginModalConversational.greeting")} <br />
-              {t("loginModalConversational.greetingPrompt")}
-            </p>
-          </div>
-        </div>
+            {t("loginModalConversational.greeting")}{" "}
+            {t("loginModalConversational.greetingPrompt")}
+          </p>
 
         {/* Chip choices — three options. Chip 1 opens the inline activation
             input; chip 2 navigates to Settings → LLM tab; chip 3 is a
             disabled placeholder. The user never types a password — the
-            demo credentials are hard-coded in the renderer + IPC handler. */}
-        <div className="pl-9 space-y-1.5 pt-1" data-testid="login-modal:chips">
+            demo credentials are hard-coded in the renderer + IPC handler.
+            Rendered as a vertical stack of full-width CTAs (Warp reference:
+            single-accent emphasis on the primary path). */}
+        <div className="space-y-2" data-testid="login-modal:chips">
           <button
             type="button"
             data-testid="login-modal:chip-demo"
@@ -528,15 +622,17 @@ export function LoginModalConversational({
               checkingDemoStatus ||
               activationOpen
             }
-            className="w-full rounded-lg border border-primary/(--opacity-medium) bg-primary/(--opacity-subtle) px-3 py-2 text-left text-[12px] text-primary hover:bg-primary/(--opacity-soft) disabled:opacity-60"
+            className="flex w-full items-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-left text-[12px] font-medium text-primary-foreground shadow-e1 transition-opacity hover:opacity-90 disabled:opacity-60"
           >
-            <span className="mr-1">⚡</span>
-            <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary/(--opacity-soft) px-1 text-[10px] font-semibold text-primary">
+            <span aria-hidden="true">⚡</span>
+            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary-foreground/(--opacity-light) px-1 text-[10px] font-semibold text-primary-foreground">
               1
             </span>
-            {t("loginModalConversational.chip1Label")}
-            <span className="ml-2 text-[10px] text-muted-foreground">
-              {t("loginModalConversational.chip1Sub")}
+            <span className="min-w-0 flex-1">
+              {t("loginModalConversational.chip1Label")}
+              <span className="ml-1.5 text-[10px] font-normal text-primary-foreground/(--opacity-stronger)">
+                {t("loginModalConversational.chip1Sub")}
+              </span>
             </span>
           </button>
           <button
@@ -551,33 +647,72 @@ export function LoginModalConversational({
               onOpenChange(false);
             }}
             disabled={submitting || activationRelaunching}
-            className="w-full rounded-lg border border-border bg-muted/(--opacity-medium) px-3 py-2 text-left text-[12px] text-foreground hover:bg-muted/(--opacity-strong) disabled:opacity-60"
+            className="flex w-full items-center gap-2 rounded-lg border border-border-subtle bg-secondary px-3 py-2.5 text-left text-[12px] text-secondary-foreground transition-colors hover:bg-muted disabled:opacity-60"
           >
-            <span className="mr-1">🔑</span>
-            <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
+            <span aria-hidden="true">🔑</span>
+            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
               2
             </span>
-            {t("loginModalConversational.chip2Label")}
-            <span className="ml-2 text-[10px] text-muted-foreground">
-              {t("loginModalConversational.chip2Sub")}
+            <span className="min-w-0 flex-1">
+              {t("loginModalConversational.chip2Label")}
+              <span className="ml-1.5 text-[10px] text-muted-foreground">
+                {t("loginModalConversational.chip2Sub")}
+              </span>
             </span>
           </button>
           <button
             type="button"
             disabled
             data-testid="login-modal:chip-sso"
-            className="w-full cursor-not-allowed rounded-lg border border-border bg-muted/(--opacity-medium) px-3 py-2 text-left text-[12px] text-muted-foreground"
+            className="flex w-full cursor-not-allowed items-center gap-2 rounded-lg border border-border-subtle bg-secondary/(--opacity-half) px-3 py-2.5 text-left text-[12px] text-muted-foreground"
             title={t("loginModalConversational.chip3Title")}
           >
-            <span className="mr-1">🏢</span>
-            <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
+            <span aria-hidden="true">🏢</span>
+            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
               3
             </span>
-            {t("loginModalConversational.chip3Label")}
-            <span className="ml-2 text-[10px] text-muted-foreground">
-              {t("loginModalConversational.chip3Sub")}
+            <span className="min-w-0 flex-1">
+              {t("loginModalConversational.chip3Label")}
+              <span className="ml-1.5 text-[10px]">
+                {t("loginModalConversational.chip3Sub")}
+              </span>
             </span>
           </button>
+          {/* #1498 — Ollama local-model fallback. Only rendered when the
+              main-process probe confirmed a local server is actually
+              reachable (`ollamaAvailable`) — never shown unconditionally,
+              since an always-visible CTA that then fails would mislead
+              off-network / no-key users into thinking local models are
+              always available. */}
+          {ollamaAvailable && (
+            <button
+              type="button"
+              data-testid="login-modal:chip-ollama"
+              onClick={() => void activateOllamaChip()}
+              disabled={
+                submitting ||
+                activating ||
+                activationRelaunching ||
+                checkingDemoStatus ||
+                activationOpen ||
+                ollamaActivating
+              }
+              className="flex w-full items-center gap-2 rounded-lg border border-border-subtle bg-secondary px-3 py-2.5 text-left text-[12px] text-secondary-foreground transition-colors hover:bg-muted disabled:opacity-60"
+            >
+              <span aria-hidden="true">🖥️</span>
+              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
+                4
+              </span>
+              <span className="min-w-0 flex-1">
+                {ollamaActivating
+                  ? t("loginModalConversational.chipOllamaActivating")
+                  : t("loginModalConversational.chipOllamaLabel")}
+                <span className="ml-1.5 text-[10px] text-muted-foreground">
+                  {t("loginModalConversational.chipOllamaSub")}
+                </span>
+              </span>
+            </button>
+          )}
         </div>
 
         {/* F2 — User-side bubble + assistant follow-up + type-on
@@ -804,16 +939,17 @@ export function LoginModalConversational({
             advancing. Status text for in-flight auth/relaunch surfaces
             inline via the chip disabled state + assistant bubble copy. */}
 
-        {/* F2 — Footer hint mirrors the mockup's quick-choice instruction. */}
-        <p
-          data-testid="login-modal:footer-hint"
-          className="border-t border-border/(--opacity-strong) pt-2 text-center text-[10.5px] text-muted-foreground"
-        >
-          {t("loginModalConversational.footerHintPre")}<kbd className="rounded border border-border bg-muted px-1 font-mono">1</kbd>
-          ~
-          <kbd className="rounded border border-border bg-muted px-1 font-mono">3</kbd>
-          {t("loginModalConversational.footerHintPost")}
-        </p>
+          {/* F2 — Footer hint mirrors the mockup's quick-choice instruction. */}
+          <p
+            data-testid="login-modal:footer-hint"
+            className="border-t border-border-subtle pt-3 text-center text-[10.5px] text-muted-foreground"
+          >
+            {t("loginModalConversational.footerHintPre")}<kbd className="rounded border border-border bg-muted px-1 font-mono">1</kbd>
+            ~
+            <kbd className="rounded border border-border bg-muted px-1 font-mono">{ollamaAvailable ? "4" : "3"}</kbd>
+            {t("loginModalConversational.footerHintPost")}
+          </p>
+        </div>
       </DialogContent>
     </Dialog>
   );

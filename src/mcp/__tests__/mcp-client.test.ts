@@ -416,7 +416,7 @@ describe("HttpTransport — happy path", () => {
       new ToolRegistry(),
     );
 
-    await expect(client.connect()).rejects.toThrow(/\[redacted]/i);
+    await expect(client.connect()).rejects.toThrow(/\[REDACTED:/i);
     await expect(client.connect()).rejects.not.toThrow(leakedToken);
     await expect(client.connect()).rejects.not.toThrow(leakedApiKey);
   });
