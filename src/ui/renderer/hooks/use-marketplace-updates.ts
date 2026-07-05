@@ -49,6 +49,16 @@ export function useMarketplaceUpdates(api: LvisApi) {
     replaceUpdates([]);
   }, [replaceUpdates]);
 
+  // Optimistically drop plugins that just updated successfully from the visible
+  // banner list. Used by the banner's partial-failure path so succeeded rows
+  // disappear while failed rows remain for retry. The host detector's next
+  // `marketplace:updates-available` broadcast remains the reconciling SOT.
+  const resolveUpdated = useCallback((pluginIds: string[]) => {
+    if (pluginIds.length === 0) return;
+    const resolved = new Set(pluginIds);
+    replaceUpdates(updatesRef.current.filter((update) => !resolved.has(update.pluginId)));
+  }, [replaceUpdates]);
+
   const skip = useCallback(async () => {
     const visibleUpdates = updatesRef.current;
     if (visibleUpdates.length === 0) return;
@@ -84,7 +94,7 @@ export function useMarketplaceUpdates(api: LvisApi) {
     await nextWrite;
   }, [api, replaceUpdates]);
 
-  return { updates, dismiss, skip };
+  return { updates, dismiss, skip, resolveUpdated };
 }
 
 function normalizeSkippedPluginUpdates(input: unknown): Record<string, string> {

@@ -88,6 +88,62 @@ describe("MarketplaceUpdateBanner", () => {
     );
   });
 
+  it("dismisses the banner when every update in the batch succeeds", async () => {
+    const onUpdate = vi.fn(async () => undefined);
+    const onDismiss = vi.fn();
+    const onResolved = vi.fn();
+    render(
+      <MarketplaceUpdateBanner
+        updates={[update("meeting", "LVIS Meeting", "2.0.0"), update("calendar", "LVIS Calendar", "1.4.0")]}
+        onDismiss={onDismiss}
+        onSkip={vi.fn()}
+        onUpdate={onUpdate}
+        onResolved={onResolved}
+      />,
+    );
+
+    screen.getByTestId("marketplace-update-action").click();
+
+    await vi.waitFor(() => expect(onDismiss).toHaveBeenCalledOnce());
+    expect(onUpdate).toHaveBeenCalledTimes(2);
+    expect(onResolved).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("marketplace-update-partial-failure")).toBeNull();
+  });
+
+  it("keeps failed updates for retry and reports succeeded ids on partial failure", async () => {
+    const onUpdate = vi.fn(async (pluginId: string) => {
+      if (pluginId === "calendar") throw new Error("download failed");
+    });
+    const onDismiss = vi.fn();
+    const onResolved = vi.fn();
+    render(
+      <MarketplaceUpdateBanner
+        updates={[
+          update("meeting", "LVIS Meeting", "2.0.0"),
+          update("calendar", "LVIS Calendar", "1.4.0"),
+        ]}
+        onDismiss={onDismiss}
+        onSkip={vi.fn()}
+        onUpdate={onUpdate}
+        onResolved={onResolved}
+      />,
+    );
+
+    screen.getByTestId("marketplace-update-action").click();
+
+    const failure = await screen.findByTestId("marketplace-update-partial-failure");
+    // "성공 1 · 실패 1 (LVIS Calendar (calendar))" — success/failure counts split out.
+    expect(failure.textContent).toContain("성공 1");
+    expect(failure.textContent).toContain("실패 1");
+    expect(failure.textContent).toContain("LVIS Calendar (calendar)");
+    // The one that failed carries its message in the hover detail.
+    expect(failure.getAttribute("title")).toContain("download failed");
+    // Succeeded rows are pruned from the visible list; the banner stays for retry.
+    expect(onResolved).toHaveBeenCalledWith(["meeting"]);
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(screen.getByTestId("marketplace-update-action").textContent).toContain("재시도");
+  });
+
   it("uses the close control as a skip-until-next-version action", () => {
     const onSkip = vi.fn();
     const onDismiss = vi.fn();

@@ -21,6 +21,7 @@ export function MarketplaceUpdateBanner({
   onDismiss,
   onSkip,
   onUpdate,
+  onResolved,
 }: {
   updates: PluginUpdateInfo[];
   onDismiss: () => void;
@@ -30,10 +31,17 @@ export function MarketplaceUpdateBanner({
     expectedVersion?: string,
     options?: PluginMarketplaceInstallOptions,
   ) => Promise<void>;
+  /**
+   * Notifies the parent which plugin ids updated successfully so the visible
+   * update list can drop them optimistically. On a partial-failure batch the
+   * succeeded rows are removed and only the failed rows stay for retry; the
+   * host-driven `marketplace:updates-available` re-broadcast remains the SOT.
+   */
+  onResolved?: (succeededPluginIds: string[]) => void;
 }) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [failureSummary, setFailureSummary] = useState<PartialFailureSummary | null>(null);
   const [pendingDisclosureUpdate, setPendingDisclosureUpdate] = useState<PluginUpdateInfo | null>(null);
   const disclosureResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
 
@@ -49,14 +57,15 @@ export function MarketplaceUpdateBanner({
 
   const handleUpdate = async () => {
     setBusy(true);
-    setError(null);
-    const failures: string[] = [];
+    setFailureSummary(null);
+    const succeeded: PluginUpdateInfo[] = [];
+    const failed: { update: PluginUpdateInfo; message: string }[] = [];
     for (const u of updates) {
       try {
         if (hasNetworkAccessDisclosure(u.networkAccess)) {
           const confirmed = await requestNetworkAccessDisclosure(u);
           if (!confirmed) {
-            failures.push(`${u.pluginId}: network access disclosure cancelled`);
+            failed.push({ update: u, message: t("marketplaceUpdateBanner.disclosureCancelled") });
             continue;
           }
         }
@@ -67,16 +76,27 @@ export function MarketplaceUpdateBanner({
             ? { networkAccessAcknowledgement: buildNetworkAccessAcknowledgement(u.networkAccess) }
             : undefined,
         );
+        succeeded.push(u);
       } catch (e) {
-        failures.push(`${u.pluginId}: ${(e as Error).message}`);
+        failed.push({ update: u, message: (e as Error).message });
       }
     }
     setBusy(false);
-    if (failures.length === 0) {
+    if (failed.length === 0) {
+      // Whole batch succeeded — clear the banner. The host detector's next
+      // `marketplace:updates-available` broadcast reconciles the SOT.
       onDismiss();
-    } else {
-      setError(failures.join("; "));
+      return;
     }
+    // Partial (or total) failure: drop the succeeded rows so only the failed
+    // ones remain for retry, and surface a success/failure count breakdown.
+    if (succeeded.length > 0) onResolved?.(succeeded.map((u) => u.pluginId));
+    setFailureSummary({
+      succeeded: succeeded.length,
+      failed: failed.length,
+      failedNames: failed.map((f) => displayName(f.update)),
+      detail: failed.map((f) => `${displayName(f.update)}: ${f.message}`).join("; "),
+    });
   };
 
   return (
@@ -88,7 +108,19 @@ export function MarketplaceUpdateBanner({
         <span className="min-w-0 flex-1" title={label}>
           <span className="block truncate leading-4">{summary}</span>
           <MarqueeText text={details} className="text-[11px] leading-3 text-info/(--opacity-emphatic)" />
-          {error ? <span className="ml-2 text-destructive">{t("marketplaceUpdateBanner.partialFailure", { error })}</span> : null}
+          {failureSummary ? (
+            <span
+              className="ml-2 text-destructive"
+              data-testid="marketplace-update-partial-failure"
+              title={failureSummary.detail}
+            >
+              {t("marketplaceUpdateBanner.partialSummary", {
+                succeeded: failureSummary.succeeded,
+                failed: failureSummary.failed,
+                names: failureSummary.failedNames.join(", "),
+              })}
+            </span>
+          ) : null}
         </span>
         <div className="flex shrink-0 items-center gap-1">
           <Button
@@ -99,7 +131,11 @@ export function MarketplaceUpdateBanner({
             data-testid="marketplace-update-action"
             className="h-7 text-[12px]"
           >
-            {busy ? t("marketplaceUpdateBanner.updating") : t("marketplaceUpdateBanner.updateButton")}
+            {busy
+              ? t("marketplaceUpdateBanner.updating")
+              : failureSummary
+                ? t("marketplaceUpdateBanner.retryButton")
+                : t("marketplaceUpdateBanner.updateButton")}
           </Button>
           <Button
             variant="ghost"
@@ -138,11 +174,20 @@ export function MarketplaceUpdateBanner({
   }
 }
 
+interface PartialFailureSummary {
+  succeeded: number;
+  failed: number;
+  failedNames: string[];
+  detail: string;
+}
+
+function displayName(update: PluginUpdateInfo): string {
+  const name = update.pluginName?.trim() || update.pluginId;
+  return name === update.pluginId ? name : `${name} (${update.pluginId})`;
+}
+
 function formatUpdateLabel(update: PluginUpdateInfo): string {
-  const displayName = update.pluginName?.trim() || update.pluginId;
-  const name =
-    displayName === update.pluginId ? displayName : `${displayName} (${update.pluginId})`;
-  return `${name} → ${update.latestVersion}`;
+  return `${displayName(update)} → ${update.latestVersion}`;
 }
 
 function updateToDialogTarget(update: PluginUpdateInfo): MarketplaceItem {
