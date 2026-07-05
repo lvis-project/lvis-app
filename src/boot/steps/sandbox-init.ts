@@ -1,33 +1,7 @@
-/**
- * Boot step — OS-level tool sandbox gate + ASRT initialization (§691,
- * extracted from boot.ts C18).
- *
- * §691: OS-level tool sandbox — initialized via Anthropic sandbox-runtime
- * (ASRT). Runs after MCP connects so the full service graph is ready before
- * adding spawn isolation.
- *
- * ASRT replaces the prior per-OS runners (bwrap / sandbox-exec). It does not
- * spawn the workload: `initialize` starts its proxy/helper machinery and the
- * host-tool spawn path (bash.ts/powershell.ts) calls `wrapToolCommand` to get
- * the `{ argv, env }` it spawns itself.
- *
- * Gate: the user-facing `osToolSandbox` feature flag (Settings → 권한) OR the
- * `LVIS_SANDBOX_ENABLED=1` env escape-hatch. `osToolSandbox` is still staged
- * (macOS default ON, Linux/Windows opt-in), and the gate distinguishes HOW the
- * on-signal arrived (decideSandboxGate in boot/steps/sandbox-gate.ts):
- *   - EXPLICIT env (`LVIS_SANDBOX_ENABLED=1`): a deliberate power-user/CI
- *     signal — stays FAIL-CLOSED (abort) when the sandbox can't activate.
- *   - DEFAULT / Settings toggle: GRACEFUL — when the sandbox can't activate
- *     (Linux deps missing, init failure, Windows not-yet-installed) it does NOT
- *     abort; it degrades to unsandboxed (isolation=none, the same posture as
- *     sandbox-OFF) with a LOUD one-time warning and continues boot.
- *
- * SECURITY PROPERTY (preserved from the old sealed registry): the sandbox
- * gate is decided exactly once here at boot. `initializeAsrtSandbox` flips the
- * module-level active flag that bash.ts/powershell.ts read; there is no
- * runtime channel to enable/disable it after boot, so nothing can inject an
- * untrusted sandbox config mid-run.
- */
+
+
+
+
 import { app } from "electron";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
@@ -147,7 +121,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
             "boot: OS tool sandbox is ON by default but its dependencies are missing — " +
               "tools run with NO OS isolation (unsandboxed, isolation=none) until the deps are installed. " +
               "Install the sandbox dependencies (Linux: bwrap, socat, ripgrep) to activate it, or turn it off " +
-              "in Settings → 권한 'OS 도구 샌드박스'. (Set LVIS_SANDBOX_ENABLED=1 to make this fail-closed instead.) " +
+      "in Settings → Permissions 'OS tool sandbox'. (Set LVIS_SANDBOX_ENABLED=1 to make this fail-closed instead.) " +
               `Missing: ${detail}`,
           );
         }
@@ -320,7 +294,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
       // platform so the off-rate is monitorable alongside activate/degrade/abort.
       if (process.platform === "darwin") {
         log.info(
-          "boot: OS tool sandbox gated off (enable via Settings → 권한 'OS 도구 샌드박스' or LVIS_SANDBOX_ENABLED=1)",
+    "boot: OS tool sandbox gated off (enable via Settings → Permissions 'OS tool sandbox' or LVIS_SANDBOX_ENABLED=1)",
         );
       }
       bootAuditLogger.logSandboxGate({

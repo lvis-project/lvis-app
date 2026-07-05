@@ -1,39 +1,7 @@
-/**
- * LoginModalConversational (Tutorial-A · L-X1) —
- *
- * Conversational login. The credential form is *removed* entirely (Path 2
- * hotfix 2026-05-19): the modal is a pure chip-driven choice surface.
- *
- *   chip 1 — 데모 자격증명으로 30초 안에 체험
- *            Opens an **activation-input sub-state** in the same chat
- *            transcript. The user pastes a `LVIS-DEMO:v1:<...>` activation
- *            string (distributed through an internal channel — Confluence,
- *            SharePoint, chat). On submit the renderer invokes
- *            `api.demo.activate(code)`, which decrypts the string into the
- *            original `.env.demo` payload, persists it under
- *            `~/.lvis/secrets/.env.demo`, and injects the keys into the main
- *            process capture. First activation then relaunches after a 5s
- *            notice so host resolver rules apply. On later boots, chip 1
- *            checks `api.demo.status()` and enters the existing `loginMockup`
- *            chain directly. The hard-coded mockup username/password
- *            (`demo` / `demo123`) still gate the IPC handler — the activation
- *            string is the *credentials-provisioning* step, not the auth step.
- *   chip 2 — 제가 발급받은 API 키가 있어요
- *            Opens Settings → LLM tab via `openSettingsWindow("llm")`.
- *   chip 3 — 조직 SSO (disabled placeholder, "곧 지원 예정").
- *
- * Behavioural parity with the original LoginModal:
- *   - Calls `api.loginMockup(...)` over IPC after boot-loaded activation is
- *     present, or after activation succeeds without needing relaunch.
- *   - The renderer translates kebab-case English `error` codes into the
- *     Korean user-facing message; the IPC handler must never embed
- *     Korean (project CLAUDE.md error-language rule).
- *
- * Mirrors the L-X1 mockup at `/tmp/login-lvis/index.html` while staying
- * inside the host theme tokens (bg-background / text-foreground / bg-muted
- * etc.) so the modal adapts to every bundle (tokyo-night, forest,
- * violet-*, …).
- */
+
+
+
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Dialog,
@@ -65,7 +33,7 @@ function errorMessage(code: string): string {
     // v0.2.1 hotfix — Step 2 (llm-key-issuing) try/catch surfaces this
     // when setSecret / patch fails (disk full, Keychain locked, etc.).
     // Without this branch the renderer fell through to the generic
-    // "로그인에 실패했습니다" toast — the user-reported "sandbox 준비 중"
+
     // fail had no actionable hint.
     case "llm-key-issuing-failed":
       return t("loginModalConversational.errLlmKeyIssuingFailed");
@@ -152,13 +120,9 @@ const CHECKLIST_LINES: readonly { mark: string; labelKey: string }[] = Object.fr
  */
 const CHECKLIST_STAGGER_MS = 900;
 
-/**
- * Y1 (pace) — extra dwell time AFTER all checklist lines have rendered
- * and the IPC call has resolved successfully, before the modal closes
- * and hands off to MemorySeedDialog. Gives the user a beat to see the
- * "✓ sandbox 준비 완료" confirmation rather than the modal vanishing
- * the moment auth succeeds.
- */
+
+
+
 const SUCCESS_DWELL_MS = 1800;
 const ACTIVATION_RELAUNCH_DWELL_MS = 5000;
 
@@ -181,7 +145,7 @@ export function LoginModalConversational({
   const [assistantReply, setAssistantReply] = useState(false);
   const [checklistRevealed, setChecklistRevealed] = useState(0);
   // Y1 — flips true the moment loginMockup resolves OK. The trailing
-  // spinner row swaps to a green ✓ + "sandbox 준비 완료" confirmation
+
   // so the user sees an explicit success state before the SUCCESS_DWELL_MS
   // window elapses and the modal closes.
   const [successConfirmed, setSuccessConfirmed] = useState(false);
@@ -206,7 +170,7 @@ export function LoginModalConversational({
   const [checkingDemoStatus, setCheckingDemoStatus] = useState(false);
 
   // Reset the conversational flow on every open so a re-entry starts
-  // from the cold "어떤 방식으로 시작할까요?" prompt.
+
   useEffect(() => {
     if (open) {
       setUserTurnVisible(false);
@@ -283,7 +247,7 @@ export function LoginModalConversational({
       if (result.ok) {
         // Y1 — flip the trailing spinner line to a ✓ confirmation
         // (state lives in `successConfirmed`), then dwell so the user
-        // actually sees "sandbox 준비 완료" before the modal closes.
+
         setSuccessConfirmed(true);
         await new Promise<void>((resolve) =>
           window.setTimeout(resolve, SUCCESS_DWELL_MS),
@@ -380,7 +344,7 @@ export function LoginModalConversational({
         }
         if (status.autoActivatable && !forceActivation) {
           // Embedded activation key — skip the paste input entirely.
-          // `forceActivation` (Settings 재입력 recovery) keeps the manual
+
           // path so the user can supply a *different* key than the one
           // embedded in this build.
           window.setTimeout(() => {
@@ -451,10 +415,8 @@ export function LoginModalConversational({
     }
   }, [api, activationCode, activating, submitting, activationRelaunching, runAuthMockup]);
 
-  // 2026-05-20 — Settings 의 "데모 자격증명 재입력" entry. forceActivation 가
-  // true 인 동안 modal 이 열리면 chip selection 화면을 우회하고 activation
-  // 입력 page 를 mount 한다. 이미 활성된 상태여도 이 path 는 재입력을 위한
-  // 복구 entry 이므로 auth transcript 로 건너뛰지 않는다.
+
+
   const forceActivationFiredRef = useRef(false);
   useEffect(() => {
     if (!open) {
@@ -468,7 +430,7 @@ export function LoginModalConversational({
   }, [open, forceActivation, activateDemoChip]);
 
   // F2 — 1/2/3 keybindings for chip activation. Mirrors the
-  // "위 선택지를 클릭하거나 `1`~`3` 키로 빠른 선택" footer hint.
+
   // Note (2026-05-20): the previous F5 "Enter to proceed" shortcut was
   // removed. First activation relaunches after the 5s notice; later boots
   // enter auth directly from chip 1 with no second user keystroke.
@@ -513,11 +475,8 @@ export function LoginModalConversational({
     CHECKLIST_LINES[checklistRevealed - 1]?.mark === "⟳";
   const handleDialogOpenChange = useCallback((next: boolean) => {
     if (activationRelaunching && !next) return;
-    // 2026-05-20 — first-boot onboarding 에서는 1/2/3 forced choice 라 outside-
-    // click / Esc dismissal 을 차단한다. 하지만 Settings → "데모 자격증명 재입력"
-    // entry (`forceActivation=true`) 는 returning-user 의 *자발적 재입력 path*
-    // 이므로 dismiss 가능해야 한다. 차이가 없으면 사용자가 wrong code 를 paste
-    // 했다가 빠져나올 길이 없음.
+
+
     if (!next && !forceActivation) return;
     onOpenChange(next);
   }, [activationRelaunching, forceActivation, onOpenChange]);
@@ -624,7 +583,7 @@ export function LoginModalConversational({
         {/* F2 — User-side bubble + assistant follow-up + type-on
             checklist. The blocks reveal only after the demo chip is
             selected so the cold-open mockup retains its original
-            "어떤 방식으로 시작할까요?" framing. Y2 — slide-up fade-in
+            start-method framing. Y2 — slide-up fade-in
             keyframes (`lvis-anim-slide-up`) make the conversational
             turns land smoothly instead of popping. */}
         {userTurnVisible && (
@@ -756,7 +715,7 @@ export function LoginModalConversational({
                     const isLast = i === checklistRevealed - 1;
                     const isSpinner = line.mark === "⟳";
                     // Y1 — once success is confirmed, flip the trailing
-                    // spinner glyph to ✓ and re-label to "sandbox 준비 완료"
+
                     // so the user gets an explicit success cue during the
                     // SUCCESS_DWELL_MS window before the modal hands off.
                     const isFinalSpinner = isSpinner && isLast;
@@ -845,8 +804,7 @@ export function LoginModalConversational({
             advancing. Status text for in-flight auth/relaunch surfaces
             inline via the chip disabled state + assistant bubble copy. */}
 
-        {/* F2 — Footer hint mirrors the mockup's
-            "위 선택지를 클릭하거나 `1`~`3` 키로 빠른 선택" line. */}
+        {/* F2 — Footer hint mirrors the mockup's quick-choice instruction. */}
         <p
           data-testid="login-modal:footer-hint"
           className="border-t border-border/(--opacity-strong) pt-2 text-center text-[10.5px] text-muted-foreground"

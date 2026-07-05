@@ -1,29 +1,7 @@
-/**
- * SessionTodoPanel — collapsible chat-side checklist for the
- * `todo_session_write` LLM tool. Visually distinct from persistent task views
- * (dashed border, amber accent) so the user can tell at a glance this is
- * the assistant's running plan.
- *
- * Expanded view: every item with status pill + content. The currently
- * in-progress item pulses so it's the obvious focal point.
- *
- * Collapsed view: header alone, but the title of the in-progress item
- * keeps streaming next to the badge — user always knows what the
- * assistant is working on without expanding.
- *
- * Manual dismiss: when every item is completed (6/6) the header surfaces an
- * X button so the user can close a finished plan immediately. The actual
- * clear is driven by the store emitting an empty list (which makes the panel
- * return null), not a local-only hide — this keeps the renderer in sync with
- * the store SOT. This is an interim manual affordance while the turn-start
- * auto-clear (gated to completed + input-origin) is unreliable.
- *
- * Session filtering: pushes from `onSessionTodoChanged` are filtered by
- * the current `sessionId` prop so a stale session's emissions cannot
- * clobber the active view (the renderer used to apply every push
- * regardless of which session emitted it, which surfaced the bug
- * "TO-DO 가 작성은 되는데 업데이트는 안됨").
- */
+
+
+
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown,

@@ -1,21 +1,7 @@
-/**
- * Renders the list of MED/HIGH-risk headless actions that the Layer 5
- * reviewer agent deferred during headless execution. Each entry has
- * "허용" / "거부" buttons; the user's click resolves the entry
- * via IPC and writes an audit record on the main side.
- *
- * Spec ref: docs/architecture/permission-policy-design.md §3
- * Layer 5 — "MED/HIGH → deferred queue, user-opened queue surface".
- *
- * Mounting:
- *   - On mount: load via lvis.permission.deferredList().
- *   - On `lvis:permissions:deferred-pending` event: refresh.
- *   - User click: lvis.permission.deferredResolve(id, decision).
- *
- * Visual: severity border, monospace inputSummary, clear
- * "approved" / "rejected" terminal feedback (entry disappears from
- * pending; the underlying JSONL keeps the resolution record).
- */
+
+
+
+
 import { useEffect, useState, useCallback, type ReactElement } from "react";
 import { Badge } from "../../../../components/ui/badge.js";
 import { Button } from "../../../../components/ui/button.js";

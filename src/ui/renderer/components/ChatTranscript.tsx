@@ -59,7 +59,7 @@ export function ChatTranscript({
       ))}
       {/* Ready-state empty-prompt: only when we know `hasApiKey === true`.
           `null` (still loading) and `false` (no key) both suppress the
-          "준비되었습니다" copy so the user never sees a "로그인된 척" race
+          ready copy so the user never sees a fake-logged-in race
           where the empty state paints before the boot probe resolves
           (#1014 tracer: Stage B). */}
       {visibleEntries.length === 0 && hasApiKey === true && !hasAskQuestions && !suggestedRepliesActive && (

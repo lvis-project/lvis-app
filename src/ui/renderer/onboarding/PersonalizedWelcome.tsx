@@ -1,27 +1,7 @@
-/**
- * PersonalizedWelcome (Z onboarding chain — replaces WelcomeQuestion).
- *
- * Mounted AFTER MemorySeed so the card can greet the user by the 호칭
- * they just typed and reference their one-line 자기소개. No skip path —
- * the user must press the confirm button to advance into the tour stage.
- *
- * LLM ping integration (2026-05-20):
- *   On mount the card invokes `api.pingAiProvider()` to surface a *연결
- *   확인 라인* below the personalised greeting. Three render states:
- *     - loading:  spinner + "LLM 연결 확인 중…" (confirm disabled)
- *     - success:  "LVIS 가 <vendor> · <model> 와 <latency>ms 만에 연결됐어요."
- *     - failure:  warning + actionable copy for either missing credentials
- *                  or private endpoint reachability (confirm still enabled).
- *
- *   The ping is a lightweight liveness probe (no full LLM round-trip); we
- *   just want to confirm the configured vendor/model responds before the
- *   user lands on the chat surface. Failure is non-fatal — the user can
- *   still proceed and fix credentials from Settings later.
- *
- * The displayed name comes from chain state (`memorySeed.nickname`); the
- * one-line intro is rendered as a quote so the user recognises their own
- * voice. Blank values gracefully fall back to a neutral greeting.
- */
+
+
+
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Dialog, DialogContent } from "../../../components/ui/dialog.js";
@@ -43,9 +23,9 @@ import type {
 
 export interface PersonalizedWelcomeProps {
   open: boolean;
-  /** 호칭 the user typed into MemorySeed. Empty = neutral greeting. */
+
   nickname?: string;
-  /** One-line 자기소개 the user typed into MemorySeed. */
+
   introduction?: string;
   /**
    * Liveness probe for the configured LLM provider. Passed as a stable
@@ -61,7 +41,7 @@ export interface PersonalizedWelcomeProps {
   marketplaceUrlReady?: boolean;
   bootstrapStatus?: BootstrapStatusEvent | null;
   onRetryBootstrap?: () => Promise<void> | void;
-  /** Fires when the user presses "예, 시작할게요 →". */
+
   onContinue: () => void;
 }
 

@@ -219,20 +219,9 @@ export interface PluginRuntimeOptions {
    * MUST be idempotent.
    */
   onDisable?: (pluginId: string) => void;
-  /**
-   * Fires after a plugin's instance is in the `loaded + started` state and
-   * the runtime considers it callable — symmetric to {@link onDisable}.
-   * Currently invoked after a successful `restartPlugin`, `addPlugin`, or
-   * `reloadPlugin`. The host wires this to targeted ToolRegistry sync so a
-   * post-restart sync re-registers the tools that the tear-down phase
-   * removed; without it the ToolRegistry stays empty and every chat-surface
-   * tool call reports `도구를 찾을 수 없습니다: <tool>` until the next
-   * install / uninstall event. The boot path's initial `startAll` is NOT
-   * covered here — boot registration now flows through PluginLoopbackManager
-   * (each plugin runs as an in-process MCP server), wired in
-   * `boot/steps/plugin-runtime.ts`, which owns that one-shot registration.
-   * See `architecture.md §9.3a`.
-   */
+
+
+
   onEnable?: (pluginId: string) => void;
   /**
    * Fires when the user toggles active/inactive without unloading the runtime.
@@ -334,10 +323,8 @@ export class PluginRuntime {
       return await parsePluginJson(path, validator);
     } catch (err) {
       // Supply-chain visibility — manifest schema reject / cross-field violation /
-      // JSON parse failure 가 발생하면 operator/security 채널이 *어느 plugin* 이
-      // *왜* 드랍됐는지 추적할 수 있어야 한다. fail-soft drop 자체는 보존
-      // (re-throw 으로 기존 load loop 의 catch path 가 그 plugin 을 skip 하고
-      // 호스트는 계속 동작).
+
+
       this.auditLog?.("error", "plugin_manifest_rejected", {
         manifestPath: path,
         error: err instanceof Error ? err.message.slice(0, 500) : String(err),

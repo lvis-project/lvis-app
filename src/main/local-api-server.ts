@@ -170,7 +170,7 @@ export function buildExternalMutationApprover(
         toolName: channel,
         toolCategory: "meta",
         args,
-        reason: "외부 CLI/API가 권한 모드 변경을 요청했습니다. 허용하시겠습니까?",
+        reason: "An external CLI/API requested a permission-mode change. Do you want to allow it?",
         source: "builtin",
         createdAt: Date.now(),
         trustOrigin: origin,

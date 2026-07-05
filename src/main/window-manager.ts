@@ -1179,7 +1179,7 @@ export class WindowManager {
     // Resize the main window to match the active workspace mode.
     //   work → centered 1243×768 (golden ratio, clamped to the work area), the focused
     //            working canvas where inline views need room.
-    //   chat   → the 기존 right-docked initial bounds (the same geometry the
+
     //            window boots with), computed from the primary work area.
     // State-mutating channel — validateHostRendererSender (rejects plugin UI
     // shells), mirroring the other host-only window IPCs.

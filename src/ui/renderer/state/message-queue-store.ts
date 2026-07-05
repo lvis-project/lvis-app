@@ -1,17 +1,7 @@
-/**
- * MessageQueueStore — mid-turn user input queue for LVIS chat.
- *
- * LLM busy 동안 사용자가 입력한 메시지들의 후보 풀. TODO 와 다름:
- * - 완료/진행중/대기 단계 없음 (단순 후보)
- * - 자연 인입 (전체) / 즉시 주입 (선택+입력) / 행별 즉시 / 취소 3 가지 시맨틱
- * - turn 종료 시 자동 비움 (다음 turn 으로 이월 X)
- *
- * Renderer-only 단순 class. main process 와 IPC 없음 — 큐 inject 는
- * 기존 chat.send IPC 로 user message 추가하는 형태. brake-point 감지는
- * 스트리밍 이벤트 구독으로 renderer 에서 수행.
- *
- * Spec: docs/blueprints/composer-redesign-message-queue.md
- */
+
+
+
+
 
 import { t } from "../../../i18n/runtime.js";
 
@@ -20,17 +10,17 @@ export interface MessageQueueItem {
   text: string;
   selected: boolean;
   createdAt: number;
-  /** 자동 만료 시점 (Date.now() 기준 ms). 초과 시 lazy prune 으로 제거됨. */
+
   expiresAt: number;
 }
 
 let nextId = 0;
 function makeId(): string {
-  // crypto.randomUUID 가 fallback 없이 가능 (renderer 환경 보장).
+
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
-  // 테스트 환경 (jsdom 일부 버전) 에서 randomUUID 부재 시 단조 증가 id.
+
   nextId += 1;
   return `mq-${Date.now()}-${nextId}`;
 }

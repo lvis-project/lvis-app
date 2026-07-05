@@ -30,12 +30,9 @@ export interface AskUserQuestionItem {
   /** Indices in `choices` of secondary recommendations (disjoint with recommendedIndex). */
   altIndices?: number[];
   allowFreeText: boolean;
-  /**
-   * When true, the user may pick more than one of `choices` and the response
-   * carries them in `choices: string[]`. Single-select (default) preserves
-   * the `choice: string` response shape. Auto-submit on single-question
-   * cards is disabled in multi-select mode — the user must press 보내기.
-   */
+
+
+
   allowMultiple?: boolean;
   /** Single-line placeholder text for the free-text input (≤ 20 Korean chars). */
   placeholder?: string;
@@ -141,12 +138,9 @@ export class AskUserQuestionGate {
      * against malformed multi-question shapes.
      */
     questions: AskUserQuestionItem[];
-    /**
-     * Per-turn abort signal from the conversation loop. When the user
-     * presses 중단 the signal fires and we resolve `dismissed: true` plus
-     * notify the renderer so the card disappears — without this, the gate
-     * sits on its 5-minute timer and the abort feels like a dead button.
-     */
+
+
+
     abortSignal?: AbortSignal;
   }): Promise<AskUserQuestionResponse> {
     if (

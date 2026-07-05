@@ -1,38 +1,7 @@
-/**
- * OS tool sandbox (ASRT) boot-gate policy — pure decision layer.
- *
- * Extracted from boot.ts so the EXPLICIT-vs-DEFAULT distinction is unit-testable
- * without standing up the full boot graph. boot.ts owns the SIDE EFFECTS
- * (checkAsrtDependencies / initializeAsrtSandbox / setActiveSandboxCapability /
- * log.warn|error|throw); THIS module owns only the BRANCH CHOICE.
- *
- * The gate has two independent on-signals:
- *   - settingOn   — `features.osToolSandbox` (staged default: macOS ON,
- *                   Linux/Windows opt-in; also the Settings → 권한 toggle).
- *   - explicitEnv — `LVIS_SANDBOX_ENABLED=1`. A deliberate power-user/CI
- *                   "I really mean it" override.
- *
- * No-fallback REFINEMENT (this is NOT a blanket fallback — it preserves the
- * fail-closed guarantee for the deliberate case and only degrades the default):
- *   - EXPLICIT opt-in (`explicitEnv`) + sandbox can't activate → ABORT
- *     (fail-closed). The operator demanded the sandbox by name; running
- *     unsandboxed under that name would be the exact silent-downgrade the
- *     no-fallback rule forbids. (Windows is exempt — see below.)
- *   - DEFAULT / settings-on (`settingOn`, NOT `explicitEnv`) + sandbox can't
- *     activate → DEGRADE (non-bricking). Staged/default-enabled hosts must not
- *     brick when deps are missing; they degrade to the SAME runtime posture as
- *     sandbox-OFF (a known-safe state) with a LOUD warning, leaving
- *     `isAsrtSandboxActive()` false.
- *   - Windows deps-missing → always DEGRADE regardless of `explicitEnv`:
- *     srt-win needs a one-time UAC install the user CANNOT complete before
- *     boot reaches the consent UI, so a throw would permanently brick first-run. The explicit
- *     fail-closed cannot apply where it leaves no recoverable state.
- *
- * "Can't activate" covers BOTH deps-missing (checkAsrtDependencies reported
- * errors) AND a runtime init failure (initializeAsrtSandbox threw): boot models
- * the latter by re-running this decision with `depsOk: false`, so the
- * explicit-vs-default branch lives in exactly one place.
- */
+
+
+
+
 
 export type SandboxGateAction = "skip" | "activate" | "degrade" | "abort";
 

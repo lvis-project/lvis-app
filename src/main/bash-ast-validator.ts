@@ -1,32 +1,9 @@
 import { t } from "../i18n/index.js";
 import { tokenizeShell } from "./shell-tokenizer.js";
 
-/**
- * Bash AST Pre-Validator — LVIS local shell safety policy
- *
- * tool-executor.ts Step 2.5에서 호출되며, Bash 계열 도구 호출 시 인자를
- * 간이 패턴 분석하여 위험 패턴을 탐지. 13개 패턴을 차단:
- *   1. rm -rf / (또는 ~/, $HOME, *)
- *   2. curl/wget | sh (or bash)
- *   3. sudo / su / doas 권한 상승
- *   4. fork bomb (:(){:|:&};:)
- *   5. eval $... untrusted
- *   6. TTY injection (echo -ne ...\\033)
- *   7. command substitution piped to shell ($(...) | bash)
- *   8. variable-expansion-exec — `X=rm; $X -rf /` / `${CMD} -rf /` 우회
- *   9. rm-rf-compound — `echo hi && rm -rf /` 복합 명령 우회
- *  10. backtick-command-substitution — `` `rm -rf /home` `` 우회
- *  11. ifs-command-injection — `r${IFS}m -rf /` IFS 조작 우회
- *  12. brace-expansion-exec — `r{m} -rf /` brace expansion 우회
- *  13. subshell-command-exec — `$(echo rm) -rf /` subshell 우회
- *
- * Leaf boundaries come from the shared {@link tokenizeShell} SOT so this
- * validator and the host risk inspector agree on what a compound-command "leaf"
- * is. A tokenizer-based `rm -rf <dangerous>` leaf check runs as an ADDITIONAL
- * deny layer alongside the regex patterns — it can only ADD denies (a
- * quote-aware split catches `rm -rf /` leaves the raw-regex boundary might miss)
- * and never relaxes an existing deny.
- */
+
+
+
 
 export type ValidationDecision = "allow" | "warn" | "deny";
 
@@ -37,17 +14,16 @@ export interface ValidationResult {
 }
 
 export interface BashAstValidatorOptions {
-  /** "warn"이면 경고만, "deny"면 실행 차단. 기본 "deny" */
+
   mode?: "warn" | "deny";
 }
 
 export class BashAstValidator {
   constructor(private readonly opts: BashAstValidatorOptions = {}) {}
 
-  /**
-   * Bash 계열 도구 호출 시 인자 검증.
-   * Bash 도구가 아닌 경우 즉시 allow.
-   */
+
+
+
   validate(toolName: string, input: Record<string, unknown>): ValidationResult {
     if (!this._isBashTool(toolName)) return { decision: "allow" };
 
@@ -65,19 +41,19 @@ export class BashAstValidator {
     const patterns: Array<{ id: string; regex: RegExp; reason: string }> = [
       {
         id: "ifs-command-injection",
-        // e.g. `r${IFS}m -rf /`, `$IFS`, `${IFS}` — IFS 조작을 통한 명령 분리
+
         regex: /\$\{?IFS\}?/i,
         reason: t("be_bashAstValidator.ifsInjection"),
       },
       {
         id: "brace-expansion-exec",
-        // e.g. `r{m} -rf /`, `rm{,} -rf /` — brace expansion으로 rm 토큰 우회
+
         regex: /\b\w\{[^}]*\}\s+-[rfRF]/,
         reason: t("be_bashAstValidator.braceExpansion"),
       },
       {
         id: "subshell-command-exec",
-        // e.g. `$(echo rm) -rf /` — subshell 결과로 위험 명령 실행
+
         regex: new RegExp(String.raw`\$\([^)]+\)\s+-[rfRF]+\s+${dangerousRmTarget}${commandBoundary}`, "i"),
         reason: t("be_bashAstValidator.subshellExec"),
       },
@@ -96,7 +72,7 @@ export class BashAstValidator {
       },
       {
         id: "rm-rf-compound",
-        // rm -rf preceded by ; && || | or newline (복합 명령 내 실행)
+
         // Does NOT use ^ so that a bare "rm -rf /" falls through to rm-rf-root.
         regex: new RegExp(String.raw`[;&|\n]\s*rm\s+(?:-[rfRF]+\s+)+${dangerousRmTarget}${commandBoundary}`, "i"),
         reason: t("be_bashAstValidator.rmRfCompound"),

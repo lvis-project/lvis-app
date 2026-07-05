@@ -9,10 +9,9 @@ import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import { formatHhMmKst } from "../utils/format-time.js";
 import { useTranslation } from "../../../i18n/react.js";
 
-/**
- * Turn-aggregate provider-reported token usage forwarded to the inline
- * <TokenCostBadge>. Subset of TokenCostBadgeProps (pricing 은 별 prop).
- */
+
+
+
 export type TurnSummaryForBadge = Pick<
   TokenCostBadgeProps,
   "tokensIn" | "freshInputTokens" | "tokensOut" | "cacheReadTokens" | "cacheWriteTokens" | "usageByModel"

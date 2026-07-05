@@ -437,16 +437,9 @@ export type LvisApi = {
         error?: string;
       }) => void,
     ) => () => void;
-    /**
-     * 2026-05-20 — Settings 가 별도 BrowserWindow 로 mount 되기 때문에 GeneralTab
-     * 의 로그아웃 / 데모 자격증명 재입력 entry 는 cross-window broadcast 가 필요.
-     * `broadcast*` 는 main 프로세스에서 모든 window 로 fan-out 하고, `on*` 은
-     * main window 의 App.tsx 가 subscribe 한다. payload 가 없는 단순 cue.
-     *
-     * Optional 로 선언한 이유: 다수 test fixture 가 `api.auth` 를 `onProgress`
-     * 만 mock 한 채 LvisApi 로 cast 한다. production preload 는 항상 정의하므로
-     * runtime presence 는 보장되지만 strict-typed test 가 깨지지 않도록 optional.
-     */
+
+
+
     broadcastLogoutReset?: () => Promise<
       | { ok: true }
       | { ok: false; error: "unauthorized-frame" }
@@ -541,12 +534,9 @@ export type LvisApi = {
       | { ok: true }
       | { ok: false; error: "not-armed" | "unauthorized-frame" }
     >;
-    /**
-     * 2026-05-20 — Logout / 데모 자격증명 재입력 path. 활성 상태(`.env.demo`
-     * + `LVIS_DEMO_*` + main 의 captured demo state) 를 한 번에 비운다. 다음
-     * `status()` 호출은 `activated=false` 를 반환하므로 LoginModal 의 activation
-     * 입력 화면이 다시 mount 될 수 있다.
-     */
+
+
+
     clearDemo: () => Promise<
       | { ok: true }
       | { ok: false; error: "clear-failed" | "unauthorized-frame" }
@@ -609,15 +599,9 @@ export type LvisApi = {
     | { ok: true; pluginId: string }
     | { ok: false; error: string; message: string }
   >;
-  /**
-   * Tutorial-X4 — write the synthesized onboarding context to
-   * `~/.lvis/onboarding/onboarding-context.md`. The host's
-   * SystemPromptBuilder picks this up as section id=9.86 "User Onboarding
-   * Context" on every subsequent turn (until the file is cleared). The
-   * renderer wizard composes a short markdown block (호칭 + 자기소개 +
-   * installed plugin ids + last completed walkthrough) and calls this
-   * once after `MemorySeedDialog` dismissal. Capped server-side at 4 KB.
-   */
+
+
+
   onboardingContextSet: (content: string) => Promise<
     | { ok: true }
     | { ok: false; error: string; message: string }
@@ -1031,13 +1015,9 @@ export type LvisApi = {
   getRuntimeEnv: () => Promise<{ platform: string; hostname: string; user: string }>;
   pingMarketplace: () => Promise<{ configured: boolean; online: boolean }>;
   pingAiProvider: () => Promise<AiProviderPingIpcResult>;
-  /**
-   * Settings "일반" dashboard host metadata. SoT for `version` is the LVIS
-   * project package.json resolved by the main process via
-   * `app.getAppPath()`; stack fields (`electronVersion` / `nodeVersion` /
-   * `chromeVersion` / `v8Version`) come from `process.versions`. The
-   * renderer never duplicates these values.
-   */
+
+
+
   getAppInfo: () => Promise<{
     version: string;
     electronVersion: string;
@@ -1165,7 +1145,7 @@ export type LvisApi = {
     /** Close all detached windows (fired on the work-mode transition). Auth/login windows are excluded. */
     closeAllDetached: () => Promise<{ ok: true } | { ok: false; error: string }>;
     loadSessionInMain: (sessionId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
-    /** Resize the main window to match the workspace mode (work → centered canvas; chat → 기존 right-docked). */
+
     resizeForMode: (mode: "chat" | "work") => Promise<{ ok: true } | { ok: false; error: string }>;
     /** Resize the chat-mode main window when the right-side work panel opens/closes. */
     resizeForSidePanel: (open: boolean) => Promise<{ ok: true } | { ok: false; error: string }>;
@@ -1593,13 +1573,9 @@ export type LvisPluginConfigApi = {
     | { ok: true }
     | { ok: false; error: string; message?: string }
   >;
-  /**
-   * US-3c.1 — batch secret-presence query. Returns the list of
-   * `format:"secret"` keys from the plugin's configSchema for which the
-   * keychain currently holds a value. Use this to populate `secretsPresent`
-   * in PluginConfigSchemaForm so the masked "**** (저장됨)" placeholder
-   * appears correctly. Fewer IPC round-trips than per-key checks.
-   */
+
+
+
   listSecretKeys: (pluginId: string) => Promise<
     | { ok: true; keys: string[] }
     | { ok: false; error: string; message?: string }

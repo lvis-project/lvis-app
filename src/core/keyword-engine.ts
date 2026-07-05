@@ -1,14 +1,7 @@
-/**
- * Keyword Detecting Engine — §6.1
- *
- * 사용자 입력에서 의도·키워드·엔티티를 감지하는 첫 번째 관문.
- * TypeScript 구현 — 향후 Rust NAPI-RS 포팅 대비 인터페이스 분리.
- *
- * 감지 우선순위 (§6.1):
- * 1. 명시적 명령어 (/command)
- * 2. 스킬 키워드 (플러그인 등록)
- * 3. 일반 대화 (fallback)
- */
+
+
+
+
 
 import { parseImportedTriggerEnvelope } from "../shared/overlay-trigger-source.js";
 
@@ -20,16 +13,13 @@ export type InputClassification =
   | { type: "general"; input: string };
 
 export interface SkillKeyword {
-  /** 트리거 키워드 (예: "회의록", "번역", "이메일") */
+
   keyword: string;
-  /** 매핑될 스킬/플러그인 ID */
+
   skillId: string;
-  /**
-   * Plugin 식별자. null/undefined = builtin 스킬.
-   * Lazy tool scoping — classify 결과에서 active plugin 집합을
-   * 도출할 때 사용된다. boot.ts createHostApi.registerKeywords가
-   * 플러그인 호출 시 자동 주입한다.
-   */
+
+
+
   pluginId?: string;
 }
 
@@ -38,17 +28,17 @@ export interface SkillKeyword {
 export class KeywordEngine {
   private skillKeywords: SkillKeyword[] = [];
 
-  /** 플러그인 로드 시 스킬 키워드 등록 */
+
   registerKeywords(keywords: SkillKeyword[]): void {
     this.skillKeywords.push(...keywords);
   }
 
-  /** 키워드 초기화 (플러그인 리로드 시) */
+
   clearKeywords(): void {
     this.skillKeywords = [];
   }
 
-  /** 특정 플러그인이 등록한 키워드 제거 (disable 시 호출) */
+
   unregisterByPlugin(pluginId: string): void {
     this.skillKeywords = this.skillKeywords.filter((sk) => sk.pluginId !== pluginId);
   }
@@ -58,11 +48,9 @@ export class KeywordEngine {
     return this.skillKeywords.some((sk) => sk.pluginId === pluginId);
   }
 
-  /**
-   * Lazy Tool Scoping — 입력에 포함된 모든 키워드의 pluginId 집합을 반환.
-   * classify()는 첫 매치만 반환하지만, scope 결정은 "이 턴에서 필요한 모든
-   * 플러그인"을 수집해야 한다. builtin 스킬(pluginId undefined)은 제외된다.
-   */
+
+
+
   matchAllPluginIds(input: string): Set<string> {
     const lowerInput = input.trim().toLowerCase();
     const result = new Set<string>();
@@ -74,16 +62,9 @@ export class KeywordEngine {
     return result;
   }
 
-  /**
-   * Tool-Level Deferral (B: keyword→tool preload) — 입력에 매치된 키워드의
-   * `skillId` 중 *실제 등록된 plugin/mcp tool 로 resolve 되는 것만* 반환한다.
-   *
-   * `matchAllPluginIds` 가 plugin 단위 scope 를 도출하는 것과 짝을 이루며,
-   * 이쪽은 tool 단위 preload 집합을 도출한다. registry 에 대한 직접 의존을
-   * 피하기 위해 `isToolName(name)` resolver 를 호출 측 (ConversationLoop) 에서
-   * 주입받는다 — circular import 없음. resolver 가 false 를 주는 skillId
-   * (builtin 스킬, 미등록 tool) 는 제외된다.
-   */
+
+
+
   matchToolNames(input: string, isToolName: (name: string) => boolean): Set<string> {
     const lowerInput = input.trim().toLowerCase();
     const result = new Set<string>();
@@ -95,7 +76,7 @@ export class KeywordEngine {
     return result;
   }
 
-  /** 사용자 입력 분류 — §6.1 우선순위 기반 */
+
   classify(input: string): InputClassification {
     const trimmed = input.trim();
 
@@ -108,7 +89,7 @@ export class KeywordEngine {
       return { type: "general", input: trimmed };
     }
 
-    // 1. 명시적 명령어: /command [args]
+
     const cmdMatch = trimmed.match(/^\/(\S+)\s*(.*)?$/s);
     if (cmdMatch) {
       return {
@@ -118,7 +99,7 @@ export class KeywordEngine {
       };
     }
 
-    // 2. 스킬 키워드 매칭 (첫 매치 반환 — routing 용)
+
     const lowerInput = trimmed.toLowerCase();
     for (const sk of this.skillKeywords) {
       if (lowerInput.includes(sk.keyword.toLowerCase())) {
@@ -132,7 +113,7 @@ export class KeywordEngine {
       }
     }
 
-    // 3. 일반 대화 (fallback)
+
     return { type: "general", input: trimmed };
   }
 }

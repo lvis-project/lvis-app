@@ -33,9 +33,9 @@ export interface OverlayItem {
   source: OverlayItemSource;
   title: string;
   summary: string;
-  /** running phase — true: spinner + "진행 중…", false: summary + actions */
+
   running: boolean;
-  /** primary action label — routine: "결과 보기", plugin: free */
+
   primaryActionLabel?: string;
   /** routine-specific — unified conversation session id */
   routineSessionId?: string;

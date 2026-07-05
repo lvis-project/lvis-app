@@ -104,17 +104,9 @@ export interface SettingsOrchestrationState {
    * payloads from landing after login owns provider/model/key state.
    */
   invalidateLlmDraftSaves: () => void;
-  /**
-   * Persist current draft for the named tab. Errors surface via
-   * `lastSaveError`, not via promise rejection (the debounced caller
-   * does `void s.save(tab)`). Resolves to `true` on success so explicit
-   * Save handlers can render a "저장되었습니다" toast.
-   *
-   * The save NEVER closes the dialog. Multi-tab Settings modals (VS Code,
-   * Linear, Raycast) keep the dialog open after Save so the user can
-   * verify the change and edit a sibling tab. Close lives on the
-   * Dialog X / Esc — same as every other modal.
-   */
+
+
+
   save: (tab: string) => Promise<boolean>;
   vendorInfo: (typeof VENDORS)[number];
 }

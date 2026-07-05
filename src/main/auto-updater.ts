@@ -1,26 +1,7 @@
-/**
- * Production release prep — Electron auto-update via electron-updater.
- *
- * Behavior (user-gated, no implicit downloads):
- *   - On app start (after boot), and every 4h, call checkForUpdates().
- *     This only QUERIES the GitHub release feed — `autoDownload = false`
- *     prevents the implicit ~100MB fetch the previous default behavior
- *     would have triggered. Hard rule from user: 사용자 명시 클릭 전엔
- *     절대 다운로드 금지.
- *   - On `update-available` → broadcast state `{ kind: "available", version }`
- *     to the renderer. The renderer shows a permanent badge next to the
- *     Home button. NO download starts here.
- *   - Renderer → main: `lvis:update:download-now` triggers downloadUpdate().
- *     `download-progress` / `update-downloaded` events feed the same
- *     state stream the badge consumes.
- *   - Renderer → main: `lvis:update:install-now` validates the host
- *     renderer sender, shows the native confirmation dialog in the main
- *     process, then triggers quitAndInstall().
- *   - Network errors silently logged (no user-facing noise).
- *
- * All credentials/publish config are declared in package.json `build.publish`
- * — NEVER in code. Users supply signing certs + GH_TOKEN at release time.
- */
+
+
+
+
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { app, shell } from "electron";

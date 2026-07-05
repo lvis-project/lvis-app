@@ -126,7 +126,7 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
     const messages = self.deps.memoryManager.loadSession(sessionId);
     if (!messages) return false;
 
-    // 현재 세션 저장 후 전환
+
     if (self.history.length > 0) {
       self.deps.memoryManager.saveSession(self.sessionId, self.history.getMessages()).catch((err: unknown) => {
         log.warn("loadSession saveSession failed: %s", (err as Error).message);

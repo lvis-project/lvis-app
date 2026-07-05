@@ -1,17 +1,7 @@
-/**
- * Shared catalog + filtering for the "/" entry point.
- *
- * Both the button-triggered SlashPicker popover and the inline caret-anchored
- * autocomplete menu import from here, so the command list, category model,
- * icons, and matching semantics stay identical — the two surfaces cannot drift.
- *
- * Categories present on this base: built-in slash commands, view shortcuts
- * (the QuickAction list — 홈/루틴/설정/플러그인 뷰), installed plugins, live
- * MCP-server tools, and registered assistant skills. MCP tools come from
- * `window.lvis.mcp.servers()` (each connected server's `registeredTools`) and
- * skills from `window.lvis.listSkills()` — both are existing read-only host
- * IPCs, so these categories are wired to REAL data (no fake/stub fallback).
- */
+
+
+
+
 import { Terminal, Zap, Puzzle, Server, Sparkles, type LucideIcon } from "lucide-react";
 import { t } from "../../../i18n/runtime.js";
 import type { QuickAction } from "./command-actions.js";

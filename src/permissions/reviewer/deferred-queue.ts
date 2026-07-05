@@ -1,23 +1,7 @@
-/**
- * Layer 5 reviewer queue for MED/HIGH headless verdicts.
- *
- * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5.
- *
- * When the reviewer agent returns a MEDIUM/HIGH verdict in headless mode, the
- * action is appended to the deferred queue rather than executed. On
- * pending-count changes the host emits
- * `lvis:permissions:deferred-pending` with a queue summary; the renderer
- * lets the user open a DeferredQueuePanel with "허용" / "거부" buttons. Each
- * click resolves the entry and writes an audit record.
- *
- * Storage: ~/.lvis/permissions/deferred-queue.jsonl (per-feature
- * namespace; Layer 0 sensitive — no plugin can read or write it
- * directly).
- *
- * Append-on-classification, drain-on-foreground. Resolved entries
- * remain in the file as historical record (status: "approved" |
- * "rejected") so the audit chain is preserved even after queue drain.
- */
+
+
+
+
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve as pathResolve } from "node:path";
 import { randomUUID } from "node:crypto";

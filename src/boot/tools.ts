@@ -1,12 +1,7 @@
-/**
- * Boot §4.2 Step 4 — Builtin tool registration + §4.4 knowledge DI.
- *
- * - registerRequestPluginMetaTool: request_plugin meta tool
- * - registerToolSearchMetaTool: tool_search meta tool (tool-level deferral)
- * - registerBuiltinTools: web_search, web_fetch, workflow tools
- * - wireKnowledgeAndIdleScheduler: worker-client capability 탐지 → HybridRetriever,
- *   knowledge tools 등록, IdleScheduler 배선
- */
+
+
+
+
 import type { ToolRegistry } from "../tools/registry.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../tools/registry.js";
 import type { SettingsService } from "../data/settings-store.js";
@@ -122,6 +117,56 @@ function webFetchCategoryForInput(
   return webFetchRequiresPrivateNetwork(input, deps) ? "network" : "read";
 }
 
+function htmlToPlainTextForWebFetch(html: string): string {
+  let output = "";
+  let skippedTag: "script" | "style" | null = null;
+
+  for (let i = 0; i < html.length;) {
+    if (skippedTag) {
+      const lower = html.slice(i, i + skippedTag.length + 4).toLowerCase();
+      if (lower.startsWith(`</${skippedTag}`)) {
+        const close = html.indexOf(">", i);
+        if (close === -1) break;
+        i = close + 1;
+        skippedTag = null;
+        output += " ";
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (html[i] === "<") {
+      const close = html.indexOf(">", i + 1);
+      if (close === -1) break;
+      const tag = html.slice(i + 1, close).trim().toLowerCase();
+      const tagName = tag.match(/^\/?\s*([a-z0-9:-]+)/)?.[1];
+      if (!tag.startsWith("/") && (tagName === "script" || tagName === "style")) {
+        skippedTag = tagName;
+      }
+      output += " ";
+      i = close + 1;
+      continue;
+    }
+
+    output += html[i];
+    i += 1;
+  }
+
+  return decodeCommonHtmlEntities(output)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function decodeCommonHtmlEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/g, "'");
+}
+
 function webFetchFetchImpl(
   input: unknown,
   deps: WorkflowToolDeps | undefined,
@@ -226,8 +271,8 @@ export function parseSerperResponse(data: unknown): NormalizedSearchResult[] {
 }
 
 export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void {
-  // Option C — request_plugin 메타 툴 (항상 활성, scope filter 통과)
-  // 실제 scope 확장은 ConversationLoop.queryLoop이 가로챈다.
+
+
   toolRegistry.register(createDynamicTool({
     name: "request_plugin",
     description: t("be_tools.requestPluginDescription"),
@@ -254,9 +299,8 @@ export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void 
 }
 
 export function registerToolSearchMetaTool(toolRegistry: ToolRegistry): void {
-  // Tool-Level Deferral — tool_search 메타 툴. Statically registered and
-  // visible whenever builtins are in scope. execute는 no-op — 실제 promotion 은
-  // ConversationLoop.queryLoop 이 가로챈다 (request_plugin 과 동일 패턴).
+
+
   toolRegistry.register(createDynamicTool({
     name: TOOL_SEARCH_TOOL_NAME,
     description: t("be_tools.toolSearchDescription"),
@@ -342,7 +386,7 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
       // plugin's FolderAutoIndexer indexes eagerly in its background worker
       // process — so the scheduler is constructed without an index worker
       // client and only drives idle-state notifications.
-      // Electron powerMonitor lazy import — test 환경에서 electron 로드 회피
+
       try {
         const { powerMonitor } = await import("electron");
         idleScheduler = new IdleSchedulerService({
@@ -475,11 +519,10 @@ export function registerBuiltinTools(
               isError: false,
             };
           }
-          // DuckDuckGo HTML 검색
-          const ddgRes = await networkFetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+          const ddgRes = await networkFetch("https://html.duckduckgo.com/html/", {
             method: "POST",
             headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", "Content-Type": "application/x-www-form-urlencoded" },
-            body: `q=${encodeURIComponent(query)}`,
+            body: new URLSearchParams({ q: query }).toString(),
           });
           const ddgHtml = await ddgRes.text();
           const results: NormalizedSearchResult[] = [];
@@ -544,12 +587,7 @@ export function registerBuiltinTools(
             headers: { "User-Agent": "LVIS-Assistant/0.1.0" },
           });
           const html = await response.text();
-          const text = html
-            .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gim, "")
-            .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gim, "")
-            .replace(/<[^>]+>/g, " ")
-            .replace(/\s+/g, " ")
-            .trim();
+          const text = htmlToPlainTextForWebFetch(html);
           return {
             output: JSON.stringify({
               url,

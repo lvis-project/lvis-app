@@ -138,8 +138,8 @@ function addTo(
   target.outputTokens += output;
   target.cacheReadTokens += cacheRead;
   target.cacheWriteTokens += cacheWrite;
-  // totalTokens 의미는 vendor 별로 다르다 — Anthropic 은 input + cache 가산,
-  // OpenAI/Gemini 는 cache 가 이미 input 안에 포함 (Vercel SDK normalized
+
+
   // cachedInputTokens). Unknown legacy rows stay input+output only because
   // cache semantics are not knowable and must not inflate visible totals.
   target.totalTokens +=

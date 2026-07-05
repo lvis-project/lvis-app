@@ -1,19 +1,7 @@
-/**
- * Structured Compact — checkpoint compaction for the current session model.
- *
- * 이 파일은 interface + parser + prompt + LLM call (`compactWithBoundary`) 모두 제공.
- * `ConversationLoop.runPreflightGuard` 가 caller — token preflight 도달 시 await.
- *
- * 핵심 추상화:
- *   - `CompactBoundary` — provider-neutral opaque-state slot
- *     OpenAI 향후 path 의 `openaiCompactionItem` 전체 저장 + Anthropic/Gemini 의
- *     `structuredSummary` 양쪽을 단일 인터페이스로 표현.
- *   - `ParsedSummary` — 12-section SUMMARY_TEMPLATE 의 구조화 결과.
- *   - `freezeBoundary()` — prompt slot + checkpoint storage + history[0] view 일관 보장.
- *   - `compactWithBoundary()` — LLM compact call.
- *
- * See `docs/architecture/session-model-v2.md` for the session/fork boundary.
- */
+
+
+
+
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -32,7 +20,7 @@ import { t } from "../i18n/index.js";
 
 const log = createLogger("compact");
 
-/** 12-section SUMMARY_TEMPLATE 헤더. 순서/이름 모두 contract — 변경 시 templateVersion bump 필수. */
+
 export const SUMMARY_TEMPLATE_HEADERS_V1 = [
   "Goal",
   "Constraints & Preferences",
@@ -50,103 +38,72 @@ export const SUMMARY_TEMPLATE_HEADERS_V1 = [
 
 export type SummarySectionName = (typeof SUMMARY_TEMPLATE_HEADERS_V1)[number];
 
-/**
- * Parsed 12-section summary. 각 섹션은 raw 본문 string 으로 보존 — LLM 이
- * 다음 turn 에서 이 boundary 를 read 할 때 본문 그대로 회상.
- *
- * `raw` field 는 parser 가 형식 위반을 만난 경우의 ungraceful fallback —
- * LLM 은 raw text 라도 의미 추론 가능하므로 *empty boundary* 보다 낫다.
- */
+
+
+
 export interface ParsedSummary {
   templateVersion: 1;
   sections: Partial<Record<SummarySectionName, string>>;
-  /** Parser 가 실패한 경우의 raw text. 정상 parse 시 absent. */
+
   raw?: string;
 }
 
-/**
- * Provider-neutral opaque-state slot.
- *
- * - `vendorOpaqueState`: OpenAI 향후 path. compaction item 전체 (`{type: "compaction", encrypted_content, ...}`)
- *   를 저장. 현재는 Anthropic/Gemini 만 활성화되므로 placeholder.
- * - `structuredSummary`: 모든 vendor 의 차선 — 12-section 인간 readable.
- * - `recentVerbatim`: LVIS preserve-recent window. 끝 N 토큰 (per-model PRESERVE_RECENT_TOKENS).
- * - `pinnedArtifacts`: skill 도구 출력 + `meta.lock=true` 메시지의 영구 보존.
- * - `toolBoundaryLedger`: 마지막 K 라운드 tool_use/result 요약 — fallback 시
- *   LLM 이 prior tool-chain 회상.
- *
- * Vendor precedence rule:
- *   `vendorOpaqueState` 가 *현재 활성 vendor* 와 일치하면 그것 *만* 직렬화 (`structuredSummary` 미포함).
- *   일치 안 하거나 부재 시 `structuredSummary` + `recentVerbatim` 으로 fallback.
- *   *두 채널 동시 직렬화 금지* — double-state hallucination 방지.
- */
+
+
+
 export interface CompactBoundary {
   templateVersion: 1;
-  /** OpenAI compaction item 전체 (향후 path). string 으로 평탄화 X. */
+
   vendorOpaqueState?: VendorOpaqueState;
   structuredSummary: ParsedSummary;
   recentVerbatim: GenericMessage[];
   pinnedArtifacts: string[];
   toolBoundaryLedger: ToolCallSummary[];
-  /** boundary 생성 시각 (UI/디버깅용). */
+
   createdAt: string;
-  /** 이 boundary 가 #N 번째 compact 의 결과인지 (numbered checkpoint chain). */
+
   compactNum: number;
 }
 
 export type VendorOpaqueState =
   | { vendor: "openai"; openaiCompactionItem: OpenAICompactionItem }
-  // 향후 vendor 가 latent state API 를 제공하면 여기에 추가.
+
   ;
 
-/**
- * OpenAI Responses API 의 compaction item — `/v1/responses/compact` 결과 그대로.
- * `encrypted_content` 는 ZDR/AES-encrypted opaque token.
- * 이 type 은 향후 OpenAI path 활성화 시까지 placeholder.
- */
+
+
+
 export interface OpenAICompactionItem {
   type: "compaction";
   encrypted_content: string;
-  // OpenAI 가 추가 필드를 정의하면 여기에 확장.
+
   [k: string]: unknown;
 }
 
-/**
- * Tool boundary ledger entry — captures the last tool boundary for recall.
- * LLM 이 이 ledger 를 read 하면 prior tool 사용 흐름 회상 가능.
- */
+
+
+
 export interface ToolCallSummary {
   round: number;
   toolName: string;
-  /** 결과 요지 (200자 이내 trim). isError true 면 원인 first-line. */
+
   resultSummary: string;
   isError?: boolean;
 }
 
-/**
- * SUMMARY_TEMPLATE LLM 프롬프트 — 12-section + 절차 규칙 5개.
- *
- * `{{conversationText}}` placeholder 는 호출자가 messagesToCompact 직렬화 결과로 치환.
- * `{{timestamp}}` / `{{compactNum}}` 도 마찬가지.
- *
- * NOTE: 이 prompt 의 `Critical Context` 섹션은 LVIS domain specific 항목 포함 — 활성 plugin /
- * routine ID / 작업 식별자 / 권한 모드. 사용자 도메인 입력으로 추가 확장 가능.
- */
+
+
+
 export const SUMMARY_TEMPLATE_PROMPT_V1: string = t("be_structuredCompact.summaryTemplatePrompt");
 
-/**
- * SUMMARY_TEMPLATE LLM 응답을 파싱. 12 섹션 모두 존재 + non-empty 인지 검증.
- *
- * 누락 시 호출자가 1회 재시도. 2회째 실패 시 `raw` field 로 fallback —
- * LLM 은 raw text 라도 의미 추론 가능하므로 hard-fail 보다 graceful.
- *
- * @returns 파싱 성공 시 sections 채워진 ParsedSummary. 실패 시 raw 만 채워진 객체.
- */
+
+
+
 export function parseSummary(text: string): ParsedSummary {
   const sections: Partial<Record<SummarySectionName, string>> = {};
 
-  // Line-by-line parse — JS regex 는 `\Z` (end-of-string anchor) 미지원이라
-  // multiline + lookahead 조합이 fragile. 명시적 split 으로 robust 한 contract.
+
+
   const validHeaders = new Set<string>(SUMMARY_TEMPLATE_HEADERS_V1);
   const lines = text.split("\n");
   let currentHeader: SummarySectionName | null = null;
@@ -173,7 +130,7 @@ export function parseSummary(text: string): ParsedSummary {
   }
   flushCurrent();
 
-  // 검증: 모든 12 헤더 존재 + non-empty 여야 valid.
+
   const allPresent = SUMMARY_TEMPLATE_HEADERS_V1.every((h) => sections[h] !== undefined);
   if (!allPresent) {
     return {
@@ -189,14 +146,9 @@ export function parseSummary(text: string): ParsedSummary {
   };
 }
 
-/**
- * Generic deep-freeze — freeze invariant 보장을 위해 CompactBoundary 의 모든
- * nested object 를 재귀적으로 freeze.
- *
- * - primitive / null / undefined: 그대로 반환 (freeze 불필요)
- * - 이미 frozen: idempotent (재귀 중단)
- * - circular reference 없는 구조 (CompactBoundary 정의상 acyclic)
- */
+
+
+
 function deepFreeze<T>(obj: T): T {
   if (obj === null || obj === undefined) return obj;
   if (typeof obj !== "object") return obj;
@@ -208,16 +160,9 @@ function deepFreeze<T>(obj: T): T {
   return obj;
 }
 
-/**
- * Freeze invariant — boundary object 와 그 자식 구조를 *deeply freeze*.
- *
- * prompt slot + checkpoint storage + history[0] system block 이
- * 동일 immutable reference 를 가리키도록 보장. step 9 이후 어떤 view 에서든
- * boundary 가 mutate 되면 race 발생하므로 deepFreeze 로 hard-block.
- *
- * GenericMessage 의 nested mutable fields (content array / toolCalls / thinkingBlocks 등)
- * 도 모두 재귀 freeze.
- */
+
+
+
 export function freezeBoundary(boundary: CompactBoundary): Readonly<CompactBoundary> {
   deepFreeze(boundary);
   return boundary;
@@ -225,17 +170,17 @@ export function freezeBoundary(boundary: CompactBoundary): Readonly<CompactBound
 
 // ─── compactWithBoundary (LLM call) ─────────────────────
 
-/** Stub message body 가 history 에 들어감 — 진짜 본문은 ⑧ slot 의 preamble. */
+
 const BOUNDARY_STUB_TEMPLATE = (n: number): string =>
   t("be_structuredCompact.boundaryStub", { n: String(n) });
 
-/** parser 실패 시 1회 재시도. 2회째 raw fallback. */
+
 const MAX_PARSE_RETRY = 1;
 
-/** Tool boundary ledger 에 보존할 마지막 K 라운드. */
+
 const TOOL_BOUNDARY_LEDGER_K = 5;
 
-/** Tool ledger 의 결과 요지 trim 길이. */
+
 const LEDGER_RESULT_MAX = 200;
 
 /** Recent user turns that must survive compaction verbatim. */
@@ -245,7 +190,7 @@ export interface CompactWithBoundaryArgs {
   messages: GenericMessage[];
   llm: LLMProvider;
   model: string;
-  /** LVIS preserve-recent-tokens — `getModelPreflightThreshold()` 의 일부 또는 별도 설정. */
+
   preserveRecentTokens: number;
   /**
    * Minimum number of recent user turns to keep verbatim regardless of the token
@@ -255,50 +200,38 @@ export interface CompactWithBoundaryArgs {
    */
   preserveRecentTurns?: number;
   compactNum: number;
-  /**
-   * Session id — 단일 거대 메시지 truncation pre-pass 가 원본 content 를
-   * `~/.lvis/sessions/<sessionId>/truncated/` 디렉토리에 격리할 때 사용.
-   */
+
+
+
   sessionId: string;
-  /**
-   * Preflight 토큰. compact 후 estimatedAfter 가 이 값의 일정 비율을 초과하면
-   * last-resort raw truncation (`REDUCED_INSUFFICIENT_FORCED`) 발동.
-   */
+
+
+
   preflightTokens: number;
   abortSignal?: AbortSignal;
 }
 
 export interface CompactWithBoundaryResult {
-  /**
-   * 사용자 가시 compact 결과 분류 — 단순 success/failure 가 아닌 4 상태로
-   * 구분된다. Renderer 가 status 별로 다른 banner variant 를 표시한다.
-   */
+
+
+
   status: CompressionStatus;
-  /** SUMMARIZED 경로에서만 truthy. NOOP/CONTENT_TRUNCATED 경로에선 null. */
+
   boundary: Readonly<CompactBoundary> | null;
   newHistory: GenericMessage[];
-  /** History 에서 stub 으로 대체된 메시지 수. NOOP=0, CONTENT_TRUNCATED=절단된 메시지 수, SUMMARIZED=요약된 메시지 수. */
+
   removedCount: number;
-  /** post-compact estimated input tokens — caller 가 cumulativeUsage 리셋용. */
+
   estimatedAfter: number;
-  /** CONTENT_TRUNCATED 경로의 원본 보존 디렉토리. 사용자 banner 에 표시. */
+
   truncatedDir?: string;
-  /** Truncation 으로 격리된 메시지 수. */
+
   truncatedCount: number;
 }
 
-/**
- * Per-message truncation pre-pass — LVIS oversize-message guard.
- *
- * 단일 메시지가 `TRUNCATION_THRESHOLD_TOKENS` 를 초과하면:
- *   - 원본 content 를 `~/.lvis/sessions/<sessionId>/truncated/compact-<N>-msg-<idx>.txt` 로 격리
- *   - in-memory content 를 `<last N lines>\n[…full content saved to <path>]` 로 대체
- *
- * 효과:
- *   - 단일 200K+ 메시지가 compact LLM call 의 input context 를 초과하는 deadlock 해소
- *   - 원본은 보존되어 사용자가 archive 접근 가능
- *   - tool_use/tool_result content 모두 적용 (가장 흔한 oversize 케이스)
- */
+
+
+
 async function truncateOversizeMessages(
   messages: GenericMessage[],
   sessionId: string,

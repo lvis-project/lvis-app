@@ -1,16 +1,7 @@
-/**
- * Boot §4.2 Step 2.5 — Marketplace whitelist registry bootstrap.
- *
- * Runs BEFORE `initPluginRuntime` so the per-plugin HostApi factory observes
- * a populated registry from the first `getSecret` call. The registry's
- * `init()` resolves whether or not the network fetch succeeds — every
- * failure path is recorded as a status (no-cache, stale-past-grace, …)
- * that `isAllowed` then reads synchronously.
- *
- * When `init()` settles into the `no-cache-and-offline` state a one-shot
- * toast event is emitted so the renderer can surface "마켓플레이스 화이트리스트
- * 미수신 — 호스트 시크릿 접근이 잠금 상태입니다.".
- */
+
+
+
+
 import { app } from "electron";
 import { join } from "node:path";
 import { whitelistRegistry } from "../../plugins/whitelist/whitelist-registry.js";

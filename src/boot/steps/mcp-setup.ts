@@ -24,7 +24,7 @@ const log = createLogger("lvis");
 export async function setupMcp(ctx: BootContext): Promise<void> {
   const { approvalGate, toolRegistry, permissionManager, bootAuditLogger, marketplaceFetcher } = ctx;
 
-  // §9.5: MCP Server 연결.
+
   const mcpGovernance = new McpGovernance();
   // MRTR live-resolver wiring (milestone mrtr-input-loop): a server's
   // `input_required` (elicitation) is gathered through the host approval gate.

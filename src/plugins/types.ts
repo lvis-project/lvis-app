@@ -1,18 +1,8 @@
 export type InstallPolicy = "admin" | "user";
 
-/**
- * Single source of truth for how a registry entry arrived on this device.
- * Supersedes the legacy combination of `installedBy` + `_devLinked`.
- *
- * - "admin"     — installPolicy="admin" manifest, via marketplace or installLocal
- * - "user"      — marketplace install triggered by the end user
- * - "local-dev" — installLocal (Settings UI "로컬 폴더에서 설치") with user policy, dev-mode only
- *
- * The pre-2026-05 `"dev-link"` value (created by the now-removed
- * `bun run dev:link`) is no longer accepted. Existing registries with
- * `installSource: "dev-link"` are migrated to `"local-dev"` on read with
- * a loud audit warning — see `readPluginRegistry`.
- */
+
+
+
 export type PluginRegistryEntryInstallSource = "admin" | "user" | "local-dev";
 
 export type PluginToolCategory = "read" | "write" | "shell" | "network";
@@ -65,25 +55,9 @@ export type OpenAuthWindowFinalUrlResult = {
   finalUrl: string;
 };
 
-/**
- * Marketplace install preflight metadata. The host does NOT auto-install
- * declared dependencies (issue #92, 2026-05).
- *
- * - `required: true` (default — `required` 누락 object 와 legacy
- *   string-form `"<pluginId>"` 모두 `normalizeDependencies` 가 동일
- *   의미로 정규화): the referenced plugin MUST already be installed
- *   when this plugin is installed, otherwise marketplace install
- *   throws `MissingPluginDependenciesError` and aborts.
- * - `required: false`: informational only. Install proceeds even if
- *   the referenced plugin is absent; the consumer plugin MUST
- *   runtime-degrade its feature surface (e.g. detector idle, tool
- *   returns `{status:'<dep>_unavailable'}` envelope) when the dep is
- *   missing.
- *
- * Cross-plugin tool/event access is governed separately via
- * `PluginAccessSpec` — prefer `dependencies: [{ pluginId, required: false }]`
- * paired with `pluginAccess.plugins[]` for soft cross-plugin integration.
- */
+
+
+
 export interface DependencySpec {
   pluginId: string;
   versionRange?: string;
@@ -112,20 +86,17 @@ export interface PluginAccessSpec {
   agentApprovalScopes?: string[];
 }
 
-/**
- * Declarative auth contract for plugins that own their OAuth/cookie/session
- * flow but want the host to render a generic 미인증 / signed-in surface in
- * Settings → 플러그인 설정. See architecture.md §9.4a "Plugin-Owned OAuth —
- * Host UI Surface" and `manifest.auth` schema description.
- */
+
+
+
 export interface PluginAuthSpec {
   /** Human-readable label shown next to the badge (defaults to plugin `name`). */
   label?: string;
   /** uiActions tool returning {@link PluginAuthStatus}. */
   statusTool: string;
-  /** uiActions tool the host invokes when the user clicks 로그인. */
+
   loginTool: string;
-  /** Optional uiActions tool the host invokes when the user clicks 로그아웃. */
+
   logoutTool?: string;
   /**
    * Hostname allow-list (suffix-match) for `hostApi.openAuthPartitionViewer`.
@@ -178,36 +149,23 @@ export interface EventSubscription {
 
 
 export interface PluginManifest {
-  /** 플러그인 고유 식별자. 도트(`.`) 형식 권장: `com.example.meeting-recorder`. */
+
   id: string;
   name: string;
   version: string;
   entry: string;
-  /**
-   * LLM에 노출되는 도구 이름 배열. `^[a-zA-Z_][a-zA-Z0-9_]*$` 필수 — 도트/하이픈 금지.
-   * UI 전용 runtime method는 여기에 넣지 말고 `uiActions`에 선언한다.
-   */
+
+
+
   tools: string[];
-  /** 플러그인 한 줄 설명 — LLM 카탈로그 및 UI에 표시. MUST 필드. */
+
   description: string;
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];
   keywords?: Array<{ keyword: string; skillId: string }>;
-  /**
-   * 플러그인이 요구/제공하는 capability 태그. 정책·UI·게이팅에 사용되며
-   * kebab-case 컨벤션을 따른다.
-   *
-   * 현재 사용 중인 capability:
-   * - `meeting-recorder` — 실시간 음성 캡처 및 STT
-   * - `mail-source` — 이메일 소스 연결
-   * - `calendar-source` — 캘린더 소스 연결
-   * - `background-watcher` — 플러그인 자체 lifecycle (`start()` hook) 에서 백그라운드 폴러/감시자 기동
-   * - `worker-client` — 외부 프로세스(Python 등) 워커 래퍼
-   * - `knowledge-index` — 문서 인덱스/검색 기능 제공
-   * - `ms-graph-consumer` — Microsoft Graph 를 사용하는 플러그인의 자기-식별
-   *   라벨 (advisory). Host 측 provider-auth HostApi 메서드는 없으므로
-   *   강제할 게이트가 없다. §9.4a "Plugin-Owned OAuth Authentication" 참고.
-   */
+
+
+
   capabilities?: string[];
   /**
    * Tier A host-mediated egress allow-list (§9.x). A plugin that calls
@@ -229,12 +187,9 @@ export interface PluginManifest {
      */
     allowPrivateNetworks?: boolean;
   };
-  /**
-   * 플러그인이 구독하는 이벤트 타입 목록.
-   * 두 가지 형태를 모두 지원한다:
-   *   - 구형 호환: `string[]` — 호스트가 중립 fallback hint를 적용.
-   *   - 신형: `{ type: string; hint?: EventSubscriptionHint }[]` — 플러그인이 hint 메타데이터를 직접 선언.
-   */
+
+
+
   eventSubscriptions?: string[] | EventSubscription[];
   /**
    * Plugin panel/user-interface action surface. Keys are runtime method names
@@ -242,28 +197,17 @@ export interface PluginManifest {
    * separate from `tools[]`, which remains the LLM-facing surface.
    */
   uiActions?: Record<string, PluginUiActionSpec>;
-  /**
-   * Optional declarative auth contract — see architecture.md §9.4a "Plugin-Owned
-   * OAuth — Host UI Surface". Lets the host render a generic 미인증 / signed-in
-   * badge + login/logout button in Settings → 플러그인 설정. The three referenced
-   * tools must also appear in `uiActions` (cross-validated in
-   * `manifest-validation.ts`). On state transitions the plugin SHOULD emit
-   * `<pluginId>.auth.changed` so the host UI can refresh without polling.
-   */
+
+
+
   auth?: PluginAuthSpec;
-  /**
-   * 이 플러그인이 호스트 이벤트 버스로 emit 하는 이벤트 타입 목록.
-   * classifySubscription("public") 판정을 통과한 이벤트만 renderer로 전달된다.
-   * (host boundary §1: plugin-specific literals forbidden in boot.ts)
-   */
+
+
+
   emittedEvents?: string[];
-  /**
-   * OS 네이티브 알림으로 표시할 이벤트 선언.
-   * titleField / bodyField 는 이벤트 데이터의 점(.) 경로.
-   * bypassFocusGate (#843): true 일 경우 활성 LVIS 윈도우가 있어도 OS 알림이
-   * 그대로 뜬다. 중요 surface (`meeting.starting-soon`,
-   * `approval.deadline-imminent`, `incident.page`) 에만 true. 기본 false.
-   */
+
+
+
   notificationEvents?: Array<{
     event: string;
     titleField?: string;
@@ -285,11 +229,9 @@ export interface PluginManifest {
    * (5000ms).
    */
   startupTimeoutMs?: number;
-  /**
-   * LLM이 도구를 호출할 때 사용하는 JSON Schema (draft-07)와
-   * 권한 정책 메타데이터. 키: tool 이름 (tools 배열 내 값과 동일).
-   * UI 전용 runtime method는 `toolSchemas`에 넣지 않는다.
-   */
+
+
+
   toolSchemas?: Record<
     string,
     {
@@ -465,13 +407,9 @@ export interface PluginUiExtension {
   entry?: string;
   exportName?: string;
   page?: string;
-  /**
-   * kind="action" 전용. 플러그인 패널 아이콘 클릭 시 host 가 직접 디스패치할
-   * plugin tool 이름. action entry 는 panel webview 를 *생성하지 않고*
-   * 곧바로 `api.callPluginMethod(tool)` 만 호출한다. tool 은 manifest의
-   * `uiActions` 에 등록되어야 하며, runtime/index.ts 의 callFromUi
-   * 게이트가 그대로 enforce 한다.
-   */
+
+
+
   tool?: string;
   /**
    * Detached-window geometry hints. Used only when the host opens this

@@ -1,24 +1,7 @@
-/**
- * useWorkspaceStats — aggregates host-side inventory counts + marketplace
- * status for the Settings "일반" tab dashboard.
- *
- * Combines existing IPC channels (no new main-side handler) so the
- * dashboard surface stays at parity with whatever the other settings
- * tabs already render:
- *   - 플러그인  → `listPluginUiExtensions` (UI-mounted plugins; the
- *     same source PluginConfigTab uses)
- *   - 도구      → sum of `listPluginCards()[].tools.length`
- *     (host-side per-plugin tool list)
- *   - 에이전트  → `listAgentProfiles().agents.length`
- *   - 스킬      → `listSkills().skills.length`
- *   - 역할      → `listPersonaPromptSummaries().prompts.length`
- *   - 마켓플레이스 → `pingMarketplace()` (configured + online flags)
- *
- * Refresh runs once on mount and on demand via the returned `refresh()`.
- * Errors are swallowed per-slice so a single failing IPC never blanks
- * the entire dashboard — each count falls back to its last known value
- * (or 0 on first error).
- */
+
+
+
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
 

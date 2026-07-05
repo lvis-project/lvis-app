@@ -8,12 +8,9 @@
  * different hour values for the same message. (Critic R2 / Code-reviewer R2.)
  */
 
-/**
- * Render an epoch-ms timestamp as `HH:MM` in Korea Standard Time, using
- * ko-KR locale's am/pm prefix (오전/오후). Pads single-digit hour/minute.
- * Returns null when `epochMs` is undefined so callers can omit the entire
- * span rather than rendering a placeholder.
- */
+
+
+
 export function formatHhMmKst(epochMs: number | undefined): string | null {
   if (epochMs === undefined) return null;
   return new Date(epochMs).toLocaleTimeString("ko-KR", {
