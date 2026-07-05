@@ -39,8 +39,8 @@ import {
 } from "./main/main-window.js";
 import { detachedWindowOptionsForViewKey, refreshApplicationMenu } from "./main/app-menu.js";
 import { ensureTray, showOrCreateMainWindow } from "./main/app-tray.js";
-import { reconcileGlobalShortcuts } from "./main/global-shortcuts.js";
-import { reconcileStartupLaunch, readStartupLaunchState } from "./main/startup-launch.js";
+import { readStartupLaunchState } from "./main/startup-launch.js";
+import { reconcileOsIntegrationOnBoot } from "./main/reconcile-os-integration.js";
 import { registerSettingsWindowHandlers } from "./main/settings-window.js";
 import { maybeStartLocalApiServer } from "./main/local-api-server.js";
 import { handleLvisUri, lvisDevLog } from "./main/lvis-deep-link.js";
@@ -184,14 +184,14 @@ async function main() {
   setRendererReloadReady(true);
 
   // E4 — reconcile OS-level global shortcuts + login item from persisted
-  // settings once the tray + services exist. Registration failure is surfaced
-  // via NotificationService inside reconcileGlobalShortcuts (No-Fallback).
+  // settings once the tray + services exist. Registration failures are surfaced
+  // via NotificationService (No-Fallback): a global-shortcut conflict inside
+  // reconcileGlobalShortcuts, and a login-item apply failure via
+  // notifyStartupLaunchFailureIfNeeded. Wiring extracted to
+  // reconcileOsIntegrationOnBoot so the conflict-notification path is unit-
+  // testable without a full main() startup.
   const initialSettings = services.settingsService.getAll();
-  reconcileGlobalShortcuts(initialSettings.shortcuts);
-  reconcileStartupLaunch({
-    launchAtStartup: initialSettings.system.launchAtStartup ?? false,
-    launchMinimized: initialSettings.system.launchMinimized ?? false,
-  });
+  reconcileOsIntegrationOnBoot(initialSettings);
   // Detect a hidden (tray-only) auto-launch so the first window show is
   // suppressed. macOS reports `wasOpenedAsHidden`; Windows uses the `--hidden`
   // launch arg the login item carries.
