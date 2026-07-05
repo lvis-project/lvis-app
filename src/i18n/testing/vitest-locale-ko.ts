@@ -14,6 +14,8 @@
  * once per test file (fresh module registry), so the locale is set before any
  * component renders.
  */
+import { loadLocaleMessages } from "../messages/index.js";
 import { setLocale } from "../runtime.js";
 
+await loadLocaleMessages("ko");
 setLocale("ko");

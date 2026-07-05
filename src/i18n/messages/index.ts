@@ -2,7 +2,7 @@
  * Locale → message-catalog registry.
  *
  * Each locale's catalog is the union of:
- *   - the hand-curated *seed* (common keys: {@link ./en} / {@link ./ko}), and
+ *   - the hand-curated *seed* (common keys: {@link ./en} and language-pack seeds), and
  *   - the *generated* per-surface fragments ({@link ./generated}), produced by
  *     the i18n migration and assembled by `scripts/i18n-build-catalog.mjs`.
  *
@@ -10,18 +10,11 @@
  * specific text wins), though namespacing keeps collisions out of practice.
  */
 import type { Locale } from "../locale.js";
-import { de as deSeed } from "./de.js";
 import { en } from "./en.js";
-import { es as esSeed } from "./es.js";
-import { fr as frSeed } from "./fr.js";
-import { ja as jaSeed } from "./ja.js";
-import { ko } from "./ko.js";
-import { zh as zhSeed } from "./zh.js";
-import { generatedEn, generatedKo } from "./generated/index.js";
+import { generatedEn } from "./generated/index.js";
 import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from "../locale.js";
 
 const englishFallbackMessages: Messages = { ...en, ...generatedEn };
-const koreanMessages: Messages = { ...ko, ...generatedKo };
 
 /**
  * Any translation key. The full key space is open (`string`) because surface
@@ -35,53 +28,63 @@ export type Messages = Record<string, string>;
 
 export type MessageRegistry = Partial<Record<Locale, Messages>> & {
   en: Messages;
-  ko: Messages;
 };
 
 /**
- * Loaded catalogs, keyed by locale. `en` and `ko` are eager because the default
- * English fallback and the Korean test/runtime surface are synchronous. The
- * larger generated extra-locale catalogs are filled by `loadLocaleMessages`.
+ * Loaded catalogs, keyed by locale. Only English is eager: the global default
+ * UI language and fallback catalog must be synchronous. Every other locale is
+ * a language-pack catalog loaded on demand.
  */
 export const messages: MessageRegistry = {
   en: englishFallbackMessages,
-  ko: koreanMessages,
 };
 
-type LazyLocale = Exclude<Locale, "en" | "ko">;
+type LazyLocale = Exclude<Locale, "en">;
 
-const lazyLocales: readonly LazyLocale[] = ["ja", "zh", "es", "fr", "de"];
+const lazyLocales: readonly LazyLocale[] = ["ko", "ja", "zh", "es", "fr", "de"];
 
 const localeLoaders: Record<LazyLocale, () => Promise<Messages>> = {
+  async ko() {
+    const [{ ko }, { koMessages }] = await Promise.all([
+      import(/* webpackChunkName: "i18n-ko-seed" */ "./ko.js"),
+      import(/* webpackChunkName: "i18n-ko" */ "./generated-locales/ko.js"),
+    ]);
+    return { ...ko, ...koMessages };
+  },
   async ja() {
-    const { jaMessages } = await import(
-      /* webpackChunkName: "i18n-ja" */ "./generated-locales/ja.js"
-    );
-    return { ...jaMessages, ...jaSeed };
+    const [{ ja }, { jaMessages }] = await Promise.all([
+      import(/* webpackChunkName: "i18n-ja-seed" */ "./ja.js"),
+      import(/* webpackChunkName: "i18n-ja" */ "./generated-locales/ja.js"),
+    ]);
+    return { ...jaMessages, ...ja };
   },
   async zh() {
-    const { zhMessages } = await import(
-      /* webpackChunkName: "i18n-zh" */ "./generated-locales/zh.js"
-    );
-    return { ...zhMessages, ...zhSeed };
+    const [{ zh }, { zhMessages }] = await Promise.all([
+      import(/* webpackChunkName: "i18n-zh-seed" */ "./zh.js"),
+      import(/* webpackChunkName: "i18n-zh" */ "./generated-locales/zh.js"),
+    ]);
+    return { ...zhMessages, ...zh };
   },
   async es() {
-    const { esMessages } = await import(
-      /* webpackChunkName: "i18n-es" */ "./generated-locales/es.js"
-    );
-    return { ...esMessages, ...esSeed };
+    const [{ es }, { esMessages }] = await Promise.all([
+      import(/* webpackChunkName: "i18n-es-seed" */ "./es.js"),
+      import(/* webpackChunkName: "i18n-es" */ "./generated-locales/es.js"),
+    ]);
+    return { ...esMessages, ...es };
   },
   async fr() {
-    const { frMessages } = await import(
-      /* webpackChunkName: "i18n-fr" */ "./generated-locales/fr.js"
-    );
-    return { ...frMessages, ...frSeed };
+    const [{ fr }, { frMessages }] = await Promise.all([
+      import(/* webpackChunkName: "i18n-fr-seed" */ "./fr.js"),
+      import(/* webpackChunkName: "i18n-fr" */ "./generated-locales/fr.js"),
+    ]);
+    return { ...frMessages, ...fr };
   },
   async de() {
-    const { deMessages } = await import(
-      /* webpackChunkName: "i18n-de" */ "./generated-locales/de.js"
-    );
-    return { ...deMessages, ...deSeed };
+    const [{ de }, { deMessages }] = await Promise.all([
+      import(/* webpackChunkName: "i18n-de-seed" */ "./de.js"),
+      import(/* webpackChunkName: "i18n-de" */ "./generated-locales/de.js"),
+    ]);
+    return { ...deMessages, ...de };
   },
 };
 
@@ -96,7 +99,7 @@ export async function loadLocaleMessages(locale: Locale): Promise<Messages> {
   if (existing) return existing;
   const pending = pendingLoads.get(locale);
   if (pending) return pending;
-  const loader = localeLoaders[locale as Exclude<Locale, "en" | "ko">];
+  const loader = localeLoaders[locale as LazyLocale];
   const next = loader().then((catalog) => {
     messages[locale] = catalog;
     pendingLoads.delete(locale);
