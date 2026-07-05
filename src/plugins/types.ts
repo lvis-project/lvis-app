@@ -1,4 +1,5 @@
 import type { MarketplacePackageType } from "../shared/assistant-context.js";
+import type { MarketplacePackageAsset } from "../shared/marketplace-package-assets.js";
 
 export type InstallPolicy = "admin" | "user";
 
@@ -650,6 +651,8 @@ export interface PluginMarketplaceItem {
    * entries are discoverable before their installers are enabled.
    */
   pluginType?: MarketplacePackageType;
+  /** Structured target for provider/theme/language-pack marketplace packages. */
+  packageAsset?: MarketplacePackageAsset;
   /**
    * MCP runtime block — present when `pluginType === "mcp"` and the
    * server has the schema extension. The host materializes this into
