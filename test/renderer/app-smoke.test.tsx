@@ -110,10 +110,13 @@ describe("App smoke (Phase 1 infra)", () => {
       fireEvent.click(container.querySelector('[data-testid="action-panel-open"]')!);
     });
 
-    expect(container.querySelector('[data-testid="action-panel"]')).toBeTruthy();
+    const actionPanel = container.querySelector('[data-testid="action-panel"]');
+    expect(actionPanel).toBeTruthy();
     expect(container.textContent).toContain("도구 활동");
     expect(container.textContent).toContain("카테고리별 최신 5개");
-    expect(container.querySelector('[role="tablist"]')).toBeFalsy();
+    // Scoped to the action panel itself — the sidebar's own Chats/Projects
+    // tablist is unrelated and (correctly) present elsewhere on the page.
+    expect(actionPanel?.querySelector('[role="tablist"]')).toBeFalsy();
 
     // Close it again → back to the collapsed rail.
     await act(async () => {
