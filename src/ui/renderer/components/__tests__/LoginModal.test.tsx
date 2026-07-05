@@ -32,11 +32,21 @@ function loginModalApi(
     | { ok: false; error: string }
   >,
   statusImpl?: () => Promise<
-    | { ok: true; activated: boolean; vendor: string | null; autoActivatable: boolean }
+    | {
+        ok: true;
+        activated: boolean;
+        vendor: string | null;
+        autoActivatable: boolean;
+        ollamaAvailable?: boolean;
+      }
     | { ok: false; error: string }
   >,
   activateEmbeddedImpl?: () => Promise<
     | { ok: true; vendor: string; requiresRelaunch?: boolean }
+    | { ok: false; error: string }
+  >,
+  activateOllamaImpl?: () => Promise<
+    | { ok: true; vendor: "ollama" }
     | { ok: false; error: string }
   >,
 ) {
@@ -47,7 +57,13 @@ function loginModalApi(
     demo: {
       status: vi.fn(
         statusImpl ??
-          (async () => ({ ok: true, activated: false, vendor: null, autoActivatable: false })),
+          (async () => ({
+            ok: true,
+            activated: false,
+            vendor: null,
+            autoActivatable: false,
+            ollamaAvailable: false,
+          })),
       ),
       activate: vi.fn(
         activateImpl ?? (async () => ({ ok: true, vendor: "azure-foundry" })),
@@ -55,6 +71,9 @@ function loginModalApi(
       activateEmbedded: vi.fn(
         activateEmbeddedImpl ??
           (async () => ({ ok: false, error: "no-embedded-code" })),
+      ),
+      activateOllama: vi.fn(
+        activateOllamaImpl ?? (async () => ({ ok: true, vendor: "ollama" as const })),
       ),
       relaunchAfterActivation: vi.fn(
         relaunchImpl ?? (async () => ({ ok: true })),
@@ -168,10 +187,13 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
       (api as unknown as { demo: { activate: ReturnType<typeof vi.fn> } }).demo
         .activate,
     ).not.toHaveBeenCalled();
+    // #1498 — `demo.status()` is now called twice: once by the on-open
+    // Ollama availability probe (independent of any chip click), and once
+    // by the chip-1 click handler's own status check.
     expect(
       (api as unknown as { demo: { status: ReturnType<typeof vi.fn> } }).demo
         .status,
-    ).toHaveBeenCalledOnce();
+    ).toHaveBeenCalledTimes(2);
   });
 
   it("forceActivation opens the activation input even when demo status is already active", async () => {
@@ -208,10 +230,12 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
       (api as unknown as { demo: { activate: ReturnType<typeof vi.fn> } }).demo
         .activate,
     ).not.toHaveBeenCalled();
+    // #1498 — the on-open Ollama probe fires alongside forceActivation's
+    // own auto-triggered chip-1 status check, so status() is called twice.
     expect(
       (api as unknown as { demo: { status: ReturnType<typeof vi.fn> } }).demo
         .status,
-    ).toHaveBeenCalledOnce();
+    ).toHaveBeenCalledTimes(2);
   });
 
   it("displays a Korean error message when the auth IPC call rejects", async () => {
@@ -559,5 +583,131 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
       (api as unknown as { demo: { activateEmbedded: ReturnType<typeof vi.fn> } }).demo
         .activateEmbedded,
     ).not.toHaveBeenCalled();
+  });
+});
+
+describe("LoginModal — Ollama local-model chip (#1498)", () => {
+  beforeEach(() => {
+    delete (window as unknown as { lvis?: unknown }).lvis;
+  });
+
+  it("does not render the Ollama chip when the probe finds no local server", async () => {
+    const api = loginModalApi(
+      async () => ({ ok: true, vendor: "azure-foundry", fieldsApplied: ["apiKey"] }),
+      undefined,
+      undefined,
+      async () => ({
+        ok: true,
+        activated: false,
+        vendor: null,
+        autoActivatable: false,
+        ollamaAvailable: false,
+      }),
+    );
+    render(<LoginModal api={api} open onOpenChange={() => {}} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-demo"]')).toBeTruthy();
+    });
+    expect(document.querySelector('[data-testid="login-modal:chip-ollama"]')).toBeNull();
+  });
+
+  it("renders the Ollama chip when the probe finds a local server", async () => {
+    const api = loginModalApi(
+      async () => ({ ok: true, vendor: "azure-foundry", fieldsApplied: ["apiKey"] }),
+      undefined,
+      undefined,
+      async () => ({
+        ok: true,
+        activated: false,
+        vendor: null,
+        autoActivatable: false,
+        ollamaAvailable: true,
+      }),
+    );
+    render(<LoginModal api={api} open onOpenChange={() => {}} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-ollama"]')).toBeTruthy();
+    });
+  });
+
+  it("clicking the Ollama chip calls activateOllama and hands off via onSuccess", async () => {
+    const onSuccess = vi.fn();
+    const onOpenChange = vi.fn();
+    const api = loginModalApi(
+      async () => ({ ok: true, vendor: "azure-foundry", fieldsApplied: ["apiKey"] }),
+      undefined,
+      undefined,
+      async () => ({
+        ok: true,
+        activated: false,
+        vendor: null,
+        autoActivatable: false,
+        ollamaAvailable: true,
+      }),
+      undefined,
+      async () => ({ ok: true, vendor: "ollama" }),
+    );
+    render(
+      <LoginModal api={api} open onOpenChange={onOpenChange} onSuccess={onSuccess} />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-ollama"]')).toBeTruthy();
+    });
+    fireEvent.click(
+      document.querySelector('[data-testid="login-modal:chip-ollama"]') as HTMLButtonElement,
+    );
+
+    await waitFor(() => {
+      expect(
+        (api as unknown as { demo: { activateOllama: ReturnType<typeof vi.fn> } }).demo
+          .activateOllama,
+      ).toHaveBeenCalledOnce();
+    });
+    await waitFor(() => {
+      expect(onSuccess).toHaveBeenCalledWith(
+        "ollama",
+        expect.objectContaining({ ok: true, vendor: "ollama" }),
+      );
+    });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    // The demo credential flow must not fire for the Ollama path.
+    expect(
+      (api as unknown as { loginMockup: ReturnType<typeof vi.fn> }).loginMockup,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("shows a Korean error and keeps the modal open when the server disappeared", async () => {
+    const onSuccess = vi.fn();
+    const api = loginModalApi(
+      async () => ({ ok: true, vendor: "azure-foundry", fieldsApplied: ["apiKey"] }),
+      undefined,
+      undefined,
+      async () => ({
+        ok: true,
+        activated: false,
+        vendor: null,
+        autoActivatable: false,
+        ollamaAvailable: true,
+      }),
+      undefined,
+      async () => ({ ok: false, error: "no-ollama" }),
+    );
+    render(<LoginModal api={api} open onOpenChange={() => {}} onSuccess={onSuccess} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-ollama"]')).toBeTruthy();
+    });
+    fireEvent.click(
+      document.querySelector('[data-testid="login-modal:chip-ollama"]') as HTMLButtonElement,
+    );
+
+    await waitFor(() => {
+      const err = document.querySelector('[data-testid="login-modal:error"]');
+      expect(err?.textContent).toMatch(/로컬 Ollama 서버를 찾을 수 없어요/);
+    });
+    expect(onSuccess).not.toHaveBeenCalled();
   });
 });

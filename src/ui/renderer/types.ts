@@ -526,7 +526,13 @@ export type LvisApi = {
    */
   demo: {
     status: () => Promise<
-      | { ok: true; activated: boolean; vendor: string | null; autoActivatable: boolean }
+      | {
+          ok: true;
+          activated: boolean;
+          vendor: string | null;
+          autoActivatable: boolean;
+          ollamaAvailable: boolean;
+        }
       | { ok: false; error: "unauthorized-frame" }
     >;
     activate: (code: string) => Promise<
@@ -541,6 +547,16 @@ export type LvisApi = {
     activateEmbedded: () => Promise<
       | { ok: true; vendor: string; requiresRelaunch?: boolean }
       | { ok: false; error: "no-embedded-code" | "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "persist-failed" | "unauthorized-frame" }
+    >;
+    /**
+     * #1498 — local Ollama fallback. `status().ollamaAvailable` advertises
+     * a reachable local server; this re-probes before configuring the
+     * vendor so a server stopped between the status check and the click
+     * fails closed with `no-ollama`.
+     */
+    activateOllama: () => Promise<
+      | { ok: true; vendor: "ollama" }
+      | { ok: false; error: "no-ollama" | "unauthorized-frame" }
     >;
     relaunchAfterActivation: () => Promise<
       | { ok: true }
