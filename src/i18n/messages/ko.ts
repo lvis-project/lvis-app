@@ -37,6 +37,7 @@ export const ko: Record<SeedMessageKey, string> = {
   "mainDialog.unauthorizedFrame": "권한이 없는 프레임입니다.",
   "mainDialog.noPersonasAvailable": "사용 가능한 persona 없음",
   "mainDialog.exportConversationTitle": "대화 내보내기",
+  "mainDialog.importConversationTitle": "대화 가져오기",
 
   // ── E4 — 시작 / 전역 단축키 설정 탭 ────────────────────────────────
   "settingsContent.tabStartup": "시작",

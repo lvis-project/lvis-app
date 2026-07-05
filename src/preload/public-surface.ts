@@ -100,6 +100,12 @@ export function buildPublicSurface() {
   chatRetryEffort: async (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) =>
     ipcRenderer.invoke(CHANNELS.chat.retryEffort, opts),
   chatExport: async (format: "markdown" | "json") => ipcRenderer.invoke(CHANNELS.chat.export, format),
+  // #1500 (E3) — reverse of chatExport. Channel is internal (not in
+  // PUBLIC_CHANNELS) even though the bridge lives alongside chatExport here.
+  chatImport: async () =>
+    ipcRenderer.invoke(CHANNELS.chat.import) as Promise<
+      { ok: true; sessionId: string; messageCount: number } | { ok: false; error?: string; canceled?: boolean }
+    >,
   chatCompact: async () => ipcRenderer.invoke(CHANNELS.chat.compact),
   chatSessionResume: async (sessionId: string) => ipcRenderer.invoke(CHANNELS.chat.sessionResume, sessionId),
   // Checkpoint view and explicit branch actions.

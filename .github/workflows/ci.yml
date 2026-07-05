@@ -66,6 +66,27 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
         working-directory: lvis-app
+      # `bun install`'s postinstall runs `electron-rebuild --only
+      # better-sqlite3,node-pty`, compiling better-sqlite3's native addon
+      # against ELECTRON's ABI (NODE_MODULE_VERSION for the bundled Electron).
+      # Vitest here runs under bun (ABI == the node ABI, process.versions.modules
+      # matches node), NOT Electron — so the Electron-ABI binary fails to load
+      # with a NODE_MODULE_VERSION mismatch. That load failure is swallowed by
+      # SessionSearchIndex.open()'s fail-closed catch, so every FTS query returns
+      # [] and the whole search suite silently 0-hits instead of erroring. Rebuild
+      # the addon for the node/bun ABI so the runtime load path the tests exercise
+      # actually works. (node-pty is always vi.mock()'d in tests, so only
+      # better-sqlite3 needs the node-ABI binary here.) This job does NOT run
+      # Electron packaging afterward — e2e.yml is a separate workflow with its own
+      # checkout — so there is no ABI re-contamination to worry about.
+      # prebuild-install fetches the prebuilt node-ABI binary in seconds; the
+      # `|| npm rebuild` fallback source-compiles it if no prebuild matches.
+      - name: Rebuild better-sqlite3 for the node/bun test ABI
+        working-directory: lvis-app
+        run: |
+          set -euo pipefail
+          ( cd node_modules/better-sqlite3 && bunx --bun prebuild-install -r node ) \
+            || npm rebuild better-sqlite3 --build-from-source
       - run: bun run build
         working-directory: lvis-app
       - name: Remove root-level Bun binary shims before Vitest

@@ -29,6 +29,7 @@ export const es: Record<SeedMessageKey, string> = {
   "mainDialog.unauthorizedFrame": "Marco no autorizado.",
   "mainDialog.noPersonasAvailable": "No hay personas disponibles",
   "mainDialog.exportConversationTitle": "Exportar conversación",
+  "mainDialog.importConversationTitle": "Importar conversación",
 
   // ── E4 — Inicio / atajos globales ─────────────────────────────────
   "settingsContent.tabStartup": "Inicio",

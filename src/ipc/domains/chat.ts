@@ -52,6 +52,155 @@ const MAX_MEMORY_PROJECT_ROOT_CHARS = 2_048;
 const MAX_MEMORY_PROJECT_NAME_CHARS = 120;
 const PROJECT_NOT_ALLOWED = { ok: false, error: "project-not-allowed" } as const;
 
+// ─── Chat import (#1500 / E3) — reverse of chat.export ────────────────────
+// Mirrors the export SOT shape (chat.export handler below, JSON branch):
+// `{ sessionId, exportedAt, messages: GenericMessage[] }`. Import re-uses
+// the same size guard the session-search linear scan used to enforce
+// (MAX_SESSION_FILE_BYTES) as a DoS gate on the imported file itself.
+const MAX_SESSION_FILE_BYTES = 5_000_000;
+// Symmetric ceiling to the byte cap above: a JSON file can stay under 5 MB yet
+// still carry an absurd number of tiny messages (e.g. hundreds of thousands of
+// `{"role":"user","content":""}`), each of which becomes a persisted session
+// line + an FTS index row. Cap the message count so import cost is bounded on
+// BOTH axes (total bytes AND element count), not just bytes.
+const MAX_IMPORTED_MESSAGES = 100_000;
+
+const USER_CONTENT_PART_KEYS: Record<string, readonly string[]> = {
+  text: ["type", "text"],
+  image: ["type", "image", "mimeType", "width", "height", "bytes"],
+  file: ["type", "data", "mimeType"],
+};
+
+function hasOnlyKeys(obj: Record<string, unknown>, allowed: readonly string[]): boolean {
+  return Object.keys(obj).every((k) => allowed.includes(k));
+}
+
+function isValidUserContentPart(part: unknown): boolean {
+  if (!part || typeof part !== "object" || Array.isArray(part)) return false;
+  const p = part as Record<string, unknown>;
+  const type = p.type;
+  if (typeof type !== "string" || !(type in USER_CONTENT_PART_KEYS)) return false;
+  if (!hasOnlyKeys(p, USER_CONTENT_PART_KEYS[type])) return false;
+  if (type === "text") return typeof p.text === "string";
+  if (type === "image") return typeof p.image === "string";
+  if (type === "file") return typeof p.data === "string" && typeof p.mimeType === "string";
+  return false;
+}
+
+function isValidToolCallBlock(call: unknown): boolean {
+  if (!call || typeof call !== "object" || Array.isArray(call)) return false;
+  const c = call as Record<string, unknown>;
+  if (!hasOnlyKeys(c, ["id", "name", "input"])) return false;
+  return (
+    typeof c.id === "string" &&
+    typeof c.name === "string" &&
+    !!c.input &&
+    typeof c.input === "object" &&
+    !Array.isArray(c.input)
+  );
+}
+
+/**
+ * Strictly validates one imported message against the `GenericMessage`
+ * union (src/engine/llm/types.ts). Whitelist-only: any key outside the
+ * role's known field set rejects the ENTIRE import (fail-closed — imported
+ * JSON is untrusted input that must not smuggle arbitrary fields into a
+ * session record). `meta` is deliberately excluded from every role's
+ * allowed-key set: it carries engine-internal bookkeeping (turn summaries,
+ * checkpoint/compaction state) that has no meaning for a freshly-imported
+ * conversation and is dropped rather than round-tripped.
+ */
+function isValidImportedMessage(raw: unknown): raw is GenericMessage {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const m = raw as Record<string, unknown>;
+  switch (m.role) {
+    case "user": {
+      if (!hasOnlyKeys(m, ["role", "content"])) return false;
+      if (typeof m.content === "string") return true;
+      return Array.isArray(m.content) && m.content.every(isValidUserContentPart);
+    }
+    case "assistant": {
+      if (!hasOnlyKeys(m, ["role", "content", "thought", "toolCalls"])) return false;
+      if (typeof m.content !== "string") return false;
+      if (m.thought !== undefined && typeof m.thought !== "string") return false;
+      if (m.toolCalls !== undefined) {
+        if (!Array.isArray(m.toolCalls) || !m.toolCalls.every(isValidToolCallBlock)) return false;
+      }
+      return true;
+    }
+    case "tool_result": {
+      if (!hasOnlyKeys(m, ["role", "content", "toolName", "toolUseId", "isError"])) return false;
+      if (typeof m.content !== "string") return false;
+      if (typeof m.toolUseId !== "string") return false;
+      if (m.toolName !== undefined && typeof m.toolName !== "string") return false;
+      if (m.isError !== undefined && typeof m.isError !== "boolean") return false;
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+interface ImportValidationResult {
+  ok: boolean;
+  messages: GenericMessage[];
+  error?: string;
+}
+
+/**
+ * Validates the top-level shape `{ sessionId, exportedAt, messages }` and
+ * every message inside `messages`. Rejects the whole file on the first
+ * invalid message (no partial-import — a rejected batch either imports in
+ * full or not at all, preventing session-content corruption).
+ */
+function validateImportedSessionJson(raw: unknown): ImportValidationResult {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, messages: [], error: "invalid-file-shape" };
+  }
+  const r = raw as Record<string, unknown>;
+  if (typeof r.sessionId !== "string" || typeof r.exportedAt !== "string" || !Array.isArray(r.messages)) {
+    return { ok: false, messages: [], error: "invalid-file-shape" };
+  }
+  if (r.messages.length === 0) {
+    return { ok: false, messages: [], error: "empty-messages" };
+  }
+  // Element-count ceiling symmetric with the byte cap the handler enforces on
+  // the file itself — bounds import cost on the message-count axis too.
+  if (r.messages.length > MAX_IMPORTED_MESSAGES) {
+    return { ok: false, messages: [], error: "too-many-messages" };
+  }
+  for (const candidate of r.messages) {
+    if (!isValidImportedMessage(candidate)) {
+      return { ok: false, messages: [], error: "invalid-message-shape" };
+    }
+  }
+  // Re-derive plain objects containing ONLY the whitelisted keys per role —
+  // never persist the caller's original object references (defense in depth
+  // even though isValidImportedMessage already rejected unknown keys).
+  const messages = (r.messages as GenericMessage[]).map((m): GenericMessage => {
+    switch (m.role) {
+      case "user":
+        return { role: "user", content: m.content };
+      case "assistant":
+        return {
+          role: "assistant",
+          content: m.content,
+          ...(m.thought !== undefined ? { thought: m.thought } : {}),
+          ...(m.toolCalls !== undefined ? { toolCalls: m.toolCalls } : {}),
+        };
+      case "tool_result":
+        return {
+          role: "tool_result",
+          toolUseId: m.toolUseId,
+          content: m.content,
+          ...(m.toolName !== undefined ? { toolName: m.toolName } : {}),
+          ...(m.isError !== undefined ? { isError: m.isError } : {}),
+        };
+    }
+  });
+  return { ok: true, messages };
+}
+
 interface MemoryProjectOptions {
   projectRoot?: string;
   projectName?: string;
@@ -584,6 +733,72 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
     await writeFile(res.filePath, body, "utf-8");
     return { ok: true, filePath: res.filePath };
+  });
+
+  // #1500 (E3) — reverse of chat.export. INTERNAL (mutating; not in
+  // PUBLIC_CHANNELS — same classification as chat.new/chat.fork above).
+  // ALWAYS creates a brand-new session (crypto.randomUUID()) — importing
+  // NEVER overwrites an existing session, matching chat.fork's pattern.
+  ipcMain.handle(CHANNELS.chat.import, async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.import, e); return UNAUTHORIZED_FRAME; }
+    const { dialog } = await import("electron");
+    const { open } = await import("node:fs/promises");
+    const win = getMainWindow();
+    const dialogOptions = {
+      title: t("mainDialog.importConversationTitle"),
+      filters: [{ name: "JSON", extensions: ["json"] }],
+      properties: ["openFile"] as Array<"openFile">,
+    };
+    const res = win
+      ? await dialog.showOpenDialog(win, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+    if (res.canceled || res.filePaths.length === 0) return { ok: false, canceled: true };
+    const filePath = res.filePaths[0];
+
+    // TOCTOU-safe read (CodeQL js/file-system-race): open ONE fd, size-guard
+    // via fstat(fd), then read from that SAME fd. A separate stat()+readFile()
+    // pair races — the path could be swapped between the size check and the
+    // read (e.g. small→huge, or file→symlink to a device) so the cap is
+    // enforced against a different inode than the one read. Anchoring both the
+    // check and the read to a single fd closes that window.
+    let text: string;
+    let fileHandle: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      fileHandle = await open(filePath, "r");
+      const stats = await fileHandle.stat();
+      // DoS guard — reject oversized files before ever reading/parsing them
+      // (same MAX_SESSION_FILE_BYTES cap memory-manager enforces on-disk).
+      if (stats.size > MAX_SESSION_FILE_BYTES) {
+        return { ok: false, error: "file-too-large" };
+      }
+      text = await fileHandle.readFile("utf-8");
+    } catch {
+      return { ok: false, error: "file-not-found" };
+    } finally {
+      await fileHandle?.close().catch(() => {});
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      return { ok: false, error: "invalid-json" };
+    }
+
+    const validated = validateImportedSessionJson(raw);
+    if (!validated.ok) {
+      return { ok: false, error: validated.error ?? "invalid-file-shape" };
+    }
+
+    const newSessionId = crypto.randomUUID();
+    await memoryManager.saveImportedSession(newSessionId, validated.messages);
+    auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: newSessionId,
+      type: "info",
+      input: `chat:import:sessionId=${newSessionId}:messageCount=${validated.messages.length}`,
+    });
+    return { ok: true, sessionId: newSessionId, messageCount: validated.messages.length };
   });
 
   // ─── Checkpoint View + Branch ─────────────────────────
