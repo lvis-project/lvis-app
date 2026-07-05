@@ -965,6 +965,32 @@ describe("lvis:demo:status — ollamaAvailable (#1498)", () => {
   });
 });
 
+describe("lvis:demo:status — ollama probe cache (#1498 security-MINOR)", () => {
+  it("collapses a burst of status calls within the TTL into a single probe", async () => {
+    const { demoMod, ollamaProbeMod } = await loadDemoModule();
+    // Spy on the underlying probe so we can count real invocations. The seam
+    // override alone would answer without letting us assert the coalescing.
+    const probeSpy = vi
+      .spyOn(ollamaProbeMod, "probeOllamaAvailable")
+      .mockResolvedValue(true);
+    demoMod.registerDemoHandlers(makeDeps() as never);
+
+    // Three back-to-back status calls (mimics the modal open + re-renders).
+    const [a, b, c] = await Promise.all([
+      invoke("lvis:demo:status"),
+      invoke("lvis:demo:status"),
+      invoke("lvis:demo:status"),
+    ]);
+    for (const r of [a, b, c]) {
+      expect((r as { ollamaAvailable: boolean }).ollamaAvailable).toBe(true);
+    }
+    // In-flight coalescing + short TTL means at most one real probe fired.
+    expect(probeSpy).toHaveBeenCalledOnce();
+
+    probeSpy.mockRestore();
+  });
+});
+
 describe("lvis:demo:activate-ollama (#1498)", () => {
   it("configures the ollama vendor and returns ok when the probe finds a local server", async () => {
     const { demoMod, ollamaProbeMod } = await loadDemoModule();
@@ -994,12 +1020,48 @@ describe("lvis:demo:activate-ollama (#1498)", () => {
     expect(deps.conversationLoop.refreshProvider).toHaveBeenCalledOnce();
     expect(deps.rewireReviewerAgent).toHaveBeenCalledOnce();
     expect(deps.refreshActiveLlmWildcard).toHaveBeenCalledOnce();
+    // MAJOR — the patch set the ollama vendor baseUrl, and the ASRT shared
+    // network union is derived from ALL vendor baseUrls (settings.ts invariant).
+    // Any vendor baseUrl change must live-refresh the sandbox network config,
+    // matching the settings:update / login-mockup choke points. A missing call
+    // here would leave the sandbox denying egress to the just-configured local
+    // Ollama endpoint until the next full restart.
+    expect(deps.refreshSandboxNetworkConfig).toHaveBeenCalledOnce();
     expect(deps.auditLogger.log).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "info",
         input: expect.stringContaining("vendor=ollama"),
       }),
     );
+  });
+
+  it("leaves the ollama api-key gate satisfied so the login modal does not re-appear next boot", async () => {
+    // critic MINOR — the `settings:has-api-key` gate that decides whether the
+    // login modal re-mounts is exactly `getSecret("llm.apiKey.<vendor>") !==
+    // null`. Locking it here guards the regression where activate-ollama
+    // configured the vendor but never seeded the presence sentinel, so a
+    // subsequent boot would re-prompt for login despite a working local model.
+    const { demoMod, ollamaProbeMod } = await loadDemoModule();
+    ollamaProbeMod._setOllamaAvailableOverrideForTest(true);
+    const deps = makeAuthLoginMockupDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:activate-ollama");
+    expect(result).toEqual({ ok: true, vendor: "ollama" });
+
+    // Same predicate as the lvis:settings:has-api-key handler.
+    expect(deps.settingsService.getSecret("llm.apiKey.ollama")).not.toBeNull();
+  });
+
+  it("skips the sandbox network refresh when the probe fails closed", async () => {
+    const { demoMod, ollamaProbeMod } = await loadDemoModule();
+    ollamaProbeMod._setOllamaAvailableOverrideForTest(false);
+    const deps = makeAuthLoginMockupDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:activate-ollama");
+    expect(result).toEqual({ ok: false, error: "no-ollama" });
+    expect(deps.refreshSandboxNetworkConfig).not.toHaveBeenCalled();
   });
 
   it("fails closed with no-ollama when the server disappeared since the status check", async () => {

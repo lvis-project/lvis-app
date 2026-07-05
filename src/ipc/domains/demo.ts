@@ -185,9 +185,47 @@ function broadcastAuthEvent(deps: IpcDeps, channel: string): void {
   fanOutToAllWindows(targets, channel, undefined);
 }
 
+/**
+ * #1498 security-MINOR — short-lived cache for the local Ollama liveness probe
+ * so a burst of `lvis:demo:status` calls within one login-modal open fires at
+ * most one ~500ms network probe instead of one per call. The modal polls
+ * status on open (and re-renders can re-invoke it), so an un-cached probe
+ * multiplied the latency and the localhost round-trips. The 1.5s TTL is short
+ * enough that a user who starts/stops their local Ollama server sees the change
+ * on the next modal open, but long enough to collapse a single open's burst.
+ */
+const OLLAMA_PROBE_CACHE_TTL_MS = 1_500;
+
+/** Cache a single Ollama probe result for a short window (see rationale above). */
+function makeCachedOllamaProbe(): () => Promise<boolean> {
+  let cachedAt = 0;
+  let cached: boolean | null = null;
+  let inflight: Promise<boolean> | null = null;
+  return async (): Promise<boolean> => {
+    const now = Date.now();
+    if (cached !== null && now - cachedAt < OLLAMA_PROBE_CACHE_TTL_MS) {
+      return cached;
+    }
+    // Coalesce concurrent callers onto one in-flight probe so a re-render burst
+    // that lands within the same tick shares a single network round-trip.
+    if (inflight !== null) return inflight;
+    inflight = probeOllamaAvailable()
+      .then((available) => {
+        cached = available;
+        cachedAt = Date.now();
+        return available;
+      })
+      .finally(() => {
+        inflight = null;
+      });
+    return inflight;
+  };
+}
+
 export function registerDemoHandlers(deps: IpcDeps): void {
   const { auditLogger } = deps;
   let relaunchArmed = false;
+  const cachedOllamaProbe = makeCachedOllamaProbe();
   const demoFoundryResolverFingerprintAtBoot =
     demoFoundryResolverFingerprintForCurrentBoot();
   let demoEffectiveForCurrentProcess =
@@ -232,15 +270,17 @@ export function registerDemoHandlers(deps: IpcDeps): void {
         // chain without mounting the manual paste input.
         autoActivatable: getEmbeddedActivationCode() !== null,
         // #1498 — `ollamaAvailable` tells the renderer a local Ollama
-        // server answered the liveness probe just now, so the login modal
-        // can offer the "start with a local model" CTA. Probed fresh on
-        // every status call (no caching): cheap (~500ms worst case, only
-        // called once per login-modal open), and the user may start/stop
-        // their local Ollama server between checks — a stale cached
-        // `true` would offer a CTA that then fails, and a stale `false`
-        // would hide a now-available local model. Never shown as `true`
-        // when nothing is actually listening (no misleading CTA).
-        ollamaAvailable: await probeOllamaAvailable(),
+        // server answered the liveness probe, so the login modal can offer
+        // the "start with a local model" CTA. Probed through a short-lived
+        // (1.5s TTL) cache so a burst of status calls within one modal open
+        // fires at most one ~500ms probe (security-MINOR: an un-cached probe
+        // ran a localhost round-trip per call). The TTL is short enough that
+        // a user who starts/stops their local Ollama server between modal
+        // opens still sees the change on the next open — never a stale `true`
+        // that offers a CTA which then fails, nor a stale `false` that hides a
+        // now-available local model. Never shown as `true` when nothing is
+        // actually listening (no misleading CTA).
+        ollamaAvailable: await cachedOllamaProbe(),
       };
     },
   );
@@ -498,6 +538,11 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       // documented placeholder value users already see in Settings → LLM
       // for this vendor, so storing it here is consistent, not a fake
       // secret bypassing a real check.
+      //
+      // SECURITY NOTE: `preset.apiKeyPlaceholder` is a build-time constant
+      // SENTINEL, not a credential — it carries no secret value and is never
+      // sent as a bearer token to a real authenticating endpoint. It only
+      // satisfies the presence-check gate for a local unauthenticated server.
       await deps.settingsService.setSecret("llm.apiKey.ollama", preset.apiKeyPlaceholder);
       await deps.settingsService.patch({
         llm: {
@@ -514,6 +559,14 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       deps.conversationLoop?.refreshProvider?.();
       deps.rewireReviewerAgent?.();
       deps.refreshActiveLlmWildcard?.();
+      // ASRT dynamic-endpoint union: the patch above sets the ollama vendor's
+      // baseUrl, and the shared sandbox network union is derived from ALL
+      // vendor baseUrls (settings.ts:40-43 invariant). Any vendor baseUrl
+      // change — not just Foundry or the previously-active vendor — must
+      // live-refresh the ASRT network config so the local Ollama endpoint host
+      // is enforced/allowed without a restart. Guarded-optional + no-op when
+      // the sandbox gate is OFF, matching settings.ts:230-232 / auth.ts:292-294.
+      deps.refreshSandboxNetworkConfig?.();
       try {
         auditLogger.log({
           timestamp: new Date().toISOString(),

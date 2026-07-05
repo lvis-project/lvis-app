@@ -50,7 +50,11 @@ export async function probeOllamaAvailable(): Promise<boolean> {
     const response = await fetch(OLLAMA_TAGS_URL, { signal: controller.signal });
     return response.ok;
   } catch (err) {
-    log.info(`ollama probe failed: ${(err as Error).message}`);
+    // debug, not info: a failed probe is the EXPECTED steady state for the
+    // majority of users who never run a local Ollama server. Logging it at
+    // info would spam the log on every login-modal open (security-NIT — keep
+    // the routine "no local server" case out of the default log level).
+    log.debug(`ollama probe failed: ${(err as Error).message}`);
     return false;
   } finally {
     clearTimeout(timer);

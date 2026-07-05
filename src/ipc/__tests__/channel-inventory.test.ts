@@ -231,6 +231,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:chat:sessions",
         "lvis:demo:activate",
         "lvis:demo:activate-embedded",
+        "lvis:demo:activate-ollama",
         "lvis:demo:clear",
         "lvis:demo:relaunch-after-activation",
         "lvis:demo:status",
