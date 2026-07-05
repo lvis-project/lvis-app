@@ -12,6 +12,7 @@ export const frMessages: Record<string, string> = {
   "chatPreviewRail.copyPath": "Copier le chemin",
   "chatPreviewRail.copyRelativePath": "Copier le chemin relatif",
   "chatPreviewRail.removeRoot": "Retirer le dossier",
+  "chatPreviewRail.removeRootPruned": "Dossier retiré · {count} autorisation(s) enregistrée(s) révoquée(s)",
   "actionPanel.closeAriaLabel": "Fermer le panneau d'activité des outils",
   "actionPanel.closeTooltip": "Fermer le panneau d'activité des outils",
   "actionPanel.fetchedPagesTitle": "Sources web",

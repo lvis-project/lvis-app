@@ -12,6 +12,7 @@ export const zhMessages: Record<string, string> = {
   "chatPreviewRail.copyPath": "复制路径",
   "chatPreviewRail.copyRelativePath": "复制相对路径",
   "chatPreviewRail.removeRoot": "移除文件夹",
+  "chatPreviewRail.removeRootPruned": "已移除文件夹 · 同时撤销 {count} 项已保存授权",
   "actionPanel.closeAriaLabel": "关闭工具活动面板",
   "actionPanel.closeTooltip": "关闭工具活动面板",
   "actionPanel.fetchedPagesTitle": "网页来源",
