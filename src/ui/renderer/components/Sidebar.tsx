@@ -364,7 +364,11 @@ function useWorkspaceProjects(): ProjectIdentity[] {
     void window.lvis?.workspace?.listRoots?.().then((result) => {
       if (cancelled || !result?.ok) return;
       const roots = Array.isArray(result.roots) ? result.roots : [];
-      setProjects(workspaceRootsToProjects(result.defaultRoot, roots, t("sidebar.currentProject")));
+      // fallbackName is only a safety net for a root with no resolvable
+      // basename (near-unreachable in practice) — the default project is
+      // filtered out of every display surface anyway, so its exact string
+      // value is never shown.
+      setProjects(workspaceRootsToProjects(result.defaultRoot, roots, t("sidebar.projectsLabel")));
     }).catch(() => {
       // Keep the localized fallback; the sidebar must remain usable without the workspace bridge.
     });
@@ -374,6 +378,52 @@ function useWorkspaceProjects(): ProjectIdentity[] {
   }, [t]);
 
   return projects;
+}
+
+/**
+ * A single conversation row — shared by both the per-project grouped list and
+ * the ungrouped "no project" flat list below, so the two surfaces render
+ * byte-identical session buttons.
+ */
+function SessionRow({
+  session,
+  active,
+  streaming,
+  onLoadSession,
+  t,
+}: {
+  session: SessionSummary;
+  active: boolean;
+  streaming: boolean;
+  onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
+  t: ReturnType<typeof useTranslation>["t"];
+}) {
+  const time = formatRelativeSessionTime(session.modifiedAt, t);
+  return (
+    <button
+      type="button"
+      disabled={streaming && !active}
+      aria-current={active ? "page" : undefined}
+      className={[
+        "group flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        active
+          ? "bg-primary/(--opacity-subtle) text-primary"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+        streaming && !active ? "cursor-not-allowed opacity-50" : "",
+      ].filter(Boolean).join(" ")}
+      data-testid={`sidebar-session-${session.id}`}
+      onClick={() => void onLoadSession?.(session.id)}
+    >
+      <MessageSquareText className="h-3.5 w-3.5 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{session.title}</span>
+      {time ? (
+        <span className="shrink-0 text-[10px] text-muted-foreground/(--opacity-intense)">
+          {time}
+        </span>
+      ) : null}
+    </button>
+  );
 }
 
 function ProjectSessionList({
@@ -397,15 +447,14 @@ function ProjectSessionList({
 }) {
   const { t } = useTranslation();
   // Reveal the project folder in the OS file manager (real capability:
-  // workspace.reveal). No-op for the default project's empty root.
+  // workspace.reveal).
   const revealProject = (projectRoot: string) => {
     if (!projectRoot) return;
     void window.lvis?.workspace?.reveal?.(projectRoot);
   };
   // Remove a picked (non-default) project from the workspace root list (real
-  // capability: workspace.removeRoot). The default/base-directory project is
-  // not removable — its menu omits this item. Refresh the sidebar list on
-  // success so the removed project disappears immediately.
+  // capability: workspace.removeRoot). Refresh the sidebar list on success so
+  // the removed project disappears immediately.
   const removeProject = (project: ProjectIdentity) => {
     if (!project.projectRoot || project.isDefault) return;
     void Promise.resolve(window.lvis?.workspace?.removeRoot?.(project.projectRoot))
@@ -420,40 +469,53 @@ function ProjectSessionList({
     () => sessions.filter((session) => session.sessionKind === "main"),
     [sessions],
   );
-  const projects = useMemo(() => {
-    const knownProjects = workspaceProjects.length > 0
-      ? workspaceProjects
-      : [{
-          projectRoot: "",
-          projectName: t("sidebar.currentProject"),
-          isDefault: true,
-        }];
-    const unknownProjects = new Map<string, ProjectIdentity>();
+  // Named (real, user-visible) projects — the default/base-directory binding
+  // is EXCLUDED here so it is never rendered as a project group or a
+  // pickable entry: "no explicit project" is the normal state for a
+  // conversation, not a synthetic "Current Project" bucket (2026-07 "remove
+  // Current Project labeling" refinement). `workspaceProjects` still carries
+  // the default entry (other internal consumers need it for execution
+  // context), so it is filtered out ONLY at this display boundary.
+  const namedProjects = useMemo(() => {
+    const known = workspaceProjects.filter((project) => !project.isDefault);
+    const unknown = new Map<string, ProjectIdentity>();
     for (const session of mainSessions) {
-      if (!session.projectRoot || knownProjects.some((project) => projectRootEquals(project.projectRoot, session.projectRoot))) continue;
-      unknownProjects.set(session.projectRoot, {
+      if (!session.projectRoot || known.some((project) => projectRootEquals(project.projectRoot, session.projectRoot))) continue;
+      unknown.set(session.projectRoot, {
         projectRoot: session.projectRoot,
         projectName: session.projectName || projectBasename(session.projectRoot),
         isDefault: false,
       });
     }
-    return [...knownProjects, ...unknownProjects.values()];
-  }, [mainSessions, t, workspaceProjects]);
-  const defaultProjectRoot = projects.find((project) => project.isDefault)?.projectRoot ?? projects[0]?.projectRoot ?? "";
+    return [...known, ...unknown.values()];
+  }, [mainSessions, workspaceProjects]);
   const sessionsByProject = useMemo(
-    () => projects.map((project) => {
-      const projectSessions = mainSessions.filter((session) => {
-        const root = session.projectRoot ?? defaultProjectRoot;
-        return projectRootEquals(root, project.projectRoot) || root === project.projectRoot;
-      });
+    () => namedProjects.map((project) => {
+      const projectSessions = mainSessions.filter(
+        (session) => session.projectRoot && projectRootEquals(session.projectRoot, project.projectRoot),
+      );
       return {
         project,
         recent: projectSessions.slice(0, PROJECT_SESSION_LIMIT),
         overflow: Math.max(0, projectSessions.length - PROJECT_SESSION_LIMIT),
       };
     }),
-    [defaultProjectRoot, mainSessions, projects],
+    [mainSessions, namedProjects],
   );
+  // Every conversation NOT scoped to a named project — no projectRoot at all
+  // (the common case once "no explicit project" stops persisting default
+  // metadata), or a projectRoot that doesn't match any named project (legacy
+  // default-tagged sessions from before this refinement). Rendered as a
+  // plain, ungrouped list — ChatGPT/Claude's "general chats" pattern — rather
+  // than wrapped in a fake project header.
+  const ungroupedSessions = useMemo(
+    () => mainSessions.filter(
+      (session) => !session.projectRoot || !namedProjects.some((project) => projectRootEquals(project.projectRoot, session.projectRoot)),
+    ),
+    [mainSessions, namedProjects],
+  );
+  const ungroupedRecent = ungroupedSessions.slice(0, PROJECT_SESSION_LIMIT);
+  const ungroupedOverflow = Math.max(0, ungroupedSessions.length - PROJECT_SESSION_LIMIT);
 
   if (collapsed) {
     return (
@@ -464,18 +526,20 @@ function ProjectSessionList({
         isActive={false}
         onClick={() => {}}
         collapsed
-        data-testid="sidebar-current-project"
+        data-testid="sidebar-projects-collapsed"
       />
     );
   }
 
+  const hasNamedProjects = sessionsByProject.length > 0;
+  const hasUngroupedSessions = ungroupedSessions.length > 0;
+
   return (
     <div className="space-y-1" data-testid="sidebar-projects">
-      {sessionsByProject.map(({ project, recent, overflow }, index) => (
-        <div key={project.projectRoot || "default-project"} className="space-y-1">
+      {sessionsByProject.map(({ project, recent, overflow }) => (
+        <div key={project.projectRoot} className="space-y-1">
           {/* Right-click a project row → context menu of REAL project actions
-              (new chat here, reveal folder, remove picked project). The default
-              project omits reveal/remove — its root is app-managed. */}
+              (new chat here, reveal folder, remove project). */}
           <ContextMenu>
             <ContextMenuTrigger asChild>
           <button
@@ -487,7 +551,7 @@ function ProjectSessionList({
               streaming ? "cursor-not-allowed opacity-50" : "hover:bg-muted",
             ].join(" ")}
             title={t("sidebar.newProjectChat", { project: project.projectName })}
-            data-testid={index === 0 ? "sidebar-current-project" : `sidebar-project-${projectTestId(project.projectRoot, project.projectName)}`}
+            data-testid={`sidebar-project-${projectTestId(project.projectRoot, project.projectName)}`}
             onClick={() => void onNewChatForProject?.({
               ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
               projectName: project.projectName,
@@ -509,61 +573,35 @@ function ProjectSessionList({
                 <Plus className="h-3.5 w-3.5" />
                 {t("sidebar.projectMenuNewChat")}
               </ContextMenuItem>
-              {project.projectRoot ? (
-                <ContextMenuItem
-                  data-testid="sidebar-project-menu-reveal"
-                  onSelect={() => revealProject(project.projectRoot)}
-                >
-                  <FolderOpen className="h-3.5 w-3.5" />
-                  {t("sidebar.projectMenuReveal")}
-                </ContextMenuItem>
-              ) : null}
-              {project.projectRoot && !project.isDefault ? (
-                <>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem
-                    data-testid="sidebar-project-menu-remove"
-                    className="text-destructive focus:text-destructive"
-                    onSelect={() => removeProject(project)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    {t("sidebar.projectMenuRemove")}
-                  </ContextMenuItem>
-                </>
-              ) : null}
+              <ContextMenuItem
+                data-testid="sidebar-project-menu-reveal"
+                onSelect={() => revealProject(project.projectRoot)}
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+                {t("sidebar.projectMenuReveal")}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                data-testid="sidebar-project-menu-remove"
+                className="text-destructive focus:text-destructive"
+                onSelect={() => removeProject(project)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t("sidebar.projectMenuRemove")}
+              </ContextMenuItem>
             </ContextMenuContent>
           </ContextMenu>
           <div className="ml-4 border-l border-border/(--opacity-half) pl-2">
-            {recent.length > 0 ? recent.map((session) => {
-              const active = session.id === currentSessionId;
-              const time = formatRelativeSessionTime(session.modifiedAt, t);
-              return (
-                <button
-                  type="button"
-                  key={session.id}
-                  disabled={streaming && !active}
-                  aria-current={active ? "page" : undefined}
-                  className={[
-                    "group flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    active
-                      ? "bg-primary/(--opacity-subtle) text-primary"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                    streaming && !active ? "cursor-not-allowed opacity-50" : "",
-                  ].filter(Boolean).join(" ")}
-                  data-testid={`sidebar-session-${session.id}`}
-                  onClick={() => void onLoadSession?.(session.id)}
-                >
-                  <MessageSquareText className="h-3.5 w-3.5 shrink-0" />
-                  <span className="min-w-0 flex-1 truncate">{session.title}</span>
-                  {time ? (
-                    <span className="shrink-0 text-[10px] text-muted-foreground/(--opacity-intense)">
-                      {time}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            }) : (
+            {recent.length > 0 ? recent.map((session) => (
+              <SessionRow
+                key={session.id}
+                session={session}
+                active={session.id === currentSessionId}
+                streaming={streaming}
+                onLoadSession={onLoadSession}
+                t={t}
+              />
+            )) : (
               <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
                 {t("sidebar.noProjectSessions")}
               </div>
@@ -576,6 +614,35 @@ function ProjectSessionList({
           </div>
         </div>
       ))}
+      {/* Conversations with no explicit project — a plain, ungrouped list
+          (ChatGPT/Claude "general chats" pattern), NOT wrapped in a fake
+          project header. Only separated from the named-project groups above
+          by a bare divider when both are present. */}
+      {hasUngroupedSessions ? (
+        <div className="space-y-1" data-testid="sidebar-unassigned-sessions">
+          {hasNamedProjects ? <SectionDivider collapsed={false} /> : null}
+          {ungroupedRecent.map((session) => (
+            <SessionRow
+              key={session.id}
+              session={session}
+              active={session.id === currentSessionId}
+              streaming={streaming}
+              onLoadSession={onLoadSession}
+              t={t}
+            />
+          ))}
+          {ungroupedOverflow > 0 ? (
+            <div className="px-2 pt-1 text-[10px] text-muted-foreground">
+              {t("sidebar.moreSessions", { count: ungroupedOverflow })}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {!hasNamedProjects && !hasUngroupedSessions ? (
+        <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+          {t("sidebar.noProjectSessions")}
+        </div>
+      ) : null}
     </div>
   );
 }
