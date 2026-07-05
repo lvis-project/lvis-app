@@ -4,6 +4,7 @@ export const SETTINGS_TABS = [
   "appearance",
   "chat",
   "web",
+  "startup",
   "permissions",
   "roles",
   "usage",

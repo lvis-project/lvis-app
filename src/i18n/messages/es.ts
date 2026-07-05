@@ -29,4 +29,35 @@ export const es: Record<SeedMessageKey, string> = {
   "mainDialog.unauthorizedFrame": "Marco no autorizado.",
   "mainDialog.noPersonasAvailable": "No hay personas disponibles",
   "mainDialog.exportConversationTitle": "Exportar conversación",
+
+  // ── E4 — Inicio / atajos globales ─────────────────────────────────
+  "settingsContent.tabStartup": "Inicio",
+  "startupTab.title": "Inicio y atajos",
+  "startupTab.description":
+    "Configura un atajo global para mostrar/ocultar la ventana y elige si LVIS se inicia al iniciar sesión.",
+  "startupTab.shortcutSectionTitle": "Atajo global",
+  "startupTab.shortcutSectionDesc":
+    "Una combinación de teclas de todo el sistema que muestra u oculta la ventana de LVIS desde cualquier lugar.",
+  "startupTab.shortcutEnabledLabel": "Activar atajo global",
+  "startupTab.shortcutEnabledHint": "Registrar el atajo en el sistema operativo.",
+  "startupTab.shortcutAcceleratorLabel": "Atajo para mostrar/ocultar la ventana",
+  "startupTab.shortcutRecord": "Grabar",
+  "startupTab.shortcutClear": "Borrar",
+  "startupTab.shortcutCapturing": "Pulsa una combinación de teclas…",
+  "startupTab.shortcutUnset": "Sin configurar",
+  "startupTab.shortcutEnabledNoAccelerator":
+    "El atajo está activado pero no hay combinación de teclas configurada. Graba una para activarlo.",
+  "startupTab.shortcutRegisterFailedTitle": "Error al registrar el atajo",
+  "startupTab.shortcutRegisterFailedBody":
+    "{accelerator} ya está en uso por otra aplicación. Elige otra combinación.",
+  "startupTab.launchSectionTitle": "Iniciar al arrancar",
+  "startupTab.launchSectionDesc":
+    "Controla si LVIS se inicia automáticamente cuando inicias sesión en tu equipo.",
+  "startupTab.launchAtStartupLabel": "Iniciar LVIS al iniciar sesión",
+  "startupTab.launchAtStartupHint": "Inicia LVIS automáticamente tras iniciar sesión. (Solo app instalada.)",
+  "startupTab.launchMinimizedLabel": "Iniciar oculto en la bandeja",
+  "startupTab.launchMinimizedHint": "Al iniciar con el sistema, arranca minimizado en la bandeja sin abrir ventana.",
+  "startupTab.launchRegisterFailedTitle": "No se pudo aplicar el inicio al arrancar",
+  "startupTab.launchRegisterFailedBody":
+    "LVIS no pudo registrarse para iniciarse al iniciar sesión en este sistema. Abre Configuración para volver a intentarlo.",
 };
