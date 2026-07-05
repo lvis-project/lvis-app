@@ -50,6 +50,7 @@ export function AppShell({
   // sidebar
   onSelectView,
   pluginViews,
+  failedPluginCards,
   pluginAuthStatuses,
   onOpenSettings,
   onNewChat,
@@ -129,6 +130,7 @@ export function AppShell({
   appUpdate: ReturnType<typeof useAppUpdate>;
   onSelectView: SidebarProps["onSelect"];
   pluginViews: SidebarProps["pluginViews"];
+  failedPluginCards?: SidebarProps["failedPluginCards"];
   pluginAuthStatuses: SidebarProps["pluginAuthStatuses"];
   onOpenSettings: (tab?: string) => void;
   onNewChat: () => void;
@@ -217,6 +219,7 @@ export function AppShell({
         activeView={activeView}
         onSelect={onSelectView}
         pluginViews={pluginViews}
+        failedPluginCards={failedPluginCards}
         pluginAuthStatuses={pluginAuthStatuses}
         sessions={sessions}
         currentSessionId={currentSessionId}

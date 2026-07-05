@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
-import { makeTestPluginPaths } from "./test-helpers.js";
+import { makeTestPluginPaths, writeTestPluginRegistry } from "./test-helpers.js";
 import { mkdtempSync } from "node:fs";
 
 /**
@@ -45,6 +45,11 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
   });
 
   async function writeCatalog(installPolicy?: "admin" | "user") {
+    const catalogEntry = makeCatalogEntry("mp-test", installPolicy);
+    await writeCatalogEntries([catalogEntry]);
+  }
+
+  function makeCatalogEntry(id: string, installPolicy?: "admin" | "user"): Record<string, unknown> {
     const catalogEntry: Record<string, unknown> = {
       id: "mp-test",
       name: "Marketplace Test",
@@ -53,10 +58,15 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
       packageName: "@lvis-test/nonexistent",
       methods: []
     };
+    catalogEntry.id = id;
     if (installPolicy) catalogEntry.installPolicy = installPolicy;
+    return catalogEntry;
+  }
+
+  async function writeCatalogEntries(plugins: Array<Record<string, unknown>>) {
     await writeFile(
       marketplacePath,
-      JSON.stringify({ version: 1, plugins: [catalogEntry] }),
+      JSON.stringify({ version: 1, plugins }),
       "utf-8",
     );
   }
@@ -122,5 +132,69 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
 
     const items = await service.list();
     expect(items[0].isManaged).toBe(false);
+  });
+
+  it("uninstall() allows cleanup for admin-installed plugins removed from the marketplace catalog", async () => {
+    await writeCatalogEntries([]);
+    const pluginDir = join(installedDir, "agent-hub");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "agent-hub",
+        name: "Agent Hub",
+        version: "1.0.0",
+        entry: "dist/hostPlugin.js",
+        tools: [],
+        installPolicy: "admin",
+      }),
+      "utf-8",
+    );
+    await writeTestPluginRegistry(
+      { registryPath },
+      [{ id: "agent-hub", manifestPath, enabled: true, installSource: "admin" }],
+    );
+    const service = makeService();
+
+    await expect(service.uninstall("agent-hub")).resolves.toEqual({
+      pluginId: "agent-hub",
+      uninstalled: true,
+    });
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: unknown[] };
+    expect(registry.plugins).toEqual([]);
+  });
+
+  it("uninstall() keeps protecting admin installs while a normalized catalog entry still exists", async () => {
+    await writeCatalogEntries([
+      {
+        ...makeCatalogEntry("lvis-plugin-agent-hub", "admin"),
+        name: "Agent Hub",
+        packageSpec: "@lvis/lvis-plugin-agent-hub",
+        packageName: "@lvis/lvis-plugin-agent-hub",
+      },
+    ]);
+    const pluginDir = join(installedDir, "agent-hub");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "agent-hub",
+        name: "Agent Hub",
+        version: "1.0.0",
+        entry: "dist/hostPlugin.js",
+        tools: [],
+        installPolicy: "admin",
+      }),
+      "utf-8",
+    );
+    await writeTestPluginRegistry(
+      { registryPath },
+      [{ id: "agent-hub", manifestPath, enabled: true, installSource: "admin" }],
+    );
+    const service = makeService();
+
+    await expect(service.uninstall("agent-hub")).rejects.toThrow(/registry installSource="admin"/);
   });
 });
