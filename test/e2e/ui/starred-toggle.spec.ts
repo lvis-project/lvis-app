@@ -1,18 +1,19 @@
 import { test, expect } from './fixtures';
 
 /**
- * Starred message toggle smoke — finds any star/favorite affordance on a
- * message row and toggles it. Skips gracefully when no starred UI exists.
+ * Pinned message toggle smoke ("Star" → "Pin" rename, 2026-07) — finds any
+ * pin/bookmark affordance on a message row and toggles it. Skips gracefully
+ * when no pin UI exists.
  */
-test('starred message toggle flips state, or skips', async ({ mainWindow }) => {
+test('pinned message toggle flips state, or skips', async ({ mainWindow }) => {
   const star = mainWindow
     .locator(
       [
         '[data-testid="star-toggle"]',
         '[data-testid="message-star"]',
-        'button[aria-label*="Star" i]',
-        'button[aria-label*="즐겨찾기"]',
-        'button[aria-label*="별표"]',
+        'button[aria-label*="Pin" i]',
+        'button[aria-label*="핀"]',
+        'button[aria-label*="고정"]',
       ].join(', '),
     )
     .first();

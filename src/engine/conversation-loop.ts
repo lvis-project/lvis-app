@@ -467,6 +467,23 @@ export class ConversationLoop {
     return this.sessionProjectName;
   }
 
+  /**
+   * True when the session's project binding is the app-managed default
+   * workspace root (no explicit project selection) rather than a user-picked
+   * project directory. UI-facing callers (chat.new domain handler,
+   * markMainActiveAfterTurn) use this to decide whether to persist
+   * projectRoot/projectName into session metadata at all — a "no explicit
+   * project" session's metadata omits them entirely (null is the normal
+   * state), while the in-memory execution binding (sessionProjectRoot /
+   * sessionAdditionalDirectories, set by applyProjectContext regardless of
+   * this flag) is unaffected — the agent still gets the default directory
+   * for tool access either way. See 2026-07 "remove Current Project
+   * labeling" refinement.
+   */
+  getSessionProjectIsDefault(): boolean {
+    return this.sessionProjectIsDefault;
+  }
+
   getSessionProjectContext(): SessionProjectContext {
     return {
       ...(this.sessionProjectRoot ? { projectRoot: this.sessionProjectRoot } : {}),

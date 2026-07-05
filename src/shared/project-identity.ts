@@ -48,6 +48,13 @@ export function projectIdentityFromRoot(
   fallbackName: string,
   isDefault = false,
 ): ProjectIdentity {
+  // No isDefault-branching: the earlier "avoid a literal folder name for the
+  // default project" special-case is dead weight now that isDefault projects
+  // are never surfaced as a selectable/displayed project at all (composer
+  // selector, sidebar grouping, and Insights all exclude/reclassify them — see
+  // 2026-07 "remove Current Project labeling" refinement). `fallbackName` is
+  // therefore only a safety net for the near-unreachable case of a root with
+  // no resolvable basename (e.g. a bare drive root).
   return {
     projectRoot,
     projectName: projectBasename(projectRoot) || fallbackName,
@@ -57,7 +64,7 @@ export function projectIdentityFromRoot(
 
 export function projectIdentityFromPayload(
   payload: { projectRoot?: unknown; projectName?: unknown; isDefault?: unknown } | null | undefined,
-  fallbackName = "workspace",
+  fallbackName = "default",
 ): ProjectIdentity | undefined {
   const projectRoot = normalizeProjectRoot(payload?.projectRoot);
   const projectName = normalizeProjectName(payload?.projectName);

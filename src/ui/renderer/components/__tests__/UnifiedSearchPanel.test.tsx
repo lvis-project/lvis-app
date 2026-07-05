@@ -75,7 +75,7 @@ describe("UnifiedSearchPanel", () => {
     expect(screen.getByTestId("unified-search-input")).toBeTruthy();
     expect(screen.getByText("현재 대화")).toBeTruthy();
     expect(screen.getByText("대화 기록")).toBeTruthy();
-    expect(screen.getByText("즐겨찾기")).toBeTruthy();
+    expect(screen.getByText("핀")).toBeTruthy();
     expect(screen.queryByLabelText("날짜 선택")).toBeNull();
 
     await waitFor(() => {

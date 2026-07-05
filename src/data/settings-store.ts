@@ -6,7 +6,9 @@ import {
   SIDE_PANEL_DEFAULT_WIDTH,
   SIDE_PANEL_MIN_WIDTH,
   SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
+  SIDEBAR_DEFAULT_WIDTH,
   clampSidePanelSplitPercent,
+  clampSidebarWidth,
 } from "../shared/side-panel.js";
 import {
   sanitizePluginConfig,
@@ -33,6 +35,8 @@ import {
 } from "../shared/appearance-font.js";
 import { DEFAULT_LOCALE, normalizeLocale, type Locale } from "../i18n/index.js";
 import { DEFAULT_APP_MODE, normalizeAppMode, type InitialAppMode } from "../shared/initial-app-mode.js";
+import { DEFAULT_SIDEBAR_TAB, isSidebarTab, type SidebarTab } from "../shared/sidebar-tab.js";
+import { projectRootKey } from "../shared/project-identity.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("settings");
 
@@ -354,6 +358,13 @@ export interface SystemSettings {
    */
   sidePanelWidth?: number;
   /**
+   * Persisted width (px) of the primary (left) navigation sidebar card, set by
+   * the inner-edge drag handle. Durable shell-layout preference; clamped to
+   * [SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH] at drag time in the renderer.
+   * Default 232 (matches the historical expanded rail padding reserve).
+   */
+  sidebarWidth?: number;
+  /**
    * Persisted TOP-pane percent of the workspace-rail vertical (list↕viewer)
    * split, one field per tab kind whose body is a list-over-viewer layout
    * (file-browser / preview / subagent). Clamped to the
@@ -364,6 +375,20 @@ export interface SystemSettings {
   sidePanelSplitFilePercent?: number;
   sidePanelSplitPreviewPercent?: number;
   sidePanelSplitSubagentPercent?: number;
+  /**
+   * Persisted active sidebar tab ("chats" = the plain ungrouped conversation
+   * list, "projects" = named-project groups). Durable UI preference, same
+   * family as `appMode`/`sidebarWidth`. Default "chats". SoT for the value
+   * set: `../shared/sidebar-tab.js`.
+   */
+  sidebarActiveTab?: SidebarTab;
+  /**
+   * Pinned project roots — pinned projects sort to the top of the sidebar's
+   * Projects tab. A lightweight preference list (not a project-domain
+   * mutation), so it lives here rather than a dedicated IPC domain. Default
+   * empty. Normalized to a de-duplicated string array on read/write.
+   */
+  pinnedProjectRoots?: string[];
 }
 
 /**
@@ -536,9 +561,12 @@ const DEFAULT_SETTINGS: AppSettings = {
     // LVIS_LOCAL_API=1). #1409/#1436.
     localApiServer: false,
     sidePanelWidth: SIDE_PANEL_DEFAULT_WIDTH,
+    sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
     sidePanelSplitFilePercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
     sidePanelSplitPreviewPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
     sidePanelSplitSubagentPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
+    sidebarActiveTab: DEFAULT_SIDEBAR_TAB,
+    pinnedProjectRoots: [],
   },
   plugins: {},
   pluginConfigs: {},
@@ -761,6 +789,15 @@ export class SettingsService {
           this.settings.system.sidePanelWidth,
         );
       }
+      const rawSidebarWidth = partial.system.sidebarWidth;
+      if (typeof rawSidebarWidth === "number" && Number.isFinite(rawSidebarWidth)) {
+        next.sidebarWidth = clampSidebarWidth(rawSidebarWidth);
+      } else if (rawSidebarWidth !== undefined) {
+        log.warn(
+          `system.sidebarWidth patch ignored (received ${JSON.stringify(rawSidebarWidth)}), keeping %s`,
+          this.settings.system.sidebarWidth,
+        );
+      }
       // Per-tab vertical split percents — each normalized independently through
       // the shared clamp so an out-of-range or non-finite value is ignored while
       // a valid sibling is preserved (mirrors the width path above).
@@ -774,6 +811,24 @@ export class SettingsService {
             this.settings.system[key],
           );
         }
+      }
+      const rawSidebarActiveTab = partial.system.sidebarActiveTab;
+      if (isSidebarTab(rawSidebarActiveTab)) {
+        next.sidebarActiveTab = rawSidebarActiveTab;
+      } else if (rawSidebarActiveTab !== undefined) {
+        log.warn(
+          `system.sidebarActiveTab patch ignored (received ${JSON.stringify(rawSidebarActiveTab)}), keeping %s`,
+          this.settings.system.sidebarActiveTab,
+        );
+      }
+      const rawPinnedProjectRoots = partial.system.pinnedProjectRoots;
+      if (Array.isArray(rawPinnedProjectRoots)) {
+        next.pinnedProjectRoots = normalizePinnedProjectRoots(rawPinnedProjectRoots);
+      } else if (rawPinnedProjectRoots !== undefined) {
+        log.warn(
+          `system.pinnedProjectRoots patch ignored (received ${JSON.stringify(rawPinnedProjectRoots)}), keeping %s`,
+          this.settings.system.pinnedProjectRoots,
+        );
       }
       this.settings.system = next;
     }
@@ -1288,6 +1343,32 @@ function normalizeWebView(input: unknown): WebViewSettings {
 
 const VALID_CLOSE_BEHAVIORS: readonly SystemCloseBehavior[] = ["hide-to-tray", "quit"];
 
+const MAX_PINNED_PROJECT_ROOTS = 200;
+
+/**
+ * De-duplicates, trims, and caps a pinned-project-roots list on both the
+ * patch and normalize paths. De-dup keys on `projectRootKey` (the same
+ * case/slash-insensitive root-identity SoT the sidebar's pin lookup uses via
+ * `projectRootEquals`) rather than raw string equality, so e.g.
+ * "C:\\ws\\alpha" and "c:/ws/alpha/" are recognized as the same pinned root
+ * instead of accumulating as separate list entries.
+ */
+function normalizePinnedProjectRoots(raw: unknown[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (trimmed.length === 0) continue;
+    const key = projectRootKey(trimmed) ?? trimmed;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+    if (out.length >= MAX_PINNED_PROJECT_ROOTS) break;
+  }
+  return out;
+}
+
 /**
  * The per-tab-kind vertical-split percent keys, iterated identically in the
  * update-patch and normalize paths so a new split-bearing tab kind is added in
@@ -1309,6 +1390,9 @@ function normalizeSystem(input: unknown): SystemSettings {
     appMode?: unknown;
     localApiServer?: unknown;
     sidePanelWidth?: unknown;
+    sidebarWidth?: unknown;
+    sidebarActiveTab?: unknown;
+    pinnedProjectRoots?: unknown;
   } & Record<(typeof SIDE_PANEL_SPLIT_KEYS)[number], unknown>;
   // Each field is normalized independently: a missing/invalid field falls
   // back to its default while a valid sibling is preserved (mirrors the
@@ -1354,6 +1438,15 @@ function normalizeSystem(input: unknown): SystemSettings {
       SIDE_PANEL_DEFAULT_WIDTH,
     );
   }
+  const rawSidebarWidth = obj.sidebarWidth;
+  if (typeof rawSidebarWidth === "number" && Number.isFinite(rawSidebarWidth)) {
+    result.sidebarWidth = clampSidebarWidth(rawSidebarWidth);
+  } else if (rawSidebarWidth !== undefined) {
+    log.warn(
+      `system.sidebarWidth invalid (received ${JSON.stringify(rawSidebarWidth)}), using default %s`,
+      SIDEBAR_DEFAULT_WIDTH,
+    );
+  }
   for (const key of SIDE_PANEL_SPLIT_KEYS) {
     const raw = obj[key];
     if (typeof raw === "number" && Number.isFinite(raw)) {
@@ -1364,6 +1457,24 @@ function normalizeSystem(input: unknown): SystemSettings {
         SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
       );
     }
+  }
+  const rawSidebarActiveTab = obj.sidebarActiveTab;
+  if (isSidebarTab(rawSidebarActiveTab)) {
+    result.sidebarActiveTab = rawSidebarActiveTab;
+  } else if (rawSidebarActiveTab !== undefined) {
+    log.warn(
+      `system.sidebarActiveTab invalid (received ${JSON.stringify(rawSidebarActiveTab)}), using default %s`,
+      DEFAULT_SETTINGS.system.sidebarActiveTab,
+    );
+  }
+  const rawPinnedProjectRoots = obj.pinnedProjectRoots;
+  if (Array.isArray(rawPinnedProjectRoots)) {
+    result.pinnedProjectRoots = normalizePinnedProjectRoots(rawPinnedProjectRoots);
+  } else if (rawPinnedProjectRoots !== undefined) {
+    log.warn(
+      `system.pinnedProjectRoots invalid (received ${JSON.stringify(rawPinnedProjectRoots)}), using default %s`,
+      DEFAULT_SETTINGS.system.pinnedProjectRoots,
+    );
   }
   return result;
 }
