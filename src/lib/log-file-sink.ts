@@ -246,7 +246,25 @@ export function createLogFileSink(options: LogFileSinkOptions = {}): LogFileSink
     // (typically 0o644). Passing the mode to the constructor is atomic and
     // deterministic. POSIX-only: Windows ignores the mode bits (file security
     // there relies on the inherited %USERPROFILE% / ~/.lvis ACL).
-    return new SonicBoom({ dest: filePath, mkdir: false, sync: false, mode: FILE_MODE });
+    const boom = new SonicBoom({ dest: filePath, mkdir: false, sync: false, mode: FILE_MODE });
+    // A REQUIRED 'error' listener, not defense-in-depth: SonicBoom is an
+    // EventEmitter, and its own async `fs.open`/`fs.write` failures (disk
+    // full, EACCES, a removed directory racing a deferred open) are reported
+    // by EMITTING 'error', not by rejecting a promise or throwing into the
+    // caller. The try/catch around write()/end() below only catches SYNCHRONOUS
+    // throws from those calls — it cannot see an error that surfaces later on
+    // a different tick from SonicBoom's internal open/write machinery. Without
+    // this listener, Node treats the unhandled 'error' event as an uncaught
+    // exception that crashes the process (or, under vitest, corrupts/aborts
+    // the whole run) — exactly the failure mode that surfaced as a same-run
+    // "Unhandled Errors" / "Uncaught Exception" ENOENT unrelated to the
+    // currently-running test. Logging is best-effort (see module docstring),
+    // so a destination failure here is intentionally swallowed, not rethrown.
+    boom.on("error", () => {
+      /* best-effort file logging — a destination failure must never crash
+         the process or corrupt the console-only logging path. */
+    });
+    return boom;
   };
 
   /** Seed activeBytes from any bytes already on disk for the current file. */

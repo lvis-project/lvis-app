@@ -124,6 +124,13 @@ const fileStream = {
  * AuditLogger's own DLP — it is a blanket guard on the general app logger.
  * `censor: "[redacted]"` keeps the key present (so the shape is still
  * debuggable) while removing the value.
+ *
+ * DEPTH LIMIT: these paths only reach one level of nesting (`*.apiKey`), not
+ * `*.*.apiKey` or deeper. A secret nested two or more levels down (e.g.
+ * `{ config: { provider: { token } } }`) is NOT masked by this list. Call
+ * sites must not log deeply-nested objects that may carry a credential —
+ * this redact list is a blanket safety net for shallow shapes, not a
+ * substitute for not logging secrets in the first place.
  */
 const REDACT_PATHS = [
   "*.apiKey",
