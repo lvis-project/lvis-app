@@ -163,6 +163,7 @@ export const frMessages: Record<string, string> = {
   "auditTab.bundleSectionTitle": "Paquet de diagnostic",
   "auditTab.bundleSectionDesc": "Un ZIP contenant les paramètres masqués, la piste d'audit, les journaux et les métadonnées des vidages de plantage. Les secrets et les données personnelles sont masqués.",
   "auditTab.bundleIncludeCrashDumps": "Inclure les binaires de vidage de plantage",
+  "auditTab.bundleCrashDumpWarning": "Les binaires de vidage de plantage peuvent contenir de la mémoire non masquée (jetons, clés, données personnelles). Ne les incluez que lorsque vous les partagez avec un support de confiance.",
   "auditTab.bundleExportButton": "Exporter le paquet",
   "auditTab.bundleExporting": "Exportation…",
   "auditTab.bundleExportSuccess": "Paquet enregistré ({bytes}).",

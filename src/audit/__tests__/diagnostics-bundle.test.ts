@@ -152,6 +152,49 @@ describe("buildDiagnosticsBundle — PII / secret exclusion", () => {
     expect(allText).toContain("[REDACTED:EMAIL]");
   });
 
+  it("credential-class secrets in log lines are scrubbed (sk-/Bearer/JWT/x-api-key)", async () => {
+    // The PII pass (redactForLLM) does NOT cover tokens/keys; the bundle must
+    // ALSO apply scrubSecretsForLLM per line (security MAJOR M1). Inject the
+    // real secret shapes and assert they never reach the ZIP. The prior test
+    // only asserted email, masking this gap.
+    const jwt =
+      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+    writeFileSync(
+      join(logsDir, "lvis-2025-06-04.log"),
+      [
+        JSON.stringify({ level: 30, msg: "key sk-ant-SUPERSECRETKEY123456 used" }),
+        JSON.stringify({ level: 30, msg: "Authorization: Bearer abcDEF123456tokenvalue" }),
+        JSON.stringify({ level: 30, msg: `token ${jwt}` }),
+        JSON.stringify({ level: 30, msg: "x-api-key: liveKEY9876543210value" }),
+        JSON.stringify({ level: 30, msg: "url https://x.example/mcp?api_key=SECRETPARAM123" }),
+      ].join("\n") + "\n",
+      "utf-8",
+    );
+    const { allText } = unzipToText(await build());
+    expect(allText).not.toContain("sk-ant-SUPERSECRETKEY123456");
+    expect(allText).not.toContain("abcDEF123456tokenvalue");
+    expect(allText).not.toContain(jwt);
+    expect(allText).not.toContain("liveKEY9876543210value");
+    expect(allText).not.toContain("SECRETPARAM123");
+    // The credential redaction markers ARE present (proof the line was scrubbed).
+    expect(allText).toContain("[REDACTED:TOKEN]");
+    expect(allText).toContain("[REDACTED:JWT]");
+  });
+
+  it("credential-class secrets in audit input/output are scrubbed", async () => {
+    const logger = new AuditLogger(auditDir);
+    logger.log({
+      timestamp: "2025-06-01T00:00:00.000Z",
+      sessionId: "s1",
+      type: "turn",
+      input: "here is my key sk-live-AUDITSECRETKEY987654",
+      output: "Authorization: Bearer auditBEARERtokenXYZ123",
+    });
+    const { allText } = unzipToText(await build({ auditLogger: logger }));
+    expect(allText).not.toContain("sk-live-AUDITSECRETKEY987654");
+    expect(allText).not.toContain("auditBEARERtokenXYZ123");
+  });
+
   it("MCP stderr in the log file is redacted at the bundle chokepoint (§5d)", async () => {
     // mcp-client pipes MCP server stderr into the app logger, so it lands in the
     // log file. The bundle's line-level redactForLLM is the single point that
