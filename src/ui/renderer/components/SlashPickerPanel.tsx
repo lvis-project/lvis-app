@@ -205,17 +205,22 @@ export function SlashPickerPanel({
 
   const renderPluginRow = (p: PluginEntry) => {
     const Icon = pluginIconFor({ icon: p.icon, iconText: p.iconText });
+    const needsDoctor = p.doctorRequired || p.loadStatus === "failed";
     return (
       <CommandItem key={p.viewKey} className={PICKER_ROW_CLASS} value={p.label} onSelect={() => runPlugin(p)}>
         <PickerIconSlot>
           <Suspense fallback={<span className={PICKER_ICON_CLASS} />}>
             <Icon
-              className={`${PICKER_ICON_CLASS} text-muted-foreground`}
+              className={`${PICKER_ICON_CLASS} ${needsDoctor ? "text-destructive" : "text-muted-foreground"}`}
               style={p.iconText ? { fontSize: "0.62rem" } : undefined}
             />
           </Suspense>
         </PickerIconSlot>
-        <PickerText title={p.label} />
+        <PickerText
+          title={p.label}
+          subtitle={needsDoctor ? t("pluginGridButton.doctorNeeded") : undefined}
+          titleClassName={needsDoctor ? "text-destructive" : ""}
+        />
       </CommandItem>
     );
   };

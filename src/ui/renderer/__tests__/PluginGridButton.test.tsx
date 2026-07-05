@@ -99,6 +99,27 @@ describe("PluginGridButton v3", () => {
     expect(onSelect).toHaveBeenCalledWith("plugin:test-0:main");
   });
 
+  it("keeps failed plugin cells visible and routes them to Doctor", () => {
+    const plugins: PluginEntry[] = [{
+      viewKey: "plugin-doctor:agent-hub",
+      pluginId: "agent-hub",
+      label: "Agent Hub",
+      loadStatus: "failed",
+      doctorRequired: true,
+    }];
+    const onSelect = vi.fn();
+    renderGrid(plugins, { onSelect });
+    fireEvent.click(screen.getByTestId("plugin-grid-button"));
+
+    const cell = screen.getByTestId("plugin-cell-plugin-doctor-agent-hub");
+    expect(cell).toHaveAttribute("data-doctor-required", "true");
+    expect(cell).not.toBeDisabled();
+    expect(screen.getByTestId("plugin-cell-plugin-doctor-agent-hub-doctor").textContent).toBe("Doctor");
+
+    fireEvent.click(cell);
+    expect(onSelect).toHaveBeenCalledWith("plugin-doctor:agent-hub");
+  });
+
   it("shows install-overlay spinner + phase label for installing registered plugins", () => {
     const plugins = makePlugins(2);
     const installingPlugins = new Map<string, InstallPhase>([["test-1", "restarting"]]);
