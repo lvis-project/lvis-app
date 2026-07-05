@@ -679,10 +679,15 @@ export class MemoryManager {
    * path.
    */
   searchSessions(query: string, options: Pick<ListSessionsOptions, "kind" | "routineId" | "projectRoot" | "includeUnscoped"> = {}): SessionSearchEntry[] {
-    // Require at least 3 chars — the FTS5 trigram tokenizer (session-search-index.ts)
-    // cannot match anything shorter, and this also prevents accidental full-dump
-    // via empty/trivial query.
-    if (query.trim().length < 3) return [];
+    // Require at least 2 Unicode code points. The FTS5 trigram tokenizer can't
+    // MATCH a query under 3 code points, but SessionSearchIndex.query() serves a
+    // 2-code-point query via a LIKE substring fallback on the same table — this
+    // restores the old linear scan's 2-syllable Korean matching (`매출`, `분기`),
+    // the single most common query shape for a CJK-first product. Only genuinely
+    // trivial (empty / 1-char / whitespace) queries are rejected here, matching
+    // the pre-#1500 `< 2` floor. Length is measured in code points (not UTF-16
+    // units) so a 2-syllable Korean query counts as 2, not more.
+    if ([...query.trim()].length < 2) return [];
     if (!this.searchIndex.open()) return [];
     try {
       return this.searchIndex.query(query, {
@@ -867,16 +872,25 @@ export class MemoryManager {
    * Builds the FTS row input for one session from its messages + metadata,
    * or `null` when the session has no searchable text (caller should drop any
    * existing row instead of inserting an empty one). Pure — opens nothing.
+   *
+   * `timestamp` is sourced from the session JSONL's on-disk mtime (its actual
+   * last-modified time), NOT the index-write wall clock. The search UI renders
+   * this as the conversation's relative/absolute time; using index-time would
+   * make every session show as "just now" after a boot-time reindex/rebuild.
+   * Falls back to the current time only when the file mtime can't be read
+   * (e.g. a from-memory upsert of a session not yet flushed to disk).
    */
   private buildIndexInput(sessionId: string, messages: unknown[]): IndexedSessionInput | null {
     const content = extractSearchableContent(messages);
     if (!content) return null;
     const metadata = this.loadSessionMetadata(sessionId);
     const summary = this.readSessionSummary(sessionId);
+    const mtimeMs = this.getFileMtimeMs(join(this.sessionsDir, `${sessionId}.jsonl`));
+    const timestamp = mtimeMs >= 0 ? new Date(mtimeMs).toISOString() : new Date().toISOString();
     return {
       sessionId,
       content,
-      timestamp: new Date().toISOString(),
+      timestamp,
       sessionKind: metadata?.sessionKind ?? normalizeSessionKind(undefined),
       ...(metadata?.routineId ? { routineId: metadata.routineId } : {}),
       ...(metadata?.projectRoot ? { projectRoot: metadata.projectRoot } : {}),
@@ -932,7 +946,9 @@ export class MemoryManager {
       return;
     }
     try {
-      this.searchIndex.clear();
+      // No clear() here: deleteFile() above removed the DB file entirely and the
+      // reopen created a FRESH empty `sessions_fts` table (CREATE TABLE IF NOT
+      // EXISTS on a new file), so there is nothing to clear — the call was dead.
       const UUID_RE = /^[0-9a-f-]{8,}$/i;
       for (const file of sessionFiles) {
         const stem = file.replace(".jsonl", "");
