@@ -4,6 +4,11 @@ import { ALL_VENDORS, getVendorOption, type VendorOption } from "../constants.js
 import { formatIpcError } from "../format-ipc-error.js";
 import type { FallbackEntry } from "../tabs/LlmTab.js";
 import { t } from "../../../i18n/runtime.js";
+import {
+  DEFAULT_LLM_VENDOR,
+  getLlmVendorSettings,
+  isLLMVendor,
+} from "../../../shared/llm-vendor-defaults.js";
 
 export interface SettingsOrchestrationState {
   // LLM
@@ -186,11 +191,14 @@ export function useSettingsOrchestration(
         api.hasMarketplaceApiKey(),
       ]);
       if (cancelled) return;
-      const block = s.llm.vendors[s.llm.provider];
-      hydratedVendorRef.current = s.llm.provider;
+      const provider = isLLMVendor(s.llm.provider)
+        ? s.llm.provider
+        : DEFAULT_LLM_VENDOR;
+      const block = getLlmVendorSettings(s.llm.vendors, provider);
+      hydratedVendorRef.current = provider;
       hydratedWebProviderRef.current = s.webSearch.provider;
       setSettingsSnapshot(s);
-      setVendor(s.llm.provider);
+      setVendor(provider);
       // #893 — top-level authMode hydration. Legacy installs (per-vendor
       // authMode) were migrated up in the settings store at load time, so
       // by the time the renderer reads `s.llm.authMode` the field is
@@ -223,8 +231,10 @@ export function useSettingsOrchestration(
       setSettingsSnapshot(next);
       setIdlePreferenceRefresh(next.features?.idlePreferenceRefresh ?? true);
       if (next.llm.authMode === "login") {
-        const nextVendor = next.llm.provider;
-        const block = next.llm.vendors[nextVendor];
+        const nextVendor = isLLMVendor(next.llm.provider)
+          ? next.llm.provider
+          : DEFAULT_LLM_VENDOR;
+        const block = getLlmVendorSettings(next.llm.vendors, nextVendor);
         hydratedVendorRef.current = nextVendor;
         setVendor(nextVendor);
         setAuthMode("login");
@@ -244,7 +254,9 @@ export function useSettingsOrchestration(
     }
     let cancelled = false;
     void api.hasApiKey(vendor).then((k) => { if (!cancelled) setHasKey(k); });
-    const block = settingsSnapshot?.llm.vendors[vendor];
+    const block = isLLMVendor(vendor)
+      ? getLlmVendorSettings(settingsSnapshot?.llm.vendors, vendor)
+      : null;
     if (block) hydrateVendorBlock(block);
     return () => { cancelled = true; };
   }, [vendor, api, settingsLoaded, settingsSnapshot]);
@@ -262,8 +274,10 @@ export function useSettingsOrchestration(
   }
 
   function hydrateLlmFromSettings(next: AppSettings): void {
-    const nextVendor = next.llm.provider;
-    const block = next.llm.vendors[nextVendor];
+    const nextVendor = isLLMVendor(next.llm.provider)
+      ? next.llm.provider
+      : DEFAULT_LLM_VENDOR;
+    const block = getLlmVendorSettings(next.llm.vendors, nextVendor);
     hydratedVendorRef.current = nextVendor;
     setSettingsSnapshot(next);
     setVendor(nextVendor);

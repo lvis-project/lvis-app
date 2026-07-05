@@ -26,6 +26,7 @@ import { GUIDE_JOINED_MAX_CHARS } from "./guidance-limits.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
 import { MAX_TOOL_CALLS_PER_ROUND } from "../../shared/subagent-policy.js";
+import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
 
 const log = createLogger("lvis");
 
@@ -105,7 +106,10 @@ export async function queryLoop(
     promotedToolNames: string[];
   }> {
     const llmSettings = self.deps.settingsService.get("llm");
-    const activeBlock = llmSettings.vendors[llmSettings.provider];
+    const activeBlock = getLlmVendorSettings(
+      llmSettings.vendors,
+      llmSettings.provider,
+    );
     const model = activeBlock.model;
     let systemPrompt = initialSystemPrompt;
     let servingVendorProvider: LLMVendor = llmSettings.provider;

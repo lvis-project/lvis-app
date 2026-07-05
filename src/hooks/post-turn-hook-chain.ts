@@ -14,6 +14,7 @@ import type { SettingsService } from "../data/settings-store.js";
 import { createLogger } from "../lib/logger.js";
 import { EMPTY_ASSISTANT_RESPONSE_TEXT } from "../lib/chat-stream-state.js";
 import { t } from "../i18n/index.js";
+import { getLlmVendorSettings } from "../shared/llm-vendor-defaults.js";
 const log = createLogger("post-turn");
 
 export interface PostTurnHookContext {
@@ -210,7 +211,12 @@ export class PostTurnHookChain {
       const provider = ctx.vendorProvider ?? llmSettings?.provider;
       const model =
         ctx.vendorModel ??
-        (llmSettings ? llmSettings.vendors[llmSettings.provider].model : undefined);
+        (llmSettings
+          ? getLlmVendorSettings(
+              llmSettings.vendors,
+              llmSettings.provider,
+            ).model
+          : undefined);
       const auditTokenUsage = provider && isLLMVendor(provider)
         ? normalizeAiSdkUsageForCost(ctx.tokenUsage, provider)
         : ctx.tokenUsage;
