@@ -72,7 +72,7 @@ export function ComposerProjectSelector({
   const label = hasRealSelection ? activeProject!.projectName : t("composerProjectSelector.selectProjectPlaceholder");
   // The default binding is not a pickable list entry — the dropdown only
   // offers real, user-added projects (+ "Add new project").
-  const realProjects = projects.filter((project) => project.isDefault !== true);
+  const namedProjects = projects.filter((project) => project.isDefault !== true);
 
   const handleSelect = (project: ProjectIdentity) => {
     onOpenChange(false);
@@ -157,12 +157,12 @@ export function ComposerProjectSelector({
         className="w-64 origin-top transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none data-[state=closed]:pointer-events-none data-[state=closed]:opacity-0 data-[state=closed]:scale-95 data-[state=open]:opacity-100 data-[state=open]:scale-100"
         data-testid="composer-project-selector-menu"
       >
-        {realProjects.length > 0 ? (
+        {namedProjects.length > 0 ? (
           <div className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             {t("composerProjectSelector.projectsHeading")}
           </div>
         ) : null}
-        {realProjects.map((project) => {
+        {namedProjects.map((project) => {
           const isActive = hasRealSelection && projectRootEquals(project.projectRoot, activeProject?.projectRoot);
           return (
             <DropdownMenuItem
@@ -177,7 +177,7 @@ export function ComposerProjectSelector({
             </DropdownMenuItem>
           );
         })}
-        {realProjects.length > 0 ? <DropdownMenuSeparator /> : null}
+        {namedProjects.length > 0 ? <DropdownMenuSeparator /> : null}
         {pendingWarning ? (
           <div
             data-testid="composer-project-selector-root-warning"
