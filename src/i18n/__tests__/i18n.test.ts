@@ -102,11 +102,23 @@ describe("interpolate", () => {
 });
 
 describe("translate", () => {
-  it("keeps extra generated locales lazy until explicitly loaded", () => {
+  it("keeps marketplace language-pack locales lazy until explicitly loaded", () => {
     expect(isLocaleMessagesLoaded("en")).toBe(true);
-    expect(isLocaleMessagesLoaded("ko")).toBe(true);
+    expect(isLocaleMessagesLoaded("ko")).toBe(false);
     expect(isLocaleMessagesLoaded("ja")).toBe(false);
     expect(isLocaleMessagesLoaded("zh")).toBe(false);
+  });
+
+  it("loads Korean as a language-pack catalog on demand", async () => {
+    expect(isLocaleMessagesLoaded("ko")).toBe(false);
+
+    await loadLocaleMessages("ko");
+
+    expect(isLocaleMessagesLoaded("ko")).toBe(true);
+    expect(translate("ko", "common.cancel")).toBe("취소");
+    expect(translate("ko", "chatTab.streamSmoothingTitle")).toBe(
+      "스트림 부드럽게 표시 (Stream Smoothing)",
+    );
   });
 
   it("coalesces concurrent lazy locale loads", async () => {
@@ -159,7 +171,9 @@ describe("translate", () => {
     expect(translate("de", "common.cancel")).toBe("Abbrechen");
   });
 
-  it("falls back to English then to the key on a miss", () => {
+  it("falls back to English then to the key on a miss", async () => {
+    await loadLocaleMessages("ko");
+
     expect(translate("ko", "chatTab.streamSmoothingTitle")).toBe("스트림 부드럽게 표시 (Stream Smoothing)");
     // A key absent everywhere returns itself (debuggable, not blank).
     expect(translate("ko", "totally.unknown.key")).toBe("totally.unknown.key");
@@ -204,9 +218,10 @@ describe("translate", () => {
 });
 
 describe("runtime t()", () => {
-  it("tracks the active locale and defaults to English", () => {
+  it("tracks the active locale and defaults to English", async () => {
     expect(getLocale()).toBe("en");
     expect(t("common.save")).toBe("Save");
+    await loadLocaleMessages("ko");
     setLocale("ko");
     expect(getLocale()).toBe("ko");
     expect(t("common.save")).toBe("저장");
