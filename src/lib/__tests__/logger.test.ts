@@ -6,6 +6,9 @@
  * vi.resetModules() + dynamic import.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 // Sentinel to detect "not passed" vs "passed undefined/null"
 const NOT_SET = Symbol("NOT_SET");
@@ -222,5 +225,90 @@ describe("logger format selection", () => {
     // isElectronRuntime=false → isPackagedElectron=false → pino-pretty
     expect(transport).toBeDefined();
     expect((transport as { target: string }).target).toBe("pino-pretty");
+  });
+});
+
+describe("logger redaction (#1499 disk-persistence defense)", () => {
+  it("censors secret-bearing fields in JSON output", async () => {
+    // Non-test JSON path (VITEST unset + LVIS_LOG_FORMAT=json) builds the real
+    // multistream pino logger whose first stream is process.stdout. Capture the
+    // serialized line and assert secret values are replaced with "[redacted]"
+    // both at the top level and one level deep, while non-secret fields survive.
+    const writes: string[] = [];
+    const spy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(chunk.toString());
+        return true;
+      }) as typeof process.stdout.write);
+    try {
+      const { logger } = await importLogger({
+        LVIS_LOG_FORMAT: "json",
+        VITEST: undefined,
+        NODE_ENV: "development",
+        LVIS_DEV: "1",
+      });
+      logger.info(
+        { apiKey: "sk-secret", provider: { token: "tok-123" }, sessionId: "keep-me" },
+        "redaction probe",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    const line = writes.join("");
+    expect(line).toContain("[redacted]");
+    expect(line).not.toContain("sk-secret");
+    expect(line).not.toContain("tok-123");
+    // Non-secret context field is preserved.
+    expect(line).toContain("keep-me");
+  });
+});
+
+describe("initFileLogSink — fail-closed lifecycle (#1499)", () => {
+  it("swallows a createLogFileSink failure and returns null (never bricks boot)", async () => {
+    // Force createLogFileSink to throw: point `dir` at a path whose parent is a
+    // regular FILE, so ensureLogDir's mkdirSync(recursive) fails with ENOTDIR/
+    // EEXIST. initFileLogSink must catch this and return null — the boot path
+    // (`if (sink) { … }` in boot/services.ts) then simply skips file logging.
+    const parentFile = join(mkdtempSync(join(tmpdir(), "lvis-logfail-")), "not-a-dir");
+    writeFileSync(parentFile, "x");
+    const badDir = join(parentFile, "logs"); // parent is a file → mkdir fails
+
+    const { initFileLogSink, closeFileLogSink } = await importLogger();
+    let sink: unknown;
+    let threw = false;
+    try {
+      sink = initFileLogSink({ dir: badDir });
+    } catch {
+      threw = true;
+    } finally {
+      closeFileLogSink();
+    }
+    // The contract: no throw escapes, and the sink is null (fail-closed).
+    expect(threw).toBe(false);
+    expect(sink).toBeNull();
+  });
+
+  it("returns a live sink for a valid directory (happy path)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-logok-"));
+    const { initFileLogSink, closeFileLogSink } = await importLogger();
+    const sink = initFileLogSink({ dir, retentionDays: 7 });
+    try {
+      expect(sink).not.toBeNull();
+      expect(typeof sink?.currentFile).toBe("string");
+      expect(sink?.currentFile.startsWith(dir)).toBe(true);
+    } finally {
+      closeFileLogSink();
+      // Retry rm — SonicBoom's async fd close can briefly hold the handle on
+      // Windows (mirrors log-file-sink.test.ts's own cleanup guard).
+      for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+          rmSync(dir, { recursive: true, force: true });
+          break;
+        } catch {
+          await new Promise((r) => setTimeout(r, 25));
+        }
+      }
+    }
   });
 });
