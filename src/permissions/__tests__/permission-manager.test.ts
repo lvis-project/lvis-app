@@ -12,7 +12,7 @@ import {
   isStrictPathDescendant,
 } from "../permission-manager.js";
 import { updatePermissionsFile } from "../permissions-store.js";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -812,16 +812,51 @@ describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
     expect(mockStore.rules).toHaveLength(1);
 
     const pruned = await pm.prunePathGrantsUnderRoot(root);
-    expect(pruned).toBe(1);
+    // #1494 item-4 — returns the pruned grant tuples (count = length).
+    expect(pruned).toHaveLength(1);
+    expect(pruned[0]).toMatchObject({
+      pattern: `write_file:path:${under}`,
+      toolName: "write_file",
+      tier: "write",
+      path: under,
+    });
     expect(mockStore.rules).toHaveLength(0);
     // In-memory alwaysAllowed entry also cleared → the grant no longer allows.
     expect(pm.checkDetailed(`write_file:path:${under}`, "builtin", "write").decision).toBe("ask");
   });
 
+  // #1494 item-2 — the ORIGINAL #1493 bug was grant revival: a path-scoped tier
+  // grant under a removed root would silently re-authorize writes if the SAME
+  // root was later re-added. This walks the full lifecycle and asserts the grant
+  // stays revoked. Re-adding a root only writes to the read allow-list
+  // (additionalDirectories via workspace.pickRoot → addAllowedDirectoryPersist);
+  // NOTHING re-inserts a `rules[].tier` grant, so after prune the target must
+  // still ask. We simulate re-add as a pure no-op on the rule surface (its only
+  // effect is on the independent read-list, which this PermissionManager unit
+  // does not own) and confirm checkDetailed never revives the pruned grant.
+  it("does not revive a pruned grant when the same root is re-added (regression)", async () => {
+    const target = join(root, "src", "app.ts");
+    const grantPattern = `write_file:path:${target}`;
+    // 1. Grant a write-tier path-scoped grant under the root.
+    await pm.addAlwaysAllowedPersist(grantPattern, "write");
+    expect(pm.checkDetailed(grantPattern, "builtin", "write").decision).toBe("allow");
+    // 2. Prune it (what workspace.removeRoot does).
+    const pruned = await pm.prunePathGrantsUnderRoot(root);
+    expect(pruned).toHaveLength(1);
+    expect(pm.checkDetailed(grantPattern, "builtin", "write").decision).toBe("ask");
+    // 3. Re-add the SAME root. The re-add path touches only the read allow-list,
+    //    never the rule/grant surface — so there is no rule mutation to make here.
+    //    Re-hydrating from the (now-pruned) persisted file must not resurrect it.
+    await pm.loadRulesFromFile();
+    // 4. The previously-granted target STILL asks — the grant did not revive.
+    expect(pm.checkDetailed(grantPattern, "builtin", "write").decision).toBe("ask");
+    expect(mockStore.rules.some((r) => r.pattern === grantPattern)).toBe(false);
+  });
+
   it("keeps a grant on the root directory entry itself (strict descendant only)", async () => {
     await pm.addAlwaysAllowedPersist(`read_file:path:${root}`, "read");
     const pruned = await pm.prunePathGrantsUnderRoot(root);
-    expect(pruned).toBe(0);
+    expect(pruned).toHaveLength(0);
     expect(mockStore.rules).toHaveLength(1);
   });
 
@@ -833,7 +868,7 @@ describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
       const underSibling = join(sibling, "file.md");
       await pm.addAlwaysAllowedPersist(`write_file:path:${underSibling}`, "write");
       const pruned = await pm.prunePathGrantsUnderRoot(root);
-      expect(pruned).toBe(0);
+      expect(pruned).toHaveLength(0);
       expect(mockStore.rules).toHaveLength(1);
     } finally {
       rmSync(sibling, { recursive: true, force: true });
@@ -844,25 +879,87 @@ describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
     await pm.addAlwaysAllowedPersist("web_fetch", "read"); // plain tool-name glob
     await pm.addAlwaysDeniedPersist(`write_file:path:${join(root, "x.md")}`); // deny under root
     const pruned = await pm.prunePathGrantsUnderRoot(root);
-    expect(pruned).toBe(0);
+    expect(pruned).toHaveLength(0);
     expect(mockStore.rules).toHaveLength(2);
   });
 
-  it("prunes multiple grants and reports the count", async () => {
-    await pm.addAlwaysAllowedPersist(`write_file:path:${join(root, "a.md")}`, "write");
-    await pm.addAlwaysAllowedPersist(`edit_file:path:${join(root, "deep", "b.ts")}`, "write");
+  it("prunes multiple grants and returns their audit tuples", async () => {
+    const aPath = join(root, "a.md");
+    const bPath = join(root, "deep", "b.ts");
+    await pm.addAlwaysAllowedPersist(`write_file:path:${aPath}`, "write");
+    await pm.addAlwaysAllowedPersist(`edit_file:path:${bPath}`, "write");
     await pm.addAlwaysAllowedPersist("web_fetch", "read"); // untouched
     const pruned = await pm.prunePathGrantsUnderRoot(root);
-    expect(pruned).toBe(2);
+    expect(pruned).toHaveLength(2);
+    // Per-pattern provenance (item-4): tool name + tier + raw path preserved.
+    const byTool = Object.fromEntries(pruned.map((p) => [p.toolName, p]));
+    expect(byTool.write_file).toMatchObject({ tier: "write", path: aPath });
+    expect(byTool.edit_file).toMatchObject({ tier: "write", path: bPath });
     expect(mockStore.rules).toHaveLength(1);
     expect(mockStore.rules[0]!.pattern).toBe("web_fetch");
   });
 
-  it("returns 0 when nothing matches (no persist side effect)", async () => {
+  it("returns an empty list when nothing matches (no persist side effect)", async () => {
     await pm.addAlwaysAllowedPersist("web_fetch", "read");
     const pruned = await pm.prunePathGrantsUnderRoot(root);
-    expect(pruned).toBe(0);
+    expect(pruned).toHaveLength(0);
     expect(mockStore.rules).toHaveLength(1);
+  });
+
+  // #1494 item-3 — Windows case-variant prune (end-to-end through the real prune
+  // with a manually-cased pattern string). On a case-insensitive filesystem
+  // (darwin/win32) a grant stored as an UPPER-cased path must still prune under a
+  // lower-cased root. On case-sensitive filesystems (linux) the cased path is a
+  // genuinely different path, so this scenario does not apply — skip there.
+  const caseInsensitiveFs = process.platform === "darwin" || process.platform === "win32";
+  it.runIf(caseInsensitiveFs)(
+    "prunes a case-variant grant path via the caseFoldForMatch branch",
+    async () => {
+      // Store the grant under an UPPER-cased spelling of a real descendant path.
+      const realTarget = join(root, "Docs", "Note.md");
+      const upper = realTarget.toUpperCase();
+      await pm.addAlwaysAllowedPersist(`write_file:path:${upper}`, "write");
+      // Prune via the lower-cased root spelling — case-fold must still match.
+      const pruned = await pm.prunePathGrantsUnderRoot(root.toLowerCase());
+      expect(pruned).toHaveLength(1);
+      expect(pruned[0]!.path).toBe(upper);
+      expect(mockStore.rules).toHaveLength(0);
+    },
+  );
+
+  // #1494 item-3 — symlinked-root prune. Grant stored under the REAL target while
+  // the root is removed via a symlink that points at it (or vice-versa). The
+  // dual-form canonical compare (realpathSync in canonicalizePathForMatch)
+  // resolves both to the same real path so the grant still prunes. Symlink
+  // creation needs privilege on Windows → skip gracefully if it throws (follows
+  // the workspace-preview.test.ts symlink precedent).
+  it("prunes a grant stored under the real target when the root is a symlink to it", async () => {
+    const realRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "lvis-prune-realroot-")));
+    const linkRoot = join(tmpdir(), `lvis-prune-link-${Date.now()}`);
+    const linkType = process.platform === "win32" ? "junction" : "dir";
+    let linkOk = true;
+    try {
+      symlinkSync(realRoot, linkRoot, linkType);
+    } catch {
+      linkOk = false; // no symlink privilege (Windows without admin) → skip body
+    }
+    if (!linkOk) {
+      rmSync(realRoot, { recursive: true, force: true });
+      return;
+    }
+    try {
+      // Grant is stored under the REAL target path…
+      const underReal = join(realRoot, "sub", "note.md");
+      await pm.addAlwaysAllowedPersist(`write_file:path:${underReal}`, "write");
+      // …but the root is removed via the SYMLINK path. canonicalizePathForMatch
+      // realpaths the link back to realRoot, so the descendant check matches.
+      const pruned = await pm.prunePathGrantsUnderRoot(join(linkRoot, "sub", ".."));
+      expect(pruned).toHaveLength(1);
+      expect(mockStore.rules).toHaveLength(0);
+    } finally {
+      rmSync(linkRoot, { recursive: true, force: true });
+      rmSync(realRoot, { recursive: true, force: true });
+    }
   });
 });
 
@@ -880,5 +977,22 @@ describe("path-grant prune helpers (#1493)", () => {
     expect(isStrictPathDescendant("/a/b", "/a/bc")).toBe(false); // sibling prefix
     expect(isStrictPathDescendant("/a/b/", "/a/b/c")).toBe(true); // trailing-slash root
     expect(isStrictPathDescendant("C:/a", "C:/a/b")).toBe(true);
+    // #1494 item-7 — backslash separators are normalized before the compare.
+    expect(isStrictPathDescendant("C:\\a", "C:\\a\\b")).toBe(true);
+  });
+
+  // #1494 item-7 — the helper now folds case DEFENSIVELY (a caller that forgot
+  // to pre-case-fold can't leak a case-variant descendant). On darwin/win32 the
+  // fold makes a case-variant child match; on linux (case-sensitive) it stays a
+  // distinct path, which is the correct filesystem semantics.
+  const caseFoldingFs = process.platform === "darwin" || process.platform === "win32";
+  it("isStrictPathDescendant folds case defensively on case-insensitive FS", () => {
+    if (caseFoldingFs) {
+      expect(isStrictPathDescendant("/A/B", "/a/b/c")).toBe(true);
+      expect(isStrictPathDescendant("/a/b", "/A/B/C")).toBe(true);
+    } else {
+      // linux: distinct paths, no accidental fold.
+      expect(isStrictPathDescendant("/A/B", "/a/b/c")).toBe(false);
+    }
   });
 });

@@ -53,6 +53,26 @@ export type ExecutionMode = "default" | "strict" | "auto" | "allow";
  */
 export type GrantTier = "read" | "write";
 
+/**
+ * #1494 item-4 — a single path-scoped "Allow always" grant pruned by
+ * {@link PermissionManager.prunePathGrantsUnderRoot}. Returned so the caller
+ * (workspace.removeRoot) can write a redacted per-pattern audit tuple instead of
+ * only a count. `path` is the RAW extracted grant path (unredacted) — the caller
+ * is responsible for `redactFsPath`-ing it before it reaches the audit log; it
+ * never crosses the IPC boundary to the renderer.
+ */
+export interface PrunedGrant {
+  /** The full persisted rule pattern, e.g. `write_file:path:/abs/target`. */
+  pattern: string;
+  /** Tool-name prefix of the grant (`write_file`), or the whole pattern if the
+   * marker split is unexpectedly absent (defensive — should not happen). */
+  toolName: string;
+  /** Graduated grant tier at prune time (legacy/absent → grandfathered write). */
+  tier: GrantTier;
+  /** Raw absolute path the grant targeted (UNREDACTED — caller must redact). */
+  path: string;
+}
+
 export interface PermissionRule {
 
   pattern: string;
@@ -733,17 +753,41 @@ export class PermissionManager {
    * folder they picked; it maps to the read-list entry, not a file under it).
    *
    * Non-path allow rules (plain tool-name globs like `web_fetch`) and deny rules
-   * are never touched. Returns the number of allow rules pruned so the caller
-   * (workspace.removeRoot) can surface it in the renderer toast.
+   * are never touched.
+   *
+   * #1494 item-4 (forensics): returns the pruned grants as {@link PrunedGrant}
+   * tuples — `{ pattern, toolName, tier, path }` — so the caller
+   * (workspace.removeRoot) can audit redacted per-pattern provenance, not just a
+   * count. The count stays derivable (`result.length`); the IPC response shape is
+   * UNCHANGED (renderer still receives a bare `prunedGrants` number — the pattern
+   * list is audit-only and never crosses the IPC boundary).
+   *
+   * #1494 item-5 (store-time form): grants are persisted in raw `pathResolve`
+   * form (file-tools `resolveApprovalPath`) while this prune canonicalizes via
+   * `canonicalizePathForMatch` (realpath + NFC). Rather than move realpath into
+   * the synchronous approval hot path (which would also silently invalidate every
+   * existing user's raw-form grant), the prune does a belt-and-braces DUAL-FORM
+   * compare: a stored grant is under the root if EITHER its canonical form OR its
+   * raw `pathResolve` form is a strict descendant of the correspondingly-formed
+   * root. This catches grants stored before AND after any future canonicalization
+   * change with zero hot-path cost. See the commit body for the full rationale.
    */
-  async prunePathGrantsUnderRoot(root: string): Promise<number> {
+  async prunePathGrantsUnderRoot(root: string): Promise<PrunedGrant[]> {
+    // Dual-form roots (item-5): canonical (realpath'd) and raw (pathResolve only).
     const rootCanon = caseFoldForMatch(canonicalizePathForMatch(root));
+    const rootRaw = caseFoldForMatch(resolve(root).replace(/\\/g, "/"));
     const isUnderRoot = (pattern: string): boolean => {
       const target = extractGrantPath(pattern);
       if (target === null) return false;
+      // A grant matches if EITHER form places it strictly under the root. The two
+      // forms are compared like-for-like (canonical↔canonical, raw↔raw) so a
+      // realpath'd stored grant and a raw stored grant are both caught.
+      // isStrictPathDescendant folds case defensively (item-7), so passing the
+      // already-folded strings is safe + idempotent.
       const targetCanon = caseFoldForMatch(canonicalizePathForMatch(target));
-      // Strict descendant only — equal path (a grant on the root itself) is kept.
-      return isStrictPathDescendant(rootCanon, targetCanon);
+      if (isStrictPathDescendant(rootCanon, targetCanon)) return true;
+      const targetRaw = caseFoldForMatch(resolve(target).replace(/\\/g, "/"));
+      return isStrictPathDescendant(rootRaw, targetRaw);
     };
 
     // The persisted file is the SOT for path grants: addAlwaysAllowedPersist
@@ -752,21 +796,23 @@ export class PermissionManager {
     // loadRulesFromFile). Scan the file, not `this.rules`, so a grant made this
     // session is still pruned. Do the read + filter inside ONE
     // updatePermissionsFile pass (atomic under the store lock) and collect the
-    // pruned patterns so in-memory state (rules + alwaysAllowed) is reconciled.
-    const prunedPatterns = new Set<string>();
+    // pruned grants so in-memory state (rules + alwaysAllowed) is reconciled and
+    // the caller can audit per-pattern tuples.
+    const pruned: PrunedGrant[] = [];
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
       file.rules = file.rules.filter((r) => {
         if (r.action === "allow" && !r.source && isUnderRoot(r.pattern)) {
-          prunedPatterns.add(r.pattern);
+          pruned.push(describePrunedGrant(r.pattern, r.tier));
           return false;
         }
         return true;
       });
     });
-    if (prunedPatterns.size === 0) return 0;
+    if (pruned.length === 0) return [];
 
     // Reconcile in-memory caches with the persisted shrink (a boot-hydrated rule
     // or a same-session Map entry for the pruned pattern must also drop).
+    const prunedPatterns = new Set(pruned.map((p) => p.pattern));
     this.rules = this.rules.filter(
       (r) => !(r.action === "allow" && !r.source && prunedPatterns.has(r.pattern)),
     );
@@ -775,7 +821,7 @@ export class PermissionManager {
     this.broadcastConfigChanged?.();
     // A revoke narrows policy — outstanding bearers must re-resolve under it.
     this.revokeAllPluginAccess(`root-removed-prune:${root}`);
-    return prunedPatterns.size;
+    return pruned;
   }
 
   /**
@@ -1478,16 +1524,31 @@ export class PermissionManager {
 
 // ── #1493 path-grant prune helpers ───────────────────
 /**
- * The marker `approvalCacheKeyFor` + file-tools use to embed a resolved path in
- * a persisted grant pattern: `<toolName>:path:<absPath>`. Splitting on the FIRST
+ * The marker `approvalCacheKeyFor` + the single-path file tools (`write_file`,
+ * `edit_file`, `apply_patch`, `delete_file`) use to embed a resolved path in a
+ * persisted grant pattern: `<toolName>:path:<absPath>`. Splitting on the FIRST
  * occurrence is Windows-safe — the tool name never contains `:path:`, and the
  * `<absPath>` tail keeps its own drive-letter colon (`C:\…`) intact.
+ *
+ * INTENTIONAL SCOPE — `move_file` is NOT covered. MoveFileTool.approvalCacheKey
+ * emits a `source:<abs>:destination:<abs>` pattern (two paths, no `:path:`
+ * marker — see `src/tools/file-tools.ts` MoveFileTool), so
+ * {@link extractGrantPath} returns null for it and a move grant is never pruned
+ * by {@link PermissionManager.prunePathGrantsUnderRoot}. This is deliberate: a
+ * move straddles two paths (potentially two different roots), so "does this
+ * grant live under the removed root?" has no single-path answer. Move grants are
+ * left intact on root removal (they are rare and category-`write`, so they still
+ * re-prompt via the tier gate for any path the read-list no longer covers). If a
+ * future change wants move grants pruned, it must decide the source-vs-destination
+ * semantics explicitly rather than silently widening this marker.
  */
 const GRANT_PATH_MARKER = ":path:";
 
 /**
  * Extract the absolute path a path-scoped grant pattern targets, or `null` when
- * the pattern is not a path grant (a plain tool-name glob like `web_fetch`).
+ * the pattern is not a path grant. Returns null for plain tool-name globs
+ * (`web_fetch`) AND for `move_file`'s `source:…:destination:…` pattern (see
+ * {@link GRANT_PATH_MARKER} — move grants are intentionally out of prune scope).
  */
 export function extractGrantPath(pattern: string): string | null {
   const idx = pattern.indexOf(GRANT_PATH_MARKER);
@@ -1497,17 +1558,37 @@ export function extractGrantPath(pattern: string): string | null {
 }
 
 /**
- * True when `child` is a STRICT descendant of `parent` — both already
- * canonicalized + case-folded. Equal paths return false (a grant on the root
- * folder itself is not pruned). The separator guard prevents `/a/foo` from
- * matching under `/a/fo`.
+ * #1494 item-4 — decompose a pruned grant pattern into an auditable tuple. The
+ * tool-name is the prefix before {@link GRANT_PATH_MARKER}; the path is the tail
+ * (already validated non-null by the prune's `isUnderRoot` guard, but fall back
+ * to the whole pattern defensively). Only called on patterns that
+ * {@link extractGrantPath} returned non-null for.
+ */
+function describePrunedGrant(pattern: string, tier: GrantTier | undefined): PrunedGrant {
+  const idx = pattern.indexOf(GRANT_PATH_MARKER);
+  const toolName = idx > 0 ? pattern.slice(0, idx) : pattern;
+  const path = extractGrantPath(pattern) ?? pattern;
+  return { pattern, toolName, tier: normalizeTier(tier), path };
+}
+
+/**
+ * True when `child` is a STRICT descendant of `parent`. Both inputs SHOULD
+ * already be canonicalized (realpath'd via {@link canonicalizePathForMatch}) by
+ * the caller — this helper does NOT realpath. It DOES fold defensively: slashes
+ * are normalized and both sides are run through {@link caseFoldForMatch} so a
+ * caller that forgot to case-fold (the previous implicit contract) cannot leak a
+ * case-variant descendant past the prefix check on darwin/win32. Case-folding is
+ * a cheap string op and idempotent on an already-folded input, so the defensive
+ * fold is free for correct callers and closes the footgun for the rest. Equal
+ * paths return false (a grant on the root folder itself is not pruned). The
+ * trailing-separator guard prevents `/a/foo` from matching under `/a/fo`.
  */
 export function isStrictPathDescendant(parent: string, child: string): boolean {
-  if (child === parent) return false;
-  const base = parent.endsWith("/") ? parent : `${parent}/`;
-  const normChild = child.replace(/\\/g, "/");
-  const normBase = base.replace(/\\/g, "/");
-  return normChild.startsWith(normBase);
+  const foldedParent = caseFoldForMatch(parent.replace(/\\/g, "/"));
+  const foldedChild = caseFoldForMatch(child.replace(/\\/g, "/"));
+  if (foldedChild === foldedParent) return false;
+  const base = foldedParent.endsWith("/") ? foldedParent : `${foldedParent}/`;
+  return foldedChild.startsWith(base);
 }
 
 // ── P2 graduated grant tier helpers ──────────────────
