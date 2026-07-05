@@ -220,7 +220,6 @@ describe("Sidebar legacy default-root session handling", () => {
       await waitFor(() => {
         expect(getByTestId("sidebar-unassigned-sessions").textContent).toContain("레거시 기본 프로젝트 대화");
       });
-      const unassigned = getByTestId("sidebar-unassigned-sessions");
       expect(getByText("레거시 기본 프로젝트 대화")).toBeTruthy();
       // No ghost project group synthesized from the default root anywhere in
       // the Projects tab — only the unrelated "other-app" real project from
