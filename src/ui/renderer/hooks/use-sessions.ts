@@ -20,12 +20,22 @@ export interface SessionSummary {
 export interface SessionProjectSummary {
   projectRoot?: string;
   projectName?: string;
+  /** True when projectRoot/projectName reflect the ambient default directory
+   *  binding rather than an explicit project selection — see
+   *  `chatGetHistory`'s `projectIsDefault` field. Absent (undefined) for
+   *  sources that read PERSISTED session metadata (chatSessionHistory) rather
+   *  than the live in-memory context, where "no project fields at all" is
+   *  already the unambiguous "no explicit project" signal. */
+  isDefault?: boolean;
 }
 
-function sessionProjectFromHistory(history: SessionProjectSummary): SessionProjectSummary {
+function sessionProjectFromHistory(
+  history: { projectRoot?: string; projectName?: string; projectIsDefault?: boolean },
+): SessionProjectSummary {
   return {
     ...(history.projectRoot ? { projectRoot: history.projectRoot } : {}),
     ...(history.projectName ? { projectName: history.projectName } : {}),
+    ...(history.projectIsDefault ? { isDefault: true } : {}),
   };
 }
 

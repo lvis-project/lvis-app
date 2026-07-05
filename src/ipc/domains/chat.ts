@@ -287,13 +287,18 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const { project } = resolved;
     conversationLoop.newConversation("main", project);
     // Persist the resolved project identity to the new session's metadata at
-    // creation — mirroring startRoutineConversation. Without this, a main
-    // session's projectRoot/projectName only landed post-turn (markMainActive
-    // AfterTurn), so the Insights "프로젝트별 대화" group-by (which reads
-    // listSessions metadata) fell back to "프로젝트 없음" for the default
-    // project. Writing metadata here makes every new main session groupable by
-    // its project immediately. Full-overwrite is safe: the session is brand new.
-    if (project.projectRoot || project.projectName) {
+    // creation — mirroring startRoutineConversation — but ONLY when the user
+    // explicitly selected a real (non-default) project. A session created
+    // with no explicit project (the common case: plain "New Chat") runs
+    // against the default/base-directory binding internally (unaffected —
+    // conversationLoop.newConversation above already applied it for tool
+    // access) but must NOT be tagged with it in metadata: "no project" (null
+    // fields) is the normal persisted state, so the sidebar renders it as a
+    // plain ungrouped conversation and Insights buckets it under "No
+    // project" rather than a synthetic "default"/"Current Project" label
+    // (2026-07 "remove Current Project labeling" refinement). Full-overwrite
+    // is safe: the session is brand new.
+    if (!project.isDefault && (project.projectRoot || project.projectName)) {
       await memoryManager.saveSessionMetadata(conversationLoop.getSessionId(), {
         sessionKind: "main",
         ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),

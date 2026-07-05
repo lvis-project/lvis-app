@@ -264,19 +264,29 @@ export async function markMainActiveAfterTurn(deps: IpcDeps, input: string): Pro
   const { conversationLoop, memoryManager } = deps;
   if (conversationLoop.getSessionKind() !== "main") return;
   if (conversationLoop.getHistory().length > 0) {
-    const project = typeof conversationLoop.getSessionProjectContext === "function"
-      ? conversationLoop.getSessionProjectContext()
-      : {
-          projectRoot: typeof conversationLoop.getSessionProjectRoot === "function" ? conversationLoop.getSessionProjectRoot() ?? undefined : undefined,
-          projectName: typeof conversationLoop.getSessionProjectName === "function" ? conversationLoop.getSessionProjectName() ?? undefined : undefined,
-        };
-    if (project.projectRoot || project.projectName) {
-      const existing = memoryManager.loadSessionMetadata(conversationLoop.getSessionId()) ?? {};
-      await memoryManager.saveSessionMetadata(conversationLoop.getSessionId(), {
-        ...existing,
-        sessionKind: "main",
-        ...project,
-      });
+    // "No explicit project" sessions (the default/base-directory binding)
+    // must NOT persist projectRoot/projectName into metadata — null project
+    // fields are the normal state for them (2026-07 "remove Current Project
+    // labeling"). Duck-typed fallback defaults to `false` (persist) so a test
+    // double that predates this getter keeps its prior behavior.
+    const isDefaultProject = typeof conversationLoop.getSessionProjectIsDefault === "function"
+      ? conversationLoop.getSessionProjectIsDefault()
+      : false;
+    if (!isDefaultProject) {
+      const project = typeof conversationLoop.getSessionProjectContext === "function"
+        ? conversationLoop.getSessionProjectContext()
+        : {
+            projectRoot: typeof conversationLoop.getSessionProjectRoot === "function" ? conversationLoop.getSessionProjectRoot() ?? undefined : undefined,
+            projectName: typeof conversationLoop.getSessionProjectName === "function" ? conversationLoop.getSessionProjectName() ?? undefined : undefined,
+          };
+      if (project.projectRoot || project.projectName) {
+        const existing = memoryManager.loadSessionMetadata(conversationLoop.getSessionId()) ?? {};
+        await memoryManager.saveSessionMetadata(conversationLoop.getSessionId(), {
+          ...existing,
+          sessionKind: "main",
+          ...project,
+        });
+      }
     }
     await memoryManager.markMainActiveResume(conversationLoop.getSessionId());
     return;
@@ -409,6 +419,14 @@ export function handleChatGetHistory(deps: IpcDeps) {
     ...(conversationLoop.getSessionRoutineTitle() ? { routineTitle: conversationLoop.getSessionRoutineTitle() } : {}),
     ...(conversationLoop.getSessionProjectRoot() ? { projectRoot: conversationLoop.getSessionProjectRoot() } : {}),
     ...(conversationLoop.getSessionProjectName() ? { projectName: conversationLoop.getSessionProjectName() } : {}),
+    // Live in-memory binding: ALWAYS resolved (default included), unlike the
+    // persisted session metadata which now omits project fields entirely for
+    // "no explicit project" sessions. The renderer needs this flag to tell
+    // "user explicitly picked this project" apart from "just the ambient
+    // default directory" when the composer/sidebar want to show the real name
+    // vs a "Select project" placeholder for the ACTIVE (not-yet-persisted)
+    // session.
+    ...(conversationLoop.getSessionProjectIsDefault() ? { projectIsDefault: true } : {}),
     messages: messages.map(serializeHistoryMessage),
   };
 }
