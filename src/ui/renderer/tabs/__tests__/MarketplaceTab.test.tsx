@@ -190,4 +190,25 @@ describe("MarketplaceTab", () => {
     expect((action as HTMLButtonElement).disabled).toBe(true);
     expect(api.listMarketplacePlugins).toHaveBeenCalledOnce();
   });
+
+  it("shows local provider/theme/language candidates when the remote catalog is empty", async () => {
+    const api = marketplaceTabApi({
+      listMarketplacePlugins: vi.fn().mockResolvedValue([]),
+    });
+    render(<MarketplaceTab {...defaultProps(api)} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Providers" }));
+    expect(await screen.findByText("Groq Provider")).toBeTruthy();
+    const providerAction = await screen.findByTestId("marketplace:action:provider-groq");
+    expect(providerAction.textContent).toContain("준비 중");
+    expect((providerAction as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Themes" }));
+    expect(await screen.findByText("Tokyo Night Theme")).toBeTruthy();
+    expect(screen.queryByText("Moonstone Theme")).toBeNull();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Languages" }));
+    expect(await screen.findByText("한국어 Language Pack")).toBeTruthy();
+    expect(screen.queryByText("English Language Pack")).toBeNull();
+  });
 });
