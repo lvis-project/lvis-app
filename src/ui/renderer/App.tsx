@@ -205,6 +205,7 @@ export function App() {
     updates: marketplaceUpdates,
     dismiss: dismissMarketplaceUpdates,
     skip: skipMarketplaceUpdates,
+    resolveUpdated: resolveMarketplaceUpdates,
   } = useMarketplaceUpdates(api);
   const { announcements: marketplaceAnnouncements, dismiss: dismissMarketplaceAnnouncement } = useMarketplaceAnnouncements(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
@@ -747,6 +748,7 @@ export function App() {
         marketplaceUpdates={marketplaceUpdates}
         onDismissMarketplaceUpdates={dismissMarketplaceUpdates}
         onSkipMarketplaceUpdates={skipMarketplaceUpdates}
+        onResolveMarketplaceUpdates={resolveMarketplaceUpdates}
         onUpdatePlugin={installPlugin}
         marketplaceAnnouncements={marketplaceAnnouncements}
         onDismissMarketplaceAnnouncement={handleMarketplaceAnnouncementDismiss}
