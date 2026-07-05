@@ -961,6 +961,45 @@ describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
       rmSync(realRoot, { recursive: true, force: true });
     }
   });
+
+  // #1494 item-5 — raw-form branch of the dual-form compare must DECIDE the
+  // outcome, not just shadow the canonical branch. Scenario: a symlink INSIDE
+  // the root points outside it, and a grant was stored via the lexical
+  // (raw pathResolve) spelling under the root. canonicalizePathForMatch
+  // realpaths that grant OUT of the root (canonical compare → no match), but
+  // the grant was authorized under the root's spelling, so the raw lexical
+  // compare must still prune it.
+  it("prunes a grant whose lexical path is under the root but realpaths outside it (raw branch)", async () => {
+    const realRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "lvis-prune-rawroot-")));
+    const outside = realpathSync.native(mkdtempSync(join(tmpdir(), "lvis-prune-outside-")));
+    const linkInside = join(realRoot, "sub");
+    const linkType = process.platform === "win32" ? "junction" : "dir";
+    let linkOk = true;
+    try {
+      symlinkSync(outside, linkInside, linkType);
+    } catch {
+      linkOk = false; // no symlink privilege → skip body (workspace-preview precedent)
+    }
+    if (!linkOk) {
+      rmSync(realRoot, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+      return;
+    }
+    try {
+      // Grant stored in raw lexical form under the root, but "sub" realpaths
+      // to `outside` — the canonical compare alone would MISS this grant.
+      const lexicalUnderRoot = join(realRoot, "sub", "note.md");
+      await pm.addAlwaysAllowedPersist(`write_file:path:${lexicalUnderRoot}`, "write");
+      const pruned = await pm.prunePathGrantsUnderRoot(realRoot);
+      expect(pruned).toHaveLength(1);
+      expect(pruned[0]!.path).toBe(lexicalUnderRoot);
+      expect(mockStore.rules).toHaveLength(0);
+    } finally {
+      rmSync(linkInside, { recursive: true, force: true });
+      rmSync(realRoot, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("path-grant prune helpers (#1493)", () => {
