@@ -37,6 +37,7 @@ import {
   unmarkMcpServerWrapped,
 } from "../permissions/sandbox-capability.js";
 import { shellQuote } from "../lib/shell-resolver.js";
+import { scrubSecretsForLLM } from "../audit/dlp-filter.js";
 import { t } from "../i18n/index.js";
 const log = createLogger("mcp-client");
 
@@ -1707,27 +1708,14 @@ function hasAuthorization(headers: Record<string, string>): boolean {
 
 /**
  * Strip likely secret material from error bodies before surfacing them in logs
- * or UI. This is best-effort redaction, but it should catch the common cases we
- * might reflect from MCP HTTP responses: bearer tokens, API keys in headers,
- * query params, and JSON payloads.
+ * or UI. Delegates the credential-class patterns to the shared SOT
+ * {@link scrubSecretsForLLM} (bearer tokens, `sk-…` keys, JWTs, auth headers,
+ * `?token=` params) — a single point that the diagnostics bundle also applies —
+ * then slices to 120 chars because this variant is for a short UI/error surface,
+ * not a full log line. The whole-line (slice-free) form lives in dlp-filter.
  */
 export function scrubSecrets(text: string): string {
-  return text
-    .replace(/[Bb]earer\s+[A-Za-z0-9._\-~+/=]+/g, "Bearer [redacted]")
-    .replace(
-      /((?:authorization|x-api-key|x-auth-token)\s*:\s*)[^\s\r\n]+/gi,
-      "$1[redacted]",
-    )
-    .replace(
-      /([?&](?:api[_-]?key|token|access[_-]?token|refresh[_-]?token))=([^&\s]+)/gi,
-      "$1=[redacted]",
-    )
-    .replace(
-      /(["'](?:api[_-]?key|token|access[_-]?token|refresh[_-]?token|authorization|x-api-key|x-auth-token)["']\s*:\s*["'])[^"']+(["'])/gi,
-      "$1[redacted]$2",
-    )
-    .replace(/\b(?:sk|pk|rk|proj|test|live)-[A-Za-z0-9_-]{8,}\b/g, "[redacted-token]")
-    .slice(0, 120);
+  return scrubSecretsForLLM(text).slice(0, 120);
 }
 
 function indexOfAny(haystack: string, needles: string[]): number {

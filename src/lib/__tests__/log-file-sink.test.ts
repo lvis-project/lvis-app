@@ -19,9 +19,14 @@ import {
   createLogFileSink,
   parseLogFileDate,
   pruneOldLogs,
+  capLogTree,
+  reprunePersistedRetention,
   LOG_RETENTION_DAYS,
   LOG_MAX_BYTES,
+  LOG_MAX_FILES_PER_DAY,
+  LOG_MAX_TOTAL_BYTES,
 } from "../log-file-sink.js";
+import { LOG_RETENTION_DAYS as SHARED_LOG_RETENTION_DAYS } from "../../shared/log-retention.js";
 
 let logDir: string;
 
@@ -152,6 +157,26 @@ describe("createLogFileSink — file creation + mode", () => {
     }
   });
 
+  it("runs capLogTree at init: an over-per-day-count tree is pruned on attach", async () => {
+    // Seed 22 sequence files for a recent (in-retention) day — above the
+    // LOG_MAX_FILES_PER_DAY cap of 20. createLogFileSink must invoke capLogTree
+    // at init (after the date-retention prune), so the oldest 2 are removed
+    // (#1499 E2 cluster-review critic gap: prove the init wiring, not just the
+    // capLogTree unit).
+    const day = daysAgo(1);
+    writeFileSync(join(logDir, `lvis-${day}.log`), "a");
+    for (let i = 1; i <= 21; i++) writeFileSync(join(logDir, `lvis-${day}.${i}.log`), "a");
+    const before = readdirSync(logDir).filter((f) => f.startsWith(`lvis-${day}`)).length;
+    expect(before).toBe(22);
+    const sink = createLogFileSink({ dir: logDir, retentionDays: 7 });
+    try {
+      const after = readdirSync(logDir).filter((f) => f.startsWith(`lvis-${day}`)).length;
+      expect(after).toBe(20); // capped to LOG_MAX_FILES_PER_DAY at init
+    } finally {
+      sink.destroy();
+    }
+  });
+
   it.runIf(process.platform !== "win32")(
     "enforces 0o600 on the log file (at open) and 0o700 on the directory",
     async () => {
@@ -180,10 +205,13 @@ describe("createLogFileSink — size-based sequence rolling", () => {
     const sink = createLogFileSink({ dir: logDir, retentionDays: 7, maxBytes: 64 });
     try {
       const base = join(logDir, `lvis-${todayDateStr()}.log`);
-      // Rolling is byte-count based (in-process, not statSync). 200 writes ×
-      // 21 bytes = 4200 bytes >> the 64-byte ceiling → several rolls.
+      // Rolling is byte-count based (in-process, not statSync). 8 writes ×
+      // 21 bytes = 168 bytes >> the 64-byte ceiling → a few rolls. Kept well
+      // under LOG_MAX_FILES_PER_DAY (20) so the #1499 per-day count cap (which
+      // prunes oldest sequences, base included, once a day exceeds the limit)
+      // does not delete the base file this assertion still expects to survive.
       const line = "x".repeat(20) + "\n";
-      for (let i = 0; i < 200; i++) sink.write(line);
+      for (let i = 0; i < 8; i++) sink.write(line);
       // currentFile (in-process, race-free) already reflects the final roll.
       const finalFile = sink.currentFile;
       expect(finalFile).not.toBe(base);
@@ -267,7 +295,77 @@ describe("createLogFileSink — size-based sequence rolling", () => {
 
 describe("SOT constants", () => {
   it("exports the documented defaults", () => {
-    expect(LOG_RETENTION_DAYS).toBe(7);
+    // LOG_RETENTION_DAYS is re-exported from the shared SOT — assert lockstep
+    // with src/shared/log-retention.ts rather than pinning a literal, so the two
+    // can never drift (#1499 E2 cluster-review architect MAJOR).
+    expect(LOG_RETENTION_DAYS).toBe(SHARED_LOG_RETENTION_DAYS);
     expect(LOG_MAX_BYTES).toBe(10 * 1024 * 1024);
+    expect(LOG_MAX_FILES_PER_DAY).toBe(20);
+    expect(LOG_MAX_TOTAL_BYTES).toBe(200 * 1024 * 1024);
+  });
+});
+
+describe("capLogTree — per-day count + total-byte caps (#1499 E2)", () => {
+  it("deletes oldest sequences beyond the per-day file limit", () => {
+    // 5 sequence files for one day; cap at 2 → oldest 3 removed.
+    writeFileSync(join(logDir, "lvis-2025-06-01.log"), "a");
+    for (let i = 1; i <= 4; i++) writeFileSync(join(logDir, `lvis-2025-06-01.${i}.log`), "a");
+    const deleted = capLogTree(logDir, { maxFilesPerDay: 2, maxTotalBytes: Infinity });
+    expect(deleted.length).toBe(3);
+    // The two highest sequences survive.
+    const remaining = readdirSync(logDir).sort();
+    expect(remaining).toEqual(["lvis-2025-06-01.3.log", "lvis-2025-06-01.4.log"]);
+  });
+
+  it("deletes oldest files first to satisfy the total-byte cap", () => {
+    writeFileSync(join(logDir, "lvis-2025-06-01.log"), "x".repeat(100));
+    writeFileSync(join(logDir, "lvis-2025-06-02.log"), "x".repeat(100));
+    writeFileSync(join(logDir, "lvis-2025-06-03.log"), "x".repeat(100));
+    const deleted = capLogTree(logDir, { maxFilesPerDay: 999, maxTotalBytes: 150 });
+    // Oldest (06-01) removed until total ≤ 150.
+    expect(deleted).toContain("lvis-2025-06-01.log");
+    expect(existsSync(join(logDir, "lvis-2025-06-03.log"))).toBe(true);
+  });
+
+  it("never deletes keepFile", () => {
+    const keep = join(logDir, "lvis-2025-06-01.5.log");
+    writeFileSync(join(logDir, "lvis-2025-06-01.log"), "a");
+    for (let i = 1; i <= 5; i++) writeFileSync(join(logDir, `lvis-2025-06-01.${i}.log`), "a");
+    capLogTree(logDir, { maxFilesPerDay: 1, maxTotalBytes: Infinity, keepFile: keep });
+    expect(existsSync(keep)).toBe(true);
+  });
+
+  it("missing dir is graceful", () => {
+    expect(capLogTree(join(logDir, "nope"))).toEqual([]);
+  });
+});
+
+describe("reprunePersistedRetention — boot re-prune (#1499 E2)", () => {
+  it("no-op when retention equals the default", () => {
+    writeFileSync(join(logDir, `lvis-${daysAgo(3)}.log`), "keep");
+    const deleted = reprunePersistedRetention(logDir, LOG_RETENTION_DAYS);
+    expect(deleted).toEqual([]);
+    expect(existsSync(join(logDir, `lvis-${daysAgo(3)}.log`))).toBe(true);
+  });
+
+  it("a tightened window (< default) prunes files older than the new window", () => {
+    // 3-day-old file survives the default (7) but not a tightened window of 2.
+    writeFileSync(join(logDir, `lvis-${daysAgo(3)}.log`), "old");
+    writeFileSync(join(logDir, `lvis-${daysAgo(1)}.log`), "recent");
+    const deleted = reprunePersistedRetention(logDir, 2);
+    expect(deleted).toContain(`lvis-${daysAgo(3)}.log`);
+    expect(existsSync(join(logDir, `lvis-${daysAgo(3)}.log`))).toBe(false);
+    expect(existsSync(join(logDir, `lvis-${daysAgo(1)}.log`))).toBe(true);
+  });
+
+  it("also re-runs capLogTree (per-day count cap) after the date prune", () => {
+    // A tightened window triggers the re-prune path; capLogTree must then cap an
+    // over-count day (symmetry with the sink's init sequence — architect NIT).
+    const day = daysAgo(1);
+    writeFileSync(join(logDir, `lvis-${day}.log`), "a");
+    for (let i = 1; i <= 21; i++) writeFileSync(join(logDir, `lvis-${day}.${i}.log`), "a");
+    reprunePersistedRetention(logDir, 5);
+    const remaining = readdirSync(logDir).filter((f) => f.startsWith(`lvis-${day}`)).length;
+    expect(remaining).toBe(LOG_MAX_FILES_PER_DAY);
   });
 });

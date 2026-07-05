@@ -56,13 +56,16 @@ import { join } from "node:path";
 // name is a valid runtime constructor under esModuleInterop.
 import { SonicBoom } from "sonic-boom";
 import { lvisHome } from "../shared/lvis-home.js";
+import { LOG_RETENTION_DAYS } from "../shared/log-retention.js";
 
 /**
- * Retention window (days) for `~/.lvis/logs/` files. Single source of truth.
- * A later E2 change will make this configurable via `diagnostics.logRetentionDays`
- * (master plan §2(d)); until then this constant is the SOT and the default.
+ * Retention window (days) for `~/.lvis/logs/` files. Re-exported from the fs-free
+ * SOT {@link ../shared/log-retention.LOG_RETENTION_DAYS} so this sink and the
+ * settings store (`DEFAULT_SETTINGS.diagnostics.logRetentionDays`) share one
+ * literal — a drift between the boot-time prune window and the UI-reported value
+ * is impossible by construction (#1499 E2 cluster-review architect MAJOR).
  */
-export const LOG_RETENTION_DAYS = 7;
+export { LOG_RETENTION_DAYS } from "../shared/log-retention.js";
 
 /**
  * Per-file size ceiling (bytes) before the active log rolls to a new sequence
@@ -70,6 +73,25 @@ export const LOG_RETENTION_DAYS = 7;
  * pressure behaves consistently across both log families.
  */
 export const LOG_MAX_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Per-day sequence-file COUNT ceiling (#1499 E2 hardening). Date-in-filename
+ * rotation + the {@link LOG_MAX_BYTES} size guard together let a single busy day
+ * spawn unbounded `lvis-<date>.<seq>.log` files. Once a day has more than this
+ * many files, the OLDEST sequences for that day are pruned so the sequence set
+ * stays bounded. 20 × 10 MB = 200 MB worst case for one day. Single source of
+ * truth.
+ */
+export const LOG_MAX_FILES_PER_DAY = 20;
+
+/**
+ * Whole-tree TOTAL byte ceiling (#1499 E2 hardening). Independent of per-day
+ * count and per-file size — a defence against many small days summing to a large
+ * tree. When the `logs/` dir exceeds this at init/roll, the oldest files (by
+ * embedded date, then sequence) are deleted until the tree is back under the cap.
+ * 200 MB. Single source of truth.
+ */
+export const LOG_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
@@ -147,6 +169,129 @@ export function pruneOldLogs(dir: string, retentionDays: number, now: number = D
 }
 
 /**
+ * A log file with its parsed sort key. Sorted ascending = oldest first (by
+ * embedded date, then sequence number).
+ */
+interface LogFileInfo {
+  name: string;
+  dateStr: string;
+  seq: number;
+  size: number;
+}
+
+/** Parse the sequence number out of a `lvis-<date>[.seq].log` name (0 = base). */
+function parseLogSeq(fileName: string): number {
+  const m = fileName.match(/^lvis-\d{4}-\d{2}-\d{2}\.(\d+)\.log$/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+/** Read all `lvis-*` log files in `dir` with size + sort keys. Missing → []. */
+function listLogFiles(dir: string): LogFileInfo[] {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const out: LogFileInfo[] = [];
+  for (const name of entries) {
+    const dateStr = parseLogFileDate(name);
+    if (!dateStr) continue;
+    let size = 0;
+    try {
+      size = statSync(join(dir, name)).size;
+    } catch {
+      continue;
+    }
+    out.push({ name, dateStr, seq: parseLogSeq(name), size });
+  }
+  return out;
+}
+
+/**
+ * Enforce the per-day file-count ceiling ({@link LOG_MAX_FILES_PER_DAY}) and the
+ * whole-tree total-byte ceiling ({@link LOG_MAX_TOTAL_BYTES}) by deleting the
+ * OLDEST files first. Called at init (after retention prune) and after each roll,
+ * so the tree can never grow unbounded within a single day or across days.
+ *
+ * NEVER deletes `keepFile` (the currently-active file) — dropping the file we
+ * are about to write would sever the sink. Best-effort: unreadable/locked files
+ * are skipped, and any failure is swallowed (logging must not break on cleanup).
+ * Returns the list of deleted file names (for test assertions).
+ */
+export function capLogTree(
+  dir: string,
+  opts: { maxFilesPerDay?: number; maxTotalBytes?: number; keepFile?: string } = {},
+): string[] {
+  const maxFilesPerDay = opts.maxFilesPerDay ?? LOG_MAX_FILES_PER_DAY;
+  const maxTotalBytes = opts.maxTotalBytes ?? LOG_MAX_TOTAL_BYTES;
+  const deleted: string[] = [];
+
+  let files = listLogFiles(dir);
+  // Oldest first: date ascending, then sequence ascending.
+  const byAge = (a: LogFileInfo, b: LogFileInfo): number =>
+    a.dateStr === b.dateStr ? a.seq - b.seq : a.dateStr < b.dateStr ? -1 : 1;
+
+  const remove = (f: LogFileInfo): void => {
+    if (opts.keepFile && join(dir, f.name) === opts.keepFile) return;
+    try {
+      unlinkSync(join(dir, f.name));
+      deleted.push(f.name);
+    } catch {
+      /* locked/removed — skip, never throw */
+    }
+  };
+
+  // ── Per-day count cap ── delete oldest sequences beyond the limit, per date.
+  const byDay = new Map<string, LogFileInfo[]>();
+  for (const f of files) {
+    const list = byDay.get(f.dateStr) ?? [];
+    list.push(f);
+    byDay.set(f.dateStr, list);
+  }
+  for (const list of byDay.values()) {
+    if (list.length <= maxFilesPerDay) continue;
+    list.sort(byAge);
+    const overflow = list.slice(0, list.length - maxFilesPerDay);
+    for (const f of overflow) remove(f);
+  }
+
+  // ── Total-bytes cap ── re-scan (some may be gone) then delete oldest first.
+  files = listLogFiles(dir).filter((f) => !deleted.includes(f.name));
+  let total = files.reduce((s, f) => s + f.size, 0);
+  if (total > maxTotalBytes) {
+    files.sort(byAge);
+    for (const f of files) {
+      if (total <= maxTotalBytes) break;
+      if (opts.keepFile && join(dir, f.name) === opts.keepFile) continue;
+      const before = deleted.length;
+      remove(f);
+      if (deleted.length > before) total -= f.size;
+    }
+  }
+  return deleted;
+}
+
+/**
+ * Re-prune the log tree with a persisted (user-configured) retention window at
+ * boot (#1499 E2). The sink already pruned at {@link LOG_RETENTION_DAYS} before
+ * settings loaded (hoisted so early boot lines are captured); once settings
+ * exist, honour a tightened/loosened window. No-op when `retentionDays` equals
+ * the default (the sink already applied it). Runs {@link capLogTree} after the
+ * date prune, mirroring the sink's own init sequence so both prune paths stay
+ * symmetric (architect NIT). Best-effort — never throws (both helpers swallow
+ * I/O errors), so a prune failure can never affect boot.
+ *
+ * Returns the list of files deleted by the date-retention pass (for tests).
+ */
+export function reprunePersistedRetention(dir: string, retentionDays: number): string[] {
+  if (retentionDays === LOG_RETENTION_DAYS) return [];
+  const deleted = pruneOldLogs(dir, retentionDays);
+  capLogTree(dir);
+  return deleted;
+}
+
+/**
  * Choose the sequence number for today's active file: the highest existing
  * sequence for `dateStr` whose file is still under `maxBytes`, else the next
  * fresh sequence. On a fresh day this returns the base file (seq 0) unless it
@@ -217,6 +362,8 @@ export function createLogFileSink(options: LogFileSinkOptions = {}): LogFileSink
 
   ensureLogDir(dir);
   pruneOldLogs(dir, retentionDays);
+  // Enforce the per-day count + whole-tree byte caps AFTER date-retention prune.
+  capLogTree(dir);
 
   const dateStr = todayDateStr();
   let seq = resolveActiveSeq(dir, dateStr, maxBytes);
@@ -293,6 +440,10 @@ export function createLogFileSink(options: LogFileSinkOptions = {}): LogFileSink
     } catch {
       /* best effort */
     }
+    // After rolling, re-enforce the count/byte caps — the just-closed file may
+    // have pushed the day over LOG_MAX_FILES_PER_DAY or the tree over the total
+    // cap. Never delete the new active file (keepFile).
+    capLogTree(dir, { keepFile: currentFile });
   };
 
   return {

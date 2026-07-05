@@ -16,6 +16,11 @@ vi.mock("electron", () => ({
 }));
 
 import { SettingsService } from "../settings-store.js";
+import {
+  LOG_RETENTION_DAYS,
+  LOG_RETENTION_MIN_DAYS,
+  LOG_RETENTION_MAX_DAYS,
+} from "../../shared/log-retention.js";
 import { DEFAULT_BUNDLE_ID } from "../../shared/theme-bundles.js";
 import { setProcessPlatform } from "../../testing/process-platform.js";
 
@@ -1201,5 +1206,52 @@ describe("SettingsService E4 — shortcuts + launch-at-startup", () => {
     const s = new SettingsService({ userDataPath });
     // Corrupt fields fall back to defaults (No-Fallback at boundary).
     expect(s.get("shortcuts")).toEqual({ toggleWindow: null, enabled: false });
+  });
+});
+
+describe("SettingsService diagnostics (#1499 E2)", () => {
+  let userDataPath: string;
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-diagnostics-"));
+  });
+  afterEach(() => {
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  it("defaults: includeCrashDumps false, logRetentionDays = LOG_RETENTION_DAYS SOT", () => {
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("diagnostics")).toEqual({
+      includeCrashDumps: false,
+      logRetentionDays: LOG_RETENTION_DAYS,
+    });
+  });
+
+  it("patch persists valid values", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ diagnostics: { includeCrashDumps: true, logRetentionDays: 30 } });
+    expect(s.get("diagnostics")).toEqual({ includeCrashDumps: true, logRetentionDays: 30 });
+  });
+
+  it("patch clamps out-of-range retention and drops non-boolean includeCrashDumps", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ diagnostics: { logRetentionDays: 99999 } });
+    expect(s.get("diagnostics").logRetentionDays).toBe(LOG_RETENTION_MAX_DAYS); // clamped to max
+    await s.patch({ diagnostics: { logRetentionDays: 0 } });
+    expect(s.get("diagnostics").logRetentionDays).toBe(LOG_RETENTION_MIN_DAYS); // clamped to min
+    await s.patch({ diagnostics: { includeCrashDumps: "yes" as never } });
+    expect(s.get("diagnostics").includeCrashDumps).toBe(false); // dropped → prior value kept
+  });
+
+  it("corrupt on-disk diagnostics falls back to defaults", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ diagnostics: { includeCrashDumps: 1, logRetentionDays: "seven" } }),
+      "utf-8",
+    );
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("diagnostics")).toEqual({
+      includeCrashDumps: false,
+      logRetentionDays: LOG_RETENTION_DAYS,
+    });
   });
 });

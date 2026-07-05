@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
-import { redactForLLM, redactFsPath, redactAuditPayload } from "../dlp-filter.js";
+import { redactForLLM, redactFsPath, redactAuditPayload, scrubSecretsForLLM } from "../dlp-filter.js";
 
 describe("redactForLLM", () => {
   it("redacts emails", () => {
@@ -49,6 +49,39 @@ describe("redactForLLM", () => {
     const r = redactForLLM("안녕하세요, LVIS 입니다.");
     expect(r.totalCount).toBe(0);
     expect(r.redacted).toBe("안녕하세요, LVIS 입니다.");
+  });
+});
+
+describe("scrubSecretsForLLM — credential-class SOT (#1499 E2 M1)", () => {
+  it("redacts prefixed API keys (sk-/pk-/live-)", () => {
+    expect(scrubSecretsForLLM("key sk-ant-ABCDEFGH1234")).not.toContain("sk-ant-ABCDEFGH1234");
+    expect(scrubSecretsForLLM("key sk-ant-ABCDEFGH1234")).toContain("[REDACTED:TOKEN]");
+  });
+
+  it("redacts bearer tokens and auth headers", () => {
+    expect(scrubSecretsForLLM("Bearer abcXYZ12345token")).not.toContain("abcXYZ12345token");
+    expect(scrubSecretsForLLM("x-api-key: myheaderSECRET99")).not.toContain("myheaderSECRET99");
+    expect(scrubSecretsForLLM("Authorization: rawSecretHeader42")).not.toContain("rawSecretHeader42");
+  });
+
+  it("redacts JWTs", () => {
+    const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+    expect(scrubSecretsForLLM(`token ${jwt}`)).not.toContain(jwt);
+    expect(scrubSecretsForLLM(`token ${jwt}`)).toContain("[REDACTED:JWT]");
+  });
+
+  it("redacts token/api_key query params", () => {
+    const out = scrubSecretsForLLM("https://x.example/mcp?api_key=SECRETVALUE123&x=1");
+    expect(out).not.toContain("SECRETVALUE123");
+  });
+
+  it("does NOT slice — a secret late in a long line is still caught", () => {
+    // The mcp-client scrubSecrets 120-char slice previously masked this class of
+    // gap. The slice-free SOT must catch a token after 200 chars.
+    const line = "x".repeat(200) + " Bearer LATElineSECRETtoken777";
+    const out = scrubSecretsForLLM(line);
+    expect(out).not.toContain("LATElineSECRETtoken777");
+    expect(out.length).toBeGreaterThan(120); // whole line preserved, not truncated
   });
 });
 
