@@ -178,6 +178,65 @@ describe("Sidebar project sessions", () => {
   });
 });
 
+describe("Sidebar legacy default-root session handling", () => {
+  // Pre-PR, markMainActiveAfterTurn persisted projectRoot (= the default
+  // workspace root)/projectName ("workspace") for EVERY session with no
+  // isDefault guard. namedProjects' "unknown project" fallback only excludes
+  // a session's projectRoot when it matches a KNOWN (non-default) project —
+  // the default root itself was never checked, so a legacy session's
+  // default-tagged metadata fell into that fallback and rendered as its own
+  // phantom "workspace" project group (sidebar AND Insights, since both read
+  // the same session list). The primary fix scrubs this at the read
+  // chokepoint (handleChatSessions, src/ipc/handlers/chat.ts — see
+  // chat-project.test.ts's "legacy default-root metadata scrub" coverage),
+  // so production sessions never reach this component with that metadata at
+  // all. This test locks in a second, cheap defense-in-depth guard directly
+  // in namedProjects (this file) against the RAW pre-scrub shape, so the
+  // grouping algorithm itself stays correct independent of any given caller
+  // having already sanitized its `sessions` prop.
+  it("renders a session tagged with the default project root as ungrouped, not as a phantom 'workspace' project group", async () => {
+    // Matches the default root renderSidebar's workspace.listRoots stub
+    // reports below (isDefault: true) — the exact "legacy default-tagged"
+    // shape pre-PR persistence produced (projectRoot=defaultRoot,
+    // projectName="workspace").
+    const DEFAULT_ROOT = "C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app";
+    const legacySession: SessionSummary = {
+      id: "legacy-session",
+      title: "레거시 기본 프로젝트 대화",
+      modifiedAt: new Date().toISOString(),
+      sessionKind: "main",
+      projectRoot: DEFAULT_ROOT,
+      projectName: "workspace",
+    };
+    const { getByTestId, getByText, queryByTestId, restore } = renderSidebar({
+      sessions: [legacySession],
+      currentSessionId: "legacy-session",
+    });
+    try {
+      // The default project entry comes from the async workspace.listRoots
+      // stub (like the "other-app" project in the tests above) — wait for
+      // it to settle so the assertion reflects steady state, not the
+      // pre-fetch render where workspaceProjects is still [].
+      await waitFor(() => {
+        expect(getByTestId("sidebar-unassigned-sessions").textContent).toContain("레거시 기본 프로젝트 대화");
+      });
+      const unassigned = getByTestId("sidebar-unassigned-sessions");
+      expect(getByText("레거시 기본 프로젝트 대화")).toBeTruthy();
+      // No ghost project group synthesized from the default root anywhere in
+      // the Projects tab — only the unrelated "other-app" real project from
+      // renderSidebar's stub. (Can't grep broadly for "workspace" in the
+      // testid: the default root's OWN path legitimately contains that
+      // substring — "C:\Users\ikcha\workspace\..." — so the precise
+      // ghost-group testid is asserted directly instead.)
+      activateTab(getByTestId("sidebar-tab-projects"));
+      await waitFor(() => expect(getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-other-app")).toBeTruthy());
+      expect(queryByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-lvis-app")).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+});
+
 describe("Sidebar Chats/Projects tabs", () => {
   it("defaults to the Chats tab and reports switches through onActiveSidebarTabChange", () => {
     const onActiveSidebarTabChange = vi.fn();
