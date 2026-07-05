@@ -282,7 +282,7 @@ function ImmediateBadge() {
   );
 }
 
-function getVendorInfo(vendorId: string): (typeof VENDORS)[number] {
+function getVendorInfo(vendorId: string): VendorOption {
   return getVendorOption(vendorId);
 }
 

@@ -221,27 +221,27 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     });
   });
 
-  it("listPlugins() passes through non-plugin marketplace package kinds", async () => {
+  it("listPlugins() passes through marketplace-eligible package assets", async () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse({
         plugins: [
           {
-            id: "openrouter-provider",
-            display_name: "OpenRouter",
+            id: "groq-provider",
+            display_name: "Groq",
             description: "Provider package",
-            package_spec: "@lvis/openrouter-provider@1.0.0",
-            package_name: "@lvis/openrouter-provider",
+            package_spec: "@lvis/groq-provider@1.0.0",
+            package_name: "@lvis/groq-provider",
             plugin_type: "provider",
-            provider_id: "openrouter",
+            provider_id: "groq",
           },
           {
-            id: "moonstone-theme",
-            display_name: "Moonstone",
+            id: "tokyo-night-theme",
+            display_name: "Tokyo Night",
             description: "Theme package",
-            package_spec: "@lvis/moonstone-theme@1.0.0",
-            package_name: "@lvis/moonstone-theme",
+            package_spec: "@lvis/tokyo-night-theme@1.0.0",
+            package_name: "@lvis/tokyo-night-theme",
             plugin_type: "theme",
-            theme_bundle_id: "moonstone",
+            theme_bundle_id: "tokyo-night",
           },
           {
             id: "ko-language-pack",
@@ -267,9 +267,58 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
       "language-pack",
     ]);
     expect(plugins.map((plugin) => plugin.packageAsset)).toEqual([
-      { type: "provider", providerId: "openrouter" },
-      { type: "theme", bundleId: "moonstone" },
+      { type: "provider", providerId: "groq" },
+      { type: "theme", bundleId: "tokyo-night" },
       { type: "language-pack", locale: "ko" },
+    ]);
+  });
+
+  it("listPlugins() does not treat default-surface assets as marketplace package assets", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse({
+        plugins: [
+          {
+            id: "openrouter-provider",
+            display_name: "OpenRouter",
+            description: "Built-in provider should not be marketplace-installed.",
+            package_spec: "provider:openrouter",
+            plugin_type: "provider",
+            provider_id: "openrouter",
+          },
+          {
+            id: "moonstone-theme",
+            display_name: "Moonstone",
+            description: "Built-in theme should not be marketplace-installed.",
+            package_spec: "theme:moonstone",
+            plugin_type: "theme",
+            theme_bundle_id: "moonstone",
+          },
+          {
+            id: "english-language-pack",
+            display_name: "English",
+            description: "Built-in locale should not be marketplace-installed.",
+            package_spec: "language-pack:en",
+            plugin_type: "language-pack",
+            locale: "en",
+          },
+        ],
+      }),
+    );
+
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com/",
+    });
+    const plugins = await fetcher.listPlugins();
+
+    expect(plugins.map((plugin) => plugin.pluginType)).toEqual([
+      "provider",
+      "theme",
+      "language-pack",
+    ]);
+    expect(plugins.map((plugin) => plugin.packageAsset)).toEqual([
+      undefined,
+      undefined,
+      undefined,
     ]);
   });
 
