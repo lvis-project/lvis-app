@@ -7,9 +7,18 @@
  * accelerator bound OS-wide after quit. These tests assert the call order and,
  * critically, that a throwing persistAll does not prevent the unregister.
  *
+ * PR #1503 (log sink) landed on main after this test was authored and added a
+ * `closeFileLogSink()` call as the LAST step of every exit path (completed /
+ * failed / timed-out) so no shutdown-step log line is dropped by an early sink
+ * close. That ordering is orthogonal to — and must survive — the
+ * unregister-before-persistAll fix here: `closeFileLogSink` stays last while
+ * `unregisterAllGlobalShortcuts` stays first.
+ *
  * MUTATION CONTRACT:
  *  - Moving unregisterAllGlobalShortcuts() back after persistAll() makes the
  *    "throwing persistAll still releases accelerators" test fail.
+ *  - Moving closeFileLogSink() off the tail of the completed path makes the
+ *    "closes the file log sink LAST" test fail.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -17,11 +26,13 @@ const calls: string[] = [];
 
 const unregisterAllGlobalShortcuts = vi.fn(() => calls.push("unregister"));
 const persistAll = vi.fn(() => calls.push("persistAll"));
+const closeFileLogSink = vi.fn(() => calls.push("closeFileLogSink"));
 
 vi.mock("electron", () => ({ app: { exit: vi.fn() } }));
 vi.mock("../../lib/logger.js", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
   logger: { flush: (cb: () => void) => cb() },
+  closeFileLogSink: (...a: unknown[]) => closeFileLogSink(...a),
 }));
 vi.mock("../shutdown-routines.js", () => ({ runShutdownRoutines: vi.fn(async () => undefined) }));
 vi.mock("../local-api-server.js", () => ({ stopLocalApiServer: vi.fn(async () => undefined) }));
@@ -93,5 +104,20 @@ describe("runAppShutdownCleanup ordering (critic M1)", () => {
     // The unregister must have already run before the throwing persistAll.
     expect(calls).toContain("unregister");
     expect(calls.indexOf("unregister")).toBeLessThan(calls.indexOf("persistAll-throw"));
+  });
+
+  // PR #1503 cross-PR check: the log-sink close (added on main after this file
+  // was authored) must remain the LAST step on the happy path, coexisting with
+  // unregisterAllGlobalShortcuts staying FIRST — the two orderings are
+  // independent constraints on opposite ends of the pipeline.
+  it("closes the file log sink LAST, after unregister runs FIRST", async () => {
+    getServices.mockReturnValue(makeServices());
+    vi.resetModules();
+    const { runAppShutdownCleanup } = await import("../app-shutdown.js");
+    const outcome = await runAppShutdownCleanup({ reason: "before-quit", exitOnTimeout: false });
+    expect(outcome).toBe("completed");
+    expect(calls[0]).toBe("unregister");
+    expect(calls.at(-1)).toBe("closeFileLogSink");
+    expect(calls.indexOf("unregister")).toBeLessThan(calls.indexOf("closeFileLogSink"));
   });
 });
