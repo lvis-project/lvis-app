@@ -6,10 +6,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
 } from "../../../components/ui/dialog.js";
 import { Button } from "../../../components/ui/button.js";
+import { OnboardingHeader } from "../onboarding/OnboardingCard.js";
 import type { LoginModalProps } from "./LoginModal.js";
 import { t } from "../../../i18n/runtime.js";
 
@@ -483,40 +482,43 @@ export function LoginModalConversational({
 
   return (
     <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-      <DialogContent size="sm" data-testid="login-modal" data-variant="conversational">
-        <DialogHeader>
-          <DialogTitle>{t("loginModalConversational.dialogTitle")}</DialogTitle>
-        </DialogHeader>
+      <DialogContent
+        size="sm"
+        data-testid="login-modal"
+        data-variant="conversational"
+        className="p-0 overflow-hidden"
+      >
+        {/* E7 — common look-and-feel (Warp login reference): a centered
+            brand wordmark header (shared OnboardingHeader scaffold used by
+            every other onboarding chain surface) over a single-column,
+            minimal-copy body with stacked full-width CTAs. The former
+            chat-transcript chrome (system status row + assistant/user
+            bubbles) is folded into the shared surface tokens so the modal
+            reads as one member of the onboarding family rather than a
+            bespoke screen. Flow + IPC are unchanged. */}
+        <OnboardingHeader
+          size="lg"
+          title={t("loginModalConversational.dialogTitle")}
+          description={t("loginModalConversational.sessionStart")}
+        />
 
-        {/* System line — quiet status row that frames the modal as a
-            chat session rather than a credential form. Uses the
-            success token so it adapts to every bundle. */}
-        <div className="flex items-center gap-2 border-b border-border/(--opacity-strong) pb-2 text-[11px] text-muted-foreground">
-          <span className="inline-block size-1.5 rounded-full bg-success" aria-hidden="true" />
-          <span>{t("loginModalConversational.sessionStart")}</span>
-        </div>
-
-        {/* Assistant message — greeting + intent disambiguation. */}
-        <div className="flex gap-2 pt-2">
-          <div
-            className="grid size-7 shrink-0 place-items-center rounded-md bg-primary text-[11px] text-primary-foreground"
-            aria-hidden="true"
+        <div className="px-6 pb-6 space-y-4">
+          {/* Intro line — big-headline + minimal-copy hierarchy. */}
+          <p
+            data-testid="login-modal:greeting"
+            className="text-[12.5px] leading-relaxed text-muted-foreground"
           >
-            ✦
-          </div>
-          <div className="space-y-1.5">
-            <p className="rounded-lg rounded-tl-sm bg-muted px-3 py-2 text-[12.5px] leading-relaxed text-foreground">
-              {t("loginModalConversational.greeting")} <br />
-              {t("loginModalConversational.greetingPrompt")}
-            </p>
-          </div>
-        </div>
+            {t("loginModalConversational.greeting")}{" "}
+            {t("loginModalConversational.greetingPrompt")}
+          </p>
 
         {/* Chip choices — three options. Chip 1 opens the inline activation
             input; chip 2 navigates to Settings → LLM tab; chip 3 is a
             disabled placeholder. The user never types a password — the
-            demo credentials are hard-coded in the renderer + IPC handler. */}
-        <div className="pl-9 space-y-1.5 pt-1" data-testid="login-modal:chips">
+            demo credentials are hard-coded in the renderer + IPC handler.
+            Rendered as a vertical stack of full-width CTAs (Warp reference:
+            single-accent emphasis on the primary path). */}
+        <div className="space-y-2" data-testid="login-modal:chips">
           <button
             type="button"
             data-testid="login-modal:chip-demo"
@@ -528,15 +530,17 @@ export function LoginModalConversational({
               checkingDemoStatus ||
               activationOpen
             }
-            className="w-full rounded-lg border border-primary/(--opacity-medium) bg-primary/(--opacity-subtle) px-3 py-2 text-left text-[12px] text-primary hover:bg-primary/(--opacity-soft) disabled:opacity-60"
+            className="flex w-full items-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-left text-[12px] font-medium text-primary-foreground shadow-e1 transition-opacity hover:opacity-90 disabled:opacity-60"
           >
-            <span className="mr-1">⚡</span>
-            <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary/(--opacity-soft) px-1 text-[10px] font-semibold text-primary">
+            <span aria-hidden="true">⚡</span>
+            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary-foreground/(--opacity-light) px-1 text-[10px] font-semibold text-primary-foreground">
               1
             </span>
-            {t("loginModalConversational.chip1Label")}
-            <span className="ml-2 text-[10px] text-muted-foreground">
-              {t("loginModalConversational.chip1Sub")}
+            <span className="min-w-0 flex-1">
+              {t("loginModalConversational.chip1Label")}
+              <span className="ml-1.5 text-[10px] font-normal text-primary-foreground/(--opacity-stronger)">
+                {t("loginModalConversational.chip1Sub")}
+              </span>
             </span>
           </button>
           <button
@@ -551,31 +555,35 @@ export function LoginModalConversational({
               onOpenChange(false);
             }}
             disabled={submitting || activationRelaunching}
-            className="w-full rounded-lg border border-border bg-muted/(--opacity-medium) px-3 py-2 text-left text-[12px] text-foreground hover:bg-muted/(--opacity-strong) disabled:opacity-60"
+            className="flex w-full items-center gap-2 rounded-lg border border-border-subtle bg-secondary px-3 py-2.5 text-left text-[12px] text-secondary-foreground transition-colors hover:bg-muted disabled:opacity-60"
           >
-            <span className="mr-1">🔑</span>
-            <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
+            <span aria-hidden="true">🔑</span>
+            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
               2
             </span>
-            {t("loginModalConversational.chip2Label")}
-            <span className="ml-2 text-[10px] text-muted-foreground">
-              {t("loginModalConversational.chip2Sub")}
+            <span className="min-w-0 flex-1">
+              {t("loginModalConversational.chip2Label")}
+              <span className="ml-1.5 text-[10px] text-muted-foreground">
+                {t("loginModalConversational.chip2Sub")}
+              </span>
             </span>
           </button>
           <button
             type="button"
             disabled
             data-testid="login-modal:chip-sso"
-            className="w-full cursor-not-allowed rounded-lg border border-border bg-muted/(--opacity-medium) px-3 py-2 text-left text-[12px] text-muted-foreground"
+            className="flex w-full cursor-not-allowed items-center gap-2 rounded-lg border border-border-subtle bg-secondary/(--opacity-half) px-3 py-2.5 text-left text-[12px] text-muted-foreground"
             title={t("loginModalConversational.chip3Title")}
           >
-            <span className="mr-1">🏢</span>
-            <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
+            <span aria-hidden="true">🏢</span>
+            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
               3
             </span>
-            {t("loginModalConversational.chip3Label")}
-            <span className="ml-2 text-[10px] text-muted-foreground">
-              {t("loginModalConversational.chip3Sub")}
+            <span className="min-w-0 flex-1">
+              {t("loginModalConversational.chip3Label")}
+              <span className="ml-1.5 text-[10px]">
+                {t("loginModalConversational.chip3Sub")}
+              </span>
             </span>
           </button>
         </div>
@@ -804,16 +812,17 @@ export function LoginModalConversational({
             advancing. Status text for in-flight auth/relaunch surfaces
             inline via the chip disabled state + assistant bubble copy. */}
 
-        {/* F2 — Footer hint mirrors the mockup's quick-choice instruction. */}
-        <p
-          data-testid="login-modal:footer-hint"
-          className="border-t border-border/(--opacity-strong) pt-2 text-center text-[10.5px] text-muted-foreground"
-        >
-          {t("loginModalConversational.footerHintPre")}<kbd className="rounded border border-border bg-muted px-1 font-mono">1</kbd>
-          ~
-          <kbd className="rounded border border-border bg-muted px-1 font-mono">3</kbd>
-          {t("loginModalConversational.footerHintPost")}
-        </p>
+          {/* F2 — Footer hint mirrors the mockup's quick-choice instruction. */}
+          <p
+            data-testid="login-modal:footer-hint"
+            className="border-t border-border-subtle pt-3 text-center text-[10.5px] text-muted-foreground"
+          >
+            {t("loginModalConversational.footerHintPre")}<kbd className="rounded border border-border bg-muted px-1 font-mono">1</kbd>
+            ~
+            <kbd className="rounded border border-border bg-muted px-1 font-mono">3</kbd>
+            {t("loginModalConversational.footerHintPost")}
+          </p>
+        </div>
       </DialogContent>
     </Dialog>
   );
