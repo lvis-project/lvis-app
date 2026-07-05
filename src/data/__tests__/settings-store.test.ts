@@ -1203,3 +1203,44 @@ describe("SettingsService E4 — shortcuts + launch-at-startup", () => {
     expect(s.get("shortcuts")).toEqual({ toggleWindow: null, enabled: false });
   });
 });
+
+describe("SettingsService diagnostics (#1499 E2)", () => {
+  let userDataPath: string;
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-diagnostics-"));
+  });
+  afterEach(() => {
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  it("defaults: includeCrashDumps false, logRetentionDays 7 (LOG_RETENTION_DAYS SOT)", () => {
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("diagnostics")).toEqual({ includeCrashDumps: false, logRetentionDays: 7 });
+  });
+
+  it("patch persists valid values", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ diagnostics: { includeCrashDumps: true, logRetentionDays: 30 } });
+    expect(s.get("diagnostics")).toEqual({ includeCrashDumps: true, logRetentionDays: 30 });
+  });
+
+  it("patch clamps out-of-range retention and drops non-boolean includeCrashDumps", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ diagnostics: { logRetentionDays: 99999 } });
+    expect(s.get("diagnostics").logRetentionDays).toBe(365); // clamped to max
+    await s.patch({ diagnostics: { logRetentionDays: 0 } });
+    expect(s.get("diagnostics").logRetentionDays).toBe(1); // clamped to min
+    await s.patch({ diagnostics: { includeCrashDumps: "yes" as never } });
+    expect(s.get("diagnostics").includeCrashDumps).toBe(false); // dropped → prior value kept
+  });
+
+  it("corrupt on-disk diagnostics falls back to defaults", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ diagnostics: { includeCrashDumps: 1, logRetentionDays: "seven" } }),
+      "utf-8",
+    );
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("diagnostics")).toEqual({ includeCrashDumps: false, logRetentionDays: 7 });
+  });
+});

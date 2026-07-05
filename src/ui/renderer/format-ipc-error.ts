@@ -198,6 +198,10 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "session-mismatch": "formatIpcError.sessionMismatch",
   "preference-refresh-service-unavailable": "formatIpcError.preferenceRefreshServiceUnavailable",
   "production-disabled": "formatIpcError.productionDisabled",
+  // ── Diagnostics bundle + log tail + crash list (#1499 E2) ──
+  "export-failed": "formatIpcError.exportFailed",
+  "crash-list-failed": "formatIpcError.crashListFailed",
+  "logs-tail-failed": "formatIpcError.logsTailFailed",
 };
 
 export interface FormatIpcErrorOptions {

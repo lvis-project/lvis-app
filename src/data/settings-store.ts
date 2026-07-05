@@ -210,6 +210,20 @@ export interface FeatureFlags {
   osToolSandbox?: boolean;
 }
 
+/**
+ * §E2 (#1499) Diagnostics bundle + production log retention settings.
+ * - includeCrashDumps: include raw crash-dump binaries in the bundle (opt-in).
+ * - logRetentionDays: retention window for `~/.lvis/logs/`. Connected to the
+ *   log-file-sink SOT (`LOG_RETENTION_DAYS`) — this setting value drives the
+ *   sink's boot-time prune (boot/services.ts). Default 7 (= LOG_RETENTION_DAYS).
+ */
+export interface DiagnosticsSettings {
+  /** Include raw crash-dump binaries in the exported bundle. Default false. */
+  includeCrashDumps: boolean;
+  /** Retention window (days) for production log files. Default 7. */
+  logRetentionDays: number;
+}
+
 export interface AppSettings {
   llm: LLMSettings;
   chat: ChatSettings;
@@ -220,6 +234,8 @@ export interface AppSettings {
   updates: UpdateSettings;
   telemetry: TelemetrySettings;
   audit: AuditSettings;
+  /** §E2 (#1499) — diagnostics bundle + log retention. */
+  diagnostics: DiagnosticsSettings;
   /** UX Track 3 — visual theme + future UI preferences. */
   appearance: AppearanceSettings;
   /** §B1 — external URL viewer policy (in-app BrowserWindow vs system browser). */
@@ -569,6 +585,14 @@ const DEFAULT_SETTINGS: AppSettings = {
     auditRotationMaxBytes: 10 * 1024 * 1024, // 10 MB
     auditRetentionDays: 30,
   },
+  diagnostics: {
+    // Raw crash-dump binaries excluded by default — metadata-only in the bundle.
+    includeCrashDumps: false,
+    // Mirrors log-file-sink's LOG_RETENTION_DAYS SOT (7). Kept as a literal here
+    // to avoid importing the node:fs-bearing sink module into the settings store;
+    // the DEFAULT_LOG_RETENTION_DAYS re-check below asserts they stay in lockstep.
+    logRetentionDays: 7,
+  },
   appearance: {
     schemaVersion: 2,
     bundleId: DEFAULT_BUNDLE_ID,
@@ -726,6 +750,16 @@ export class SettingsService {
     }
     if (partial.audit) {
       this.settings.audit = { ...this.settings.audit, ...partial.audit };
+    }
+    if (partial.diagnostics) {
+      // Field-level validation (mirrors `system`/`features`): an invalid
+      // includeCrashDumps or out-of-range logRetentionDays is coerced/dropped so
+      // a malformed renderer/IPC payload can never persist an unsafe value.
+      // normalizeDiagnostics clamps retention to [1,365] and drops non-booleans.
+      this.settings.diagnostics = normalizeDiagnostics({
+        ...this.settings.diagnostics,
+        ...partial.diagnostics,
+      });
     }
     if (partial.appearance) {
       // Deep-merge the nested `font` block + validate every incoming font
@@ -1103,6 +1137,7 @@ export class SettingsService {
         updates: { ...DEFAULT_SETTINGS.updates, ...parsed.updates },
         telemetry: { ...DEFAULT_SETTINGS.telemetry, ...parsed.telemetry },
         audit: { ...DEFAULT_SETTINGS.audit, ...parsed.audit },
+        diagnostics: normalizeDiagnostics(parsed.diagnostics),
         appearance,
         webView: normalizeWebView(parsed.webView),
         system: normalizeSystem(parsed.system),
@@ -1590,6 +1625,34 @@ function normalizeSystem(input: unknown): SystemSettings {
  * Missing or invalid fields are silently dropped, so each flag falls back to
  * its value in DEFAULT_SETTINGS.features.
  */
+/** Lower/upper bounds for the diagnostics log-retention window (days). */
+const DIAGNOSTICS_RETENTION_MIN = 1;
+const DIAGNOSTICS_RETENTION_MAX = 365;
+
+/**
+ * Coerce on-disk / patch `diagnostics` block to DiagnosticsSettings.
+ * Invalid fields fall back to DEFAULT_SETTINGS.diagnostics; logRetentionDays is
+ * clamped to [1,365] (a non-integer or out-of-range value can never persist).
+ */
+function normalizeDiagnostics(input: unknown): DiagnosticsSettings {
+  const base = DEFAULT_SETTINGS.diagnostics;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { ...base };
+  }
+  const obj = input as Record<string, unknown>;
+  const result: DiagnosticsSettings = { ...base };
+  if (typeof obj.includeCrashDumps === "boolean") {
+    result.includeCrashDumps = obj.includeCrashDumps;
+  }
+  if (typeof obj.logRetentionDays === "number" && Number.isInteger(obj.logRetentionDays)) {
+    result.logRetentionDays = Math.min(
+      DIAGNOSTICS_RETENTION_MAX,
+      Math.max(DIAGNOSTICS_RETENTION_MIN, obj.logRetentionDays),
+    );
+  }
+  return result;
+}
+
 function normalizeFeatureFlags(input: unknown): FeatureFlags {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return {};

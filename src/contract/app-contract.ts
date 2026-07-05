@@ -292,6 +292,21 @@ export const CHANNELS = {
     search: "lvis:audit:search",
     stats: "lvis:audit:stats",
   },
+  // ── Diagnostics bundle + production log viewer + crash list (#1499 E2) ──────
+  // ALL INTERNAL: deliberately absent from PUBLIC_CHANNELS / CHANNEL_GESTURE /
+  // EXTERNAL_MUTATION_CHANNELS. A diagnostics bundle serializes redacted host
+  // state (settings whitelist, audit jsonl, logs, crash-dump metadata) to a
+  // user-chosen file — it must never be reachable from an external origin
+  // (local-api / cli / plugin frame). The fail-closed default
+  // (isPublicChannel === false) enforces that; each invoke additionally gates
+  // on validateSender so a plugin-ui-shell frame cannot reach them either.
+  diagnostics: {
+    export: "lvis:diagnostics:export", // invoke renderer→main → { ok, path } | { ok:false, error }
+    crashList: "lvis:diagnostics:crash-list", // invoke → crash-dump metadata list
+  },
+  logs: {
+    tail: "lvis:logs:tail", // invoke (lines, level?) → redacted recent log lines
+  },
   view: {
     activate: "lvis:view:activate",
   },

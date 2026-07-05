@@ -267,6 +267,34 @@ function assertPackagedFirstLaunchSeed(homeDir) {
   }
 }
 
+/**
+ * #1499 E2 — assert the production log file sink actually wrote a file. A
+ * PACKAGED app has no console, so `~/.lvis/logs/lvis-<date>.log` is the ONLY
+ * readable log a diagnostics bundle / support engineer can rely on. If boot did
+ * not attach the SonicBoom sink (the PR #684 ERR_MODULE_NOT_FOUND regression
+ * class, or a broken `shouldEnableFileLogSink` gate), no file appears here.
+ */
+function assertProductionLogFile(homeDir) {
+  const logsDir = join(homeDir, "logs");
+  if (!existsSync(logsDir)) {
+    throw new Error(`production log sink did not create logs dir: ${logsDir}`);
+  }
+  const logFiles = readdirSync(logsDir).filter((f) => /^lvis-\d{4}-\d{2}-\d{2}(?:\.\d+)?\.log$/.test(f));
+  if (logFiles.length === 0) {
+    throw new Error(`production log sink created no lvis-<date>.log file in ${logsDir}`);
+  }
+  const nonEmpty = logFiles.some((f) => {
+    try {
+      return statSync(join(logsDir, f)).size > 0;
+    } catch {
+      return false;
+    }
+  });
+  if (!nonEmpty) {
+    throw new Error(`production log file(s) are all empty in ${logsDir}`);
+  }
+}
+
 function prepareUpgradeProbe(homeDir) {
   const rel = join("skills", "report-writing.md");
   const target = join(homeDir, rel);
@@ -359,6 +387,8 @@ async function launchSmoke(executable, timeoutMs) {
   try {
     await runPackagedAppOnce(executable, timeoutMs, env, "first launch");
     assertPackagedFirstLaunchSeed(lvisHomeDir);
+    // #1499 E2 — production log sink must have written a real log file.
+    assertProductionLogFile(lvisHomeDir);
     const probe = prepareUpgradeProbe(lvisHomeDir);
     await runPackagedAppOnce(executable, timeoutMs, env, "upgrade probe");
     assertUpgradeProbe(probe);
