@@ -29,6 +29,7 @@ import {
   getLlmVendorSettings,
 } from "../../shared/llm-vendor-defaults.js";
 import { llmModelListCacheKey } from "../../shared/llm-model-list.js";
+import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
 
 describe("SettingsService marketplace defaults", () => {
   let userDataPath: string;
@@ -176,6 +177,214 @@ describe("SettingsService marketplace defaults", () => {
       installedThemeBundleIds: ["high-contrast"],
       installedLanguagePacks: ["ja"],
     });
+  });
+
+  it("resets the active custom provider preset when the preset is uninstalled", async () => {
+    const service = new SettingsService({ userDataPath });
+    const preset = {
+      providerId: "future-router",
+      label: "Future Router",
+      baseUrl: "https://future.example/v1",
+      defaultModel: "future/free",
+      modelOptions: ["future/free"],
+      requiresApiKey: true,
+    };
+    await service.patch({
+      marketplace: { installedProviderPresets: [preset] },
+    });
+    await service.patch({
+      llm: {
+        provider: "openai-compatible",
+        marketplaceProviderPresetId: "future-router",
+        vendors: {
+          "openai-compatible": {
+            model: "future/free",
+            baseUrl: "https://future.example/v1",
+          },
+        },
+        modelListCache: {
+          [llmModelListCacheKey(
+            "openai-compatible",
+            "https://future.example/v1",
+            "future-router",
+          )]: {
+            vendor: "openai-compatible",
+            baseUrl: "https://future.example/v1",
+            credentialScope: "future-router",
+            endpoint: "https://future.example/v1/models",
+            models: ["future/free"],
+            fetchedAt: new Date(0).toISOString(),
+          },
+        },
+      },
+    });
+    await service.setSecret(
+      marketplaceProviderPresetSecretKey("future-router"),
+      "fr-secret",
+    );
+    expect(service.getSecret(marketplaceProviderPresetSecretKey("future-router")))
+      .toBe("fr-secret");
+    expect(service.get("llm")).toMatchObject({
+      provider: "openai-compatible",
+      marketplaceProviderPresetId: "future-router",
+    });
+
+    await service.patch({
+      marketplace: { installedProviderPresets: [] },
+    });
+
+    const llm = service.get("llm");
+    expect(llm.provider).toBe(DEFAULT_LLM_VENDOR);
+    expect(llm.marketplaceProviderPresetId).toBeUndefined();
+    expect(getLlmVendorSettings(llm.vendors, "openai-compatible")).toEqual(
+      getLlmVendorSettings(undefined, "openai-compatible"),
+    );
+    expect(Object.values(llm.modelListCache)).not.toContainEqual(
+      expect.objectContaining({ credentialScope: "future-router" }),
+    );
+    expect(service.getSecret(marketplaceProviderPresetSecretKey("future-router")))
+      .toBeNull();
+  });
+
+  it("normalizes active custom provider endpoint to the installed preset baseUrl", async () => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({
+      marketplace: {
+        installedProviderPresets: [{
+          providerId: "future-router",
+          label: "Future Router",
+          baseUrl: "https://future.example/v1",
+          defaultModel: "future/free",
+          modelOptions: ["future/free"],
+          requiresApiKey: true,
+        }],
+      },
+    });
+
+    await service.patch({
+      llm: {
+        provider: "openai-compatible",
+        marketplaceProviderPresetId: "future-router",
+        vendors: {
+          "openai-compatible": {
+            model: "future/free",
+            baseUrl: "https://stale.example/v1",
+          },
+        },
+      },
+    });
+
+    const llm = service.get("llm");
+    expect(llm.marketplaceProviderPresetId).toBe("future-router");
+    expect(getLlmVendorSettings(llm.vendors, "openai-compatible").baseUrl)
+      .toBe("https://future.example/v1");
+  });
+
+  it("preserves existing custom provider preset metadata when settings patch tries to mutate its endpoint", async () => {
+    const service = new SettingsService({ userDataPath });
+    const preset = {
+      providerId: "future-router",
+      label: "Future Router",
+      baseUrl: "https://future.example/v1",
+      defaultModel: "future/free",
+      modelOptions: ["future/free"],
+      requiresApiKey: true,
+    };
+    await service.patch({
+      marketplace: { installedProviderPresets: [preset] },
+    });
+    await service.patch({
+      llm: {
+        provider: "openai-compatible",
+        marketplaceProviderPresetId: "future-router",
+        vendors: {
+          "openai-compatible": {
+            model: "future/free",
+            baseUrl: "https://future.example/v1",
+          },
+        },
+        fallbackChain: [{ provider: "openai-compatible", model: "fallback/free" }],
+      },
+    });
+
+    await service.patch({
+      marketplace: {
+        installedProviderPresets: [{
+          ...preset,
+          baseUrl: "https://attacker.example/v1",
+        }],
+      },
+      llm: {
+        vendors: {
+          "openai-compatible": {
+            model: "future/free",
+            baseUrl: "https://attacker.example/v1",
+          },
+        },
+        fallbackChain: [{ provider: "openai-compatible", model: "fallback/free" }],
+      },
+    });
+
+    const marketplace = service.get("marketplace");
+    expect(marketplace.installedProviderPresets).toEqual([preset]);
+    const llm = service.get("llm");
+    expect(getLlmVendorSettings(llm.vendors, "openai-compatible").baseUrl)
+      .toBe("https://future.example/v1");
+    expect(llm.fallbackChain).toEqual([]);
+  });
+
+  it("leaves an active custom provider preset installed when preset-secret deletion fails", async () => {
+    const service = new SettingsService({ userDataPath });
+    const preset = {
+      providerId: "future-router",
+      label: "Future Router",
+      baseUrl: "https://future.example/v1",
+      defaultModel: "future/free",
+      modelOptions: ["future/free"],
+      requiresApiKey: true,
+    };
+    await service.patch({
+      marketplace: { installedProviderPresets: [preset] },
+    });
+    await service.patch({
+      llm: {
+        provider: "openai-compatible",
+        marketplaceProviderPresetId: "future-router",
+        vendors: {
+          "openai-compatible": {
+            model: "future/free",
+            baseUrl: "https://future.example/v1",
+          },
+        },
+      },
+    });
+    await service.setSecret(
+      marketplaceProviderPresetSecretKey("future-router"),
+      "fr-secret",
+    );
+    const deleteSecretSpy = vi
+      .spyOn(service, "deleteSecret")
+      .mockRejectedValueOnce(new Error("keychain write failed"));
+
+    await expect(service.patch({
+      marketplace: { installedProviderPresets: [] },
+    })).rejects.toThrow("keychain write failed");
+
+    expect(service.get("marketplace").installedProviderPresets).toEqual([preset]);
+    expect(service.get("llm")).toMatchObject({
+      provider: "openai-compatible",
+      marketplaceProviderPresetId: "future-router",
+    });
+    expect(service.getSecret(marketplaceProviderPresetSecretKey("future-router")))
+      .toBe("fr-secret");
+
+    deleteSecretSpy.mockRestore();
+    await service.patch({
+      marketplace: { installedProviderPresets: [] },
+    });
+    expect(service.get("marketplace").installedProviderPresets).toEqual([]);
+    expect(service.getSecret(marketplaceProviderPresetSecretKey("future-router")))
+      .toBeNull();
   });
 
   it("migrates legacy realCloud* keys → cloud* (renamed when the mock backend was removed)", () => {

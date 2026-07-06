@@ -143,6 +143,25 @@ export function normalizeAzureFoundryBaseURL(rawBaseUrl: string): string {
   return parsedUrl.toString().replace(/\/$/, "");
 }
 
+function assertCredentialedBaseUrlUsesHttps(
+  vendor: VercelVendor,
+  baseUrl: string | undefined,
+  apiKey: string,
+): void {
+  if (!baseUrl || !apiKey) return;
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    return;
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error(
+      `VercelUnifiedProvider(${vendor}): credentialed baseUrl must use https`,
+    );
+  }
+}
+
 export interface VercelProviderExtras {
   /** Vertex AI — GCP project ID (required when vendor="vertex-ai"). */
   vertexProject?: string;
@@ -380,6 +399,7 @@ export class VercelUnifiedProvider implements LLMProvider {
 
   private resolveModel(modelId: string, _hasTools: boolean) {
     const slot = this.vendorSlot;
+    assertCredentialedBaseUrlUsesHttps(slot, this.baseUrl, this.apiKey);
 
     if (slot === "claude") {
       const anthropic = createAnthropic({

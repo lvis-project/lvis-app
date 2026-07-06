@@ -24,6 +24,7 @@ import {
 } from "../../../shared/network-access.js";
 import {
   marketplaceProviderPresetFromAsset,
+  marketplaceProviderPresetSecretId,
   type MarketplaceInstalledProviderPreset,
 } from "../../../shared/marketplace-package-assets.js";
 import { isMarketplaceEligibleLLMVendor } from "../../../shared/llm-vendor-defaults.js";
@@ -357,6 +358,14 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
         const preset = marketplaceProviderPresetFromAsset(asset, item.name);
         if (!preset) {
           throw new Error("Marketplace provider package is missing preset metadata");
+        }
+        if (!install) {
+          const deleted: unknown = await api.deleteApiKey(
+            marketplaceProviderPresetSecretId(preset.providerId),
+          );
+          if (isIpcErrorResult(deleted)) {
+            throw new Error(deleted.message ?? deleted.error);
+          }
         }
         marketplace.installedProviderPresets = install
           ? upsertProviderPreset(installed.installedProviderPresets, preset)

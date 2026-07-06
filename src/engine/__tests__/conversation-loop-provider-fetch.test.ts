@@ -11,9 +11,18 @@ describe("ConversationLoop LLM fetch wiring", () => {
     vi.resetModules();
   });
 
-  afterEach(() => {
-    vi.doUnmock("../llm/provider-factory.js");
-  });
+afterEach(() => {
+  vi.useRealTimers();
+  vi.doUnmock("../llm/provider-factory.js");
+});
+
+async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[]> {
+  const events: unknown[] = [];
+  for await (const event of iterable) {
+    events.push(event);
+  }
+  return events;
+}
 
   it("passes the injected main-process fetch implementation to the active provider", async () => {
     const createProvider = vi.fn(() => ({
@@ -163,7 +172,7 @@ describe("ConversationLoop LLM fetch wiring", () => {
       model: "future/free",
     });
     settings.marketplaceProviderPresetId = "future-router";
-    settings.vendors["openai-compatible"].baseUrl = "https://future.example/v1";
+    settings.vendors["openai-compatible"].baseUrl = "https://stale.example/v1";
 
     new ConversationLoop(({
       settingsService: {
@@ -203,6 +212,122 @@ describe("ConversationLoop LLM fetch wiring", () => {
         baseUrl: "https://future.example/v1",
       }),
     );
+  });
+
+  it("does not fall back to generic OpenAI-compatible credentials when the selected preset is uninstalled", async () => {
+    const createProvider = vi.fn(() => ({
+      vendor: "openai-compatible" as const,
+      streamTurn: async function* () {},
+    }));
+    vi.doMock("../llm/provider-factory.js", () => ({
+      createProvider,
+      secretKeyFor: (vendor: string) => `llm.apiKey.${vendor}`,
+    }));
+    const { ConversationLoop } = await import("../conversation-loop.js");
+
+    const toolRegistry = new ToolRegistry();
+    const settings = fakeLlmSettings({
+      provider: "openai-compatible",
+      model: "future/free",
+    });
+    settings.marketplaceProviderPresetId = "future-router";
+    settings.vendors["openai-compatible"].baseUrl = "https://future.example/v1";
+
+    new ConversationLoop(({
+      settingsService: {
+        get: (key: string) => {
+          if (key === "llm") return settings;
+          if (key === "marketplace") return { installedProviderPresets: [] };
+          throw new Error(`unexpected settings key: ${key}`);
+        },
+        getSecret: (key: string) =>
+          key === "llm.apiKey.openai-compatible"
+            ? "generic-secret"
+            : null,
+      },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+
+    expect(createProvider).not.toHaveBeenCalled();
+  });
+
+  it("does not resolve generic OpenAI-compatible fallback credentials while a marketplace preset is active", async () => {
+    vi.useFakeTimers();
+    const primaryProvider = {
+      vendor: "openai-compatible" as const,
+      streamTurn: vi.fn(async function* () {
+        yield { type: "error" as const, error: "503 unavailable", classification: "network" };
+      }),
+    };
+    const createProvider = vi.fn(() => primaryProvider);
+    vi.doMock("../llm/provider-factory.js", () => ({
+      createProvider,
+      secretKeyFor: (vendor: string) => `llm.apiKey.${vendor}`,
+    }));
+    const { ConversationLoop } = await import("../conversation-loop.js");
+
+    const toolRegistry = new ToolRegistry();
+    const settings = fakeLlmSettings({
+      provider: "openai-compatible",
+      model: "future/free",
+    });
+    settings.marketplaceProviderPresetId = "future-router";
+    settings.vendors["openai-compatible"].baseUrl = "https://future.example/v1";
+    settings.fallbackChain = [{ provider: "openai-compatible", model: "fallback/free" }];
+    const getSecret = vi.fn((key: string) =>
+      key === marketplaceProviderPresetSecretKey("future-router")
+        ? "fr-secret"
+        : key === "llm.apiKey.openai-compatible"
+          ? "generic-secret"
+          : null
+    );
+
+    const loop = new ConversationLoop(({
+      settingsService: {
+        get: (key: string) => {
+          if (key === "llm") return settings;
+          if (key === "marketplace") {
+            return {
+              installedProviderPresets: [{
+                providerId: "future-router",
+                label: "Future Router",
+                baseUrl: "https://future.example/v1",
+                defaultModel: "future/free",
+                modelOptions: ["future/free"],
+                requiresApiKey: true,
+              }],
+            };
+          }
+          throw new Error(`unexpected settings key: ${key}`);
+        },
+        getSecret,
+      },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+
+    const pending = collectStream(loop.provider!.streamTurn({
+      model: "future/free",
+      systemPrompt: "sys",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [],
+    }));
+    const rejection = expect(pending).rejects.toThrow("503 unavailable");
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await rejection;
+    expect(createProvider).toHaveBeenCalledTimes(1);
+    expect(getSecret).toHaveBeenCalledWith(
+      marketplaceProviderPresetSecretKey("future-router"),
+    );
+    expect(getSecret).not.toHaveBeenCalledWith("llm.apiKey.openai-compatible");
   });
 
   it("does not create ordinary keyed providers when the API key is missing", async () => {

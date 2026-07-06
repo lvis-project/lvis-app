@@ -45,18 +45,21 @@ export type MarketplacePackageAssetType = MarketplacePackageAsset["type"];
 
 const MARKETPLACE_PROVIDER_PRESET_SECRET_ID_PREFIX = "marketplace-provider:";
 const MARKETPLACE_PROVIDER_PRESET_SECRET_KEY_PREFIX = "llm.marketplaceProvider.";
-const MAX_PROVIDER_ID_LENGTH = 80;
+export const MARKETPLACE_PROVIDER_PRESET_ID_MAX_LENGTH = 80;
+export const MARKETPLACE_PROVIDER_PRESET_ID_PATTERN_SOURCE = "[A-Za-z0-9][A-Za-z0-9._-]*";
 const MAX_PROVIDER_LABEL_LENGTH = 80;
 const MAX_PROVIDER_URL_LENGTH = 512;
 const MAX_PROVIDER_MODEL_LENGTH = 256;
 const MAX_PROVIDER_MODEL_OPTIONS = 100;
+const MARKETPLACE_PROVIDER_PRESET_ID_PATTERN =
+  new RegExp(`^${MARKETPLACE_PROVIDER_PRESET_ID_PATTERN_SOURCE}$`);
 
 export function isMarketplaceProviderPresetId(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length > 0 &&
-    value.length <= MAX_PROVIDER_ID_LENGTH &&
-    /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)
+    value.length <= MARKETPLACE_PROVIDER_PRESET_ID_MAX_LENGTH &&
+    MARKETPLACE_PROVIDER_PRESET_ID_PATTERN.test(value)
   );
 }
 
@@ -84,6 +87,14 @@ function cleanUrl(value: unknown): string | undefined {
     return trimmed;
   } catch {
     return undefined;
+  }
+}
+
+function usesHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
   }
 }
 
@@ -127,7 +138,6 @@ function providerPresetFieldsFromRecord(
     record.defaultModel ?? record.default_model ?? record.model,
     MAX_PROVIDER_MODEL_LENGTH,
   ) ?? modelOptions[0];
-  if (!baseUrl || !defaultModel) return undefined;
   const apiKeyPlaceholder = cleanString(
     record.apiKeyPlaceholder ?? record.api_key_placeholder ?? record.keyPlaceholder ?? record.key_placeholder,
     MAX_PROVIDER_LABEL_LENGTH,
@@ -142,6 +152,8 @@ function providerPresetFieldsFromRecord(
           : typeof record.api_key_required === "boolean"
             ? record.api_key_required
             : true;
+  if (!baseUrl || !defaultModel) return undefined;
+  if (requiresApiKey && !usesHttpsUrl(baseUrl)) return undefined;
   const normalizedOptions = modelOptions.includes(defaultModel)
     ? modelOptions
     : [defaultModel, ...modelOptions];
@@ -198,6 +210,22 @@ export function marketplaceProviderPresetIdFromSecretId(
 
 export function marketplaceProviderPresetSecretKey(providerId: string): string {
   return `${MARKETPLACE_PROVIDER_PRESET_SECRET_KEY_PREFIX}${providerId}.apiKey`;
+}
+
+export function marketplaceProviderPresetIdFromSecretKey(
+  value: unknown,
+): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (!value.startsWith(MARKETPLACE_PROVIDER_PRESET_SECRET_KEY_PREFIX)) {
+    return undefined;
+  }
+  if (!value.endsWith(".apiKey")) return undefined;
+  return normalizeProviderId(
+    value.slice(
+      MARKETPLACE_PROVIDER_PRESET_SECRET_KEY_PREFIX.length,
+      -".apiKey".length,
+    ),
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

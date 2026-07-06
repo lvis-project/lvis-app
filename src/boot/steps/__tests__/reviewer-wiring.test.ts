@@ -25,6 +25,7 @@ import {
   type VerdictCacheContext,
 } from "../../../permissions/reviewer/verdict-cache.js";
 import type { LLMProvider, StreamEvent } from "../../../engine/llm/types.js";
+import { marketplaceProviderPresetSecretKey } from "../../../shared/marketplace-package-assets.js";
 
 let tmpDir: string;
 
@@ -621,6 +622,109 @@ describe("Permission policy P4 reviewer-wiring", () => {
       deferredQueuePath: join(tmpDir, "queue-2.jsonl"),
     });
     expect(pm.getInteractiveAutoApprove()).toBe("off");
+  });
+});
+
+describe("wireReviewerAndPermissions marketplace preset endpoint binding", () => {
+  it("uses the installed preset endpoint when building the reviewer provider", async () => {
+    vi.resetModules();
+    const provider = stubProvider([]);
+    const createProvider = vi.fn(() => provider);
+    const wireReviewerAgentMock = vi.fn();
+    vi.doMock("electron", () => ({
+      BrowserWindow: { getAllWindows: () => [] },
+    }));
+    vi.doMock("../../../engine/llm/provider-factory.js", () => ({
+      createProvider,
+      secretKeyFor: (vendor: string) => `llm.apiKey.${vendor}`,
+    }));
+    vi.doMock("../reviewer-wiring.js", () => ({
+      wireReviewerAgent: wireReviewerAgentMock,
+    }));
+    vi.doMock("../../../ipc/domains/permissions.js", () => ({
+      broadcastPermissionConfigChanged: vi.fn(),
+    }));
+
+    const { wireReviewerAndPermissions } = await import("../reviewer-permission-wiring.js");
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") {
+          return {
+            provider: "openai-compatible",
+            marketplaceProviderPresetId: "future-router",
+            vendors: {
+              "openai-compatible": {
+                model: "future/free",
+                baseUrl: "https://stale.example/v1",
+              },
+            },
+            fallbackChain: [],
+          };
+        }
+        if (key === "marketplace") {
+          return {
+            installedProviderPresets: [{
+              providerId: "future-router",
+              label: "Future Router",
+              baseUrl: "https://future.example/v1",
+              defaultModel: "future/free",
+              modelOptions: ["future/free"],
+              requiresApiKey: true,
+            }],
+          };
+        }
+        if (key === "permissions") {
+          return {
+            reviewer: {
+              mode: "llm",
+              provider: "active",
+              model: "ignored",
+              fallbackOnError: "rule",
+              interactive: { autoApprove: "off" },
+            },
+          };
+        }
+        return {};
+      }),
+      getSecret: vi.fn((key: string) =>
+        key === marketplaceProviderPresetSecretKey("future-router")
+          ? "fr-secret"
+          : null
+      ),
+    };
+    const permissionManager = new PermissionManager(join(tmpDir, "boot-permissions.json"));
+
+    wireReviewerAndPermissions({
+      toolRegistry: { setDenyRules: vi.fn() },
+      permissionManager,
+      settingsService,
+      llmFetch: vi.fn(),
+      getMainWindow: () => null,
+      bootAuditLogger: { log: vi.fn() },
+    } as never);
+
+    const options = wireReviewerAgentMock.mock.calls[0]?.[0] as {
+      readActiveLlm: () => { baseUrl?: string };
+      streamProviderFor: (vendor: string) => LLMProvider | null;
+    };
+    expect(options.readActiveLlm()).toMatchObject({
+      provider: "openai-compatible",
+      marketplaceProviderPresetId: "future-router",
+      baseUrl: "https://future.example/v1",
+    });
+    expect(options.streamProviderFor("openai-compatible")).toBe(provider);
+    expect(createProvider).toHaveBeenCalledWith(expect.objectContaining({
+      vendor: "openai-compatible",
+      apiKey: "fr-secret",
+      model: "future/free",
+      baseUrl: "https://future.example/v1",
+    }));
+
+    vi.doUnmock("electron");
+    vi.doUnmock("../../../engine/llm/provider-factory.js");
+    vi.doUnmock("../reviewer-wiring.js");
+    vi.doUnmock("../../../ipc/domains/permissions.js");
+    vi.resetModules();
   });
 });
 

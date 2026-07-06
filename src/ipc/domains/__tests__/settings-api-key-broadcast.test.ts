@@ -181,6 +181,58 @@ describe("delete-api-key broadcast (MAJOR-3)", () => {
       expect(win.webContents.send).toHaveBeenCalledWith(SETTINGS.updated, snapshot);
     }
   });
+
+  it("deletes API keys for installed marketplace provider presets", async () => {
+    const deps = makeDeps([]);
+    deps.settingsService.get.mockImplementation((key?: string) => {
+      if (key === "marketplace") {
+        return {
+          installedProviderPresets: [{
+            providerId: "future-router",
+            label: "Future Router",
+            baseUrl: "https://future.example/v1",
+            defaultModel: "future/free",
+            modelOptions: ["future/free"],
+            requiresApiKey: true,
+          }],
+        };
+      }
+      if (key === "shortcuts") return {};
+      if (key === "system") return {};
+      return {
+        provider: "openai",
+        vendors: { "azure-foundry": { baseUrl: null } },
+      };
+    });
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke(
+      "lvis:settings:delete-api-key",
+      "marketplace-provider:future-router",
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(deps.settingsService.deleteSecret).toHaveBeenCalledWith(
+      "llm.marketplaceProvider.future-router.apiKey",
+    );
+  });
+
+  it("rejects API key deletion for uninstalled inactive marketplace provider presets", async () => {
+    const deps = makeDeps([]);
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke(
+      "lvis:settings:delete-api-key",
+      "marketplace-provider:ghost-router",
+    );
+
+    expect(result).toMatchObject({ ok: false, error: "unknown-provider" });
+    expect(deps.settingsService.deleteSecret).not.toHaveBeenCalled();
+  });
 });
 
 // ─── MAJOR-3: set/delete-web-api-key broadcast ────────────────────────

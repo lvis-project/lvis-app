@@ -55,20 +55,26 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     if (!llmVendor) return null;
     const llmSettings = settingsService.get("llm");
     const block = getLlmVendorSettings(llmSettings.vendors, llmVendor);
-    const marketplaceProviderPreset = llmVendor === "openai-compatible" && llmSettings.marketplaceProviderPresetId
-      ? settingsService
-        .get("marketplace")
-        .installedProviderPresets
+    const hasMarketplaceProviderPresetSelection =
+      llmVendor === "openai-compatible" && Boolean(llmSettings.marketplaceProviderPresetId);
+    const marketplaceProviderPreset = hasMarketplaceProviderPresetSelection
+      ? (settingsService.get("marketplace").installedProviderPresets ?? [])
         .find((preset) => preset.providerId === llmSettings.marketplaceProviderPresetId)
       : undefined;
+    if (hasMarketplaceProviderPresetSelection && !marketplaceProviderPreset) {
+      return null;
+    }
     const apiKey = settingsService.getSecret(
       marketplaceProviderPreset
         ? marketplaceProviderPresetSecretKey(marketplaceProviderPreset.providerId)
         : secretKeyFor(llmVendor),
     );
+    const effectiveBaseUrl = marketplaceProviderPreset
+      ? marketplaceProviderPreset.baseUrl
+      : block.baseUrl;
     const isVertex = llmVendor === "vertex-ai";
     const canUseWithoutApiKey = marketplaceProviderPreset
-      ? marketplaceProviderPreset.requiresApiKey === false && Boolean(block.baseUrl?.trim())
+      ? marketplaceProviderPreset.requiresApiKey === false && Boolean(effectiveBaseUrl?.trim())
       : canUseLlmVendorWithoutApiKey(llmVendor, block);
     if (!apiKey && !isVertex && !canUseWithoutApiKey) return null;
     if (
@@ -84,7 +90,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
       apiKey: apiKey ?? "",
       model: block.model,
       ...(llmVendor === "azure-foundry" ? { fetch: llmFetch } : {}),
-      ...(block.baseUrl ? { baseUrl: block.baseUrl } : {}),
+      ...(effectiveBaseUrl ? { baseUrl: effectiveBaseUrl } : {}),
       ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
       ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
     });
@@ -93,13 +99,19 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     const llm = settingsService.get("llm");
     const provider = llm.provider;
     const block = getLlmVendorSettings(llm.vendors, provider);
+    const activeMarketplaceProviderPreset =
+      provider === "openai-compatible" && llm.marketplaceProviderPresetId
+        ? (settingsService.get("marketplace").installedProviderPresets ?? [])
+          .find((preset) => preset.providerId === llm.marketplaceProviderPresetId)
+        : undefined;
+    const providerBaseUrl = activeMarketplaceProviderPreset?.baseUrl ?? block.baseUrl;
     return {
       provider,
       ...(provider === "openai-compatible" && llm.marketplaceProviderPresetId
         ? { marketplaceProviderPresetId: llm.marketplaceProviderPresetId }
         : {}),
       model: block.model,
-      ...(block.baseUrl ? { baseUrl: block.baseUrl } : {}),
+      ...(providerBaseUrl ? { baseUrl: providerBaseUrl } : {}),
       ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
       ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
     };
