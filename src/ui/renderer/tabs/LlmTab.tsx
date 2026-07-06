@@ -68,6 +68,7 @@ interface ProviderSelectProps {
   triggerTestId?: string;
   placeholder?: string;
   vendorOptions?: readonly VendorOption[];
+  marketplaceProviderIds?: readonly string[];
 }
 
 function normalizeProviderSearch(value: string): string {
@@ -83,10 +84,15 @@ function ProviderSelect({
   triggerTestId,
   placeholder,
   vendorOptions = VENDORS,
+  marketplaceProviderIds = [],
 }: ProviderSelectProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const demoLabel = t("llmTab.demoVendor");
+  const marketplaceProviderIdSet = useMemo(
+    () => new Set(marketplaceProviderIds),
+    [marketplaceProviderIds],
+  );
 
   const options = useMemo(
     () => [
@@ -95,15 +101,17 @@ function ProviderSelect({
             id: DEMO_VENDOR_VALUE,
             label: demoLabel,
             searchText: `${DEMO_VENDOR_VALUE} ${demoLabel}`,
+            marketplaceInstalled: false,
           }]
         : []),
       ...vendorOptions.map((vendor) => ({
         id: vendor.id,
         label: vendor.label,
         searchText: `${vendor.id} ${vendor.label}`,
+        marketplaceInstalled: marketplaceProviderIdSet.has(vendor.id),
       })),
     ],
-    [demoLabel, includeDemo, vendorOptions],
+    [demoLabel, includeDemo, marketplaceProviderIdSet, vendorOptions],
   );
 
   const normalizedQuery = normalizeProviderSearch(query);
@@ -156,7 +164,17 @@ function ProviderSelect({
           {filteredOptions.length > 0 ? (
             filteredOptions.map((option) => (
               <SelectItem key={option.id} value={option.id}>
-                {option.label}
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="min-w-0 truncate">{option.label}</span>
+                  {option.marketplaceInstalled && (
+                    <span
+                      className="inline-flex h-5 shrink-0 items-center rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground"
+                      data-testid={`llm-tab:vendor-marketplace-badge:${option.id}`}
+                    >
+                      {t("llmTab.marketplaceInstalledBadge")}
+                    </span>
+                  )}
+                </span>
               </SelectItem>
             ))
           ) : (
@@ -549,6 +567,7 @@ export function LlmTab(props: LlmTabProps) {
   // fixed demo vendor). Otherwise the real selected vendor is shown.
   const isDemoSelected = demoActive && isLoginMode && vendor === "azure-foundry";
   const displayVendor = isDemoSelected ? DEMO_VENDOR_VALUE : vendor;
+  const isMarketplaceProviderSelected = marketplaceProviderIds.includes(vendor);
   const handleVendorChange = useCallback(
     (v: string) => {
       if (v === DEMO_VENDOR_VALUE) {
@@ -726,6 +745,14 @@ export function LlmTab(props: LlmTabProps) {
             <Label htmlFor="vendor-select" className="flex items-center gap-2">
               {t("llmTab.vendor")}
               {!isLoginMode && <ImmediateBadge />}
+              {isMarketplaceProviderSelected && (
+                <span
+                  className="inline-flex h-5 items-center rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground"
+                  data-testid={`llm-tab:selected-provider-marketplace:${vendor}`}
+                >
+                  {t("llmTab.marketplaceInstalledBadge")}
+                </span>
+              )}
             </Label>
             <ProviderSelect
               value={displayVendor}
@@ -735,6 +762,7 @@ export function LlmTab(props: LlmTabProps) {
               triggerClassName="w-full"
               placeholder={t("llmTab.vendorPlaceholder")}
               vendorOptions={providerSelectOptions}
+              marketplaceProviderIds={marketplaceProviderIds}
             />
           </div>
           {/* Provider detail form — disabled when authMode === "login". */}
@@ -1071,6 +1099,7 @@ export function LlmTab(props: LlmTabProps) {
                         entry.provider,
                         ...marketplaceProviderIds,
                       ])}
+                      marketplaceProviderIds={marketplaceProviderIds}
                     />
                     <Select
                       value={fallbackModelValue}
