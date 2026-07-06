@@ -384,7 +384,20 @@ export function App() {
   }, [api, handleLoadSessionAndRefresh]);
 
   // LLM settings + context budget (single source of truth: src/shared/pricing-data.ts)
-  const { llmVendor, llmModel, enableThinkingChat, refresh: refreshLlmSettings, toggleThinking } = useSettings(api);
+  const {
+    llmVendor,
+    llmModel,
+    enableThinkingChat,
+    llmReadyWithoutApiKey,
+    refresh: refreshLlmSettings,
+    toggleThinking,
+  } = useSettings(api);
+  const effectiveLlmReady = useMemo(
+    () => effectiveHasApiKey === null
+      ? null
+      : effectiveHasApiKey || llmReadyWithoutApiKey,
+    [effectiveHasApiKey, llmReadyWithoutApiKey],
+  );
   const draftAttachmentTokens = useMemo(
     () => estimateMultimodalTokenOverhead(attachments
       .filter((attachment) => attachment.kind === "image")
@@ -622,7 +635,7 @@ export function App() {
     appendUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
     setErrorWithThought, handleCompactCommand, sessionLoad, applyLoadedSession,
     refreshSessionId, refreshSessions, attachments, setAttachments,
-    llmVendor, llmModel, onOpenSettings, setQuestion, handleAskRef,
+    llmVendor, llmModel, llmReadyWithoutApiKey, onOpenSettings, setQuestion, handleAskRef,
   });
 
   const { costEstimate, costBadgeClass } =
@@ -704,11 +717,12 @@ export function App() {
   );
 
   // ChatView context bundle — avoids drilling ~40 props through the tree.
-  // `effectiveHasApiKey` (the chain-masked key state) is surfaced by
-  // useOnboardingChainController; see that hook for the masking rationale (#1014).
+  // `effectiveLlmReady` combines the chain-masked key state with explicit
+  // keyless-compatible provider readiness. See useOnboardingChainController
+  // for the masking rationale (#1014).
   const chatContextValue = useChatContextValue({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, currentSessionId, hasApiKey: effectiveHasApiKey, onOpenSettings,
+    question, setQuestion, chatEndRef, currentSessionId, hasApiKey: effectiveLlmReady, onOpenSettings,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
     contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
@@ -766,7 +780,7 @@ export function App() {
         onSidebarWidthCommit={commitSidebarWidth}
         activeView={activeView}
         streaming={streaming}
-        hasApiKey={effectiveHasApiKey}
+        hasApiKey={effectiveLlmReady}
         onToggleAppMode={setAppMode}
         onOpenDevTools={() => setDevToolsOpen((v) => !v)}
         appUpdate={appUpdate}

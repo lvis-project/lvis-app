@@ -10,7 +10,10 @@ import { createProvider, secretKeyFor } from "../llm/provider-factory.js";
 import { FallbackProvider } from "../llm/vercel/fallback-chain.js";
 import type { LLMProvider, ProviderConfig } from "../llm/types.js";
 import type { SettingsService } from "../../data/settings-store.js";
-import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
+import {
+  canUseLlmVendorWithoutApiKey,
+  getLlmVendorSettings,
+} from "../../shared/llm-vendor-defaults.js";
 import type { AiProviderPingResult } from "../../shared/ai-provider-ping.js";
 import type { ConversationLoopDeps } from "./types.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
@@ -25,8 +28,11 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
     const apiKey = deps.settingsService.getSecret(secretKeyFor(vendor));
 
     // Vertex AI uses service account / ADC — apiKey not required, but project is.
+    // Self-hosted/local OpenAI-compatible endpoints can also run without an
+    // API key when a baseUrl is configured.
     const isVertex = vendor === "vertex-ai";
-    if (!apiKey && !isVertex) {
+    const canUseWithoutApiKey = canUseLlmVendorWithoutApiKey(vendor, block);
+    if (!apiKey && !isVertex && !canUseWithoutApiKey) {
       return null;
     }
     if (isVertex && !block.vertexProject && !process.env.GOOGLE_CLOUD_PROJECT && !process.env.GCLOUD_PROJECT) {
