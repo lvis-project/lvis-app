@@ -5,6 +5,7 @@ import {
   parseStandardModelListResponse,
 } from "../model-list.js";
 import { NetworkGuardError } from "../../../core/network-guard.js";
+import { marketplaceProviderPresetSecretKey } from "../../../shared/marketplace-package-assets.js";
 
 function makeSettingsService(overrides: {
   provider?: string;
@@ -177,6 +178,117 @@ describe("LLM model list sync", () => {
         timeoutMs: 8000,
       }),
     );
+  });
+
+  it("uses the selected marketplace provider preset key for saved OpenAI-compatible model sync", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: "future/free" }] }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") {
+          return {
+            authMode: "manual",
+            provider: "openai-compatible",
+            marketplaceProviderPresetId: "persisted-router",
+            vendors: {
+              "openai-compatible": {
+                model: "future/free",
+                baseUrl: "https://future.example/v1",
+                enableThinking: true,
+                thinkingBudgetTokens: 10_000,
+              },
+            },
+            streamSmoothing: "none",
+            fallbackChain: [],
+            modelListCache: {},
+          };
+        }
+        if (key === "marketplace") {
+          return {
+            installedProviderPresets: [{
+              providerId: "future-router",
+              label: "Future Router",
+              baseUrl: "https://future.example/v1",
+              defaultModel: "future/free",
+              modelOptions: ["future/free"],
+              requiresApiKey: true,
+            }],
+          };
+        }
+        throw new Error(`unexpected settings key: ${key}`);
+      }),
+      getSecret: vi.fn((key: string) =>
+        key === marketplaceProviderPresetSecretKey("future-router")
+          ? "fr-secret"
+          : null
+      ),
+    };
+
+    const result = await listLlmModelsFromSettings(
+      settingsService as never,
+      { vendor: "openai-compatible", credentialScope: "future-router" },
+      guardedFetchOptions(fetchImpl),
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      endpoint: "https://future.example/v1/models",
+      models: ["future/free"],
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://future.example/v1/models",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer fr-secret",
+        }),
+      }),
+    );
+  });
+
+  it("rejects an uninstalled marketplace provider preset scope before fetching", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: "future/free" }] }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "marketplace") return { installedProviderPresets: [] };
+        if (key === "llm") {
+          return {
+            authMode: "manual",
+            provider: "openai-compatible",
+            vendors: {
+              "openai-compatible": {
+                model: "future/free",
+                baseUrl: "https://future.example/v1",
+              },
+            },
+            streamSmoothing: "none",
+            fallbackChain: [],
+            modelListCache: {},
+          };
+        }
+        throw new Error(`unexpected settings key: ${key}`);
+      }),
+      getSecret: vi.fn(() => "should-not-be-used"),
+    };
+
+    const result = await listLlmModelsFromSettings(
+      settingsService as never,
+      { vendor: "openai-compatible", credentialScope: "missing-router" },
+      guardedFetchOptions(fetchImpl),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "provider-not-installed",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(settingsService.getSecret).not.toHaveBeenCalled();
   });
 
   it("returns a structured error when the model response has no ids", async () => {

@@ -40,6 +40,10 @@ import {
   type LlmModelListCache,
   type LlmModelListCacheEntry,
 } from "../../../shared/llm-model-list.js";
+import {
+  marketplaceProviderPresetSecretId,
+  type MarketplaceInstalledProviderPreset,
+} from "../../../shared/marketplace-package-assets.js";
 import type { LvisApi } from "../types.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
@@ -91,9 +95,11 @@ interface ProviderSelectProps {
   triggerClassName?: string;
   triggerTestId?: string;
   placeholder?: string;
-  vendorOptions?: readonly VendorOption[];
+  vendorOptions?: readonly ProviderOption[];
   marketplaceProviderIds?: readonly string[];
 }
+
+type ProviderOption = Omit<VendorOption, "id"> & { id: string };
 
 function normalizeProviderSearch(value: string): string {
   return value.trim().toLocaleLowerCase();
@@ -235,6 +241,10 @@ export interface LlmTabProps {
    */
   authMode: "manual" | "login";
   setAuthMode: (mode: "manual" | "login") => void;
+  marketplaceProviderPresetId?: string;
+  marketplaceProviderPresets?: readonly MarketplaceInstalledProviderPreset[];
+  onSelectMarketplaceProviderPreset?: (preset: MarketplaceInstalledProviderPreset) => void;
+  onClearMarketplaceProviderPreset?: () => void;
   /** Fired when the user clicks the "Login" button in the auth-mode section. */
   onOpenLogin?: () => void;
   /** Opens Settings → Marketplace with the provider package filter active. */
@@ -338,9 +348,29 @@ function getVendorInfo(vendorId: string): VendorOption {
   return getVendorOption(vendorId);
 }
 
+function providerOptionFromPreset(
+  preset: MarketplaceInstalledProviderPreset,
+): ProviderOption {
+  return {
+    id: marketplaceProviderPresetSecretId(preset.providerId),
+    label: preset.label,
+    placeholder: preset.apiKeyPlaceholder ?? "sk-...",
+    needsBaseUrl: true,
+    baseUrlPlaceholder: preset.baseUrl,
+    defaultModel: preset.defaultModel,
+    modelOptions: preset.modelOptions,
+  };
+}
+
+function providerOptionsForPresets(
+  presets: readonly MarketplaceInstalledProviderPreset[],
+): ProviderOption[] {
+  return presets.map(providerOptionFromPreset);
+}
+
 function shouldSyncModelList(
   vendorId: string,
-  info: VendorOption,
+  info: ProviderOption | VendorOption,
   baseUrl?: string,
 ): boolean {
   if (!vendorId || vendorId === DEMO_VENDOR_VALUE) return false;
@@ -354,8 +384,8 @@ function modelOptionsFor(
   vendorId: string,
   selectedModel: string,
   syncedOptions?: readonly string[],
+  info: ProviderOption | VendorOption = getVendorInfo(vendorId),
 ): string[] {
-  const info = getVendorInfo(vendorId);
   const options = syncedOptions && syncedOptions.length > 0
     ? [...syncedOptions]
     : [...info.modelOptions];
@@ -435,6 +465,10 @@ export function LlmTab(props: LlmTabProps) {
     setKeyInput,
     authMode,
     setAuthMode,
+    marketplaceProviderPresetId = "",
+    marketplaceProviderPresets = [],
+    onSelectMarketplaceProviderPreset,
+    onClearMarketplaceProviderPreset,
     onOpenLogin,
     onOpenMarketplace,
     demoActive,
@@ -459,7 +493,17 @@ export function LlmTab(props: LlmTabProps) {
     settingsLoaded = true,
   } = props;
   const { t } = useTranslation();
-  const vendorInfo = getVendorInfo(vendor);
+  const selectedMarketplaceProviderPreset = vendor === "openai-compatible" && marketplaceProviderPresetId
+    ? marketplaceProviderPresets.find((preset) => preset.providerId === marketplaceProviderPresetId)
+    : undefined;
+  const selectedMarketplaceProviderOption = selectedMarketplaceProviderPreset
+    ? providerOptionFromPreset(selectedMarketplaceProviderPreset)
+    : undefined;
+  const vendorInfo = selectedMarketplaceProviderOption ?? getVendorInfo(vendor);
+  const activeCredentialProviderId = selectedMarketplaceProviderPreset
+    ? marketplaceProviderPresetSecretId(selectedMarketplaceProviderPreset.providerId)
+    : vendor;
+  const activeModelListCredentialScope = selectedMarketplaceProviderPreset?.providerId ?? "";
   // (B) Pre-hydration the parent initializes `vendor` to "" so the dropdown
   // never flashes the wrong vendor. `getVendorInfo("")` still falls back to
   // VENDORS[0], so reading `vendorInfo.label` directly would leak that stale
@@ -484,12 +528,14 @@ export function LlmTab(props: LlmTabProps) {
     });
   }, []);
   const requestModelList = useCallback(
-    async (provider: string, options: { baseUrl?: string; force?: boolean } = {}) => {
+    async (provider: string, options: { baseUrl?: string; force?: boolean; credentialScope?: string } = {}) => {
       if (!settingsLoaded && !options.force) return;
       const providerInfo = getVendorInfo(provider);
       const baseUrl = options.baseUrl?.trim() ?? "";
       if (!shouldSyncModelList(provider, providerInfo, baseUrl)) return;
-      const key = llmModelListCacheKey(provider, baseUrl);
+      const credentialScope =
+        provider === "openai-compatible" ? options.credentialScope?.trim() ?? "" : "";
+      const key = llmModelListCacheKey(provider, baseUrl, credentialScope);
       const existing = modelListsRef.current[key];
       const persistedCacheHasKey = Object.prototype.hasOwnProperty.call(
         modelListCacheRef.current,
@@ -505,11 +551,13 @@ export function LlmTab(props: LlmTabProps) {
         const result = await api.listLlmModels({
           vendor: provider,
           ...(baseUrl ? { baseUrl } : {}),
+          ...(credentialScope ? { credentialScope } : {}),
         });
         if (result.ok) {
           const nextEntry: LlmModelListCacheEntry = {
             vendor: result.vendor,
             ...(baseUrl ? { baseUrl } : {}),
+            ...(credentialScope ? { credentialScope } : {}),
             endpoint: result.endpoint,
             models: result.models,
             fetchedAt: result.fetchedAt,
@@ -555,14 +603,29 @@ export function LlmTab(props: LlmTabProps) {
     [api, setModelListState, settingsLoaded],
   );
   const activeModelListBaseUrl = baseUrl.trim();
-  const activeModelListKey = llmModelListCacheKey(vendor, activeModelListBaseUrl);
+  const activeModelListKey = llmModelListCacheKey(
+    vendor,
+    activeModelListBaseUrl,
+    activeModelListCredentialScope,
+  );
   const activeModelList = modelLists[activeModelListKey];
   const activeModelOptions = modelOptionsFor(
     vendor,
     activeModelValue,
     optionsFromModelListState(activeModelList),
+    vendorInfo,
   );
   const isLoginMode = authMode === "login";
+  const marketplaceProviderPresetOptions = useMemo(
+    () => providerOptionsForPresets(marketplaceProviderPresets),
+    [marketplaceProviderPresets],
+  );
+  const marketplaceProviderPresetSelectIds = useMemo(
+    () => marketplaceProviderPresets.map((preset) =>
+      marketplaceProviderPresetSecretId(preset.providerId)
+    ),
+    [marketplaceProviderPresets],
+  );
   useEffect(() => {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
@@ -597,17 +660,24 @@ export function LlmTab(props: LlmTabProps) {
     };
   }, [api]);
   const providerSelectOptions = useMemo(
-    () => visibleVendorsFor([vendor, ...marketplaceProviderIds]),
-    [marketplaceProviderIds, vendor],
+    () => [
+      ...visibleVendorsFor([vendor, ...marketplaceProviderIds]),
+      ...marketplaceProviderPresetOptions,
+    ],
+    [marketplaceProviderIds, marketplaceProviderPresetOptions, vendor],
   );
   useEffect(() => {
     if (!settingsLoaded || isLoginMode) return;
     const timer = window.setTimeout(() => {
-      void requestModelList(vendor, { baseUrl: activeModelListBaseUrl });
+      void requestModelList(vendor, {
+        baseUrl: activeModelListBaseUrl,
+        credentialScope: activeModelListCredentialScope,
+      });
     }, MODEL_LIST_SYNC_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [
     activeModelListBaseUrl,
+    activeModelListCredentialScope,
     isLoginMode,
     requestModelList,
     settingsLoaded,
@@ -673,23 +743,47 @@ export function LlmTab(props: LlmTabProps) {
   // hydrated AND it is the active provider (login mode + azure-foundry, the
   // fixed demo vendor). Otherwise the real selected vendor is shown.
   const isDemoSelected = demoActive && isLoginMode && vendor === "azure-foundry";
-  const displayVendor = isDemoSelected ? DEMO_VENDOR_VALUE : vendor;
-  const isMarketplaceProviderSelected = marketplaceProviderIds.includes(vendor);
+  const displayVendor = isDemoSelected
+    ? DEMO_VENDOR_VALUE
+    : selectedMarketplaceProviderPreset
+      ? marketplaceProviderPresetSecretId(selectedMarketplaceProviderPreset.providerId)
+      : vendor;
+  const isMarketplaceProviderSelected =
+    marketplaceProviderIds.includes(vendor) || Boolean(selectedMarketplaceProviderPreset);
   const handleVendorChange = useCallback(
     (v: string) => {
       if (v === DEMO_VENDOR_VALUE) {
         void onSelectDemo();
         return;
       }
+      const preset = marketplaceProviderPresets.find(
+        (entry) => marketplaceProviderPresetSecretId(entry.providerId) === v,
+      );
+      if (preset) {
+        onSelectMarketplaceProviderPreset?.(preset);
+        if (isLoginMode) setAuthMode("manual");
+        onImmediateChange?.();
+        return;
+      }
       // Real vendor picked. If we were in a login/demo session, this is an
       // explicit switch out → back to manual mode for the chosen vendor. We do
       // NOT clear the demo session (it stays in .env.demo); the user can
       // re-select "데모 체험" later to restore it.
+      onClearMarketplaceProviderPreset?.();
       setVendor(v);
       if (isLoginMode) setAuthMode("manual");
       onImmediateChange?.();
     },
-    [onSelectDemo, setVendor, isLoginMode, setAuthMode, onImmediateChange],
+    [
+      marketplaceProviderPresets,
+      onClearMarketplaceProviderPreset,
+      onImmediateChange,
+      onSelectDemo,
+      onSelectMarketplaceProviderPreset,
+      setAuthMode,
+      setVendor,
+      isLoginMode,
+    ],
   );
   // Requirement D — only allow Apply when the host map has ACTUALLY changed
   // from the last-persisted value. `loadedHostResolverMap` is the value
@@ -855,7 +949,7 @@ export function LlmTab(props: LlmTabProps) {
               {isMarketplaceProviderSelected && (
                 <span
                   className="inline-flex h-5 items-center rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground"
-                  data-testid={`llm-tab:selected-provider-marketplace:${vendor}`}
+                  data-testid={`llm-tab:selected-provider-marketplace:${displayVendor}`}
                 >
                   {t("llmTab.marketplaceInstalledBadge")}
                 </span>
@@ -869,7 +963,10 @@ export function LlmTab(props: LlmTabProps) {
               triggerClassName="w-full"
               placeholder={t("llmTab.vendorPlaceholder")}
               vendorOptions={providerSelectOptions}
-              marketplaceProviderIds={marketplaceProviderIds}
+              marketplaceProviderIds={[
+                ...marketplaceProviderIds,
+                ...marketplaceProviderPresetSelectIds,
+              ]}
             />
           </div>
           {/* Provider detail form — disabled when authMode === "login". */}
@@ -953,7 +1050,7 @@ export function LlmTab(props: LlmTabProps) {
                       size="sm"
                       variant="ghost"
                       className="h-7 text-xs text-destructive"
-                      onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}
+                      onClick={() => void api.deleteApiKey(activeCredentialProviderId).then(() => { setHasKey(false); onSaved(); })}
                     >
                       {t("llmTab.delete")}
                     </Button>
@@ -985,6 +1082,7 @@ export function LlmTab(props: LlmTabProps) {
                         disabled={isLoginMode || activeModelList?.status === "loading"}
                         onClick={() => void requestModelList(vendor, {
                           baseUrl: activeModelListBaseUrl,
+                          credentialScope: activeModelListCredentialScope,
                           force: true,
                         })}
                       >

@@ -154,7 +154,11 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
           dispatchChain({ type: "probe-skip" });
           return;
         }
-        const anyKey = await Promise.all(
+        const activeKey = await api.hasApiKey().catch(() => false);
+        if (cancelled) return;
+        const anyKey = activeKey
+          ? [true]
+          : await Promise.all(
           LLM_VENDORS.map((v) => api.hasApiKey(v).catch(() => false)),
         );
         if (cancelled) return;

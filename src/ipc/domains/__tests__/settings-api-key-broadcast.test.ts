@@ -352,6 +352,82 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
     expect(rewire).toHaveBeenCalledOnce();
   });
 
+  it("calls rewireReviewerAgent when only the active marketplace provider preset changes", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const rewire = vi.fn();
+    const providerBlock = {
+      model: "shared/free",
+      baseUrl: "https://router.example/v1",
+    };
+    const prevLlm = {
+      provider: "openai-compatible",
+      marketplaceProviderPresetId: "router-a",
+      vendors: {
+        "openai-compatible": providerBlock,
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    const nextLlm = {
+      provider: "openai-compatible",
+      marketplaceProviderPresetId: "router-b",
+      vendors: {
+        "openai-compatible": providerBlock,
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    let llmReads = 0;
+    const baseDeps = makeDeps(windows);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        get: vi.fn((key: string) => {
+          if (key === "llm") {
+            llmReads += 1;
+            return llmReads === 1 ? prevLlm : nextLlm;
+          }
+          if (key === "marketplace") {
+            return {
+              cloudAllowPrivateNetwork: false,
+              installedProviderPresets: [
+                {
+                  providerId: "router-a",
+                  label: "Router A",
+                  baseUrl: "https://router.example/v1",
+                  defaultModel: "shared/free",
+                  modelOptions: ["shared/free"],
+                  requiresApiKey: true,
+                },
+                {
+                  providerId: "router-b",
+                  label: "Router B",
+                  baseUrl: "https://router.example/v1",
+                  defaultModel: "shared/free",
+                  modelOptions: ["shared/free"],
+                  requiresApiKey: true,
+                },
+              ],
+            };
+          }
+          if (key === "shortcuts") return { toggleWindow: null, enabled: false };
+          if (key === "system") return { launchAtStartup: false, launchMinimized: false };
+          return {};
+        }),
+        patch: vi.fn(async (p: unknown) => p),
+      },
+      rewireReviewerAgent: rewire,
+    };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:update", {
+      llm: { marketplaceProviderPresetId: "router-b" },
+    });
+
+    expect(rewire).toHaveBeenCalledOnce();
+  });
+
   it("rolls back active LLM settings when reviewer rewire fails", async () => {
     const windows: ReturnType<typeof makeWindow>[] = [];
     const rewire = vi.fn()

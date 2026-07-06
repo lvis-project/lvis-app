@@ -369,6 +369,47 @@ describe("MarketplaceTab", () => {
     expect(api.updateSettings).not.toHaveBeenCalled();
   });
 
+  it("installs user-authored provider presets from marketplace metadata", async () => {
+    const customProvider: MarketplaceItem = {
+      id: "provider-future-router",
+      name: "Future Router Provider",
+      description: "Custom OpenAI-compatible router",
+      packageSpec: "provider:future-router",
+      installed: false,
+      enabled: false,
+      pluginType: "provider",
+      packageAsset: {
+        type: "provider",
+        providerId: "future-router",
+        label: "Future Router",
+        baseUrl: "https://future.example/v1",
+        defaultModel: "future/free",
+        modelOptions: ["future/free", "future/pro"],
+        requiresApiKey: false,
+      },
+    };
+    const api = marketplaceTabApi({
+      listMarketplacePlugins: vi.fn().mockResolvedValue([customProvider]),
+    });
+    render(<MarketplaceTab {...defaultProps(api)} initialFilter="provider" />);
+
+    fireEvent.click(await screen.findByTestId("marketplace:action:provider-future-router"));
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        marketplace: {
+          installedProviderPresets: [{
+            providerId: "future-router",
+            label: "Future Router",
+            baseUrl: "https://future.example/v1",
+            defaultModel: "future/free",
+            modelOptions: ["future/free", "future/pro"],
+            requiresApiKey: false,
+          }],
+        },
+      });
+    });
+  });
+
   it("shows local provider/theme/language candidates when the remote catalog is empty", async () => {
     const api = marketplaceTabApi({
       listMarketplacePlugins: vi.fn().mockResolvedValue([]),
