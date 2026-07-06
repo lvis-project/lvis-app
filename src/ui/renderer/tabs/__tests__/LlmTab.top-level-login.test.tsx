@@ -186,6 +186,22 @@ describe("LlmTab — top-level login toggle UI", () => {
     fireEvent.change(search, { target: { value: "groq" } });
 
     expect(screen.getByText("Groq")).toBeInTheDocument();
+    expect(screen.getByTestId("llm-tab:vendor-marketplace-badge:groq")).toHaveTextContent(
+      "마켓플레이스",
+    );
+  });
+
+  it("marks the selected provider when it came from Marketplace", async () => {
+    const api = llmTabApi();
+    (api.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      marketplace: {
+        installedProviderIds: ["groq"],
+      },
+    });
+    render(<Harness initialAuthMode="manual" initialVendor="groq" api={api} />);
+
+    expect(await screen.findByTestId("llm-tab:selected-provider-marketplace:groq"))
+      .toHaveTextContent("마켓플레이스");
   });
 
   it("opens the Marketplace provider filter from the provider section", () => {
