@@ -18,6 +18,15 @@
  */
 import type { LLMVendor } from "./types.js";
 import { isOpenAICompatibleVendor } from "../../shared/llm-vendor-defaults.js";
+import type {
+  MarketplaceInstalledProviderPreset,
+  MarketplaceProviderPackageAsset,
+} from "../../shared/marketplace-package-assets.js";
+
+type ProviderPackageCapabilitySource =
+  | Pick<MarketplaceInstalledProviderPreset, "capabilities">
+  | Pick<MarketplaceProviderPackageAsset, "capabilities">
+  | undefined;
 
 const NON_VISION_MODEL_PATTERNS = [
   /^o1(-mini|-preview)?$/i,
@@ -86,4 +95,10 @@ export function supportsVision(vendor: LLMVendor, model: string): boolean {
  */
 export function vendorSupportsLengthContinuation(vendor: LLMVendor): boolean {
   return vendor === "openai-compatible";
+}
+
+export function providerPackageSupportsReviewerAdapter(
+  metadata: ProviderPackageCapabilitySource,
+): boolean {
+  return metadata?.capabilities?.reviewerAdapter === true;
 }

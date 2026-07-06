@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
+  BUILT_IN_LLM_VENDOR_IDS,
   DEFAULT_VISIBLE_LLM_VENDOR_IDS,
+  INSTALLED_LLM_VENDOR_IDS,
+  KNOWN_LEGACY_LLM_VENDOR_IDS,
   isLLMVendor,
   LLM_VENDORS,
   LLM_VENDOR_DEFAULTS,
@@ -93,6 +96,13 @@ describe("LLM vendor defaults", () => {
   });
 
   it("keeps only five providers in the default visible surface", () => {
+    expect(BUILT_IN_LLM_VENDOR_IDS).toEqual([
+      "openai",
+      "claude",
+      "gemini",
+      "openrouter",
+      "openai-compatible",
+    ]);
     expect(DEFAULT_VISIBLE_LLM_VENDOR_IDS).toEqual([
       "openai",
       "claude",
@@ -112,6 +122,19 @@ describe("LLM vendor defaults", () => {
     expect(isMarketplaceEligibleLLMVendor("groq")).toBe(true);
     expect(isMarketplaceEligibleLLMVendor("openrouter")).toBe(false);
     expect(isMarketplaceEligibleLLMVendor("unknown-vendor")).toBe(false);
+  });
+
+  it("keeps built-in, marketplace-installed seed, and known legacy provider ids explicit", () => {
+    expect(DEFAULT_VISIBLE_LLM_VENDOR_IDS).toBe(BUILT_IN_LLM_VENDOR_IDS);
+    expect(INSTALLED_LLM_VENDOR_IDS).toEqual(MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS);
+    expect(KNOWN_LEGACY_LLM_VENDOR_IDS).toEqual(INSTALLED_LLM_VENDOR_IDS);
+    expect(INSTALLED_LLM_VENDOR_IDS).not.toContain("openai");
+    expect(INSTALLED_LLM_VENDOR_IDS).not.toContain("openrouter");
+    expect(INSTALLED_LLM_VENDOR_IDS).toContain("azure-foundry");
+    expect(INSTALLED_LLM_VENDOR_IDS).toContain("groq");
+    expect(KNOWN_LEGACY_LLM_VENDOR_IDS).toContain("vertex-ai");
+    expect([...BUILT_IN_LLM_VENDOR_IDS, ...KNOWN_LEGACY_LLM_VENDOR_IDS].sort())
+      .toEqual([...LLM_VENDORS].sort());
   });
 
   it("uses gpt-5.4-mini as the OpenAI default model", () => {

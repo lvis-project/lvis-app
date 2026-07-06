@@ -103,36 +103,57 @@ seeded rows.
 
 ## Verification Snapshot
 
-Current merged heads after marketplace scope was reflected:
+Current app mainline after marketplace provider preset hardening:
 
-- App: `0d601b13` (`#1528`) tightened marketplace asset UI tests and dynamic
-  configured-base-url model-list assertions.
-- Marketplace: `584e4dc` (`#179`) tightened provider/theme/language category
-  assertions in catalog/detail coverage.
+- App: `40ab4e3f` (`#1534`) merged the provider preset credential-boundary
+  hardening on top of the provider/theme/language marketplace asset split.
 
 Post-merge checks succeeded on July 6, 2026:
 
-- App main: CI and CodeQL for `0d601b13`
-- Marketplace main: server-ci and alembic upgrade checks for `584e4dc`
+- `build-and-test`
+- `Windows permission path tests`
+- `CodeQL`
+- `naming-gate`
+- `cluster-detector`
 
-Remaining goal work is not blocked by the seed-to-DB change. The app now has a
-true Electron settings E2E that clicks through Marketplace asset installs and
-then proves the installed provider, theme, and language pack appear in the live
-LLM/Appearance pickers:
+The app now has a true Electron settings E2E that clicks through Marketplace
+asset installs and then proves the installed provider, theme, and language pack
+appear in the live LLM/Appearance pickers:
 
 - `test/e2e/ui/marketplace-assets.spec.ts`
+
+The server-side Marketplace DB/API work lives outside this repository. This app
+repository treats built-in provider/theme/language entries as local seed
+candidates and treats remote catalog entries as authoritative when returned by
+the configured marketplace endpoint.
 
 ## Sources
 
 - VS Code, Publishing Extensions:
   https://code.visualstudio.com/api/working-with-extensions/publishing-extension
+- VS Code, Extension Manifest:
+  https://code.visualstudio.com/api/references/extension-manifest
+- VS Code, Color Theme:
+  https://code.visualstudio.com/api/extension-guides/color-theme
+- VS Code, Language Extensions Overview:
+  https://code.visualstudio.com/api/language-extensions/overview
 - JetBrains Marketplace, Plugin upload API:
   https://plugins.jetbrains.com/docs/marketplace/plugin-upload.html
+- JetBrains, Install plugins:
+  https://www.jetbrains.com/help/idea/managing-plugins.html
 - Chrome for Developers, Publish in the Chrome Web Store:
   https://developer.chrome.com/docs/webstore/publish
+- Obsidian, Community plugins:
+  https://help.obsidian.md/Extending+Obsidian/Community+plugins
+- Obsidian, Themes:
+  https://help.obsidian.md/Extending+Obsidian/Themes
 - OpenCode, Providers:
   https://opencode.ai/docs/providers/
 - OpenRouter, model list API:
   https://openrouter.ai/api/v1/models
+- OpenRouter, Models:
+  https://openrouter.ai/docs/guides/overview/models
 - OpenRouter, provider routing:
   https://openrouter.ai/docs/guides/routing/provider-selection
+- OpenRouter, model fallbacks:
+  https://openrouter.ai/docs/guides/routing/model-fallbacks

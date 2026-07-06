@@ -268,8 +268,17 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     ]);
     expect(plugins.map((plugin) => plugin.packageAsset)).toEqual([
       { type: "provider", providerId: "groq" },
-      { type: "theme", bundleId: "tokyo-night" },
-      { type: "language-pack", locale: "ko" },
+      {
+        type: "theme",
+        bundleId: "tokyo-night",
+        displayName: "Tokyo Night",
+        description: "Theme package",
+      },
+      {
+        type: "language-pack",
+        locale: "ko",
+        displayName: "Korean",
+      },
     ]);
   });
 

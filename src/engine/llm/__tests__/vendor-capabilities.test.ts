@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { supportsVision } from "../vendor-capabilities.js";
+import {
+  providerPackageSupportsReviewerAdapter,
+  supportsVision,
+} from "../vendor-capabilities.js";
 
 describe("supportsVision", () => {
   it("claude-sonnet-4-6 supports vision", () => {
@@ -41,5 +44,18 @@ describe("supportsVision", () => {
   it("copilot routing falls back by model name", () => {
     expect(supportsVision("copilot", "gpt-4.1")).toBe(true);
     expect(supportsVision("copilot", "gpt-3.5-turbo")).toBe(false);
+  });
+});
+
+describe("providerPackageSupportsReviewerAdapter", () => {
+  it("requires explicit package metadata opt-in", () => {
+    expect(providerPackageSupportsReviewerAdapter(undefined)).toBe(false);
+    expect(providerPackageSupportsReviewerAdapter({ capabilities: {} })).toBe(false);
+    expect(providerPackageSupportsReviewerAdapter({
+      capabilities: { reviewerAdapter: false },
+    })).toBe(false);
+    expect(providerPackageSupportsReviewerAdapter({
+      capabilities: { reviewerAdapter: true },
+    })).toBe(true);
   });
 });

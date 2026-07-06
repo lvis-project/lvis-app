@@ -17,6 +17,7 @@ import {
   type LLMVendor,
   type OpenAICompatiblePresetVendor,
 } from "../../shared/llm-vendor-defaults.js";
+import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
 import type { ProviderErrorDiagnostics } from "./provider-error-diagnostics.js";
 export type { LLMVendor };
 export { LLM_VENDORS, isLLMVendor } from "../../shared/llm-vendor-defaults.js";
@@ -399,4 +400,11 @@ export interface ProviderConfig {
   vertexProject?: string;
   /** Vertex AI — GCP region (default "us-central1"). */
   vertexLocation?: string;
+  /**
+   * Marketplace/provider-package metadata selected at settings time. Runtime
+   * adapters can use this to honor catalog-owned base URLs, auth policy,
+   * model discovery, capability flags, and trust metadata without branching on
+   * static OpenAI-compatible preset ids.
+   */
+  providerMetadata?: MarketplaceInstalledProviderPreset;
 }

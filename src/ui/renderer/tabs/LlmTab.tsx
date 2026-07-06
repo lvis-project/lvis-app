@@ -41,6 +41,9 @@ import {
   type LlmModelListCacheEntry,
 } from "../../../shared/llm-model-list.js";
 import {
+  isOpenRouterFreeModel,
+} from "../../../shared/openrouter-free-models.js";
+import {
   marketplaceProviderPresetSecretId,
   type MarketplaceInstalledProviderPreset,
 } from "../../../shared/marketplace-package-assets.js";
@@ -400,6 +403,25 @@ function modelOptionsFor(
   }
 
   return options;
+}
+
+function ModelSelectItemContent({ option }: { option: string }) {
+  const { t } = useTranslation();
+  const isFree = isOpenRouterFreeModel(option);
+  if (!isFree) return <>{option}</>;
+  return (
+    <span className="flex min-w-0 flex-col gap-0.5 py-0.5">
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="min-w-0 truncate">{option}</span>
+        <Badge variant="secondary" className="h-4 px-1 text-[9px] uppercase">
+          {t("llmTab.openRouterFreeBadge")}
+        </Badge>
+      </span>
+      <span className="text-[10px] leading-tight text-muted-foreground">
+        {t("llmTab.openRouterFreeDisclaimer")}
+      </span>
+    </span>
+  );
 }
 
 function modelListStateFromCacheEntry(entry: LlmModelListCacheEntry): ModelListState {
@@ -1114,7 +1136,9 @@ export function LlmTab(props: LlmTabProps) {
                 </SelectTrigger>
                 <SelectContent>
                   {activeModelOptions.map((option) => (
-                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                    <SelectItem key={option} value={option}>
+                      <ModelSelectItemContent option={option} />
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -1322,7 +1346,9 @@ export function LlmTab(props: LlmTabProps) {
                       </SelectTrigger>
                       <SelectContent>
                         {fallbackModelOptions.map((option) => (
-                          <SelectItem key={option} value={option}>{option}</SelectItem>
+                          <SelectItem key={option} value={option}>
+                            <ModelSelectItemContent option={option} />
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

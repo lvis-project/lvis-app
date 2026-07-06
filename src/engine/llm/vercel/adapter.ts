@@ -28,6 +28,7 @@ import {
   PROVIDER_TOOL_SEARCH_TEXT_ALIASES,
 } from "../../../shared/tool-name-aliases.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../../../tools/registry.js";
+import type { MarketplaceInstalledProviderPreset } from "../../../shared/marketplace-package-assets.js";
 
 /** Vendor slot recognised by VercelUnifiedProvider. */
 export type VercelVendor = LLMVendor;
@@ -176,6 +177,7 @@ export class VercelUnifiedProvider implements LLMProvider {
   private readonly baseUrl?: string;
   private readonly customFetch?: typeof fetch;
   private readonly extras: VercelProviderExtras;
+  private readonly providerMetadata?: MarketplaceInstalledProviderPreset;
 
   constructor(
     vendor: VercelVendor,
@@ -183,6 +185,7 @@ export class VercelUnifiedProvider implements LLMProvider {
     baseUrl?: string,
     customFetch?: typeof fetch,
     extras: VercelProviderExtras = {},
+    providerMetadata?: MarketplaceInstalledProviderPreset,
   ) {
     this.vendor = vendor;
     this.vendorSlot = vendor;
@@ -190,6 +193,7 @@ export class VercelUnifiedProvider implements LLMProvider {
     this.baseUrl = baseUrl;
     this.customFetch = customFetch;
     this.extras = extras;
+    this.providerMetadata = providerMetadata;
   }
 
   async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
@@ -399,7 +403,11 @@ export class VercelUnifiedProvider implements LLMProvider {
 
   private resolveModel(modelId: string, _hasTools: boolean) {
     const slot = this.vendorSlot;
-    assertCredentialedBaseUrlUsesHttps(slot, this.baseUrl, this.apiKey);
+    assertCredentialedBaseUrlUsesHttps(
+      slot,
+      this.providerMetadata?.baseUrl ?? this.baseUrl,
+      this.apiKey,
+    );
 
     if (slot === "claude") {
       const anthropic = createAnthropic({
@@ -444,14 +452,15 @@ export class VercelUnifiedProvider implements LLMProvider {
     }
 
     if (isOpenAICompatibleVendor(slot)) {
-      if (!this.baseUrl) {
+      const compatibleBaseUrl = this.providerMetadata?.baseUrl ?? this.baseUrl;
+      if (!compatibleBaseUrl) {
         throw new Error(
           `VercelUnifiedProvider(${slot}): baseUrl is required`,
         );
       }
       const compat = createOpenAICompatible({
         name: OPENAI_COMPAT_PROVIDER_NAME,
-        baseURL: this.baseUrl,
+        baseURL: compatibleBaseUrl,
         apiKey: this.apiKey,
         ...(this.customFetch ? { fetch: this.customFetch } : {}),
       });

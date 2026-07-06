@@ -20,11 +20,49 @@ describe("marketplace package assets", () => {
   it("accepts explicit catalog asset fields and packageSpec fallbacks", () => {
     expect(parseMarketplacePackageAsset({ type: "provider", provider_id: "ollama" }))
       .toEqual({ type: "provider", providerId: "ollama" });
-    expect(parseMarketplacePackageAsset({ type: "theme", package_spec: "theme:high-contrast" }))
-      .toEqual({ type: "theme", bundleId: "high-contrast" });
+    expect(parseMarketplacePackageAsset({
+      type: "theme",
+      package_spec: "theme:high-contrast",
+      display_name: "High Contrast",
+      description: "Accessible theme",
+      shell_mode: "dark",
+      compatibility_version: "1",
+      token_map: {
+        "app.background": "#000000",
+        "app.foreground": "#ffffff",
+      },
+    })).toEqual({
+      type: "theme",
+      bundleId: "high-contrast",
+      displayName: "High Contrast",
+      description: "Accessible theme",
+      shellMode: "dark",
+      compatibilityVersion: "1",
+      tokens: {
+        "app.background": "#000000",
+        "app.foreground": "#ffffff",
+      },
+    });
     expect(assetFromMarketplaceCatalogFields("language-pack", "@lvis/ko@1.0.0", {
       locale: "ko",
-    })).toEqual({ type: "language-pack", locale: "ko" });
+      display_name: "Korean",
+      native_name: "Korean",
+      english_name: "Korean",
+      catalog_version: "2026.07",
+      messages: {
+        "settings.title": "Settings",
+      },
+    })).toEqual({
+      type: "language-pack",
+      locale: "ko",
+      displayName: "Korean",
+      nativeName: "Korean",
+      englishName: "Korean",
+      catalogVersion: "2026.07",
+      messages: {
+        "settings.title": "Settings",
+      },
+    });
   });
 
   it("accepts custom provider preset metadata for user-authored marketplace assets", () => {
@@ -36,6 +74,19 @@ describe("marketplace package assets", () => {
       default_model: "future/free",
       model_options: ["future/free", "future/pro", "future/free"],
       requires_api_key: false,
+      model_discovery_policy: "openrouter-models-api",
+      capabilities: {
+        streaming: true,
+        tool_calls: true,
+        vision: false,
+        reasoning: true,
+        reviewer_adapter: true,
+      },
+      trust_metadata: {
+        credential_use: "optional",
+        network_access: "router-api",
+        data_policy: "router-policy",
+      },
     })).toEqual({
       type: "provider",
       providerId: "future-router",
@@ -44,6 +95,19 @@ describe("marketplace package assets", () => {
       defaultModel: "future/free",
       modelOptions: ["future/free", "future/pro"],
       requiresApiKey: false,
+      modelDiscoveryPolicy: "openrouter-models-api",
+      capabilities: {
+        streaming: true,
+        toolCalls: true,
+        vision: false,
+        reasoning: true,
+        reviewerAdapter: true,
+      },
+      trust: {
+        credentialUse: "optional",
+        networkAccess: "router-api",
+        dataPolicy: "router-policy",
+      },
     });
     expect(assetFromMarketplaceCatalogFields("provider", "provider:top-level-router", {
       label: "Top-level Router",
@@ -70,6 +134,13 @@ describe("marketplace package assets", () => {
     })).toBeUndefined();
     expect(parseMarketplacePackageAsset({
       type: "provider",
+      provider_id: "http-keyless-remote-router",
+      base_url: "http://router.example/v1",
+      default_model: "router/free",
+      requires_api_key: false,
+    })).toBeUndefined();
+    expect(parseMarketplacePackageAsset({
+      type: "provider",
       provider_id: "http-keyless-router",
       base_url: "http://localhost:11434/v1",
       default_model: "local/free",
@@ -81,6 +152,18 @@ describe("marketplace package assets", () => {
       baseUrl: "http://localhost:11434/v1",
       defaultModel: "local/free",
       modelOptions: ["local/free"],
+      requiresApiKey: false,
+    });
+    expect(parseMarketplacePackageAsset({
+      type: "provider",
+      provider_id: "http-keyless-loopback-router",
+      base_url: "http://127.0.0.1:11434/v1",
+      default_model: "local/free",
+      requires_api_key: false,
+    })).toMatchObject({
+      type: "provider",
+      providerId: "http-keyless-loopback-router",
+      baseUrl: "http://127.0.0.1:11434/v1",
       requiresApiKey: false,
     });
   });

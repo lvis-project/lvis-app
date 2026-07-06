@@ -101,3 +101,13 @@ export function visibleLocalesFor(currentLocales: readonly unknown[] = []): Loca
   }
   return visible;
 }
+
+export function recommendedMarketplaceLocaleForSystem(
+  systemLocale: unknown,
+  currentLocales: readonly unknown[] = [],
+): MarketplaceEligibleLocale | undefined {
+  const locale = normalizeLocale(systemLocale);
+  if (!isMarketplaceEligibleLocale(locale)) return undefined;
+  const current = visibleLocalesFor(currentLocales);
+  return current.includes(locale) ? undefined : locale;
+}

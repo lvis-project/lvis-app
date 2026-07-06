@@ -3,9 +3,11 @@ import {
   type MarketplaceEligibleLocale,
 } from "../i18n/locale.js";
 import {
-  isMarketplacePackageType,
   type MarketplacePackageType,
 } from "./assistant-context.js";
+import {
+  isMarketplaceAssetPackageType,
+} from "./marketplace-package-sections.js";
 import {
   isMarketplaceEligibleLLMVendor,
   isLLMVendor,
@@ -24,6 +26,9 @@ export interface MarketplaceProviderPackageAsset {
   defaultModel?: string;
   modelOptions?: string[];
   requiresApiKey?: boolean;
+  modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy;
+  capabilities?: MarketplaceProviderPackageCapabilities;
+  trust?: MarketplaceProviderPackageTrustMetadata;
 }
 
 export interface MarketplaceInstalledProviderPreset {
@@ -34,12 +39,62 @@ export interface MarketplaceInstalledProviderPreset {
   defaultModel: string;
   modelOptions: string[];
   requiresApiKey: boolean;
+  modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy;
+  capabilities?: MarketplaceProviderPackageCapabilities;
+  trust?: MarketplaceProviderPackageTrustMetadata;
+}
+
+export const MARKETPLACE_PROVIDER_MODEL_DISCOVERY_POLICIES = [
+  "static",
+  "models-api",
+  "openrouter-models-api",
+  "manual",
+] as const;
+
+export type MarketplaceProviderModelDiscoveryPolicy =
+  (typeof MARKETPLACE_PROVIDER_MODEL_DISCOVERY_POLICIES)[number];
+
+export interface MarketplaceProviderPackageCapabilities {
+  streaming?: boolean;
+  toolCalls?: boolean;
+  vision?: boolean;
+  reasoning?: boolean;
+  localOnly?: boolean;
+  reviewerAdapter?: boolean;
+}
+
+export interface MarketplaceProviderPackageTrustMetadata {
+  credentialUse?: "none" | "optional" | "required";
+  networkAccess?: "none" | "local" | "provider-api" | "router-api";
+  dataPolicy?: "local-only" | "provider-policy" | "router-policy";
+}
+
+export type MarketplaceThemeShellMode = "light" | "dark" | "system";
+
+export interface MarketplaceThemePackageAsset {
+  type: "theme";
+  bundleId: MarketplaceEligibleThemeBundleId;
+  displayName?: string;
+  description?: string;
+  shellMode?: MarketplaceThemeShellMode;
+  compatibilityVersion?: string;
+  tokens?: Record<string, string>;
+}
+
+export interface MarketplaceLanguagePackPackageAsset {
+  type: "language-pack";
+  locale: MarketplaceEligibleLocale;
+  displayName?: string;
+  nativeName?: string;
+  englishName?: string;
+  catalogVersion?: string;
+  messages?: Record<string, string>;
 }
 
 export type MarketplacePackageAsset =
   | MarketplaceProviderPackageAsset
-  | { type: "theme"; bundleId: MarketplaceEligibleThemeBundleId }
-  | { type: "language-pack"; locale: MarketplaceEligibleLocale };
+  | MarketplaceThemePackageAsset
+  | MarketplaceLanguagePackPackageAsset;
 
 export type MarketplacePackageAssetType = MarketplacePackageAsset["type"];
 
@@ -51,6 +106,10 @@ const MAX_PROVIDER_LABEL_LENGTH = 80;
 const MAX_PROVIDER_URL_LENGTH = 512;
 const MAX_PROVIDER_MODEL_LENGTH = 256;
 const MAX_PROVIDER_MODEL_OPTIONS = 100;
+const MAX_PACKAGE_METADATA_LENGTH = 256;
+const MAX_PACKAGE_METADATA_VALUE_LENGTH = 4_000;
+const MAX_THEME_TOKENS = 500;
+const MAX_LANGUAGE_MESSAGES = 10_000;
 const MARKETPLACE_PROVIDER_PRESET_ID_PATTERN =
   new RegExp(`^${MARKETPLACE_PROVIDER_PRESET_ID_PATTERN_SOURCE}$`);
 
@@ -98,6 +157,35 @@ function usesHttpsUrl(value: string): boolean {
   }
 }
 
+function usesLoopbackHttpUrl(value: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:") return false;
+
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
+  if (hostname === "::1" || hostname === "[::1]") return true;
+
+  const octets = hostname.split(".");
+  return (
+    octets.length === 4 &&
+    octets[0] === "127" &&
+    octets.every((part) => {
+      if (!/^\d+$/.test(part)) return false;
+      const value = Number(part);
+      return value >= 0 && value <= 255;
+    })
+  );
+}
+
+function isAllowedProviderBaseUrl(value: string, requiresApiKey: boolean): boolean {
+  return usesHttpsUrl(value) || (!requiresApiKey && usesLoopbackHttpUrl(value));
+}
+
 function cleanModelOptions(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const options: string[] = [];
@@ -110,6 +198,86 @@ function cleanModelOptions(value: unknown): string[] {
     if (options.length >= MAX_PROVIDER_MODEL_OPTIONS) break;
   }
   return options;
+}
+
+function cleanEnum<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): T | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return (allowed as readonly string[]).includes(trimmed) ? trimmed as T : undefined;
+}
+
+function cleanStringRecord(
+  value: unknown,
+  maxEntries: number,
+  maxValueLength = MAX_PACKAGE_METADATA_LENGTH,
+): Record<string, string> | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const result: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(record)) {
+    const key = cleanString(rawKey, MAX_PACKAGE_METADATA_LENGTH);
+    const entryValue = cleanString(rawValue, maxValueLength);
+    if (!key || entryValue === undefined) continue;
+    result[key] = entryValue;
+    if (Object.keys(result).length >= maxEntries) break;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function cleanCapabilities(
+  value: unknown,
+): MarketplaceProviderPackageCapabilities | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const capabilities: MarketplaceProviderPackageCapabilities = {};
+  for (const [field, target] of [
+    ["streaming", "streaming"],
+    ["toolCalls", "toolCalls"],
+    ["tool_calls", "toolCalls"],
+    ["vision", "vision"],
+    ["reasoning", "reasoning"],
+    ["localOnly", "localOnly"],
+    ["local_only", "localOnly"],
+    ["reviewerAdapter", "reviewerAdapter"],
+    ["reviewer_adapter", "reviewerAdapter"],
+    ["reviewer", "reviewerAdapter"],
+  ] as const) {
+    if (typeof record[field] === "boolean") {
+      capabilities[target] = record[field];
+    }
+  }
+  return Object.keys(capabilities).length > 0 ? capabilities : undefined;
+}
+
+function cleanTrustMetadata(
+  value: unknown,
+): MarketplaceProviderPackageTrustMetadata | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const credentialUse = cleanEnum(record.credentialUse ?? record.credential_use, [
+    "none",
+    "optional",
+    "required",
+  ] as const);
+  const networkAccess = cleanEnum(record.networkAccess ?? record.network_access, [
+    "none",
+    "local",
+    "provider-api",
+    "router-api",
+  ] as const);
+  const dataPolicy = cleanEnum(record.dataPolicy ?? record.data_policy, [
+    "local-only",
+    "provider-policy",
+    "router-policy",
+  ] as const);
+  const trust: MarketplaceProviderPackageTrustMetadata = {};
+  if (credentialUse) trust.credentialUse = credentialUse;
+  if (networkAccess) trust.networkAccess = networkAccess;
+  if (dataPolicy) trust.dataPolicy = dataPolicy;
+  return Object.keys(trust).length > 0 ? trust : undefined;
 }
 
 function humanizeProviderId(providerId: string): string {
@@ -153,10 +321,21 @@ function providerPresetFieldsFromRecord(
             ? record.api_key_required
             : true;
   if (!baseUrl || !defaultModel) return undefined;
-  if (requiresApiKey && !usesHttpsUrl(baseUrl)) return undefined;
+  if (!isAllowedProviderBaseUrl(baseUrl, requiresApiKey)) return undefined;
   const normalizedOptions = modelOptions.includes(defaultModel)
     ? modelOptions
     : [defaultModel, ...modelOptions];
+  const modelDiscoveryPolicy = cleanEnum(
+    record.modelDiscoveryPolicy ??
+      record.model_discovery_policy ??
+      record.modelDiscovery ??
+      record.model_discovery,
+    MARKETPLACE_PROVIDER_MODEL_DISCOVERY_POLICIES,
+  );
+  const capabilities = cleanCapabilities(record.capabilities);
+  const trust = cleanTrustMetadata(
+    record.trust ?? record.trustMetadata ?? record.trust_metadata,
+  );
   return {
     label,
     baseUrl,
@@ -164,7 +343,19 @@ function providerPresetFieldsFromRecord(
     defaultModel,
     modelOptions: normalizedOptions,
     requiresApiKey,
+    ...(modelDiscoveryPolicy ? { modelDiscoveryPolicy } : {}),
+    ...(capabilities ? { capabilities } : {}),
+    ...(trust ? { trust } : {}),
   };
+}
+
+function providerPackageFieldsFromRecord(
+  providerId: string,
+  record: Record<string, unknown>,
+): Omit<MarketplaceProviderPackageAsset, "type" | "providerId"> | undefined {
+  const presetFields = providerPresetFieldsFromRecord(providerId, record);
+  if (!presetFields) return undefined;
+  return presetFields;
 }
 
 export function normalizeMarketplaceProviderPreset(
@@ -250,14 +441,8 @@ function stringField(
 function normalizeAssetType(
   value: unknown,
 ): MarketplacePackageAssetType | undefined {
-  if (value === "language") return "language-pack";
-  if (
-    isMarketplacePackageType(value) &&
-    (value === "provider" || value === "theme" || value === "language-pack")
-  ) {
-    return value;
-  }
-  return undefined;
+  const normalized: unknown = value === "language" ? "language-pack" : value;
+  return isMarketplaceAssetPackageType(normalized) ? normalized : undefined;
 }
 
 export function marketplacePackageTypeForAsset(
@@ -286,25 +471,88 @@ function providerAsset(
       : undefined;
   }
   if (!metadata) return undefined;
-  const fields = providerPresetFieldsFromRecord(id, metadata);
+  const fields = providerPackageFieldsFromRecord(id, metadata);
   return fields ? { type: "provider", providerId: id, ...fields } : undefined;
 }
 
-function themeAsset(bundleId: unknown): MarketplacePackageAsset | undefined {
-  return isMarketplaceEligibleThemeBundleId(bundleId)
-    ? { type: "theme", bundleId }
-    : undefined;
+function themeAsset(
+  bundleId: unknown,
+  metadata?: Record<string, unknown>,
+): MarketplaceThemePackageAsset | undefined {
+  if (!isMarketplaceEligibleThemeBundleId(bundleId)) return undefined;
+  if (!metadata) return { type: "theme", bundleId };
+  const displayName = cleanString(
+    metadata.displayName ?? metadata.display_name ?? metadata.name,
+    MAX_PROVIDER_LABEL_LENGTH,
+  );
+  const description = cleanString(metadata.description, MAX_PACKAGE_METADATA_LENGTH);
+  const shellMode = cleanEnum(metadata.shellMode ?? metadata.shell_mode, [
+    "light",
+    "dark",
+    "system",
+  ] as const);
+  const compatibilityVersion = cleanString(
+    metadata.compatibilityVersion ?? metadata.compatibility_version,
+    MAX_PACKAGE_METADATA_LENGTH,
+  );
+  const tokens = cleanStringRecord(
+    metadata.tokens ?? metadata.tokenMap ?? metadata.token_map,
+    MAX_THEME_TOKENS,
+    MAX_PACKAGE_METADATA_LENGTH,
+  );
+  return {
+    type: "theme",
+    bundleId,
+    ...(displayName ? { displayName } : {}),
+    ...(description ? { description } : {}),
+    ...(shellMode ? { shellMode } : {}),
+    ...(compatibilityVersion ? { compatibilityVersion } : {}),
+    ...(tokens ? { tokens } : {}),
+  };
 }
 
-function languagePackAsset(locale: unknown): MarketplacePackageAsset | undefined {
-  return isMarketplaceEligibleLocale(locale)
-    ? { type: "language-pack", locale }
-    : undefined;
+function languagePackAsset(
+  locale: unknown,
+  metadata?: Record<string, unknown>,
+): MarketplaceLanguagePackPackageAsset | undefined {
+  if (!isMarketplaceEligibleLocale(locale)) return undefined;
+  if (!metadata) return { type: "language-pack", locale };
+  const displayName = cleanString(
+    metadata.displayName ?? metadata.display_name ?? metadata.name,
+    MAX_PROVIDER_LABEL_LENGTH,
+  );
+  const nativeName = cleanString(
+    metadata.nativeName ?? metadata.native_name,
+    MAX_PROVIDER_LABEL_LENGTH,
+  );
+  const englishName = cleanString(
+    metadata.englishName ?? metadata.english_name,
+    MAX_PROVIDER_LABEL_LENGTH,
+  );
+  const catalogVersion = cleanString(
+    metadata.catalogVersion ?? metadata.catalog_version,
+    MAX_PACKAGE_METADATA_LENGTH,
+  );
+  const messages = cleanStringRecord(
+    metadata.messages ?? metadata.catalog ?? metadata.message_catalog,
+    MAX_LANGUAGE_MESSAGES,
+    MAX_PACKAGE_METADATA_VALUE_LENGTH,
+  );
+  return {
+    type: "language-pack",
+    locale,
+    ...(displayName ? { displayName } : {}),
+    ...(nativeName ? { nativeName } : {}),
+    ...(englishName ? { englishName } : {}),
+    ...(catalogVersion ? { catalogVersion } : {}),
+    ...(messages ? { messages } : {}),
+  };
 }
 
 export function assetFromMarketplacePackageSpec(
   pluginType: MarketplacePackageType | undefined,
   packageSpec: string,
+  metadata?: Record<string, unknown>,
 ): MarketplacePackageAsset | undefined {
   const separatorIndex = packageSpec.indexOf(":");
   if (separatorIndex <= 0) return undefined;
@@ -316,9 +564,9 @@ export function assetFromMarketplacePackageSpec(
     : normalizeAssetType(pluginType);
 
   if (!type || prefix !== type) return undefined;
-  if (type === "provider") return providerAsset(value);
-  if (type === "theme") return themeAsset(value);
-  return languagePackAsset(value);
+  if (type === "provider") return providerAsset(value, metadata);
+  if (type === "theme") return themeAsset(value, metadata);
+  return languagePackAsset(value, metadata);
 }
 
 function providerAssetFromMarketplacePackageSpec(
@@ -383,8 +631,9 @@ export function parseMarketplacePackageAsset(
         "theme_bundle_id",
         "id",
       ]),
+      record,
     ) ?? (packageSpec
-      ? assetFromMarketplacePackageSpec(type, packageSpec)
+      ? assetFromMarketplacePackageSpec(type, packageSpec, record)
       : undefined);
   }
   return languagePackAsset(
@@ -395,8 +644,9 @@ export function parseMarketplacePackageAsset(
       "language",
       "id",
     ]),
+    record,
   ) ?? (packageSpec
-    ? assetFromMarketplacePackageSpec(type, packageSpec)
+    ? assetFromMarketplacePackageSpec(type, packageSpec, record)
     : undefined);
 }
 
@@ -437,6 +687,7 @@ export function assetFromMarketplaceCatalogFields(
           "themeBundleId",
           "theme_bundle_id",
         ]),
+        fields,
       );
       if (fromFields) return fromFields;
     } else {
@@ -447,6 +698,7 @@ export function assetFromMarketplaceCatalogFields(
           "language_code",
           "language",
         ]),
+        fields,
       );
       if (fromFields) return fromFields;
     }
@@ -461,5 +713,5 @@ export function assetFromMarketplaceCatalogFields(
     if (fromPackageSpec) return fromPackageSpec;
   }
 
-  return assetFromMarketplacePackageSpec(pluginType, packageSpec);
+  return assetFromMarketplacePackageSpec(pluginType, packageSpec, fields);
 }
