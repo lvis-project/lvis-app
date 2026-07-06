@@ -323,10 +323,12 @@ export interface PluginManifest {
    * #893 — Declarative allowlist of host-owned secret keys this plugin is
    * allowed to read via `hostApi.getSecret(key)`. The runtime gate matches
    * the requested key against `hostSecrets.read[]` (`audit.log` on
-   * allow + deny) and currently only accepts entries shaped
-   * `llm.apiKey.<vendor>` — enforced both here at manifest load time and
-   * by the SDK JSON-schema so plugins can't grant themselves wildcard
-   * access by shipping an older SDK build.
+   * allow + deny) and currently accepts entries shaped
+   * `llm.apiKey.<vendor>` or
+   * `llm.marketplaceProvider.<presetId>.apiKey` — enforced both here at
+   * manifest load time and by the SDK JSON-schema/host compatibility patch
+   * so plugins can't grant themselves wildcard access by shipping an older
+   * SDK build.
    *
    * Keys outside the namespace are rejected at manifest load
    * (`manifest_schema` reason) so a misconfigured plugin never reaches the

@@ -14,6 +14,7 @@
  * descriptive per-field errors, fail-closed on any unknown shape.
  */
 import type { SignatureEnvelope } from "../types.js";
+import { marketplaceProviderPresetIdFromSecretKey } from "../../shared/marketplace-package-assets.js";
 
 /** Per-plugin grant entry. */
 export interface WhitelistPluginGrant {
@@ -39,8 +40,16 @@ export interface WhitelistDocument {
 /** Sidecar signature envelope. Mirrors `SignatureEnvelope` for marketplace tarballs. */
 export type WhitelistSignatureEnvelope = SignatureEnvelope;
 
-/** Pattern for `hostSecrets.read[]` — matches `HOST_SECRETS_KEY_PATTERN` in manifest-validation.ts. */
-const HOST_SECRET_KEY_PATTERN = /^llm\.apiKey\.[a-z-]+$/;
+/** Accepted `hostSecrets.read[]` keys — matches manifest-validation.ts. */
+const LLM_API_KEY_PATTERN = /^llm\.apiKey\.[a-z]+(?:-[a-z]+)*$/;
+
+function isAllowedHostSecretKey(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    (LLM_API_KEY_PATTERN.test(value) ||
+      marketplaceProviderPresetIdFromSecretKey(value) !== undefined)
+  );
+}
 
 /** ISO-8601 — accept the subset Date.parse round-trips correctly. */
 function isValidIsoTimestamp(value: unknown): value is string {
@@ -121,9 +130,9 @@ export function parseWhitelistDocument(raw: string): WhitelistDocument {
     const read: string[] = [];
     for (let i = 0; i < readRaw.length; i += 1) {
       const k = readRaw[i];
-      if (typeof k !== "string" || !HOST_SECRET_KEY_PATTERN.test(k)) {
+      if (!isAllowedHostSecretKey(k)) {
         throw new Error(
-          `[whitelist] pluginGrants['${pluginId}'].hostSecrets.read[${i}] '${String(k)}' does not match llm.apiKey.<vendor>`,
+          `[whitelist] pluginGrants['${pluginId}'].hostSecrets.read[${i}] '${String(k)}' does not match an allowed host-secret key`,
         );
       }
       read.push(k);

@@ -60,6 +60,31 @@ describe("marketplace package assets", () => {
     });
   });
 
+  it("requires https for custom provider presets that use API keys", () => {
+    expect(parseMarketplacePackageAsset({
+      type: "provider",
+      provider_id: "http-keyed-router",
+      base_url: "http://router.example/v1",
+      default_model: "router/free",
+      requires_api_key: true,
+    })).toBeUndefined();
+    expect(parseMarketplacePackageAsset({
+      type: "provider",
+      provider_id: "http-keyless-router",
+      base_url: "http://localhost:11434/v1",
+      default_model: "local/free",
+      requires_api_key: false,
+    })).toEqual({
+      type: "provider",
+      providerId: "http-keyless-router",
+      label: "Http Keyless Router",
+      baseUrl: "http://localhost:11434/v1",
+      defaultModel: "local/free",
+      modelOptions: ["local/free"],
+      requiresApiKey: false,
+    });
+  });
+
   it("formats structured assets back into marketplace package specs", () => {
     expect(marketplacePackageTypeForAsset({ type: "provider", providerId: "groq" }))
       .toBe("provider");

@@ -822,6 +822,41 @@ describe("VercelUnifiedProvider openai-compatible", () => {
     vi.doUnmock("ai");
     vi.doUnmock("@ai-sdk/openai-compatible");
   });
+
+  it("rejects credentialed HTTP baseUrl before constructing the provider client", async () => {
+    vi.resetModules();
+    const createCompatSpy = vi.fn(() => vi.fn(() => ({ __mock: "compat" })));
+    vi.doMock("@ai-sdk/openai-compatible", () => ({
+      createOpenAICompatible: createCompatSpy,
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider(
+      "openai-compatible",
+      "k",
+      "http://router.example/v1",
+    );
+
+    const events = await collect(
+      provider.streamTurn({
+        model: "qwen3.6",
+        systemPrompt: "sys",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    );
+
+    expect(events[0]).toMatchObject({
+      type: "error",
+      providerError: {
+        messagePreview: expect.stringContaining(
+          "credentialed baseUrl must use https",
+        ),
+      },
+    });
+    expect(createCompatSpy).not.toHaveBeenCalled();
+
+    vi.doUnmock("@ai-sdk/openai-compatible");
+  });
 });
 
 describe("VercelUnifiedProvider openai — custom baseUrl proxy guard", () => {

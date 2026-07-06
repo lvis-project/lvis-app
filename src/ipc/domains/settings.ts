@@ -135,10 +135,18 @@ function llmSecretKeyForInput(deps: IpcDeps, vendor?: unknown): string | undefin
     : undefined;
 }
 
-function llmSecretKeyForDeleteInput(vendor: unknown): string | undefined {
+function llmSecretKeyForDeleteInput(deps: IpcDeps, vendor: unknown): string | undefined {
   if (typeof vendor !== "string") return undefined;
   const providerPresetId = marketplaceProviderPresetIdFromSecretId(vendor);
-  if (providerPresetId) return marketplaceProviderPresetSecretKey(providerPresetId);
+  if (providerPresetId) {
+    const llm = deps.settingsService.get("llm");
+    const activePreset =
+      llm.provider === "openai-compatible" &&
+      llm.marketplaceProviderPresetId === providerPresetId;
+    return activePreset || isMarketplaceProviderPresetInstalled(deps, providerPresetId)
+      ? marketplaceProviderPresetSecretKey(providerPresetId)
+      : undefined;
+  }
   return isLLMVendor(vendor) ? `llm.apiKey.${vendor}` : undefined;
 }
 
@@ -324,7 +332,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.settings.deleteApiKey, async (e, vendor: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.deleteApiKey, e); return UNAUTHORIZED_FRAME; }
-    const secretKey = llmSecretKeyForDeleteInput(vendor);
+    const secretKey = llmSecretKeyForDeleteInput(deps, vendor);
     if (!secretKey) {
       return {
         ok: false,

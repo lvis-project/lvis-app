@@ -118,6 +118,36 @@ describe("LLM model list sync", () => {
     );
   });
 
+  it("rejects credentialed HTTP model-list endpoints before fetching", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: "router/free" }] }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+    const ensurePublicUrl = vi.fn(async (url: string) => new URL(url));
+
+    const result = await listLlmModelsFromSettings(
+      makeSettingsService({ baseUrl: "http://router.example/v1" }) as never,
+      { vendor: "openrouter" },
+      {
+        fetchImpl,
+        ensurePublicUrl,
+        fetchPublicHttpResponseImpl: async (
+          url: string,
+          init?: RequestInit & { fetchImpl?: typeof fetch },
+        ) => (init?.fetchImpl ?? fetch)(url, init),
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "invalid-model-list-endpoint",
+      endpoint: "http://router.example/v1/models",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(ensurePublicUrl).not.toHaveBeenCalled();
+  });
+
   it("rejects stored private model-list endpoints before fetching", async () => {
     const fetchImpl = vi.fn(async () =>
       new Response(JSON.stringify({ data: [{ id: "local/model" }] }), {
@@ -192,7 +222,7 @@ describe("LLM model list sync", () => {
           return {
             authMode: "manual",
             provider: "openai-compatible",
-            marketplaceProviderPresetId: "persisted-router",
+            marketplaceProviderPresetId: "future-router",
             vendors: {
               "openai-compatible": {
                 model: "future/free",
@@ -246,6 +276,126 @@ describe("LLM model list sync", () => {
         }),
       }),
     );
+  });
+
+  it("rejects a marketplace credential scope that is not the active persisted preset", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: "future/free" }] }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") {
+          return {
+            authMode: "manual",
+            provider: "openai-compatible",
+            marketplaceProviderPresetId: "router-b",
+            vendors: {
+              "openai-compatible": {
+                model: "shared/free",
+                baseUrl: "https://shared.example/v1",
+              },
+            },
+            streamSmoothing: "none",
+            fallbackChain: [],
+            modelListCache: {},
+          };
+        }
+        if (key === "marketplace") {
+          return {
+            installedProviderPresets: [
+              {
+                providerId: "router-a",
+                label: "Router A",
+                baseUrl: "https://shared.example/v1",
+                defaultModel: "shared/free",
+                modelOptions: ["shared/free"],
+                requiresApiKey: true,
+              },
+              {
+                providerId: "router-b",
+                label: "Router B",
+                baseUrl: "https://shared.example/v1",
+                defaultModel: "shared/free",
+                modelOptions: ["shared/free"],
+                requiresApiKey: true,
+              },
+            ],
+          };
+        }
+        throw new Error(`unexpected settings key: ${key}`);
+      }),
+      getSecret: vi.fn(() => "should-not-be-used"),
+    };
+
+    const result = await listLlmModelsFromSettings(
+      settingsService as never,
+      { vendor: "openai-compatible", credentialScope: "router-a" },
+      guardedFetchOptions(fetchImpl),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "provider-not-installed",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(settingsService.getSecret).not.toHaveBeenCalled();
+  });
+
+  it("rejects a marketplace credential scope when the resolved endpoint does not match the preset", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: "other/free" }] }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") {
+          return {
+            authMode: "manual",
+            provider: "openai-compatible",
+            marketplaceProviderPresetId: "future-router",
+            vendors: {
+              "openai-compatible": {
+                model: "other/free",
+                baseUrl: "https://other.example/v1",
+              },
+            },
+            streamSmoothing: "none",
+            fallbackChain: [],
+            modelListCache: {},
+          };
+        }
+        if (key === "marketplace") {
+          return {
+            installedProviderPresets: [{
+              providerId: "future-router",
+              label: "Future Router",
+              baseUrl: "https://future.example/v1",
+              defaultModel: "future/free",
+              modelOptions: ["future/free"],
+              requiresApiKey: true,
+            }],
+          };
+        }
+        throw new Error(`unexpected settings key: ${key}`);
+      }),
+      getSecret: vi.fn(() => "should-not-be-used"),
+    };
+
+    const result = await listLlmModelsFromSettings(
+      settingsService as never,
+      { vendor: "openai-compatible", credentialScope: "future-router" },
+      guardedFetchOptions(fetchImpl),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "invalid-model-list-endpoint",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(settingsService.getSecret).not.toHaveBeenCalled();
   });
 
   it("rejects an uninstalled marketplace provider preset scope before fetching", async () => {

@@ -504,6 +504,7 @@ export function LlmTab(props: LlmTabProps) {
     ? marketplaceProviderPresetSecretId(selectedMarketplaceProviderPreset.providerId)
     : vendor;
   const activeModelListCredentialScope = selectedMarketplaceProviderPreset?.providerId ?? "";
+  const endpointLockedToMarketplacePreset = Boolean(selectedMarketplaceProviderPreset);
   // (B) Pre-hydration the parent initializes `vendor` to "" so the dropdown
   // never flashes the wrong vendor. `getVendorInfo("")` still falls back to
   // VENDORS[0], so reading `vendorInfo.label` directly would leak that stale
@@ -602,7 +603,7 @@ export function LlmTab(props: LlmTabProps) {
     },
     [api, setModelListState, settingsLoaded],
   );
-  const activeModelListBaseUrl = baseUrl.trim();
+  const activeModelListBaseUrl = selectedMarketplaceProviderPreset?.baseUrl ?? baseUrl.trim();
   const activeModelListKey = llmModelListCacheKey(
     vendor,
     activeModelListBaseUrl,
@@ -987,10 +988,14 @@ export function LlmTab(props: LlmTabProps) {
                 </Label>
                 <Input
                   data-testid="llm-base-url-input"
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
+                  value={selectedMarketplaceProviderPreset?.baseUrl ?? baseUrl}
+                  onChange={(e) => {
+                    if (endpointLockedToMarketplacePreset) return;
+                    setBaseUrl(e.target.value);
+                  }}
                   placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
                   disabled={isLoginMode}
+                  readOnly={endpointLockedToMarketplacePreset}
                 />
                 <p className="text-[11px] text-muted-foreground">
                   {t("llmTab.baseUrlDiscardWarning")}
