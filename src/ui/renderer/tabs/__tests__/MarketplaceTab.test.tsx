@@ -234,6 +234,31 @@ describe("MarketplaceTab", () => {
     expect(api.listMarketplacePlugins).toHaveBeenCalled();
   });
 
+  it("marks unsupported asset rows as non-installable", async () => {
+    const unsupportedProvider: MarketplaceItem = {
+      id: "provider-future-router",
+      name: "Future Router Provider",
+      description: "Provider package for a future app contract",
+      packageSpec: "provider:future-router",
+      installed: false,
+      enabled: false,
+      pluginType: "provider",
+    };
+    const api = marketplaceTabApi({
+      listMarketplacePlugins: vi.fn().mockResolvedValue([unsupportedProvider]),
+    });
+    render(<MarketplaceTab {...defaultProps(api)} initialFilter="provider" />);
+
+    expect(await screen.findByText("Future Router Provider")).toBeTruthy();
+    expect(await screen.findByTestId("marketplace:unsupported-asset:provider-future-router"))
+      .toHaveTextContent("현재 앱 버전 미지원");
+    const action = await screen.findByTestId("marketplace:action:provider-future-router");
+    expect(action.textContent).toContain("지원 안 됨");
+    expect((action as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(action);
+    expect(api.updateSettings).not.toHaveBeenCalled();
+  });
+
   it("shows local provider/theme/language candidates when the remote catalog is empty", async () => {
     const api = marketplaceTabApi({
       listMarketplacePlugins: vi.fn().mockResolvedValue([]),
