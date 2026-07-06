@@ -4,6 +4,7 @@ import {
   modelListEndpointFromBaseUrl,
   parseStandardModelListResponse,
 } from "../model-list.js";
+import { NetworkGuardError } from "../../../core/network-guard.js";
 
 function makeSettingsService(overrides: {
   provider?: string;
@@ -32,6 +33,17 @@ function makeSettingsService(overrides: {
       };
     }),
     getSecret: vi.fn(() => secret),
+  };
+}
+
+function guardedFetchOptions(fetchImpl: typeof fetch) {
+  return {
+    fetchImpl,
+    ensurePublicUrl: async (url: string) => new URL(url),
+    fetchPublicHttpResponseImpl: async (
+      url: string,
+      init?: RequestInit & { fetchImpl?: typeof fetch },
+    ) => (init?.fetchImpl ?? fetch)(url, init),
   };
 }
 
@@ -81,7 +93,7 @@ describe("LLM model list sync", () => {
     const result = await listLlmModelsFromSettings(
       settingsService as never,
       { vendor: "openrouter" },
-      { fetchImpl },
+      guardedFetchOptions(fetchImpl),
     );
 
     expect(result).toMatchObject({
@@ -98,8 +110,38 @@ describe("LLM model list sync", () => {
           Accept: "application/json",
           Authorization: "Bearer sk-or-test",
         }),
+        maxRedirects: 0,
+        timeoutMs: 8000,
       }),
     );
+  });
+
+  it("rejects stored private model-list endpoints before fetching", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: "local/model" }] }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+
+    const result = await listLlmModelsFromSettings(
+      makeSettingsService({ baseUrl: "http://127.0.0.1:11434/v1" }) as never,
+      { vendor: "openrouter" },
+      {
+        fetchImpl,
+        ensurePublicUrl: async () => {
+          throw new NetworkGuardError(
+            "target resolves to non-public address(es): 127.0.0.1",
+          );
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "invalid-model-list-endpoint",
+      endpoint: "http://127.0.0.1:11434/v1/models",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("does not send the stored provider key to an unsaved draft baseUrl", async () => {
@@ -116,8 +158,7 @@ describe("LLM model list sync", () => {
         baseUrl: "https://models.example.com/v1",
       },
       {
-        fetchImpl,
-        ensurePublicUrl: async (url) => new URL(url),
+        ...guardedFetchOptions(fetchImpl),
       },
     );
 
@@ -131,7 +172,8 @@ describe("LLM model list sync", () => {
       expect.objectContaining({
         method: "GET",
         headers: { Accept: "application/json" },
-        redirect: "manual",
+        maxRedirects: 0,
+        timeoutMs: 8000,
       }),
     );
   });
@@ -146,7 +188,7 @@ describe("LLM model list sync", () => {
     const result = await listLlmModelsFromSettings(
       makeSettingsService() as never,
       { vendor: "openrouter" },
-      { fetchImpl },
+      guardedFetchOptions(fetchImpl),
     );
 
     expect(result).toMatchObject({
@@ -161,7 +203,7 @@ describe("LLM model list sync", () => {
     const result = await listLlmModelsFromSettings(
       makeSettingsService() as never,
       { vendor: "openrouter" },
-      { fetchImpl },
+      guardedFetchOptions(fetchImpl),
     );
 
     expect(result).toMatchObject({
