@@ -104,4 +104,76 @@ describe("ConversationLoop LLM fetch wiring", () => {
       }),
     );
   });
+
+  it("creates OpenAI-compatible providers without an API key when a base URL is configured", async () => {
+    const createProvider = vi.fn(() => ({
+      vendor: "openai-compatible" as const,
+      streamTurn: async function* () {},
+    }));
+    vi.doMock("../llm/provider-factory.js", () => ({
+      createProvider,
+      secretKeyFor: (vendor: string) => `llm.apiKey.${vendor}`,
+    }));
+    const { ConversationLoop } = await import("../conversation-loop.js");
+
+    const toolRegistry = new ToolRegistry();
+    const settings = fakeLlmSettings({
+      provider: "openai-compatible",
+      model: "Qwen3.6-35B-A3B-NVFP4",
+    });
+    settings.vendors["openai-compatible"].baseUrl = "http://localhost:8000/v1";
+
+    new ConversationLoop(({
+      settingsService: {
+        get: () => settings,
+        getSecret: () => null,
+      },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+
+    expect(createProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vendor: "openai-compatible",
+        apiKey: "",
+        model: "Qwen3.6-35B-A3B-NVFP4",
+        baseUrl: "http://localhost:8000/v1",
+      }),
+    );
+  });
+
+  it("does not create ordinary keyed providers when the API key is missing", async () => {
+    const createProvider = vi.fn(() => ({
+      vendor: "openai" as const,
+      streamTurn: async function* () {},
+    }));
+    vi.doMock("../llm/provider-factory.js", () => ({
+      createProvider,
+      secretKeyFor: (vendor: string) => `llm.apiKey.${vendor}`,
+    }));
+    const { ConversationLoop } = await import("../conversation-loop.js");
+
+    const toolRegistry = new ToolRegistry();
+    const settings = fakeLlmSettings({
+      provider: "openai",
+      model: "gpt-5.4-mini",
+    });
+
+    new ConversationLoop(({
+      settingsService: {
+        get: () => settings,
+        getSecret: () => null,
+      },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+
+    expect(createProvider).not.toHaveBeenCalled();
+  });
 });
