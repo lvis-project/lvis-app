@@ -193,6 +193,31 @@ describe("LlmTab — top-level login toggle UI", () => {
     );
   });
 
+  it("reflects provider packages installed after a Marketplace settings broadcast", async () => {
+    const api = llmTabApi();
+    const { container } = render(
+      <Harness initialAuthMode="manual" initialVendor="openai" api={api} />,
+    );
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    await act(async () => {
+      await api.updateSettings({ marketplace: { installedProviderIds: ["groq"] } });
+    });
+
+    const vendorTrigger = container.querySelector("#vendor-select") as HTMLElement | null;
+    expect(vendorTrigger).not.toBeNull();
+    fireEvent.mouseDown(vendorTrigger!);
+    fireEvent.keyDown(vendorTrigger!, { key: "ArrowDown" });
+
+    const search = await screen.findByTestId("llm-tab:vendor-search");
+    fireEvent.change(search, { target: { value: "groq" } });
+
+    expect(screen.getByText("Groq")).toBeInTheDocument();
+    expect(screen.getByTestId("llm-tab:vendor-marketplace-badge:groq")).toHaveTextContent(
+      "마켓플레이스",
+    );
+  });
+
   it("marks the selected provider when it came from Marketplace", async () => {
     const api = llmTabApi();
     (api.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({

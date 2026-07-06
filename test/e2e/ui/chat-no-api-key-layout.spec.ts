@@ -28,8 +28,10 @@ test.describe("chat no-API-key layout", () => {
 
     const card = ctx.page.locator('[data-testid="chat-view:no-api-key-card"]');
     const composer = ctx.page.locator('[data-testid="composer-input-bar"]');
+    const projectSelector = ctx.page.locator('[data-testid="composer-project-selector-slot"]');
     await expect(card).toBeVisible();
     await expect(composer).toBeVisible();
+    await expect(projectSelector).toBeVisible();
 
     const metrics = await ctx.page.evaluate(() => {
       const toBox = (selector: string) => {
@@ -46,9 +48,10 @@ test.describe("chat no-API-key layout", () => {
       const cardEl = document.querySelector('[data-testid="chat-view:no-api-key-card"]');
       const cardBox = toBox('[data-testid="chat-view:no-api-key-card"]');
       const composerBox = toBox('[data-testid="composer-input-bar"]');
-      const placement = document
-        .querySelector("[data-composer-placement]")
-        ?.getAttribute("data-composer-placement");
+      const composerDock = document.querySelector("[data-composer-placement]");
+      const placement = composerDock?.getAttribute("data-composer-placement");
+      const lift = composerDock?.getAttribute("data-composer-centered-lift");
+      const marginBottom = composerDock ? Number.parseFloat(getComputedStyle(composerDock).marginBottom) : Number.NaN;
       if (!cardBox || !composerBox) return null;
       const overlaps = !(
         cardBox.right <= composerBox.left ||
@@ -58,16 +61,22 @@ test.describe("chat no-API-key layout", () => {
       );
       return {
         placement,
+        lift,
+        marginBottom,
         overlaps,
+        cardBox,
+        composerBox,
         cardInsideScroll: Boolean(cardEl?.closest(".lvis-chat-scroll")),
         gap: composerBox.top - cardBox.bottom,
       };
     });
 
     expect(metrics).not.toBeNull();
-    expect(metrics?.placement).toBe("bottom");
+    expect(metrics?.placement).toBe("center");
+    expect(metrics?.lift).toBe("compact");
+    expect(metrics?.marginBottom, JSON.stringify(metrics)).toBeGreaterThan(0);
     expect(metrics?.cardInsideScroll).toBe(true);
-    expect(metrics?.overlaps).toBe(false);
-    expect(metrics?.gap).toBeGreaterThanOrEqual(0);
+    expect(metrics?.overlaps, JSON.stringify(metrics)).toBe(false);
+    expect(metrics?.gap, JSON.stringify(metrics)).toBeGreaterThanOrEqual(0);
   });
 });

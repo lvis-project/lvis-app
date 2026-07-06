@@ -64,13 +64,24 @@ describe("ChatView", () => {
   });
 
   it("shows API key prompt when hasApiKey is false", async () => {
-    const { container } = await renderApp({ hasApiKey: false });
+    const { container, api } = await renderApp({ hasApiKey: false });
     await waitFor(() => {
       expect(container.textContent).toContain("API 키 설정 필요");
+      expect(container.textContent).toContain("마켓플레이스 열기");
       const card = container.querySelector('[data-testid="chat-view:no-api-key-card"]');
       expect(card).not.toBeNull();
       expect(card?.closest(".lvis-chat-scroll")).not.toBeNull();
     });
+
+    const card = container.querySelector('[data-testid="chat-view:no-api-key-card"]') as HTMLElement;
+    const marketplaceButton = Array.from(card.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("마켓플레이스 열기"));
+    expect(marketplaceButton).toBeTruthy();
+    fireEvent.click(marketplaceButton!);
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="marketplace:cta:open"]')).not.toBeNull();
+    });
+    expect(api.openSettingsWindow).not.toHaveBeenCalled();
   });
 
   it("renders empty-state message when no entries", async () => {
@@ -216,14 +227,16 @@ describe("ChatView", () => {
     });
   });
 
-  it("bottom-docks the disabled composer when an API key is required", async () => {
+  it("keeps the empty composer centered with project selector when an API key is required", async () => {
     const { container } = await renderApp({ hasApiKey: false });
 
     await waitFor(() => {
       expect(container.textContent).toContain("API 키 설정 필요");
       const composerDock = container.querySelector("[data-composer-placement]");
       expect(composerDock).not.toBeNull();
-      expect(composerDock).toHaveAttribute("data-composer-placement", "bottom");
+      expect(composerDock).toHaveAttribute("data-composer-placement", "center");
+      expect(composerDock).toHaveAttribute("data-composer-centered-lift", "compact");
+      expect(container.querySelector('[data-testid="composer-project-selector-slot"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="composer-textarea"]')).not.toBeNull();
       const sendButton = container.querySelector('[data-testid="composer-send-button"]') as HTMLButtonElement | null;
       expect(sendButton?.disabled).toBe(true);

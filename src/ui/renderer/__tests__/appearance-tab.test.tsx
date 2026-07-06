@@ -11,7 +11,7 @@
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "../theme/ThemeProvider.js";
 import { AppearanceTab } from "../tabs/AppearanceTab.js";
 import {
@@ -103,6 +103,33 @@ describe("AppearanceTab — bundle card grid", () => {
       .toHaveTextContent("마켓플레이스");
     expect(getByTestId("language-option-ko"))
       .toHaveAttribute("data-marketplace-installed", "true");
+    expect(getByTestId("appearance-tab:language-marketplace-badge:ko"))
+      .toHaveTextContent("마켓플레이스");
+  });
+
+  it("reflects theme and language packages installed after a Marketplace settings broadcast", async () => {
+    const { api } = makeMockLvisApi();
+    (window as unknown as { lvisApi: unknown }).lvisApi = api;
+
+    const { getByRole, getByTestId, queryByRole } = renderWithBundle();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    expect(queryByRole("radio", { name: /테마: Tokyo Night/ })).toBeNull();
+
+    await act(async () => {
+      await api.updateSettings({
+        marketplace: {
+          installedThemeBundleIds: ["tokyo-night"],
+          installedLanguagePacks: ["ko"],
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(getByRole("radio", { name: /테마: Tokyo Night/ })).toBeTruthy();
+      expect(getByTestId("language-option-ko")).toBeTruthy();
+    });
+    expect(getByTestId("appearance-tab:theme-marketplace-badge:tokyo-night"))
+      .toHaveTextContent("마켓플레이스");
     expect(getByTestId("appearance-tab:language-marketplace-badge:ko"))
       .toHaveTextContent("마켓플레이스");
   });
