@@ -221,6 +221,10 @@ describe("MarketplaceTab", () => {
     const action = await screen.findByTestId("marketplace:action:groq-provider");
     expect(action.textContent).toContain("설치");
     expect((action as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByTestId("marketplace:trust:groq-provider").textContent)
+      .toContain("프로바이더 인증 정보 사용");
+    expect(screen.getByTestId("marketplace:trust:groq-provider").textContent)
+      .toContain("모델 요청을 프로바이더로 전송");
     fireEvent.click(action);
     await waitFor(() => {
       expect(api.updateSettings).toHaveBeenCalledWith({
@@ -251,9 +255,13 @@ describe("MarketplaceTab", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Themes" }));
     expect(await screen.findByText("Tokyo Night Theme")).toBeTruthy();
     expect(screen.queryByText("Moonstone Theme")).toBeNull();
+    expect(screen.getByTestId("marketplace:trust:theme-tokyo-night").textContent)
+      .toContain("테마 토큰만");
 
     fireEvent.click(await screen.findByRole("button", { name: "Languages" }));
     expect(await screen.findByText("한국어 Language Pack")).toBeTruthy();
     expect(screen.queryByText("English Language Pack")).toBeNull();
+    expect(screen.getByTestId("marketplace:trust:language-ko").textContent)
+      .toContain("UI 문구 카탈로그만");
   });
 });
