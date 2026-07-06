@@ -33,6 +33,7 @@ import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { useWorkspaceStats } from "../hooks/use-workspace-stats.js";
 import type { SettingsTab } from "../../../shared/settings-tabs.js";
+import { marketplaceProviderPresetSecretId } from "../../../shared/marketplace-package-assets.js";
 
 export interface GeneralTabProps {
   api: LvisApi;
@@ -212,7 +213,11 @@ export function GeneralTab({
       const activeVendor = settings?.llm.provider ?? "";
       if (activeVendor.length > 0) {
         try {
-          await api.deleteApiKey(activeVendor);
+          const activeCredentialId =
+            activeVendor === "openai-compatible" && settings?.llm.marketplaceProviderPresetId
+              ? marketplaceProviderPresetSecretId(settings.llm.marketplaceProviderPresetId)
+              : activeVendor;
+          await api.deleteApiKey(activeCredentialId);
         } catch {
           // Logout is a credential-deletion operation. If the active vendor
           // secret remains, resetting onboarding would create a false logged-
@@ -238,7 +243,7 @@ export function GeneralTab({
     } finally {
       setLoggingOut(false);
     }
-  }, [api, loggingOut, onLogout, settings?.llm.provider]);
+  }, [api, loggingOut, onLogout, settings?.llm.marketplaceProviderPresetId, settings?.llm.provider, t]);
 
   const handleLogoutClick = useCallback(() => {
     setLogoutError(null);

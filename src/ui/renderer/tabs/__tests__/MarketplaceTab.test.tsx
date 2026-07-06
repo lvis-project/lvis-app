@@ -19,6 +19,7 @@ import { MarketplaceTab } from "../MarketplaceTab.js";
 import type { MarketplaceItem } from "../../types.js";
 import type { LvisApi } from "../../types.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import { marketplaceProviderPresetSecretId } from "../../../../shared/marketplace-package-assets.js";
 
 function marketplaceTabApi(overrides: Partial<LvisApi> = {}): LvisApi {
   const { api } = makeMockLvisApi();
@@ -367,6 +368,98 @@ describe("MarketplaceTab", () => {
     expect((action as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(action);
     expect(api.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("installs user-authored provider presets from marketplace metadata", async () => {
+    const customProvider: MarketplaceItem = {
+      id: "provider-future-router",
+      name: "Future Router Provider",
+      description: "Custom OpenAI-compatible router",
+      packageSpec: "provider:future-router",
+      installed: false,
+      enabled: false,
+      pluginType: "provider",
+      packageAsset: {
+        type: "provider",
+        providerId: "future-router",
+        label: "Future Router",
+        baseUrl: "https://future.example/v1",
+        defaultModel: "future/free",
+        modelOptions: ["future/free", "future/pro"],
+        requiresApiKey: false,
+      },
+    };
+    const api = marketplaceTabApi({
+      listMarketplacePlugins: vi.fn().mockResolvedValue([customProvider]),
+    });
+    render(<MarketplaceTab {...defaultProps(api)} initialFilter="provider" />);
+
+    fireEvent.click(await screen.findByTestId("marketplace:action:provider-future-router"));
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        marketplace: {
+          installedProviderPresets: [{
+            providerId: "future-router",
+            label: "Future Router",
+            baseUrl: "https://future.example/v1",
+            defaultModel: "future/free",
+            modelOptions: ["future/free", "future/pro"],
+            requiresApiKey: false,
+          }],
+        },
+      });
+    });
+  });
+
+  it("deletes a custom provider preset secret before uninstalling its metadata", async () => {
+    const customProvider: MarketplaceItem = {
+      id: "provider-future-router",
+      name: "Future Router Provider",
+      description: "Custom OpenAI-compatible router",
+      packageSpec: "provider:future-router",
+      installed: true,
+      enabled: true,
+      pluginType: "provider",
+      packageAsset: {
+        type: "provider",
+        providerId: "future-router",
+        label: "Future Router",
+        baseUrl: "https://future.example/v1",
+        defaultModel: "future/free",
+        modelOptions: ["future/free", "future/pro"],
+        requiresApiKey: true,
+      },
+    };
+    const api = marketplaceTabApi({
+      listMarketplacePlugins: vi.fn().mockResolvedValue([customProvider]),
+      getSettings: vi.fn().mockResolvedValue({
+        marketplace: {
+          installedProviderPresets: [{
+            providerId: "future-router",
+            label: "Future Router",
+            baseUrl: "https://future.example/v1",
+            defaultModel: "future/free",
+            modelOptions: ["future/free", "future/pro"],
+            requiresApiKey: true,
+          }],
+        },
+      }),
+    });
+    render(<MarketplaceTab {...defaultProps(api)} initialFilter="provider" />);
+
+    fireEvent.click(await screen.findByTestId("marketplace:action:provider-future-router"));
+
+    await waitFor(() => {
+      expect(api.deleteApiKey).toHaveBeenCalledWith(
+        marketplaceProviderPresetSecretId("future-router"),
+      );
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        marketplace: { installedProviderPresets: [] },
+      });
+    });
+    expect(vi.mocked(api.deleteApiKey).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(api.updateSettings).mock.invocationCallOrder[0],
+    );
   });
 
   it("shows local provider/theme/language candidates when the remote catalog is empty", async () => {

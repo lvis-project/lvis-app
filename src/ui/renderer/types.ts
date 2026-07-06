@@ -8,6 +8,7 @@ import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defaults.js";
+import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
 import type { BundleId } from "../../shared/theme-bundles.js";
 import type { LlmModelListCache } from "../../shared/llm-model-list.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
@@ -184,6 +185,7 @@ export type AppSettings = {
      */
     authMode: "manual" | "login";
     provider: string;
+    marketplaceProviderPresetId?: string;
     vendors: Record<string, LLMVendorSettingsRenderer>;
     streamSmoothing: "none" | "word" | "char";
     fallbackChain: Array<{ provider: string; model: string }>;
@@ -206,6 +208,8 @@ export type AppSettings = {
     skippedPluginUpdates?: Record<string, string>;
     /** Marketplace-installed provider packages visible in the LLM picker. */
     installedProviderIds?: MarketplaceEligibleLLMVendor[];
+    /** Marketplace-installed custom OpenAI-compatible provider presets. */
+    installedProviderPresets?: MarketplaceInstalledProviderPreset[];
     /** Marketplace-installed theme bundles visible in Appearance. */
     installedThemeBundleIds?: BundleId[];
     /** Marketplace-installed language packs visible in Appearance. */

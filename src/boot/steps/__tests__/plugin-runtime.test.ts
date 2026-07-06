@@ -1055,6 +1055,211 @@ describe("initPluginRuntime HostApi factory", () => {
     expect(denyAudit).toBeDefined();
   });
 
+  it("getSecret denies non-active marketplace provider preset keys even when allowlisted", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    const bootAuditLogger = { log: vi.fn() };
+    const { canonicalJSON } = await import("../../../plugins/whitelist/canonical-json.js");
+    const { createHash } = await import("node:crypto");
+    const activeKey = "llm.marketplaceProvider.future-router.apiKey";
+    const idleKey = "llm.marketplaceProvider.idle-router.apiKey";
+    const manifest = {
+      id: "plugin-marketplace-secret",
+      config: {},
+      hostSecrets: { read: [activeKey, idleKey] },
+    };
+    const manifestSha256 = createHash("sha256")
+      .update(canonicalJSON(manifest))
+      .digest("hex");
+    runtimeTestState.readPluginRegistry.mockResolvedValueOnce({
+      version: 1,
+      plugins: [
+        {
+          id: "plugin-marketplace-secret",
+          manifestPath: "plugin-marketplace-secret/plugin.json",
+          enabled: true,
+          installSource: "admin",
+          manifestSha256,
+        },
+      ],
+    });
+    const getSecretMock = vi.fn((key: string) => {
+      if (key === activeKey) return "fr-secret";
+      if (key === idleKey) return "idle-secret";
+      return null;
+    });
+
+    await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") {
+            return {
+              provider: "openai-compatible",
+              marketplaceProviderPresetId: "future-router",
+            };
+          }
+          if (key === "marketplace") {
+            return {
+              installedProviderPresets: [
+                { providerId: "future-router" },
+                { providerId: "idle-router" },
+              ],
+            };
+          }
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: getSecretMock,
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: {
+        registerKeywords: vi.fn(),
+        unregisterByPlugin: vi.fn(),
+      } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: bootAuditLogger as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: { requestAndWait: vi.fn() } as never,
+      routinesStore: { list: () => [] } as never,
+    });
+
+    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
+      | ((pluginId: string, manifest: {
+          id: string;
+          config?: Record<string, unknown>;
+          hostSecrets?: { read?: string[] };
+        }, pluginDataDir: string) => {
+          getSecret: (key: string) => string | null;
+        })
+      | undefined;
+    expect(createHostApi).toBeDefined();
+
+    const api = createHostApi!(
+      "plugin-marketplace-secret",
+      manifest,
+      mkdtempSync("/tmp/lvis-hostapi-data-"),
+    );
+
+    expect(api.getSecret(activeKey)).toBe("fr-secret");
+    expect(api.getSecret(idleKey)).toBeNull();
+    expect(getSecretMock).not.toHaveBeenCalledWith(idleKey);
+    expect(bootAuditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
+      type: "warn",
+      input: expect.stringContaining("non-active-vendor"),
+    }));
+  });
+
+  it("getSecret denies generic OpenAI-compatible host key while a marketplace preset is active", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    const bootAuditLogger = { log: vi.fn() };
+    const { canonicalJSON } = await import("../../../plugins/whitelist/canonical-json.js");
+    const { createHash } = await import("node:crypto");
+    const genericKey = "llm.apiKey.openai-compatible";
+    const manifest = {
+      id: "plugin-generic-compatible-secret",
+      config: {},
+      hostSecrets: { read: [genericKey] },
+    };
+    const manifestSha256 = createHash("sha256")
+      .update(canonicalJSON(manifest))
+      .digest("hex");
+    runtimeTestState.readPluginRegistry.mockResolvedValueOnce({
+      version: 1,
+      plugins: [
+        {
+          id: "plugin-generic-compatible-secret",
+          manifestPath: "plugin-generic-compatible-secret/plugin.json",
+          enabled: true,
+          installSource: "admin",
+          manifestSha256,
+        },
+      ],
+    });
+    const getSecretMock = vi.fn((key: string) =>
+      key === genericKey ? "generic-secret" : null
+    );
+
+    await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") {
+            return {
+              provider: "openai-compatible",
+              marketplaceProviderPresetId: "future-router",
+            };
+          }
+          if (key === "marketplace") {
+            return { installedProviderPresets: [{ providerId: "future-router" }] };
+          }
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: getSecretMock,
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: {
+        registerKeywords: vi.fn(),
+        unregisterByPlugin: vi.fn(),
+      } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: bootAuditLogger as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: { requestAndWait: vi.fn() } as never,
+      routinesStore: { list: () => [] } as never,
+    });
+
+    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
+      | ((pluginId: string, manifest: {
+          id: string;
+          config?: Record<string, unknown>;
+          hostSecrets?: { read?: string[] };
+        }, pluginDataDir: string) => {
+          getSecret: (key: string) => string | null;
+        })
+      | undefined;
+    expect(createHostApi).toBeDefined();
+
+    const api = createHostApi!(
+      "plugin-generic-compatible-secret",
+      manifest,
+      mkdtempSync("/tmp/lvis-hostapi-data-"),
+    );
+
+    expect(api.getSecret(genericKey)).toBeNull();
+    expect(getSecretMock).not.toHaveBeenCalledWith(genericKey);
+    expect(bootAuditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
+      type: "warn",
+      input: expect.stringContaining("non-active-vendor"),
+    }));
+  });
+
   it("B7 — getSecret denied for unknown prefix falls into `other` counter bucket", async () => {
     runtimeTestState.capturedRuntimeOptions = null;
     const bootAuditLogger = { log: vi.fn() };

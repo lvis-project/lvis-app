@@ -20,6 +20,24 @@ function narrowVendor(raw: unknown): LLMVendor {
   return isLLMVendor(raw) ? raw : DEFAULT_LLM_VENDOR;
 }
 
+function canUseSettingsWithoutApiKey(
+  settings: Awaited<ReturnType<LvisApi["getSettings"]>>,
+  provider: LLMVendor,
+): boolean {
+  const block = getLlmVendorSettings(settings.llm.vendors, provider);
+  if (provider === "openai-compatible" && settings.llm.marketplaceProviderPresetId) {
+    const preset = settings.marketplace?.installedProviderPresets?.find(
+      (entry) => entry.providerId === settings.llm.marketplaceProviderPresetId,
+    );
+    return Boolean(
+      preset &&
+      preset.requiresApiKey === false &&
+      block.baseUrl?.trim(),
+    );
+  }
+  return canUseLlmVendorWithoutApiKey(provider, block);
+}
+
 /**
  * LLM settings cache hook.
  *
@@ -76,7 +94,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
       setLlmVendor(provider);
       setLlmModel(block.model);
       setEnableThinkingChat(block.enableThinking);
-      setLlmReadyWithoutApiKey(canUseLlmVendorWithoutApiKey(provider, block));
+      setLlmReadyWithoutApiKey(canUseSettingsWithoutApiKey(s, provider));
     } catch {
       /* ignore */
     }
@@ -93,7 +111,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
         setLlmVendor(provider);
         setLlmModel(block.model);
         setEnableThinkingChat(block.enableThinking);
-        setLlmReadyWithoutApiKey(canUseLlmVendorWithoutApiKey(provider, block));
+        setLlmReadyWithoutApiKey(canUseSettingsWithoutApiKey(s, provider));
         setCurrentLlmSettings({ provider, model: block.model });
       })
       .catch(() => {});

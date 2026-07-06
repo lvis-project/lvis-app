@@ -273,6 +273,50 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     ]);
   });
 
+  it("listPlugins() preserves user-authored provider preset metadata from package_asset", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse({
+        plugins: [
+          {
+            id: "future-router-provider",
+            display_name: "Future Router",
+            description: "User-authored OpenAI-compatible provider preset",
+            package_spec: "provider:future-router",
+            package_name: "future-router-provider",
+            plugin_type: "provider",
+            package_asset: {
+              type: "provider",
+              provider_id: "future-router",
+              label: "Future Router",
+              base_url: "https://future.example/v1",
+              default_model: "future/free",
+              models: ["future/free", "future/pro"],
+              api_key_placeholder: "fr-...",
+              requires_api_key: false,
+            },
+          },
+        ],
+      }),
+    );
+
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com/",
+    });
+    const plugins = await fetcher.listPlugins();
+
+    expect(plugins).toHaveLength(1);
+    expect(plugins[0].packageAsset).toEqual({
+      type: "provider",
+      providerId: "future-router",
+      label: "Future Router",
+      baseUrl: "https://future.example/v1",
+      defaultModel: "future/free",
+      modelOptions: ["future/free", "future/pro"],
+      apiKeyPlaceholder: "fr-...",
+      requiresApiKey: false,
+    });
+  });
+
   it("listPlugins() does not treat default-surface assets as marketplace package assets", async () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse({

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { useSettingsOrchestration } from "../use-settings-orchestration.js";
 import type { AppSettings, LvisApi } from "../../types.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import { marketplaceProviderPresetSecretId } from "../../../../shared/marketplace-package-assets.js";
 
 function makeSettings(): AppSettings {
   return {
@@ -149,5 +150,114 @@ describe("useSettingsOrchestration", () => {
       tab: "llm",
       message: expect.stringContaining("권한 검토 모델"),
     });
+  });
+
+  it("persists custom marketplace provider presets through openai-compatible with a preset-scoped key", async () => {
+    const settings = makeSettings();
+    const futureRouter = {
+      providerId: "future-router",
+      label: "Future Router",
+      baseUrl: "https://future.example/v1",
+      defaultModel: "future/free",
+      modelOptions: ["future/free"],
+      requiresApiKey: true,
+    };
+    settings.marketplace = {
+      ...settings.marketplace,
+      installedProviderPresets: [futureRouter],
+    };
+    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
+    Object.assign(api, {
+      updateSettings: vi.fn(async () => ({ ok: true })),
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+      setApiKey: vi.fn(async () => ({ ok: true })),
+    });
+    const onSaved = vi.fn();
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, onSaved)
+    );
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+
+    act(() => {
+      result.current.selectMarketplaceProviderPreset(futureRouter);
+      result.current.setKeyInput("fr-secret");
+    });
+    await waitFor(() => expect(result.current.vendor).toBe("openai-compatible"));
+
+    let saved = false;
+    await act(async () => {
+      saved = await result.current.save("llm");
+    });
+
+    expect(saved).toBe(true);
+    expect(api.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      llm: expect.objectContaining({
+        provider: "openai-compatible",
+        marketplaceProviderPresetId: "future-router",
+        vendors: {
+          "openai-compatible": expect.objectContaining({
+            baseUrl: "https://future.example/v1",
+            model: "future/free",
+          }),
+        },
+      }),
+    }));
+    expect(api.setApiKey).toHaveBeenCalledWith(
+      marketplaceProviderPresetSecretId("future-router"),
+      "fr-secret",
+    );
+    expect(onSaved).toHaveBeenCalled();
+  });
+
+  it("restores generic OpenAI-compatible defaults when clearing a marketplace provider preset", async () => {
+    const settings = makeSettings();
+    const futureRouter = {
+      providerId: "future-router",
+      label: "Future Router",
+      baseUrl: "https://future.example/v1",
+      defaultModel: "future/free",
+      modelOptions: ["future/free"],
+      requiresApiKey: true,
+    };
+    settings.marketplace = {
+      ...settings.marketplace,
+      installedProviderPresets: [futureRouter],
+    };
+    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
+    Object.assign(api, {
+      updateSettings: vi.fn(async () => ({ ok: true })),
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+      setApiKey: vi.fn(async () => ({ ok: true })),
+    });
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, vi.fn())
+    );
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+
+    act(() => {
+      result.current.selectMarketplaceProviderPreset(futureRouter);
+    });
+    await waitFor(() => expect(result.current.baseUrl).toBe("https://future.example/v1"));
+
+    act(() => {
+      result.current.clearMarketplaceProviderPreset();
+    });
+    await waitFor(() => expect(result.current.baseUrl).not.toBe("https://future.example/v1"));
+
+    await act(async () => {
+      await result.current.save("llm");
+    });
+
+    const payload = (api.updateSettings as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
+    expect(payload).toMatchObject({
+      llm: {
+        provider: "openai-compatible",
+        marketplaceProviderPresetId: "",
+      },
+    });
+    expect(payload.llm.vendors["openai-compatible"].baseUrl)
+      .not.toBe("https://future.example/v1");
   });
 });

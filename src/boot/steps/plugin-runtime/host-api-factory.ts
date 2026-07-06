@@ -54,6 +54,7 @@ import { plog, PluginPhase } from "../../../plugins/lifecycle-log.js";
 import { incrementHostSecretCounter, sanitizeKeyPrefix } from "../../../telemetry/host-secret-counters.js";
 import { canonicalJSON } from "../../../plugins/whitelist/canonical-json.js";
 import { runTier3Then4 } from "../../../plugins/whitelist/tier-order.js";
+import { isMarketplaceProviderPresetId } from "../../../shared/marketplace-package-assets.js";
 import {
   resolveApiKey as resolveApiKeyImpl,
   type ResolveApiKeyPurpose,
@@ -433,16 +434,48 @@ export function createHostApiFactory(
           // (coarse signed ACL) before vendor cross-check (per-call
           // dynamic state). Ralph cycle 1 MEDIUM fix.
           //
-          // Tier-4 only applies to `llm.apiKey.*` keys; non-`llm.apiKey.*`
-          // allowlist entries (if any future host-secret class is added)
-          // are passed `activeProvider === vendor` so the cross-check is a
-          // no-op for them.
           const llmKeyPrefix = "llm.apiKey.";
           const isLlmKey = key.startsWith(llmKeyPrefix);
-          const vendor = isLlmKey ? key.slice(llmKeyPrefix.length) : "";
-          const activeProvider = isLlmKey
-            ? (settingsService.get("llm").provider as string)
-            : vendor;
+          const marketplaceProviderKeyPrefix = "llm.marketplaceProvider.";
+          const marketplaceProviderKeySuffix = ".apiKey";
+          const marketplaceProviderPresetId =
+            key.startsWith(marketplaceProviderKeyPrefix) &&
+            key.endsWith(marketplaceProviderKeySuffix)
+              ? key.slice(
+                  marketplaceProviderKeyPrefix.length,
+                  -marketplaceProviderKeySuffix.length,
+                )
+              : "";
+          const isMarketplaceProviderKey = marketplaceProviderPresetId.length > 0;
+          let vendor = "";
+          let activeProvider = "";
+          if (isLlmKey) {
+            vendor = key.slice(llmKeyPrefix.length);
+            const llm = settingsService.get("llm");
+            activeProvider =
+              vendor === "openai-compatible" &&
+              llm.provider === "openai-compatible" &&
+              isMarketplaceProviderPresetId(llm.marketplaceProviderPresetId)
+                ? llm.marketplaceProviderPresetId
+                : (llm.provider as string);
+          } else if (isMarketplaceProviderKey) {
+            vendor = marketplaceProviderPresetId;
+            const llm = settingsService.get("llm");
+            const installedPreset = isMarketplaceProviderPresetId(marketplaceProviderPresetId)
+              ? (settingsService
+                .get("marketplace")
+                .installedProviderPresets ?? [])
+                .some((preset) => preset.providerId === marketplaceProviderPresetId)
+              : false;
+            activeProvider =
+              installedPreset &&
+              llm.provider === "openai-compatible" &&
+              llm.marketplaceProviderPresetId === marketplaceProviderPresetId
+                ? marketplaceProviderPresetId
+                : "";
+          } else {
+            activeProvider = vendor;
+          }
           // #958/#959 security — registry-recorded `installSource` is the
           // only source that can activate admin secret-access bypass.
           // The registry file is host-managed; `plugin.json` is inside
