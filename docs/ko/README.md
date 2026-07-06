@@ -11,6 +11,7 @@ AI 프론티어 생산성 향상 엔터프라이즈 매니지먼트 시스템
 
 | 문서 | 설명 |
 |------|------|
+| [한국어 앱 README](./app-readme.md) | lvis-app 저장소 개요, 개발 명령, 플러그인/패키징 흐름 |
 | [구현 철학](./vision/philosophy.md) | 프로젝트의 배경, 문제 인식, 철학 |
 | [비전 & 골](./vision/README.md) | 프로젝트 비전, 목표, 로드맵 |
 | [아키텍처](./architecture/README.md) | **LVIS Architecture v0.4.1 Draft** — 5-Layer, 42+ Mermaid 다이어그램 |
