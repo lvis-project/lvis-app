@@ -6,7 +6,9 @@ import {
   LLM_VENDOR_DEFAULTS,
   LLM_VENDOR_MODEL_OPTIONS,
   MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS,
+  freshAllVendorBlocks,
   freshVendorBlocks,
+  getLlmVendorSettings,
   isDefaultVisibleLLMVendor,
   isMarketplaceEligibleLLMVendor,
   isRetiredLlmModel,
@@ -58,8 +60,18 @@ describe("LLMVendorSettings — #893 top-level authMode promotion", () => {
     }
   });
 
-  it("freshVendorBlocks() returns mutable copies without authMode", () => {
+  it("freshVendorBlocks() returns default-visible mutable copies without authMode", () => {
     const blocks = freshVendorBlocks();
+    expect(Object.keys(blocks).sort()).toEqual(
+      [...DEFAULT_VISIBLE_LLM_VENDOR_IDS].sort(),
+    );
+    for (const v of DEFAULT_VISIBLE_LLM_VENDOR_IDS) {
+      expect("authMode" in blocks[v]).toBe(false);
+    }
+  });
+
+  it("freshAllVendorBlocks() remains available for exhaustive fixtures", () => {
+    const blocks = freshAllVendorBlocks();
     for (const v of LLM_VENDORS) {
       expect("authMode" in blocks[v]).toBe(false);
     }
@@ -133,13 +145,20 @@ describe("LLM vendor defaults", () => {
     }
   });
 
-  it("freshVendorBlocks() preserves the default thinking-enabled blocks", () => {
+  it("freshVendorBlocks() preserves the default-visible thinking-enabled blocks", () => {
     const blocks = freshVendorBlocks();
     expect(blocks.openai.model).toBe("gpt-5.4-mini");
     expect(blocks.gemini.model).toBe("gemini-2.5-flash");
-    for (const v of LLM_VENDORS) {
+    expect(blocks.groq).toBeUndefined();
+    for (const v of DEFAULT_VISIBLE_LLM_VENDOR_IDS) {
       expect(blocks[v].enableThinking).toBe(true);
     }
+  });
+
+  it("getLlmVendorSettings() materializes missing marketplace blocks from defaults", () => {
+    const block = getLlmVendorSettings(freshVendorBlocks(), "groq");
+    expect(block.model).toBe(LLM_VENDOR_DEFAULTS.groq.model);
+    expect(block.enableThinking).toBe(true);
   });
 
   it("includes each provider's default model in its dropdown options", () => {

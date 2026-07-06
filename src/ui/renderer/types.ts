@@ -7,7 +7,7 @@ import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../mcp/types.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
-import type { LLMVendor } from "../../shared/llm-vendor-defaults.js";
+import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { BundleId } from "../../shared/theme-bundles.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { RolePreset } from "../../data/role-presets.js";
@@ -32,6 +32,10 @@ import type { SessionTodoItem } from "../../shared/session-todo.js";
 import type { SidebarTab } from "../../shared/sidebar-tab.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
+import type {
+  LlmModelListRequest,
+  LlmModelListResult,
+} from "../../shared/llm-model-list.js";
 import type {
   SandboxCapabilityInfo,
   SandboxConfinement,
@@ -199,7 +203,7 @@ export type AppSettings = {
     /** Plugin update versions skipped until the marketplace publishes a newer version. */
     skippedPluginUpdates?: Record<string, string>;
     /** Marketplace-installed provider packages visible in the LLM picker. */
-    installedProviderIds?: LLMVendor[];
+    installedProviderIds?: MarketplaceEligibleLLMVendor[];
     /** Marketplace-installed theme bundles visible in Appearance. */
     installedThemeBundleIds?: BundleId[];
     /** Marketplace-installed language packs visible in Appearance. */
@@ -411,6 +415,7 @@ export type LvisApi = {
   setApiKey: (vendor: string, k: string) => Promise<{ ok: true }>;
   hasApiKey: (vendor?: string) => Promise<boolean>;
   deleteApiKey: (vendor: string) => Promise<{ ok: true }>;
+  listLlmModels: (request: LlmModelListRequest) => Promise<LlmModelListResult>;
   setWebApiKey: (provider: string, k: string) => Promise<{ ok: true }>;
   hasWebApiKey: (provider: string) => Promise<boolean>;
   deleteWebApiKey: (provider: string) => Promise<{ ok: true }>;
@@ -566,7 +571,7 @@ export type LvisApi = {
      */
     activateOllama: () => Promise<
       | { ok: true; vendor: "ollama" }
-      | { ok: false; error: "no-ollama" | "unauthorized-frame" }
+      | { ok: false; error: "no-ollama" | "persist-failed" | "unauthorized-frame" }
     >;
     relaunchAfterActivation: () => Promise<
       | { ok: true }

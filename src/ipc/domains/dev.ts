@@ -13,6 +13,7 @@ import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
+import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
 
 const log = createLogger("ipc-dev");
 
@@ -46,7 +47,7 @@ export function registerDevHandlers(deps: IpcDeps): void {
     }
     const llm = deps.settingsService.get("llm");
     const provider = llm.provider;
-    const model = llm.vendors[provider].model;
+    const model = getLlmVendorSettings(llm.vendors, provider).model;
     const effective = getModelPreflightThreshold(provider, model);
     return {
       ok: true,

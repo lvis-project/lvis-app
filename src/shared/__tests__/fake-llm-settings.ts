@@ -7,7 +7,7 @@
  * exists on LLMVendorSettings.
  */
 import {
-  freshVendorBlocks,
+  freshAllVendorBlocks,
   type LLMVendor,
 } from "../llm-vendor-defaults.js";
 
@@ -19,7 +19,7 @@ export function fakeLlmSettings(overrides: {
   authMode?: "manual" | "login";
 } = {}) {
   const provider: LLMVendor = overrides.provider ?? "openai";
-  const vendors = freshVendorBlocks();
+  const vendors = freshAllVendorBlocks();
   if (overrides.model !== undefined) vendors[provider].model = overrides.model;
   return {
     authMode: overrides.authMode ?? "manual" as const,

@@ -10,6 +10,7 @@ import { createProvider, secretKeyFor } from "../llm/provider-factory.js";
 import { FallbackProvider } from "../llm/vercel/fallback-chain.js";
 import type { LLMProvider, ProviderConfig } from "../llm/types.js";
 import type { SettingsService } from "../../data/settings-store.js";
+import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
 import type { AiProviderPingResult } from "../../shared/ai-provider-ping.js";
 import type { ConversationLoopDeps } from "./types.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
@@ -20,7 +21,7 @@ export const AI_PROVIDER_PING_TIMEOUT_MS = 8_000;
 export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
     const llmSettings = deps.settingsService.get("llm");
     const vendor = llmSettings.provider;
-    const block = llmSettings.vendors[vendor];
+    const block = getLlmVendorSettings(llmSettings.vendors, vendor);
     const apiKey = deps.settingsService.getSecret(secretKeyFor(vendor));
 
     // Vertex AI uses service account / ADC — apiKey not required, but project is.
@@ -55,7 +56,10 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
       const chain = llmSettings.fallbackChain
         .filter((e) => e.provider && e.model)
         .map((entry) => {
-          const fallbackBlock = llmSettings.vendors[entry.provider];
+          const fallbackBlock = getLlmVendorSettings(
+            llmSettings.vendors,
+            entry.provider,
+          );
           return {
             ...entry,
             ...(fallbackBlock?.baseUrl ? { baseUrl: fallbackBlock.baseUrl } : {}),
@@ -89,11 +93,12 @@ export async function generateText(
     if (abortSignal?.aborted) throw new Error("LLM generation aborted");
     let text = "";
     const llm = settingsService.get("llm");
+    const block = getLlmVendorSettings(llm.vendors, llm.provider);
     for await (const ev of provider.streamTurn({
       systemPrompt,
       messages: [{ role: "user", content: prompt }],
       tools: [],
-      model: llm.vendors[llm.provider].model,
+      model: block.model,
       abortSignal,
     })) {
       if (abortSignal?.aborted) throw new Error("LLM generation aborted");
@@ -113,7 +118,7 @@ export async function pingProvider(
 ): Promise<AiProviderPingResult> {
     const llm = settingsService.get("llm");
     const vendor = llm.provider;
-    const model = llm.vendors[vendor]?.model ?? "";
+    const model = getLlmVendorSettings(llm.vendors, vendor).model;
     if (!provider) {
       return {
         configured: false,

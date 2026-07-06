@@ -7,7 +7,12 @@ import { ChevronDown, Lightbulb } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { getApi } from "../api-client.js";
-import { DEFAULT_LLM_VENDOR, isLLMVendor, type LLMVendor } from "../../../shared/llm-vendor-defaults.js";
+import {
+  DEFAULT_LLM_VENDOR,
+  getLlmVendorSettings,
+  isLLMVendor,
+  type LLMVendor,
+} from "../../../shared/llm-vendor-defaults.js";
 
 type Depth = "low" | "medium" | "high";
 
@@ -46,7 +51,10 @@ export function ReasoningSlider({ enabled, onToggle }: ReasoningSliderProps) {
       try {
         const s = await getApi().getSettings();
         const provider = narrowVendor(s.llm.provider);
-        const budget = s.llm.vendors[provider]?.thinkingBudgetTokens;
+        const budget = getLlmVendorSettings(
+          s.llm.vendors,
+          provider,
+        ).thinkingBudgetTokens;
         if (!cancelled && typeof budget === "number") setDepth(budgetToDepth(budget));
       } catch {
         /* keep default */

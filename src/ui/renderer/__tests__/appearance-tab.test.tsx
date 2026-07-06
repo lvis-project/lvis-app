@@ -30,10 +30,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderWithBundle(initialBundleId = DEFAULT_BUNDLE_ID) {
+function renderWithBundle(initialBundleId = DEFAULT_BUNDLE_ID, onOpenMarketplace?: (filter: "theme" | "language-pack") => void) {
   return render(
     <ThemeProvider initialBundleId={initialBundleId}>
-      <AppearanceTab />
+      <AppearanceTab onOpenMarketplace={onOpenMarketplace} />
     </ThemeProvider>,
   );
 }
@@ -101,6 +101,17 @@ describe("AppearanceTab — bundle card grid", () => {
     expect(getByTestId("language-option-ko")).toBeTruthy();
   });
 
+
+  it("opens Marketplace filters from theme and language CTAs", () => {
+    const onOpenMarketplace = vi.fn();
+    const { getByTestId } = renderWithBundle(DEFAULT_BUNDLE_ID, onOpenMarketplace);
+
+    fireEvent.click(getByTestId("appearance-tab:marketplace-languages"));
+    expect(onOpenMarketplace).toHaveBeenLastCalledWith("language-pack");
+
+    fireEvent.click(getByTestId("appearance-tab:marketplace-themes"));
+    expect(onOpenMarketplace).toHaveBeenLastCalledWith("theme");
+  });
   it("clicking back to a default theme writes data-theme-bundle=gallery", async () => {
     const { getByRole } = renderWithBundle("violet-dark");
     fireEvent.click(getByRole("radio", { name: /테마: Gallery/ }));
