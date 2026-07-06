@@ -27,7 +27,11 @@ import { getApi } from "../api-client.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
-import { LOCALE_INFO, visibleLocalesFor } from "../../../i18n/index.js";
+import {
+  LOCALE_INFO,
+  recommendedMarketplaceLocaleForSystem,
+  visibleLocalesFor,
+} from "../../../i18n/index.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 type WebViewPreferredFlow = "in-app" | "system-browser";
@@ -466,6 +470,11 @@ function LanguageSection({
   const notifySaved = useNotifySaved();
   const visibleLocales = visibleLocalesFor([locale, ...installedLocaleIds]);
   const installedLocaleIdSet = new Set(installedLocaleIds);
+  const systemLocale = typeof navigator === "undefined" ? undefined : navigator.language;
+  const recommendedLocale = recommendedMarketplaceLocaleForSystem(systemLocale, [
+    locale,
+    ...installedLocaleIds,
+  ]);
   return (
     <SettingsSection
       title={t("settings.appearance.language.title")}
@@ -520,6 +529,29 @@ function LanguageSection({
           );
         })}
       </div>
+      {recommendedLocale && onOpenMarketplace && (
+        <div
+          className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/(--opacity-subtle) px-3 py-2 text-xs text-muted-foreground"
+          data-testid="appearance-tab:language-recommendation"
+        >
+          <span>
+            {t("appearanceTab.languageRecommendation", {
+              language: LOCALE_INFO[recommendedLocale].englishName,
+            })}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1.5 text-xs"
+            data-testid={`appearance-tab:language-recommendation-open:${recommendedLocale}`}
+            onClick={() => onOpenMarketplace("language-pack")}
+          >
+            <Store className="size-3.5" aria-hidden={true} />
+            {t("appearanceTab.openMarketplace")}
+          </Button>
+        </div>
+      )}
     </SettingsSection>
   );
 }

@@ -77,6 +77,7 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
         ...(effectiveBaseUrl ? { baseUrl: effectiveBaseUrl } : {}),
         ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
         ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
+        ...(marketplaceProviderPreset ? { providerMetadata: marketplaceProviderPreset } : {}),
       });
       const chain = llmSettings.fallbackChain
         .filter((e) =>

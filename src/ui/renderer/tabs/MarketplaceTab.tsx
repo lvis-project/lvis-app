@@ -10,9 +10,14 @@ import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import { isIpcErrorResult, type LvisApi, type MarketplaceItem } from "../types.js";
 import type { MarketplaceSettings } from "../../../data/settings-store.js";
 import {
-  INSTALLABLE_MARKETPLACE_PACKAGE_TYPES,
-  type MarketplacePackageType,
-} from "../../../shared/assistant-context.js";
+  MARKETPLACE_PACKAGE_FILTER_OPTIONS,
+  canInstallMarketplacePackageType,
+  canUninstallMarketplacePackageType,
+  isMarketplaceAssetPackageType,
+  marketplacePackageLabel,
+  marketplaceTrustLabelKeysForPackage,
+  type MarketplacePackageFilter,
+} from "../../../shared/marketplace-package-sections.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { PluginInstallDialog } from "../dialogs/PluginInstallDialog.js";
@@ -28,20 +33,6 @@ import {
   type MarketplaceInstalledProviderPreset,
 } from "../../../shared/marketplace-package-assets.js";
 import { isMarketplaceEligibleLLMVendor } from "../../../shared/llm-vendor-defaults.js";
-
-const INSTALLABLE_PACKAGE_TYPE_SET = new Set<MarketplacePackageType>(
-  INSTALLABLE_MARKETPLACE_PACKAGE_TYPES,
-);
-
-const PACKAGE_TYPE_LABELS: Record<MarketplacePackageType, string> = {
-  plugin: "Plugins",
-  mcp: "MCP",
-  agent: "Agents",
-  skill: "Skills",
-  provider: "Providers",
-  theme: "Themes",
-  "language-pack": "Languages",
-};
 
 type MarketplaceAssetInstallState = Pick<
   MarketplaceSettings,
@@ -70,18 +61,8 @@ function installedAssetsFromMarketplace(
 function isMarketplaceAssetPackage(item: MarketplaceItem): boolean {
   const packageType = item.pluginType ?? "plugin";
   return (
-    (packageType === "provider" ||
-      packageType === "theme" ||
-      packageType === "language-pack") &&
+    isMarketplaceAssetPackageType(packageType) &&
     item.packageAsset?.type === packageType
-  );
-}
-
-function isMarketplaceAssetPackageType(packageType: MarketplacePackageType): boolean {
-  return (
-    packageType === "provider" ||
-    packageType === "theme" ||
-    packageType === "language-pack"
   );
 }
 
@@ -147,33 +128,6 @@ function removeProviderPreset(
   return values.filter((entry) => entry.providerId !== providerId);
 }
 
-function isInstallablePackageType(
-  packageType: MarketplacePackageType,
-): packageType is (typeof INSTALLABLE_MARKETPLACE_PACKAGE_TYPES)[number] {
-  return INSTALLABLE_PACKAGE_TYPE_SET.has(packageType);
-}
-
-function marketplaceTrustLabelKeys(item: MarketplaceItem): string[] {
-  const asset = item.packageAsset;
-  if (!asset || !isMarketplaceAssetPackage(item)) return [];
-  if (asset.type === "provider") {
-    return [
-      "marketplaceTab.trustProviderCredentials",
-      "marketplaceTab.trustProviderNetwork",
-    ];
-  }
-  if (asset.type === "theme") {
-    return [
-      "marketplaceTab.trustNoCode",
-      "marketplaceTab.trustThemeTokens",
-    ];
-  }
-  return [
-    "marketplaceTab.trustNoCode",
-    "marketplaceTab.trustLanguageCatalog",
-  ];
-}
-
 export interface MarketplaceTabProps {
   api: LvisApi;
   baseUrl: string;
@@ -189,7 +143,7 @@ export interface MarketplaceTabProps {
    *  the explicit URL / API key Save buttons (200ms after the React state
    *  update commits, so the save reads fresh values). */
   onImmediateChange?: () => void;
-  initialFilter?: "all" | MarketplacePackageType;
+  initialFilter?: MarketplacePackageFilter;
 }
 
 export function MarketplaceTab(props: MarketplaceTabProps) {
@@ -210,7 +164,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   } = props;
   const [packages, setPackages] = useState<MarketplaceItem[]>([]);
   const [packageStatus, setPackageStatus] = useState(() => t("marketplaceTab.statusLoading"));
-  const [filter, setFilter] = useState<"all" | MarketplacePackageType>(initialFilter);
+  const [filter, setFilter] = useState<MarketplacePackageFilter>(initialFilter);
   const [workingSlug, setWorkingSlug] = useState<string | null>(null);
   // #1098/#1279 — plugin installs that need explicit pre-install disclosure.
   const [installDialogTarget, setInstallDialogTarget] = useState<MarketplaceItem | null>(null);
@@ -446,16 +400,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     }
   }, [refreshPackages, t, updateMarketplaceAssetInstall]);
 
-  const filterOptions: Array<{ value: "all" | MarketplacePackageType; label: string }> = [
-    { value: "all", label: "All" },
-    { value: "plugin", label: PACKAGE_TYPE_LABELS.plugin },
-    { value: "mcp", label: PACKAGE_TYPE_LABELS.mcp },
-    { value: "agent", label: PACKAGE_TYPE_LABELS.agent },
-    { value: "skill", label: PACKAGE_TYPE_LABELS.skill },
-    { value: "provider", label: PACKAGE_TYPE_LABELS.provider },
-    { value: "theme", label: PACKAGE_TYPE_LABELS.theme },
-    { value: "language-pack", label: PACKAGE_TYPE_LABELS["language-pack"] },
-  ];
+  const filterOptions = MARKETPLACE_PACKAGE_FILTER_OPTIONS;
 
   return (
     <div className="space-y-6">
@@ -529,13 +474,15 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
             ) : visiblePackages.map((item) => {
               const packageType = item.pluginType ?? "plugin";
               const isWorking = workingSlug === item.id;
+              const supportedAssetPackage = isMarketplaceAssetPackage(item);
               const unsupportedAssetPackage = isUnsupportedMarketplaceAssetPackage(item);
-              const canInstall = isInstallablePackageType(packageType) || isMarketplaceAssetPackage(item);
+              const canInstall = canInstallMarketplacePackageType(packageType, {
+                hasSupportedAsset: supportedAssetPackage,
+              });
               const canUninstall = item.installed && (
-                packageType === "plugin" ||
-                packageType === "agent" ||
-                packageType === "skill" ||
-                isMarketplaceAssetPackage(item)
+                canUninstallMarketplacePackageType(packageType, {
+                  hasSupportedAsset: supportedAssetPackage,
+                })
               );
               const actionDisabled = isWorking || (item.installed ? !canUninstall : !canInstall);
               const actionLabel = isWorking
@@ -552,9 +499,11 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                 : unsupportedAssetPackage
                   ? t("marketplaceTab.unsupportedAssetPackageTitle")
                   : t("marketplaceTab.packageInstallUnavailableTitle", {
-                    label: PACKAGE_TYPE_LABELS[packageType],
+                    label: marketplacePackageLabel(packageType),
                   });
-              const trustLabelKeys = marketplaceTrustLabelKeys(item);
+              const trustLabelKeys = marketplaceTrustLabelKeysForPackage(packageType, {
+                hasSupportedAsset: supportedAssetPackage,
+              });
               return (
                 <div key={`${packageType}:${item.id}`} className="flex items-start justify-between gap-3 p-2">
                   <div className="min-w-0">
