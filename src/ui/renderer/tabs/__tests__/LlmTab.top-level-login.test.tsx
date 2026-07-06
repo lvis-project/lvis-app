@@ -289,7 +289,7 @@ describe("LlmTab — top-level login toggle UI", () => {
       fetchedAt: "2026-07-06T00:00:00.000Z",
     });
 
-    render(
+    const { container } = render(
       <Harness
         initialAuthMode="manual"
         initialVendor="openai-compatible"
@@ -305,6 +305,15 @@ describe("LlmTab — top-level login toggle UI", () => {
       }),
     );
     expect(screen.getByTestId("llm-tab:model-sync-status").textContent).toContain("1");
+
+    const modelTrigger = container.querySelector(
+      '[data-testid="llm-model-select"]',
+    ) as HTMLElement | null;
+    expect(modelTrigger).not.toBeNull();
+    fireEvent.mouseDown(modelTrigger!);
+    fireEvent.keyDown(modelTrigger!, { key: "ArrowDown" });
+
+    expect(await screen.findByText("router/free-model")).toBeInTheDocument();
   });
 
   it("host-resolver map textarea is disabled in login mode", () => {
