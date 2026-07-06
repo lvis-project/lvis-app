@@ -115,10 +115,12 @@ Post-merge checks succeeded on July 6, 2026:
 - App main: CI and CodeQL for `0d601b13`
 - Marketplace main: server-ci and alembic upgrade checks for `584e4dc`
 
-Remaining goal work is not blocked by the seed-to-DB change. The next
-high-value verification gap is true browser/Electron E2E that clicks through
-Marketplace install/uninstall and then proves the target provider/theme/language
-appears in the live app surface.
+Remaining goal work is not blocked by the seed-to-DB change. The app now has a
+true Electron settings E2E that clicks through Marketplace asset installs and
+then proves the installed provider, theme, and language pack appear in the live
+LLM/Appearance pickers:
+
+- `test/e2e/ui/marketplace-assets.spec.ts`
 
 ## Sources
 
