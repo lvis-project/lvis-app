@@ -11,6 +11,7 @@ import {
 import {
   isMarketplaceProviderPresetId,
   marketplaceProviderPresetSecretKey,
+  type MarketplaceInstalledProviderPreset,
 } from "../../shared/marketplace-package-assets.js";
 import {
   ensurePublicHttpUrl,
@@ -71,6 +72,14 @@ function sameModelListEndpoint(a: string, b: string): boolean {
   }
 }
 
+function usesHttpsEndpoint(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function resolveModelListBaseUrl(
   settingsService: SettingsService,
   vendor: LLMVendor,
@@ -110,11 +119,15 @@ function storedCredentialForModelList(
   if (requestedPresetId) {
     const installedPreset = settingsService
       .get("marketplace")
-      .installedProviderPresets
+      .installedProviderPresets ?? [];
+    const requestedPreset = installedPreset
       .find((preset) => preset.providerId === requestedPresetId);
-    if (installedPreset) {
+    if (requestedPreset) {
+      if (!resolved.baseUrl || !sameModelListEndpoint(resolved.baseUrl, requestedPreset.baseUrl)) {
+        return "";
+      }
       return settingsService.getSecret(
-        marketplaceProviderPresetSecretKey(installedPreset.providerId),
+        marketplaceProviderPresetSecretKey(requestedPreset.providerId),
       ) ?? "";
     }
     return "";
@@ -127,20 +140,33 @@ function storedCredentialForModelList(
   ) {
     const installedPreset = settingsService
       .get("marketplace")
-      .installedProviderPresets
+      .installedProviderPresets ?? [];
+    const activePreset = installedPreset
       .find((preset) => preset.providerId === llm.marketplaceProviderPresetId);
-    if (installedPreset) {
+    if (activePreset) {
+      if (!resolved.baseUrl || !sameModelListEndpoint(resolved.baseUrl, activePreset.baseUrl)) {
+        return "";
+      }
       return settingsService.getSecret(
-        marketplaceProviderPresetSecretKey(installedPreset.providerId),
+        marketplaceProviderPresetSecretKey(activePreset.providerId),
       ) ?? "";
     }
   }
   return settingsService.getSecret(secretKeyFor(vendor)) ?? "";
 }
 
+function installedProviderPresetForScope(
+  settingsService: SettingsService,
+  providerId: string,
+): MarketplaceInstalledProviderPreset | undefined {
+  return (settingsService.get("marketplace").installedProviderPresets ?? [])
+    .find((preset) => preset.providerId === providerId);
+}
+
 function validateModelListCredentialScope(
   settingsService: SettingsService,
   vendor: LLMVendor,
+  resolved: ResolvedModelListBaseUrl,
   credentialScope?: string,
 ): LlmModelListResult | null {
   if (vendor !== "openai-compatible" || !credentialScope) return null;
@@ -151,17 +177,33 @@ function validateModelListCredentialScope(
       message: "Install this marketplace provider before syncing its models.",
     };
   }
-  const installedPreset = settingsService
-    .get("marketplace")
-    .installedProviderPresets
-    .find((preset) => preset.providerId === credentialScope);
-  return installedPreset
-    ? null
-    : {
-        ok: false,
-        error: "provider-not-installed",
-        message: "Install this marketplace provider before syncing its models.",
-      };
+  const installedPreset = installedProviderPresetForScope(settingsService, credentialScope);
+  if (!installedPreset) {
+    return {
+      ok: false,
+      error: "provider-not-installed",
+      message: "Install this marketplace provider before syncing its models.",
+    };
+  }
+  const llm = settingsService.get("llm");
+  if (
+    llm.provider !== "openai-compatible" ||
+    llm.marketplaceProviderPresetId !== credentialScope
+  ) {
+    return {
+      ok: false,
+      error: "provider-not-installed",
+      message: "Only the active marketplace provider can sync models with its stored credential.",
+    };
+  }
+  if (!resolved.baseUrl || !sameModelListEndpoint(resolved.baseUrl, installedPreset.baseUrl)) {
+    return {
+      ok: false,
+      error: "invalid-model-list-endpoint",
+      message: "Model list endpoint must match the active marketplace provider preset.",
+    };
+  }
+  return null;
 }
 
 export function modelListEndpointFromBaseUrl(baseUrl: string): string {
@@ -329,13 +371,6 @@ export async function listLlmModelsFromSettings(
       message: "Unknown LLM provider.",
     };
   }
-  const credentialScopeError = validateModelListCredentialScope(
-    settingsService,
-    request.vendor,
-    request.credentialScope,
-  );
-  if (credentialScopeError) return credentialScopeError;
-
   const resolved = resolveModelListBaseUrl(
     settingsService,
     request.vendor,
@@ -359,12 +394,28 @@ export async function listLlmModelsFromSettings(
     throw err;
   }
 
+  const credentialScopeError = validateModelListCredentialScope(
+    settingsService,
+    request.vendor,
+    resolved,
+    request.credentialScope,
+  );
+  if (credentialScopeError) return credentialScopeError;
+
   const apiKey = storedCredentialForModelList(
     settingsService,
     request.vendor,
     resolved,
     request.credentialScope,
   );
+  if (apiKey && !usesHttpsEndpoint(endpoint)) {
+    return {
+      ok: false,
+      error: "invalid-model-list-endpoint",
+      endpoint,
+      message: "Credentialed model list endpoints must use https.",
+    };
+  }
   const headers: Record<string, string> = { Accept: "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 

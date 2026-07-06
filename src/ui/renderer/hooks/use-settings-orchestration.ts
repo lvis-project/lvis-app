@@ -425,7 +425,11 @@ export function useSettingsOrchestration(
         if (isLlmSave && llmDraftGeneration !== llmDraftGenerationRef.current) {
           return false;
         }
-        const trimmedBaseUrl = baseUrl.trim();
+        const selectedMarketplaceProviderPreset =
+          vendor === "openai-compatible" && marketplaceProviderPresetId
+            ? marketplaceProviderPresets.find((preset) => preset.providerId === marketplaceProviderPresetId)
+            : undefined;
+        const trimmedBaseUrl = selectedMarketplaceProviderPreset?.baseUrl ?? baseUrl.trim();
         const trimmedVertexProject = vertexProject.trim();
         const trimmedVertexLocation = vertexLocation.trim();
         const activeBlock: AppSettings["llm"]["vendors"][string] = {

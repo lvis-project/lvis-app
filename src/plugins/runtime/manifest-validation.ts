@@ -14,6 +14,10 @@ import type { ValidateFunction } from "ajv";
 import type { PluginManifest, InstallPolicy } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
+import {
+  MARKETPLACE_PROVIDER_PRESET_ID_MAX_LENGTH,
+  marketplaceProviderPresetIdFromSecretKey,
+} from "../../shared/marketplace-package-assets.js";
 
 // Re-exported here so manifest/plugin-loading consumers can import the
 // minAppVersion gate error + IPC code alongside the other manifest contracts.
@@ -31,13 +35,25 @@ export const STABLE_SEMVER_RE =
 
 /**
  * #893 — Allow-listed host secret key pattern. A plugin manifest's
- * `hostSecrets.read[]` entries MUST match this regex so the runtime allowlist
- * only ever points at LLM API keys (the only host-owned secret class plugins
- * may currently request). Mirrors the SDK JSON-schema constraint so a plugin
- * cannot install a wider allowlist via a stale SDK build.
+ * `hostSecrets.read[]` entries MUST match one of these host-owned LLM secret
+ * key shapes. Mirrors the SDK JSON-schema constraint so a plugin cannot
+ * install a wider allowlist via a stale SDK build.
  */
-export const HOST_SECRETS_KEY_PATTERN = /^llm\.apiKey\.[a-z-]+$/;
+const LLM_API_KEY_PATTERN = /^llm\.apiKey\.[a-z]+(?:-[a-z]+)*$/;
+const MARKETPLACE_PROVIDER_PRESET_ID_SCHEMA_PATTERN_SOURCE =
+  `[A-Za-z0-9][A-Za-z0-9._-]{0,${MARKETPLACE_PROVIDER_PRESET_ID_MAX_LENGTH - 1}}`;
+export const HOST_SECRETS_KEY_PATTERN_SOURCE =
+  `^(?:llm\\.apiKey\\.[a-z]+(?:-[a-z]+)*|llm\\.marketplaceProvider\\.${MARKETPLACE_PROVIDER_PRESET_ID_SCHEMA_PATTERN_SOURCE}\\.apiKey)$`;
+export const HOST_SECRETS_KEY_PATTERN = new RegExp(HOST_SECRETS_KEY_PATTERN_SOURCE);
 const log = createLogger("plugin-runtime");
+
+function isAllowedHostSecretKey(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    (LLM_API_KEY_PATTERN.test(value) ||
+      marketplaceProviderPresetIdFromSecretKey(value) !== undefined)
+  );
+}
 
 async function loadSdkManifestSchema(): Promise<unknown> {
   const schemaPath = createRequire(import.meta.url).resolve(
@@ -71,6 +87,22 @@ function schemaAcceptsToolSchemaWorkerId(validator: ValidateFunction): boolean {
   return ok === true;
 }
 
+function schemaAcceptsMarketplaceProviderHostSecret(validator: ValidateFunction): boolean {
+  const ok = validator({
+    id: "marketplace-provider-secret",
+    name: "Marketplace Provider Secret Plugin",
+    version: "1.0.0",
+    description: "Marketplace provider secret fixture.",
+    publisher: "LVIS",
+    entry: "dist/index.js",
+    tools: [],
+    hostSecrets: {
+      read: ["llm.marketplaceProvider.future-router.apiKey"],
+    },
+  });
+  return ok === true;
+}
+
 function applyHostManifestSchemaCompatibility(schema: unknown): unknown {
   const copy = cloneJsonObject(schema) as Record<string, unknown>;
   const properties = copy.properties as Record<string, unknown> | undefined;
@@ -86,6 +118,25 @@ function applyHostManifestSchemaCompatibility(schema: unknown): unknown {
       description:
         "Host-spawned plugin worker id. Paired with plugin id so the host reviewer can resolve the specific ASRT-wrapped worker substrate.",
     };
+  }
+  const hostSecrets = properties?.hostSecrets as Record<string, unknown> | undefined;
+  const hostSecretProperties = hostSecrets?.properties as Record<string, unknown> | undefined;
+  const readSchema = hostSecretProperties?.read as Record<string, unknown> | undefined;
+  const readItems = readSchema?.items as Record<string, unknown> | undefined;
+  if (readItems) {
+    readItems.pattern = HOST_SECRETS_KEY_PATTERN_SOURCE;
+    readItems.maxLength =
+      "llm.marketplaceProvider.".length +
+      MARKETPLACE_PROVIDER_PRESET_ID_MAX_LENGTH +
+      ".apiKey".length;
+  }
+  if (readSchema) {
+    readSchema.description =
+      "Secret keys this plugin is permitted to read. Accepted forms: llm.apiKey.<vendor> or llm.marketplaceProvider.<presetId>.apiKey. Marketplace preset ids follow the host provider-preset id contract.";
+  }
+  if (hostSecrets) {
+    hostSecrets.description =
+      "Explicit allowlist of host-managed LLM secrets the plugin reads via hostApi.getSecret. Default deny when unset.";
   }
   return copy;
 }
@@ -151,11 +202,17 @@ export async function buildManifestValidator(): Promise<ValidateFunction> {
     const sdk = (await import("@lvis/plugin-sdk")) as unknown as SdkModule;
     if (typeof sdk.compileManifestValidator === "function") {
       const validator = sdk.compileManifestValidator();
-      if (schemaAcceptsToolSchemaWorkerId(validator)) {
+      const needsWorkerIdPatch = !schemaAcceptsToolSchemaWorkerId(validator);
+      const needsMarketplaceProviderSecretPatch =
+        !schemaAcceptsMarketplaceProviderHostSecret(validator);
+      if (!needsWorkerIdPatch && !needsMarketplaceProviderSecretPatch) {
         return validator;
       }
       log.warn(
-        "SDK manifest validator does not yet accept toolSchemas.*.workerId — applying host-local compatibility patch. Update @lvis/plugin-sdk once the field lands upstream.",
+        `SDK manifest validator needs host-local compatibility patch for ${[
+          needsWorkerIdPatch ? "toolSchemas.*.workerId" : "",
+          needsMarketplaceProviderSecretPatch ? "llm.marketplaceProvider.<presetId>.apiKey" : "",
+        ].filter(Boolean).join(", ")}. Update @lvis/plugin-sdk once these fields land upstream.`,
       );
       return compileAjvValidator(applyHostManifestSchemaCompatibility(await loadSdkManifestSchema()));
     }
@@ -608,11 +665,11 @@ export async function parsePluginJson(
         // arrow-function call path is sometimes lossy — re-assert via a
         // local typed binding so the regex test below sees `key: string`.
         const keyStr: string = key as string;
-        if (!HOST_SECRETS_KEY_PATTERN.test(keyStr)) {
+        if (!isAllowedHostSecretKey(keyStr)) {
           fail(
             `hostSecrets.read[${i}]`,
-            `value '${keyStr}' does not match the allowed host-secret pattern (manifest_schema). Only \`llm.apiKey.<vendor>\` keys are accepted`,
-            `"hostSecrets": { "read": ["llm.apiKey.openai"] }`,
+            `value '${keyStr}' does not match the allowed host-secret pattern (manifest_schema). Accepted forms are \`llm.apiKey.<vendor>\` and \`llm.marketplaceProvider.<presetId>.apiKey\``,
+            `"hostSecrets": { "read": ["llm.apiKey.openai", "llm.marketplaceProvider.future-router.apiKey"] }`,
           );
         }
       }

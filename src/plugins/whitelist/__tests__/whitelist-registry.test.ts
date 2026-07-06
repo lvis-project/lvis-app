@@ -30,6 +30,7 @@ function buildWhitelist(opts: {
   issuedAt: string;
   expiresAt: string;
   manifestSha?: string;
+  hostSecretsRead?: string[];
 }) {
   return {
     version: 1 as const,
@@ -39,7 +40,9 @@ function buildWhitelist(opts: {
     pluginGrants: {
       meeting: {
         publisher: "lvis-community",
-        hostSecrets: { read: ["llm.apiKey.openai"] as string[] },
+        hostSecrets: {
+          read: opts.hostSecretsRead ?? ["llm.apiKey.openai"] as string[],
+        },
         approvedManifestSha256:
           opts.manifestSha ?? "a".repeat(64),
       },
@@ -145,6 +148,36 @@ describe("WhitelistRegistry — fresh allow", () => {
     );
     expect(decision.kind).toBe("allow");
     expect(whitelistRegistry.status().state).toBe("fresh");
+  });
+
+  it("returns allow for a marketplace provider preset secret grant", async () => {
+    const userDataDir = freshUserData();
+    const cache = new WhitelistCache(userDataDir);
+    const key = "llm.marketplaceProvider.future-router.apiKey";
+    const signed = makeSigned({
+      issuedAt: "2026-05-17T00:00:00.000Z",
+      expiresAt: "2030-01-01T00:00:00.000Z",
+      manifestSha: "f".repeat(64),
+      hostSecretsRead: [key],
+    });
+    await cache.store({
+      body: signed.body,
+      signature: signed.signature,
+      meta: { highestSeenIssuedAt: signed.doc.issuedAt },
+    });
+
+    await whitelistRegistry.init({
+      userDataDir,
+      online: false,
+      now: () => Date.parse("2026-05-18T00:00:00.000Z"),
+    });
+
+    const decision = whitelistRegistry.isAllowed(
+      "meeting",
+      key,
+      "f".repeat(64),
+    );
+    expect(decision.kind).toBe("allow");
   });
 });
 
