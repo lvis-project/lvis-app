@@ -111,6 +111,27 @@ function isInstallablePackageType(
   return INSTALLABLE_PACKAGE_TYPE_SET.has(packageType);
 }
 
+function marketplaceTrustLabelKeys(item: MarketplaceItem): string[] {
+  const asset = item.packageAsset;
+  if (!asset || !isMarketplaceAssetPackage(item)) return [];
+  if (asset.type === "provider") {
+    return [
+      "marketplaceTab.trustProviderCredentials",
+      "marketplaceTab.trustProviderNetwork",
+    ];
+  }
+  if (asset.type === "theme") {
+    return [
+      "marketplaceTab.trustNoCode",
+      "marketplaceTab.trustThemeTokens",
+    ];
+  }
+  return [
+    "marketplaceTab.trustNoCode",
+    "marketplaceTab.trustLanguageCatalog",
+  ];
+}
+
 export interface MarketplaceTabProps {
   api: LvisApi;
   baseUrl: string;
@@ -467,6 +488,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                 : t("marketplaceTab.packageInstallUnavailableTitle", {
                   label: PACKAGE_TYPE_LABELS[packageType],
                 });
+              const trustLabelKeys = marketplaceTrustLabelKeys(item);
               return (
                 <div key={`${packageType}:${item.id}`} className="flex items-start justify-between gap-3 p-2">
                   <div className="min-w-0">
@@ -479,6 +501,15 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                       {item.installed && <Badge variant="default" className="h-5 px-1.5 text-[10px]">{t("marketplaceTab.installedBadge")}</Badge>}
                     </div>
                     <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{item.description || item.packageSpec}</p>
+                    {trustLabelKeys.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1" data-testid={`marketplace:trust:${item.id}`}>
+                        {trustLabelKeys.map((key) => (
+                          <Badge key={key} variant="outline" className="h-5 px-1.5 text-[10px]">
+                            {t(key)}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                     <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{item.id}</p>
                   </div>
                   <Button
