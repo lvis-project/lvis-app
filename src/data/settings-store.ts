@@ -58,6 +58,12 @@ import {
   type LlmModelListCacheEntry,
 } from "../shared/llm-model-list.js";
 import {
+  isMarketplaceProviderPresetId,
+  marketplaceProviderPresetSecretKey,
+  normalizeMarketplaceProviderPreset,
+  type MarketplaceInstalledProviderPreset,
+} from "../shared/marketplace-package-assets.js";
+import {
   normalizeAccelerator,
   normalizeShortcuts,
   type ShortcutSettings,
@@ -118,6 +124,12 @@ export interface LLMSettings {
    */
   authMode: "manual" | "login";
   provider: LLMVendor;
+  /**
+   * Marketplace custom provider preset selected in the provider picker.
+   * Runtime still routes through `openai-compatible`; this id preserves the
+   * user-visible preset identity, key namespace, and keyless policy.
+   */
+  marketplaceProviderPresetId?: string;
   vendors: LLMVendorSettingsMap;
   streamSmoothing: "none" | "word" | "char";
   fallbackChain: Array<{ provider: LLMVendor; model: string }>;
@@ -151,6 +163,7 @@ export interface LLMSettings {
 export interface LLMSettingsPatch {
   authMode?: "manual" | "login";
   provider?: LLMVendor;
+  marketplaceProviderPresetId?: string;
   vendors?: Partial<Record<LLMVendor, Partial<LLMVendorSettings>>>;
   streamSmoothing?: "none" | "word" | "char";
   fallbackChain?: Array<{ provider: LLMVendor; model: string }>;
@@ -569,6 +582,8 @@ export interface MarketplaceSettings {
    * first-run surface.
    */
   installedProviderIds: MarketplaceEligibleLLMVendor[];
+  /** User-installed OpenAI-compatible provider presets from Marketplace. */
+  installedProviderPresets: MarketplaceInstalledProviderPreset[];
   /** Marketplace-installed theme bundles shown in Appearance. */
   installedThemeBundleIds: BundleId[];
   /** Marketplace-installed language packs shown in the language picker. */
@@ -615,6 +630,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     cloudBaseUrl: "https://marketplace.lvisai.xyz",
     cloudAllowPrivateNetwork: false,
     installedProviderIds: [],
+    installedProviderPresets: [],
     installedThemeBundleIds: [],
     installedLanguagePacks: [],
   },
@@ -780,11 +796,27 @@ export class SettingsService {
           ...partial.marketplace,
         })
       : this.settings.marketplace;
+    if (partial.marketplace) {
+      nextMarketplace.installedProviderPresets = preserveInstalledProviderPresetMetadata(
+        this.settings.marketplace.installedProviderPresets,
+        nextMarketplace.installedProviderPresets,
+      );
+    }
+    const removedProviderPresetIds = partial.marketplace
+      ? removedMarketplaceProviderPresetIds(
+          this.settings.marketplace.installedProviderPresets,
+          nextMarketplace.installedProviderPresets,
+        )
+      : [];
+    for (const providerId of removedProviderPresetIds) {
+      await this.deleteSecret(marketplaceProviderPresetSecretKey(providerId));
+    }
     if (partial.llm) {
       this.settings.llm = mergeLlmPatch(
         this.settings.llm,
         partial.llm,
         nextMarketplace.installedProviderIds,
+        nextMarketplace.installedProviderPresets,
       );
     }
     if (partial.chat) this.settings.chat = { ...this.settings.chat, ...partial.chat };
@@ -794,6 +826,7 @@ export class SettingsService {
       const prunedLlm = pruneLazyLlmVendorBlocks(
         this.settings.llm,
         nextMarketplace.installedProviderIds,
+        nextMarketplace.installedProviderPresets,
         { inferInstalledFromCustom: false },
       );
       this.settings.llm = prunedLlm.llm;
@@ -1149,6 +1182,7 @@ export class SettingsService {
         DEFAULT_SETTINGS.llm,
         migratedLlm,
         LLM_VENDORS.filter(isMarketplaceEligibleLLMVendor),
+        undefined,
       );
       const marketplaceParsed: Record<string, unknown> = { ...(parsed.marketplace ?? {}) };
       // Migration: the marketplace cloud fields were renamed (the old "real"
@@ -1195,6 +1229,7 @@ export class SettingsService {
       const prunedLlm = pruneLazyLlmVendorBlocks(
         llm,
         marketplace.installedProviderIds,
+        marketplace.installedProviderPresets,
         { inferInstalledFromCustom: true },
       );
       llm = prunedLlm.llm;
@@ -1280,6 +1315,53 @@ function isLlmProviderEnabled(
   );
 }
 
+function isMarketplaceProviderPresetInstalled(
+  providerId: string | undefined,
+  installedProviderPresets: readonly MarketplaceInstalledProviderPreset[] | undefined,
+): boolean {
+  if (!providerId || !isMarketplaceProviderPresetId(providerId)) return false;
+  if (installedProviderPresets === undefined) return true;
+  return installedProviderPresets.some((preset) => preset.providerId === providerId);
+}
+
+function normalizeActiveMarketplaceProviderPresetId(
+  provider: LLMVendor,
+  requested: unknown,
+  installedProviderPresets: readonly MarketplaceInstalledProviderPreset[] | undefined,
+): string | undefined {
+  if (provider !== "openai-compatible") return undefined;
+  if (!isMarketplaceProviderPresetId(requested)) return undefined;
+  return isMarketplaceProviderPresetInstalled(requested, installedProviderPresets)
+    ? requested
+    : undefined;
+}
+
+function marketplaceProviderPresetForId(
+  providerId: string | undefined,
+  installedProviderPresets: readonly MarketplaceInstalledProviderPreset[] | undefined,
+): MarketplaceInstalledProviderPreset | undefined {
+  if (!providerId || !installedProviderPresets) return undefined;
+  return installedProviderPresets.find((preset) => preset.providerId === providerId);
+}
+
+function bindOpenAICompatibleVendorBlockToMarketplaceProviderPreset(
+  vendors: LLMVendorSettingsMap,
+  preset: MarketplaceInstalledProviderPreset | undefined,
+): void {
+  if (!preset) return;
+  const current = getLlmVendorSettings(vendors, "openai-compatible");
+  vendors["openai-compatible"] = getLlmVendorSettings(
+    {
+      ...vendors,
+      "openai-compatible": {
+        ...current,
+        baseUrl: preset.baseUrl,
+      },
+    },
+    "openai-compatible",
+  );
+}
+
 function isValidCachedModelId(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const id = value.trim();
@@ -1322,6 +1404,7 @@ function isValidModelListUrl(value: unknown): value is string {
 function normalizeLlmModelListCache(
   input: unknown,
   installedProviderIds: readonly MarketplaceEligibleLLMVendor[],
+  installedProviderPresets?: readonly MarketplaceInstalledProviderPreset[],
 ): LlmModelListCache {
   if (!input || typeof input !== "object" || Array.isArray(input)) return {};
   const result: LlmModelListCache = {};
@@ -1334,13 +1417,21 @@ function normalizeLlmModelListCache(
     const models = normalizeCachedModelIds(entry.models);
     if (models.length === 0) continue;
     const baseUrl = typeof entry.baseUrl === "string" ? entry.baseUrl.trim() : "";
+    let credentialScope = "";
+    if (entry.credentialScope !== undefined) {
+      if (!isMarketplaceProviderPresetId(entry.credentialScope)) continue;
+      const scopedPresetId = entry.credentialScope.trim();
+      if (!isMarketplaceProviderPresetInstalled(scopedPresetId, installedProviderPresets)) continue;
+      credentialScope = scopedPresetId;
+    }
     const fetchedAt = typeof entry.fetchedAt === "string" && entry.fetchedAt.trim()
       ? entry.fetchedAt.trim()
       : new Date(0).toISOString();
-    const key = llmModelListCacheKey(entry.vendor, baseUrl);
+    const key = llmModelListCacheKey(entry.vendor, baseUrl, credentialScope);
     result[key] = {
       vendor: entry.vendor,
       ...(baseUrl ? { baseUrl } : {}),
+      ...(credentialScope ? { credentialScope } : {}),
       endpoint: entry.endpoint.trim(),
       models,
       fetchedAt,
@@ -1354,6 +1445,7 @@ function mergeLlmPatch(
   base: LLMSettings,
   partial: LLMSettingsPatch,
   installedProviderIds: readonly MarketplaceEligibleLLMVendor[],
+  installedProviderPresets: readonly MarketplaceInstalledProviderPreset[] | undefined,
 ): LLMSettings {
   const vendors: LLMVendorSettingsMap = { ...base.vendors };
   if (partial.vendors) {
@@ -1390,7 +1482,40 @@ function mergeLlmPatch(
   const provider = isLlmProviderEnabled(requestedProvider, installedProviderIds)
     ? requestedProvider
     : DEFAULT_LLM_VENDOR;
-  vendors[provider] = getLlmVendorSettings(vendors, provider);
+  const requestedMarketplaceProviderPresetId =
+    partial.marketplaceProviderPresetId !== undefined
+      ? partial.marketplaceProviderPresetId
+      : base.marketplaceProviderPresetId;
+  const activeMarketplaceProviderPresetExplicitlyCleared =
+    provider === "openai-compatible" &&
+    partial.marketplaceProviderPresetId !== undefined &&
+    isMarketplaceProviderPresetId(base.marketplaceProviderPresetId) &&
+    !isMarketplaceProviderPresetId(partial.marketplaceProviderPresetId);
+  let activeProvider = provider;
+  const marketplaceProviderPresetId = normalizeActiveMarketplaceProviderPresetId(
+    provider,
+    requestedMarketplaceProviderPresetId,
+    installedProviderPresets,
+  );
+  const activeMarketplaceProviderPreset = marketplaceProviderPresetForId(
+    marketplaceProviderPresetId,
+    installedProviderPresets,
+  );
+  const removedActiveMarketplaceProviderPreset =
+    provider === "openai-compatible" &&
+    isMarketplaceProviderPresetId(requestedMarketplaceProviderPresetId) &&
+    !marketplaceProviderPresetId;
+  if (activeMarketplaceProviderPresetExplicitlyCleared || removedActiveMarketplaceProviderPreset) {
+    vendors["openai-compatible"] = getLlmVendorSettings(undefined, "openai-compatible");
+  }
+  if (removedActiveMarketplaceProviderPreset) {
+    activeProvider = DEFAULT_LLM_VENDOR;
+  }
+  bindOpenAICompatibleVendorBlockToMarketplaceProviderPreset(
+    vendors,
+    activeMarketplaceProviderPreset,
+  );
+  vendors[activeProvider] = getLlmVendorSettings(vendors, activeProvider);
   const authMode: "manual" | "login" =
     partial.authMode === "login" || partial.authMode === "manual"
       ? partial.authMode
@@ -1398,7 +1523,8 @@ function mergeLlmPatch(
   const fallbackChain = (partial.fallbackChain ?? base.fallbackChain)
     .filter((entry) =>
       isLLMVendor(entry.provider) &&
-      isLlmProviderEnabled(entry.provider, installedProviderIds)
+      isLlmProviderEnabled(entry.provider, installedProviderIds) &&
+      !(marketplaceProviderPresetId && entry.provider === "openai-compatible")
     )
     .map((entry) => ({
       ...entry,
@@ -1406,13 +1532,15 @@ function mergeLlmPatch(
     }));
   return {
     authMode,
-    provider,
+    provider: activeProvider,
+    ...(marketplaceProviderPresetId ? { marketplaceProviderPresetId } : {}),
     vendors,
     streamSmoothing: partial.streamSmoothing ?? base.streamSmoothing,
     fallbackChain,
     modelListCache: normalizeLlmModelListCache(
       "modelListCache" in partial ? partial.modelListCache : base.modelListCache,
       installedProviderIds,
+      installedProviderPresets,
     ),
     // `undefined` means "no mapping"; an explicit empty string clears the map.
     hostResolverMap: "hostResolverMap" in partial ? partial.hostResolverMap : base.hostResolverMap,
@@ -1450,6 +1578,7 @@ function addUniqueMarketplaceProvider(
 function pruneLazyLlmVendorBlocks(
   llm: LLMSettings,
   installedProviderIds: MarketplaceEligibleLLMVendor[],
+  installedProviderPresets: readonly MarketplaceInstalledProviderPreset[],
   options: { inferInstalledFromCustom: boolean },
 ): {
   llm: LLMSettings;
@@ -1471,11 +1600,28 @@ function pruneLazyLlmVendorBlocks(
     }
   }
 
-  const provider = isLlmProviderEnabled(llm.provider, inferredInstalledProviderIds)
+  let provider = isLlmProviderEnabled(llm.provider, inferredInstalledProviderIds)
     ? llm.provider
     : DEFAULT_LLM_VENDOR;
+  const marketplaceProviderPresetId = normalizeActiveMarketplaceProviderPresetId(
+    provider,
+    llm.marketplaceProviderPresetId,
+    installedProviderPresets,
+  );
+  const activeMarketplaceProviderPreset = marketplaceProviderPresetForId(
+    marketplaceProviderPresetId,
+    installedProviderPresets,
+  );
+  const removedActiveMarketplaceProviderPreset =
+    provider === "openai-compatible" &&
+    isMarketplaceProviderPresetId(llm.marketplaceProviderPresetId) &&
+    !marketplaceProviderPresetId;
+  if (removedActiveMarketplaceProviderPreset) {
+    provider = DEFAULT_LLM_VENDOR;
+  }
   const fallbackChain = llm.fallbackChain.filter((entry) =>
-    isLlmProviderEnabled(entry.provider, inferredInstalledProviderIds)
+    isLlmProviderEnabled(entry.provider, inferredInstalledProviderIds) &&
+    !(marketplaceProviderPresetId && entry.provider === "openai-compatible")
   );
   const required = new Set<LLMVendor>(inferredInstalledProviderIds);
   required.add(provider);
@@ -1503,19 +1649,33 @@ function pruneLazyLlmVendorBlocks(
     }
   }
 
+  if (removedActiveMarketplaceProviderPreset) {
+    vendors["openai-compatible"] = getLlmVendorSettings(undefined, "openai-compatible");
+  }
+  bindOpenAICompatibleVendorBlockToMarketplaceProviderPreset(
+    vendors,
+    activeMarketplaceProviderPreset,
+  );
   vendors[provider] = getLlmVendorSettings(vendors, provider);
+  const prunedLlm: LLMSettings = {
+    ...llm,
+    provider,
+    fallbackChain,
+    vendors,
+    modelListCache: normalizeLlmModelListCache(
+      llm.modelListCache,
+      inferredInstalledProviderIds,
+      installedProviderPresets,
+    ),
+  };
+  if (marketplaceProviderPresetId) {
+    prunedLlm.marketplaceProviderPresetId = marketplaceProviderPresetId;
+  } else {
+    delete prunedLlm.marketplaceProviderPresetId;
+  }
 
   return {
-    llm: {
-      ...llm,
-      provider,
-      fallbackChain,
-      vendors,
-      modelListCache: normalizeLlmModelListCache(
-        llm.modelListCache,
-        inferredInstalledProviderIds,
-      ),
-    },
+    llm: prunedLlm,
     installedProviderIds: inferredInstalledProviderIds,
   };
 }
@@ -1532,6 +1692,37 @@ function uniqueValidList<T extends string>(
     result.push(value);
   }
   return result;
+}
+
+function uniqueValidProviderPresets(value: unknown): MarketplaceInstalledProviderPreset[] {
+  if (!Array.isArray(value)) return [];
+  const result: MarketplaceInstalledProviderPreset[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    const preset = normalizeMarketplaceProviderPreset(raw);
+    if (!preset || seen.has(preset.providerId)) continue;
+    seen.add(preset.providerId);
+    result.push(preset);
+  }
+  return result;
+}
+
+function removedMarketplaceProviderPresetIds(
+  previous: readonly MarketplaceInstalledProviderPreset[],
+  next: readonly MarketplaceInstalledProviderPreset[],
+): string[] {
+  const nextIds = new Set(next.map((preset) => preset.providerId));
+  return previous
+    .map((preset) => preset.providerId)
+    .filter((providerId) => !nextIds.has(providerId));
+}
+
+function preserveInstalledProviderPresetMetadata(
+  previous: readonly MarketplaceInstalledProviderPreset[],
+  next: readonly MarketplaceInstalledProviderPreset[],
+): MarketplaceInstalledProviderPreset[] {
+  const previousById = new Map(previous.map((preset) => [preset.providerId, preset]));
+  return next.map((preset) => previousById.get(preset.providerId) ?? preset);
 }
 
 function normalizeMarketplace(input: unknown): MarketplaceSettings {
@@ -1555,6 +1746,9 @@ function normalizeMarketplace(input: unknown): MarketplaceSettings {
   merged.installedProviderIds = uniqueValidList(
     raw.installedProviderIds,
     isMarketplaceEligibleLLMVendor,
+  );
+  merged.installedProviderPresets = uniqueValidProviderPresets(
+    raw.installedProviderPresets,
   );
   merged.installedThemeBundleIds = uniqueValidList(
     raw.installedThemeBundleIds,

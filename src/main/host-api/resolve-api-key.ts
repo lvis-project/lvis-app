@@ -47,6 +47,7 @@ import {
   incrementHostSecretCounter,
   sanitizeKeyPrefix,
 } from "../../telemetry/host-secret-counters.js";
+import { isMarketplaceProviderPresetId } from "../../shared/marketplace-package-assets.js";
 
 export type ResolveApiKeyPurpose = "llm" | "stt" | "embedding" | "vision";
 export type ResolveApiKeyVendor =
@@ -226,11 +227,16 @@ export async function resolveApiKey(
   // Default vendor to the user's active LLM provider when the plugin omits
   // it (purpose-only call). This matches the SDK example where the plugin
   // declines to pin a specific provider and asks the host to pick.
-  const activeProvider = deps.settingsService.get("llm").provider as string;
+  const llmSettings = deps.settingsService.get("llm") as {
+    provider?: unknown;
+    marketplaceProviderPresetId?: unknown;
+  };
+  const defaultActiveProvider =
+    typeof llmSettings.provider === "string" ? llmSettings.provider : "";
   // Ralph cycle 1 CRITICAL — map SDK vendor enum to host vendor name so
   // a Claude-default user + `vendor:"anthropic"` request lands on
   // `llm.apiKey.claude` not a non-existent `llm.apiKey.anthropic`.
-  const requestedVendor = request.vendor ?? activeProvider;
+  const requestedVendor = request.vendor ?? defaultActiveProvider;
   const normalizedVendor =
     typeof requestedVendor === "string" ? normalizeVendor(requestedVendor) : requestedVendor;
   if (typeof normalizedVendor !== "string" || normalizedVendor.length === 0) {
@@ -246,6 +252,12 @@ export async function resolveApiKey(
     );
   }
   const vendor = normalizedVendor;
+  const activeProvider =
+    vendor === "openai-compatible" &&
+    defaultActiveProvider === "openai-compatible" &&
+    isMarketplaceProviderPresetId(llmSettings.marketplaceProviderPresetId)
+      ? llmSettings.marketplaceProviderPresetId
+      : defaultActiveProvider;
   const llmKey = `llm.apiKey.${vendor}`;
   const keyPrefix = sanitizeKeyPrefix(llmKey);
 

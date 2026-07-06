@@ -119,6 +119,7 @@ function makeAuditLogger() {
 
 interface SettingsOverrides {
   provider: string;
+  marketplaceProviderPresetId?: string;
   secrets?: Record<string, string | null>;
   baseUrl?: string;
 }
@@ -129,6 +130,9 @@ function makeSettingsService(overrides: SettingsOverrides) {
       if (key === "llm") {
         return {
           provider: overrides.provider,
+          ...(overrides.marketplaceProviderPresetId
+            ? { marketplaceProviderPresetId: overrides.marketplaceProviderPresetId }
+            : {}),
           vendors: {
             "azure-foundry": overrides.baseUrl
               ? { baseUrl: overrides.baseUrl }
@@ -316,6 +320,37 @@ describe("resolveApiKey — Tier-4 vendor mismatch", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe("vendor-mismatch");
+  });
+
+  it("denies the generic OpenAI-compatible key while a marketplace preset is active", async () => {
+    const genericKey = "llm.apiKey.openai-compatible";
+    const manifest = manifestFor("p", [genericKey]);
+    const manifestSha256 = shaOfManifest(manifest);
+    await seedRegistryWithGrant({
+      pluginId: "p",
+      allowedKeys: [genericKey],
+      manifestSha256,
+    });
+    const settingsService = makeSettingsService({
+      provider: "openai-compatible",
+      marketplaceProviderPresetId: "future-router",
+      secrets: { [genericKey]: "sk-generic" },
+    });
+
+    const result = await resolveApiKey(
+      { purpose: "llm" },
+      {
+        pluginId: "p",
+        manifest,
+        manifestSha256,
+        settingsService: settingsService as never,
+        auditLogger: makeAuditLogger(),
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("vendor-mismatch");
+    expect(settingsService.getSecret).not.toHaveBeenCalledWith(genericKey);
   });
 });
 

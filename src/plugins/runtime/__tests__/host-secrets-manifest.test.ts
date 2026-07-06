@@ -2,8 +2,8 @@
  * #893 — Manifest `hostSecrets.read[]` validator unit tests.
  *
  * Verifies that `parsePluginJson()` rejects allowlist entries that don't
- * match the `llm.apiKey.<vendor>` pattern (`manifest_schema` failure) and
- * accepts a well-formed allowlist unchanged.
+ * match the allowed host LLM secret key patterns (`manifest_schema` failure)
+ * and accepts a well-formed allowlist unchanged.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
-import { parsePluginJson } from "../manifest-validation.js";
+import { buildManifestValidator, parsePluginJson } from "../manifest-validation.js";
 
 describe("manifest hostSecrets.read[] validator (#893)", () => {
   let workDir: string;
@@ -73,6 +73,48 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
       "llm.apiKey.openai",
       "llm.apiKey.claude",
     ]);
+  });
+
+  it("accepts marketplace provider preset host secret keys", async () => {
+    const path = await writeManifest({
+      hostSecrets: {
+        read: ["llm.marketplaceProvider.future-router.apiKey"],
+      },
+    });
+    const validator = makeValidator();
+    const parsed = await parsePluginJson(path, validator);
+    expect(parsed.hostSecrets?.read).toEqual([
+      "llm.marketplaceProvider.future-router.apiKey",
+    ]);
+  });
+
+  it("patches the SDK schema to accept marketplace provider preset host secret keys", async () => {
+    const validator = await buildManifestValidator();
+    const valid = validator({
+      id: "marketplace-provider-secret",
+      name: "Marketplace Provider Secret Plugin",
+      version: "1.0.0",
+      description: "Marketplace provider secret fixture.",
+      publisher: "LVIS",
+      entry: "dist/index.js",
+      tools: [],
+      hostSecrets: {
+        read: ["llm.marketplaceProvider.future-router.apiKey"],
+      },
+    });
+    expect(valid, JSON.stringify(validator.errors, null, 2)).toBe(true);
+  });
+
+  it("rejects malformed marketplace provider preset host secret keys", async () => {
+    const path = await writeManifest({
+      hostSecrets: {
+        read: ["llm.marketplaceProvider.bad router.apiKey"],
+      },
+    });
+    const validator = makeValidator();
+    await expect(parsePluginJson(path, validator)).rejects.toThrow(
+      /hostSecrets\.read\[0\].*manifest_schema/,
+    );
   });
 
   it("rejects a non-llm prefix with manifest_schema reason", async () => {

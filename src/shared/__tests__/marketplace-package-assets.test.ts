@@ -27,6 +27,64 @@ describe("marketplace package assets", () => {
     })).toEqual({ type: "language-pack", locale: "ko" });
   });
 
+  it("accepts custom provider preset metadata for user-authored marketplace assets", () => {
+    expect(parseMarketplacePackageAsset({
+      type: "provider",
+      provider_id: "future-router",
+      label: "Future Router",
+      base_url: "https://future.example/v1",
+      default_model: "future/free",
+      model_options: ["future/free", "future/pro", "future/free"],
+      requires_api_key: false,
+    })).toEqual({
+      type: "provider",
+      providerId: "future-router",
+      label: "Future Router",
+      baseUrl: "https://future.example/v1",
+      defaultModel: "future/free",
+      modelOptions: ["future/free", "future/pro"],
+      requiresApiKey: false,
+    });
+    expect(assetFromMarketplaceCatalogFields("provider", "provider:top-level-router", {
+      label: "Top-level Router",
+      baseUrl: "https://top-level.example/v1",
+      defaultModel: "top/free",
+    })).toEqual({
+      type: "provider",
+      providerId: "top-level-router",
+      label: "Top-level Router",
+      baseUrl: "https://top-level.example/v1",
+      defaultModel: "top/free",
+      modelOptions: ["top/free"],
+      requiresApiKey: true,
+    });
+  });
+
+  it("requires https for custom provider presets that use API keys", () => {
+    expect(parseMarketplacePackageAsset({
+      type: "provider",
+      provider_id: "http-keyed-router",
+      base_url: "http://router.example/v1",
+      default_model: "router/free",
+      requires_api_key: true,
+    })).toBeUndefined();
+    expect(parseMarketplacePackageAsset({
+      type: "provider",
+      provider_id: "http-keyless-router",
+      base_url: "http://localhost:11434/v1",
+      default_model: "local/free",
+      requires_api_key: false,
+    })).toEqual({
+      type: "provider",
+      providerId: "http-keyless-router",
+      label: "Http Keyless Router",
+      baseUrl: "http://localhost:11434/v1",
+      defaultModel: "local/free",
+      modelOptions: ["local/free"],
+      requiresApiKey: false,
+    });
+  });
+
   it("formats structured assets back into marketplace package specs", () => {
     expect(marketplacePackageTypeForAsset({ type: "provider", providerId: "groq" }))
       .toBe("provider");
@@ -38,7 +96,7 @@ describe("marketplace package assets", () => {
       .toBe("language-pack:ko");
   });
 
-  it("rejects unknown ids and mismatched package specs", () => {
+  it("rejects unknown ids without preset metadata and mismatched package specs", () => {
     expect(assetFromMarketplacePackageSpec("provider", "provider:not-a-vendor"))
       .toBeUndefined();
     expect(assetFromMarketplacePackageSpec("theme", "provider:groq"))
