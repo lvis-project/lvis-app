@@ -9,6 +9,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 import { deferred, submitChatMessage } from "../../../../test/renderer/helpers.js";
+import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 import {
   __resetSuggestedRepliesStoreForTests,
   __teardownSuggestedRepliesIpcForTests,
@@ -66,6 +67,9 @@ describe("ChatView", () => {
     const { container } = await renderApp({ hasApiKey: false });
     await waitFor(() => {
       expect(container.textContent).toContain("API 키 설정 필요");
+      const card = container.querySelector('[data-testid="chat-view:no-api-key-card"]');
+      expect(card).not.toBeNull();
+      expect(card?.closest(".lvis-chat-scroll")).not.toBeNull();
     });
   });
 
@@ -212,23 +216,64 @@ describe("ChatView", () => {
     });
   });
 
-  it("renders the keyless empty state through the SAME centered composer layout (no legacy fork)", async () => {
-    // Unified keyless layout: with NO API key the empty work-mode chat must use
-    // the same raised/centered composer dock as the keyed state — the no-key
-    // card is only an overlay on top, never a separate legacy composer path.
+  it("bottom-docks the disabled composer when an API key is required", async () => {
     const { container } = await renderApp({ hasApiKey: false });
 
     await waitFor(() => {
-      // The key-required card overlays the shared layout.
       expect(container.textContent).toContain("API 키 설정 필요");
-      // The composer dock is the SAME centered dock as the keyed empty state.
-      const dock = container.querySelector('[data-testid="session-todo-dock"]');
-      expect(dock).not.toBeNull();
-      expect(dock).toHaveClass("mx-auto");
-      expect(dock).toHaveClass("max-w-[58rem]");
-      // Composer is present (shared component) but its send is disabled.
+      const composerDock = container.querySelector("[data-composer-placement]");
+      expect(composerDock).not.toBeNull();
+      expect(composerDock).toHaveAttribute("data-composer-placement", "bottom");
       expect(container.querySelector('[data-testid="composer-textarea"]')).not.toBeNull();
+      const sendButton = container.querySelector('[data-testid="composer-send-button"]') as HTMLButtonElement | null;
+      expect(sendButton?.disabled).toBe(true);
     });
+  });
+
+  it("allows keyless OpenAI-compatible endpoints with a configured base URL to send", async () => {
+    const llm = fakeLlmSettings({
+      provider: "openai-compatible",
+      model: "Qwen3.6-35B-A3B-NVFP4",
+    });
+    llm.vendors["openai-compatible"].baseUrl = "http://localhost:8000/v1";
+    const { container, api } = await renderApp({
+      hasApiKey: false,
+      settings: {
+        llm,
+        chat: { systemPrompt: "", autoCompact: true },
+        webSearch: { provider: "none" },
+        marketplace: {
+          backend: "real-cloud",
+          cloudBaseUrl: "https://marketplace.example.com",
+          cloudAllowPrivateNetwork: false,
+          installedProviderIds: [],
+          installedThemeBundleIds: [],
+          installedLanguagePacks: [],
+        },
+        routine: {},
+        privacy: { piiRedactEnabled: false },
+        features: { idlePreferenceRefresh: false, onboardingCompleted: true },
+      },
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("LVIS 에이전트가 준비되었습니다");
+      expect(container.textContent).not.toContain("API 키 설정 필요");
+    });
+    const apiKeyChecksBeforeSend = api.hasApiKey.mock.calls.length;
+
+    await submitChatMessage(container, "keyless endpoint smoke");
+
+    await waitFor(() => {
+      expect(api.chatSend).toHaveBeenCalledWith(
+        "keyless endpoint smoke",
+        [],
+        "user-keyboard",
+        expect.objectContaining({ inputOrigin: "user-keyboard" }),
+        undefined,
+      );
+    });
+    expect(api.hasApiKey.mock.calls.length).toBe(apiKeyChecksBeforeSend);
   });
 
   it("keeps an active conversation composer on the full-width chat-mode dock", async () => {
