@@ -210,6 +210,13 @@ describe("MarketplaceTab", () => {
       },
     ];
     const api = marketplaceTabApi({
+      getSettings: vi.fn().mockResolvedValue({
+        marketplace: {
+          installedProviderIds: ["ollama"],
+          installedThemeBundleIds: ["high-contrast"],
+          installedLanguagePacks: ["ja"],
+        },
+      }),
       listMarketplacePlugins: vi.fn().mockResolvedValue(packages),
     });
     render(<MarketplaceTab {...defaultProps(api)} />);
@@ -228,7 +235,7 @@ describe("MarketplaceTab", () => {
     fireEvent.click(action);
     await waitFor(() => {
       expect(api.updateSettings).toHaveBeenCalledWith({
-        marketplace: { installedProviderIds: ["groq"] },
+        marketplace: { installedProviderIds: ["ollama", "groq"] },
       });
     });
 
@@ -241,7 +248,7 @@ describe("MarketplaceTab", () => {
     fireEvent.click(themeAction);
     await waitFor(() => {
       expect(api.updateSettings).toHaveBeenCalledWith({
-        marketplace: { installedThemeBundleIds: ["tokyo-night"] },
+        marketplace: { installedThemeBundleIds: ["high-contrast", "tokyo-night"] },
       });
     });
 
@@ -254,7 +261,7 @@ describe("MarketplaceTab", () => {
     fireEvent.click(languageAction);
     await waitFor(() => {
       expect(api.updateSettings).toHaveBeenCalledWith({
-        marketplace: { installedLanguagePacks: ["ko"] },
+        marketplace: { installedLanguagePacks: ["ja", "ko"] },
       });
     });
 
