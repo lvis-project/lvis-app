@@ -231,7 +231,110 @@ describe("MarketplaceTab", () => {
         marketplace: { installedProviderIds: ["groq"] },
       });
     });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Themes" }));
+    const themeAction = await screen.findByTestId("marketplace:action:tokyo-night-theme");
+    expect(themeAction.textContent).toContain("설치");
+    expect((themeAction as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByTestId("marketplace:trust:tokyo-night-theme").textContent)
+      .toContain("테마 토큰만");
+    fireEvent.click(themeAction);
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        marketplace: { installedThemeBundleIds: ["tokyo-night"] },
+      });
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Languages" }));
+    const languageAction = await screen.findByTestId("marketplace:action:ko-language-pack");
+    expect(languageAction.textContent).toContain("설치");
+    expect((languageAction as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByTestId("marketplace:trust:ko-language-pack").textContent)
+      .toContain("UI 문구 카탈로그만");
+    fireEvent.click(languageAction);
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        marketplace: { installedLanguagePacks: ["ko"] },
+      });
+    });
+
     expect(api.listMarketplacePlugins).toHaveBeenCalled();
+  });
+
+  it("uninstalls provider/theme/language packages through marketplace settings", async () => {
+    const packages: MarketplaceItem[] = [
+      {
+        id: "groq-provider",
+        name: "Groq Provider",
+        description: "Provider package",
+        packageSpec: "provider:groq",
+        installed: false,
+        enabled: false,
+        pluginType: "provider",
+        packageAsset: { type: "provider", providerId: "groq" },
+      },
+      {
+        id: "tokyo-night-theme",
+        name: "Tokyo Night Theme",
+        description: "Theme package",
+        packageSpec: "theme:tokyo-night",
+        installed: false,
+        enabled: false,
+        pluginType: "theme",
+        packageAsset: { type: "theme", bundleId: "tokyo-night" },
+      },
+      {
+        id: "ko-language-pack",
+        name: "Korean Language Pack",
+        description: "Language package",
+        packageSpec: "language-pack:ko",
+        installed: false,
+        enabled: false,
+        pluginType: "language-pack",
+        packageAsset: { type: "language-pack", locale: "ko" },
+      },
+    ];
+    const api = marketplaceTabApi({
+      getSettings: vi.fn().mockResolvedValue({
+        marketplace: {
+          installedProviderIds: ["groq"],
+          installedThemeBundleIds: ["tokyo-night"],
+          installedLanguagePacks: ["ko"],
+        },
+      }),
+      listMarketplacePlugins: vi.fn().mockResolvedValue(packages),
+    });
+    render(<MarketplaceTab {...defaultProps(api)} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Providers" }));
+    const providerAction = await screen.findByTestId("marketplace:action:groq-provider");
+    expect(providerAction.textContent).toContain("제거");
+    fireEvent.click(providerAction);
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        marketplace: { installedProviderIds: [] },
+      });
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Themes" }));
+    const themeAction = await screen.findByTestId("marketplace:action:tokyo-night-theme");
+    expect(themeAction.textContent).toContain("제거");
+    fireEvent.click(themeAction);
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        marketplace: { installedThemeBundleIds: [] },
+      });
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Languages" }));
+    const languageAction = await screen.findByTestId("marketplace:action:ko-language-pack");
+    expect(languageAction.textContent).toContain("제거");
+    fireEvent.click(languageAction);
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        marketplace: { installedLanguagePacks: [] },
+      });
+    });
   });
 
   it("marks unsupported asset rows as non-installable", async () => {
