@@ -30,6 +30,7 @@ import {
   listApprovals,
   canonicalStringify,
 } from "../../permissions/user-approval-store.js";
+import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
 import type {
   SandboxWindowsStatusInfo,
   SandboxWindowsInstallResult,
@@ -483,8 +484,11 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       provider,
       (key) => deps.settingsService.getSecret(key),
       // Foundry endpoint lives in the plain settings (not encrypted).
-      // Minor-2: vendors may be undefined — use optional chain to avoid TypeError.
-      () => deps.settingsService.get("llm").vendors?.["azure-foundry"]?.baseUrl ?? null,
+      () =>
+        getLlmVendorSettings(
+          deps.settingsService.get("llm").vendors,
+          "azure-foundry",
+        ).baseUrl ?? null,
     );
   });
 

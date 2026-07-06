@@ -17,6 +17,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useState } from "react";
 import { LlmTab, type FallbackEntry } from "../LlmTab.js";
 import { ALL_VENDORS, VENDORS } from "../../constants.js";
+import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
 type HarnessApi = Parameters<typeof LlmTab>[0]["api"];
@@ -33,6 +34,7 @@ function Harness({
   initialVendor = "openai",
   settingsLoaded = true,
   api,
+  onOpenMarketplace,
 }: {
   initialAuthMode: "manual" | "login";
   initialHostResolverMap?: string;
@@ -40,6 +42,7 @@ function Harness({
   initialVendor?: string;
   settingsLoaded?: boolean;
   api?: HarnessApi;
+  onOpenMarketplace?: () => void;
 }) {
   const [authMode, setAuthMode] = useState<"manual" | "login">(initialAuthMode);
   const [vendor, setVendor] = useState(initialVendor);
@@ -55,39 +58,42 @@ function Harness({
   const [fallbackOpen, setFallbackOpen] = useState(false);
   const [hostResolverMap, setHostResolverMap] = useState(initialHostResolverMap);
   return (
-    <LlmTab
-      api={api ?? llmTabApi()}
-      vendor={vendor}
-      setVendor={setVendor}
-      baseUrl={baseUrl}
-      setBaseUrl={setBaseUrl}
-      vertexProject={vertexProject}
-      setVertexProject={setVertexProject}
-      vertexLocation={vertexLocation}
-      setVertexLocation={setVertexLocation}
-      hasKey={hasKey}
-      setHasKey={setHasKey}
-      keyInput={keyInput}
-      setKeyInput={setKeyInput}
-      authMode={authMode}
-      setAuthMode={setAuthMode}
-      onOpenLogin={vi.fn()}
-      model={model}
-      setModel={setModel}
-      enableThinking={enableThinking}
-      setEnableThinking={setEnableThinking}
-      thinkingBudget={thinkingBudget}
-      setThinkingBudget={setThinkingBudget}
-      fallbackChain={fallbackChain}
-      setFallbackChain={setFallbackChain}
-      fallbackOpen={fallbackOpen}
-      setFallbackOpen={setFallbackOpen}
-      hostResolverMap={hostResolverMap}
-      setHostResolverMap={setHostResolverMap}
-      loadedHostResolverMap={loadedHostResolverMap}
-      onSaved={vi.fn()}
-      settingsLoaded={settingsLoaded}
-    />
+    <TooltipProvider>
+      <LlmTab
+        api={api ?? llmTabApi()}
+        vendor={vendor}
+        setVendor={setVendor}
+        baseUrl={baseUrl}
+        setBaseUrl={setBaseUrl}
+        vertexProject={vertexProject}
+        setVertexProject={setVertexProject}
+        vertexLocation={vertexLocation}
+        setVertexLocation={setVertexLocation}
+        hasKey={hasKey}
+        setHasKey={setHasKey}
+        keyInput={keyInput}
+        setKeyInput={setKeyInput}
+        authMode={authMode}
+        setAuthMode={setAuthMode}
+        onOpenLogin={vi.fn()}
+        onOpenMarketplace={onOpenMarketplace}
+        model={model}
+        setModel={setModel}
+        enableThinking={enableThinking}
+        setEnableThinking={setEnableThinking}
+        thinkingBudget={thinkingBudget}
+        setThinkingBudget={setThinkingBudget}
+        fallbackChain={fallbackChain}
+        setFallbackChain={setFallbackChain}
+        fallbackOpen={fallbackOpen}
+        setFallbackOpen={setFallbackOpen}
+        hostResolverMap={hostResolverMap}
+        setHostResolverMap={setHostResolverMap}
+        loadedHostResolverMap={loadedHostResolverMap}
+        onSaved={vi.fn()}
+        settingsLoaded={settingsLoaded}
+      />
+    </TooltipProvider>
   );
 }
 
@@ -180,6 +186,79 @@ describe("LlmTab — top-level login toggle UI", () => {
     fireEvent.change(search, { target: { value: "groq" } });
 
     expect(screen.getByText("Groq")).toBeInTheDocument();
+  });
+
+  it("opens the Marketplace provider filter from the provider section", () => {
+    const onOpenMarketplace = vi.fn();
+    const { getByTestId } = render(
+      <Harness
+        initialAuthMode="manual"
+        initialVendor="openrouter"
+        onOpenMarketplace={onOpenMarketplace}
+      />,
+    );
+
+    fireEvent.click(getByTestId("llm-tab:marketplace-providers"));
+    expect(onOpenMarketplace).toHaveBeenCalledOnce();
+  });
+  it("uses synced provider model ids in the model dropdown", async () => {
+    const api = llmTabApi();
+    (api.listLlmModels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      vendor: "openrouter",
+      endpoint: "https://openrouter.ai/api/v1/models",
+      models: ["openrouter/free", "google/gemini-2.5-flash:free"],
+      fetchedAt: "2026-07-06T00:00:00.000Z",
+    });
+    const { container } = render(
+      <Harness initialAuthMode="manual" initialVendor="openrouter" api={api} />,
+    );
+
+    await waitFor(() =>
+      expect(api.listLlmModels).toHaveBeenCalledWith({ vendor: "openrouter" }),
+    );
+    expect(screen.getByTestId("llm-tab:model-sync-status").textContent).toContain("2");
+
+    const modelTrigger = container.querySelector(
+      '[data-testid="llm-model-select"]',
+    ) as HTMLElement | null;
+    expect(modelTrigger).not.toBeNull();
+    fireEvent.mouseDown(modelTrigger!);
+    fireEvent.keyDown(modelTrigger!, { key: "ArrowDown" });
+
+    expect(await screen.findByText("openrouter/free")).toBeInTheDocument();
+    expect(screen.getByText("google/gemini-2.5-flash:free")).toBeInTheDocument();
+  });
+
+  it("does not automatically retry a failed model sync", async () => {
+    const api = llmTabApi();
+    (api.listLlmModels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      error: "model-list-fetch-failed",
+      message: "missing provider key",
+    });
+    render(<Harness initialAuthMode="manual" initialVendor="openrouter" api={api} />);
+
+    await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("llm-tab:model-sync-status").textContent).toBeTruthy();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    });
+    expect(api.listLlmModels).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not auto-sync a required-baseUrl provider before a URL exists", async () => {
+    const api = llmTabApi();
+    render(
+      <Harness initialAuthMode="manual" initialVendor="openai-compatible" api={api} />,
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    });
+    expect(api.listLlmModels).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("llm-tab:model-sync")).toBeNull();
   });
 
   it("host-resolver map textarea is disabled in login mode", () => {

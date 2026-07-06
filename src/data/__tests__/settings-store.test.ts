@@ -23,6 +23,11 @@ import {
 } from "../../shared/log-retention.js";
 import { DEFAULT_BUNDLE_ID } from "../../shared/theme-bundles.js";
 import { setProcessPlatform } from "../../testing/process-platform.js";
+import {
+  DEFAULT_LLM_VENDOR,
+  freshAllVendorBlocks,
+  getLlmVendorSettings,
+} from "../../shared/llm-vendor-defaults.js";
 
 describe("SettingsService marketplace defaults", () => {
   let userDataPath: string;
@@ -355,11 +360,101 @@ describe("SettingsService LLM per-vendor patching", () => {
     rmSync(userDataPath, { recursive: true, force: true });
   });
 
+  it("fresh installs persist only default-visible provider blocks", () => {
+    const service = new SettingsService({ userDataPath });
+    const llm = service.get("llm");
+
+    expect(llm.provider).toBe(DEFAULT_LLM_VENDOR);
+    expect(Object.keys(llm.vendors).sort()).toEqual([
+      "claude",
+      "gemini",
+      "openai",
+      "openai-compatible",
+      "openrouter",
+    ]);
+    expect(llm.vendors["azure-foundry"]).toBeUndefined();
+    expect(getLlmVendorSettings(llm.vendors, "azure-foundry").model).toBe(
+      "gpt-5.4-mini",
+    );
+  });
+
+  it("prunes legacy default marketplace vendor blocks while preserving custom ones", () => {
+    const legacyVendors = freshAllVendorBlocks();
+    legacyVendors.groq.model = "llama-3.3-70b-versatile";
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        llm: {
+          provider: "openai",
+          vendors: legacyVendors,
+          fallbackChain: [],
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = new SettingsService({ userDataPath });
+    const settings = service.getAll();
+
+    expect(settings.llm.vendors["azure-foundry"]).toBeUndefined();
+    expect(settings.llm.vendors.ollama).toBeUndefined();
+    expect(getLlmVendorSettings(settings.llm.vendors, "groq").model).toBe(
+      "llama-3.3-70b-versatile",
+    );
+    expect(settings.marketplace.installedProviderIds).toEqual(["groq"]);
+  });
+
+  it("rejects uninstalled marketplace providers as active or fallback providers", async () => {
+    const service = new SettingsService({ userDataPath });
+
+    await service.patch({
+      llm: {
+        provider: "groq",
+        vendors: { groq: { model: "llama-3.3-70b-versatile" } },
+        fallbackChain: [{ provider: "ollama", model: "llama3.3" }],
+      },
+    });
+
+    const llm = service.get("llm");
+    expect(llm.provider).toBe(DEFAULT_LLM_VENDOR);
+    expect(llm.fallbackChain).toEqual([]);
+    expect(llm.vendors.groq).toBeUndefined();
+    expect(llm.vendors.ollama).toBeUndefined();
+    expect(service.get("marketplace").installedProviderIds).toEqual([]);
+  });
+
+  it("allows installed marketplace providers and removes them durably on uninstall", async () => {
+    const service = new SettingsService({ userDataPath });
+
+    await service.patch({
+      marketplace: { installedProviderIds: ["groq", "ollama"] },
+      llm: {
+        provider: "groq",
+        vendors: { groq: { model: "llama-3.3-70b-versatile" } },
+        fallbackChain: [{ provider: "ollama", model: "llama3.3" }],
+      },
+    });
+    expect(service.get("llm").provider).toBe("groq");
+    expect(service.get("llm").fallbackChain).toEqual([
+      { provider: "ollama", model: "llama3.3" },
+    ]);
+
+    await service.patch({
+      marketplace: { installedProviderIds: [] },
+    });
+    const settings = service.getAll();
+    expect(settings.llm.provider).toBe(DEFAULT_LLM_VENDOR);
+    expect(settings.llm.fallbackChain).toEqual([]);
+    expect(settings.llm.vendors.groq).toBeUndefined();
+    expect(settings.llm.vendors.ollama).toBeUndefined();
+    expect(settings.marketplace.installedProviderIds).toEqual([]);
+  });
+
   // Regression for the bug shipped + reverted between #279 and the per-vendor
   // refactor: switching the active provider used to carry the previous
   // vendor's model into the new vendor's persisted block. With per-vendor
-  // blocks, a patch touching only `azure-foundry` MUST leave every other
-  // vendor's settings intact.
+  // lazy blocks, a patch touching only `azure-foundry` MUST leave every other
+  // materialized vendor's settings intact.
   //
   // CTRL simplification: test rewritten to use `model` instead of the
   // removed `maxOutputTokens` field.
@@ -375,6 +470,10 @@ describe("SettingsService LLM per-vendor patching", () => {
       },
     });
 
+    await service.patch({
+      marketplace: { installedProviderIds: ["azure-foundry"] },
+    });
+
     // User switches to azure-foundry and saves a retired Foundry model.
     // The retired exact gpt-4o id is normalized, but the patch must still not
     // leak across vendor blocks.
@@ -387,10 +486,12 @@ describe("SettingsService LLM per-vendor patching", () => {
 
     const llm = service.get("llm");
     expect(llm.provider).toBe("azure-foundry");
-    expect(llm.vendors["azure-foundry"].model).toBe("gpt-5.4-mini");
+    expect(getLlmVendorSettings(llm.vendors, "azure-foundry").model).toBe(
+      "gpt-5.4-mini",
+    );
     // The OpenAI block must still hold the user-tuned value, not be
     // overwritten by the Foundry save.
-    expect(llm.vendors.openai.model).toBe("gpt-5-turbo");
+    expect(getLlmVendorSettings(llm.vendors, "openai").model).toBe("gpt-5-turbo");
   });
 
   it("replaceLlm removes optional transport fields that merge patches would retain", async () => {
@@ -412,9 +513,10 @@ describe("SettingsService LLM per-vendor patching", () => {
     await service.replaceLlm(original);
 
     const llm = service.get("llm");
-    expect(llm.vendors.openai.baseUrl).toBeUndefined();
-    expect(llm.vendors.openai.vertexProject).toBeUndefined();
-    expect(llm.vendors.openai.vertexLocation).toBeUndefined();
+    const openai = getLlmVendorSettings(llm.vendors, "openai");
+    expect(openai.baseUrl).toBeUndefined();
+    expect(openai.vertexProject).toBeUndefined();
+    expect(openai.vertexLocation).toBeUndefined();
   });
 
   it("coerces a stale unknown provider on disk to the default", () => {
@@ -430,8 +532,8 @@ describe("SettingsService LLM per-vendor patching", () => {
     const service = new SettingsService({ userDataPath });
     const llm = service.get("llm");
 
-    expect(llm.provider).toBe("azure-foundry");
-    expect(llm.vendors[llm.provider]).toBeDefined();
+    expect(llm.provider).toBe(DEFAULT_LLM_VENDOR);
+    expect(getLlmVendorSettings(llm.vendors, llm.provider)).toBeDefined();
   });
 });
 

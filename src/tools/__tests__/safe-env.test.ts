@@ -8,7 +8,36 @@ import { vi } from "vitest";
 
 import { buildSafeChildEnv, buildSandboxedChildEnv } from "../safe-env.js";
 
-const SAFE_KEYS = ["PATH", "HOME", "USER", "USERNAME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM", "SHELL", "TMPDIR", "TMP", "TEMP", "PWD"] as const;
+const SAFE_KEYS = [
+  "PATH",
+  "HOME",
+  "USER",
+  "USERNAME",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TZ",
+  "TERM",
+  "SHELL",
+  "COMSPEC",
+  "PATHEXT",
+  "SystemDrive",
+  "SystemRoot",
+  "WINDIR",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "PROGRAMDATA",
+  "PYTHONDONTWRITEBYTECODE",
+  "PYTHONUNBUFFERED",
+  "PYTHONUTF8",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "PWD",
+] as const;
 
 const SECRET_KEYS = [
   "ANTHROPIC_API_KEY",
@@ -93,6 +122,22 @@ describe("buildSafeChildEnv — allowlist forwarding", () => {
   it("forwards HOME when present", () => {
     const env = buildSafeChildEnv();
     expect(env.HOME).toBe("/home/testuser");
+  });
+
+  it("forwards non-secret Windows runtime variables when present", () => {
+    vi.stubEnv("LOCALAPPDATA", "C:\\Users\\test\\AppData\\Local");
+    vi.stubEnv("APPDATA", "C:\\Users\\test\\AppData\\Roaming");
+    vi.stubEnv("SystemRoot", "C:\\Windows");
+    vi.stubEnv("PATHEXT", ".COM;.EXE;.BAT;.CMD");
+    vi.stubEnv("PYTHONDONTWRITEBYTECODE", "1");
+
+    const env = buildSafeChildEnv();
+
+    expect(env.LOCALAPPDATA).toBe("C:\\Users\\test\\AppData\\Local");
+    expect(env.APPDATA).toBe("C:\\Users\\test\\AppData\\Roaming");
+    expect(env.SystemRoot).toBe("C:\\Windows");
+    expect(env.PATHEXT).toBe(".COM;.EXE;.BAT;.CMD");
+    expect(env.PYTHONDONTWRITEBYTECODE).toBe("1");
   });
 
   it("only includes keys from FORWARD_ENV_KEYS (plus extras)", () => {

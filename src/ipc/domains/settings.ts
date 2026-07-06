@@ -14,6 +14,11 @@ import {
   reconcileStartupLaunch,
   notifyStartupLaunchFailureIfNeeded,
 } from "../../main/startup-launch.js";
+import {
+  isLLMVendor,
+  isMarketplaceEligibleLLMVendor,
+} from "../../shared/llm-vendor-defaults.js";
+import type { LlmModelListRequest } from "../../shared/llm-model-list.js";
 import type { IpcDeps } from "../types.js";
 import type { LLMSettings, ShortcutSettings } from "../../data/settings-store.js";
 
@@ -82,6 +87,14 @@ function activeLlmIdentity(llm: LLMSettings): string {
     vertexProject: block?.vertexProject ?? null,
     vertexLocation: block?.vertexLocation ?? null,
   });
+}
+
+function isProviderEnabledForSecrets(deps: IpcDeps, vendor: unknown): vendor is string {
+  if (!isLLMVendor(vendor)) return false;
+  if (!isMarketplaceEligibleLLMVendor(vendor)) return true;
+  const installedProviderIds =
+    deps.settingsService.get("marketplace").installedProviderIds ?? [];
+  return installedProviderIds.includes(vendor);
 }
 
 export function registerSettingsHandlers(deps: IpcDeps): void {
@@ -239,6 +252,13 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.settings.setApiKey, async (e, vendor: string, apiKey: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.setApiKey, e); return UNAUTHORIZED_FRAME; }
+    if (!isProviderEnabledForSecrets(deps, vendor)) {
+      return {
+        ok: false,
+        error: "provider-not-installed",
+        message: "Install this marketplace provider before saving its API key.",
+      };
+    }
     await settingsService.setSecret(`llm.apiKey.${vendor}`, apiKey);
     conversationLoop.refreshProvider();
     // MAJOR-2: rewire reviewer when provider key changes so cacheScope refreshes.
@@ -253,11 +273,19 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   // read-only — sender guard optional
   ipcMain.handle(CHANNELS.settings.hasApiKey, (_e, vendor?: string) => {
     const v = vendor ?? settingsService.get("llm").provider;
+    if (!isProviderEnabledForSecrets(deps, v)) return false;
     return settingsService.getSecret(`llm.apiKey.${v}`) !== null;
   });
 
   ipcMain.handle(CHANNELS.settings.deleteApiKey, async (e, vendor: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.deleteApiKey, e); return UNAUTHORIZED_FRAME; }
+    if (!isLLMVendor(vendor)) {
+      return {
+        ok: false,
+        error: "unknown-provider",
+        message: "Unknown LLM provider.",
+      };
+    }
     await settingsService.deleteSecret(`llm.apiKey.${vendor}`);
     conversationLoop.refreshProvider();
     // MAJOR-2: rewire reviewer when provider key is removed so cacheScope refreshes.
@@ -266,6 +294,27 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     deps.refreshActiveLlmWildcard?.();
     await broadcastSettingsSnapshot(deps);
     return { ok: true };
+  });
+
+  ipcMain.handle(CHANNELS.settings.listLlmModels, async (e, request: LlmModelListRequest) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.listLlmModels, e); return UNAUTHORIZED_FRAME; }
+    const vendor = request && typeof request.vendor === "string"
+      ? request.vendor
+      : settingsService.get("llm").provider;
+    if (!isProviderEnabledForSecrets(deps, vendor)) {
+      return {
+        ok: false,
+        error: isLLMVendor(vendor) ? "provider-not-installed" : "invalid-provider",
+        message: isLLMVendor(vendor)
+          ? "Install this marketplace provider before syncing its models."
+          : "Unknown LLM provider.",
+      };
+    }
+    const baseUrl = request && typeof request.baseUrl === "string"
+      ? request.baseUrl
+      : undefined;
+    const { listLlmModelsFromSettings } = await import("../../engine/llm/model-list.js");
+    return listLlmModelsFromSettings(settingsService, { vendor, baseUrl });
   });
 
   // ─── Marketplace API Key ──────────────────────

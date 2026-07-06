@@ -101,6 +101,7 @@ describe("auth:login-mockup — full vendor config application (#893)", () => {
       "sk-azure-key",
     );
     expect(deps.settingsService.patch).toHaveBeenCalledWith({
+      marketplace: { installedProviderIds: ["azure-foundry"] },
       llm: {
         authMode: "login",
         provider: "azure-foundry",
@@ -133,6 +134,7 @@ describe("auth:login-mockup — full vendor config application (#893)", () => {
       "sk-azure-key",
     );
     expect(deps.settingsService.patch).toHaveBeenCalledWith({
+      marketplace: { installedProviderIds: ["azure-foundry"] },
       llm: {
         authMode: "login",
         provider: "azure-foundry",
@@ -280,6 +282,7 @@ describe("auth:login-mockup — full vendor config application (#893)", () => {
     expect(result.fieldsApplied).toContain("vertexProject");
     expect(result.fieldsApplied).toContain("vertexLocation");
     expect(deps.settingsService.patch).toHaveBeenCalledWith({
+      marketplace: { installedProviderIds: ["vertex-ai"] },
       llm: {
         authMode: "login",
         provider: "vertex-ai",
@@ -313,6 +316,7 @@ describe("auth:login-mockup — full vendor config application (#893)", () => {
       expect.arrayContaining(["apiKey", "baseUrl", "model"]),
     );
     expect(deps.settingsService.patch).toHaveBeenCalledWith({
+      marketplace: { installedProviderIds: ["azure-foundry"] },
       llm: {
         authMode: "login",
         provider: "azure-foundry",
@@ -324,6 +328,54 @@ describe("auth:login-mockup — full vendor config application (#893)", () => {
         },
       },
     });
+  });
+
+  it("rolls back marketplace install when reviewer rewire fails", async () => {
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-key";
+    process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY = "https://resource.openai.azure.com/";
+    process.env.LVIS_DEMO_HOST_MAP = "resource.openai.azure.com=10.182.192.20";
+    const prevLlm = {
+      provider: "openai",
+      vendors: { openai: { model: "gpt-4o" } },
+      fallbackChain: [],
+    };
+    const prevMarketplace = {
+      backend: "real-cloud",
+      cloudBaseUrl: "https://marketplace.lvisai.xyz",
+      cloudAllowPrivateNetwork: false,
+      installedProviderIds: ["groq"],
+      installedThemeBundleIds: [],
+      installedLanguagePacks: [],
+    };
+    const deps = makeDeps();
+    deps.settingsService.get.mockImplementation((key?: string) => {
+      if (key === "marketplace") return prevMarketplace;
+      return prevLlm;
+    });
+    deps.rewireReviewerAgent.mockImplementation(() => {
+      throw new Error("rewire failed");
+    });
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    }) as { ok: boolean; error?: string };
+
+    expect(result).toEqual({ ok: false, error: "reviewer-rewire-failed" });
+    expect(deps.settingsService.patch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        marketplace: expect.objectContaining({
+          installedProviderIds: ["groq", "azure-foundry"],
+        }),
+      }),
+    );
+    expect(deps.settingsService.patch).toHaveBeenCalledWith({
+      marketplace: prevMarketplace,
+    });
+    expect(deps.settingsService.replaceLlm).toHaveBeenCalledWith(prevLlm);
   });
 
   it("returns { ok: true, vendor, fieldsApplied } shape on success", async () => {

@@ -13,19 +13,35 @@
 /**
  * Environment variables safe to forward to child processes. Only generic
  * shell / locale / path variables needed for most tools to run correctly.
- * Provider API keys and LVIS-internal variables are intentionally omitted.
+ * Windows profile/system vars are included because Store/launcher-backed
+ * interpreters need them to find their own runtime state. Provider API keys
+ * and LVIS-internal variables are intentionally omitted.
  */
 const FORWARD_ENV_KEYS = [
   "PATH",
   "HOME",
   "USER",
   "USERNAME",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
   "LANG",
   "LC_ALL",
   "LC_CTYPE",
   "TZ",
   "TERM",
   "SHELL",
+  "COMSPEC",
+  "PATHEXT",
+  "SystemDrive",
+  "SystemRoot",
+  "WINDIR",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "PROGRAMDATA",
+  "PYTHONDONTWRITEBYTECODE",
+  "PYTHONUNBUFFERED",
+  "PYTHONUTF8",
   "TMPDIR",
   "TMP",
   "TEMP",

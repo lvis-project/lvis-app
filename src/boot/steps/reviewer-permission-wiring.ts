@@ -16,7 +16,10 @@ import { PERMISSIONS } from "../../shared/ipc-channels.js";
 import { createProvider, secretKeyFor } from "../../engine/llm/provider-factory.js";
 import { reviewerVendorFor } from "../../permissions/reviewer/reviewer-vendor-map.js";
 import type { LLMProvider } from "../../engine/llm/types.js";
-import { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
+import {
+  getLlmVendorSettings,
+  isLLMVendor,
+} from "../../shared/llm-vendor-defaults.js";
 import { wireReviewerAgent } from "./reviewer-wiring.js";
 import {
   bindManifestIntegrityAudit,
@@ -49,7 +52,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     const llmVendor = reviewerVendorFor(vendor) ?? (isLLMVendor(vendor) ? vendor : null);
     if (!llmVendor) return null;
     const llmSettings = settingsService.get("llm");
-    const block = llmSettings.vendors[llmVendor];
+    const block = getLlmVendorSettings(llmSettings.vendors, llmVendor);
     const apiKey = settingsService.getSecret(secretKeyFor(llmVendor));
     const isVertex = llmVendor === "vertex-ai";
     if (!apiKey && !isVertex) return null;
@@ -74,7 +77,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
   const readActiveReviewerLlm = () => {
     const llm = settingsService.get("llm");
     const provider = llm.provider;
-    const block = llm.vendors[provider];
+    const block = getLlmVendorSettings(llm.vendors, provider);
     return {
       provider,
       model: block.model,
@@ -95,7 +98,10 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
       // Foundry endpoint is a plain (non-secret) setting: the same
       // llm.vendors.azure-foundry.baseUrl field used by the chat provider.
       getFoundryEndpoint: () =>
-        settingsService.get("llm").vendors["azure-foundry"]?.baseUrl ?? null,
+        getLlmVendorSettings(
+          settingsService.get("llm").vendors,
+          "azure-foundry",
+        ).baseUrl ?? null,
       onDeferredPendingChange: (summary) => {
         sendToWindow(getMainWindow(), PERMISSIONS.deferredPending, summary, log);
       },
