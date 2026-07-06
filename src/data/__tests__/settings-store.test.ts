@@ -404,6 +404,52 @@ describe("SettingsService LLM per-vendor patching", () => {
     expect(settings.marketplace.installedProviderIds).toEqual(["groq"]);
   });
 
+  it("rejects uninstalled marketplace providers as active or fallback providers", async () => {
+    const service = new SettingsService({ userDataPath });
+
+    await service.patch({
+      llm: {
+        provider: "groq",
+        vendors: { groq: { model: "llama-3.3-70b-versatile" } },
+        fallbackChain: [{ provider: "ollama", model: "llama3.3" }],
+      },
+    });
+
+    const llm = service.get("llm");
+    expect(llm.provider).toBe(DEFAULT_LLM_VENDOR);
+    expect(llm.fallbackChain).toEqual([]);
+    expect(llm.vendors.groq).toBeUndefined();
+    expect(llm.vendors.ollama).toBeUndefined();
+    expect(service.get("marketplace").installedProviderIds).toEqual([]);
+  });
+
+  it("allows installed marketplace providers and removes them durably on uninstall", async () => {
+    const service = new SettingsService({ userDataPath });
+
+    await service.patch({
+      marketplace: { installedProviderIds: ["groq", "ollama"] },
+      llm: {
+        provider: "groq",
+        vendors: { groq: { model: "llama-3.3-70b-versatile" } },
+        fallbackChain: [{ provider: "ollama", model: "llama3.3" }],
+      },
+    });
+    expect(service.get("llm").provider).toBe("groq");
+    expect(service.get("llm").fallbackChain).toEqual([
+      { provider: "ollama", model: "llama3.3" },
+    ]);
+
+    await service.patch({
+      marketplace: { installedProviderIds: [] },
+    });
+    const settings = service.getAll();
+    expect(settings.llm.provider).toBe(DEFAULT_LLM_VENDOR);
+    expect(settings.llm.fallbackChain).toEqual([]);
+    expect(settings.llm.vendors.groq).toBeUndefined();
+    expect(settings.llm.vendors.ollama).toBeUndefined();
+    expect(settings.marketplace.installedProviderIds).toEqual([]);
+  });
+
   // Regression for the bug shipped + reverted between #279 and the per-vendor
   // refactor: switching the active provider used to carry the previous
   // vendor's model into the new vendor's persisted block. With per-vendor
@@ -422,6 +468,10 @@ describe("SettingsService LLM per-vendor patching", () => {
         provider: "openai",
         vendors: { openai: { model: "gpt-5-turbo" } },
       },
+    });
+
+    await service.patch({
+      marketplace: { installedProviderIds: ["azure-foundry"] },
     });
 
     // User switches to azure-foundry and saves a retired Foundry model.

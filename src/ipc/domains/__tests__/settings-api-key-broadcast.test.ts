@@ -37,13 +37,20 @@ function makeWindow() {
 }
 
 function makeDeps(appWindows: ReturnType<typeof makeWindow>[], vendorBaseUrl?: string) {
+  const llm = {
+    provider: "openai",
+    vendors: { "azure-foundry": { baseUrl: vendorBaseUrl ?? null } },
+  };
+  const marketplace = { installedProviderIds: [] as string[] };
   return {
     settingsService: {
       getAll: vi.fn(() => ({ llm: { provider: "openai" } })),
-      get: vi.fn(() => ({
-        provider: "openai",
-        vendors: { "azure-foundry": { baseUrl: vendorBaseUrl ?? null } },
-      })),
+      get: vi.fn((key?: string) => {
+        if (key === "marketplace") return marketplace;
+        if (key === "shortcuts") return {};
+        if (key === "system") return {};
+        return llm;
+      }),
       patch: vi.fn(async (p: unknown) => p),
       replaceLlm: vi.fn(async (llm: unknown) => llm),
       getSecret: vi.fn(() => null),
@@ -91,11 +98,44 @@ describe("set-api-key broadcast (M3)", () => {
     const { registerSettingsHandlers } = await import("../settings.js");
     registerSettingsHandlers(deps as never);
 
-    await invoke("lvis:settings:set-api-key", "azure-foundry", "az-key");
+    await invoke("lvis:settings:set-api-key", "gemini", "gemini-key");
 
     // live window gets the broadcast; destroyed window is skipped by sendToWindow
     expect(liveWindow.webContents.send).toHaveBeenCalledWith(SETTINGS.updated, expect.anything());
     expect(deadWindow.webContents.send).not.toHaveBeenCalled();
+  });
+
+  it("rejects API keys for marketplace providers until the provider is installed", async () => {
+    const deps = makeDeps([]);
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke("lvis:settings:set-api-key", "groq", "gsk-test");
+
+    expect(result).toMatchObject({ ok: false, error: "provider-not-installed" });
+    expect(deps.settingsService.setSecret).not.toHaveBeenCalled();
+  });
+
+  it("accepts API keys for installed marketplace providers", async () => {
+    const deps = makeDeps([]);
+    deps.settingsService.get.mockImplementation((key?: string) => {
+      if (key === "marketplace") return { installedProviderIds: ["groq"] };
+      if (key === "shortcuts") return {};
+      if (key === "system") return {};
+      return {
+        provider: "openai",
+        vendors: { "azure-foundry": { baseUrl: null } },
+      };
+    });
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke("lvis:settings:set-api-key", "groq", "gsk-test");
+
+    expect(result).toEqual({ ok: true });
+    expect(deps.settingsService.setSecret).toHaveBeenCalledWith("llm.apiKey.groq", "gsk-test");
   });
 });
 
@@ -489,7 +529,7 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
     const { registerSettingsHandlers } = await import("../settings.js");
     registerSettingsHandlers(deps as never);
 
-    await invoke("lvis:settings:set-api-key", "azure-foundry", "az-key");
+    await invoke("lvis:settings:set-api-key", "openai", "az-key");
 
     expect(rewire).toHaveBeenCalledOnce();
   });

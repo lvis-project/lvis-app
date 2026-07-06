@@ -1238,6 +1238,8 @@ export const frMessages: Record<string, string> = {
   "formatIpcError.invalidText": "Saisie de texte invalide.",
   "formatIpcError.invalidValue": "Valeur invalide.",
   "formatIpcError.invalidVendor": "Le fournisseur n'est pas pris en charge.",
+  "formatIpcError.providerNotInstalled": "Installez ce fournisseur du marketplace avant d'enregistrer sa clé API.",
+  "formatIpcError.unknownProvider": "Fournisseur LLM inconnu.",
   "formatIpcError.invalidWebcontentsId": "ID webContents invalide.",
   "formatIpcError.lastMessageNotUser": "Le dernier message n'est pas une question de l'utilisateur, la génération ne peut donc pas continuer.",
   "formatIpcError.llmKeyIssuingFailed": "Une erreur s'est produite lors de l'enregistrement de la clé LLM. Veuillez vérifier les autorisations du disque ou l'état du trousseau.",

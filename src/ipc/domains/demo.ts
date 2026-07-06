@@ -35,12 +35,29 @@ import { probeOllamaAvailable } from "../../main/ollama-probe.js";
 import { validateFoundryEndpoint } from "../../permissions/reviewer/provider-adapters.js";
 import {
   isLLMVendor,
+  isMarketplaceEligibleLLMVendor,
   OPENAI_COMPATIBLE_VENDOR_PRESETS,
 } from "../../shared/llm-vendor-defaults.js";
 import type { IpcDeps } from "../types.js";
 import { DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE } from "../../../scripts/lib/dev-electron-exit.mjs";
 
 const log = createLogger("demo-activation-ipc");
+
+function marketplaceInstallPatchForDemoVendor(
+  deps: IpcDeps,
+  vendor: string,
+) {
+  if (!isMarketplaceEligibleLLMVendor(vendor)) return {};
+  const installedProviderIds =
+    deps.settingsService.get("marketplace").installedProviderIds ?? [];
+  return {
+    marketplace: {
+      installedProviderIds: installedProviderIds.includes(vendor)
+        ? installedProviderIds
+        : [...installedProviderIds, vendor],
+    },
+  };
+}
 
 
 
@@ -516,7 +533,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       e,
     ): Promise<
       | { ok: true; vendor: "ollama" }
-      | { ok: false; error: "no-ollama" | "unauthorized-frame" }
+      | { ok: false; error: "no-ollama" | "persist-failed" | "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.demo.activateOllama, e);
@@ -543,30 +560,59 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       // SENTINEL, not a credential — it carries no secret value and is never
       // sent as a bearer token to a real authenticating endpoint. It only
       // satisfies the presence-check gate for a local unauthenticated server.
-      await deps.settingsService.setSecret("llm.apiKey.ollama", preset.apiKeyPlaceholder);
-      await deps.settingsService.patch({
-        llm: {
-          authMode: "login",
-          provider: "ollama",
-          vendors: {
-            ollama: {
-              baseUrl: preset.baseUrl,
-              model: preset.defaultModel,
+      const apiKeySecretKey = "llm.apiKey.ollama";
+      const prevApiKey = deps.settingsService.getSecret(apiKeySecretKey);
+      const prevLlm = deps.settingsService.get("llm");
+      const prevMarketplace = deps.settingsService.get("marketplace");
+      try {
+        await deps.settingsService.setSecret(apiKeySecretKey, preset.apiKeyPlaceholder);
+        await deps.settingsService.patch({
+          ...marketplaceInstallPatchForDemoVendor(deps, "ollama"),
+          llm: {
+            authMode: "login",
+            provider: "ollama",
+            vendors: {
+              ollama: {
+                baseUrl: preset.baseUrl,
+                model: preset.defaultModel,
+              },
             },
           },
-        },
-      });
-      deps.conversationLoop?.refreshProvider?.();
-      deps.rewireReviewerAgent?.();
-      deps.refreshActiveLlmWildcard?.();
-      // ASRT dynamic-endpoint union: the patch above sets the ollama vendor's
-      // baseUrl, and the shared sandbox network union is derived from ALL
-      // vendor baseUrls (settings.ts:40-43 invariant). Any vendor baseUrl
-      // change — not just Foundry or the previously-active vendor — must
-      // live-refresh the ASRT network config so the local Ollama endpoint host
-      // is enforced/allowed without a restart. Guarded-optional + no-op when
-      // the sandbox gate is OFF, matching settings.ts:230-232 / auth.ts:292-294.
-      deps.refreshSandboxNetworkConfig?.();
+        });
+        deps.conversationLoop?.refreshProvider?.();
+        deps.rewireReviewerAgent?.();
+        deps.refreshActiveLlmWildcard?.();
+        // ASRT dynamic-endpoint union: the patch above sets the ollama vendor's
+        // baseUrl, and the shared sandbox network union is derived from ALL
+        // vendor baseUrls (settings.ts:40-43 invariant). Any vendor baseUrl
+        // change — not just Foundry or the previously-active vendor — must
+        // live-refresh the ASRT network config so the local Ollama endpoint host
+        // is enforced/allowed without a restart. Guarded-optional + no-op when
+        // the sandbox gate is OFF, matching settings.ts:230-232 / auth.ts:292-294.
+        deps.refreshSandboxNetworkConfig?.();
+      } catch (err) {
+        log.error(`ollama activation failed: ${(err as Error).message}`);
+        try {
+          if (prevApiKey === null) {
+            await deps.settingsService.deleteSecret(apiKeySecretKey);
+          } else {
+            await deps.settingsService.setSecret(apiKeySecretKey, prevApiKey);
+          }
+        } catch (rollbackErr) {
+          log.error(`ollama secret rollback failed: ${(rollbackErr as Error).message}`);
+        }
+        try {
+          await deps.settingsService.patch({ marketplace: prevMarketplace });
+        } catch (rollbackErr) {
+          log.error(`ollama marketplace rollback failed: ${(rollbackErr as Error).message}`);
+        }
+        try {
+          await deps.settingsService.replaceLlm(prevLlm);
+        } catch (rollbackErr) {
+          log.error(`ollama LLM rollback failed: ${(rollbackErr as Error).message}`);
+        }
+        return { ok: false, error: "persist-failed" };
+      }
       try {
         auditLogger.log({
           timestamp: new Date().toISOString(),
