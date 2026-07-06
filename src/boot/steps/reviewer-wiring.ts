@@ -206,6 +206,7 @@ export interface WireReviewerResult {
 
 export interface ActiveReviewerLlmIdentity {
   provider: LLMVendor;
+  marketplaceProviderPresetId?: string;
   model: string;
   baseUrl?: string;
   vertexProject?: string;
@@ -214,6 +215,7 @@ export interface ActiveReviewerLlmIdentity {
 
 type EffectiveReviewerSettings = Omit<ReviewerSettingsBlock, "provider"> & {
   provider: string;
+  marketplaceProviderPresetId?: string;
   baseUrl?: string;
   vertexProject?: string;
   vertexLocation?: string;
@@ -340,6 +342,7 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
       // Vertex project changes invalidate reviewer verdicts produced under a
       // different upstream deployment.
       providerBaseUrl: effectiveSettings.baseUrl ?? null,
+      marketplaceProviderPresetId: effectiveSettings.marketplaceProviderPresetId ?? null,
       vertexProject: effectiveSettings.vertexProject ?? null,
       vertexLocation: effectiveSettings.vertexLocation ?? null,
       // Legacy Foundry endpoint key retained for existing cache-scope tests.
@@ -422,6 +425,9 @@ function resolveEffectiveSettings(
   return {
     ...settings,
     provider: active.provider,
+    ...(active.marketplaceProviderPresetId !== undefined
+      ? { marketplaceProviderPresetId: active.marketplaceProviderPresetId }
+      : {}),
     model: active.model,
     ...(active.baseUrl !== undefined ? { baseUrl: active.baseUrl } : {}),
     ...(active.vertexProject !== undefined ? { vertexProject: active.vertexProject } : {}),

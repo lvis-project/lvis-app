@@ -14,6 +14,7 @@ import {
   canUseLlmVendorWithoutApiKey,
   getLlmVendorSettings,
 } from "../../shared/llm-vendor-defaults.js";
+import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
 import type { AiProviderPingResult } from "../../shared/ai-provider-ping.js";
 import type { ConversationLoopDeps } from "./types.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
@@ -25,13 +26,25 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
     const llmSettings = deps.settingsService.get("llm");
     const vendor = llmSettings.provider;
     const block = getLlmVendorSettings(llmSettings.vendors, vendor);
-    const apiKey = deps.settingsService.getSecret(secretKeyFor(vendor));
+    const marketplaceProviderPreset = vendor === "openai-compatible" && llmSettings.marketplaceProviderPresetId
+      ? deps.settingsService
+        .get("marketplace")
+        .installedProviderPresets
+        .find((preset) => preset.providerId === llmSettings.marketplaceProviderPresetId)
+      : undefined;
+    const apiKey = deps.settingsService.getSecret(
+      marketplaceProviderPreset
+        ? marketplaceProviderPresetSecretKey(marketplaceProviderPreset.providerId)
+        : secretKeyFor(vendor),
+    );
 
     // Vertex AI uses service account / ADC — apiKey not required, but project is.
     // Self-hosted/local OpenAI-compatible endpoints can also run without an
     // API key when a baseUrl is configured.
     const isVertex = vendor === "vertex-ai";
-    const canUseWithoutApiKey = canUseLlmVendorWithoutApiKey(vendor, block);
+    const canUseWithoutApiKey = marketplaceProviderPreset
+      ? marketplaceProviderPreset.requiresApiKey === false && Boolean(block.baseUrl?.trim())
+      : canUseLlmVendorWithoutApiKey(vendor, block);
     if (!apiKey && !isVertex && !canUseWithoutApiKey) {
       return null;
     }

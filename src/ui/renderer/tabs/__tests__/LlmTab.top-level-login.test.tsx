@@ -20,6 +20,7 @@ import { ALL_VENDORS, VENDORS } from "../../constants.js";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import { llmModelListCacheKey } from "../../../../shared/llm-model-list.js";
+import { marketplaceProviderPresetSecretId, type MarketplaceInstalledProviderPreset } from "../../../../shared/marketplace-package-assets.js";
 
 type HarnessApi = Parameters<typeof LlmTab>[0]["api"];
 
@@ -37,6 +38,8 @@ function Harness({
   settingsLoaded = true,
   api,
   onOpenMarketplace,
+  marketplaceProviderPresets = [],
+  initialMarketplaceProviderPresetId = "",
 }: {
   initialAuthMode: "manual" | "login";
   initialHostResolverMap?: string;
@@ -46,6 +49,8 @@ function Harness({
   settingsLoaded?: boolean;
   api?: HarnessApi;
   onOpenMarketplace?: () => void;
+  marketplaceProviderPresets?: readonly MarketplaceInstalledProviderPreset[];
+  initialMarketplaceProviderPresetId?: string;
 }) {
   const [authMode, setAuthMode] = useState<"manual" | "login">(initialAuthMode);
   const [vendor, setVendor] = useState(initialVendor);
@@ -60,6 +65,8 @@ function Harness({
   const [fallbackChain, setFallbackChain] = useState<FallbackEntry[]>([]);
   const [fallbackOpen, setFallbackOpen] = useState(false);
   const [hostResolverMap, setHostResolverMap] = useState(initialHostResolverMap);
+  const [marketplaceProviderPresetId, setMarketplaceProviderPresetId] =
+    useState(initialMarketplaceProviderPresetId);
   return (
     <TooltipProvider>
       <LlmTab
@@ -78,6 +85,15 @@ function Harness({
         setKeyInput={setKeyInput}
         authMode={authMode}
         setAuthMode={setAuthMode}
+        marketplaceProviderPresetId={marketplaceProviderPresetId}
+        marketplaceProviderPresets={marketplaceProviderPresets}
+        onSelectMarketplaceProviderPreset={(preset) => {
+          setMarketplaceProviderPresetId(preset.providerId);
+          setVendor("openai-compatible");
+          setBaseUrl(preset.baseUrl);
+          setModel(preset.defaultModel);
+        }}
+        onClearMarketplaceProviderPreset={() => setMarketplaceProviderPresetId("")}
         onOpenLogin={vi.fn()}
         onOpenMarketplace={onOpenMarketplace}
         model={model}
@@ -230,6 +246,142 @@ describe("LlmTab — top-level login toggle UI", () => {
 
     expect(await screen.findByTestId("llm-tab:selected-provider-marketplace:groq"))
       .toHaveTextContent("마켓플레이스");
+  });
+
+  it("shows and applies marketplace custom provider presets", async () => {
+    const futureRouter: MarketplaceInstalledProviderPreset = {
+      providerId: "future-router",
+      label: "Future Router",
+      baseUrl: "https://future.example/v1",
+      apiKeyPlaceholder: "fr_...",
+      defaultModel: "future/free",
+      modelOptions: ["future/free", "future/pro"],
+      requiresApiKey: false,
+    };
+    const { container } = render(
+      <Harness
+        initialAuthMode="manual"
+        initialVendor="openai"
+        marketplaceProviderPresets={[futureRouter]}
+      />,
+    );
+
+    const vendorTrigger = container.querySelector("#vendor-select") as HTMLElement | null;
+    expect(vendorTrigger).not.toBeNull();
+    fireEvent.mouseDown(vendorTrigger!);
+    fireEvent.keyDown(vendorTrigger!, { key: "ArrowDown" });
+
+    const search = await screen.findByTestId("llm-tab:vendor-search");
+    fireEvent.change(search, { target: { value: "future" } });
+    fireEvent.click(await screen.findByText("Future Router"));
+
+    expect(await screen.findByTestId(
+      `llm-tab:selected-provider-marketplace:${marketplaceProviderPresetSecretId("future-router")}`,
+    )).toHaveTextContent("마켓플레이스");
+    expect((screen.getByTestId("llm-base-url-input") as HTMLInputElement).value)
+      .toBe("https://future.example/v1");
+    expect(container.querySelector('[data-testid="llm-model-select"]')?.textContent)
+      .toContain("future/free");
+  });
+
+  it("scopes synced model-list cache by marketplace provider preset id", async () => {
+    const api = llmTabApi();
+    (api.listLlmModels as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        ok: true,
+        vendor: "openai-compatible",
+        endpoint: "https://shared.example/v1/models",
+        models: ["router-a/free"],
+        fetchedAt: "2026-07-07T00:00:00.000Z",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        vendor: "openai-compatible",
+        endpoint: "https://shared.example/v1/models",
+        models: ["router-b/free"],
+        fetchedAt: "2026-07-07T00:00:01.000Z",
+      });
+    const routerA: MarketplaceInstalledProviderPreset = {
+      providerId: "router-a",
+      label: "Router A",
+      baseUrl: "https://shared.example/v1",
+      defaultModel: "router-a/free",
+      modelOptions: ["router-a/free"],
+      requiresApiKey: true,
+    };
+    const routerB: MarketplaceInstalledProviderPreset = {
+      providerId: "router-b",
+      label: "Router B",
+      baseUrl: "https://shared.example/v1",
+      defaultModel: "router-b/free",
+      modelOptions: ["router-b/free"],
+      requiresApiKey: true,
+    };
+    const { container } = render(
+      <Harness
+        initialAuthMode="manual"
+        initialVendor="openai"
+        api={api}
+        marketplaceProviderPresets={[routerA, routerB]}
+      />,
+    );
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    const vendorTrigger = container.querySelector("#vendor-select") as HTMLElement;
+    fireEvent.mouseDown(vendorTrigger);
+    fireEvent.keyDown(vendorTrigger, { key: "ArrowDown" });
+    fireEvent.change(await screen.findByTestId("llm-tab:vendor-search"), {
+      target: { value: "Router A" },
+    });
+    fireEvent.click(await screen.findByText("Router A"));
+    await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledTimes(1));
+    expect(api.listLlmModels).toHaveBeenLastCalledWith({
+      vendor: "openai-compatible",
+      baseUrl: "https://shared.example/v1",
+      credentialScope: "router-a",
+    });
+
+    fireEvent.mouseDown(vendorTrigger);
+    fireEvent.keyDown(vendorTrigger, { key: "ArrowDown" });
+    fireEvent.change(await screen.findByTestId("llm-tab:vendor-search"), {
+      target: { value: "Router B" },
+    });
+    fireEvent.click(await screen.findByText("Router B"));
+    await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledTimes(2));
+    expect(api.listLlmModels).toHaveBeenLastCalledWith({
+      vendor: "openai-compatible",
+      baseUrl: "https://shared.example/v1",
+      credentialScope: "router-b",
+    });
+
+    expect(api.updateSettings).toHaveBeenCalledWith({
+      llm: {
+        modelListCache: {
+          [llmModelListCacheKey("openai-compatible", "https://shared.example/v1", "router-a")]: {
+            vendor: "openai-compatible",
+            baseUrl: "https://shared.example/v1",
+            credentialScope: "router-a",
+            endpoint: "https://shared.example/v1/models",
+            models: ["router-a/free"],
+            fetchedAt: "2026-07-07T00:00:00.000Z",
+          },
+        },
+      },
+    });
+    expect(api.updateSettings).toHaveBeenCalledWith({
+      llm: {
+        modelListCache: expect.objectContaining({
+          [llmModelListCacheKey("openai-compatible", "https://shared.example/v1", "router-b")]: {
+            vendor: "openai-compatible",
+            baseUrl: "https://shared.example/v1",
+            credentialScope: "router-b",
+            endpoint: "https://shared.example/v1/models",
+            models: ["router-b/free"],
+            fetchedAt: "2026-07-07T00:00:01.000Z",
+          },
+        }),
+      },
+    });
   });
 
   it("opens the Marketplace provider filter from the provider section", () => {

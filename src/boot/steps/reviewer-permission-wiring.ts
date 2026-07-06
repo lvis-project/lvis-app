@@ -19,7 +19,9 @@ import type { LLMProvider } from "../../engine/llm/types.js";
 import {
   getLlmVendorSettings,
   isLLMVendor,
+  canUseLlmVendorWithoutApiKey,
 } from "../../shared/llm-vendor-defaults.js";
+import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
 import { wireReviewerAgent } from "./reviewer-wiring.js";
 import {
   bindManifestIntegrityAudit,
@@ -53,9 +55,22 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     if (!llmVendor) return null;
     const llmSettings = settingsService.get("llm");
     const block = getLlmVendorSettings(llmSettings.vendors, llmVendor);
-    const apiKey = settingsService.getSecret(secretKeyFor(llmVendor));
+    const marketplaceProviderPreset = llmVendor === "openai-compatible" && llmSettings.marketplaceProviderPresetId
+      ? settingsService
+        .get("marketplace")
+        .installedProviderPresets
+        .find((preset) => preset.providerId === llmSettings.marketplaceProviderPresetId)
+      : undefined;
+    const apiKey = settingsService.getSecret(
+      marketplaceProviderPreset
+        ? marketplaceProviderPresetSecretKey(marketplaceProviderPreset.providerId)
+        : secretKeyFor(llmVendor),
+    );
     const isVertex = llmVendor === "vertex-ai";
-    if (!apiKey && !isVertex) return null;
+    const canUseWithoutApiKey = marketplaceProviderPreset
+      ? marketplaceProviderPreset.requiresApiKey === false && Boolean(block.baseUrl?.trim())
+      : canUseLlmVendorWithoutApiKey(llmVendor, block);
+    if (!apiKey && !isVertex && !canUseWithoutApiKey) return null;
     if (
       isVertex &&
       !block.vertexProject &&
@@ -80,6 +95,9 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     const block = getLlmVendorSettings(llm.vendors, provider);
     return {
       provider,
+      ...(provider === "openai-compatible" && llm.marketplaceProviderPresetId
+        ? { marketplaceProviderPresetId: llm.marketplaceProviderPresetId }
+        : {}),
       model: block.model,
       ...(block.baseUrl ? { baseUrl: block.baseUrl } : {}),
       ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),

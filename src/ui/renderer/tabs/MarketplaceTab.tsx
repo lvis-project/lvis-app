@@ -22,6 +22,11 @@ import {
   buildNetworkAccessAcknowledgement,
   hasNetworkAccessDisclosure,
 } from "../../../shared/network-access.js";
+import {
+  marketplaceProviderPresetFromAsset,
+  type MarketplaceInstalledProviderPreset,
+} from "../../../shared/marketplace-package-assets.js";
+import { isMarketplaceEligibleLLMVendor } from "../../../shared/llm-vendor-defaults.js";
 
 const INSTALLABLE_PACKAGE_TYPE_SET = new Set<MarketplacePackageType>(
   INSTALLABLE_MARKETPLACE_PACKAGE_TYPES,
@@ -39,7 +44,7 @@ const PACKAGE_TYPE_LABELS: Record<MarketplacePackageType, string> = {
 
 type MarketplaceAssetInstallState = Pick<
   MarketplaceSettings,
-  "installedProviderIds" | "installedThemeBundleIds" | "installedLanguagePacks"
+  "installedProviderIds" | "installedProviderPresets" | "installedThemeBundleIds" | "installedLanguagePacks"
 >;
 
 function installedAssetsFromMarketplace(
@@ -48,6 +53,9 @@ function installedAssetsFromMarketplace(
   return {
     installedProviderIds: Array.isArray(marketplace?.installedProviderIds)
       ? marketplace.installedProviderIds
+      : [],
+    installedProviderPresets: Array.isArray(marketplace?.installedProviderPresets)
+      ? marketplace.installedProviderPresets
       : [],
     installedThemeBundleIds: Array.isArray(marketplace?.installedThemeBundleIds)
       ? marketplace.installedThemeBundleIds
@@ -88,7 +96,12 @@ function isMarketplaceAssetInstalled(
   const asset = item.packageAsset;
   if (!asset) return false;
   if (asset.type === "provider") {
-    return installed.installedProviderIds.includes(asset.providerId);
+    if (isMarketplaceEligibleLLMVendor(asset.providerId)) {
+      return installed.installedProviderIds.includes(asset.providerId);
+    }
+    return installed.installedProviderPresets.some(
+      (preset) => preset.providerId === asset.providerId,
+    );
   }
   if (asset.type === "theme") {
     return installed.installedThemeBundleIds.includes(asset.bundleId);
@@ -116,6 +129,21 @@ function addUnique<T>(values: readonly T[], value: T): T[] {
 
 function removeValue<T>(values: readonly T[], value: T): T[] {
   return values.filter((entry) => entry !== value);
+}
+
+function upsertProviderPreset(
+  values: readonly MarketplaceInstalledProviderPreset[],
+  preset: MarketplaceInstalledProviderPreset,
+): MarketplaceInstalledProviderPreset[] {
+  const withoutCurrent = values.filter((entry) => entry.providerId !== preset.providerId);
+  return [...withoutCurrent, preset];
+}
+
+function removeProviderPreset(
+  values: readonly MarketplaceInstalledProviderPreset[],
+  providerId: string,
+): MarketplaceInstalledProviderPreset[] {
+  return values.filter((entry) => entry.providerId !== providerId);
 }
 
 function isInstallablePackageType(
@@ -280,6 +308,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     } catch (err) {
       let installed: MarketplaceAssetInstallState = {
         installedProviderIds: [],
+        installedProviderPresets: [],
         installedThemeBundleIds: [],
         installedLanguagePacks: [],
       };
@@ -320,9 +349,19 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     const installed = installedAssetsFromMarketplace(settings.marketplace);
     const marketplace: Partial<MarketplaceSettings> = {};
     if (asset.type === "provider") {
-      marketplace.installedProviderIds = install
-        ? addUnique(installed.installedProviderIds, asset.providerId)
-        : removeValue(installed.installedProviderIds, asset.providerId);
+      if (isMarketplaceEligibleLLMVendor(asset.providerId)) {
+        marketplace.installedProviderIds = install
+          ? addUnique(installed.installedProviderIds, asset.providerId)
+          : removeValue(installed.installedProviderIds, asset.providerId);
+      } else {
+        const preset = marketplaceProviderPresetFromAsset(asset, item.name);
+        if (!preset) {
+          throw new Error("Marketplace provider package is missing preset metadata");
+        }
+        marketplace.installedProviderPresets = install
+          ? upsertProviderPreset(installed.installedProviderPresets, preset)
+          : removeProviderPreset(installed.installedProviderPresets, preset.providerId);
+      }
     } else if (asset.type === "theme") {
       marketplace.installedThemeBundleIds = install
         ? addUnique(installed.installedThemeBundleIds, asset.bundleId)

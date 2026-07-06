@@ -424,6 +424,10 @@ export function SettingsContent({
               setKeyInput={s.setKeyInput}
               authMode={s.authMode}
               setAuthMode={s.setAuthMode}
+              marketplaceProviderPresetId={s.marketplaceProviderPresetId}
+              marketplaceProviderPresets={s.marketplaceProviderPresets}
+              onSelectMarketplaceProviderPreset={s.selectMarketplaceProviderPreset}
+              onClearMarketplaceProviderPreset={s.clearMarketplaceProviderPreset}
               onOpenLogin={() => {
                 llmSave.cancel();
                 s.invalidateLlmDraftSaves();

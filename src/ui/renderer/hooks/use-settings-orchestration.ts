@@ -9,6 +9,10 @@ import {
   getLlmVendorSettings,
   isLLMVendor,
 } from "../../../shared/llm-vendor-defaults.js";
+import {
+  marketplaceProviderPresetSecretId,
+  type MarketplaceInstalledProviderPreset,
+} from "../../../shared/marketplace-package-assets.js";
 
 export interface SettingsOrchestrationState {
   // LLM
@@ -84,6 +88,10 @@ export interface SettingsOrchestrationState {
   setHasMarketplaceApiKey: (v: boolean) => void;
   marketplaceApiKeyInput: string;
   setMarketplaceApiKeyInput: (v: string) => void;
+  marketplaceProviderPresetId: string;
+  marketplaceProviderPresets: readonly MarketplaceInstalledProviderPreset[];
+  selectMarketplaceProviderPreset: (preset: MarketplaceInstalledProviderPreset) => void;
+  clearMarketplaceProviderPreset: () => void;
   // Lifecycle
   settingsLoaded: boolean;
   saving: boolean;
@@ -154,6 +162,8 @@ export function useSettingsOrchestration(
   const [marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork] = useState(true);
   const [hasMarketplaceApiKey, setHasMarketplaceApiKey] = useState(false);
   const [marketplaceApiKeyInput, setMarketplaceApiKeyInput] = useState("");
+  const [marketplaceProviderPresetId, setMarketplaceProviderPresetId] = useState("");
+  const [marketplaceProviderPresets, setMarketplaceProviderPresets] = useState<MarketplaceInstalledProviderPreset[]>([]);
   const [saving, setSaving] = useState(false);
   const [lastSaveError, setLastSaveError] = useState<{ tab: string; message: string } | null>(null);
   const clearLastSaveError = useCallback(() => setLastSaveError(null), []);
@@ -178,6 +188,11 @@ export function useSettingsOrchestration(
 
   const vendorInfo = getVendorOption(vendor);
 
+  const activeCredentialProviderId =
+    vendor === "openai-compatible" && marketplaceProviderPresetId
+      ? marketplaceProviderPresetSecretId(marketplaceProviderPresetId)
+      : vendor;
+
   // Load all settings on mount. (Before the BrowserWindow conversion this
   // was gated on `open`; that's now always true while the window exists.)
   useEffect(() => {
@@ -185,20 +200,27 @@ export function useSettingsOrchestration(
     setSettingsLoaded(false);
     void (async () => {
       const s = await api.getSettings();
+      const provider = isLLMVendor(s.llm.provider)
+        ? s.llm.provider
+        : DEFAULT_LLM_VENDOR;
+      const providerPresetId = provider === "openai-compatible"
+        ? s.llm.marketplaceProviderPresetId ?? ""
+        : "";
       const [apiKeySet, webApiKeySet, marketplaceKeySet] = await Promise.all([
-        api.hasApiKey(s.llm.provider),
+        api.hasApiKey(providerPresetId
+          ? marketplaceProviderPresetSecretId(providerPresetId)
+          : provider),
         api.hasWebApiKey(s.webSearch.provider),
         api.hasMarketplaceApiKey(),
       ]);
       if (cancelled) return;
-      const provider = isLLMVendor(s.llm.provider)
-        ? s.llm.provider
-        : DEFAULT_LLM_VENDOR;
       const block = getLlmVendorSettings(s.llm.vendors, provider);
       hydratedVendorRef.current = provider;
       hydratedWebProviderRef.current = s.webSearch.provider;
       setSettingsSnapshot(s);
       setVendor(provider);
+      setMarketplaceProviderPresetId(providerPresetId);
+      setMarketplaceProviderPresets(s.marketplace?.installedProviderPresets ?? []);
       // #893 — top-level authMode hydration. Legacy installs (per-vendor
       // authMode) were migrated up in the settings store at load time, so
       // by the time the renderer reads `s.llm.authMode` the field is
@@ -230,10 +252,17 @@ export function useSettingsOrchestration(
     return api.onSettingsUpdated((next) => {
       setSettingsSnapshot(next);
       setIdlePreferenceRefresh(next.features?.idlePreferenceRefresh ?? true);
+      const nextProvider = isLLMVendor(next.llm.provider)
+        ? next.llm.provider
+        : DEFAULT_LLM_VENDOR;
+      setMarketplaceProviderPresets(next.marketplace?.installedProviderPresets ?? []);
+      setMarketplaceProviderPresetId(
+        nextProvider === "openai-compatible"
+          ? next.llm.marketplaceProviderPresetId ?? ""
+          : "",
+      );
       if (next.llm.authMode === "login") {
-        const nextVendor = isLLMVendor(next.llm.provider)
-          ? next.llm.provider
-          : DEFAULT_LLM_VENDOR;
+        const nextVendor = nextProvider;
         const block = getLlmVendorSettings(next.llm.vendors, nextVendor);
         hydratedVendorRef.current = nextVendor;
         setVendor(nextVendor);
@@ -253,13 +282,13 @@ export function useSettingsOrchestration(
       return;
     }
     let cancelled = false;
-    void api.hasApiKey(vendor).then((k) => { if (!cancelled) setHasKey(k); });
+    void api.hasApiKey(activeCredentialProviderId).then((k) => { if (!cancelled) setHasKey(k); });
     const block = isLLMVendor(vendor)
       ? getLlmVendorSettings(settingsSnapshot?.llm.vendors, vendor)
       : null;
     if (block) hydrateVendorBlock(block);
     return () => { cancelled = true; };
-  }, [vendor, api, settingsLoaded, settingsSnapshot]);
+  }, [vendor, api, settingsLoaded, settingsSnapshot, activeCredentialProviderId]);
 
   function hydrateVendorBlock(block: AppSettings["llm"]["vendors"][string]): void {
     setModel(block.model);
@@ -278,9 +307,14 @@ export function useSettingsOrchestration(
       ? next.llm.provider
       : DEFAULT_LLM_VENDOR;
     const block = getLlmVendorSettings(next.llm.vendors, nextVendor);
+    const providerPresetId = nextVendor === "openai-compatible"
+      ? next.llm.marketplaceProviderPresetId ?? ""
+      : "";
     hydratedVendorRef.current = nextVendor;
     setSettingsSnapshot(next);
     setVendor(nextVendor);
+    setMarketplaceProviderPresetId(providerPresetId);
+    setMarketplaceProviderPresets(next.marketplace?.installedProviderPresets ?? []);
     setAuthMode(next.llm.authMode === "login" ? "login" : "manual");
     hydrateVendorBlock(block);
     setStreamSmoothing(next.llm.streamSmoothing);
@@ -300,6 +334,40 @@ export function useSettingsOrchestration(
     void api.hasWebApiKey(webProvider).then((k) => { if (!cancelled) setHasWebKey(k); });
     return () => { cancelled = true; };
   }, [webProvider, api, settingsLoaded]);
+
+  const selectMarketplaceProviderPreset = useCallback((preset: MarketplaceInstalledProviderPreset) => {
+    const openaiCompatibleDefaults = getLlmVendorSettings(
+      settingsSnapshot?.llm.vendors,
+      "openai-compatible",
+    );
+    hydratedVendorRef.current = "openai-compatible";
+    setMarketplaceProviderPresetId(preset.providerId);
+    setVendor("openai-compatible");
+    setModel(preset.defaultModel);
+    setBaseUrl(preset.baseUrl);
+    setVertexProject("");
+    setVertexLocation("");
+    setEnableThinking(openaiCompatibleDefaults.enableThinking);
+    setThinkingBudget(openaiCompatibleDefaults.thinkingBudgetTokens);
+    setKeyInput("");
+    void api
+      .hasApiKey(marketplaceProviderPresetSecretId(preset.providerId))
+      .then((k) => setHasKey(k))
+      .catch(() => setHasKey(false));
+  }, [api, settingsSnapshot]);
+
+  const clearMarketplaceProviderPreset = useCallback(() => {
+    setMarketplaceProviderPresetId("");
+    if (vendor !== "openai-compatible") return;
+    const genericBlock = settingsSnapshot?.llm.marketplaceProviderPresetId
+      ? getLlmVendorSettings(undefined, "openai-compatible")
+      : getLlmVendorSettings(settingsSnapshot?.llm.vendors, "openai-compatible");
+    hydrateVendorBlock(genericBlock);
+    setKeyInput("");
+    void api.hasApiKey("openai-compatible")
+      .then((k) => setHasKey(k))
+      .catch(() => setHasKey(false));
+  }, [api, settingsSnapshot, vendor]);
 
   // In-flight guard + pending re-fire: if a debounced save lands while a
   // previous save is still in flight (cross-tab race), mark it pending
@@ -372,6 +440,8 @@ export function useSettingsOrchestration(
           // #893 — top-level authMode persisted alongside provider.
           authMode: latestAuthMode,
           provider: vendor,
+          marketplaceProviderPresetId:
+            vendor === "openai-compatible" ? marketplaceProviderPresetId : "",
           streamSmoothing,
           fallbackChain: fallbackChain.filter((e) => e.provider && e.model).map((e) => ({ provider: e.provider, model: e.model })),
         };
@@ -398,7 +468,7 @@ export function useSettingsOrchestration(
           if (llmDraftGeneration !== llmDraftGenerationRef.current) {
             return false;
           }
-          await api.setApiKey(vendor, trimmedKeyInput);
+          await api.setApiKey(activeCredentialProviderId, trimmedKeyInput);
           setKeyInput("");
           setHasKey(true);
         }
@@ -480,6 +550,10 @@ export function useSettingsOrchestration(
     marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork,
     hasMarketplaceApiKey, setHasMarketplaceApiKey,
     marketplaceApiKeyInput, setMarketplaceApiKeyInput,
+    marketplaceProviderPresetId,
+    marketplaceProviderPresets,
+    selectMarketplaceProviderPreset,
+    clearMarketplaceProviderPreset,
     settingsLoaded,
     saving,
     save,
