@@ -38,6 +38,7 @@ import { LoginModal } from "./components/LoginModal.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
 import { useDebouncedSave } from "./hooks/use-debounced-save.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
+import type { MarketplacePackageType } from "../../shared/assistant-context.js";
 
 /**
  * Inline save bar rendered at the bottom of each tab that holds a
@@ -66,6 +67,8 @@ function TabSaveBar({
 }
 
 
+type MarketplaceFilter = "all" | MarketplacePackageType;
+
 // `./contexts/saved-toast.tsx` so PluginConfigTab can import the consumer
 // hook without forming a circular import with SettingsContent (which
 // itself imports PluginConfigTab in this file).
@@ -81,6 +84,7 @@ export function SettingsContent({
 }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState(() => normalizeSettingsTab(initialTab));
+  const [marketplaceFilter, setMarketplaceFilter] = useState<MarketplaceFilter>("all");
   const [pendingPermissions, setPendingPermissions] = useState(0);
 
   // the dialog. Tabs whose save runs through the orchestration hook hit
@@ -144,6 +148,15 @@ export function SettingsContent({
   const chatSave = useDebouncedSave(() => void s.save("chat"));
   const webSave = useDebouncedSave(() => void s.save("web"));
   const marketplaceSave = useDebouncedSave(() => void s.save("marketplace"));
+  const openMarketplaceTab = useCallback((filter: MarketplaceFilter = "all") => {
+    setMarketplaceFilter(filter);
+    setTab("marketplace");
+  }, []);
+  const handleTabValueChange = useCallback((nextTab: string) => {
+    const normalized = normalizeSettingsTab(nextTab);
+    if (normalized === "marketplace") setMarketplaceFilter("all");
+    setTab(normalized);
+  }, []);
 
   // Flush any pending debounced save when the user closes the window or
   // quits the app. The 200ms debounce window is short, but a user who
@@ -232,7 +245,7 @@ export function SettingsContent({
     <Tabs
       orientation="vertical"
       value={tab}
-      onValueChange={(nextTab) => setTab(normalizeSettingsTab(nextTab))}
+      onValueChange={handleTabValueChange}
       // No gap: sidebar and content share a single border (right edge of
       // the sidebar) so the layout reads as two regions of the dialog,
       // not two stacked cards. Simplified per user direction
@@ -417,6 +430,7 @@ export function SettingsContent({
                 s.setKeyInput("");
                 setLoginOpen(true);
               }}
+              onOpenMarketplace={() => openMarketplaceTab("provider")}
               demoActive={demoActive}
               onSelectDemo={handleSelectDemo}
               model={s.model}
@@ -444,7 +458,7 @@ export function SettingsContent({
           </TabsContent>
 
           <TabsContent value="appearance" className="flex-1 min-h-0 outline-none">
-            <AppearanceTab />
+            <AppearanceTab onOpenMarketplace={openMarketplaceTab} />
           </TabsContent>
 
           <TabsContent value="chat" className="flex-1 min-h-0 outline-none">
@@ -507,6 +521,7 @@ export function SettingsContent({
               setHasApiKey={s.setHasMarketplaceApiKey}
               apiKeyInput={s.marketplaceApiKeyInput}
               setApiKeyInput={s.setMarketplaceApiKeyInput}
+              initialFilter={marketplaceFilter}
               onSaved={onSaved}
               onImmediateChange={marketplaceSave.schedule}
             />

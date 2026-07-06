@@ -94,6 +94,36 @@ describe("MarketplaceTab", () => {
     await findByTestId("marketplace:url:save");
   });
 
+
+  it("honors an initial package-type filter from Settings section CTAs", async () => {
+    const providerItem: MarketplaceItem = {
+      id: "groq-provider",
+      name: "Groq Provider",
+      description: "provider",
+      packageSpec: "provider:groq",
+      installed: false,
+      enabled: false,
+      pluginType: "provider",
+      packageAsset: { type: "provider", providerId: "groq" },
+    };
+    const pluginItem: MarketplaceItem = {
+      id: "regular-plugin",
+      name: "Regular Plugin",
+      description: "plugin",
+      packageSpec: "plugin:regular",
+      installed: false,
+      enabled: false,
+      pluginType: "plugin",
+    };
+    const api = marketplaceTabApi({
+      listMarketplacePlugins: vi.fn().mockResolvedValue([providerItem, pluginItem]),
+    });
+
+    render(<MarketplaceTab {...defaultProps(api)} initialFilter="provider" />);
+
+    await screen.findByTestId("marketplace:action:groq-provider");
+    expect(screen.queryByTestId("marketplace:action:regular-plugin")).toBeNull();
+  });
   it("routes an admin-policy plugin install through the consent dialog (#1098)", async () => {
     const adminPlugin: MarketplaceItem = {
       id: "admin-plug",

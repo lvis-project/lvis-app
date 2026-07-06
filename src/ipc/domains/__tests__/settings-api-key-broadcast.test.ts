@@ -137,6 +137,30 @@ describe("set-api-key broadcast (M3)", () => {
     expect(result).toEqual({ ok: true });
     expect(deps.settingsService.setSecret).toHaveBeenCalledWith("llm.apiKey.groq", "gsk-test");
   });
+
+  it("rejects model list sync for uninstalled marketplace providers", async () => {
+    const deps = makeDeps([]);
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke("lvis:settings:list-llm-models", { vendor: "groq" });
+
+    expect(result).toMatchObject({ ok: false, error: "provider-not-installed" });
+  });
+
+  it("rejects model list sync for unknown providers", async () => {
+    const deps = makeDeps([]);
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke("lvis:settings:list-llm-models", {
+      vendor: "not-a-provider",
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "invalid-provider" });
+  });
 });
 
 describe("delete-api-key broadcast (MAJOR-3)", () => {

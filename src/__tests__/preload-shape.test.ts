@@ -286,6 +286,7 @@ describe("preload contextBridge world shape lock", () => {
           "installMcpFromMarketplace": "function",
           "installSkillFromMarketplace": "function",
           "listAgentProfiles": "function",
+          "listLlmModels": "function",
           "listMarketplacePlugins": "function",
           "listMcpCatalog": "function",
           "listPendingRoutineResultsV2": "function",
