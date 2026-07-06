@@ -105,6 +105,50 @@ describe("createProvider lazy adapter (PR #705)", () => {
     );
   });
 
+  it("passes marketplace provider metadata through to the Vercel adapter", async () => {
+    const innerStreamTurn = vi.fn(async function* () {
+      yield { type: "text_delta", text: "ok" };
+    });
+    const ctor = vi.fn(function () {
+      return {
+        vendor: "openai-compatible",
+        streamTurn: innerStreamTurn,
+      };
+    });
+    vi.doMock("../vercel/adapter.js", () => ({ VercelUnifiedProvider: ctor }));
+
+    const providerMetadata = {
+      providerId: "future-router",
+      label: "Future Router",
+      baseUrl: "https://future.example/v1",
+      defaultModel: "future/free",
+      modelOptions: ["future/free"],
+      requiresApiKey: false,
+      modelDiscoveryPolicy: "models-api" as const,
+    };
+    const { createProvider } = await import("../provider-factory.js");
+    const provider = createProvider({
+      vendor: "openai-compatible",
+      apiKey: "",
+      baseUrl: "https://stale.example/v1",
+      providerMetadata,
+    });
+
+    await drain(provider.streamTurn(TURN));
+
+    expect(ctor).toHaveBeenCalledWith(
+      "openai-compatible",
+      "",
+      "https://stale.example/v1",
+      undefined,
+      {
+        vertexProject: undefined,
+        vertexLocation: undefined,
+      },
+      providerMetadata,
+    );
+  });
+
   it("retries after a transient adapter construction failure", async () => {
     let attempt = 0;
     const ctor = vi.fn(function () {

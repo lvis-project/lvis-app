@@ -8,6 +8,7 @@ import {
   isLocale,
   isMarketplaceEligibleLocale,
   normalizeLocale,
+  recommendedMarketplaceLocaleForSystem,
   visibleLocalesFor,
 } from "../locale.js";
 import {
@@ -70,6 +71,9 @@ describe("locale", () => {
     expect(isMarketplaceEligibleLocale("en")).toBe(false);
     expect(isMarketplaceEligibleLocale("it")).toBe(false);
     expect(visibleLocalesFor(["ko-KR"])).toEqual(["en", "ko"]);
+    expect(recommendedMarketplaceLocaleForSystem("ko-KR")).toBe("ko");
+    expect(recommendedMarketplaceLocaleForSystem("ko-KR", ["ko"])).toBeUndefined();
+    expect(recommendedMarketplaceLocaleForSystem("en-US")).toBeUndefined();
   });
 
   it("normalizeLocale coerces region tags and falls back to default", () => {

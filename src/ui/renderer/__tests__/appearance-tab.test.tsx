@@ -145,6 +145,34 @@ describe("AppearanceTab — bundle card grid", () => {
     fireEvent.click(getByTestId("appearance-tab:marketplace-themes"));
     expect(onOpenMarketplace).toHaveBeenLastCalledWith("theme");
   });
+
+  it("recommends the matching system language pack without installing it", async () => {
+    const originalLanguage = navigator.language;
+    Object.defineProperty(navigator, "language", {
+      configurable: true,
+      value: "ja-JP",
+    });
+    const onOpenMarketplace = vi.fn();
+    try {
+      const { api } = makeMockLvisApi();
+      (window as unknown as { lvisApi: unknown }).lvisApi = api;
+
+      const { getByTestId, queryByTestId } = renderWithBundle(DEFAULT_BUNDLE_ID, onOpenMarketplace);
+      await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+      expect(queryByTestId("language-option-ja")).toBeNull();
+      expect(getByTestId("appearance-tab:language-recommendation"))
+        .toHaveTextContent("Japanese 언어 팩이 시스템 언어와 일치합니다.");
+      fireEvent.click(getByTestId("appearance-tab:language-recommendation-open:ja"));
+      expect(onOpenMarketplace).toHaveBeenCalledWith("language-pack");
+    } finally {
+      Object.defineProperty(navigator, "language", {
+        configurable: true,
+        value: originalLanguage,
+      });
+    }
+  });
+
   it("clicking back to a default theme writes data-theme-bundle=gallery", async () => {
     const { getByRole } = renderWithBundle("violet-dark");
     fireEvent.click(getByRole("radio", { name: /테마: Gallery/ }));

@@ -316,12 +316,12 @@ export const LLM_VENDORS = [
 export type LLMVendor = (typeof LLM_VENDORS)[number];
 
 /**
- * Providers shown as the default in-app provider surface while the long-tail
- * OpenAI-compatible presets move toward marketplace packages. The full
- * `LLM_VENDORS` union intentionally remains broad for settings, secrets,
- * legacy configs, and runtime compatibility during the migration.
+ * Providers shipped as the built-in provider surface. The full `LLM_VENDORS`
+ * union intentionally remains broad for settings, secrets, legacy configs,
+ * and runtime compatibility while long-tail providers move to marketplace
+ * packages.
  */
-export const DEFAULT_VISIBLE_LLM_VENDOR_IDS = [
+export const BUILT_IN_LLM_VENDOR_IDS = [
   "openai",
   "claude",
   "gemini",
@@ -329,20 +329,45 @@ export const DEFAULT_VISIBLE_LLM_VENDOR_IDS = [
   "openai-compatible",
 ] as const satisfies readonly LLMVendor[];
 
-export type DefaultVisibleLLMVendor =
-  (typeof DEFAULT_VISIBLE_LLM_VENDOR_IDS)[number];
+export type BuiltInLLMVendor = (typeof BUILT_IN_LLM_VENDOR_IDS)[number];
+
+/**
+ * Compatibility alias for existing settings/UI code. New provider-registry
+ * code should prefer `BUILT_IN_LLM_VENDOR_IDS` when it means "ships in core".
+ */
+export const DEFAULT_VISIBLE_LLM_VENDOR_IDS = BUILT_IN_LLM_VENDOR_IDS;
+
+export type DefaultVisibleLLMVendor = BuiltInLLMVendor;
 
 const DEFAULT_VISIBLE_LLM_VENDOR_ID_SET = new Set<string>(
-  DEFAULT_VISIBLE_LLM_VENDOR_IDS,
+  BUILT_IN_LLM_VENDOR_IDS,
 );
 
-export type MarketplaceEligibleLLMVendor =
-  Exclude<LLMVendor, DefaultVisibleLLMVendor>;
+export type InstalledLLMVendor = Exclude<LLMVendor, BuiltInLLMVendor>;
 
-export const MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS = LLM_VENDORS.filter(
-  (vendor): vendor is MarketplaceEligibleLLMVendor =>
+/**
+ * Seed provider ids that can be made available through marketplace install
+ * state. This is not the user's dynamic installed-provider state; settings
+ * own that. The static list preserves a typed bridge while catalog ownership
+ * moves out of core.
+ */
+export const INSTALLED_LLM_VENDOR_IDS = LLM_VENDORS.filter(
+  (vendor): vendor is InstalledLLMVendor =>
     !DEFAULT_VISIBLE_LLM_VENDOR_ID_SET.has(vendor),
 );
+
+/**
+ * Provider ids accepted at migration/secret/runtime boundaries even when they
+ * are no longer part of the built-in surface. This intentionally mirrors the
+ * marketplace seed list until provider package metadata is fully catalog-owned.
+ */
+export const KNOWN_LEGACY_LLM_VENDOR_IDS = INSTALLED_LLM_VENDOR_IDS;
+
+export type KnownLegacyLLMVendor = (typeof KNOWN_LEGACY_LLM_VENDOR_IDS)[number];
+
+export type MarketplaceEligibleLLMVendor = InstalledLLMVendor;
+
+export const MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS = INSTALLED_LLM_VENDOR_IDS;
 
 const MARKETPLACE_ELIGIBLE_LLM_VENDOR_ID_SET = new Set<string>(
   MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS,
