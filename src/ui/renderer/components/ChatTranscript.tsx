@@ -1,6 +1,6 @@
 import type React from "react";
 import type { RefObject } from "react";
-import { KeyRound } from "lucide-react";
+import { KeyRound, Store } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
@@ -73,17 +73,25 @@ export function ChatTranscript({
         </div>
       )}
       {visibleEntries.length === 0 && hasApiKey === false && !hasAskQuestions && !suggestedRepliesActive && (
-        <div className="flex min-h-[min(18rem,45vh)] items-center justify-center px-2">
-          <Card data-testid="chat-view:no-api-key-card" className="w-full max-w-[400px]">
-            <CardHeader className="p-4 pb-2 text-center">
-              <KeyRound className="mx-auto mb-1 h-8 w-8 text-muted-foreground" />
-              <CardTitle className="text-base">{t("chatView.noApiKeyTitle")}</CardTitle>
-              <CardDescription className="text-xs">{t("chatView.noApiKeyDescription")}</CardDescription>
+        <div className="flex min-h-[min(12rem,36vh)] items-start justify-center px-2 pt-3">
+          <Card data-testid="chat-view:no-api-key-card" className="w-full max-w-[520px]">
+            <CardHeader className="flex flex-row items-start gap-3 p-3 pb-2 text-left">
+              <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/(--opacity-muted)">
+                <KeyRound className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div className="min-w-0">
+                <CardTitle className="text-sm">{t("chatView.noApiKeyTitle")}</CardTitle>
+                <CardDescription className="mt-1 text-xs leading-snug">{t("chatView.noApiKeyDescription")}</CardDescription>
+              </div>
             </CardHeader>
-            <CardContent className="flex justify-center p-4 pt-0">
+            <CardContent className="flex flex-wrap justify-center gap-2 p-4 pt-0">
               <Button size="sm" onClick={() => onOpenSettings("llm")}>
                 <KeyRound className="mr-2 h-4 w-4" />
                 {t("chatView.openSettingsButton")}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => onOpenSettings("marketplace")}>
+                <Store className="mr-2 h-4 w-4" />
+                {t("chatView.openMarketplaceButton")}
               </Button>
             </CardContent>
           </Card>
