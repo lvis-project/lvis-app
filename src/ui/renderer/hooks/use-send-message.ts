@@ -47,6 +47,7 @@ export interface UseSendMessageDeps {
   setAttachments: Dispatch<SetStateAction<Attachment[]>>;
   llmVendor: Settings["llmVendor"];
   llmModel: Settings["llmModel"];
+  llmReadyWithoutApiKey: Settings["llmReadyWithoutApiKey"];
   onOpenSettings: (tab?: string) => void;
   setQuestion: Dispatch<SetStateAction<string>>;
   /**
@@ -86,7 +87,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
     appendUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
     setErrorWithThought, handleCompactCommand, sessionLoad, applyLoadedSession,
     refreshSessionId, refreshSessions, attachments, setAttachments,
-    llmVendor, llmModel, onOpenSettings, setQuestion, handleAskRef,
+    llmVendor, llmModel, llmReadyWithoutApiKey, onOpenSettings, setQuestion, handleAskRef,
   } = deps;
 
   const turnRequestRef = useRef(0);
@@ -149,7 +150,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
           return;
         }
       }
-      if (!(await checkApiKey())) {
+      if (!llmReadyWithoutApiKey && !(await checkApiKey())) {
         onOpenSettings("llm");
         return;
       }
@@ -260,6 +261,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       attachments,
       llmVendor,
       llmModel,
+      llmReadyWithoutApiKey,
       onOpenSettings,
       setAttachments,
       setQuestion,

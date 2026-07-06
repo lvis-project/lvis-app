@@ -6,9 +6,11 @@ import {
   LLM_VENDOR_DEFAULTS,
   LLM_VENDOR_MODEL_OPTIONS,
   MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS,
+  canUseLlmVendorWithoutApiKey,
   freshAllVendorBlocks,
   freshVendorBlocks,
   getLlmVendorSettings,
+  isApiKeyOptionalLlmVendor,
   isDefaultVisibleLLMVendor,
   isMarketplaceEligibleLLMVendor,
   isRetiredLlmModel,
@@ -118,6 +120,21 @@ describe("LLM vendor defaults", () => {
 
   it("offers the OpenRouter free router as an explicit selectable model", () => {
     expect(LLM_VENDOR_MODEL_OPTIONS.openrouter).toContain("openrouter/free");
+  });
+
+  it("marks only local or OpenAI-compatible endpoints as API-key optional", () => {
+    expect(isApiKeyOptionalLlmVendor("openai-compatible")).toBe(true);
+    expect(isApiKeyOptionalLlmVendor("litellm")).toBe(true);
+    expect(isApiKeyOptionalLlmVendor("ollama")).toBe(true);
+    expect(isApiKeyOptionalLlmVendor("lmstudio")).toBe(true);
+    expect(isApiKeyOptionalLlmVendor("openrouter")).toBe(false);
+    expect(isApiKeyOptionalLlmVendor("openai")).toBe(false);
+  });
+
+  it("requires a configured base URL before treating a provider as keyless-ready", () => {
+    expect(canUseLlmVendorWithoutApiKey("openai-compatible", { baseUrl: "http://localhost:8000/v1" })).toBe(true);
+    expect(canUseLlmVendorWithoutApiKey("openai-compatible", { baseUrl: "  " })).toBe(false);
+    expect(canUseLlmVendorWithoutApiKey("openrouter", { baseUrl: "https://openrouter.ai/api/v1" })).toBe(false);
   });
 
   it("does not offer gpt-4o in user-selectable LLM model options", () => {
