@@ -28,6 +28,8 @@ export interface ChatComposerDockProps {
   dockColumnClass: string;
   /** Empty work-mode conversation: visually lift the composer into the first screen. */
   centered?: boolean;
+  /** Keep center placement, but reduce lift when the transcript owns an empty-state card. */
+  centeredLift?: "default" | "compact";
   workflowApi: LvisApi;
   api: LvisApi;
   currentSessionId: string;
@@ -93,6 +95,7 @@ export interface ChatComposerDockProps {
 export function ChatComposerDock({
   dockColumnClass,
   centered = false,
+  centeredLift = "default",
   workflowApi,
   api,
   currentSessionId,
@@ -162,13 +165,20 @@ export function ChatComposerDock({
     return () => window.clearTimeout(timer);
   }, [centered]);
 
+  const centeredMarginClass = centered
+    ? centeredLift === "compact"
+      ? "mb-[clamp(1rem,5vh,4rem)]"
+      : "mb-[clamp(9rem,32vh,20rem)]"
+    : "mb-0";
+
   return (
     <div
       className={[
         "relative z-30 w-full max-w-full min-w-0 overflow-visible transition-[margin,transform] duration-300 ease-out motion-reduce:transition-none",
-        centered ? "mb-[clamp(9rem,32vh,20rem)]" : "mb-0",
+        centeredMarginClass,
       ].join(" ")}
       data-composer-placement={centered ? "center" : "bottom"}
+      data-composer-centered-lift={centered ? centeredLift : undefined}
     >
       <div className={dockColumnClass} data-testid="session-todo-dock">
         <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
