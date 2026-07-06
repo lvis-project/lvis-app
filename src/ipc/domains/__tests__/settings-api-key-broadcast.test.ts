@@ -181,6 +181,58 @@ describe("delete-api-key broadcast (MAJOR-3)", () => {
       expect(win.webContents.send).toHaveBeenCalledWith(SETTINGS.updated, snapshot);
     }
   });
+
+  it("deletes API keys for installed marketplace provider presets", async () => {
+    const deps = makeDeps([]);
+    deps.settingsService.get.mockImplementation((key?: string) => {
+      if (key === "marketplace") {
+        return {
+          installedProviderPresets: [{
+            providerId: "future-router",
+            label: "Future Router",
+            baseUrl: "https://future.example/v1",
+            defaultModel: "future/free",
+            modelOptions: ["future/free"],
+            requiresApiKey: true,
+          }],
+        };
+      }
+      if (key === "shortcuts") return {};
+      if (key === "system") return {};
+      return {
+        provider: "openai",
+        vendors: { "azure-foundry": { baseUrl: null } },
+      };
+    });
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke(
+      "lvis:settings:delete-api-key",
+      "marketplace-provider:future-router",
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(deps.settingsService.deleteSecret).toHaveBeenCalledWith(
+      "llm.marketplaceProvider.future-router.apiKey",
+    );
+  });
+
+  it("rejects API key deletion for uninstalled inactive marketplace provider presets", async () => {
+    const deps = makeDeps([]);
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke(
+      "lvis:settings:delete-api-key",
+      "marketplace-provider:ghost-router",
+    );
+
+    expect(result).toMatchObject({ ok: false, error: "unknown-provider" });
+    expect(deps.settingsService.deleteSecret).not.toHaveBeenCalled();
+  });
 });
 
 // ─── MAJOR-3: set/delete-web-api-key broadcast ────────────────────────
@@ -347,6 +399,82 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
 
     await invoke("lvis:settings:update", {
       llm: { vendors: { openai: { model: "gpt-5.4" } } },
+    });
+
+    expect(rewire).toHaveBeenCalledOnce();
+  });
+
+  it("calls rewireReviewerAgent when only the active marketplace provider preset changes", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const rewire = vi.fn();
+    const providerBlock = {
+      model: "shared/free",
+      baseUrl: "https://router.example/v1",
+    };
+    const prevLlm = {
+      provider: "openai-compatible",
+      marketplaceProviderPresetId: "router-a",
+      vendors: {
+        "openai-compatible": providerBlock,
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    const nextLlm = {
+      provider: "openai-compatible",
+      marketplaceProviderPresetId: "router-b",
+      vendors: {
+        "openai-compatible": providerBlock,
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    let llmReads = 0;
+    const baseDeps = makeDeps(windows);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        get: vi.fn((key: string) => {
+          if (key === "llm") {
+            llmReads += 1;
+            return llmReads === 1 ? prevLlm : nextLlm;
+          }
+          if (key === "marketplace") {
+            return {
+              cloudAllowPrivateNetwork: false,
+              installedProviderPresets: [
+                {
+                  providerId: "router-a",
+                  label: "Router A",
+                  baseUrl: "https://router.example/v1",
+                  defaultModel: "shared/free",
+                  modelOptions: ["shared/free"],
+                  requiresApiKey: true,
+                },
+                {
+                  providerId: "router-b",
+                  label: "Router B",
+                  baseUrl: "https://router.example/v1",
+                  defaultModel: "shared/free",
+                  modelOptions: ["shared/free"],
+                  requiresApiKey: true,
+                },
+              ],
+            };
+          }
+          if (key === "shortcuts") return { toggleWindow: null, enabled: false };
+          if (key === "system") return { launchAtStartup: false, launchMinimized: false };
+          return {};
+        }),
+        patch: vi.fn(async (p: unknown) => p),
+      },
+      rewireReviewerAgent: rewire,
+    };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:update", {
+      llm: { marketplaceProviderPresetId: "router-b" },
     });
 
     expect(rewire).toHaveBeenCalledOnce();

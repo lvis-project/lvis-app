@@ -76,7 +76,7 @@ describe("buildManifestValidator — SDK fallback (PR #894 B5)", () => {
 
   });
 
-  it("uses the SDK helper when it IS exported and already accepts workerId", async () => {
+  it("uses the SDK helper when it IS exported and already accepts host compatibility probes", async () => {
     // Build a minimal AJV-shaped helper so the host's `typeof === 'function'`
     // gate accepts it. The returned function is the production code path
     // — we assert the helper was invoked, not the warn.
@@ -102,8 +102,9 @@ describe("buildManifestValidator — SDK fallback (PR #894 B5)", () => {
 
     expect(compileManifestValidator).toHaveBeenCalledTimes(1);
     expect(validator({})).toBe(true);
-    // One call is the workerId capability probe, the second is this smoke call.
-    expect(sdkValidator).toHaveBeenCalledTimes(2);
+    // Two calls are capability probes (workerId + marketplace preset host
+    // secret), and the third is this smoke call.
+    expect(sdkValidator).toHaveBeenCalledTimes(3);
     // No missing-helper fallback warn — SDK helper is present.
     const warnedWithMissingHelperSignal = warnSpy.mock.calls.some((call) =>
       typeof call[0] === "string" && call[0].includes("does not export compileManifestValidator"),

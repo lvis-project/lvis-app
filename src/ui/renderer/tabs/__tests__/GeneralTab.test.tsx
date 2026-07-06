@@ -13,6 +13,7 @@ import { fireEvent, render, waitFor } from "@testing-library/react";
 import { GeneralTab } from "../GeneralTab.js";
 import type { LvisApi } from "../../types.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import { marketplaceProviderPresetSecretId } from "../../../../shared/marketplace-package-assets.js";
 
 const GENERAL_SETTINGS = {
   llm: { authMode: "manual", provider: "openai", vendors: {}, streamSmoothing: "none", fallbackChain: [] },
@@ -167,6 +168,36 @@ describe("GeneralTab", () => {
     await waitFor(() =>
       expect(queryByTestId("general-tab-logout-confirm")).toBeNull(),
     );
+  });
+
+  it("custom marketplace provider logout deletes the preset-scoped API key", async () => {
+    const presetId = "future-router";
+    const api = generalTabApi({
+      getSettings: vi.fn().mockResolvedValue({
+        ...GENERAL_SETTINGS,
+        llm: {
+          ...GENERAL_SETTINGS.llm,
+          provider: "openai-compatible",
+          marketplaceProviderPresetId: presetId,
+        },
+      }),
+    });
+    const onLogout = vi.fn();
+    const { findByTestId } = render(
+      <GeneralTab api={api} onNavigate={() => {}} onLogout={onLogout} onReactivateDemo={() => {}} />,
+    );
+    await findByTestId("general-tab-card-plugin");
+
+    fireEvent.click(await findByTestId("general-tab-logout"));
+    fireEvent.click(await findByTestId("general-tab-logout-confirm-button"));
+
+    await waitFor(() => {
+      expect(api.deleteApiKey).toHaveBeenCalledWith(
+        marketplaceProviderPresetSecretId(presetId),
+      );
+      expect(api.demo.clearDemo).toHaveBeenCalledTimes(1);
+      expect(onLogout).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("clearDemo 가 실패하면 onLogout 을 호출하지 않고 error 메시지를 노출", async () => {

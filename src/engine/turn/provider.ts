@@ -14,6 +14,7 @@ import {
   canUseLlmVendorWithoutApiKey,
   getLlmVendorSettings,
 } from "../../shared/llm-vendor-defaults.js";
+import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
 import type { AiProviderPingResult } from "../../shared/ai-provider-ping.js";
 import type { ConversationLoopDeps } from "./types.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
@@ -25,13 +26,31 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
     const llmSettings = deps.settingsService.get("llm");
     const vendor = llmSettings.provider;
     const block = getLlmVendorSettings(llmSettings.vendors, vendor);
-    const apiKey = deps.settingsService.getSecret(secretKeyFor(vendor));
+    const hasMarketplaceProviderPresetSelection =
+      vendor === "openai-compatible" && Boolean(llmSettings.marketplaceProviderPresetId);
+    const marketplaceProviderPreset = hasMarketplaceProviderPresetSelection
+      ? (deps.settingsService.get("marketplace").installedProviderPresets ?? [])
+        .find((preset) => preset.providerId === llmSettings.marketplaceProviderPresetId)
+      : undefined;
+    if (hasMarketplaceProviderPresetSelection && !marketplaceProviderPreset) {
+      return null;
+    }
+    const apiKey = deps.settingsService.getSecret(
+      marketplaceProviderPreset
+        ? marketplaceProviderPresetSecretKey(marketplaceProviderPreset.providerId)
+        : secretKeyFor(vendor),
+    );
+    const effectiveBaseUrl = marketplaceProviderPreset
+      ? marketplaceProviderPreset.baseUrl
+      : block.baseUrl;
 
     // Vertex AI uses service account / ADC — apiKey not required, but project is.
     // Self-hosted/local OpenAI-compatible endpoints can also run without an
     // API key when a baseUrl is configured.
     const isVertex = vendor === "vertex-ai";
-    const canUseWithoutApiKey = canUseLlmVendorWithoutApiKey(vendor, block);
+    const canUseWithoutApiKey = marketplaceProviderPreset
+      ? marketplaceProviderPreset.requiresApiKey === false && Boolean(effectiveBaseUrl?.trim())
+      : canUseLlmVendorWithoutApiKey(vendor, block);
     if (!apiKey && !isVertex && !canUseWithoutApiKey) {
       return null;
     }
@@ -55,12 +74,16 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
         // configured model; falls back to block.model when no override is set
         // (parent loops and sub-agents without a resolved profile model).
         model: deps.modelOverride ?? block.model,
-        ...(block.baseUrl ? { baseUrl: block.baseUrl } : {}),
+        ...(effectiveBaseUrl ? { baseUrl: effectiveBaseUrl } : {}),
         ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
         ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
       });
       const chain = llmSettings.fallbackChain
-        .filter((e) => e.provider && e.model)
+        .filter((e) =>
+          e.provider &&
+          e.model &&
+          !(marketplaceProviderPreset && e.provider === "openai-compatible")
+        )
         .map((entry) => {
           const fallbackBlock = getLlmVendorSettings(
             llmSettings.vendors,

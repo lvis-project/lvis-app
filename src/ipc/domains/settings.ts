@@ -18,6 +18,10 @@ import {
   isLLMVendor,
   isMarketplaceEligibleLLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
+import {
+  marketplaceProviderPresetIdFromSecretId,
+  marketplaceProviderPresetSecretKey,
+} from "../../shared/marketplace-package-assets.js";
 import type { LlmModelListRequest } from "../../shared/llm-model-list.js";
 import type { IpcDeps } from "../types.js";
 import type { LLMSettings, ShortcutSettings } from "../../data/settings-store.js";
@@ -82,6 +86,10 @@ function activeLlmIdentity(llm: LLMSettings): string {
   const block = llm.vendors?.[provider];
   return JSON.stringify({
     provider,
+    marketplaceProviderPresetId:
+      provider === "openai-compatible"
+        ? (llm.marketplaceProviderPresetId ?? null)
+        : null,
     model: block?.model ?? null,
     baseUrl: block?.baseUrl ?? null,
     vertexProject: block?.vertexProject ?? null,
@@ -95,6 +103,51 @@ function isProviderEnabledForSecrets(deps: IpcDeps, vendor: unknown): vendor is 
   const installedProviderIds =
     deps.settingsService.get("marketplace").installedProviderIds ?? [];
   return installedProviderIds.includes(vendor);
+}
+
+function isMarketplaceProviderPresetInstalled(deps: IpcDeps, providerId: string): boolean {
+  const installedProviderPresets =
+    deps.settingsService.get("marketplace").installedProviderPresets ?? [];
+  return installedProviderPresets.some((preset) => preset.providerId === providerId);
+}
+
+function llmSecretKeyForInput(deps: IpcDeps, vendor?: unknown): string | undefined {
+  if (typeof vendor === "string") {
+    const providerPresetId = marketplaceProviderPresetIdFromSecretId(vendor);
+    if (providerPresetId) {
+      return isMarketplaceProviderPresetInstalled(deps, providerPresetId)
+        ? marketplaceProviderPresetSecretKey(providerPresetId)
+        : undefined;
+    }
+    return isProviderEnabledForSecrets(deps, vendor)
+      ? `llm.apiKey.${vendor}`
+      : undefined;
+  }
+
+  const llm = deps.settingsService.get("llm");
+  if (llm.provider === "openai-compatible" && llm.marketplaceProviderPresetId) {
+    return isMarketplaceProviderPresetInstalled(deps, llm.marketplaceProviderPresetId)
+      ? marketplaceProviderPresetSecretKey(llm.marketplaceProviderPresetId)
+      : undefined;
+  }
+  return isProviderEnabledForSecrets(deps, llm.provider)
+    ? `llm.apiKey.${llm.provider}`
+    : undefined;
+}
+
+function llmSecretKeyForDeleteInput(deps: IpcDeps, vendor: unknown): string | undefined {
+  if (typeof vendor !== "string") return undefined;
+  const providerPresetId = marketplaceProviderPresetIdFromSecretId(vendor);
+  if (providerPresetId) {
+    const llm = deps.settingsService.get("llm");
+    const activePreset =
+      llm.provider === "openai-compatible" &&
+      llm.marketplaceProviderPresetId === providerPresetId;
+    return activePreset || isMarketplaceProviderPresetInstalled(deps, providerPresetId)
+      ? marketplaceProviderPresetSecretKey(providerPresetId)
+      : undefined;
+  }
+  return isLLMVendor(vendor) ? `llm.apiKey.${vendor}` : undefined;
 }
 
 export function registerSettingsHandlers(deps: IpcDeps): void {
@@ -252,14 +305,15 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.settings.setApiKey, async (e, vendor: string, apiKey: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.setApiKey, e); return UNAUTHORIZED_FRAME; }
-    if (!isProviderEnabledForSecrets(deps, vendor)) {
+    const secretKey = llmSecretKeyForInput(deps, vendor);
+    if (!secretKey) {
       return {
         ok: false,
         error: "provider-not-installed",
         message: "Install this marketplace provider before saving its API key.",
       };
     }
-    await settingsService.setSecret(`llm.apiKey.${vendor}`, apiKey);
+    await settingsService.setSecret(secretKey, apiKey);
     conversationLoop.refreshProvider();
     // MAJOR-2: rewire reviewer when provider key changes so cacheScope refreshes.
     deps.rewireReviewerAgent?.();
@@ -272,21 +326,21 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
 
   // read-only — sender guard optional
   ipcMain.handle(CHANNELS.settings.hasApiKey, (_e, vendor?: string) => {
-    const v = vendor ?? settingsService.get("llm").provider;
-    if (!isProviderEnabledForSecrets(deps, v)) return false;
-    return settingsService.getSecret(`llm.apiKey.${v}`) !== null;
+    const secretKey = llmSecretKeyForInput(deps, vendor);
+    return secretKey ? settingsService.getSecret(secretKey) !== null : false;
   });
 
   ipcMain.handle(CHANNELS.settings.deleteApiKey, async (e, vendor: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.deleteApiKey, e); return UNAUTHORIZED_FRAME; }
-    if (!isLLMVendor(vendor)) {
+    const secretKey = llmSecretKeyForDeleteInput(deps, vendor);
+    if (!secretKey) {
       return {
         ok: false,
         error: "unknown-provider",
         message: "Unknown LLM provider.",
       };
     }
-    await settingsService.deleteSecret(`llm.apiKey.${vendor}`);
+    await settingsService.deleteSecret(secretKey);
     conversationLoop.refreshProvider();
     // MAJOR-2: rewire reviewer when provider key is removed so cacheScope refreshes.
     deps.rewireReviewerAgent?.();
@@ -313,8 +367,11 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     const baseUrl = request && typeof request.baseUrl === "string"
       ? request.baseUrl
       : undefined;
+    const credentialScope = request && typeof request.credentialScope === "string"
+      ? request.credentialScope
+      : undefined;
     const { listLlmModelsFromSettings } = await import("../../engine/llm/model-list.js");
-    return listLlmModelsFromSettings(settingsService, { vendor, baseUrl });
+    return listLlmModelsFromSettings(settingsService, { vendor, baseUrl, credentialScope });
   });
 
   // ─── Marketplace API Key ──────────────────────
