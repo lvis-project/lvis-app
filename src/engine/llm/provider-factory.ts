@@ -46,19 +46,21 @@ class LazyVercelProvider implements LLMProvider {
           ? (cfg.baseUrl ?? COPILOT_BASE_URL)
           : cfg.baseUrl;
       this.innerP = loadAdapterModule()
-        .then(
-          ({ VercelUnifiedProvider }) =>
-            new VercelUnifiedProvider(
-              cfg.vendor,
-              cfg.apiKey,
-              baseUrl,
-              cfg.fetch,
-              {
-                vertexProject: cfg.vertexProject,
-                vertexLocation: cfg.vertexLocation,
-              },
-            ),
-        )
+        .then(({ VercelUnifiedProvider }) => {
+          const args = [
+            cfg.vendor,
+            cfg.apiKey,
+            baseUrl,
+            cfg.fetch,
+            {
+              vertexProject: cfg.vertexProject,
+              vertexLocation: cfg.vertexLocation,
+            },
+          ] as const;
+          return cfg.providerMetadata
+            ? new VercelUnifiedProvider(...args, cfg.providerMetadata)
+            : new VercelUnifiedProvider(...args);
+        })
         .catch((err) => {
           this.innerP = null;
           throw err;

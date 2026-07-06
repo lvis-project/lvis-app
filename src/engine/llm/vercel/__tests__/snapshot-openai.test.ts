@@ -619,6 +619,70 @@ describe("VercelUnifiedProvider openai-compatible", () => {
     vi.doUnmock("@ai-sdk/openai-compatible");
   });
 
+  it("prefers marketplace provider metadata baseUrl over the vendor block baseUrl", async () => {
+    vi.resetModules();
+    const compatFactory = vi.fn(() => ({ __mock: "marketplace-compat" }));
+    const createCompatSpy = vi.fn(() => compatFactory);
+
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return {
+        ...actual,
+        streamText: vi.fn(() => ({
+          stream: (async function* () {
+            yield { type: "text-delta", id: "t1", text: "ok" };
+            yield {
+              type: "finish",
+              finishReason: "stop",
+              totalUsage: { inputTokens: 1, outputTokens: 1 },
+            };
+          })(),
+        })),
+      };
+    });
+    vi.doMock("@ai-sdk/openai-compatible", () => ({
+      createOpenAICompatible: createCompatSpy,
+    }));
+
+    const providerMetadata = {
+      providerId: "future-router",
+      label: "Future Router",
+      baseUrl: "https://future.example/v1",
+      defaultModel: "future/free",
+      modelOptions: ["future/free"],
+      requiresApiKey: false,
+    };
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider(
+      "openai-compatible",
+      "",
+      "https://stale.example/v1",
+      undefined,
+      {},
+      providerMetadata,
+    );
+
+    await collect(
+      provider.streamTurn({
+        model: "future/free",
+        systemPrompt: "sys",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    );
+
+    expect(createCompatSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseURL: "https://future.example/v1",
+        apiKey: "",
+        name: "lvis-compat",
+      }),
+    );
+    expect(compatFactory).toHaveBeenCalledWith("future/free");
+
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/openai-compatible");
+  });
+
   it("routes Cline-style preset vendors through createOpenAICompatible", async () => {
     vi.resetModules();
     const compatFactory = vi.fn(() => ({ __mock: "openrouter" }));

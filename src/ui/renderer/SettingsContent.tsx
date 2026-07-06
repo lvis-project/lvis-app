@@ -38,7 +38,7 @@ import { LoginModal } from "./components/LoginModal.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
 import { useDebouncedSave } from "./hooks/use-debounced-save.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
-import type { MarketplacePackageType } from "../../shared/assistant-context.js";
+import type { MarketplacePackageFilter } from "../../shared/marketplace-package-sections.js";
 
 /**
  * Inline save bar rendered at the bottom of each tab that holds a
@@ -67,8 +67,6 @@ function TabSaveBar({
 }
 
 
-type MarketplaceFilter = "all" | MarketplacePackageType;
-
 // `./contexts/saved-toast.tsx` so PluginConfigTab can import the consumer
 // hook without forming a circular import with SettingsContent (which
 // itself imports PluginConfigTab in this file).
@@ -84,7 +82,7 @@ export function SettingsContent({
 }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState(() => normalizeSettingsTab(initialTab));
-  const [marketplaceFilter, setMarketplaceFilter] = useState<MarketplaceFilter>("all");
+  const [marketplaceFilter, setMarketplaceFilter] = useState<MarketplacePackageFilter>("all");
   const [pendingPermissions, setPendingPermissions] = useState(0);
 
   // the dialog. Tabs whose save runs through the orchestration hook hit
@@ -148,7 +146,7 @@ export function SettingsContent({
   const chatSave = useDebouncedSave(() => void s.save("chat"));
   const webSave = useDebouncedSave(() => void s.save("web"));
   const marketplaceSave = useDebouncedSave(() => void s.save("marketplace"));
-  const openMarketplaceTab = useCallback((filter: MarketplaceFilter = "all") => {
+  const openMarketplaceTab = useCallback((filter: MarketplacePackageFilter = "all") => {
     setMarketplaceFilter(filter);
     setTab("marketplace");
   }, []);
