@@ -27,5 +27,6 @@ export function fakeLlmSettings(overrides: {
     vendors,
     streamSmoothing: "none" as const,
     fallbackChain: [],
+    modelListCache: {},
   };
 }
