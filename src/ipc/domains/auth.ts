@@ -18,6 +18,7 @@ import {
 import { validateDemoFoundryHostMap } from "../../main/demo-host-resolver.js";
 import { validateFoundryEndpoint } from "../../permissions/reviewer/provider-adapters.js";
 import { LoginProgressEmitter } from "../../main/login-progress-emitter.js";
+import { isMarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { IpcDeps } from "../types.js";
 import type { LLMSettings } from "../../data/settings-store.js";
 
@@ -66,6 +67,22 @@ const DEFAULT_DEMO_PASS = "demo123";
  */
 export function demoKeyEnvVar(vendor: string): string {
   return `LVIS_DEMO_KEY_${vendor.toUpperCase().replace(/-/g, "_")}`;
+}
+
+function marketplaceInstallPatchForDemoVendor(
+  settingsService: IpcDeps["settingsService"],
+  vendor: string,
+) {
+  if (!isMarketplaceEligibleLLMVendor(vendor)) return {};
+  const installedProviderIds =
+    settingsService.get("marketplace").installedProviderIds ?? [];
+  return {
+    marketplace: {
+      installedProviderIds: installedProviderIds.includes(vendor)
+        ? installedProviderIds
+        : [...installedProviderIds, vendor],
+    },
+  };
 }
 
 export function registerAuthHandlers(deps: IpcDeps): void {
@@ -193,6 +210,7 @@ export function registerAuthHandlers(deps: IpcDeps): void {
       const apiKeySecretKey = `llm.apiKey.${vendor}`;
       const prevApiKey = settingsService.getSecret(apiKeySecretKey);
       const prevLlm = settingsService.get("llm");
+      const prevMarketplace = settingsService.get("marketplace");
       try {
         await progress.runStep(
           "llm-key-issuing",
@@ -222,6 +240,7 @@ export function registerAuthHandlers(deps: IpcDeps): void {
             // #893 — single combined patch: flip top-level authMode + provider
             // AND apply the active vendor's optional config block.
             await settingsService.patch({
+              ...marketplaceInstallPatchForDemoVendor(settingsService, vendor),
               llm: {
                 authMode: "login",
                 provider: vendor,
@@ -251,6 +270,19 @@ export function registerAuthHandlers(deps: IpcDeps): void {
           } else {
             await settingsService.setSecret(apiKeySecretKey, prevApiKey);
           }
+        } catch (rollbackErr) {
+          log.error(
+            `loginMockup secret rollback failed: ${(rollbackErr as Error).message}`,
+          );
+        }
+        try {
+          await settingsService.patch({ marketplace: prevMarketplace });
+        } catch (rollbackErr) {
+          log.error(
+            `loginMockup marketplace rollback failed: ${(rollbackErr as Error).message}`,
+          );
+        }
+        try {
           await settingsService.replaceLlm(prevLlm);
         } catch (rollbackErr) {
           // Rollback itself failed (e.g. Keychain unavailable). The
@@ -308,6 +340,13 @@ export function registerAuthHandlers(deps: IpcDeps): void {
         log.error(
           `loginMockup sandbox-preparing failed: ${(err as Error).message}`,
         );
+        try {
+          await settingsService.patch({ marketplace: prevMarketplace });
+        } catch (rollbackErr) {
+          log.error(
+            `loginMockup marketplace rollback failed: ${(rollbackErr as Error).message}`,
+          );
+        }
         try {
           await settingsService.replaceLlm(prevLlm);
         } catch (rollbackErr) {

@@ -1238,6 +1238,8 @@ export const zhMessages: Record<string, string> = {
   "formatIpcError.invalidText": "文本输入无效。",
   "formatIpcError.invalidValue": "无效值。",
   "formatIpcError.invalidVendor": "不支持该供应商。",
+  "formatIpcError.providerNotInstalled": "请先安装此市场提供商，然后再保存其 API 密钥。",
+  "formatIpcError.unknownProvider": "未知的 LLM 提供商。",
   "formatIpcError.invalidWebcontentsId": "无效的网页内容 ID。",
   "formatIpcError.lastMessageNotUser": "最后一条消息不是用户问题，因此生成无法继续。",
   "formatIpcError.llmKeyIssuingFailed": "保存 LLM 密钥时出错。请检查磁盘权限或钥匙串状态。",

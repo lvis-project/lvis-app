@@ -1238,6 +1238,8 @@ export const esMessages: Record<string, string> = {
   "formatIpcError.invalidText": "Entrada de texto no válida.",
   "formatIpcError.invalidValue": "Valor no válido.",
   "formatIpcError.invalidVendor": "El proveedor no es compatible.",
+  "formatIpcError.providerNotInstalled": "Instala este proveedor del marketplace antes de guardar su clave de API.",
+  "formatIpcError.unknownProvider": "Proveedor LLM desconocido.",
   "formatIpcError.invalidWebcontentsId": "ID de contenido web no válido.",
   "formatIpcError.lastMessageNotUser": "El último mensaje no es una pregunta del usuario, por lo que la generación no puede continuar.",
   "formatIpcError.llmKeyIssuingFailed": "Se produjo un error al guardar la clave LLM. Verifique los permisos del disco o el estado del llavero.",

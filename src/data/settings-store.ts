@@ -751,19 +751,35 @@ export class SettingsService {
   }
 
   async patch(
-    partial: Partial<Omit<AppSettings, "llm" | "shortcuts">> & {
+    partial: Partial<Omit<AppSettings, "llm" | "marketplace" | "shortcuts">> & {
+      marketplace?: Partial<MarketplaceSettings>;
       llm?: LLMSettingsPatch;
       shortcuts?: ShortcutSettingsPatch;
     },
   ): Promise<AppSettings> {
-    if (partial.llm) this.settings.llm = mergeLlmPatch(this.settings.llm, partial.llm);
+    const nextMarketplace = partial.marketplace
+      ? normalizeMarketplace({
+          ...this.settings.marketplace,
+          ...partial.marketplace,
+        })
+      : this.settings.marketplace;
+    if (partial.llm) {
+      this.settings.llm = mergeLlmPatch(
+        this.settings.llm,
+        partial.llm,
+        nextMarketplace.installedProviderIds,
+      );
+    }
     if (partial.chat) this.settings.chat = { ...this.settings.chat, ...partial.chat };
     if (partial.webSearch) this.settings.webSearch = { ...this.settings.webSearch, ...partial.webSearch };
     if (partial.marketplace) {
-      this.settings.marketplace = normalizeMarketplace({
-        ...this.settings.marketplace,
-        ...partial.marketplace,
-      });
+      this.settings.marketplace = nextMarketplace;
+      const prunedLlm = pruneLazyLlmVendorBlocks(
+        this.settings.llm,
+        nextMarketplace.installedProviderIds,
+        { inferInstalledFromCustom: false },
+      );
+      this.settings.llm = prunedLlm.llm;
     }
     if (partial.routine) {
       this.settings.routine = { ...this.settings.routine, ...partial.routine };
@@ -1112,7 +1128,11 @@ export class SettingsService {
       const raw = readFileSync(this.settingsPath, "utf-8");
       const parsed = JSON.parse(raw) as any;
       const migratedLlm = migrateLegacyLlmAuthMode(parsed.llm);
-      let llm = mergeLlmPatch(DEFAULT_SETTINGS.llm, migratedLlm);
+      let llm = mergeLlmPatch(
+        DEFAULT_SETTINGS.llm,
+        migratedLlm,
+        LLM_VENDORS.filter(isMarketplaceEligibleLLMVendor),
+      );
       const marketplaceParsed: Record<string, unknown> = { ...(parsed.marketplace ?? {}) };
       // Migration: the marketplace cloud fields were renamed (the old "real"
       // prefix became vestigial once the mock backend was removed). Preserve
@@ -1158,6 +1178,7 @@ export class SettingsService {
       const prunedLlm = pruneLazyLlmVendorBlocks(
         llm,
         marketplace.installedProviderIds,
+        { inferInstalledFromCustom: true },
       );
       llm = prunedLlm.llm;
       marketplace = {
@@ -1232,12 +1253,27 @@ export class SettingsService {
  * Unknown vendor ids in `partial.vendors` are ignored — the active provider
  * must be one of LLM_VENDORS, validated below.
  */
-function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSettings {
+function isLlmProviderEnabled(
+  vendor: LLMVendor,
+  installedProviderIds: readonly MarketplaceEligibleLLMVendor[],
+): boolean {
+  return (
+    !isMarketplaceEligibleLLMVendor(vendor) ||
+    installedProviderIds.includes(vendor)
+  );
+}
+
+function mergeLlmPatch(
+  base: LLMSettings,
+  partial: LLMSettingsPatch,
+  installedProviderIds: readonly MarketplaceEligibleLLMVendor[],
+): LLMSettings {
   const vendors: LLMVendorSettingsMap = { ...base.vendors };
   if (partial.vendors) {
     for (const [vendorId, incoming] of Object.entries(partial.vendors)) {
       if (!isLLMVendor(vendorId) || !incoming) continue;
       const v = vendorId;
+      if (!isLlmProviderEnabled(v, installedProviderIds)) continue;
       // Spread carries explicit `undefined` keys through (e.g. clearing `seed`).
       // Omitting a key from the patch leaves the previous value intact —
       // omit ≠ clear by design.
@@ -1261,20 +1297,26 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
   // base provider — `vendors[provider]` would otherwise be undefined and
   // crash refreshProvider/stream-collector at first turn. The type guard
   // narrows `partial.provider` so the assignment below is cast-free.
-  const provider: LLMVendor = isLLMVendor(partial.provider)
+  const requestedProvider: LLMVendor = isLLMVendor(partial.provider)
     ? partial.provider
     : base.provider;
+  const provider = isLlmProviderEnabled(requestedProvider, installedProviderIds)
+    ? requestedProvider
+    : DEFAULT_LLM_VENDOR;
   vendors[provider] = getLlmVendorSettings(vendors, provider);
   const authMode: "manual" | "login" =
     partial.authMode === "login" || partial.authMode === "manual"
       ? partial.authMode
       : base.authMode;
-  const fallbackChain = (partial.fallbackChain ?? base.fallbackChain).map((entry) => ({
-    ...entry,
-    model: isLLMVendor(entry.provider)
-      ? normalizeLlmVendorModel(entry.provider, entry.model)
-      : entry.model,
-  }));
+  const fallbackChain = (partial.fallbackChain ?? base.fallbackChain)
+    .filter((entry) =>
+      isLLMVendor(entry.provider) &&
+      isLlmProviderEnabled(entry.provider, installedProviderIds)
+    )
+    .map((entry) => ({
+      ...entry,
+      model: normalizeLlmVendorModel(entry.provider, entry.model),
+    }));
   return {
     authMode,
     provider,
@@ -1317,18 +1359,38 @@ function addUniqueMarketplaceProvider(
 function pruneLazyLlmVendorBlocks(
   llm: LLMSettings,
   installedProviderIds: MarketplaceEligibleLLMVendor[],
+  options: { inferInstalledFromCustom: boolean },
 ): {
   llm: LLMSettings;
   installedProviderIds: MarketplaceEligibleLLMVendor[];
 } {
-  const required = new Set<LLMVendor>(installedProviderIds);
-  required.add(llm.provider);
-  for (const entry of llm.fallbackChain) {
-    required.add(entry.provider);
-  }
-
   const vendors: LLMVendorSettingsMap = {};
   let inferredInstalledProviderIds = installedProviderIds;
+
+  if (options.inferInstalledFromCustom) {
+    for (const [vendorId, block] of Object.entries(llm.vendors)) {
+      if (!isLLMVendor(vendorId) || !block) continue;
+      if (!isMarketplaceEligibleLLMVendor(vendorId)) continue;
+      const normalized = getLlmVendorSettings({ [vendorId]: block }, vendorId);
+      if (!hasCustomLlmVendorSettings(vendorId, normalized)) continue;
+      inferredInstalledProviderIds = addUniqueMarketplaceProvider(
+        inferredInstalledProviderIds,
+        vendorId,
+      );
+    }
+  }
+
+  const provider = isLlmProviderEnabled(llm.provider, inferredInstalledProviderIds)
+    ? llm.provider
+    : DEFAULT_LLM_VENDOR;
+  const fallbackChain = llm.fallbackChain.filter((entry) =>
+    isLlmProviderEnabled(entry.provider, inferredInstalledProviderIds)
+  );
+  const required = new Set<LLMVendor>(inferredInstalledProviderIds);
+  required.add(provider);
+  for (const entry of fallbackChain) {
+    required.add(entry.provider);
+  }
 
   for (const [vendorId, block] of Object.entries(llm.vendors)) {
     if (!isLLMVendor(vendorId) || !block) continue;
@@ -1336,10 +1398,13 @@ function pruneLazyLlmVendorBlocks(
     const normalized = getLlmVendorSettings({ [vendor]: block }, vendor);
     const marketplaceOnly = isMarketplaceEligibleLLMVendor(vendor);
     const custom = hasCustomLlmVendorSettings(vendor, normalized);
-    const keep = !marketplaceOnly || required.has(vendor) || custom;
+    const keep =
+      !marketplaceOnly ||
+      required.has(vendor) ||
+      (options.inferInstalledFromCustom && custom);
     if (!keep) continue;
     vendors[vendor] = normalized;
-    if (marketplaceOnly && (required.has(vendor) || custom)) {
+    if (options.inferInstalledFromCustom && marketplaceOnly && custom) {
       inferredInstalledProviderIds = addUniqueMarketplaceProvider(
         inferredInstalledProviderIds,
         vendor,
@@ -1347,11 +1412,13 @@ function pruneLazyLlmVendorBlocks(
     }
   }
 
-  vendors[llm.provider] = getLlmVendorSettings(vendors, llm.provider);
+  vendors[provider] = getLlmVendorSettings(vendors, provider);
 
   return {
     llm: {
       ...llm,
+      provider,
+      fallbackChain,
       vendors,
     },
     installedProviderIds: inferredInstalledProviderIds,

@@ -1238,6 +1238,8 @@ export const deMessages: Record<string, string> = {
   "formatIpcError.invalidText": "Ungültige Texteingabe.",
   "formatIpcError.invalidValue": "Ungültiger Wert.",
   "formatIpcError.invalidVendor": "Der Anbieter wird nicht unterstützt.",
+  "formatIpcError.providerNotInstalled": "Installieren Sie diesen Marketplace-Anbieter, bevor Sie seinen API-Schlüssel speichern.",
+  "formatIpcError.unknownProvider": "Unbekannter LLM-Anbieter.",
   "formatIpcError.invalidWebcontentsId": "Ungültige WebContents-ID.",
   "formatIpcError.lastMessageNotUser": "Die letzte Nachricht ist keine Benutzerfrage, daher kann die Generierung nicht fortgesetzt werden.",
   "formatIpcError.llmKeyIssuingFailed": "Beim Speichern des LLM-Schlüssels ist ein Fehler aufgetreten. Bitte überprüfen Sie die Festplattenberechtigungen oder den Schlüsselbundstatus.",

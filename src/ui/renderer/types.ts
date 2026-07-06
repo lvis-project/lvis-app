@@ -566,7 +566,7 @@ export type LvisApi = {
      */
     activateOllama: () => Promise<
       | { ok: true; vendor: "ollama" }
-      | { ok: false; error: "no-ollama" | "unauthorized-frame" }
+      | { ok: false; error: "no-ollama" | "persist-failed" | "unauthorized-frame" }
     >;
     relaunchAfterActivation: () => Promise<
       | { ok: true }
