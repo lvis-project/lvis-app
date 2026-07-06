@@ -68,6 +68,19 @@ function isMarketplaceAssetPackage(item: MarketplaceItem): boolean {
   );
 }
 
+function isMarketplaceAssetPackageType(packageType: MarketplacePackageType): boolean {
+  return (
+    packageType === "provider" ||
+    packageType === "theme" ||
+    packageType === "language-pack"
+  );
+}
+
+function isUnsupportedMarketplaceAssetPackage(item: MarketplaceItem): boolean {
+  const packageType = item.pluginType ?? "plugin";
+  return isMarketplaceAssetPackageType(packageType) && !isMarketplaceAssetPackage(item);
+}
+
 function isMarketplaceAssetInstalled(
   item: MarketplaceItem,
   installed: MarketplaceAssetInstallState,
@@ -468,6 +481,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
             ) : visiblePackages.map((item) => {
               const packageType = item.pluginType ?? "plugin";
               const isWorking = workingSlug === item.id;
+              const unsupportedAssetPackage = isUnsupportedMarketplaceAssetPackage(item);
               const canInstall = isInstallablePackageType(packageType) || isMarketplaceAssetPackage(item);
               const canUninstall = item.installed && (
                 packageType === "plugin" ||
@@ -480,14 +494,18 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                 ? t("marketplaceTab.processingLabel")
                 : item.installed
                   ? t("marketplaceTab.removeButton")
+                  : unsupportedAssetPackage
+                    ? t("marketplaceTab.unsupportedAssetPackageButton")
                   : canInstall
                     ? t("marketplaceTab.installButton")
                     : t("marketplaceTab.comingSoon");
               const unavailableTitle = canInstall
                 ? undefined
-                : t("marketplaceTab.packageInstallUnavailableTitle", {
-                  label: PACKAGE_TYPE_LABELS[packageType],
-                });
+                : unsupportedAssetPackage
+                  ? t("marketplaceTab.unsupportedAssetPackageTitle")
+                  : t("marketplaceTab.packageInstallUnavailableTitle", {
+                    label: PACKAGE_TYPE_LABELS[packageType],
+                  });
               const trustLabelKeys = marketplaceTrustLabelKeys(item);
               return (
                 <div key={`${packageType}:${item.id}`} className="flex items-start justify-between gap-3 p-2">
@@ -499,6 +517,15 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                         <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">OAuth</Badge>
                       )}
                       {item.installed && <Badge variant="default" className="h-5 px-1.5 text-[10px]">{t("marketplaceTab.installedBadge")}</Badge>}
+                      {unsupportedAssetPackage && (
+                        <Badge
+                          variant="outline"
+                          className="h-5 px-1.5 text-[10px]"
+                          data-testid={`marketplace:unsupported-asset:${item.id}`}
+                        >
+                          {t("marketplaceTab.unsupportedAssetPackageBadge")}
+                        </Badge>
+                      )}
                     </div>
                     <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{item.description || item.packageSpec}</p>
                     {trustLabelKeys.length > 0 && (
