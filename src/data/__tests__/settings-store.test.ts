@@ -56,6 +56,7 @@ describe("SettingsService marketplace defaults", () => {
       cloudBaseUrl: "https://marketplace.lvisai.xyz",
       cloudAllowPrivateNetwork: false,
       installedProviderIds: [],
+      installedProviderPresets: [],
       installedThemeBundleIds: [],
       installedLanguagePacks: [],
     });
@@ -81,6 +82,7 @@ describe("SettingsService marketplace defaults", () => {
       cloudBaseUrl: "https://marketplace.lvis.local",
       cloudAllowPrivateNetwork: false,
       installedProviderIds: [],
+      installedProviderPresets: [],
       installedThemeBundleIds: [],
       installedLanguagePacks: [],
     });
@@ -101,6 +103,28 @@ describe("SettingsService marketplace defaults", () => {
             "tokyo-night",
           ],
           installedLanguagePacks: ["en", "ko", "it", "ko"],
+          installedProviderPresets: [
+            {
+              providerId: "future-router",
+              label: "Future Router",
+              baseUrl: "https://future.example/v1",
+              defaultModel: "future/free",
+              modelOptions: ["future/free", "future/pro"],
+              requiresApiKey: false,
+            },
+            {
+              providerId: "openai",
+              label: "Core collision",
+              baseUrl: "https://ignored.example/v1",
+              defaultModel: "ignored",
+            },
+            {
+              providerId: "future-router",
+              label: "Duplicate",
+              baseUrl: "https://duplicate.example/v1",
+              defaultModel: "duplicate",
+            },
+          ],
         },
       }),
       "utf-8",
@@ -109,6 +133,14 @@ describe("SettingsService marketplace defaults", () => {
     const service = new SettingsService({ userDataPath });
     expect(service.get("marketplace")).toMatchObject({
       installedProviderIds: ["groq"],
+      installedProviderPresets: [{
+        providerId: "future-router",
+        label: "Future Router",
+        baseUrl: "https://future.example/v1",
+        defaultModel: "future/free",
+        modelOptions: ["future/free", "future/pro"],
+        requiresApiKey: false,
+      }],
       installedThemeBundleIds: ["tokyo-night"],
       installedLanguagePacks: ["ko"],
     });
@@ -116,6 +148,16 @@ describe("SettingsService marketplace defaults", () => {
     await service.patch({
       marketplace: {
         installedProviderIds: ["ollama", "openai", "nope"] as never,
+        installedProviderPresets: [
+          {
+            providerId: "local-router",
+            label: "Local Router",
+            baseUrl: "http://localhost:8000/v1",
+            defaultModel: "local/free",
+            requiresApiKey: false,
+          },
+          { providerId: "bad router", label: "Bad", baseUrl: "http://localhost:8000/v1", defaultModel: "x" },
+        ],
         installedThemeBundleIds: ["high-contrast", "moonstone", "nope"] as never,
         installedLanguagePacks: ["ja", "en", "nope"] as never,
       },
@@ -123,6 +165,14 @@ describe("SettingsService marketplace defaults", () => {
 
     expect(service.get("marketplace")).toMatchObject({
       installedProviderIds: ["ollama"],
+      installedProviderPresets: [{
+        providerId: "local-router",
+        label: "Local Router",
+        baseUrl: "http://localhost:8000/v1",
+        defaultModel: "local/free",
+        modelOptions: ["local/free"],
+        requiresApiKey: false,
+      }],
       installedThemeBundleIds: ["high-contrast"],
       installedLanguagePacks: ["ja"],
     });

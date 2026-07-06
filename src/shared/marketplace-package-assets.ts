@@ -8,19 +8,197 @@ import {
 } from "./assistant-context.js";
 import {
   isMarketplaceEligibleLLMVendor,
-  type MarketplaceEligibleLLMVendor,
+  isLLMVendor,
 } from "./llm-vendor-defaults.js";
 import {
   isMarketplaceEligibleThemeBundleId,
   type MarketplaceEligibleThemeBundleId,
 } from "./theme-bundles.js";
 
+export interface MarketplaceProviderPackageAsset {
+  type: "provider";
+  providerId: string;
+  label?: string;
+  baseUrl?: string;
+  apiKeyPlaceholder?: string;
+  defaultModel?: string;
+  modelOptions?: string[];
+  requiresApiKey?: boolean;
+}
+
+export interface MarketplaceInstalledProviderPreset {
+  providerId: string;
+  label: string;
+  baseUrl: string;
+  apiKeyPlaceholder?: string;
+  defaultModel: string;
+  modelOptions: string[];
+  requiresApiKey: boolean;
+}
+
 export type MarketplacePackageAsset =
-  | { type: "provider"; providerId: MarketplaceEligibleLLMVendor }
+  | MarketplaceProviderPackageAsset
   | { type: "theme"; bundleId: MarketplaceEligibleThemeBundleId }
   | { type: "language-pack"; locale: MarketplaceEligibleLocale };
 
 export type MarketplacePackageAssetType = MarketplacePackageAsset["type"];
+
+const MARKETPLACE_PROVIDER_PRESET_SECRET_ID_PREFIX = "marketplace-provider:";
+const MARKETPLACE_PROVIDER_PRESET_SECRET_KEY_PREFIX = "llm.marketplaceProvider.";
+const MAX_PROVIDER_ID_LENGTH = 80;
+const MAX_PROVIDER_LABEL_LENGTH = 80;
+const MAX_PROVIDER_URL_LENGTH = 512;
+const MAX_PROVIDER_MODEL_LENGTH = 256;
+const MAX_PROVIDER_MODEL_OPTIONS = 100;
+
+export function isMarketplaceProviderPresetId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_PROVIDER_ID_LENGTH &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)
+  );
+}
+
+function normalizeProviderId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return isMarketplaceProviderPresetId(trimmed) ? trimmed : undefined;
+}
+
+function cleanString(value: unknown, maxLength: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > maxLength) return undefined;
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) return undefined;
+  return trimmed;
+}
+
+function cleanUrl(value: unknown): string | undefined {
+  const trimmed = cleanString(value, MAX_PROVIDER_URL_LENGTH);
+  if (!trimmed) return undefined;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    if (url.username || url.password) return undefined;
+    return trimmed;
+  } catch {
+    return undefined;
+  }
+}
+
+function cleanModelOptions(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const options: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    const model = cleanString(raw, MAX_PROVIDER_MODEL_LENGTH);
+    if (!model || seen.has(model)) continue;
+    seen.add(model);
+    options.push(model);
+    if (options.length >= MAX_PROVIDER_MODEL_OPTIONS) break;
+  }
+  return options;
+}
+
+function humanizeProviderId(providerId: string): string {
+  return providerId
+    .split(/[-_.]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ") || providerId;
+}
+
+function providerPresetFieldsFromRecord(
+  providerId: string,
+  record: Record<string, unknown>,
+): Omit<MarketplaceInstalledProviderPreset, "providerId"> | undefined {
+  const label = cleanString(
+    record.label ?? record.name ?? record.displayName ?? record.display_name ?? record.providerName ?? record.provider_name,
+    MAX_PROVIDER_LABEL_LENGTH,
+  ) ?? humanizeProviderId(providerId);
+  const baseUrl = cleanUrl(
+    record.baseUrl ?? record.base_url ?? record.endpoint ?? record.apiBaseUrl ?? record.api_base_url,
+  );
+  const modelOptions = cleanModelOptions(
+    record.modelOptions ?? record.model_options ?? record.models,
+  );
+  const defaultModel = cleanString(
+    record.defaultModel ?? record.default_model ?? record.model,
+    MAX_PROVIDER_MODEL_LENGTH,
+  ) ?? modelOptions[0];
+  if (!baseUrl || !defaultModel) return undefined;
+  const apiKeyPlaceholder = cleanString(
+    record.apiKeyPlaceholder ?? record.api_key_placeholder ?? record.keyPlaceholder ?? record.key_placeholder,
+    MAX_PROVIDER_LABEL_LENGTH,
+  );
+  const requiresApiKey =
+    typeof record.requiresApiKey === "boolean"
+      ? record.requiresApiKey
+      : typeof record.requires_api_key === "boolean"
+        ? record.requires_api_key
+        : typeof record.apiKeyRequired === "boolean"
+          ? record.apiKeyRequired
+          : typeof record.api_key_required === "boolean"
+            ? record.api_key_required
+            : true;
+  const normalizedOptions = modelOptions.includes(defaultModel)
+    ? modelOptions
+    : [defaultModel, ...modelOptions];
+  return {
+    label,
+    baseUrl,
+    ...(apiKeyPlaceholder ? { apiKeyPlaceholder } : {}),
+    defaultModel,
+    modelOptions: normalizedOptions,
+    requiresApiKey,
+  };
+}
+
+export function normalizeMarketplaceProviderPreset(
+  value: unknown,
+): MarketplaceInstalledProviderPreset | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const providerId = normalizeProviderId(
+    record.providerId ?? record.provider_id ?? record.id,
+  );
+  if (!providerId || isLLMVendor(providerId)) return undefined;
+  const fields = providerPresetFieldsFromRecord(providerId, record);
+  return fields ? { providerId, ...fields } : undefined;
+}
+
+export function marketplaceProviderPresetFromAsset(
+  asset: MarketplacePackageAsset | undefined,
+  fallbackLabel?: string,
+): MarketplaceInstalledProviderPreset | undefined {
+  if (!asset || asset.type !== "provider") return undefined;
+  if (isLLMVendor(asset.providerId)) return undefined;
+  return normalizeMarketplaceProviderPreset({
+    ...asset,
+    ...(fallbackLabel && !asset.label ? { label: fallbackLabel } : {}),
+  });
+}
+
+export function marketplaceProviderPresetSecretId(providerId: string): string {
+  return `${MARKETPLACE_PROVIDER_PRESET_SECRET_ID_PREFIX}${providerId}`;
+}
+
+export function marketplaceProviderPresetIdFromSecretId(
+  value: unknown,
+): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (!value.startsWith(MARKETPLACE_PROVIDER_PRESET_SECRET_ID_PREFIX)) {
+    return undefined;
+  }
+  return normalizeProviderId(
+    value.slice(MARKETPLACE_PROVIDER_PRESET_SECRET_ID_PREFIX.length),
+  );
+}
+
+export function marketplaceProviderPresetSecretKey(providerId: string): string {
+  return `${MARKETPLACE_PROVIDER_PRESET_SECRET_KEY_PREFIX}${providerId}.apiKey`;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -68,10 +246,20 @@ export function marketplacePackageSpecForAsset(
   return `language-pack:${asset.locale}`;
 }
 
-function providerAsset(providerId: unknown): MarketplacePackageAsset | undefined {
-  return isMarketplaceEligibleLLMVendor(providerId)
-    ? { type: "provider", providerId }
-    : undefined;
+function providerAsset(
+  providerId: unknown,
+  metadata?: Record<string, unknown>,
+): MarketplacePackageAsset | undefined {
+  const id = normalizeProviderId(providerId);
+  if (!id) return undefined;
+  if (isLLMVendor(id)) {
+    return isMarketplaceEligibleLLMVendor(id)
+      ? { type: "provider", providerId: id }
+      : undefined;
+  }
+  if (!metadata) return undefined;
+  const fields = providerPresetFieldsFromRecord(id, metadata);
+  return fields ? { type: "provider", providerId: id, ...fields } : undefined;
 }
 
 function themeAsset(bundleId: unknown): MarketplacePackageAsset | undefined {
@@ -103,6 +291,22 @@ export function assetFromMarketplacePackageSpec(
   if (type === "provider") return providerAsset(value);
   if (type === "theme") return themeAsset(value);
   return languagePackAsset(value);
+}
+
+function providerAssetFromMarketplacePackageSpec(
+  pluginType: MarketplacePackageType | undefined,
+  packageSpec: string,
+  metadata: Record<string, unknown>,
+): MarketplacePackageAsset | undefined {
+  const separatorIndex = packageSpec.indexOf(":");
+  if (separatorIndex <= 0) return undefined;
+  const prefix = packageSpec.slice(0, separatorIndex);
+  const value = packageSpec.slice(separatorIndex + 1);
+  const type = pluginType === undefined
+    ? normalizeAssetType(prefix)
+    : normalizeAssetType(pluginType);
+  if (type !== "provider" || prefix !== type) return undefined;
+  return providerAsset(value, metadata);
 }
 
 export function parseMarketplacePackageAsset(
@@ -137,8 +341,9 @@ export function parseMarketplacePackageAsset(
         "llm_vendor_id",
         "id",
       ]),
+      record,
     ) ?? (packageSpec
-      ? assetFromMarketplacePackageSpec(type, packageSpec)
+      ? providerAssetFromMarketplacePackageSpec(type, packageSpec, record)
       : undefined);
   }
   if (type === "theme") {
@@ -193,6 +398,7 @@ export function assetFromMarketplaceCatalogFields(
           "llmVendorId",
           "llm_vendor_id",
         ]),
+        fields,
       );
       if (fromFields) return fromFields;
     } else if (type === "theme") {
@@ -216,6 +422,15 @@ export function assetFromMarketplaceCatalogFields(
       );
       if (fromFields) return fromFields;
     }
+  }
+
+  if (type === "provider") {
+    const fromPackageSpec = providerAssetFromMarketplacePackageSpec(
+      pluginType,
+      packageSpec,
+      fields ?? {},
+    );
+    if (fromPackageSpec) return fromPackageSpec;
   }
 
   return assetFromMarketplacePackageSpec(pluginType, packageSpec);

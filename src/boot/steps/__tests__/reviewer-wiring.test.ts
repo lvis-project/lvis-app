@@ -126,7 +126,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
       },
     ]);
     const factorySpy = vi.fn((vendor: string) =>
-      vendor === "claude" ? provider : null,
+      vendor === "openai-compatible" ? provider : null,
     );
     const result = wireReviewerAgent({
       permissionManager: pm,
@@ -138,9 +138,10 @@ describe("Permission policy P4 reviewer-wiring", () => {
         interactive: { autoApprove: "off" },
       }),
       readActiveLlm: () => ({
-        provider: "claude",
-        model: "claude-sonnet-4-6",
-        baseUrl: "https://anthropic-proxy.example/v1",
+        provider: "openai-compatible",
+        marketplaceProviderPresetId: "future-router",
+        model: "future/free",
+        baseUrl: "https://future.example/v1",
       }),
       streamProviderFor: factorySpy,
       verdictCachePath: join(tmpDir, "cache-active-llm.jsonl"),
@@ -148,13 +149,15 @@ describe("Permission policy P4 reviewer-wiring", () => {
     });
 
     expect(result.appliedSettings.provider).toBe("openai");
-    expect(result.effectiveSettings.provider).toBe("claude");
-    expect(result.effectiveSettings.model).toBe("claude-sonnet-4-6");
-    expect(factorySpy).toHaveBeenCalledWith("claude");
+    expect(result.effectiveSettings.provider).toBe("openai-compatible");
+    expect(result.effectiveSettings.marketplaceProviderPresetId).toBe("future-router");
+    expect(result.effectiveSettings.model).toBe("future/free");
+    expect(factorySpy).toHaveBeenCalledWith("openai-compatible");
     const { cacheScope } = setReviewerSpy.mock.calls[0][0];
-    expect(cacheScope?.provider).toBe("claude");
-    expect(cacheScope?.model).toBe("claude-sonnet-4-6");
-    expect(cacheScope?.providerBaseUrl).toBe("https://anthropic-proxy.example/v1");
+    expect(cacheScope?.provider).toBe("openai-compatible");
+    expect(cacheScope?.marketplaceProviderPresetId).toBe("future-router");
+    expect(cacheScope?.model).toBe("future/free");
+    expect(cacheScope?.providerBaseUrl).toBe("https://future.example/v1");
   });
 
   it("mode=llm active cacheScope includes Vertex transport identity", () => {

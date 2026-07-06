@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
 import { ToolRegistry } from "../../tools/registry.js";
 
 describe("ConversationLoop LLM fetch wiring", () => {
@@ -141,6 +142,65 @@ describe("ConversationLoop LLM fetch wiring", () => {
         apiKey: "",
         model: "Qwen3.6-35B-A3B-NVFP4",
         baseUrl: "http://localhost:8000/v1",
+      }),
+    );
+  });
+
+  it("uses the selected marketplace provider preset key for OpenAI-compatible providers", async () => {
+    const createProvider = vi.fn(() => ({
+      vendor: "openai-compatible" as const,
+      streamTurn: async function* () {},
+    }));
+    vi.doMock("../llm/provider-factory.js", () => ({
+      createProvider,
+      secretKeyFor: (vendor: string) => `llm.apiKey.${vendor}`,
+    }));
+    const { ConversationLoop } = await import("../conversation-loop.js");
+
+    const toolRegistry = new ToolRegistry();
+    const settings = fakeLlmSettings({
+      provider: "openai-compatible",
+      model: "future/free",
+    });
+    settings.marketplaceProviderPresetId = "future-router";
+    settings.vendors["openai-compatible"].baseUrl = "https://future.example/v1";
+
+    new ConversationLoop(({
+      settingsService: {
+        get: (key: string) => {
+          if (key === "llm") return settings;
+          if (key === "marketplace") {
+            return {
+              installedProviderPresets: [{
+                providerId: "future-router",
+                label: "Future Router",
+                baseUrl: "https://future.example/v1",
+                defaultModel: "future/free",
+                modelOptions: ["future/free"],
+                requiresApiKey: true,
+              }],
+            };
+          }
+          throw new Error(`unexpected settings key: ${key}`);
+        },
+        getSecret: (key: string) =>
+          key === marketplaceProviderPresetSecretKey("future-router")
+            ? "fr-secret"
+            : null,
+      },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+
+    expect(createProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vendor: "openai-compatible",
+        apiKey: "fr-secret",
+        model: "future/free",
+        baseUrl: "https://future.example/v1",
       }),
     );
   });
