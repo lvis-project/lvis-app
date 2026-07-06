@@ -424,6 +424,9 @@ describe("LlmTab — top-level login toggle UI", () => {
 
     expect(await screen.findByText("openrouter/free")).toBeInTheDocument();
     expect(screen.getByText("google/gemini-2.5-flash:free")).toBeInTheDocument();
+    expect(screen.getAllByText("무료")).toHaveLength(2);
+    expect(screen.getAllByText(/속도 제한.*사용 가능 여부/))
+      .toHaveLength(2);
     await waitFor(() =>
       expect(api.updateSettings).toHaveBeenCalledWith({
         llm: {

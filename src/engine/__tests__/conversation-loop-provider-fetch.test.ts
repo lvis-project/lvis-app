@@ -187,6 +187,8 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
                 defaultModel: "future/free",
                 modelOptions: ["future/free"],
                 requiresApiKey: true,
+                modelDiscoveryPolicy: "models-api",
+                capabilities: { streaming: true, toolCalls: true },
               }],
             };
           }
@@ -210,6 +212,12 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
         apiKey: "fr-secret",
         model: "future/free",
         baseUrl: "https://future.example/v1",
+        providerMetadata: expect.objectContaining({
+          providerId: "future-router",
+          baseUrl: "https://future.example/v1",
+          modelDiscoveryPolicy: "models-api",
+          capabilities: { streaming: true, toolCalls: true },
+        }),
       }),
     );
   });
