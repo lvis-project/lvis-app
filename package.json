@@ -8,7 +8,19 @@
     "#hooks/*": "./src/hooks/*.ts",
     "#lib/*": "./src/lib/*.ts"
   },
-  "description": "Test Electron host app for LVIS plugins.",
+  "description": "Extensible Electron desktop agent workspace for LVIS chat, plugin workflows, local indexing, meetings, MS Graph, and managed marketplace extensions.",
+  "keywords": [
+    "lvis",
+    "electron",
+    "desktop-agent",
+    "ai-agent",
+    "plugin-runtime",
+    "marketplace",
+    "local-indexing",
+    "meetings",
+    "ms-graph",
+    "work-assistant"
+  ],
   "homepage": "https://github.com/lvis-project/lvis-app",
   "author": {
     "name": "Ken Jo",
