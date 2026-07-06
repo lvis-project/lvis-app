@@ -8,7 +8,11 @@ import {
   isLLMVendor,
   type LLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
-import { ensurePublicHttpUrl } from "../../core/network-guard.js";
+import {
+  ensurePublicHttpUrl,
+  fetchPublicHttpResponse,
+  NetworkGuardError,
+} from "../../core/network-guard.js";
 import { secretKeyFor } from "./provider-factory.js";
 
 const DEFAULT_TIMEOUT_MS = 8_000;
@@ -23,6 +27,7 @@ const STANDARD_MODEL_LIST_BASE_URLS: Partial<Record<LLMVendor, string>> = {
 
 export type LlmModelListFetchOptions = {
   fetchImpl?: typeof fetch;
+  fetchPublicHttpResponseImpl?: typeof fetchPublicHttpResponse;
   timeoutMs?: number;
   maxResponseBytes?: number;
   ensurePublicUrl?: typeof ensurePublicHttpUrl;
@@ -283,26 +288,28 @@ export async function listLlmModelsFromSettings(
   const headers: Record<string, string> = { Accept: "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-  );
+  let requestEndpoint = endpoint;
   try {
-    if (resolved.isDraftEndpoint) {
-      await (options.ensurePublicUrl ?? ensurePublicHttpUrl)(endpoint);
-    }
-    const response = await (options.fetchImpl ?? fetch)(endpoint, {
+    // Model-list sync intentionally sends a user/provider-configured LLM URL
+    // to the network. Validate every stored or draft endpoint through the same
+    // DNS-aware SSRF guard before the request wrapper revalidates redirect hops.
+    requestEndpoint = (await (options.ensurePublicUrl ?? ensurePublicHttpUrl)(
+      endpoint,
+    )).toString();
+    const response = await (
+      options.fetchPublicHttpResponseImpl ?? fetchPublicHttpResponse
+    )(requestEndpoint, {
       method: "GET",
       headers,
-      ...(resolved.isDraftEndpoint ? { redirect: "manual" as const } : {}),
-      signal: controller.signal,
+      fetchImpl: options.fetchImpl,
+      maxRedirects: 0,
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     });
     if (!response.ok) {
       return {
         ok: false,
         error: "model-list-fetch-failed",
-        endpoint,
+        endpoint: requestEndpoint,
         status: response.status,
         message: `Model list request failed with HTTP ${response.status}.`,
       };
@@ -324,7 +331,7 @@ export async function listLlmModelsFromSettings(
     return {
       ok: true,
       vendor: request.vendor,
-      endpoint,
+      endpoint: requestEndpoint,
       models: parseStandardModelListResponse(payload),
       fetchedAt: new Date().toISOString(),
     };
@@ -332,10 +339,18 @@ export async function listLlmModelsFromSettings(
     if (err instanceof ModelListError) {
       return { ok: false, error: err.code, endpoint, message: err.message };
     }
+    if (err instanceof NetworkGuardError) {
+      return {
+        ok: false,
+        error: "invalid-model-list-endpoint",
+        endpoint,
+        message: err.message,
+      };
+    }
     return {
       ok: false,
       error: "model-list-fetch-failed",
-      endpoint,
+      endpoint: requestEndpoint,
       message:
         err instanceof Error && err.name === "AbortError"
           ? "Model list request timed out."
@@ -343,7 +358,5 @@ export async function listLlmModelsFromSettings(
             ? err.message
             : String(err),
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }
