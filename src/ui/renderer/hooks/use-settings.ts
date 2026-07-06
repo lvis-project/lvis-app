@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
 import {
+  canUseLlmVendorWithoutApiKey,
   DEFAULT_LLM_VENDOR,
   getLlmVendorSettings,
   isLLMVendor,
@@ -34,6 +35,8 @@ export interface UseSettingsResult {
   llmModel: string;
   /** Cached `enableThinking` flag for the active vendor. */
   enableThinkingChat: boolean;
+  /** True when the active vendor can run with no stored API key. */
+  llmReadyWithoutApiKey: boolean;
   /** One-shot snapshot of {provider, model} used for context overflow %. */
   currentLlmSettings: { provider: LLMVendor; model: string } | null;
   /** Re-read settings from disk (call after SettingsContent save). */
@@ -46,6 +49,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
   const [llmVendor, setLlmVendor] = useState<LLMVendor>(DEFAULT_LLM_VENDOR);
   const [llmModel, setLlmModel] = useState<string>("");
   const [enableThinkingChat, setEnableThinkingChat] = useState<boolean>(true);
+  const [llmReadyWithoutApiKey, setLlmReadyWithoutApiKey] = useState(false);
   const [currentLlmSettings, setCurrentLlmSettings] = useState<
     { provider: LLMVendor; model: string } | null
   >(null);
@@ -72,6 +76,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
       setLlmVendor(provider);
       setLlmModel(block.model);
       setEnableThinkingChat(block.enableThinking);
+      setLlmReadyWithoutApiKey(canUseLlmVendorWithoutApiKey(provider, block));
     } catch {
       /* ignore */
     }
@@ -88,6 +93,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
         setLlmVendor(provider);
         setLlmModel(block.model);
         setEnableThinkingChat(block.enableThinking);
+        setLlmReadyWithoutApiKey(canUseLlmVendorWithoutApiKey(provider, block));
         setCurrentLlmSettings({ provider, model: block.model });
       })
       .catch(() => {});
@@ -120,6 +126,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
     llmVendor,
     llmModel,
     enableThinkingChat,
+    llmReadyWithoutApiKey,
     currentLlmSettings,
     refresh,
     toggleThinking,
