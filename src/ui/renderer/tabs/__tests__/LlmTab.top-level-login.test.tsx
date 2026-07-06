@@ -32,6 +32,7 @@ function Harness({
   initialHostResolverMap = "",
   loadedHostResolverMap = "",
   initialVendor = "openai",
+  initialBaseUrl = "",
   settingsLoaded = true,
   api,
   onOpenMarketplace,
@@ -40,6 +41,7 @@ function Harness({
   initialHostResolverMap?: string;
   loadedHostResolverMap?: string;
   initialVendor?: string;
+  initialBaseUrl?: string;
   settingsLoaded?: boolean;
   api?: HarnessApi;
   onOpenMarketplace?: () => void;
@@ -48,7 +50,7 @@ function Harness({
   const [vendor, setVendor] = useState(initialVendor);
   const [keyInput, setKeyInput] = useState("");
   const [model, setModel] = useState("gpt-5.4-mini");
-  const [baseUrl, setBaseUrl] = useState("");
+  const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [vertexProject, setVertexProject] = useState("");
   const [vertexLocation, setVertexLocation] = useState("");
   const [hasKey, setHasKey] = useState(false);
@@ -275,6 +277,34 @@ describe("LlmTab — top-level login toggle UI", () => {
     });
     expect(api.listLlmModels).not.toHaveBeenCalled();
     expect(screen.queryByTestId("llm-tab:model-sync")).toBeNull();
+  });
+
+  it("syncs model ids from the configured provider base URL", async () => {
+    const api = llmTabApi();
+    (api.listLlmModels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      vendor: "openai-compatible",
+      endpoint: "https://router.example.com/v1/models",
+      models: ["router/free-model"],
+      fetchedAt: "2026-07-06T00:00:00.000Z",
+    });
+
+    render(
+      <Harness
+        initialAuthMode="manual"
+        initialVendor="openai-compatible"
+        initialBaseUrl="https://router.example.com/v1"
+        api={api}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(api.listLlmModels).toHaveBeenCalledWith({
+        vendor: "openai-compatible",
+        baseUrl: "https://router.example.com/v1",
+      }),
+    );
+    expect(screen.getByTestId("llm-tab:model-sync-status").textContent).toContain("1");
   });
 
   it("host-resolver map textarea is disabled in login mode", () => {
