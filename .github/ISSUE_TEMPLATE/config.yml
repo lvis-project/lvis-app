@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: LVIS documentation
+    url: https://github.com/lvis-project/lvis-app/tree/main/docs
+    about: Check architecture, development, release, and plugin documentation before opening an issue.

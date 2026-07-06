@@ -1,0 +1,94 @@
+name: Bug report
+description: Report a reproducible LVIS App defect.
+title: "fix: "
+labels:
+  - bug
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for reproducible app, plugin host, IPC, packaging, or desktop runtime defects.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What broke, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest workflow that reproduces the issue.
+      placeholder: |
+        1. Launch LVIS with ...
+        2. Install or enable ...
+        3. Click or run ...
+        4. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Include errors, logs, screenshots, or crash output when available.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: Describe the correct behavior.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Chat / conversation loop
+        - Plugin runtime / marketplace
+        - Local Indexer / retrieval
+        - Meeting / MS Graph / work assistant
+        - IPC / preload / permissions
+        - UI / theme / localization
+        - Packaging / installer / updater
+        - Tests / CI / tooling
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version or commit
+      placeholder: "0.4.5, commit SHA, or branch name"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS Apple Silicon
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation already tried
+      description: Commands, smoke tests, or manual checks you already ran.
+      placeholder: |
+        - bun run typecheck
+        - bun run test
+        - bun run build
+        - bun run test:electron-smoke
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Plugin list, marketplace state, environment variables, or related PRs/issues.

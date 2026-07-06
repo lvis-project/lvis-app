@@ -1,0 +1,59 @@
+name: Feature request
+description: Propose a product, plugin, workflow, or developer-experience improvement.
+title: "feat: "
+labels:
+  - enhancement
+  - needs-triage
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or developer problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the desired behavior or API shape.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Chat / conversation loop
+        - Plugin runtime / marketplace
+        - Local Indexer / retrieval
+        - Meeting / MS Graph / work assistant
+        - IPC / preload / permissions
+        - UI / theme / localization
+        - Packaging / installer / updater
+        - Tests / CI / tooling
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: Success criteria
+      description: How should reviewers know the work is complete?
+      placeholder: |
+        - User can ...
+        - Existing plugin compatibility is preserved.
+        - Validation includes ...
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and risks
+      description: Permissions, side effects, compatibility, migration, packaging, or localization concerns.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing workflows or smaller changes that might solve the same problem.

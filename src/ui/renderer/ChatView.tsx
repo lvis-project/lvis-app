@@ -171,16 +171,19 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     () => viewMode ? entries.slice(0, viewMode.slicedRangeEnd) : entries,
     [entries, viewMode],
   );
-  // Empty-state centered composer applies only when the active provider is
-  // usable. If an API key is required, the no-key card lives in the transcript
-  // and the disabled composer stays bottom-docked so the surfaces cannot overlap.
+  // Empty-state centered composer applies once the boot key/readiness probe has
+  // resolved, including the no-key state. That keeps the new-session project
+  // selector and composer lift consistent while the no-key card remains in the
+  // transcript flow instead of an absolute overlay.
   const emptyComposerCentered =
     appMode === "work" &&
     hasAskQuestions === false &&
     visibleEntries.length === 0 &&
-    hasApiKey === true &&
+    hasApiKey !== null &&
     !suggestedRepliesActive &&
     viewMode === null;
+  const centeredComposerLift =
+    emptyComposerCentered && hasApiKey === false ? "compact" : "default";
   const dockColumnClass = emptyComposerCentered
     ? "mx-auto w-full max-w-[58rem] min-w-0"
     : blogLayout
@@ -732,6 +735,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       <ChatComposerDock
         dockColumnClass={dockColumnClass}
         centered={emptyComposerCentered}
+        centeredLift={centeredComposerLift}
         workflowApi={workflowApi}
         api={api}
         currentSessionId={currentSessionId}
