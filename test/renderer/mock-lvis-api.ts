@@ -227,6 +227,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     setApiKey: vi.fn(async () => ({ ok: true })),
     hasApiKey: vi.fn(async () => hasApiKey),
     deleteApiKey: vi.fn(async () => ({ ok: true })),
+    listLlmModels: vi.fn(async () => ({
+      ok: false,
+      error: "model-list-not-supported",
+    })),
     setWebApiKey: vi.fn(async () => ({ ok: true })),
     hasWebApiKey: vi.fn(async () => false),
     deleteWebApiKey: vi.fn(async () => ({ ok: true })),

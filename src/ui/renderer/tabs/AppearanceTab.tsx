@@ -17,6 +17,8 @@
  * The external URL section (§B1 webView policy) is preserved verbatim.
  */
 import { useEffect, useRef, useState } from "react";
+import { Store } from "lucide-react";
+import { Button } from "../../../components/ui/button.js";
 import { useTheme } from "../theme/index.js";
 import { VIOLET_PAIR_IDS, visibleBundlesFor } from "../theme/index.js";
 import type { ThemeBundle } from "../theme/index.js";
@@ -29,6 +31,7 @@ import { LOCALE_INFO, visibleLocalesFor } from "../../../i18n/index.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 type WebViewPreferredFlow = "in-app" | "system-browser";
+type AppearanceMarketplaceFilter = "theme" | "language-pack";
 
 /* ─── Bundle card mini-mock helpers ─────────────────────────────────────── */
 
@@ -440,8 +443,10 @@ function FontFamilyCustomInput({
  */
 function LanguageSection({
   installedLocaleIds,
+  onOpenMarketplace,
 }: {
   installedLocaleIds: readonly string[];
+  onOpenMarketplace?: (filter: AppearanceMarketplaceFilter) => void;
 }) {
   const { locale, setLocale, t } = useTranslation();
   const notifySaved = useNotifySaved();
@@ -450,6 +455,19 @@ function LanguageSection({
     <SettingsSection
       title={t("settings.appearance.language.title")}
       description={t("settings.appearance.language.description")}
+      actions={onOpenMarketplace ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1.5 text-xs"
+          data-testid="appearance-tab:marketplace-languages"
+          onClick={() => onOpenMarketplace("language-pack")}
+        >
+          <Store className="size-3.5" aria-hidden={true} />
+          {t("appearanceTab.moreLanguagesInMarketplace")}
+        </Button>
+      ) : null}
     >
       <div role="radiogroup" aria-label={t("settings.appearance.language.title")} className="flex flex-wrap gap-2">
         {visibleLocales.map((code) => {
@@ -482,7 +500,7 @@ function LanguageSection({
   );
 }
 
-export function AppearanceTab() {
+export function AppearanceTab({ onOpenMarketplace }: { onOpenMarketplace?: (filter: AppearanceMarketplaceFilter) => void } = {}) {
   const { t } = useTranslation();
   const { bundleId, setBundle, followSystem, setFollowSystem } = useTheme();
   const { flow: webViewFlow, setFlow: setWebViewFlow } = useWebViewPreferredFlow();
@@ -513,12 +531,25 @@ export function AppearanceTab() {
       />
 
       {/* ── Language ──────────────────────────────────── */}
-      <LanguageSection installedLocaleIds={marketplaceAssets.languagePacks} />
+      <LanguageSection installedLocaleIds={marketplaceAssets.languagePacks} onOpenMarketplace={onOpenMarketplace} />
 
       {/* ── 테마 선택 ─────────────────────────────────── */}
       <SettingsSection
         title={t("appearanceTab.themeSectionTitle")}
         description={t("appearanceTab.themeSectionDescription")}
+        actions={onOpenMarketplace ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1.5 text-xs"
+            data-testid="appearance-tab:marketplace-themes"
+            onClick={() => onOpenMarketplace("theme")}
+          >
+            <Store className="size-3.5" aria-hidden={true} />
+            {t("appearanceTab.moreThemesInMarketplace")}
+          </Button>
+        ) : null}
       >
         <div
           role="radiogroup"

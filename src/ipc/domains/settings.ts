@@ -18,6 +18,7 @@ import {
   isLLMVendor,
   isMarketplaceEligibleLLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
+import type { LlmModelListRequest } from "../../shared/llm-model-list.js";
 import type { IpcDeps } from "../types.js";
 import type { LLMSettings, ShortcutSettings } from "../../data/settings-store.js";
 
@@ -293,6 +294,27 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     deps.refreshActiveLlmWildcard?.();
     await broadcastSettingsSnapshot(deps);
     return { ok: true };
+  });
+
+  ipcMain.handle(CHANNELS.settings.listLlmModels, async (e, request: LlmModelListRequest) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.listLlmModels, e); return UNAUTHORIZED_FRAME; }
+    const vendor = request && typeof request.vendor === "string"
+      ? request.vendor
+      : settingsService.get("llm").provider;
+    if (!isProviderEnabledForSecrets(deps, vendor)) {
+      return {
+        ok: false,
+        error: isLLMVendor(vendor) ? "provider-not-installed" : "invalid-provider",
+        message: isLLMVendor(vendor)
+          ? "Install this marketplace provider before syncing its models."
+          : "Unknown LLM provider.",
+      };
+    }
+    const baseUrl = request && typeof request.baseUrl === "string"
+      ? request.baseUrl
+      : undefined;
+    const { listLlmModelsFromSettings } = await import("../../engine/llm/model-list.js");
+    return listLlmModelsFromSettings(settingsService, { vendor, baseUrl });
   });
 
   // ─── Marketplace API Key ──────────────────────

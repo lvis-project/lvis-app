@@ -126,6 +126,7 @@ export interface MarketplaceTabProps {
    *  the explicit URL / API key Save buttons (200ms after the React state
    *  update commits, so the save reads fresh values). */
   onImmediateChange?: () => void;
+  initialFilter?: "all" | MarketplacePackageType;
 }
 
 export function MarketplaceTab(props: MarketplaceTabProps) {
@@ -142,13 +143,17 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     setApiKeyInput,
     onSaved,
     onImmediateChange,
+    initialFilter = "all",
   } = props;
   const [packages, setPackages] = useState<MarketplaceItem[]>([]);
   const [packageStatus, setPackageStatus] = useState(() => t("marketplaceTab.statusLoading"));
-  const [filter, setFilter] = useState<"all" | MarketplacePackageType>("all");
+  const [filter, setFilter] = useState<"all" | MarketplacePackageType>(initialFilter);
   const [workingSlug, setWorkingSlug] = useState<string | null>(null);
   // #1098/#1279 — plugin installs that need explicit pre-install disclosure.
   const [installDialogTarget, setInstallDialogTarget] = useState<MarketplaceItem | null>(null);
+  useEffect(() => {
+    setFilter(initialFilter);
+  }, [initialFilter]);
 
 
   // the parent setter (and marketplace endpoint switchover) fire when Save
