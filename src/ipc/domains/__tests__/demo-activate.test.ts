@@ -1006,6 +1006,7 @@ describe("lvis:demo:activate-ollama (#1498)", () => {
       "ollama",
     );
     expect(deps.settingsService.patch).toHaveBeenCalledWith({
+      marketplace: { installedProviderIds: ["ollama"] },
       llm: {
         authMode: "login",
         provider: "ollama",
@@ -1051,6 +1052,42 @@ describe("lvis:demo:activate-ollama (#1498)", () => {
 
     // Same predicate as the lvis:settings:has-api-key handler.
     expect(deps.settingsService.getSecret("llm.apiKey.ollama")).not.toBeNull();
+  });
+
+  it("rolls back secret, marketplace, and LLM state when activation persistence fails", async () => {
+    const { demoMod, ollamaProbeMod } = await loadDemoModule();
+    ollamaProbeMod._setOllamaAvailableOverrideForTest(true);
+    const deps = makeAuthLoginMockupDeps();
+    const prevLlm = {
+      provider: "openai",
+      vendors: { openai: { model: "gpt-4o" } },
+      fallbackChain: [],
+    };
+    const prevMarketplace = {
+      backend: "real-cloud",
+      cloudBaseUrl: "https://marketplace.lvisai.xyz",
+      cloudAllowPrivateNetwork: false,
+      installedProviderIds: ["groq"],
+      installedThemeBundleIds: [],
+      installedLanguagePacks: [],
+    };
+    deps.settingsService.get.mockImplementation((key?: string) => {
+      if (key === "marketplace") return prevMarketplace;
+      return prevLlm;
+    });
+    deps.settingsService.patch.mockRejectedValueOnce(new Error("disk full"));
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:activate-ollama");
+
+    expect(result).toEqual({ ok: false, error: "persist-failed" });
+    expect(deps.settingsService.deleteSecret).toHaveBeenCalledWith("llm.apiKey.ollama");
+    expect(deps.settingsService.patch).toHaveBeenCalledWith({
+      marketplace: prevMarketplace,
+    });
+    expect(deps.settingsService.replaceLlm).toHaveBeenCalledWith(prevLlm);
+    expect(deps.conversationLoop.refreshProvider).not.toHaveBeenCalled();
+    expect(deps.rewireReviewerAgent).not.toHaveBeenCalled();
   });
 
   it("skips the sandbox network refresh when the probe fails closed", async () => {

@@ -1238,6 +1238,8 @@ export const jaMessages: Record<string, string> = {
   "formatIpcError.invalidText": "無効なテキスト入力です。",
   "formatIpcError.invalidValue": "無効な値です。",
   "formatIpcError.invalidVendor": "ベンダーはサポートされていません。",
+  "formatIpcError.providerNotInstalled": "このマーケットプレイスプロバイダーをインストールしてから API キーを保存してください。",
+  "formatIpcError.unknownProvider": "不明な LLM プロバイダーです。",
   "formatIpcError.invalidWebcontentsId": "無効な webContents ID。",
   "formatIpcError.lastMessageNotUser": "最後のメッセージはユーザーの質問ではないため、生成を続行できません。",
   "formatIpcError.llmKeyIssuingFailed": "LLM キーの保存中にエラーが発生しました。ディスクのアクセス許可またはキーチェーンのステータスを確認してください。",
