@@ -28,6 +28,7 @@ import {
   freshAllVendorBlocks,
   getLlmVendorSettings,
 } from "../../shared/llm-vendor-defaults.js";
+import { llmModelListCacheKey } from "../../shared/llm-model-list.js";
 
 describe("SettingsService marketplace defaults", () => {
   let userDataPath: string;
@@ -421,6 +422,52 @@ describe("SettingsService LLM per-vendor patching", () => {
     expect(llm.vendors.groq).toBeUndefined();
     expect(llm.vendors.ollama).toBeUndefined();
     expect(service.get("marketplace").installedProviderIds).toEqual([]);
+  });
+
+  it("persists model list cache and prunes uninstalled marketplace provider caches", async () => {
+    const service = new SettingsService({ userDataPath });
+
+    await service.patch({
+      marketplace: { installedProviderIds: ["groq"] },
+      llm: {
+        modelListCache: {
+          [llmModelListCacheKey("openrouter")]: {
+            vendor: "openrouter",
+            endpoint: "https://openrouter.ai/api/v1/models",
+            models: ["openrouter/free", "openai/gpt-5.4"],
+            fetchedAt: "2026-07-06T00:00:00.000Z",
+          },
+          [llmModelListCacheKey("groq")]: {
+            vendor: "groq",
+            endpoint: "https://api.groq.com/openai/v1/models",
+            models: ["llama-3.3-70b-versatile"],
+            fetchedAt: "2026-07-06T00:00:00.000Z",
+          },
+          malformed: {
+            vendor: "openrouter",
+            endpoint: "file:///tmp/models.json",
+            models: ["bad"],
+            fetchedAt: "2026-07-06T00:00:00.000Z",
+          },
+        },
+      },
+    });
+
+    expect(Object.keys(service.get("llm").modelListCache).sort()).toEqual([
+      llmModelListCacheKey("groq"),
+      llmModelListCacheKey("openrouter"),
+    ].sort());
+
+    await service.patch({ marketplace: { installedProviderIds: [] } });
+
+    expect(service.get("llm").modelListCache).toEqual({
+      [llmModelListCacheKey("openrouter")]: {
+        vendor: "openrouter",
+        endpoint: "https://openrouter.ai/api/v1/models",
+        models: ["openrouter/free", "openai/gpt-5.4"],
+        fetchedAt: "2026-07-06T00:00:00.000Z",
+      },
+    });
   });
 
   it("allows installed marketplace providers and removes them durably on uninstall", async () => {

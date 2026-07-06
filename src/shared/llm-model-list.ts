@@ -8,6 +8,24 @@ export type LlmModelListRequest = {
   baseUrl?: string;
 };
 
+export const MAX_LLM_MODEL_LIST_CACHE_ENTRIES = 48;
+export const MAX_CACHED_LLM_MODEL_IDS = 2_000;
+export const MAX_CACHED_LLM_MODEL_ID_LENGTH = 256;
+
+export type LlmModelListCacheEntry = {
+  vendor: string;
+  baseUrl?: string;
+  endpoint: string;
+  models: string[];
+  fetchedAt: string;
+};
+
+export type LlmModelListCache = Record<string, LlmModelListCacheEntry>;
+
+export function llmModelListCacheKey(vendor: string, baseUrl?: string): string {
+  return `${vendor.trim()}\n${baseUrl?.trim() ?? ""}`;
+}
+
 export type LlmModelListError =
   | "invalid-provider"
   | "provider-not-installed"

@@ -30,6 +30,7 @@ function makeSettingsService(overrides: {
         },
         streamSmoothing: "none",
         fallbackChain: [],
+        modelListCache: {},
       };
     }),
     getSecret: vi.fn(() => secret),

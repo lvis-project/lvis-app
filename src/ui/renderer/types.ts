@@ -9,6 +9,7 @@ import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { BundleId } from "../../shared/theme-bundles.js";
+import type { LlmModelListCache } from "../../shared/llm-model-list.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { RolePreset } from "../../data/role-presets.js";
 import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
@@ -186,6 +187,7 @@ export type AppSettings = {
     vendors: Record<string, LLMVendorSettingsRenderer>;
     streamSmoothing: "none" | "word" | "char";
     fallbackChain: Array<{ provider: string; model: string }>;
+    modelListCache?: LlmModelListCache;
     /** Manual-mode Chromium host-resolver map (persisted /etc/hosts-style text). */
     hostResolverMap?: string;
   };

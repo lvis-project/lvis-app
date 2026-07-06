@@ -50,6 +50,14 @@ import {
 import { DEFAULT_APP_MODE, normalizeAppMode, type InitialAppMode } from "../shared/initial-app-mode.js";
 import { DEFAULT_SIDEBAR_TAB, isSidebarTab, type SidebarTab } from "../shared/sidebar-tab.js";
 import {
+  MAX_CACHED_LLM_MODEL_ID_LENGTH,
+  MAX_CACHED_LLM_MODEL_IDS,
+  MAX_LLM_MODEL_LIST_CACHE_ENTRIES,
+  llmModelListCacheKey,
+  type LlmModelListCache,
+  type LlmModelListCacheEntry,
+} from "../shared/llm-model-list.js";
+import {
   normalizeAccelerator,
   normalizeShortcuts,
   type ShortcutSettings,
@@ -114,6 +122,13 @@ export interface LLMSettings {
   streamSmoothing: "none" | "word" | "char";
   fallbackChain: Array<{ provider: LLMVendor; model: string }>;
   /**
+   * Last successful standard `/models` sync per provider/baseUrl. This keeps
+   * router catalogs (OpenRouter/free tiers, local gateways, OpenAI-compatible
+   * endpoints) from collapsing back to the small built-in seed list after a
+   * settings remount or offline restart.
+   */
+  modelListCache: LlmModelListCache;
+  /**
    * Manual-mode Chromium host-resolver map. Persisted as /etc/hosts-style
    * text (one "IP hostname" entry per line; blank lines and # comments
    * ignored). Applied via Chromium `host-resolver-rules` command-line switch
@@ -139,6 +154,7 @@ export interface LLMSettingsPatch {
   vendors?: Partial<Record<LLMVendor, Partial<LLMVendorSettings>>>;
   streamSmoothing?: "none" | "word" | "char";
   fallbackChain?: Array<{ provider: LLMVendor; model: string }>;
+  modelListCache?: LlmModelListCache;
   hostResolverMap?: string;
 }
 
@@ -577,6 +593,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     vendors: freshVendorBlocks(),
     streamSmoothing: "none",
     fallbackChain: [],
+    modelListCache: {},
   },
   chat: {
     systemPrompt:
@@ -1263,6 +1280,76 @@ function isLlmProviderEnabled(
   );
 }
 
+function isValidCachedModelId(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const id = value.trim();
+  return (
+    id.length > 0 &&
+    id.length <= MAX_CACHED_LLM_MODEL_ID_LENGTH &&
+    !/[\u0000-\u001f\u007f]/.test(id)
+  );
+}
+
+function normalizeCachedModelIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const models: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    if (!isValidCachedModelId(raw)) continue;
+    const model = raw.trim();
+    if (seen.has(model)) continue;
+    seen.add(model);
+    models.push(model);
+    if (models.length >= MAX_CACHED_LLM_MODEL_IDS) break;
+  }
+  return models;
+}
+
+function isValidModelListUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value.trim());
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      !url.username &&
+      !url.password
+    );
+  } catch {
+    return false;
+  }
+}
+
+function normalizeLlmModelListCache(
+  input: unknown,
+  installedProviderIds: readonly MarketplaceEligibleLLMVendor[],
+): LlmModelListCache {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const result: LlmModelListCache = {};
+  for (const value of Object.values(input as Record<string, unknown>)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const entry = value as Partial<LlmModelListCacheEntry>;
+    if (!isLLMVendor(entry.vendor)) continue;
+    if (!isLlmProviderEnabled(entry.vendor, installedProviderIds)) continue;
+    if (!isValidModelListUrl(entry.endpoint)) continue;
+    const models = normalizeCachedModelIds(entry.models);
+    if (models.length === 0) continue;
+    const baseUrl = typeof entry.baseUrl === "string" ? entry.baseUrl.trim() : "";
+    const fetchedAt = typeof entry.fetchedAt === "string" && entry.fetchedAt.trim()
+      ? entry.fetchedAt.trim()
+      : new Date(0).toISOString();
+    const key = llmModelListCacheKey(entry.vendor, baseUrl);
+    result[key] = {
+      vendor: entry.vendor,
+      ...(baseUrl ? { baseUrl } : {}),
+      endpoint: entry.endpoint.trim(),
+      models,
+      fetchedAt,
+    };
+    if (Object.keys(result).length >= MAX_LLM_MODEL_LIST_CACHE_ENTRIES) break;
+  }
+  return result;
+}
+
 function mergeLlmPatch(
   base: LLMSettings,
   partial: LLMSettingsPatch,
@@ -1323,6 +1410,10 @@ function mergeLlmPatch(
     vendors,
     streamSmoothing: partial.streamSmoothing ?? base.streamSmoothing,
     fallbackChain,
+    modelListCache: normalizeLlmModelListCache(
+      "modelListCache" in partial ? partial.modelListCache : base.modelListCache,
+      installedProviderIds,
+    ),
     // `undefined` means "no mapping"; an explicit empty string clears the map.
     hostResolverMap: "hostResolverMap" in partial ? partial.hostResolverMap : base.hostResolverMap,
   };
@@ -1420,6 +1511,10 @@ function pruneLazyLlmVendorBlocks(
       provider,
       fallbackChain,
       vendors,
+      modelListCache: normalizeLlmModelListCache(
+        llm.modelListCache,
+        inferredInstalledProviderIds,
+      ),
     },
     installedProviderIds: inferredInstalledProviderIds,
   };

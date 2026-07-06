@@ -35,6 +35,11 @@ import {
 } from "../constants.js";
 import { parseHostResolverMap } from "../../../shared/host-resolver-map.js";
 import { isRetiredLlmModel } from "../../../shared/llm-vendor-defaults.js";
+import {
+  llmModelListCacheKey,
+  type LlmModelListCache,
+  type LlmModelListCacheEntry,
+} from "../../../shared/llm-model-list.js";
 import type { LvisApi } from "../types.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
@@ -55,9 +60,28 @@ const VENDOR_SELECT_MAX_HEIGHT = "max-h-[386px]";
 const MODEL_LIST_SYNC_DEBOUNCE_MS = 350;
 
 type ModelListState =
-  | { status: "loading" }
-  | { status: "ready"; options: string[]; endpoint: string; fetchedAt: string }
-  | { status: "error"; error: string };
+  | {
+      status: "loading";
+      options?: string[];
+      endpoint?: string;
+      fetchedAt?: string;
+      source?: "cache" | "network";
+    }
+  | {
+      status: "ready";
+      options: string[];
+      endpoint: string;
+      fetchedAt: string;
+      source?: "cache" | "network";
+    }
+  | {
+      status: "error";
+      error: string;
+      options?: string[];
+      endpoint?: string;
+      fetchedAt?: string;
+      source?: "cache" | "network";
+    };
 
 interface ProviderSelectProps {
   value: string;
@@ -314,10 +338,6 @@ function getVendorInfo(vendorId: string): VendorOption {
   return getVendorOption(vendorId);
 }
 
-function modelListCacheKey(vendorId: string, baseUrl?: string): string {
-  return `${vendorId}\n${baseUrl?.trim() ?? ""}`;
-}
-
 function shouldSyncModelList(
   vendorId: string,
   info: VendorOption,
@@ -350,6 +370,52 @@ function modelOptionsFor(
   }
 
   return options;
+}
+
+function modelListStateFromCacheEntry(entry: LlmModelListCacheEntry): ModelListState {
+  return {
+    status: "ready",
+    options: entry.models,
+    endpoint: entry.endpoint,
+    fetchedAt: entry.fetchedAt,
+    source: "cache",
+  };
+}
+
+function modelListStatesFromCache(cache?: LlmModelListCache): Record<string, ModelListState> {
+  if (!cache) return {};
+  const states: Record<string, ModelListState> = {};
+  for (const [key, entry] of Object.entries(cache)) {
+    if (!entry.models.length) continue;
+    states[key] = modelListStateFromCacheEntry(entry);
+  }
+  return states;
+}
+
+function optionsFromModelListState(state: ModelListState | undefined): readonly string[] | undefined {
+  return state?.options && state.options.length > 0 ? state.options : undefined;
+}
+
+function hasUsableModelListOptions(state: ModelListState | undefined): boolean {
+  return Boolean(optionsFromModelListState(state));
+}
+
+function reconcileModelListStatesWithCache(
+  current: Record<string, ModelListState>,
+  cachedStates: Record<string, ModelListState>,
+): Record<string, ModelListState> {
+  const next: Record<string, ModelListState> = {};
+  for (const [key, state] of Object.entries(current)) {
+    if (state.source === "cache" && !(key in cachedStates)) continue;
+    next[key] = state;
+  }
+  for (const [key, state] of Object.entries(cachedStates)) {
+    const currentState = current[key];
+    next[key] = currentState && currentState.source !== "cache" && hasUsableModelListOptions(currentState)
+      ? currentState
+      : state;
+  }
+  return next;
 }
 
 export function LlmTab(props: LlmTabProps) {
@@ -409,6 +475,7 @@ export function LlmTab(props: LlmTabProps) {
   const [marketplaceProviderIds, setMarketplaceProviderIds] = useState<readonly string[]>([]);
   const [modelLists, setModelLists] = useState<Record<string, ModelListState>>({});
   const modelListsRef = useRef<Record<string, ModelListState>>({});
+  const modelListCacheRef = useRef<LlmModelListCache>({});
   const setModelListState = useCallback((key: string, state: ModelListState) => {
     setModelLists((current) => {
       const next = { ...current, [key]: state };
@@ -422,63 +489,103 @@ export function LlmTab(props: LlmTabProps) {
       const providerInfo = getVendorInfo(provider);
       const baseUrl = options.baseUrl?.trim() ?? "";
       if (!shouldSyncModelList(provider, providerInfo, baseUrl)) return;
-      const key = modelListCacheKey(provider, baseUrl);
+      const key = llmModelListCacheKey(provider, baseUrl);
+      const existing = modelListsRef.current[key];
+      const persistedCacheHasKey = Object.prototype.hasOwnProperty.call(
+        modelListCacheRef.current,
+        key,
+      );
       if (!options.force) {
-        const existing = modelListsRef.current[key];
-        if (existing) return;
+        if (existing && existing.source !== "cache" && persistedCacheHasKey) return;
       }
-      setModelListState(key, { status: "loading" });
+      setModelListState(key, existing?.options
+        ? { ...existing, status: "loading" }
+        : { status: "loading" });
       try {
         const result = await api.listLlmModels({
           vendor: provider,
           ...(baseUrl ? { baseUrl } : {}),
         });
         if (result.ok) {
+          const nextEntry: LlmModelListCacheEntry = {
+            vendor: result.vendor,
+            ...(baseUrl ? { baseUrl } : {}),
+            endpoint: result.endpoint,
+            models: result.models,
+            fetchedAt: result.fetchedAt,
+          };
+          const nextCache = {
+            ...modelListCacheRef.current,
+            [key]: nextEntry,
+          };
+          modelListCacheRef.current = nextCache;
           setModelListState(key, {
             status: "ready",
             options: result.models,
             endpoint: result.endpoint,
             fetchedAt: result.fetchedAt,
+            source: "network",
+          });
+          void api.updateSettings({ llm: { modelListCache: nextCache } }).catch(() => {
+            /* cache persistence is best-effort; synced options remain usable */
           });
         } else {
+          const latest = modelListsRef.current[key] ?? existing;
           setModelListState(key, {
             status: "error",
             error: result.message ?? result.error,
+            options: latest?.options,
+            endpoint: latest?.endpoint,
+            fetchedAt: latest?.fetchedAt,
+            source: latest?.source,
           });
         }
       } catch (err) {
+        const latest = modelListsRef.current[key] ?? existing;
         setModelListState(key, {
           status: "error",
           error: err instanceof Error ? err.message : String(err),
+          options: latest?.options,
+          endpoint: latest?.endpoint,
+          fetchedAt: latest?.fetchedAt,
+          source: latest?.source,
         });
       }
     },
     [api, setModelListState, settingsLoaded],
   );
   const activeModelListBaseUrl = baseUrl.trim();
-  const activeModelListKey = modelListCacheKey(vendor, activeModelListBaseUrl);
+  const activeModelListKey = llmModelListCacheKey(vendor, activeModelListBaseUrl);
   const activeModelList = modelLists[activeModelListKey];
   const activeModelOptions = modelOptionsFor(
     vendor,
     activeModelValue,
-    activeModelList?.status === "ready" ? activeModelList.options : undefined,
+    optionsFromModelListState(activeModelList),
   );
   const isLoginMode = authMode === "login";
   useEffect(() => {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
-    const applyProviderIds = (settings: Awaited<ReturnType<LvisApi["getSettings"]>>) => {
+    const applySettings = (settings: Awaited<ReturnType<LvisApi["getSettings"]>>) => {
       const ids = settings.marketplace?.installedProviderIds;
       setMarketplaceProviderIds(Array.isArray(ids) ? ids : []);
+      const cache = settings.llm?.modelListCache ?? {};
+      modelListCacheRef.current = cache;
+      const cachedStates = modelListStatesFromCache(cache);
+      setModelLists((current) => {
+        const next = reconcileModelListStatesWithCache(current, cachedStates);
+        modelListsRef.current = next;
+        return next;
+      });
     };
     void (async () => {
       try {
         const settings = await api.getSettings();
         if (cancelled) return;
-        applyProviderIds(settings);
+        applySettings(settings);
         unsubscribe = api.onSettingsUpdated((nextSettings) => {
           if (cancelled) return;
-          applyProviderIds(nextSettings);
+          applySettings(nextSettings);
         });
       } catch {
         /* defaults remain */
@@ -1072,13 +1179,11 @@ export function LlmTab(props: LlmTabProps) {
                 const fallbackModelValue = trimmedFallbackModel && !isRetiredLlmModel(trimmedFallbackModel)
                   ? trimmedFallbackModel
                   : fallbackVendorInfo.defaultModel;
-                const fallbackModelList = modelLists[modelListCacheKey(entry.provider)];
+                const fallbackModelList = modelLists[llmModelListCacheKey(entry.provider)];
                 const fallbackModelOptions = modelOptionsFor(
                   entry.provider,
                   fallbackModelValue,
-                  fallbackModelList?.status === "ready"
-                    ? fallbackModelList.options
-                    : undefined,
+                  optionsFromModelListState(fallbackModelList),
                 );
                 return (
                   <div key={idx} className="flex gap-2">
