@@ -94,10 +94,16 @@ function BundleMock({ bundle }: { bundle: ThemeBundle }) {
 interface BundleCardProps {
   bundle: ThemeBundle;
   selected: boolean;
+  marketplaceInstalled?: boolean;
   onSelect: () => void;
 }
 
-function BundleCard({ bundle, selected, onSelect }: BundleCardProps) {
+function BundleCard({
+  bundle,
+  selected,
+  marketplaceInstalled = false,
+  onSelect,
+}: BundleCardProps) {
   const { t } = useTranslation();
   return (
     <button
@@ -120,7 +126,15 @@ function BundleCard({ bundle, selected, onSelect }: BundleCardProps) {
         <BundleMock bundle={bundle} />
       </div>
       <div className="lvis-theme-card-label">
-        <span>{bundle.name}</span>
+        <span className="min-w-0 truncate">{bundle.name}</span>
+        {marketplaceInstalled && (
+          <span
+            className="inline-flex h-5 shrink-0 items-center rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground"
+            data-testid={`appearance-tab:theme-marketplace-badge:${bundle.id}`}
+          >
+            {t("appearanceTab.marketplaceInstalledBadge")}
+          </span>
+        )}
         <span className="lvis-theme-card-checkmark" aria-hidden="true">✓</span>
       </div>
     </button>
@@ -451,6 +465,7 @@ function LanguageSection({
   const { locale, setLocale, t } = useTranslation();
   const notifySaved = useNotifySaved();
   const visibleLocales = visibleLocalesFor([locale, ...installedLocaleIds]);
+  const installedLocaleIdSet = new Set(installedLocaleIds);
   return (
     <SettingsSection
       title={t("settings.appearance.language.title")}
@@ -479,6 +494,7 @@ function LanguageSection({
               role="radio"
               aria-checked={selected}
               data-testid={`language-option-${code}`}
+              data-marketplace-installed={installedLocaleIdSet.has(code) ? "true" : "false"}
               onClick={() => {
                 if (!selected) {
                   setLocale(code);
@@ -491,7 +507,15 @@ function LanguageSection({
                   : "border-border text-muted-foreground hover:bg-muted"
               }`}
             >
-              {LOCALE_INFO[code].nativeName}
+              <span>{LOCALE_INFO[code].nativeName}</span>
+              {installedLocaleIdSet.has(code) && (
+                <span
+                  className="ml-2 inline-flex h-5 items-center rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground"
+                  data-testid={`appearance-tab:language-marketplace-badge:${code}`}
+                >
+                  {t("appearanceTab.marketplaceInstalledBadge")}
+                </span>
+              )}
             </button>
           );
         })}
@@ -520,6 +544,7 @@ export function AppearanceTab({ onOpenMarketplace }: { onOpenMarketplace?: (filt
     bundleId,
     ...marketplaceAssets.themeBundleIds,
   ]);
+  const marketplaceThemeBundleIdSet = new Set(marketplaceAssets.themeBundleIds);
   const activePreset = presetForStack(family);
   const customStack = activePreset === "custom" ? family : "";
 
@@ -561,6 +586,7 @@ export function AppearanceTab({ onOpenMarketplace }: { onOpenMarketplace?: (filt
               key={bundle.id}
               bundle={bundle}
               selected={bundleId === bundle.id}
+              marketplaceInstalled={marketplaceThemeBundleIdSet.has(bundle.id)}
               onSelect={() => selectBundle(bundle.id)}
             />
           ))}

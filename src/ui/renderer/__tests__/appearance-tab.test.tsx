@@ -99,6 +99,12 @@ describe("AppearanceTab — bundle card grid", () => {
 
     expect(getByRole("radio", { name: /테마: Tokyo Night/ })).toBeTruthy();
     expect(getByTestId("language-option-ko")).toBeTruthy();
+    expect(getByTestId("appearance-tab:theme-marketplace-badge:tokyo-night"))
+      .toHaveTextContent("마켓플레이스");
+    expect(getByTestId("language-option-ko"))
+      .toHaveAttribute("data-marketplace-installed", "true");
+    expect(getByTestId("appearance-tab:language-marketplace-badge:ko"))
+      .toHaveTextContent("마켓플레이스");
   });
 
 
