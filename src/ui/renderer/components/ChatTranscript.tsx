@@ -1,6 +1,9 @@
 import type React from "react";
 import type { RefObject } from "react";
+import { KeyRound } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
+import { Button } from "../../../components/ui/button.js";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { SkillBadge, type SkillBadgeProps } from "./SkillBadge.js";
 import { SubAgentCard, type SubAgentSpawn } from "./SubAgentCard.js";
@@ -17,6 +20,7 @@ export interface ChatTranscriptProps {
   suggestedRepliesActive: boolean;
   transcriptEntries: React.ReactNode;
   chatEndRef: RefObject<HTMLDivElement | null>;
+  onOpenSettings: (tab?: string) => void;
 }
 
 /**
@@ -36,6 +40,7 @@ export function ChatTranscript({
   suggestedRepliesActive,
   transcriptEntries,
   chatEndRef,
+  onOpenSettings,
 }: ChatTranscriptProps) {
   const { t } = useTranslation();
   return (
@@ -65,6 +70,23 @@ export function ChatTranscript({
       {visibleEntries.length === 0 && hasApiKey === true && !hasAskQuestions && !suggestedRepliesActive && (
         <div className="sr-only">
           {t("chatView.emptyState")}
+        </div>
+      )}
+      {visibleEntries.length === 0 && hasApiKey === false && !hasAskQuestions && !suggestedRepliesActive && (
+        <div className="flex min-h-[min(18rem,45vh)] items-center justify-center px-2">
+          <Card data-testid="chat-view:no-api-key-card" className="w-full max-w-[400px]">
+            <CardHeader className="p-4 pb-2 text-center">
+              <KeyRound className="mx-auto mb-1 h-8 w-8 text-muted-foreground" />
+              <CardTitle className="text-base">{t("chatView.noApiKeyTitle")}</CardTitle>
+              <CardDescription className="text-xs">{t("chatView.noApiKeyDescription")}</CardDescription>
+            </CardHeader>
+            <CardContent className="flex justify-center p-4 pt-0">
+              <Button size="sm" onClick={() => onOpenSettings("llm")}>
+                <KeyRound className="mr-2 h-4 w-4" />
+                {t("chatView.openSettingsButton")}
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       )}
       {transcriptEntries}

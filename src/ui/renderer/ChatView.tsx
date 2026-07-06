@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../i18n/react.js";
-import { ChevronDown, KeyRound } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
 import { isDebugStreamEnabled } from "../../lib/debug-stream.js";
 import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import { ViewModeBanner, type ViewModeState } from "./components/ViewModeBanner.js";
@@ -172,17 +171,14 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     () => viewMode ? entries.slice(0, viewMode.slicedRangeEnd) : entries,
     [entries, viewMode],
   );
-  // Empty-state centered composer applies to BOTH the keyed and the keyless
-  // (no-API-key) state — the layout is unified so the no-key state is only an
-  // overlaid key-required card + disabled send on top of the SAME raised
-  // composer, never a separate legacy fork. `hasApiKey === null` (still probing
-  // at boot) is excluded so the centered layout does not flash before the probe
-  // resolves (mirrors the ChatTranscript empty-state suppression, #1014).
+  // Empty-state centered composer applies only when the active provider is
+  // usable. If an API key is required, the no-key card lives in the transcript
+  // and the disabled composer stays bottom-docked so the surfaces cannot overlap.
   const emptyComposerCentered =
     appMode === "work" &&
     hasAskQuestions === false &&
     visibleEntries.length === 0 &&
-    hasApiKey !== null &&
+    hasApiKey === true &&
     !suggestedRepliesActive &&
     viewMode === null;
   const dockColumnClass = emptyComposerCentered
@@ -566,13 +562,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           onOpenItemInSystemApp={openActivityItemInSystemApp}
         />
       ) : null}
-      {hasApiKey === false && (
-        <div className="absolute inset-x-4 top-1/2 z-10 flex -translate-y-1/2 justify-center">
-          <Card className="w-full max-w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>{t("chatView.noApiKeyTitle")}</CardTitle><CardDescription>{t("chatView.noApiKeyDescription")}</CardDescription></CardHeader>
-            <CardContent className="flex justify-center"><Button onClick={() => onOpenSettings()}><KeyRound className="mr-2 h-4 w-4" />{t("chatView.openSettingsButton")}</Button></CardContent>
-          </Card>
-        </div>
-      )}
       {/* Routine fire + plugin overlay. Routine items stay isolated from chat history; plugin items insert via imported_trigger on confirm. */}
       <OverlayCardRegion
         onPluginPrimaryAction={onPluginPrimaryAction ?? noopPluginPrimaryAction}
@@ -680,6 +669,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         suggestedRepliesActive={suggestedRepliesActive}
         transcriptEntries={transcriptEntries}
         chatEndRef={chatEndRef}
+        onOpenSettings={onOpenSettings}
       />
       {showJumpToBottom && (
         <Button

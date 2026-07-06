@@ -411,14 +411,32 @@ export function isOpenAICompatibleVendor(v: LLMVendor): boolean {
   return v === "openai-compatible" || isOpenAICompatiblePresetVendor(v);
 }
 
+const API_KEY_OPTIONAL_LLM_VENDOR_IDS = new Set<LLMVendor>([
+  "openai-compatible",
+  "litellm",
+  "ollama",
+  "lmstudio",
+]);
+
+export function isApiKeyOptionalLlmVendor(v: LLMVendor): boolean {
+  return API_KEY_OPTIONAL_LLM_VENDOR_IDS.has(v);
+}
+
+export function canUseLlmVendorWithoutApiKey(
+  vendor: LLMVendor,
+  block: Pick<LLMVendorSettings, "baseUrl">,
+): boolean {
+  return isApiKeyOptionalLlmVendor(vendor) && Boolean(block.baseUrl?.trim());
+}
+
 /**
  * Per-vendor configuration block. Every vendor's block in `LLMSettings.vendors`
  * carries its own complete copy of these fields, so switching the active
  * vendor never inherits stale values from the previous one.
  *
- * Optional fields are vendor-specific: `baseUrl` is required only for
- * `azure-foundry`; `vertexProject` / `vertexLocation` only meaningful for
- * `vertex-ai`.
+ * Optional fields are vendor-specific: `baseUrl` is required for
+ * `azure-foundry` and OpenAI-compatible endpoints; `vertexProject` /
+ * `vertexLocation` only meaningful for `vertex-ai`.
  *
  * CHANGELOG (CTRL simplification):
  *   Removed `temperature`, `maxOutputTokens`, `seed`, `responseFormat`,
