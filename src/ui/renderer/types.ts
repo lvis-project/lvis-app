@@ -33,6 +33,10 @@ import type { SidebarTab } from "../../shared/sidebar-tab.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import type {
+  LlmModelListRequest,
+  LlmModelListResult,
+} from "../../shared/llm-model-list.js";
+import type {
   SandboxCapabilityInfo,
   SandboxConfinement,
   SandboxWindowsStatusInfo,
@@ -411,6 +415,7 @@ export type LvisApi = {
   setApiKey: (vendor: string, k: string) => Promise<{ ok: true }>;
   hasApiKey: (vendor?: string) => Promise<boolean>;
   deleteApiKey: (vendor: string) => Promise<{ ok: true }>;
+  listLlmModels: (request: LlmModelListRequest) => Promise<LlmModelListResult>;
   setWebApiKey: (provider: string, k: string) => Promise<{ ok: true }>;
   hasWebApiKey: (provider: string) => Promise<boolean>;
   deleteWebApiKey: (provider: string) => Promise<{ ok: true }>;

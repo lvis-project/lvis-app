@@ -342,6 +342,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:settings:get",
         "lvis:settings:has-api-key",
         "lvis:settings:has-web-api-key",
+        "lvis:settings:list-llm-models",
         "lvis:settings:marketplace:delete-api-key",
         "lvis:settings:marketplace:has-api-key",
         "lvis:settings:marketplace:set-api-key",
