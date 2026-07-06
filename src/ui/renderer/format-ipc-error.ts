@@ -152,6 +152,8 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // ── #893 Auth mockup login ──
   "invalid-credentials": "formatIpcError.invalidCredentials",
   "invalid-vendor": "formatIpcError.invalidVendor",
+  "provider-not-installed": "formatIpcError.providerNotInstalled",
+  "unknown-provider": "formatIpcError.unknownProvider",
   "no-demo-key": "formatIpcError.noDemoKey",
   "reviewer-rewire-failed": "formatIpcError.reviewerRewireFailed",
   // v0.2.1 hotfix — Step 2 (llm-key-issuing) try/catch surfaces this

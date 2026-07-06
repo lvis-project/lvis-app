@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
@@ -15,6 +15,7 @@ import {
 import { Slider } from "../../../components/ui/slider.js";
 import { Switch } from "../../../components/ui/switch.js";
 import { Textarea } from "../../../components/ui/textarea.js";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../../components/ui/dialog.js";
+import { Loader2, RefreshCw, Store } from "lucide-react";
 import {
   REASONING_EFFORT_STEPS,
   VENDORS,
@@ -50,6 +52,12 @@ export interface FallbackEntry {
 const DEMO_VENDOR_VALUE = "__demo__";
 const VENDOR_SCROLL_THRESHOLD = 10;
 const VENDOR_SELECT_MAX_HEIGHT = "max-h-[386px]";
+const MODEL_LIST_SYNC_DEBOUNCE_MS = 350;
+
+type ModelListState =
+  | { status: "loading" }
+  | { status: "ready"; options: string[]; endpoint: string; fetchedAt: string }
+  | { status: "error"; error: string };
 
 interface ProviderSelectProps {
   value: string;
@@ -187,6 +195,8 @@ export interface LlmTabProps {
   setAuthMode: (mode: "manual" | "login") => void;
   /** Fired when the user clicks the "Login" button in the auth-mode section. */
   onOpenLogin?: () => void;
+  /** Opens Settings → Marketplace with the provider package filter active. */
+  onOpenMarketplace?: () => void;
   /**
    * True when a demo session is currently hydrated
    * (`api.demo.status().activated`). Combined with authMode/vendor it drives
@@ -286,9 +296,31 @@ function getVendorInfo(vendorId: string): VendorOption {
   return getVendorOption(vendorId);
 }
 
-function modelOptionsFor(vendorId: string, selectedModel: string): string[] {
+function modelListCacheKey(vendorId: string, baseUrl?: string): string {
+  return `${vendorId}\n${baseUrl?.trim() ?? ""}`;
+}
+
+function shouldSyncModelList(
+  vendorId: string,
+  info: VendorOption,
+  baseUrl?: string,
+): boolean {
+  if (!vendorId || vendorId === DEMO_VENDOR_VALUE) return false;
+  if (baseUrl?.trim()) return true;
+  if (vendorId === "openai" || vendorId === "copilot") return true;
+  if (!info.needsBaseUrl) return false;
+  return vendorId !== "openai-compatible" && vendorId !== "azure-foundry";
+}
+
+function modelOptionsFor(
+  vendorId: string,
+  selectedModel: string,
+  syncedOptions?: readonly string[],
+): string[] {
   const info = getVendorInfo(vendorId);
-  const options = [...info.modelOptions];
+  const options = syncedOptions && syncedOptions.length > 0
+    ? [...syncedOptions]
+    : [...info.modelOptions];
   const defaultModel = info.defaultModel.trim();
   if (defaultModel && !options.includes(defaultModel)) {
     options.unshift(defaultModel);
@@ -320,6 +352,7 @@ export function LlmTab(props: LlmTabProps) {
     authMode,
     setAuthMode,
     onOpenLogin,
+    onOpenMarketplace,
     demoActive,
     onSelectDemo,
     model,
@@ -355,8 +388,64 @@ export function LlmTab(props: LlmTabProps) {
   const activeModelValue = trimmedModel && !isRetiredLlmModel(trimmedModel)
     ? trimmedModel
     : vendorInfo.defaultModel;
-  const activeModelOptions = modelOptionsFor(vendor, activeModelValue);
   const [marketplaceProviderIds, setMarketplaceProviderIds] = useState<readonly string[]>([]);
+  const [modelLists, setModelLists] = useState<Record<string, ModelListState>>({});
+  const modelListsRef = useRef<Record<string, ModelListState>>({});
+  const setModelListState = useCallback((key: string, state: ModelListState) => {
+    setModelLists((current) => {
+      const next = { ...current, [key]: state };
+      modelListsRef.current = next;
+      return next;
+    });
+  }, []);
+  const requestModelList = useCallback(
+    async (provider: string, options: { baseUrl?: string; force?: boolean } = {}) => {
+      if (!settingsLoaded && !options.force) return;
+      const providerInfo = getVendorInfo(provider);
+      const baseUrl = options.baseUrl?.trim() ?? "";
+      if (!shouldSyncModelList(provider, providerInfo, baseUrl)) return;
+      const key = modelListCacheKey(provider, baseUrl);
+      if (!options.force) {
+        const existing = modelListsRef.current[key];
+        if (existing) return;
+      }
+      setModelListState(key, { status: "loading" });
+      try {
+        const result = await api.listLlmModels({
+          vendor: provider,
+          ...(baseUrl ? { baseUrl } : {}),
+        });
+        if (result.ok) {
+          setModelListState(key, {
+            status: "ready",
+            options: result.models,
+            endpoint: result.endpoint,
+            fetchedAt: result.fetchedAt,
+          });
+        } else {
+          setModelListState(key, {
+            status: "error",
+            error: result.message ?? result.error,
+          });
+        }
+      } catch (err) {
+        setModelListState(key, {
+          status: "error",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+    [api, setModelListState, settingsLoaded],
+  );
+  const activeModelListBaseUrl = baseUrl.trim();
+  const activeModelListKey = modelListCacheKey(vendor, activeModelListBaseUrl);
+  const activeModelList = modelLists[activeModelListKey];
+  const activeModelOptions = modelOptionsFor(
+    vendor,
+    activeModelValue,
+    activeModelList?.status === "ready" ? activeModelList.options : undefined,
+  );
+  const isLoginMode = authMode === "login";
   useEffect(() => {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
@@ -386,6 +475,31 @@ export function LlmTab(props: LlmTabProps) {
     () => visibleVendorsFor([vendor, ...marketplaceProviderIds]),
     [marketplaceProviderIds, vendor],
   );
+  useEffect(() => {
+    if (!settingsLoaded || isLoginMode) return;
+    const timer = window.setTimeout(() => {
+      void requestModelList(vendor, { baseUrl: activeModelListBaseUrl });
+    }, MODEL_LIST_SYNC_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeModelListBaseUrl,
+    isLoginMode,
+    requestModelList,
+    settingsLoaded,
+    vendor,
+  ]);
+  const fallbackProviderKey = useMemo(
+    () => [...new Set(fallbackChain.map((entry) => entry.provider).filter(Boolean))]
+      .sort()
+      .join("\n"),
+    [fallbackChain],
+  );
+  useEffect(() => {
+    if (!settingsLoaded || !fallbackOpen) return;
+    for (const provider of fallbackProviderKey.split("\n").filter(Boolean)) {
+      void requestModelList(provider);
+    }
+  }, [fallbackOpen, fallbackProviderKey, requestModelList, settingsLoaded]);
 
   // Relaunch confirmation dialog state for host map changes.
   const [relaunchConfirmOpen, setRelaunchConfirmOpen] = useState(false);
@@ -430,7 +544,6 @@ export function LlmTab(props: LlmTabProps) {
     }
   }, [api, hostResolverMap, t]);
 
-  const isLoginMode = authMode === "login";
   // The dropdown shows "데모 체험" as selected only when the demo SESSION is
   // hydrated AND it is the active provider (login mode + azure-foundry, the
   // fixed demo vendor). Otherwise the real selected vendor is shown.
@@ -522,6 +635,19 @@ export function LlmTab(props: LlmTabProps) {
       <SettingsSection
         title={t("llmTab.providerConfig")}
         id="llm-providers"
+        actions={onOpenMarketplace ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1.5 text-xs"
+            data-testid="llm-tab:marketplace-providers"
+            onClick={onOpenMarketplace}
+          >
+            <Store className="size-3.5" aria-hidden={true} />
+            {t("llmTab.moreProvidersInMarketplace")}
+          </Button>
+        ) : null}
       >
         <div
           className="space-y-3"
@@ -709,7 +835,33 @@ export function LlmTab(props: LlmTabProps) {
               </div>
             )}
             <div className="space-y-2">
-              <Label htmlFor="model-select" className="text-sm font-medium">{t("llmTab.model")}</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="model-select" className="text-sm font-medium">{t("llmTab.model")}</Label>
+                {shouldSyncModelList(vendor, vendorInfo, activeModelListBaseUrl) && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 p-0"
+                        aria-label={t("llmTab.modelSync")}
+                        data-testid="llm-tab:model-sync"
+                        disabled={isLoginMode || activeModelList?.status === "loading"}
+                        onClick={() => void requestModelList(vendor, {
+                          baseUrl: activeModelListBaseUrl,
+                          force: true,
+                        })}
+                      >
+                        {activeModelList?.status === "loading"
+                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden={true} />
+                          : <RefreshCw className="h-3.5 w-3.5" aria-hidden={true} />}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("llmTab.modelSync")}</TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
               <Select
                 value={activeModelValue}
                 onValueChange={setModel}
@@ -728,6 +880,21 @@ export function LlmTab(props: LlmTabProps) {
                   ))}
                 </SelectContent>
               </Select>
+              {activeModelList?.status === "loading" && (
+                <p className="text-[11px] text-muted-foreground" data-testid="llm-tab:model-sync-status">
+                  {t("llmTab.modelSyncing")}
+                </p>
+              )}
+              {activeModelList?.status === "ready" && (
+                <p className="text-[11px] text-muted-foreground" data-testid="llm-tab:model-sync-status">
+                  {t("llmTab.modelSynced", { count: activeModelList.options.length })}
+                </p>
+              )}
+              {activeModelList?.status === "error" && (
+                <p className="text-[11px] text-muted-foreground" data-testid="llm-tab:model-sync-status">
+                  {t("llmTab.modelSyncFailed")}
+                </p>
+              )}
             </div>
           </div>
 
@@ -877,7 +1044,14 @@ export function LlmTab(props: LlmTabProps) {
                 const fallbackModelValue = trimmedFallbackModel && !isRetiredLlmModel(trimmedFallbackModel)
                   ? trimmedFallbackModel
                   : fallbackVendorInfo.defaultModel;
-                const fallbackModelOptions = modelOptionsFor(entry.provider, fallbackModelValue);
+                const fallbackModelList = modelLists[modelListCacheKey(entry.provider)];
+                const fallbackModelOptions = modelOptionsFor(
+                  entry.provider,
+                  fallbackModelValue,
+                  fallbackModelList?.status === "ready"
+                    ? fallbackModelList.options
+                    : undefined,
+                );
                 return (
                   <div key={idx} className="flex gap-2">
                     <ProviderSelect

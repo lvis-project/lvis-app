@@ -20,6 +20,7 @@ import { estimateRequestInputProjection } from "../request-input-projection.js";
 import { compactedHistoryWithContextCarrier, contentTruncatedHistoryWithContextCarrier } from "./context-carrier.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
+import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
 
 const log = createLogger("lvis");
 
@@ -53,7 +54,7 @@ export async function manualCompact(self: ConversationLoop, callbacks?: Pick<Tur
 
     const llmSettings = self.deps.settingsService.get("llm");
     const provider = llmSettings.provider;
-    const model = llmSettings.vendors[provider].model;
+    const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
     const preflight = getModelPreflightThreshold(provider, model);
     const preserveRecentTokens = Math.max(1_000, Math.floor(preflight * 0.4));
 
@@ -201,7 +202,7 @@ export async function applyBoundaryToSession(
         );
         const llmSettings = self.deps.settingsService.get("llm");
         const provider = llmSettings.provider;
-        const model = llmSettings.vendors[provider].model;
+        const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
         const usable = getModelUsableContext(provider, model);
         const ctxUsageAtTrigger = usable > 0 ? Math.min(1.0, estimatedBefore / usable) : 0;
         const checkpointEntry: import("../../memory/memory-manager.js").Checkpoint = {
@@ -279,7 +280,7 @@ export async function applyBoundaryToSession(
     try {
       const llmSettings = self.deps.settingsService.get("llm");
       const provider = llmSettings.provider;
-      const model = llmSettings.vendors[provider].model;
+      const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
       const usable = getModelUsableContext(provider, model);
       const ctxUsageAtTrigger = usable > 0 ? Math.min(1.0, estimatedBefore / usable) : 0;
       const checkpointEntry: import("../../memory/memory-manager.js").Checkpoint = {
@@ -367,7 +368,7 @@ export async function runPreflightGuard(
 
     const llmSettings = self.deps.settingsService.get("llm");
     const provider = llmSettings.provider;
-    const model = llmSettings.vendors[provider].model;
+    const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
     const preflight = getModelPreflightThreshold(provider, model);
     if (!forceRecover && !forceRateLimit && preflight <= 0) return false;
 
