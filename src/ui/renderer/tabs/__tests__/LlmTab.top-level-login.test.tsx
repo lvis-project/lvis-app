@@ -19,6 +19,7 @@ import { LlmTab, type FallbackEntry } from "../LlmTab.js";
 import { ALL_VENDORS, VENDORS } from "../../constants.js";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import { llmModelListCacheKey } from "../../../../shared/llm-model-list.js";
 
 type HarnessApi = Parameters<typeof LlmTab>[0]["api"];
 
@@ -271,6 +272,272 @@ describe("LlmTab — top-level login toggle UI", () => {
 
     expect(await screen.findByText("openrouter/free")).toBeInTheDocument();
     expect(screen.getByText("google/gemini-2.5-flash:free")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        llm: {
+          modelListCache: {
+            [llmModelListCacheKey("openrouter")]: {
+              vendor: "openrouter",
+              endpoint: "https://openrouter.ai/api/v1/models",
+              models: ["openrouter/free", "google/gemini-2.5-flash:free"],
+              fetchedAt: "2026-07-06T00:00:00.000Z",
+            },
+          },
+        },
+      }),
+    );
+  });
+
+  it("hydrates cached provider model ids before another network sync", async () => {
+    const api = llmTabApi();
+    (api.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      llm: {
+        modelListCache: {
+          [llmModelListCacheKey("openrouter")]: {
+            vendor: "openrouter",
+            endpoint: "https://openrouter.ai/api/v1/models",
+            models: ["cached/free-router", "cached/paid-router"],
+            fetchedAt: "2026-07-06T00:00:00.000Z",
+          },
+        },
+      },
+      marketplace: {},
+    });
+    const { container } = render(
+      <Harness
+        initialAuthMode="manual"
+        initialVendor="openrouter"
+        api={api}
+        settingsLoaded={false}
+      />,
+    );
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    const modelTrigger = container.querySelector(
+      '[data-testid="llm-model-select"]',
+    ) as HTMLElement | null;
+    expect(modelTrigger).not.toBeNull();
+    fireEvent.mouseDown(modelTrigger!);
+    fireEvent.keyDown(modelTrigger!, { key: "ArrowDown" });
+
+    expect(await screen.findByText("cached/free-router")).toBeInTheDocument();
+    expect(screen.getByText("cached/paid-router")).toBeInTheDocument();
+    expect(api.listLlmModels).not.toHaveBeenCalled();
+  });
+
+  it("uses cached provider model ids when an earlier background refresh failed", async () => {
+    const api = llmTabApi();
+    let resolveSettings!: (settings: unknown) => void;
+    (api.getSettings as ReturnType<typeof vi.fn>).mockReturnValue(
+      new Promise((resolve) => {
+        resolveSettings = resolve;
+      }),
+    );
+    (api.listLlmModels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      error: "model-list-fetch-failed",
+      message: "offline",
+    });
+
+    const { container } = render(
+      <Harness initialAuthMode="manual" initialVendor="openrouter" api={api} />,
+    );
+    await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      resolveSettings({
+        llm: {
+          modelListCache: {
+            [llmModelListCacheKey("openrouter")]: {
+              vendor: "openrouter",
+              endpoint: "https://openrouter.ai/api/v1/models",
+              models: ["cached/offline-router"],
+              fetchedAt: "2026-07-06T00:00:00.000Z",
+            },
+          },
+        },
+        marketplace: {},
+      });
+    });
+
+    const modelTrigger = container.querySelector(
+      '[data-testid="llm-model-select"]',
+    ) as HTMLElement | null;
+    expect(modelTrigger).not.toBeNull();
+    fireEvent.mouseDown(modelTrigger!);
+    fireEvent.keyDown(modelTrigger!, { key: "ArrowDown" });
+
+    expect(await screen.findByText("cached/offline-router")).toBeInTheDocument();
+  });
+
+  it("keeps hydrated cache when an in-flight background refresh fails later", async () => {
+    const api = llmTabApi();
+    let resolveSettings!: (settings: unknown) => void;
+    let resolveModelList!: (result: unknown) => void;
+    (api.getSettings as ReturnType<typeof vi.fn>).mockReturnValue(
+      new Promise((resolve) => {
+        resolveSettings = resolve;
+      }),
+    );
+    (api.listLlmModels as ReturnType<typeof vi.fn>).mockReturnValue(
+      new Promise((resolve) => {
+        resolveModelList = resolve;
+      }),
+    );
+    function ReloadToggleHarness() {
+      const [settingsLoaded, setSettingsLoaded] = useState(true);
+      return (
+        <>
+          <button
+            type="button"
+            data-testid="in-flight-cache-race:unload"
+            onClick={() => setSettingsLoaded(false)}
+          >
+            unload
+          </button>
+          <button
+            type="button"
+            data-testid="in-flight-cache-race:load"
+            onClick={() => setSettingsLoaded(true)}
+          >
+            load
+          </button>
+          <Harness
+            initialAuthMode="manual"
+            initialVendor="openrouter"
+            api={api}
+            settingsLoaded={settingsLoaded}
+          />
+        </>
+      );
+    }
+
+    const { container } = render(<ReloadToggleHarness />);
+    await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      resolveSettings({
+        llm: {
+          modelListCache: {
+            [llmModelListCacheKey("openrouter")]: {
+              vendor: "openrouter",
+              endpoint: "https://openrouter.ai/api/v1/models",
+              models: ["cached/in-flight-router"],
+              fetchedAt: "2026-07-06T00:00:00.000Z",
+            },
+          },
+        },
+        marketplace: {},
+      });
+    });
+    await act(async () => {
+      resolveModelList({
+        ok: false,
+        error: "model-list-fetch-failed",
+        message: "offline",
+      });
+    });
+
+    const modelTrigger = container.querySelector(
+      '[data-testid="llm-model-select"]',
+    ) as HTMLElement | null;
+    expect(modelTrigger).not.toBeNull();
+    fireEvent.mouseDown(modelTrigger!);
+    fireEvent.keyDown(modelTrigger!, { key: "ArrowDown" });
+    expect(await screen.findByText("cached/in-flight-router")).toBeInTheDocument();
+
+    (api.listLlmModels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      vendor: "openrouter",
+      endpoint: "https://openrouter.ai/api/v1/models",
+      models: ["live/after-race-router"],
+      fetchedAt: "2026-07-07T00:00:00.000Z",
+    });
+    fireEvent.click(screen.getByTestId("in-flight-cache-race:unload"));
+    fireEvent.click(screen.getByTestId("in-flight-cache-race:load"));
+
+    await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledTimes(2));
+  });
+
+  it("refreshes cached provider model ids in the background", async () => {
+    const api = llmTabApi();
+    (api.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      llm: {
+        modelListCache: {
+          [llmModelListCacheKey("openrouter")]: {
+            vendor: "openrouter",
+            endpoint: "https://openrouter.ai/api/v1/models",
+            models: ["cached/free-router"],
+            fetchedAt: "2026-07-06T00:00:00.000Z",
+          },
+        },
+      },
+      marketplace: {},
+    });
+    (api.listLlmModels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      vendor: "openrouter",
+      endpoint: "https://openrouter.ai/api/v1/models",
+      models: ["live/free-router", "live/new-router"],
+      fetchedAt: "2026-07-07T00:00:00.000Z",
+    });
+
+    render(<Harness initialAuthMode="manual" initialVendor="openrouter" api={api} />);
+
+    await waitFor(() =>
+      expect(api.listLlmModels).toHaveBeenCalledWith({ vendor: "openrouter" }),
+    );
+    await waitFor(() =>
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        llm: {
+          modelListCache: {
+            [llmModelListCacheKey("openrouter")]: {
+              vendor: "openrouter",
+              endpoint: "https://openrouter.ai/api/v1/models",
+              models: ["live/free-router", "live/new-router"],
+              fetchedAt: "2026-07-07T00:00:00.000Z",
+            },
+          },
+        },
+      }),
+    );
+  });
+
+  it("does not let pruned persisted caches block a later auto-refresh", async () => {
+    const api = llmTabApi();
+    (api.listLlmModels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      vendor: "openrouter",
+      endpoint: "https://openrouter.ai/api/v1/models",
+      models: ["live/free-router"],
+      fetchedAt: "2026-07-07T00:00:00.000Z",
+    });
+    function ReloadToggleHarness() {
+      const [settingsLoaded, setSettingsLoaded] = useState(true);
+      return (
+        <>
+          <button type="button" onClick={() => setSettingsLoaded(false)}>unload</button>
+          <button type="button" onClick={() => setSettingsLoaded(true)}>load</button>
+          <Harness
+            initialAuthMode="manual"
+            initialVendor="openrouter"
+            api={api}
+            settingsLoaded={settingsLoaded}
+          />
+        </>
+      );
+    }
+
+    render(<ReloadToggleHarness />);
+    await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      await api.updateSettings({ llm: { modelListCache: {} } });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "unload" }));
+    fireEvent.click(screen.getByRole("button", { name: "load" }));
+
+    await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledTimes(2));
   });
 
   it("does not automatically retry a failed model sync", async () => {
