@@ -378,6 +378,7 @@ describe("plugins IPC lifecycle broadcast", () => {
 
   it("cleans up catalog grant mismatch diagnostics without bypassing general admin uninstall policy", async () => {
     const { deps, appWindows } = await setup();
+    deps.pluginMarketplace.getInstalledVersion.mockResolvedValueOnce(null);
     deps.pluginMarketplace.getInstallFailureDiagnostics.mockReturnValueOnce([
       {
         id: "meeting",
@@ -415,6 +416,73 @@ describe("plugins IPC lifecycle broadcast", () => {
       expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:uninstall-result",
         { slug: "meeting", success: true },
+      );
+    }
+  });
+
+  it("cleans up manifest validation diagnostics without bypassing general admin uninstall policy", async () => {
+    const { deps, appWindows } = await setup();
+    deps.pluginMarketplace.getInstalledVersion.mockResolvedValueOnce(null);
+    deps.pluginMarketplace.getInstallFailureDiagnostics.mockReturnValueOnce([
+      {
+        id: "meeting",
+        name: "LVIS Meeting",
+        description: "Meeting plugin",
+        error: "[manifest:meeting] schema validation failed (/tmp/plugin.json): / unknown property: 'startupTools'",
+        installFailureKind: "manifest-validation-error",
+        isManaged: true,
+        installPolicy: "admin",
+        installAliases: ["lvis-plugin-meeting"],
+      },
+    ]);
+
+    await expect(invoke("lvis:plugins:uninstall", "meeting", {
+      doctorCleanup: { installFailureKind: "manifest-validation-error" },
+    })).resolves.toEqual({
+      pluginId: "meeting",
+      uninstalled: true,
+    });
+
+    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("meeting");
+    expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalledWith("meeting");
+    expect(deps.pluginMarketplace.clearInstallFailureDiagnostic).toHaveBeenCalledWith("meeting");
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:uninstall-result",
+        { slug: "meeting", success: true },
+      );
+    }
+  });
+
+  it("does not Doctor-cleanup an installed managed plugin update diagnostic", async () => {
+    const { deps, appWindows } = await setup();
+    deps.pluginMarketplace.getInstalledVersion.mockResolvedValueOnce("1.0.0");
+    deps.pluginMarketplace.getInstallFailureDiagnostics.mockReturnValueOnce([
+      {
+        id: "meeting",
+        name: "LVIS Meeting",
+        description: "Meeting plugin",
+        error: "[manifest:meeting] schema validation failed (/tmp/plugin.json): / unknown property: 'startupTools'",
+        installFailureKind: "manifest-validation-error",
+        isManaged: true,
+        installPolicy: "admin",
+        installAliases: ["lvis-plugin-meeting"],
+      },
+    ]);
+    deps.pluginMarketplace.uninstall.mockRejectedValueOnce(
+      new Error("Managed plugin cannot be uninstalled by user: meeting"),
+    );
+
+    await expect(invoke("lvis:plugins:uninstall", "meeting", {
+      doctorCleanup: { installFailureKind: "manifest-validation-error" },
+    })).rejects.toThrow("Managed plugin cannot be uninstalled by user: meeting");
+
+    expect(deps.pluginMarketplace.uninstall).toHaveBeenCalledWith("meeting");
+    expect(deps.pluginMarketplace.clearInstallFailureDiagnostic).not.toHaveBeenCalled();
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:uninstall-result",
+        { slug: "meeting", success: false, error: "Managed plugin cannot be uninstalled by user: meeting" },
       );
     }
   });
