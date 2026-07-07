@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { redactForLLM, redactFsPath, redactAuditPayload, scrubSecretsForLLM } from "../dlp-filter.js";
+import { fixtureSecret } from "./secret-fixtures.js";
 
 describe("redactForLLM", () => {
   it("redacts emails", () => {
@@ -56,12 +57,88 @@ describe("scrubSecretsForLLM — credential-class SOT (#1499 E2 M1)", () => {
   it("redacts prefixed API keys (sk-/pk-/live-)", () => {
     expect(scrubSecretsForLLM("key sk-ant-ABCDEFGH1234")).not.toContain("sk-ant-ABCDEFGH1234");
     expect(scrubSecretsForLLM("key sk-ant-ABCDEFGH1234")).toContain("[REDACTED:TOKEN]");
+    expect(scrubSecretsForLLM("key SK-ANT-ABCDEFGH1234")).not.toContain("SK-ANT-ABCDEFGH1234");
+  });
+
+  it("redacts GitHub and Slack vendor-prefixed tokens case-insensitively", () => {
+    const githubPat = fixtureSecret("gh", "p_", "1234567890abcdefghijklmnopqrstuv");
+    const githubOauth = fixtureSecret("GH", "O_", "1234567890ABCDEFGHIJKLMNOPQRSTUV");
+    const githubUser = fixtureSecret("gh", "u_", "1234567890abcdefghijklmnopqrstuv");
+    const githubServer = fixtureSecret("gh", "s_", "1234567890abcdefghijklmnopqrstuv");
+    const githubRefresh = fixtureSecret("gh", "r_", "1234567890abcdefghijklmnopqrstuv");
+    const githubFineGrained = fixtureSecret("github", "_pat_", "1234567890abcdefghijklmnopqrstuv_1234567890");
+    const slackBot = fixtureSecret("xo", "xb-", "123456789012-123456789012-abcdefghijklmnopqrstuv");
+    const slackUser = fixtureSecret("XO", "XP-", "123456789012-123456789012-abcdefghijklmnopqrstuv");
+    const slackApp = fixtureSecret("xa", "pp-", "123456789012-123456789012-abcdefghijklmnopqrstuv");
+    const out = scrubSecretsForLLM(
+      `tokens ${githubPat} ${githubOauth} ${githubUser} ${githubServer} ${githubRefresh} ${githubFineGrained} ${slackBot} ${slackUser} ${slackApp}`,
+    );
+
+    expect(out).not.toContain(githubPat);
+    expect(out).not.toContain(githubOauth);
+    expect(out).not.toContain(githubUser);
+    expect(out).not.toContain(githubServer);
+    expect(out).not.toContain(githubRefresh);
+    expect(out).not.toContain(githubFineGrained);
+    expect(out).not.toContain(slackBot);
+    expect(out).not.toContain(slackUser);
+    expect(out).not.toContain(slackApp);
+    expect(out.match(/\[REDACTED:TOKEN\]/g)?.length).toBe(9);
+  });
+
+  it("redacts AWS and Google vendor-prefixed tokens", () => {
+    const awsAccessKeyId = fixtureSecret("AK", "IA", "1234567890ABCDEF");
+    const awsSecret = fixtureSecret("wJalrXUtn", "FEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+    const labeledAwsSecret = fixtureSecret("WJalrXUtn", "FEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+    const googleApiKey = fixtureSecret("AI", "za", "SyD1234567890abcdefghijklmnopqrstu");
+    const out = scrubSecretsForLLM(
+      `aws ${awsAccessKeyId} ${awsSecret} AWS_SECRET_ACCESS_KEY=${labeledAwsSecret} google ${googleApiKey}`,
+    );
+
+    expect(out).not.toContain(awsAccessKeyId);
+    expect(out).not.toContain(awsSecret);
+    expect(out).not.toContain(labeledAwsSecret);
+    expect(out).not.toContain(googleApiKey);
+    expect(out.match(/\[REDACTED:TOKEN\]/g)?.length).toBe(4);
+
+    const paddedSecret = "A".repeat(39) + "=";
+    const paddedOut = scrubSecretsForLLM(`aws ${awsAccessKeyId} ${paddedSecret}`);
+    expect(paddedOut).not.toContain(paddedSecret);
+    expect(paddedOut.match(/\[REDACTED:TOKEN\]/g)?.length).toBe(2);
   });
 
   it("redacts bearer tokens and auth headers", () => {
     expect(scrubSecretsForLLM("Bearer abcXYZ12345token")).not.toContain("abcXYZ12345token");
+    expect(scrubSecretsForLLM("BEARER abcXYZ12345token")).toBe("Bearer [REDACTED:TOKEN]");
+    expect(scrubSecretsForLLM("Authorization: Bearer abcXYZ12345token")).toBe("Authorization: [REDACTED:TOKEN]");
+    expect(scrubSecretsForLLM("Authorization: Bearer [REDACTED:TOKEN] status=200")).toBe(
+      "Authorization: Bearer [REDACTED:TOKEN] status=200",
+    );
     expect(scrubSecretsForLLM("x-api-key: myheaderSECRET99")).not.toContain("myheaderSECRET99");
     expect(scrubSecretsForLLM("Authorization: rawSecretHeader42")).not.toContain("rawSecretHeader42");
+    const basicSecret = fixtureSecret("Basic ", "QWxhZGRpbjpvcGVuIHNlc2FtZQ==");
+    expect(scrubSecretsForLLM(`Authorization: ${basicSecret}`)).toBe("Authorization: [REDACTED:TOKEN]");
+    const embedded = scrubSecretsForLLM(`{"level":30,"msg":"Authorization: ${basicSecret}","status":200}`);
+    expect(embedded).not.toContain(basicSecret);
+    expect(embedded).toContain("Authorization: [REDACTED:TOKEN]");
+    expect(embedded).toContain('"status":200');
+    const digest = scrubSecretsForLLM('Authorization: Digest username="user", response="secret-response-token" status=200');
+    expect(digest).not.toContain('username="user"');
+    expect(digest).not.toContain('response="secret-response-token"');
+    expect(digest).toBe("Authorization: [REDACTED:TOKEN] status=200");
+    const embeddedDigest = scrubSecretsForLLM(
+      '{"level":30,"msg":"Authorization: Digest username=\\"user\\", response=\\"secret-response-token\\"","status":200}',
+    );
+    expect(embeddedDigest).not.toContain('response=\\"secret-response-token\\"');
+    expect(embeddedDigest).toContain("Authorization: [REDACTED:TOKEN]");
+    expect(embeddedDigest).toContain('","status":200');
+    expect(scrubSecretsForLLM("Authorization: rawSecretHeader42 status=200")).toBe(
+      "Authorization: [REDACTED:TOKEN] status=200",
+    );
+    expect(scrubSecretsForLLM("x-api-key: myheaderSECRET99 status=200")).toBe("x-api-key: [REDACTED:TOKEN] status=200");
+    expect(scrubSecretsForLLM("x-auth-token: rawHeaderToken42 status=200")).toBe(
+      "x-auth-token: [REDACTED:TOKEN] status=200",
+    );
   });
 
   it("redacts JWTs", () => {
@@ -82,6 +159,18 @@ describe("scrubSecretsForLLM — credential-class SOT (#1499 E2 M1)", () => {
     const out = scrubSecretsForLLM(line);
     expect(out).not.toContain("LATElineSECRETtoken777");
     expect(out.length).toBeGreaterThan(120); // whole line preserved, not truncated
+  });
+
+  it("does not redact unprefixed high-entropy hashes without credential context", () => {
+    // #1511 reviewed bare high-entropy heuristics. Redacting every 40-hex or
+    // base64-ish blob would mask common commit SHAs and artifact hashes in
+    // diagnostic bundles, so the scrubber stays prefix/context driven.
+    const commitSha = "0123456789abcdef0123456789abcdef01234567";
+    const base64Blob = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo1234567890";
+    const out = scrubSecretsForLLM(`commit ${commitSha} artifact ${base64Blob}`);
+
+    expect(out).toContain(commitSha);
+    expect(out).toContain(base64Blob);
   });
 });
 

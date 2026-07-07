@@ -960,7 +960,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       }));
       const reviewerCtx = classifySpy.mock.calls[0]?.[0];
       expect(reviewerCtx?.finalInput).toMatchObject({
-        payload: "send ***@example.com with sk-****",
+        payload: "send ***@example.com with [REDACTED:TOKEN]",
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });

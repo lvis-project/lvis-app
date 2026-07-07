@@ -332,7 +332,7 @@ export const deMessages: Record<string, string> = {
   "be_conversationLoop.toolRoundLimitExceeded": "(Grenzwert für Werkzeugausführungsrunde überschritten)",
   "be_conversationLoop.userPromptBlocked": "Diese Eingabeaufforderung wurde durch einen vertrauenswürdigen Hook blockiert: {reason}",
   "be_costEstimator.costUnknown": "Kosten unbekannt",
-  "be_dlp.patternApiKey": "API-Schlüssel",
+  "be_dlp.patternCredential": "Anmeldeinformation",
   "be_dlp.patternCreditCard": "Kreditkarte",
   "be_dlp.patternEmail": "E-Mail",
   "be_dlp.patternPhoneNumber": "Telefonnummer",

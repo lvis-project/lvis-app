@@ -11,6 +11,63 @@ interface DlpPattern {
   replace: (...args: string[]) => string;
 }
 
+/**
+ * Slice-free credential scrubber shared by diagnostics bundles, log-tail IPC,
+ * audit/display masking, and MCP error surfacing.
+ *
+ * This covers credential-shaped spans that the PII patterns below intentionally
+ * do not model: bearer tokens, API-key fields, JWTs, vendor-prefixed tokens,
+ * and context-labeled cloud secrets. It stays prefix/context driven rather than
+ * redacting every high-entropy blob, because diagnostics often contain commit
+ * SHAs and artifact hashes.
+ */
+export function scrubSecretsForLLM(text: string): string {
+  return text
+    .replace(
+      /(authorization\s*:\s*)digest\s+[A-Za-z][A-Za-z0-9_-]*=(?:\\"[^"]*\\"|"[^"]*"|[^,\s"]+)(?:,\s*[A-Za-z][A-Za-z0-9_-]*=(?:\\"[^"]*\\"|"[^"]*"|[^,\s"]+))*/gi,
+      "$1[REDACTED:TOKEN]",
+    )
+    .replace(
+      /(authorization\s*:\s*)(?:basic|bearer|digest|negotiate|token)\s+[A-Za-z0-9._\-~+/=]+/gi,
+      "$1[REDACTED:TOKEN]",
+    )
+    .replace(
+      /(authorization\s*:\s*)(?!(?:basic|bearer|digest|negotiate|token)\s)[A-Za-z0-9._\-~+/=]+/gi,
+      "$1[REDACTED:TOKEN]",
+    )
+    .replace(
+      /((?:x-api-key|x-auth-token)\s*:\s*)[A-Za-z0-9._\-~+/=]+/gi,
+      "$1[REDACTED:TOKEN]",
+    )
+    .replace(/\bbearer\s+[A-Za-z0-9._\-~+/=]+/gi, "Bearer [REDACTED:TOKEN]")
+    .replace(
+      /([?&](?:api[_-]?key|token|access[_-]?token|refresh[_-]?token))=([^&\s]+)/gi,
+      "$1=[REDACTED:TOKEN]",
+    )
+    .replace(
+      /(["'](?:api[_-]?key|token|access[_-]?token|refresh[_-]?token|authorization|x-api-key|x-auth-token|aws[_-]?secret[_-]?access[_-]?key)["']\s*:\s*["'])[^"']+(["'])/gi,
+      "$1[REDACTED:TOKEN]$2",
+    )
+    // JSON Web Tokens: three base64url segments separated by dots (header.payload.sig).
+    .replace(/\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b/g, "[REDACTED:JWT]")
+    // AWS access-key + adjacent 40-char secret pair. Do this before the
+    // standalone AKIA pass so the paired secret does not remain visible.
+    .replace(
+      /\bAKIA[0-9A-Z]{16}([\s:=,]+)[A-Za-z0-9/+=]{40}(?=$|[^A-Za-z0-9/+=])/gi,
+      "[REDACTED:TOKEN]$1[REDACTED:TOKEN]",
+    )
+    .replace(/\b(AWS_SECRET_ACCESS_KEY\s*[:=]\s*["']?)[A-Za-z0-9/+=]{40}(["']?)/gi, "$1[REDACTED:TOKEN]$2")
+    // Vendor-prefixed tokens observed in diagnostics probes (#1511).
+    .replace(/\bgh[opsru]_[A-Za-z0-9_]{20,}\b/gi, "[REDACTED:TOKEN]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/gi, "[REDACTED:TOKEN]")
+    .replace(/\bxox[bp]-[A-Za-z0-9-]{10,}\b/gi, "[REDACTED:TOKEN]")
+    .replace(/\bxapp-[A-Za-z0-9-]{10,}\b/gi, "[REDACTED:TOKEN]")
+    .replace(/\bAKIA[0-9A-Z]{16}\b/gi, "[REDACTED:TOKEN]")
+    .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/gi, "[REDACTED:TOKEN]")
+    // Prefixed API keys: sk-/pk-/rk-/proj-/test-/live- followed by >=8 key chars.
+    .replace(/\b(?:sk|pk|rk|proj|test|live)-[A-Za-z0-9_-]{8,}\b/gi, "[REDACTED:TOKEN]");
+}
+
 const DLP_PATTERNS: DlpPattern[] = [
   {
     nameKey: "be_dlp.patternResidentId",
@@ -25,11 +82,6 @@ const DLP_PATTERNS: DlpPattern[] = [
       const last4 = digits.slice(-4);
       return `****-****-****-${last4}`;
     },
-  },
-  {
-    nameKey: "be_dlp.patternApiKey",
-    pattern: /sk-[a-zA-Z0-9]{20,}/g,
-    replace: () => "sk-****",
   },
   {
     nameKey: "be_dlp.patternPhoneNumber",
@@ -51,7 +103,10 @@ const DLP_PATTERNS: DlpPattern[] = [
  */
 export function maskSensitiveData(text: string): DlpResult {
   const detections: string[] = [];
-  let masked = text;
+  let masked = scrubSecretsForLLM(text);
+  if (masked !== text) {
+    detections.push(t("be_dlp.patternCredential"));
+  }
 
   for (const { nameKey, pattern, replace } of DLP_PATTERNS) {
     pattern.lastIndex = 0;

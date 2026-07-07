@@ -21,8 +21,8 @@
  *   - audit      → {@link redactAuditPayload} (home-dir path fields) + a
  *                  DOUBLE-APPLY over input/output: {@link redactForLLM} for the
  *                  PII class (email/phone/SSN/CC) AND {@link scrubSecretsForLLM}
- *                  for the credential class (bearer/`sk-…`/JWT/auth-header/token
- *                  param). See {@link redactBundleText}.
+ *                  for the credential class (bearer/vendor-prefixed tokens/JWT/
+ *                  auth-header/token param). See {@link redactBundleText}.
  *   - logs       → per-line DOUBLE-APPLY (same {@link redactBundleText}: PII +
  *                  credential class). The production log file also carries MCP
  *                  stderr (mcp-client pipes it into the app logger); mcp-client's
@@ -368,7 +368,7 @@ function redactAuditEntry(entry: AuditEntry): Record<string, unknown> {
 /**
  * DOUBLE-APPLY DLP for a single free-text span written into the bundle: the PII
  * class via {@link redactForLLM} (email/phone/SSN/CC) AND the credential class
- * via {@link scrubSecretsForLLM} (bearer/`sk-…`/JWT/auth-header/token-param).
+ * via {@link scrubSecretsForLLM} (bearer/vendor-prefixed tokens/JWT/auth-header/token-param).
  * {@link redactForLLM} alone misses secrets, so both must run over every log
  * line and audit input/output — this is the single chokepoint where both DLP
  * classes are enforced (#1499 E2 cluster-review security MAJOR M1).
