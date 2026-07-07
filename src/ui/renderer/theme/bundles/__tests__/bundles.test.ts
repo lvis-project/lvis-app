@@ -1,10 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect } from "vitest";
 import {
   BUNDLES,
+  BUNDLE_IDS,
   DEFAULT_BUNDLE_ID,
   DEFAULT_VISIBLE_BUNDLES,
+  MARKETPLACE_THEME_BUNDLE_MANIFESTS,
   MARKETPLACE_THEME_BUNDLES,
   findBundle,
+  loadAllThemeBundles,
+  loadThemeBundle,
   visibleBundlesFor,
 } from "../index.js";
 import {
@@ -52,13 +56,20 @@ const REQUIRED_TOKEN_KEYS: ReadonlyArray<keyof BundleTokens> = [
 /** Basic HSL-value or raw triple pattern: "H S% L%" or "H S% L% / A%" */
 const HSL_TRIPLE_RE = /^\d+(?:\.\d+)?\s+\d+(?:\.\d+)?%\s+\d+(?:\.\d+)?%/;
 
+let allBundles: Awaited<ReturnType<typeof loadAllThemeBundles>> = [];
+
+beforeAll(async () => {
+  allBundles = await loadAllThemeBundles();
+});
+
 describe("bundle registry", () => {
   it("exports exactly 16 bundles", () => {
-    expect(BUNDLES).toHaveLength(16);
+    expect(allBundles).toHaveLength(16);
+    expect(BUNDLES).toHaveLength(2);
   });
 
   it("all bundle IDs are unique", () => {
-    const ids = BUNDLES.map((b) => b.id);
+    const ids = allBundles.map((b) => b.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
@@ -97,21 +108,36 @@ describe("bundle registry", () => {
     ]);
   });
 
+  it("keeps marketplace manifests in sync with lazy-loaded bundle metadata", async () => {
+    for (const id of MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS) {
+      const manifest = MARKETPLACE_THEME_BUNDLE_MANIFESTS[id];
+      const bundle = await loadThemeBundle(id);
+      expect(bundle).toMatchObject({
+        id: manifest.id,
+        name: manifest.name,
+        description: manifest.description,
+        shell: manifest.shell,
+        highContrast: manifest.highContrast,
+      });
+    }
+  });
+
   it("findBundle returns undefined for unknown id", () => {
     expect(findBundle("does-not-exist")).toBeUndefined();
   });
 
   it("exactly one high-contrast bundle is flagged", () => {
-    const hc = BUNDLES.filter((b) => b.highContrast);
+    const hc = allBundles.filter((b) => b.highContrast);
     expect(hc).toHaveLength(1);
     expect(hc[0].id).toBe("high-contrast");
   });
 });
 
-describe.each(BUNDLES.map((b) => [b.id, b] as [string, (typeof BUNDLES)[number]]))(
+describe.each(BUNDLE_IDS.map((id) => [id] as [string]))(
   "bundle %s",
-  (_id, bundle) => {
+  (id) => {
     it("has id, name, description, shell, highContrast", () => {
+      const bundle = findBundle(id)!;
       expect(typeof bundle.id).toBe("string");
       expect(bundle.id.length).toBeGreaterThan(0);
       expect(typeof bundle.name).toBe("string");
@@ -121,12 +147,14 @@ describe.each(BUNDLES.map((b) => [b.id, b] as [string, (typeof BUNDLES)[number]]
     });
 
     it("defines all required token keys", () => {
+      const bundle = findBundle(id)!;
       for (const key of REQUIRED_TOKEN_KEYS) {
         expect(bundle.tokens).toHaveProperty(key);
       }
     });
 
     it("all token values are non-empty strings", () => {
+      const bundle = findBundle(id)!;
       for (const key of REQUIRED_TOKEN_KEYS) {
         const val = bundle.tokens[key];
         expect(typeof val, `${key} should be a string`).toBe("string");
@@ -135,6 +163,7 @@ describe.each(BUNDLES.map((b) => [b.id, b] as [string, (typeof BUNDLES)[number]]
     });
 
     it("all token values match HSL triple pattern", () => {
+      const bundle = findBundle(id)!;
       for (const key of REQUIRED_TOKEN_KEYS) {
         const val = bundle.tokens[key];
         expect(HSL_TRIPLE_RE.test(val), `${key} = "${val}" should be an HSL triple`).toBe(true);
@@ -142,6 +171,7 @@ describe.each(BUNDLES.map((b) => [b.id, b] as [string, (typeof BUNDLES)[number]]
     });
 
     it("shell matches color-scheme implied by background lightness", () => {
+      const bundle = findBundle(id)!;
       // Heuristic: if background lightness > 50%, expect shell === "light"
       const bgVal = bundle.tokens.background;
       const match = bgVal.match(/(\d+(?:\.\d+)?%)$/);
