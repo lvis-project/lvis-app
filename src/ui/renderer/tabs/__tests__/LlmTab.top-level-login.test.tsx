@@ -388,6 +388,44 @@ describe("LlmTab — top-level login toggle UI", () => {
     });
   });
 
+  it("does not auto-sync model lists for manual marketplace provider presets", async () => {
+    const api = llmTabApi();
+    const manualRouter: MarketplaceInstalledProviderPreset = {
+      providerId: "manual-router",
+      label: "Manual Router",
+      baseUrl: "https://manual.example/v1",
+      defaultModel: "manual/default",
+      modelOptions: ["manual/default", "manual/large"],
+      requiresApiKey: true,
+      modelDiscoveryPolicy: "manual",
+    };
+
+    render(
+      <Harness
+        initialAuthMode="manual"
+        initialVendor="openai-compatible"
+        initialBaseUrl="https://manual.example/v1"
+        initialMarketplaceProviderPresetId="manual-router"
+        api={api}
+        marketplaceProviderPresets={[manualRouter]}
+      />,
+    );
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    });
+
+    expect(api.listLlmModels).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("llm-tab:model-sync")).toBeNull();
+
+    const modelTrigger = screen.getByTestId("llm-model-select");
+    fireEvent.mouseDown(modelTrigger);
+    fireEvent.keyDown(modelTrigger, { key: "ArrowDown" });
+
+    expect(await screen.findByText("manual/default")).toBeInTheDocument();
+    expect(screen.getByText("manual/large")).toBeInTheDocument();
+  });
+
   it("opens the Marketplace from provider and model discovery buttons", () => {
     const onOpenMarketplace = vi.fn();
     const { getByTestId } = render(

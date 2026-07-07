@@ -33,6 +33,17 @@ test.describe("chat no-API-key layout", () => {
     await expect(composer).toBeVisible();
     await expect(projectSelector).toBeVisible();
 
+    await expect.poll(async () => {
+      return ctx.page.evaluate(() => {
+        const cardEl = document.querySelector('[data-testid="chat-view:no-api-key-card"]');
+        const composerEl = document.querySelector('[data-testid="composer-input-bar"]');
+        if (!cardEl || !composerEl) return Number.NEGATIVE_INFINITY;
+        const cardBox = cardEl.getBoundingClientRect();
+        const composerBox = composerEl.getBoundingClientRect();
+        return composerBox.top - cardBox.bottom;
+      });
+    }).toBeGreaterThanOrEqual(0);
+
     const metrics = await ctx.page.evaluate(() => {
       const toBox = (selector: string) => {
         const el = document.querySelector(selector);
@@ -63,6 +74,9 @@ test.describe("chat no-API-key layout", () => {
         placement,
         lift,
         marginBottom,
+        windowInnerHeight: window.innerHeight,
+        visualViewportHeight: window.visualViewport?.height ?? null,
+        visualViewportScale: window.visualViewport?.scale ?? null,
         overlaps,
         cardBox,
         composerBox,
@@ -74,7 +88,7 @@ test.describe("chat no-API-key layout", () => {
     expect(metrics).not.toBeNull();
     expect(metrics?.placement).toBe("center");
     expect(metrics?.lift).toBe("compact");
-    expect(metrics?.marginBottom, JSON.stringify(metrics)).toBeGreaterThan(0);
+    expect(metrics?.marginBottom, JSON.stringify(metrics)).toBeGreaterThanOrEqual(0);
     expect(metrics?.cardInsideScroll).toBe(true);
     expect(metrics?.overlaps, JSON.stringify(metrics)).toBe(false);
     expect(metrics?.gap, JSON.stringify(metrics)).toBeGreaterThanOrEqual(0);

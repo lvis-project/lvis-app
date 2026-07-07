@@ -51,6 +51,7 @@ import {
 import {
   marketplaceProviderPresetSecretId,
   type MarketplaceInstalledProviderPreset,
+  type MarketplaceProviderModelDiscoveryPolicy,
 } from "../../../shared/marketplace-package-assets.js";
 import { isIpcErrorResult, type LvisApi } from "../types.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
@@ -114,6 +115,7 @@ interface ProviderSelectProps {
 type ProviderOption = Omit<VendorOption, "id"> & {
   id: string;
   requiresApiKey?: boolean;
+  modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy;
 };
 
 function normalizeProviderSearch(value: string): string {
@@ -375,6 +377,7 @@ function providerOptionFromPreset(
     defaultModel: preset.defaultModel,
     modelOptions: preset.modelOptions,
     requiresApiKey: preset.requiresApiKey,
+    ...(preset.modelDiscoveryPolicy ? { modelDiscoveryPolicy: preset.modelDiscoveryPolicy } : {}),
   };
 }
 
@@ -388,8 +391,10 @@ function shouldSyncModelList(
   vendorId: string,
   info: ProviderOption | VendorOption,
   baseUrl?: string,
+  modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy,
 ): boolean {
   if (!vendorId || vendorId === DEMO_VENDOR_VALUE) return false;
+  if (modelDiscoveryPolicy === "manual" || modelDiscoveryPolicy === "static") return false;
   if (baseUrl?.trim()) return true;
   if (vendorId === "openai" || vendorId === "copilot") return true;
   if (!info.needsBaseUrl) return false;
@@ -616,11 +621,19 @@ export function LlmTab(props: LlmTabProps) {
     });
   }, []);
   const requestModelList = useCallback(
-    async (provider: string, options: { baseUrl?: string; force?: boolean; credentialScope?: string } = {}) => {
+    async (
+      provider: string,
+      options: {
+        baseUrl?: string;
+        force?: boolean;
+        credentialScope?: string;
+        modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy;
+      } = {},
+    ) => {
       if (!settingsLoaded && !options.force) return;
       const providerInfo = getVendorInfo(provider);
       const baseUrl = options.baseUrl?.trim() ?? "";
-      if (!shouldSyncModelList(provider, providerInfo, baseUrl)) return;
+      if (!shouldSyncModelList(provider, providerInfo, baseUrl, options.modelDiscoveryPolicy)) return;
       const credentialScope =
         provider === "openai-compatible" ? options.credentialScope?.trim() ?? "" : "";
       const key = llmModelListCacheKey(provider, baseUrl, credentialScope);
@@ -640,6 +653,7 @@ export function LlmTab(props: LlmTabProps) {
           vendor: provider,
           ...(baseUrl ? { baseUrl } : {}),
           ...(credentialScope ? { credentialScope } : {}),
+          ...(options.modelDiscoveryPolicy ? { modelDiscoveryPolicy: options.modelDiscoveryPolicy } : {}),
         });
         if (result.ok) {
           const nextEntry: LlmModelListCacheEntry = {
@@ -707,6 +721,7 @@ export function LlmTab(props: LlmTabProps) {
     [api, setModelListState, settingsLoaded],
   );
   const activeModelListBaseUrl = selectedMarketplaceProviderPreset?.baseUrl ?? baseUrl.trim();
+  const activeModelDiscoveryPolicy = selectedMarketplaceProviderPreset?.modelDiscoveryPolicy;
   const activeProviderRequiresApiKey = selectedMarketplaceProviderPreset
     ? selectedMarketplaceProviderPreset.requiresApiKey !== false
     : !(isLLMVendor(vendor) && canUseLlmVendorWithoutApiKey(vendor, {
@@ -718,6 +733,12 @@ export function LlmTab(props: LlmTabProps) {
     activeModelListCredentialScope,
   );
   const activeModelList = modelLists[activeModelListKey];
+  const activeShouldSyncModelList = shouldSyncModelList(
+    vendor,
+    vendorInfo,
+    activeModelListBaseUrl,
+    activeModelDiscoveryPolicy,
+  );
   const activeModelOptions = modelOptionsFor(
     vendor,
     activeModelValue,
@@ -785,6 +806,7 @@ export function LlmTab(props: LlmTabProps) {
       void requestModelList(vendor, {
         baseUrl: activeModelListBaseUrl,
         credentialScope: activeModelListCredentialScope,
+        ...(activeModelDiscoveryPolicy ? { modelDiscoveryPolicy: activeModelDiscoveryPolicy } : {}),
       });
     }, MODEL_LIST_SYNC_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
@@ -792,6 +814,7 @@ export function LlmTab(props: LlmTabProps) {
     activeModelListBaseUrl,
     activeModelListCredentialScope,
     isLoginMode,
+    activeModelDiscoveryPolicy,
     requestModelList,
     settingsLoaded,
     vendor,
@@ -1216,7 +1239,7 @@ export function LlmTab(props: LlmTabProps) {
                       <TooltipContent>{t("llmTab.moreModelsInMarketplace")}</TooltipContent>
                     </Tooltip>
                   )}
-                  {shouldSyncModelList(vendor, vendorInfo, activeModelListBaseUrl) && (
+                  {activeShouldSyncModelList && (
                     <Tooltip>
                       <TooltipTrigger asChild>
                       <Button
@@ -1230,6 +1253,7 @@ export function LlmTab(props: LlmTabProps) {
                         onClick={() => void requestModelList(vendor, {
                           baseUrl: activeModelListBaseUrl,
                           credentialScope: activeModelListCredentialScope,
+                          ...(activeModelDiscoveryPolicy ? { modelDiscoveryPolicy: activeModelDiscoveryPolicy } : {}),
                           force: true,
                         })}
                       >

@@ -14,6 +14,7 @@ import {
   isMarketplaceProviderPresetId,
   marketplaceProviderPresetSecretKey,
   type MarketplaceInstalledProviderPreset,
+  type MarketplaceProviderModelDiscoveryPolicy,
 } from "../../shared/marketplace-package-assets.js";
 import {
   ensurePublicHttpUrl,
@@ -31,6 +32,14 @@ const STANDARD_MODEL_LIST_BASE_URLS: Partial<Record<LLMVendor, string>> = {
   openai: "https://api.openai.com/v1",
   copilot: "https://models.github.ai/inference",
 };
+
+function modelDiscoveryPolicyAllowsFetch(
+  policy: MarketplaceProviderModelDiscoveryPolicy | undefined,
+): boolean {
+  return policy === undefined ||
+    policy === "models-api" ||
+    policy === "openrouter-models-api";
+}
 
 export type LlmModelListFetchOptions = {
   fetchImpl?: typeof fetch;
@@ -544,6 +553,13 @@ export async function listLlmModelsFromSettings(
       ok: false,
       error: "invalid-provider",
       message: "Unknown LLM provider.",
+    };
+  }
+  if (!modelDiscoveryPolicyAllowsFetch(request.modelDiscoveryPolicy)) {
+    return {
+      ok: false,
+      error: "model-list-not-supported",
+      message: "This provider uses a static or manually configured model list.",
     };
   }
   const resolved = resolveModelListBaseUrl(
