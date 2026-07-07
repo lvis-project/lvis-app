@@ -56,6 +56,11 @@ export interface Tool {
    * decision matrix. See {@link ToolDecisionOverride} for semantics.
    */
   readonly decisionOverride?: ToolDecisionOverride;
+  /**
+   * Executor opt-in for tools whose adjacent invocations can safely run
+   * concurrently. The default is strict ordered execution.
+   */
+  readonly parallelSafe?: boolean;
   readonly pluginId?: string;
   /**
    * Host-owned plugin worker identity for plugin tools whose side effects are
@@ -146,6 +151,7 @@ export abstract class ZodTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny>
   readonly source: ToolSource = "builtin";
   abstract readonly category: ToolCategory;
   readonly decisionOverride?: ToolDecisionOverride;
+  readonly parallelSafe?: boolean;
   readonly pluginId?: string;
   readonly workerId?: string;
   readonly mcpServerId?: string;
@@ -197,6 +203,7 @@ export interface DynamicToolSpec {
   category: ToolCategory;
   categoryForInput?: (input: unknown) => ToolCategory;
   decisionOverride?: ToolDecisionOverride;
+  parallelSafe?: boolean;
   pluginId?: string;
   workerId?: string;
   mcpServerId?: string;
@@ -235,6 +242,7 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     category: spec.category,
     categoryForInput: spec.categoryForInput,
     decisionOverride: spec.decisionOverride,
+    parallelSafe: spec.parallelSafe,
     pluginId: spec.pluginId,
     workerId: spec.workerId,
     mcpServerId: spec.mcpServerId,

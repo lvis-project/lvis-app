@@ -1,10 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
-import type { SubAgentSpawn } from "../components/SubAgentCard.js";
 import {
   textRevision,
   valueRevision,
-  subAgentRevision,
   toolGroupRevision,
   entryRenderRevision,
   bottomFollowSignature,
@@ -75,20 +73,7 @@ describe("entryRenderRevision", () => {
   });
 });
 
-describe("subAgentRevision + toolGroupRevision", () => {
-  it("subAgentRevision is deterministic and includes the spawn id", () => {
-    const spawn: SubAgentSpawn = {
-      spawnId: "s1",
-      title: "T",
-      status: "done",
-      toolCallCount: 2,
-      entries: [{ kind: "assistant", text: "x", streaming: false }],
-    };
-    const rev = subAgentRevision(spawn);
-    expect(rev).toBe(subAgentRevision(spawn));
-    expect(rev.startsWith("s1:")).toBe(true);
-  });
-
+describe("toolGroupRevision", () => {
   it("toolGroupRevision changes when a tool result changes", () => {
     const base: ToolGroupEntry = {
       kind: "tool_group",
@@ -101,7 +86,7 @@ describe("subAgentRevision + toolGroupRevision", () => {
       ...base,
       tools: [{ ...base.tools[0]!, result: "r2" }],
     };
-    expect(toolGroupRevision(base, [])).not.toBe(toolGroupRevision(changed, []));
+    expect(toolGroupRevision(base)).not.toBe(toolGroupRevision(changed));
   });
 });
 

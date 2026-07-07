@@ -1,5 +1,4 @@
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
-import type { SubAgentSpawn } from "../components/SubAgentCard.js";
 
 type ToolGroupEntry = Extract<ChatEntry, { kind: "tool_group" }>;
 
@@ -32,23 +31,7 @@ export function valueRevision(value: unknown): string {
     .join(",")}}`);
 }
 
-export function subAgentRevision(spawn: SubAgentSpawn): string {
-  return [
-    spawn.spawnId,
-    textRevision(spawn.title),
-    spawn.status,
-    spawn.toolCallCount,
-    textRevision(spawn.summary),
-    textRevision(spawn.errorMessage),
-    // Fingerprint the child transcript so a live-updating spawn re-renders when
-    // its entries change (new tool row, streamed reasoning, final assistant).
-    spawn.entries
-      .map((entry, i) => entryRenderRevision({ entry, idx: i, searchHighlight: "", starred: false }))
-      .join("|"),
-  ].join(":");
-}
-
-export function toolGroupRevision(group: ToolGroupEntry, spawnRevisions: string[]): string {
+export function toolGroupRevision(group: ToolGroupEntry): string {
   return [
     group.groupId,
     group.groupIds.join(","),
@@ -70,7 +53,6 @@ export function toolGroupRevision(group: ToolGroupEntry, spawnRevisions: string[
         valueRevision(tool.uiPayload),
       ].join(":"))
       .join("|"),
-    spawnRevisions.join(","),
   ].join("#");
 }
 
@@ -79,9 +61,8 @@ export function entryRenderRevision(params: {
   idx: number;
   searchHighlight: string;
   starred: boolean;
-  spawnRevisions?: string[];
 }): string {
-  const { entry, idx, searchHighlight, starred, spawnRevisions = [] } = params;
+  const { entry, idx, searchHighlight, starred } = params;
   switch (entry.kind) {
     case "reasoning":
       return `${idx}:reasoning:${textRevision(entry.text)}:${entry.streaming ? "1" : "0"}`;
@@ -103,7 +84,7 @@ export function entryRenderRevision(params: {
         valueRevision(entry.approvalPurpose),
       ].join(":");
     case "tool_group":
-      return `${idx}:tool_group:${toolGroupRevision(entry, spawnRevisions)}`;
+      return `${idx}:tool_group:${toolGroupRevision(entry)}`;
     case "ask_user_answer":
       return `${idx}:ask_user_answer:${entry.dismissed ? "1" : "0"}:${entry.rows.map((row) => `${row.label}:${textRevision(row.value)}`).join("|")}`;
     default:

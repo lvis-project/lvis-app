@@ -38,7 +38,10 @@ import {
   startInstalledPluginWithLifecycle,
   withPluginInstallLock,
 } from "../../plugins/install-lifecycle.js";
-import { uninstallPluginWithLifecycle } from "../../plugins/uninstall-lifecycle.js";
+import {
+  cleanupFailedPluginInstallWithLifecycle,
+  uninstallPluginWithLifecycle,
+} from "../../plugins/uninstall-lifecycle.js";
 import { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../../plugins/types.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
@@ -74,6 +77,14 @@ function parseNetworkAccessAcknowledgement(value: unknown): NetworkAccessAcknowl
     allowedDomains,
     ...(input.allowPrivateNetworks === true ? { allowPrivateNetworks: true as const } : {}),
   };
+}
+
+function parseDoctorCleanupKind(value: unknown): "catalog-grant-mismatch" | undefined {
+  const input = asPlainRecord(value);
+  const doctorCleanup = asPlainRecord(input.doctorCleanup);
+  return doctorCleanup.installFailureKind === "catalog-grant-mismatch"
+    ? "catalog-grant-mismatch"
+    : undefined;
 }
 
 function sanitizeNotificationContextRef(value: unknown): NotificationContextRef | undefined {
@@ -472,12 +483,35 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     return result;
   });
 
-  ipcMain.handle(CHANNELS.plugins.uninstall, async (e, pluginId: string) => {
+  ipcMain.handle(CHANNELS.plugins.uninstall, async (e, pluginId: string, rawOptions?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.uninstall, e); return UNAUTHORIZED_FRAME; }
     const broadcastUninstallResult = (payload: { slug: string; success: boolean; error?: string }) => {
       broadcastPluginLifecycleEvent(CHANNELS.plugins.uninstallResult, payload);
     };
     try {
+      const doctorCleanupKind = parseDoctorCleanupKind(rawOptions);
+      const matchingFailure = doctorCleanupKind
+        ? pluginMarketplace
+            .getInstallFailureDiagnostics()
+            .find((failure) => failure.id === pluginId && failure.installFailureKind === doctorCleanupKind)
+        : undefined;
+      if (matchingFailure) {
+        const result = await cleanupFailedPluginInstallWithLifecycle(pluginId, {
+          pluginMarketplace,
+          pluginRuntime,
+          settingsService,
+          pluginPaths,
+          clearAuthPartitionService,
+          listPluginAuthPartitionsService,
+          forgetPluginAuthPartitionsService,
+          refreshPluginNotifications,
+          emitHostEvent,
+          log,
+        });
+        broadcastUninstallResult({ slug: pluginId, success: true });
+        return result;
+      }
+
       // Lifecycle ordering lives in uninstallPluginWithLifecycle:
       // runtime remove (stop/dispose) first, marketplace file removal second,
       // then best-effort host state cleanup. This keeps the Windows EBUSY

@@ -594,11 +594,34 @@ export class ToolExecutor {
     opts: ExecuteOptions = {},
   ): Promise<ToolResult[]> {
     const groupId = randomUUID();
-    const results: ToolResult[] = [];
-    for (let idx = 0; idx < toolUses.length; idx++) {
-      results.push(await this.executeOne(toolUses[idx], groupId, idx, opts));
+    const results: ToolResult[] = new Array(toolUses.length);
+    for (let idx = 0; idx < toolUses.length;) {
+      if (!this.isParallelSafeToolUse(toolUses[idx])) {
+        results[idx] = await this.executeOne(toolUses[idx], groupId, idx, opts);
+        idx += 1;
+        continue;
+      }
+
+      const start = idx;
+      while (idx < toolUses.length && this.isParallelSafeToolUse(toolUses[idx])) {
+        idx += 1;
+      }
+      const segment = toolUses.slice(start, idx);
+      const segmentResults = await Promise.all(
+        segment.map((toolUse, offset) =>
+          this.executeOne(toolUse, groupId, start + offset, opts),
+        ),
+      );
+      for (let offset = 0; offset < segmentResults.length; offset++) {
+        results[start + offset] = segmentResults[offset];
+      }
     }
     return results;
+  }
+
+  private isParallelSafeToolUse(toolUse: ToolUseBlock): boolean {
+    const tool = this.toolRegistry.findByName(toolUse.name);
+    return tool?.parallelSafe === true;
   }
 
 

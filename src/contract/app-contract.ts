@@ -72,6 +72,7 @@ export const CHANNELS = {
     exitCheckpointView: "lvis:chat:exit-checkpoint-view",
     branchFromCheckpoint: "lvis:chat:branch-from-checkpoint",
     getVerbatimToolResult: "lvis:chat:get-verbatim-tool-result",
+    getSubAgentTranscript: "lvis:chat:get-sub-agent-transcript",
     getWriteDiff: "lvis:chat:get-write-diff",
     // Streaming / event channels (main → renderer). Full event schema in ./events.ts.
     stream: "lvis:chat:stream",

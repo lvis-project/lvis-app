@@ -281,6 +281,14 @@ export interface SessionMetadata {
   profileModel?: string;
   /** Agent profile's `mode:` frontmatter the child was spawned with (resume reuses it). */
   profileMode?: string;
+  /** Parent chat session that created this sub-agent. Used only for transcript lookup/join. */
+  originSessionId?: string;
+  /** Parent `agent_spawn` tool_use id that created this sub-agent. */
+  originToolUseId?: string;
+  /** Host-visible spawn id emitted on the live agent-spawn event stream. */
+  spawnId?: string;
+  /** User-visible sub-agent title. Stored separately from `title`, which is capped for session lists. */
+  subAgentTitle?: string;
   /**
    * Number of times this sub-agent session has been resumed. Initialized to 0
    * on spawn. PR-D's MAX_RESUMES loop guard reads this to refuse a fork-bomb
@@ -531,6 +539,10 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     : undefined;
   const profileModel = typeof raw.profileModel === "string" ? raw.profileModel : undefined;
   const profileMode = typeof raw.profileMode === "string" ? raw.profileMode : undefined;
+  const originSessionId = isValidSessionId(raw.originSessionId) ? raw.originSessionId : undefined;
+  const originToolUseId = normalizeMetadataString(raw.originToolUseId, 256);
+  const spawnId = normalizeMetadataString(raw.spawnId, 128);
+  const subAgentTitle = normalizeMetadataString(raw.subAgentTitle, MAX_PROJECT_NAME_CHARS);
   const resumeCount = typeof raw.resumeCount === "number" && Number.isInteger(raw.resumeCount) && raw.resumeCount >= 0
     ? raw.resumeCount
     : undefined;
@@ -559,6 +571,10 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     sourceTools: sourceTools && sourceTools.length > 0 ? sourceTools : undefined,
     profileModel,
     profileMode,
+    originSessionId,
+    originToolUseId,
+    spawnId,
+    subAgentTitle,
     resumeCount,
     cumulativeRounds,
   };

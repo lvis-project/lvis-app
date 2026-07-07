@@ -1,6 +1,7 @@
-// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/SubAgentCard.tsx. Do not edit by hand.
+// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/ChatSidePanel.tsx. Do not edit by hand.
 export const en = {
   "subAgentCard.statusError": "Error",
+  "subAgentCard.statusInterrupted": "Interrupted",
   "subAgentCard.statusDone": "Done",
   "subAgentCard.statusRunning": "Running",
   "subAgentCard.summaryLabel": "Summary",
@@ -11,6 +12,7 @@ export const en = {
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "subAgentCard.statusError": "오류",
+  "subAgentCard.statusInterrupted": "중단됨",
   "subAgentCard.statusDone": "완료",
   "subAgentCard.statusRunning": "실행 중",
   "subAgentCard.summaryLabel": "요약",

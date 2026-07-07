@@ -7,7 +7,7 @@
  */
 import { vi, type Mock } from "vitest";
 import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
-import type { StreamEvent } from "../../src/lib/chat-stream-state.js";
+import type { ChatEntry, StreamEvent } from "../../src/lib/chat-stream-state.js";
 
 export type MockLvisApi = Record<string, Mock>;
 
@@ -16,6 +16,20 @@ type HistoryMock = {
   sessionTitle?: string;
   sessionKind?: "main" | "routine";
   messages: unknown[];
+};
+
+type AgentSpawnEvent = {
+  spawnId: string;
+  type: "start" | "activity" | "done" | "error";
+  status?: "running" | "done" | "error" | "interrupted";
+  title?: string;
+  instructions?: string;
+  entries?: ChatEntry[];
+  summary?: string;
+  toolCallCount?: number;
+  message?: string;
+  toolUseId?: string;
+  childSessionId?: string;
 };
 
 type ApiOverrides = {
@@ -102,6 +116,7 @@ const DEFAULT_APP_INFO = {
 export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   api: MockLvisApi;
   emitChatStream: (ev: StreamEvent) => void;
+  emitAgentSpawnEvent: (event: AgentSpawnEvent) => void;
   emitOverlayShow: (item: unknown) => void;
   emitOverlayDismiss: (id: string) => void;
   emitRoutineFiredV2: (r: unknown) => void;
@@ -149,6 +164,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   };
 
   const chatStreamHandlers = new Set<(ev: StreamEvent) => void>();
+  const agentSpawnEventHandlers = new Set<(event: AgentSpawnEvent) => void>();
   const overlayShowHandlers = new Set<(item: unknown) => void>();
   const overlayDismissHandlers = new Set<(id: string) => void>();
   const routineFiredV2Handlers = new Set<(r: unknown) => void>();
@@ -390,6 +406,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       chatStreamHandlers.add(h);
       return () => chatStreamHandlers.delete(h);
     }),
+    onAgentSpawnEvent: vi.fn((handler: (event: AgentSpawnEvent) => void) => {
+      agentSpawnEventHandlers.add(handler);
+      return () => agentSpawnEventHandlers.delete(handler);
+    }),
     onChatFallback: vi.fn((_h: (payload: { from: string; to: string }) => void) => () => {}),
     onNotificationToast: vi.fn((handler: (payload: unknown) => void) => {
       notificationToastHandlers.add(handler);
@@ -611,6 +631,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   return {
     api,
     emitChatStream: (ev) => chatStreamHandlers.forEach((h) => h(ev)),
+    emitAgentSpawnEvent: (event) => agentSpawnEventHandlers.forEach((h) => h(event)),
     emitOverlayShow: (item) => overlayShowHandlers.forEach((h) => h(item)),
     emitOverlayDismiss: (id) => overlayDismissHandlers.forEach((h) => h(id)),
     emitRoutineFiredV2: (r) => routineFiredV2Handlers.forEach((h) => h(r)),
