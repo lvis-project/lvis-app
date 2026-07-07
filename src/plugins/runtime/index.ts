@@ -26,6 +26,7 @@ import type { Actor, PluginDeploymentGuard } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
 import { appVersionSatisfiesMin } from "../../shared/semver-compare.js";
 import { getLvisAppVersion } from "../../shared/app-version.js";
+import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
 import { isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
@@ -124,7 +125,9 @@ export interface PluginCard {
   /** Declarative egress disclosure copied from the plugin manifest/catalog. */
   networkAccess?: PluginManifest["networkAccess"];
   /** Structured marketplace install failure classification for Doctor UI. */
-  installFailureKind?: "catalog-grant-mismatch";
+  installFailureKind?: PluginInstallFailureKind;
+  /** User-visible install/load failure detail preserved for Doctor diagnostics. */
+  installFailureMessage?: string;
   /**
    * Request slugs that can address this installed plugin in marketplace
    * lifecycle events. This is derived from registry hints, not plugin-specific

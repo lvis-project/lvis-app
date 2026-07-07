@@ -45,6 +45,7 @@ import {
 import { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../../plugins/types.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
+import { isPluginInstallFailureKind, type PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
 import { handlePluginCards, handleMarketplaceList } from "../handlers/plugins.js";
 const log = createLogger("lvis");
 const MARKETPLACE_PING_TIMEOUT_MS = 15_000;
@@ -79,12 +80,11 @@ function parseNetworkAccessAcknowledgement(value: unknown): NetworkAccessAcknowl
   };
 }
 
-function parseDoctorCleanupKind(value: unknown): "catalog-grant-mismatch" | undefined {
+function parseDoctorCleanupKind(value: unknown): PluginInstallFailureKind | undefined {
   const input = asPlainRecord(value);
   const doctorCleanup = asPlainRecord(input.doctorCleanup);
-  return doctorCleanup.installFailureKind === "catalog-grant-mismatch"
-    ? "catalog-grant-mismatch"
-    : undefined;
+  const kind = doctorCleanup.installFailureKind;
+  return isPluginInstallFailureKind(kind) ? kind : undefined;
 }
 
 function sanitizeNotificationContextRef(value: unknown): NotificationContextRef | undefined {
@@ -495,7 +495,15 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
             .getInstallFailureDiagnostics()
             .find((failure) => failure.id === pluginId && failure.installFailureKind === doctorCleanupKind)
         : undefined;
-      if (matchingFailure) {
+      const canCleanupSyntheticFailure = matchingFailure
+        ? await pluginMarketplace.getInstalledVersion(pluginId)
+            .then((installedVersion) => installedVersion === null)
+            .catch((err) => {
+              log.warn(`doctor cleanup refused for '${pluginId}': cannot prove plugin is absent: ${errMessage(err)}`);
+              return false;
+            })
+        : false;
+      if (matchingFailure && canCleanupSyntheticFailure) {
         const result = await cleanupFailedPluginInstallWithLifecycle(pluginId, {
           pluginMarketplace,
           pluginRuntime,
