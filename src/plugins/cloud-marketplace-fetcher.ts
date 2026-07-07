@@ -12,8 +12,8 @@
  *
  * All public-network calls go through {@link fetchPublicHttpResponse}
  * to inherit SSRF defense + timeouts. Private-network mode is available
- * for local development/testing against a loopback server; it bypasses
- * the NetworkGuard and must be opted in explicitly via
+ * for local development/testing against a loopback server; it still uses
+ * NetworkGuard redirect-hop validation and must be opted in explicitly via
  * `allowPrivateNetwork: true`.
  */
 import { createHash } from "node:crypto";
@@ -56,8 +56,8 @@ export interface RealCloudMarketplaceConfig {
   apiKey?: string;
   timeoutMs?: number;
   /**
-   * When true, bypasses {@link fetchPublicHttpResponse} (SSRF guard).
-   * Intended for local dev/test only — do not enable in production.
+   * When true, allows guarded same-origin private/loopback marketplace calls.
+   * Intended for local dev/test only - do not enable in production.
    */
   allowPrivateNetwork?: boolean;
 }
@@ -289,31 +289,14 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     }
     const timeoutMs = this.config.timeoutMs ?? 15_000;
 
-    if (this.config.allowPrivateNetwork) {
-      // Local dev/test path — do NOT use in production. Loopback servers
-      // are blocked by NetworkGuard, so we bypass it here.
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const res = await fetch(url, {
-          method,
-          headers,
-          signal: controller.signal,
-        });
-        if (!options.allowNonOk && !res.ok) {
-          throw new Error(`marketplace ${res.status}: ${res.statusText}`);
-        }
-        return res;
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-
     try {
+      const privateNetworkScope = this.privateNetworkScopeFor(base);
       const res = await fetchPublicHttpResponse(url, {
         method,
         headers,
         timeoutMs,
+        allowPrivateNetworks: privateNetworkScope,
+        allowLoopback: privateNetworkScope,
       });
       if (!options.allowNonOk && !res.ok) {
         throw new Error(`marketplace ${res.status}: ${res.statusText}`);
@@ -324,6 +307,16 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
         throw new Error(`network guard: ${err.message}`);
       }
       throw err;
+    }
+  }
+
+  private privateNetworkScopeFor(base: string): false | ((url: URL) => boolean) {
+    if (!this.config.allowPrivateNetwork) return false;
+    try {
+      const allowedOrigin = new URL(base).origin;
+      return (candidate) => candidate.origin === allowedOrigin;
+    } catch {
+      return false;
     }
   }
 

@@ -206,6 +206,8 @@ export const CHANNELS = {
     hasApiKey: "lvis:settings:has-api-key",
     deleteApiKey: "lvis:settings:delete-api-key",
     listLlmModels: "lvis:settings:list-llm-models",
+    marketplaceInstallProviderPreset: "lvis:settings:marketplace:install-provider-preset",
+    marketplaceUninstallProviderPreset: "lvis:settings:marketplace:uninstall-provider-preset",
     marketplaceSetApiKey: "lvis:settings:marketplace:set-api-key",
     marketplaceHasApiKey: "lvis:settings:marketplace:has-api-key",
     marketplaceDeleteApiKey: "lvis:settings:marketplace:delete-api-key",

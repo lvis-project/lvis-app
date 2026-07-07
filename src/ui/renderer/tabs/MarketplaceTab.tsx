@@ -29,8 +29,6 @@ import {
 } from "../../../shared/network-access.js";
 import {
   marketplaceProviderPresetFromAsset,
-  marketplaceProviderPresetSecretId,
-  type MarketplaceInstalledProviderPreset,
 } from "../../../shared/marketplace-package-assets.js";
 import { isMarketplaceEligibleLLMVendor } from "../../../shared/llm-vendor-defaults.js";
 
@@ -111,21 +109,6 @@ function addUnique<T>(values: readonly T[], value: T): T[] {
 
 function removeValue<T>(values: readonly T[], value: T): T[] {
   return values.filter((entry) => entry !== value);
-}
-
-function upsertProviderPreset(
-  values: readonly MarketplaceInstalledProviderPreset[],
-  preset: MarketplaceInstalledProviderPreset,
-): MarketplaceInstalledProviderPreset[] {
-  const withoutCurrent = values.filter((entry) => entry.providerId !== preset.providerId);
-  return [...withoutCurrent, preset];
-}
-
-function removeProviderPreset(
-  values: readonly MarketplaceInstalledProviderPreset[],
-  providerId: string,
-): MarketplaceInstalledProviderPreset[] {
-  return values.filter((entry) => entry.providerId !== providerId);
 }
 
 export interface MarketplaceTabProps {
@@ -313,17 +296,13 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
         if (!preset) {
           throw new Error("Marketplace provider package is missing preset metadata");
         }
-        if (!install) {
-          const deleted: unknown = await api.deleteApiKey(
-            marketplaceProviderPresetSecretId(preset.providerId),
-          );
-          if (isIpcErrorResult(deleted)) {
-            throw new Error(deleted.message ?? deleted.error);
-          }
+        const result = install
+          ? await api.installMarketplaceProviderPreset(preset)
+          : await api.uninstallMarketplaceProviderPreset(preset.providerId);
+        if (isIpcErrorResult(result)) {
+          throw new Error(result.message ?? result.error);
         }
-        marketplace.installedProviderPresets = install
-          ? upsertProviderPreset(installed.installedProviderPresets, preset)
-          : removeProviderPreset(installed.installedProviderPresets, preset.providerId);
+        return;
       }
     } else if (asset.type === "theme") {
       marketplace.installedThemeBundleIds = install
@@ -388,6 +367,8 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       } else if (packageType === "skill") {
         const result = await getHostMarketplaceApi().uninstallMarketplaceSkill?.(item.id);
         if (!result?.ok) throw new Error(result?.message ?? result?.error ?? "Skill uninstall API unavailable");
+      } else if (packageType === "mcp") {
+        await window.lvis.mcp.removeConfig(item.id);
       } else if (packageType === "plugin") {
         const result = await getHostMarketplaceApi().uninstallMarketplacePlugin(item.id);
         if (!result.ok) throw new Error(result.message ?? result.error);

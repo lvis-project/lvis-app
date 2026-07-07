@@ -47,7 +47,7 @@ import {
   marketplaceProviderPresetSecretId,
   type MarketplaceInstalledProviderPreset,
 } from "../../../shared/marketplace-package-assets.js";
-import type { LvisApi } from "../types.js";
+import { isIpcErrorResult, type LvisApi } from "../types.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { useTranslation } from "../../../i18n/react.js";
@@ -80,6 +80,7 @@ type ModelListState =
       endpoint: string;
       fetchedAt: string;
       source?: "cache" | "network";
+      persistError?: string;
     }
   | {
       status: "error";
@@ -597,9 +598,21 @@ export function LlmTab(props: LlmTabProps) {
             fetchedAt: result.fetchedAt,
             source: "network",
           });
-          void api.updateSettings({ llm: { modelListCache: nextCache } }).catch(() => {
-            /* cache persistence is best-effort; synced options remain usable */
-          });
+          const markPersistError = (err: unknown): void => {
+            const latest = modelListsRef.current[key];
+            if (latest?.status !== "ready") return;
+            setModelListState(key, {
+              ...latest,
+              persistError: err instanceof Error ? err.message : String(err),
+            });
+          };
+          void api.updateSettings({ llm: { modelListCache: nextCache } })
+            .then((persistResult) => {
+              if (isIpcErrorResult(persistResult)) {
+                markPersistError(persistResult.message ?? persistResult.error);
+              }
+            })
+            .catch(markPersistError);
         } else {
           const latest = modelListsRef.current[key] ?? existing;
           setModelListState(key, {
@@ -1149,7 +1162,9 @@ export function LlmTab(props: LlmTabProps) {
               )}
               {activeModelList?.status === "ready" && (
                 <p className="text-[11px] text-muted-foreground" data-testid="llm-tab:model-sync-status">
-                  {t("llmTab.modelSynced", { count: activeModelList.options.length })}
+                  {activeModelList.persistError
+                    ? t("llmTab.modelSyncCacheSaveFailed")
+                    : t("llmTab.modelSynced", { count: activeModelList.options.length })}
                 </p>
               )}
               {activeModelList?.status === "error" && (

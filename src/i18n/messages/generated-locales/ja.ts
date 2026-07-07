@@ -1423,6 +1423,7 @@ export const jaMessages: Record<string, string> = {
   "llmTab.modelSync": "モデル一覧を同期",
   "llmTab.modelSyncing": "モデル一覧を同期中…",
   "llmTab.modelSynced": "エンドポイントから{count}個のモデルを同期しました",
+  "llmTab.modelSyncCacheSaveFailed": "Models synced, but the saved cache could not be updated.",
   "llmTab.moreProvidersInMarketplace": "Marketplaceでさらにプロバイダーを見る",
   "llmTab.modelSyncFailed": "モデル一覧を同期できませんでした。保存済みの候補を使用します。",
   "llmTab.openRouterFreeBadge": "無料",

@@ -790,6 +790,7 @@ export class SettingsService {
       shortcuts?: ShortcutSettingsPatch;
     },
   ): Promise<AppSettings> {
+    const previousSettings = this.getAll();
     const nextMarketplace = partial.marketplace
       ? normalizeMarketplace({
           ...this.settings.marketplace,
@@ -808,9 +809,6 @@ export class SettingsService {
           nextMarketplace.installedProviderPresets,
         )
       : [];
-    for (const providerId of removedProviderPresetIds) {
-      await this.deleteSecret(marketplaceProviderPresetSecretKey(providerId));
-    }
     if (partial.llm) {
       this.settings.llm = mergeLlmPatch(
         this.settings.llm,
@@ -1064,7 +1062,101 @@ export class SettingsService {
       };
     }
     await this.saveSettings();
+    await this.deleteMarketplaceProviderPresetSecretsAtomically(
+      previousSettings,
+      removedProviderPresetIds,
+    );
     return this.getAll();
+  }
+
+  async installMarketplaceProviderPreset(
+    preset: MarketplaceInstalledProviderPreset,
+  ): Promise<AppSettings> {
+    const normalized = normalizeMarketplaceProviderPreset(preset);
+    if (!normalized) {
+      throw new Error("Invalid marketplace provider preset.");
+    }
+    const current = this.settings.marketplace.installedProviderPresets;
+    return this.replaceMarketplaceProviderPresets([
+      ...current.filter((item) => item.providerId !== normalized.providerId),
+      normalized,
+    ]);
+  }
+
+  async uninstallMarketplaceProviderPreset(providerId: string): Promise<AppSettings> {
+    if (!isMarketplaceProviderPresetId(providerId)) {
+      throw new Error("Invalid marketplace provider preset id.");
+    }
+    const current = this.settings.marketplace.installedProviderPresets;
+    return this.replaceMarketplaceProviderPresets(
+      current.filter((item) => item.providerId !== providerId),
+    );
+  }
+
+  private async replaceMarketplaceProviderPresets(
+    installedProviderPresets: readonly MarketplaceInstalledProviderPreset[],
+  ): Promise<AppSettings> {
+    const previousSettings = this.getAll();
+    const nextMarketplace = normalizeMarketplace({
+      ...this.settings.marketplace,
+      installedProviderPresets,
+    });
+    const removedProviderPresetIds = removedMarketplaceProviderPresetIds(
+      this.settings.marketplace.installedProviderPresets,
+      nextMarketplace.installedProviderPresets,
+    );
+    this.settings.marketplace = nextMarketplace;
+    const prunedLlm = pruneLazyLlmVendorBlocks(
+      this.settings.llm,
+      nextMarketplace.installedProviderIds,
+      nextMarketplace.installedProviderPresets,
+      { inferInstalledFromCustom: false },
+    );
+    this.settings.llm = prunedLlm.llm;
+    await this.saveSettings();
+    await this.deleteMarketplaceProviderPresetSecretsAtomically(
+      previousSettings,
+      removedProviderPresetIds,
+    );
+    return this.getAll();
+  }
+
+  private async deleteMarketplaceProviderPresetSecretsAtomically(
+    previousSettings: AppSettings,
+    providerIds: readonly string[],
+  ): Promise<void> {
+    const secrets = providerIds.map((providerId) => {
+      const key = marketplaceProviderPresetSecretKey(providerId);
+      return { key, value: this.getSecret(key) };
+    });
+    try {
+      await this.deleteMarketplaceProviderPresetSecrets(providerIds);
+    } catch (err) {
+      this.settings = previousSettings;
+      for (const { key, value } of secrets) {
+        if (value !== null) {
+          await this.setSecret(key, value).catch((restoreErr: Error) => {
+            log.warn(
+              "provider preset secret restore after deletion failure failed: %s",
+              restoreErr.message,
+            );
+          });
+        }
+      }
+      await this.saveSettings().catch((rollbackErr: Error) => {
+        log.warn(
+          "settings rollback after provider preset secret deletion failure failed: %s",
+          rollbackErr.message,
+        );
+      });
+      throw err;
+    }
+  }
+
+  private async deleteMarketplaceProviderPresetSecrets(providerIds: readonly string[]): Promise<void> {
+    for (const providerId of providerIds) {
+      await this.deleteSecret(marketplaceProviderPresetSecretKey(providerId));
+    }
   }
 
   async replaceLlm(llm: LLMSettings): Promise<AppSettings> {
