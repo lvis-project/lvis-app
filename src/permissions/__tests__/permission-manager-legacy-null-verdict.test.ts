@@ -268,7 +268,7 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
     expect(auditEntry?.tool.args).not.toContain("alice@example.com");
     expect(auditEntry?.tool.args).not.toContain("sk-abcdefghijklmnopqrst");
     expect(auditEntry?.tool.args).toContain("***@example.com");
-    expect(auditEntry?.tool.args).toContain("sk-****");
+    expect(auditEntry?.tool.args).toContain("[REDACTED:TOKEN]");
     expect(auditEntry?.tool.source).toBe("plugin");
     expect(auditEntry?.tool.trustOrigin).toBe("plugin-emitted");
     expect(auditEntry?.tool.approvalCacheKey).toBe("plugin_send:scope-a");

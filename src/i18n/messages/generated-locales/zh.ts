@@ -332,7 +332,7 @@ export const zhMessages: Record<string, string> = {
   "be_conversationLoop.toolRoundLimitExceeded": "（超出工具执行轮次限制）",
   "be_conversationLoop.userPromptBlocked": "此提示已被受信任的挂钩阻止：{reason}",
   "be_costEstimator.costUnknown": "成本未知",
-  "be_dlp.patternApiKey": "API密钥",
+  "be_dlp.patternCredential": "凭据",
   "be_dlp.patternCreditCard": "信用卡",
   "be_dlp.patternEmail": "电子邮件",
   "be_dlp.patternPhoneNumber": "电话号码",
