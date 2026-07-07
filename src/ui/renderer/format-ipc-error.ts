@@ -117,6 +117,9 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "install-failed": "formatIpcError.installFailed",
   "uninstall-failed": "formatIpcError.uninstallFailed",
   "marketplace-disabled": "formatIpcError.marketplaceDisabled",
+  "invalid-provider-preset-id": "formatIpcError.invalidValue",
+  "marketplace-provider-preset-install-failed": "formatIpcError.installFailed",
+  "marketplace-provider-preset-uninstall-failed": "formatIpcError.uninstallFailed",
   // Plugin↔app minimum-version gate (install + load). The English IPC message
   // carries the concrete versions ("plugin requires LVIS >= X, current Y");
   // callsites that have the structured {required,current} fields render the
