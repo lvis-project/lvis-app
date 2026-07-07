@@ -24,7 +24,7 @@ import {
   listCrashDumps,
   type CrashDumpMeta,
 } from "../../audit/diagnostics-bundle.js";
-import { redactForLLM, redactFsPath } from "../../audit/dlp-filter.js";
+import { redactForLLM, redactFsPath, scrubSecretsForLLM } from "../../audit/dlp-filter.js";
 import { parseLogFileDate } from "../../lib/log-file-sink.js";
 import { getLvisAppVersion } from "../../shared/app-version.js";
 import { lvisHome } from "../../shared/lvis-home.js";
@@ -60,7 +60,7 @@ async function crashDumpsDir(): Promise<string> {
 
 /**
  * Read the last `lines` log lines from the most-recent log files, redacting each
- * with redactForLLM and applying the optional level filter. Newest file first;
+ * with PII + credential DLP and applying the optional level filter. Newest file first;
  * reads only enough files to satisfy `lines`.
  *
  * KNOWN LIMITATION (accepted, #1499 E2 cluster-review NIT): this loads each
@@ -92,7 +92,7 @@ async function tailLogs(lines: number, level: LogLevelFilter): Promise<string[]>
   }
   const filtered = level === "all" ? collected : collected.filter((l) => lineMatchesLevel(l, level));
   const tail = filtered.slice(-lines);
-  return tail.map((l) => redactForLLM(l).redacted);
+  return tail.map((l) => scrubSecretsForLLM(redactForLLM(l).redacted));
 }
 
 /** Does a (JSON or pretty) log line match the requested level? */

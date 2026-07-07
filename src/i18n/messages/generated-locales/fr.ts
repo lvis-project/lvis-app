@@ -332,7 +332,7 @@ export const frMessages: Record<string, string> = {
   "be_conversationLoop.toolRoundLimitExceeded": "(Limite de cycle d'exécution d'outil dépassée)",
   "be_conversationLoop.userPromptBlocked": "Cette invite a été bloquée par un hook approuvé: {reason}",
   "be_costEstimator.costUnknown": "Coût inconnu",
-  "be_dlp.patternApiKey": "Clé API",
+  "be_dlp.patternCredential": "Identifiant",
   "be_dlp.patternCreditCard": "Carte de crédit",
   "be_dlp.patternEmail": "E-mail",
   "be_dlp.patternPhoneNumber": "Numéro de téléphone",
