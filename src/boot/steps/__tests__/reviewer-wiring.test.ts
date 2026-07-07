@@ -34,6 +34,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -628,6 +629,10 @@ describe("Permission policy P4 reviewer-wiring", () => {
 describe("wireReviewerAndPermissions marketplace preset endpoint binding", () => {
   it("uses the installed preset endpoint when building the reviewer provider", async () => {
     vi.resetModules();
+    const networkGuard = await import("../../../core/network-guard.js");
+    const fetchPublicHttpResponse = vi
+      .spyOn(networkGuard, "fetchPublicHttpResponse")
+      .mockResolvedValue(new Response("ok"));
     const provider = stubProvider([]);
     const createProvider = vi.fn(() => provider);
     const wireReviewerAgentMock = vi.fn();
@@ -718,7 +723,27 @@ describe("wireReviewerAndPermissions marketplace preset endpoint binding", () =>
       apiKey: "fr-secret",
       model: "future/free",
       baseUrl: "https://future.example/v1",
+      fetch: expect.any(Function),
+      providerMetadata: expect.objectContaining({
+        providerId: "future-router",
+        baseUrl: "https://future.example/v1",
+      }),
     }));
+    const providerConfig = createProvider.mock.calls[0]?.[0];
+    await providerConfig?.fetch?.("https://future.example/v1/chat/completions", {
+      method: "POST",
+      body: "{}",
+    });
+    expect(fetchPublicHttpResponse).toHaveBeenCalledWith(
+      "https://future.example/v1/chat/completions",
+      expect.objectContaining({
+        method: "POST",
+        body: "{}",
+        allowLoopback: false,
+        maxRedirects: 0,
+        fetchImpl: expect.any(Function),
+      }),
+    );
 
     vi.doUnmock("electron");
     vi.doUnmock("../../../engine/llm/provider-factory.js");
