@@ -34,6 +34,7 @@ import type { SessionTodoItem } from "../../shared/session-todo.js";
 import type { SidebarTab } from "../../shared/sidebar-tab.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
+import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
 import type {
   LlmModelListRequest,
   LlmModelListResult,
@@ -146,7 +147,9 @@ export type PluginCardSummary = {
     allowPrivateNetworks?: boolean;
   };
   /** Structured marketplace install failure classification for Doctor UI. */
-  installFailureKind?: "catalog-grant-mismatch";
+  installFailureKind?: PluginInstallFailureKind;
+  /** User-visible install/load failure detail preserved for Doctor diagnostics. */
+  installFailureMessage?: string;
   /** Marketplace request slugs that should collapse onto this installed plugin. */
   installAliases?: string[];
 };
@@ -381,7 +384,7 @@ export type PluginMarketplaceInstallOptions = {
 
 export type PluginMarketplaceUninstallOptions = {
   doctorCleanup?: {
-    installFailureKind: "catalog-grant-mismatch";
+    installFailureKind: PluginInstallFailureKind;
   };
 };
 
