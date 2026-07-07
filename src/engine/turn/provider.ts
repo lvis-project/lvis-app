@@ -14,13 +14,70 @@ import {
   canUseLlmVendorWithoutApiKey,
   getLlmVendorSettings,
 } from "../../shared/llm-vendor-defaults.js";
-import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
+import {
+  marketplaceProviderPresetSecretKey,
+  type MarketplaceInstalledProviderPreset,
+} from "../../shared/marketplace-package-assets.js";
 import type { AiProviderPingResult } from "../../shared/ai-provider-ping.js";
+import { fetchPublicHttpResponse } from "../../core/network-guard.js";
 import type { ConversationLoopDeps } from "./types.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
 import { t } from "../../i18n/index.js";
 
 export const AI_PROVIDER_PING_TIMEOUT_MS = 8_000;
+
+function sameOriginScopeFor(value: string): false | ((url: URL) => boolean) {
+  try {
+    const origin = new URL(value).origin;
+    return (candidate) => candidate.origin === origin;
+  } catch {
+    return false;
+  }
+}
+
+function fetchInputUrl(input: Parameters<typeof fetch>[0]): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
+}
+
+function requestInitFromFetchInput(
+  input: Parameters<typeof fetch>[0],
+  init: Parameters<typeof fetch>[1],
+): RequestInit | undefined {
+  if (!(typeof Request !== "undefined" && input instanceof Request)) {
+    return init;
+  }
+  const requestInit: RequestInit = {
+    method: input.method,
+    headers: input.headers,
+    signal: input.signal,
+    ...init,
+  };
+  if (input.body && init?.body === undefined) {
+    Object.assign(requestInit, {
+      body: input.body,
+      duplex: "half",
+    });
+  }
+  return requestInit;
+}
+
+function guardedMarketplaceProviderFetch(
+  baseUrl: string,
+  preset: MarketplaceInstalledProviderPreset,
+  fetchImpl: typeof fetch = fetch,
+): typeof fetch {
+  const allowLoopback =
+    preset.requiresApiKey === false ? sameOriginScopeFor(baseUrl) : false;
+
+  return (input, init) =>
+    fetchPublicHttpResponse(fetchInputUrl(input), {
+      ...requestInitFromFetchInput(input, init),
+      allowLoopback,
+      fetchImpl,
+    });
+}
 
 export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
     const llmSettings = deps.settingsService.get("llm");
@@ -62,6 +119,15 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
       const createLoopProvider = (config: ProviderConfig): LLMProvider =>
         createProvider({
           ...config,
+          ...(config.providerMetadata && config.baseUrl
+            ? {
+                fetch: guardedMarketplaceProviderFetch(
+                  config.baseUrl,
+                  config.providerMetadata,
+                  deps.llmFetch ?? fetch,
+                ),
+              }
+            : {}),
           ...(config.vendor === "azure-foundry" && deps.llmFetch
             ? { fetch: deps.llmFetch }
             : {}),
