@@ -1423,6 +1423,7 @@ export const deMessages: Record<string, string> = {
   "llmTab.modelSync": "Modellliste synchronisieren",
   "llmTab.modelSyncing": "Modelle werden synchronisiert…",
   "llmTab.modelSynced": "{count} Modelle vom Endpunkt synchronisiert",
+  "llmTab.modelSyncCacheSaveFailed": "Models synced, but the saved cache could not be updated.",
   "llmTab.moreProvidersInMarketplace": "Weitere Anbieter im Marketplace",
   "llmTab.modelSyncFailed": "Modelle konnten nicht synchronisiert werden. Gespeicherte Optionen werden verwendet.",
   "llmTab.openRouterFreeBadge": "Kostenlos",

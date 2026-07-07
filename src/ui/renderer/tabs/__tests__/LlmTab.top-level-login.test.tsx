@@ -280,6 +280,8 @@ describe("LlmTab — top-level login toggle UI", () => {
     )).toHaveTextContent("마켓플레이스");
     expect((screen.getByTestId("llm-base-url-input") as HTMLInputElement).value)
       .toBe("https://future.example/v1");
+    expect(screen.getByTestId("llm-tab:api-key-section"))
+      .toHaveAttribute("data-api-key-required", "false");
     expect(container.querySelector('[data-testid="llm-model-select"]')?.textContent)
       .toContain("future/free");
   });
@@ -334,6 +336,8 @@ describe("LlmTab — top-level login toggle UI", () => {
       target: { value: "Router A" },
     });
     fireEvent.click(await screen.findByText("Router A"));
+    expect(screen.getByTestId("llm-tab:api-key-section"))
+      .toHaveAttribute("data-api-key-required", "true");
     await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledTimes(1));
     expect(api.listLlmModels).toHaveBeenLastCalledWith({
       vendor: "openai-compatible",

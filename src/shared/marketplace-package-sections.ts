@@ -45,6 +45,7 @@ const INSTALLABLE_PACKAGE_TYPE_SET = new Set<string>(INSTALLABLE_MARKETPLACE_PAC
 const MARKETPLACE_ASSET_PACKAGE_TYPE_SET = new Set<string>(MARKETPLACE_ASSET_PACKAGE_TYPES);
 const HOST_UNINSTALLABLE_PACKAGE_TYPE_SET = new Set<string>([
   "plugin",
+  "mcp",
   "agent",
   "skill",
 ] satisfies readonly MarketplacePackageType[]);

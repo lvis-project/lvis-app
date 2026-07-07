@@ -422,6 +422,12 @@ export type LvisApi = {
   hasApiKey: (vendor?: string) => Promise<boolean>;
   deleteApiKey: (vendor: string) => Promise<{ ok: true }>;
   listLlmModels: (request: LlmModelListRequest) => Promise<LlmModelListResult>;
+  installMarketplaceProviderPreset: (
+    preset: MarketplaceInstalledProviderPreset,
+  ) => Promise<SettingsUpdateResult>;
+  uninstallMarketplaceProviderPreset: (
+    providerId: string,
+  ) => Promise<SettingsUpdateResult>;
   setWebApiKey: (provider: string, k: string) => Promise<{ ok: true }>;
   hasWebApiKey: (provider: string) => Promise<boolean>;
   deleteWebApiKey: (provider: string) => Promise<{ ok: true }>;

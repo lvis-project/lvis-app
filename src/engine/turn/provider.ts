@@ -16,6 +16,7 @@ import {
 } from "../../shared/llm-vendor-defaults.js";
 import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
 import type { AiProviderPingResult } from "../../shared/ai-provider-ping.js";
+import { createGuardedMarketplaceProviderFetch } from "../llm/marketplace-provider-fetch.js";
 import type { ConversationLoopDeps } from "./types.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
 import { t } from "../../i18n/index.js";
@@ -62,6 +63,14 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
       const createLoopProvider = (config: ProviderConfig): LLMProvider =>
         createProvider({
           ...config,
+          ...(config.providerMetadata && config.baseUrl
+            ? {
+                fetch: createGuardedMarketplaceProviderFetch(
+                  config.baseUrl,
+                  config.providerMetadata,
+                ),
+              }
+            : {}),
           ...(config.vendor === "azure-foundry" && deps.llmFetch
             ? { fetch: deps.llmFetch }
             : {}),

@@ -80,6 +80,15 @@ function usesHttpsEndpoint(value: string): boolean {
   }
 }
 
+function sameOriginScopeFor(value: string): false | ((url: URL) => boolean) {
+  try {
+    const origin = new URL(value).origin;
+    return (candidate) => candidate.origin === origin;
+  } catch {
+    return false;
+  }
+}
+
 function resolveModelListBaseUrl(
   settingsService: SettingsService,
   vendor: LLMVendor,
@@ -204,6 +213,27 @@ function validateModelListCredentialScope(
     };
   }
   return null;
+}
+
+function privateNetworkScopeForKeylessModelList(
+  settingsService: SettingsService,
+  vendor: LLMVendor,
+  resolved: ResolvedModelListBaseUrl,
+  apiKey: string,
+  credentialScope?: string,
+): false | ((url: URL) => boolean) {
+  if (apiKey || vendor !== "openai-compatible" || !resolved.baseUrl) return false;
+  const llm = settingsService.get("llm");
+  const providerPresetId = isMarketplaceProviderPresetId(credentialScope)
+    ? credentialScope
+    : llm.provider === "openai-compatible"
+      ? llm.marketplaceProviderPresetId
+      : undefined;
+  if (!providerPresetId) return false;
+  const preset = installedProviderPresetForScope(settingsService, providerPresetId);
+  if (!preset || preset.requiresApiKey !== false) return false;
+  if (!sameModelListEndpoint(resolved.baseUrl, preset.baseUrl)) return false;
+  return sameOriginScopeFor(resolved.baseUrl);
 }
 
 export function modelListEndpointFromBaseUrl(baseUrl: string): string {
@@ -418,6 +448,13 @@ export async function listLlmModelsFromSettings(
   }
   const headers: Record<string, string> = { Accept: "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  const privateNetworkScope = privateNetworkScopeForKeylessModelList(
+    settingsService,
+    request.vendor,
+    resolved,
+    apiKey,
+    request.credentialScope,
+  );
 
   let requestEndpoint = endpoint;
   try {
@@ -426,6 +463,9 @@ export async function listLlmModelsFromSettings(
     // DNS-aware SSRF guard before the request wrapper revalidates redirect hops.
     requestEndpoint = (await (options.ensurePublicUrl ?? ensurePublicHttpUrl)(
       endpoint,
+      {
+        allowLoopback: privateNetworkScope,
+      },
     )).toString();
     const response = await (
       options.fetchPublicHttpResponseImpl ?? fetchPublicHttpResponse
@@ -435,6 +475,7 @@ export async function listLlmModelsFromSettings(
       fetchImpl: options.fetchImpl,
       maxRedirects: 0,
       timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      allowLoopback: privateNetworkScope,
     });
     if (!response.ok) {
       return {

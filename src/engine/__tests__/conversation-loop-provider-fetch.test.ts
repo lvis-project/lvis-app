@@ -13,6 +13,7 @@ describe("ConversationLoop LLM fetch wiring", () => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.doUnmock("../llm/provider-factory.js");
 });
 
@@ -212,6 +213,7 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
         apiKey: "fr-secret",
         model: "future/free",
         baseUrl: "https://future.example/v1",
+        fetch: expect.any(Function),
         providerMetadata: expect.objectContaining({
           providerId: "future-router",
           baseUrl: "https://future.example/v1",
@@ -220,6 +222,153 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
         }),
       }),
     );
+  });
+
+  it("guards credentialed marketplace provider runtime fetches through NetworkGuard", async () => {
+    const networkGuard = await import("../../core/network-guard.js");
+    const fetchPublicHttpResponse = vi
+      .spyOn(networkGuard, "fetchPublicHttpResponse")
+      .mockResolvedValue(new Response("ok"));
+    const createProvider = vi.fn(() => ({
+      vendor: "openai-compatible" as const,
+      streamTurn: async function* () {},
+    }));
+    vi.doMock("../llm/provider-factory.js", () => ({
+      createProvider,
+      secretKeyFor: (vendor: string) => `llm.apiKey.${vendor}`,
+    }));
+    const { ConversationLoop } = await import("../conversation-loop.js");
+
+    const toolRegistry = new ToolRegistry();
+    const settings = fakeLlmSettings({
+      provider: "openai-compatible",
+      model: "future/free",
+    });
+    settings.marketplaceProviderPresetId = "future-router";
+
+    new ConversationLoop(({
+      settingsService: {
+        get: (key: string) => {
+          if (key === "llm") return settings;
+          if (key === "marketplace") {
+            return {
+              installedProviderPresets: [{
+                providerId: "future-router",
+                label: "Future Router",
+                baseUrl: "https://future.example/v1",
+                defaultModel: "future/free",
+                modelOptions: ["future/free"],
+                requiresApiKey: true,
+              }],
+            };
+          }
+          throw new Error(`unexpected settings key: ${key}`);
+        },
+        getSecret: (key: string) =>
+          key === marketplaceProviderPresetSecretKey("future-router")
+            ? "fr-secret"
+            : null,
+      },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+
+    const providerConfig = createProvider.mock.calls[0]?.[0];
+    const guardedFetch = providerConfig?.fetch;
+    expect(guardedFetch).toEqual(expect.any(Function));
+
+    await guardedFetch?.("https://future.example/v1/chat/completions", {
+      method: "POST",
+      body: "{}",
+    });
+
+    expect(fetchPublicHttpResponse).toHaveBeenCalledWith(
+      "https://future.example/v1/chat/completions",
+      expect.objectContaining({
+        method: "POST",
+        body: "{}",
+        allowLoopback: false,
+        fetchImpl: expect.any(Function),
+        maxRedirects: 0,
+      }),
+    );
+  });
+
+  it("scopes keyless marketplace loopback runtime fetches to the preset origin", async () => {
+    const networkGuard = await import("../../core/network-guard.js");
+    const fetchPublicHttpResponse = vi
+      .spyOn(networkGuard, "fetchPublicHttpResponse")
+      .mockResolvedValue(new Response("ok"));
+    const createProvider = vi.fn(() => ({
+      vendor: "openai-compatible" as const,
+      streamTurn: async function* () {},
+    }));
+    vi.doMock("../llm/provider-factory.js", () => ({
+      createProvider,
+      secretKeyFor: (vendor: string) => `llm.apiKey.${vendor}`,
+    }));
+    const { ConversationLoop } = await import("../conversation-loop.js");
+
+    const toolRegistry = new ToolRegistry();
+    const settings = fakeLlmSettings({
+      provider: "openai-compatible",
+      model: "local/free",
+    });
+    settings.marketplaceProviderPresetId = "local-router";
+
+    new ConversationLoop(({
+      settingsService: {
+        get: (key: string) => {
+          if (key === "llm") return settings;
+          if (key === "marketplace") {
+            return {
+              installedProviderPresets: [{
+                providerId: "local-router",
+                label: "Local Router",
+                baseUrl: "http://localhost:8000/v1",
+                defaultModel: "local/free",
+                modelOptions: ["local/free"],
+                requiresApiKey: false,
+              }],
+            };
+          }
+          throw new Error(`unexpected settings key: ${key}`);
+        },
+        getSecret: () => null,
+      },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+
+    const providerConfig = createProvider.mock.calls[0]?.[0];
+    const guardedFetch = providerConfig?.fetch;
+    expect(guardedFetch).toEqual(expect.any(Function));
+
+    await guardedFetch?.("http://localhost:8000/v1/chat/completions", {
+      method: "POST",
+      body: "{}",
+    });
+
+    const [, init] = fetchPublicHttpResponse.mock.calls[0] as [
+      string,
+      RequestInit & {
+        allowLoopback?: false | ((url: URL) => boolean);
+        allowPrivateNetworks?: boolean;
+        fetchImpl?: typeof fetch;
+      },
+    ];
+    expect(init.allowPrivateNetworks).toBeUndefined();
+    expect(init.maxRedirects).toBe(0);
+    expect(init.allowLoopback).toEqual(expect.any(Function));
+    const allowLoopback = init.allowLoopback as (url: URL) => boolean;
+    expect(allowLoopback(new URL("http://localhost:8000/v1/models"))).toBe(true);
+    expect(allowLoopback(new URL("http://localhost:9000/v1/models"))).toBe(false);
   });
 
   it("does not fall back to generic OpenAI-compatible credentials when the selected preset is uninstalled", async () => {
