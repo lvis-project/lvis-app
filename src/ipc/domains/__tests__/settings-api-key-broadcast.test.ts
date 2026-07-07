@@ -13,6 +13,7 @@ import { SETTINGS } from "../../../shared/ipc-channels.js";
 import { makeAppIpcInvoker } from "./test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
+const listLlmModelsFromSettingsMock = vi.hoisted(() => vi.fn());
 
 vi.mock("electron", () => ({
   ipcMain: {
@@ -20,6 +21,9 @@ vi.mock("electron", () => ({
       handlers.set(channel, fn);
     }),
   },
+}));
+vi.mock("../../../engine/llm/model-list.js", () => ({
+  listLlmModelsFromSettings: listLlmModelsFromSettingsMock,
 }));
 
 // Shared fixture (test-helpers.ts) — no senderFrame set, so validateSender's
@@ -67,6 +71,8 @@ function makeDeps(appWindows: ReturnType<typeof makeWindow>[], vendorBaseUrl?: s
 
 beforeEach(() => {
   handlers.clear();
+  listLlmModelsFromSettingsMock.mockReset();
+  listLlmModelsFromSettingsMock.mockResolvedValue({ ok: true, models: [], endpoint: "", fetchedAt: "" });
   vi.resetModules();
 });
 
@@ -478,6 +484,107 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
     });
 
     expect(rewire).toHaveBeenCalledOnce();
+  });
+
+  it("derives model-list discovery policy from the installed marketplace provider preset", async () => {
+    const deps = makeDeps([]);
+    deps.settingsService.get.mockImplementation((key?: string) => {
+      if (key === "marketplace") {
+        return {
+          installedProviderIds: [],
+          installedProviderPresets: [{
+            providerId: "manual-router",
+            label: "Manual Router",
+            baseUrl: "https://manual.example/v1",
+            defaultModel: "manual/default",
+            modelOptions: ["manual/default", "manual/large"],
+            requiresApiKey: true,
+            modelDiscoveryPolicy: "manual",
+          }],
+        };
+      }
+      if (key === "shortcuts") return {};
+      if (key === "system") return {};
+      return {
+        provider: "openai-compatible",
+        marketplaceProviderPresetId: "manual-router",
+        vendors: {
+          "openai-compatible": {
+            model: "manual/default",
+            baseUrl: "https://manual.example/v1",
+          },
+        },
+      };
+    });
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:list-llm-models", {
+      vendor: "openai-compatible",
+      baseUrl: "https://manual.example/v1",
+      credentialScope: "manual-router",
+      modelDiscoveryPolicy: "models-api",
+    });
+
+    expect(listLlmModelsFromSettingsMock).toHaveBeenCalledWith(
+      deps.settingsService,
+      {
+        vendor: "openai-compatible",
+        baseUrl: "https://manual.example/v1",
+        credentialScope: "manual-router",
+        modelDiscoveryPolicy: "manual",
+      },
+    );
+  });
+
+  it("derives model-list discovery policy from the active marketplace provider preset", async () => {
+    const deps = makeDeps([]);
+    deps.settingsService.get.mockImplementation((key?: string) => {
+      if (key === "marketplace") {
+        return {
+          installedProviderIds: [],
+          installedProviderPresets: [{
+            providerId: "manual-router",
+            label: "Manual Router",
+            baseUrl: "https://manual.example/v1",
+            defaultModel: "manual/default",
+            modelOptions: ["manual/default", "manual/large"],
+            requiresApiKey: true,
+            modelDiscoveryPolicy: "manual",
+          }],
+        };
+      }
+      if (key === "shortcuts") return {};
+      if (key === "system") return {};
+      return {
+        provider: "openai-compatible",
+        marketplaceProviderPresetId: "manual-router",
+        vendors: {
+          "openai-compatible": {
+            model: "manual/default",
+            baseUrl: "https://manual.example/v1",
+          },
+        },
+      };
+    });
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:list-llm-models", {
+      vendor: "openai-compatible",
+      baseUrl: "https://manual.example/v1",
+    });
+
+    expect(listLlmModelsFromSettingsMock).toHaveBeenCalledWith(
+      deps.settingsService,
+      {
+        vendor: "openai-compatible",
+        baseUrl: "https://manual.example/v1",
+        modelDiscoveryPolicy: "manual",
+      },
+    );
   });
 
   it("rolls back active LLM settings when reviewer rewire fails", async () => {
