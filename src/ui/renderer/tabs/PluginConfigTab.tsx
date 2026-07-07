@@ -543,9 +543,10 @@ export function PluginConfigTab() {
   const handleUninstall = useCallback(async (pluginId: string, displayName: string) => {
     setSaving(true);
     try {
+      const doctorCleanupKind = uninstallTarget?.id === pluginId ? uninstallTarget.installFailureKind : undefined;
       const uninstallOptions: PluginMarketplaceUninstallOptions | undefined =
-        uninstallTarget?.id === pluginId && uninstallTarget.installFailureKind === "catalog-grant-mismatch"
-          ? { doctorCleanup: { installFailureKind: "catalog-grant-mismatch" } }
+        doctorCleanupKind
+          ? { doctorCleanup: { installFailureKind: doctorCleanupKind } }
           : undefined;
       const marketplaceApi = getHostMarketplaceApi();
       const result = uninstallOptions
@@ -861,13 +862,27 @@ export function PluginConfigTab() {
                         <p className="text-xs font-medium text-destructive">
                           {selectedPlugin.installFailureKind === "catalog-grant-mismatch"
                             ? t("pluginConfigTab.doctorGrantMismatchTitle")
-                            : t("pluginConfigTab.doctorTitle")}
+                            : selectedPlugin.installFailureKind === "manifest-validation-error"
+                              ? t("pluginConfigTab.doctorManifestValidationTitle")
+                              : t("pluginConfigTab.doctorTitle")}
                         </p>
                         <p className="text-[11px] text-destructive/(--opacity-intense)">
                           {selectedPlugin.installFailureKind === "catalog-grant-mismatch"
                             ? t("pluginConfigTab.doctorGrantMismatchDescription")
-                            : t("pluginConfigTab.doctorDescription")}
+                            : selectedPlugin.installFailureKind === "manifest-validation-error"
+                              ? t("pluginConfigTab.doctorManifestValidationDescription")
+                              : t("pluginConfigTab.doctorDescription")}
                         </p>
+                        {selectedPlugin.installFailureMessage ? (
+                          <div className="mt-2 rounded border border-destructive/(--opacity-muted) bg-background/(--opacity-muted) px-2 py-1.5">
+                            <p className="text-[10px] font-medium uppercase tracking-wide text-destructive">
+                              {t("pluginConfigTab.doctorFailureDetailLabel")}
+                            </p>
+                            <p className="mt-1 break-words font-mono text-[10.5px] leading-snug text-destructive/(--opacity-intense)">
+                              {selectedPlugin.installFailureMessage}
+                            </p>
+                          </div>
+                        ) : null}
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <Button

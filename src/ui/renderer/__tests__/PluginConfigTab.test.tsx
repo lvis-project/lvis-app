@@ -275,6 +275,41 @@ describe("PluginConfigTab", () => {
     });
   });
 
+  it("shows manifest validation field details in the Doctor panel", async () => {
+    const broken = {
+      id: "ms-graph",
+      name: "MS Graph",
+      description: "Marketplace install failed",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      installAliases: ["lvis-plugin-ms-graph"],
+      installFailureKind: "manifest-validation-error" as const,
+      installFailureMessage:
+        "[manifest:ms-graph] schema validation failed (/tmp/plugin.json): / unknown property: 'startupTools' — the manifest contains a field that the current SDK schema no longer allows.",
+      loadStatus: "failed" as const,
+    };
+    const cards = vi.fn().mockResolvedValue([broken]);
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:ms-graph")).toBeInTheDocument();
+    });
+    expect(screen.getByText("플러그인 manifest 검증 실패")).toBeInTheDocument();
+    expect(screen.getByText("상세 오류")).toBeInTheDocument();
+    expect(screen.getByText(/unknown property: 'startupTools'/)).toBeInTheDocument();
+  });
+
   it("resolves Doctor install id from marketplace when a failed plugin has no install alias", async () => {
     const broken = {
       id: "lge-api",
@@ -415,6 +450,51 @@ describe("PluginConfigTab", () => {
     await waitFor(() => {
       expect(mockUninstall).toHaveBeenCalledWith("meeting", {
         doctorCleanup: { installFailureKind: "catalog-grant-mismatch" },
+      });
+      expect(screen.getByText("LVIS Meeting 제거 완료")).toBeInTheDocument();
+    });
+  });
+
+  it("requests Doctor cleanup when removing a manifest validation diagnostic", async () => {
+    const broken = {
+      id: "meeting",
+      name: "LVIS Meeting",
+      description: "Meeting plugin",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      isManaged: true,
+      installPolicy: "admin" as const,
+      loadStatus: "failed" as const,
+      installFailureKind: "manifest-validation-error" as const,
+      installFailureMessage:
+        "[manifest:meeting] schema validation failed (/tmp/plugin.json): / unknown property: 'startupTools'",
+    };
+    const cards = vi.fn(async () => [broken]);
+    mockUninstall.mockResolvedValueOnce({ ok: true as const });
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:meeting")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("plugin-config:doctor-remove:meeting"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "제거" }));
+
+    await waitFor(() => {
+      expect(mockUninstall).toHaveBeenCalledWith("meeting", {
+        doctorCleanup: { installFailureKind: "manifest-validation-error" },
       });
       expect(screen.getByText("LVIS Meeting 제거 완료")).toBeInTheDocument();
     });
