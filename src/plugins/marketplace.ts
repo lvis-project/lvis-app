@@ -41,6 +41,20 @@ import {
 } from "../shared/marketplace-announcements.js";
 export type { MarketplaceAnnouncement, MarketplaceFetcher } from "./marketplace-fetcher.js";
 
+export interface MarketplaceInstallFailureDiagnostic {
+  id: string;
+  name: string;
+  description: string;
+  error: string;
+  installFailureKind?: "catalog-grant-mismatch";
+  isManaged: boolean;
+  installPolicy: InstallPolicy;
+  installAliases: string[];
+  networkAccess?: PluginMarketplaceItem["networkAccess"];
+  version?: string;
+  publisher?: string;
+}
+
 function normalizeInstallPolicy(source: {
   installPolicy?: InstallPolicy;
 }): InstallPolicy {
@@ -88,6 +102,12 @@ function hasExternalAuthConsumerCapability(source: {
   capabilities?: readonly string[];
 }): boolean {
   return source.capabilities?.includes("external-auth-consumer") === true;
+}
+
+function classifyInstallFailure(message: string): MarketplaceInstallFailureDiagnostic["installFailureKind"] | undefined {
+  return message.includes("artifact manifest") && message.includes("catalog-approved grant")
+    ? "catalog-grant-mismatch"
+    : undefined;
 }
 
 function assertNetworkAccessAcknowledgement(options: {
@@ -327,6 +347,7 @@ export class PluginMarketplaceService {
   private readonly locks = new Map<string, Promise<void>>();
   private readonly installReceiptValidationCache = new Map<string, InstallReceiptValidation>();
   private readonly localInstallRollbackSnapshots = new Map<string, LocalInstallRollbackSnapshot>();
+  private readonly installFailureDiagnostics = new Map<string, MarketplaceInstallFailureDiagnostic>();
   /** Optional diagnostic logger. Injected in tests; no-op in production. */
   readonly log?: (message: string, ...args: unknown[]) => void;
 
@@ -374,6 +395,43 @@ export class PluginMarketplaceService {
    */
   getFetcher(): MarketplaceFetcher {
     return this.fetcher;
+  }
+
+  getInstallFailureDiagnostics(): MarketplaceInstallFailureDiagnostic[] {
+    return [...this.installFailureDiagnostics.values()];
+  }
+
+  clearInstallFailureDiagnostic(pluginId: string): boolean {
+    return this.installFailureDiagnostics.delete(pluginId);
+  }
+
+  private rememberInstallFailure(plugin: PluginMarketplaceItem, error: unknown): void {
+    const installPolicy = normalizeInstallPolicy(plugin);
+    const message = error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : String(error);
+    const installFailureKind = classifyInstallFailure(message);
+    const installAliases = [plugin.slug, plugin.packageName, plugin.packageSpec]
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+    this.installFailureDiagnostics.set(plugin.id, {
+      id: plugin.id,
+      name: plugin.name || plugin.id,
+      description: plugin.description || plugin.name || plugin.id,
+      error: message,
+      ...(installFailureKind ? { installFailureKind } : {}),
+      isManaged: installPolicy === "admin",
+      installPolicy,
+      installAliases,
+      ...(plugin.networkAccess ? { networkAccess: plugin.networkAccess } : {}),
+      ...(plugin.version ? { version: plugin.version } : {}),
+      ...(plugin.publisher ? { publisher: plugin.publisher } : {}),
+    });
+  }
+
+  private clearInstallFailure(pluginId: string): void {
+    this.installFailureDiagnostics.delete(pluginId);
   }
 
   async list(): Promise<MarketplaceListItem[]> {
@@ -545,8 +603,11 @@ export class PluginMarketplaceService {
       touchedEntries: new Map(),
     };
     try {
-      return await this.installWithDependencies(pluginId, actor, catalogSnapshot, new Set<string>(), state, onProgress);
+      const result = await this.installWithDependencies(pluginId, actor, catalogSnapshot, new Set<string>(), state, onProgress);
+      this.clearInstallFailure(result.pluginId);
+      return result;
     } catch (error) {
+      if (catalogItem) this.rememberInstallFailure(catalogItem, error);
       await this.rollbackInstallOperation(state);
       throw error;
     }
@@ -829,9 +890,11 @@ export class PluginMarketplaceService {
           throw innerErr;
         }
         (isUpdate ? result.updated : result.installed).push(plugin.id);
+        this.clearInstallFailure(plugin.id);
       } catch (err) {
         const msg = (err as Error).message;
         result.failed.push({ id: plugin.id, error: msg });
+        this.rememberInstallFailure(plugin, err);
         log.warn(`managed plugin '${plugin.id}' ${isUpdate ? "update" : "install"} failed: ${msg}`);
       }
     }

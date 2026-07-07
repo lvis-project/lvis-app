@@ -36,6 +36,17 @@ describe("useWorkspaceTabs", () => {
     expect(result.current.activeTabId).toBe(added.id);
   });
 
+  it("ensureContainerTab reuses an existing container tab and activates it", () => {
+    const { result } = renderHook(() => useWorkspaceTabs());
+    act(() => result.current.ensureContainerTab("subagent"));
+    const subagentId = result.current.activeTabId!;
+    act(() => result.current.addTab("terminal"));
+    expect(result.current.activeTabId).not.toBe(subagentId);
+    act(() => result.current.ensureContainerTab("subagent"));
+    expect(result.current.tabs.filter((tab) => tab.kind === "subagent" && tab.content === null)).toHaveLength(1);
+    expect(result.current.activeTabId).toBe(subagentId);
+  });
+
   it("addTab assigns per-kind ordinals and unique ids", () => {
     const { result } = renderHook(() => useWorkspaceTabs());
     act(() => result.current.addTab("browser"));

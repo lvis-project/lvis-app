@@ -135,6 +135,23 @@ export function useChatScroll({
     });
   }, [pinChatToBottom]);
 
+  useEffect(() => {
+    const viewport = scrollViewportRef.current;
+    const ResizeObserverImpl = typeof window !== "undefined" ? window.ResizeObserver : undefined;
+    if (!viewport || typeof ResizeObserverImpl !== "function") return;
+    const observer = new ResizeObserverImpl(() => {
+      if (viewMode) return;
+      if (pinnedToBottomRef.current || isNearBottom()) {
+        scheduleAutoBottomPin();
+      }
+    });
+    observer.observe(viewport);
+    if (viewport.firstElementChild instanceof HTMLElement) {
+      observer.observe(viewport.firstElementChild);
+    }
+    return () => observer.disconnect();
+  }, [isNearBottom, scheduleAutoBottomPin, scrollViewportRef, viewMode]);
+
   const scrollChatToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     cancelAutoBottomPin();
     const viewport = scrollViewportRef.current;

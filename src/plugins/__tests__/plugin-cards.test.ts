@@ -18,6 +18,11 @@ function writePlugin(root: string, id: string, opts: {
   tools: string[];
   icon?: string;
   iconText?: string;
+  networkAccess?: {
+    allowedDomains: string[];
+    reasoning?: string;
+    allowPrivateNetworks?: boolean;
+  };
   ui?: Array<{
     id: string;
     slot: "sidebar";
@@ -44,6 +49,7 @@ function writePlugin(root: string, id: string, opts: {
     entry: "index.mjs",
     icon: opts.icon,
     iconText: opts.iconText,
+    networkAccess: opts.networkAccess,
     tools: opts.tools,
     ui: opts.ui,
     toolSchemas: opts.toolSchemas,
@@ -138,6 +144,25 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
         exportName: "PluginUi",
       }),
     ]);
+  });
+
+  it("surfaces manifest networkAccess disclosure on plugin cards", async () => {
+    const manifestA = writePlugin(tmp, "example-network", {
+      name: "Network",
+      tools: ["network_read"],
+      networkAccess: {
+        allowedDomains: ["api.example.com"],
+        reasoning: "Required for remote API calls.",
+      },
+    });
+
+    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
+    await runtime.load();
+
+    expect(runtime.listPluginCards()[0].networkAccess).toEqual({
+      allowedDomains: ["api.example.com"],
+      reasoning: "Required for remote API calls.",
+    });
   });
 
   it("adds a runtime revision cache key to loaded plugin UI entry URLs", async () => {

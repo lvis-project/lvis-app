@@ -268,7 +268,7 @@ export function App() {
     currentSessionId, currentSessionKind, currentSessionTitle, sessions, refreshSessionId, refreshSessions,
     currentSessionProject,
     handleLoadSession: sessionLoad, handleFork: sessionFork,
-  } = useSessions(api, applyInitialSession);
+  } = useSessions(api, applyInitialSession, resetForNewSession);
   const attachmentSessionScopeRef = useRef<{ initialized: boolean; sessionId?: string }>({
     initialized: false,
     sessionId: undefined,

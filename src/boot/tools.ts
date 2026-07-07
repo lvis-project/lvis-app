@@ -13,7 +13,12 @@ import { createRenderHtmlTool } from "../tools/render-html.js";
 import { createAskUserQuestionTool } from "../tools/ask-user-question.js";
 import { createRoutineScheduleTool } from "../tools/routine-schedule.js";
 import { createTodoSessionWriteTool } from "../tools/todo-session-write.js";
-import { createAgentSpawnTool, type AgentSpawnEvent } from "../tools/agent-spawn.js";
+import {
+  createAgentInterruptTool,
+  createAgentSpawnTool,
+  createAgentStatusTool,
+  type AgentSpawnEvent,
+} from "../tools/agent-spawn.js";
 import { createSkillLoadTool, type SkillLoadEvent } from "../tools/skill-load.js";
 import { createSkillListTool } from "../tools/skill-list.js";
 import { createAgentListTool } from "../tools/agent-list.js";
@@ -635,6 +640,12 @@ export function registerBuiltinTools(
           ? async (name) => await agentProfileStore.load(name)
           : undefined,
         emit: workflowDeps.emitAgentSpawn,
+      }),
+      createAgentStatusTool({
+        getRunner: workflowDeps.getSubAgentRunner,
+      }),
+      createAgentInterruptTool({
+        getRunner: workflowDeps.getSubAgentRunner,
       }),
     );
   }

@@ -1496,9 +1496,10 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
 // ─── D4 §4.5.3 — ordered tool approval/execution ─────────────
 
 /**
- * D4: When the LLM emits multiple tool_calls in one round, executeAll runs
- * them in the exact emitted order. Each call still reaches the approval gate,
- * but later calls must not start until earlier calls have resolved.
+ * D4: When the LLM emits multiple non-parallel tool_calls in one round,
+ * executeAll runs them in the exact emitted order. Each call still reaches
+ * the approval gate, but later calls must not start until earlier calls have
+ * resolved.
  * This test verifies:
  *   1. Only the first approval request is pending before it is resolved.
  *   2. Resolving one request advances to the next request in order.
@@ -1742,6 +1743,51 @@ describe("ToolExecutor — D4 ordered approval/execution (§4.5.3)", () => {
     expect(rF.is_error).toBe(true);
     expect(spyDeny).not.toHaveBeenCalled();
   }, 10000);
+
+  it("parallelSafe 도구 segment 는 동시에 실행하되 결과 순서는 유지", async () => {
+    const started: string[] = [];
+    const resolvers = new Map<string, (value: { output: string; isError: boolean }) => void>();
+    const makeParallelTool = (name: string) => createDynamicTool({
+      name,
+      description: `parallel ${name}`,
+      source: "builtin",
+      category: "read",
+      parallelSafe: true,
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => {
+        started.push(name);
+        return await new Promise<{ output: string; isError: boolean }>((resolve) => {
+          resolvers.set(name, resolve);
+        });
+      },
+    });
+
+    const registry = new ToolRegistry();
+    registry.register(makeParallelTool("parallel_a"));
+    registry.register(makeParallelTool("parallel_b"));
+    const executor = new ToolExecutor(registry);
+
+    const execPromise = executor.executeAll(
+      [
+        { id: "pa", name: "parallel_a", input: {} },
+        { id: "pb", name: "parallel_b", input: {} },
+      ],
+      { sessionId: "sess-parallel-safe", permissionContext: userPermissionContext() },
+    );
+
+    const deadline = Date.now() + 1000;
+    while (started.length < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(started).toEqual(["parallel_a", "parallel_b"]);
+    resolvers.get("parallel_b")?.({ output: "B", isError: false });
+    resolvers.get("parallel_a")?.({ output: "A", isError: false });
+
+    const results = await execPromise;
+    expect(results.map((result) => result.tool_use_id)).toEqual(["pa", "pb"]);
+    expect(results.map((result) => result.content)).toEqual(["A", "B"]);
+  });
 });
 
 // ─── C1 regression — ask_user_question must NOT double-modal ──
