@@ -151,9 +151,6 @@ export function ChatComposerDock({
   // read as one coordinated motion. Reduced-motion users skip the linger
   // entirely (no transition to wait out).
   const [showProjectSelectorSlot, setShowProjectSelectorSlot] = useState(centered);
-  const [viewportHeight, setViewportHeight] = useState(() =>
-    typeof window === "undefined" ? 0 : window.innerHeight,
-  );
   useEffect(() => {
     if (centered) {
       setShowProjectSelectorSlot(true);
@@ -167,19 +164,9 @@ export function ChatComposerDock({
     const timer = window.setTimeout(() => setShowProjectSelectorSlot(false), 300);
     return () => window.clearTimeout(timer);
   }, [centered]);
-  useEffect(() => {
-    const updateViewportHeight = () => setViewportHeight(window.innerHeight);
-    updateViewportHeight();
-    window.addEventListener("resize", updateViewportHeight);
-    return () => window.removeEventListener("resize", updateViewportHeight);
-  }, []);
 
   const compactCenteredMarginClass =
-    viewportHeight >= 720
-      ? "mb-48"
-      : viewportHeight >= 560
-        ? "mb-32"
-        : "mb-[clamp(1rem,5vh,4rem)]";
+    "mb-0 [@media(min-height:560px)]:mb-32 [@media(min-height:720px)]:mb-48";
 
   const centeredMarginClass = centered
     ? centeredLift === "compact"
