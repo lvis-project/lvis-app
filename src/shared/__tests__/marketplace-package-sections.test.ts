@@ -56,7 +56,7 @@ describe("marketplace package sections", () => {
     expect(isInstallableMarketplacePackageType("provider")).toBe(false);
 
     expect(canInstallMarketplacePackageType("mcp")).toBe(true);
-    expect(canUninstallMarketplacePackageType("mcp")).toBe(false);
+    expect(canUninstallMarketplacePackageType("mcp")).toBe(true);
     expect(canUninstallMarketplacePackageType("plugin")).toBe(true);
 
     expect(canInstallMarketplacePackageType("provider")).toBe(false);

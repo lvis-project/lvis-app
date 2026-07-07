@@ -278,6 +278,74 @@ describe("LLM model list sync", () => {
     );
   });
 
+  it("allows keyless marketplace provider presets to sync loopback model lists", async () => {
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") {
+          return {
+            authMode: "manual",
+            provider: "openai-compatible",
+            marketplaceProviderPresetId: "local-router",
+            vendors: {
+              "openai-compatible": {
+                model: "local/free",
+                baseUrl: "http://localhost:8000/v1",
+              },
+            },
+            streamSmoothing: "none",
+            fallbackChain: [],
+            modelListCache: {},
+          };
+        }
+        if (key === "marketplace") {
+          return {
+            installedProviderPresets: [{
+              providerId: "local-router",
+              label: "Local Router",
+              baseUrl: "http://localhost:8000/v1",
+              defaultModel: "local/free",
+              modelOptions: ["local/free"],
+              requiresApiKey: false,
+            }],
+          };
+        }
+        throw new Error(`unexpected settings key: ${key}`);
+      }),
+      getSecret: vi.fn(() => null),
+    };
+    const ensurePublicUrl = vi.fn(async (url: string, options?: { allowLoopback?: (url: URL) => boolean }) => {
+      expect(options?.allowLoopback?.(new URL(url))).toBe(true);
+      return new URL(url);
+    });
+    const fetchPublicHttpResponseImpl = vi.fn(async (
+      url: string,
+      init?: { allowLoopback?: (url: URL) => boolean; headers?: Record<string, string> },
+    ) => {
+      expect(init?.allowLoopback?.(new URL(url))).toBe(true);
+      expect(init?.headers?.Authorization).toBeUndefined();
+      return new Response(JSON.stringify({ data: [{ id: "local/free" }] }), {
+        status: 200,
+      });
+    }) as unknown as typeof import("../../../core/network-guard.js").fetchPublicHttpResponse;
+
+    const result = await listLlmModelsFromSettings(
+      settingsService as never,
+      { vendor: "openai-compatible", credentialScope: "local-router" },
+      {
+        ensurePublicUrl: ensurePublicUrl as never,
+        fetchPublicHttpResponseImpl,
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      endpoint: "http://localhost:8000/v1/models",
+      models: ["local/free"],
+    });
+    expect(ensurePublicUrl).toHaveBeenCalledOnce();
+    expect(fetchPublicHttpResponseImpl).toHaveBeenCalledOnce();
+  });
+
   it("rejects a marketplace credential scope that is not the active persisted preset", async () => {
     const fetchImpl = vi.fn(async () =>
       new Response(JSON.stringify({ data: [{ id: "future/free" }] }), {

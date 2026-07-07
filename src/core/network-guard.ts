@@ -40,6 +40,13 @@ export interface NetworkGuardOptions {
    * 0.0.0.0/8 remain blocked.
    */
   allowPrivateNetworks?: boolean | ((url: URL) => boolean);
+  /**
+   * Allows loopback addresses after a separate local-development approval
+   * gate has authorized the request. A predicate scopes that approval to the
+   * current redirect hop URL. Link-local, metadata, CGNAT, and 0.0.0.0/8
+   * remain blocked.
+   */
+  allowLoopback?: boolean | ((url: URL) => boolean);
 }
 
 type NetworkGuardFetchInit = RequestInit & NetworkGuardOptions & {
@@ -120,7 +127,11 @@ export async function ensurePublicHttpUrl(
     options.allowPrivateNetworks === true ||
     (typeof options.allowPrivateNetworks === "function" &&
       options.allowPrivateNetworks(parsed));
-  const blocked = addresses.filter((addr) => !isAllowedAddress(addr, allowPrivateNetworks));
+  const allowLoopback =
+    options.allowLoopback === true ||
+    (typeof options.allowLoopback === "function" &&
+      options.allowLoopback(parsed));
+  const blocked = addresses.filter((addr) => !isAllowedAddress(addr, allowPrivateNetworks, allowLoopback));
   if (blocked.length > 0) {
     const rendered =
       blocked.slice(0, 3).join(", ") + (blocked.length > 3 ? ", ..." : "");
@@ -149,6 +160,7 @@ export async function fetchPublicHttpResponse(
 ): Promise<Response> {
   const {
     allowPrivateNetworks = false,
+    allowLoopback = false,
     fetchImpl = fetch,
     maxRedirects = 5,
     timeoutMs = TOOL_TIMEOUT_POLICY.networkFetchDefaultMs,
@@ -158,7 +170,7 @@ export async function fetchPublicHttpResponse(
   let currentUrl = rawUrl;
 
   for (let hop = 0; hop <= maxRedirects; hop++) {
-    await ensurePublicHttpUrl(currentUrl, { allowPrivateNetworks });
+    await ensurePublicHttpUrl(currentUrl, { allowPrivateNetworks, allowLoopback });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     // Forward aborts from the caller-supplied signal so callers can cancel
@@ -265,10 +277,27 @@ function isPublicAddress(address: string): boolean {
   return false;
 }
 
-function isAllowedAddress(address: string, allowPrivateNetworks: boolean): boolean {
+function isAllowedAddress(address: string, allowPrivateNetworks: boolean, allowLoopback: boolean): boolean {
   if (isPublicAddress(address)) return true;
+  if (allowLoopback && isLoopbackAddress(address)) return true;
   if (!allowPrivateNetworks) return false;
   return isPrivateNetworkAddress(address);
+}
+
+function isLoopbackAddress(address: string): boolean {
+  if (isIPv4(address)) {
+    const num = ipv4ToBigInt(address);
+    return num >= ipv4ToBigInt("127.0.0.0") && num <= ipv4ToBigInt("127.255.255.255");
+  }
+  if (isIPv6(address)) {
+    const lower = address.toLowerCase();
+    if (lower === "::1") return true;
+    if (lower.startsWith("::ffff:")) {
+      const ipv4 = ipv4FromMappedIpv6(lower);
+      return ipv4 !== null && isLoopbackAddress(ipv4);
+    }
+  }
+  return false;
 }
 
 function isPrivateNetworkAddress(address: string): boolean {

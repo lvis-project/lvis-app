@@ -21,6 +21,7 @@ import {
 import {
   marketplaceProviderPresetIdFromSecretId,
   marketplaceProviderPresetSecretKey,
+  type MarketplaceInstalledProviderPreset,
 } from "../../shared/marketplace-package-assets.js";
 import type { LlmModelListRequest } from "../../shared/llm-model-list.js";
 import type { IpcDeps } from "../types.js";
@@ -95,6 +96,32 @@ function activeLlmIdentity(llm: LLMSettings): string {
     vertexProject: block?.vertexProject ?? null,
     vertexLocation: block?.vertexLocation ?? null,
   });
+}
+
+async function finishProviderPresetMarketplaceMutation(
+  deps: IpcDeps,
+  prevLlm: LLMSettings,
+): Promise<{ ok: false; error: string; message: string } | null> {
+  const newLlm = deps.settingsService.get("llm");
+  let rewireError: { ok: false; error: string; message: string } | null = null;
+  if (activeLlmIdentity(prevLlm) !== activeLlmIdentity(newLlm)) {
+    try {
+      deps.rewireReviewerAgent?.();
+    } catch (err) {
+      rewireError = {
+        ok: false,
+        error: "reviewer-rewire-failed",
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+  deps.conversationLoop.refreshProvider();
+  deps.refreshActiveLlmWildcard?.();
+  if (vendorBaseUrlSignature(prevLlm) !== vendorBaseUrlSignature(newLlm)) {
+    deps.refreshSandboxNetworkConfig?.();
+  }
+  await broadcastSettingsSnapshot(deps);
+  return rewireError;
 }
 
 function isProviderEnabledForSecrets(deps: IpcDeps, vendor: unknown): vendor is string {
@@ -301,6 +328,53 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     reconcileShortcutStartupIfChanged();
     await broadcastSettingsSnapshot(deps);
     return result;
+  });
+
+  ipcMain.handle(CHANNELS.settings.marketplaceInstallProviderPreset, async (e, preset) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.marketplaceInstallProviderPreset, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const prevLlm = settingsService.get("llm");
+    try {
+      const result = await settingsService.installMarketplaceProviderPreset(
+        preset as MarketplaceInstalledProviderPreset,
+      );
+      const finishError = await finishProviderPresetMarketplaceMutation(deps, prevLlm);
+      return finishError ?? result;
+    } catch (err) {
+      return {
+        ok: false,
+        error: "marketplace-provider-preset-install-failed",
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
+
+  ipcMain.handle(CHANNELS.settings.marketplaceUninstallProviderPreset, async (e, providerId) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.marketplaceUninstallProviderPreset, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (typeof providerId !== "string") {
+      return {
+        ok: false,
+        error: "invalid-provider-preset-id",
+        message: "Provider preset id must be a string.",
+      };
+    }
+    const prevLlm = settingsService.get("llm");
+    try {
+      const result = await settingsService.uninstallMarketplaceProviderPreset(providerId);
+      const finishError = await finishProviderPresetMarketplaceMutation(deps, prevLlm);
+      return finishError ?? result;
+    } catch (err) {
+      return {
+        ok: false,
+        error: "marketplace-provider-preset-uninstall-failed",
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
   });
 
   ipcMain.handle(CHANNELS.settings.setApiKey, async (e, vendor: string, apiKey: string) => {
