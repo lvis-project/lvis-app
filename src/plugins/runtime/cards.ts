@@ -73,6 +73,7 @@ export function buildPluginCard(
     publisher: manifest.publisher,
     configSchema: manifest.configSchema,
     auth: manifest.auth,
+    networkAccess: manifest.networkAccess,
     installAliases: extras.installAliases,
   };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatEntry } from "../../../../lib/chat-stream-state.js";
-import type { SubAgentSpawn } from "../../components/SubAgentCard.js";
+import type { SubAgentSpawn } from "../types.js";
 import { groupSubAgentSessions } from "../group-subagent-sessions.js";
 
 // Minimal assistant entry factory so each segment carries a distinguishable
@@ -26,6 +26,7 @@ describe("groupSubAgentSessions", () => {
       spawn({
         spawnId: "orig",
         title: "Research task",
+        instructions: "original prompt",
         status: "done",
         childSessionId: "child-1",
         entries: [assistant("original work")],
@@ -54,6 +55,7 @@ describe("groupSubAgentSessions", () => {
     // Identity from the FIRST segment.
     expect(unified.spawnId).toBe("orig");
     expect(unified.title).toBe("Research task");
+    expect(unified.instructions).toBe("original prompt");
     expect(unified.childSessionId).toBe("child-1");
     // Transcript is the ordered flat concat of every segment.
     expect(unified.entries.map((e) => (e.kind === "assistant" ? e.text : ""))).toEqual([

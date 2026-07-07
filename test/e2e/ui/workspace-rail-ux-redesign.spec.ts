@@ -9,6 +9,7 @@ import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electro
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
 const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main/main.js");
+const CLEANUP_RM_OPTIONS = { recursive: true, force: true, maxRetries: 5, retryDelay: 100 } as const;
 
 /**
  * Workspace-rail UX redesign (vertical resize, browser de-nest + search Popover,
@@ -25,22 +26,32 @@ test.describe("workspace rail UX redesign", () => {
   let workspaceDir: string;
 
   async function launch() {
-    app = await electron.launch({
-      args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`, "--no-sandbox"],
-      env: buildIsolatedElectronEnv({
-        HOME: tempHome,
-        USERPROFILE: tempHome,
-        LVIS_HOME: resolve(tempHome, ".lvis"),
-        LVIS_DEV: "1",
-        LVIS_E2E: "1",
-        LVIS_MAIN_ENTRY: MAIN_ENTRY,
-        NODE_ENV: "test",
-        ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
-      }),
-      timeout: 30_000,
-    });
-    page = await app.firstWindow();
-    await page.locator('[data-testid="main-toolbar"]').first().waitFor({ state: "visible", timeout: 60_000 });
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      app = await electron.launch({
+        args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`, "--no-sandbox"],
+        env: buildIsolatedElectronEnv({
+          HOME: tempHome,
+          USERPROFILE: tempHome,
+          LVIS_HOME: resolve(tempHome, ".lvis"),
+          LVIS_DEV: "1",
+          LVIS_E2E: "1",
+          LVIS_MAIN_ENTRY: MAIN_ENTRY,
+          NODE_ENV: "test",
+          ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
+        }),
+        timeout: 30_000,
+      });
+      try {
+        page = await app.firstWindow();
+        await page.locator('[data-testid="main-toolbar"]').first().waitFor({ state: "visible", timeout: 60_000 });
+        return;
+      } catch (err) {
+        lastError = err;
+        await app?.close().catch(() => {});
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("Electron launch failed");
   }
 
   test.beforeEach(async () => {
@@ -59,8 +70,8 @@ test.describe("workspace rail UX redesign", () => {
 
   test.afterEach(async () => {
     await app?.close().catch(() => {});
-    if (userDataDir) rmSync(userDataDir, { recursive: true, force: true });
-    if (tempHome) rmSync(tempHome, { recursive: true, force: true });
+    if (userDataDir) rmSync(userDataDir, CLEANUP_RM_OPTIONS);
+    if (tempHome) rmSync(tempHome, CLEANUP_RM_OPTIONS);
   });
 
   test("file tab: directory/session segment toggle (default directory, session disabled empty)", async () => {
@@ -203,7 +214,7 @@ test.describe("workspace rail UX redesign", () => {
     const CHILD = "e2e-child-session";
     // 1) original spawn runs to an INCOMPLETE finish (learns its childSessionId
     //    on `done`, the first phase to carry the join key).
-    await sendSpawn({ spawnId: "e2e-orig", type: "start", title: "E2E research", toolUseId: "tu-orig" });
+    await sendSpawn({ spawnId: "e2e-orig", type: "start", title: "E2E research", instructions: "E2E prompt", toolUseId: "tu-orig" });
     await sendSpawn({
       spawnId: "e2e-orig",
       type: "done",
@@ -215,12 +226,14 @@ test.describe("workspace rail UX redesign", () => {
 
     const detail = page.getByTestId("chat-side-panel-subagent-detail");
     await expect(page.getByTestId("chat-side-panel-subagent-row")).toHaveCount(1);
+    await expect(detail.getByTestId("chat-side-panel-subagent-transcript")).toBeVisible();
+    await expect(detail).toContainText("E2E prompt");
     await expect(detail).toContainText("ORIGINAL_SEGMENT");
 
     // 2) a resume (separate spawnId, SAME childSessionId) starts and streams a
     //    growing tail. The unified transcript's prefix (the original segment)
     //    must stay stable while the tail grows — no flicker / re-mount.
-    await sendSpawn({ spawnId: "e2e-resume", type: "start", title: "(sub-agent)", toolUseId: "tu-resume", childSessionId: CHILD });
+    await sendSpawn({ spawnId: "e2e-resume", type: "start", title: "(sub-agent)", instructions: "resume prompt", toolUseId: "tu-resume", childSessionId: CHILD });
     await sendSpawn({
       spawnId: "e2e-resume",
       type: "activity",
@@ -253,12 +266,14 @@ test.describe("workspace rail UX redesign", () => {
     const order = await detail.evaluate((el) => {
       const text = el.textContent ?? "";
       return {
+        prompt: text.indexOf("E2E prompt"),
         orig: text.indexOf("ORIGINAL_SEGMENT"),
         tailA: text.indexOf("RESUME_TAIL_A"),
         tailB: text.indexOf("RESUME_TAIL_B"),
       };
     });
-    expect(order.orig).toBeGreaterThanOrEqual(0);
+    expect(order.prompt).toBeGreaterThanOrEqual(0);
+    expect(order.orig).toBeGreaterThan(order.prompt);
     expect(order.tailA).toBeGreaterThan(order.orig);
     expect(order.tailB).toBeGreaterThan(order.tailA);
     // The row carries the ORIGINAL's title (one logical agent = one name).

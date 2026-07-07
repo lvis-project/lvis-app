@@ -1055,7 +1055,7 @@ describe("ChatView", () => {
     expect(container.querySelector('[data-testid="input-action-bar"]')).not.toBeNull();
   });
 
-  it("shows sub-agents from a loaded past session (derived from agent_spawn entries) in the viewer + inline", async () => {
+  it("does not reconstruct sub-agent rows from loaded parent history", async () => {
     const now = new Date().toISOString();
     const { container } = await renderApp({
       currentSession: "subagent-session",
@@ -1097,11 +1097,9 @@ describe("ChatView", () => {
       expect(container.textContent).toContain("서브에이전트 실행이 완료되었습니다.");
     });
 
-    // The loaded session's agent_spawn tool call is derived into a spawn even
-    // though the live agent-spawn event stream never replayed. Past-turn
-    // WorkGroups start collapsed, so expand it to reveal the inline completion
-    // CHIP (PR3: the lightweight inline surface — full transcript lives in the
-    // sub-agent tab, not inline) that renders next to its tool group.
+    // Parent transcript history is not a sub-agent SOT. The normal WorkGroup
+    // remains visible, but the sub-agent rail is populated only by live
+    // agent-spawn events from the current runtime.
     const workGroupToggle = await waitFor(() => {
       const button = container.querySelector('[data-testid="work-group"] button') as HTMLButtonElement | null;
       expect(button).not.toBeNull();
@@ -1110,21 +1108,10 @@ describe("ChatView", () => {
     await act(async () => {
       fireEvent.click(workGroupToggle);
     });
-    await waitFor(() => {
-      const inlineChips = container.querySelectorAll('[data-testid="sub-agent-spawn-chip"]');
-      expect(inlineChips.length).toBeGreaterThan(0);
-      expect(container.textContent).toContain("인덱서 조사");
-    });
+    expect(container.querySelector('[data-testid="chat-side-panel-subagent-viewer"]')).toBeNull();
 
-    // Open the workspace rail and its sub-agent tab — the viewer must be
-    // NON-empty (previously showed the "no sub-agents" empty state on load).
-    const openButton = await waitFor(() => {
-      const button = container.querySelector('[data-testid="chat-side-panel-toggle"]') as HTMLButtonElement | null;
-      expect(button).not.toBeNull();
-      return button!;
-    });
     await act(async () => {
-      fireEvent.click(openButton);
+      fireEvent.click(container.querySelector('[data-testid="chat-side-panel-toggle"]')!);
     });
     const subagentLauncher = await waitFor(() => {
       const button = container.querySelector('[data-testid="chat-side-panel-launcher-subagent"]') as HTMLButtonElement | null;
@@ -1132,11 +1119,12 @@ describe("ChatView", () => {
       return button!;
     });
     await act(async () => {
-      fireEvent.click(subagentLauncher!);
+      fireEvent.click(subagentLauncher);
     });
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="chat-side-panel-subagent-viewer"]')).not.toBeNull();
-      expect(container.querySelector('[data-testid="chat-side-panel-subagent-empty"]')).toBeNull();
+      expect(container.querySelector('[data-testid="chat-side-panel-subagent-viewer"]')).toBeNull();
+      expect(container.querySelector('[data-testid="chat-side-panel-subagent-empty"]')).not.toBeNull();
+      expect(container.textContent).not.toContain("인덱서 조사");
     });
   });
 
@@ -1995,6 +1983,81 @@ describe("ChatView", () => {
       expect(scrollToSpy).not.toHaveBeenCalled();
     } finally {
       scrollMetrics.restore();
+    }
+  });
+
+  it("re-pins the chat bottom when a pinned viewport resizes after first layout", async () => {
+    const scrollMetrics = installDeterministicScrollMetrics();
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn((id: number) => {
+      rafCallbacks[id - 1] = () => undefined;
+    }));
+    const originalWindowResizeObserver = window.ResizeObserver;
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+    }
+    Object.defineProperty(window, "ResizeObserver", {
+      configurable: true,
+      value: TestResizeObserver,
+    });
+
+    try {
+      const { container } = await renderApp({
+        mainActiveState: {
+          mainActiveSessionId: "sess-resize-bottom",
+          mainActiveMode: "resume",
+          updatedAt: new Date().toISOString(),
+        },
+        history: {
+          sessionId: "sess-resize-bottom",
+          messages: [
+            { index: 0, role: "user", content: "첫 질문" },
+            { index: 1, role: "assistant", content: "첫 답변" },
+          ],
+        },
+      });
+
+      await waitFor(() => {
+        expect(container.textContent).toContain("첫 답변");
+        expect(resizeCallbacks.length).toBeGreaterThan(0);
+      });
+      await act(async () => {
+        while (rafCallbacks.length > 0) {
+          rafCallbacks.shift()?.(0);
+        }
+      });
+      expect(scrollMetrics.assignedScrollTop).toBe(2400);
+
+      scrollMetrics.setAssignedScrollTop(1600);
+      rafCallbacks.length = 0;
+      await act(async () => {
+        for (const callback of resizeCallbacks) {
+          callback([], {} as ResizeObserver);
+        }
+      });
+      expect(rafCallbacks.length).toBeGreaterThan(0);
+      await act(async () => {
+        while (rafCallbacks.length > 0) {
+          rafCallbacks.shift()?.(0);
+        }
+      });
+      expect(scrollMetrics.assignedScrollTop).toBe(2400);
+    } finally {
+      scrollMetrics.restore();
+      Object.defineProperty(window, "ResizeObserver", {
+        configurable: true,
+        value: originalWindowResizeObserver,
+      });
     }
   });
 

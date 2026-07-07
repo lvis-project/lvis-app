@@ -71,8 +71,11 @@ import { SideChatView } from "./SideChatView.js";
 import { VerticalSplitLayout } from "./VerticalSplitLayout.js";
 import { useVerticalSplit } from "../hooks/use-vertical-split.js";
 import { useAddProjectFolder } from "../hooks/use-add-project-folder.js";
-import { SubAgentCard, type SubAgentSpawn } from "./SubAgentCard.js";
+import type { SubAgentSpawn } from "../subagents/types.js";
 import { groupSubAgentSessions } from "../subagents/group-subagent-sessions.js";
+import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+import { TranscriptRenderer } from "./TranscriptRenderer.js";
+import { historyToEntries } from "../utils/history.js";
 
 interface FileTreeNode {
   id: string;
@@ -1903,6 +1906,7 @@ function BrowserWorkspace({
 /** Status tone for the sub-agent list row badge. */
 function subAgentStatusTone(status: SubAgentSpawn["status"]): string {
   if (status === "error") return "text-destructive";
+  if (status === "interrupted") return "text-warning";
   if (status === "done") return "text-muted-foreground";
   return "text-warning";
 }
@@ -1912,9 +1916,10 @@ function subAgentStatusTone(status: SubAgentSpawn["status"]): string {
  * (its turn count / status ticks as the agent runs) only re-renders its OWN row,
  * not every sibling — the list can hold many concurrent spawns.
  */
-/** Localized status label, reusing the SubAgentCard status i18n keys. */
+/** Localized status label for the sub-agent rail. */
 function subAgentStatusLabel(status: SubAgentSpawn["status"], t: (key: string) => string): string {
   if (status === "error") return t("subAgentCard.statusError");
+  if (status === "interrupted") return t("subAgentCard.statusInterrupted");
   if (status === "done") return t("subAgentCard.statusDone");
   return t("subAgentCard.statusRunning");
 }
@@ -1958,18 +1963,106 @@ const SubAgentRow = memo(function SubAgentRow({
   );
 });
 
+function subAgentTranscriptEntries(spawn: SubAgentSpawn, sourceEntries: ChatEntry[] = spawn.entries): ChatEntry[] {
+  const prompt = spawn.instructions?.trim();
+  if (!prompt) return sourceEntries;
+  const bodyEntries = sourceEntries[0]?.kind === "user" ? sourceEntries.slice(1) : sourceEntries;
+  return [{ kind: "user", text: prompt }, ...bodyEntries];
+}
+
+function transcriptEntryFingerprint(entry: ChatEntry): string {
+  return JSON.stringify(entry, (key, value) =>
+    key === "createdAt" || key === "streaming" ? undefined : value,
+  );
+}
+
+function mergeHydratedTranscriptWithLiveTail(hydratedEntries: ChatEntry[], liveEntries: ChatEntry[]): ChatEntry[] {
+  if (hydratedEntries.length === 0) return liveEntries;
+  if (liveEntries.length === 0) return hydratedEntries;
+  const seen = new Set(hydratedEntries.map(transcriptEntryFingerprint));
+  const tail = liveEntries.filter((entry) => !seen.has(transcriptEntryFingerprint(entry)));
+  return tail.length > 0 ? [...hydratedEntries, ...tail] : hydratedEntries;
+}
+
+function SubAgentTranscriptDetail({
+  api,
+  parentSessionId,
+  spawn,
+}: {
+  api: LvisApi;
+  parentSessionId?: string;
+  spawn: SubAgentSpawn;
+}) {
+  const { t } = useTranslation();
+  const hydrationKey = `${parentSessionId ?? ""}\u0001${spawn.childSessionId ?? ""}`;
+  const [hydrated, setHydrated] = useState<{ key: string; entries: ChatEntry[] } | null>(null);
+  useEffect(() => {
+    setHydrated(null);
+    if (!parentSessionId || !spawn.childSessionId || typeof api.chatGetSubAgentTranscript !== "function") return;
+    let cancelled = false;
+    void api.chatGetSubAgentTranscript({
+      originSessionId: parentSessionId,
+      childSessionId: spawn.childSessionId,
+    }).then((result) => {
+      if (cancelled || !result.ok) return;
+      setHydrated({ key: hydrationKey, entries: historyToEntries(result.messages) });
+    }).catch(() => {
+      // Fail closed for persisted transcript hydration. The child JSONL keyed by
+      // childSessionId is the only persisted transcript SOT; parent tool results
+      // are not used as a reconstruction source.
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, parentSessionId, spawn.childSessionId, hydrationKey]);
+  const sourceEntries = useMemo(() => {
+    const hydratedEntries = hydrated?.key === hydrationKey ? hydrated.entries : [];
+    if (spawn.childSessionId && hydratedEntries.length > 0) {
+      return mergeHydratedTranscriptWithLiveTail(hydratedEntries, spawn.entries);
+    }
+    return spawn.entries;
+  }, [hydrated, hydrationKey, spawn.childSessionId, spawn.entries]);
+  const entries = useMemo(() => subAgentTranscriptEntries(spawn, sourceEntries), [spawn, sourceEntries]);
+  const sessionId = spawn.childSessionId ?? spawn.spawnId;
+  return (
+    <div className="min-h-0 min-w-0 space-y-3 py-1" data-testid="chat-side-panel-subagent-transcript">
+      {entries.length > 0 ? (
+        <TranscriptRenderer
+          entries={entries}
+          streaming={spawn.status === "running"}
+          currentSessionId={sessionId}
+          workGroupsForceOpen
+        />
+      ) : (
+        <div className="py-1 text-xs text-muted-foreground">
+          {spawn.status === "running"
+            ? t("subAgentCard.statusRunning")
+            : t("subAgentCard.summaryLabel")}
+        </div>
+      )}
+      {spawn.errorMessage ? (
+        <div className="rounded border border-destructive/(--opacity-medium) bg-destructive/(--opacity-faint) px-2 py-1 text-[11px] text-destructive">
+          {spawn.errorMessage}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * Sub-agent viewer tab (R4). Top pane = the list of this chat's sub-agent spawns
  * (live + completed); bottom pane = the SELECTED spawn's transcript/tool-activity
- * via the shared SubAgentCard. Only the selected spawn is rendered in detail (not
- * every card), and the list rows are memoized, so a chat that fanned out many
+ * via a sub-agent-only expanded transcript renderer. Only the selected spawn is
+ * rendered in detail (not every transcript), and the list rows are memoized, so a chat that fanned out many
  * agents stays cheap. The top↕bottom split persists via sidePanelSplitSubagentPercent.
  */
 function SubAgentViewer({
   api,
+  parentSessionId,
   subAgentSpawns,
 }: {
   api: LvisApi;
+  parentSessionId?: string;
   subAgentSpawns: SubAgentSpawn[];
 }) {
   const { t } = useTranslation();
@@ -1978,7 +2071,7 @@ function SubAgentViewer({
   // Unify each spawn with its resume segments (JOIN KEY = childSessionId) into a
   // single row with a concatenated transcript. The prop stays a FLAT list (one
   // spawn source of truth prop-drilled from ChatView) — grouping is a viewer-only
-  // presentation concern applied here, so the inline chat cards are unaffected.
+  // presentation concern applied here.
   const groupedSpawns = useMemo(() => groupSubAgentSessions(subAgentSpawns), [subAgentSpawns]);
   // Running spawns first (the user usually wants the live one), then completed.
   const orderedSpawns = useMemo(() => {
@@ -2049,7 +2142,11 @@ function SubAgentViewer({
         bottom={
           <div className="min-h-0 p-3" data-testid="chat-side-panel-subagent-detail">
             {selectedSpawn ? (
-              <SubAgentCard spawn={selectedSpawn} />
+              <SubAgentTranscriptDetail
+                api={api}
+                {...(parentSessionId ? { parentSessionId } : {})}
+                spawn={selectedSpawn}
+              />
             ) : (
               <div className="text-xs text-muted-foreground">{t("chatPreviewRail.subagentSelectHint")}</div>
             )}
@@ -2801,7 +2898,11 @@ export function ChatSidePanel({
           ) : activeTab.kind === "terminal" ? (
             <PtyTerminalView api={api} tabId={activeTab.id} />
           ) : activeTab.kind === "subagent" ? (
-            <SubAgentViewer api={api} subAgentSpawns={subAgentSpawns} />
+            <SubAgentViewer
+              api={api}
+              {...(sessionId ? { parentSessionId: sessionId } : {})}
+              subAgentSpawns={subAgentSpawns}
+            />
           ) : activeTab.kind === "side-chat" ? (
             // Side chat — a second, independently-streaming chat session driven
             // by a dedicated ConversationLoop in main. The view subscribes to the

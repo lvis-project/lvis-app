@@ -142,6 +142,50 @@ function isValidImportedMessage(raw: unknown): raw is GenericMessage {
   }
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function parseJsonRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "string") return null;
+  try {
+    return asRecord(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+function hasParentSubAgentReference(
+  messages: GenericMessage[],
+  childSessionId: string,
+): boolean {
+  const resultByToolUseId = new Map<string, Record<string, unknown> | null>();
+  for (const message of messages) {
+    if (message.role === "tool_result") {
+      resultByToolUseId.set(message.toolUseId, parseJsonRecord(message.content));
+    }
+  }
+
+  for (const message of messages) {
+    if (message.role !== "assistant" || !Array.isArray(message.toolCalls)) continue;
+    for (const toolCall of message.toolCalls) {
+      if (toolCall.name !== "agent_spawn") continue;
+      const input = asRecord(toolCall.input) ?? {};
+      const result = resultByToolUseId.get(toolCall.id) ?? null;
+      const linkedIds = [
+        typeof input.resumeId === "string" ? input.resumeId : undefined,
+        typeof result?.childSessionId === "string" ? result.childSessionId : undefined,
+        typeof result?.resumeId === "string" ? result.resumeId : undefined,
+      ];
+      if (!linkedIds.includes(childSessionId)) continue;
+      return true;
+    }
+  }
+  return false;
+}
+
 interface ImportValidationResult {
   ok: boolean;
   messages: GenericMessage[];
@@ -1044,6 +1088,47 @@ export function registerChatHandlers(deps: IpcDeps): void {
         if (verbatim.charCodeAt(i) === 10) lineCount++;
       }
       return { content: verbatim, lineCount };
+    },
+  );
+
+  // ─── Sub-agent transcript lazy-load ───────────────────────────────────
+  // Parent `agent_spawn` results may be stored as a small handle/stub, while
+  // the full child loop transcript lives in the isolated ~/.lvis/subagent/
+  // namespace. This read-only handler re-joins them for the right-side
+  // sub-agent viewer without exposing sub-agent sessions in the main session
+  // list.
+  ipcMain.handle(
+    CHANNELS.chat.getSubAgentTranscript,
+    (e, payload: unknown) => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.chat.getSubAgentTranscript, e);
+        return { ok: false, error: "unauthorized-frame" };
+      }
+      const p = (payload ?? {}) as Record<string, unknown>;
+      const originSessionId = typeof p.originSessionId === "string" && isSafeSessionId(p.originSessionId)
+        ? p.originSessionId
+        : "";
+      if (!originSessionId) return { ok: false, error: "invalid-origin-session-id" };
+      if (originSessionId !== conversationLoop.getSessionId()) {
+        return { ok: false, error: "origin-session-not-active" };
+      }
+      const runner = deps.getSubAgentRunner?.();
+      if (!runner) return { ok: false, error: "sub-agent runner not configured" };
+      const childSessionId = typeof p.childSessionId === "string" && isSafeSessionId(p.childSessionId)
+        ? p.childSessionId
+        : undefined;
+      if (!childSessionId) return { ok: false, error: "invalid-child-session-id" };
+      const messages = memoryManager.rehydrateToolResultArtifacts(
+        originSessionId,
+        conversationLoop.getHistory().getMessages(),
+      ) as GenericMessage[];
+      if (!hasParentSubAgentReference(messages, childSessionId)) {
+        return { ok: false, error: "sub-agent-reference-not-found" };
+      }
+      return runner.getPersistedTranscript({
+        originSessionId,
+        childSessionId,
+      });
     },
   );
 

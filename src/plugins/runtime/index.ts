@@ -121,6 +121,10 @@ export interface PluginCard {
   configSchema?: PluginConfigSchema;
   /** Optional declarative auth contract — see architecture.md §9.4a "Plugin-Owned OAuth — Host UI Surface". */
   auth?: PluginAuthSpec;
+  /** Declarative egress disclosure copied from the plugin manifest/catalog. */
+  networkAccess?: PluginManifest["networkAccess"];
+  /** Structured marketplace install failure classification for Doctor UI. */
+  installFailureKind?: "catalog-grant-mismatch";
   /**
    * Request slugs that can address this installed plugin in marketplace
    * lifecycle events. This is derived from registry hints, not plugin-specific

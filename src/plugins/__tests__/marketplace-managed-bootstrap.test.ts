@@ -287,6 +287,51 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(result.installed).toEqual([]);
   });
 
+  it("keeps managed install failures as Doctor diagnostics until a later success", async () => {
+    await writeAdminCatalog("2.0.0");
+    const service = makeManagedService(testDir, marketplacePath);
+    const installSpy = vi
+      .spyOn(
+        service as unknown as {
+          installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+        },
+        "installWithDependencies",
+      )
+      .mockRejectedValueOnce(
+        new Error(
+          'plugin "meeting" artifact manifest external-auth-consumer capability does not match the catalog-approved grant',
+        ),
+      )
+      .mockResolvedValueOnce({ pluginId: "meeting", installed: true });
+
+    const failed = await service.ensureManagedInstalled();
+
+    expect(installSpy).toHaveBeenCalledTimes(1);
+    expect(failed.installed).toEqual([]);
+    expect(failed.failed).toEqual([
+      {
+        id: "meeting",
+        error:
+          'plugin "meeting" artifact manifest external-auth-consumer capability does not match the catalog-approved grant',
+      },
+    ]);
+    expect(service.getInstallFailureDiagnostics()).toEqual([
+      expect.objectContaining({
+        id: "meeting",
+        name: "Meeting",
+        isManaged: true,
+        installPolicy: "admin",
+        error:
+          'plugin "meeting" artifact manifest external-auth-consumer capability does not match the catalog-approved grant',
+      }),
+    ]);
+
+    const recovered = await service.ensureManagedInstalled();
+
+    expect(recovered.installed).toEqual(["meeting"]);
+    expect(service.getInstallFailureDiagnostics()).toEqual([]);
+  });
+
   it("a corrupt installed managed plugin's unreadable version does not abort install/update of others", async () => {
     // alpha installed but its manifest version cannot be read (getInstalledVersion
     // throws); beta is missing. The corrupt alpha must be skipped, NOT abort the

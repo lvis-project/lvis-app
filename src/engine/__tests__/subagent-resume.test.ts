@@ -57,6 +57,30 @@ class ScriptedProvider implements LLMProvider {
   }
 }
 
+class AbortAwareBlockingProvider implements LLMProvider {
+  readonly vendor = "openai" as const;
+  private markStarted!: () => void;
+  readonly started = new Promise<void>((resolve) => {
+    this.markStarted = resolve;
+  });
+
+  async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
+    this.markStarted();
+    await new Promise<never>((_resolve, reject) => {
+      const abort = () => {
+        const err = new Error("aborted");
+        err.name = "AbortError";
+        reject(err);
+      };
+      if (params.abortSignal?.aborted) {
+        abort();
+        return;
+      }
+      params.abortSignal?.addEventListener("abort", abort, { once: true });
+    });
+  }
+}
+
 function buildLoopDeps(toolRegistry: ToolRegistry) {
   const keywordEngine = new KeywordEngine();
   const routeEngine = new RouteEngine({ toolRegistry });
@@ -145,6 +169,139 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       ],
     ]);
   }
+
+  it("persists parent agent_spawn linkage and reloads the child transcript by explicit childSessionId", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+    const restore = patchProvider(cleanSpawnProvider());
+    try {
+      const result = await runner.spawn({
+        title: "linked child",
+        instructions: "collect evidence",
+        sourceTools: ["noop"],
+        originSessionId: "parent-session-1",
+        toolUseId: "tool-use-1",
+        spawnId: "spawn-1",
+      });
+      expect(result.ok).toBe(true);
+      const meta = subStore.loadSessionMetadata(result.childSessionId);
+      expect(meta).toMatchObject({
+        sessionKind: "subagent",
+        originSessionId: "parent-session-1",
+        originToolUseId: "tool-use-1",
+        spawnId: "spawn-1",
+        subAgentTitle: "linked child",
+      });
+      const transcript = runner.getPersistedTranscript({
+        originSessionId: "parent-session-1",
+        childSessionId: result.childSessionId,
+      });
+      expect(transcript.ok).toBe(true);
+      if (transcript.ok) {
+        expect(transcript.childSessionId).toBe(result.childSessionId);
+        expect(transcript.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+        expect(transcript.messages.at(-1)?.content).toContain("spawn answer");
+      }
+      expect(runner.listRunStatuses("parent-session-1").map((run) => run.childSessionId)).toEqual([
+        result.childSessionId,
+      ]);
+      expect(runner.listRunStatuses("other-parent-session")).toEqual([]);
+      expect(runner.getRunStatus("spawn-1", "parent-session-1")?.childSessionId).toBe(result.childSessionId);
+      expect(runner.getRunStatus("spawn-1", "other-parent-session")).toBeNull();
+      expect(runner.interruptRun("spawn-1", "other-parent-session")).toMatchObject({
+        ok: false,
+        message: "sub-agent run not found: spawn-1",
+      });
+      expect(runner.interruptRun("spawn-1", "parent-session-1")).toMatchObject({
+        ok: false,
+        message: "sub-agent run is not running: spawn-1",
+      });
+
+      const directTranscript = runner.getPersistedTranscript({
+        originSessionId: "parent-session-1",
+        childSessionId: result.childSessionId,
+      });
+      expect(directTranscript.ok).toBe(true);
+      if (directTranscript.ok) {
+        expect(directTranscript.childSessionId).toBe(result.childSessionId);
+        expect(directTranscript.messages.at(-1)?.content).toContain("spawn answer");
+      }
+      const crossOriginDirectTranscript = runner.getPersistedTranscript({
+        originSessionId: "other-parent-session",
+        childSessionId: result.childSessionId,
+      });
+      expect(crossOriginDirectTranscript).toEqual({
+        ok: false,
+        error: "sub-agent transcript not found",
+      });
+      await subStore.saveSessionMetadata(result.childSessionId, {
+        sessionKind: "subagent",
+        sourceTools: ["noop"],
+        resumeCount: 0,
+        cumulativeRounds: 1,
+      });
+      const missingLinkageTranscript = runner.getPersistedTranscript({
+        originSessionId: "parent-session-1",
+        childSessionId: result.childSessionId,
+      });
+      expect(missingLinkageTranscript).toEqual({
+        ok: false,
+        error: "sub-agent transcript not found",
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it("marks an accepted interrupt as interrupted before the child loop unwinds", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+    const provider = new AbortAwareBlockingProvider();
+    const restore = patchProvider(provider);
+    try {
+      const spawnPromise = runner.spawn({
+        title: "interruptible child",
+        instructions: "wait until interrupted",
+        sourceTools: ["noop"],
+        originSessionId: "parent-session-1",
+        spawnId: "spawn-interrupt",
+        maxRounds: 3,
+      });
+      await provider.started;
+
+      const interrupted = runner.interruptRun("spawn-interrupt", "parent-session-1");
+
+      expect(interrupted).toMatchObject({
+        ok: true,
+        run: { status: "interrupted", stopReason: "interrupted" },
+      });
+      expect(runner.getRunStatus("spawn-interrupt", "parent-session-1")).toMatchObject({
+        status: "interrupted",
+        stopReason: "interrupted",
+      });
+
+      const final = await spawnPromise;
+      expect(final.stopReason).toBe("interrupted");
+      expect(runner.getRunStatus("spawn-interrupt", "parent-session-1")).toMatchObject({
+        status: "interrupted",
+        stopReason: "interrupted",
+      });
+    } finally {
+      restore();
+    }
+  });
 
   // ── 1) full-history restore ─────────────────────────
   it("re-hydrates the original spawn's full history into the continuation turn (tool-pair valid, no loss)", async () => {
