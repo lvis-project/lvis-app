@@ -76,10 +76,12 @@ describe("AppearanceTab — bundle card grid", () => {
     });
   });
 
-  it("keeps a selected marketplace-candidate theme in the picker", () => {
+  it("keeps a selected marketplace-candidate theme in the picker", async () => {
     const { getByRole, queryByRole } = renderWithBundle("violet-dark");
-    const selected = getByRole("radio", { name: /테마: Violet Dark/ });
-    expect(selected.getAttribute("aria-checked")).toBe("true");
+    await waitFor(() => {
+      const selected = getByRole("radio", { name: /테마: Violet Dark/ });
+      expect(selected.getAttribute("aria-checked")).toBe("true");
+    });
     expect(queryByRole("radio", { name: /테마: Forest/ })).toBeNull();
   });
 
@@ -97,7 +99,9 @@ describe("AppearanceTab — bundle card grid", () => {
     const { getByRole, getByTestId } = renderWithBundle();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
-    expect(getByRole("radio", { name: /테마: Tokyo Night/ })).toBeTruthy();
+    await waitFor(() => {
+      expect(getByRole("radio", { name: /테마: Tokyo Night/ })).toBeTruthy();
+    });
     expect(getByTestId("language-option-ko")).toBeTruthy();
     expect(getByTestId("appearance-tab:theme-marketplace-badge:tokyo-night"))
       .toHaveTextContent("마켓플레이스");
@@ -181,9 +185,11 @@ describe("AppearanceTab — bundle card grid", () => {
     });
   });
 
-  it("keeps high-contrast visible only when it is the selected legacy theme", () => {
+  it("keeps high-contrast visible only when it is the selected legacy theme", async () => {
     const { getByRole } = renderWithBundle("high-contrast");
-    expect(getByRole("radio", { name: /테마: High Contrast/ }).getAttribute("aria-checked")).toBe("true");
+    await waitFor(() => {
+      expect(getByRole("radio", { name: /테마: High Contrast/ }).getAttribute("aria-checked")).toBe("true");
+    });
   });
 
   it("selected card updates aria-checked after click", async () => {

@@ -13,9 +13,13 @@ export {
   MARKETPLACE_THEME_BUNDLES,
   DEFAULT_BUNDLE_ID,
   findBundle,
+  isBundleId,
+  loadAllThemeBundles,
+  loadThemeBundle,
+  loadThemeBundles,
   visibleBundlesFor,
 } from "./bundles/index.js";
-export type { ThemeBundle, BundleTokens } from "./bundles/index.js";
+export type { ThemeBundle, BundleTokens, ThemeBundleManifest } from "./bundles/index.js";
 export type {
   ThemeContextValue,
   BundleId,

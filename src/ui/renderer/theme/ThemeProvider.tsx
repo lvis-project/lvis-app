@@ -1,7 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { AppSettings, LvisApi } from "../types.js";
-import { BUNDLES, DEFAULT_BUNDLE_ID, findBundle } from "./bundles/index.js";
+import {
+  BUNDLES,
+  DEFAULT_BUNDLE_ID,
+  findBundle,
+  isBundleId,
+  loadThemeBundle,
+} from "./bundles/index.js";
 import type { ThemeBundle } from "./bundles/index.js";
 import { applyBundleToDocument, resolveSystemPair } from "./resolve-theme.js";
 import { bundleToPluginTokens } from "./plugin-token-map.js";
@@ -36,7 +42,7 @@ function readGlobalInitialBundleId(): BundleId | undefined {
   if (!initial || typeof initial !== "object") return undefined;
   const id = initial.bundleId;
   if (typeof id !== "string") return undefined;
-  return findBundle(id) ? (id as BundleId) : undefined;
+  return isBundleId(id) ? (id as BundleId) : undefined;
 }
 
 /**
@@ -50,7 +56,7 @@ function resolveAppearanceSettings(settings: AppSettings): { bundleId: BundleId;
     ? appearance.bundleId
     : DEFAULT_BUNDLE_ID;
   return {
-    bundleId: findBundle(rawId) ? rawId : DEFAULT_BUNDLE_ID,
+    bundleId: isBundleId(rawId) ? rawId : DEFAULT_BUNDLE_ID,
     followSystem: appearance?.followSystem === true,
   };
 }
@@ -95,6 +101,9 @@ export function ThemeProvider({
     () => initialBundleId ?? readGlobalInitialBundleId() ?? DEFAULT_BUNDLE_ID,
   );
   const [followSystem, setFollowSystemState] = useState<boolean>(initialFollowSystem);
+  const [activeBundle, setActiveBundle] = useState<ThemeBundle>(() =>
+    resolveBundle(initialBundleId ?? readGlobalInitialBundleId() ?? DEFAULT_BUNDLE_ID)
+  );
 
   // Track mount + user-touched state so late getSettings() doesn't clobber
   // a user toggle that happened in the meantime.
@@ -171,16 +180,37 @@ export function ThemeProvider({
     return bundleId;
   }, [bundleId, followSystem, osTick]);
 
-  const activeBundle: ThemeBundle = useMemo(
-    () => resolveBundle(effectiveBundleId),
-    [effectiveBundleId, resolveBundle],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    const cached = findBundle(effectiveBundleId);
+    if (cached) setActiveBundle(cached);
+    void loadThemeBundle(effectiveBundleId)
+      .then((bundle) => {
+        if (cancelled) return;
+        if (!bundle) {
+          setBundleIdState(DEFAULT_BUNDLE_ID);
+          setActiveBundle(resolveBundle(DEFAULT_BUNDLE_ID));
+          return;
+        }
+        setActiveBundle(bundle);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBundleIdState(DEFAULT_BUNDLE_ID);
+          setActiveBundle(resolveBundle(DEFAULT_BUNDLE_ID));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveBundleId, resolveBundle]);
 
   // Apply bundle to DOM on every active bundle change.
   useEffect(() => {
     if (typeof document === "undefined") return;
+    if (activeBundle.id !== effectiveBundleId) return;
     applyBundleToDocument(activeBundle);
-  }, [activeBundle]);
+  }, [activeBundle, effectiveBundleId]);
 
   // Propagate bundle tokens to plugin webviews whenever active bundle changes.
   // Font stack is NOT broadcast — SDK v5+ removed the `fonts` channel from
@@ -190,6 +220,7 @@ export function ThemeProvider({
   // a `fonts.family` payload here would be dead code that the SDK ignores.
   useEffect(() => {
     if (!api) return;
+    if (activeBundle.id !== effectiveBundleId) return;
     const tokens = bundleToPluginTokens(activeBundle);
     void api.notifyPluginTheme({
       bundleId: effectiveBundleId,
@@ -200,7 +231,7 @@ export function ThemeProvider({
         console.warn("[theme-propagation] notifyPluginTheme failed:", err);
       }
     });
-  }, [api, activeBundle]);
+  }, [api, activeBundle, effectiveBundleId]);
 
   // Live-follow OS preference when followSystem is active for violet pair.
   // A tick counter forces effectiveBundleId to re-evaluate on OS scheme change.
@@ -235,7 +266,7 @@ export function ThemeProvider({
   const setBundle = useCallback(
     (id: BundleId) => {
       userTouchedRef.current = true;
-      const safeId = findBundle(id) ? id : DEFAULT_BUNDLE_ID;
+      const safeId = isBundleId(id) ? id : DEFAULT_BUNDLE_ID;
       setBundleIdState(safeId);
       /* When the user explicitly picks one of the violet pair while followSystem
        * is on, the pick would otherwise be silently overridden by the OS

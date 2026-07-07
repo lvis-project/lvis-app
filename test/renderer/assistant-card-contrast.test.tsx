@@ -29,7 +29,7 @@ import { render } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { AssistantCard } from "../../src/ui/renderer/components/AssistantCard.js";
 import type { ChatEntry } from "../../src/lib/chat-stream-state.js";
-import { BUNDLES } from "../../src/ui/renderer/theme/bundles/index.js";
+import { BUNDLE_IDS, loadThemeBundle } from "../../src/ui/renderer/theme/bundles/index.js";
 
 /* ────────────────────────────────────────────────────────────────────────
  * 1. Component-level guard
@@ -126,13 +126,19 @@ describe("Theme tokens — body text contrast must clear WCAG AA on every shell"
 });
 
 describe("Theme bundles — chat and code text contrast must clear WCAG AA", () => {
-  for (const bundle of BUNDLES) {
-    it(`${bundle.id} foreground/background contrast >= 4.5:1`, () => {
+  for (const bundleId of BUNDLE_IDS) {
+    it(`${bundleId} foreground/background contrast >= 4.5:1`, async () => {
+      const bundle = await loadThemeBundle(bundleId);
+      expect(bundle).toBeDefined();
+      if (!bundle) return;
       const ratio = contrastRatio(bundle.tokens.foreground, bundle.tokens.background);
       expect(ratio).toBeGreaterThanOrEqual(4.5);
     });
 
-    it(`${bundle.id} code foreground/background contrast >= 4.5:1`, () => {
+    it(`${bundleId} code foreground/background contrast >= 4.5:1`, async () => {
+      const bundle = await loadThemeBundle(bundleId);
+      expect(bundle).toBeDefined();
+      if (!bundle) return;
       const ratio = contrastRatio(bundle.tokens["code-fg"], bundle.tokens["code-bg"]);
       expect(ratio).toBeGreaterThanOrEqual(4.5);
     });
