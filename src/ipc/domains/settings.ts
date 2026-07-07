@@ -19,9 +19,12 @@ import {
   isMarketplaceEligibleLLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
 import {
+  MARKETPLACE_PROVIDER_MODEL_DISCOVERY_POLICIES,
+  isMarketplaceProviderPresetId,
   marketplaceProviderPresetIdFromSecretId,
   marketplaceProviderPresetSecretKey,
   type MarketplaceInstalledProviderPreset,
+  type MarketplaceProviderModelDiscoveryPolicy,
 } from "../../shared/marketplace-package-assets.js";
 import type { LlmModelListRequest } from "../../shared/llm-model-list.js";
 import type { IpcDeps } from "../types.js";
@@ -133,9 +136,43 @@ function isProviderEnabledForSecrets(deps: IpcDeps, vendor: unknown): vendor is 
 }
 
 function isMarketplaceProviderPresetInstalled(deps: IpcDeps, providerId: string): boolean {
+  return marketplaceProviderPresetForId(deps, providerId) !== undefined;
+}
+
+function marketplaceProviderPresetForId(
+  deps: IpcDeps,
+  providerId: string,
+): MarketplaceInstalledProviderPreset | undefined {
   const installedProviderPresets =
     deps.settingsService.get("marketplace").installedProviderPresets ?? [];
-  return installedProviderPresets.some((preset) => preset.providerId === providerId);
+  return installedProviderPresets.find((preset) => preset.providerId === providerId);
+}
+
+function normalizeModelDiscoveryPolicy(value: unknown): MarketplaceProviderModelDiscoveryPolicy | undefined {
+  return typeof value === "string" &&
+    (MARKETPLACE_PROVIDER_MODEL_DISCOVERY_POLICIES as readonly string[]).includes(value)
+    ? value as MarketplaceProviderModelDiscoveryPolicy
+    : undefined;
+}
+
+function modelDiscoveryPolicyForListRequest(
+  deps: IpcDeps,
+  request: LlmModelListRequest,
+  vendor: string,
+  credentialScope?: string,
+): MarketplaceProviderModelDiscoveryPolicy | undefined {
+  if (vendor === "openai-compatible" && credentialScope && isMarketplaceProviderPresetId(credentialScope)) {
+    const preset = marketplaceProviderPresetForId(deps, credentialScope);
+    if (preset?.modelDiscoveryPolicy) return preset.modelDiscoveryPolicy;
+  }
+  if (vendor === "openai-compatible") {
+    const llm = deps.settingsService.get("llm");
+    if (llm.provider === "openai-compatible" && llm.marketplaceProviderPresetId) {
+      const preset = marketplaceProviderPresetForId(deps, llm.marketplaceProviderPresetId);
+      if (preset?.modelDiscoveryPolicy) return preset.modelDiscoveryPolicy;
+    }
+  }
+  return normalizeModelDiscoveryPolicy(request?.modelDiscoveryPolicy);
 }
 
 function llmSecretKeyForInput(deps: IpcDeps, vendor?: unknown): string | undefined {
@@ -444,8 +481,19 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     const credentialScope = request && typeof request.credentialScope === "string"
       ? request.credentialScope
       : undefined;
+    const modelDiscoveryPolicy = modelDiscoveryPolicyForListRequest(
+      deps,
+      request,
+      vendor,
+      credentialScope,
+    );
     const { listLlmModelsFromSettings } = await import("../../engine/llm/model-list.js");
-    return listLlmModelsFromSettings(settingsService, { vendor, baseUrl, credentialScope });
+    return listLlmModelsFromSettings(settingsService, {
+      vendor,
+      baseUrl,
+      credentialScope,
+      ...(modelDiscoveryPolicy ? { modelDiscoveryPolicy } : {}),
+    });
   });
 
   // ─── Marketplace API Key ──────────────────────
