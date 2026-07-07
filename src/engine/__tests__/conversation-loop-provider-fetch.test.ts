@@ -292,6 +292,7 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
         body: "{}",
         allowLoopback: false,
         fetchImpl: expect.any(Function),
+        maxRedirects: 0,
       }),
     );
   });
@@ -363,6 +364,7 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
       },
     ];
     expect(init.allowPrivateNetworks).toBeUndefined();
+    expect(init.maxRedirects).toBe(0);
     expect(init.allowLoopback).toEqual(expect.any(Function));
     const allowLoopback = init.allowLoopback as (url: URL) => boolean;
     expect(allowLoopback(new URL("http://localhost:8000/v1/models"))).toBe(true);
