@@ -6,7 +6,7 @@ import os from "node:os";
 import { pathToFileURL } from "node:url";
 
 export type { DlpResult } from "../shared/dlp.js";
-export { maskSensitiveData } from "../shared/dlp.js";
+export { maskSensitiveData, scrubSecretsForLLM } from "../shared/dlp.js";
 
 
 
@@ -50,40 +50,6 @@ export function initDlpAudit(
 ): void {
   _auditLogger = auditLogger;
   _sessionId = sessionId;
-}
-
-/**
- * Slice-free secret scrubber (#1499 E2 cluster-review security MAJOR M1).
- *
- * {@link redactForLLM} covers the PII class (email / phone / SSN / CC) but NOT
- * the credential class — bearer tokens, `sk-…`/`pk-…`-style API keys, JWTs,
- * `x-api-key` / `x-auth-token` headers, and `?token=`/`&api_key=` query params.
- * This is the SOT for that class: `mcp-client.ts`'s `scrubSecrets` wraps it (and
- * adds a 120-char slice for UI/error surfacing), and the diagnostics bundle
- * applies it (whole-line, NO slice) alongside `redactForLLM` on every log line
- * and audit input/output. Returns the FULL string with only the secret spans
- * replaced — never truncates, so a secret late in a long log line is still
- * caught.
- */
-export function scrubSecretsForLLM(text: string): string {
-  return text
-    .replace(/[Bb]earer\s+[A-Za-z0-9._\-~+/=]+/g, "Bearer [REDACTED:TOKEN]")
-    .replace(
-      /((?:authorization|x-api-key|x-auth-token)\s*:\s*)[^\s\r\n]+/gi,
-      "$1[REDACTED:TOKEN]",
-    )
-    .replace(
-      /([?&](?:api[_-]?key|token|access[_-]?token|refresh[_-]?token))=([^&\s]+)/gi,
-      "$1=[REDACTED:TOKEN]",
-    )
-    .replace(
-      /(["'](?:api[_-]?key|token|access[_-]?token|refresh[_-]?token|authorization|x-api-key|x-auth-token)["']\s*:\s*["'])[^"']+(["'])/gi,
-      "$1[REDACTED:TOKEN]$2",
-    )
-    // JSON Web Tokens: three base64url segments separated by dots (header.payload.sig).
-    .replace(/\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b/g, "[REDACTED:JWT]")
-    // Prefixed API keys: sk-/pk-/rk-/proj-/test-/live- followed by ≥8 key chars.
-    .replace(/\b(?:sk|pk|rk|proj|test|live)-[A-Za-z0-9_-]{8,}\b/g, "[REDACTED:TOKEN]");
 }
 
 export function redactForLLM(text: string, turnId?: string): RedactResult {

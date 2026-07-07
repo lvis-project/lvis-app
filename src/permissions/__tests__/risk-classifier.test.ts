@@ -214,7 +214,7 @@ describe("dlpRedactInputForPrompt", () => {
   it("masks sk-style API keys", () => {
     const out = dlpRedactInputForPrompt({ apiKey: "sk-abc123def456ghi789jkl012mno" });
     expect(out.apiKey).not.toContain("sk-abc123");
-    expect(out.apiKey).toContain("sk-****");
+    expect(out.apiKey).toContain("[REDACTED:TOKEN]");
   });
 
   it("masks emails", () => {
@@ -347,7 +347,7 @@ describe("LlmRiskClassifier — DLP filter on input (security threat-gap #3)", (
     const arg = completeSpy.mock.calls[0][0];
     expect(arg.systemPrompt).toBe(PERMISSION_REVIEWER_FRAMEWORK.systemPrompt);
     expect(arg.userPrompt).not.toContain("sk-abc123");
-    expect(arg.userPrompt).toContain("sk-****");
+    expect(arg.userPrompt).toContain("[REDACTED:TOKEN]");
   });
 
   it("does NOT send credit card to provider", async () => {

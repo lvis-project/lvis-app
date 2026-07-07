@@ -576,7 +576,7 @@ describe("ApprovalGate", () => {
     const maskedArgs = payload.args as typeof originalArgs;
 
     // UI payload is masked
-    expect(maskedArgs.prompt).toBe("use sk-****");
+    expect(maskedArgs.prompt).toBe("use [REDACTED:TOKEN]");
     expect(maskedArgs.email).toBe("***@example.com");
     expect(maskedArgs.nested.phone).toBe("010-****-****");
     expect(maskedArgs.nested.count).toBe(3);

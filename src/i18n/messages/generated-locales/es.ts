@@ -332,7 +332,7 @@ export const esMessages: Record<string, string> = {
   "be_conversationLoop.toolRoundLimitExceeded": "(Se superó el límite de ronda de ejecución de herramientas)",
   "be_conversationLoop.userPromptBlocked": "Este mensaje fue bloqueado por un enlace confiable: {reason}",
   "be_costEstimator.costUnknown": "Costo desconocido",
-  "be_dlp.patternApiKey": "Clave API",
+  "be_dlp.patternCredential": "Credencial",
   "be_dlp.patternCreditCard": "Tarjeta de crédito",
   "be_dlp.patternEmail": "Correo electrónico",
   "be_dlp.patternPhoneNumber": "Número de teléfono",
