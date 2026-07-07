@@ -343,7 +343,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       source: "plugin" as const,
       category: "network" as const,
       pathFields: [],
-      finalInput: { payload: "send ***@example.com with sk-****" },
+      finalInput: { payload: "send ***@example.com with [REDACTED:TOKEN]" },
       allowedDirectories: [],
       sensitivePathsAdjacent: [],
       trustOrigin: "llm-tool-arg" as const,

@@ -332,7 +332,7 @@ export const jaMessages: Record<string, string> = {
   "be_conversationLoop.toolRoundLimitExceeded": "(ツール実行ラウンド制限を超えました)",
   "be_conversationLoop.userPromptBlocked": "このプロンプトは信頼できるフックによってブロックされました: {reason}",
   "be_costEstimator.costUnknown": "コスト不明",
-  "be_dlp.patternApiKey": "APIキー",
+  "be_dlp.patternCredential": "認証情報",
   "be_dlp.patternCreditCard": "クレジットカード",
   "be_dlp.patternEmail": "電子メール",
   "be_dlp.patternPhoneNumber": "電話番号",
