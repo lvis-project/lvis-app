@@ -187,6 +187,28 @@ describe("LLM model list sync", () => {
     );
   });
 
+  it("does not fetch model lists for manual or static discovery policies", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: "router/free" }] }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+
+    for (const modelDiscoveryPolicy of ["manual", "static"] as const) {
+      const result = await listLlmModelsFromSettings(
+        makeSettingsService() as never,
+        { vendor: "openrouter", modelDiscoveryPolicy },
+        guardedFetchOptions(fetchImpl),
+      );
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: "model-list-not-supported",
+      });
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("rejects credentialed HTTP model-list endpoints before fetching", async () => {
     const fetchImpl = vi.fn(async () =>
       new Response(JSON.stringify({ data: [{ id: "router/free" }] }), {
