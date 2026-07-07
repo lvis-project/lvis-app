@@ -32,6 +32,7 @@ import { registerDiagnosticsHandlers } from "../diagnostics.js";
 import { CHANNELS } from "../../../contract/app-contract.js";
 import { AuditLogger } from "../../../audit/audit-logger.js";
 import type { IpcDeps } from "../../types.js";
+import { fixtureSecret } from "../../../audit/__tests__/secret-fixtures.js";
 
 let tmp: string;
 const REJECT_EVENT = { senderFrame: { url: "https://evil.example.com" } };
@@ -121,6 +122,29 @@ describe("lvis:logs:tail", () => {
     expect(r.ok).toBe(true);
     expect(r.lines.join("\n")).not.toContain("bob@example.com");
     expect(r.lines.join("\n")).toContain("[REDACTED:EMAIL]");
+  });
+
+  it("redacts credential-class secrets in recent log lines", async () => {
+    const githubPat = fixtureSecret("github", "_pat_", "1234567890abcdefghijklmnopqrstuv_1234567890");
+    const awsSecret = fixtureSecret("wJalrXUtn", "FEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+    writeFileSync(
+      join(tmp, "logs", "lvis-2025-06-01.log"),
+      [
+        JSON.stringify({ level: 30, msg: `github ${githubPat}` }),
+        JSON.stringify({ level: 30, msg: `AWS_SECRET_ACCESS_KEY=${awsSecret}` }),
+      ].join("\n") + "\n",
+      "utf-8",
+    );
+    const r = (await invokeRegisteredHandlerWithEvent(handlers, CHANNELS.logs.tail, ACCEPT_EVENT, { lines: 50 })) as {
+      ok: boolean;
+      lines: string[];
+    };
+    const text = r.lines.join("\n");
+
+    expect(r.ok).toBe(true);
+    expect(text).not.toContain(githubPat);
+    expect(text).not.toContain(awsSecret);
+    expect(text).toContain("[REDACTED:TOKEN]");
   });
 
   it("clamps an absurd line count and never throws on empty", async () => {

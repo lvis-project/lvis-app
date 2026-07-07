@@ -5,6 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { maskSensitiveData } from "../dlp-filter.js";
+import { fixtureSecret } from "./secret-fixtures.js";
 
 describe("maskSensitiveData — 주민등록번호 (Korean RRN)", () => {
   it("masks a valid RRN with hyphen", () => {
@@ -53,13 +54,15 @@ describe("maskSensitiveData — API 키 (sk- prefix)", () => {
   it("masks OpenAI-style API key", () => {
     const { masked, detections } = maskSensitiveData("key=sk-abcdefghijklmnopqrst");
     expect(masked).not.toContain("sk-abcdefghijklmnopqrst");
-    expect(masked).toContain("sk-****");
-    expect(detections).toContain("API 키");
+    expect(masked).toContain("[REDACTED:TOKEN]");
+    expect(masked).not.toContain(`sk-${"*".repeat(4)}`);
+    expect(detections).toContain("자격 증명");
+    expect(detections).not.toContain("API 키");
   });
 
   it("masks longer API key", () => {
     const { masked } = maskSensitiveData(`key=sk-${"x".repeat(40)}`);
-    expect(masked).toContain("sk-****");
+    expect(masked).toContain("[REDACTED:TOKEN]");
   });
 
   it("does NOT mask sk- with fewer than 20 chars (too short to be a real key)", () => {
@@ -67,6 +70,17 @@ describe("maskSensitiveData — API 키 (sk- prefix)", () => {
     // Pattern requires 20+ alphanum chars after sk-
     expect(detections).not.toContain("API 키");
     expect(masked).toContain("sk-abc123");
+  });
+
+  it("uses the shared credential scrubber for vendor-prefixed tokens", () => {
+    const githubPat = fixtureSecret("gh", "p_", "1234567890abcdefghijklmnopqrstuv");
+    const slackApp = fixtureSecret("xa", "pp-", "123456789012-123456789012-abcdefghijklmnopqrstuv");
+    const { masked, detections } = maskSensitiveData(`tokens ${githubPat} ${slackApp}`);
+
+    expect(masked).not.toContain(githubPat);
+    expect(masked).not.toContain(slackApp);
+    expect(masked.match(/\[REDACTED:TOKEN\]/g)?.length).toBe(2);
+    expect(detections).toContain("자격 증명");
   });
 });
 
@@ -115,8 +129,9 @@ describe("maskSensitiveData — clean text (no false positives)", () => {
 
   it("returns detections array listing only matched pattern names", () => {
     const { detections } = maskSensitiveData("api key: sk-abcdefghijklmnopqrstu email: x@y.com");
-    expect(detections).toContain("API 키");
+    expect(detections).toContain("자격 증명");
     expect(detections).toContain("이메일");
+    expect(detections).not.toContain("API 키");
     expect(detections).not.toContain("신용카드");
     expect(detections).not.toContain("전화번호");
   });
