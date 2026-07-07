@@ -31,6 +31,7 @@ export function handlePluginCards(deps: IpcDeps) {
       runtimeLoaded: false,
       installAliases: failure.installAliases,
       ...(failure.installFailureKind ? { installFailureKind: failure.installFailureKind } : {}),
+      installFailureMessage: failure.error,
       ...(failure.networkAccess ? { networkAccess: failure.networkAccess } : {}),
       ...(failure.version ? { version: failure.version } : {}),
       ...(failure.publisher ? { publisher: failure.publisher } : {}),

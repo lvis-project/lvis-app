@@ -60,6 +60,8 @@ describe("handlePluginCards", () => {
         active: false,
         runtimeLoaded: false,
         installFailureKind: "catalog-grant-mismatch",
+        installFailureMessage:
+          'plugin "meeting" artifact manifest external-auth-consumer capability does not match the catalog-approved grant',
         installAliases: ["lvis-plugin-meeting"],
         networkAccess: {
           allowedDomains: ["graph.microsoft.com"],
