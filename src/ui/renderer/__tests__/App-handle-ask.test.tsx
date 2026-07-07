@@ -88,6 +88,50 @@ describe("App.handleAsk — /load command routing", () => {
     expect(api.chatSend).not.toHaveBeenCalled();
   });
 
+  it("clears live sub-agent workflow state after loading another session", async () => {
+    const now = new Date().toISOString();
+    const { container, api, emitAgentSpawnEvent } = await renderApp({
+      hasApiKey: true,
+      currentSession: "sess-current",
+      sessions: [{ id: "sess-load-target-xyz", modifiedAt: now, title: "불러올 대화" }],
+      history: { sessionId: "sess-current", messages: [] },
+      historyBySession: {
+        "sess-load-target-xyz": {
+          messages: [
+            { index: 0, role: "user", content: "로드된 세션 질문" },
+            { index: 1, role: "assistant", content: "로드된 세션 답변" },
+          ],
+        },
+      },
+    });
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    await act(async () => {
+      emitAgentSpawnEvent({
+        spawnId: "live-old-spawn",
+        type: "start",
+        title: "이전 세션 live 서브에이전트",
+        instructions: "old live work",
+        toolUseId: "old-tool",
+        childSessionId: "sub-old-child",
+      });
+    });
+    await waitFor(() => {
+      expect(container.textContent).toContain("이전 세션 live 서브에이전트");
+    });
+
+    await submitSlashCommand(container, "/load sess-load-target");
+
+    await waitFor(() =>
+      expect(api.chatSessionResume).toHaveBeenCalledWith("sess-load-target-xyz"),
+    );
+    await waitFor(() => {
+      expect(container.textContent).toContain("로드된 세션 답변");
+      expect(container.textContent).not.toContain("이전 세션 live 서브에이전트");
+    });
+    expect(api.chatSend).not.toHaveBeenCalled();
+  });
+
   it("surfaces a usage error for bare /load and does NOT chatSend or list sessions", async () => {
     const { container, api } = await renderApp({ hasApiKey: true });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());

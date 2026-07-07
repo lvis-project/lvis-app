@@ -1,6 +1,7 @@
 /**
- * Unit tests for the 5 workflow system tools (S1+S2):
- * ask_user_question, routine_schedule, todo_session_write, agent_spawn, skill_load.
+ * Unit tests for workflow system tools (S1+S2):
+ * ask_user_question, routine_schedule, todo_session_write, agent_spawn,
+ * agent_status, agent_interrupt, skill_load.
  *
  * Each test stubs the service dependency and exercises the tool's
  * `execute(rawInput, ctx)` contract directly — no Electron / IPC.
@@ -20,7 +21,11 @@ import type { ToolExecutionContext } from "../base.js";
 import { createAskUserQuestionTool } from "../ask-user-question.js";
 import { createRoutineScheduleTool } from "../routine-schedule.js";
 import { createTodoSessionWriteTool } from "../todo-session-write.js";
-import { createAgentSpawnTool } from "../agent-spawn.js";
+import {
+  createAgentInterruptTool,
+  createAgentSpawnTool,
+  createAgentStatusTool,
+} from "../agent-spawn.js";
 import { createSkillLoadTool } from "../skill-load.js";
 import { createSkillListTool } from "../skill-list.js";
 import { createAgentListTool } from "../agent-list.js";
@@ -446,6 +451,7 @@ describe("agent_spawn tool", () => {
       getRunner: () => undefined,
       emit: () => undefined,
     });
+    expect(tool.parallelSafe).toBe(true);
     expect(tool.description).toContain("직접 호출");
     expect(tool.description).toContain("request_plugin");
   });
@@ -493,11 +499,8 @@ describe("agent_spawn tool", () => {
     const parsed = JSON.parse(r.output);
     expect(parsed.summary).toBe("done-text");
     expect(parsed.toolCallCount).toBe(0);
-    // PR3: the child transcript is embedded in the tool result for persistence
-    // parity (derive-subagent-spawns reads `entries` on reload).
-    expect(Array.isArray(parsed.entries)).toBe(true);
-    expect(parsed.entries).toHaveLength(1);
-    expect(parsed.entries[0]).toEqual({ kind: "assistant", text: "done-text", streaming: false });
+    expect(parsed.childSessionId).toBe("child-1");
+    expect(parsed.entries).toBeUndefined();
     const types = events.map((e) => e.type);
     expect(types).toContain("start");
     // PR3: activity events carry the live ChatEntry[] snapshot.
@@ -505,7 +508,169 @@ describe("agent_spawn tool", () => {
     expect(types).toContain("done");
   });
 
-  it("embeds the child entries snapshot on the done event and activity events", async () => {
+  it("background mode returns a handle immediately and emits terminal event later", async () => {
+    let resolveSpawn!: (value: {
+      summary: string;
+      toolCallCount: number;
+      turnCount: number;
+      childSessionId: string;
+      entries: [];
+      ok: true;
+    }) => void;
+    const spawnPromise = new Promise<{
+      summary: string;
+      toolCallCount: number;
+      turnCount: number;
+      childSessionId: string;
+      entries: [];
+      ok: true;
+    }>((resolve) => {
+      resolveSpawn = resolve;
+    });
+    const events: Array<{ type: string; spawnId: string; childSessionId?: string }> = [];
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        spawn: async (input, callbacks) => {
+          expect(input.spawnId).toBeTruthy();
+          callbacks?.onLinked?.({ childSessionId: "child-bg" });
+          return await spawnPromise;
+        },
+      }) as never,
+      emit: (event) => {
+        events.push({
+          type: event.type,
+          spawnId: event.spawnId,
+          ...(event.childSessionId ? { childSessionId: event.childSessionId } : {}),
+        });
+      },
+    });
+
+    const r = await tool.execute(
+      { title: "bg", instructions: "work in background", background: true },
+      ctx(),
+    );
+
+    expect(r.isError).toBe(false);
+    const parsed = JSON.parse(r.output);
+    expect(parsed.background).toBe(true);
+    expect(parsed.status).toBe("running");
+    expect(parsed.spawnId).toBeTruthy();
+    expect(parsed.childSessionId).toBe("child-bg");
+    expect(events.map((event) => event.type)).toEqual(["start", "activity"]);
+
+    resolveSpawn({
+      summary: "done later",
+      toolCallCount: 0,
+      turnCount: 1,
+      childSessionId: "child-bg",
+      entries: [],
+      ok: true,
+    });
+    const deadline = Date.now() + 1000;
+    while (!events.some((event) => event.type === "done") && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      spawnId: parsed.spawnId,
+      childSessionId: "child-bg",
+    });
+  });
+
+  it("background mode preserves interrupted status through interrupt, status, and terminal event", async () => {
+    let spawnId = "";
+    let resolveSpawn!: () => void;
+    const spawnPromise = new Promise<{
+      summary: string;
+      toolCallCount: number;
+      turnCount: number;
+      childSessionId: string;
+      entries: [];
+      ok: true;
+      stopReason: "interrupted";
+    }>((resolve) => {
+      resolveSpawn = () =>
+        resolve({
+          summary: "stopped",
+          toolCallCount: 0,
+          turnCount: 1,
+          childSessionId: "child-bg",
+          entries: [],
+          ok: true,
+          stopReason: "interrupted",
+        });
+    });
+    const run = {
+      spawnId: "",
+      childSessionId: "child-bg",
+      title: "Interruptible",
+      status: "running" as "running" | "interrupted",
+      startedAt: "2026-07-07T00:00:00.000Z",
+      updatedAt: "2026-07-07T00:00:00.000Z",
+      toolCallCount: 0,
+      turnCount: 0,
+      entries: [],
+    };
+    const events: Array<{ type: string; spawnId: string; status?: string; childSessionId?: string }> = [];
+    const runner = {
+      spawn: async (input, callbacks) => {
+        spawnId = input.spawnId ?? "";
+        run.spawnId = spawnId;
+        callbacks?.onLinked?.({ childSessionId: "child-bg" });
+        return await spawnPromise;
+      },
+      listRunStatuses: (originSessionId: string) => (originSessionId === "session-x" ? [run] : []),
+      getRunStatus: (id: string, originSessionId: string) =>
+        id === spawnId && originSessionId === "session-x" ? run : null,
+      interruptRun: (id: string, originSessionId: string) => {
+        if (id !== spawnId || originSessionId !== "session-x") return { ok: false, message: "not found" };
+        run.status = "interrupted";
+        run.updatedAt = "2026-07-07T00:00:01.000Z";
+        resolveSpawn();
+        return { ok: true, message: "interrupt requested", run };
+      },
+    };
+    const spawnTool = createAgentSpawnTool({
+      getRunner: () => runner as never,
+      emit: (event) => {
+        events.push({
+          type: event.type,
+          spawnId: event.spawnId,
+          ...(event.status ? { status: event.status } : {}),
+          ...(event.childSessionId ? { childSessionId: event.childSessionId } : {}),
+        });
+      },
+    });
+    const interruptTool = createAgentInterruptTool({ getRunner: () => runner as never });
+    const statusTool = createAgentStatusTool({ getRunner: () => runner as never });
+
+    const spawned = await spawnTool.execute(
+      { title: "bg", instructions: "work in background", background: true },
+      ctx(),
+    );
+    const handle = JSON.parse(spawned.output);
+    expect(handle.status).toBe("running");
+
+    const interrupt = JSON.parse((await interruptTool.execute({ id: handle.spawnId }, ctx())).output);
+    expect(interrupt.ok).toBe(true);
+    expect(interrupt.run.status).toBe("interrupted");
+
+    const status = JSON.parse((await statusTool.execute({ id: handle.spawnId }, ctx())).output);
+    expect(status.run.status).toBe("interrupted");
+
+    const deadline = Date.now() + 1000;
+    while (!events.some((event) => event.type === "done") && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      spawnId: handle.spawnId,
+      childSessionId: "child-bg",
+      status: "interrupted",
+    });
+  });
+
+  it("emits the child entries snapshot on done and activity events without embedding it in the tool result", async () => {
     const spawnEvents: Array<{ type: string; entries?: unknown[] }> = [];
     const tool = createAgentSpawnTool({
       getRunner: () => ({
@@ -551,6 +716,7 @@ describe("agent_spawn tool", () => {
     });
     const r = await tool.execute({ title: "t", instructions: "do" }, ctx());
     expect(r.isError).toBe(false);
+    expect(JSON.parse(r.output).entries).toBeUndefined();
     const activity = spawnEvents.find((e) => e.type === "activity");
     expect(activity?.entries).toHaveLength(1);
     const done = spawnEvents.find((e) => e.type === "done");
@@ -608,6 +774,109 @@ describe("agent_spawn tool", () => {
     });
     const r = await tool.execute({ title: "", instructions: "" }, ctx());
     expect(r.isError).toBe(true);
+  });
+});
+
+describe("agent_status and agent_interrupt tools", () => {
+  it("agent_status lists tracked runs or returns one run by id", async () => {
+    const fakeRun = {
+      spawnId: "spawn-1",
+      childSessionId: "child-1",
+      title: "Lookup",
+      status: "running" as const,
+      startedAt: "2026-07-07T00:00:00.000Z",
+      updatedAt: "2026-07-07T00:00:01.000Z",
+      toolCallCount: 1,
+      turnCount: 0,
+      entries: [],
+    };
+    const tool = createAgentStatusTool({
+      getRunner: () => ({
+        listRunStatuses: (originSessionId: string) => originSessionId === "session-x" ? [fakeRun] : [],
+        getRunStatus: (id: string, originSessionId: string) =>
+          id === "spawn-1" && originSessionId === "session-x" ? fakeRun : null,
+      }) as never,
+    });
+
+    const listed = JSON.parse((await tool.execute({}, ctx())).output);
+    expect(listed.runs).toEqual([fakeRun]);
+
+    const one = JSON.parse((await tool.execute({ id: "spawn-1" }, ctx())).output);
+    expect(one.run).toEqual(fakeRun);
+  });
+
+  it("agent_status requires and scopes to the current session id", async () => {
+    const fakeRun = {
+      spawnId: "spawn-1",
+      childSessionId: "child-1",
+      title: "Lookup",
+      status: "running" as const,
+      startedAt: "2026-07-07T00:00:00.000Z",
+      updatedAt: "2026-07-07T00:00:01.000Z",
+      toolCallCount: 1,
+      turnCount: 0,
+      entries: [],
+    };
+    const listSpy = vi.fn((originSessionId: string) => originSessionId === "session-a" ? [fakeRun] : []);
+    const getSpy = vi.fn((id: string, originSessionId: string) =>
+      id === "spawn-1" && originSessionId === "session-a" ? fakeRun : null);
+    const tool = createAgentStatusTool({
+      getRunner: () => ({
+        listRunStatuses: listSpy,
+        getRunStatus: getSpy,
+      }) as never,
+    });
+
+    const missingSession = await tool.execute(
+      {},
+      { cwd: process.cwd(), extraAllowedDirectories: [], metadata: {} },
+    );
+    expect(missingSession.isError).toBe(true);
+    expect(JSON.parse(missingSession.output).error).toContain("session id");
+
+    const listed = JSON.parse((await tool.execute({}, ctx("session-a"))).output);
+    expect(listed.runs).toEqual([fakeRun]);
+    expect(listSpy).toHaveBeenCalledWith("session-a");
+
+    const denied = await tool.execute({ id: "spawn-1" }, ctx("session-b"));
+    expect(denied.isError).toBe(true);
+    expect(JSON.parse(denied.output).error).toContain("not found");
+    expect(getSpy).toHaveBeenCalledWith("spawn-1", "session-b");
+  });
+
+  it("agent_interrupt delegates to the runner", async () => {
+    const interruptSpy = vi.fn((id: string, originSessionId: string) => ({
+      ok: true,
+      message: `interrupt requested for ${id} in ${originSessionId}`,
+    }));
+    const tool = createAgentInterruptTool({
+      getRunner: () => ({
+        interruptRun: interruptSpy,
+      }) as never,
+    });
+
+    const result = await tool.execute({ id: "spawn-1", reason: "not needed" }, ctx());
+    expect(result.isError).toBe(false);
+    expect(interruptSpy).toHaveBeenCalledWith("spawn-1", "session-x");
+    expect(JSON.parse(result.output).ok).toBe(true);
+  });
+
+  it("agent_interrupt requires the current session id before delegating", async () => {
+    const interruptSpy = vi.fn();
+    const tool = createAgentInterruptTool({
+      getRunner: () => ({
+        interruptRun: interruptSpy,
+      }) as never,
+    });
+
+    const result = await tool.execute(
+      { id: "spawn-1" },
+      { cwd: process.cwd(), extraAllowedDirectories: [], metadata: {} },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.output).error).toContain("session id");
+    expect(interruptSpy).not.toHaveBeenCalled();
   });
 });
 

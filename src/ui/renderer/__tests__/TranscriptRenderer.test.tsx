@@ -5,16 +5,15 @@
  * a context-free `<TranscriptRenderer>` so side-chat / sub-agent sources (PR2 /
  * PR3) can reuse it by omitting optional prop clusters. The true regression risk
  * of that reshape is NOT a type error — it is a *silent* one: forgetting a
- * default value makes spawns / footer actions / stars vanish (or crash) at
+ * default value makes footer actions / stars vanish (or crash) at
  * runtime with no compile-time signal.
  *
  * These tests render the core directly with ONLY the three required props and
  * lock the default-value contract:
  *   (a) no crash,
  *   (b) no edit / fork / star hover actions,
- *   (c) no sub-agent spawn cards,
- *   (d) no TurnActionBar retry/fork/star footer buttons,
- *   (e) WorkGroup still collapses mid-turn work.
+ *   (c) no TurnActionBar retry/fork/star footer buttons,
+ *   (d) WorkGroup still collapses mid-turn work.
  * A parallel "fully-wired" case asserts the actions DO appear once their
  * callbacks are supplied — i.e. suppression keys off callback presence.
  *
@@ -79,16 +78,6 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
     expect(queryByTitle(RETRY_TITLE)).toBeNull();
   });
 
-  it("renders no sub-agent spawn cards when the spawns cluster is absent", () => {
-    const entries = [user("q"), toolGroup(), assistant("done")];
-    const { queryByTestId } = renderCore(
-      <TranscriptRenderer entries={entries} streaming={false} currentSessionId="s1" />,
-    );
-    // SubAgentCard would surface a sub-agent card; the no-op renderer default
-    // means none appear even though a tool_group is present.
-    expect(queryByTestId("sub-agent-card")).toBeNull();
-  });
-
   it("still collapses mid-turn work into a WorkGroup", () => {
     const entries = [user("q"), toolGroup(), assistant("done")];
     const { getAllByTestId } = renderCore(
@@ -98,6 +87,19 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
     // final assistant renders outside it. This is the heart of the unified
     // render and must survive extraction unchanged.
     expect(getAllByTestId("work-group").length).toBe(1);
+  });
+
+  it("can force historical WorkGroups open for read-only companion surfaces", () => {
+    const entries = [user("q"), toolGroup("forced-tool"), assistant("done")];
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={entries}
+        streaming={false}
+        currentSessionId="s1"
+        workGroupsForceOpen
+      />,
+    );
+    expect(getByTestId("work-group").textContent).toContain("x");
   });
 });
 

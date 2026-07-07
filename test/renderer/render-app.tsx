@@ -28,6 +28,7 @@ export type RenderAppReturn = {
   unmount: RenderResult["unmount"];
   api: MockLvisApi;
   emitChatStream: (ev: unknown) => void;
+  emitAgentSpawnEvent: (event: unknown) => void;
   emitOverlayShow: (item: unknown) => void;
   emitOverlayDismiss: (id: string) => void;
   emitRoutineFiredV2: (r: unknown) => void;
@@ -45,6 +46,7 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
   const {
     api,
     emitChatStream,
+    emitAgentSpawnEvent,
     emitOverlayShow,
     emitOverlayDismiss,
     emitRoutineFiredV2,
@@ -71,6 +73,7 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     unmount: result.unmount,
     api,
     emitChatStream,
+    emitAgentSpawnEvent,
     emitOverlayShow,
     emitOverlayDismiss,
     emitRoutineFiredV2,

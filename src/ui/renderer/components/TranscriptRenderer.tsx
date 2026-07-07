@@ -1,4 +1,4 @@
-import { Fragment, useMemo } from "react";
+import { useMemo } from "react";
 import type React from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
@@ -10,7 +10,7 @@ import { detectFromStream } from "../../../lib/stream-markers.js";
 import { lookupBillablePricingOptional } from "../../../shared/pricing-data.js";
 import { highlightText } from "../utils/html-preview.js";
 import { classifyTurnEntries, isTurnStartEntry } from "../utils/classify-turn-entries.js";
-import { entryRenderRevision, subAgentRevision } from "../utils/chat-entry-revision.js";
+import { entryRenderRevision } from "../utils/chat-entry-revision.js";
 import { AssistantCard } from "./AssistantCard.js";
 import { UserMessageEditor } from "./UserMessageEditor.js";
 import { ReasoningCard } from "./ReasoningCard.js";
@@ -24,7 +24,6 @@ import { PermissionReviewStatusCard } from "./PermissionReviewStatusCard.js";
 import { TurnActionBar } from "./TurnActionBar.js";
 import { ImportedTriggerCard } from "./ImportedTriggerCard.js";
 import { AskUserAnswerBubble } from "./AskUserAnswerBubble.js";
-import type { SubAgentSpawn } from "./SubAgentCard.js";
 
 /**
  * Per-turn provider-reported usage summary, keyed by turn-start entry index.
@@ -70,16 +69,6 @@ export interface TranscriptSearchProps {
 }
 
 /**
- * Spawn-cluster props: inline sub-agent cards attached to their owning
- * ToolGroupCard. Omit when a source has no sub-agent spawns (defaults collapse
- * to an empty map + a no-op renderer, so no spawn nodes are emitted).
- */
-export interface TranscriptSpawnProps {
-  spawnsByToolUseId: Map<string, SubAgentSpawn[]>;
-  renderSpawnsForGroup: (group: { tools: { toolUseId: string }[] }) => React.ReactNode[];
-}
-
-/**
  * Action-cluster props: mutating per-entry / per-turn actions (fork, star,
  * retry, feedback) + checkpoint navigation. Each action renders only when its
  * callback is present (side-chat omits the cluster to opt out of all actions).
@@ -105,7 +94,6 @@ export interface SharedTranscriptProps {
   turnSummaryByTurnStart?: Map<number, TurnSummary>;
   edit?: TranscriptEditProps;
   search?: TranscriptSearchProps;
-  spawns?: TranscriptSpawnProps;
   actions?: TranscriptActionProps;
 
   /**
@@ -120,10 +108,15 @@ export interface SharedTranscriptProps {
 
   /** When true, WorkGroup render decisions are traced via debugLog. */
   debugStreamEnabled?: boolean;
+
+  /**
+   * Read-only companion surfaces such as the sub-agent side panel need the same
+   * WorkGroup / ToolGroup SOT as main chat, but with historical content visible
+   * immediately after selecting a row.
+   */
+  workGroupsForceOpen?: boolean;
 }
 
-const EMPTY_SPAWNS: Map<string, SubAgentSpawn[]> = new Map();
-const NO_SPAWN_NODES: () => React.ReactNode[] = () => [];
 const NO_STAR: () => string | null = () => null;
 
 /**
@@ -134,11 +127,9 @@ const NO_STAR: () => string | null = () => null;
  * and the memo dependency array is preserved exactly.
  *
  * Capability differences between the three chat sources (main / side-chat /
- * sub-agent) are expressed as optional prop clusters: an omitted cluster
- * degrades to inert defaults (empty spawn map, no-op renderers, no star, no
- * highlight) with no runtime crash. Individual mutating actions render only when
- * their callback is present, so a read-only source that omits `actions` shows no
- * fork / star / retry / feedback affordances.
+ * sub-agent) are expressed as optional prop clusters. Individual mutating
+ * actions render only when their callback is present, so a read-only source that
+ * omits `actions` shows no fork / star / retry / feedback affordances.
  */
 export function TranscriptRenderer({
   entries,
@@ -147,17 +138,17 @@ export function TranscriptRenderer({
   turnSummaryByTurnStart,
   edit,
   search,
-  spawns,
   actions,
   viewMode = null,
   activeVendor,
   debugStreamEnabled = false,
+  workGroupsForceOpen = false,
 }: SharedTranscriptProps): React.ReactElement {
   const { t } = useTranslation();
 
   // Cluster fields with explicit inert defaults. These defaults ARE the
   // no-regression contract: forgetting one produces wrong runtime output
-  // (spawns / footers / actions silently vanish) with no type error.
+  // (footers / actions silently vanish) with no type error.
   const summaryByTurnStart = turnSummaryByTurnStart;
   const editingEntryIdx = edit?.editingEntryIdx ?? null;
   const editBusy = edit?.editBusy ?? false;
@@ -169,9 +160,6 @@ export function TranscriptRenderer({
   const searchMatchSet = search?.searchMatchSet;
   const searchIdx = search?.searchIdx ?? 0;
   const searchHighlight = search?.searchHighlight ?? "";
-
-  const spawnsByToolUseId = spawns?.spawnsByToolUseId ?? EMPTY_SPAWNS;
-  const renderSpawnsForGroup = spawns?.renderSpawnsForGroup ?? NO_SPAWN_NODES;
 
   const isEntryStarred = actions?.isEntryStarred ?? NO_STAR;
   const onFork = actions?.onFork;
@@ -440,21 +428,10 @@ export function TranscriptRenderer({
           }
         } else if (e.kind === "tool_group") {
           if (cls === "intermediate") {
-            const spawnRevisions = e.tools.flatMap((tool) =>
-              (spawnsByToolUseId.get(tool.toolUseId) ?? []).map(subAgentRevision),
-            );
-            const spawnNodes = renderSpawnsForGroup(e);
-            groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false, spawnRevisions }));
+            groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
             groupEntries.push({
               idx: i,
-              node: spawnNodes.length === 0 ? (
-                <ToolGroupCard key={e.groupId} group={e} sessionId={currentSessionId} />
-              ) : (
-                <Fragment key={e.groupId}>
-                  <ToolGroupCard group={e} sessionId={currentSessionId} />
-                  {spawnNodes}
-                </Fragment>
-              ),
+              node: <ToolGroupCard key={e.groupId} group={e} sessionId={currentSessionId} />,
             });
           } else {
             break;
@@ -508,8 +485,8 @@ export function TranscriptRenderer({
       if (groupEntries.length > 0) {
         // Prefer the turn_summary's authoritative `toolCount` over
         // groupEntries.length — the latter includes reasoning /
-        // assistant bubbles / ask_user_answer / inline sub-agent
-        // cards and would diverge from the actual tool-call count.
+        // assistant bubbles / ask_user_answer and would diverge from the actual
+        // tool-call count.
         const groupSummary = summaryByTurnStart?.get(groupTurnStart);
         rendered.push(
           <WorkGroup
@@ -518,7 +495,7 @@ export function TranscriptRenderer({
             streaming={groupIsActiveTurn}
             turnDurationMs={groupSummary?.turnDurationMs}
             revision={[currentSessionId, ...groupRevisions].join("||")}
-            forceOpen={groupHasPermissionReview}
+            forceOpen={workGroupsForceOpen || groupHasPermissionReview}
           >
             {groupEntries.map((ge) => (
               <div key={ge.idx} data-chat-entry-index={ge.idx}>
@@ -539,7 +516,6 @@ export function TranscriptRenderer({
         rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
       } else if (entry.kind === "tool_group") {
         rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} />);
-        for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
       } else if (entry.kind === "assistant") {
         rendered.push(
           <div key={idx} data-chat-entry-index={idx} className={`min-w-0 w-full max-w-full overflow-x-hidden rounded-lg${ringCls ? ` ${ringCls}` : ""}`}>
@@ -607,7 +583,6 @@ export function TranscriptRenderer({
       rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
     } else if (entry.kind === "tool_group") {
       rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} />);
-      for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
     }
     i++;
   }
@@ -631,8 +606,6 @@ export function TranscriptRenderer({
     onFork,
     onRetryEffort,
     onToggleStar,
-    renderSpawnsForGroup,
-    spawnsByToolUseId,
     searchHighlight,
     searchIdx,
     searchMatchSet,
@@ -642,6 +615,7 @@ export function TranscriptRenderer({
     streaming,
     summaryByTurnStart,
     viewMode,
+    workGroupsForceOpen,
     entries,
   ]);
 

@@ -22,6 +22,13 @@ export interface PluginUninstallLifecycleDeps {
   log?: WarnLogger;
 }
 
+export interface PluginFailedInstallCleanupLifecycleDeps
+  extends Omit<PluginUninstallLifecycleDeps, "pluginMarketplace"> {
+  pluginMarketplace: Pick<PluginMarketplaceService, "clearInstallFailureDiagnostic">;
+}
+
+type PluginStateCleanupDeps = Omit<PluginUninstallLifecycleDeps, "pluginMarketplace">;
+
 const RESERVED_CACHE_DIR_NAMES = new Set([
   ".tarballs",
   "marketplace-catalog",
@@ -51,7 +58,7 @@ async function cleanupPluginCache(pluginId: string, cacheRoot: string): Promise<
 
 async function bestEffortCleanupPluginState(
   pluginId: string,
-  deps: PluginUninstallLifecycleDeps,
+  deps: PluginStateCleanupDeps,
   options: { cleanupCache: boolean; secretKeys: Set<string> },
 ): Promise<void> {
   const failures: string[] = [];
@@ -121,5 +128,23 @@ export async function uninstallPluginWithLifecycle(
     deps.refreshPluginNotifications?.();
 
     return result ?? { pluginId, uninstalled: true as const };
+  });
+}
+
+export async function cleanupFailedPluginInstallWithLifecycle(
+  pluginId: string,
+  deps: PluginFailedInstallCleanupLifecycleDeps,
+): Promise<{ pluginId: string; uninstalled: true }> {
+  return withPluginInstallLock(pluginId, async () => {
+    const secretKeys = listSecretKeys(deps.pluginRuntime.getPluginManifest(pluginId)?.configSchema);
+    await deps.pluginRuntime.removePlugin(pluginId);
+    deps.pluginMarketplace.clearInstallFailureDiagnostic(pluginId);
+    await bestEffortCleanupPluginState(pluginId, deps, {
+      cleanupCache: true,
+      secretKeys,
+    });
+    deps.emitHostEvent?.("plugin.uninstalled", { pluginId });
+    deps.refreshPluginNotifications?.();
+    return { pluginId, uninstalled: true as const };
   });
 }
