@@ -18,7 +18,13 @@ import { useEffect } from "react";
 import { ThemeProvider, useTheme, useOptionalTheme } from "../theme/ThemeProvider.js";
 import { applyBundleToDocument, resolveSystemPair } from "../theme/resolve-theme.js";
 import { bundleToPluginTokens } from "../theme/plugin-token-map.js";
-import { findBundle, DEFAULT_BUNDLE_ID } from "../theme/bundles/index.js";
+import {
+  findBundle,
+  DEFAULT_BUNDLE_ID,
+  loadAllThemeBundles,
+  resetLoadedThemeBundleCacheForTests,
+  setThemeBundleLoaderOverrideForTests,
+} from "../theme/bundles/index.js";
 import { makeMockLvisApi } from "../../../../test/renderer/mock-lvis-api.js";
 
 afterEach(() => {
@@ -29,6 +35,11 @@ afterEach(() => {
     .filter((c) => c.startsWith("lvis-bundle-"))
     .forEach((c) => document.documentElement.classList.remove(c));
   vi.unstubAllGlobals();
+});
+
+beforeEach(async () => {
+  resetLoadedThemeBundleCacheForTests();
+  await loadAllThemeBundles();
 });
 
 describe("applyBundleToDocument", () => {
@@ -257,6 +268,42 @@ describe("<ThemeProvider>", () => {
     );
     expect(observed).toBe("high-contrast");
     expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("high-contrast");
+  });
+
+  it("lazy-loads a marketplace initialBundleId from a cold bundle cache", async () => {
+    resetLoadedThemeBundleCacheForTests();
+    expect(findBundle("tokyo-night")).toBeUndefined();
+
+    let observed: string | null = null;
+    render(
+      <ThemeProvider initialBundleId="tokyo-night">
+        <Probe onValue={(v) => { observed = v.bundleId; }} />
+      </ThemeProvider>,
+    );
+
+    await waitFor(() => {
+      expect(observed).toBe("tokyo-night");
+      expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("tokyo-night");
+    });
+  });
+
+  it("falls back to the default bundle when a marketplace theme chunk fails", async () => {
+    resetLoadedThemeBundleCacheForTests();
+    setThemeBundleLoaderOverrideForTests("tokyo-night", async () => {
+      throw new Error("chunk unavailable");
+    });
+
+    let observed: string | null = null;
+    render(
+      <ThemeProvider initialBundleId="tokyo-night">
+        <Probe onValue={(v) => { observed = v.bundleId; }} />
+      </ThemeProvider>,
+    );
+
+    await waitFor(() => {
+      expect(observed).toBe(DEFAULT_BUNDLE_ID);
+      expect(document.documentElement.getAttribute("data-theme-bundle")).toBe(DEFAULT_BUNDLE_ID);
+    });
   });
 
   it("useTheme throws when called outside the provider", () => {

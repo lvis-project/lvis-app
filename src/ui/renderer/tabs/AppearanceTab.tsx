@@ -20,7 +20,7 @@ import { useEffect, useRef, useState } from "react";
 import { Store } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { useTheme } from "../theme/index.js";
-import { VIOLET_PAIR_IDS, visibleBundlesFor } from "../theme/index.js";
+import { VIOLET_PAIR_IDS, loadThemeBundles, visibleBundlesFor } from "../theme/index.js";
 import type { ThemeBundle } from "../theme/index.js";
 import type { CSSProperties } from "react";
 import { getApi } from "../api-client.js";
@@ -572,10 +572,29 @@ export function AppearanceTab({ onOpenMarketplace }: { onOpenMarketplace?: (filt
   const selectFollowSystem = (next: boolean) => { setFollowSystem(next); notifySaved(); };
 
   const isVioletPair = VIOLET_PAIR_IDS.includes(bundleId);
+  const themeBundleIdsToLoad = [
+    bundleId,
+    ...marketplaceAssets.themeBundleIds,
+  ];
+  const themeBundleIdsToLoadKey = themeBundleIdsToLoad.join("\u0001");
+  const [loadedMarketplaceThemeBundles, setLoadedMarketplaceThemeBundles] = useState<ThemeBundle[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void loadThemeBundles(themeBundleIdsToLoad)
+      .then((bundles) => {
+        if (!cancelled) setLoadedMarketplaceThemeBundles(bundles);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadedMarketplaceThemeBundles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [themeBundleIdsToLoadKey]);
   const visibleBundles = visibleBundlesFor([
     bundleId,
     ...marketplaceAssets.themeBundleIds,
-  ]);
+  ], loadedMarketplaceThemeBundles);
   const marketplaceThemeBundleIdSet = new Set(marketplaceAssets.themeBundleIds);
   const activePreset = presetForStack(family);
   const customStack = activePreset === "custom" ? family : "";

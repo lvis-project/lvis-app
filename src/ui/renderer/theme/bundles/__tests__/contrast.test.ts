@@ -9,7 +9,7 @@
  * can't ship a paired bg/fg that fails contrast.
  */
 import { describe, it, expect } from "vitest";
-import { BUNDLES } from "../index.js";
+import { BUNDLE_IDS, loadThemeBundle } from "../index.js";
 import type { BundleTokens } from "../types.js";
 
 /** HSL "H S% L%" string → numeric components. */
@@ -94,9 +94,12 @@ const UI_LINE_BACKDROPS: Array<keyof BundleTokens> = [
 ];
 
 describe("Theme contrast — body-text surfaces (WCAG AA 4.5:1)", () => {
-  for (const bundle of BUNDLES) {
+  for (const bundleId of BUNDLE_IDS) {
     for (const [bgKey, fgKey] of BODY_PAIRS) {
-      it(`${bundle.id}: ${String(bgKey)} ↔ ${String(fgKey)} ≥ 4.5`, () => {
+      it(`${bundleId}: ${String(bgKey)} ↔ ${String(fgKey)} ≥ 4.5`, async () => {
+        const bundle = await loadThemeBundle(bundleId);
+        expect(bundle).toBeDefined();
+        if (!bundle) return;
         const ratio = ratioFor(bundle.tokens[bgKey], bundle.tokens[fgKey]);
         expect(
           ratio,
@@ -108,9 +111,12 @@ describe("Theme contrast — body-text surfaces (WCAG AA 4.5:1)", () => {
 });
 
 describe("Theme contrast — chip/badge surfaces (WCAG AA Large 3:1)", () => {
-  for (const bundle of BUNDLES) {
+  for (const bundleId of BUNDLE_IDS) {
     for (const [bgKey, fgKey] of CHIP_PAIRS) {
-      it(`${bundle.id}: ${String(bgKey)} ↔ ${String(fgKey)} ≥ 3.0`, () => {
+      it(`${bundleId}: ${String(bgKey)} ↔ ${String(fgKey)} ≥ 3.0`, async () => {
+        const bundle = await loadThemeBundle(bundleId);
+        expect(bundle).toBeDefined();
+        if (!bundle) return;
         const ratio = ratioFor(bundle.tokens[bgKey], bundle.tokens[fgKey]);
         expect(
           ratio,
@@ -122,9 +128,12 @@ describe("Theme contrast — chip/badge surfaces (WCAG AA Large 3:1)", () => {
 });
 
 describe("Theme contrast — visible UI line token (non-text 3:1)", () => {
-  for (const bundle of BUNDLES) {
+  for (const bundleId of BUNDLE_IDS) {
     for (const bgKey of UI_LINE_BACKDROPS) {
-      it(`${bundle.id}: ui-line against ${String(bgKey)} ≥ 3.0`, () => {
+      it(`${bundleId}: ui-line against ${String(bgKey)} ≥ 3.0`, async () => {
+        const bundle = await loadThemeBundle(bundleId);
+        expect(bundle).toBeDefined();
+        if (!bundle) return;
         const ratio = ratioFor(bundle.tokens[bgKey], bundle.tokens["ui-line"]);
         expect(
           ratio,

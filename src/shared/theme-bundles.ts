@@ -35,6 +35,12 @@ export const BUNDLE_IDS = [
 
 export type BundleId = (typeof BUNDLE_IDS)[number];
 
+const BUNDLE_ID_SET = new Set<string>(BUNDLE_IDS);
+
+export function isBundleId(value: unknown): value is BundleId {
+  return typeof value === "string" && BUNDLE_ID_SET.has(value);
+}
+
 export const DEFAULT_BUNDLE_ID: BundleId = "moonstone";
 
 /**
