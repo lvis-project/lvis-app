@@ -466,9 +466,12 @@ function providerAsset(
   const id = normalizeProviderId(providerId);
   if (!id) return undefined;
   if (isLLMVendor(id)) {
-    return isMarketplaceEligibleLLMVendor(id)
-      ? { type: "provider", providerId: id }
-      : undefined;
+    if (!isMarketplaceEligibleLLMVendor(id)) return undefined;
+    if (!metadata) return { type: "provider", providerId: id };
+    const fields = providerPackageFieldsFromRecord(id, metadata);
+    return fields
+      ? { type: "provider", providerId: id, ...fields }
+      : { type: "provider", providerId: id };
   }
   if (!metadata) return undefined;
   const fields = providerPackageFieldsFromRecord(id, metadata);
