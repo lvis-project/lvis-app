@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   listLlmModelsFromSettings,
   modelListEndpointFromBaseUrl,
+  parseStandardModelListEntries,
   parseStandardModelListResponse,
 } from "../model-list.js";
 import { NetworkGuardError } from "../../../core/network-guard.js";
@@ -78,6 +79,70 @@ describe("LLM model list sync", () => {
     ).toEqual(["openai/gpt-5.4", "google/gemini-2.5-flash:free"]);
   });
 
+  it("preserves extended model metadata from OpenRouter-compatible model lists", () => {
+    expect(
+      parseStandardModelListEntries({
+        object: "list",
+        data: [
+          {
+            id: "google/gemini-2.5-flash:free",
+            name: "Gemini 2.5 Flash Free",
+            description: "Free routed model",
+            context_length: 1_048_576,
+            architecture: {
+              input_modalities: ["text", "image"],
+              output_modalities: ["text"],
+            },
+            pricing: {
+              prompt: "0",
+              completion: "0",
+              request: "0",
+            },
+            supported_parameters: ["tools", "response_format"],
+            top_provider: { name: "Google" },
+          },
+          {
+            id: "openrouter/auto",
+            name: "Auto Router",
+            pricing: {
+              prompt: "0.000001",
+              completion: "0.000002",
+            },
+          },
+        ],
+      }),
+    ).toMatchObject([
+      {
+        id: "google/gemini-2.5-flash:free",
+        name: "Gemini 2.5 Flash Free",
+        description: "Free routed model",
+        contextLength: 1_048_576,
+        inputModalities: ["text", "image"],
+        outputModalities: ["text"],
+        supportedParameters: ["tools", "response_format"],
+        pricing: {
+          prompt: "0",
+          completion: "0",
+          request: "0",
+        },
+        tags: {
+          free: true,
+        },
+      },
+      {
+        id: "openrouter/auto",
+        name: "Auto Router",
+        pricing: {
+          prompt: "0.000001",
+          completion: "0.000002",
+        },
+        tags: {
+          router: true,
+        },
+      },
+    ]);
+  });
+
   it("fetches models from the vendor baseUrl using the stored provider key", async () => {
     const fetchImpl = vi.fn(async () =>
       new Response(
@@ -103,6 +168,10 @@ describe("LLM model list sync", () => {
       vendor: "openrouter",
       endpoint: "https://openrouter.ai/api/v1/models",
       models: ["anthropic/claude-sonnet-4.6", "openrouter/free"],
+      modelEntries: [
+        { id: "anthropic/claude-sonnet-4.6" },
+        { id: "openrouter/free", tags: { free: true, router: true } },
+      ],
     });
     expect(fetchImpl).toHaveBeenCalledWith(
       "https://openrouter.ai/api/v1/models",
