@@ -19,7 +19,6 @@ import { MarketplaceTab } from "../MarketplaceTab.js";
 import type { MarketplaceItem } from "../../types.js";
 import type { LvisApi } from "../../types.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
-import { marketplaceProviderPresetSecretId } from "../../../../shared/marketplace-package-assets.js";
 
 function marketplaceTabApi(overrides: Partial<LvisApi> = {}): LvisApi {
   const { api } = makeMockLvisApi();
@@ -396,22 +395,18 @@ describe("MarketplaceTab", () => {
 
     fireEvent.click(await screen.findByTestId("marketplace:action:provider-future-router"));
     await waitFor(() => {
-      expect(api.updateSettings).toHaveBeenCalledWith({
-        marketplace: {
-          installedProviderPresets: [{
-            providerId: "future-router",
-            label: "Future Router",
-            baseUrl: "https://future.example/v1",
-            defaultModel: "future/free",
-            modelOptions: ["future/free", "future/pro"],
-            requiresApiKey: false,
-          }],
-        },
+      expect(api.installMarketplaceProviderPreset).toHaveBeenCalledWith({
+        providerId: "future-router",
+        label: "Future Router",
+        baseUrl: "https://future.example/v1",
+        defaultModel: "future/free",
+        modelOptions: ["future/free", "future/pro"],
+        requiresApiKey: false,
       });
     });
   });
 
-  it("deletes a custom provider preset secret before uninstalling its metadata", async () => {
+  it("uninstalls custom provider presets through the host-side settings API", async () => {
     const customProvider: MarketplaceItem = {
       id: "provider-future-router",
       name: "Future Router Provider",
@@ -450,16 +445,8 @@ describe("MarketplaceTab", () => {
     fireEvent.click(await screen.findByTestId("marketplace:action:provider-future-router"));
 
     await waitFor(() => {
-      expect(api.deleteApiKey).toHaveBeenCalledWith(
-        marketplaceProviderPresetSecretId("future-router"),
-      );
-      expect(api.updateSettings).toHaveBeenCalledWith({
-        marketplace: { installedProviderPresets: [] },
-      });
+      expect(api.uninstallMarketplaceProviderPreset).toHaveBeenCalledWith("future-router");
     });
-    expect(vi.mocked(api.deleteApiKey).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(api.updateSettings).mock.invocationCallOrder[0],
-    );
   });
 
   it("shows local provider/theme/language candidates when the remote catalog is empty", async () => {
