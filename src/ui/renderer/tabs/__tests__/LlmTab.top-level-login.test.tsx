@@ -399,6 +399,21 @@ describe("LlmTab — top-level login toggle UI", () => {
       requiresApiKey: true,
       modelDiscoveryPolicy: "manual",
     };
+    (api.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      llm: {
+        modelListCache: {
+          [llmModelListCacheKey("openai-compatible", "https://manual.example/v1", "manual-router")]: {
+            vendor: "openai-compatible",
+            baseUrl: "https://manual.example/v1",
+            credentialScope: "manual-router",
+            endpoint: "https://manual.example/v1/models",
+            models: ["cached/network-only"],
+            fetchedAt: "2026-07-06T00:00:00.000Z",
+          },
+        },
+      },
+      marketplace: {},
+    });
 
     render(
       <Harness
@@ -424,6 +439,7 @@ describe("LlmTab — top-level login toggle UI", () => {
 
     expect(await screen.findByText("manual/default")).toBeInTheDocument();
     expect(screen.getByText("manual/large")).toBeInTheDocument();
+    expect(screen.queryByText("cached/network-only")).toBeNull();
   });
 
   it("opens the Marketplace from provider and model discovery buttons", () => {
