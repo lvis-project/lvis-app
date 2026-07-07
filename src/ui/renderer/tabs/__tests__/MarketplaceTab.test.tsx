@@ -186,7 +186,12 @@ describe("MarketplaceTab", () => {
         installed: false,
         enabled: false,
         pluginType: "provider",
-        packageAsset: { type: "provider", providerId: "groq" },
+        packageAsset: {
+          type: "provider",
+          providerId: "groq",
+          baseUrl: "https://api.groq.com/openai/v1",
+          defaultModel: "moonshotai/kimi-k2-instruct-0905",
+        },
       },
       {
         id: "tokyo-night-theme",
@@ -236,6 +241,14 @@ describe("MarketplaceTab", () => {
     await waitFor(() => {
       expect(api.updateSettings).toHaveBeenCalledWith({
         marketplace: { installedProviderIds: ["ollama", "groq"] },
+        llm: {
+          vendors: {
+            groq: {
+              baseUrl: "https://api.groq.com/openai/v1",
+              model: "moonshotai/kimi-k2-instruct-0905",
+            },
+          },
+        },
       });
     });
 
