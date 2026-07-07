@@ -394,7 +394,7 @@ export function App() {
   } = useSettings(api);
   const effectiveLlmReady = useMemo(
     () => effectiveHasApiKey === null
-      ? null
+      ? (llmReadyWithoutApiKey ? true : null)
       : effectiveHasApiKey || llmReadyWithoutApiKey,
     [effectiveHasApiKey, llmReadyWithoutApiKey],
   );

@@ -56,6 +56,7 @@ import {
   llmModelListCacheKey,
   type LlmModelListCache,
   type LlmModelListCacheEntry,
+  type LlmModelListEntry,
 } from "../shared/llm-model-list.js";
 import {
   isMarketplaceProviderPresetId,
@@ -1479,6 +1480,108 @@ function normalizeCachedModelIds(value: unknown): string[] {
   return models;
 }
 
+function normalizeCachedModelListString(
+  value: unknown,
+  maxLength = MAX_CACHED_LLM_MODEL_ID_LENGTH,
+): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > maxLength || /[\u0000-\u001f\u007f]/.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function normalizeCachedModelListNumber(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
+  return value;
+}
+
+function normalizeCachedModelListStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    const entry = normalizeCachedModelListString(raw, 64);
+    if (!entry || seen.has(entry)) continue;
+    seen.add(entry);
+    entries.push(entry);
+    if (entries.length >= 32) break;
+  }
+  return entries.length > 0 ? entries : undefined;
+}
+
+function normalizeCachedModelListPricing(value: unknown): LlmModelListEntry["pricing"] | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const pricing: NonNullable<LlmModelListEntry["pricing"]> = {};
+  for (const key of [
+    "prompt",
+    "completion",
+    "request",
+    "image",
+    "webSearch",
+    "internalReasoning",
+    "inputCacheRead",
+    "inputCacheWrite",
+  ] as const) {
+    const entry = normalizeCachedModelListString(record[key], 64);
+    if (entry !== undefined) pricing[key] = entry;
+  }
+  return Object.keys(pricing).length > 0 ? pricing : undefined;
+}
+
+function normalizeCachedModelListTags(value: unknown): LlmModelListEntry["tags"] | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const tags: NonNullable<LlmModelListEntry["tags"]> = {};
+  if (record.free === true) tags.free = true;
+  if (record.router === true) tags.router = true;
+  if (record.local === true) tags.local = true;
+  return Object.keys(tags).length > 0 ? tags : undefined;
+}
+
+function normalizeCachedModelListEntries(
+  value: unknown,
+  models: readonly string[],
+): LlmModelListEntry[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const allowed = new Set(models);
+  const entries: LlmModelListEntry[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const record = raw as Partial<LlmModelListEntry>;
+    const id = normalizeCachedModelListString(record.id);
+    if (!id || !allowed.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    const entry: LlmModelListEntry = { id };
+    const name = normalizeCachedModelListString(record.name);
+    const provider = normalizeCachedModelListString(record.provider);
+    const ownedBy = normalizeCachedModelListString(record.ownedBy);
+    const description = normalizeCachedModelListString(record.description, 4_096);
+    const contextLength = normalizeCachedModelListNumber(record.contextLength);
+    const inputModalities = normalizeCachedModelListStringArray(record.inputModalities);
+    const outputModalities = normalizeCachedModelListStringArray(record.outputModalities);
+    const supportedParameters = normalizeCachedModelListStringArray(record.supportedParameters);
+    const pricing = normalizeCachedModelListPricing(record.pricing);
+    const tags = normalizeCachedModelListTags(record.tags);
+    if (name && name !== id) entry.name = name;
+    if (provider) entry.provider = provider;
+    if (ownedBy) entry.ownedBy = ownedBy;
+    if (description) entry.description = description;
+    if (contextLength !== undefined) entry.contextLength = contextLength;
+    if (inputModalities) entry.inputModalities = inputModalities;
+    if (outputModalities) entry.outputModalities = outputModalities;
+    if (supportedParameters) entry.supportedParameters = supportedParameters;
+    if (pricing) entry.pricing = pricing;
+    if (tags) entry.tags = tags;
+    entries.push(entry);
+    if (entries.length >= models.length) break;
+  }
+  return entries.length > 0 ? entries : undefined;
+}
+
 function isValidModelListUrl(value: unknown): value is string {
   if (typeof value !== "string") return false;
   try {
@@ -1508,6 +1611,7 @@ function normalizeLlmModelListCache(
     if (!isValidModelListUrl(entry.endpoint)) continue;
     const models = normalizeCachedModelIds(entry.models);
     if (models.length === 0) continue;
+    const modelEntries = normalizeCachedModelListEntries(entry.modelEntries, models);
     const baseUrl = typeof entry.baseUrl === "string" ? entry.baseUrl.trim() : "";
     let credentialScope = "";
     if (entry.credentialScope !== undefined) {
@@ -1526,6 +1630,7 @@ function normalizeLlmModelListCache(
       ...(credentialScope ? { credentialScope } : {}),
       endpoint: entry.endpoint.trim(),
       models,
+      ...(modelEntries ? { modelEntries } : {}),
       fetchedAt,
     };
     if (Object.keys(result).length >= MAX_LLM_MODEL_LIST_CACHE_ENTRIES) break;

@@ -745,6 +745,19 @@ describe("SettingsService LLM per-vendor patching", () => {
             vendor: "openrouter",
             endpoint: "https://openrouter.ai/api/v1/models",
             models: ["openrouter/free", "openai/gpt-5.4"],
+            modelEntries: [
+              {
+                id: "openrouter/free",
+                name: "Free Router",
+                contextLength: 128_000,
+                pricing: { prompt: "0", completion: "0" },
+                tags: { free: true, router: true },
+              },
+              {
+                id: "not-in-models",
+                name: "Should be pruned",
+              },
+            ],
             fetchedAt: "2026-07-06T00:00:00.000Z",
           },
           [llmModelListCacheKey("groq")]: {
@@ -775,6 +788,15 @@ describe("SettingsService LLM per-vendor patching", () => {
         vendor: "openrouter",
         endpoint: "https://openrouter.ai/api/v1/models",
         models: ["openrouter/free", "openai/gpt-5.4"],
+        modelEntries: [
+          {
+            id: "openrouter/free",
+            name: "Free Router",
+            contextLength: 128_000,
+            pricing: { prompt: "0", completion: "0" },
+            tags: { free: true, router: true },
+          },
+        ],
         fetchedAt: "2026-07-06T00:00:00.000Z",
       },
     });
