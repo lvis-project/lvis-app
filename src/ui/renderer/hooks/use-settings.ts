@@ -29,10 +29,11 @@ function canUseSettingsWithoutApiKey(
     const preset = settings.marketplace?.installedProviderPresets?.find(
       (entry) => entry.providerId === settings.llm.marketplaceProviderPresetId,
     );
+    const baseUrl = block.baseUrl?.trim() || preset?.baseUrl?.trim();
     return Boolean(
       preset &&
       preset.requiresApiKey === false &&
-      block.baseUrl?.trim(),
+      baseUrl,
     );
   }
   return canUseLlmVendorWithoutApiKey(provider, block);

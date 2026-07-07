@@ -43,6 +43,7 @@ import {
   llmModelListCacheKey,
   type LlmModelListCache,
   type LlmModelListCacheEntry,
+  type LlmModelListEntry,
 } from "../../../shared/llm-model-list.js";
 import {
   isOpenRouterFreeModel,
@@ -74,6 +75,7 @@ type ModelListState =
   | {
       status: "loading";
       options?: string[];
+      entries?: LlmModelListEntry[];
       endpoint?: string;
       fetchedAt?: string;
       source?: "cache" | "network";
@@ -81,6 +83,7 @@ type ModelListState =
   | {
       status: "ready";
       options: string[];
+      entries?: LlmModelListEntry[];
       endpoint: string;
       fetchedAt: string;
       source?: "cache" | "network";
@@ -90,6 +93,7 @@ type ModelListState =
       status: "error";
       error: string;
       options?: string[];
+      entries?: LlmModelListEntry[];
       endpoint?: string;
       fetchedAt?: string;
       source?: "cache" | "network";
@@ -414,21 +418,72 @@ function modelOptionsFor(
   return options;
 }
 
-function ModelSelectItemContent({ option }: { option: string }) {
+function compactNumber(value: number): string {
+  if (value >= 1_000_000) return `${Math.round(value / 100_000) / 10}M`;
+  if (value >= 1_000) return `${Math.round(value / 100) / 10}k`;
+  return String(value);
+}
+
+function modelEntryMap(entries: readonly LlmModelListEntry[] | undefined): Map<string, LlmModelListEntry> {
+  const map = new Map<string, LlmModelListEntry>();
+  for (const entry of entries ?? []) {
+    if (!entry.id || map.has(entry.id)) continue;
+    map.set(entry.id, entry);
+  }
+  return map;
+}
+
+function modelEntryPricingLabel(entry: LlmModelListEntry | undefined): string | null {
+  const pricing = entry?.pricing;
+  if (!pricing) return null;
+  if (pricing.prompt === undefined && pricing.completion === undefined) return null;
+  return `in ${pricing.prompt ?? "?"} / out ${pricing.completion ?? "?"}`;
+}
+
+function ModelSelectItemContent({
+  option,
+  entry,
+}: {
+  option: string;
+  entry?: LlmModelListEntry;
+}) {
   const { t } = useTranslation();
-  const isFree = isOpenRouterFreeModel(option);
-  if (!isFree) return <>{option}</>;
+  const isFree = entry?.tags?.free === true || isOpenRouterFreeModel(option);
+  const isRouter = entry?.tags?.router === true;
+  const isLocal = entry?.tags?.local === true;
+  const detailParts = [
+    entry?.provider ?? entry?.ownedBy,
+    entry?.contextLength !== undefined
+      ? t("llmTab.modelContextTokens", { count: compactNumber(entry.contextLength) })
+      : undefined,
+    modelEntryPricingLabel(entry) ?? undefined,
+  ].filter((part): part is string => Boolean(part));
+  if (!isFree && !isRouter && !isLocal && detailParts.length === 0) return <>{option}</>;
   return (
     <span className="flex min-w-0 flex-col gap-0.5 py-0.5">
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="min-w-0 truncate">{option}</span>
-        <Badge variant="secondary" className="h-4 px-1 text-[9px] uppercase">
-          {t("llmTab.openRouterFreeBadge")}
-        </Badge>
+        {isFree && (
+          <Badge variant="secondary" className="h-4 px-1 text-[9px] uppercase">
+            {t("llmTab.openRouterFreeBadge")}
+          </Badge>
+        )}
+        {isRouter && (
+          <Badge variant="outline" className="h-4 px-1 text-[9px] uppercase">
+            {t("llmTab.modelRouterBadge")}
+          </Badge>
+        )}
+        {isLocal && (
+          <Badge variant="outline" className="h-4 px-1 text-[9px] uppercase">
+            {t("llmTab.modelLocalBadge")}
+          </Badge>
+        )}
       </span>
-      <span className="text-[10px] leading-tight text-muted-foreground">
-        {t("llmTab.openRouterFreeDisclaimer")}
-      </span>
+      {(isFree || detailParts.length > 0) && (
+        <span className="text-[10px] leading-tight text-muted-foreground">
+          {isFree ? t("llmTab.openRouterFreeDisclaimer") : detailParts.join(" · ")}
+        </span>
+      )}
     </span>
   );
 }
@@ -437,6 +492,7 @@ function modelListStateFromCacheEntry(entry: LlmModelListCacheEntry): ModelListS
   return {
     status: "ready",
     options: entry.models,
+    entries: entry.modelEntries,
     endpoint: entry.endpoint,
     fetchedAt: entry.fetchedAt,
     source: "cache",
@@ -592,6 +648,7 @@ export function LlmTab(props: LlmTabProps) {
             ...(credentialScope ? { credentialScope } : {}),
             endpoint: result.endpoint,
             models: result.models,
+            ...(result.modelEntries ? { modelEntries: result.modelEntries } : {}),
             fetchedAt: result.fetchedAt,
           };
           const nextCache = {
@@ -602,6 +659,7 @@ export function LlmTab(props: LlmTabProps) {
           setModelListState(key, {
             status: "ready",
             options: result.models,
+            entries: result.modelEntries,
             endpoint: result.endpoint,
             fetchedAt: result.fetchedAt,
             source: "network",
@@ -627,6 +685,7 @@ export function LlmTab(props: LlmTabProps) {
             status: "error",
             error: result.message ?? result.error,
             options: latest?.options,
+            entries: latest?.entries,
             endpoint: latest?.endpoint,
             fetchedAt: latest?.fetchedAt,
             source: latest?.source,
@@ -638,6 +697,7 @@ export function LlmTab(props: LlmTabProps) {
           status: "error",
           error: err instanceof Error ? err.message : String(err),
           options: latest?.options,
+          entries: latest?.entries,
           endpoint: latest?.endpoint,
           fetchedAt: latest?.fetchedAt,
           source: latest?.source,
@@ -663,6 +723,10 @@ export function LlmTab(props: LlmTabProps) {
     activeModelValue,
     optionsFromModelListState(activeModelList),
     vendorInfo,
+  );
+  const activeModelEntryById = useMemo(
+    () => modelEntryMap(activeModelList?.entries),
+    [activeModelList],
   );
   const isLoginMode = authMode === "login";
   const marketplaceProviderPresetOptions = useMemo(
@@ -1133,9 +1197,28 @@ export function LlmTab(props: LlmTabProps) {
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <Label htmlFor="model-select" className="text-sm font-medium">{t("llmTab.model")}</Label>
-                {shouldSyncModelList(vendor, vendorInfo, activeModelListBaseUrl) && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
+                <div className="flex items-center gap-1">
+                  {onOpenMarketplace && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 gap-1.5 px-2 text-xs"
+                          data-testid="llm-tab:marketplace-models"
+                          onClick={onOpenMarketplace}
+                        >
+                          <Store className="h-3.5 w-3.5" aria-hidden={true} />
+                          {t("llmTab.moreModelsInMarketplace")}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("llmTab.moreModelsInMarketplace")}</TooltipContent>
+                    </Tooltip>
+                  )}
+                  {shouldSyncModelList(vendor, vendorInfo, activeModelListBaseUrl) && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
                       <Button
                         type="button"
                         size="sm"
@@ -1154,10 +1237,11 @@ export function LlmTab(props: LlmTabProps) {
                           ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden={true} />
                           : <RefreshCw className="h-3.5 w-3.5" aria-hidden={true} />}
                       </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{t("llmTab.modelSync")}</TooltipContent>
-                  </Tooltip>
-                )}
+                      </TooltipTrigger>
+                      <TooltipContent>{t("llmTab.modelSync")}</TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
               </div>
               <Select
                 value={activeModelValue}
@@ -1174,7 +1258,12 @@ export function LlmTab(props: LlmTabProps) {
                 <SelectContent>
                   {activeModelOptions.map((option) => (
                     <SelectItem key={option} value={option}>
-                      <ModelSelectItemContent option={option} />
+                      <ModelSelectItemContent
+                        option={option}
+                        {...(activeModelEntryById.has(option)
+                          ? { entry: activeModelEntryById.get(option)! }
+                          : {})}
+                      />
                     </SelectItem>
                   ))}
                 </SelectContent>
