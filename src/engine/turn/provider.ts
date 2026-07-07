@@ -76,6 +76,7 @@ function guardedMarketplaceProviderFetch(
       ...requestInitFromFetchInput(input, init),
       allowLoopback,
       fetchImpl,
+      maxRedirects: 0,
     });
 }
 
