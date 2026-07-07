@@ -241,6 +241,10 @@ export function buildInternalApiSurface() {
   hasApiKey: async (vendor?: string) => ipcRenderer.invoke(CHANNELS.settings.hasApiKey, vendor) as Promise<boolean>,
   deleteApiKey: async (vendor: string) => ipcRenderer.invoke(CHANNELS.settings.deleteApiKey, vendor),
   listLlmModels: async (request: unknown) => ipcRenderer.invoke(CHANNELS.settings.listLlmModels, request),
+  installMarketplaceProviderPreset: async (preset: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.marketplaceInstallProviderPreset, preset),
+  uninstallMarketplaceProviderPreset: async (providerId: string) =>
+    ipcRenderer.invoke(CHANNELS.settings.marketplaceUninstallProviderPreset, providerId),
   setWebApiKey: async (provider: string, apiKey: string) => ipcRenderer.invoke(CHANNELS.settings.setWebApiKey, provider, apiKey),
   hasWebApiKey: async (provider: string) => ipcRenderer.invoke(CHANNELS.settings.hasWebApiKey, provider) as Promise<boolean>,
   deleteWebApiKey: async (provider: string) => ipcRenderer.invoke(CHANNELS.settings.deleteWebApiKey, provider),

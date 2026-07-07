@@ -1423,6 +1423,7 @@ export const esMessages: Record<string, string> = {
   "llmTab.modelSync": "Sincronizar lista de modelos",
   "llmTab.modelSyncing": "Sincronizando modelos…",
   "llmTab.modelSynced": "{count} modelos sincronizados desde el endpoint",
+  "llmTab.modelSyncCacheSaveFailed": "Models synced, but the saved cache could not be updated.",
   "llmTab.moreProvidersInMarketplace": "Mas proveedores en Marketplace",
   "llmTab.modelSyncFailed": "No se pudieron sincronizar los modelos. Se usan las opciones guardadas.",
   "llmTab.openRouterFreeBadge": "Gratis",

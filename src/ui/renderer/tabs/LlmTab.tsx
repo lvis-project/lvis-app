@@ -34,7 +34,11 @@ import {
   type VendorOption,
 } from "../constants.js";
 import { parseHostResolverMap } from "../../../shared/host-resolver-map.js";
-import { isRetiredLlmModel } from "../../../shared/llm-vendor-defaults.js";
+import {
+  canUseLlmVendorWithoutApiKey,
+  isLLMVendor,
+  isRetiredLlmModel,
+} from "../../../shared/llm-vendor-defaults.js";
 import {
   llmModelListCacheKey,
   type LlmModelListCache,
@@ -47,7 +51,7 @@ import {
   marketplaceProviderPresetSecretId,
   type MarketplaceInstalledProviderPreset,
 } from "../../../shared/marketplace-package-assets.js";
-import type { LvisApi } from "../types.js";
+import { isIpcErrorResult, type LvisApi } from "../types.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { useTranslation } from "../../../i18n/react.js";
@@ -80,6 +84,7 @@ type ModelListState =
       endpoint: string;
       fetchedAt: string;
       source?: "cache" | "network";
+      persistError?: string;
     }
   | {
       status: "error";
@@ -102,7 +107,10 @@ interface ProviderSelectProps {
   marketplaceProviderIds?: readonly string[];
 }
 
-type ProviderOption = Omit<VendorOption, "id"> & { id: string };
+type ProviderOption = Omit<VendorOption, "id"> & {
+  id: string;
+  requiresApiKey?: boolean;
+};
 
 function normalizeProviderSearch(value: string): string {
   return value.trim().toLocaleLowerCase();
@@ -362,6 +370,7 @@ function providerOptionFromPreset(
     baseUrlPlaceholder: preset.baseUrl,
     defaultModel: preset.defaultModel,
     modelOptions: preset.modelOptions,
+    requiresApiKey: preset.requiresApiKey,
   };
 }
 
@@ -597,9 +606,21 @@ export function LlmTab(props: LlmTabProps) {
             fetchedAt: result.fetchedAt,
             source: "network",
           });
-          void api.updateSettings({ llm: { modelListCache: nextCache } }).catch(() => {
-            /* cache persistence is best-effort; synced options remain usable */
-          });
+          const markPersistError = (err: unknown): void => {
+            const latest = modelListsRef.current[key];
+            if (latest?.status !== "ready") return;
+            setModelListState(key, {
+              ...latest,
+              persistError: err instanceof Error ? err.message : String(err),
+            });
+          };
+          void api.updateSettings({ llm: { modelListCache: nextCache } })
+            .then((persistResult) => {
+              if (isIpcErrorResult(persistResult)) {
+                markPersistError(persistResult.message ?? persistResult.error);
+              }
+            })
+            .catch(markPersistError);
         } else {
           const latest = modelListsRef.current[key] ?? existing;
           setModelListState(key, {
@@ -626,6 +647,11 @@ export function LlmTab(props: LlmTabProps) {
     [api, setModelListState, settingsLoaded],
   );
   const activeModelListBaseUrl = selectedMarketplaceProviderPreset?.baseUrl ?? baseUrl.trim();
+  const activeProviderRequiresApiKey = selectedMarketplaceProviderPreset
+    ? selectedMarketplaceProviderPreset.requiresApiKey !== false
+    : !(isLLMVendor(vendor) && canUseLlmVendorWithoutApiKey(vendor, {
+      baseUrl: activeModelListBaseUrl,
+    }));
   const activeModelListKey = llmModelListCacheKey(
     vendor,
     activeModelListBaseUrl,
@@ -1066,12 +1092,23 @@ export function LlmTab(props: LlmTabProps) {
               </div>
             )}
             {vendor !== "vertex-ai" && (
-              <div className="space-y-2">
+              <div
+                className="space-y-2"
+                data-testid="llm-tab:api-key-section"
+                data-api-key-required={activeProviderRequiresApiKey ? "true" : "false"}
+              >
                 <Label className="text-sm font-medium" data-testid="llm-tab:api-key-label">
                   {vendorLabel ? `${vendorLabel} ` : ""}{t("llmTab.apiKey")}
+                  {!activeProviderRequiresApiKey ? ` (${t("llmTab.optional")})` : ""}
                 </Label>
                 <div className="flex items-center gap-2">
-                  {hasKey ? <Badge variant="default" className="text-xs">{t("llmTab.apiKeySet")}</Badge> : <Badge variant="secondary" className="text-xs">{t("llmTab.apiKeyNotSet")}</Badge>}
+                  {hasKey ? (
+                    <Badge variant="default" className="text-xs">{t("llmTab.apiKeySet")}</Badge>
+                  ) : (
+                    <Badge variant="secondary" className="text-xs">
+                      {activeProviderRequiresApiKey ? t("llmTab.apiKeyNotSet") : t("llmTab.optional")}
+                    </Badge>
+                  )}
                   {hasKey && !isLoginMode && (
                     <Button
                       size="sm"
@@ -1149,7 +1186,9 @@ export function LlmTab(props: LlmTabProps) {
               )}
               {activeModelList?.status === "ready" && (
                 <p className="text-[11px] text-muted-foreground" data-testid="llm-tab:model-sync-status">
-                  {t("llmTab.modelSynced", { count: activeModelList.options.length })}
+                  {activeModelList.persistError
+                    ? t("llmTab.modelSyncCacheSaveFailed")
+                    : t("llmTab.modelSynced", { count: activeModelList.options.length })}
                 </p>
               )}
               {activeModelList?.status === "error" && (

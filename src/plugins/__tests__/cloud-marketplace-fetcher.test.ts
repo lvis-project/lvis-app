@@ -1,9 +1,9 @@
 /**
  * Tests for CloudMarketplaceFetcher — §9.5 M4.
  *
- * We mock `fetchPublicHttpResponse` (public-network path) and the global
- * `fetch` (private-network path) to prove both wiring paths and the
- * mapping/error handling behavior without making real HTTP calls.
+ * We mock `fetchPublicHttpResponse` to prove both public and private-network
+ * wiring paths plus the mapping/error handling behavior without making real
+ * HTTP calls.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
@@ -599,15 +599,13 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
 });
 
 describe("CloudMarketplaceFetcher (private-network path)", () => {
-  const originalFetch = global.fetch;
-
   afterEach(() => {
-    global.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
-  it("allowPrivateNetwork=true bypasses SSRF guard and calls global fetch", async () => {
-    const fakeFetch = vi.fn().mockResolvedValue(
+  it("allowPrivateNetwork=true keeps SSRF guard in front of same-origin local requests", async () => {
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse([
         {
           id: "local-plugin",
@@ -619,8 +617,6 @@ describe("CloudMarketplaceFetcher (private-network path)", () => {
         },
       ]),
     );
-    global.fetch = fakeFetch as unknown as typeof global.fetch;
-    mockedFetchPublic.mockReset();
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "http://127.0.0.1:8080",
@@ -630,19 +626,17 @@ describe("CloudMarketplaceFetcher (private-network path)", () => {
 
     expect(plugins).toHaveLength(1);
     expect(plugins[0].id).toBe("local-plugin");
-    // NetworkGuard path must NOT have been invoked.
-    expect(mockedFetchPublic).not.toHaveBeenCalled();
-    expect(fakeFetch).toHaveBeenCalledOnce();
-    const [url] = fakeFetch.mock.calls[0];
+    expect(mockedFetchPublic).toHaveBeenCalledOnce();
+    const [url, opts] = mockedFetchPublic.mock.calls[0];
     expect(url).toBe("http://127.0.0.1:8080/api/v1/catalog");
+    expect((opts.allowLoopback as (url: URL) => boolean)(new URL("http://127.0.0.1:8080/next"))).toBe(true);
+    expect((opts.allowLoopback as (url: URL) => boolean)(new URL("http://127.0.0.1:9090/next"))).toBe(false);
+    expect((opts.allowPrivateNetworks as (url: URL) => boolean)(new URL("http://127.0.0.1:8080/next"))).toBe(true);
   });
 });
 
 describe("CloudMarketplaceFetcher — actual server response shape", () => {
-  const originalFetch = global.fetch;
-
   afterEach(() => {
-    global.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
@@ -664,8 +658,8 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
   };
 
   it("listPlugins() uses slug as the client id, display_name as name, and slug@version for packageSpec", async () => {
-    const fakeFetch = vi.fn().mockResolvedValue(jsonResponse([serverPlugin]));
-    global.fetch = fakeFetch as unknown as typeof global.fetch;
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse([serverPlugin]));
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "http://127.0.0.1:8000",
@@ -696,8 +690,8 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     const payload = new TextEncoder().encode("PK\u0003\u0004fake-zip");
     const expectedSha = createHash("sha256").update(Buffer.from(payload)).digest("hex");
 
-    const fakeFetch = vi.fn().mockResolvedValue(bytesResponse(payload));
-    global.fetch = fakeFetch as unknown as typeof global.fetch;
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(bytesResponse(payload));
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "http://127.0.0.1:8000",
@@ -707,7 +701,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
 
     expect(Buffer.isBuffer(result.zipBuffer)).toBe(true);
     expect(result.sha256).toBe(expectedSha);
-    const [url] = fakeFetch.mock.calls[0];
+    const [url] = mockedFetchPublic.mock.calls[0];
     expect(url).toBe(
       "http://127.0.0.1:8000/api/v1/plugins/lvis-plugin-meeting/versions/0.1.0/download",
     );
@@ -715,8 +709,8 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
 
   it("missing latest_stable_version (null) → packageSpec falls back to slug only", async () => {
     const pluginWithoutVersion = { ...serverPlugin, latest_stable_version: null };
-    const fakeFetch = vi.fn().mockResolvedValue(jsonResponse([pluginWithoutVersion]));
-    global.fetch = fakeFetch as unknown as typeof global.fetch;
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse([pluginWithoutVersion]));
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "http://127.0.0.1:8000",
@@ -857,20 +851,15 @@ describe("CloudMarketplaceFetcher — input validation (security)", () => {
 });
 
 describe("CloudMarketplaceFetcher.updateAllowPrivateNetwork (live config)", () => {
-  const originalFetch = global.fetch;
-
   beforeEach(() => {
     mockedFetchPublic.mockReset();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
-  it("flips the SSRF-bypass path without rebuilding the fetcher", async () => {
-    const fakeFetch = vi.fn().mockResolvedValue(jsonResponse([]));
-    global.fetch = fakeFetch as unknown as typeof global.fetch;
+  it("flips the guarded private-network scope without rebuilding the fetcher", async () => {
     mockedFetchPublic.mockResolvedValue(jsonResponse([]));
 
     const fetcher = new CloudMarketplaceFetcher({
@@ -878,21 +867,25 @@ describe("CloudMarketplaceFetcher.updateAllowPrivateNetwork (live config)", () =
       allowPrivateNetwork: false,
     });
 
-    // 1) Initial state: SSRF guard is in front of the request.
+    // 1) Initial state: SSRF guard is public-only.
     await fetcher.listPlugins();
     expect(mockedFetchPublic).toHaveBeenCalledTimes(1);
-    expect(fakeFetch).not.toHaveBeenCalled();
+    expect(mockedFetchPublic.mock.calls[0][1].allowLoopback).toBe(false);
 
-    // 2) Flip the live flag. Next request must bypass the SSRF guard.
+    // 2) Flip the live flag. Next request must keep the guard and add scope.
     fetcher.updateAllowPrivateNetwork(true);
     await fetcher.listPlugins();
-    expect(mockedFetchPublic).toHaveBeenCalledTimes(1);
-    expect(fakeFetch).toHaveBeenCalledOnce();
+    expect(mockedFetchPublic).toHaveBeenCalledTimes(2);
+    expect(
+      (mockedFetchPublic.mock.calls[1][1].allowLoopback as (url: URL) => boolean)(
+        new URL("http://127.0.0.1:8080/next"),
+      ),
+    ).toBe(true);
 
     // 3) Flip it back. Next request must route through the guard again.
     fetcher.updateAllowPrivateNetwork(false);
     await fetcher.listPlugins();
-    expect(mockedFetchPublic).toHaveBeenCalledTimes(2);
-    expect(fakeFetch).toHaveBeenCalledOnce();
+    expect(mockedFetchPublic).toHaveBeenCalledTimes(3);
+    expect(mockedFetchPublic.mock.calls[2][1].allowLoopback).toBe(false);
   });
 });
