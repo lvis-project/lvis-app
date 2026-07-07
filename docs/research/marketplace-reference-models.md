@@ -24,15 +24,21 @@ Implementation anchors:
 
 - App install state: `src/data/settings-store.ts`
 - App install/uninstall UI: `src/ui/renderer/tabs/MarketplaceTab.tsx`
+- App provider default split: `src/shared/llm-vendor-defaults.ts`
+- App theme default split: `src/shared/theme-bundles.ts`
+- App locale default split: `src/i18n/locale.ts`
 - App model-list/baseUrl sync tests:
   `src/ui/renderer/tabs/__tests__/LlmTab.top-level-login.test.tsx`
 - App marketplace asset install tests:
   `src/ui/renderer/tabs/__tests__/MarketplaceTab.test.tsx`
 - Marketplace DB migration:
   `server/alembic/versions/20260706_0023_asset_package_columns.py`
+- Marketplace asset authorship migration:
+  `server/alembic/versions/20260707_0024_asset_package_authorship.py`
 - Marketplace seed source:
   `server/src/lvis_marketplace/asset_catalog.py`
 - Marketplace admin/catalog API tests: `server/tests/test_catalog.py`
+- Marketplace publisher API tests: `server/tests/test_publisher.py`
 - Marketplace admin UI tests: `web/src/__tests__/new-pages.test.tsx`
 
 ## External Patterns
@@ -103,18 +109,40 @@ seeded rows.
 
 ## Verification Snapshot
 
-Current app mainline after marketplace provider preset hardening:
+Current app and marketplace mainlines after PR merge:
 
-- App: `40ab4e3f` (`#1534`) merged the provider preset credential-boundary
-  hardening on top of the provider/theme/language marketplace asset split.
+- App: `a7702240` (`#1536`) merged `fix(marketplace): harden lifecycle and
+  keyless providers` into `main` on 2026-07-07.
+- Marketplace: `1489c3a` (`#181`) merged `feat(marketplace): cover provider
+  asset contracts and authoring` into `main` on 2026-07-07.
 
-Post-merge checks succeeded on July 6, 2026:
+Post-merge checks observed on July 7, 2026:
 
-- `build-and-test`
-- `Windows permission path tests`
-- `CodeQL`
-- `naming-gate`
-- `cluster-detector`
+- App PR #1536: `build-and-test`, `Windows permission path tests`, `CodeQL`,
+  `naming-gate`, `cluster-detector`, and `Sensitive Area Cluster Check` passed.
+  `e2e` and `marketplace-e2e` were skipped by workflow conditions.
+- Marketplace PR #181: `test`, `Alembic upgrade - empty Postgres DB`,
+  `Alembic upgrade - populated fixture`, and `naming-gate` passed.
+
+Local verification on the merged mainlines:
+
+- App targeted tests:
+  `bunx vitest run src/shared/__tests__/llm-vendor-defaults.test.ts src/shared/__tests__/marketplace-package-assets.test.ts src/ui/renderer/__tests__/marketplace-asset-registry.test.ts src/ui/renderer/tabs/__tests__/MarketplaceTab.test.tsx src/ui/renderer/theme/bundles/__tests__/bundles.test.ts src/i18n/__tests__/i18n.test.ts`
+  passed: 6 files, 162 tests.
+- Marketplace targeted tests:
+  `uv run pytest --no-cov tests/test_catalog.py tests/test_publisher.py tests/test_bootstrap.py tests/test_migrations.py`
+  passed: 90 tests.
+- The same Marketplace target without `--no-cov` passed all 90 tests but failed
+  the repository coverage threshold because it was a partial suite.
+
+Current verified default split:
+
+- Providers visible by default: `openai`, `claude`, `gemini`, `openrouter`,
+  `openai-compatible`.
+- Themes visible by default: `moonstone`, `gallery`.
+- Locale visible by default: `en`.
+- Long-tail providers, non-default themes, and non-English locales are
+  marketplace-eligible assets rather than first-run defaults.
 
 The app now has a true Electron settings E2E that clicks through Marketplace
 asset installs and then proves the installed provider, theme, and language pack
@@ -122,10 +150,63 @@ appear in the live LLM/Appearance pickers:
 
 - `test/e2e/ui/marketplace-assets.spec.ts`
 
-The server-side Marketplace DB/API work lives outside this repository. This app
-repository treats built-in provider/theme/language entries as local seed
-candidates and treats remote catalog entries as authoritative when returned by
-the configured marketplace endpoint.
+The Marketplace server now has DB-backed provider/theme/language asset packages
+with admin and publisher authoring APIs. Seed rows are starter catalog data only;
+user-authored rows use the same `package_spec` and `package_asset_json`
+contract.
+
+The next architecture boundary is provider metadata authority. The app still
+keeps legacy long-tail provider metadata in `src/shared/llm-vendor-defaults.ts`
+so old settings and secrets keep working. The intended next step is to move the
+rich provider package metadata into Marketplace seed/user rows and make the app
+consume catalog metadata first, with static app metadata serving only as a
+legacy compatibility fallback.
+
+## Current Big PR Slice
+
+Title target:
+
+- `feat(marketplace): promote catalog-owned asset metadata`
+
+Scope under way:
+
+- Enrich Marketplace provider seed `package_asset_json` with label, base URL,
+  default model, optional model choices, model discovery policy, keyless support,
+  capabilities, and trust metadata.
+- Preserve DB/user ownership: bootstrap may insert or backfill seed rows but must
+  not overwrite user-authored asset packages.
+- Teach the app to prefer catalog-provided provider metadata when installing
+  marketplace provider packages, while preserving known legacy provider IDs and
+  secret keys.
+- Keep current five-provider/two-theme/English defaults locked by tests.
+- Add tests that prove seed rows and user-authored provider rows travel through
+  the same catalog/detail/install path.
+
+Current working-tree progress:
+
+- Marketplace provider seeds now carry catalog-owned metadata for default model,
+  model options, discovery policy, credential behavior, and trust labels.
+- Existing bare provider seed rows are covered by an Alembic backfill that only
+  updates exact old bootstrap payloads for known seed slugs.
+- Local keyless providers such as Ollama and LM Studio are marked keyless/local
+  instead of requiring an API key.
+- App catalog parsing now preserves provider metadata for known marketplace
+  provider IDs instead of reducing them to `providerId` only.
+- Known provider marketplace installs now materialize catalog `baseUrl` and
+  `defaultModel` into the app's LLM vendor settings patch when present.
+- Added focused tests for rich provider seed metadata and known-provider
+  metadata parsing.
+
+Follow-up slimming candidates:
+
+- Move non-English generated locale catalogs behind language-pack artifacts once
+  missing-pack fallback UX is explicit.
+- Move non-default theme token bundles behind theme package artifacts once theme
+  package loading is runtime-safe.
+- Add typed Marketplace sections and trust badges for Providers, Themes,
+  Languages, Plugins, MCP, Agents, and Skills.
+- Annotate router/free model lists from dynamic provider model metadata instead
+  of hard-coding availability.
 
 ## Sources
 
