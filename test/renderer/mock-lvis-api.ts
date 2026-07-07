@@ -231,6 +231,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       ok: false,
       error: "model-list-not-supported",
     })),
+    installMarketplaceProviderPreset: vi.fn(async () => settings),
+    uninstallMarketplaceProviderPreset: vi.fn(async () => settings),
     setWebApiKey: vi.fn(async () => ({ ok: true })),
     hasWebApiKey: vi.fn(async () => false),
     deleteWebApiKey: vi.fn(async () => ({ ok: true })),

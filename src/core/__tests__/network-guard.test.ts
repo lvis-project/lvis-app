@@ -187,6 +187,13 @@ describe("ensurePublicHttpUrl — explicit private network access", () => {
     ).rejects.toThrowError(/non-public/);
   });
 
+  it("allows loopback only when the separate loopback gate is enabled", async () => {
+    const url = await ensurePublicHttpUrl("http://127.0.0.1/", {
+      allowLoopback: true,
+    });
+    expect(url.hostname).toBe("127.0.0.1");
+  });
+
   it("keeps link-local metadata blocked even when private network access is enabled", async () => {
     await expect(
       ensurePublicHttpUrl("http://169.254.169.254/latest/meta-data/", {
@@ -368,6 +375,24 @@ describe("fetchPublicHttpResponse (mocked fetch)", () => {
     await expect(
       fetchPublicHttpResponse("https://start.example.com/", {
         allowPrivateNetworks: (url) => url.hostname === "start.example.com",
+      }),
+    ).rejects.toThrowError(/non-public/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("scopes loopback redirects through the allowLoopback predicate", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(null, {
+        status: 302,
+        headers: { location: "http://127.0.0.1/internal" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchPublicHttpResponse("https://start.example.com/", {
+        allowLoopback: (url) => url.hostname === "start.example.com",
       }),
     ).rejects.toThrowError(/non-public/);
     expect(fetchMock).toHaveBeenCalledTimes(1);

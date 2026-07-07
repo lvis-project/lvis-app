@@ -333,6 +333,57 @@ describe("SettingsService marketplace defaults", () => {
     expect(llm.fallbackChain).toEqual([]);
   });
 
+  it("refreshes existing custom provider preset metadata through the trusted marketplace install path", async () => {
+    const service = new SettingsService({ userDataPath });
+    const preset = {
+      providerId: "future-router",
+      label: "Future Router",
+      baseUrl: "https://future.example/v1",
+      defaultModel: "future/free",
+      modelOptions: ["future/free"],
+      requiresApiKey: true,
+    };
+    await service.installMarketplaceProviderPreset(preset);
+    await service.patch({
+      llm: {
+        provider: "openai-compatible",
+        marketplaceProviderPresetId: "future-router",
+        vendors: {
+          "openai-compatible": {
+            model: "future/free",
+            baseUrl: "https://future.example/v1",
+          },
+        },
+      },
+    });
+    await service.setSecret(
+      marketplaceProviderPresetSecretKey("future-router"),
+      "fr-old-secret",
+    );
+
+    await service.installMarketplaceProviderPreset({
+      ...preset,
+      label: "Future Router v2",
+      baseUrl: "https://future-v2.example/v1",
+      defaultModel: "future/v2",
+      modelOptions: ["future/v2", "future/free"],
+      requiresApiKey: false,
+    });
+
+    expect(service.get("marketplace").installedProviderPresets).toEqual([{
+      providerId: "future-router",
+      label: "Future Router v2",
+      baseUrl: "https://future-v2.example/v1",
+      defaultModel: "future/v2",
+      modelOptions: ["future/v2", "future/free"],
+      requiresApiKey: false,
+    }]);
+    expect(getLlmVendorSettings(service.get("llm").vendors, "openai-compatible").baseUrl)
+      .toBe("https://future-v2.example/v1");
+    expect(service.getSecret(marketplaceProviderPresetSecretKey("future-router")))
+      .toBeNull();
+  });
+
   it("leaves an active custom provider preset installed when preset-secret deletion fails", async () => {
     const service = new SettingsService({ userDataPath });
     const preset = {

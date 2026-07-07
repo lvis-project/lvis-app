@@ -14,6 +14,7 @@ import { sendToWindow } from "../../ipc/safe-send.js";
 import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "../../ipc/domains/permissions.js";
 import { PERMISSIONS } from "../../shared/ipc-channels.js";
 import { createProvider, secretKeyFor } from "../../engine/llm/provider-factory.js";
+import { createGuardedMarketplaceProviderFetch } from "../../engine/llm/marketplace-provider-fetch.js";
 import { reviewerVendorFor } from "../../permissions/reviewer/reviewer-vendor-map.js";
 import type { LLMProvider } from "../../engine/llm/types.js";
 import {
@@ -91,6 +92,15 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
       model: block.model,
       ...(llmVendor === "azure-foundry" ? { fetch: llmFetch } : {}),
       ...(effectiveBaseUrl ? { baseUrl: effectiveBaseUrl } : {}),
+      ...(marketplaceProviderPreset && effectiveBaseUrl
+        ? {
+            fetch: createGuardedMarketplaceProviderFetch(
+              effectiveBaseUrl,
+              marketplaceProviderPreset,
+            ),
+            providerMetadata: marketplaceProviderPreset,
+          }
+        : {}),
       ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
       ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
     });
