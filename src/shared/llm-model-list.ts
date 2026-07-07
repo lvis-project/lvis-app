@@ -1,3 +1,5 @@
+import type { MarketplaceProviderModelDiscoveryPolicy } from "./marketplace-package-assets.js";
+
 export type LlmModelListRequest = {
   vendor: string;
   /**
@@ -12,6 +14,11 @@ export type LlmModelListRequest = {
    * separate credential namespaces and cache entries.
    */
   credentialScope?: string;
+  /**
+   * Optional marketplace provider discovery policy. Static/manual providers
+   * keep their seeded model list and must not be probed through /models.
+   */
+  modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy;
 };
 
 export const MAX_LLM_MODEL_LIST_CACHE_ENTRIES = 48;
