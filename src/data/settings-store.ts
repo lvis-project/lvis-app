@@ -803,8 +803,8 @@ export class SettingsService {
         nextMarketplace.installedProviderPresets,
       );
     }
-    const removedProviderPresetIds = partial.marketplace
-      ? removedMarketplaceProviderPresetIds(
+    const providerPresetSecretInvalidationIds = partial.marketplace
+      ? marketplaceProviderPresetSecretInvalidationIds(
           this.settings.marketplace.installedProviderPresets,
           nextMarketplace.installedProviderPresets,
         )
@@ -1064,7 +1064,7 @@ export class SettingsService {
     await this.saveSettings();
     await this.deleteMarketplaceProviderPresetSecretsAtomically(
       previousSettings,
-      removedProviderPresetIds,
+      providerPresetSecretInvalidationIds,
     );
     return this.getAll();
   }
@@ -1101,7 +1101,7 @@ export class SettingsService {
       ...this.settings.marketplace,
       installedProviderPresets,
     });
-    const removedProviderPresetIds = removedMarketplaceProviderPresetIds(
+    const providerPresetSecretInvalidationIds = marketplaceProviderPresetSecretInvalidationIds(
       this.settings.marketplace.installedProviderPresets,
       nextMarketplace.installedProviderPresets,
     );
@@ -1116,7 +1116,7 @@ export class SettingsService {
     await this.saveSettings();
     await this.deleteMarketplaceProviderPresetSecretsAtomically(
       previousSettings,
-      removedProviderPresetIds,
+      providerPresetSecretInvalidationIds,
     );
     return this.getAll();
   }
@@ -1807,6 +1807,25 @@ function removedMarketplaceProviderPresetIds(
   return previous
     .map((preset) => preset.providerId)
     .filter((providerId) => !nextIds.has(providerId));
+}
+
+function marketplaceProviderPresetSecretInvalidationIds(
+  previous: readonly MarketplaceInstalledProviderPreset[],
+  next: readonly MarketplaceInstalledProviderPreset[],
+): string[] {
+  const ids = new Set(removedMarketplaceProviderPresetIds(previous, next));
+  const previousById = new Map(previous.map((preset) => [preset.providerId, preset]));
+  for (const nextPreset of next) {
+    const previousPreset = previousById.get(nextPreset.providerId);
+    if (!previousPreset) continue;
+    if (
+      previousPreset.baseUrl !== nextPreset.baseUrl ||
+      previousPreset.requiresApiKey !== nextPreset.requiresApiKey
+    ) {
+      ids.add(nextPreset.providerId);
+    }
+  }
+  return [...ids];
 }
 
 function preserveInstalledProviderPresetMetadata(
