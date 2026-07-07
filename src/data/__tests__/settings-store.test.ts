@@ -802,6 +802,99 @@ describe("SettingsService LLM per-vendor patching", () => {
     });
   });
 
+  it("prunes manual and static marketplace provider model list caches", async () => {
+    const service = new SettingsService({ userDataPath });
+
+    await service.patch({
+      marketplace: {
+        installedProviderPresets: [
+          {
+            providerId: "manual-router",
+            label: "Manual Router",
+            baseUrl: "https://manual.example/v1",
+            defaultModel: "manual/default",
+            modelOptions: ["manual/default"],
+            requiresApiKey: true,
+            modelDiscoveryPolicy: "manual",
+          },
+          {
+            providerId: "static-router",
+            label: "Static Router",
+            baseUrl: "https://static.example/v1",
+            defaultModel: "static/default",
+            modelOptions: ["static/default"],
+            requiresApiKey: true,
+            modelDiscoveryPolicy: "static",
+          },
+          {
+            providerId: "dynamic-router",
+            label: "Dynamic Router",
+            baseUrl: "https://dynamic.example/v1",
+            defaultModel: "dynamic/default",
+            modelOptions: ["dynamic/default"],
+            requiresApiKey: true,
+            modelDiscoveryPolicy: "models-api",
+          },
+        ],
+      },
+      llm: {
+        modelListCache: {
+          [llmModelListCacheKey(
+            "openai-compatible",
+            "https://manual.example/v1",
+            "manual-router",
+          )]: {
+            vendor: "openai-compatible",
+            baseUrl: "https://manual.example/v1",
+            credentialScope: "manual-router",
+            endpoint: "https://manual.example/v1/models",
+            models: ["cached/manual-only"],
+            fetchedAt: "2026-07-06T00:00:00.000Z",
+          },
+          [llmModelListCacheKey(
+            "openai-compatible",
+            "https://static.example/v1",
+            "static-router",
+          )]: {
+            vendor: "openai-compatible",
+            baseUrl: "https://static.example/v1",
+            credentialScope: "static-router",
+            endpoint: "https://static.example/v1/models",
+            models: ["cached/static-only"],
+            fetchedAt: "2026-07-06T00:00:00.000Z",
+          },
+          [llmModelListCacheKey(
+            "openai-compatible",
+            "https://dynamic.example/v1",
+            "dynamic-router",
+          )]: {
+            vendor: "openai-compatible",
+            baseUrl: "https://dynamic.example/v1",
+            credentialScope: "dynamic-router",
+            endpoint: "https://dynamic.example/v1/models",
+            models: ["dynamic/discovered"],
+            fetchedAt: "2026-07-06T00:00:00.000Z",
+          },
+        },
+      },
+    });
+
+    expect(service.get("llm").modelListCache).toEqual({
+      [llmModelListCacheKey(
+        "openai-compatible",
+        "https://dynamic.example/v1",
+        "dynamic-router",
+      )]: {
+        vendor: "openai-compatible",
+        baseUrl: "https://dynamic.example/v1",
+        credentialScope: "dynamic-router",
+        endpoint: "https://dynamic.example/v1/models",
+        models: ["dynamic/discovered"],
+        fetchedAt: "2026-07-06T00:00:00.000Z",
+      },
+    });
+  });
+
   it("allows installed marketplace providers and removes them durably on uninstall", async () => {
     const service = new SettingsService({ userDataPath });
 

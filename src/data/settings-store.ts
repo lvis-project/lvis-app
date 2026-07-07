@@ -1437,6 +1437,14 @@ function marketplaceProviderPresetForId(
   return installedProviderPresets.find((preset) => preset.providerId === providerId);
 }
 
+function marketplaceProviderPresetUsesSeededModelOptions(
+  providerId: string,
+  installedProviderPresets: readonly MarketplaceInstalledProviderPreset[] | undefined,
+): boolean {
+  const preset = marketplaceProviderPresetForId(providerId, installedProviderPresets);
+  return preset?.modelDiscoveryPolicy === "manual" || preset?.modelDiscoveryPolicy === "static";
+}
+
 function bindOpenAICompatibleVendorBlockToMarketplaceProviderPreset(
   vendors: LLMVendorSettingsMap,
   preset: MarketplaceInstalledProviderPreset | undefined,
@@ -1618,6 +1626,7 @@ function normalizeLlmModelListCache(
       if (!isMarketplaceProviderPresetId(entry.credentialScope)) continue;
       const scopedPresetId = entry.credentialScope.trim();
       if (!isMarketplaceProviderPresetInstalled(scopedPresetId, installedProviderPresets)) continue;
+      if (marketplaceProviderPresetUsesSeededModelOptions(scopedPresetId, installedProviderPresets)) continue;
       credentialScope = scopedPresetId;
     }
     const fetchedAt = typeof entry.fetchedAt === "string" && entry.fetchedAt.trim()
