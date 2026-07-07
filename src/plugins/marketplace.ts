@@ -23,6 +23,7 @@ import { canonicalJSON } from "./whitelist/canonical-json.js";
 import type { PluginInstallReceipt } from "./plugin-install-receipt.js";
 import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
+import type { PluginInstallFailureKind } from "../shared/plugin-install-failure.js";
 import { createLogger } from "../lib/logger.js";
 import { readAgentRegistry } from "../agents/agent-registry.js";
 import { readSkillRegistry } from "../skills/skill-registry.js";
@@ -46,7 +47,7 @@ export interface MarketplaceInstallFailureDiagnostic {
   name: string;
   description: string;
   error: string;
-  installFailureKind?: "catalog-grant-mismatch";
+  installFailureKind?: PluginInstallFailureKind;
   isManaged: boolean;
   installPolicy: InstallPolicy;
   installAliases: string[];
@@ -104,7 +105,10 @@ function hasExternalAuthConsumerCapability(source: {
   return source.capabilities?.includes("external-auth-consumer") === true;
 }
 
-function classifyInstallFailure(message: string): MarketplaceInstallFailureDiagnostic["installFailureKind"] | undefined {
+function classifyInstallFailure(message: string): PluginInstallFailureKind | undefined {
+  if (message.includes("schema validation failed") || message.includes("manifest validation")) {
+    return "manifest-validation-error";
+  }
   return message.includes("artifact manifest") && message.includes("catalog-approved grant")
     ? "catalog-grant-mismatch"
     : undefined;

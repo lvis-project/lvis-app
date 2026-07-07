@@ -321,6 +321,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         name: "Meeting",
         isManaged: true,
         installPolicy: "admin",
+        installFailureKind: "catalog-grant-mismatch",
         error:
           'plugin "meeting" artifact manifest external-auth-consumer capability does not match the catalog-approved grant',
       }),
@@ -330,6 +331,38 @@ describe("PluginMarketplaceService managed bootstrap", () => {
 
     expect(recovered.installed).toEqual(["meeting"]);
     expect(service.getInstallFailureDiagnostics()).toEqual([]);
+  });
+
+  it("classifies managed manifest validation failures for Doctor detail UI", async () => {
+    await writeAdminCatalog("2.0.0");
+    const service = makeManagedService(testDir, marketplacePath);
+    vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+      },
+      "installWithDependencies",
+    ).mockRejectedValue(
+      new Error(
+        "[manifest:meeting] schema validation failed (/tmp/plugin.json): / unknown property: 'startupTools'",
+      ),
+    );
+
+    const result = await service.ensureManagedInstalled();
+
+    expect(result.failed).toEqual([
+      {
+        id: "meeting",
+        error: "[manifest:meeting] schema validation failed (/tmp/plugin.json): / unknown property: 'startupTools'",
+      },
+    ]);
+    expect(service.getInstallFailureDiagnostics()).toEqual([
+      expect.objectContaining({
+        id: "meeting",
+        name: "Meeting",
+        installFailureKind: "manifest-validation-error",
+        error: "[manifest:meeting] schema validation failed (/tmp/plugin.json): / unknown property: 'startupTools'",
+      }),
+    ]);
   });
 
   it("a corrupt installed managed plugin's unreadable version does not abort install/update of others", async () => {
