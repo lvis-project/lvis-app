@@ -145,6 +145,8 @@ export type PluginCardSummary = {
     reasoning?: string;
     allowPrivateNetworks?: boolean;
   };
+  /** Structured marketplace install failure classification for Doctor UI. */
+  installFailureKind?: "catalog-grant-mismatch";
   /** Marketplace request slugs that should collapse onto this installed plugin. */
   installAliases?: string[];
 };
@@ -375,6 +377,12 @@ export type PluginMarketplaceActionResult =
 
 export type PluginMarketplaceInstallOptions = {
   networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
+};
+
+export type PluginMarketplaceUninstallOptions = {
+  doctorCleanup?: {
+    installFailureKind: "catalog-grant-mismatch";
+  };
 };
 
 export type LvisApi = {
@@ -773,6 +781,21 @@ export type LvisApi = {
     sessionId: string,
     toolUseId: string,
   ) => Promise<{ content: string; lineCount: number } | null>;
+  /** Lazy-load the isolated child-session transcript for a sub-agent row. */
+  chatGetSubAgentTranscript?: (opts: {
+    originSessionId: string;
+    childSessionId: string;
+  }) => Promise<
+    | {
+        ok: true;
+        childSessionId: string;
+        messages: SerializedHistoryMessage[];
+        title?: string;
+        spawnId?: string;
+        originToolUseId?: string;
+      }
+    | { ok: false; error?: string }
+  >;
   /** Issue #749: lazy-load full write_file diff when content exceeded preview limit.
    * Returns { before, after } from ~/.lvis/diff-cache/<sessionId>/<toolUseId>.json,
    * or null when sidecar not found / session id invalid. */
@@ -1144,7 +1167,9 @@ export type LvisApi = {
     h: (event: {
       spawnId: string;
       type: "start" | "activity" | "done" | "error";
+      status?: "running" | "done" | "error" | "interrupted";
       title?: string;
+      instructions?: string;
       entries?: ChatEntry[];
       summary?: string;
       toolCallCount?: number;
@@ -1651,7 +1676,10 @@ export type LvisHostMarketplaceApi = {
     expectedVersion?: string,
     options?: PluginMarketplaceInstallOptions,
   ) => Promise<PluginMarketplaceActionResult>;
-  uninstallMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
+  uninstallMarketplacePlugin: (
+    id: string,
+    options?: PluginMarketplaceUninstallOptions,
+  ) => Promise<PluginMarketplaceActionResult>;
   installMarketplaceAgent?: (slug: string) => Promise<PluginMarketplaceActionResult>;
   uninstallMarketplaceAgent?: (slug: string) => Promise<PluginMarketplaceActionResult>;
   installMarketplaceSkill?: (slug: string) => Promise<PluginMarketplaceActionResult>;

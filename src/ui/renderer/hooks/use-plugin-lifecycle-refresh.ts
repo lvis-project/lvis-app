@@ -44,13 +44,25 @@ export function usePluginLifecycleRefresh({
   useEffect(() => {
     if (typeof api.onPluginInstallResult !== "function") return;
     const unsubscribe = api.onPluginInstallResult(({ success }) => {
-      if (!success) return;
-      void refreshViews();
-      void refreshMarketplace();
+      if (success) {
+        void refreshViews();
+        void refreshMarketplace();
+      }
       void refreshCards();
     });
     return unsubscribe;
   }, [api, refreshViews, refreshMarketplace, refreshCards]);
+
+  useEffect(() => {
+    if (typeof api.onBootstrapStatus !== "function") return;
+    const unsubscribe = api.onBootstrapStatus((status) => {
+      if (status.phase === "start") return;
+      void refreshCards();
+      void refreshViews();
+      void refreshMarketplace();
+    });
+    return unsubscribe;
+  }, [api, refreshViews, refreshCards, refreshMarketplace]);
 
   useEffect(() => {
     if (typeof api.onPluginRuntimeUpdated !== "function") return;

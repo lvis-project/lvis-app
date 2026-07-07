@@ -3,8 +3,9 @@
  * a turn cap. The sub-agent runs inline (await) and the assistant gets the
  * final summary string + tool call count.
  *
- * Renderer integration: per-spawn lifecycle events stream to a SubAgentCard
- * (start → turn → done|error) so the user sees what the sub-agent is doing.
+ * Renderer integration: per-spawn lifecycle events stream to the workspace-rail
+ * sub-agent viewer (start → turn → done|error) so the user sees what the
+ * sub-agent is doing.
  */
 import { randomUUID } from "node:crypto";
 import { createDynamicTool, type Tool } from "./base.js";
@@ -26,12 +27,14 @@ export interface AgentSpawnEvent {
    *                  the FULL {@link entries} snapshot (idempotent replace, not
    *                  a delta) so the renderer swaps the whole child transcript.
    *   - `done`     — clean completion; carries `summary`, `toolCallCount`, and
-   *                  the final {@link entries} snapshot (embedded for persistence
-   *                  parity — the same array is written into the tool result).
+   *                  the final live {@link entries} snapshot for the current
+   *                  renderer session. Persistence stays in the child JSONL.
    *   - `error`    — failed run; carries `message` (+ any partial `entries`).
    */
   type: "start" | "activity" | "done" | "error";
   title?: string;
+  /** Raw prompt sent by the parent assistant to the child agent. */
+  instructions?: string;
   /**
    * Full child transcript snapshot as `ChatEntry[]` — the SAME model the main
    * chat renders. Present on `activity` / `done` (and `error` when partial
@@ -44,6 +47,8 @@ export interface AgentSpawnEvent {
   summary?: string;
   toolCallCount?: number;
   message?: string;
+  /** Terminal display state. `done` events may carry `interrupted`. */
+  status?: "running" | "done" | "error" | "interrupted";
   /**
    * The `tool_use` id of the `agent_spawn` invocation that triggered this
    * spawn. Set on the `start` event so the renderer can attach the sub-agent
@@ -57,8 +62,8 @@ export interface AgentSpawnEvent {
    * a single sub-agent transcript: a resume is a SEPARATE `agent_spawn` call
    * (own `toolUseId`) but shares the original's `childSessionId`, so the viewer
    * groups on this field. A resume carries it on EVERY phase (it equals the
-   * `resumeId` from the tool call); the original spawn learns its own value only
-   * on completion, so it is set on the `done` (or terminal `error`) phase.
+   * `resumeId` from the tool call); a fresh spawn emits it as soon as the child
+   * session is linked, before the first child LLM round.
    */
   childSessionId?: string;
 }
@@ -77,6 +82,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
     source: "builtin",
     category: "meta",
     decisionOverride: "ask",
+    parallelSafe: true,
     jsonSchema: {
       type: "object",
       required: ["instructions"],
@@ -101,6 +107,10 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         resumeId: {
           type: "string",
           description: t("be_agentSpawn.propResumeIdDescription"),
+        },
+        background: {
+          type: "boolean",
+          description: "When true, start the sub-agent and return a run handle immediately. Use agent_status to inspect progress and agent_interrupt to stop it.",
         },
       },
     },
@@ -160,6 +170,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
       const resumeId = typeof a.resumeId === "string" && a.resumeId.trim()
         ? a.resumeId.trim()
         : undefined;
+      const background = a.background === true;
       if (!instructions || (!resumeId && !title)) {
         return {
           output: JSON.stringify({
@@ -190,31 +201,46 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
       // A resume knows its join key up front (it equals `resumeId`); the original
       // spawn learns `childSessionId` only from the run result (set on `done`).
       const resumeChildSessionId = resumeId ? { childSessionId: resumeId } : {};
-      deps.emit({ spawnId, type: "start", title, toolUseId, ...resumeChildSessionId });
+      const promptPayload = instructions ? { instructions } : {};
+      let linkedChildSessionId = resumeId;
+      const linkedPayload = () => linkedChildSessionId ? { childSessionId: linkedChildSessionId } : {};
+      deps.emit({ spawnId, type: "start", title, toolUseId, ...promptPayload, ...resumeChildSessionId });
       try {
         const callbacks = {
+          onLinked: ({ childSessionId }: { childSessionId: string }) => {
+            linkedChildSessionId = childSessionId;
+            deps.emit({
+              spawnId,
+              type: "activity" as const,
+              childSessionId,
+              ...promptPayload,
+            });
+          },
           onActivity: (u: { entries: ChatEntry[]; toolCallCount: number }) =>
             deps.emit({
               spawnId,
               type: "activity" as const,
               entries: u.entries,
               toolCallCount: u.toolCallCount,
-              ...resumeChildSessionId,
+              ...promptPayload,
+              ...linkedPayload(),
             }),
           onError: (msg: string) =>
-            deps.emit({ spawnId, type: "error" as const, message: msg, ...resumeChildSessionId }),
+            deps.emit({ spawnId, type: "error" as const, message: msg, ...promptPayload, ...linkedPayload() }),
         };
         // Resume RE-HYDRATES a frozen sub-agent; spawn starts a fresh one. The
         // resume path takes NO sourceTools/profile from the tool call — those are
         // read from the persisted metadata so a resume cannot re-scope the child.
-        const result = resumeId
-          ? await runner.resume(resumeId, instructions, title, callbacks, originSessionId)
+        const run = async () => resumeId
+          ? await runner.resume(resumeId, instructions, title, callbacks, originSessionId, spawnId)
           : await runner.spawn(
               {
                 title,
                 instructions: profile
                   ? renderAgentProfilePrompt(profile, instructions)
                   : instructions,
+                spawnId,
+                toolUseId,
                 sourceTools,
                 originSessionId,
                 // #1112: profile's `model:` frontmatter (complexity tier or
@@ -228,13 +254,52 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
               },
               callbacks,
             );
+        if (background) {
+          const runPromise = run();
+          void runPromise
+            .then((result) => {
+              if (result.ok === false) {
+                const message = result.error ?? result.summary;
+                deps.emit({ spawnId, type: "error", message, ...promptPayload, ...linkedPayload() });
+                return;
+              }
+              linkedChildSessionId = result.childSessionId;
+              deps.emit({
+                spawnId,
+                type: "done",
+                status: result.stopReason === "interrupted" ? "interrupted" : "done",
+                summary: result.summary,
+                toolCallCount: result.toolCallCount,
+                entries: result.entries,
+                ...promptPayload,
+                childSessionId: result.childSessionId,
+              });
+            })
+            .catch((err) => {
+              const message = (err as Error).message ?? "agent_spawn failed";
+              deps.emit({ spawnId, type: "error", message, ...promptPayload, ...linkedPayload() });
+            });
+          return {
+            output: JSON.stringify({
+              spawnId,
+              status: "running",
+              background: true,
+              ...(resumeId ? { resumeId } : {}),
+              ...(linkedChildSessionId ? { childSessionId: linkedChildSessionId } : {}),
+              agentName: profile?.name,
+            }),
+            isError: false,
+          };
+        }
+
+        const result = await run();
         // A spawn that could not run (LLM provider unconfigured, child loop
         // threw) returns `ok: false` with the error text as `summary` rather
         // than throwing. Surface it as a tool error so the assistant does not
         // treat the error string as a successful sub-agent result.
         if (result.ok === false) {
           const message = result.error ?? result.summary;
-          deps.emit({ spawnId, type: "error", message, ...resumeChildSessionId });
+          deps.emit({ spawnId, type: "error", message, ...promptPayload, ...linkedPayload() });
           return {
             output: JSON.stringify({ error: message }),
             isError: true,
@@ -246,9 +311,11 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         deps.emit({
           spawnId,
           type: "done",
+          status: result.stopReason === "interrupted" ? "interrupted" : "done",
           summary: result.summary,
           toolCallCount: result.toolCallCount,
           entries: result.entries,
+          ...promptPayload,
           childSessionId: result.childSessionId,
         });
         return {
@@ -258,6 +325,8 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             turnCount: result.turnCount,
             spawnId,
             agentName: profile?.name,
+            childSessionId: result.childSessionId,
+            ...(result.stopReason ? { stopReason: result.stopReason } : {}),
             // Cut-off resume signal (Claude Code "the sub-agent ran out of
             // turns and didn't finish" pattern). When the child hit its
             // host-assigned round budget, `summary` is PARTIAL — surface that
@@ -278,22 +347,124 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
                   resumeId: result.childSessionId,
                 }
               : {}),
-            // Embed the child transcript so a reloaded session rebuilds the
-            // sub-agent tab's full tool/reasoning timeline from persistence
-            // (derive-subagent-spawns reads `entries` here). DLP-masked at the
-            // SubAgentTranscriptAccumulator source.
-            entries: result.entries,
           }),
           isError: false,
         };
       } catch (err) {
         const message = (err as Error).message ?? "agent_spawn failed";
-        deps.emit({ spawnId, type: "error", message, ...resumeChildSessionId });
+        deps.emit({ spawnId, type: "error", message, ...promptPayload, ...linkedPayload() });
         return {
           output: JSON.stringify({ error: message }),
           isError: true,
         };
       }
+    },
+  });
+}
+
+export function createAgentStatusTool(deps: Pick<AgentSpawnToolDeps, "getRunner">): Tool {
+  return createDynamicTool({
+    name: "agent_status",
+    description: "Inspect active or recent sub-agent runs. Pass spawnId or childSessionId as id; omit id to list all tracked runs.",
+    source: "builtin",
+    category: "meta",
+    decisionOverride: "always-allow-with-audit",
+    jsonSchema: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: "spawnId or childSessionId to inspect. Omit to list tracked runs.",
+        },
+      },
+    },
+    execute: async (rawInput, ctx) => {
+      const runner = deps.getRunner();
+      if (!runner) {
+        return {
+          output: JSON.stringify({ error: "agent_status runner not configured" }),
+          isError: true,
+        };
+      }
+      const originSessionId =
+        typeof ctx.metadata?.sessionId === "string"
+          ? (ctx.metadata.sessionId as string)
+          : "";
+      if (!originSessionId) {
+        return {
+          output: JSON.stringify({ error: "agent_status requires a session id" }),
+          isError: true,
+        };
+      }
+      const input = (rawInput ?? {}) as Record<string, unknown>;
+      const id = typeof input.id === "string" && input.id.trim() ? input.id.trim() : "";
+      if (id) {
+        const run = runner.getRunStatus(id, originSessionId);
+        return {
+          output: JSON.stringify(run ? { run } : { error: `sub-agent run not found: ${id}` }),
+          isError: !run,
+        };
+      }
+      return {
+        output: JSON.stringify({ runs: runner.listRunStatuses(originSessionId) }),
+        isError: false,
+      };
+    },
+  });
+}
+
+export function createAgentInterruptTool(deps: Pick<AgentSpawnToolDeps, "getRunner">): Tool {
+  return createDynamicTool({
+    name: "agent_interrupt",
+    description: "Request interruption of a running sub-agent by spawnId or childSessionId.",
+    source: "builtin",
+    category: "meta",
+    decisionOverride: "ask",
+    jsonSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: {
+          type: "string",
+          description: "spawnId or childSessionId for the running sub-agent.",
+        },
+        reason: {
+          type: "string",
+          description: "Short reason for interrupting the sub-agent.",
+        },
+      },
+    },
+    execute: async (rawInput, ctx) => {
+      const runner = deps.getRunner();
+      if (!runner) {
+        return {
+          output: JSON.stringify({ error: "agent_interrupt runner not configured" }),
+          isError: true,
+        };
+      }
+      const originSessionId =
+        typeof ctx.metadata?.sessionId === "string"
+          ? (ctx.metadata.sessionId as string)
+          : "";
+      if (!originSessionId) {
+        return {
+          output: JSON.stringify({ error: "agent_interrupt requires a session id" }),
+          isError: true,
+        };
+      }
+      const input = (rawInput ?? {}) as Record<string, unknown>;
+      const id = typeof input.id === "string" && input.id.trim() ? input.id.trim() : "";
+      if (!id) {
+        return {
+          output: JSON.stringify({ error: "id is required" }),
+          isError: true,
+        };
+      }
+      const result = runner.interruptRun(id, originSessionId);
+      return {
+        output: JSON.stringify(result),
+        isError: !result.ok,
+      };
     },
   });
 }

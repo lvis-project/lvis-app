@@ -1541,7 +1541,9 @@ export function buildInternalApiSurface() {
     handler: (event: {
       spawnId: string;
       type: "start" | "activity" | "done" | "error";
+      status?: "running" | "done" | "error" | "interrupted";
       title?: string;
+      instructions?: string;
       entries?: ChatEntry[];
       summary?: string;
       toolCallCount?: number;
@@ -1749,8 +1751,11 @@ export function buildLvisHostWorld() {
           ...(expectedVersion ? { expectedVersion } : {}),
           ...(options?.networkAccessAcknowledgement ? { networkAccessAcknowledgement: options.networkAccessAcknowledgement } : {}),
         })),
-      uninstallMarketplacePlugin: async (pluginId: string) =>
-        normalizePluginActionResult(await ipcRenderer.invoke(CHANNELS.plugins.uninstall, pluginId)),
+      uninstallMarketplacePlugin: async (
+        pluginId: string,
+        options?: { doctorCleanup?: { installFailureKind?: string } },
+      ) =>
+        normalizePluginActionResult(await ipcRenderer.invoke(CHANNELS.plugins.uninstall, pluginId, options)),
       installMarketplaceAgent: async (slug: string) =>
         normalizeMarketplacePackageActionResult(await ipcRenderer.invoke(CHANNELS.agents.install, slug), "agentId"),
       uninstallMarketplaceAgent: async (slug: string) =>

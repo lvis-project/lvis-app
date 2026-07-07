@@ -129,6 +129,21 @@ export function buildPublicSurface() {
     ipcRenderer.invoke(CHANNELS.chat.getVerbatimToolResult, { sessionId, toolUseId }) as Promise<
       { content: string; lineCount: number } | null
     >,
+  chatGetSubAgentTranscript: async (opts: {
+    originSessionId: string;
+    childSessionId: string;
+  }) =>
+    ipcRenderer.invoke(CHANNELS.chat.getSubAgentTranscript, opts) as Promise<
+      | {
+          ok: true;
+          childSessionId: string;
+          messages: SerializedHistoryMessage[];
+          title?: string;
+          spawnId?: string;
+          originToolUseId?: string;
+        }
+      | { ok: false; error?: string }
+    >,
   // Issue #749: lazy-load full write_file diff when content exceeds preview limit
   chatGetWriteDiff: async (sessionId: string, toolUseId: string) =>
     ipcRenderer.invoke(CHANNELS.chat.getWriteDiff, { sessionId, toolUseId }) as Promise<

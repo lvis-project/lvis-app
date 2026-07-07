@@ -224,6 +224,7 @@ describe("preload contextBridge world shape lock", () => {
           "chatExport": "function",
           "chatFork": "function",
           "chatGetHistory": "function",
+          "chatGetSubAgentTranscript": "function",
           "chatGetVerbatimToolResult": "function",
           "chatGetWriteDiff": "function",
           "chatGuide": "function",

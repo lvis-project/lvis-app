@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writePermissionSettings } from "../../permissions/permission-settings-store.js";
@@ -20,6 +20,7 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "lvis-project-auth-"));
   workspace = join(root, "workspace");
   mkdirSync(workspace, { recursive: true });
+  workspace = realpathSync(workspace);
   process.env.LVIS_HOME = root;
   process.chdir(workspace);
 });
@@ -51,9 +52,10 @@ describe("project root authorization", () => {
     const denied = join(root, "denied-project");
     mkdirSync(allowed);
     mkdirSync(denied);
-    await writePermissionSettings({ additionalDirectories: [allowed] });
+    const allowedRoot = realpathSync(allowed);
+    await writePermissionSettings({ additionalDirectories: [allowedRoot] });
 
-    const allowedResolution = resolveAuthorizedWorkspaceProject(allowed, "allowed");
+    const allowedResolution = resolveAuthorizedWorkspaceProject(allowedRoot, "allowed");
     expect(allowedResolution).toMatchObject({
       authorized: true,
       project: {
@@ -62,8 +64,8 @@ describe("project root authorization", () => {
     });
     expect(allowedResolution.project).not.toBeNull();
     if (!allowedResolution.project) throw new Error("expected authorized project");
-    expect(projectRootEquals(allowedResolution.project.projectRoot, allowed)).toBe(true);
-    expect(resolveAuthorizedWorkspaceProject(`${allowed}/`, "allowed")).toMatchObject({
+    expect(projectRootEquals(allowedResolution.project.projectRoot, allowedRoot)).toBe(true);
+    expect(resolveAuthorizedWorkspaceProject(`${allowedRoot}/`, "allowed")).toMatchObject({
       authorized: true,
     });
     expect(resolveAuthorizedWorkspaceProject(denied, "denied")).toMatchObject({

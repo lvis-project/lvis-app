@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { LvisApi } from "../types.js";
 import type { AskUserQuestionRequest } from "../components/AskUserQuestionCard.js";
-import type { SubAgentSpawn } from "../components/SubAgentCard.js";
+import type { SubAgentSpawn } from "../subagents/types.js";
 import type { SkillBadgeProps } from "../components/SkillBadge.js";
 
 /**
@@ -48,6 +48,7 @@ export function useWorkflowTools(api: LvisApi) {
             spawnId: event.spawnId,
             title: event.title ?? "(sub-agent)",
             status: "running",
+            ...(event.instructions ? { instructions: event.instructions } : {}),
             entries: [],
             toolCallCount: 0,
             toolUseId: event.toolUseId,
@@ -64,10 +65,11 @@ export function useWorkflowTools(api: LvisApi) {
             title: event.title ?? "(sub-agent)",
             status:
               event.type === "done"
-                ? "done"
+                ? (event.status ?? "done")
                 : event.type === "error"
                   ? "error"
                   : "running",
+            ...(event.instructions ? { instructions: event.instructions } : {}),
             entries: event.entries ?? [],
             toolCallCount: event.toolCallCount ?? 0,
             summary: event.summary,
@@ -86,6 +88,9 @@ export function useWorkflowTools(api: LvisApi) {
         const childSessionIdPatch = event.childSessionId
           ? { childSessionId: event.childSessionId }
           : {};
+        const instructionsPatch = event.instructions
+          ? { instructions: event.instructions }
+          : {};
         if (event.type === "activity") {
           next[existingIdx] = {
             ...existing,
@@ -94,15 +99,17 @@ export function useWorkflowTools(api: LvisApi) {
             // and idempotent against re-emitted events.
             ...(event.entries ? { entries: event.entries } : {}),
             toolCallCount: event.toolCallCount ?? existing.toolCallCount,
+            ...instructionsPatch,
             ...childSessionIdPatch,
           };
         } else if (event.type === "done") {
           next[existingIdx] = {
             ...existing,
-            status: "done",
+            status: event.status ?? "done",
             summary: event.summary,
             ...(event.entries ? { entries: event.entries } : {}),
             toolCallCount: event.toolCallCount ?? existing.toolCallCount,
+            ...instructionsPatch,
             ...childSessionIdPatch,
           };
         } else if (event.type === "error") {
@@ -111,6 +118,7 @@ export function useWorkflowTools(api: LvisApi) {
             status: "error",
             errorMessage: event.message,
             ...(event.entries ? { entries: event.entries } : {}),
+            ...instructionsPatch,
             ...childSessionIdPatch,
           };
         }

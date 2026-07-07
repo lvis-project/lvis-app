@@ -12,13 +12,14 @@
  *   - A host-assigned round budget (default 30; lower per mode) —
  *     runTurn(`maxRounds: cappedRounds`) terminates
  *     queryLoop cleanly between rounds, and the executor's per-round
- *     fan-out cap (10 calls/round) bounds total tool execution count.
+ *     fan-out cap (5 calls/round) bounds total tool execution count.
  *   - An ApprovalGate wrapper that prepends "[Sub-Agent: <title>]" to the
  *     user-facing approval reason so users know an approval modal originated
  *     from a sub-agent.
  *
  * Per-turn updates are streamed back as events so the renderer can show a
- * live SubAgentCard. Final summary is delivered as `summary` in the result.
+ * live workspace-rail sub-agent viewer. Final summary is delivered as `summary`
+ * in the result.
  *
  * Rationale (vs. mutating the main loop): a sub-loop helper file keeps the
  * primary ConversationLoop unchanged, avoids reentrancy hazards on the
@@ -46,12 +47,19 @@ import { createLogger } from "../lib/logger.js";
 import { t } from "../i18n/index.js";
 import { SubAgentTranscriptAccumulator } from "./subagent-transcript.js";
 import type { ChatEntry } from "../lib/chat-stream-state.js";
+import { serializeHistoryMessage, type SerializedHistoryMessage } from "../shared/chat-history.js";
+import { isToolResultStubContent } from "../shared/tool-result-stub.js";
+import type { GenericMessage } from "./llm/types.js";
 
 const log = createLogger("lvis");
 
 export interface SubAgentSpawnInput {
   title: string;
   instructions: string;
+  /** Host-visible run id created by the `agent_spawn` tool. */
+  spawnId?: string;
+  /** Parent `agent_spawn` tool_use id, persisted as the reload join key. */
+  toolUseId?: string;
   sourceTools?: string[];
   /**
    * Host-assigned round budget for the child loop, in assistant rounds.
@@ -149,12 +157,69 @@ export interface SubAgentSpawnResult {
 
 export interface SubAgentSpawnCallbacks {
   /**
+   * Fired as soon as a fresh spawn has an addressable child session id. This
+   * happens before the first child LLM round, so background `agent_spawn` can
+   * return a durable handle immediately and the live viewer can join later
+   * activity against the same persisted session.
+   */
+  onLinked?: (link: { childSessionId: string }) => void;
+  /**
    * Fired whenever the child loop produces new transcript content (tool
    * start/end, permission review, completed assistant round). Carries the full
    * `ChatEntry[]` snapshot so the consumer swaps the whole child transcript.
    */
   onActivity?: (update: SubAgentActivityUpdate) => void;
   onError?: (message: string) => void;
+}
+
+export type SubAgentRunStatus = "running" | "done" | "error" | "interrupted";
+
+export interface SubAgentRunSnapshot {
+  spawnId?: string;
+  childSessionId: string;
+  title: string;
+  status: SubAgentRunStatus;
+  startedAt: string;
+  updatedAt: string;
+  toolCallCount: number;
+  turnCount: number;
+  entries: ChatEntry[];
+  summary?: string;
+  error?: string;
+  stopReason?: import("./turn/types.js").TurnStopReason;
+}
+
+export interface PersistedSubAgentTranscriptRequest {
+  originSessionId?: string;
+  childSessionId: string;
+}
+
+export type PersistedSubAgentTranscriptResult =
+  | {
+      ok: true;
+      childSessionId: string;
+      messages: SerializedHistoryMessage[];
+      title?: string;
+      spawnId?: string;
+      originToolUseId?: string;
+    }
+  | { ok: false; error: string };
+
+interface TrackedSubAgentRun {
+  spawnId?: string;
+  childSessionId: string;
+  originSessionId?: string;
+  title: string;
+  status: SubAgentRunStatus;
+  startedAt: string;
+  updatedAt: string;
+  toolCallCount: number;
+  turnCount: number;
+  entries: ChatEntry[];
+  summary?: string;
+  error?: string;
+  stopReason?: import("./turn/types.js").TurnStopReason;
+  abort?: () => void;
 }
 
 export interface SubAgentRunnerDeps {
@@ -193,7 +258,11 @@ const MAX_TURNS_CAP = 30;
  * defense; depth check on the tool itself (in `agent-spawn.ts`) is the
  * defense-in-depth backstop.
  */
-const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>(["agent_spawn"]);
+const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>([
+  "agent_spawn",
+  "agent_status",
+  "agent_interrupt",
+]);
 
 /**
  * Resume-axis loop guards (Commit 2 — security-required to land WITH the resume
@@ -211,6 +280,7 @@ const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>(["agent_spawn"]);
  */
 const MAX_RESUMES = 3;
 const CUMULATIVE_ROUNDS_CEILING = 4 * MAX_TURNS_CAP;
+const MAX_TRACKED_RUNS = 100;
 
 /**
  * Build the child loop's session id. It MUST satisfy MemoryManager's
@@ -233,12 +303,14 @@ const CUMULATIVE_ROUNDS_CEILING = 4 * MAX_TURNS_CAP;
  */
 function buildChildSessionId(originSessionId?: string): string {
   const origin = originSessionId ?? "";
-  const originTag = origin
-    ? createHash("sha256").update(origin).digest("hex").slice(0, 8)
-    : "";
+  const originTag = origin ? originSessionTag(origin) : "";
   return originTag
     ? `sub-${originTag}-${randomUUID()}`
     : `sub-${randomUUID()}`;
+}
+
+function originSessionTag(originSessionId: string): string {
+  return createHash("sha256").update(originSessionId).digest("hex").slice(0, 8);
 }
 
 /**
@@ -348,6 +420,32 @@ function makeSubAgentApprovalAdapter(
   return wrapper;
 }
 
+function isGenericMessage(value: unknown): value is GenericMessage {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const message = value as Record<string, unknown>;
+  if (message.role === "user") {
+    return typeof message.content === "string" || Array.isArray(message.content);
+  }
+  if (message.role === "assistant") {
+    return typeof message.content === "string";
+  }
+  if (message.role === "tool_result") {
+    return typeof message.content === "string" && typeof message.toolUseId === "string";
+  }
+  return false;
+}
+
+function hideUnhydratedToolResultStub(message: GenericMessage): GenericMessage {
+  if (
+    message.role === "tool_result" &&
+    typeof message.content === "string" &&
+    isToolResultStubContent(message.content)
+  ) {
+    return { ...message, content: "" };
+  }
+  return message;
+}
+
 export class SubAgentRunner {
   constructor(private readonly deps: SubAgentRunnerDeps) {}
 
@@ -363,6 +461,186 @@ export class SubAgentRunner {
    * keyed on the session id is sufficient — no cross-process contention.
    */
   private readonly inFlight = new Map<string, Promise<SubAgentSpawnResult>>();
+  private readonly trackedRuns = new Map<string, TrackedSubAgentRun>();
+
+  listRunStatuses(originSessionId: string): SubAgentRunSnapshot[] {
+    return [...this.uniqueTrackedRuns()]
+      .filter((run) => this.isRunVisibleToOrigin(run, originSessionId))
+      .map((run) => this.snapshotRun(run))
+      .sort((a, b) => {
+        if (a.status === "running" && b.status !== "running") return -1;
+        if (a.status !== "running" && b.status === "running") return 1;
+        return b.updatedAt.localeCompare(a.updatedAt);
+      });
+  }
+
+  getRunStatus(id: string, originSessionId: string): SubAgentRunSnapshot | null {
+    const run = this.trackedRuns.get(id);
+    if (run && !this.isRunVisibleToOrigin(run, originSessionId)) return null;
+    return run ? this.snapshotRun(run) : null;
+  }
+
+  getPersistedTranscript(
+    request: PersistedSubAgentTranscriptRequest,
+  ): PersistedSubAgentTranscriptResult {
+    const childSessionId = typeof request.childSessionId === "string" && isValidSessionId(request.childSessionId)
+      ? request.childSessionId
+      : undefined;
+    if (!childSessionId) return { ok: false, error: "invalid-child-session-id" };
+
+    const makeResult = (id: string, meta: ReturnType<MemoryManager["loadSessionMetadata"]>) => {
+      const loaded = this.deps.subAgentMemoryManager.loadSession(id);
+      if (!Array.isArray(loaded)) return null;
+      const hydrated = this.deps.subAgentMemoryManager.rehydrateToolResultArtifacts(id, loaded);
+      const messages = hydrated
+        .filter(isGenericMessage)
+        .map(hideUnhydratedToolResultStub)
+        .map(serializeHistoryMessage);
+      return {
+        ok: true as const,
+        childSessionId: id,
+        messages,
+        ...(meta?.subAgentTitle ? { title: meta.subAgentTitle } : {}),
+        ...(meta?.spawnId ? { spawnId: meta.spawnId } : {}),
+        ...(meta?.originToolUseId ? { originToolUseId: meta.originToolUseId } : {}),
+      };
+    };
+
+    for (const id of [childSessionId]) {
+      const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(id);
+      if (meta?.sessionKind !== "subagent") continue;
+      if (request.originSessionId) {
+        if (meta.originSessionId !== request.originSessionId) continue;
+      }
+      const result = makeResult(id, meta);
+      if (result) return result;
+    }
+    return { ok: false, error: "sub-agent transcript not found" };
+  }
+
+  interruptRun(id: string, originSessionId: string): { ok: boolean; message: string; run?: SubAgentRunSnapshot } {
+    const run = this.trackedRuns.get(id);
+    if (!run || !this.isRunVisibleToOrigin(run, originSessionId)) {
+      return { ok: false, message: `sub-agent run not found: ${id}` };
+    }
+    if (run.status !== "running" || !run.abort) {
+      return {
+        ok: false,
+        message: `sub-agent run is not running: ${id}`,
+        run: this.snapshotRun(run),
+      };
+    }
+    run.abort();
+    this.updateRun(run, {
+      status: "interrupted",
+      stopReason: "interrupted",
+    });
+    return {
+      ok: true,
+      message: `interrupt requested for sub-agent run: ${id}`,
+      run: this.snapshotRun(run),
+    };
+  }
+
+  private *uniqueTrackedRuns(): Iterable<TrackedSubAgentRun> {
+    const seen = new Set<TrackedSubAgentRun>();
+    for (const run of this.trackedRuns.values()) {
+      if (seen.has(run)) continue;
+      seen.add(run);
+      yield run;
+    }
+  }
+
+  private snapshotRun(run: TrackedSubAgentRun): SubAgentRunSnapshot {
+    return {
+      ...(run.spawnId ? { spawnId: run.spawnId } : {}),
+      childSessionId: run.childSessionId,
+      title: run.title,
+      status: run.status,
+      startedAt: run.startedAt,
+      updatedAt: run.updatedAt,
+      toolCallCount: run.toolCallCount,
+      turnCount: run.turnCount,
+      entries: run.entries,
+      ...(run.summary !== undefined ? { summary: run.summary } : {}),
+      ...(run.error !== undefined ? { error: run.error } : {}),
+      ...(run.stopReason !== undefined ? { stopReason: run.stopReason } : {}),
+    };
+  }
+
+  private trackRun(args: {
+    spawnId?: string;
+    childSessionId: string;
+    originSessionId?: string;
+    title: string;
+    abort?: () => void;
+  }): TrackedSubAgentRun {
+    const now = new Date().toISOString();
+    const run: TrackedSubAgentRun = {
+      ...(args.spawnId ? { spawnId: args.spawnId } : {}),
+      childSessionId: args.childSessionId,
+      ...(args.originSessionId ? { originSessionId: args.originSessionId } : {}),
+      title: args.title,
+      status: "running",
+      startedAt: now,
+      updatedAt: now,
+      toolCallCount: 0,
+      turnCount: 0,
+      entries: [],
+      ...(args.abort ? { abort: args.abort } : {}),
+    };
+    this.trackedRuns.set(args.childSessionId, run);
+    if (args.spawnId) this.trackedRuns.set(args.spawnId, run);
+    this.pruneTrackedRuns();
+    return run;
+  }
+
+  private isRunVisibleToOrigin(run: TrackedSubAgentRun, originSessionId: string): boolean {
+    return Boolean(originSessionId) && run.originSessionId === originSessionId;
+  }
+
+  private updateRun(
+    run: TrackedSubAgentRun,
+    patch: Partial<Omit<TrackedSubAgentRun, "spawnId" | "childSessionId" | "title" | "startedAt">>,
+  ): void {
+    Object.assign(run, patch, { updatedAt: new Date().toISOString() });
+  }
+
+  private finalizeRun(
+    run: TrackedSubAgentRun,
+    result: SubAgentSpawnResult,
+  ): void {
+    const patch: Partial<Omit<TrackedSubAgentRun, "spawnId" | "childSessionId" | "title" | "startedAt">> = {
+      status: result.stopReason === "interrupted"
+        ? "interrupted"
+        : result.ok
+          ? "done"
+          : "error",
+      toolCallCount: result.toolCallCount,
+      turnCount: result.turnCount,
+      entries: result.entries,
+      stopReason: result.stopReason,
+    };
+    if (result.ok) {
+      patch.summary = result.summary;
+    } else {
+      patch.error = result.error ?? result.summary;
+    }
+    delete run.abort;
+    this.updateRun(run, patch);
+  }
+
+  private pruneTrackedRuns(): void {
+    const unique = [...this.uniqueTrackedRuns()];
+    if (unique.length <= MAX_TRACKED_RUNS) return;
+    const removable = unique
+      .filter((run) => run.status !== "running")
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+    for (const run of removable.slice(0, unique.length - MAX_TRACKED_RUNS)) {
+      this.trackedRuns.delete(run.childSessionId);
+      if (run.spawnId) this.trackedRuns.delete(run.spawnId);
+    }
+  }
 
   /**
    * Shared child-loop reconstruction used by BOTH `spawn()` and `resume()`.
@@ -471,6 +749,7 @@ export class SubAgentRunner {
     callbacks?: SubAgentSpawnCallbacks,
   ): Promise<SubAgentSpawnResult> {
     const childSessionId = buildChildSessionId(input.originSessionId);
+    callbacks?.onLinked?.({ childSessionId });
 
     // Resolve the profile's mode → working-posture preamble + round-budget hint.
     // Unknown / absent mode resolves to the inert `default` mode; a non-empty
@@ -522,10 +801,16 @@ export class SubAgentRunner {
     // session. Mirrors how `newConversation`/`loadSession` re-init the tracer
     // after they change the session identity.
     child.rebindTracer();
+    const trackedRun = this.trackRun({
+      spawnId: input.spawnId,
+      childSessionId,
+      originSessionId: input.originSessionId,
+      title: input.title,
+      abort: () => child.abortCurrentTurn(),
+    });
     if (!child.hasProvider()) {
       const msg = "sub-agent: LLM provider not configured";
-      callbacks?.onError?.(msg);
-      return {
+      const result: SubAgentSpawnResult = {
         summary: msg,
         toolCallCount: 0,
         turnCount: 0,
@@ -537,6 +822,9 @@ export class SubAgentRunner {
         ok: false,
         error: msg,
       };
+      this.finalizeRun(trackedRun, result);
+      callbacks?.onError?.(msg);
+      return result;
     }
 
     let totalToolCalls = 0;
@@ -548,11 +836,18 @@ export class SubAgentRunner {
     // forwarded on every activity so the sub-agent tab renders live through the
     // same TranscriptRenderer the main chat uses.
     const transcript = new SubAgentTranscriptAccumulator();
-    const emitActivity = () =>
+    const emitActivity = () => {
+      const entries = transcript.snapshot();
+      this.updateRun(trackedRun, {
+        entries,
+        toolCallCount: totalToolCalls,
+        turnCount: turn,
+      });
       callbacks?.onActivity?.({
-        entries: transcript.snapshot(),
+        entries,
         toolCallCount: totalToolCalls,
       });
+    };
     // Track whether the child loop completed cleanly. Starts false; flips true
     // only after `runTurn` returns without throwing. The catch leaves it false
     // so the error text surfaced as `summary` is reported as a FAILED spawn,
@@ -584,6 +879,10 @@ export class SubAgentRunner {
       sourceTools: scopedTools.map((tool) => tool.name),
       ...(input.profileModel !== undefined ? { profileModel: input.profileModel } : {}),
       ...(input.profileMode !== undefined ? { profileMode: input.profileMode } : {}),
+      ...(input.originSessionId !== undefined ? { originSessionId: input.originSessionId } : {}),
+      ...(input.toolUseId !== undefined ? { originToolUseId: input.toolUseId } : {}),
+      ...(input.spawnId !== undefined ? { spawnId: input.spawnId } : {}),
+      subAgentTitle: input.title,
       resumeCount: 0,
       cumulativeRounds: 0,
     });
@@ -662,12 +961,16 @@ export class SubAgentRunner {
         sourceTools: scopedTools.map((tool) => tool.name),
         ...(input.profileModel !== undefined ? { profileModel: input.profileModel } : {}),
         ...(input.profileMode !== undefined ? { profileMode: input.profileMode } : {}),
+        ...(input.originSessionId !== undefined ? { originSessionId: input.originSessionId } : {}),
+        ...(input.toolUseId !== undefined ? { originToolUseId: input.toolUseId } : {}),
+        ...(input.spawnId !== undefined ? { spawnId: input.spawnId } : {}),
+        subAgentTitle: input.title,
         resumeCount: 0,
         cumulativeRounds: turn,
       });
     }
 
-    return {
+    const result: SubAgentSpawnResult = {
       summary: lastText,
       toolCallCount: totalToolCalls,
       turnCount: turn,
@@ -682,6 +985,8 @@ export class SubAgentRunner {
       // (ok === true) but stopped on its round budget, so the task is unfinished.
       ...(ok && childStopReason === "round-cap" ? { incomplete: true } : {}),
     };
+    this.finalizeRun(trackedRun, result);
+    return result;
   }
 
   /**
@@ -731,6 +1036,7 @@ export class SubAgentRunner {
     title: string,
     callbacks?: SubAgentSpawnCallbacks,
     originSessionId?: string,
+    spawnId?: string,
   ): Promise<SubAgentSpawnResult> {
     // In-flight lock: fail-closed if a resume for THIS session is already
     // running. Checked before any load so two concurrent resumes cannot both
@@ -750,7 +1056,7 @@ export class SubAgentRunner {
       };
     }
 
-    const runPromise = this.runResume(resumeId, continuationInstructions, title, callbacks, originSessionId);
+    const runPromise = this.runResume(resumeId, continuationInstructions, title, callbacks, originSessionId, spawnId);
     this.inFlight.set(resumeId, runPromise);
     try {
       return await runPromise;
@@ -766,6 +1072,7 @@ export class SubAgentRunner {
     title: string,
     callbacks?: SubAgentSpawnCallbacks,
     originSessionId?: string,
+    spawnId?: string,
   ): Promise<SubAgentSpawnResult> {
     const fail = (msg: string, extra?: Partial<SubAgentSpawnResult>): SubAgentSpawnResult => {
       callbacks?.onError?.(msg);
@@ -902,32 +1209,37 @@ export class SubAgentRunner {
     if (!loaded) {
       return fail(`sub-agent resume: failed to load session history for "${resumeId}"`);
     }
+    const trackedRun = this.trackRun({
+      spawnId,
+      childSessionId: resumeId,
+      originSessionId,
+      title,
+      abort: () => child.abortCurrentTurn(),
+    });
 
     let totalToolCalls = 0;
     let lastText = "";
     let turn = 0;
     let assistantRounds = 0;
-    // Accumulator seed decision (design point 7 — DEGRADE path, intentional):
-    // `historyToEntries` lives in `src/ui/renderer/utils/history.ts` — a
-    // renderer-layer util the engine (main process) must not import (the engine
-    // imports nothing from `ui/renderer`). Rather than duplicate ~90 lines of
-    // reducer logic here, we take the documented DEGRADE path: the resumed run's
-    // accumulator starts fresh (resumed segment only). Continuity across chip/tab
-    // is handled downstream — each resume writes its OWN `agent_spawn` tool result
-    // with its OWN `entries` snapshot (distinct `toolUseId` per call), and on
-    // reload `deriveSubAgentSpawnsFromEntries` walks BOTH the original spawn's and
-    // every resume's tool calls while `mergeSubAgentSpawns` dedupes by `toolUseId`,
-    // so each segment renders as its OWN sub-agent card (not a unified transcript).
-    // A unified continuous transcript across segments is OUT OF SCOPE for PR-C and
-    // is deferred to PR-E. Do NOT "fix" this by seeding the accumulator from the
-    // re-hydrated history — doing so would require importing renderer-layer code
-    // into the engine, violating the layer boundary.
+    // Accumulator seed decision: keep the engine accumulator segment-local.
+    // `historyToEntries` lives in renderer code, so seeding from hydrated child
+    // history here would cross the main/renderer layer boundary. Continuity is
+    // handled downstream: each resume writes its own `agent_spawn` tool result
+    // with a distinct `toolUseId`, and the renderer groups segments by shared
+    // childSessionId into one unified transcript.
     const transcript = new SubAgentTranscriptAccumulator();
-    const emitActivity = () =>
+    const emitActivity = () => {
+      const entries = transcript.snapshot();
+      this.updateRun(trackedRun, {
+        entries,
+        toolCallCount: totalToolCalls,
+        turnCount: turn,
+      });
       callbacks?.onActivity?.({
-        entries: transcript.snapshot(),
+        entries,
         toolCallCount: totalToolCalls,
       });
+    };
     let ok = false;
     let failureReason: string | undefined;
     let childStopReason: import("./turn/types.js").TurnStopReason | undefined;
@@ -998,7 +1310,7 @@ export class SubAgentRunner {
       });
     }
 
-    return {
+    const result: SubAgentSpawnResult = {
       summary: lastText,
       toolCallCount: totalToolCalls,
       turnCount: turn,
@@ -1009,6 +1321,8 @@ export class SubAgentRunner {
       ...(childStopReason ? { stopReason: childStopReason } : {}),
       ...(ok && childStopReason === "round-cap" ? { incomplete: true } : {}),
     };
+    this.finalizeRun(trackedRun, result);
+    return result;
   }
 
   /**

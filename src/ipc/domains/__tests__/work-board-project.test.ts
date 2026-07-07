@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WORK_BOARD } from "../../../shared/ipc-channels.js";
@@ -63,6 +63,7 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "lvis-work-board-project-"));
   workspace = join(root, "workspace");
   mkdirSync(workspace, { recursive: true });
+  workspace = realpathSync(workspace);
   process.env.LVIS_HOME = root;
   process.chdir(workspace);
   ipc.handlers.clear();

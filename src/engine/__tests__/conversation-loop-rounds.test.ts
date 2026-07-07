@@ -761,12 +761,12 @@ describe("ConversationLoop queryLoop", () => {
   });
 
   // R2-CR-1: per-round fan-out cap must not orphan tool_use ids in history.
-  // If the LLM emits >MAX_TOOL_CALLS_PER_ROUND (10) tool_use blocks in one
+  // If the LLM emits >MAX_TOOL_CALLS_PER_ROUND (5) tool_use blocks in one
   // round, only the capped slice may be persisted — every tool_use block in
   // assistant history MUST have a matching tool_result block in the next
   // user turn, otherwise Anthropic + OpenAI strict APIs 400 the next request.
-  it("R2-CR-1: per-round fan-out cap persists only the capped slice (10) so tool_use/tool_result counts match", async () => {
-    expect(MAX_AGENT_SPAWNS_PER_ROUND).toBe(10);
+  it("R2-CR-1: per-round fan-out cap persists only the capped slice (5) so tool_use/tool_result counts match", async () => {
+    expect(MAX_AGENT_SPAWNS_PER_ROUND).toBe(5);
 
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(createDynamicTool({
@@ -832,7 +832,7 @@ describe("ConversationLoop queryLoop", () => {
     const toolResults = messages.filter((m) => m.role === "tool_result");
     expect(toolResults).toHaveLength(MAX_AGENT_SPAWNS_PER_ROUND);
 
-    // The persisted tool_use ids must be the first 10 (tu-0 .. tu-9), not
+    // The persisted tool_use ids must be the first capped slice, not
     // a later subset, and every persisted tool_use id has a matching
     // tool_result.toolUseId.
     const persistedIds = assistantWithTools!.toolCalls.map((tc) => tc.id);

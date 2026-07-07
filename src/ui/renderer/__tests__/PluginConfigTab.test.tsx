@@ -173,6 +173,108 @@ describe("PluginConfigTab", () => {
     });
   });
 
+  it("passes networkAccess acknowledgement when Doctor reinstalls a network-enabled failed plugin", async () => {
+    const broken = {
+      id: "meeting",
+      name: "Meeting",
+      description: "Meeting plugin",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      installAliases: ["lvis-plugin-meeting"],
+      loadStatus: "failed" as const,
+      networkAccess: {
+        allowedDomains: ["graph.microsoft.com"],
+        allowPrivateNetworks: true,
+      },
+    };
+    const repaired = {
+      ...broken,
+      loadStatus: "loaded" as const,
+    };
+    const cards = vi.fn()
+      .mockResolvedValueOnce([broken])
+      .mockResolvedValueOnce([repaired]);
+    mockInstall.mockResolvedValue({ ok: true as const, pluginId: "meeting" });
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "lvisHost", {
+      value: {
+        takePluginMarketplaceApi: () => ({
+          installMarketplacePlugin: mockInstall,
+          uninstallMarketplacePlugin: mockUninstall,
+        }),
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:meeting")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("plugin-config:doctor:meeting"));
+
+    await waitFor(() => {
+      expect(mockInstall).toHaveBeenCalledWith("lvis-plugin-meeting", undefined, {
+        networkAccessAcknowledgement: {
+          allowedDomains: ["graph.microsoft.com"],
+          allowPrivateNetworks: true,
+        },
+      });
+      expect(screen.getByText("Meeting 복구 완료")).toBeInTheDocument();
+    });
+  });
+
+  it("completes Doctor diagnostics without reinstalling when grants do not match", async () => {
+    const broken = {
+      id: "meeting",
+      name: "Meeting",
+      description:
+        'Marketplace install failed: plugin "meeting" artifact manifest external-auth-consumer capability does not match the catalog-approved grant',
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      installAliases: ["lvis-plugin-meeting"],
+      installFailureKind: "catalog-grant-mismatch" as const,
+      loadStatus: "failed" as const,
+    };
+    const cards = vi.fn().mockResolvedValue([broken]);
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:meeting")).toBeInTheDocument();
+    });
+    expect(screen.getByText("마켓플레이스 패키지 불일치")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("plugin-config:doctor:meeting"));
+
+    await waitFor(() => {
+      expect(mockInstall).not.toHaveBeenCalled();
+      expect(cards).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("Meeting 진단 완료")).toBeInTheDocument();
+    });
+  });
+
   it("resolves Doctor install id from marketplace when a failed plugin has no install alias", async () => {
     const broken = {
       id: "lge-api",
@@ -272,6 +374,49 @@ describe("PluginConfigTab", () => {
     await waitFor(() => {
       expect(mockUninstall).toHaveBeenCalledWith("agent-hub");
       expect(screen.getByText("Agent Hub 제거 완료")).toBeInTheDocument();
+    });
+  });
+
+  it("requests Doctor cleanup when removing a catalog grant mismatch diagnostic", async () => {
+    const broken = {
+      id: "meeting",
+      name: "LVIS Meeting",
+      description: "Meeting plugin",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      isManaged: true,
+      installPolicy: "admin" as const,
+      loadStatus: "failed" as const,
+      installFailureKind: "catalog-grant-mismatch" as const,
+    };
+    const cards = vi.fn(async () => [broken]);
+    mockUninstall.mockResolvedValueOnce({ ok: true as const });
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:meeting")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("plugin-config:doctor-remove:meeting"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "제거" }));
+
+    await waitFor(() => {
+      expect(mockUninstall).toHaveBeenCalledWith("meeting", {
+        doctorCleanup: { installFailureKind: "catalog-grant-mismatch" },
+      });
+      expect(screen.getByText("LVIS Meeting 제거 완료")).toBeInTheDocument();
     });
   });
 

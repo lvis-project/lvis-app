@@ -9,7 +9,7 @@ import { sanitizePluginConfig, sanitizePluginConfigKey } from "../../../shared/p
 import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { InstallInFlight, InstallPhase, InstallProgressPayload } from "../hooks/use-plugin-marketplace.js";
-import type { MarketplaceItem, PluginCardSummary } from "../types.js";
+import type { MarketplaceItem, PluginCardSummary, PluginMarketplaceUninstallOptions } from "../types.js";
 import { PluginAuthSection } from "../components/PluginAuthSection.js";
 import { usePluginAuthStatuses } from "../hooks/use-plugin-auth-status.js";
 import { PluginUninstallDialog } from "../dialogs/PluginUninstallDialog.js";
@@ -21,6 +21,7 @@ import { isPluginInstallKey } from "../utils/plugin-install-aliases.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { buildNetworkAccessAcknowledgement } from "../../../shared/network-access.js";
 
 type KV = { key: string; value: string };
 
@@ -512,10 +513,20 @@ export function PluginConfigTab() {
   }, [showBanner, refreshPlugins, t]);
 
   const handleDoctorPlugin = useCallback(async (plugin: PluginCardSummary) => {
+    if (plugin.installFailureKind === "catalog-grant-mismatch") {
+      showBanner("success", t("pluginConfigTab.successDoctorDiagnostic", { displayName: plugin.name }));
+      await refreshPlugins();
+      return;
+    }
     setDoctoringId(plugin.id);
     try {
       const installKey = await resolvePluginDoctorInstallKey(plugin);
-      const result = await getHostMarketplaceApi().installMarketplacePlugin(installKey);
+      const networkAccessAcknowledgement = buildNetworkAccessAcknowledgement(plugin.networkAccess);
+      const result = networkAccessAcknowledgement
+        ? await getHostMarketplaceApi().installMarketplacePlugin(installKey, undefined, {
+            networkAccessAcknowledgement,
+          })
+        : await getHostMarketplaceApi().installMarketplacePlugin(installKey);
       if (!result.ok) {
         showBanner("error", result.message ?? result.error ?? t("pluginConfigTab.errorDoctor"));
         return;
@@ -532,7 +543,14 @@ export function PluginConfigTab() {
   const handleUninstall = useCallback(async (pluginId: string, displayName: string) => {
     setSaving(true);
     try {
-      const result = await getHostMarketplaceApi().uninstallMarketplacePlugin(pluginId);
+      const uninstallOptions: PluginMarketplaceUninstallOptions | undefined =
+        uninstallTarget?.id === pluginId && uninstallTarget.installFailureKind === "catalog-grant-mismatch"
+          ? { doctorCleanup: { installFailureKind: "catalog-grant-mismatch" } }
+          : undefined;
+      const marketplaceApi = getHostMarketplaceApi();
+      const result = uninstallOptions
+        ? await marketplaceApi.uninstallMarketplacePlugin(pluginId, uninstallOptions)
+        : await marketplaceApi.uninstallMarketplacePlugin(pluginId);
       if (!result.ok) {
         showBanner("error", result.message ?? t("pluginConfigTab.errorUninstall"));
         return;
@@ -546,7 +564,7 @@ export function PluginConfigTab() {
       setSaving(false);
       setUninstallTarget(null);
     }
-  }, [showBanner, t]);
+  }, [showBanner, t, uninstallTarget]);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col gap-3">
@@ -841,10 +859,14 @@ export function PluginConfigTab() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 space-y-0.5">
                         <p className="text-xs font-medium text-destructive">
-                          {t("pluginConfigTab.doctorTitle")}
+                          {selectedPlugin.installFailureKind === "catalog-grant-mismatch"
+                            ? t("pluginConfigTab.doctorGrantMismatchTitle")
+                            : t("pluginConfigTab.doctorTitle")}
                         </p>
                         <p className="text-[11px] text-destructive/(--opacity-intense)">
-                          {t("pluginConfigTab.doctorDescription")}
+                          {selectedPlugin.installFailureKind === "catalog-grant-mismatch"
+                            ? t("pluginConfigTab.doctorGrantMismatchDescription")
+                            : t("pluginConfigTab.doctorDescription")}
                         </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">

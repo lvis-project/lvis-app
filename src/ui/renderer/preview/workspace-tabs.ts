@@ -77,6 +77,12 @@ export interface WorkspaceTabsStore {
    */
   addTab: (kind: WorkspaceTabKind) => void;
   /**
+   * Programmatic launcher: activate the existing pinned CONTAINER tab of this
+   * kind, or create one if it does not exist. Used by event-driven surfaces
+   * such as sub-agent spawns where repeated events must not duplicate tabs.
+   */
+  ensureContainerTab: (kind: WorkspaceTabKind) => void;
+  /**
    * Content routing (left-click). Opens `content` in the single ephemeral slot:
    * reuse the tab already showing this content (keeping its mode), else replace
    * the existing ephemeral tab in-place, else append a new ephemeral tab.
@@ -153,6 +159,19 @@ export function useWorkspaceTabs(): WorkspaceTabsStore {
 
   const addTab = useCallback((kind: WorkspaceTabKind) => {
     setState((prev) => {
+      const ordinal = nextOrdinalRef.current[kind]++;
+      const id = `${kind}:${nextIdRef.current++}`;
+      const tab: WorkspaceTab = { id, kind, ordinal, mode: "pinned", content: null };
+      return { ...prev, tabs: [...prev.tabs, tab], activeTabId: id };
+    });
+  }, []);
+
+  const ensureContainerTab = useCallback((kind: WorkspaceTabKind) => {
+    setState((prev) => {
+      const existing = prev.tabs.find((tab) => tab.kind === kind && tab.content === null);
+      if (existing) {
+        return prev.activeTabId === existing.id ? prev : { ...prev, activeTabId: existing.id };
+      }
       const ordinal = nextOrdinalRef.current[kind]++;
       const id = `${kind}:${nextIdRef.current++}`;
       const tab: WorkspaceTab = { id, kind, ordinal, mode: "pinned", content: null };
@@ -280,6 +299,7 @@ export function useWorkspaceTabs(): WorkspaceTabsStore {
       browserUrlByTab: state.browserUrlByTab,
       setActiveTabId,
       addTab,
+      ensureContainerTab,
       openInEphemeral,
       openPinned,
       promoteToPinned,
@@ -287,6 +307,6 @@ export function useWorkspaceTabs(): WorkspaceTabsStore {
       closeTab,
       setBrowserTabUrl,
     }),
-    [state, setActiveTabId, addTab, openInEphemeral, openPinned, promoteToPinned, pruneContentTabs, closeTab, setBrowserTabUrl],
+    [state, setActiveTabId, addTab, ensureContainerTab, openInEphemeral, openPinned, promoteToPinned, pruneContentTabs, closeTab, setBrowserTabUrl],
   );
 }

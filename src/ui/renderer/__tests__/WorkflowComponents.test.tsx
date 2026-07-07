@@ -10,7 +10,6 @@ import { TooltipProvider } from "../../../components/ui/tooltip.js";
 import { AskUserQuestionCard } from "../components/AskUserQuestionCard.js";
 import { RoutinePanel } from "../components/RoutinePanel.js";
 import { SessionTodoPanel } from "../components/SessionTodoPanel.js";
-import { SubAgentCard } from "../components/SubAgentCard.js";
 import { SkillBadge } from "../components/SkillBadge.js";
 import { t } from "../../../i18n/runtime.js";
 import type { LvisApi } from "../types.js";
@@ -710,43 +709,6 @@ describe("SessionTodoPanel", () => {
   });
 });
 
-describe("SubAgentCard", () => {
-  it("renders title + status badge", () => {
-    const { container } = render(
-      <SubAgentCard
-        spawn={{
-          spawnId: "s1",
-          title: "search task",
-          status: "done",
-          entries: [{ kind: "assistant", text: "hello", streaming: false }],
-          summary: "all done",
-          toolCallCount: 0,
-        }}
-      />,
-    );
-    expect(container.textContent).toContain("search task");
-    expect(container.textContent).toContain("완료");
-  });
-
-  it("renders error state", async () => {
-    const { container, getByText } = render(
-      <SubAgentCard
-        spawn={{
-          spawnId: "s2",
-          title: "broken",
-          status: "error",
-          entries: [],
-          toolCallCount: 0,
-          errorMessage: "kapow",
-        }}
-      />,
-    );
-    expect(container.textContent).toContain("오류");
-    // Default-collapsed for non-running spawns; open it to inspect details.
-    fireEvent.click(getByText("broken"));
-    expect(container.textContent).toContain("kapow");
-  });
-});
 
 describe("SkillBadge", () => {
   it("renders the skill name", () => {

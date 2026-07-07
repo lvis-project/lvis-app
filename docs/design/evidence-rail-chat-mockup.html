@@ -1,0 +1,1067 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LVIS Evidence Rail Chat Mockup</title>
+  <style>
+    :root {
+      --bg: #1a1a1a;
+      --surface: #262626;
+      --card: #2e2e2e;
+      --card-2: #383838;
+      --fg: #f6f3eb;
+      --fg-muted: #b3aea3;
+      --fg-soft: #948f86;
+      --low: #74d99f;
+      --med: #f6c763;
+      --high: #fd312e;
+      --info: #c497ef;
+      --accent: #734dff;
+      --paper: #fbf8f5;
+      --paper-2: #f2ecef;
+      --paper-line: #e8d3db;
+      --ink: #2c2628;
+      --ink-muted: #796971;
+      --rose: #c91452;
+      --rose-soft: #f7c6d7;
+      --rail: #221e20;
+      --rail-2: #2d282a;
+      --rail-line: #494044;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+      color-scheme: dark;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at 14% 18%, rgba(196, 151, 239, 0.22), transparent 30%),
+        linear-gradient(130deg, #29313d 0%, #1f2429 42%, #3c322e 100%);
+      color: var(--fg);
+      font-family: Pretendard, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .app {
+      width: min(1500px, calc(100vw - 28px));
+      height: min(930px, calc(100vh - 28px));
+      display: grid;
+      grid-template-columns: 248px minmax(520px, 1fr) 382px;
+      grid-template-rows: minmax(0, 1fr);
+      align-items: stretch;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 18px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .sidebar {
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      height: 100%;
+      overflow: hidden;
+      flex-direction: column;
+      border-right: 1px solid #dfc6cf;
+      background: #fbedf3;
+      color: #765261;
+    }
+
+    .traffic {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      height: 38px;
+      padding: 0 15px;
+    }
+
+    .dot {
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+    }
+
+    .dot.red { background: #ff5f57; }
+    .dot.yellow { background: #ffbd2e; }
+    .dot.green { background: #28c840; }
+
+    .mini-tools {
+      margin-left: auto;
+      display: flex;
+      gap: 12px;
+      color: #6d4556;
+      font-size: 14px;
+    }
+
+    .new-chat {
+      margin: 10px 15px 16px;
+      height: 40px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--rose);
+      color: white;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .nav-section {
+      padding: 0 10px 16px;
+      border-bottom: 1px solid #dfc6cf;
+    }
+
+    .nav-title {
+      padding: 4px 14px 9px;
+      color: #7e5364;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      height: 34px;
+      padding: 0 12px;
+      border-radius: 7px;
+      color: #765261;
+      font-size: 14px;
+    }
+
+    .nav-item.active {
+      background: #dfe1ff;
+      color: #315be8;
+      font-weight: 700;
+    }
+
+    .nav-item b {
+      width: 18px;
+      color: inherit;
+      font-size: 14px;
+      text-align: center;
+    }
+
+    .spacer {
+      flex: 1;
+    }
+
+    .main {
+      position: relative;
+      display: block;
+      min-width: 0;
+      min-height: 0;
+      height: 100%;
+      overflow: hidden;
+      background: var(--paper);
+      color: var(--ink);
+    }
+
+    .topbar {
+      position: absolute;
+      inset: 0 0 auto;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      border-bottom: 1px solid #eadce2;
+      padding: 0 16px;
+      color: #9b5b18;
+      font-size: 12px;
+    }
+
+    .kbd {
+      display: inline-grid;
+      min-width: 23px;
+      height: 18px;
+      place-items: center;
+      border: 1px solid #e3b889;
+      border-radius: 4px;
+      background: #fff7ef;
+      color: #9b5b18;
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10px;
+    }
+
+    .segmented {
+      display: flex;
+      overflow: hidden;
+      border: 1px solid #e7bbc7;
+      border-radius: 10px;
+      background: #fff8fb;
+      color: #744756;
+    }
+
+    .segmented span {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+
+    .segmented .on {
+      background: var(--rose);
+      color: white;
+      font-weight: 700;
+    }
+
+    .chat-scroll {
+      position: absolute;
+      inset: 52px 0 142px;
+      overflow: auto;
+      padding: 26px 26px 34px;
+    }
+
+    .message {
+      max-width: 880px;
+      margin: 0 0 24px;
+    }
+
+    .message.user {
+      margin-left: auto;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .bubble {
+      max-width: min(760px, 82%);
+      padding: 14px 18px;
+      border-radius: 8px;
+      background: var(--rose-soft);
+      color: #6a203a;
+      box-shadow: 0 8px 24px rgba(199, 20, 82, 0.12);
+      line-height: 1.55;
+    }
+
+    .meta-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #967986;
+      font-size: 12px;
+      margin: 10px 0 0 12px;
+    }
+
+    .mini-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 22px;
+      padding: 0 8px;
+      border: 1px solid #ead0d9;
+      border-radius: 5px;
+      background: #fff7fa;
+      color: #896475;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .quote {
+      margin: 14px 0;
+      padding: 0 0 0 16px;
+      border-left: 4px solid #e3bfd0;
+      color: #4d3b42;
+      font-family: Georgia, "Times New Roman", serif;
+      font-style: italic;
+      line-height: 1.75;
+    }
+
+    .answer {
+      line-height: 1.85;
+      font-size: 14px;
+    }
+
+    .answer table {
+      width: 560px;
+      max-width: 100%;
+      margin: 14px 0 20px;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .answer th {
+      color: #614552;
+      font-size: 12px;
+      text-align: left;
+    }
+
+    .answer th,
+    .answer td {
+      border-bottom: 1px solid #e5cbd5;
+      padding: 10px 8px;
+    }
+
+    .work {
+      max-width: 900px;
+      margin: 18px 0 28px;
+      overflow: hidden;
+      border: 1px solid #ead3dc;
+      border-radius: 8px;
+      background: #fffafc;
+    }
+
+    .work-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 40px;
+      padding: 0 13px;
+      border-bottom: 1px solid #eed9e1;
+      color: #5c454f;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .work-head small {
+      color: #aa8f9b;
+      font-weight: 500;
+    }
+
+    .spin {
+      width: 15px;
+      height: 15px;
+      border: 2px solid rgba(196, 151, 239, 0.25);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--med);
+      box-shadow: 0 0 0 0 rgba(246, 199, 99, 0.5);
+      animation: pulse 1.8s ease-out infinite;
+    }
+
+    @keyframes pulse {
+      70% { box-shadow: 0 0 0 8px rgba(246, 199, 99, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(246, 199, 99, 0); }
+    }
+
+    .work-body {
+      padding: 10px 12px 14px;
+      display: grid;
+      gap: 9px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 22px 1fr auto;
+      align-items: start;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      color: #5c454f;
+      font-size: 12px;
+    }
+
+    .step.active {
+      border-color: rgba(246, 199, 99, 0.55);
+      background: rgba(246, 199, 99, 0.11);
+    }
+
+    .step.done .state {
+      border-color: rgba(116, 217, 159, 0.5);
+      background: rgba(116, 217, 159, 0.18);
+      color: #236241;
+    }
+
+    .state {
+      display: grid;
+      width: 22px;
+      height: 22px;
+      place-items: center;
+      border: 1px solid #ead0d9;
+      border-radius: 50%;
+      color: #8c6878;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .step-title {
+      display: flex;
+      min-width: 0;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+    }
+
+    .step p {
+      margin: 6px 0 0;
+      color: #806977;
+      line-height: 1.55;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      height: 19px;
+      padding: 0 6px;
+      border-radius: 4px;
+      background: rgba(196, 151, 239, 0.18);
+      color: #67448e;
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    .tag.med {
+      background: rgba(246, 199, 99, 0.2);
+      color: #7a5412;
+    }
+
+    .tool-output {
+      margin-top: 8px;
+      overflow: hidden;
+      border: 1px solid #ead6de;
+      border-radius: 7px;
+      background: #fff;
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+    }
+
+    .tool-output .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 30px;
+      padding: 7px 9px;
+      border-bottom: 1px solid #f0dfe5;
+    }
+
+    .tool-output .row:last-child {
+      border-bottom: 0;
+    }
+
+    .stdout {
+      color: #6f6068;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .shimmer {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .shimmer::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      transform: translateX(-120%);
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+      animation: shimmer 1.8s ease-in-out infinite;
+    }
+
+    @keyframes shimmer {
+      to { transform: translateX(120%); }
+    }
+
+    .progress {
+      width: 118px;
+      height: 6px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #ebd8df;
+    }
+
+    .progress span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--info));
+    }
+
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 14px;
+      color: #8a6776;
+      font-size: 13px;
+    }
+
+    .composer {
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      bottom: 14px;
+      height: 114px;
+      margin: 0;
+      display: grid;
+      grid-template-rows: 1fr 36px;
+      overflow: hidden;
+      border: 1px solid #e7bbc7;
+      border-radius: 10px;
+      background: #fff;
+      color: #8b6575;
+    }
+
+    .composer textarea {
+      width: 100%;
+      resize: none;
+      border: 0;
+      outline: 0;
+      background: #fff;
+      padding: 14px 16px;
+      color: #6e5260;
+      font: inherit;
+    }
+
+    .composer-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      border-top: 1px solid #f0dbe3;
+      font-size: 12px;
+    }
+
+    .icon-btn {
+      display: grid;
+      width: 27px;
+      height: 27px;
+      place-items: center;
+      border: 1px solid #e6cbd4;
+      border-radius: 7px;
+      background: white;
+      color: #765261;
+      font-weight: 700;
+    }
+
+    .send {
+      margin-left: auto;
+      border: 0;
+      border-radius: 7px;
+      background: #e68aa7;
+      color: white;
+      padding: 8px 14px;
+      font-weight: 700;
+    }
+
+    .status {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      white-space: nowrap;
+      color: #9b6b47;
+      font-size: 11px;
+    }
+
+    .token-ring {
+      width: 21px;
+      height: 21px;
+      border-radius: 50%;
+      background: conic-gradient(var(--low) 0 72%, #efdce5 72% 100%);
+      position: relative;
+    }
+
+    .token-ring::after {
+      content: "";
+      position: absolute;
+      inset: 4px;
+      border-radius: 50%;
+      background: #fff;
+    }
+
+    .rail {
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      height: 100%;
+      overflow: hidden;
+      grid-template-rows: 52px 1fr;
+      border-left: 1px solid var(--rail-line);
+      background: var(--rail);
+      color: var(--fg);
+    }
+
+    .rail-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--rail-line);
+    }
+
+    .rail-head h1 {
+      margin: 0;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+
+    .rail-head .count {
+      margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--fg-muted);
+      font-size: 12px;
+    }
+
+    .rail-scroll {
+      min-height: 0;
+      overflow: auto;
+      padding: 12px;
+      display: grid;
+      align-content: start;
+      gap: 12px;
+    }
+
+    .widget {
+      overflow: hidden;
+      border: 1px solid var(--rail-line);
+      border-radius: 8px;
+      background: var(--rail-2);
+    }
+
+    .widget-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 10px;
+      border-bottom: 1px solid var(--rail-line);
+      color: var(--fg);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .widget-head small {
+      margin-left: auto;
+      color: var(--fg-soft);
+      font-weight: 500;
+    }
+
+    .widget-body {
+      padding: 9px;
+    }
+
+    .intent-edge {
+      border-left: 3px solid var(--info);
+    }
+
+    .intent-edge.med {
+      border-left-color: var(--med);
+    }
+
+    .intent-edge.low {
+      border-left-color: var(--low);
+    }
+
+    .rail-list {
+      display: grid;
+      gap: 7px;
+    }
+
+    .rail-row {
+      display: grid;
+      gap: 3px;
+      padding: 7px;
+      border: 1px solid rgba(246, 243, 235, 0.08);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.03);
+      font-size: 12px;
+    }
+
+    .rail-row.active {
+      border-color: rgba(246, 199, 99, 0.45);
+      background: rgba(246, 199, 99, 0.08);
+    }
+
+    .rail-row-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      font-weight: 800;
+    }
+
+    .rail-row p {
+      margin: 0;
+      color: var(--fg-muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .mono {
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .receipt {
+      display: grid;
+      gap: 7px;
+      font-size: 11px;
+    }
+
+    .receipt-row {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: baseline;
+      gap: 8px;
+      color: var(--fg-muted);
+    }
+
+    .leader {
+      border-bottom: 1px dotted rgba(246, 243, 235, 0.22);
+      transform: translateY(-3px);
+    }
+
+    .receipt-row b {
+      color: var(--fg);
+      font-weight: 700;
+    }
+
+    .diff-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(246, 243, 235, 0.08);
+      font-size: 12px;
+    }
+
+    .diff-row:last-child {
+      border-bottom: 0;
+    }
+
+    .file-meta {
+      color: var(--fg-soft);
+      font-size: 11px;
+    }
+
+    .plus {
+      color: var(--low);
+    }
+
+    .minus {
+      color: var(--high);
+    }
+
+    .rail-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .rail-tab {
+      flex: 1;
+      height: 28px;
+      border: 1px solid var(--rail-line);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--fg-muted);
+      font-size: 11px;
+    }
+
+    .rail-tab.on {
+      border-color: rgba(196, 151, 239, 0.55);
+      background: rgba(196, 151, 239, 0.14);
+      color: var(--fg);
+    }
+
+    .tiny-bar {
+      height: 5px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(246, 243, 235, 0.1);
+    }
+
+    .tiny-bar span {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, var(--med), var(--info));
+    }
+
+    @media (max-width: 1200px) {
+      .app {
+        grid-template-columns: 220px minmax(480px, 1fr) 330px;
+      }
+    }
+
+    @media (max-width: 980px) {
+      body {
+        place-items: stretch;
+      }
+
+      .app {
+        width: 100vw;
+        height: 100vh;
+        border-radius: 0;
+        grid-template-columns: 74px minmax(0, 1fr);
+      }
+
+      .sidebar .new-chat,
+      .sidebar .nav-title,
+      .sidebar .nav-item span,
+      .mini-tools {
+        display: none;
+      }
+
+      .rail {
+        position: fixed;
+        inset: auto 12px 12px;
+        height: 44vh;
+        border: 1px solid var(--rail-line);
+        border-radius: 12px;
+        box-shadow: var(--shadow);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .spin,
+      .pulse-dot,
+      .shimmer::after {
+        animation: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <aside class="sidebar">
+      <div class="traffic">
+        <span class="dot red"></span>
+        <span class="dot yellow"></span>
+        <span class="dot green"></span>
+        <div class="mini-tools"><span>⌘</span><span>⌕</span><span>☆</span><span>⇩</span></div>
+      </div>
+      <button class="new-chat">＋ New Chat</button>
+      <section class="nav-section">
+        <div class="nav-item"><b>▥</b><span>Work Board</span></div>
+        <div class="nav-item"><b>↳</b><span>Routines</span></div>
+        <div class="nav-item"><b>◎</b><span>Memory</span></div>
+        <div class="nav-item"><b>☆</b><span>Starred</span></div>
+      </section>
+      <section class="nav-section">
+        <div class="nav-title">Plugins</div>
+        <div class="nav-item"><b>EP</b><span>EP</span></div>
+        <div class="nav-item"><b>⌁</b><span>미팅</span></div>
+        <div class="nav-item"><b>✉</b><span>Outlook</span></div>
+        <div class="nav-item"><b>◇</b><span>업무 도우미</span></div>
+      </section>
+      <div class="spacer"></div>
+      <section class="nav-section">
+        <div class="nav-item active"><b>⌂</b><span>Home</span></div>
+        <div class="nav-item"><b>□</b><span>Marketplace</span></div>
+        <div class="nav-item"><b>⌕</b><span>Settings</span></div>
+      </section>
+    </aside>
+
+    <section class="main">
+      <header class="topbar">
+        <span>⌁ Dev</span>
+        <span class="kbd">⌘D</span>
+        <div class="segmented"><span>Chat</span><span class="on">Action</span></div>
+      </header>
+
+      <div class="chat-scroll">
+        <article class="message answer">
+          <ul>
+            <li>기타 주요 일정
+              <ul>
+                <li>aujourd'hui (6-26)에는 국회·정부 회의와 함께 다양한 문화·예술 행사가 진행될 예정이 알려져 있습니다.</li>
+              </ul>
+            </li>
+          </ul>
+          <p class="quote">"요약: 당내 갈등과 민생 행보, 물가·경제 이슈, 그리고 국제 무역 논의가 오늘의 핵심을 차지하고 있습니다."</p>
+          <div class="meta-line"><span>오후 07:38</span><span class="mini-pill">◉ 0 TBD</span></div>
+        </article>
+
+        <article class="message user">
+          <div class="bubble">30개 이상의 뉴스를 검색해서 3개씩 서로다른 언론사에서 찾아주시고 공통된거 카운트해 보여주세요.</div>
+        </article>
+
+        <section class="work">
+          <div class="work-head">
+            <span>Work</span>
+            <small>2 steps</small>
+            <span class="spin" aria-hidden="true"></span>
+            <small>32.8s</small>
+            <span class="pulse-dot" aria-hidden="true"></span>
+          </div>
+          <div class="work-body">
+            <div class="step done">
+              <div class="state">✓</div>
+              <div>
+                <div class="step-title">검색 후보 수집 <span class="tag">web_search</span><span class="tag">30+ docs</span></div>
+                <p>네이트·뉴스1·연합뉴스·SBS·중앙일보·블로그 검색 결과를 교차 확인했습니다.</p>
+              </div>
+              <span class="tag">12.4s</span>
+            </div>
+            <div class="step active">
+              <div class="state"><span class="spin" aria-hidden="true"></span></div>
+              <div>
+                <div class="step-title">공통 토픽 집계 중 <span class="tag med">thinking</span><span class="tag">rank by overlap</span></div>
+                <p>서로 다른 매체에서 반복 등장하는 토픽을 묶고, 매체 다양성과 중복 출현 횟수를 기준으로 정렬하고 있습니다.</p>
+                <div class="tool-output">
+                  <div class="row shimmer"><span class="tag med">Preparing</span><span class="stdout">normalize outlets → SBS, News1, 연합뉴스, 중앙일보...</span></div>
+                  <div class="row"><span class="tag">Done</span><span class="stdout">web_fetch: 36 candidates / 31 accepted / 5 duplicate</span></div>
+                  <div class="row"><span class="tag">Running</span><span class="stdout">common_topic_count.ts --min-outlets=3 --date=2026-06-26</span></div>
+                </div>
+              </div>
+              <div class="progress" aria-label="진행률 72퍼센트"><span style="width:72%"></span></div>
+            </div>
+          </div>
+        </section>
+
+        <article class="message answer">
+          <p>검색을 거쳐 30개 이상의 최신 뉴스를 수집했으며, 이 중 공통적으로 반복되는 주요 주제를 정리했습니다.</p>
+          <table>
+            <thead>
+              <tr><th>공통 주제</th><th>해당 주제가 보도된 매체</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>이란·미국 간 종전 협상·핵 협상</td><td>SBS, News1, 연합뉴스</td></tr>
+              <tr><td>투표용지 부족·선거 관련 이슈</td><td>SBS, 연합뉴스, 뉴스1</td></tr>
+              <tr><td>부동산·도심 공급 확대 정책</td><td>SBS, 뉴스1, 연합뉴스</td></tr>
+              <tr><td>인공지능(AI) 열풍·챗GPT·딥시크 등 신기술 discourse</td><td>SBS, 중앙일보, 블로그</td></tr>
+            </tbody>
+          </table>
+          <p><strong>공통 주제 수: 4개</strong></p>
+          <p>따라서 오늘(2026-06-26) 주요 뉴스에서 여러 매체에서 동시에 다루고 있는 핵심 이야기는 위 4가지이며, 필요하시면 세부 기사나 추가 정리가 가능합니다.</p>
+          <div class="meta-line"><span>오후 09:02</span><span class="mini-pill">◉ 0 TBD</span></div>
+        </article>
+
+        <div class="actions">□ ↻ ⌘ ☆ ♡ ♧</div>
+      </div>
+
+      <form class="composer">
+        <textarea aria-label="message">다른 매체 기준으로 한 번 더 검산하고, 표를 CSV로 내보낼 수 있게 정리해줘.</textarea>
+        <div class="composer-bar">
+          <button type="button" class="icon-btn">⌘</button>
+          <button type="button" class="icon-btn">♙</button>
+          <button type="button" class="icon-btn">⌕</button>
+          <div class="token-ring" aria-hidden="true"></div>
+          <div class="status">
+            <span class="mini-pill">Approval 4</span>
+            <span>Auto-verify</span>
+            <span>openai-compatible</span>
+            <span>nemotron</span>
+            <span>Reasoning <b>Medium</b></span>
+          </div>
+          <button class="send" type="button">Send ↵</button>
+        </div>
+      </form>
+    </section>
+
+    <aside class="rail">
+      <header class="rail-head">
+        <span class="spin" aria-hidden="true"></span>
+        <h1>Evidence Rail</h1>
+        <span class="count"><span class="pulse-dot"></span>live work</span>
+      </header>
+      <div class="rail-scroll">
+        <div class="rail-tabs">
+          <button class="rail-tab on">Work</button>
+          <button class="rail-tab">Changes</button>
+          <button class="rail-tab">Artifacts</button>
+        </div>
+
+        <section class="widget intent-edge med">
+          <div class="widget-head">
+            <span>Current Work</span>
+            <small>2/3 running</small>
+          </div>
+          <div class="widget-body rail-list">
+            <div class="rail-row">
+              <div class="rail-row-title"><span class="state">✓</span><span>검색 후보 수집</span><span class="tag">36 hits</span></div>
+              <p>서로 다른 출처 6개에서 31개 후보를 채택했습니다.</p>
+            </div>
+            <div class="rail-row active">
+              <div class="rail-row-title"><span class="spin"></span><span>공통 토픽 집계</span><span class="tag med">72%</span></div>
+              <p>매체명 정규화와 중복 기사 제거를 마친 뒤 주제별 출현 횟수를 계산 중입니다.</p>
+              <div class="tiny-bar"><span style="width:72%"></span></div>
+            </div>
+            <div class="rail-row">
+              <div class="rail-row-title"><span class="state">3</span><span>출처 표기 검산</span><span class="tag">queued</span></div>
+              <p>최종 답변 전 각 주제의 대표 매체를 3개 이상 유지하는지 확인합니다.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="widget intent-edge">
+          <div class="widget-head">
+            <span>Tool Stream</span>
+            <small>expanded</small>
+          </div>
+          <div class="widget-body receipt">
+            <div class="receipt-row"><span>active tool</span><span class="leader"></span><b>common_topic_count</b></div>
+            <div class="receipt-row"><span>input</span><span class="leader"></span><b class="mono">31 accepted · 5 duplicate</b></div>
+            <div class="receipt-row"><span>elapsed</span><span class="leader"></span><b>00:32.8</b></div>
+            <div class="receipt-row"><span>next</span><span class="leader"></span><b>source verification</b></div>
+          </div>
+        </section>
+
+        <section class="widget intent-edge low">
+          <div class="widget-head">
+            <span>Changes</span>
+            <small>session artifacts</small>
+          </div>
+          <div class="widget-body">
+            <div class="diff-row">
+              <div>
+                <strong>news-common-topics.csv</strong>
+                <div class="file-meta">generated from final table</div>
+              </div>
+              <span><span class="plus">+18</span> <span class="minus">−0</span></span>
+            </div>
+            <div class="diff-row">
+              <div>
+                <strong>news-search-evidence.md</strong>
+                <div class="file-meta">web_search summary + outlets</div>
+              </div>
+              <span><span class="plus">+42</span> <span class="minus">−0</span></span>
+            </div>
+          </div>
+        </section>
+
+        <section class="widget intent-edge">
+          <div class="widget-head">
+            <span>Artifacts</span>
+            <small>2 ready</small>
+          </div>
+          <div class="widget-body rail-list">
+            <div class="rail-row">
+              <div class="rail-row-title"><span class="tag">table</span><span>공통 주제 매트릭스</span></div>
+              <p>4개 주제, 6개 매체, 중복 후보 5건 제거.</p>
+            </div>
+            <div class="rail-row">
+              <div class="rail-row-title"><span class="tag">log</span><span>검색 증거 로그</span></div>
+              <p>질문 기준과 매체 정규화 규칙을 함께 보관합니다.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="widget intent-edge med">
+          <div class="widget-head">
+            <span>Permissions</span>
+            <small>Approval 4</small>
+          </div>
+          <div class="widget-body receipt">
+            <div class="receipt-row"><span>mode</span><span class="leader"></span><b>Auto-verify</b></div>
+            <div class="receipt-row"><span>risk</span><span class="leader"></span><b>network · read-only</b></div>
+            <div class="receipt-row"><span>blocked</span><span class="leader"></span><b>none</b></div>
+          </div>
+        </section>
+      </div>
+    </aside>
+  </main>
+</body>
+</html>

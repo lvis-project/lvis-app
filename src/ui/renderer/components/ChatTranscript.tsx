@@ -6,14 +6,12 @@ import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { SkillBadge, type SkillBadgeProps } from "./SkillBadge.js";
-import { SubAgentCard, type SubAgentSpawn } from "./SubAgentCard.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 
 export interface ChatTranscriptProps {
   scrollViewportRef: RefObject<HTMLDivElement | null>;
   readingColumnClass: string;
   loadedSkills: SkillBadgeProps[];
-  orphanSpawns: SubAgentSpawn[];
   visibleEntries: ChatEntry[];
   hasApiKey: boolean | null;
   hasAskQuestions: boolean;
@@ -24,8 +22,8 @@ export interface ChatTranscriptProps {
 }
 
 /**
- * Presentational chat transcript scroll region: skill badges, orphan sub-agent
- * cards, empty state, the rendered transcript entries, and the bottom anchor.
+ * Presentational chat transcript scroll region: skill badges, empty state, the
+ * rendered transcript entries, and the bottom anchor.
  * Scroll behavior lives in `useChatScroll` — this component only receives the
  * viewport ref + already-rendered nodes.
  */
@@ -33,7 +31,6 @@ export function ChatTranscript({
   scrollViewportRef,
   readingColumnClass,
   loadedSkills,
-  orphanSpawns,
   visibleEntries,
   hasApiKey,
   hasAskQuestions,
@@ -45,7 +42,7 @@ export function ChatTranscript({
   const { t } = useTranslation();
   return (
     <ScrollArea type="always" className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className={`min-w-0 overflow-x-hidden space-y-4 py-5 ${readingColumnClass}`}>
-      {/* Workflow tools (S1+S2): skill badges + sub-agents + ask-user inline.
+      {/* Workflow tools (S1+S2): skill badges + ask-user inline.
           SessionTodoPanel is intentionally NOT here — it sits above the input
           cluster (see below the ScrollArea) so it stays visible regardless of
           chat scroll position. */}
@@ -56,12 +53,6 @@ export function ChatTranscript({
           ))}
         </div>
       )}
-      {/* Orphan-only fallback: spawns without a toolUseId association
-          (older events or pre-association race conditions). Spawns with
-          a toolUseId render inline next to their ToolGroupCard below. */}
-      {orphanSpawns.map((spawn) => (
-        <SubAgentCard key={spawn.spawnId} spawn={spawn} />
-      ))}
       {/* Ready-state empty-prompt: only when we know `hasApiKey === true`.
           `null` (still loading) and `false` (no key) both suppress the
           ready copy so the user never sees a fake-logged-in race
