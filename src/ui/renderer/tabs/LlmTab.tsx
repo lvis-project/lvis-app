@@ -394,11 +394,17 @@ function shouldSyncModelList(
   modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy,
 ): boolean {
   if (!vendorId || vendorId === DEMO_VENDOR_VALUE) return false;
-  if (modelDiscoveryPolicy === "manual" || modelDiscoveryPolicy === "static") return false;
+  if (modelDiscoveryPolicyUsesSeededOptions(modelDiscoveryPolicy)) return false;
   if (baseUrl?.trim()) return true;
   if (vendorId === "openai" || vendorId === "copilot") return true;
   if (!info.needsBaseUrl) return false;
   return vendorId !== "openai-compatible" && vendorId !== "azure-foundry";
+}
+
+function modelDiscoveryPolicyUsesSeededOptions(
+  modelDiscoveryPolicy: MarketplaceProviderModelDiscoveryPolicy | undefined,
+): boolean {
+  return modelDiscoveryPolicy === "manual" || modelDiscoveryPolicy === "static";
 }
 
 function modelOptionsFor(
@@ -504,11 +510,20 @@ function modelListStateFromCacheEntry(entry: LlmModelListCacheEntry): ModelListS
   };
 }
 
-function modelListStatesFromCache(cache?: LlmModelListCache): Record<string, ModelListState> {
+function modelListStatesFromCache(
+  cache?: LlmModelListCache,
+  marketplaceProviderPresets: readonly MarketplaceInstalledProviderPreset[] = [],
+): Record<string, ModelListState> {
   if (!cache) return {};
   const states: Record<string, ModelListState> = {};
   for (const [key, entry] of Object.entries(cache)) {
     if (!entry.models.length) continue;
+    if (entry.vendor === "openai-compatible" && entry.credentialScope) {
+      const preset = marketplaceProviderPresets.find((candidate) =>
+        candidate.providerId === entry.credentialScope
+      );
+      if (modelDiscoveryPolicyUsesSeededOptions(preset?.modelDiscoveryPolicy)) continue;
+    }
     states[key] = modelListStateFromCacheEntry(entry);
   }
   return states;
@@ -739,10 +754,13 @@ export function LlmTab(props: LlmTabProps) {
     activeModelListBaseUrl,
     activeModelDiscoveryPolicy,
   );
+  const activeSyncedModelOptions = modelDiscoveryPolicyUsesSeededOptions(activeModelDiscoveryPolicy)
+    ? undefined
+    : optionsFromModelListState(activeModelList);
   const activeModelOptions = modelOptionsFor(
     vendor,
     activeModelValue,
-    optionsFromModelListState(activeModelList),
+    activeSyncedModelOptions,
     vendorInfo,
   );
   const activeModelEntryById = useMemo(
@@ -768,7 +786,7 @@ export function LlmTab(props: LlmTabProps) {
       setMarketplaceProviderIds(Array.isArray(ids) ? ids : []);
       const cache = settings.llm?.modelListCache ?? {};
       modelListCacheRef.current = cache;
-      const cachedStates = modelListStatesFromCache(cache);
+      const cachedStates = modelListStatesFromCache(cache, marketplaceProviderPresets);
       setModelLists((current) => {
         const next = reconcileModelListStatesWithCache(current, cachedStates);
         modelListsRef.current = next;
@@ -792,7 +810,7 @@ export function LlmTab(props: LlmTabProps) {
       cancelled = true;
       unsubscribe?.();
     };
-  }, [api]);
+  }, [api, marketplaceProviderPresets]);
   const providerSelectOptions = useMemo(
     () => [
       ...visibleVendorsFor([vendor, ...marketplaceProviderIds]),
