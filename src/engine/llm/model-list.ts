@@ -1,5 +1,7 @@
 import type { SettingsService } from "../../data/settings-store.js";
 import type {
+  LlmModelListEntry,
+  LlmModelListPricing,
   LlmModelListRequest,
   LlmModelListResult,
 } from "../../shared/llm-model-list.js";
@@ -293,7 +295,7 @@ function candidateId(value: unknown): string | null {
   return null;
 }
 
-export function parseStandardModelListResponse(payload: unknown): string[] {
+function modelListRows(payload: unknown): unknown[] {
   const record =
     payload && typeof payload === "object"
       ? (payload as Record<string, unknown>)
@@ -312,23 +314,166 @@ export function parseStandardModelListResponse(payload: unknown): string[] {
       "model list response must contain data[] or models[]",
     );
   }
+  return rows;
+}
 
-  const ids: string[] = [];
+function optionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return value >= 0 ? value : undefined;
+}
+
+function optionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries = value
+    .map(optionalString)
+    .filter((entry): entry is string => Boolean(entry));
+  return entries.length > 0 ? [...new Set(entries)] : undefined;
+}
+
+function optionalRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function pricingValue(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return String(value);
+  }
+  return optionalString(value);
+}
+
+function pricingFromRecord(value: unknown): LlmModelListPricing | undefined {
+  const record = optionalRecord(value);
+  if (!record) return undefined;
+  const pricing: LlmModelListPricing = {};
+  const fields: Array<[keyof LlmModelListPricing, string[]]> = [
+    ["prompt", ["prompt", "input"]],
+    ["completion", ["completion", "output"]],
+    ["request", ["request"]],
+    ["image", ["image"]],
+    ["webSearch", ["web_search", "webSearch"]],
+    ["internalReasoning", ["internal_reasoning", "internalReasoning"]],
+    ["inputCacheRead", ["input_cache_read", "inputCacheRead"]],
+    ["inputCacheWrite", ["input_cache_write", "inputCacheWrite"]],
+  ];
+  for (const [target, keys] of fields) {
+    for (const key of keys) {
+      const value = pricingValue(record[key]);
+      if (value !== undefined) {
+        pricing[target] = value;
+        break;
+      }
+    }
+  }
+  return Object.keys(pricing).length > 0 ? pricing : undefined;
+}
+
+function isZeroPrice(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed === 0;
+}
+
+function hasFreePricing(pricing: LlmModelListPricing | undefined): boolean {
+  if (!pricing) return false;
+  return isZeroPrice(pricing.prompt) && isZeroPrice(pricing.completion);
+}
+
+function modelEntryTags(
+  id: string,
+  record: Record<string, unknown> | undefined,
+  pricing: LlmModelListPricing | undefined,
+): LlmModelListEntry["tags"] | undefined {
+  const lowerId = id.toLocaleLowerCase();
+  const provider = optionalString(record?.provider)?.toLocaleLowerCase()
+    ?? optionalString(record?.owned_by)?.toLocaleLowerCase()
+    ?? optionalString(optionalRecord(record?.top_provider)?.name)?.toLocaleLowerCase()
+    ?? "";
+  const free = lowerId === "openrouter/free" || lowerId.endsWith(":free") || hasFreePricing(pricing);
+  const router = lowerId === "openrouter/auto"
+    || lowerId === "openrouter/free"
+    || lowerId.startsWith("openrouter/")
+    || provider.includes("router")
+    || Boolean(record?.route)
+    || Boolean(record?.routing);
+  const local = lowerId.startsWith("ollama/")
+    || lowerId.startsWith("lmstudio/")
+    || lowerId.startsWith("lm-studio/")
+    || provider.includes("ollama")
+    || provider.includes("lm studio");
+  const tags: LlmModelListEntry["tags"] = {};
+  if (free) tags.free = true;
+  if (router) tags.router = true;
+  if (local) tags.local = true;
+  return Object.keys(tags).length > 0 ? tags : undefined;
+}
+
+function modelEntryFromRow(row: unknown): LlmModelListEntry | null {
+  const id = candidateId(row);
+  if (!id) return null;
+  const record = optionalRecord(row);
+  if (!record) return { id };
+  const architecture = optionalRecord(record.architecture);
+  const topProvider = optionalRecord(record.top_provider);
+  const pricing = pricingFromRecord(record.pricing);
+  const name = optionalString(record.name);
+  const provider = optionalString(record.provider);
+  const ownedBy = optionalString(record.owned_by);
+  const description = optionalString(record.description);
+  const contextLength = optionalNumber(record.context_length)
+    ?? optionalNumber(record.contextLength)
+    ?? optionalNumber(topProvider?.context_length);
+  const inputModalities = optionalStringArray(architecture?.input_modalities);
+  const outputModalities = optionalStringArray(architecture?.output_modalities);
+  const supportedParameters = optionalStringArray(record.supported_parameters);
+  const entry: LlmModelListEntry = {
+    id,
+    ...(name && name !== id ? { name } : {}),
+    ...(provider ? { provider } : {}),
+    ...(ownedBy ? { ownedBy } : {}),
+    ...(description ? { description } : {}),
+    ...(contextLength !== undefined ? { contextLength } : {}),
+    ...(inputModalities ? { inputModalities } : {}),
+    ...(outputModalities ? { outputModalities } : {}),
+    ...(supportedParameters ? { supportedParameters } : {}),
+    ...(pricing ? { pricing } : {}),
+  };
+  const tags = modelEntryTags(id, record, pricing);
+  if (tags) entry.tags = tags;
+  return entry;
+}
+
+export function parseStandardModelListEntries(payload: unknown): LlmModelListEntry[] {
+  const rows = modelListRows(payload);
+
+  const entries: LlmModelListEntry[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
-    const id = candidateId(row);
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    ids.push(id);
-    if (ids.length >= MAX_MODEL_IDS) break;
+    const entry = modelEntryFromRow(row);
+    if (!entry || seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    entries.push(entry);
+    if (entries.length >= MAX_MODEL_IDS) break;
   }
 
-  if (ids.length === 0) {
+  if (entries.length === 0) {
     throw new ModelListError(
       "invalid-model-list-response",
       "model list response did not contain model ids",
     );
   }
+  return entries;
+}
+
+export function parseStandardModelListResponse(payload: unknown): string[] {
+  const ids = parseStandardModelListEntries(payload).map((entry) => entry.id);
   return ids;
 }
 
@@ -500,11 +645,13 @@ export async function listLlmModelsFromSettings(
         "model list response must be valid JSON",
       );
     }
+    const modelEntries = parseStandardModelListEntries(payload);
     return {
       ok: true,
       vendor: request.vendor,
       endpoint: requestEndpoint,
-      models: parseStandardModelListResponse(payload),
+      models: modelEntries.map((entry) => entry.id),
+      modelEntries,
       fetchedAt: new Date().toISOString(),
     };
   } catch (err) {
