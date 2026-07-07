@@ -34,7 +34,11 @@ import {
   type VendorOption,
 } from "../constants.js";
 import { parseHostResolverMap } from "../../../shared/host-resolver-map.js";
-import { isRetiredLlmModel } from "../../../shared/llm-vendor-defaults.js";
+import {
+  canUseLlmVendorWithoutApiKey,
+  isLLMVendor,
+  isRetiredLlmModel,
+} from "../../../shared/llm-vendor-defaults.js";
 import {
   llmModelListCacheKey,
   type LlmModelListCache,
@@ -102,7 +106,10 @@ interface ProviderSelectProps {
   marketplaceProviderIds?: readonly string[];
 }
 
-type ProviderOption = Omit<VendorOption, "id"> & { id: string };
+type ProviderOption = Omit<VendorOption, "id"> & {
+  id: string;
+  requiresApiKey?: boolean;
+};
 
 function normalizeProviderSearch(value: string): string {
   return value.trim().toLocaleLowerCase();
@@ -362,6 +369,7 @@ function providerOptionFromPreset(
     baseUrlPlaceholder: preset.baseUrl,
     defaultModel: preset.defaultModel,
     modelOptions: preset.modelOptions,
+    requiresApiKey: preset.requiresApiKey,
   };
 }
 
@@ -626,6 +634,11 @@ export function LlmTab(props: LlmTabProps) {
     [api, setModelListState, settingsLoaded],
   );
   const activeModelListBaseUrl = selectedMarketplaceProviderPreset?.baseUrl ?? baseUrl.trim();
+  const activeProviderRequiresApiKey = selectedMarketplaceProviderPreset
+    ? selectedMarketplaceProviderPreset.requiresApiKey !== false
+    : !(isLLMVendor(vendor) && canUseLlmVendorWithoutApiKey(vendor, {
+      baseUrl: activeModelListBaseUrl,
+    }));
   const activeModelListKey = llmModelListCacheKey(
     vendor,
     activeModelListBaseUrl,
@@ -1066,12 +1079,23 @@ export function LlmTab(props: LlmTabProps) {
               </div>
             )}
             {vendor !== "vertex-ai" && (
-              <div className="space-y-2">
+              <div
+                className="space-y-2"
+                data-testid="llm-tab:api-key-section"
+                data-api-key-required={activeProviderRequiresApiKey ? "true" : "false"}
+              >
                 <Label className="text-sm font-medium" data-testid="llm-tab:api-key-label">
                   {vendorLabel ? `${vendorLabel} ` : ""}{t("llmTab.apiKey")}
+                  {!activeProviderRequiresApiKey ? ` (${t("llmTab.optional")})` : ""}
                 </Label>
                 <div className="flex items-center gap-2">
-                  {hasKey ? <Badge variant="default" className="text-xs">{t("llmTab.apiKeySet")}</Badge> : <Badge variant="secondary" className="text-xs">{t("llmTab.apiKeyNotSet")}</Badge>}
+                  {hasKey ? (
+                    <Badge variant="default" className="text-xs">{t("llmTab.apiKeySet")}</Badge>
+                  ) : (
+                    <Badge variant="secondary" className="text-xs">
+                      {activeProviderRequiresApiKey ? t("llmTab.apiKeyNotSet") : t("llmTab.optional")}
+                    </Badge>
+                  )}
                   {hasKey && !isLoginMode && (
                     <Button
                       size="sm"
