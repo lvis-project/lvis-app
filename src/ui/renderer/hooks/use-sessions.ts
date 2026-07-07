@@ -52,6 +52,7 @@ function sessionProjectFromHistory(
 export function useSessions(
   api: LvisApi,
   applyInitialSession?: (entries: ChatEntry[]) => void,
+  onLoadedSession?: () => void,
 ) {
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [currentSessionKind, setCurrentSessionKind] = useState<"main" | "routine">("main");
@@ -168,6 +169,7 @@ export function useSessions(
         if (token !== sessionReadTokenRef.current) return false;
         if (!h.ok) return false;
         applyLoadedSession(sessionHistoryToEntries(h));
+        onLoadedSession?.();
         setCurrentSessionId(sessionId);
         setCurrentSessionKind(h.sessionKind ?? "main");
         setCurrentSessionTitle(h.sessionTitle);
@@ -177,7 +179,7 @@ export function useSessions(
         return false;
       }
     },
-    [api],
+    [api, onLoadedSession],
   );
 
   const handleFork = useCallback(

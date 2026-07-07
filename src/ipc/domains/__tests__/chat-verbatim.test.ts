@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import path from "node:path";
 import os from "node:os";
+import { mkdirSync, realpathSync } from "node:fs";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 import { invokeRegisteredHandler } from "../../../__tests__/test-helpers.js";
 
@@ -152,7 +153,7 @@ function makeConversationLoop(
 
 function makeMinimalDeps(
   loop: ReturnType<typeof makeConversationLoop>,
-  opts: { getMainWindow?: () => unknown; personaPromptStore?: unknown } = {},
+  opts: { getMainWindow?: () => unknown; personaPromptStore?: unknown; getSubAgentRunner?: () => unknown } = {},
 ) {
   return {
     conversationLoop: loop as any,
@@ -191,6 +192,7 @@ function makeMinimalDeps(
     feedbackStore: undefined,
     auditLogger: { log: vi.fn() } as any,
     personaPromptStore: opts.personaPromptStore,
+    getSubAgentRunner: opts.getSubAgentRunner,
     askUserQuestionGate: undefined,
     notificationService: undefined,
     getMainWindow: opts.getMainWindow ?? vi.fn(() => null),
@@ -199,7 +201,7 @@ function makeMinimalDeps(
 
 async function setupHandlers(
   loop: ReturnType<typeof makeConversationLoop>,
-  opts: { getMainWindow?: () => unknown; personaPromptStore?: unknown } = {},
+  opts: { getMainWindow?: () => unknown; personaPromptStore?: unknown; getSubAgentRunner?: () => unknown } = {},
 ) {
   handlers.clear();
   vi.clearAllMocks();
@@ -430,6 +432,181 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
   });
 });
 
+describe("lvis:chat:get-sub-agent-transcript", () => {
+  const CHANNEL = "lvis:chat:get-sub-agent-transcript";
+  const SESSION_ID = "session-abc";
+
+  function makeAgentSpawnMessages() {
+    return [
+      {
+        role: "assistant" as const,
+        content: "",
+        toolCalls: [
+          {
+            id: "tu-agent",
+            name: "agent_spawn",
+            input: { title: "Research", instructions: "collect", resumeId: "child-resume" },
+          },
+        ],
+      },
+      {
+        role: "tool_result" as const,
+        toolUseId: "tu-agent",
+        toolName: "agent_spawn",
+        content: JSON.stringify({
+          spawnId: "spawn-live",
+          childSessionId: "child-1",
+          summary: "done",
+        }),
+      },
+    ];
+  }
+
+  it("hydrates only when the active parent transcript contains the requested sub-agent reference", async () => {
+    const getPersistedTranscript = vi.fn(() => ({
+      ok: true,
+      childSessionId: "child-1",
+      messages: [{ role: "assistant", content: "done" }],
+    }));
+    const loop = makeConversationLoop(SESSION_ID, makeAgentSpawnMessages());
+    await setupHandlers(loop, { getSubAgentRunner: () => ({ getPersistedTranscript }) });
+
+    const result = invoke(CHANNEL, {
+      originSessionId: SESSION_ID,
+      childSessionId: "child-1",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      childSessionId: "child-1",
+      messages: [{ role: "assistant", content: "done" }],
+    });
+    expect(getPersistedTranscript).toHaveBeenCalledWith({
+      originSessionId: SESSION_ID,
+      childSessionId: "child-1",
+    });
+  });
+
+  it("rejects toolUseId/spawnId-only requests instead of reconstructing a legacy child lookup", async () => {
+    const getPersistedTranscript = vi.fn();
+    const loop = makeConversationLoop(SESSION_ID, makeAgentSpawnMessages());
+    await setupHandlers(loop, { getSubAgentRunner: () => ({ getPersistedTranscript }) });
+
+    const result = invoke(CHANNEL, {
+      originSessionId: SESSION_ID,
+      toolUseId: "tu-agent",
+      spawnId: "spawn-live",
+    });
+
+    expect(result).toEqual({ ok: false, error: "invalid-child-session-id" });
+    expect(getPersistedTranscript).not.toHaveBeenCalled();
+  });
+
+  it("uses childSessionId alone when a grouped sub-agent row has a direct child link", async () => {
+    const getPersistedTranscript = vi.fn(() => ({
+      ok: true,
+      childSessionId: "child-1",
+      messages: [{ role: "assistant", content: "done" }],
+    }));
+    const loop = makeConversationLoop(SESSION_ID, makeAgentSpawnMessages());
+    await setupHandlers(loop, { getSubAgentRunner: () => ({ getPersistedTranscript }) });
+
+    const result = invoke(CHANNEL, {
+      originSessionId: SESSION_ID,
+      childSessionId: "child-1",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      childSessionId: "child-1",
+      messages: [{ role: "assistant", content: "done" }],
+    });
+    expect(getPersistedTranscript).toHaveBeenCalledWith({
+      originSessionId: SESSION_ID,
+      childSessionId: "child-1",
+    });
+  });
+
+  it("uses artifact-rehydrated parent agent_spawn handles for the childSessionId gate", async () => {
+    const getPersistedTranscript = vi.fn(() => ({
+      ok: true,
+      childSessionId: "child-artifact",
+      messages: [{ role: "assistant", content: "artifact-backed child transcript" }],
+    }));
+    const messages = makeAgentSpawnMessages();
+    messages[0] = {
+      ...(messages[0] as any),
+      toolCalls: [
+        {
+          id: "tu-agent",
+          name: "agent_spawn",
+          input: { title: "Research", instructions: "collect" },
+        },
+      ],
+    };
+    messages[1] = {
+      ...(messages[1] as any),
+      content: "[tool_result stripped: tool=agent_spawn, origLen=2048]",
+    };
+    const loop = makeConversationLoop(SESSION_ID, messages);
+    const deps = await setupHandlers(loop, { getSubAgentRunner: () => ({ getPersistedTranscript }) });
+    deps.memoryManager.rehydrateToolResultArtifacts.mockImplementation((_sessionId: string, raw: unknown[]) =>
+      raw.map((message) =>
+        (message as any).role === "tool_result" && (message as any).toolUseId === "tu-agent"
+          ? {
+              ...(message as any),
+              content: JSON.stringify({
+                childSessionId: "child-artifact",
+                summary: "done",
+              }),
+            }
+          : message,
+      ),
+    );
+
+    const result = invoke(CHANNEL, {
+      originSessionId: SESSION_ID,
+      childSessionId: "child-artifact",
+    });
+
+    expect(deps.memoryManager.rehydrateToolResultArtifacts).toHaveBeenCalledWith(SESSION_ID, expect.any(Array));
+    expect(result).toEqual({
+      ok: true,
+      childSessionId: "child-artifact",
+      messages: [{ role: "assistant", content: "artifact-backed child transcript" }],
+    });
+  });
+
+
+  it("rejects requests for a non-active parent session before runner lookup", async () => {
+    const getPersistedTranscript = vi.fn();
+    const loop = makeConversationLoop(SESSION_ID, makeAgentSpawnMessages());
+    await setupHandlers(loop, { getSubAgentRunner: () => ({ getPersistedTranscript }) });
+
+    const result = invoke(CHANNEL, {
+      originSessionId: "other-session",
+      childSessionId: "child-1",
+    });
+
+    expect(result).toEqual({ ok: false, error: "origin-session-not-active" });
+    expect(getPersistedTranscript).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unrelated childSessionId", async () => {
+    const getPersistedTranscript = vi.fn();
+    const loop = makeConversationLoop(SESSION_ID, makeAgentSpawnMessages());
+    await setupHandlers(loop, { getSubAgentRunner: () => ({ getPersistedTranscript }) });
+
+    const result = invoke(CHANNEL, {
+      originSessionId: SESSION_ID,
+      childSessionId: "child-from-another-run",
+    });
+
+    expect(result).toEqual({ ok: false, error: "sub-agent-reference-not-found" });
+    expect(getPersistedTranscript).not.toHaveBeenCalled();
+  });
+});
+
 describe("lvis:chat active main state", () => {
   it("marks fresh state when a new main chat starts", async () => {
     const loop = makeConversationLoop("session-active", []);
@@ -462,10 +639,12 @@ describe("lvis:chat active main state", () => {
     // persists metadata at creation — mirrors startRoutineConversation — so
     // the Insights "프로젝트별 대화" group-by can join it immediately without
     // waiting for the first turn to complete.
+    mkdirSync(EXPLICIT_TEST_PROJECT_ROOT, { recursive: true });
+    const explicitProjectRoot = realpathSync(EXPLICIT_TEST_PROJECT_ROOT);
     const loop = makeConversationLoop("session-active", []);
     const deps = await setupHandlers(loop);
 
-    await invoke("lvis:chat:new", { projectRoot: EXPLICIT_TEST_PROJECT_ROOT, projectName: "explicit-project" });
+    await invoke("lvis:chat:new", { projectRoot: explicitProjectRoot, projectName: "explicit-project" });
 
     expect(deps.memoryManager.saveSessionMetadata).toHaveBeenCalledTimes(1);
     const [savedId, savedMeta] = (deps.memoryManager.saveSessionMetadata as any).mock.calls[0];
@@ -476,7 +655,7 @@ describe("lvis:chat active main state", () => {
     expect(savedMeta.sessionKind).toBe("main");
     expect(savedMeta.projectName).toBe("explicit-project");
     expect((savedMeta.projectRoot as string).toLowerCase().replace(/\\/g, "/")).toBe(
-      EXPLICIT_TEST_PROJECT_ROOT.toLowerCase().replace(/\\/g, "/"),
+      explicitProjectRoot.toLowerCase().replace(/\\/g, "/"),
     );
   });
 

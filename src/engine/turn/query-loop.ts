@@ -58,7 +58,8 @@ const MAX_TOOL_SCHEMA_DROPS_PER_TURN = 5;
  * issue. Pathological round-emitting many tool_use blocks at once would
  * otherwise execute every one before the maxRounds guard could intervene.
  * Since `agent_spawn` is a tool call, this is also the model-facing sub-agent
- * fan-out limit: at most 10 sub-agents can be requested in one assistant round.
+ * fan-out limit: at most MAX_TOOL_CALLS_PER_ROUND sub-agents can be requested
+ * in one assistant round.
  * SubAgentRunner also relies on this cap to keep a sub-agent's total tool
  * execution count bounded by `maxRounds * MAX_TOOL_CALLS_PER_ROUND`.
  */

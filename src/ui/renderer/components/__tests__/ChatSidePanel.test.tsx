@@ -9,12 +9,13 @@ import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../../shared/side-browser.js";
 import { ChatSidePanel } from "../ChatSidePanel.js";
 import { useWorkspaceTabs } from "../../preview/workspace-tabs.js";
-import type { SubAgentSpawn } from "../SubAgentCard.js";
+import type { SubAgentSpawn } from "../../subagents/types.js";
 
 function api(): LvisApi {
   return {
     openExternalUrl: vi.fn(async () => ({ ok: true })),
     chatGetVerbatimToolResult: vi.fn(async () => null),
+    chatGetSubAgentTranscript: vi.fn(async () => ({ ok: false, error: "not-found" })),
     // useVerticalSplit (file-browser / preview / subagent tabs) seeds + persists
     // the split ratio through the settings round-trip.
     getSettings: vi.fn(async () => ({}) as never),
@@ -1186,8 +1187,8 @@ describe("ChatSidePanel", () => {
 
   it("subagent tab: lists spawns (running first) and shows the selected one's detail", () => {
     const subAgentSpawns: SubAgentSpawn[] = [
-      { spawnId: "done-1", title: "Completed agent", status: "done", entries: [{ kind: "assistant", text: "did work", streaming: false }], summary: "all done", toolCallCount: 2 },
-      { spawnId: "run-1", title: "Live agent", status: "running", entries: [{ kind: "assistant", text: "working", streaming: false }], toolCallCount: 1 },
+      { spawnId: "done-1", title: "Completed agent", status: "done", instructions: "completed prompt", entries: [{ kind: "assistant", text: "did work", streaming: false }], summary: "all done", toolCallCount: 2 },
+      { spawnId: "run-1", title: "Live agent", status: "running", instructions: "live prompt", entries: [{ kind: "assistant", text: "working", streaming: false }], toolCallCount: 1 },
     ];
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
@@ -1199,10 +1200,16 @@ describe("ChatSidePanel", () => {
     expect(rows[0]!.textContent).toContain("Live agent");
     expect(rows[0]!.getAttribute("aria-selected")).toBe("true");
     const detail = screen.getByTestId("chat-side-panel-subagent-detail");
-    expect(detail.textContent).toContain("Live agent");
-    // Selecting the completed spawn swaps the detail card.
+    expect(within(detail).getByTestId("chat-side-panel-subagent-transcript")).toBeTruthy();
+    expect(detail.textContent).toContain("live prompt");
+    expect(detail.textContent).toContain("working");
+    expect(detail.textContent).not.toContain("Live agent");
+    // Selecting the completed spawn swaps the chat-style detail transcript.
     fireEvent.click(rows[1]!);
-    expect(screen.getByTestId("chat-side-panel-subagent-detail").textContent).toContain("Completed agent");
+    const completedDetail = screen.getByTestId("chat-side-panel-subagent-detail");
+    expect(completedDetail.textContent).toContain("completed prompt");
+    expect(completedDetail.textContent).toContain("did work");
+    expect(completedDetail.textContent).not.toContain("Completed agent");
   });
 
   it("subagent tab: list is a role=listbox and each row is a role=option (valid aria-selected)", () => {
@@ -1221,6 +1228,107 @@ describe("ChatSidePanel", () => {
     expect(rows[0]!.getAttribute("aria-selected")).toBe("true");
   });
 
+  it("subagent tab: selected detail reuses the shared WorkGroup/ToolGroup transcript renderer", () => {
+    const subAgentSpawns: SubAgentSpawn[] = [
+      {
+        spawnId: "run-1",
+        title: "Weather agent",
+        status: "done",
+        instructions: "서울 날씨를 확인해줘",
+        entries: [
+          { kind: "reasoning", text: "날씨 출처를 확인합니다.", streaming: false },
+          {
+            kind: "tool_group",
+            groupId: "tg-weather",
+            groupIds: ["tg-weather"],
+            status: "done",
+            tools: [
+              {
+                toolUseId: "weather-tool",
+                name: "web_fetch",
+                displayOrder: 0,
+                status: "done",
+                category: "network",
+                input: { url: "https://weather.example.test" },
+                result: "Seoul weather source content",
+              },
+            ],
+          },
+          { kind: "assistant", text: "서울은 맑음입니다.", streaming: false },
+        ],
+        toolCallCount: 1,
+      },
+    ];
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    const detail = screen.getByTestId("chat-side-panel-subagent-detail");
+    const workGroup = within(detail).getByTestId("work-group");
+    expect(workGroup).toBeTruthy();
+    expect(within(detail).queryByTestId("chat-side-panel-subagent-tool-group")).toBeNull();
+    expect(detail.textContent).toContain("서울 날씨를 확인해줘");
+    expect(detail.textContent).toContain("서울은 맑음입니다.");
+    const buttons = detail.querySelectorAll("button");
+    expect(buttons.length).toBeGreaterThanOrEqual(3);
+    fireEvent.click(buttons[1]!);
+    expect(detail.textContent).toContain("날씨 출처를 확인합니다.");
+    fireEvent.click(buttons[2]!);
+    expect(detail.textContent).toContain("weather.example.test");
+    expect(detail.textContent).toContain("Seoul weather source content");
+  });
+
+  it("subagent tab: hydrates the persisted child transcript through the shared chat renderer", async () => {
+    const apiMock = api();
+    apiMock.chatGetSubAgentTranscript = vi.fn(async () => ({
+      ok: true,
+      childSessionId: "child-1",
+      messages: [
+        { index: 0, role: "user", content: "internal profile preamble" },
+        {
+          index: 1,
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "child-tool-1", name: "web_fetch", input: { url: "https://news.example.test" } }],
+        },
+        {
+          index: 2,
+          role: "tool_result",
+          toolUseId: "child-tool-1",
+          toolName: "web_fetch",
+          content: "headline source content",
+        },
+        { index: 3, role: "assistant", content: "hydrated child final" },
+      ],
+    }));
+    const subAgentSpawns: SubAgentSpawn[] = [
+      {
+        spawnId: "derived-tu-1",
+        title: "News agent",
+        status: "done",
+        instructions: "한국어로 오늘 뉴스 요약",
+        childSessionId: "child-1",
+        toolUseId: "parent-tool-1",
+        entries: [],
+        toolCallCount: 0,
+      },
+    ];
+    renderPanel(
+      <HarnessPanel api={apiMock} sessionId="parent-session-1" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    await waitFor(() => expect(apiMock.chatGetSubAgentTranscript).toHaveBeenCalledWith({
+      originSessionId: "parent-session-1",
+      childSessionId: "child-1",
+    }));
+    const detail = screen.getByTestId("chat-side-panel-subagent-detail");
+    expect(within(detail).getByTestId("work-group")).toBeTruthy();
+    expect(detail.textContent).toContain("한국어로 오늘 뉴스 요약");
+    expect(detail.textContent).toContain("hydrated child final");
+    expect(detail.textContent).not.toContain("internal profile preamble");
+    expect(within(detail).getByTestId("chat-side-panel-subagent-transcript")).toBeTruthy();
+  });
+
   it("subagent tab: renders a localized status label, not the raw enum", () => {
     const subAgentSpawns: SubAgentSpawn[] = [
       { spawnId: "done-1", title: "Done agent", status: "done", entries: [], toolCallCount: 0 },
@@ -1235,13 +1343,26 @@ describe("ChatSidePanel", () => {
     expect(row.textContent).not.toContain("done");
   });
 
+  it("subagent tab: renders interrupted as a localized status label", () => {
+    const subAgentSpawns: SubAgentSpawn[] = [
+      { spawnId: "stop-1", title: "Stopped agent", status: "interrupted", entries: [], toolCallCount: 0 },
+    ];
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    const row = screen.getByTestId("chat-side-panel-subagent-row");
+    expect(row.textContent).toContain("중단됨");
+    expect(row.textContent).not.toContain("interrupted");
+  });
+
   it("subagent tab: selection is pinned to the chosen spawn and does not jump when the list reorders", () => {
     // Two done spawns; select the second. When a new running spawn arrives and
     // reorders the list (running-first), the pinned selection must stay on the
     // originally-chosen spawn, not silently jump to the new top row.
     const initial: SubAgentSpawn[] = [
-      { spawnId: "a", title: "Agent A", status: "done", entries: [], toolCallCount: 0 },
-      { spawnId: "b", title: "Agent B", status: "done", entries: [], toolCallCount: 0 },
+      { spawnId: "a", title: "Agent A", status: "done", entries: [{ kind: "assistant", text: "Agent A transcript", streaming: false }], toolCallCount: 0 },
+      { spawnId: "b", title: "Agent B", status: "done", entries: [{ kind: "assistant", text: "Agent B transcript", streaming: false }], toolCallCount: 0 },
     ];
     const { rerender } = renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={initial} />,
@@ -1249,12 +1370,12 @@ describe("ChatSidePanel", () => {
     fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
     const rows = screen.getAllByTestId("chat-side-panel-subagent-row");
     fireEvent.click(rows[1]!); // select Agent B
-    expect(screen.getByTestId("chat-side-panel-subagent-detail").textContent).toContain("Agent B");
+    expect(screen.getByTestId("chat-side-panel-subagent-detail").textContent).toContain("Agent B transcript");
 
     // A new running spawn arrives and would sort to the top of the list.
     const reordered: SubAgentSpawn[] = [
       ...initial,
-      { spawnId: "c", title: "Agent C", status: "running", entries: [], toolCallCount: 0 },
+      { spawnId: "c", title: "Agent C", status: "running", entries: [{ kind: "assistant", text: "Agent C transcript", streaming: false }], toolCallCount: 0 },
     ];
     rerender(
       <TooltipProvider>
@@ -1262,7 +1383,8 @@ describe("ChatSidePanel", () => {
       </TooltipProvider>,
     );
     // The detail stays pinned to Agent B — no silent jump to the new top row.
-    expect(screen.getByTestId("chat-side-panel-subagent-detail").textContent).toContain("Agent B");
+    expect(screen.getByTestId("chat-side-panel-subagent-detail").textContent).toContain("Agent B transcript");
+    expect(screen.getByTestId("chat-side-panel-subagent-detail").textContent).not.toContain("Agent C transcript");
   });
 
   it("subagent tab: unifies a spawn + its resume (shared childSessionId) into one row with a concatenated transcript", () => {
@@ -1300,6 +1422,89 @@ describe("ChatSidePanel", () => {
     const detail = screen.getByTestId("chat-side-panel-subagent-detail");
     expect(detail.textContent).toContain("original segment");
     expect(detail.textContent).toContain("resumed segment");
+  });
+
+  it("subagent tab: hydrates a unified resume group by childSessionId only", async () => {
+    const apiMock = api();
+    apiMock.chatGetSubAgentTranscript = vi.fn(async () => ({
+      ok: true,
+      childSessionId: "child-1",
+      messages: [{ index: 0, role: "assistant", content: "hydrated unified transcript" }],
+    }));
+    const subAgentSpawns: SubAgentSpawn[] = [
+      {
+        spawnId: "live-orig",
+        toolUseId: "orig-tool",
+        title: "Long research",
+        status: "done",
+        childSessionId: "child-1",
+        entries: [],
+        toolCallCount: 1,
+      },
+      {
+        spawnId: "live-resume",
+        toolUseId: "resume-tool",
+        title: "(sub-agent)",
+        status: "done",
+        childSessionId: "child-1",
+        entries: [],
+        toolCallCount: 1,
+      },
+    ];
+    renderPanel(
+      <HarnessPanel api={apiMock} sessionId="parent-session-1" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+
+    await waitFor(() => expect(apiMock.chatGetSubAgentTranscript).toHaveBeenCalledWith({
+      originSessionId: "parent-session-1",
+      childSessionId: "child-1",
+    }));
+    expect(apiMock.chatGetSubAgentTranscript).not.toHaveBeenCalledWith(
+      expect.objectContaining({ toolUseId: "resume-tool", spawnId: "live-orig" }),
+    );
+    expect(screen.getByTestId("chat-side-panel-subagent-detail").textContent).toContain("hydrated unified transcript");
+  });
+
+  it("subagent tab: keeps hydrated child transcript and live tail for the selected live spawn", async () => {
+    const apiMock = api();
+    apiMock.chatGetSubAgentTranscript = vi.fn(async () => ({
+      ok: true,
+      childSessionId: "child-1",
+      messages: [{ index: 0, role: "assistant", content: "hydrated original transcript" }],
+    }));
+    const subAgentSpawns: SubAgentSpawn[] = [
+      {
+        spawnId: "live-orig",
+        toolUseId: "orig-tool",
+        title: "Long research",
+        status: "done",
+        childSessionId: "child-1",
+        entries: [],
+        toolCallCount: 1,
+      },
+      {
+        spawnId: "live-resume",
+        toolUseId: "resume-tool",
+        title: "(sub-agent)",
+        status: "running",
+        childSessionId: "child-1",
+        entries: [{ kind: "assistant", text: "live resume tail", streaming: true }],
+        toolCallCount: 1,
+      },
+    ];
+    renderPanel(
+      <HarnessPanel api={apiMock} sessionId="parent-session-1" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+
+    await waitFor(() => expect(apiMock.chatGetSubAgentTranscript).toHaveBeenCalledWith({
+      originSessionId: "parent-session-1",
+      childSessionId: "child-1",
+    }));
+    const detail = screen.getByTestId("chat-side-panel-subagent-detail");
+    expect(detail.textContent).toContain("hydrated original transcript");
+    expect(detail.textContent).toContain("live resume tail");
   });
 
   it("subagent tab: empty state when the chat has no spawns", () => {

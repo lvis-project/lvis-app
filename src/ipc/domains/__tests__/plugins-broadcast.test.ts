@@ -72,6 +72,8 @@ async function setup() {
         return { pluginId: "agent-hub", installed: true };
       }),
       uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true })),
+      getInstallFailureDiagnostics: vi.fn(() => []),
+      clearInstallFailureDiagnostic: vi.fn(() => true),
       rollbackPlugin: vi.fn(async (pluginId: string) => ({ pluginId, rolledBackTo: "0.0.1" })),
       rollbackLocalInstall: vi.fn(async (pluginId: string) => ({ pluginId, rolledBack: true })),
       clearLocalInstallRollback: vi.fn(async () => undefined),
@@ -370,6 +372,49 @@ describe("plugins IPC lifecycle broadcast", () => {
       expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:uninstall-result",
         { slug: "agent-hub", success: true },
+      );
+    }
+  });
+
+  it("cleans up catalog grant mismatch diagnostics without bypassing general admin uninstall policy", async () => {
+    const { deps, appWindows } = await setup();
+    deps.pluginMarketplace.getInstallFailureDiagnostics.mockReturnValueOnce([
+      {
+        id: "meeting",
+        name: "LVIS Meeting",
+        description: "Meeting plugin",
+        error:
+          'plugin "meeting" artifact manifest external-auth-consumer capability does not match the catalog-approved grant',
+        installFailureKind: "catalog-grant-mismatch",
+        isManaged: true,
+        installPolicy: "admin",
+        installAliases: ["lvis-plugin-meeting"],
+      },
+    ]);
+    deps.listPluginAuthPartitionsService.mockReturnValueOnce([
+      "persist:plugin-auth:meeting",
+      "persist:plugin-auth:meeting:tenant",
+    ]);
+
+    await expect(invoke("lvis:plugins:uninstall", "meeting", {
+      doctorCleanup: { installFailureKind: "catalog-grant-mismatch" },
+    })).resolves.toEqual({
+      pluginId: "meeting",
+      uninstalled: true,
+    });
+
+    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("meeting");
+    expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalledWith("meeting");
+    expect(deps.pluginMarketplace.clearInstallFailureDiagnostic).toHaveBeenCalledWith("meeting");
+    expect(deps.settingsService.deletePluginConfig).toHaveBeenCalledWith("meeting");
+    expect(deps.settingsService.deletePluginSecrets).toHaveBeenCalledWith("meeting", new Set(["apiKey", "sttApiKey"]));
+    expect(deps.clearAuthPartitionService).toHaveBeenCalledWith("persist:plugin-auth:meeting");
+    expect(deps.clearAuthPartitionService).toHaveBeenCalledWith("persist:plugin-auth:meeting:tenant");
+    expect(deps.forgetPluginAuthPartitionsService).toHaveBeenCalledWith("meeting");
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:uninstall-result",
+        { slug: "meeting", success: true },
       );
     }
   });
