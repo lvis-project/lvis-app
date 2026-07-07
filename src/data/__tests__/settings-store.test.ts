@@ -356,6 +356,10 @@ describe("SettingsService marketplace defaults", () => {
         },
       },
     });
+    await service.setSecret(
+      marketplaceProviderPresetSecretKey("future-router"),
+      "fr-old-secret",
+    );
 
     await service.installMarketplaceProviderPreset({
       ...preset,
@@ -376,6 +380,8 @@ describe("SettingsService marketplace defaults", () => {
     }]);
     expect(getLlmVendorSettings(service.get("llm").vendors, "openai-compatible").baseUrl)
       .toBe("https://future-v2.example/v1");
+    expect(service.getSecret(marketplaceProviderPresetSecretKey("future-router")))
+      .toBeNull();
   });
 
   it("leaves an active custom provider preset installed when preset-secret deletion fails", async () => {
