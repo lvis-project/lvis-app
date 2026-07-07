@@ -286,11 +286,18 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     const settings = await api.getSettings();
     const installed = installedAssetsFromMarketplace(settings.marketplace);
     const marketplace: Partial<MarketplaceSettings> = {};
+    const llmVendorsPatch: Record<string, { model?: string; baseUrl?: string }> = {};
     if (asset.type === "provider") {
       if (isMarketplaceEligibleLLMVendor(asset.providerId)) {
         marketplace.installedProviderIds = install
           ? addUnique(installed.installedProviderIds, asset.providerId)
           : removeValue(installed.installedProviderIds, asset.providerId);
+        if (install && (asset.defaultModel || asset.baseUrl)) {
+          llmVendorsPatch[asset.providerId] = {
+            ...(asset.defaultModel ? { model: asset.defaultModel } : {}),
+            ...(asset.baseUrl ? { baseUrl: asset.baseUrl } : {}),
+          };
+        }
       } else {
         const preset = marketplaceProviderPresetFromAsset(asset, item.name);
         if (!preset) {
@@ -313,7 +320,12 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
         ? addUnique(installed.installedLanguagePacks, asset.locale)
         : removeValue(installed.installedLanguagePacks, asset.locale);
     }
-    const result = await api.updateSettings({ marketplace });
+    const result = await api.updateSettings({
+      marketplace,
+      ...(Object.keys(llmVendorsPatch).length > 0
+        ? { llm: { vendors: llmVendorsPatch } }
+        : {}),
+    });
     if (isIpcErrorResult(result)) {
       throw new Error(result.message ?? result.error);
     }
