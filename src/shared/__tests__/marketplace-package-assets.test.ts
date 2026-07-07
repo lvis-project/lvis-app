@@ -124,6 +124,37 @@ describe("marketplace package assets", () => {
     });
   });
 
+  it("preserves catalog metadata for known marketplace provider ids", () => {
+    expect(parseMarketplacePackageAsset({
+      type: "provider",
+      provider_id: "groq",
+      label: "Groq",
+      base_url: "https://api.groq.com/openai/v1",
+      default_model: "moonshotai/kimi-k2-instruct-0905",
+      model_options: ["moonshotai/kimi-k2-instruct-0905", "llama-3.3-70b-versatile"],
+      model_discovery_policy: "models-api",
+      trust_metadata: {
+        credential_use: "required",
+        network_access: "provider-api",
+        data_policy: "provider-policy",
+      },
+    })).toEqual({
+      type: "provider",
+      providerId: "groq",
+      label: "Groq",
+      baseUrl: "https://api.groq.com/openai/v1",
+      defaultModel: "moonshotai/kimi-k2-instruct-0905",
+      modelOptions: ["moonshotai/kimi-k2-instruct-0905", "llama-3.3-70b-versatile"],
+      requiresApiKey: true,
+      modelDiscoveryPolicy: "models-api",
+      trust: {
+        credentialUse: "required",
+        networkAccess: "provider-api",
+        dataPolicy: "provider-policy",
+      },
+    });
+  });
+
   it("requires https for custom provider presets that use API keys", () => {
     expect(parseMarketplacePackageAsset({
       type: "provider",
