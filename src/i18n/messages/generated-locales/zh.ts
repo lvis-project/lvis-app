@@ -1423,6 +1423,7 @@ export const zhMessages: Record<string, string> = {
   "llmTab.modelSync": "同步模型列表",
   "llmTab.modelSyncing": "正在同步模型…",
   "llmTab.modelSynced": "已从端点同步 {count} 个模型",
+  "llmTab.modelSyncCacheSaveFailed": "Models synced, but the saved cache could not be updated.",
   "llmTab.moreProvidersInMarketplace": "在 Marketplace 查看更多提供商",
   "llmTab.modelSyncFailed": "无法同步模型。正在使用已保存的候选项。",
   "llmTab.openRouterFreeBadge": "免费",
