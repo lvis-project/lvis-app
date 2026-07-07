@@ -18,12 +18,42 @@ export const MAX_LLM_MODEL_LIST_CACHE_ENTRIES = 48;
 export const MAX_CACHED_LLM_MODEL_IDS = 2_000;
 export const MAX_CACHED_LLM_MODEL_ID_LENGTH = 256;
 
+export type LlmModelListPricing = {
+  prompt?: string;
+  completion?: string;
+  request?: string;
+  image?: string;
+  webSearch?: string;
+  internalReasoning?: string;
+  inputCacheRead?: string;
+  inputCacheWrite?: string;
+};
+
+export type LlmModelListEntry = {
+  id: string;
+  name?: string;
+  provider?: string;
+  ownedBy?: string;
+  description?: string;
+  contextLength?: number;
+  inputModalities?: string[];
+  outputModalities?: string[];
+  supportedParameters?: string[];
+  pricing?: LlmModelListPricing;
+  tags?: {
+    free?: boolean;
+    router?: boolean;
+    local?: boolean;
+  };
+};
+
 export type LlmModelListCacheEntry = {
   vendor: string;
   baseUrl?: string;
   credentialScope?: string;
   endpoint: string;
   models: string[];
+  modelEntries?: LlmModelListEntry[];
   fetchedAt: string;
 };
 
@@ -52,6 +82,7 @@ export type LlmModelListResult =
       vendor: string;
       endpoint: string;
       models: string[];
+      modelEntries?: LlmModelListEntry[];
       fetchedAt: string;
     }
   | {

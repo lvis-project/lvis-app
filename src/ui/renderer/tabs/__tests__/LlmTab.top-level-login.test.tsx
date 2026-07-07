@@ -388,7 +388,7 @@ describe("LlmTab — top-level login toggle UI", () => {
     });
   });
 
-  it("opens the Marketplace provider filter from the provider section", () => {
+  it("opens the Marketplace from provider and model discovery buttons", () => {
     const onOpenMarketplace = vi.fn();
     const { getByTestId } = render(
       <Harness
@@ -399,7 +399,8 @@ describe("LlmTab — top-level login toggle UI", () => {
     );
 
     fireEvent.click(getByTestId("llm-tab:marketplace-providers"));
-    expect(onOpenMarketplace).toHaveBeenCalledOnce();
+    fireEvent.click(getByTestId("llm-tab:marketplace-models"));
+    expect(onOpenMarketplace).toHaveBeenCalledTimes(2);
   });
   it("uses synced provider model ids in the model dropdown", async () => {
     const api = llmTabApi();
@@ -408,6 +409,19 @@ describe("LlmTab — top-level login toggle UI", () => {
       vendor: "openrouter",
       endpoint: "https://openrouter.ai/api/v1/models",
       models: ["openrouter/free", "google/gemini-2.5-flash:free"],
+      modelEntries: [
+        {
+          id: "openrouter/free",
+          name: "Free Router",
+          tags: { free: true, router: true },
+        },
+        {
+          id: "google/gemini-2.5-flash:free",
+          name: "Gemini 2.5 Flash Free",
+          pricing: { prompt: "0", completion: "0" },
+          tags: { free: true },
+        },
+      ],
       fetchedAt: "2026-07-06T00:00:00.000Z",
     });
     const { container } = render(
@@ -429,6 +443,7 @@ describe("LlmTab — top-level login toggle UI", () => {
     expect(await screen.findByText("openrouter/free")).toBeInTheDocument();
     expect(screen.getByText("google/gemini-2.5-flash:free")).toBeInTheDocument();
     expect(screen.getAllByText("무료")).toHaveLength(2);
+    expect(screen.getByText("라우터")).toBeInTheDocument();
     expect(screen.getAllByText(/속도 제한.*사용 가능 여부/))
       .toHaveLength(2);
     await waitFor(() =>
@@ -439,6 +454,19 @@ describe("LlmTab — top-level login toggle UI", () => {
               vendor: "openrouter",
               endpoint: "https://openrouter.ai/api/v1/models",
               models: ["openrouter/free", "google/gemini-2.5-flash:free"],
+              modelEntries: [
+                {
+                  id: "openrouter/free",
+                  name: "Free Router",
+                  tags: { free: true, router: true },
+                },
+                {
+                  id: "google/gemini-2.5-flash:free",
+                  name: "Gemini 2.5 Flash Free",
+                  pricing: { prompt: "0", completion: "0" },
+                  tags: { free: true },
+                },
+              ],
               fetchedAt: "2026-07-06T00:00:00.000Z",
             },
           },
