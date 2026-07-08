@@ -226,10 +226,10 @@ export function __resetWrappedMcpServersForTest(): void {
  * This is the per-worker "wrapped" signal {@link resolveReviewerSandboxCapability}
  * consults so a plugin tool call reports the GENUINE asrt capability ONLY for a
  * worker that is genuinely confined — an unwrapped worker (gate off, wrap
- * failed, Windows ASRT fail-closed path, or a plugin with no host-spawned worker) stays
- * `none`. Membership is necessary but NOT sufficient: the resolver also
- * re-checks {@link detectSandboxCapability} so a torn-down sandbox cannot leave
- * a stale `asrt` report (the #1359/#1364 no-leak invariant).
+ * failed, or a plugin with no host-spawned worker) stays `none`. Membership is
+ * necessary but NOT sufficient: the resolver also re-checks
+ * {@link detectSandboxCapability} so a torn-down sandbox cannot leave a stale
+ * `asrt` report (the #1359/#1364 no-leak invariant).
  */
 const _wrappedPluginWorkerIds = new Set<string>();
 
@@ -633,18 +633,37 @@ export function isActiveSandboxShellContained(): boolean {
   return sandboxRelaxesCategory(detectSandboxCapability(), "shell");
 }
 
+export interface PluginEffectContainmentLookup {
+  readonly source?: ToolSource;
+  readonly name?: string;
+  readonly toolName?: string;
+  readonly pluginId?: string;
+  readonly workerId?: string;
+}
+
 /**
  * Whether the foreground plugin effect-boundary can stand in for the removed
- * pre-exec ask.
+ * pre-exec ask for THIS plugin tool call.
  *
- * This intentionally reads the same filesystem-confinement SOT as
- * {@link isActiveSandboxFilesystemContained}, but excludes Windows until the
- * worker-spawn path has a real per-worker/per-plugin filesystem grant. ASRT
- * 0.0.64 exposes only process-global Windows filesystem grants; treating that
- * as plugin containment would let unrelated plugin workers inherit each
- * other's data roots.
+ * The generic host-shell capability is deliberately not enough here. Plugin
+ * effect-boundary relaxation is valid only when the call is tied to a
+ * host-owned `Tool.workerId` and that exact `pluginId/workerId` is currently
+ * marked as ASRT-wrapped by {@link spawnWorker}. This keeps ordinary in-process
+ * plugin tools on the pre-exec ask path until their execution substrate is
+ * actually worker-backed.
  */
-export function isActiveSandboxFilesystemContainedForPluginEffects(): boolean {
-  const capability = detectSandboxCapability();
-  return capability.platform !== "win32" && capability.confines?.filesystem === true;
+export function isActiveSandboxFilesystemContainedForPluginEffects(
+  input?: PluginEffectContainmentLookup,
+): boolean {
+  if (input?.source !== "plugin" || !input.pluginId || !input.workerId) {
+    return false;
+  }
+  const capability = resolveReviewerSandboxCapability(
+    "plugin",
+    input.toolName ?? input.name ?? "",
+    undefined,
+    input.workerId,
+    input.pluginId,
+  );
+  return sandboxRelaxesCategory(capability, "read");
 }

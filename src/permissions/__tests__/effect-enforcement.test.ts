@@ -74,6 +74,10 @@ function makeApi(log: string[]) {
       log.push("llm");
       return "resp";
     },
+    spawnWorker: async (_spec: unknown): Promise<{ pid: number; socketPath: null }> => {
+      log.push("spawnWorker");
+      return { pid: 123, socketPath: null };
+    },
     storage: {
       write: async (_rel: string, _data?: unknown): Promise<void> => {
         log.push("write");
@@ -590,6 +594,108 @@ describe("M3 — target-less blanket grants surface a method-wide breadth marker
     expect((requests[0].args as { target?: unknown }).target).toBeUndefined();
     expect(requests[1].args).toMatchObject({ methodPath: "storage.write", target: "a.txt" });
     expect((requests[1].args as { methodWide?: unknown }).methodWide).toBeUndefined();
+  });
+
+  it("spawnWorker approvals are scoped to worker command and filesystem grants", async () => {
+    const log: string[] = [];
+    const { gate, requests } = makeGate(["allow-session", "allow-session"]);
+    const api = enforceMutatingEffects(makeApi(log), deps(gate, true));
+    const base = {
+      workerId: "embed",
+      command: "C:/Python/python.exe",
+      allowReadPaths: ["C:/worker.py"],
+      allowWritePaths: ["C:/index-a"],
+    };
+
+    await runWithEffectGateContext({ headless: false, toolName: "t" }, async () => {
+      await api.spawnWorker(base);
+      await api.spawnWorker({ ...base, allowWritePaths: ["C:/index-a"] });
+      await api.spawnWorker({ ...base, allowWritePaths: ["C:/index-b"] });
+    });
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0].args).toMatchObject({ methodPath: "spawnWorker" });
+    expect((requests[0].args as { methodWide?: unknown }).methodWide).toBeUndefined();
+    expect(JSON.parse((requests[0].args as { target: string }).target)).toMatchObject({
+      workerId: "embed",
+      command: "C:/Python/python.exe",
+      allowRead: ["C:/worker.py"],
+      allowWrite: ["C:/index-a"],
+    });
+    expect(JSON.parse((requests[1].args as { target: string }).target)).toMatchObject({
+      allowWrite: ["C:/index-b"],
+    });
+    expect(log).toEqual(["spawnWorker", "spawnWorker", "spawnWorker"]);
+  });
+
+  it("spawnWorker grants remain scoped by the host-bound plugin id", async () => {
+    const log: string[] = [];
+    const { gate, requests } = makeGate(["allow-session", "allow-session"]);
+    const apiA = enforceMutatingEffects(makeApi(log), deps(gate, true));
+    const apiB = enforceMutatingEffects(makeApi(log), {
+      ...deps(gate, true),
+      pluginId: "p2",
+    });
+    const spec = {
+      workerId: "embed",
+      command: "C:/Python/python.exe",
+      allowReadPaths: ["C:/worker.py"],
+      allowWritePaths: ["C:/index"],
+    };
+
+    await runWithEffectGateContext({ headless: false, toolName: "t" }, async () => {
+      await apiA.spawnWorker(spec);
+      await apiB.spawnWorker(spec);
+    });
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0].sourcePluginId).toBe("p1");
+    expect(requests[1].sourcePluginId).toBe("p2");
+    expect(requests[0].args).toMatchObject(requests[1].args);
+    expect(log).toEqual(["spawnWorker", "spawnWorker"]);
+  });
+
+  it("spawnWorker malformed object specs do not become method-wide approvals", async () => {
+    const log: string[] = [];
+    const { gate, requests } = makeGate("allow-session");
+    const api = enforceMutatingEffects(makeApi(log), deps(gate, true));
+
+    await runWithEffectGateContext({ headless: false, toolName: "t" }, async () => {
+      await api.spawnWorker({});
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].args).toMatchObject({ methodPath: "spawnWorker" });
+    expect((requests[0].args as { methodWide?: unknown }).methodWide).toBeUndefined();
+    expect(JSON.parse((requests[0].args as { target: string }).target)).toEqual({
+      workerId: "",
+      command: "",
+      allowRead: [],
+      allowWrite: [],
+    });
+    expect(log).toEqual(["spawnWorker"]);
+  });
+
+  it("spawnWorker non-object specs do not become method-wide approvals", async () => {
+    const log: string[] = [];
+    const { gate, requests } = makeGate("allow-session");
+    const api = enforceMutatingEffects(makeApi(log), deps(gate, true));
+
+    await runWithEffectGateContext({ headless: false, toolName: "t" }, async () => {
+      await (api.spawnWorker as (spec: unknown) => Promise<unknown>)("not-a-spec");
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].args).toMatchObject({ methodPath: "spawnWorker" });
+    expect((requests[0].args as { methodWide?: unknown }).methodWide).toBeUndefined();
+    expect(JSON.parse((requests[0].args as { target: string }).target)).toEqual({
+      workerId: "",
+      command: "",
+      allowRead: [],
+      allowWrite: [],
+      invalidSpec: true,
+    });
+    expect(log).toEqual(["spawnWorker"]);
   });
 });
 

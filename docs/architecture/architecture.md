@@ -122,16 +122,21 @@ Key boundaries:
 
 - plugin code cannot invent its own identity when calling HostApi;
 - installed plugin assets are loaded through host-approved URLs;
-- plugin tools must declare schemas and categories;
+- plugin tools must declare schemas; manifest categories are optional metadata
+  and the host derives the effective category per invocation;
 - plugin UI can render in host slots but cannot bypass permission review;
 - marketplace metadata should not override local policy or managed-plugin rules.
+- renderer-to-plugin method calls are allowlisted by `manifest.uiActions`;
+- long-lived plugin workers are spawned only through HostApi `spawnWorker`;
+  filesystem read grants must be declared explicitly as `allowReadPaths` and are
+  never inferred from argv.
 
 ## Tool Governance
 
 All tool execution flows through the registry and executor:
 
 1. resolve the tool by name and source;
-2. validate input schema and declared category;
+2. validate input schema and resolve the effective category;
 3. build permission context from trust origin, project, headless state, and
    policy mode;
 4. run hard gates before any reviewer or user prompt;
@@ -141,6 +146,36 @@ All tool execution flows through the registry and executor:
 
 The source of a tool changes display and audit metadata; it does not create a
 separate policy bypass.
+
+## OS Execution Sandbox And Plugin Workers
+
+The OS execution sandbox is backed by
+`@anthropic-ai/sandbox-runtime` (ASRT). The active sandbox capability is
+published as `kind: "asrt"` with explicit `confines` dimensions. macOS and
+Linux ASRT substrates provide filesystem, process, and network confinement.
+Windows srt-win provides filesystem and network confinement but no process
+confinement, so shell/process relaxation must remain stricter than filesystem
+or network-bearing tool relaxation.
+
+Plugin read-relaxation is narrower than the host-shell capability. The
+foreground plugin effect-boundary may replace a pre-exec ask only when
+`hostClassifiesRisk` is enabled and
+`isActiveSandboxFilesystemContainedForPluginEffects(tool)` returns true for
+that exact tool. A process-global "sandbox active" signal is not sufficient.
+The plugin effect provider requires a host-owned `Tool.workerId` and a matching
+`pluginId/workerId` that the main process currently tracks as ASRT-wrapped.
+Ordinary in-process plugin tools, degraded hosts, and sandbox-off hosts keep
+the known-safe pre-exec ask path.
+
+`spawnWorker` is the only host primitive that can establish that worker-backed
+plugin substrate. macOS and Linux workers use an ASRT-wrapped Unix-domain-socket
+control path. Windows workers keep TCP control, but their filesystem access is
+scoped through a per-worker holder PID ACL grant using ASRT's Windows
+`grantWindowsAcl`/`revokeWindowsAcl` primitives, then the command is wrapped
+through srt-win. The holder command must be launched through a pinned System32
+binary and its lifecycle is part of the worker's confinement proof: if the
+holder exits or errors, the host must revoke grants, unmark the worker, and
+terminate the wrapped worker.
 
 ## Security And Audit
 

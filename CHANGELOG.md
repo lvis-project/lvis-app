@@ -142,7 +142,7 @@ UI shell, localization, navigation, and action-panel polish release. This patch 
 
 - **host-managed 플러그인 인증 경로 정렬** (PR #1343, #1346, #1351) — 플러그인 인증 실패는 silent fail 이 아니라 채팅 입력 영역 위 토스트로 노출하고, 로그인 실패 시 플러그인 창을 열지 않도록 순서를 정렬했다.
 - **토스트 위치와 형태 개선** (PR #1351) — 토스트를 입력창 위의 별도 floating card 가 아니라 composer 뒤에서 올라오는 겹침 형태로 배치하고, severity 별 색상과 긴 메시지 흐름 표시를 추가했다.
-- **플러그인 UI callable manifest 허용** (PR #1344) — UI callable tool schema 가 host validation 에서 정상 통과하도록 manifest 검증 경로를 보강했다.
+- **플러그인 UI action manifest 허용** (PR #1344) — UI action tool schema 가 host validation 에서 정상 통과하도록 manifest 검증 경로를 보강했다.
 
 ### 권한 / 설정
 

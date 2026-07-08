@@ -17,7 +17,7 @@
  *     contains the off-hostApi `node:fs` WRITE residual when the sandbox
  *     filesystem-contains). Filesystem-contained mac/linux plugin worker
  *     effects → relax; NOT filesystem-contained (degraded / off / synthetic
- *     network-only / current Windows plugin worker fail-closed path) → the
+ *     network-only / ordinary non-worker-backed plugin call path) → the
  *     pre-exec ask remains.
  *   • FLAG OFF (default) → full pre-exec ask, byte-for-byte unchanged.
  *   • PLUGIN ONLY → MCP + builtin keep the pre-exec ask (not relaxed).
@@ -47,7 +47,9 @@ import {
 import {
   isActiveSandboxFilesystemContained,
   isActiveSandboxFilesystemContainedForPluginEffects,
+  markPluginWorkerWrapped,
   setActiveSandboxCapability,
+  unmarkPluginWorkerWrapped,
   __resetActiveSandboxCapabilityForTest,
 } from "../../permissions/sandbox-capability.js";
 
@@ -84,12 +86,17 @@ function makeGate(choice: ApprovalChoice): {
  * the flag OFF we declare `write` so the pre-exec ask is shown for the
  * byte-for-byte lock.
  */
-function makePluginNoEffectTool(spy: { ran: boolean }): Tool {
+function makePluginNoEffectTool(
+  spy: { ran: boolean },
+  ids: { readonly pluginId?: string; readonly workerId?: string } = {},
+): Tool {
+  const pluginId = ids.pluginId ?? "p-read";
   return createDynamicTool({
     name: "plugin_noeffect",
     description: "A plugin tool that performs no host-mediated effect.",
     source: "plugin",
-    pluginId: "p-read",
+    pluginId,
+    ...(ids.workerId ? { workerId: ids.workerId } : {}),
     category: "write",
     pathFields: [],
     isReadOnly: () => false,
@@ -260,7 +267,7 @@ function makeExecutor(
   // true`); existing relaxation assertions run with the sandbox fs-contained.
   // The coupling tests below pass `() => false` to assert the degraded /
   // sandbox-off / synthetic network-only fallback.
-  sandboxFsContained: () => boolean = () => true,
+  sandboxFsContained: (tool: Tool) => boolean = () => true,
 ): { executor: ToolExecutor; permMgr: PermissionManager } {
   const registry = new ToolRegistry();
   registry.register(tool);
@@ -650,9 +657,9 @@ describe("plugin read-relaxation — coupled to the OS sandbox FILESYSTEM-CONTAI
 
 // Confines-aware coupling wired through the REAL active-capability SOT. These
 // assert both the generic active filesystem-containment signal and the narrower
-// production plugin-effect provider. Windows host-shell ASRT may report
-// filesystem confinement, but plugin workers remain excluded until ASRT can
-// scope filesystem allow grants per worker/plugin.
+// production plugin-effect provider. Platform-specific worker details live in
+// worker-spawn; the production provider only relaxes a plugin tool when its
+// specific worker-backed execution substrate is wrapped and filesystem-contained.
 describe("plugin read-relaxation — confines-aware via the active-capability SOT", () => {
   beforeEach(() => {
     __resetActiveSandboxCapabilityForTest();
@@ -721,7 +728,7 @@ describe("plugin read-relaxation — confines-aware via the active-capability SO
     expect(result.content).toContain("noeffect-ok");
   });
 
-  it("production plugin provider excludes Windows partial until worker-scoped filesystem grants exist", async () => {
+  it("production plugin provider does not relax a generic Windows capability for an ordinary plugin tool", async () => {
     setActiveSandboxCapability({
       kind: "asrt",
       confidence: "verified",
@@ -749,6 +756,76 @@ describe("plugin read-relaxation — confines-aware via the active-capability SO
     expect(requests[0]?.category).toBe("tool");
     expect(spy.ran).toBe(false);
     expect(result.is_error).toBe(true);
+  });
+
+  it("production plugin provider relaxes only a matching wrapped worker-backed plugin tool", async () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
+      confines: { filesystem: true, process: false, network: true },
+    });
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    markPluginWorkerWrapped("local-indexer", "embed");
+    try {
+      const { executor } = makeExecutor(
+        makePluginNoEffectTool(spy, { pluginId: "local-indexer", workerId: "embed" }),
+        gate,
+        () => true,
+        new PermissionManager("/tmp/nonexistent-permissions.json"),
+        undefined,
+        isActiveSandboxFilesystemContainedForPluginEffects,
+      );
+
+      const [result] = await executor.executeAll(
+        [{ id: "t1", name: "plugin_noeffect", input: {} }],
+        { sessionId: "s", permissionContext: userPermissionContext() },
+      );
+
+      expect(requests).toHaveLength(0);
+      expect(spy.ran).toBe(true);
+      expect(result.is_error).toBeFalsy();
+      expect(result.content).toContain("noeffect-ok");
+    } finally {
+      unmarkPluginWorkerWrapped("local-indexer", "embed");
+    }
+  });
+
+  it("production plugin provider does not relax when workerId mismatches the wrapped worker", async () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
+      confines: { filesystem: true, process: false, network: true },
+    });
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    markPluginWorkerWrapped("local-indexer", "embed");
+    try {
+      const { executor } = makeExecutor(
+        makePluginNoEffectTool(spy, { pluginId: "local-indexer", workerId: "other" }),
+        gate,
+        () => true,
+        new PermissionManager("/tmp/nonexistent-permissions.json"),
+        undefined,
+        isActiveSandboxFilesystemContainedForPluginEffects,
+      );
+
+      const [result] = await executor.executeAll(
+        [{ id: "t1", name: "plugin_noeffect", input: {} }],
+        { sessionId: "s", permissionContext: userPermissionContext() },
+      );
+
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.category).toBe("tool");
+      expect(spy.ran).toBe(false);
+      expect(result.is_error).toBe(true);
+    } finally {
+      unmarkPluginWorkerWrapped("local-indexer", "embed");
+    }
   });
 
   it("active capability synthetic NETWORK-ONLY (confines.filesystem === false) → NOT relaxed: pre-exec ask stands, tool NOT auto-allowed", async () => {
