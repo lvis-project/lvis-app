@@ -20,9 +20,9 @@ import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFro
 // Confines-aware reader for the foreground plugin read-relaxation coupling. It
 // reads the published active-sandbox capability snapshot (no asrt-sandbox.js
 // import) and reports whether plugin off-hostApi filesystem residuals are
-// actually contained. This is narrower than generic filesystem confinement:
-// Windows host shells are ASRT-wrapped, but Windows plugin workers are still the
-// legacy unwrapped spawn path until that substrate is upgraded.
+// actually contained. Windows plugin workers stay fail-closed under ASRT until
+// worker-scoped filesystem grants exist, so this provider deliberately excludes
+// the generic Windows host-shell filesystem signal.
 import { isActiveSandboxFilesystemContainedForPluginEffects } from "../../permissions/sandbox-capability.js";
 import type { PluginToolInvocationContext } from "../../plugins/runtime.js";
 import {

@@ -164,7 +164,7 @@ export interface TrustedSandboxSettings {
  * per command, and it can only ever NARROW or RE-SHAPE the filesystem jail —
  * it cannot widen network egress and cannot carry any sandbox-weakening flag.
  *
- * Windows ASRT 0.0.63 note: `srt-win exec` supports per-exec `denyRead` /
+ * Windows ASRT 0.0.64 note: `srt-win exec` supports per-exec `denyRead` /
  * `denyWrite` only. Non-empty per-exec `allowRead` / `allowWrite` is rejected
  * before calling ASRT; callers must move those grants to the session-level
  * config or keep that Windows execution path disabled/fail-closed.
@@ -325,10 +325,11 @@ export function assertPerExecFilesystemSupported(
     return;
   }
   throw new Error(
-    `${caller}: ASRT 0.0.63 on Windows does not support per-exec ` +
+    `${caller}: ASRT 0.0.64 on Windows does not support per-exec ` +
       "filesystem.allowRead/allowWrite; only per-exec denyRead/denyWrite " +
-      "are supported. Move allow grants to initializeAsrtSandbox() session " +
-      "config or keep this Windows execution path disabled.",
+      "are supported. Session allow grants are permitted only for explicitly " +
+      "trusted non-plugin global cases; plugin-worker paths must stay disabled " +
+      "until ASRT supports worker-scoped grants.",
   );
 }
 
@@ -437,7 +438,7 @@ export function isAsrtSandboxActive(): boolean {
  * PLATFORM: every entry is a LITERAL absolute path (NO glob chars). On macOS the
  * stripped path is a recursive seatbelt subpath; on Linux bwrap deny-binds the
  * literal path (bwrap cannot glob — ASRT only `expandGlobPattern`s entries that
- * CONTAIN glob chars, so literals are safe on both). On Windows, ASRT 0.0.63+
+ * CONTAIN glob chars, so literals are safe on both). On Windows, ASRT 0.0.64
  * applies filesystem rules through the srt-sandbox user ACL backend.
  *
  * NO-FALLBACK (deny-by-default): paths are derived from `os.homedir()` /

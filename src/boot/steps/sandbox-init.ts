@@ -31,10 +31,9 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
   //     the gap is visible. When win32 IS ready → initialize ASRT normally and
   //     publish a PARTIAL capability (filesystem + network, process=false).
   {
-    const {
-      initializeAsrtSandbox,
-      checkAsrtDependencies,
-    } = await import("../../permissions/asrt-sandbox.js");
+    const { initializeAsrtSandbox, checkAsrtDependencies } = await import(
+      "../../permissions/asrt-sandbox.js"
+    );
     const { setActiveSandboxCapability } = await import(
       "../../permissions/sandbox-capability.js"
     );
@@ -180,7 +179,6 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
             .listPluginIds()
             .map((id) => pluginRuntime.getPluginManifest(id)?.networkAccess?.allowedDomains ?? []);
           const unionAllowedDomains = await buildSandboxUnionDomains();
-
           // Trust boundary: WEAKENING flags are NOT set here (deny-by-default,
           // no Apple events / weaker isolation / unix-socket opening). Only the
           // enforced allow-list + strict flag. Per-command filesystem scoping

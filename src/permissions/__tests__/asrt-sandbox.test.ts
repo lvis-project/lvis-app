@@ -813,6 +813,18 @@ describe("asrt-sandbox — sensitive read deny-list (host-secret hardening)", ()
     buildSandboxConfig({ allowedDomains: [] });
     expect(isAsrtSandboxActive()).toBe(false);
   });
+
+  it("does not put plugin worker data roots into the shared sandbox config", () => {
+    const data = join(FAKE_LVIS_HOME, "plugins", "local-indexer", "data");
+    const cfg = buildSandboxConfig({
+      allowedDomains: [],
+      allowRead: [join(FAKE_LVIS_HOME, "notes")],
+      allowWrite: [join(FAKE_LVIS_HOME, "tasks")],
+    });
+
+    expect(cfg.filesystem.allowRead ?? []).not.toContain(data);
+    expect(cfg.filesystem.allowWrite ?? []).not.toContain(data);
+  });
 });
 
 describe("asrt-sandbox — worker-UDS shared-config emission (worker-confinement PR D-1)", () => {
