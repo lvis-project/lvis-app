@@ -36,7 +36,7 @@ import {
   registerMainWindowPluginEventBridge,
   showMainWindow,
 } from "./main-window.js";
-import { openSettingsWindow } from "./settings-window.js";
+import { activateInlineSettings } from "./app-menu.js";
 
 const log = createLogger("lvis");
 
@@ -342,7 +342,7 @@ async function handleMcpLoginAction(
 ): Promise<void> {
   const existingConfigs = await activeServices.mcpManager.getConfigs().catch(() => []);
   if (existingConfigs.some((config) => config.id === params.slug)) {
-    openSettingsWindow("mcp");
+    activateInlineSettings("mcp");
     return;
   }
   const target = await resolveMarketplaceActionTarget(activeServices, params.slug);
@@ -368,7 +368,7 @@ async function handleMcpLoginAction(
       pythonPath: activeServices.pythonPath,
       registerConfig: (config) => activeServices.mcpManager.addConfig(config),
     });
-    openSettingsWindow("mcp");
+    activateInlineSettings("mcp");
   })().catch((err: Error) => {
     log.error({ slug: params.slug, error: err.message, stack: err.stack }, "lvis:// MCP login failed");
   });
