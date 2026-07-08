@@ -122,7 +122,7 @@ describe("sandbox-capability — setActiveSandboxCapability publish", () => {
     expect(isWeakSandbox(cap)).toBe(true);
   });
 
-  it("keeps Windows host-shell filesystem containment separate from plugin worker effect containment", () => {
+  it("keeps Windows plugin effect containment closed until worker-scoped grants exist", () => {
     setActiveSandboxCapability({
       kind: "asrt",
       confidence: "verified",

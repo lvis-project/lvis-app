@@ -229,7 +229,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     // and Linux (bwrap) confine fs + process + network ("full"). Windows
     // (srt-win) confines filesystem + network but not process, which is a
     // genuine PARTIAL confinement, NOT "none". Earlier code reported Windows as
-    // network-only; ASRT 0.0.63 adds the dedicated srt-sandbox user ACL backend.
+    // network-only; ASRT 0.0.64 uses the dedicated srt-sandbox user ACL backend.
     //
     // The gate (enabled) only controls whether the ASRT sandbox initializes at
     // boot, not what the platform is capable of, so report the platform's
