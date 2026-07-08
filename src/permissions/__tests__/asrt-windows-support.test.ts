@@ -17,7 +17,7 @@ function readAsrtSandboxManagerSource(): string {
 }
 
 describe("asrt-windows-support adapter", () => {
-  it("normalizes the ASRT 0.0.63 ready sandbox-user shape", () => {
+  it("normalizes the ASRT 0.0.64 ready sandbox-user shape", () => {
     expect(
       normalizeAsrtWindowsUserState({
         provisioned: true,
@@ -79,8 +79,8 @@ describe("asrt-windows-support adapter", () => {
     const source = readAsrtSandboxManagerSource();
     expect(source).toContain("grantWindowsAcl({");
     expect(source).toContain("stampWindowsAcl({");
-    expect(source).toContain("revokeWindowsAcl({ sandboxUserSid: windowsFsSbUserSid })");
-    expect(source).toContain("restoreWindowsAcl({ sandboxUserSid: windowsFsSbUserSid })");
+    expect(source).toContain("revokeWindowsAcl({ sandboxUserSid: sb, srtWin })");
+    expect(source).toContain("restoreWindowsAcl({ sandboxUserSid: sb, srtWin })");
     expect(source).toContain("config = undefined;");
     expect(source).toContain("throw e;");
   });

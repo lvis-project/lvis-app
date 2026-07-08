@@ -15,10 +15,10 @@
  *     ACTIVE OS sandbox to FILESYSTEM-CONTAIN the host (`confines.filesystem ===
  *     true`), not merely be active (it relies on the effect-boundary, which only
  *     contains the off-hostApi `node:fs` WRITE residual when the sandbox
- *     filesystem-contains). Filesystem-contained plugin worker effects
- *     (mac/linux ASRT-wrapped workers) → relax; NOT filesystem-contained
- *     (degraded / off / synthetic network-only / current Windows unwrapped
- *     plugin worker) → the pre-exec ask stands (known-safe fallback).
+ *     filesystem-contains). Filesystem-contained mac/linux plugin worker
+ *     effects → relax; NOT filesystem-contained (degraded / off / synthetic
+ *     network-only / current Windows plugin worker fail-closed path) → the
+ *     pre-exec ask remains.
  *   • FLAG OFF (default) → full pre-exec ask, byte-for-byte unchanged.
  *   • PLUGIN ONLY → MCP + builtin keep the pre-exec ask (not relaxed).
  *   • FOREGROUND ONLY → a headless plugin tool keeps the existing headless lane.
@@ -650,9 +650,9 @@ describe("plugin read-relaxation — coupled to the OS sandbox FILESYSTEM-CONTAI
 
 // Confines-aware coupling wired through the REAL active-capability SOT. These
 // assert both the generic active filesystem-containment signal and the narrower
-// production plugin-effect provider. Windows ASRT can filesystem-contain
-// host-shell commands, but current Windows plugin workers are still unwrapped,
-// so the production plugin provider keeps the pre-exec ask there.
+// production plugin-effect provider. Windows host-shell ASRT may report
+// filesystem confinement, but plugin workers remain excluded until ASRT can
+// scope filesystem allow grants per worker/plugin.
 describe("plugin read-relaxation — confines-aware via the active-capability SOT", () => {
   beforeEach(() => {
     __resetActiveSandboxCapabilityForTest();
@@ -691,7 +691,7 @@ describe("plugin read-relaxation — confines-aware via the active-capability SO
     expect(result.content).toContain("noeffect-ok");
   });
 
-  it("active capability filesystem-contained (Windows ASRT fs+network partial) → relaxed (NO modal, tool runs)", async () => {
+  it("generic active capability filesystem-contained (Windows ASRT fs+network partial) → relaxed for the generic provider", async () => {
     setActiveSandboxCapability({
       kind: "asrt",
       confidence: "verified",
@@ -721,7 +721,7 @@ describe("plugin read-relaxation — confines-aware via the active-capability SO
     expect(result.content).toContain("noeffect-ok");
   });
 
-  it("production plugin provider excludes Windows partial until plugin workers are ASRT-wrapped", async () => {
+  it("production plugin provider excludes Windows partial until worker-scoped filesystem grants exist", async () => {
     setActiveSandboxCapability({
       kind: "asrt",
       confidence: "verified",

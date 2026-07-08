@@ -195,9 +195,9 @@ export class ConversationLoop {
       () => deps.settingsService.get("features")?.hostClassifiesRisk ?? false,
       // Couple the foreground plugin read-relaxation to the plugin worker
       // effect-boundary actually filesystem-containing off-hostApi residuals.
-      // Windows host shells are ASRT-wrapped after setup, but plugin workers
-      // are still unwrapped there, so the provider intentionally excludes
-      // Windows until that substrate is upgraded.
+      // Windows host shells are ASRT-wrapped after setup, but ASRT 0.0.64
+      // cannot scope plugin-worker filesystem grants per worker/plugin, so
+      // Windows worker spawn fails closed and the provider excludes Windows.
       isActiveSandboxFilesystemContainedForPluginEffects,
     );
     this.auditLogger = deps.auditLogger ?? new AuditLogger();
