@@ -18,9 +18,8 @@
  *   - udsArgName injection (arg form + env form).
  *   - idempotent any-exit cleanup → unmark + cleanup once on exit (and stop()
  *     does not double-run); reviewer falls back to none after.
- *   - win32 + gate ON → fail closed because ASRT 0.0.64 cannot scope
- *     filesystem allow grants per worker/plugin and shared all-plugin grants
- *     would break plugin isolation.
+ *   - win32 + gate ON → dedicated holder PID ACL grant + srt-win wrapped TCP
+ *     worker, no shared all-plugin grant and no UDS injection.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
@@ -70,6 +69,16 @@ const wrapWorkerCommandMock = vi.fn<
 const cleanupMock = vi.fn(() => Promise.resolve());
 const registerUdsMock = vi.fn<(dir: string) => Promise<void>>(() => Promise.resolve());
 const unregisterUdsMock = vi.fn<(dir: string) => Promise<void>>(() => Promise.resolve());
+const grantReleaseMock = vi.fn<() => void>();
+const grantWindowsWorkerFilesystemAccessMock = vi.fn<
+  (opts: unknown) => Promise<{ allowRead: readonly string[]; allowWrite: readonly string[]; release: () => void }>
+>(() =>
+  Promise.resolve({
+    allowRead: [],
+    allowWrite: [],
+    release: grantReleaseMock,
+  }),
+);
 vi.mock("../asrt-sandbox.js", () => ({
   isAsrtSandboxActive: () => gateActive,
   wrapWorkerCommand: (command: string, options?: unknown) =>
@@ -77,6 +86,8 @@ vi.mock("../asrt-sandbox.js", () => ({
   cleanupAsrtSandboxAfterCommand: () => cleanupMock(),
   registerWorkerUnixSocketDir: (dir: string) => registerUdsMock(dir),
   unregisterWorkerUnixSocketDir: (dir: string) => unregisterUdsMock(dir),
+  grantWindowsWorkerFilesystemAccess: (opts: unknown) =>
+    grantWindowsWorkerFilesystemAccessMock(opts),
   // The host-secret read floor restated on the worker wrap (#1365 SOT).
   getDefaultSensitiveReadDenyPaths: () => ["/home/u/.lvis/secrets", "/home/u/.ssh"],
   // The persistence-vector write floor restated on the worker wrap (#1449 SOT).
@@ -103,23 +114,49 @@ import { withPlatformForTest } from "../../__tests__/test-helpers.js";
 
 /** A minimal child-process double (NOT a shared helper — local to this file). */
 class StubWorkerChild extends EventEmitter {
+  stdin = new PassThrough();
   stdout = new PassThrough();
   stderr = new PassThrough();
   exitCode: number | null = null;
   pid = 4242;
-  kill(_signal?: string): boolean {
+  killed = false;
+  killCalls: Array<string | undefined> = [];
+  kill(signal?: string): boolean {
+    this.killCalls.push(signal);
+    this.killed = true;
     return true;
   }
 }
 
+function setEnvForTest(values: Record<string, string | undefined>): () => void {
+  const prior = new Map<string, string | undefined>();
+  for (const [key, value] of Object.entries(values)) {
+    prior.set(key, process.env[key]);
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  return () => {
+    for (const [key, value] of prior) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
+}
+
 const REAL_PLATFORM = process.platform;
+const REAL_SYSTEM_ROOT = process.env.SystemRoot;
+const REAL_WINDIR = process.env.WINDIR;
 
 beforeEach(() => {
+  process.env.SystemRoot = "C:\\Windows";
+  process.env.WINDIR = "C:\\Windows";
   spawnMock.mockReset();
   wrapWorkerCommandMock.mockReset();
   cleanupMock.mockClear();
   registerUdsMock.mockClear();
   unregisterUdsMock.mockClear();
+  grantReleaseMock.mockClear();
+  grantWindowsWorkerFilesystemAccessMock.mockClear();
   mkdirMock.mockClear();
   unlinkSyncMock.mockClear();
   rmdirSyncMock.mockClear();
@@ -129,12 +166,22 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (REAL_SYSTEM_ROOT === undefined) {
+    delete process.env.SystemRoot;
+  } else {
+    process.env.SystemRoot = REAL_SYSTEM_ROOT;
+  }
+  if (REAL_WINDIR === undefined) {
+    delete process.env.WINDIR;
+  } else {
+    process.env.WINDIR = REAL_WINDIR;
+  }
   withPlatformForTest(REAL_PLATFORM);
   __resetActiveSandboxCapabilityForTest();
   __resetWrappedPluginWorkersForTest();
 });
 
-// ─── Gate OFF — plain spawn, byte-for-byte legacy ───────────
+// ─── Gate OFF — plain unwrapped spawn ───────────────────────
 
 describe("spawnWorker — gate OFF (default)", () => {
   it("plain-spawns the worker UNCHANGED, no wrap, no UDS, socketPath null, reviewer none", async () => {
@@ -193,6 +240,7 @@ describe("spawnWorker — gate ON (macOS)", () => {
       workerId: "embed",
       command: "/opt/worker",
       args: ["--serve"],
+      allowReadPaths: ["/opt/worker", "/opt/scripts/embed.py"],
       allowWritePaths: ["/data/index"],
       udsArgName: "--uds",
     });
@@ -216,6 +264,8 @@ describe("spawnWorker — gate ON (macOS)", () => {
     ];
     expect(options.filesystem.allowWrite[0]).toBe(socketDir);
     expect(options.filesystem.allowWrite).toContain("/data/index");
+    expect(options.filesystem.allowRead).toContain("/opt/worker");
+    expect(options.filesystem.allowRead).toContain("/opt/scripts/embed.py");
     expect(options.allowUnixSocketPath).toBeUndefined();
     expect(options.allowAllUnixSockets).toBeUndefined();
     // The host-secret read floor MUST be restated on the worker wrap — a
@@ -408,10 +458,132 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
   });
 });
 
-// ─── Windows + gate ON → fail closed until per-worker grants exist ─
+// ─── Windows + gate ON → holder ACL grant + srt-win wrapped TCP ─
 
 describe("spawnWorker — Windows with gate ON", () => {
-  it("fails closed instead of granting all plugin worker data dirs globally", async () => {
+  it("wraps the worker with a dedicated holder PID ACL grant and keeps TCP control", async () => {
+    withPlatformForTest("win32");
+    gateActive = true;
+    const restoreEnv = setEnvForTest({
+      COMSPEC: "C:\\Windows\\System32\\cmd.exe",
+      PATHEXT: ".COM;.EXE;.BAT;.CMD",
+      LOCALAPPDATA: "C:\\Users\\test\\AppData\\Local",
+      TEMP: "C:\\Users\\test\\AppData\\Local\\Temp",
+      TMP: "C:\\Users\\test\\AppData\\Local\\Temp",
+      ANTHROPIC_API_KEY: "sk-should-not-reach-worker",
+      LVIS_INTERNAL_SECRET: "lvis-should-not-reach-worker",
+    });
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
+      confines: { filesystem: true, process: false, network: true },
+    });
+    wrapWorkerCommandMock.mockResolvedValueOnce({
+      argv: ["srt-win.exe", "exec", "--", "powershell.exe", "-Command", "wrapped"],
+      env: { ...process.env, HTTPS_PROXY: "http://127.0.0.1:60080" },
+    });
+    const holder = new StubWorkerChild();
+    holder.pid = 5101;
+    const child = new StubWorkerChild();
+    child.pid = 5102;
+    spawnMock.mockReturnValueOnce(holder).mockReturnValueOnce(child);
+
+    const pluginDataDir = join(lvisHome(), "plugins", "local-indexer", "data");
+    const indexDir = join(pluginDataDir, "index");
+    const workerScript = "C:/lvis/local-indexer/dist/worker/local_indexer_worker.py";
+    const pythonExecutable = "C:/Python/python.exe";
+    const worker = await (async () => {
+      try {
+        return await spawnWorker({
+          pluginId: "local-indexer",
+          workerId: "embed",
+          command: pythonExecutable,
+          args: [workerScript, "--host", "127.0.0.1", "--port", "17037"],
+          allowReadPaths: [pythonExecutable, workerScript],
+          allowWritePaths: [indexDir],
+          udsArgName: "--uds",
+        });
+      } finally {
+        restoreEnv();
+      }
+    })();
+
+    expect(mkdirMock).not.toHaveBeenCalled();
+    expect(registerUdsMock).not.toHaveBeenCalled();
+    expect(unregisterUdsMock).not.toHaveBeenCalled();
+    expect(grantWindowsWorkerFilesystemAccessMock).toHaveBeenCalledWith({
+      holderPid: 5101,
+      allowRead: [pythonExecutable, workerScript],
+      allowWrite: [indexDir],
+    });
+
+    expect(wrapWorkerCommandMock).toHaveBeenCalledTimes(1);
+    const [cmdline, options] = wrapWorkerCommandMock.mock.calls[0] as [
+      string,
+      { filesystem: { allowRead?: string[]; allowWrite?: string[]; denyRead?: string[]; denyWrite?: string[] }; binShell?: string },
+    ];
+    expect(cmdline).toContain("& 'C:/Python/python.exe'");
+    expect(cmdline).toContain("'C:/lvis/local-indexer/dist/worker/local_indexer_worker.py'");
+    expect(cmdline).not.toContain("--uds");
+    expect(options.binShell).toBe("powershell");
+    expect(options.filesystem.allowRead).toBeUndefined();
+    expect(options.filesystem.allowWrite).toBeUndefined();
+    expect(options.filesystem.denyRead).toContain("/home/u/.lvis/secrets");
+    expect(options.filesystem.denyWrite).toContain("/home/u/.zshrc");
+
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    const [holderCmd, holderArgs, holderOpts] = spawnMock.mock.calls[0] as [
+      string,
+      string[],
+      { cwd?: string; env?: NodeJS.ProcessEnv; shell: boolean; stdio: unknown[] },
+    ];
+    expect(holderCmd).toBe("C:\\Windows\\System32\\more.com");
+    expect(holderArgs).toEqual([]);
+    expect(holderOpts.cwd).toBe("C:\\Windows\\System32");
+    expect(holderOpts.env?.PATH).toBeUndefined();
+    expect(holderOpts.shell).toBe(false);
+    expect(holderOpts.stdio).toEqual(["pipe", "ignore", "ignore"]);
+    const [workerCmd, workerArgs, workerOpts] = spawnMock.mock.calls[1] as [
+      string,
+      string[],
+      { env?: NodeJS.ProcessEnv; shell: boolean; stdio: unknown[] },
+    ];
+    expect(workerCmd).toBe("srt-win.exe");
+    expect(workerArgs[0]).toBe("exec");
+    expect(workerOpts.env?.SystemRoot).toBe("C:\\Windows");
+    expect(workerOpts.env?.WINDIR).toBe("C:\\Windows");
+    expect(workerOpts.env?.COMSPEC).toBe("C:\\Windows\\System32\\cmd.exe");
+    expect(workerOpts.env?.PATHEXT).toBe(".COM;.EXE;.BAT;.CMD");
+    expect(workerOpts.env?.LOCALAPPDATA).toBe("C:\\Users\\test\\AppData\\Local");
+    expect(workerOpts.env?.TEMP).toBe("C:\\Users\\test\\AppData\\Local\\Temp");
+    expect(workerOpts.env?.TMP).toBe("C:\\Users\\test\\AppData\\Local\\Temp");
+    expect(workerOpts.env?.HTTPS_PROXY).toBe("http://127.0.0.1:60080");
+    expect(workerOpts.env?.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(workerOpts.env?.LVIS_INTERNAL_SECRET).toBeUndefined();
+    expect(workerOpts.shell).toBe(false);
+    expect(workerOpts.stdio).toEqual(["ignore", "pipe", "pipe"]);
+
+    expect(worker.socketPath).toBeNull();
+    expect(worker.pid).toBe(5102);
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(true);
+    const cap = resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed", "local-indexer");
+    expect(cap.kind).toBe("asrt");
+
+    worker.stop();
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(grantReleaseMock).toHaveBeenCalledTimes(1);
+    expect(holder.killed).toBe(true);
+    const workerKillCalls = child.killCalls.length;
+    holder.emit("exit", 0, "SIGTERM");
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(grantReleaseMock).toHaveBeenCalledTimes(1);
+    expect(child.killCalls).toHaveLength(workerKillCalls);
+  });
+
+  it("terminates the Windows worker and releases grants when the holder exits first", async () => {
     withPlatformForTest("win32");
     gateActive = true;
     setActiveSandboxCapability({
@@ -421,23 +593,153 @@ describe("spawnWorker — Windows with gate ON", () => {
       reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
       confines: { filesystem: true, process: false, network: true },
     });
+    wrapWorkerCommandMock.mockResolvedValueOnce({
+      argv: ["srt-win.exe", "exec", "--", "powershell.exe", "-Command", "wrapped"],
+      env: { ...process.env },
+    });
+    const holder = new StubWorkerChild();
+    holder.pid = 5101;
+    const child = new StubWorkerChild();
+    child.pid = 5102;
+    spawnMock.mockReturnValueOnce(holder).mockReturnValueOnce(child);
 
-    const pluginDataDir = join(lvisHome(), "plugins", "local-indexer", "data");
+    await spawnWorker({
+      pluginId: "local-indexer",
+      workerId: "embed",
+      command: "C:/Python/python.exe",
+      args: ["C:/worker.py"],
+      allowReadPaths: ["C:/worker.py"],
+      allowWritePaths: ["C:/index"],
+    });
+
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(true);
+    holder.emit("exit", 1, null);
+
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(grantReleaseMock).toHaveBeenCalledTimes(1);
+    expect(child.killed).toBe(true);
+
+    child.emit("exit", 0, null);
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(grantReleaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts Windows worker spawn if the holder exits during grant setup", async () => {
+    withPlatformForTest("win32");
+    gateActive = true;
+    const holder = new StubWorkerChild();
+    holder.pid = 5101;
+    spawnMock.mockReturnValueOnce(holder);
+    grantWindowsWorkerFilesystemAccessMock.mockImplementationOnce(async () => {
+      holder.emit("exit", 1, null);
+      return {
+        allowRead: [],
+        allowWrite: [],
+        release: grantReleaseMock,
+      };
+    });
+
     await expect(
       spawnWorker({
         pluginId: "local-indexer",
         workerId: "embed",
         command: "C:/Python/python.exe",
-        args: ["C:/worker.py", "--host", "127.0.0.1", "--port", "17037"],
-        allowWritePaths: [join(pluginDataDir, "index")],
-        udsArgName: "--uds",
+        args: ["C:/worker.py"],
+        allowReadPaths: ["C:/worker.py"],
+        allowWritePaths: ["C:/index"],
       }),
-    ).rejects.toThrow(/Windows ASRT plugin workers are disabled|per-worker filesystem allow grants/i);
+    ).rejects.toThrow(/Windows ACL grant holder exited/);
 
+    expect(spawnMock).toHaveBeenCalledTimes(1);
     expect(wrapWorkerCommandMock).not.toHaveBeenCalled();
+    expect(cleanupMock).not.toHaveBeenCalled();
+    expect(grantReleaseMock).toHaveBeenCalledTimes(1);
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
+  });
+
+  it("consumes the Windows holder spawn error when no holder pid is published", async () => {
+    withPlatformForTest("win32");
+    gateActive = true;
+    const holder = new StubWorkerChild();
+    (holder as unknown as { pid?: number }).pid = undefined;
+    spawnMock.mockReturnValueOnce(holder);
+
+    await expect(
+      spawnWorker({
+        pluginId: "local-indexer",
+        workerId: "embed",
+        command: "C:/Python/python.exe",
+        args: ["C:/worker.py"],
+      }),
+    ).rejects.toThrow(/Windows ACL grant holder started without a pid/);
+
+    expect(holder.listenerCount("error")).toBeGreaterThan(0);
+    expect(() => holder.emit("error", new Error("spawn ENOENT"))).not.toThrow();
+    expect(grantWindowsWorkerFilesystemAccessMock).not.toHaveBeenCalled();
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
+  });
+
+  it("continues Windows cleanup when grant release throws", async () => {
+    withPlatformForTest("win32");
+    gateActive = true;
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
+      confines: { filesystem: true, process: false, network: true },
+    });
+    grantReleaseMock.mockImplementationOnce(() => {
+      throw new Error("already revoked");
+    });
+    wrapWorkerCommandMock.mockResolvedValueOnce({
+      argv: ["srt-win.exe", "exec", "--", "powershell.exe", "-Command", "wrapped"],
+      env: { ...process.env },
+    });
+    const holder = new StubWorkerChild();
+    holder.pid = 5101;
+    const child = new StubWorkerChild();
+    child.pid = 5102;
+    spawnMock.mockReturnValueOnce(holder).mockReturnValueOnce(child);
+
+    const worker = await spawnWorker({
+      pluginId: "local-indexer",
+      workerId: "embed",
+      command: "C:/Python/python.exe",
+      args: ["C:/worker.py"],
+      allowReadPaths: ["C:/worker.py"],
+      allowWritePaths: ["C:/index"],
+    });
+
+    expect(() => worker.stop()).not.toThrow();
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
+    expect(holder.killed).toBe(true);
+  });
+
+  it("rolls back the holder grant when the Windows wrap fails", async () => {
+    withPlatformForTest("win32");
+    gateActive = true;
+    const holder = new StubWorkerChild();
+    holder.pid = 5101;
+    spawnMock.mockReturnValueOnce(holder);
+    wrapWorkerCommandMock.mockRejectedValueOnce(new Error("wrap failed"));
+
+    await expect(
+      spawnWorker({
+        pluginId: "local-indexer",
+        workerId: "embed",
+        command: "C:/Python/python.exe",
+        args: ["C:/worker.py"],
+        allowReadPaths: ["C:/worker.py"],
+        allowWritePaths: ["C:/index"],
+      }),
+    ).rejects.toThrow(/wrap failed/);
+
+    expect(grantReleaseMock).toHaveBeenCalledTimes(1);
+    expect(cleanupMock).not.toHaveBeenCalled();
     expect(mkdirMock).not.toHaveBeenCalled();
     expect(registerUdsMock).not.toHaveBeenCalled();
-    expect(spawnMock).not.toHaveBeenCalled();
     expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
   });
 });
