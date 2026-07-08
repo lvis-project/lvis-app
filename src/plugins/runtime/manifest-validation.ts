@@ -5,11 +5,6 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
-// ajv + ajv-formats ship a CJS default export; ESM interop requires the
-// `.default ?? module` dance below.
-import * as AjvModule from "ajv";
-import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
 import type { PluginManifest, InstallPolicy } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
@@ -55,21 +50,22 @@ function isAllowedHostSecretKey(value: unknown): value is string {
   );
 }
 
-async function loadSdkManifestSchema(): Promise<unknown> {
-  const schemaPath = createRequire(import.meta.url).resolve(
-    "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
-  );
-  const schemaBytes = await readFile(schemaPath, "utf-8");
-  return JSON.parse(schemaBytes);
-}
-
-function cloneJsonObject(value: unknown): unknown {
-  return JSON.parse(JSON.stringify(value));
+export function formatUnknownErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
+  }
+  return String(err);
 }
 
 function schemaAcceptsToolSchemaWorkerId(validator: ValidateFunction): boolean {
   const ok = validator({
-    id: "com.example.worker",
+    id: "worker-plugin",
     name: "Worker Plugin",
     version: "1.0.0",
     description: "Worker plugin fixture.",
@@ -82,6 +78,24 @@ function schemaAcceptsToolSchemaWorkerId(validator: ValidateFunction): boolean {
         workerId: "main-worker",
         inputSchema: { type: "object", properties: {} },
       },
+    },
+  });
+  return ok === true;
+}
+
+function schemaAcceptsNetworkAccessAllowPrivateNetworks(validator: ValidateFunction): boolean {
+  const ok = validator({
+    id: "private-network-plugin",
+    name: "Private Network Plugin",
+    version: "1.0.0",
+    description: "Private network fixture.",
+    publisher: "LVIS",
+    entry: "dist/index.js",
+    tools: [],
+    networkAccess: {
+      allowedDomains: ["intranet.example.com"],
+      allowPrivateNetworks: true,
+      reasoning: "Host-mediated intranet access.",
     },
   });
   return ok === true;
@@ -103,63 +117,23 @@ function schemaAcceptsMarketplaceProviderHostSecret(validator: ValidateFunction)
   return ok === true;
 }
 
-function applyHostManifestSchemaCompatibility(schema: unknown): unknown {
-  const copy = cloneJsonObject(schema) as Record<string, unknown>;
-  const properties = copy.properties as Record<string, unknown> | undefined;
-  const toolSchemas = properties?.toolSchemas as Record<string, unknown> | undefined;
-  const entrySchema = toolSchemas?.additionalProperties as Record<string, unknown> | undefined;
-  const entryProperties = entrySchema?.properties as Record<string, unknown> | undefined;
-  if (entryProperties && entryProperties.workerId === undefined) {
-    entryProperties.workerId = {
-      type: "string",
-      minLength: 1,
-      maxLength: 128,
-      pattern: "^[A-Za-z0-9._-]+$",
-      description:
-        "Host-spawned plugin worker id. Paired with plugin id so the host reviewer can resolve the specific ASRT-wrapped worker substrate.",
-    };
-  }
-  const hostSecrets = properties?.hostSecrets as Record<string, unknown> | undefined;
-  const hostSecretProperties = hostSecrets?.properties as Record<string, unknown> | undefined;
-  const readSchema = hostSecretProperties?.read as Record<string, unknown> | undefined;
-  const readItems = readSchema?.items as Record<string, unknown> | undefined;
-  if (readItems) {
-    readItems.pattern = HOST_SECRETS_KEY_PATTERN_SOURCE;
-    readItems.maxLength =
-      "llm.marketplaceProvider.".length +
-      MARKETPLACE_PROVIDER_PRESET_ID_MAX_LENGTH +
-      ".apiKey".length;
-  }
-  if (readSchema) {
-    readSchema.description =
-      "Secret keys this plugin is permitted to read. Accepted forms: llm.apiKey.<vendor> or llm.marketplaceProvider.<presetId>.apiKey. Marketplace preset ids follow the host provider-preset id contract.";
-  }
-  if (hostSecrets) {
-    hostSecrets.description =
-      "Explicit allowlist of host-managed LLM secrets the plugin reads via hostApi.getSecret. Default deny when unset.";
-  }
-  return copy;
-}
-
-function compileAjvValidator(schema: unknown): ValidateFunction {
-  // Ajv default export compat for ESM/CJS interop.
-  const AjvAny = AjvModule as unknown as { default?: unknown };
-  const AjvCtor = (AjvAny.default ?? AjvModule) as new (opts?: unknown) => {
-    compile: (schema: unknown) => ValidateFunction;
-  };
-  // strictRequired=false — if/then branches reference properties declared
-  // on the outer `properties` block; AJV's strict mode otherwise flags
-  // these as "property not defined inside the same schema object".
-  const ajv = new AjvCtor({
-    strict: true,
-    strictRequired: false,
-    allErrors: true,
-    allowUnionTypes: true,
+function schemaAcceptsCategorylessToolSchema(validator: ValidateFunction): boolean {
+  const ok = validator({
+    id: "categoryless-tool-plugin",
+    name: "Categoryless Tool Plugin",
+    version: "1.0.0",
+    description: "Categoryless tool schema fixture.",
+    publisher: "LVIS",
+    entry: "dist/index.js",
+    tools: ["categoryless_ping"],
+    toolSchemas: {
+      categoryless_ping: {
+        description: "Categoryless ping tool fixture.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    },
   });
-  const AddAny = AddFormatsModule as unknown as { default?: unknown };
-  const addFormatsFn = (AddAny.default ?? AddFormatsModule) as (a: unknown) => void;
-  addFormatsFn(ajv);
-  return ajv.compile(schema);
+  return ok === true;
 }
 
 export function normalizeInstallPolicy(
@@ -181,55 +155,51 @@ export function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
 /**
  * Lazy-load + compile the SDK plugin manifest schema into an AJV validator.
  * The SDK schema is the manifest shape SOT; if it cannot be resolved or
- * compiled, plugin loading must fail closed instead of switching validators.
- *
- * PR #894 review B5 — when the SDK exposes a `compileManifestValidator()`
- * helper, prefer it so host + SDK never drift apart on AJV options. The
- * helper is intentionally optional; SDK builds without it fall through to the
- * host-local AJV compile of the shipped schema with a one-shot warn so
- * operators see the drift signal in logs.
- *
- * As of @lvis/plugin-sdk v5.20.0 the manifest schema natively carries every
- * host-required field (hostSecrets, networkAccess, requires.minAppVersion) and
- * makes per-tool `category` optional. Host-only compatibility is now limited to
- * `toolSchemas.*.workerId` while the SDK tag catches up; once the SDK helper
- * accepts it natively this path uses the helper unchanged.
+ * compiled, plugin loading must fail closed. Do not mutate the SDK schema in
+ * the host. As of @lvis/plugin-sdk v5.21.0, the helper must natively accept
+ * every host-required manifest field (`networkAccess.allowPrivateNetworks`,
+ * `toolSchemas.*.workerId`, marketplace-provider secret grants, and
+ * category-less tool schemas).
  */
 export async function buildManifestValidator(): Promise<ValidateFunction> {
+  type SdkModule = { compileManifestValidator?: () => ValidateFunction };
+  let sdk: SdkModule;
   try {
-    // Prefer SDK helper when available so AJV options stay in lockstep.
-    type SdkModule = { compileManifestValidator?: () => ValidateFunction };
-    const sdk = (await import("@lvis/plugin-sdk")) as unknown as SdkModule;
-    if (typeof sdk.compileManifestValidator === "function") {
-      const validator = sdk.compileManifestValidator();
-      const needsWorkerIdPatch = !schemaAcceptsToolSchemaWorkerId(validator);
-      const needsMarketplaceProviderSecretPatch =
-        !schemaAcceptsMarketplaceProviderHostSecret(validator);
-      if (!needsWorkerIdPatch && !needsMarketplaceProviderSecretPatch) {
-        return validator;
-      }
-      log.warn(
-        `SDK manifest validator needs host-local compatibility patch for ${[
-          needsWorkerIdPatch ? "toolSchemas.*.workerId" : "",
-          needsMarketplaceProviderSecretPatch ? "llm.marketplaceProvider.<presetId>.apiKey" : "",
-        ].filter(Boolean).join(", ")}. Update @lvis/plugin-sdk once these fields land upstream.`,
-      );
-      return compileAjvValidator(applyHostManifestSchemaCompatibility(await loadSdkManifestSchema()));
-    }
-    log.warn(
-      "SDK does not export compileManifestValidator() — falling back to host-local AJV compile. Update @lvis/plugin-sdk to keep manifest validation in lockstep.",
+    sdk = (await import("@lvis/plugin-sdk")) as unknown as SdkModule;
+  } catch (err) {
+    throw new Error(`SDK plugin manifest validator unavailable: ${formatUnknownErrorMessage(err)}`);
+  }
+
+  if (typeof sdk.compileManifestValidator !== "function") {
+    throw new Error(
+      "SDK plugin manifest validator unavailable: @lvis/plugin-sdk does not export compileManifestValidator(); update @lvis/plugin-sdk to v5.21.0 or newer.",
     );
-  } catch (err) {
-    // SDK import itself failed (rare — host always depends on SDK for
-    // types). Fall through to the local compile so plugin loading isn't
-    // blocked on an SDK packaging quirk.
-    log.warn(`SDK validator import failed, using host-local AJV: ${(err as Error).message}`);
   }
+
+  let validator: ValidateFunction;
   try {
-    return compileAjvValidator(applyHostManifestSchemaCompatibility(await loadSdkManifestSchema()));
+    validator = sdk.compileManifestValidator();
   } catch (err) {
-    throw new Error(`SDK plugin manifest schema unavailable: ${(err as Error).message}`);
+    throw new Error(
+      `SDK plugin manifest validator failed to compile: ${formatUnknownErrorMessage(err)}`,
+    );
   }
+  const missingNativeFields = [
+    schemaAcceptsNetworkAccessAllowPrivateNetworks(validator)
+      ? ""
+      : "networkAccess.allowPrivateNetworks",
+    schemaAcceptsToolSchemaWorkerId(validator) ? "" : "toolSchemas.*.workerId",
+    schemaAcceptsMarketplaceProviderHostSecret(validator)
+      ? ""
+      : "llm.marketplaceProvider.<presetId>.apiKey",
+    schemaAcceptsCategorylessToolSchema(validator) ? "" : "category-less toolSchemas",
+  ].filter(Boolean);
+  if (missingNativeFields.length > 0) {
+    throw new Error(
+      `SDK plugin manifest validator is missing native support for ${missingNativeFields.join(", ")}; update @lvis/plugin-sdk to v5.21.0 or newer.`,
+    );
+  }
+  return validator;
 }
 
 /**
