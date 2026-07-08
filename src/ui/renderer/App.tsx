@@ -539,27 +539,17 @@ export function App() {
     });
   }, [api, approvalQueue.length, handleLoadSessionAndRefresh, handleViewSelect]);
 
-  // Inline settings exists only in work mode. Switching to chat mode while it
-  // is open returns to home so chat mode's detached-Settings contract holds (a
-  // subsequent sidebar Settings click then opens the detached BrowserWindow).
-  useEffect(() => {
-    if (appMode === "chat" && activeView === "settings") {
-      setActiveView(settingsReturnViewRef.current === "settings" ? "home" : settingsReturnViewRef.current);
-    }
-  }, [appMode, activeView]);
+  // Settings is ALWAYS an inline view now — there is no detached Settings
+  // window in either mode (overhaul). So the old "chat mode force-closes inline
+  // settings" guard is gone: the settings view is valid in every appMode, and a
+  // mode switch must not eject the user from it.
 
-  // appMode is the SOLE authority for inline-vs-detached, mirroring the other
-  // views (업무보드/루틴/메모리/별표 + plugin views). In work mode Settings
-  // joins that inline pattern: setActiveView("settings") + MainContent renders
-  // SettingsContent inline. In chat mode Settings keeps the existing detached
-  // BrowserWindow path untouched. Re-selecting Settings while already on the
-  // inline view is a no-op (only the tab is refreshed) so the view never
+  // Settings joins the inline view pattern (업무보드/루틴/메모리/별표 + plugin
+  // views) in EVERY mode. `setActiveView("settings")` + MainContent renders
+  // SettingsContent inline; there is no BrowserWindow path. Re-selecting
+  // Settings while already inline only refreshes the tab, so the view never
   // re-mounts and loses its place.
   const onOpenSettings = useCallback((tab = "llm") => {
-    if (appMode === "chat") {
-      void api.openSettingsWindow(tab);
-      return;
-    }
     setSettingsTab(normalizeSettingsTab(tab));
     setActiveView((current) => {
       // Only capture the return view on the first entry into settings; a
@@ -567,7 +557,7 @@ export function App() {
       if (current !== "settings") settingsReturnViewRef.current = current;
       return "settings";
     });
-  }, [api, appMode]);
+  }, []);
 
   const handleViewSelectWithDoctor = useCallback((key: string) => {
     const doctorPluginId = parsePluginDoctorViewKey(key);
