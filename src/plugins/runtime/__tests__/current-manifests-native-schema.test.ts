@@ -1,7 +1,7 @@
 /**
  * Step-1 migration evidence — every CURRENT/published plugin manifest plus the
  * plugin-template manifest validates against the native @lvis/plugin-sdk
- * v5.18.0 schema through the host's real `buildManifestValidator()` +
+ * v5.21.0 schema through the host's real `buildManifestValidator()` +
  * `parsePluginJson()`, with the legacy-schema compatibility patches retired.
  *
  * The fixtures under `fixtures/current-plugin-manifests/` are verbatim copies of
@@ -10,11 +10,11 @@
  *   ms-graph 0.3.36, lge-api 0.17.23, meeting 0.5.27, work-assistant 0.10.3,
  *   local-indexer 0.5.1, plugin-template 0.1.1.
  *
- * This pins the migration claim: v5.18.0 (which dropped `ui[].window.defaultMode`
- * and now carries hostSecrets / networkAccess / requires.minAppVersion natively
- * and makes per-tool `category` optional) accepts every current manifest with no
- * host compatibility patch. A regression that reintroduces a patch dependency —
- * or an SDK schema change that rejects a shipped manifest — fails here.
+ * This pins the migration claim: v5.21.0 carries hostSecrets, networkAccess,
+ * requires.minAppVersion, networkAccess.allowPrivateNetworks, per-tool workerId,
+ * marketplace-provider secret grants, and category-less tool schemas natively.
+ * A regression that reintroduces a host compatibility patch dependency — or an
+ * SDK schema change that rejects a shipped manifest — fails here.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
@@ -37,7 +37,7 @@ const EXPECTED_IDS: Record<string, string> = {
   "plugin-template.plugin.json": "your-plugin-id",
 };
 
-describe("current plugin manifests — native @lvis/plugin-sdk v5.18.0 schema acceptance", () => {
+describe("current plugin manifests — native @lvis/plugin-sdk v5.21.0 schema acceptance", () => {
   const files = readdirSync(fixturesDir)
     .filter((f) => f.endsWith(".plugin.json"))
     .sort();
@@ -50,7 +50,7 @@ describe("current plugin manifests — native @lvis/plugin-sdk v5.18.0 schema ac
     it(`${file} parses + validates with no compat patch and carries no defaultMode`, async () => {
       const path = join(fixturesDir, file);
 
-      // Native v5.18.0 schema dropped ui[].window.defaultMode — assert the
+      // Native SDK schema dropped ui[].window.defaultMode — assert the
       // current manifest does not depend on the removed field.
       const raw = readFileSync(path, "utf-8");
       expect(raw).not.toContain("defaultMode");

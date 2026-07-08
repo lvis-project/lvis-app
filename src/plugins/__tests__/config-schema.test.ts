@@ -48,10 +48,9 @@ function buildAjv() {
 
 async function loadHostManifestSchema() {
   const raw = await readFile(SCHEMA_PATH, "utf-8");
-  // As of @lvis/plugin-sdk v5.18.0 the manifest schema natively carries the
-  // host-required fields (hostSecrets, networkAccess) and makes per-tool
-  // `category` optional, so tests compile the SDK schema verbatim — the same
-  // shape the runtime enforces.
+  // As of @lvis/plugin-sdk v5.21.0 the manifest schema natively carries the
+  // host-required fields and makes per-tool `category` optional, so tests
+  // compile the SDK schema verbatim — the same shape the runtime enforces.
   return JSON.parse(raw);
 }
 
@@ -189,9 +188,8 @@ describe("toolSchemas authority metadata", () => {
 
   it("host schema accepts toolSchemas without a category", async () => {
     // The host owns risk classification (default-strict at runtime), so the
-    // host-compat schema tolerates a manifest that omits the per-tool category
-    // ahead of the SDK schema dropping the field. A category, when present,
-    // must still validate (see the test above).
+    // native SDK schema accepts manifests that omit the deprecated per-tool
+    // category. A category, when present, must still validate (see above).
     const ajv = buildAjv();
     const validate = ajv.compile(await loadHostManifestSchema());
     const ok = validate(manifestWithToolSchema({
@@ -248,7 +246,7 @@ describe("toolSchemas authority metadata", () => {
     }
   });
 
-  it("end-to-end: parsePluginJson accepts toolSchemas workerId via host schema compatibility", async () => {
+  it("end-to-end: parsePluginJson accepts toolSchemas workerId via native SDK schema", async () => {
     const { buildManifestValidator, parsePluginJson } = await import(
       "../runtime/manifest-validation.js"
     );
