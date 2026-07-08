@@ -664,7 +664,7 @@ export function App() {
 
   useAppBootstrap({
     api, refreshViews, refreshCards: async () => { await refreshCards(); }, checkApiKey,
-    setActiveView,
+    setActiveView, onOpenSettings,
     toggleCommandPopover,
   });
   // Plugin/agent/skill lifecycle → catalog refresh. Owns the in-flight install
@@ -919,6 +919,7 @@ export function App() {
 
       <AppDialogs
         api={api}
+        onOpenSettings={onOpenSettings}
         deferredQueueOpen={deferredQueueOpen}
         onDeferredQueueOpenChange={setDeferredQueueOpen}
         approvalQueue={approvalQueue}
