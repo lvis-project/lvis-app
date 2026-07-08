@@ -20,6 +20,7 @@ import type { RolePreset } from "../../../data/role-presets.js";
 import type { AppMode } from "../MainToolbar.js";
 import type { AskUserQuestionRequest } from "./AskUserQuestionCard.js";
 import { ComposerProjectSelector } from "./ComposerProjectSelector.js";
+import { ComposerApiKeyChip } from "./ComposerApiKeyChip.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 
 type InputStatusRow = React.ComponentProps<typeof InputActionBar>["statusRow"];
@@ -28,8 +29,6 @@ export interface ChatComposerDockProps {
   dockColumnClass: string;
   /** Empty work-mode conversation: visually lift the composer into the first screen. */
   centered?: boolean;
-  /** Keep center placement, but reduce lift when the transcript owns an empty-state card. */
-  centeredLift?: "default" | "compact";
   workflowApi: LvisApi;
   api: LvisApi;
   currentSessionId: string;
@@ -48,6 +47,8 @@ export interface ChatComposerDockProps {
   plugins: PluginEntry[];
   onSelectPlugin: (viewKey: string) => void;
   hasApiKey: boolean | null;
+  /** Opens the settings window on a tab. Used by the no-key chip. */
+  onOpenSettings: (tab?: string) => void;
   viewMode: ViewModeState | null;
   streaming: boolean;
   onInsertSlashCommand: (cmd: string) => void;
@@ -95,7 +96,6 @@ export interface ChatComposerDockProps {
 export function ChatComposerDock({
   dockColumnClass,
   centered = false,
-  centeredLift = "default",
   workflowApi,
   api,
   currentSessionId,
@@ -114,6 +114,7 @@ export function ChatComposerDock({
   plugins,
   onSelectPlugin,
   hasApiKey,
+  onOpenSettings,
   viewMode,
   streaming,
   onInsertSlashCommand,
@@ -165,14 +166,11 @@ export function ChatComposerDock({
     return () => window.clearTimeout(timer);
   }, [centered]);
 
-  const compactCenteredMarginClass =
-    "mb-0 [@media(min-height:560px)]:mb-32 [@media(min-height:720px)]:mb-48";
-
-  const centeredMarginClass = centered
-    ? centeredLift === "compact"
-      ? compactCenteredMarginClass
-      : "mb-[clamp(9rem,32vh,20rem)]"
-    : "mb-0";
+  // One lift, unconditionally. The `"compact"` variant existed only to leave
+  // room for the no-API-key transcript card; that card is gone (its affordance
+  // is now the zero-height `ComposerApiKeyChip` in the strip above), so an empty
+  // conversation always centers the composer the same way, key or no key.
+  const centeredMarginClass = centered ? "mb-[clamp(9rem,32vh,20rem)]" : "mb-0";
 
   return (
     <div
@@ -181,7 +179,6 @@ export function ChatComposerDock({
         centeredMarginClass,
       ].join(" ")}
       data-composer-placement={centered ? "center" : "bottom"}
-      data-composer-centered-lift={centered ? centeredLift : undefined}
     >
       <div className={dockColumnClass} data-testid="session-todo-dock">
         <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
@@ -237,6 +234,21 @@ export function ChatComposerDock({
                 open={projectSelectorOpen && centered}
                 onOpenChange={onProjectSelectorOpenChange}
               />
+            </div>
+          ) : null}
+          {/* No-key affordance — mirrored across the same reserved strip the
+              project selector occupies. Absolutely positioned + popover-based,
+              so it adds no layout height and the centered composer keeps its
+              full lift (it replaced a transcript card that did claim height).
+              `hasApiKey` here is App's `effectiveLlmReady`, which already ORs in
+              `llmReadyWithoutApiKey` — a keyless-ready session never shows it,
+              and `null` (probe unresolved) stays silent. */}
+          {hasApiKey === false ? (
+            <div
+              className="absolute right-0 top-0 z-20"
+              data-testid="composer-api-key-chip-slot"
+            >
+              <ComposerApiKeyChip onOpenSettings={onOpenSettings} />
             </div>
           ) : null}
           <div className="lvis-surface-raised relative z-10 rounded-xl bg-input-bar overflow-hidden">
