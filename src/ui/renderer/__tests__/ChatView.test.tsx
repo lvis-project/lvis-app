@@ -65,19 +65,28 @@ describe("ChatView", () => {
 
   it("shows API key prompt when hasApiKey is false", async () => {
     const { container, api } = await renderApp({ hasApiKey: false });
+
+    // The prompt is a chip in the composer's reserved strip — it must NOT live
+    // in the scrolling transcript, where its height decentered the composer.
     await waitFor(() => {
       expect(container.textContent).toContain("API 키 설정 필요");
-      expect(container.textContent).toContain("마켓플레이스 열기");
-      const card = container.querySelector('[data-testid="chat-view:no-api-key-card"]');
-      expect(card).not.toBeNull();
-      expect(card?.closest(".lvis-chat-scroll")).not.toBeNull();
     });
+    const chip = container.querySelector('[data-testid="composer-api-key-chip"]') as HTMLElement | null;
+    expect(chip).not.toBeNull();
+    expect(chip?.closest(".lvis-chat-scroll")).toBeNull();
+    expect(container.querySelector('[data-testid="chat-view:no-api-key-card"]')).toBeNull();
 
-    const card = container.querySelector('[data-testid="chat-view:no-api-key-card"]') as HTMLElement;
-    const marketplaceButton = Array.from(card.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("마켓플레이스 열기"));
-    expect(marketplaceButton).toBeTruthy();
-    fireEvent.click(marketplaceButton!);
+    // Both of the retired card's destinations survive, one click deeper.
+    fireEvent.click(chip!);
+    const marketplaceButton = await waitFor(() => {
+      const button = document.querySelector<HTMLElement>('[data-testid="composer-api-key-chip:marketplace"]');
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    expect(document.querySelector('[data-testid="composer-api-key-chip:settings"]')).not.toBeNull();
+    expect(marketplaceButton.textContent).toContain("마켓플레이스 열기");
+
+    fireEvent.click(marketplaceButton);
     await waitFor(() => {
       expect(container.querySelector('[data-testid="marketplace:cta:open"]')).not.toBeNull();
     });
@@ -231,16 +240,33 @@ describe("ChatView", () => {
     const { container } = await renderApp({ hasApiKey: false });
 
     await waitFor(() => {
+      // The no-key affordance is a zero-height chip in the composer's reserved
+      // strip, NOT a transcript card. The card used to claim
+      // `min-h-[min(12rem,36vh)]`, which is why the dock had to shrink its lift
+      // (`data-composer-centered-lift="compact"`). Both are gone: the composer
+      // is centered identically whether or not a key is configured.
       expect(container.textContent).toContain("API 키 설정 필요");
+      expect(container.querySelector('[data-testid="chat-view:no-api-key-card"]')).toBeNull();
+      expect(container.querySelector('[data-testid="composer-api-key-chip"]')).not.toBeNull();
       const composerDock = container.querySelector("[data-composer-placement]");
       expect(composerDock).not.toBeNull();
       expect(composerDock).toHaveAttribute("data-composer-placement", "center");
-      expect(composerDock).toHaveAttribute("data-composer-centered-lift", "compact");
+      expect(composerDock).not.toHaveAttribute("data-composer-centered-lift");
       expect(container.querySelector('[data-testid="composer-project-selector-slot"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="composer-textarea"]')).not.toBeNull();
       const sendButton = container.querySelector('[data-testid="composer-send-button"]') as HTMLButtonElement | null;
       expect(sendButton?.disabled).toBe(true);
     });
+  });
+
+  it("does not render the no-key chip once a key (or keyless readiness) resolves", async () => {
+    const { container } = await renderApp({ hasApiKey: true });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="composer-textarea"]')).not.toBeNull();
+    });
+    expect(container.querySelector('[data-testid="composer-api-key-chip"]')).toBeNull();
+    expect(container.querySelector('[data-testid="chat-view:no-api-key-card"]')).toBeNull();
   });
 
   it("allows keyless OpenAI-compatible endpoints with a configured base URL to send", async () => {

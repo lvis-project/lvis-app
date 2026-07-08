@@ -177,8 +177,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     hasApiKey !== null &&
     !suggestedRepliesActive &&
     viewMode === null;
-  const centeredComposerLift =
-    emptyComposerCentered && hasApiKey === false ? "compact" : "default";
   const dockColumnClass = emptyComposerCentered
     ? "mx-auto w-full max-w-[58rem] min-w-0"
     : blogLayout
@@ -624,7 +622,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         suggestedRepliesActive={suggestedRepliesActive}
         transcriptEntries={transcriptEntries}
         chatEndRef={chatEndRef}
-        onOpenSettings={onOpenSettings}
       />
       {showJumpToBottom && (
         <Button
@@ -687,7 +684,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       <ChatComposerDock
         dockColumnClass={dockColumnClass}
         centered={emptyComposerCentered}
-        centeredLift={centeredComposerLift}
+        onOpenSettings={onOpenSettings}
         workflowApi={workflowApi}
         api={api}
         currentSessionId={currentSessionId}
