@@ -672,7 +672,7 @@ export type LvisApi = {
     | { ok: true }
     | { ok: false; error: string; message: string }
   >;
-  openSettingsWindow: (initialTab?: string) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
+  openSettingsWindow: (initialTab?: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   notifySettingsWindowSaved: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onSettingsWindowSaved: (handler: () => void) => () => void;
   onSettingsWindowTab: (handler: (initialTab: string) => void) => () => void;
@@ -1114,7 +1114,7 @@ export type LvisApi = {
     userDataPath: string;
   }>;
   registerPluginWebview: (payload: { webContentsId: number; pluginId: string; entryUrl: string }) => Promise<{ ok: boolean; error?: string }>;
-  onViewActivate: (h: (k: string) => void) => () => void;
+  onViewActivate: (h: (k: string, settingsTab?: string) => void) => () => void;
   getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;
   getUsageRange: (opts: { dateFrom: string; dateTo: string }) => Promise<UsageSummaryShape>;
   getUsageDailySummary: (input: UsageDailySummaryInput) => Promise<UsageDailySummaryResult>;

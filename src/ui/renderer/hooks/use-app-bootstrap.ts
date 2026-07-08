@@ -7,6 +7,11 @@ export interface AppBootstrapDeps {
   refreshCards: () => Promise<void> | void;
   checkApiKey: () => Promise<unknown> | unknown;
   setActiveView: (k: string) => void;
+  /** Same inline-settings entry point used by in-app affordances — the main
+   *  process routes settings opens through view:activate with a settings tab,
+   *  and this reuses onOpenSettings so tab normalization + return-view capture
+   *  stay identical to a click. */
+  onOpenSettings: (tab?: string) => void;
   toggleCommandPopover: () => void;
 }
 
@@ -30,7 +35,7 @@ export interface AppBootstrapDeps {
  */
 export function useAppBootstrap({
   api, refreshViews, refreshCards, checkApiKey,
-  setActiveView, toggleCommandPopover,
+  setActiveView, onOpenSettings, toggleCommandPopover,
 }: AppBootstrapDeps) {
   const isMountedRef = useRef(true);
 
@@ -49,7 +54,14 @@ export function useAppBootstrap({
     void refreshCards();
     void checkApiKey();
 
-    const dv = api.onViewActivate((k) => { if (isMountedRef.current) setActiveView(k); });
+    const dv = api.onViewActivate((k, settingsTab) => {
+      if (!isMountedRef.current) return;
+      // "settings" routes through the SAME inline-settings path as an in-app
+      // click so the tab is normalized and the return view is captured
+      // identically; there is no detached settings window anymore.
+      if (k === "settings") { onOpenSettings(settingsTab); return; }
+      setActiveView(k);
+    });
     return () => { dv(); };
   }, []);
 

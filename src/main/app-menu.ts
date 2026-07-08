@@ -8,13 +8,43 @@
  */
 import { app, Menu, type MenuItemConstructorOptions } from "electron";
 import { t } from "../i18n/index.js";
+import { normalizeSettingsTab } from "../shared/settings-tabs.js";
 import { type DetachedWindowOptions } from "./window-manager.js";
 import { getMainWindow, getServices } from "./app-state.js";
-import { openSettingsWindow } from "./settings-window.js";
-import { refreshTrayMenu } from "./app-tray.js";
+import { refreshTrayMenu, showOrCreateMainWindow } from "./app-tray.js";
 
 function activateView(viewKey: string) {
   getMainWindow()?.webContents.send("lvis:view:activate", { viewKey });
+}
+
+/**
+ * Route a settings-open request to the INLINE settings panel. Settings no
+ * longer detaches to its own BrowserWindow (settings-inline-overhaul), so every
+ * main-process entry point — the app menu, the tray, `lvis://` MCP-login deep
+ * links, and the `lvis:settings-window:open` IPC — funnels through here.
+ *
+ * Surfaces the main window (creating/restoring it if missing so the entry point
+ * never dead-ends), then sends `lvis:view:activate` with the requested tab. The
+ * renderer runs this through the SAME `onOpenSettings(tab)` path used by in-app
+ * affordances, so tab normalization + return-view capture are identical. When
+ * the window was just (re)created its renderer may still be loading, so the
+ * signal is deferred to `did-finish-load` in that case.
+ */
+export function activateInlineSettings(tabInput: unknown = "llm"): void {
+  const settingsTab = normalizeSettingsTab(tabInput);
+  showOrCreateMainWindow("settings-open");
+  const win = getMainWindow();
+  if (!win || win.isDestroyed()) return;
+  const send = () => {
+    if (!win.isDestroyed()) {
+      win.webContents.send("lvis:view:activate", { viewKey: "settings", settingsTab });
+    }
+  };
+  if (win.webContents.isLoading()) {
+    win.webContents.once("did-finish-load", send);
+  } else {
+    send();
+  }
 }
 
 function createViewMenu() {
@@ -55,7 +85,7 @@ export function createSettingsMenuItem(): MenuItemConstructorOptions {
     label: t("be_main.menuSettings"),
     accelerator: "CommandOrControl+,",
     click: () => {
-      openSettingsWindow("llm");
+      activateInlineSettings("llm");
     },
   };
 }

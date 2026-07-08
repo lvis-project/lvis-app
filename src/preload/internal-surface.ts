@@ -606,9 +606,12 @@ export function buildInternalApiSurface() {
       | { ok: true }
       | { ok: false; error: string; message: string }
     >,
+  // Settings no longer detaches to its own BrowserWindow — this IPC now routes
+  // the main process to the INLINE settings panel (view:activate → settings).
+  // Kept as a bridge for defence-in-depth; no window id is produced anymore.
   openSettingsWindow: async (initialTab?: string) =>
     ipcRenderer.invoke(CHANNELS.settingsWindow.open, initialTab) as Promise<
-      { ok: true; windowId: number } | { ok: false; error: string }
+      { ok: true } | { ok: false; error: string }
     >,
   notifySettingsWindowSaved: async () =>
     ipcRenderer.invoke(CHANNELS.settingsWindow.saved) as Promise<{ ok: true } | { ok: false; error: string }>,
@@ -1284,8 +1287,9 @@ export function buildInternalApiSurface() {
     ipcRenderer.invoke(CHANNELS.feedback.submit, payload) as Promise<{ ok: boolean; error?: string }>,
 
   // ─── View Events ─────────────────────────────────
-  onViewActivate: (handler: (viewKey: string) => void) => {
-    const listener = (_event: unknown, payload: { viewKey?: string }) => handler(payload?.viewKey ?? "home");
+  onViewActivate: (handler: (viewKey: string, settingsTab?: string) => void) => {
+    const listener = (_event: unknown, payload: { viewKey?: string; settingsTab?: string }) =>
+      handler(payload?.viewKey ?? "home", typeof payload?.settingsTab === "string" ? payload.settingsTab : undefined);
     ipcRenderer.on(CHANNELS.view.activate, listener);
     return () => ipcRenderer.removeListener(CHANNELS.view.activate, listener);
   },

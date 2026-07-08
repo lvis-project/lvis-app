@@ -147,6 +147,7 @@ export function LoginModalConversational({
   open,
   onOpenChange,
   onSuccess,
+  onOpenSettings,
   forceActivation = false,
 }: LoginModalProps) {
   const [submitting, setSubmitting] = useState(false);
@@ -542,7 +543,7 @@ export function LoginModalConversational({
         activateDemoChip();
       } else if (e.key === "2") {
         e.preventDefault();
-        void api.openSettingsWindow?.("llm");
+        onOpenSettings?.("llm");
         onOpenChange(false);
       } else if (e.key === "3") {
         // chip 3 is a disabled placeholder; swallow the keystroke so it
@@ -557,7 +558,7 @@ export function LoginModalConversational({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, activateDemoChip, api, onOpenChange, ollamaAvailable, activateOllamaChip]);
+  }, [open, activateDemoChip, api, onOpenChange, onOpenSettings, ollamaAvailable, activateOllamaChip]);
 
   const isLastChecklistLine =
     checklistRevealed > 0 && checklistRevealed <= CHECKLIST_LINES.length;
@@ -639,11 +640,10 @@ export function LoginModalConversational({
             type="button"
             data-testid="login-modal:chip-byok"
             onClick={() => {
-              // Open the canonical API-key editor (Settings → LLM tab).
-              // The host's `openSettingsWindow` handler validates the tab
-              // id and falls back to the default tab if unknown, so we
-              // can pass the string directly without sanitising here.
-              void api.openSettingsWindow?.("llm");
+              // Open the canonical API-key editor (Settings → LLM tab) INLINE.
+              // App's onOpenSettings normalizes the tab id and captures the
+              // return view, so we pass the string directly without sanitising.
+              onOpenSettings?.("llm");
               onOpenChange(false);
             }}
             disabled={submitting || activationRelaunching}

@@ -24,6 +24,7 @@ import {
 import type { AppServices } from "../boot.js";
 import { getSettingsWindow, setSettingsWindow } from "./app-state.js";
 import { getAppWindows, initialThemeArgs, rendererIndexUrl } from "./main-window.js";
+import { activateInlineSettings } from "./app-menu.js";
 
 const log = createLogger("lvis");
 
@@ -61,6 +62,17 @@ function isSettingsWindowUrl(url: string): boolean {
   }
 }
 
+/**
+ * @deprecated UNREACHABLE as of the settings-inline-overhaul (R4). Every
+ * settings-open path now routes to the inline panel via `activateInlineSettings`
+ * (app-menu.ts); no caller invokes this and the `lvis:settings-window:open` IPC
+ * redirects inline. The detached-window machinery (this function,
+ * `settingsWindowUrl`/`isSettingsWindowUrl`, the `settingsWindowPendingTab`
+ * handoff, and the `SettingsWindow.tsx` renderer entry) is intentionally left
+ * in place — a follow-up removes it once `getAppWindows`/save-broadcast fan-out
+ * and `get/setSettingsWindow` app-state can be simplified together. It creates a
+ * `new BrowserWindow`, so it MUST stay uncalled.
+ */
 export function openSettingsWindow(initialTabInput: unknown = "llm"): BrowserWindow {
   const initialTab = normalizeSettingsTab(initialTabInput);
   const preloadPath = resolve(mainDir, "..", "preload.cjs");
@@ -179,8 +191,11 @@ export function registerSettingsWindowHandlers(auditLogger: AppServices["auditLo
       return UNAUTHORIZED_FRAME;
     }
     try {
-      const win = openSettingsWindow(initialTab);
-      return { ok: true, windowId: win.id };
+      // Defence-in-depth: settings never detaches to its own BrowserWindow
+      // anymore (settings-inline-overhaul). Any remaining caller of this IPC is
+      // redirected to the INLINE settings panel — no `new BrowserWindow` path.
+      activateInlineSettings(initialTab);
+      return { ok: true };
     } catch (err) {
       return { ok: false, error: errorMessage(err) };
     }
