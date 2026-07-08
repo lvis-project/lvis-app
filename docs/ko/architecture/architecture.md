@@ -1914,12 +1914,14 @@ Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* �
   의존하므로, plugin worker substrate 가 그 residual 을 실제로
   filesystem-contain 할 때만 허용된다. macOS/Linux plugin workers 는
   ASRT-wrapped UDS path 를 쓰므로 relax 가능하다. Windows host-shell 은 ASRT
-  0.0.63+ 로 filesystem+network partial confinement 를 갖지만, Windows plugin
-  worker path 는 아직 legacy unwrapped spawn 이므로 plugin read-relaxation 에서
-  Windows 를 명시적으로 제외한다. degraded/off/egress-only synthetic substrate/Windows
-  unwrapped plugin worker 에서는 known-safe pre-exec ask 가 유지된다. reviewer
-  SOT `sandboxRelaxesCategory` 는 host-shell ASRT capability 기준이고, plugin
-  read-relaxation provider 는 worker effect-boundary 현실을 반영해 더 좁다.
+  0.0.64 로 filesystem+network partial confinement 를 갖지만, ASRT 0.0.64 가
+  plugin worker 별 filesystem allow grant 를 지원하지 않으므로 Windows plugin
+  worker path 는 gate ON 에서 fail-closed 하고 plugin read-relaxation 에서도
+  Windows 를 명시적으로 제외한다. degraded/off/egress-only synthetic substrate/
+  Windows plugin worker 에서는 known-safe pre-exec ask 또는 fail-closed 가
+  유지된다. reviewer SOT `sandboxRelaxesCategory` 는 host-shell ASRT capability
+  기준이고, plugin read-relaxation provider 는 worker effect-boundary 현실을
+  반영해 더 좁다.
 - **Activation telemetry**: boot 의 gate 는 **boot 당 1건** 의 구조화 audit
   이벤트를 발행한다 — `{ platform, onSignal(explicit-env|default-settings|off),
   outcome(activate|degrade|abort|skip), reason }`. `AuditLogger.logSandboxGate()`
@@ -1928,7 +1930,7 @@ Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* �
   activation 성공/degrade 율 모니터링용. **Rollback**: Settings → 권한 'OS 도구
   샌드박스' 토글(per-host opt-out) + `hostClassifiesRisk` 토글(relaxation off).
 - **Windows (srt-win)**: 동일 gate 에 합류한다 (`LVIS_SANDBOX_WINDOWS` 별도
-  opt-in 제거). ASRT 0.0.63+ srt-win 은 dedicated `srt-sandbox` user ACL backend
+  opt-in 제거). ASRT 0.0.64 srt-win 은 dedicated `srt-sandbox` user ACL backend
   로 filesystem rules 를 적용하고 WFP + loopback proxy 로 egress 를 제한하는
   **filesystem+network partial** 샌드박스다. process 격리는 제공하지 않는다.
   srt-win.exe 는 **번들** (asarUnpack vendor/**) 이라 **다운로드가 없다** —
@@ -2014,9 +2016,11 @@ Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* �
   artifact 에서 KEPT 바이너리 present+executable, PRUNED 바이너리 absent 를
   hard-assert 하므로 prune drift 가 빌드를 깬다. 런타임 resolver
   (`getSrtWinPath()` 등) 는 미변경.
-- **알려진 follow-up**: long-lived worker(ep-api / local-indexer 의 Python
-  워커)의 egress 는 아직 이 shared floor 로 완전히 수렴되지 않은 문서화된
-  후속 작업이다 (§9 plugin egress 참조).
+- **Plugin egress SOT**: `local-indexer` 의 long-lived Python worker provider
+  egress 는 broker + `hostApi.hostFetch` chokepoint 로 수렴한다. `ep-api` 는
+  Python worker 가 없고 Playwright 브라우저 SSO + 사내망 HTTP/HTTPS endpoint 를
+  직접 다루는 예외이므로, 허용 호스트는 `lvis-plugin-ep-api/plugin.json` 의
+  `networkAccess.allowedDomains` 가 SOT 이다 (§9 plugin egress 참조).
 
 **Files:** `src/permissions/asrt-sandbox.ts` (어댑터 + NETWORK ENFORCEMENT
 MODEL 헤더), `src/permissions/sandbox-capability.ts` (capability SOT +
@@ -2906,10 +2910,13 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
 - **Windows (srt-win, fs+network partial)**: §6.3.9 와 동일 — 동일 gate,
   fs+network partial capability, win32-not-ready 시 non-bricking 신호
   (hard-throw 안 함).
-- **알려진 follow-up**: long-lived worker (예: `lvis-plugin-ep-api` /
-  `lvis-plugin-local-indexer` 의 Python 워커) 의 egress 를 이 shared floor 로
-  완전히 수렴시키는 것은 문서화된 후속 작업이다. 현행 plugin egress 의 일부는
-  여전히 HostApi `hostFetch` chokepoint (Tier A NetworkGuard) 를 경유한다.
+- **Plugin egress SOT**: `lvis-plugin-local-indexer` 의 Python worker provider
+  egress 는 broker 가 host-side upstream 을 고정하고 `hostApi.hostFetch`
+  (Tier A NetworkGuard) 로 호출한다. `lvis-plugin-ep-api` 는 Python worker 가
+  없고 Playwright 브라우저 SSO + 사내망 HTTP/HTTPS endpoint 를 직접 다루는
+  예외이므로, `lvis-plugin-ep-api/plugin.json` 의 `networkAccess.allowedDomains`
+  가 허용 호스트 SOT 이다. 새 direct egress 는 manifest allow-list 없이 추가하지
+  않는다.
 - **Apache attribution / 라이선스**: ASRT (`@anthropic-ai/sandbox-runtime`) 는
   Apache-2.0 이며 attribution 은 repo 루트의 `THIRD-PARTY-NOTICES.md` 에 유지한다;
   LVIS 자체 라이선스는 MIT 로 변동 없다.

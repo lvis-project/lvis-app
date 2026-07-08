@@ -14,7 +14,7 @@
  * free of process-specific imports (electron, node:fs, etc.).
  */
 
-export const BUNDLE_IDS = [
+export const BUNDLE_IDS = Object.freeze([
   "moonstone",
   "gallery",
   "cherry-blossom",
@@ -31,7 +31,7 @@ export const BUNDLE_IDS = [
   "solarized-light",
   "rose-pine",
   "executive-graphite",
-] as const;
+] as const);
 
 export type BundleId = (typeof BUNDLE_IDS)[number];
 
@@ -49,10 +49,10 @@ export const DEFAULT_BUNDLE_ID: BundleId = "moonstone";
  * broad for settings migration, plugin theme events, and backward-compatible
  * validation during the marketplace migration.
  */
-export const DEFAULT_VISIBLE_THEME_BUNDLE_IDS = [
+export const DEFAULT_VISIBLE_THEME_BUNDLE_IDS = Object.freeze([
   "moonstone",
   "gallery",
-] as const satisfies readonly BundleId[];
+] as const satisfies readonly BundleId[]);
 
 export type DefaultVisibleThemeBundleId =
   (typeof DEFAULT_VISIBLE_THEME_BUNDLE_IDS)[number];
@@ -64,9 +64,11 @@ const DEFAULT_VISIBLE_THEME_BUNDLE_ID_SET = new Set<string>(
 export type MarketplaceEligibleThemeBundleId =
   Exclude<BundleId, DefaultVisibleThemeBundleId>;
 
-export const MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS = BUNDLE_IDS.filter(
-  (bundleId): bundleId is MarketplaceEligibleThemeBundleId =>
-    !DEFAULT_VISIBLE_THEME_BUNDLE_ID_SET.has(bundleId),
+export const MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS = Object.freeze(
+  BUNDLE_IDS.filter(
+    (bundleId): bundleId is MarketplaceEligibleThemeBundleId =>
+      !DEFAULT_VISIBLE_THEME_BUNDLE_ID_SET.has(bundleId),
+  ),
 );
 
 const MARKETPLACE_ELIGIBLE_THEME_BUNDLE_ID_SET = new Set<string>(
