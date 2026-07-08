@@ -26,10 +26,13 @@
  *     the socketDir on `network.allowUnixSockets` emits the seatbelt allow rule
  *     so the worker may BIND the socket. The host connects from OUTSIDE the
  *     sandbox (unconstrained).
- *   - Windows: no reliable UDS-bind primitive and ASRT 0.0.64 does not accept
- *     per-exec filesystem allow grants. A process-global all-plugin data grant
- *     would violate plugin namespace isolation, so gate ON + win32 fails closed
- *     until ASRT can scope allow grants per worker/plugin.
+ *   - Windows: no reliable UDS-bind primitive, so the worker keeps its TCP
+ *     control channel. ASRT 0.0.64 cannot accept per-exec filesystem
+ *     allowRead/allowWrite, but it DOES expose a live ACL grant primitive
+ *     keyed by holder PID. The host therefore creates a dedicated holder
+ *     process per worker, applies explicit worker-scoped read/write grants to
+ *     that holder, wraps the command through srt-win, and revokes the grant on
+ *     worker cleanup. No shared all-plugin data grant is ever used.
  *
  * ⚠️ The Unix-socket ALLOW config (macOS `allowUnixSockets` / Linux
  * `allowAllUnixSockets`) is INERT per-command in current ASRT — it MUST be set on
@@ -43,11 +46,11 @@
  *
  * STORAGE NAMESPACE (CLAUDE.md `~/.lvis/plugins/<id>/` rule): the socketDir is
  * the plugin's own sandbox-root subtree `~/.lvis/plugins/<pluginId>/run/
- * <workerId>/` — host-controlled, never a plugin-supplied path. mkdir 0o700;
- * the worker binds the socket 0o600.
+ * <workerId>/` — host-allocated from the host-bound pluginId and sanitized
+ * workerId. mkdir 0o700; the worker binds the socket 0o600.
  *
  * GATE DEFAULT-OFF: when {@link isAsrtSandboxActive} is false, this is a plain
- * spawn of the exact command — byte-for-byte the legacy behaviour — and returns
+ * spawn of the exact command with the same secret-stripped worker env and returns
  * `socketPath: null` so the consumer falls back to the legacy TCP channel. No
  * UDS dir is created, nothing is wrapped.
  */
@@ -59,7 +62,7 @@ import { join, resolve as pathResolve } from "node:path";
 
 import { lvisHome } from "../shared/lvis-home.js";
 import { shellQuote } from "../lib/shell-resolver.js";
-import { buildSandboxedChildEnv } from "../tools/safe-env.js";
+import { buildSafeChildEnv, buildSandboxedChildEnv } from "../tools/safe-env.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
 import {
   isAsrtSandboxActive,
@@ -67,8 +70,10 @@ import {
   cleanupAsrtSandboxAfterCommand,
   registerWorkerUnixSocketDir,
   unregisterWorkerUnixSocketDir,
+  grantWindowsWorkerFilesystemAccess,
   getDefaultSensitiveReadDenyPaths,
   getDefaultSensitiveWriteDenyPaths,
+  type WindowsWorkerFilesystemGrant,
 } from "./asrt-sandbox.js";
 import {
   markPluginWorkerWrapped,
@@ -79,9 +84,10 @@ import {
 export type WorkerOutputListener = (chunk: string) => void;
 
 /**
- * The spec the HOST hands {@link spawnWorker}. Every field originates from
- * TRUSTED host code (the hostApi factory binds `pluginId`); none is a plugin-
- * supplied path. `allowWritePaths` is the worker's filesystem write-jail; the
+ * The spec the HOST hands {@link spawnWorker}. The hostApi factory binds
+ * `pluginId` from the calling plugin instance; workerId/command/grant paths are
+ * declared by trusted first-party plugin code and reviewed at the HostApi effect
+ * boundary. `allowWritePaths` is the worker's filesystem write-jail; the
  * host-allocated socketDir is unioned onto it automatically.
  */
 export interface SpawnWorkerSpec {
@@ -96,6 +102,12 @@ export interface SpawnWorkerSpec {
   readonly args?: readonly string[];
   /** Extra env merged onto the secret-stripped base env. */
   readonly env?: NodeJS.ProcessEnv;
+  /**
+   * Paths the worker may read in addition to write-granted paths. This is
+   * explicit by design: host code must declare trusted worker code/runtime
+   * paths instead of the spawn primitive inferring path grants from argv.
+   */
+  readonly allowReadPaths?: readonly string[];
   /** Paths the worker may write (its sandbox root etc.). The host-allocated
    *  socketDir is added automatically so the `--bind` (Linux) comes for free. */
   readonly allowWritePaths?: readonly string[];
@@ -170,10 +182,96 @@ function removeSocketArtifacts(socketPath: string, socketDir: string): void {
 
 function buildWorkerCommand(command: string, args: readonly string[]): {
   readonly cmdline: string;
+  readonly binShell?: string;
 } {
+  if (process.platform === "win32") {
+    return {
+      cmdline: ["&", powershellQuote(command), ...args.map((part) => powershellQuote(part))].join(" "),
+      binShell: "powershell",
+    };
+  }
   return {
     cmdline: [command, ...args].map((part) => shellQuote(part)).join(" "),
   };
+}
+
+function powershellQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function windowsSystemRoot(): string {
+  const root = process.env.SystemRoot ?? process.env.WINDIR;
+  if (root === undefined || root.trim().length === 0) {
+    throw new Error("[worker-spawn] cannot start Windows ACL grant holder: SystemRoot is unset");
+  }
+  return root.replace(/[\\/]+$/, "");
+}
+
+function windowsSystem32Path(fileName?: string): string {
+  const system32 = `${windowsSystemRoot()}\\System32`;
+  return fileName === undefined ? system32 : `${system32}\\${fileName}`;
+}
+
+function windowsHolderEnv(): NodeJS.ProcessEnv {
+  const root = windowsSystemRoot();
+  return {
+    SystemRoot: root,
+    WINDIR: root,
+  };
+}
+
+function startWindowsAclGrantHolder(label: string): ChildProcess {
+  const system32 = windowsSystem32Path();
+  const child = spawn(windowsSystem32Path("more.com"), [], {
+    cwd: system32,
+    stdio: ["pipe", "ignore", "ignore"],
+    shell: false,
+    windowsHide: true,
+    env: windowsHolderEnv(),
+  });
+  if (child.pid === undefined) {
+    child.once("error", () => {
+      // The synchronous throw below is the fail-closed signal for this path.
+      // Keep the later async spawn error from becoming an unhandled event.
+    });
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // Spawn failed before pid publication.
+    }
+    throw new Error("[worker-spawn] Windows ACL grant holder started without a pid");
+  }
+  trackManagedChildProcess(child, { label });
+  return child;
+}
+
+function stopWindowsAclGrantHolder(child: ChildProcess): void {
+  try {
+    child.stdin?.end();
+  } catch {
+    // Already closed.
+  }
+  try {
+    if (!child.killed) child.kill("SIGTERM");
+  } catch {
+    // Already gone.
+  }
+}
+
+function killChildBestEffort(child: ChildProcess, signal: NodeJS.Signals): void {
+  try {
+    if (!child.killed) child.kill(signal);
+  } catch {
+    // Already gone.
+  }
+}
+
+function definedEnv(env: NodeJS.ProcessEnv | undefined): Record<string, string> {
+  const extra: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env ?? {})) {
+    if (value !== undefined) extra[key] = value;
+  }
+  return extra;
 }
 
 /**
@@ -181,27 +279,21 @@ function buildWorkerCommand(command: string, args: readonly string[]): {
  * with a bind-mounted UDS control channel. See the module header for the model.
  *
  * @returns a {@link SpawnedWorker}. `socketPath` is non-null only on the wrapped
- *   mac/linux UDS path; null only on the gate-OFF plain TCP path. Windows with
- *   ASRT active fails closed until per-worker/per-plugin allow grants exist.
+ *   mac/linux UDS path; null covers gate-OFF plain TCP and the Windows ASRT
+ *   wrapped path, which keeps TCP control while filesystem/network effects run
+ *   under srt-win.
  */
 export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker> {
   const safePlugin = safeSegment(spec.pluginId, "pluginId");
   const safeWorker = safeSegment(spec.workerId, "workerId");
   const args = [...(spec.args ?? [])];
 
-  // Secret-stripped base env (Least Privilege), mirroring the MCP stdio worker.
-  const baseEnv: NodeJS.ProcessEnv = {
-    PATH: process.env.PATH,
-    HOME: process.env.HOME ?? process.env.USERPROFILE,
-    USERPROFILE: process.env.USERPROFILE,
-    APPDATA: process.env.APPDATA,
-    LANG: process.env.LANG,
-    NODE_ENV: process.env.NODE_ENV,
-    ...spec.env,
-  };
+  // Secret-stripped base env (Least Privilege), shared with other child process
+  // spawners so Windows runtime variables stay complete without forwarding
+  // provider/API-key secrets.
+  const baseEnv: NodeJS.ProcessEnv = buildSafeChildEnv(definedEnv(spec.env));
 
-  // ── Gate OFF → LEGACY plain spawn ───────────────────────────────────
-  // Byte-for-byte the pre-existing spawn behaviour for this branch.
+  // ── Gate OFF → plain unwrapped spawn ────────────────────────────────
   if (!isAsrtSandboxActive()) {
     const child = spawn(spec.command, args, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -215,17 +307,108 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     });
   }
 
-  // Windows: ASRT 0.0.64 cannot accept per-exec allowRead/allowWrite grants,
-  // and a shared all-plugin data grant would break plugin namespace isolation.
-  // Fail closed under the sandbox gate until ASRT exposes per-worker/per-plugin
-  // filesystem allow scoping. Gate OFF above remains the explicit legacy plain
-  // spawn path.
   if (process.platform === "win32") {
-    throw new Error(
-      "[worker-spawn] Windows ASRT plugin workers are disabled: ASRT 0.0.64 " +
-        "does not support per-worker filesystem allow grants, and shared " +
-        "session-level plugin data grants would break plugin isolation.",
+    const denyRead = getDefaultSensitiveReadDenyPaths();
+    const denyWrite = getDefaultSensitiveWriteDenyPaths();
+    const holder = startWindowsAclGrantHolder(
+      `worker:${safePlugin}:${safeWorker}:asrt-win-acl`,
     );
+    const holderPid = holder.pid;
+    if (holderPid === undefined) {
+      stopWindowsAclGrantHolder(holder);
+      throw new Error("[worker-spawn] Windows ACL grant holder started without a pid");
+    }
+    let grant: WindowsWorkerFilesystemGrant | undefined;
+    let wrapped = false;
+    let marked = false;
+    let child: ChildProcess | undefined;
+    let grantReleased = false;
+    let asrtCleanupRequested = false;
+    let holderStopped = false;
+    let holderFailure: Error | undefined;
+    const cleanupResources = (): void => {
+      if (marked) {
+        marked = false;
+        unmarkPluginWorkerWrapped(safePlugin, safeWorker);
+      }
+      if (wrapped && !asrtCleanupRequested) {
+        asrtCleanupRequested = true;
+        void cleanupAsrtSandboxAfterCommand();
+      }
+      if (grant !== undefined && !grantReleased) {
+        grantReleased = true;
+        try {
+          grant.release();
+        } catch {
+          // Cleanup must continue even if ASRT reports the grant was already gone.
+        }
+      }
+      if (!holderStopped) {
+        holderStopped = true;
+        stopWindowsAclGrantHolder(holder);
+      }
+    };
+    const holderDied = (first?: unknown, second?: unknown): void => {
+      if (holderStopped) return;
+      holderFailure =
+        first instanceof Error
+          ? first
+          : new Error(
+              `[worker-spawn] Windows ACL grant holder exited before worker cleanup ` +
+                `(code=${String(first ?? "null")} signal=${String(second ?? "null")})`,
+            );
+      cleanupResources();
+      if (child !== undefined) killChildBestEffort(child, "SIGTERM");
+    };
+    const assertHolderAlive = (): void => {
+      if (holderFailure !== undefined) throw holderFailure;
+    };
+    holder.once("exit", holderDied);
+    holder.once("error", holderDied);
+    try {
+      grant = await grantWindowsWorkerFilesystemAccess({
+        holderPid,
+        allowRead: spec.allowReadPaths,
+        allowWrite: spec.allowWritePaths,
+      });
+      assertHolderAlive();
+
+      const { cmdline, binShell } = buildWorkerCommand(spec.command, args);
+      const { argv, env } = await wrapWorkerCommand(cmdline, {
+        filesystem: { denyRead, denyWrite },
+        ...(binShell !== undefined ? { binShell } : {}),
+      });
+      wrapped = true;
+      assertHolderAlive();
+
+      const [cmd, ...wrappedArgs] = argv;
+      if (cmd === undefined) {
+        throw new Error("[worker-spawn] ASRT returned an empty argv for the Windows worker wrap");
+      }
+
+      markPluginWorkerWrapped(safePlugin, safeWorker);
+      marked = true;
+
+      child = spawn(cmd, wrappedArgs, {
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: false,
+        windowsHide: true,
+        env: buildWrappedWorkerEnv(baseEnv, env),
+      });
+      trackManagedChildProcess(child, { label: `worker:${safePlugin}:${safeWorker}:asrt-win` });
+      assertHolderAlive();
+
+      child.once("exit", cleanupResources);
+      child.once("error", cleanupResources);
+      child.once("close", cleanupResources);
+      assertHolderAlive();
+
+      return makeHandle(child, null, cleanupResources);
+    } catch (err) {
+      if (child !== undefined) killChildBestEffort(child, "SIGTERM");
+      cleanupResources();
+      throw err instanceof Error ? err : new Error(String(err));
+    }
   }
 
   // ── Gate ON, mac/linux → ASRT-wrapped with a bind-mounted UDS ──
@@ -265,7 +448,12 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
   // worker also needs to READ its socketDir + tmp.
   const allowWrite = [socketDir, ...(spec.allowWritePaths ?? [])];
   const tmpDir = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP;
-  const allowRead = [socketDir, ...(spec.allowWritePaths ?? []), ...(tmpDir ? [tmpDir] : [])];
+  const allowRead = [
+    socketDir,
+    ...(spec.allowReadPaths ?? []),
+    ...(spec.allowWritePaths ?? []),
+    ...(tmpDir ? [tmpDir] : []),
+  ];
 
   // FAIL-CLOSED read jail: a per-command `denyRead` REPLACES the shared boot
   // floor in ASRT (`customConfig?.filesystem?.denyRead ?? config.filesystem
@@ -294,9 +482,10 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     // path with spaces/metacharacters cannot mis-split. ASRT runs this branch
     // under a POSIX shell (mac/linux). The per-command wrap carries ONLY the
     // filesystem jail (the `--bind`).
-    const { cmdline } = buildWorkerCommand(spec.command, args);
+    const { cmdline, binShell } = buildWorkerCommand(spec.command, args);
     const { argv, env } = await wrapWorkerCommand(cmdline, {
       filesystem: { allowWrite, allowRead, denyRead, denyWrite },
+      ...(binShell !== undefined ? { binShell } : {}),
     });
     // The wrap incremented ASRT's per-command state (Linux activeSandboxCount,
     // proxy ref); from here a failure MUST decrement it (see the catch).

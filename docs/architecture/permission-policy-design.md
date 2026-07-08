@@ -68,8 +68,9 @@ returns malformed output, the host fails closed:
 ## Plugin And MCP Tools
 
 Plugins and MCP servers use the same path as builtin tools. The tool provider
-must declare schemas and categories. The host may display provider-specific
-metadata, but policy logic remains category- and origin-driven.
+must declare schemas. Manifest categories are optional provider metadata; the
+host derives the effective category per invocation and policy logic remains
+host category- and origin-driven.
 
 Low-trust MCP tools cannot lower their risk solely through a reviewer verdict
 when hard policy requires explicit approval.

@@ -166,8 +166,9 @@ export interface TrustedSandboxSettings {
  *
  * Windows ASRT 0.0.64 note: `srt-win exec` supports per-exec `denyRead` /
  * `denyWrite` only. Non-empty per-exec `allowRead` / `allowWrite` is rejected
- * before calling ASRT; callers must move those grants to the session-level
- * config or keep that Windows execution path disabled/fail-closed.
+ * before calling ASRT. Long-lived plugin workers that need explicit read/write
+ * grants use {@link grantWindowsWorkerFilesystemAccess} with a dedicated
+ * holder PID instead of passing allow grants through this per-exec channel.
  *
  * ⚠️ TRUST BOUNDARY (security MINOR from the PR #1355 cluster review) ⚠️
  * `wrapWithSandboxArgv` accepts a `customConfig: Partial<SandboxRuntimeConfig>`
@@ -190,6 +191,12 @@ export interface PerCommandFilesystem {
   readonly denyRead?: readonly string[];
   /** Paths the child is denied writing (takes precedence over allowWrite). */
   readonly denyWrite?: readonly string[];
+}
+
+export interface WindowsWorkerFilesystemGrant {
+  readonly allowRead: readonly string[];
+  readonly allowWrite: readonly string[];
+  release(): void;
 }
 
 /**
@@ -327,9 +334,8 @@ export function assertPerExecFilesystemSupported(
   throw new Error(
     `${caller}: ASRT 0.0.64 on Windows does not support per-exec ` +
       "filesystem.allowRead/allowWrite; only per-exec denyRead/denyWrite " +
-      "are supported. Session allow grants are permitted only for explicitly " +
-      "trusted non-plugin global cases; plugin-worker paths must stay disabled " +
-      "until ASRT supports worker-scoped grants.",
+      "are supported. Long-lived plugin workers must use the holder-PID " +
+      "Windows ACL grant path instead.",
   );
 }
 
@@ -1118,6 +1124,78 @@ export async function unregisterWorkerUnixSocketDir(socketDir: string): Promise<
   SandboxManager.updateConfig(
     buildSandboxConfig(withWorkerUnixSockets(_baseTrustedSettings)),
   );
+}
+
+/**
+ * Apply a Windows-only, worker-lifetime filesystem grant under a dedicated
+ * holder PID. ASRT 0.0.64 cannot carry per-exec allowRead/allowWrite through
+ * `wrapWithSandboxArgv()`, and `updateConfig()` explicitly does not apply
+ * Windows filesystem changes live. The supported live primitive is therefore
+ * srt-win's refcounted ACL grant/revoke path, keyed by a holder PID that the
+ * caller owns for exactly one worker.
+ */
+export async function grantWindowsWorkerFilesystemAccess(opts: {
+  readonly holderPid: number;
+  readonly allowRead?: readonly string[];
+  readonly allowWrite?: readonly string[];
+}): Promise<WindowsWorkerFilesystemGrant> {
+  if (!active || _baseTrustedSettings === undefined) {
+    throw new Error(
+      "grantWindowsWorkerFilesystemAccess: ASRT sandbox is not active (initialize at boot first)",
+    );
+  }
+  if (process.platform !== "win32") {
+    throw new Error("grantWindowsWorkerFilesystemAccess is only valid on win32");
+  }
+  const {
+    getWindowsSandboxUserStatus,
+    grantWindowsAcl,
+    revokeWindowsAcl,
+    expandWindowsFsPaths,
+  } = await import("@anthropic-ai/sandbox-runtime");
+
+  const user = getWindowsSandboxUserStatus();
+  const sandboxUserSid = user.sid;
+  if (!user.provisioned || !user.credPresent || sandboxUserSid === undefined) {
+    throw new Error(
+      "grantWindowsWorkerFilesystemAccess: Windows sandbox user is not provisioned",
+    );
+  }
+
+  const allowWrite = [
+    ...new Set(expandWindowsFsPaths([...(opts.allowWrite ?? [])])),
+  ];
+  const allowRead = [
+    ...new Set(expandWindowsFsPaths([
+      ...(opts.allowRead ?? []),
+      ...allowWrite,
+    ])),
+  ];
+
+  if (allowRead.length > 0 || allowWrite.length > 0) {
+    try {
+      grantWindowsAcl({
+        sandboxUserSid,
+        holderPid: opts.holderPid,
+        read: allowRead,
+        write: allowWrite,
+      });
+    } catch (err) {
+      revokeWindowsAcl({ sandboxUserSid, holderPid: opts.holderPid });
+      throw err;
+    }
+  }
+
+  let released = false;
+  return {
+    allowRead,
+    allowWrite,
+    release: () => {
+      if (released) return;
+      released = true;
+      revokeWindowsAcl({ sandboxUserSid, holderPid: opts.holderPid });
+    },
+  };
 }
 
 /**

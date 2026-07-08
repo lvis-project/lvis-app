@@ -253,6 +253,30 @@ function objectStringField(field: string) {
   };
 }
 
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((item): item is string => typeof item === "string"))].sort();
+}
+
+function spawnWorkerTargetFromArgs(args: readonly unknown[]): string | undefined {
+  const spec = args[0];
+  if (spec === null || typeof spec !== "object" || Array.isArray(spec)) {
+    return JSON.stringify({
+      workerId: "",
+      command: "",
+      allowRead: [],
+      allowWrite: [],
+      invalidSpec: true,
+    });
+  }
+  const record = spec as Record<string, unknown>;
+  const workerId = typeof record.workerId === "string" ? record.workerId : "";
+  const command = typeof record.command === "string" ? record.command : "";
+  const allowRead = stringArray(record.allowReadPaths);
+  const allowWrite = stringArray(record.allowWritePaths);
+  return JSON.stringify({ workerId, command, allowRead, allowWrite });
+}
+
 /**
  * COMPLETE classification SOT — every function-valued hostApi method PATH.
  *
@@ -315,7 +339,7 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   // It is async but `selfRecorded`, so enforcement gates it INLINE in that same
   // closure (an enforcement exclusion for the generic wrapper).
   hostFetch: { kind: "hostFetch", selfRecorded: true, async: true },
-  spawnWorker: { kind: "spawnWorker", async: true },
+  spawnWorker: { kind: "spawnWorker", async: true, targetFromArgs: spawnWorkerTargetFromArgs },
   openExternalUrl: { kind: "openExternalUrl", async: true, targetFromArgs: urlOriginArg },
   openAuthWindow: { kind: "openAuthWindow", async: true, targetFromArgs: urlOriginFromOpts },
   openAuthPartitionViewer: { kind: "openAuthPartitionViewer", async: true, targetFromArgs: urlOriginFromOpts },

@@ -798,6 +798,12 @@ export interface PluginWorkerSpec {
   readonly args?: readonly string[];
   /** Extra env merged onto the host's secret-stripped base env. */
   readonly env?: Record<string, string | undefined>;
+  /**
+   * Paths the worker may read in addition to write-granted paths. Trusted
+   * plugin code should declare runtime/script/CA inputs here; the host does
+   * not infer filesystem grants from argv.
+   */
+  readonly allowReadPaths?: readonly string[];
   /** Paths the worker may write. The host-allocated control-socket dir is
    *  unioned on automatically. */
   readonly allowWritePaths?: readonly string[];
@@ -814,9 +820,9 @@ export interface PluginWorkerSpec {
 /**
  * The handle `PluginHostApi.spawnWorker` resolves to. `socketPath` is the
  * host-side UDS path to connect to, or `null` when the worker should use TCP
- * control. `null` covers gate-OFF plain spawn; Windows with ASRT active fails
- * closed until worker-scoped filesystem grants exist. Callers must not infer
- * sandbox status from transport alone.
+ * control. `null` covers gate-OFF plain spawn and Windows ASRT-wrapped workers
+ * (Windows keeps TCP control while filesystem/network effects are confined).
+ * Callers must not infer sandbox status from transport alone.
  */
 export interface SpawnedPluginWorker {
   readonly socketPath: string | null;
@@ -986,10 +992,9 @@ export interface PluginHostApi {
 
   /**
    * Spawn a long-lived plugin worker, host-mediated and (when the OS-tool ASRT
-   * sandbox gate is ON, non-Windows) ASRT-wrapped with a bind-mounted Unix-
-   * domain-socket (UDS) control channel — for an HTTP worker the host connects
-   * INBOUND to (the real dynamic-endpoint egress doer; e.g. local-indexer's
-   * embedding worker).
+   * sandbox gate is ON) ASRT-wrapped. macOS/Linux workers use a bind-mounted
+   * Unix-domain-socket (UDS) control channel; Windows workers keep TCP control
+   * but run under srt-win with a worker-lifetime holder PID ACL grant.
    *
    * `pluginId` is bound by the host from THIS hostApi instance — a plugin
    * cannot spawn a worker under another plugin's namespace. The worker's
@@ -998,9 +1003,9 @@ export interface PluginHostApi {
    *
    * Returns a handle whose `socketPath` is the host-side path to connect to
    * (undici `Agent({ connect: { socketPath } })` / `http.request({ socketPath })`)
-   * — or `null` when the worker was plain-spawned (gate OFF). Windows with
-   * ASRT active fails closed because this UDS control-channel primitive has no
-   * Windows equivalent.
+   * on the wrapped macOS/Linux UDS path. It is `null` for gate-OFF plain TCP and
+   * for the Windows ASRT path, where the worker keeps TCP control while
+   * filesystem/network effects are confined by the srt-win holder grant.
    *
    * OPTIONAL: undefined on host builds that predate this primitive — guard with
    * `typeof hostApi.spawnWorker === "function"`, mirroring `resolveApiKey?`.

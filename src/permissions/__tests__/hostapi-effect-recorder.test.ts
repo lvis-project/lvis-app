@@ -137,6 +137,54 @@ describe("instrumentEffectsByPath — target extractors (valid + degenerate)", (
     });
     expect(purpose[0].target).toBe("stt");
   });
+
+  it("spawnWorker target scopes worker identity, command, and filesystem grants", async () => {
+    const effects = await record({ spawnWorker: noop }, (w) => {
+      w.spawnWorker({
+        workerId: "embed",
+        command: "C:/Python/python.exe",
+        allowReadPaths: ["C:/worker.py", "C:/Python/python.exe", "C:/worker.py"],
+        allowWritePaths: ["C:/index"],
+      });
+    });
+
+    expect(effects[0]).toMatchObject({ kind: "spawnWorker", effect: "write" });
+    expect(JSON.parse(effects[0].target ?? "{}")).toEqual({
+      workerId: "embed",
+      command: "C:/Python/python.exe",
+      allowRead: ["C:/Python/python.exe", "C:/worker.py"],
+      allowWrite: ["C:/index"],
+    });
+  });
+
+  it("spawnWorker target keeps malformed object specs target-scoped", async () => {
+    const effects = await record({ spawnWorker: noop }, (w) => {
+      w.spawnWorker({});
+    });
+
+    expect(effects[0]).toMatchObject({ kind: "spawnWorker", effect: "write" });
+    expect(JSON.parse(effects[0].target ?? "{}")).toEqual({
+      workerId: "",
+      command: "",
+      allowRead: [],
+      allowWrite: [],
+    });
+  });
+
+  it("spawnWorker target keeps non-object specs target-scoped", async () => {
+    const effects = await record({ spawnWorker: noop }, (w) => {
+      (w.spawnWorker as (spec: unknown) => unknown)("not-a-spec");
+    });
+
+    expect(effects[0]).toMatchObject({ kind: "spawnWorker", effect: "write" });
+    expect(JSON.parse(effects[0].target ?? "{}")).toEqual({
+      workerId: "",
+      command: "",
+      allowRead: [],
+      allowWrite: [],
+      invalidSpec: true,
+    });
+  });
 });
 
 describe("instrumentEffectsByPath — recursion, idempotence, passthrough", () => {

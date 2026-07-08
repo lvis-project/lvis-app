@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { resolve as pathResolve } from "node:path";
+import type { Tool } from "./base.js";
 import type { ToolRegistry } from "./registry.js";
 import type {
   ToolSource,
@@ -274,17 +275,14 @@ export class ToolExecutor {
   /**
    * Filesystem-containment interlock for the foreground plugin read-relaxation.
    * The relaxation (see executeOne's effect-boundary block) removes the pre-exec
-   * ask and relies on the host-mediated effect-boundary gate — but that
-   * boundary only CONTAINS off-hostApi mutations (direct `node:fs` / bare
-   * `fetch` / detached async frames) when the OS sandbox FILESYSTEM-CONTAINS the
-   * host. A bare "sandbox active" boolean is NOT enough: degraded/off hosts do
-   * not contain the off-hostApi `node:fs` WRITE residual. Windows ASRT 0.0.64
-   * cannot scope filesystem allow grants per worker/plugin, so plugin-effect
-   * containment deliberately excludes Windows until that substrate is real. The
-   * relaxation fires ONLY when this returns `true`. Defaults to always-off so
-   * existing call sites / tests fall back to the known-safe pre-exec ask.
+   * ask and relies on the host-mediated effect-boundary gate. That is safe only
+   * when this specific plugin tool is backed by an execution substrate that
+   * filesystem-contains off-hostApi mutations (direct `node:fs` / bare `fetch` /
+   * detached async frames). A process-global "sandbox active" boolean is not
+   * enough. Defaults to always-off so existing call sites/tests fall back to the
+   * known-safe pre-exec ask.
    */
-  private readonly sandboxFsContainedProvider: () => boolean;
+  private readonly sandboxFsContainedProvider: (tool: Tool) => boolean;
   private readonly reviewerAuthorizations = new ReviewerAuthorizationStore();
   private readonly auditWriter: AuditWriter;
 
@@ -297,7 +295,7 @@ export class ToolExecutor {
     scriptHookManager?: ScriptHookManager,
     auditLogger?: AuditLogger,
     hostClassifiesRiskProvider?: () => boolean,
-    sandboxFsContainedProvider?: () => boolean,
+    sandboxFsContainedProvider?: (tool: Tool) => boolean,
   ) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
@@ -1306,7 +1304,7 @@ export class ToolExecutor {
       // ── Plugin-read auto-allow ↔ sandbox-fs-containment coupling ──────────
       //
       // The merged read-relaxation coupling (the block immediately below) only
-      // gates the `ask` path: it requires `this.sandboxFsContainedProvider()`
+      // gates the `ask` path: it requires `this.sandboxFsContainedProvider(tool)`
       // before flipping a FOREGROUND PLUGIN `ask` (layer ≥ 3) to `allow`. But a
       // plugin tool the host inspector classifies as `read` (inspectHostRisk →
       // `"read"` for a read-only command-bearing arg) is auto-allowed DIRECTLY by
@@ -1322,8 +1320,8 @@ export class ToolExecutor {
       // read auto-allow must NOT silently proceed — convert it to the pre-exec
       // approval `ask` so the residual is gated, exactly mirroring the relaxation.
       //
-      // MUTUAL EXCLUSIVITY — this fires only when `!sandboxFsContainedProvider()`;
-      // the relaxation below fires only when `sandboxFsContainedProvider()`. The
+      // MUTUAL EXCLUSIVITY — this fires only when `!sandboxFsContainedProvider(tool)`;
+      // the relaxation below fires only when `sandboxFsContainedProvider(tool)`. The
       // two are mutually exclusive on the same signal and can never both fire on
       // one invocation, so the ordering relative to the relaxation is immaterial
       // (a `read` flipped here to `ask` is NOT re-relaxed below — that requires
@@ -1352,10 +1350,10 @@ export class ToolExecutor {
       //     reads stricter than headless writes (which take the reviewer lane).
       //     Headless plugin reads keep today's auto-allow, exactly as the
       //     relaxation leaves the headless write lane untouched.
-      //   • NOT FILESYSTEM-CONTAINED only (`!sandboxFsContainedProvider()`).
-      //     macOS/Linux full-confine plugin workers → the read auto-allows
-      //     unchanged; degraded / sandbox-off / current Windows plugin workers
-      //     → the pre-exec ask stands. Same plugin-effect containment signal the
+      //   • NOT FILESYSTEM-CONTAINED only (`!sandboxFsContainedProvider(tool)`).
+      //     A worker-backed, ASRT-wrapped plugin tool keeps the read auto-allow;
+      //     degraded / sandbox-off / ordinary in-process plugin tools fall back
+      //     to the pre-exec ask. Same plugin-effect containment signal the
       //     relaxation uses.
       // Deny rules still win — they resolve to a layer-1 `deny` and never reach here.
       if (
@@ -1366,7 +1364,7 @@ export class ToolExecutor {
         permissionResult.layer === 6 &&
         invocationPermissionContext.headless !== true &&
         this.permissionManager?.getMode() !== "allow" &&
-        !this.sandboxFsContainedProvider()
+        !this.sandboxFsContainedProvider(tool)
       ) {
         permissionResult = {
           decision: "ask",
@@ -1408,7 +1406,7 @@ export class ToolExecutor {
       //     MCP/per-tool strict override, global strict mode) exactly as the
       //     Store B memory-skip does; a per-invocation `forceModal` ask is never
       //     relaxed.
-      //   • SANDBOX FILESYSTEM-CONTAINED ONLY (`this.sandboxFsContainedProvider()`).
+      //   • SANDBOX FILESYSTEM-CONTAINED ONLY (`this.sandboxFsContainedProvider(tool)`).
       //     The effect-boundary only CONTAINS the off-hostApi mutation residual
       //     (residual #1 below) when the OS sandbox FILESYSTEM-CONTAINS the host.
       //     This requires `confines.filesystem === true` on the ACTIVE sandbox
@@ -1418,10 +1416,9 @@ export class ToolExecutor {
       //     the existing pre-exec approval ask stands. This makes
       //     `hostClassifiesRisk`-ON safe on every platform: macOS / Linux
       //     (full ASRT) can relax filesystem-contained plugin reads; current
-      //     Windows plugin workers and degraded/sandbox-off hosts fall back to
-      //     the known-safe ask. Mirrors the reviewer SOT
-      //     `sandboxRelaxesCategory`, which relaxes filesystem-bearing
-      //     categories only when `confines.filesystem === true`.
+      //     ordinary plugin tools and degraded/sandbox-off hosts fall back to the
+      //     known-safe ask. Mirrors the reviewer SOT `sandboxRelaxesCategory`,
+      //     but with the specific plugin worker substrate threaded in.
       //   • FLAG OFF (default) → this whole block is skipped: behaviour is
       //     byte-for-byte today's full pre-exec ask. The condition is the FIRST
       //     read, so the relaxed path is reachable only with the flag ON.
@@ -1453,13 +1450,11 @@ export class ToolExecutor {
       //      effect-boundary sees a read → it runs with no gate. Closed ONLY by the
       //      OS sandbox (ASRT) FILESYSTEM-CONTAINING the host. This relaxation now
       //      REQUIRES the active sandbox to filesystem-contain (the
-      //      `sandboxFsContainedProvider()` clause above — `confines.filesystem
-      //      === true`), so whenever the relaxation is in effect this `node:fs`
-      //      WRITE residual is contained by the sandbox. A host that is NOT
-      //      filesystem-contained does not relax. Current Windows plugin
-      //      workers fail closed under ASRT instead of relying on process-global
-      //      plugin data grants. NOT a regression: a first-party
-      //      plugin already executes arbitrary in-process code today — this is an
+      //      `sandboxFsContainedProvider(tool)` clause above), so whenever the
+      //      relaxation is in effect this `node:fs` WRITE residual is contained
+      //      by the tool's actual worker substrate. A call path that is not
+      //      worker-backed does not relax. NOT a regression: a first-party plugin
+      //      already executes arbitrary in-process code today — this is an
       //      LLM-action gate over mediated effects, not an in-process jail.
       //   2. The mediated excluded writes (ENFORCEMENT_EXCLUSIONS). The relaxation
       //      removes the pre-exec ask, so these are gated ONLY at the effect-boundary
@@ -1485,7 +1480,7 @@ export class ToolExecutor {
       //      decision weighs it.
       if (
         this.hostClassifiesRiskProvider() &&
-        this.sandboxFsContainedProvider() &&
+        this.sandboxFsContainedProvider(tool) &&
         source === "plugin" &&
         invocationPermissionContext.headless !== true &&
         permissionResult.decision === "ask" &&
