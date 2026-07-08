@@ -63,13 +63,24 @@ describe("App smoke (Phase 1 infra)", () => {
     const { container, api } = await renderApp({ hasApiKey: false });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
     await waitFor(() => expect(container.textContent).toContain("API 키 설정 필요"));
-    const settingsButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("설정 열기"),
-    );
-    expect(settingsButton).toBeTruthy();
+
+    // The prompt is a chip in the composer strip now, not a transcript card, so
+    // "설정 열기" lives one click deep inside its popover (rendered in a portal).
+    const chip = container.querySelector<HTMLElement>('[data-testid="composer-api-key-chip"]');
+    expect(chip).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(chip!);
+    });
+
+    const settingsButton = await waitFor(() => {
+      const button = document.querySelector<HTMLElement>('[data-testid="composer-api-key-chip:settings"]');
+      expect(button).toBeTruthy();
+      return button!;
+    });
+    expect(settingsButton.textContent).toContain("설정 열기");
 
     await act(async () => {
-      fireEvent.click(settingsButton!);
+      fireEvent.click(settingsButton);
     });
 
     // Default appMode is "work" — Settings renders INLINE in the main area
