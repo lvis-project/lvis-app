@@ -171,22 +171,21 @@ export interface PluginManifest {
 
   capabilities?: string[];
   /**
-   * Tier A host-mediated egress allow-list (§9.x). A plugin that calls
-   * `hostApi.hostFetch` may only reach hosts matching `allowedDomains`
-   * (dot-boundary suffix match — see `host-allow-list.ts`). Deny-by-default:
-   * absent or empty ⇒ no egress is permitted. `reasoning` is a human-readable
-   * justification surfaced to the user at install for broad grants.
+   * Tier A egress allow-list (§9.x). Host-mediated egress (`hostApi.hostFetch`)
+   * and explicitly documented browser/direct intranet exceptions may only reach
+   * hosts matching `allowedDomains` (dot-boundary suffix match — see
+   * `host-allow-list.ts`). Deny-by-default: absent or empty ⇒ no egress is
+   * permitted. `reasoning` is a human-readable justification surfaced to the
+   * user at install for broad grants.
    */
   networkAccess?: {
     allowedDomains: string[];
     reasoning?: string;
     /**
-     * Declarative, user-approved governance opt-in for reaching private /
-     * loopback / link-local endpoints through `hostApi.hostFetch` (mirrors the
-     * MCP per-server `allowPrivateNetworks` escape hatch). Deny-by-default:
-     * absent/false ⇒ hostFetch rejects any allow-listed host that resolves to a
-     * non-public address (SSRF defense). Set only for on-prem / intranet
-     * plugins whose target genuinely lives on a private range.
+     * Declarative, user-approved governance opt-in for reaching private-network
+     * allow-listed hosts through host-mediated egress or an explicitly
+     * documented browser/direct intranet exception. Loopback/link-local/metadata
+     * addresses remain denied by host guards where applicable.
      */
     allowPrivateNetworks?: boolean;
   };
@@ -814,10 +813,10 @@ export interface PluginWorkerSpec {
 
 /**
  * The handle `PluginHostApi.spawnWorker` resolves to. `socketPath` is the
- * host-side UDS path to connect to, or `null` on the legacy gate-OFF
- * plain-spawn path — `null` signals the caller to use the legacy TCP channel.
- * Windows with ASRT active fails before spawn until a Windows control-channel
- * design exists.
+ * host-side UDS path to connect to, or `null` when the worker should use TCP
+ * control. `null` covers gate-OFF plain spawn; Windows with ASRT active fails
+ * closed until worker-scoped filesystem grants exist. Callers must not infer
+ * sandbox status from transport alone.
  */
 export interface SpawnedPluginWorker {
   readonly socketPath: string | null;
@@ -965,9 +964,10 @@ export interface PluginHostApi {
    * TLS-inspecting corporate network. Capability-gated (external-auth-consumer)
    * + SSRF-validated + audited host-side.
    *
-   * OPTIONAL: undefined on host builds that predate this capability — plugins
-   * MUST guard (`typeof hostApi.hostFetch === "function"`) and fall back to bare
-   * fetch, mirroring `resolveApiKey?`.
+   * OPTIONAL: undefined on host builds that predate this capability. Plugins
+   * that require host-mediated egress MUST guard
+   * (`typeof hostApi.hostFetch === "function"`) and fail closed when absent;
+   * do not replace this chokepoint with bare plugin fetch.
    */
   hostFetch?(input: string | URL, init?: RequestInit): Promise<Response>;
 

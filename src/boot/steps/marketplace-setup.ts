@@ -9,6 +9,7 @@
  * network allow-list rebuild. Finally it runs the managed enterprise-plugin
  * bootstrap.
  */
+import { app } from "electron";
 import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "../../plugins/marketplace.js";
 import type { MarketplaceFetcher } from "../../plugins/marketplace.js";
 import { CloudMarketplaceFetcher } from "../../plugins/cloud-marketplace-fetcher.js";
@@ -20,7 +21,14 @@ import type { BootContext } from "../context.js";
 const log = createLogger("lvis");
 
 export async function setupMarketplace(ctx: BootContext): Promise<void> {
-  const { settingsService, pluginPaths, deploymentGuard, bootAuditLogger, pluginRuntime, mainWindow } = ctx;
+  const {
+    settingsService,
+    pluginPaths,
+    deploymentGuard,
+    bootAuditLogger,
+    pluginRuntime,
+    mainWindow,
+  } = ctx;
 
   // §9.5 marketplace backend selection.
   const marketplaceSettings = settingsService.get("marketplace");
@@ -121,14 +129,23 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
   // config to update, and we must not initialize one outside the boot gate.
   const refreshSandboxNetworkConfig = (): void => {
     void (async () => {
-      const { isAsrtSandboxActive, updateAsrtSandboxConfig } = await import(
+      const {
+        isAsrtSandboxActive,
+        updateAsrtSandboxConfig,
+      } = await import(
         "../../permissions/asrt-sandbox.js"
       );
       if (!isAsrtSandboxActive()) return;
       const allowedDomains = await buildSandboxUnionDomains();
       // Same trusted shape boot init uses: enforced allow-list + strict, no
-      // weakening flags. Per-command filesystem scoping is unaffected.
-      await updateAsrtSandboxConfig({ allowedDomains, strictAllowlist: true });
+      // weakening flags. Plugin-worker filesystem grants are not kept in the
+      // shared config; Windows worker spawn remains fail-closed until ASRT can
+      // scope allow grants per worker/plugin.
+      await updateAsrtSandboxConfig({
+        allowedDomains,
+        strictAllowlist: true,
+        userDataDir: app.getPath("userData"),
+      });
       log.info(
         "boot: ASRT network config live-refreshed (%d union domains after settings change)",
         allowedDomains.length,

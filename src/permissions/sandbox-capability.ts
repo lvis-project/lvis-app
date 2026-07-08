@@ -573,7 +573,7 @@ export function isWeakSandbox(cap: SandboxCapability): boolean {
  * Behaviour invariant: a full-confine ASRT relaxes ALL categories, matching the
  * historical `isWeakSandbox(cap) === false` behavior. A partial-confine ASRT
  * relaxes only the categories covered by its declared dimensions. This actively
- * applies on Windows ASRT 0.0.63+ (`filesystem + network`, no process): network
+ * applies on Windows ASRT 0.0.64 (`filesystem + network`, no process): network
  * and filesystem-bearing read/write/meta calls may relax, but shell calls may
  * not relax because process isolation is absent.
  */
@@ -603,8 +603,8 @@ export function sandboxRelaxesCategory(
  * whose job is to gate (among others) the off-hostApi `node:fs` WRITE residual,
  * so it may fire ONLY when that residual is FILESYSTEM-CONTAINED by the OS
  * sandbox — a bare "sandbox active" boolean is NOT sufficient. Windows srt-win
- * is partial, but ASRT 0.0.63+ does provide filesystem ACL confinement, so this
- * signal can be true on Windows once the sandbox is ready.
+ * is partial, but this generic signal only describes the host shell substrate;
+ * plugin workers need the narrower per-worker/plugin provider below.
  *
  * Reads the SAME active capability the reviewer lane consults
  * ({@link detectSandboxCapability}) and applies the SAME filesystem-confinement
@@ -637,14 +637,14 @@ export function isActiveSandboxShellContained(): boolean {
  * Whether the foreground plugin effect-boundary can stand in for the removed
  * pre-exec ask.
  *
- * This is narrower than {@link isActiveSandboxFilesystemContained}: Windows
- * ASRT 0.0.63 can filesystem-contain ASRT-wrapped host shell commands, but the
- * current Windows plugin worker path is still the legacy unwrapped spawn path.
- * Until that worker substrate is upgraded, do not use Windows partial ASRT as
- * proof that off-hostApi plugin `node:fs` residuals are contained.
+ * This intentionally reads the same filesystem-confinement SOT as
+ * {@link isActiveSandboxFilesystemContained}, but excludes Windows until the
+ * worker-spawn path has a real per-worker/per-plugin filesystem grant. ASRT
+ * 0.0.64 exposes only process-global Windows filesystem grants; treating that
+ * as plugin containment would let unrelated plugin workers inherit each
+ * other's data roots.
  */
 export function isActiveSandboxFilesystemContainedForPluginEffects(): boolean {
-  const cap = detectSandboxCapability();
-  if (cap.platform === "win32") return false;
-  return cap.confines?.filesystem === true;
+  const capability = detectSandboxCapability();
+  return capability.platform !== "win32" && capability.confines?.filesystem === true;
 }

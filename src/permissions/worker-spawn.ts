@@ -26,10 +26,10 @@
  *     the socketDir on `network.allowUnixSockets` emits the seatbelt allow rule
  *     so the worker may BIND the socket. The host connects from OUTSIDE the
  *     sandbox (unconstrained).
- *   - Windows: no reliable UDS-bind primitive, so this HTTP-worker control path
- *     FAILS CLOSED when ASRT is active. The legacy unwrapped TCP branch is kept
- *     only while the gate is OFF. Windows worker wrapping needs a separate
- *     TCP-control-channel design; do not infer it from the mac/linux UDS path.
+ *   - Windows: no reliable UDS-bind primitive and ASRT 0.0.64 does not accept
+ *     per-exec filesystem allow grants. A process-global all-plugin data grant
+ *     would violate plugin namespace isolation, so gate ON + win32 fails closed
+ *     until ASRT can scope allow grants per worker/plugin.
  *
  * ⚠️ The Unix-socket ALLOW config (macOS `allowUnixSockets` / Linux
  * `allowAllUnixSockets`) is INERT per-command in current ASRT — it MUST be set on
@@ -114,12 +114,12 @@ export interface SpawnWorkerSpec {
 /**
  * The handle {@link spawnWorker} returns. `socketPath` is the host-side path to
  * connect to (undici `Agent({ connect: { socketPath } })` / `http.request({
- * socketPath })`) — or `null` when the worker was plain-spawned (gate OFF),
- * signalling the consumer to use the legacy TCP channel. Windows with ASRT
- * active throws before spawn until a Windows control-channel design exists.
+ * socketPath })`) — or `null` when the worker should use TCP control. `null`
+ * means gate-OFF plain spawn; callers must not infer sandbox status from
+ * transport alone.
  */
 export interface SpawnedWorker {
-  /** Host-side UDS path, or null on the legacy gate-OFF path. */
+  /** Host-side UDS path, or null when the worker uses TCP control. */
   readonly socketPath: string | null;
   /** The child pid (undefined only if spawn produced no pid). */
   readonly pid: number | undefined;
@@ -168,12 +168,21 @@ function removeSocketArtifacts(socketPath: string, socketDir: string): void {
   }
 }
 
+function buildWorkerCommand(command: string, args: readonly string[]): {
+  readonly cmdline: string;
+} {
+  return {
+    cmdline: [command, ...args].map((part) => shellQuote(part)).join(" "),
+  };
+}
+
 /**
  * Spawn a long-lived plugin worker, host-mediated and (gate ON) ASRT-wrapped
  * with a bind-mounted UDS control channel. See the module header for the model.
  *
  * @returns a {@link SpawnedWorker}. `socketPath` is non-null only on the wrapped
- *   (gate ON, non-win32) path; null on the gate-OFF legacy TCP fallback.
+ *   mac/linux UDS path; null only on the gate-OFF plain TCP path. Windows with
+ *   ASRT active fails closed until per-worker/per-plugin allow grants exist.
  */
 export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker> {
   const safePlugin = safeSegment(spec.pluginId, "pluginId");
@@ -206,12 +215,16 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     });
   }
 
-  // Windows: this primitive's confinement path depends on a UDS control channel
-  // that does not exist on win32. Fail closed while the ASRT gate is active so
-  // callers cannot mistake an unwrapped TCP worker for a contained substrate.
+  // Windows: ASRT 0.0.64 cannot accept per-exec allowRead/allowWrite grants,
+  // and a shared all-plugin data grant would break plugin namespace isolation.
+  // Fail closed under the sandbox gate until ASRT exposes per-worker/per-plugin
+  // filesystem allow scoping. Gate OFF above remains the explicit legacy plain
+  // spawn path.
   if (process.platform === "win32") {
     throw new Error(
-      "[worker-spawn] ASRT-wrapped plugin workers on Windows are disabled: this UDS control-channel primitive has no Windows equivalent. Keep fail-closed until a Windows TCP control-channel/session-grant design lands.",
+      "[worker-spawn] Windows ASRT plugin workers are disabled: ASRT 0.0.64 " +
+        "does not support per-worker filesystem allow grants, and shared " +
+        "session-level plugin data grants would break plugin isolation.",
     );
   }
 
@@ -278,10 +291,10 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     registered = true;
 
     // Assemble the command DEFENSIVELY: shell-quote the binary + every arg so a
-    // path with spaces/metacharacters cannot mis-split. ASRT runs it under a
-    // POSIX shell (mac/linux); win32 is handled by the legacy branch above. The
-    // per-command wrap carries ONLY the filesystem jail (the `--bind`).
-    const cmdline = [spec.command, ...args].map((part) => shellQuote(part)).join(" ");
+    // path with spaces/metacharacters cannot mis-split. ASRT runs this branch
+    // under a POSIX shell (mac/linux). The per-command wrap carries ONLY the
+    // filesystem jail (the `--bind`).
+    const { cmdline } = buildWorkerCommand(spec.command, args);
     const { argv, env } = await wrapWorkerCommand(cmdline, {
       filesystem: { allowWrite, allowRead, denyRead, denyWrite },
     });

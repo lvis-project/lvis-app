@@ -23,7 +23,7 @@ import { buildImportUrl } from "./sandbox.js";
 /**
  * The UI-invokable method names a manifest declares — the keys of
  * `manifest.uiActions`. These are the only methods reachable from the renderer
- * IPC bridge (SDK 5.20.0 migrated off the legacy `uiCallable[]` allowlist).
+ * IPC bridge (SDK 5.20.0 made `uiActions` the single allowlist).
  */
 export function declaredUiInvokableMethods(
   manifest: Pick<PluginManifest, "uiActions">,
