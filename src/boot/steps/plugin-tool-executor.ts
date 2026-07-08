@@ -18,11 +18,9 @@ import { createPluginSurfacePermissionScope } from "../plugin-surface-permission
 import { readPermissionSettings } from "../../permissions/permission-settings-store.js";
 import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "../../ipc/domains/permissions.js";
 // Confines-aware reader for the foreground plugin read-relaxation coupling. It
-// reads the published active-sandbox capability snapshot (no asrt-sandbox.js
-// import) and reports whether plugin off-hostApi filesystem residuals are
-// actually contained. Windows plugin workers stay fail-closed under ASRT until
-// worker-scoped filesystem grants exist, so this provider deliberately excludes
-// the generic Windows host-shell filesystem signal.
+// reads the published active-sandbox capability snapshot plus the exact
+// host-owned plugin worker registry (no asrt-sandbox.js import) and reports
+// whether this tool's off-hostApi filesystem residuals are actually contained.
 import { isActiveSandboxFilesystemContainedForPluginEffects } from "../../permissions/sandbox-capability.js";
 import type { PluginToolInvocationContext } from "../../plugins/runtime.js";
 import {
@@ -72,14 +70,12 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     scriptHookManager,
     bootAuditLogger,
     () => settingsService.get("features")?.hostClassifiesRisk ?? false,
-    // Couple the foreground plugin read-relaxation to the active OS sandbox
-    // FILESYSTEM-CONTAINING the host (evaluated per tool-call, after boot's
-    // sandbox gate has run + published the active capability). The relaxation
-    // relies on the effect-boundary, which only contains the off-hostApi
-    // `node:fs` WRITE residual when the sandbox filesystem-contains; a degraded
-    // or sandbox-off host (`confines.filesystem !== true`) returns false here so
-    // the pre-exec ask stands (see
-    // ToolExecutor.sandboxFsContainedProvider).
+    // Couple the foreground plugin read-relaxation to the concrete tool's
+    // worker-backed filesystem containment. The relaxation relies on the
+    // effect-boundary, which only contains the off-hostApi `node:fs` WRITE
+    // residual when this exact plugin worker is ASRT-wrapped; ordinary plugin
+    // tools, degraded hosts, and sandbox-off hosts return false so the pre-exec
+    // ask stands (see ToolExecutor.sandboxFsContainedProvider).
     isActiveSandboxFilesystemContainedForPluginEffects,
   );
   const pluginSurfacePermissionScope = createPluginSurfacePermissionScope({
