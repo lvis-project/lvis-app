@@ -148,6 +148,12 @@ describe("installer smoke and packaging discipline", () => {
     expect(afterPack).toContain("conpty_console_list.node");
     expect(afterPack).toContain("winpty.dll");
     expect(afterPack).toContain("winpty-agent.exe");
+    // node-pty builds `spawn-helper` only on macOS (binding.gyp `OS=="mac"`), and
+    // only macOS uses it at runtime (`pty.cc` gates helperPath on `__APPLE__`).
+    // Scoping this assertion to any non-Windows platform fails every Linux
+    // installer build at afterPack — it broke the v0.4.5/v0.4.6 tag builds.
+    expect(afterPack).toContain('if (platform === "darwin") {');
+    expect(afterPack).toContain("spawn-helper");
     expect(smokePackagedApp).toContain("assertPackagedFootprint(target, executable)");
     expect(smokePackagedApp).toContain("check-package-footprint.mjs");
     expect(smokePackagedApp).toContain("app.asar footprint passed");
