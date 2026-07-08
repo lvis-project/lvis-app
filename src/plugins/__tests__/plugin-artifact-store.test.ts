@@ -17,33 +17,11 @@
  */
 import AdmZip from "adm-zip";
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { assertSafeArtifactSlug, PluginArtifactStore } from "../plugin-artifact-store.js";
-import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
-
-function makeStore(tmpDir: string): PluginArtifactStore {
-  const fetcher = {
-    listPlugins: async () => [],
-    getPluginDetail: async () => null,
-    downloadVersion: async () => ({ zipBuffer: Buffer.alloc(0), sha256: "x" }),
-    listAnnouncements: async () => [],
-  } satisfies MarketplaceFetcher;
-  return new PluginArtifactStore({
-    installRoot: resolve(tmpDir, "installed"),
-    cacheRoot: resolve(tmpDir, "cache"),
-    fetcher,
-    publicKeys: {},
-    tarballCacheBase: null,
-  });
-}
-
-function makeTmpDir(): string {
-  const root = tmpdir();
-  return mkdtempSync(join(root, "artifact-store-"));
-}
+import { resolve } from "node:path";
+import { assertSafeArtifactSlug } from "../plugin-artifact-store.js";
+import { makeStore, makeTmpDir } from "./artifact-store-test-helpers.js";
 
 describe("PluginArtifactStore — history journal", () => {
   it("appendHistory + readHistory round-trip preserves order", async () => {
