@@ -1,5 +1,62 @@
 # Changelog
 
+## v0.4.6 — 2026-07-08
+
+Marketplace asset platform, the desktop-gaps program (E1–E7), sub-agent lifecycle, and permission/sandbox hardening release. Bundles everything merged after the `v0.4.5` tag.
+
+### Marketplace / provider catalog
+
+- **Marketplace re-architected around installable assets** (PR #1513, #1516, #1517, #1515, #1522, #1521, #1514) — a lightweight marketplace core, an asset registry, local candidate resolution, and explicit asset-catalog / settings boundaries; the provider default split moves provider metadata out of the app bundle.
+- **Catalog-owned provider metadata + dynamic model catalog** (PR #1538, #1539, #1529, #1533) — providers and reference models are described by the catalog, the model list is cached and persisted, and the model-catalog UI is driven from that data.
+- **Custom provider presets + typed catalog sections** (PR #1534, #1535).
+- **Lazy loading for marketplace payloads** (PR #1540, #1520, #1523) — theme bundles, language-pack catalogs, and provider settings all load on demand.
+- **Asset-state UX** (PR #1525, #1524, #1526) — installed-asset badges, package trust labels, and an explicit unsupported-asset state.
+- **Lifecycle hardening + e2e coverage** (PR #1536, #1527, #1528, #1532).
+
+### Desktop gaps program (E1–E7)
+
+- **E1 — keyless value experience** (PR #1508, #1530) — public-build embedded-key guard, Ollama fallback (localhost probe + login chip), endpoint-unreachable UX, keyless LLM readiness.
+- **E2 — diagnostics bundle + production logs** (PR #1503, #1510) — rotating file log sink, dual DLP chokepoint, deny-by-default settings allowlist, opt-in crash dumps, an AuditTab diagnostics section, and log rotation / total-size caps.
+- **E3 — conversation import + FTS search** (PR #1509) — whitelist-validated `lvis:chat:import`, SQLite FTS5 trigram + 2-character CJK `LIKE` hybrid, and a better-sqlite3 packaging guard.
+- **E4 — global shortcuts + launch-at-startup** (PR #1506), including a hidden-window deep-link fix.
+- **E5 — plugin update e2e + partial-failure UX** (PR #1504).
+- **E7 — onboarding look & feel** (PR #1507) plus the no-key composer lift (PR #1541).
+
+### Sub-agents
+
+- **Resume + session isolation** (PR #1476, #1478, #1480, #1474) — resume metadata, same-instance resume, UI continuity across resume, and a dedicated sub-agent session namespace.
+- **Parallel runs and fan-out cap** (PR #1543, #1519) — governed parallel sub-agent runs with Doctor recovery, and a fan-out limit of 10.
+
+### Permissions / sandbox
+
+- **Graduated grant tiers** (PR #1481) and a shared shell tokenizer for permission matching (PR #1472).
+- **PermissionManager owns its own state** (PR #1475, #1477, #1479) — reviewer decision, meta override, and path scope moved behind the manager.
+- **Windows ASRT plugin workers** (PR #1546, #1548) — worker isolation preserved until Windows ASRT can scope grants; plugin workers now run through per-worker ASRT ACL grants.
+- **`sed` risk classification fix** (PR #1491).
+
+### Plugins / SDK
+
+- **SDK manifest schema is the only host validator** (PR #1547) — `@lvis/plugin-sdk` is now pinned at `v5.22.0` (PR #1549), aligned across every plugin repo.
+- **Windows plugin install/update no longer fails with `EPERM`** (PR #1549) — the atomic install directory swap retries transient Windows lock contention, and a locked previous install is no longer misread as a first install. Fixes `lvis-plugin-meeting#154`.
+- **Plugin Doctor** (PR #1495, #1544) — actionable manifest Doctor failures.
+
+### Security
+
+- **DLP token-prefix coverage** (PR #1545) — unmarked vendor tokens can no longer enter diagnostics.
+
+### Packaging / deps
+
+- **Branded NSIS installer** (PR #1492) and a lighter Electron locale footprint (PR #1518).
+- **Electron 43** (PR #1490), `@types/node` 26 (PR #1487), `actions/cache` v6 (PR #1369).
+
+### UI
+
+- **Shell refinements + depth tokens** (PR #1489, #1486) and multi-project insights (PR #1482).
+
+### Docs / hygiene
+
+- English-default docs with a Korean mirror (PR #1488), README metadata templates (PR #1531), and a hygiene bundle (PR #1494).
+
 ## v0.4.5 — 2026-07-03
 
 Workspace rail, chat-rendering unification, side-chat, and permission/sub-agent hardening release. Bundles everything merged after the `v0.4.4` tag.
