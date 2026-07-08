@@ -51,6 +51,58 @@ import {
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("plugin-artifact-store");
 
+/**
+ * Transient filesystem error codes surfaced on Windows when another process
+ * (a still-running plugin webview/worker, an antivirus scanner, or the shell
+ * indexer) holds a handle to a file inside the directory we are trying to
+ * `rename()`/`rm()`. Windows rejects the operation with one of these until the
+ * lock clears — which typically happens within a few hundred milliseconds of
+ * the previous plugin instance tearing down. macOS/Linux do not surface these
+ * for the directory-swap path. `ENOENT` is deliberately NOT included: an
+ * absent source is a legitimate "first install" signal that callers must be
+ * able to tell apart from a locked source.
+ */
+const TRANSIENT_FS_LOCK_CODES = new Set(["EPERM", "EACCES", "EBUSY", "ENOTEMPTY", "EEXIST"]);
+
+export function isTransientFsLockError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return typeof code === "string" && TRANSIENT_FS_LOCK_CODES.has(code);
+}
+
+/**
+ * Run a filesystem op with bounded retry for transient Windows lock
+ * contention. Only {@link TRANSIENT_FS_LOCK_CODES} are retried; `ENOENT` and
+ * every other error propagate immediately so the caller can distinguish
+ * "source absent" (first install) from "source locked" (worth retrying) from a
+ * genuine failure. With the defaults the total wait is bounded to ~1.75s
+ * (9 sleeps: 50+100+150+200 then 250×5) so an install can never hang the user.
+ *
+ * `sleep`/`delayMs` are injectable so tests exercise the retry ladder without
+ * real timers.
+ */
+export async function retryOnTransientFsLock<T>(
+  op: () => Promise<T>,
+  opts: {
+    attempts?: number;
+    delayMs?: (attempt: number) => number;
+    sleep?: (ms: number) => Promise<void>;
+    onRetry?: (attempt: number, code: string | undefined) => void;
+  } = {},
+): Promise<T> {
+  const attempts = opts.attempts ?? 10;
+  const delayMs = opts.delayMs ?? ((attempt) => Math.min(50 * attempt, 250));
+  const sleep = opts.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)));
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await op();
+    } catch (err) {
+      if (attempt >= attempts || !isTransientFsLockError(err)) throw err;
+      opts.onRetry?.(attempt, (err as NodeJS.ErrnoException).code);
+      await sleep(delayMs(attempt));
+    }
+  }
+}
+
 export interface ArtifactStoreHistoryEntry {
   version: string;
   /** ISO timestamp. */
@@ -263,19 +315,35 @@ export class PluginArtifactStore {
       // .old before promoting stageDir, so a half-promoted state is never
       // observable. `rename()` refuses to overwrite a non-empty directory
       // on Windows; macOS/Linux would also reject the no-op rename.
+      //
+      // Both renames are retried through `retryOnTransientFsLock` because on
+      // Windows a directory-swap rejects with EPERM/EBUSY while the previous
+      // plugin instance (webview/worker) or an antivirus scan still holds a
+      // handle inside the directory — a transient lock that clears once the
+      // old instance finishes tearing down (meeting#154).
       const oldDir = resolve(this.installRoot, `.${safeSlug}.old-${randomUUID()}`);
       let hadOldDir = false;
       try {
-        await rename(installDir, oldDir);
+        await retryOnTransientFsLock(() => rename(installDir, oldDir), {
+          onRetry: (attempt, code) =>
+            log.warn({ safeSlug, attempt, code }, "retrying installDir->old swap under fs lock"),
+        });
         hadOldDir = true;
-      } catch {
-        // installDir didn't exist (first install).
+      } catch (err) {
+        // Only an absent installDir is a legitimate "first install". A locked
+        // installDir that survived the retry ladder must surface — swallowing
+        // it here would leave the still-present dir in the promotion's path and
+        // resurface as the confusing EPERM in the issue's stack trace.
+        if ((err as NodeJS.ErrnoException | null)?.code !== "ENOENT") throw err;
       }
       try {
-        await rename(stageDir, installDir);
+        await retryOnTransientFsLock(() => rename(stageDir, installDir), {
+          onRetry: (attempt, code) =>
+            log.warn({ safeSlug, attempt, code }, "retrying stage->installDir promotion under fs lock"),
+        });
       } catch (renameErr) {
         if (hadOldDir) {
-          await rename(oldDir, installDir).catch(() => undefined);
+          await retryOnTransientFsLock(() => rename(oldDir, installDir)).catch(() => undefined);
         }
         throw renameErr;
       }
@@ -286,7 +354,7 @@ export class PluginArtifactStore {
       } catch (commitErr) {
         await rm(installDir, { recursive: true, force: true }).catch(() => undefined);
         if (hadOldDir) {
-          await rename(oldDir, installDir).catch(() => undefined);
+          await retryOnTransientFsLock(() => rename(oldDir, installDir)).catch(() => undefined);
         }
         throw commitErr;
       }
