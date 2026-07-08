@@ -241,10 +241,17 @@ function assertNodePtyBinary(context) {
       throw new Error(`packaged node-pty native addon is empty: ${nodeAddon}`);
     }
   }
-  // POSIX: node-pty forks its `spawn-helper` to set the controlling TTY; it MUST
-  // be present + executable. Windows is covered above by the conpty.node and
-  // conpty_console_list.node addon checks — no separate helper is expected.
-  if (platform !== "win32") {
+  // macOS ONLY: node-pty forks its `spawn-helper` to set the controlling TTY,
+  // and it MUST be present + executable there. It is NOT a POSIX-wide artifact:
+  //   - node-pty's `binding.gyp` declares the `spawn-helper` target under
+  //     `['OS=="mac"', ...]`; the `OS!="win"` branch builds only `pty`.
+  //   - `src/unix/pty.cc` reads `helperPath` but only *uses* it inside
+  //     `#if defined(__APPLE__)`; the Linux path forkpty()s directly.
+  // Asserting it for every non-Windows platform made every Linux installer
+  // build fail at afterPack (the v0.4.5 and v0.4.6 tag builds never published).
+  // Windows is covered above by the conpty.node / conpty_console_list.node
+  // addon checks — no separate helper is expected there either.
+  if (platform === "darwin") {
     const helper = join(ptyRoot, "spawn-helper");
     if (!existsSync(helper)) {
       throw new Error(
