@@ -8,8 +8,10 @@ import {
   isActiveSandboxFilesystemContainedForPluginEffects,
   isActiveSandboxShellContained,
   isWeakSandbox,
+  markPluginWorkerWrapped,
   sandboxRelaxesCategory,
   setActiveSandboxCapability,
+  unmarkPluginWorkerWrapped,
   type SandboxCapability,
 } from "../sandbox-capability.js";
 import type { ToolCategory } from "../../tools/types.js";
@@ -113,7 +115,7 @@ describe("sandbox-capability — setActiveSandboxCapability publish", () => {
     expect(isWeakSandbox(cap)).toBe(false);
   });
 
-  it("falls back to kind='none' (verified) when no capability was published (gate OFF / Windows fail-closed / Linux deps-missing)", () => {
+  it("falls back to kind='none' (verified) when no capability was published (gate OFF / Linux deps-missing)", () => {
     // No setActiveSandboxCapability call — the SOT reports the absence of OS
     // isolation, matching the default-OFF posture and the non-initialized paths.
     const cap = detectSandboxCapability();
@@ -122,7 +124,7 @@ describe("sandbox-capability — setActiveSandboxCapability publish", () => {
     expect(isWeakSandbox(cap)).toBe(true);
   });
 
-  it("keeps Windows plugin effect containment closed until worker-scoped grants exist", () => {
+  it("keeps generic Windows filesystem containment separate from plugin-effect containment", () => {
     setActiveSandboxCapability({
       kind: "asrt",
       confidence: "verified",
@@ -134,6 +136,47 @@ describe("sandbox-capability — setActiveSandboxCapability publish", () => {
     expect(isActiveSandboxFilesystemContained()).toBe(true);
     expect(isActiveSandboxFilesystemContainedForPluginEffects()).toBe(false);
     expect(isActiveSandboxShellContained()).toBe(false);
+  });
+
+  it("reports plugin effect containment only for a matching wrapped worker", () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
+      confines: { filesystem: true, process: false, network: true },
+    });
+
+    expect(
+      isActiveSandboxFilesystemContainedForPluginEffects({
+        source: "plugin",
+        name: "index_search",
+        pluginId: "local-indexer",
+        workerId: "embed",
+      }),
+    ).toBe(false);
+
+    markPluginWorkerWrapped("local-indexer", "embed");
+    try {
+      expect(
+        isActiveSandboxFilesystemContainedForPluginEffects({
+          source: "plugin",
+          name: "index_search",
+          pluginId: "local-indexer",
+          workerId: "embed",
+        }),
+      ).toBe(true);
+      expect(
+        isActiveSandboxFilesystemContainedForPluginEffects({
+          source: "plugin",
+          name: "index_search",
+          pluginId: "local-indexer",
+          workerId: "other",
+        }),
+      ).toBe(false);
+    } finally {
+      unmarkPluginWorkerWrapped("local-indexer", "embed");
+    }
   });
 });
 

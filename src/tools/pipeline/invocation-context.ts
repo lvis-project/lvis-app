@@ -6,8 +6,8 @@
  * executeOne (executor.ts) owns ~20 per-invocation mutable locals. The highest-
  * risk of them participate in the TWO MUTUALLY-EXCLUSIVE sandbox
  * FILESYSTEM-CONTAINMENT relaxation blocks (one flips a plugin read auto-allow
- * to `ask` only when `!sandboxFsContainedProvider()`; the other relaxes a
- * foreground plugin `ask` to `allow` only when `sandboxFsContainedProvider()`).
+ * to `ask` only when `!sandboxFsContainedProvider(tool)`; the other relaxes a
+ * foreground plugin `ask` to `allow` only when `sandboxFsContainedProvider(tool)`).
  * Those blocks MUST stay inline and byte-identical — a denied WRITE must never
  * become an allowed one, and the read-relaxation must fire under exactly the same
  * conditions. This module therefore extracts ONLY the genuinely self-contained
