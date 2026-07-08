@@ -1135,7 +1135,7 @@ class StdioTransport implements McpTransport {
     if (process.platform === "win32") {
       throw new Error(
         "[mcp-client] ASRT-wrapped MCP stdio on Windows is disabled because " +
-          "ASRT 0.0.63 cannot apply per-server filesystem.allowRead/allowWrite " +
+          "ASRT 0.0.64 cannot apply per-server filesystem.allowRead/allowWrite " +
           "grants per exec; only denyRead/denyWrite are supported. Keep MCP " +
           "stdio fail-closed until a Windows session-grant/control-channel " +
           "design lands.",

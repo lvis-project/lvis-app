@@ -18,7 +18,9 @@
  *   - udsArgName injection (arg form + env form).
  *   - idempotent any-exit cleanup → unmark + cleanup once on exit (and stop()
  *     does not double-run); reviewer falls back to none after.
- *   - win32 + gate ON → fail closed before spawn (no unwrapped TCP fallback).
+ *   - win32 + gate ON → fail closed because ASRT 0.0.64 cannot scope
+ *     filesystem allow grants per worker/plugin and shared all-plugin grants
+ *     would break plugin isolation.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
@@ -406,25 +408,35 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
   });
 });
 
-// ─── Windows + gate ON → fail closed (no unwrapped fallback) ─
+// ─── Windows + gate ON → fail closed until per-worker grants exist ─
 
 describe("spawnWorker — Windows with gate ON", () => {
-  it("fails closed before spawn because the UDS control channel has no Windows equivalent", async () => {
+  it("fails closed instead of granting all plugin worker data dirs globally", async () => {
     withPlatformForTest("win32");
     gateActive = true;
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "ASRT (srt-win) active — filesystem + network contained, process isolation unavailable",
+      confines: { filesystem: true, process: false, network: true },
+    });
 
+    const pluginDataDir = join(lvisHome(), "plugins", "local-indexer", "data");
     await expect(
       spawnWorker({
         pluginId: "local-indexer",
         workerId: "embed",
-        command: "C:/worker.exe",
-        args: ["--serve"],
+        command: "C:/Python/python.exe",
+        args: ["C:/worker.py", "--host", "127.0.0.1", "--port", "17037"],
+        allowWritePaths: [join(pluginDataDir, "index")],
+        udsArgName: "--uds",
       }),
-    ).rejects.toThrow(/Windows.*disabled|control-channel/i);
+    ).rejects.toThrow(/Windows ASRT plugin workers are disabled|per-worker filesystem allow grants/i);
 
-    // No fabrication and no unwrapped TCP fallback while ASRT is active.
     expect(wrapWorkerCommandMock).not.toHaveBeenCalled();
     expect(mkdirMock).not.toHaveBeenCalled();
+    expect(registerUdsMock).not.toHaveBeenCalled();
     expect(spawnMock).not.toHaveBeenCalled();
     expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
   });

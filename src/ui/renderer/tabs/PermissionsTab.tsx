@@ -754,7 +754,7 @@ export function PermissionsTab() {
             windowsStatus.wfpState !== "absent" ? (
               // Install partially ran or status cannot be fully read. Show the
               // verbatim ASRT instructions and keep the explicit retry action
-              // available. ASRT 0.0.63 no longer requires Windows sign-out.
+              // available. ASRT 0.0.64 no longer requires Windows sign-out.
               <div
                 data-testid="os-sandbox-windows-setup-status"
                 className="space-y-2 rounded-md border border-info/(--opacity-medium) bg-info/(--opacity-soft) px-3 py-2 text-[11px] text-info"
