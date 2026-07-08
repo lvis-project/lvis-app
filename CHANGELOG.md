@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.7 — 2026-07-09
+
+Packaging fix-forward for the failed `v0.4.5` and `v0.4.6` tags. Ships the entire `v0.4.6` payload (see below) — neither of those tags produced a GitHub Release, so `v0.4.4` was the last published build.
+
+### Packaging
+
+- **`node-pty` `spawn-helper` assertion scoped to macOS** — `scripts/electron-after-pack.cjs` required `spawn-helper` for every non-Windows platform, but it is a macOS-only artifact: node-pty's `binding.gyp` declares that target under `['OS=="mac"', ...]` (the `OS!="win"` branch builds only `pty`), and `src/unix/pty.cc` uses `helperPath` solely inside `#if defined(__APPLE__)` — Linux calls `forkpty()` directly. The Linux installer job therefore failed at `afterPack` on every tag build, and because `publish-release` is `needs: installers`, the atomic publish was skipped and no Release was ever created. A regression assertion in `packaging-discipline-source.test.ts` now pins the `darwin`-only scoping.
+
+### 검증
+
+- `v0.4.5` and `v0.4.6` tag-push installer runs: macOS + Windows succeeded, Linux failed at `assertNodePtyBinary`, publish skipped.
+- Fix verified before tagging via a `workflow_dispatch` run of `build-installers.yml` (publish is gated on `github.event_name == 'push'`, so nothing was released): macOS, Windows, and Linux installers all built successfully.
+
 ## v0.4.6 — 2026-07-08
 
 Marketplace asset platform, the desktop-gaps program (E1–E7), sub-agent lifecycle, and permission/sandbox hardening release. Bundles everything merged after the `v0.4.5` tag.
