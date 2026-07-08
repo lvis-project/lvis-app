@@ -25,36 +25,13 @@
  */
 import AdmZip from "adm-zip";
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { mkdir, open, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import {
-  isTransientFsLockError,
-  PluginArtifactStore,
-  retryOnTransientFsLock,
-} from "../plugin-artifact-store.js";
-import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
+import { resolve } from "node:path";
+import { isTransientFsLockError, retryOnTransientFsLock } from "../plugin-artifact-store.js";
+import { makeStore, makeTmpDir } from "./artifact-store-test-helpers.js";
 
-function makeStore(tmpDir: string): PluginArtifactStore {
-  const fetcher = {
-    listPlugins: async () => [],
-    getPluginDetail: async () => null,
-    downloadVersion: async () => ({ zipBuffer: Buffer.alloc(0), sha256: "x" }),
-    listAnnouncements: async () => [],
-  } satisfies MarketplaceFetcher;
-  return new PluginArtifactStore({
-    installRoot: resolve(tmpDir, "installed"),
-    cacheRoot: resolve(tmpDir, "cache"),
-    fetcher,
-    publicKeys: {},
-    tarballCacheBase: null,
-  });
-}
-
-function makeTmpDir(): string {
-  return mkdtempSync(join(tmpdir(), "artifact-store-winlock-"));
-}
+const TMP_PREFIX = "artifact-store-winlock-";
 
 function lockError(code: string): NodeJS.ErrnoException {
   const err = new Error(`${code}: simulated lock`) as NodeJS.ErrnoException;
@@ -114,7 +91,7 @@ describe.skipIf(process.platform !== "win32")(
   "extractZipWithCommit — real Windows file-lock (meeting#154 repro)",
   () => {
     it("updates the plugin when a transient in-dir lock clears mid-swap", async () => {
-      const tmp = makeTmpDir();
+      const tmp = makeTmpDir(TMP_PREFIX);
       try {
         const store = makeStore(tmp);
         const installDir = store.installDirFor("meeting");
@@ -158,7 +135,7 @@ describe.skipIf(process.platform !== "win32")(
     });
 
     it("rejects and preserves the old install when the in-dir lock never clears", async () => {
-      const tmp = makeTmpDir();
+      const tmp = makeTmpDir(TMP_PREFIX);
       try {
         const store = makeStore(tmp);
         const installDir = store.installDirFor("meeting");
