@@ -2465,7 +2465,7 @@ export const esMessages: Record<string, string> = {
   "settingsContent.tabPluginPerf": "Rendimiento del complemento",
   "settingsContent.tabRoles": "Roles",
   "settingsContent.tabUsage": "Uso",
-  "settingsContent.tabWeb": "Buscar (web)",
+  "settingsContent.tabWeb": "Web / Navegación",
   "settingsWindow.documentTitle": "Configuración LVIS",
   "sidebar.ariaLabel": "Navegación primaria",
   "sidebar.authRequiredAriaLabel": "Se requiere autenticación",

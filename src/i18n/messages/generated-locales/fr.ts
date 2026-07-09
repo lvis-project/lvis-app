@@ -2465,7 +2465,7 @@ export const frMessages: Record<string, string> = {
   "settingsContent.tabPluginPerf": "Performances des plugins",
   "settingsContent.tabRoles": "Rôles",
   "settingsContent.tabUsage": "Usage",
-  "settingsContent.tabWeb": "Recherche (Web)",
+  "settingsContent.tabWeb": "Web / Navigation",
   "settingsWindow.documentTitle": "Paramètres LVIS",
   "sidebar.ariaLabel": "Navigation principale",
   "sidebar.authRequiredAriaLabel": "Authentification requise",

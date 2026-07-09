@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import { openSettingsWindow } from './settings-window';
 
 /**
- * Settings → Appearance 탭의 외부 URL 표시 정책 토글 e2e.
+ * Settings → Web / Browsing 탭의 외부 URL 표시 정책 토글 e2e. (The control was
+ * relocated from the Appearance tab to the Web tab in the settings IA restructure.)
  */
 test('webView.preferredFlow toggle persists to settings.json', async ({
   app,
@@ -12,7 +13,7 @@ test('webView.preferredFlow toggle persists to settings.json', async ({
   userDataDir,
 }) => {
   const settingsPath = path.join(userDataDir, 'lvis-settings.json');
-  const settingsWindow = await openSettingsWindow(app, mainWindow, 'appearance');
+  const settingsWindow = await openSettingsWindow(app, mainWindow, 'web');
 
   const radiogroup = settingsWindow.locator('[data-testid="webview-preferred-flow"]').first();
   await expect(radiogroup).toBeVisible({ timeout: 10_000 });
