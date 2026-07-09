@@ -1,9 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   dispatchUiOnlyRuntimeInvocation,
   isUiOnlyRuntimeInvocation,
   uiOnlyRuntimeInvocationRequiresUserAction,
 } from "../plugin-tool-invocation.js";
+import { PluginRuntime, type PluginToolInvocationContext } from "../../plugins/runtime.js";
+import {
+  currentInvocationOrigin,
+  runWithInvocationOrigin,
+} from "../../plugins/runtime/origin-chain.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 
 function runtimeWithManifest(manifest: {
   tools?: string[];
@@ -125,59 +133,80 @@ describe("plugin UI-only runtime invocation", () => {
   });
 });
 
-// #1553 — the UI-only bypass must still pass through the governed
-// `runWithCeiling` cap so a hung uiActions handler cannot block the renderer
-// caller forever. `dispatchUiOnlyRuntimeInvocation` accepts a `ceilingMs`
-// test seam (default = TOOL_TIMEOUT_POLICY.globalCeilingMs) so we can prove
-// the ceiling without waiting the real 120s and without weakening the SOT.
-describe("dispatchUiOnlyRuntimeInvocation — ceiling on the uiActions bypass", () => {
-  function runtimeWithHandler(
-    manifest: {
-      tools?: string[];
-      uiActions?: Record<string, { description?: string }>;
-      auth?: { statusTool: string; loginTool: string; logoutTool?: string };
-    },
-    callDeclaredUiAction: (method: string, payload?: unknown) => Promise<unknown>,
-  ) {
-    return {
-      listPluginManifests: () => [{ pluginId: "meeting", manifest }],
-      callDeclaredUiAction,
-    } as any;
+// #1553 (relocated + wiring guard) — the uiActions bypass ceiling now lives
+// STRUCTURALLY inside `PluginRuntime.callDeclaredUiAction` (proven directly at
+// the runtime level in plugins/runtime/__tests__/ui-action-ceiling.test.ts).
+// This block adds the wiring-level regression guard the cluster review asked
+// for: a FAITHFUL reproduction of the production `invokePluginTool` UI-only
+// branch (boot/steps/plugin-tool-executor.ts) — runWithInvocationOrigin →
+// isUiOnlyRuntimeInvocation → dispatchUiOnlyRuntimeInvocation — driven against a
+// REAL PluginRuntime. It proves the boot dispatch path reaches that structural
+// ceiling, so a hung uiActions handler rejects at the global ceiling instead of
+// blocking the renderer forever — even if this dispatch were ever reverted to a
+// direct `pluginRuntime.callDeclaredUiAction(...)` call. (The analogous OTHER
+// executor branch is reproduced in tools/__tests__/executor-effect-ledger.test.ts.)
+// Fake timers advance to the SOT ceiling so the test does not wait the real 120s.
+describe("invokePluginTool UI-only branch — reaches the structural ceiling (#1553 wiring guard)", () => {
+  const HOST_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+
+  function realRuntimeWithUiAction(
+    manifest: { tools?: string[]; uiActions?: Record<string, { description?: string }> },
+    method: string,
+    handler: (payload?: unknown) => Promise<unknown>,
+  ): PluginRuntime {
+    const rt = new PluginRuntime({ hostRoot: HOST_ROOT, manifestPaths: [] });
+    const internals = rt as unknown as {
+      plugins: Map<string, { manifest: unknown }>;
+      methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
+    };
+    internals.plugins.set("test.plugin", { manifest } as unknown as never);
+    internals.methodMap.set(method, { pluginId: "test.plugin", handler });
+    return rt;
   }
 
-  it("rejects at the global ceiling when the uiActions handler never resolves (caller does not hang)", async () => {
-    const runtime = runtimeWithHandler(
-      { tools: ["meeting_upload_file"], uiActions: { meeting_stage_upload_begin: {} } },
-      // Never resolves — simulates a hung uiActions handler.
-      () => new Promise<never>(() => {}),
-    );
+  // Faithful reproduction of the production invokePluginTool UI-only branch.
+  function invokePluginToolRepro(
+    rt: PluginRuntime,
+    toolName: string,
+    payload: Record<string, unknown>,
+    context: PluginToolInvocationContext,
+  ): Promise<unknown> {
+    return runWithInvocationOrigin(context.origin, context.parentOrigin, async () => {
+      const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
+      if (isUiOnlyRuntimeInvocation(rt, toolName, context, effectiveOrigin)) {
+        return dispatchUiOnlyRuntimeInvocation(rt, toolName, payload, context);
+      }
+      throw new Error("reproduction did not take the UI-only branch");
+    });
+  }
 
-    await expect(
-      dispatchUiOnlyRuntimeInvocation(
-        runtime,
+  it("rejects at the global ceiling when a uiActions-only handler hangs (caller does not block)", async () => {
+    vi.useFakeTimers();
+    try {
+      const rt = realRuntimeWithUiAction(
+        { tools: ["meeting_upload_file"], uiActions: { meeting_stage_upload_begin: {} } },
+        "meeting_stage_upload_begin",
+        // Never resolves — simulates a hung uiActions handler.
+        () => new Promise<never>(() => {}),
+      );
+      const pending = invokePluginToolRepro(
+        rt,
         "meeting_stage_upload_begin",
         {},
-        { origin: "ui", ownerPluginId: "meeting", userAction: true },
-        5, // small ceiling via the test seam — the SOT default is untouched
-      ),
-    ).rejects.toThrow(/exceeded global ceiling \(5ms\): meeting_stage_upload_begin/);
-  });
-
-  it("returns the handler value when it resolves within the ceiling", async () => {
-    const runtime = runtimeWithHandler(
-      { tools: ["meeting_upload_file"], uiActions: { meeting_stage_upload_begin: {} } },
-      async (_method, payload) => ({ echoed: payload }),
-    );
-
-    await expect(
-      dispatchUiOnlyRuntimeInvocation(
-        runtime,
-        "meeting_stage_upload_begin",
-        { chunk: 1 },
-        { origin: "ui", ownerPluginId: "meeting", userAction: true },
-        5_000,
-      ),
-    ).resolves.toEqual({ echoed: { chunk: 1 } });
+        { origin: "ui", ownerPluginId: "test.plugin", userAction: true },
+      );
+      // Attach the rejection expectation BEFORE advancing so the ceiling
+      // rejection is never an unhandled rejection.
+      const rejection = expect(pending).rejects.toThrow(
+        new RegExp(
+          `exceeded global ceiling \\(${TOOL_TIMEOUT_POLICY.globalCeilingMs}ms\\): meeting_stage_upload_begin`,
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_POLICY.globalCeilingMs + 1);
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
