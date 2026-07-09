@@ -127,10 +127,11 @@ Key boundaries:
 - plugin UI can render in host slots but cannot bypass permission review;
 - marketplace metadata should not override local policy or managed-plugin rules.
 - renderer-to-plugin method calls are allowlisted by `manifest.uiActions`;
-- a `uiActions`-only method (declared in `uiActions` but not `tools[]`) is driven
-  by a direct UI activation only and cannot be invoked from a plugin-origin
-  `ctx.callTool` — declare it in `tools[]` for governed model/plugin invocation
-  (#1556);
+- a `uiActions`-only **non-status** method (declared in `uiActions` but not
+  `tools[]`) is driven by a direct UI activation only and cannot be invoked from
+  a plugin-origin `ctx.callTool` — declare it in `tools[]` for governed
+  model/plugin invocation (the auth `statusTool` is exempt: status polling skips
+  the user-activation gate and runs on a plugin-origin chain) (#1556);
 - long-lived plugin workers are spawned only through HostApi `spawnWorker`;
   filesystem read grants must be declared explicitly as `allowReadPaths` and are
   never inferred from argv.
