@@ -475,6 +475,49 @@ export async function parsePluginJson(
   }
   const uiInvokable = new Set(uiActionNames);
 
+  // #1554 — UNCONDITIONAL tools[] ∩ uiActions overlap guard. A method declared
+  // in BOTH tools[] and uiActions is dual-declared: it is reachable as an
+  // LLM/plugin tool (the governed ToolExecutor path) AND as a uiActions runtime
+  // method. That is LEGITIMATE (6 first-party plugins overlap 2-24 methods
+  // today) precisely BECAUSE `plugin-tool-invocation.ts` fail-closes a
+  // dual-declared method to the governed path — `isUiOnlyRuntimeInvocation`
+  // routes to the uiActions bypass only when the method is NOT in tools[]
+  // (`manifest.tools?.includes(toolName) !== true`), so the overlap never
+  // silently reaches the reviewer-skipping bypass. The pre-#1554 overlap check
+  // lived only inside `if (parsed.auth)` and covered only the 3 auth tool
+  // names, so a plugin with no `auth` block had ZERO overlap visibility.
+  //
+  // Soft warn (not `fail()`) to match the auth-event / notificationEvents drift
+  // pattern above and below — it documents the invariant without breaking the
+  // legitimately-overlapping first-party plugins. The warn names the
+  // overlapping methods and states they stay on the governed ToolExecutor path.
+  if (Array.isArray(parsed.tools) && uiInvokable.size > 0) {
+    // EXCLUDE the auth tool names (statusTool/loginTool/logoutTool) from this
+    // general overlap set: they have their own STRICTER rule below — a hard
+    // `fail()` if they appear in tools[] at all. Without this exclusion the same
+    // auth method would get two contradictory verdicts: this soft
+    // "...This is allowed" warn AND the auth block's hard fail (#1554
+    // cluster-review MINOR). The general warn is for NON-auth dual declarations,
+    // which are legitimately allowed.
+    const authToolNames = new Set(
+      ([parsed.auth?.statusTool, parsed.auth?.loginTool, parsed.auth?.logoutTool] as Array<unknown>)
+        .filter((v): v is string => typeof v === "string" && v.length > 0),
+    );
+    const overlap = parsed.tools.filter(
+      (name): name is string =>
+        typeof name === "string" && uiInvokable.has(name) && !authToolNames.has(name),
+    );
+    if (overlap.length > 0) {
+      const names = overlap.map((n) => `'${n}'`).join(", ");
+      log.warn(
+        `Plugin manifest '${pid}': method(s) ${names} appear in BOTH tools[] and uiActions — ` +
+          `they stay on the governed ToolExecutor path (a dual-declared method is fail-closed to ` +
+          `the executor by plugin-tool-invocation.ts, never the uiActions runtime bypass). This is ` +
+          `allowed; the warning documents the invariant. See architecture.md §9.4a.`,
+      );
+    }
+  }
+
   // Plugin auth UI surface (architecture.md §9.4a) — auth.{statusTool,
   // loginTool, logoutTool?} must all be members of uiActions. AJV cannot express
   // cross-surface membership without a custom
