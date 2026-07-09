@@ -1,11 +1,20 @@
 # LVIS ⇄ MCP 2026-07-28 RC Alignment — Design
 
-> Status: **Design / approved direction** (decisions §0 ratified by the maintainer 2026-06-06).
+> **2026-07-09 scope narrowing (maintainer):** the **plugin-contract axis of #885 is NO LONGER driven by
+> this document.** #885 is narrowed to "borrow the MCP `Tool` **object** shape + MCP **isolation parity**"
+> and is owned by [`plugin-contract-v6-design.md`](./plugin-contract-v6-design.md); the full stateless
+> `2026-07-28` JSON-RPC **wire** migration of the plugin contract (`server/discover`/MRTR/per-request `_meta`)
+> is **not** the current direction (Claude Code / Codex CLI both keep plugin-contract and MCP separate; MCP
+> dropped fixed-version releases in 2026 → wire-migration = spec-drift risk). The **loopback topology**
+> (§3.1) already shipped and is retained. Treat the wire-migration sections below as a **deferred/aspirational**
+> direction, not an approved plan, pending a separate decision.
+>
+> Status: **Design / partially-superseded** (decisions §0 ratified 2026-06-06; plugin-contract axis narrowed 2026-07-09 — see above).
 > Target revision: MCP `2026-07-28` Release Candidate (stateless protocol, per-request `_meta`,
 > `server/discover`, MRTR, + Apps/Tasks/Skills extensions).
 > Directive: LVIS plugins implemented **as MCP apps/servers**; **No Fallback Code** — design for the
 > correct end-state, no degrade/shim layers.
-> Issues: supersedes/absorbs #885 (plugin contract simplification + MCP isolation parity) and frames
+> Issues: ~~supersedes/absorbs #885~~ (**narrowed 2026-07-09 → `plugin-contract-v6-design.md`**) and frames
 > #811 (hook runtime expansion) in an MCP-aligned direction.
 
 > **Wire shapes are verified.** The exact RC field shapes were pinned **verbatim** against the
