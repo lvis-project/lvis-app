@@ -88,6 +88,14 @@ const SETTINGS_NAV: { group: string; items: SettingsNavItem[] }[] = [
     group: "settingsContent.groupAdvanced",
     items: [
       { value: "audit", icon: FileSearch, labelKey: "settingsContent.tabAudit" },
+    ],
+  },
+  // About is app/system info, not an "Advanced" setting — it sits on its own as
+  // a divider-separated footer item (empty group string ⇒ headerless render)
+  // rather than under the Advanced header.
+  {
+    group: "",
+    items: [
       { value: "about", icon: Info, labelKey: "settingsContent.tabAbout" },
     ],
   },
@@ -393,13 +401,19 @@ export function SettingsContent({
         className="flex-1 overflow-y-auto"
       >
         {SETTINGS_NAV.map((group) => (
-          <Fragment key={group.group}>
+          <Fragment key={group.items[0]?.value ?? group.group}>
             {/* Group header: uppercase, muted, small mono. Non-focusable (a
                 plain generic element, skipped by the tablist roving focus) so
-                arrow keys still move only between triggers. */}
-            <div className="select-none px-3 pb-1 pt-3 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground first:pt-0">
-              {t(group.group)}
-            </div>
+                arrow keys still move only between triggers. A group with an
+                empty header string (the trailing About item) renders a thin
+                divider instead, separating it as a standalone footer entry. */}
+            {group.group ? (
+              <div className="select-none px-3 pb-1 pt-3 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground first:pt-0">
+                {t(group.group)}
+              </div>
+            ) : (
+              <div className="mx-3 my-2 border-t border-border/(--opacity-medium)" aria-hidden="true" />
+            )}
             {group.items.map((item) => {
               const Icon = item.icon;
               const isPermissions = item.value === "permissions";
