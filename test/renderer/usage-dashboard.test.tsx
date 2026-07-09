@@ -4,7 +4,6 @@
 import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import React from "react";
 import { makeMockLvisApi } from "./mock-lvis-api.js";
 import { t } from "../../src/i18n/runtime.js";
 
@@ -18,14 +17,14 @@ const MOCK_SUMMARY = {
   thisWeek: { inputTokens: 7000, outputTokens: 3500, cacheReadTokens: 700, cacheWriteTokens: 140, totalTokens: 11340, cost: 0.07 },
   thisMonth: { inputTokens: 30000, outputTokens: 15000, cacheReadTokens: 3000, cacheWriteTokens: 600, totalTokens: 48600, cost: 0.30 },
   perVendor: [
-    { vendor: "claude", model: "*", inputTokens: 30000, outputTokens: 15000, cacheReadTokens: 3000, cacheWriteTokens: 600, totalTokens: 48600, cost: 0.30 },
+    { vendor: "claude", model: "*", inputTokens: 30000, outputTokens: 15000, cacheReadTokens: 3000, cacheWriteTokens: 600, totalTokens: 48600, cost: 0.30, unknownCostTurns: 0 },
   ],
   perModel: [
-    { vendor: "claude", model: "claude-sonnet-4-6", inputTokens: 30000, outputTokens: 15000, cacheReadTokens: 3000, cacheWriteTokens: 600, totalTokens: 48600, cost: 0.30 },
+    { vendor: "claude", model: "claude-sonnet-4-6", inputTokens: 30000, outputTokens: 15000, cacheReadTokens: 3000, cacheWriteTokens: 600, totalTokens: 48600, cost: 0.30, unknownCostTurns: 0 },
   ],
   trend: [
-    { date: "2026-04-17", inputTokens: 1000, outputTokens: 500, cacheReadTokens: 100, cacheWriteTokens: 20, totalTokens: 1620, cost: 0.01 },
-    { date: "2026-04-18", inputTokens: 2000, outputTokens: 1000, cacheReadTokens: 200, cacheWriteTokens: 40, totalTokens: 3240, cost: 0.02 },
+    { date: "2026-04-17", inputTokens: 1000, outputTokens: 500, cacheReadTokens: 100, cacheWriteTokens: 20, totalTokens: 1620, cost: 0.01, unknownCostTurns: 0 },
+    { date: "2026-04-18", inputTokens: 2000, outputTokens: 1000, cacheReadTokens: 200, cacheWriteTokens: 40, totalTokens: 3240, cost: 0.02, unknownCostTurns: 0 },
   ],
   topConversations: [
     { sessionId: "sess-abc123", turns: 5, firstInput: "안녕", inputTokens: 10000, outputTokens: 5000, cacheReadTokens: 1000, cacheWriteTokens: 200, totalTokens: 16200, cost: 0.10 },
