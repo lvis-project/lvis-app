@@ -731,6 +731,7 @@ export const zhMessages: Record<string, string> = {
   "chatTab.conversationOptimizationDescription": "自动总结长时间对话中的旧历史记录以保存上下文。",
   "chatTab.conversationOptimizationTitle": "对话优化",
   "chatTab.description": "配置自动压缩、流平滑和实验功能",
+  "chatTab.experimentalBadge": "实验性",
   "chatTab.experimentalDescription": "更改立即生效。",
   "chatTab.experimentalTitle": "偏好设置",
   "chatTab.idleRefreshHint": "在IDLE_SCAN期间，将AGENTS.md、MEMORY.md和memories/*.md发送到LLM以更新user-preferences.md。默认为开。",

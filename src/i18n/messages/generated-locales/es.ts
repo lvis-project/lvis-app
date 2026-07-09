@@ -731,6 +731,7 @@ export const esMessages: Record<string, string> = {
   "chatTab.conversationOptimizationDescription": "Resume automáticamente la historia anterior en largas conversaciones para guardar el contexto.",
   "chatTab.conversationOptimizationTitle": "Optimización de la conversación",
   "chatTab.description": "Configure funciones experimentales, de suavizado de transmisión y de autocompactación",
+  "chatTab.experimentalBadge": "Experimental",
   "chatTab.experimentalDescription": "Los cambios entran en vigor inmediatamente.",
   "chatTab.experimentalTitle": "Preferencias",
   "chatTab.idleRefreshHint": "Durante IDLE_SCAN, envía AGENTS.md, MEMORY.md y Memories/*.md al LLM para actualizar user-preferences.md. El valor predeterminado es ENCENDIDO.",

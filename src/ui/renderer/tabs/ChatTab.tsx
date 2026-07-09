@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { PrivacyTab } from "./PrivacyTab.js";
+import { Badge } from "../../../components/ui/badge.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Label } from "../../../components/ui/label.js";
 import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
@@ -96,6 +97,11 @@ export function ChatTab({
       <SettingsSection
         title={t("chatTab.experimentalTitle")}
         description={t("chatTab.experimentalDescription")}
+        badge={
+          <Badge variant="outline" className="text-[10px] uppercase">
+            {t("chatTab.experimentalBadge")}
+          </Badge>
+        }
       >
         <div className="flex items-center gap-3 rounded-md border px-3 py-3">
           <Checkbox

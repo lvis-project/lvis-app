@@ -731,6 +731,7 @@ export const frMessages: Record<string, string> = {
   "chatTab.conversationOptimizationDescription": "Résume automatiquement l’historique plus ancien dans les longues conversations pour enregistrer le contexte.",
   "chatTab.conversationOptimizationTitle": "Optimisation des conversations",
   "chatTab.description": "Configurer les fonctionnalités de compactage automatique, de lissage du flux et expérimentales",
+  "chatTab.experimentalBadge": "Expérimental",
   "chatTab.experimentalDescription": "Les modifications prennent effet immédiatement.",
   "chatTab.experimentalTitle": "Préférences",
   "chatTab.idleRefreshHint": "Pendant IDLE_SCAN, envoie AGENTS.md, MEMORY.md et souvenirs/*.md au LLM pour mettre à jour user-preferences.md. La valeur par défaut est ON.",
