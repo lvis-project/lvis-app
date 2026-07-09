@@ -13,8 +13,10 @@
  * Why a registry instead of a giant switch — a single source of truth
  * that:
  *   1. PermissionManager consults for every host-side category decision.
- *   2. Plugin category metadata is accepted only through the SDK manifest
- *      schema (`toolSchemas[].category/pathFields`). `meta` remains host-only.
+ *   2. #885 v6 — plugin `category` is REMOVED from the contract (Q3); the
+ *      effective category is host-derived per invocation (`inspectHostRisk`).
+ *      Filesystem path args are declared via `_meta["xyz.lvis/pathFields"]`.
+ *      `meta` remains host-only.
  *   3. The reviewer classifier can score against `riskWeight`, the input
  *      to its baseline `final = max(rule, llm)` composition.
  *   4. Audit-schema consumers can iterate to enumerate the full decision

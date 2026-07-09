@@ -4,14 +4,17 @@
  * the permission pipeline consume. The symmetric inverse of
  * `plugin-server-projection.ts` (manifest → MCP tool).
  *
- * This is the "category SOT from `_meta`" half of the `plugin-loopback-server`
- * milestone (docs/architecture/mcp-alignment-design.md §5): a migrated plugin's
- * permission-relevant authority — category / pathFields / writesToOwnSandbox /
- * version / deprecation — is read back from the tool's reverse-DNS `xyz.lvis/*`
- * `_meta`, NOT from a second direct manifest read. The
- * manifest is projected to MCP exactly once (forward), and host policy still
- * reads a single authoritative `category` — now carried in `_meta` rather than
- * the raw manifest field.
+ * Half of the `plugin-loopback-server` milestone (docs/architecture/mcp-alignment-design.md §5):
+ * a migrated plugin's `pathFields` is read back from the tool's reverse-DNS
+ * `_meta["xyz.lvis/pathFields"]`, NOT from a second direct manifest read; the
+ * manifest is projected to MCP exactly once (forward).
+ *
+ * #885 v6: `category` is REMOVED from the contract (Q3) — the wire carries none,
+ * so this reverse projection registers the write-equivalent default-strict
+ * baseline and the effective category is derived host-side per invocation.
+ * `writesToOwnSandbox` is no longer promoted (the reviewer auto-LOW keys on the
+ * host-computed sandbox-containment). The `version`/`deprecatedSince`/`replacedBy`
+ * reads are inert (the wire no longer carries them) — Phase-R deletions.
  *
  * Trust boundary: `_meta["xyz.lvis/workerId"]` is intentionally NOT promoted to
  * `Tool.workerId` here. Loopback `tools/call` executes through

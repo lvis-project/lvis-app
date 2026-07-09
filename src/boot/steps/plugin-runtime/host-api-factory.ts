@@ -742,7 +742,8 @@ export function createHostApiFactory(
       // `pluginId` bound from THIS hostApi instance (a plugin can never name
       // another plugin's namespace). A future host-routed tool producer must
       // prove that its call path actually uses this worker before setting
-      // Tool.workerId; manifest `toolSchemas.workerId` alone is advisory.
+      // Tool.workerId; a plugin-self-claimed worker id is advisory only (#885 v6
+      // removed the manifest field — normalize drops any legacy `workerId`).
       spawnWorker: (workerSpec) => {
         return spawnWorker({ ...workerSpec, pluginId });
       },
