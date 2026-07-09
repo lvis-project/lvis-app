@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { closeSettingsWindow, openSettingsWindow } from './settings-window';
 
 /**
  * English-default boot smoke.
@@ -27,18 +28,11 @@ test('boots in English: composer placeholder renders the English catalog', async
   expect(placeholder).not.toContain('질문 입력');
 });
 
-test('boots in English: settings window heading is "Settings"', async ({ app, mainWindow }) => {
-  // Open the settings window directly (the shared openSettingsWindow helper
-  // waits on the Korean "설정" heading, so it is intentionally not used here).
-  const settingsWindowPromise = app.waitForEvent('window', { timeout: 10_000 });
-  await mainWindow.evaluate(async () => {
-    const api = (window as unknown as {
-      lvisApi: { openSettingsWindow: (tab: string) => Promise<unknown> };
-    }).lvisApi;
-    await api.openSettingsWindow('llm');
-  });
-  const settingsWindow = await settingsWindowPromise;
-  await settingsWindow.waitForLoadState('domcontentloaded');
+test('boots in English: inline settings heading is "Settings"', async ({ app, mainWindow }) => {
+  // Settings is an always-inline panel now (settings-inline-overhaul); the
+  // shared helper is locale-independent (it gates on the `settings-sidebar-
+  // heading` testid), so it works for the English seed too.
+  const settingsWindow = await openSettingsWindow(app, mainWindow, 'llm');
 
   await expect(
     settingsWindow.getByRole('heading', { name: 'Settings', exact: true }),
@@ -46,4 +40,6 @@ test('boots in English: settings window heading is "Settings"', async ({ app, ma
   await expect(
     settingsWindow.getByRole('heading', { name: '설정', exact: true }),
   ).toHaveCount(0);
+
+  await closeSettingsWindow(app, settingsWindow);
 });

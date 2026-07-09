@@ -40,6 +40,9 @@ function Harness({
   onOpenMarketplace,
   marketplaceProviderPresets = [],
   initialMarketplaceProviderPresetId = "",
+  initialHasKey = false,
+  onLogout,
+  onReactivateDemo,
 }: {
   initialAuthMode: "manual" | "login";
   initialHostResolverMap?: string;
@@ -51,6 +54,9 @@ function Harness({
   onOpenMarketplace?: () => void;
   marketplaceProviderPresets?: readonly MarketplaceInstalledProviderPreset[];
   initialMarketplaceProviderPresetId?: string;
+  initialHasKey?: boolean;
+  onLogout?: () => void;
+  onReactivateDemo?: () => void;
 }) {
   const [authMode, setAuthMode] = useState<"manual" | "login">(initialAuthMode);
   const [vendor, setVendor] = useState(initialVendor);
@@ -59,7 +65,7 @@ function Harness({
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [vertexProject, setVertexProject] = useState("");
   const [vertexLocation, setVertexLocation] = useState("");
-  const [hasKey, setHasKey] = useState(false);
+  const [hasKey, setHasKey] = useState(initialHasKey);
   const [enableThinking, setEnableThinking] = useState(true);
   const [thinkingBudget, setThinkingBudget] = useState(10_000);
   const [fallbackChain, setFallbackChain] = useState<FallbackEntry[]>([]);
@@ -111,6 +117,8 @@ function Harness({
         loadedHostResolverMap={loadedHostResolverMap}
         onSaved={vi.fn()}
         settingsLoaded={settingsLoaded}
+        onLogout={onLogout}
+        onReactivateDemo={onReactivateDemo}
       />
     </TooltipProvider>
   );
@@ -1092,5 +1100,124 @@ describe("LlmTab — top-level login toggle UI", () => {
     const label = container.querySelector('[data-testid="llm-tab:api-key-label"]');
     const openai = VENDORS.find((v) => v.id === "openai")!;
     expect(label?.textContent ?? "").toContain(openai.label);
+  });
+});
+
+// Account identity + auth management were relocated from the former General
+// tab onto this Model surface (login + key + account on one surface). Logout
+// reads the active vendor + marketplace preset from the props already hydrated
+// here — no separate settings fetch, so there is no provider-load race.
+describe("LlmTab — account + auth management", () => {
+  function accountApi(overrides: Record<string, unknown> = {}): HarnessApi {
+    const { api } = makeMockLvisApi();
+    Object.assign(api, overrides);
+    return api as unknown as HarnessApi;
+  }
+
+  it("renders 인증 관리 buttons (reactivate + logout) in the account section", async () => {
+    render(<Harness initialAuthMode="login" onLogout={() => {}} onReactivateDemo={() => {}} />);
+    const reactivate = await screen.findByTestId("general-tab-reactivate-demo");
+    const logout = await screen.findByTestId("general-tab-logout");
+    expect(reactivate.textContent).toContain("활성화 키 재입력");
+    expect(logout.textContent).toContain("로그아웃");
+  });
+
+  it("invokes onReactivateDemo when the 활성화 키 재입력 button is clicked", async () => {
+    const onReactivateDemo = vi.fn();
+    render(<Harness initialAuthMode="login" onReactivateDemo={onReactivateDemo} />);
+    fireEvent.click(await screen.findByTestId("general-tab-reactivate-demo"));
+    expect(onReactivateDemo).toHaveBeenCalledTimes(1);
+  });
+
+  it("로그아웃 → confirm → active vendor 의 deleteApiKey + demo clear + onboardingCompleted=false + onLogout", async () => {
+    const api = accountApi();
+    const onLogout = vi.fn();
+    render(
+      <Harness
+        initialAuthMode="login"
+        initialVendor="openai"
+        api={api}
+        onLogout={onLogout}
+        onReactivateDemo={() => {}}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("general-tab-logout"));
+    fireEvent.click(await screen.findByTestId("general-tab-logout-confirm-button"));
+
+    await waitFor(() => {
+      expect(api.deleteApiKey).toHaveBeenCalledWith("openai");
+      expect(api.demo.clearDemo).toHaveBeenCalledTimes(1);
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        llm: { authMode: "manual" },
+        features: { onboardingCompleted: false },
+      });
+      expect(onLogout).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() =>
+      expect(screen.queryByTestId("general-tab-logout-confirm")).toBeNull(),
+    );
+  });
+
+  it("custom marketplace provider logout deletes the preset-scoped API key", async () => {
+    const presetId = "future-router";
+    const api = accountApi();
+    const onLogout = vi.fn();
+    render(
+      <Harness
+        initialAuthMode="login"
+        initialVendor="openai-compatible"
+        initialMarketplaceProviderPresetId={presetId}
+        api={api}
+        onLogout={onLogout}
+        onReactivateDemo={() => {}}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("general-tab-logout"));
+    fireEvent.click(await screen.findByTestId("general-tab-logout-confirm-button"));
+
+    await waitFor(() => {
+      expect(api.deleteApiKey).toHaveBeenCalledWith(
+        marketplaceProviderPresetSecretId(presetId),
+      );
+      expect(api.demo.clearDemo).toHaveBeenCalledTimes(1);
+      expect(onLogout).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("clearDemo 가 실패하면 onLogout 을 호출하지 않고 error 메시지를 노출", async () => {
+    const api = accountApi({
+      demo: {
+        status: vi.fn(),
+        activate: vi.fn(),
+        relaunchAfterActivation: vi.fn(),
+        clearDemo: vi.fn().mockResolvedValue({ ok: false, error: "clear-failed" }),
+      },
+    });
+    const onLogout = vi.fn();
+    render(
+      <Harness initialAuthMode="login" initialVendor="openai" api={api} onLogout={onLogout} />,
+    );
+    fireEvent.click(await screen.findByTestId("general-tab-logout"));
+    fireEvent.click(await screen.findByTestId("general-tab-logout-confirm-button"));
+    await screen.findByTestId("general-tab-logout-error");
+    expect(onLogout).not.toHaveBeenCalled();
+  });
+
+  it("active vendor 키 삭제가 실패하면 demo clear/onLogout 없이 fail-closed", async () => {
+    const api = accountApi({
+      deleteApiKey: vi.fn().mockRejectedValue(new Error("keychain failed")),
+    });
+    const onLogout = vi.fn();
+    render(
+      <Harness initialAuthMode="login" initialVendor="openai" api={api} onLogout={onLogout} />,
+    );
+    fireEvent.click(await screen.findByTestId("general-tab-logout"));
+    fireEvent.click(await screen.findByTestId("general-tab-logout-confirm-button"));
+
+    const err = await screen.findByTestId("general-tab-logout-error");
+    expect(err.textContent).toContain("API 키 삭제");
+    expect(api.demo.clearDemo).not.toHaveBeenCalled();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(onLogout).not.toHaveBeenCalled();
   });
 });

@@ -107,6 +107,31 @@ describe("StartupTab", () => {
     });
   });
 
+  it("loads the persisted close-behavior selection on mount", async () => {
+    installApi({
+      ...STARTUP_SETTINGS,
+      system: { closeBehavior: "quit", launchAtStartup: false, launchMinimized: false },
+    });
+    const { container } = render(<StartupTab />);
+    await waitFor(() => {
+      expect(container.querySelector("#close-quit")?.getAttribute("aria-checked")).toBe("true");
+    });
+  });
+
+  it("selecting 'quit' close-behavior persists through updateSettings", async () => {
+    const api = installApi();
+    const { container } = render(<StartupTab />);
+    const quit = await waitFor(() => {
+      const node = container.querySelector<HTMLElement>("#close-quit");
+      expect(node).toBeTruthy();
+      return node!;
+    });
+    fireEvent.click(quit);
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({ system: { closeBehavior: "quit" } });
+    });
+  });
+
   it("clearing the accelerator persists null", async () => {
     const api = installApi({
       ...STARTUP_SETTINGS,
