@@ -10,7 +10,7 @@ import { ToolRegistry } from "../../tools/registry.js";
 import { PluginMcpServer, type PluginToolDelegate } from "../plugin-mcp-server.js";
 import { LoopbackTransport } from "../loopback-transport.js";
 import type { McpGovernancePolicy } from "../types.js";
-import type { PluginManifest } from "../../plugins/types.js";
+import type { NormalizedManifest } from "../../plugins/types.js";
 import { governanceWithPolicy } from "./test-helpers.js";
 
 afterEach(() => vi.restoreAllMocks());
@@ -45,20 +45,20 @@ function approvingPolicy(id: string, command: string): McpGovernancePolicy {
   };
 }
 
-const MANIFEST: PluginManifest = {
+const MANIFEST: NormalizedManifest = {
   id: "com.example.fs",
   name: "FS",
   version: "1.0.0",
   entry: "dist/p.js",
   description: "files",
-  tools: ["fs_read"],
-  toolSchemas: {
-    fs_read: {
+  tools: [
+    {
+      name: "fs_read",
       description: "Read a file",
-      category: "read",
       inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      _meta: { ui: { visibility: ["model"] } },
     },
-  },
+  ],
 };
 
 describe("plugin-as-MCP-server loopback round-trip (#1230)", () => {

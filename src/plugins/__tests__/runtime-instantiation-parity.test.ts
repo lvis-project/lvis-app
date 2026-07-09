@@ -42,7 +42,8 @@ async function captureState(rt: PluginRuntime): Promise<RegisteredState> {
     toolListed: rt.listToolNames().includes(TOOL),
     callResult: await rt.call(TOOL),
     hasPerfEntry: Boolean(rt.getPerfStats()[PLUGIN_ID]),
-    manifestTools: rt.getPluginManifest(PLUGIN_ID)?.tools ?? null,
+    // #885 v6 — manifest.tools is now Tool[]; project to names for the parity compare.
+    manifestTools: rt.getPluginManifest(PLUGIN_ID)?.tools.map((t) => t.name) ?? null,
   };
 }
 

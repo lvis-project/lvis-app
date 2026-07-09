@@ -12,7 +12,7 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { PluginMcpHost } from "../plugin-mcp-host.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import type { PluginToolDelegate } from "../plugin-mcp-server.js";
-import type { PluginManifest } from "../../plugins/types.js";
+import type { NormalizedManifest } from "../../plugins/types.js";
 import {
   __resetActiveSandboxCapabilityForTest,
   __resetWrappedPluginWorkersForTest,
@@ -21,34 +21,32 @@ import {
   setActiveSandboxCapability,
 } from "../../permissions/sandbox-capability.js";
 
-const MANIFEST: PluginManifest = {
+// #885 v6 — the loopback consumes the NORMALIZED pure `Tool[]` (manifest == wire).
+const MANIFEST: NormalizedManifest = {
   id: "com.example.notes",
   name: "Notes",
   version: "1.4.2",
   entry: "dist/index.js",
   description: "note ops",
-  tools: ["notes_read", "notes_save"],
-  toolSchemas: {
-    notes_read: {
+  tools: [
+    {
+      name: "notes_read",
       description: "Read a note",
-      category: "read",
-      pathFields: ["path"],
       inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
     },
-    notes_save: {
+    {
+      name: "notes_save",
       description: "Save a note",
-      category: "write",
-      pathFields: ["path"],
-      workerId: "notes-worker",
-      writesToOwnSandbox: true,
       inputSchema: {
         type: "object",
         properties: { path: { type: "string" }, body: { type: "string" } },
         required: ["path"],
       },
+      _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
     },
-  },
-} as PluginManifest;
+  ],
+};
 
 describe("PluginMcpHost — first-party loopback registration + round-trip", () => {
   afterEach(() => {
@@ -77,17 +75,20 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
     const read = registry.findByName("notes_read");
     expect(read?.source).toBe("plugin");
     expect(read?.pluginId).toBe("com.example.notes");
-    expect(read?.category).toBe("read"); // authority sourced from xyz.lvis/category
+    // #885 v6 — category is REMOVED from the wire; the reverse projection
+    // registers the host-derived write-equivalent baseline (effective category
+    // is computed host-side per invocation).
+    expect(read?.category).toBe("write");
     expect(read?.pathFields).toEqual(["path"]);
-    expect(read?.version).toBe("1.4.2"); // manifest version fallback via _meta
+    // wire carries no per-tool version → createDynamicTool "1.0.0" default.
+    expect(read?.version).toBe("1.0.0");
 
     const save = registry.findByName("notes_save");
     expect(save?.category).toBe("write");
-    // The manifest declares workerId, but loopback calls are not host-routed
-    // through that worker. Do not promote self-attested worker identity into the
-    // Tool descriptor the reviewer uses for ASRT relaxation.
+    // v6 — no self-attested worker identity or writesToOwnSandbox on the wire;
+    // both stay undefined so the reviewer cannot relax on a plugin self-claim.
     expect(save?.workerId).toBeUndefined();
-    expect(save?.writesToOwnSandbox).toBe(true);
+    expect(save?.writesToOwnSandbox).toBeUndefined();
 
     // tools/call round-trips host → loopback → server → delegate → back.
     const result = await read!.execute({ path: "/a.md" }, {} as never);
@@ -161,26 +162,27 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
   });
 
   it("drops a tool whose inputSchema fails the #1182 provider-strict lint (parity)", async () => {
-    const badManifest: PluginManifest = {
+    const badManifest: NormalizedManifest = {
       id: "com.example.bad",
       name: "Bad",
       version: "1.0.0",
       entry: "dist/index.js",
       description: "bad",
-      tools: ["good_tool", "bad_tool"],
-      toolSchemas: {
-        good_tool: {
+      tools: [
+        {
+          name: "good_tool",
           description: "fine",
-          category: "read",
           inputSchema: { type: "object", properties: { q: { type: "string" } } },
+          _meta: { ui: { visibility: ["model"] } },
         },
-        bad_tool: {
+        {
+          name: "bad_tool",
           description: "array without items — OpenAI/Azure 400",
-          category: "read",
           inputSchema: { type: "object", properties: { tags: { type: "array" } } },
+          _meta: { ui: { visibility: ["model"] } },
         },
-      },
-    } as PluginManifest;
+      ],
+    };
     const delegate: PluginToolDelegate = async () => ({ content: [{ type: "text", text: "ok" }] });
     const registry = new ToolRegistry();
     const host = PluginMcpHost.loopback(badManifest, delegate, registry);

@@ -358,17 +358,19 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       name: "bad-plugin",
       version: "1.0.0",
       main: "index.js",
-      tools: ["bad_write"],
-      toolSchemas: {
-        bad_write: {
+      tools: [
+        {
+          name: "bad_write",
           description: "no category declared",
           inputSchema: { type: "object", properties: { path: { type: "string" } } },
+          _meta: { ui: { visibility: ["model"] } },
         },
-      },
-    } as PluginManifest;
+      ],
+    } as unknown as NormalizedManifest;
     const runtime = { call: vi.fn() } as unknown as PluginRuntime;
     const tools = buildPluginToolsForTest(runtime, "bad-plugin", manifest);
     expect(tools).toHaveLength(1);
+    expect(tools[0].name).toBe("bad_write");
     expect(tools[0].category).toBe("write");
   });
 

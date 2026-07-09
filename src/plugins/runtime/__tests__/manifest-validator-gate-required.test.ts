@@ -69,7 +69,7 @@ describe("parsePluginJson — SDK schema validator required", () => {
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(/schema validation failed/);
   });
 
-  it("allows UI-only runtime methods to stay out of tools[]", async () => {
+  it("#885 v6 — compiles a legacy UI-only method (uiActions) to an app-only Tool, drops the uiActions map", async () => {
     await writeFile(
       manifestPath,
       JSON.stringify({
@@ -86,13 +86,15 @@ describe("parsePluginJson — SDK schema validator required", () => {
     );
 
     const validator = await buildManifestValidator();
-    await expect(parsePluginJson(manifestPath, validator)).resolves.toMatchObject({
-      uiActions: { ui_upload_chunk: {} },
-      tools: [],
-    });
+    const manifest = await parsePluginJson(manifestPath, validator);
+    // The legacy uiActions map is ELIMINATED; the method is now ONE Tool object
+    // carrying explicit app-only visibility (the pure-form equivalent).
+    expect((manifest as Record<string, unknown>).uiActions).toBeUndefined();
+    const tool = manifest.tools.find((t) => t.name === "ui_upload_chunk");
+    expect(tool?._meta?.ui?.visibility).toEqual(["app"]);
   });
 
-  it("allows uiActions runtime methods to stay out of tools[]", async () => {
+  it("#885 v6 — a legacy uiActions-only method loads (no toolSchemas entry) as an app-only Tool", async () => {
     await writeFile(
       manifestPath,
       JSON.stringify({
@@ -111,15 +113,13 @@ describe("parsePluginJson — SDK schema validator required", () => {
     );
 
     const validator = await buildManifestValidator();
-    await expect(parsePluginJson(manifestPath, validator)).resolves.toMatchObject({
-      uiActions: {
-        ui_upload_chunk: { description: "Upload a staged chunk from the panel" },
-      },
-      tools: [],
-    });
+    const manifest = await parsePluginJson(manifestPath, validator);
+    const tool = manifest.tools.find((t) => t.name === "ui_upload_chunk");
+    expect(tool).toBeDefined();
+    expect(tool?._meta?.ui?.visibility).toEqual(["app"]);
   });
 
-  it("allows auth tools to be declared in uiActions without legacy uiActions", async () => {
+  it("#885 v6 — legacy auth tools (declared in uiActions) compile to app-only Tools that pass the auth-visibility check", async () => {
     await writeFile(
       manifestPath,
       JSON.stringify({
@@ -143,15 +143,12 @@ describe("parsePluginJson — SDK schema validator required", () => {
     );
 
     const validator = await buildManifestValidator();
-    await expect(parsePluginJson(manifestPath, validator)).resolves.toMatchObject({
-      auth: {
-        statusTool: "auth_status",
-        loginTool: "auth_login",
-      },
-      uiActions: {
-        auth_status: {},
-        auth_login: {},
-      },
-    });
+    const manifest = await parsePluginJson(manifestPath, validator);
+    expect(manifest.auth).toMatchObject({ statusTool: "auth_status", loginTool: "auth_login" });
+    expect((manifest as Record<string, unknown>).uiActions).toBeUndefined();
+    // auth tools resolve to EXACTLY ["app"] (host-managed, never model-callable —
+    // the #1554 invariant, now enforced at the tool-object level).
+    expect(manifest.tools.find((t) => t.name === "auth_status")?._meta?.ui?.visibility).toEqual(["app"]);
+    expect(manifest.tools.find((t) => t.name === "auth_login")?._meta?.ui?.visibility).toEqual(["app"]);
   });
 });

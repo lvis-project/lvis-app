@@ -27,11 +27,21 @@ function runtimeWithUiAction(
 ): PluginRuntime {
   const rt = new PluginRuntime({ hostRoot: HOST_ROOT, manifestPaths: [] });
   const internals = rt as unknown as {
-    plugins: Map<string, { manifest: { uiActions: Record<string, unknown> } }>;
+    plugins: Map<string, { manifest: unknown }>;
     methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
   };
+  // #885 v6 — normalized manifest: the UI action is one Tool with visibility
+  // ["app"] (the pure-form equivalent of a uiActions-only method).
   internals.plugins.set("test.plugin", {
-    manifest: { uiActions: { [method]: {} } },
+    manifest: {
+      tools: [
+        {
+          name: method,
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["app"] } },
+        },
+      ],
+    },
   } as unknown as never);
   internals.methodMap.set(method, { pluginId: "test.plugin", handler });
   return rt;

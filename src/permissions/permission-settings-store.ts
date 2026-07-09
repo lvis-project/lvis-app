@@ -136,9 +136,11 @@ const DEFAULT_REVIEWER: ReviewerSettingsBlock = {
   // intended one. Encoding "llm" as the default keeps the intent visible and
   // makes the degrade observable (banner + boot warn) rather than baking the
   // weaker classifier in as the silent baseline. Sandbox-internal plugin
-  // writes still collapse to LOW via the writesToOwnSandbox auto-LOW rule (P1)
-  // in either mode, so the #664 fresh-install flood does not reappear under
-  // the degraded rule classifier.
+  // writes still collapse to LOW via the #664-P1 auto-LOW rule — now keyed on
+  // the HOST-computed `ownerPluginSandboxRoot` + path-containment (#885 v6 Q4;
+  // the manifest `writesToOwnSandbox` self-claim was removed) — in either mode,
+  // so the #664 fresh-install flood does not reappear under the degraded rule
+  // classifier.
   mode: "llm",
   provider: "openai",
   model: "gpt-4o-mini",

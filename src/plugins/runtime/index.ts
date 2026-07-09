@@ -16,6 +16,7 @@ import type {
   PluginConfigSchema,
   PluginHostApi,
   PluginManifest,
+  NormalizedManifest,
   PluginToolHandler,
   PluginUiExtension,
   RuntimePlugin,
@@ -70,6 +71,7 @@ import {
   declaredUiInvokableMethods,
   importPluginFactory,
 } from "./plugin-loader.js";
+import { isModelVisible } from "./tool-visibility.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
 const log = createLogger("plugin-runtime");
@@ -99,7 +101,7 @@ export interface PluginCard {
   tools: string[];
   /** Capability tags declared in manifest.capabilities. */
   capabilities: string[];
-  /** tool name → description from manifest.toolSchemas */
+  /** tool name → the tool's own `description` (#885 v6 — toolSchemas removed). */
   toolDescriptions?: Record<string, string>;
   /** true when the plugin is protected from ordinary user uninstall/disable */
   isManaged?: boolean;
@@ -196,7 +198,7 @@ export type PluginToolInvocationDelegate = (
 
 export interface PluginStartPreparationContext {
   pluginId: string;
-  manifest: PluginManifest;
+  manifest: NormalizedManifest;
   manifestPath: string;
   pluginRoot: string;
   reportProgress?: (status: PluginPreparationProgressInput) => void;
@@ -209,7 +211,7 @@ export interface PluginRuntimeOptions {
   pluginsRoot?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
   /** Plugin-scoped HostApi factory — injected by boot.ts */
-  createHostApi?: (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi;
+  createHostApi?: (pluginId: string, manifest: NormalizedManifest, pluginDataDir: string) => PluginHostApi;
   deploymentGuard?: PluginDeploymentGuard;
   installReceiptCacheRoot?: string;
   auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
@@ -255,7 +257,7 @@ export class PluginRuntime {
   private readonly registryPath?: string;
   private readonly pluginsRoot?: string;
   private readonly configStore: ConfigOverrideStore;
-  private readonly createHostApi?: (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi;
+  private readonly createHostApi?: (pluginId: string, manifest: NormalizedManifest, pluginDataDir: string) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly installReceiptCacheRoot?: string;
   private readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
@@ -267,7 +269,7 @@ export class PluginRuntime {
   private readonly methodMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
   private readonly perf = new PerfStatsTracker();
   private readonly disposers = new Map<string, Array<() => void>>();
-  private readonly knownPluginManifests = new Map<string, PluginManifest>();
+  private readonly knownPluginManifests = new Map<string, NormalizedManifest>();
   private readonly knownPluginAccessGrants = new Map<string, PluginAccessSpec | undefined>();
   private readonly knownInstallAliases = new Map<string, Set<string>>();
   private readonly knownToolOwners = new Map<string, string>();
@@ -326,7 +328,7 @@ export class PluginRuntime {
     return this.manifestValidator;
   }
 
-  private async readManifest(path: string): Promise<PluginManifest> {
+  private async readManifest(path: string): Promise<NormalizedManifest> {
     const validator = await this.getManifestValidator();
     try {
       return await parsePluginJson(path, validator);
@@ -352,7 +354,7 @@ export class PluginRuntime {
     return ensurePluginDataDir(pluginId, pluginRoot, this.pluginsRoot);
   }
 
-  private buildHostApi(pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi {
+  private buildHostApi(pluginId: string, manifest: NormalizedManifest, pluginDataDir: string): PluginHostApi {
     const hostApi = this.createHostApi?.(pluginId, manifest, pluginDataDir) ?? createNoopHostApi(pluginId, pluginDataDir);
     // Defence-in-depth: PluginHostApi.storage is required but partial hostApi
     // objects from test harnesses may omit it.
@@ -372,7 +374,7 @@ export class PluginRuntime {
     return this.pluginUiRevisions.get(pluginId) ?? this.markPluginUiRevision(pluginId);
   }
 
-  private buildPluginUiEntryUrl(pluginId: string, manifest: PluginManifest, entryPath: string): string {
+  private buildPluginUiEntryUrl(pluginId: string, manifest: NormalizedManifest, entryPath: string): string {
     const url = new URL(buildImportUrl(entryPath));
     url.searchParams.set("lvisPluginVersion", manifest.version ?? "0");
     url.searchParams.set("lvisRuntimeRevision", String(this.getPluginUiRevision(pluginId)));
@@ -398,7 +400,7 @@ export class PluginRuntime {
 
   private rememberPluginManifest(
     pluginId: string,
-    manifest: PluginManifest,
+    manifest: NormalizedManifest,
     approvedPluginAccess: PluginAccessSpec | undefined,
   ): void {
     this.knownPluginManifests.set(pluginId, manifest);
@@ -413,8 +415,15 @@ export class PluginRuntime {
     for (const [eventType, ownerId] of [...this.knownEventOwners.entries()]) {
       if (ownerId === pluginId) this.knownEventOwners.delete(eventType);
     }
-    for (const toolName of manifest.tools ?? []) {
-      this.knownToolOwners.set(toolName, pluginId);
+    // #885 v6 — MODEL-ONLY (ratified security decision §2.4a). This ownership map
+    // is the pre-runtime `??` fallback in resolveToolOwner, feeding
+    // assertPluginToolAccess (plugin-to-plugin access control). Today's tools[]
+    // was model-facing only; a naive all-names `.map` would silently add the
+    // app-only auth trio to the access-control map (a widening). `isModelVisible`
+    // reproduces today's EXACT set; UI-only ownership still resolves at runtime
+    // via methodMap (all names), which stays authoritative.
+    for (const t of (manifest.tools ?? []).filter(isModelVisible)) {
+      this.knownToolOwners.set(t.name, pluginId);
     }
     for (const eventType of getDeclaredEmittedEvents(manifest)) {
       this.knownEventOwners.set(eventType, pluginId);
@@ -455,8 +464,10 @@ export class PluginRuntime {
       this.rememberPluginInstallAlias(manifest.id, pluginId);
       this.knownPluginManifests.set(pluginId, manifest);
       this.knownPluginAccessGrants.set(pluginId, approvedPluginAccess);
-      for (const toolName of manifest.tools ?? []) {
-        this.knownToolOwners.set(toolName, pluginId);
+      // #885 v6 — MODEL-ONLY (§2.4a): reproduces today's model-facing tools[] set;
+      // never adds the app-only auth trio to the plugin-to-plugin access map.
+      for (const t of (manifest.tools ?? []).filter(isModelVisible)) {
+        this.knownToolOwners.set(t.name, pluginId);
       }
       for (const eventType of getDeclaredEmittedEvents(manifest)) {
         this.knownEventOwners.set(eventType, pluginId);
@@ -479,7 +490,7 @@ export class PluginRuntime {
           continue;
         }
       }
-      let manifest: PluginManifest;
+      let manifest: NormalizedManifest;
       try {
         manifest = await this.readManifest(manifestPath);
       } catch (err) {
@@ -776,7 +787,7 @@ export class PluginRuntime {
     if (!integrityResult.ok) {
       return "failed";
     }
-    let manifest: PluginManifest;
+    let manifest: NormalizedManifest;
     try {
       manifest =
         snapshot?.manifest ??
@@ -1016,8 +1027,15 @@ export class PluginRuntime {
     this.rememberPluginInstallAlias(manifest.id, pluginId);
     this.knownPluginManifests.set(pluginId, manifest);
     this.knownPluginAccessGrants.set(pluginId, approvedPluginAccess);
-    for (const toolName of manifest.tools ?? []) {
-      this.knownToolOwners.set(toolName, pluginId);
+    // #885 v6 — MODEL-ONLY (ratified security decision §2.4a). This ownership map
+    // is the pre-runtime `??` fallback in resolveToolOwner, feeding
+    // assertPluginToolAccess (plugin-to-plugin access control). Today's tools[]
+    // was model-facing only; a naive all-names `.map` would silently add the
+    // app-only auth trio to the access-control map (a widening). `isModelVisible`
+    // reproduces today's EXACT set; UI-only ownership still resolves at runtime
+    // via methodMap (all names), which stays authoritative.
+    for (const t of (manifest.tools ?? []).filter(isModelVisible)) {
+      this.knownToolOwners.set(t.name, pluginId);
     }
     for (const eventType of getDeclaredEmittedEvents(manifest)) {
       this.knownEventOwners.set(eventType, pluginId);
@@ -1176,7 +1194,7 @@ export class PluginRuntime {
    */
   private async instantiateAndStartSinglePlugin(
     plan: ManifestLoadPlan,
-    manifest: PluginManifest,
+    manifest: NormalizedManifest,
     approvedPluginAccess: PluginAccessSpec | undefined,
     opts: { skipPreparation?: boolean; cacheBust?: boolean; shouldCommit?: () => boolean } = {},
   ): Promise<SinglePluginStartResult> {
@@ -1556,8 +1574,10 @@ export class PluginRuntime {
 
   /**
    * Invoke a plugin method declared as a UI action directly against the runtime,
-   * enforcing the `manifest.uiActions` allowlist. Used by the boot plugin-tool
-   * executor for UI-only runtime methods that bypass the reviewer surface.
+   * enforcing the app-visible allowlist (#885 v6 — tools whose
+   * `_meta.ui.visibility` includes `"app"`, via `declaredUiInvokableMethods`).
+   * Used by the boot plugin-tool executor for UI-only runtime methods that bypass
+   * the reviewer surface.
    *
    * This bypass skips the ToolExecutor and therefore its Step-6
    * `runWithCeiling` cap, so the ceiling is enforced STRUCTURALLY here — at the
@@ -1672,7 +1692,14 @@ export class PluginRuntime {
         entry: "index.js",
         description: "Test fixture",
         publisher: "Test fixture",
-        tools: [toolName],
+        // #885 v6 — pure Tool[] (model-visible, matching the old tools[]-only shape).
+        tools: [
+          {
+            name: toolName,
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model"] } },
+          },
+        ],
       },
       pluginRoot: "/tmp/test-inject",
       instance: {} as import("../types.js").RuntimePlugin,
@@ -1793,7 +1820,7 @@ export class PluginRuntime {
     }
   }
 
-  getPluginManifest(pluginId: string): PluginManifest | undefined {
+  getPluginManifest(pluginId: string): NormalizedManifest | undefined {
     return this.plugins.get(pluginId)?.manifest ?? this.knownPluginManifests.get(pluginId);
   }
 
@@ -1854,8 +1881,8 @@ export class PluginRuntime {
     return [...cards.values()];
   }
 
-  listPluginManifests(): Array<{ pluginId: string; manifest: PluginManifest }> {
-    const result: Array<{ pluginId: string; manifest: PluginManifest }> = [];
+  listPluginManifests(): Array<{ pluginId: string; manifest: NormalizedManifest }> {
+    const result: Array<{ pluginId: string; manifest: NormalizedManifest }> = [];
     for (const pluginId of this.preparation.preparingIds()) {
       const manifest = this.knownPluginManifests.get(pluginId);
       if (manifest) result.push({ pluginId, manifest });
@@ -2084,7 +2111,7 @@ export class PluginRuntime {
    * The failed-stub `description` carries the English IPC error message; the
    * renderer maps the `incompatible-app-version` code to the Korean copy.
    */
-  private markIncompatibleAppVersion(manifest: PluginManifest): boolean {
+  private markIncompatibleAppVersion(manifest: NormalizedManifest): boolean {
     const minAppVersion = manifest.requires?.minAppVersion;
     if (!minAppVersion) return false;
     const currentAppVersion = getLvisAppVersion();

@@ -1,19 +1,16 @@
 /**
- * Issue #664 P1 — sandbox-write auto-LOW rule unit tests.
+ * #664 P1 / #885 v6 — sandbox-write auto-LOW rule unit tests.
  *
- * Pins the contract:
- *   (a) `writesToOwnSandbox: true` + every resolved path inside the owner
- *       sandbox → LOW with "write inside owner plugin sandbox" reason.
- *   (b) Path-traversal (`..`) cannot escape — `canonicalizePathForMatch()`
- *       collapses the segment before the prefix compare.
- *   (c) `writesToOwnSandbox: true` + path outside the owner sandbox →
- *       falls through to the standard "write outside allowed dirs" HIGH.
- *   (d) `writesToOwnSandbox: false` (or absent) → no auto-LOW; the normal
- *       write rules apply. Defends against a tool that omits the flag but
- *       writes inside a sandbox-shaped path "accidentally" qualifying.
- *
- * The runtime verifies the path-containment claim — declaration alone is
- * insufficient ("sound by construction").
+ * v6 (Q4): the manifest `writesToOwnSandbox` self-attestation is REMOVED. The
+ * auto-LOW keys SOLELY on the HOST-computed `ownerPluginSandboxRoot` + the
+ * host-verified path-containment proof (every resolved path inside the root):
+ *   (a) ownerPluginSandboxRoot set + every path inside → LOW.
+ *   (b) `..` traversal cannot escape — canonicalize collapses it before the
+ *       prefix compare → no auto-LOW.
+ *   (c) path outside the root AND outside allowed → HIGH "write outside".
+ *   (d) ownerPluginSandboxRoot ABSENT (builtin / MCP tool) → no auto-LOW (the
+ *       real "cannot accidentally qualify" guard — a self-claim never existed).
+ *   (e) declared-but-empty pathFields (manifest mistake) → HIGH "not declared".
  */
 import { describe, it, expect } from "vitest";
 import { realpathSync } from "node:fs";
@@ -46,13 +43,12 @@ function ctx(overrides: Partial<ToolInvocationContext>): ToolInvocationContext {
   };
 }
 
-describe("RuleBasedRiskClassifier — issue #664 P1 writesToOwnSandbox", () => {
+describe("RuleBasedRiskClassifier — #664 P1 / #885 v6 host-derived sandbox-write auto-LOW", () => {
   const rb = new RuleBasedRiskClassifier();
 
-  it("(a) writesToOwnSandbox + path inside sandbox → LOW", () => {
+  it("(a) ownerPluginSandboxRoot set + path inside → LOW (no self-claim needed)", () => {
     const v = rb.classify(
       ctx({
-        writesToOwnSandbox: true,
         ownerPluginSandboxRoot: SANDBOX_ROOT,
         finalInput: { path: `${SANDBOX_ROOT}/msal-cache.bin` },
       }),
@@ -61,30 +57,22 @@ describe("RuleBasedRiskClassifier — issue #664 P1 writesToOwnSandbox", () => {
     expect(v.reason).toMatch(/owner plugin sandbox/);
   });
 
-  it("(b) writesToOwnSandbox + path-traversal `..` denied (no auto-LOW, falls through)", () => {
+  it("(b) path-traversal `..` cannot escape → no auto-LOW (falls through)", () => {
     // `../` traversal: nominally inside SANDBOX_ROOT by string prefix but
-    // resolves to a parent dir. canonicalizePathForMatch collapses `..` so
-    // the prefix compare no longer matches → falls through to the standard
-    // write rule. The non-traversed canonical IS still inside the allowed
-    // dir tree (the parent contains the sandbox), so the verdict drops to
-    // the next applicable write rule rather than HIGH. The critical check
-    // is that the auto-LOW is NOT engaged.
+    // canonicalizePathForMatch collapses `..` so the prefix compare no longer
+    // matches → the auto-LOW is NOT engaged.
     const v = rb.classify(
       ctx({
-        writesToOwnSandbox: true,
         ownerPluginSandboxRoot: SANDBOX_ROOT,
-        finalInput: {
-          path: `${SANDBOX_ROOT}/../../sessions/sensitive.jsonl`,
-        },
+        finalInput: { path: `${SANDBOX_ROOT}/../../sessions/sensitive.jsonl` },
       }),
     );
     expect(v.reason).not.toMatch(/owner plugin sandbox/);
   });
 
-  it("(c) writesToOwnSandbox + path outside sandbox AND outside allowed → HIGH (write outside)", () => {
+  it("(c) path outside the root AND outside allowed → HIGH (write outside)", () => {
     const v = rb.classify(
       ctx({
-        writesToOwnSandbox: true,
         ownerPluginSandboxRoot: SANDBOX_ROOT,
         finalInput: { path: `${TMP}/outside-everything/file.bin` },
       }),
@@ -93,38 +81,20 @@ describe("RuleBasedRiskClassifier — issue #664 P1 writesToOwnSandbox", () => {
     expect(v.reason).toMatch(/outside allowed/);
   });
 
-  it("(d) writesToOwnSandbox NOT set → no auto-LOW (path inside sandbox shape)", () => {
-    // Tool declares the path but does NOT claim writesToOwnSandbox. The
-    // sandbox-prefix shape is "accidental" — auto-LOW must NOT engage,
-    // otherwise a tool could omit the flag and benefit anyway.
+  it("(d) ownerPluginSandboxRoot ABSENT (builtin/MCP tool) → no auto-LOW", () => {
+    // No host-computed sandbox root ⇒ the tool is not plugin-owned ⇒ the normal
+    // write rules apply. A sandbox-shaped path can never "accidentally" auto-LOW.
     const v = rb.classify(
       ctx({
-        // writesToOwnSandbox: undefined — explicitly not set
-        ownerPluginSandboxRoot: SANDBOX_ROOT,
         finalInput: { path: `${SANDBOX_ROOT}/anything.bin` },
       }),
     );
     expect(v.reason).not.toMatch(/owner plugin sandbox/);
   });
 
-  it("(d') writesToOwnSandbox true but ownerPluginSandboxRoot missing → no auto-LOW", () => {
+  it("(e) manifest mistake — pathFields declared but resolves to nothing → HIGH (not declared)", () => {
     const v = rb.classify(
       ctx({
-        writesToOwnSandbox: true,
-        // ownerPluginSandboxRoot: undefined — runtime did not resolve
-        finalInput: { path: `${SANDBOX_ROOT}/anything.bin` },
-      }),
-    );
-    expect(v.reason).not.toMatch(/owner plugin sandbox/);
-  });
-
-  it("manifest mistake — pathFields declared but resolves to nothing → no auto-LOW", () => {
-    // A tool that declares writesToOwnSandbox + pathFields but emits an
-    // empty path object must NOT auto-LOW. Falls through to "write path
-    // not declared" HIGH so manifest bugs surface.
-    const v = rb.classify(
-      ctx({
-        writesToOwnSandbox: true,
         ownerPluginSandboxRoot: SANDBOX_ROOT,
         finalInput: {}, // path field absent
       }),

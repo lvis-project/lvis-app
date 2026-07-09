@@ -129,7 +129,7 @@ describe("manifest validation — auth cross-field", () => {
     expect(parsed.auth?.logoutTool).toBeUndefined();
   });
 
-  it("rejects auth.statusTool not in uiActions[]", async () => {
+  it("#885 v6 — rejects auth.statusTool that resolves to no declared tool", async () => {
     await writeManifest({
       uiActions: { test_login: {}, test_signout: {} }, // statusTool missing
       auth: {
@@ -139,12 +139,13 @@ describe("manifest validation — auth cross-field", () => {
       },
     });
     const validator = TEST_VALIDATOR;
+    // Not in tools[] nor uiActions → after normalize the ref names no tool.
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
-      /auth\.statusTool.*not declared in uiActions/,
+      /auth\.statusTool.*not declared in tools\[\]/,
     );
   });
 
-  it("rejects auth.loginTool not in uiActions[]", async () => {
+  it("#885 v6 — rejects auth.loginTool that resolves to no declared tool", async () => {
     await writeManifest({
       uiActions: { test_status: {}, test_signout: {} }, // loginTool missing
       auth: {
@@ -155,11 +156,11 @@ describe("manifest validation — auth cross-field", () => {
     });
     const validator = TEST_VALIDATOR;
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
-      /auth\.loginTool.*not declared in uiActions/,
+      /auth\.loginTool.*not declared in tools\[\]/,
     );
   });
 
-  it("rejects auth.logoutTool not in uiActions[] when declared", async () => {
+  it("#885 v6 — rejects auth.logoutTool that resolves to no declared tool when declared", async () => {
     await writeManifest({
       uiActions: { test_status: {}, test_login: {} }, // logoutTool missing
       auth: {
@@ -170,7 +171,7 @@ describe("manifest validation — auth cross-field", () => {
     });
     const validator = TEST_VALIDATOR;
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
-      /auth\.logoutTool.*not declared in uiActions/,
+      /auth\.logoutTool.*not declared in tools\[\]/,
     );
   });
 

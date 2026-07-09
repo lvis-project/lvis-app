@@ -12,8 +12,31 @@ import {
   runWithInvocationOrigin,
 } from "../../plugins/runtime/origin-chain.js";
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
+import { normalizeManifest } from "../../plugins/types.js";
+import type { NormalizedManifest } from "../../plugins/types.js";
 
-function runtimeWithManifest(manifest: {
+// #885 v6 — the gate reads the NORMALIZED manifest (`Tool[]` + `_meta.ui.visibility`).
+// These fixtures declare the LEGACY shape and run it through the real
+// `normalizeManifest`, so each test exercises legacy→pure parity exactly as
+// production does (tools[]-only→["model"], uiActions-only→["app"], both→dual).
+function normalize(spec: {
+  tools?: string[];
+  uiActions?: Record<string, { description?: string }>;
+  auth?: { statusTool: string; loginTool: string; logoutTool?: string };
+}): NormalizedManifest {
+  return normalizeManifest({
+    id: "meeting",
+    name: "Meeting",
+    version: "1.0.0",
+    entry: "index.js",
+    description: "test fixture",
+    tools: spec.tools ?? [],
+    ...(spec.uiActions ? { uiActions: spec.uiActions } : {}),
+    ...(spec.auth ? { auth: spec.auth } : {}),
+  });
+}
+
+function runtimeWithManifest(spec: {
   tools?: string[];
   uiActions?: Record<string, { description?: string }>;
   auth?: { statusTool: string; loginTool: string; logoutTool?: string };
@@ -22,7 +45,7 @@ function runtimeWithManifest(manifest: {
     listPluginManifests: () => [
       {
         pluginId: "meeting",
-        manifest,
+        manifest: normalize(spec),
       },
     ],
   } as any;
@@ -159,7 +182,7 @@ describe("invokePluginTool UI-only branch — reaches the structural ceiling (#1
       plugins: Map<string, { manifest: unknown }>;
       methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
     };
-    internals.plugins.set("test.plugin", { manifest } as unknown as never);
+    internals.plugins.set("test.plugin", { manifest: normalize(manifest) } as unknown as never);
     internals.methodMap.set(method, { pluginId: "test.plugin", handler });
     return rt;
   }
@@ -222,10 +245,10 @@ describe("dispatchUiOnlyRuntimeInvocation — nested plugin-origin ctx.callTool 
       listPluginManifests: () => [
         {
           pluginId: "meeting",
-          manifest: {
+          manifest: normalize({
             tools: ["meeting_upload_file"],
             uiActions: { meeting_stage_upload_begin: {} },
-          },
+          }),
         },
       ],
       callDeclaredUiAction: async () => {
@@ -260,10 +283,10 @@ describe("dispatchUiOnlyRuntimeInvocation — nested plugin-origin ctx.callTool 
       listPluginManifests: () => [
         {
           pluginId: "meeting",
-          manifest: {
+          manifest: normalize({
             tools: ["meeting_upload_file"],
             uiActions: { meeting_stage_upload_begin: {} },
-          },
+          }),
         },
       ],
       callDeclaredUiAction: async () => "unreached",
@@ -292,11 +315,11 @@ describe("dispatchUiOnlyRuntimeInvocation — boundary routing gate (security de
       listPluginManifests: () => [
         {
           pluginId: "meeting",
-          manifest: {
-            // dual-declared: present in BOTH tools[] and uiActions
+          manifest: normalize({
+            // dual-declared: present in BOTH tools[] and uiActions → visibility ["model","app"]
             tools: ["meeting_upload_file"],
             uiActions: { meeting_upload_file: {} },
-          },
+          }),
         },
       ],
       callDeclaredUiAction: async () => {
@@ -312,7 +335,7 @@ describe("dispatchUiOnlyRuntimeInvocation — boundary routing gate (security de
         {},
         { origin: "ui", ownerPluginId: "meeting", userAction: true },
       ),
-    ).rejects.toThrow(/is a tools\[\] method; refusing ungoverned uiActions dispatch/);
+    ).rejects.toThrow(/is a model-visible tool; refusing ungoverned uiActions dispatch/);
     // The bypass handler is never reached — the boundary gate fails closed.
     expect(handlerCalled).toBe(false);
   });
@@ -322,10 +345,10 @@ describe("dispatchUiOnlyRuntimeInvocation — boundary routing gate (security de
       listPluginManifests: () => [
         {
           pluginId: "meeting",
-          manifest: {
+          manifest: normalize({
             tools: ["meeting_upload_file"],
             uiActions: { meeting_stage_upload_begin: {} },
-          },
+          }),
         },
       ],
       callDeclaredUiAction: async (_method: string, payload: unknown) => ({ ok: payload }),

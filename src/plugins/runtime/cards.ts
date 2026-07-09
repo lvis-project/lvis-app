@@ -6,13 +6,14 @@
  * The runtime resolves load-status, visibility, preparation status, and
  * install aliases, then delegates the shaping here.
  */
-import type { PluginManifest } from "../types.js";
+import type { NormalizedManifest } from "../types.js";
 import { normalizeInstallPolicy } from "./manifest-validation.js";
+import { isModelVisible } from "./tool-visibility.js";
 import type { PluginCard, PluginPreparationStatus } from "./index.js";
 
 export function buildPluginCard(
   pluginId: string,
-  manifest: PluginManifest,
+  manifest: NormalizedManifest,
   loadStatus: PluginCard["loadStatus"],
   visibleNames: Set<string> | null,
   state: { active: boolean; runtimeLoaded: boolean },
@@ -21,35 +22,33 @@ export function buildPluginCard(
     installAliases: string[] | undefined;
   },
 ): PluginCard {
-  const allTools = manifest.tools ?? [];
+  // #885 v6 — the card stays LLM-facing: model-visible tools only. `visibleNames`
+  // (the ToolRegistry-visible set) is itself model-facing, so the pre-filter is a
+  // no-op when it is provided; it matters for the `visibleNames === null` fallback
+  // (listPluginCards with no registry), keeping app-only auth tools from surfacing
+  // as "tools" in the settings/marketplace UI (as today — they were in uiActions).
+  const modelTools = (manifest.tools ?? []).filter(isModelVisible);
   const filteredTools = !state.active
     ? []
     : visibleNames
-    ? allTools.filter((t) => visibleNames.has(t))
-    : allTools;
-  const sampleTools = filteredTools.slice(0, 3);
+    ? modelTools.filter((t) => visibleNames.has(t.name))
+    : modelTools;
+  const filteredNames = filteredTools.map((t) => t.name);
+  const sampleTools = filteredNames.slice(0, 3);
   let description: string;
   if (manifest.description) {
     description = manifest.description;
   } else {
-    const schemas = manifest.toolSchemas;
-    if (schemas) {
-      const parts: string[] = [];
-      for (const toolName of sampleTools) {
-        const desc = schemas[toolName]?.description;
-        if (desc) parts.push(desc);
-      }
-      description = parts.length > 0 ? parts.join(" / ") : `Plugin: ${manifest.name}`;
-    } else {
-      description = `Plugin: ${manifest.name}`;
-    }
+    // v6: `toolSchemas` is gone — fall back to the first-3 tools' own descriptions.
+    const parts = filteredTools
+      .slice(0, 3)
+      .map((t) => t.description)
+      .filter((d): d is string => !!d);
+    description = parts.length > 0 ? parts.join(" / ") : `Plugin: ${manifest.name}`;
   }
   const toolDescriptions: Record<string, string> = {};
-  if (manifest.toolSchemas) {
-    for (const toolName of filteredTools) {
-      const desc = manifest.toolSchemas[toolName]?.description;
-      if (desc) toolDescriptions[toolName] = desc;
-    }
+  for (const t of filteredTools) {
+    if (t.description) toolDescriptions[t.name] = t.description;
   }
   const uiExtensions = manifest.ui?.filter((extension) => extension.slot === "sidebar");
   return {
@@ -57,7 +56,7 @@ export function buildPluginCard(
     name: manifest.name,
     description,
     sampleTools,
-    tools: filteredTools,
+    tools: filteredNames,
     capabilities: manifest.capabilities ?? [],
     toolDescriptions: Object.keys(toolDescriptions).length > 0 ? toolDescriptions : undefined,
     isManaged: normalizeInstallPolicy(manifest) === "admin",

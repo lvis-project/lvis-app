@@ -13,30 +13,33 @@
  * logging exactly as before.
  */
 import type {
-  PluginManifest,
+  NormalizedManifest,
   PluginToolHandler,
   RuntimePlugin,
   RuntimePluginFactory,
 } from "../types.js";
+import { isAppVisible } from "./tool-visibility.js";
 import { buildImportUrl } from "./sandbox.js";
 
 /**
- * The UI-invokable method names a manifest declares — the keys of
- * `manifest.uiActions`. These are the only methods reachable from the renderer
- * IPC bridge (SDK 5.20.0 made `uiActions` the single allowlist).
+ * #885 v6 — the UI-invokable method names a manifest declares: the normalized
+ * `Tool[]` whose `_meta.ui.visibility` includes "app" (replaces the old
+ * `uiActions` keys). Set-equivalent to today's {UI-only ∪ dual} allowlist that
+ * feeds the renderer IPC bridge (`assertUiActionInvokable`).
  */
 export function declaredUiInvokableMethods(
-  manifest: Pick<PluginManifest, "uiActions">,
+  manifest: Pick<NormalizedManifest, "tools">,
 ): string[] {
-  return manifest.uiActions ? Object.keys(manifest.uiActions) : [];
+  return (manifest.tools ?? []).filter(isAppVisible).map((t) => t.name);
 }
 
 /**
- * The set of runtime method names a manifest declares — the union of `tools`
- * and `uiActions`, de-duplicated while preserving first-seen order.
+ * #885 v6 — every runtime-invokable method name (model / app / dual is now one
+ * `Tool` object). De-duped defensively though `parsePluginJson` already rejects
+ * duplicate names at load. Set-equivalent to today's `tools[] ∪ uiActions`.
  */
-export function declaredRuntimeMethods(manifest: PluginManifest): string[] {
-  return [...new Set([...(manifest.tools ?? []), ...declaredUiInvokableMethods(manifest)])];
+export function declaredRuntimeMethods(manifest: Pick<NormalizedManifest, "tools">): string[] {
+  return [...new Set((manifest.tools ?? []).map((t) => t.name))];
 }
 
 /**
@@ -62,7 +65,7 @@ export async function importPluginFactory(
  * to `onMissingHandler` so the caller can emit its site-specific warning.
  */
 export function buildMethodMap(
-  manifest: PluginManifest,
+  manifest: Pick<NormalizedManifest, "tools">,
   instance: RuntimePlugin,
   onMissingHandler: (toolName: string) => void,
 ): Map<string, PluginToolHandler> {

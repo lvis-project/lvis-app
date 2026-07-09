@@ -34,7 +34,7 @@ export async function dispatchReviewerForHeadless(
   sensitivePathsAdjacent: string[],
   context: ToolPermissionContext,
   evaluationContext: PermissionEvaluationContext,
-  sandboxAttestation: { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
+  sandboxAttestation: { ownerPluginSandboxRoot?: string },
   callbacks: ToolExecutorCallbacks | undefined,
   meta: ToolCallMeta,
   approvalPurpose: ApprovalPurposeSuggestion | undefined,
@@ -102,9 +102,6 @@ export async function dispatchReviewerForHeadless(
       evaluationContext,
       ...(context.userIntent ? { conversationContext: { recentUserMessage: context.userIntent } } : {}),
       ...(context.approvalCacheKey ? { approvalCacheKey: context.approvalCacheKey } : {}),
-      ...(sandboxAttestation.writesToOwnSandbox !== undefined
-        ? { writesToOwnSandbox: sandboxAttestation.writesToOwnSandbox }
-        : {}),
       ...(sandboxAttestation.ownerPluginSandboxRoot !== undefined
         ? { ownerPluginSandboxRoot: sandboxAttestation.ownerPluginSandboxRoot }
         : {}),
@@ -170,7 +167,7 @@ export async function dispatchReviewerForInteractiveAuto(
   sensitivePathsAdjacent: string[],
   context: ToolPermissionContext,
   evaluationContext: PermissionEvaluationContext,
-  sandboxAttestation: { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
+  sandboxAttestation: { ownerPluginSandboxRoot?: string },
   callbacks: ToolExecutorCallbacks | undefined,
   meta: ToolCallMeta,
   approvalPurpose: ApprovalPurposeSuggestion | undefined,
@@ -223,9 +220,6 @@ export async function dispatchReviewerForInteractiveAuto(
         evaluationContext,
         ...(context.userIntent ? { conversationContext: { recentUserMessage: context.userIntent } } : {}),
         ...(context.approvalCacheKey ? { approvalCacheKey: context.approvalCacheKey } : {}),
-        ...(sandboxAttestation.writesToOwnSandbox !== undefined
-          ? { writesToOwnSandbox: sandboxAttestation.writesToOwnSandbox }
-          : {}),
         ...(sandboxAttestation.ownerPluginSandboxRoot !== undefined
           ? { ownerPluginSandboxRoot: sandboxAttestation.ownerPluginSandboxRoot }
           : {}),

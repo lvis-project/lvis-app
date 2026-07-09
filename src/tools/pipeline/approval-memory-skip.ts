@@ -63,7 +63,7 @@ export async function tryUserApprovalMemorySkip(
   sensitivePathsAdjacent: string[],
   context: ToolPermissionContext,
   approvalCacheKey: string | undefined,
-  sandboxAttestation: { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
+  sandboxAttestation: { ownerPluginSandboxRoot?: string },
   mcpServerId?: string,
   workerId?: string,
   pluginId?: string,
@@ -118,9 +118,6 @@ export async function tryUserApprovalMemorySkip(
     sensitivePathsAdjacent,
     sandboxCapability,
     ...(context.userIntent ? { conversationContext: { recentUserMessage: context.userIntent } } : {}),
-    ...(sandboxAttestation.writesToOwnSandbox !== undefined
-      ? { writesToOwnSandbox: sandboxAttestation.writesToOwnSandbox }
-      : {}),
     ...(sandboxAttestation.ownerPluginSandboxRoot !== undefined
       ? { ownerPluginSandboxRoot: sandboxAttestation.ownerPluginSandboxRoot }
       : {}),

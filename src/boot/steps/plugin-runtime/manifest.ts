@@ -7,8 +7,12 @@
  */
 import type { PluginManifest } from "../../../plugins/types.js";
 
-export function declaresHostManagedPythonRuntime(manifest: PluginManifest): boolean {
-  const pluginManifest = manifest as PluginManifest & {
+// #885 v6 — accepts both the legacy `PluginManifest` and the pure
+// `NormalizedManifest` (both carry `config`); only shared fields are read.
+export function declaresHostManagedPythonRuntime(
+  manifest: Pick<PluginManifest, "config">,
+): boolean {
+  const pluginManifest = manifest as Pick<PluginManifest, "config"> & {
     python?: { managedBy?: unknown; requirementsLock?: unknown };
     pythonRequirementsLock?: unknown;
     runtime?: { python?: { requirementsLock?: unknown } };
