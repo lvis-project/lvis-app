@@ -107,12 +107,16 @@ Real-manifest scale (per-surface, verified 2026-07-09): meeting declares 28 `too
   **schema-REJECTED in the manifest** — this is security-mandated, not minimization: plugin-authored
   `readOnlyHint`/`destructiveHint` are exactly the untrusted self-claims Q4 removed; the host derives its
   own interop annotations at projection time and never reads inbound ones (`plugin-server-projection.ts`).
-- **Host compatibility gate (critic-u4 ruling, adopted):** pure-form manifests declare a host-compat
-  field (e.g. `engines.lvisHost` semver range — final shape owned by the U1/U4 detailed designs); the a4
-  host loader enforces it with a clear reject error. No such gate exists today (verified: zero
-  engines/minHostVersion hits across sdk+marketplace), so for THIS migration the real protection is
-  choreography: a3 plugin versions are published to the marketplace **only after the a4 host is GA**.
-  The schema field permanently fixes the class going forward.
+- **Host compatibility gate — REUSE `requires.minAppVersion` (design-u1 discovery, orchestrator-verified):**
+  the mechanism already exists and is live-enforced — `manifest-validation.ts:655-667` validates it
+  (stable SemVer, fail-loud) and the host "enforces compatibility at install + load against this value"
+  (compareSemver gate); the SDK schema (`plugin-manifest.schema.json:564`) and SDK types carry it, and
+  `lvis-plugin-local-indexer` already declares it. Every a3 pure-form manifest declares
+  `requires.minAppVersion: "<the a4 host release version>"`, so **pre-a4 hosts cleanly refuse the update
+  at install/load with a version error** instead of a confusing schema failure. No new field is invented
+  (single SoT). Belt-and-suspenders choreography stays: a3 marketplace publication is held until the a4
+  host is GA. (Supersedes the earlier `engines.lvisHost` sketch — that premise assumed no gate existed;
+  the grep missed the differently-named existing field.)
 
 ### 2.3 Preserving the #1554/#1556 governed-vs-bypass invariant (single-source)
 
