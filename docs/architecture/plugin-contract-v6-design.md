@@ -41,7 +41,7 @@ The plugin tool contract has **three scattered method surfaces** joined by name 
 
 The scatter forces load-time cross-field validation (`toolSchemas` keys ⊆ `tools ∪ uiActions`, auth-tool placement rules, the #1554 overlap warn), and the **governed-vs-bypass security boundary reads two sources at once** (`src/boot/plugin-tool-invocation.ts:33-37`). Consolidating to one MCP-shaped object per tool makes every one of these single-source, and feeds the **already-live loopback projection** (`src/mcp/plugin-server-projection.ts`) without a translation step.
 
-Real-manifest scale: meeting declares 28 tools with 24 also UI-invokable; ms-graph 27 tools, 12 UI-invokable, 3 UI-only (the auth trio). **A method is very commonly BOTH model-facing and UI-invokable** — the surface model expresses this as membership in a visibility array, not an either/or.
+Real-manifest scale (per-surface, verified 2026-07-09): meeting declares 28 `tools[]` entries (24 also UI-invokable) **plus 4 UI-only methods (the schemaless upload quad) — 32 tool objects total after migration**; ms-graph 27 `tools[]`, 12 UI-invokable, 3 UI-only (the auth trio) — 30 objects. **A method is very commonly BOTH model-facing and UI-invokable** — the surface model expresses this as membership in a visibility array, not an either/or.
 
 ## 2. Axis (a) — the tool object is a pure MCP `Tool`
 
@@ -102,6 +102,17 @@ Real-manifest scale: meeting declares 28 tools with 24 also UI-invokable; ms-gra
   surface**; the wider default applies only to future hand-authored omissions.
 - The auth trio must reference tools whose visibility is exactly `["app"]` — replaces the two
   cross-surface auth checks with one intra-object lookup.
+- **Optional standard MCP fields (critic-u1 ruling, adopted):** `outputSchema` is **accepted and
+  projected** (standard, harmless, keeps Q5 "manifest==wire" literally true). `annotations` is
+  **schema-REJECTED in the manifest** — this is security-mandated, not minimization: plugin-authored
+  `readOnlyHint`/`destructiveHint` are exactly the untrusted self-claims Q4 removed; the host derives its
+  own interop annotations at projection time and never reads inbound ones (`plugin-server-projection.ts`).
+- **Host compatibility gate (critic-u4 ruling, adopted):** pure-form manifests declare a host-compat
+  field (e.g. `engines.lvisHost` semver range — final shape owned by the U1/U4 detailed designs); the a4
+  host loader enforces it with a clear reject error. No such gate exists today (verified: zero
+  engines/minHostVersion hits across sdk+marketplace), so for THIS migration the real protection is
+  choreography: a3 plugin versions are published to the marketplace **only after the a4 host is GA**.
+  The schema field permanently fixes the class going forward.
 
 ### 2.3 Preserving the #1554/#1556 governed-vs-bypass invariant (single-source)
 
@@ -241,15 +252,21 @@ Deleting the `tools` union type statically proves no fallback branch survives.
 
 ## 5. Phased plan + cross-repo sweep
 
+**Phase order is a2 → a4 → a3 (LOAD-BEARING, critic-ruled):** until a4 wires `normalizeManifest` into
+`parsePluginJson` and rewrites the consumers, the host actively REJECTS pure manifests
+(`manifest-validation.ts:391-403` string-loop fires first) — so a pure manifest shipped before a4 fails
+load silently (0 handlers registered). The same fact makes a2-in-isolation safe (string[]-typed consumers
+can never see a `Tool[]`).
+
 | Phase | Scope | Gate |
 |---|---|---|
-| **a1** | This design doc → maintainer sign-off | agreement (done, §0 — two rounds 2026-07-09) |
-| **a2 (SDK v6)** | MCP `Tool` type + `tools: string[] \| Tool[]` `oneOf` schema + `normalizeManifest` compat (legacy → pure form, removed fields dropped with a load-time notice) | SDK tests; host validator native-field probes updated |
-| **a3** | Migrate 6 first-party manifests + template to the pure form; bump each to SDK v6 | each loads + registers; tsc/vitest green |
-| **a4** | Host: intra-object auth/visibility checks replace cross-field checks; `manifestToolsToMcpTools`/`declaredRuntimeMethods`/gate read the normalized `Tool[]`; `writesToOwnSandbox` verdict input replaced by the host-side containment derivation | full vitest + pre-push |
+| **a1** | This design doc → maintainer sign-off | agreement (done, §0 — three rounds 2026-07-09) |
+| **a2 (SDK v6)** | MCP `Tool` type + `tools: string[] \| Tool[]` `oneOf` schema + `normalizeManifest` compat (legacy → pure form, removed fields dropped with a load-time notice) + the `engines.lvisHost`-style host-compat field | SDK tests; host validator native-field probes updated |
+| **a4** | Host: `normalizeManifest` wired into `parsePluginJson` (incl. the :391-403 string-loop rewrite); intra-object auth/visibility checks replace cross-field checks; `manifestToolsToMcpTools`/`declaredRuntimeMethods`/gate read the normalized `Tool[]`; `writesToOwnSandbox` verdict input replaced by the host-side containment derivation; host-compat gate enforced | full vitest + pre-push |
+| **a3** | Migrate 6 first-party manifests + template to the pure form; bump each to SDK v6. **Marketplace publication held until the a4 host is GA** (pre-a4 hosts cannot load pure manifests) | each loads + registers on an a4 host; per-surface SET-equality invariant (model-set == old `tools[]`, app-set == old `uiActions` keys); tsc/vitest green |
 | **b1+b2+b3** | Per-server partition + detached viewKey + disconnect teardown (b1 lands with b2 — the `will-attach-webview` allowlist couples them) | Playwright e2e (renderer) + cluster review (touches `src/main`, IPC trust boundary) |
 | **b4** | Executor parity regression test + docs (no behavior change) | test asserts mcp==plugin traversal |
-| **R (removal)** | Delete legacy `toolSchemas`/`uiActions`/`PluginUiActionSpec` + removed-field plumbing + dormant deprecation machinery + compat branch (§3) | removal gate §3.2 green; sweep §3.3 = 0; tsc/vitest/build green |
+| **R (removal)** | Delete legacy `toolSchemas`/`uiActions`/`PluginUiActionSpec` + removed-field plumbing + dormant deprecation machinery + compat branch (§3). **First-party-only assumption:** the removal gate verifies first-party + catalog manifests; a sideloaded third-party LEGACY manifest fails load post-R with the schema's clear reject error (accepted — the ecosystem is first-party at this stage) | removal gate §3.2 green; sweep §3.3 = 0; tsc/vitest/build green |
 
 **Cross-repo sweep (must move in-session per CLAUDE.md §Cross-repo contract sync):**
 `lvis-app` (host) · `lvis-plugin-sdk` (v5.22.0 → **v6**) · 6 plugins (`meeting`, `ms-graph`, `work-assistant`,
