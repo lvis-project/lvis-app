@@ -42,7 +42,6 @@ function Harness({
   initialMarketplaceProviderPresetId = "",
   initialHasKey = false,
   onLogout,
-  onReactivateDemo,
 }: {
   initialAuthMode: "manual" | "login";
   initialHostResolverMap?: string;
@@ -118,7 +117,8 @@ function Harness({
         onSaved={vi.fn()}
         settingsLoaded={settingsLoaded}
         onLogout={onLogout}
-        onReactivateDemo={onReactivateDemo}
+        demoActive={false}
+        onSelectDemo={() => {}}
       />
     </TooltipProvider>
   );
@@ -1114,19 +1114,13 @@ describe("LlmTab — account + auth management", () => {
     return api as unknown as HarnessApi;
   }
 
-  it("renders 인증 관리 buttons (reactivate + logout) in the account section", async () => {
-    render(<Harness initialAuthMode="login" onLogout={() => {}} onReactivateDemo={() => {}} />);
-    const reactivate = await screen.findByTestId("general-tab-reactivate-demo");
+  it("renders the logout button in the account section", async () => {
+    render(<Harness initialAuthMode="login" onLogout={() => {}} />);
     const logout = await screen.findByTestId("general-tab-logout");
-    expect(reactivate.textContent).toContain("활성화 키 재입력");
     expect(logout.textContent).toContain("로그아웃");
-  });
-
-  it("invokes onReactivateDemo when the 활성화 키 재입력 button is clicked", async () => {
-    const onReactivateDemo = vi.fn();
-    render(<Harness initialAuthMode="login" onReactivateDemo={onReactivateDemo} />);
-    fireEvent.click(await screen.findByTestId("general-tab-reactivate-demo"));
-    expect(onReactivateDemo).toHaveBeenCalledTimes(1);
+    // The redundant "Re-enter activation key" button was removed — login /
+    // re-activation is a single flow via the "Login" auth method.
+    expect(screen.queryByTestId("general-tab-reactivate-demo")).toBeNull();
   });
 
   it("로그아웃 → confirm → active vendor 의 deleteApiKey + demo clear + onboardingCompleted=false + onLogout", async () => {
@@ -1138,7 +1132,6 @@ describe("LlmTab — account + auth management", () => {
         initialVendor="openai"
         api={api}
         onLogout={onLogout}
-        onReactivateDemo={() => {}}
       />,
     );
     fireEvent.click(await screen.findByTestId("general-tab-logout"));
@@ -1169,7 +1162,6 @@ describe("LlmTab — account + auth management", () => {
         initialMarketplaceProviderPresetId={presetId}
         api={api}
         onLogout={onLogout}
-        onReactivateDemo={() => {}}
       />,
     );
     fireEvent.click(await screen.findByTestId("general-tab-logout"));

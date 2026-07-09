@@ -24,7 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../../components/ui/dialog.js";
-import { KeyRound, Loader2, LogOut, RefreshCw, Store } from "lucide-react";
+import { Loader2, LogOut, RefreshCw, Store } from "lucide-react";
 import {
   REASONING_EFFORT_STEPS,
   VENDORS,
@@ -338,10 +338,9 @@ export interface LlmTabProps {
   /**
    * Account/auth management (relocated from the former General tab onto this
    * Model surface so login + key + account live together). Fired after a
-   * successful logout / when the user asks to re-enter their activation key.
+   * successful logout.
    */
   onLogout?: () => void;
-  onReactivateDemo?: () => void;
 }
 
 /**
@@ -623,7 +622,6 @@ export function LlmTab(props: LlmTabProps) {
     saving = false,
     settingsLoaded = true,
     onLogout,
-    onReactivateDemo,
   } = props;
   const { t } = useTranslation();
   const selectedMarketplaceProviderPreset = vendor === "openai-compatible" && marketplaceProviderPresetId
@@ -1038,10 +1036,6 @@ export function LlmTab(props: LlmTabProps) {
     setLogoutConfirmOpen(true);
   }, []);
 
-  const handleReactivateClick = useCallback(() => {
-    onReactivateDemo?.();
-  }, [onReactivateDemo]);
-
   return (
     <div className="space-y-6">
       <SettingsPageHeader
@@ -1049,11 +1043,30 @@ export function LlmTab(props: LlmTabProps) {
         description={t("llmTab.pageDescription")}
       />
 
-      {/* Account identity + auth management (relocated from the former General
-          tab so login + key + account live on one surface). */}
+      {/* Account identity + logout (relocated from the former General tab so
+          login + key + account live on one surface). Logging in / re-activating
+          the demo is a SINGLE flow via the "Login" auth method below; the old
+          separate "Re-enter activation key" button was a redundant second entry
+          point into the same login modal and has been removed. */}
       <SettingsSection
         title={t("generalTab.accountTitle")}
         description={t("generalTab.accountDescription")}
+        actions={
+          onLogout ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 text-xs text-destructive hover:text-destructive"
+              onClick={handleLogoutClick}
+              disabled={loggingOut}
+              data-testid="general-tab-logout"
+            >
+              <LogOut className="size-3.5" aria-hidden={true} />
+              {t("generalTab.logoutButton")}
+            </Button>
+          ) : undefined
+        }
       >
         <div className="flex items-start gap-4">
           <div
@@ -1089,36 +1102,6 @@ export function LlmTab(props: LlmTabProps) {
               {intro ?? t("generalTab.introNotSet")}
             </p>
           </div>
-        </div>
-      </SettingsSection>
-
-      <SettingsSection
-        title={t("generalTab.authManagementTitle")}
-        description={t("generalTab.authManagementDescription")}
-      >
-        <div className="flex flex-col gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="justify-start"
-            onClick={handleReactivateClick}
-            disabled={!onReactivateDemo}
-            data-testid="general-tab-reactivate-demo"
-          >
-            <KeyRound className="mr-2 size-4" aria-hidden={true} />
-            {t("generalTab.reactivateDemoButton")}
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            className="justify-start"
-            onClick={handleLogoutClick}
-            disabled={!onLogout || loggingOut}
-            data-testid="general-tab-logout"
-          >
-            <LogOut className="mr-2 size-4" aria-hidden={true} />
-            {t("generalTab.logoutButton")}
-          </Button>
         </div>
       </SettingsSection>
 
