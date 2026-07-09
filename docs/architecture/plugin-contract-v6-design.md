@@ -279,12 +279,19 @@ Deleting the `tools` union type statically proves no fallback branch survives.
   `payload.serverId === serverId` (placeholder, transcript preserved) and `WindowManager` closes detached
   `mcp-app:<serverId>:*` windows (scoped sweep like `closeAllDetached`).
 - **(b4) Permission parity — no change.** External-MCP tools (`mcpToolToTool` → `source:mcp,
-  category:network, low trust`) and plugin loopback tools (`mcpToolToPluginTool` → `source:plugin`) BOTH
-  traverse the identical `ToolExecutor.executeOne` pipeline (Layer-1 deny / reviewer / ApprovalGate / audit /
-  effect-ledger); only the host-derived risk-classification input differs (deny-stricter for MCP). Add an
-  executor-level invariant test (`source:"mcp"` traverses the same reviewer/audit steps as `source:"plugin"`)
-  + document in `architecture.md §6.4`. The #1553/#1554/#1556 `uiActions` bypass has **no MCP analog**
-  (external servers have no `uiActions`).
+  category:network, low trust`) and plugin loopback tools (`mcpToolToPluginTool` → `source:plugin`) both flow
+  through the one `ToolExecutor.executeOne` pipeline and **converge at the same governed chokepoints —
+  Layer-1 deny, ApprovalGate, audit, and the effect-ledger shadow**; the host-derived risk-classification
+  input is the only INPUT difference (deny-stricter for MCP). **b4-verified refinement (2026-07-10):** the
+  reviewer *auto-approve* lane is NOT a shared step — a low-trust foreign MCP peer is never silently
+  auto-approved, so `PermissionManager.categoryBasedDecision` short-circuits every low-trust (MCP) call to a
+  bare `ask` (no `reviewer.route`) and it escalates STRAIGHT to the ApprovalGate, while a medium-trust plugin
+  runs the classify/foreground-auto lane first. This is a sanctioned, fail-safe *consequence* of the
+  trust-tier split (an input-driven path fork toward the stricter posture), not a regression — both still
+  converge at the governed gate. Locked by `executor-mcp-plugin-parity.test.ts` (asserts gate/audit/
+  effect-ledger convergence + the classify-lane fork as the only sanctioned divergence) + documented in
+  `architecture.md §Tool Governance → "MCP↔plugin execution parity (invariant)"`. The #1553/#1554/#1556
+  `uiActions` bypass has **no MCP analog** (external servers have no `uiActions`).
 - **(b5) Ratified model.** In-process plugins → `persist:plugin:<hash>` (storage-bearing, trusted);
   out-of-process MCP servers → `lvis-mcp-app:<serverId>` (b1) — the same per-extension isolation principle,
   differing only by persistence/trust boundary.
