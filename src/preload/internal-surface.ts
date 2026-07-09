@@ -34,7 +34,7 @@ import {
   normalizeAppMode,
   type InitialAppMode,
 } from "../shared/initial-app-mode.js";
-import type { McpServerConfig } from "../mcp/types.js";
+import type { McpServerConfig, McpUiPayload } from "../mcp/types.js";
 import type {
   PermissionReviewSuggestionPayload,
   UserApprovalHitPayload,
@@ -1081,6 +1081,25 @@ export function buildInternalApiSurface() {
     setApiKey: async (id: string, apiKey: string) => ipcRenderer.invoke(CHANNELS.mcp.configSetApiKey, id, apiKey),
     removeConfig: async (id: string) => ipcRenderer.invoke(CHANNELS.mcp.configRemove, id),
     readUiResource: async (serverId: string, uri: string) => ipcRenderer.invoke(CHANNELS.mcp.uiResource, serverId, uri) as Promise<string>,
+    // #885 b2 — open an MCP-app card in a detached window (host mints the
+    // cardId + viewKey; renderer only supplies the payload it already holds).
+    openDetached: async (payload: McpUiPayload) =>
+      ipcRenderer.invoke(CHANNELS.mcp.openDetached, { payload }) as Promise<
+        { ok: true; windowId: number } | { ok: false; error: string }
+      >,
+    // #885 b2 — the detached host renderer fetches its stored payload on mount.
+    getDetachedPayload: async (viewKey: string) =>
+      ipcRenderer.invoke(CHANNELS.mcp.detachedPayload, viewKey) as Promise<McpUiPayload | null>,
+    // #885 b3 — subscribe to the main→renderer server-disconnected broadcast.
+    // Pure event (no gesture / sender validation); McpAppView validates the
+    // payload shape and matches on its own serverId. Returns an unsubscribe fn.
+    onServerDisconnected: (handler: (serverId: string) => void) => {
+      const listener = (_event: unknown, payload: { serverId?: unknown }) => {
+        if (typeof payload?.serverId === "string") handler(payload.serverId);
+      };
+      ipcRenderer.on(CHANNELS.mcp.serverDisconnected, listener);
+      return () => ipcRenderer.removeListener(CHANNELS.mcp.serverDisconnected, listener);
+    },
   },
 
   // ─── Permission ───────────────────────────────────

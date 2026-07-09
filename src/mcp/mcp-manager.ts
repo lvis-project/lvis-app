@@ -16,6 +16,7 @@ import type { McpInputRequestResolver } from "./mcp-client.js";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { MAX_SERVER_ID_LEN } from "../shared/mcp-app-partition.js";
 import { t } from "../i18n/index.js";
 const log = createLogger("mcp-manager");
 
@@ -56,6 +57,16 @@ export class McpManager {
      * `input_required` (No-Fallback).
      */
     private readonly inputResolverFactory?: (serverId: string) => McpInputRequestResolver,
+    /**
+     * #885 b3 — invoked EXACTLY once per server *retirement* (the 3 teardown
+     * paths: `killSwitch`, `removeConfig`, `disconnectAll`). NOT invoked from
+     * the 2 reconnect/replace paths (`setApiKey`, `connectServer`'s error
+     * re-establish), because those re-create the same server id and the card is
+     * about to become valid again. The sink (wired in `mcp-setup.ts`) broadcasts
+     * the disconnect, closes detached MCP windows, and clears the ephemeral
+     * per-server partition. Omitted ⇒ teardown proceeds without a UI signal.
+     */
+    private readonly onServerDisconnected?: (serverId: string) => void,
   ) {
     this.configPath = configPath ?? DEFAULT_CONFIG_PATH;
     this.configLockPath = `${this.configPath}.guard`;
@@ -203,6 +214,7 @@ export class McpManager {
 
   /** 모든 서버 연결 해제 */
   async disconnectAll(): Promise<void> {
+    const ids = Array.from(this.clients.keys());
     const promises: Promise<void>[] = [];
     for (const [id, client] of this.clients) {
       promises.push(
@@ -213,6 +225,12 @@ export class McpManager {
     }
     await Promise.all(promises);
     this.clients.clear();
+    // b3 — teardown path: emit once per retired id AFTER client teardown.
+    // Best-effort (may run at shutdown); the sink guards `isDestroyed()` and
+    // swallows send errors so a send-after-window-destroy is a no-op.
+    for (const id of ids) {
+      this.onServerDisconnected?.(id);
+    }
     log.info("All MCP servers disconnected");
   }
 
@@ -270,6 +288,10 @@ export class McpManager {
       type: "kill_switch",
       input: JSON.stringify({ serverId }),
     });
+
+    // b3 — teardown path (permanent retirement): signal the UI to disable cards
+    // + close detached windows + clear the ephemeral partition.
+    this.onServerDisconnected?.(serverId);
 
     log.warn(`Kill switch completed: ${serverId} — all tools unregistered`);
   }
@@ -336,6 +358,15 @@ export class McpManager {
     const normalizedId = config.id.trim();
     if (!normalizedId) {
       throw new Error(`[mcp-manager] ${t("be_mcpManager.serverIdBlank")}`);
+    }
+    // #885 b1 (MINOR-4) — bound the id at ingestion. This is the primary guard;
+    // `encodeMcpServerId` applies the same bound defensively for the
+    // `loadFromConfig`/servers.json path that bypasses addConfig. English throw
+    // (developer-facing tamper path, per CLAUDE.md IPC error-language convention).
+    if (normalizedId.length > MAX_SERVER_ID_LEN) {
+      throw new Error(
+        `[mcp-manager] server id exceeds ${MAX_SERVER_ID_LEN} characters`,
+      );
     }
     const normalizedConfig = { ...config, id: normalizedId } as McpServerConfig;
 
@@ -485,6 +516,8 @@ export class McpManager {
         this.clients.delete(serverId);
       }
       this.toolRegistry.unregisterByMcp(serverId);
+      // b3 — teardown path (permanent retirement).
+      this.onServerDisconnected?.(serverId);
     });
   }
 

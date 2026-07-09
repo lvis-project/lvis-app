@@ -108,7 +108,9 @@ describe("side browser webview attach policy", () => {
       event: attachEvent,
       webPreferences: prefs,
       params: {
-        partition: "lvis-mcp-app",
+        // A per-server MCP-app partition (#885 b1) — unrelated to the side
+        // browser, so the attach configurer must leave it alone ("ignored").
+        partition: "lvis-mcp-app:676974687562",
         src: "data:text/html,ok",
       },
       enqueueAllowedSrc,

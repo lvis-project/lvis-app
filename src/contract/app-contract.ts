@@ -177,6 +177,16 @@ export const CHANNELS = {
     installFromMarketplace: "lvis:mcp:install-from-marketplace",
     importClaudeDesktopPreview: "lvis:mcp:import:claude-desktop:preview",
     importClaudeDesktopApply: "lvis:mcp:import:claude-desktop:apply",
+    // #885 b2/b3 — MCP-app detach + disconnect. ALL THREE INTERNAL: absent from
+    // PUBLIC_CHANNELS / CHANNEL_GESTURE / EXTERNAL_MUTATION_CHANNELS, so an
+    // external origin (local-api / cli / plugin frame) can never reach them
+    // (fail-closed isPublicChannel). `openDetached` (state-mutating, spawns a
+    // window) + `detachedPayload` (read) are registered in window-manager.ts and
+    // gated on validateHostRendererSender; `serverDisconnected` is a pure
+    // main→renderer event (no ipcMain.handle, renderer validates payload shape).
+    openDetached: "lvis:mcp:open-detached",
+    detachedPayload: "lvis:mcp:detached-payload",
+    serverDisconnected: "lvis:mcp:server-disconnected",
   },
   /** Plugin webview bridge (lvis:plugin:*) — sandboxed plugin-frame origin. */
   pluginBridge: {
@@ -572,6 +582,10 @@ export const INTERNAL_HOST_CHANNELS = {
     CHANNELS.window.resizeForMode,
     CHANNELS.window.snapEdge,
     CHANNELS.window.detachedNavigate,
+    // #885 b2 — MCP-app detach IPC handlers are registered in window-manager.ts
+    // (out-of-tree), so they are classified here for inventory completeness.
+    CHANNELS.mcp.openDetached,
+    CHANNELS.mcp.detachedPayload,
   ],
   autoUpdater: [
     CHANNELS.update.state,
