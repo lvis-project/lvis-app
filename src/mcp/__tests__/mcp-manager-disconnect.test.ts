@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeFile, mkdir, rm } from "node:fs/promises";
+import { mkdtempSync } from "node:fs";
 
 const mockConnect = vi.fn().mockResolvedValue(undefined);
 const mockDisconnect = vi.fn().mockResolvedValue(undefined);
@@ -45,7 +46,9 @@ vi.mock("../../tools/registry.js", () => ({
 import { McpManager } from "../mcp-manager.js";
 import type { McpServerConfig } from "../types.js";
 
-const testDir = join(tmpdir(), `lvis-mcp-disc-${process.pid}`);
+// Unique random temp dir (mkdtempSync) — not a predictable tmpdir()+pid path, so
+// no symlink/race on a shared temp dir (CodeQL js/insecure-temporary-file).
+const testDir = mkdtempSync(join(tmpdir(), "lvis-mcp-disc-"));
 const testConfigPath = join(testDir, "mcp-servers.json");
 
 async function makeManager(onServerDisconnected: (id: string) => void) {
