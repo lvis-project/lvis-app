@@ -82,4 +82,33 @@ describe("manifest tools[] ∩ uiActions overlap — unconditional soft warn (#1
     expect(overlapWarned("ui_only_method")).toBe(false);
     expect(overlapWarned("t_one")).toBe(false);
   });
+
+  // #1554 cluster-review MINOR — an auth tool leaked into tools[] must not get
+  // TWO contradictory verdicts (this soft "...allowed" overlap warn AND the auth
+  // block's hard fail). The general overlap warn now EXCLUDES the auth tool
+  // names; the auth block's stricter hard-fail is the sole verdict on them. A
+  // non-auth dual declaration in the same manifest must still warn.
+  it("excludes auth tools from the general overlap warn (their hard-fail owns the verdict) but still warns a non-auth overlap", async () => {
+    const validator = await buildManifestValidator();
+    const path = await writeManifest({
+      // ms_status is the auth statusTool leaked into tools[] (the violation the
+      // auth block hard-fails); shared_method is a legitimate non-auth overlap.
+      tools: ["ms_status", "shared_method"],
+      uiActions: {
+        ms_status: {},
+        ms_login: {},
+        shared_method: { description: "dual-declared non-auth" },
+      },
+      auth: { statusTool: "ms_status", loginTool: "ms_login" },
+      emittedEvents: ["overlap-test.auth.changed"],
+    });
+    // The auth block hard-fails the leaked auth tool — the sole verdict on it.
+    await expect(parsePluginJson(path, validator)).rejects.toThrow(
+      /must not appear in tools\[\]/,
+    );
+    // The non-auth dual declaration still warns (fires before the hard fail) ...
+    expect(overlapWarned("shared_method")).toBe(true);
+    // ... but the auth tool is NOT double-flagged by the general overlap warn.
+    expect(overlapWarned("ms_status")).toBe(false);
+  });
 });
