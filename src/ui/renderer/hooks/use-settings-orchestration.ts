@@ -40,10 +40,12 @@ export interface SettingsOrchestrationState {
    */
   loadedHostResolverMap: string;
   /**
-   * #893 — Top-level auth mode toggle. Persisted in `llm.authMode`.
-   * `"login"` collapses the vendor dropdown + per-vendor settings down to a
-   * single Login button; `"manual"` (default) shows the full per-vendor
-   * form.
+   * #893 — Top-level auth mode, persisted in `llm.authMode`. ①안 — the
+   * settings Model tab is manual-only now (the login/demo toggle was removed);
+   * this value is hydrated from settings and drives only the LlmTab Account
+   * badge. `setAuthMode` is still used by hydration + the host-managed login
+   * IPC (LoginModal in AppDialogs / onboarding chain); an LLM save with a
+   * manual key persists `"manual"` (see `save()` → `effectiveAuthMode`).
    */
   authMode: "manual" | "login";
   setAuthMode: (mode: "manual" | "login") => void;
@@ -401,9 +403,17 @@ export function useSettingsOrchestration(
         const secretUpdates: Array<Promise<unknown>> = [];
         const latestAuthMode = authModeRef.current;
         const trimmedKeyInput = keyInput.trim();
+        // ①안 — the settings Model tab is manual-only now (the login/demo auth
+        // toggle was removed). Saving the LLM tab WITH a manual key commits
+        // manual mode, transitioning a former demo user (authMode="login") to
+        // their own key. Keyless LLM saves and non-LLM saves preserve the
+        // persisted authMode so a demo user who only tweaks an immediate-apply
+        // control (vendor / thinking) keeps their trial endpoint resolution.
+        const effectiveAuthMode: "manual" | "login" =
+          isLlmSave && trimmedKeyInput.length > 0 ? "manual" : latestAuthMode;
         const shouldPersistLlmKey =
           isLlmSave &&
-          latestAuthMode !== "login" &&
+          effectiveAuthMode !== "login" &&
           trimmedKeyInput.length > 0;
         if (webKeyInput.trim()) {
           secretUpdates.push(
@@ -441,15 +451,16 @@ export function useSettingsOrchestration(
           thinkingBudgetTokens: thinkingBudget,
         };
         const llmPatch: DeepPartial<AppSettings["llm"]> = {
-          // #893 — top-level authMode persisted alongside provider.
-          authMode: latestAuthMode,
+          // #893 — top-level authMode persisted alongside provider. ①안 — an
+          // LLM save with a manual key commits manual mode (see effectiveAuthMode).
+          authMode: effectiveAuthMode,
           provider: vendor,
           marketplaceProviderPresetId:
             vendor === "openai-compatible" ? marketplaceProviderPresetId : "",
           streamSmoothing,
           fallbackChain: fallbackChain.filter((e) => e.provider && e.model).map((e) => ({ provider: e.provider, model: e.model })),
         };
-        if (latestAuthMode !== "login") {
+        if (effectiveAuthMode !== "login") {
           // In login mode, provider-specific fields are host-managed by the
           // login IPC. Persisting the hidden manual draft here can race the
           // login response and overwrite demo/model/baseUrl with stale values.
