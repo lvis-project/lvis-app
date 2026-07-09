@@ -180,3 +180,73 @@ describe("dispatchUiOnlyRuntimeInvocation — ceiling on the uiActions bypass", 
     ).resolves.toEqual({ echoed: { chunk: 1 } });
   });
 });
+
+// #1556 — a nested plugin-origin `ctx.callTool` (HostApi.callTool builds
+// `origin: "plugin"` and never forwards `userAction`, even while riding a
+// UI-rooted chain via `parentOrigin: "ui"`) targeting a uiActions-only
+// non-status method must throw an error naming the REAL manifest constraint,
+// not the generic user-activation error which misleads the plugin author.
+describe("dispatchUiOnlyRuntimeInvocation — nested plugin-origin ctx.callTool clarity (#1556)", () => {
+  it("throws the explicit uiActions-only constraint error for a nested plugin-origin call (not the generic activation error)", async () => {
+    let handlerCalled = false;
+    const runtime = {
+      listPluginManifests: () => [
+        {
+          pluginId: "meeting",
+          manifest: {
+            tools: ["meeting_upload_file"],
+            uiActions: { meeting_stage_upload_begin: {} },
+          },
+        },
+      ],
+      callDeclaredUiAction: async () => {
+        handlerCalled = true;
+        return "unreached";
+      },
+    } as any;
+
+    const err = await dispatchUiOnlyRuntimeInvocation(
+      runtime,
+      "meeting_stage_upload_begin",
+      {},
+      // nested hop: origin "plugin" but effective chain is UI (parentOrigin).
+      { origin: "plugin", ownerPluginId: "meeting", parentOrigin: "ui" },
+    ).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(
+      /uiActions-only method and cannot be invoked from a plugin-origin ctx\.callTool/,
+    );
+    // Must NOT be the old, misleading generic activation error.
+    expect((err as Error).message).not.toMatch(/requires an active user activation/);
+    // The constraint is detected before dispatch — the handler is never run.
+    expect(handlerCalled).toBe(false);
+  });
+
+  it("keeps the generic user-activation error for a genuine direct-UI call without activation", async () => {
+    const runtime = {
+      listPluginManifests: () => [
+        {
+          pluginId: "meeting",
+          manifest: {
+            tools: ["meeting_upload_file"],
+            uiActions: { meeting_stage_upload_begin: {} },
+          },
+        },
+      ],
+      callDeclaredUiAction: async () => "unreached",
+    } as any;
+
+    await expect(
+      dispatchUiOnlyRuntimeInvocation(
+        runtime,
+        "meeting_stage_upload_begin",
+        {},
+        { origin: "ui", ownerPluginId: "meeting" }, // direct UI, no userAction
+      ),
+    ).rejects.toThrow(/requires an active user activation/);
+  });
+});
