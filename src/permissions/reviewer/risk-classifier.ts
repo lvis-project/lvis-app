@@ -113,28 +113,24 @@ export interface ToolInvocationContext {
     recentUserMessage?: string;
   };
   /**
-   * Issue #664 P1 — sandbox-write self-attestation.
+   * Issue #664 P1 — HOST-derived sandbox-write auto-LOW signal.
    *
-   * `ownerPluginSandboxRoot` is the absolute directory path the owning
-   * plugin (or builtin tool) is permitted to write inside without
-   * triggering reviewer escalation. For plugin tools this is
-   * `~/.lvis/plugins/<ownerPluginId>/`, computed by the plugin runtime at
-   * tool-invocation time. For builtin tools or where the contract does
-   * not declare a sandbox, leave undefined and the normal write rules
-   * apply.
+   * `ownerPluginSandboxRoot` is the absolute directory path the owning plugin
+   * tool is permitted to write inside without triggering reviewer escalation:
+   * `~/.lvis/plugins/<ownerPluginId>/`, computed HOST-side by the executor at
+   * tool-invocation time (`pathResolve(lvisHome(), "plugins", pluginId)`) —
+   * never a manifest value. For builtin tools, or where the contract declares no
+   * sandbox, leave undefined and the normal write rules apply. The path
+   * participates in the verdict-cache identity so a plugin rename/reinstall that
+   * changes the sandbox root invalidates a cached LOW.
    *
-   * `writesToOwnSandbox` is the manifest/SDK-declared intent flag: the
-   * tool promises that every value resolved through `pathFields` will
-   * stay inside `ownerPluginSandboxRoot`. The classifier still verifies
-   * the claim at invocation time (sound by construction) — a tool that
-   * declares the flag but emits a path outside its own sandbox falls
-   * back to the normal write rules.
-   *
-   * Both fields must be present to engage the auto-LOW rule. The owner
-   * sandbox path participates in the verdict-cache scope so a future
-   * sandbox move invalidates stale verdicts.
+   * #885 v6 (Q4): the old manifest-declared `writesToOwnSandbox` self-attestation
+   * is REMOVED — it was an untrusted self-claim (MCP "annotations untrusted"); a
+   * lying `true` never bypassed anything because the REAL check was always the
+   * host path-containment proof (every resolved path inside this root). The
+   * auto-LOW now keys SOLELY on this host-computed root + host-verified
+   * containment — 100% host-derived, no self-claim participates.
    */
-  writesToOwnSandbox?: boolean;
   ownerPluginSandboxRoot?: string;
 }
 
@@ -536,12 +532,14 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
 
   // ── write rules (4) ────────────────────────────────────
   //
-  // Issue #664 P1 — Sandbox-write auto-LOW.
+  // Issue #664 P1 — Sandbox-write auto-LOW (#885 v6 — HOST-DERIVED).
   //
-  // When the tool's manifest declared `writesToOwnSandbox: true` AND every
-  // resolved path is inside the owner plugin's sandbox root, the write
-  // collapses to LOW. The runtime verifies the path containment claim — the
-  // declaration alone is not sufficient (sound-by-construction).
+  // When the tool is plugin-owned (host-computed `ownerPluginSandboxRoot` set)
+  // AND every resolved path is inside that sandbox root, the write collapses to
+  // LOW. #885 v6 (Q4): the old manifest `writesToOwnSandbox` gate is GONE — the
+  // containment proof below IS the signal (the self-claim added no security
+  // value; a lying `true` never bypassed this proof). The failure direction is
+  // safe: a path escaping the root falls through to the existing HIGH rules.
   //
   // Without this rule a plugin like ms-graph that writes its MSAL token cache
   // to `~/.lvis/plugins/lvis-plugin-ms-graph/...` gets caught by the "write
@@ -555,10 +553,9 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
   // declared" HIGH so manifest bugs do not silently downgrade verdicts.
   (ctx) => {
     if (ctx.category !== "write") return null;
-    if (!ctx.writesToOwnSandbox) return null;
-    if (!ctx.ownerPluginSandboxRoot) return null;
+    if (!ctx.ownerPluginSandboxRoot) return null; // host-set; plugin-owned tools only
     const paths = extractDeclaredPaths(ctx);
-    if (paths.length === 0) return null;
+    if (paths.length === 0) return null; // declared-but-empty → fall through to HIGH
     // Canonicalize the sandbox root on the producer's behalf so the
     // path-traversal defense holds even if a caller forgets to pre-
     // canonicalize. Both sides of the prefix compare are now bit-

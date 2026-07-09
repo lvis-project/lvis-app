@@ -15,14 +15,14 @@ import { pluginRuntimeToolDelegate } from "../../mcp/plugin-runtime-delegate.js"
 import { lintToolInputSchema } from "../tool-schema-lint.js";
 import type { Tool } from "../../tools/base.js";
 import type { PluginRuntime } from "../runtime.js";
-import type { PluginManifest } from "../types.js";
+import type { NormalizedManifest } from "../types.js";
 
 const RAW_RESULT_META = "xyz.lvis/rawResult";
 
 export function buildPluginToolsForTest(
   pluginRuntime: PluginRuntime,
   pluginId: string,
-  manifest: PluginManifest,
+  manifest: NormalizedManifest,
 ): Tool[] {
   const delegate = pluginRuntimeToolDelegate(pluginRuntime, pluginId);
   const invoke = async (name: string, args: Record<string, unknown>) => {

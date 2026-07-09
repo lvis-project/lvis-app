@@ -73,7 +73,6 @@ export interface VerdictCacheLookupKey {
     recentUserMessage?: string;
   };
   pathFields?: readonly string[];
-  writesToOwnSandbox?: boolean;
   ownerPluginSandboxRoot?: string;
   mcpServerId?: string;
   pluginId?: string;
@@ -151,9 +150,14 @@ export function computeCacheKey(lookup: VerdictCacheLookupKey): string {
   const conversationContext = canonicalInputValue({
     conversationContext: lookup.conversationContext ?? null,
   });
+  // #885 v6 (§5.4): `writesToOwnSandbox` REMOVED from the hashed identity. This
+  // shrinks the canonical JSON of EVERY entry, so sha256(new) ≠ sha256(old) for
+  // all keys — the pre-migration on-disk cache becomes unreachable (mass
+  // re-classify on first lookup, never a stale HIT that could replay an old
+  // dead-rule verdict). `ownerPluginSandboxRoot` STAYS — the auto-LOW now DEPENDS
+  // on it, so a plugin rename/reinstall must (and does) invalidate a cached LOW.
   const toolPolicyIdentity = canonicalInputValue({
     pathFields: lookup.pathFields ?? null,
-    writesToOwnSandbox: lookup.writesToOwnSandbox ?? null,
     ownerPluginSandboxRoot: lookup.ownerPluginSandboxRoot ?? null,
     mcpServerId: lookup.mcpServerId ?? null,
     pluginId: lookup.pluginId ?? null,

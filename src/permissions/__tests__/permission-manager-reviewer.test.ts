@@ -681,7 +681,7 @@ describe("#664 flood guard — degraded rule reviewer does not over-defer headle
         allowedDirectories: [allowedDir(`${TMP}/lvis-664-flood/work`)],
         sensitivePathsAdjacent: [],
         trustOrigin: "plugin-emitted",
-        writesToOwnSandbox: true,
+        // #885 v6 — auto-LOW keys solely on the host-computed ownerPluginSandboxRoot.
         ownerPluginSandboxRoot: sandboxRoot,
         sandboxCapability: detectSandboxCapability(),
       },

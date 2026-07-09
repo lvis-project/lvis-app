@@ -210,16 +210,12 @@ export interface ReviewerDispatchInput {
   /** When true, out-of-allowed-dir access also routes to the reviewer. */
   outOfAllowedDir?: boolean;
   /**
-   * Issue #664 P1 — manifest-declared sandbox-write self-attestation.
-   * Threaded from the Tool descriptor through to the classifier's
-   * {@link ToolInvocationContext} so the auto-LOW rule can engage.
-   */
-  writesToOwnSandbox?: boolean;
-  /**
-   * Issue #664 P1 — owning plugin's sandbox root
-   * (`~/.lvis/plugins/<pluginId>/`). Computed by the executor when the
-   * tool descriptor carries `pluginId` and threaded here for the
-   * sandbox-write auto-LOW rule.
+   * Issue #664 P1 — owning plugin's sandbox root (`~/.lvis/plugins/<pluginId>/`).
+   * Computed HOST-side by the executor when the tool descriptor carries
+   * `pluginId` and threaded here for the sandbox-write auto-LOW rule. #885 v6
+   * (Q4): the manifest `writesToOwnSandbox` self-attestation that used to
+   * accompany it is REMOVED — the auto-LOW keys solely on this host-computed
+   * root + host-verified path containment.
    */
   ownerPluginSandboxRoot?: string;
   /**
@@ -1101,10 +1097,10 @@ export class PermissionManager {
       approvalCacheKey: input.approvalCacheKey,
       conversationContext: input.conversationContext,
       finalInput: cacheIdentityInput,
-      // Issue #664 P1 — sandbox-write attestation participates in cache
-      // identity. A future change to the owning plugin's sandbox root
-      // (e.g. plugin renamed/reinstalled) invalidates stale verdicts.
-      writesToOwnSandbox: input.writesToOwnSandbox,
+      // Issue #664 P1 — the owning plugin's sandbox root participates in cache
+      // identity. A future change (plugin renamed/reinstalled) invalidates the
+      // auto-LOW verdict that now DEPENDS on it. #885 v6: the untrusted
+      // `writesToOwnSandbox` self-claim no longer participates (§5.4).
       ownerPluginSandboxRoot: input.ownerPluginSandboxRoot,
       mcpServerId: input.mcpServerId,
       pluginId: input.pluginId,
@@ -1184,9 +1180,6 @@ export class PermissionManager {
       // input.pluginId/input.workerId). See the resolver invariant.
       sandboxCapability: reviewerSandboxState.capability,
       ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
-      ...(input.writesToOwnSandbox !== undefined
-        ? { writesToOwnSandbox: input.writesToOwnSandbox }
-        : {}),
       ...(input.ownerPluginSandboxRoot !== undefined
         ? { ownerPluginSandboxRoot: input.ownerPluginSandboxRoot }
         : {}),

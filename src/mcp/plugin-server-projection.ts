@@ -1,49 +1,46 @@
 /**
- * Pure projection: an LVIS {@link PluginManifest} / `toolSchemas` → the MCP
- * `2026-07-28` RC server shapes a plugin-as-MCP-server exposes
+ * Pure projection: an LVIS normalized {@link NormalizedManifest} `Tool[]` → the
+ * MCP `2026-07-28` RC server shapes a plugin-as-MCP-server exposes
  * (`server/discover`'s `DiscoverResult` and `tools/list`'s `Tool[]`).
  *
- * Design: docs/architecture/mcp-alignment-design.md §3.2 (manifest → discover)
- * and §3.3 (toolSchemas → Tool), against the verified §8 wire shapes.
+ * #885 v6 — the manifest tool object IS the wire shape (manifest == wire, Q5),
+ * so the forward projection is near-identity. Its only jobs are:
+ *  - filter to MODEL-visible tools — app-only (the auth trio, UI-only methods)
+ *    must NEVER enter the LLM ToolRegistry via the loopback (the #1554
+ *    registry-exclusion invariant); "was in tools[]" ⇔ `model ∈ visibility`.
+ *  - emit `_meta.ui.visibility` EXPLICITLY (SoT §2.2 "the wire projection always
+ *    emits visibility explicitly").
+ *  - construct `_meta` from a WHITELIST so no stray/removed proprietary key
+ *    (category / version / writesToOwnSandbox / workerId / deprecation) can ride
+ *    the wire — they simply have nowhere to come from.
  *
- * This module is intentionally PURE (no I/O, no host deps) — it is the spec'd
- * transformation that the `plugin-loopback-server` milestone wires into a real
- * per-plugin MCP server. Keeping it pure makes the contract independently
- * testable before any runtime wiring.
+ * This module is intentionally PURE (no I/O, no host deps). The host still
+ * DERIVES its own interop annotations elsewhere and never reads inbound
+ * (untrusted) `annotations` — plugin-authored annotations are exactly the
+ * self-claims Q4 removed (MCP "annotations untrusted", design §2.2).
  *
  * Key invariants:
- *  - **Category is the authoritative policy SOT**, carried under reverse-DNS
- *    `_meta["xyz.lvis/category"]`. MCP `ToolAnnotations` are ALSO projected, but
- *    they are interop hints only — host policy reads `_meta`, never the
- *    (untrusted) annotations (design §3.3, §8 "annotations untrusted").
  *  - `_meta` keys use the `xyz.lvis/` prefix; per §8 any prefix whose second
- *    label is `mcp`/`modelcontextprotocol` is RESERVED for MCP, so LVIS keys
- *    MUST NOT use those.
- *  - `inputSchema` dialect moves draft-07 → JSON Schema 2020-12 (a relabel —
- *    LVIS plugin tool schemas use a 2020-12 subset, no `$ref` network deref).
- *  - `manifest.capabilities[]` (the advisory kebab-case dependency tags) are
+ *    label is `mcp`/`modelcontextprotocol` is RESERVED for MCP.
+ *  - `inputSchema` dialect moves to JSON Schema 2020-12 (a relabel — LVIS plugin
+ *    tool schemas use a 2020-12 subset, no `$ref` network deref).
+ *  - `manifest.capabilities[]` (advisory kebab-case dependency tags) are
  *    LVIS-internal and are NOT projected into MCP `ServerCapabilities`.
  */
-import type { PluginManifest, PluginToolCategory } from "../plugins/types.js";
+import type { NormalizedManifest, PluginToolCategory, Tool as McpTool } from "../plugins/types.js";
+import { toolVisibility, isModelVisible } from "../plugins/runtime/tool-visibility.js";
 
 /** The RC protocol revision LVIS plugin-servers speak. */
 const MCP_PROTOCOL_VERSION = "2026-07-28";
-
-/** Reverse-DNS prefix for LVIS-private `_meta` keys (second label ≠ mcp). */
-const LVIS_META_PREFIX = "xyz.lvis/";
 
 /** JSON Schema 2020-12 dialect URI (the RC default for tool inputSchema). */
 const JSON_SCHEMA_2020_12 = "https://json-schema.org/draft/2020-12/schema";
 
 /**
- * Write-equivalent baseline used when a `toolSchemas` entry omits `category`
- * (host-classifies-risk, project_permission_review_redesign). The declared
- * category is optional and advisory; when absent the host projects the safe,
- * write-equivalent default rather than rejecting the manifest. Never read.
+ * MCP `ToolAnnotations` (hints only — NOT authoritative). #885 v6 — no longer
+ * projected onto the wire (the host derives its own interop annotations); retained
+ * for the Phase-R deletion sweep only.
  */
-const DEFAULT_STRICT_CATEGORY: PluginToolCategory = "write";
-
-/** MCP `ToolAnnotations` (hints only — NOT authoritative). */
 export interface McpToolAnnotations {
   readOnlyHint: boolean;
   destructiveHint: boolean;
@@ -51,9 +48,15 @@ export interface McpToolAnnotations {
   openWorldHint: boolean;
 }
 
-/** An MCP `Tool` projected from one LVIS `toolSchemas` entry. */
+/**
+ * An MCP `Tool` projected from one normalized `Tool`. #885 v6 — `annotations` is
+ * DROPPED (the host never projects plugin-authored ones) and `_meta` is narrowed
+ * to exactly the standard visibility block + the single kept LVIS-proprietary key
+ * (`xyz.lvis/pathFields`).
+ */
 export interface McpToolProjection {
   name: string;
+  title?: string;
   description: string;
   inputSchema: {
     $schema: string;
@@ -62,8 +65,12 @@ export interface McpToolProjection {
     required?: string[];
     additionalProperties?: boolean;
   };
-  annotations: McpToolAnnotations;
-  _meta: Record<string, unknown>;
+  outputSchema?: McpTool["outputSchema"];
+  icons?: McpTool["icons"];
+  _meta: {
+    ui: { visibility: Array<"model" | "app"> };
+    "xyz.lvis/pathFields"?: string[];
+  };
 }
 
 /** A `server/discover` `DiscoverResult` projected from a plugin manifest. */
@@ -78,13 +85,10 @@ export interface McpDiscoverProjection {
   instructions: string;
 }
 
-type ToolSchemaEntry = NonNullable<PluginManifest["toolSchemas"]>[string];
-
 /**
- * Project the LVIS permission `category` to MCP `ToolAnnotations` hints. The
- * mapping is deliberately conservative (writes/shell are destructive; only
- * `read` is read-only/idempotent; `network` opens the world). These are
- * interop hints; the authoritative category lives in `_meta` (§3.3).
+ * Project the LVIS permission `category` to MCP `ToolAnnotations` hints. #885 v6 —
+ * category is removed from the contract, so this is no longer wired into the
+ * forward projection; retained for the Phase-R deletion sweep only.
  */
 export function annotationsForCategory(category: PluginToolCategory): McpToolAnnotations {
   return {
@@ -96,57 +100,36 @@ export function annotationsForCategory(category: PluginToolCategory): McpToolAnn
 }
 
 /**
- * Project one `toolSchemas[name]` entry to an MCP `Tool`. `manifestVersion` is
- * the per-tool version fallback (a tool without its own `version` inherits the
- * manifest version — §6.4).
+ * Project ONE normalized `Tool` to the MCP wire shape. The tool object IS already
+ * the wire shape (manifest == wire, Q5), so this is near-identity: it makes
+ * `_meta.ui.visibility` explicit and builds `_meta` from a whitelist so no
+ * stray/removed proprietary key can ride the wire. `outputSchema` (standard MCP)
+ * is passed through verbatim when present.
  */
-export function toolSchemaToMcpTool(
-  name: string,
-  entry: ToolSchemaEntry,
-  manifestVersion: string,
-): McpToolProjection {
-  const inputSchema = { ...entry.inputSchema, $schema: JSON_SCHEMA_2020_12 };
-
-  // `category` is now optional (host-classifies-risk). When the plugin omits
-  // it, project the write-equivalent default-strict baseline so the manifest
-  // still loads and the reverse adapter reads a valid category. The host never
-  // trusts this value as the authority — it derives the effective category per
-  // invocation — but it remains the declared value for shadow reconciliation.
-  const declaredCategory: PluginToolCategory = entry.category ?? DEFAULT_STRICT_CATEGORY;
-
-  const meta: Record<string, unknown> = {
-    [`${LVIS_META_PREFIX}category`]: declaredCategory,
-    [`${LVIS_META_PREFIX}version`]: entry.version ?? manifestVersion,
-  };
-  if (entry.pathFields !== undefined) meta[`${LVIS_META_PREFIX}pathFields`] = entry.pathFields;
-  if (entry.workerId !== undefined) meta[`${LVIS_META_PREFIX}workerId`] = entry.workerId;
-  if (entry.writesToOwnSandbox !== undefined) meta[`${LVIS_META_PREFIX}writesToOwnSandbox`] = entry.writesToOwnSandbox;
-  if (entry.deprecatedSince !== undefined) meta[`${LVIS_META_PREFIX}deprecatedSince`] = entry.deprecatedSince;
-  if (entry.replacedBy !== undefined) meta[`${LVIS_META_PREFIX}replacedBy`] = entry.replacedBy;
-
+function toWireTool(tool: McpTool): McpToolProjection {
+  const meta: McpToolProjection["_meta"] = { ui: { visibility: toolVisibility(tool) } };
+  const pathFields = tool._meta?.["xyz.lvis/pathFields"];
+  if (pathFields !== undefined) meta["xyz.lvis/pathFields"] = pathFields;
   return {
-    name,
-    description: entry.description,
-    inputSchema,
-    annotations: annotationsForCategory(declaredCategory),
+    name: tool.name,
+    ...(tool.title !== undefined ? { title: tool.title } : {}),
+    description: tool.description ?? tool.name,
+    inputSchema: { ...tool.inputSchema, $schema: JSON_SCHEMA_2020_12 },
+    ...(tool.outputSchema !== undefined ? { outputSchema: tool.outputSchema } : {}),
+    ...(tool.icons !== undefined ? { icons: tool.icons } : {}),
     _meta: meta,
   };
 }
 
 /**
- * Project the manifest's declared tools to MCP `Tool[]`. A `tools[]` entry with
- * no matching `toolSchemas` entry is skipped (UI-only runtime methods live in
- * `uiActions`, not `toolSchemas`, and are not model-callable MCP tools).
+ * Project the manifest's declared tools to MCP `Tool[]`. #885 v6 — filter to
+ * MODEL-visible tools: app-only (auth trio, UI-only methods) must NOT enter the
+ * LLM ToolRegistry via the loopback (the #1554 registry-exclusion invariant).
+ * Every `Tool` has a mandatory `inputSchema`, so this reproduces the old
+ * {name ∈ tools[] ∧ has schema} output set exactly — registry contents identical.
  */
-export function manifestToolsToMcpTools(manifest: PluginManifest): McpToolProjection[] {
-  const schemas = manifest.toolSchemas ?? {};
-  const out: McpToolProjection[] = [];
-  for (const name of manifest.tools ?? []) {
-    const entry = schemas[name];
-    if (entry === undefined) continue;
-    out.push(toolSchemaToMcpTool(name, entry, manifest.version));
-  }
-  return out;
+export function manifestToolsToMcpTools(manifest: NormalizedManifest): McpToolProjection[] {
+  return (manifest.tools ?? []).filter(isModelVisible).map(toWireTool);
 }
 
 /**
@@ -156,7 +139,7 @@ export function manifestToolsToMcpTools(manifest: PluginManifest): McpToolProjec
  * is NOT projected — it is LVIS-internal dependency metadata, not MCP
  * `ServerCapabilities` (§3.2).
  */
-export function manifestToDiscoverResult(manifest: PluginManifest): McpDiscoverProjection {
+export function manifestToDiscoverResult(manifest: NormalizedManifest): McpDiscoverProjection {
   const capabilities: McpDiscoverProjection["capabilities"] = {};
   if ((manifest.tools?.length ?? 0) > 0) {
     capabilities.tools = { listChanged: true };

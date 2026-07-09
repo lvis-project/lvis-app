@@ -7,17 +7,20 @@
 import type {
   PluginAccessSpec,
   PluginManifest,
+  NormalizedManifest,
   PluginToolHandler,
   RuntimePlugin,
 } from "../types.js";
 
-export type { PluginAccessSpec, PluginManifest, PluginToolHandler, RuntimePlugin };
+export type { PluginAccessSpec, PluginManifest, NormalizedManifest, PluginToolHandler, RuntimePlugin };
 
 /**
  * A fully-loaded plugin: manifest + running instance + registered handlers.
+ * #885 v6 — `manifest` is the pure `NormalizedManifest` (`parsePluginJson` output);
+ * every runtime consumer reads its `tools: Tool[]` via the tool-visibility primitive.
  */
 export type LoadedPlugin = {
-  manifest: PluginManifest;
+  manifest: NormalizedManifest;
   pluginRoot: string;
   instance: RuntimePlugin;
   methods: Map<string, PluginToolHandler>;
@@ -40,7 +43,7 @@ export type ManifestLoadPlan = {
  * Per-plugin manifest snapshot including resolved access grants.
  */
 export type ManifestSnapshot = {
-  manifest: PluginManifest;
+  manifest: NormalizedManifest;
   approvedPluginAccess?: PluginAccessSpec;
 };
 

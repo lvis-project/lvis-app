@@ -360,15 +360,15 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       name: "indexer",
       version: "1.0.0",
       main: "x.js",
-      tools: [toolName],
-      toolSchemas: {
-        [toolName]: {
+      tools: [
+        {
+          name: toolName,
           description: "scan the index",
-          category: "read",
           inputSchema: { type: "object", properties: { q: { type: "string" } } },
+          _meta: { ui: { visibility: ["model"] } },
         },
-      },
-    } as PluginManifest)) {
+      ],
+    } as unknown as NormalizedManifest)) {
       toolRegistry.register(tool);
     }
 

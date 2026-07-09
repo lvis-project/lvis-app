@@ -1,8 +1,8 @@
 import {
-  declaredUiInvokableMethods,
   type PluginRuntime,
   type PluginToolInvocationContext,
 } from "../plugins/runtime.js";
+import { isUiOnly, isModelVisible } from "../plugins/runtime/tool-visibility.js";
 
 type RuntimeManifestView = Pick<PluginRuntime, "listPluginManifests">;
 
@@ -28,12 +28,19 @@ export function isUiOnlyRuntimeInvocation(
   context: PluginToolInvocationContext,
   effectiveOrigin: "plugin" | "ui" | undefined,
 ): boolean {
+  // #1556 — an LLM-origin ("plugin") call to ANY visibility ALWAYS takes the
+  // governed executor; the ungoverned bypass is unreachable from the model.
   if (effectiveOrigin !== "ui") return false;
 
   const manifest = findOwnerManifest(pluginRuntime, context.ownerPluginId);
-  return manifest != null
-    && declaredUiInvokableMethods(manifest).includes(toolName)
-    && manifest.tools?.includes(toolName) !== true;
+  if (!manifest) return false;
+  // #885 v6 — single-source predicate: ONE array read on ONE object. `isUiOnly`
+  // (SoT §2.3) = `app ∈ vis ∧ model ∉ vis`, the bit-identical restatement of the
+  // old `declaredUiInvokableMethods(m).includes(name) ∧ tools[].includes(name) !==
+  // true` conjunction. A model-visible tool (model-only or dual) is isUiOnly=false
+  // → governed (the load-bearing #1554 rule; "model wins" for dual).
+  const tool = manifest.tools.find((t) => t.name === toolName);
+  return tool != null && isUiOnly(tool);
 }
 
 export function uiOnlyRuntimeInvocationRequiresUserAction(
@@ -82,9 +89,14 @@ export async function dispatchUiOnlyRuntimeInvocation(
   // through the reviewer-skipping uiActions bypass. Cheap: the same owner
   // manifest resolution the gate below already performs.
   const ownerManifest = findOwnerManifest(pluginRuntime, context.ownerPluginId);
-  if (ownerManifest?.tools?.includes(toolName) === true) {
+  // #885 v6 — pure-form equivalent of the old `tools?.includes(toolName)` guard:
+  // "a tools[] method" ⇔ a MODEL-visible tool (model-only OR dual). Refuse to
+  // route any model-visible tool through the ungoverned bypass, so a future caller
+  // that forgets `isUiOnlyRuntimeInvocation` cannot smuggle a governed tool here.
+  const ownerTool = ownerManifest?.tools.find((t) => t.name === toolName);
+  if (ownerTool && isModelVisible(ownerTool)) {
     throw new Error(
-      `'${toolName}' is a tools[] method; refusing ungoverned uiActions dispatch`,
+      `'${toolName}' is a model-visible tool; refusing ungoverned uiActions dispatch`,
     );
   }
   if (
