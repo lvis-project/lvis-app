@@ -22,6 +22,7 @@
 | Q3 `category` | Fate of the deprecated per-tool `category` | **Removed.** `host-classifies-risk` is live; a plugin grading its own danger is not a control. |
 | **Q4 field minimization** | Fate of the remaining LVIS-proprietary tool fields | **6 → 1.** `model`+`ui` → folded into the **standard** `_meta.ui.visibility` (MCP Apps SEP-1865). `writesToOwnSandbox`, `workerId`, per-tool `version`, `deprecatedSince`/`replacedBy` → **removed from the manifest** (host-derived / host-assigned / plugin-level / YAGNI). Only `_meta["xyz.lvis/pathFields"]` remains LVIS-proprietary. |
 | **Q5 manifest form** | Authoring shape in `plugin.json` | **Pure form** — the manifest tool object IS the MCP `Tool` (including `_meta`). Manifest shape == wire shape; no top-level `model`/`ui` sugar, no translation layer for the new shape (`normalizeManifest` handles the LEGACY shape only). |
+| **Q6 visibility default** | Interpretation when `_meta.ui.visibility` is absent | **Standard SEP-1865 default `["model","app"]`** (round 3 — LVIS hosts external MCP tools with the same semantics; a host-private reinterpretation cannot be imposed on the ecosystem). Safe by construction: the default yields only governed dual routing; the ungoverned bypass requires an explicit `["app"]`-only declaration. Resolved to an explicit array once at load. |
 | b1 partition | MCP App UI partition isolation | **Per-server, ephemeral** — `lvis-mcp-app:<serverId>` (in-memory), replacing the shared `lvis-mcp-app`. |
 | b2 detach | MCP App detached windows | **Host-owned** app-mode detach with a new `mcp-app:<serverId>:<cardId>` viewKey. **No** manifest/server `defaultMode`. |
 | b3 lifecycle | Teardown on MCP disconnect | New `mcp.server.disconnected(serverId)` host event; **disable-in-place** rendered `ui://` cards + close detached `mcp-app:<serverId>:*` windows. |
@@ -81,13 +82,24 @@ Real-manifest scale: meeting declares 28 tools with 24 also UI-invokable; ms-gra
 ```
 
 - The `uiActions` map is **eliminated**; the `toolSchemas` map is **eliminated**. Each tool is one object.
-- **Visibility default (host security posture, stricter than the SEP):** when `_meta.ui.visibility` is
-  absent in the MANIFEST, LVIS interprets it as **`["model"]`** — model-only. SEP-1865's own default is
-  `["model","app"]`, but adopting that default would make every plain tool webview-callable by default,
-  widening the renderer attack surface relative to today's opt-in `uiActions` allowlist. Hosts may be
-  stricter than the spec; the wire projection always emits `visibility` explicitly so there is no
-  ambiguity outside the manifest. `visibility: []` (or a tool reachable by neither surface) is rejected
-  at load.
+- **Visibility default — STANDARD `["model","app"]`, resolved explicitly at load (round 3, 2026-07-09):**
+  when `_meta.ui.visibility` is absent, LVIS applies **SEP-1865's own default**. Rationale (maintainer):
+  LVIS hosts external MCP servers whose tools carry the same `_meta.ui` semantics — a host-private
+  reinterpretation of the standard default cannot be imposed on the wider MCP ecosystem, so LVIS must not
+  diverge. This is **safe by construction**: the default can only ever produce GOVERNED access — a
+  defaulted tool is dual (`model`+`app`), and the "model wins" host routing sends every webview invocation
+  of a dual tool through the governed `ToolExecutor` (Layer-1 denies, reviewer, approval gate with
+  genuine-user-activation semantics, audit). The **ungoverned** uiActions runtime bypass still requires an
+  **explicit app-only declaration** (`["app"]` without `"model"`) — the security-critical surface remains
+  opt-in and can never arise from the default (fail-closed by construction).
+  The absent case is resolved to an explicit array ONCE at manifest load (`normalizeManifest` output is
+  always explicit — single SoT; no consumer re-derives the default), and the wire projection always emits
+  `visibility` explicitly. `visibility: []` (a tool reachable by neither surface) is rejected at load.
+  **Known delta vs today (accepted):** a newly-authored pure-form tool that omits `_meta.ui` becomes
+  webview-invokable *through the governed path* (today's `uiActions` was opt-in even for governed access).
+  Authors wanting LLM-only tools declare `visibility: ["model"]` explicitly — and the legacy→pure
+  converter emits exactly that for `tools[]`-only methods, so **migrated manifests preserve today's exact
+  surface**; the wider default applies only to future hand-authored omissions.
 - The auth trio must reference tools whose visibility is exactly `["app"]` — replaces the two
   cross-surface auth checks with one intra-object lookup.
 
@@ -95,9 +107,9 @@ Real-manifest scale: meeting declares 28 tools with 24 also UI-invokable; ms-gra
 
 | Case | Old shape | New shape (`_meta.ui.visibility`) | Route |
 |---|---|---|---|
-| LLM-only | `tools[]` only | `["model"]` (or absent — strict default) | governed ToolExecutor |
-| Dual (24/28 meeting) | `tools[] ∩ uiActions` | `["model","app"]` | **governed** (model wins — fail-closed, matches #1554) |
-| UI-only (auth, upload chunks) | `uiActions` only + schema | `["app"]` | uiActions runtime bypass (ceiling-capped per #1553) |
+| LLM-only | `tools[]` only | `["model"]` (explicit; the legacy converter emits this for `tools[]`-only methods) | governed ToolExecutor |
+| Dual (24/28 meeting) | `tools[] ∩ uiActions` | `["model","app"]` (also the resolved value when `_meta.ui` is absent — standard default) | **governed** (model wins — fail-closed, matches #1554) |
+| UI-only (auth, upload chunks) | `uiActions` only + schema | `["app"]` (always explicit — never reachable via the default) | uiActions runtime bypass (ceiling-capped per #1553) |
 | Neither | — | `[]` | rejected at load |
 
 ```ts
