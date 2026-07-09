@@ -2465,7 +2465,7 @@ export const deMessages: Record<string, string> = {
   "settingsContent.tabPluginPerf": "Plugin-Leistung",
   "settingsContent.tabRoles": "Rollen",
   "settingsContent.tabUsage": "Verwendung",
-  "settingsContent.tabWeb": "Suche (Web)",
+  "settingsContent.tabWeb": "Web / Browsen",
   "settingsWindow.documentTitle": "LVIS-Einstellungen",
   "sidebar.ariaLabel": "Primäre Navigation",
   "sidebar.authRequiredAriaLabel": "Authentifizierung erforderlich",

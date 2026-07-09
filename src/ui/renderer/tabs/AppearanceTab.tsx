@@ -34,7 +34,6 @@ import {
 } from "../../../i18n/index.js";
 import { useTranslation } from "../../../i18n/react.js";
 
-type WebViewPreferredFlow = "in-app" | "system-browser";
 type AppearanceMarketplaceFilter = "theme" | "language-pack";
 
 /* ─── Bundle card mini-mock helpers ─────────────────────────────────────── */
@@ -269,58 +268,6 @@ function useFontPreferences() {
   return { family, sizeScale, setFamily, setSizeScale };
 }
 
-/* ─── webView preferredFlow options ──────────────────────────────────────── */
-const WEBVIEW_OPTIONS: ReadonlyArray<{ value: WebViewPreferredFlow; label: string; hint: string }> = [
-  { value: "in-app", label: "appearanceTab.webViewInApp", hint: "appearanceTab.webViewInAppHint" },
-  { value: "system-browser", label: "appearanceTab.webViewSystemBrowser", hint: "appearanceTab.webViewSystemBrowserHint" },
-];
-
-function useWebViewPreferredFlow(): {
-  flow: WebViewPreferredFlow;
-  setFlow: (next: WebViewPreferredFlow) => void;
-} {
-  const [flow, setFlowState] = useState<WebViewPreferredFlow>("in-app");
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const api = getApi();
-        const settings = await api.getSettings();
-        if (cancelled) return;
-        const next = settings.webView?.preferredFlow;
-        if (next === "in-app" || next === "system-browser") {
-          setFlowState(next);
-        }
-      } catch {
-        /* ignore — toggle stays at default until user interacts */
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const notifySaved = useNotifySaved();
-  const setFlow = (next: WebViewPreferredFlow) => {
-    const prev = flow;
-    setFlowState(next);
-    if (typeof process !== "undefined" && process.env?.LVIS_DEV === "1") {
-      // dev-mode toggle log — formal telemetry deferred (see plan §7).
-      // eslint-disable-next-line no-console
-      console.log(`[settings] webView.preferredFlow changed: ${prev} -> ${next}`);
-    }
-    try {
-      const api = getApi();
-      void api
-        .updateSettings({ webView: { preferredFlow: next } })
-        .then(() => notifySaved())
-        .catch(() => { /* ignore — local state already reflects */ });
-    } catch {
-      /* ignore */
-    }
-  };
-
-  return { flow, setFlow };
-}
 
 function useMarketplaceAppearanceAssets(): {
   themeBundleIds: readonly string[];
@@ -559,7 +506,6 @@ function LanguageSection({
 export function AppearanceTab({ onOpenMarketplace }: { onOpenMarketplace?: (filter: AppearanceMarketplaceFilter) => void } = {}) {
   const { t } = useTranslation();
   const { bundleId, setBundle, followSystem, setFollowSystem } = useTheme();
-  const { flow: webViewFlow, setFlow: setWebViewFlow } = useWebViewPreferredFlow();
   const { family, sizeScale, setFamily, setSizeScale } = useFontPreferences();
   const marketplaceAssets = useMarketplaceAppearanceAssets();
   const notifySaved = useNotifySaved();
@@ -756,45 +702,6 @@ export function AppearanceTab({ onOpenMarketplace }: { onOpenMarketplace?: (filt
         </div>
       </SettingsSection>
 
-      {/* ── 외부 URL 표시 정책 (B1) ─────────────────────────────────── */}
-      <SettingsSection
-        title={t("appearanceTab.webViewSectionTitle")}
-        description={t("appearanceTab.webViewSectionDescription")}
-        actions={
-          <span className="text-[11px] text-muted-foreground">
-            {t("appearanceTab.webViewCurrentLabel")} <span className="font-mono text-foreground">{webViewFlow}</span>
-          </span>
-        }
-      >
-        <div
-          role="radiogroup"
-          aria-label={t("appearanceTab.webViewRadioGroupLabel")}
-          data-testid="webview-preferred-flow"
-          className="flex flex-wrap gap-2"
-        >
-          {WEBVIEW_OPTIONS.map((opt) => {
-            const checked = webViewFlow === opt.value;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                role="radio"
-                aria-checked={checked}
-                data-value={opt.value}
-                title={t(opt.hint)}
-                onClick={() => setWebViewFlow(opt.value)}
-                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                  checked
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border text-muted-foreground hover:bg-muted/(--opacity-half) hover:text-foreground"
-                }`}
-              >
-                {t(opt.label)}
-              </button>
-            );
-          })}
-        </div>
-      </SettingsSection>
     </div>
   );
 }

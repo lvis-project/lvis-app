@@ -2465,7 +2465,7 @@ export const zhMessages: Record<string, string> = {
   "settingsContent.tabPluginPerf": "插件性能",
   "settingsContent.tabRoles": "角色",
   "settingsContent.tabUsage": "用法",
-  "settingsContent.tabWeb": "搜索（网络）",
+  "settingsContent.tabWeb": "网页 / 浏览",
   "settingsWindow.documentTitle": "路视设置",
   "sidebar.ariaLabel": "主要导航",
   "sidebar.authRequiredAriaLabel": "需要身份验证",
