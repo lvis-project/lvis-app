@@ -423,7 +423,7 @@ export function GeneralTab({
             label={t("generalTab.statTools")}
             count={stats.toolCount}
             icon={Wrench}
-            onClick={() => onNavigate("plugin-perf")}
+            onClick={() => onNavigate("plugin-config")}
             loading={loading}
             testId="general-tab-card-tool"
           />

@@ -11,7 +11,6 @@ import {
   UserCog,
   BarChart3,
   FileSearch,
-  Gauge,
   Server,
   Puzzle,
   Store,
@@ -29,7 +28,6 @@ import { RolesTab } from "./tabs/RolesTab.js";
 import { PermissionsTab } from "./tabs/PermissionsTab.js";
 import { AuditTab } from "./tabs/AuditTab.js";
 import { UsageDashboard } from "./components/UsageDashboard.js";
-import { PluginPerfTab } from "./tabs/PluginPerfTab.js";
 import { LlmTab } from "./tabs/LlmTab.js";
 import { AppearanceTab } from "./tabs/AppearanceTab.js";
 import { ChatTab } from "./tabs/ChatTab.js";
@@ -84,7 +82,6 @@ const SETTINGS_NAV: { group: string; items: SettingsNavItem[] }[] = [
     items: [
       { value: "marketplace", icon: Store, labelKey: "settingsContent.tabMarketplace" },
       { value: "plugin-config", icon: Puzzle, labelKey: "settingsContent.tabPluginConfig" },
-      { value: "plugin-perf", icon: Gauge, labelKey: "settingsContent.tabPluginPerf" },
       { value: "mcp", icon: Server, labelKey: "settingsContent.tabMcp" },
     ],
   },
@@ -632,9 +629,8 @@ export function SettingsContent({
           <TabsContent value="roles" className="flex-1 min-h-0 outline-none"><RolesTab api={api} /></TabsContent>
           <TabsContent value="usage" className="flex-1 min-h-0 outline-none"><UsageDashboard api={api} /></TabsContent>
           <TabsContent value="audit" className="flex-1 min-h-0 outline-none"><AuditTab /></TabsContent>
-          <TabsContent value="plugin-perf" className="flex-1 min-h-0 outline-none"><PluginPerfTab api={api} /></TabsContent>
           <TabsContent value="mcp" className="flex-1 min-h-0 outline-none"><McpTab /></TabsContent>
-          <TabsContent value="plugin-config" className="flex-1 min-h-0 outline-none"><PluginConfigTab /></TabsContent>
+          <TabsContent value="plugin-config" className="flex-1 min-h-0 outline-none"><PluginConfigTab api={api} /></TabsContent>
           <TabsContent value="marketplace" className="flex-1 min-h-0 outline-none">
             <MarketplaceTab
               api={api}
