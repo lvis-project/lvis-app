@@ -26,6 +26,12 @@ import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../ipc-br
 import { validateHostRendererSender } from "../ipc/gated.js";
 import { CHANNELS } from "../contract/app-contract.js";
 import { isAuthOwned } from "./auth-window-registry.js";
+import {
+  MCP_APP_PARTITION_PREFIX,
+  mcpAppViewKey,
+  mcpAppViewKeyPrefix,
+} from "../shared/mcp-app-partition.js";
+import type { McpUiPayload } from "../mcp/types.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { resolveAppIconPath } from "./app-icon.js";
@@ -42,7 +48,7 @@ import {
  * where each segment is alphanumeric with dots/underscores/hyphens.
  * toViewKey() in api-client.ts produces exactly this shape.
  */
-export const ALLOWED_VIEW_KEYS = /^(reminders|routines|memory|starred|insights|work-board|plugin:[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*)$/;
+export const ALLOWED_VIEW_KEYS = /^(reminders|routines|memory|starred|insights|work-board|plugin:[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*|mcp-app:[0-9a-f]+:[a-z0-9][a-z0-9_.-]*)$/;
 
 /** Human-readable window titles for built-in view keys. */
 const BUILTIN_VIEW_LABELS: Record<string, string> = {
@@ -56,6 +62,22 @@ const BUILTIN_VIEW_LABELS: Record<string, string> = {
 
 function isPluginViewKey(viewKey: string): boolean {
   return viewKey.startsWith("plugin:");
+}
+
+/** #885 b2 — detached MCP-app card viewKey (`mcp-app:<hex>:<cardId>`). */
+function isMcpAppViewKey(viewKey: string): boolean {
+  return viewKey.startsWith("mcp-app:");
+}
+
+/**
+ * Free-floating windows (plugin + mcp-app) behave alike: near-main initial
+ * placement but NO magnetic snap-to-edge, and they own their full-bleed canvas.
+ * Built-in panels (reminders/routines/…) snap; these do not. The snap/placement
+ * sites discriminate on this, not on `isPluginViewKey`, so mcp-app windows
+ * inherit the plugin (free-floating) behavior.
+ */
+function isFreeFloatingViewKey(viewKey: string): boolean {
+  return isPluginViewKey(viewKey) || isMcpAppViewKey(viewKey);
 }
 
 /** Returns a safe window title for a validated viewKey. */
@@ -116,7 +138,7 @@ function normalizeDetachedWindowOptionsForViewKey(
   options: DetachedWindowOptions | undefined
 ): NormalizedDetachedWindowOptions {
   const normalized = normalizeDetachedWindowOptions(options);
-  if (!isPluginViewKey(viewKey)) return normalized;
+  if (!isFreeFloatingViewKey(viewKey)) return normalized;
 
   return {
     ...normalized,
@@ -324,6 +346,15 @@ export class WindowManager {
   private _detachedShell: BrowserWindow | null = null;
   private _detachedShellViewKey: string | null = null;
   /**
+   * #885 b2 — host-owned registry of the `McpUiPayload` for each detached
+   * MCP-app card, keyed by its `mcp-app:<hex>:<cardId>` viewKey. The URL
+   * fragment (`#detached/<viewKey>`) cannot carry `resourceUri`/`csp`/`title`,
+   * so the detached renderer fetches its payload from here on mount via
+   * `getMcpDetachedPayload`. Purged on window-close, in-place navigation away,
+   * and on b3 scoped disconnect-close — so a stale payload never lingers.
+   */
+  private _mcpDetachedPayloads = new Map<string, McpUiPayload>();
+  /**
    * IDs of locked children that were hidden BY maximize (not by the user).
    * Used in the unmaximize handler to avoid accidentally restoring windows
    * that the user intentionally minimised before the main was maximised.
@@ -433,7 +464,16 @@ export class WindowManager {
     // to the new viewKey in-place rather than spawning a second window.
     if (this._detachedShell !== null && !this._detachedShell.isDestroyed()) {
       const shell = this._detachedShell;
-      if (isPluginViewKey(this._detachedShellViewKey ?? "") !== isPluginViewKey(viewKey)) {
+      if (isFreeFloatingViewKey(this._detachedShellViewKey ?? "") !== isFreeFloatingViewKey(viewKey)) {
+        // b2 — category switch destroys the shell. We delete the `_children`
+        // entry here BEFORE destroy(), so the `closed`-handler purge (which reads
+        // `_children.get`) can no longer find the outgoing mcp-app card's payload.
+        // Purge it explicitly so `_mcpDetachedPayloads` never lingers to process
+        // exit (restores the "stale payload never lingers" invariant).
+        const outgoingViewKey = this._children.get(shell.id)?.viewKey ?? this._detachedShellViewKey;
+        if (outgoingViewKey && isMcpAppViewKey(outgoingViewKey)) {
+          this._mcpDetachedPayloads.delete(outgoingViewKey);
+        }
         this._children.delete(shell.id);
         this._detachedShell = null;
         this._detachedShellViewKey = null;
@@ -449,15 +489,23 @@ export class WindowManager {
           applyDetachedWindowOptions(shell, nextOptions);
           shell.setSize(nextBounds.width, nextBounds.height);
           // Update the entry's viewKey so listChildren() reflects the live viewKey.
+          // b2 — the single-shell slot navigated away from a prior mcp-app card:
+          // its stored payload is now unreachable, so purge it here (the one
+          // chokepoint every in-place navigation passes through).
           const entry = this._children.get(shell.id);
-          if (entry) entry.viewKey = viewKey;
+          if (entry) {
+            if (isMcpAppViewKey(entry.viewKey) && entry.viewKey !== viewKey) {
+              this._mcpDetachedPayloads.delete(entry.viewKey);
+            }
+            entry.viewKey = viewKey;
+          }
           shell.setTitle(`LVIS — ${viewKeyLabel(viewKey)}`);
           shell.webContents.send("lvis:detached:navigate", { viewKey });
-          if (!isPluginViewKey(viewKey)) {
+          if (!isFreeFloatingViewKey(viewKey)) {
             this._snapToLeftEdge(shell.id);
           }
         }
-        if (isPluginViewKey(viewKey)) {
+        if (isFreeFloatingViewKey(viewKey)) {
           const entry = this._children.get(shell.id);
           if (entry) this._unsnap(entry);
         }
@@ -492,7 +540,7 @@ export class WindowManager {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
-        webviewTag: isPluginViewKey(viewKey),
+        webviewTag: isFreeFloatingViewKey(viewKey),
         preload: this._preloadPath,
         // Theme race-window-zero: main's cached `lastThemePayload` is passed
         // here so the preload can apply tokens to documentElement at
@@ -520,7 +568,7 @@ export class WindowManager {
     // the production-only attack surface (real Electron webContents)
     // always exposes the listener API.
     if (
-      isPluginViewKey(viewKey) &&
+      isFreeFloatingViewKey(viewKey) &&
       typeof child.webContents?.on === "function"
     ) {
       child.webContents.on("will-attach-webview", (event, webPreferences, params) => {
@@ -532,7 +580,9 @@ export class WindowManager {
         // `additionalArguments` into <webview> guests, the plugin sandbox
         // would NOT receive `--lvis-initial-theme=` (which carries host
         // theme cache). Plugin webviews already get theme via the
-        // `host.theme.changed` event, never via argv.
+        // `host.theme.changed` event, never via argv. The MCP-app webview uses
+        // NO Electron preload (data: URL + an injected bridge script), so
+        // stripping preload here is a no-op-safe hardening for it too.
         delete prefs.additionalArguments;
         prefs.nodeIntegration = false;
         prefs.nodeIntegrationInWorker = false;
@@ -542,15 +592,19 @@ export class WindowManager {
         // Force-set: a `<webview webpreferences="sandbox=no">` injection
         // would otherwise survive and run unsandboxed.
         prefs.sandbox = true;
-        // Partition-allowlist gate. Only `persist:plugin:<slug>` partitions
-        // pass through `installPluginPartitionPolicy()` in main.ts (which
-        // sets the preload + http/https network block). A guest with any
-        // other `partition=` value would skip that policy and regain
-        // unrestricted initial navigation/network access. Block the attach
-        // entirely rather than rewriting the partition — silently changing
-        // it would yield an attached webview with no storage isolation.
+        // Partition-allowlist gate. Only two host-controlled prefixes are
+        // policy-registered: `persist:plugin:<slug>` (installPluginPartitionPolicy,
+        // sets preload + network block) and `lvis-mcp-app:<hex>` (b1
+        // installMcpAppPartitionPolicy, sets the CDN network gate in the
+        // readUiResource chokepoint). A guest with any other `partition=` value
+        // would skip that policy and regain unrestricted navigation/network
+        // access, so block the attach entirely rather than rewriting the
+        // partition — silently changing it would yield an ungated webview.
         const requested = (params as { partition?: unknown } | undefined)?.partition;
-        if (typeof requested !== "string" || !requested.startsWith("persist:plugin:")) {
+        if (
+          typeof requested !== "string" ||
+          !(requested.startsWith("persist:plugin:") || requested.startsWith(MCP_APP_PARTITION_PREFIX))
+        ) {
           if (typeof event.preventDefault === "function") event.preventDefault();
         }
       });
@@ -597,6 +651,13 @@ export class WindowManager {
         clearTimeout(trailingMoveTimer);
         trailingMoveTimer = null;
       }
+      // b2 — drop this window's stored MCP-app payload (if any). Read the LIVE
+      // viewKey from the entry (in-place navigation may have changed it) before
+      // deleting the entry.
+      const closingViewKey = this._children.get(child.id)?.viewKey;
+      if (closingViewKey && isMcpAppViewKey(closingViewKey)) {
+        this._mcpDetachedPayloads.delete(closingViewKey);
+      }
       this._children.delete(child.id);
       if (this._detachedShell === child) {
         this._detachedShell = null;
@@ -607,7 +668,7 @@ export class WindowManager {
 
     child.once("ready-to-show", () => {
       const main = this.getMainWindow();
-      if (isPluginViewKey(viewKey)) {
+      if (isFreeFloatingViewKey(viewKey)) {
         // Keep the established initial spawn location, but do not lock plugins
         // to the main window after creation.
         this._placeNearMainLeftEdge(child.id);
@@ -640,6 +701,50 @@ export class WindowManager {
     const entry = this._children.get(windowId);
     if (entry && !entry.window.isDestroyed()) {
       entry.window.close();
+    }
+  }
+
+  // ── MCP-app detach (#885 b2) ──────────────────────────────────────────────
+
+  /**
+   * Open an MCP-app card in a detached BrowserWindow (b2). The `cardId` is
+   * minted HOST-SIDE (`randomUUID`, charset-safe) so a renderer-supplied cardId
+   * can never influence the viewKey; the payload is stored in
+   * `_mcpDetachedPayloads` for the detached renderer to fetch on mount (the URL
+   * fragment cannot carry `resourceUri`/`csp`). Returns the opened window.
+   */
+  openDetachedMcpApp(payload: McpUiPayload): BrowserWindow {
+    const cardId = randomUUID();
+    const viewKey = mcpAppViewKey(payload.serverId, cardId);
+    this._mcpDetachedPayloads.set(viewKey, payload);
+    const win = this.openDetachedTab(viewKey);
+    // viewKeyLabel() has no useful title for an mcp-app key; use the payload's.
+    win.setTitle(`LVIS — ${payload.title ?? "MCP App"}`);
+    return win;
+  }
+
+  /** Backs the `lvis:mcp:detached-payload` read IPC. */
+  getMcpDetachedPayload(viewKey: string): McpUiPayload | null {
+    return this._mcpDetachedPayloads.get(viewKey) ?? null;
+  }
+
+  /**
+   * b3 scoped close — on a server disconnect, close ONLY that server's detached
+   * MCP-app windows (matched by the `mcp-app:<hex(serverId)>:` viewKey prefix)
+   * and purge their stored payloads. Other detached windows (built-in / plugin /
+   * other MCP servers) are untouched. Modeled on `closeAllDetached` but scoped;
+   * auth windows never carry an `mcp-app:` viewKey so no auth guard is needed.
+   *
+   * May throw synchronously if `serverId` is over-length (encode fail-closed) —
+   * the caller (the b3 sink) wraps this in try/catch so teardown still
+   * completes.
+   */
+  closeDetachedMcpWindows(serverId: string): void {
+    const prefix = mcpAppViewKeyPrefix(serverId);
+    for (const [, entry] of this._children) {
+      if (!entry.viewKey.startsWith(prefix)) continue;
+      this._mcpDetachedPayloads.delete(entry.viewKey);
+      if (!entry.window.isDestroyed()) entry.window.close();
     }
   }
 
@@ -783,7 +888,7 @@ export class WindowManager {
     const entry = this._children.get(childId);
     if (!entry || entry.window.isDestroyed()) return;
 
-    if (isPluginViewKey(entry.viewKey)) {
+    if (isFreeFloatingViewKey(entry.viewKey)) {
       const main = this.getMainWindow();
       if (main && !main.isDestroyed()) {
         main.webContents.send("lvis:window:snap-edge", null);
@@ -1099,6 +1204,45 @@ export class WindowManager {
       } catch (err) {
         return { ok: false, error: (err as Error).message };
       }
+    });
+
+    // #885 b2 — open an MCP-app card in a detached window. State-mutating +
+    // host-only ⇒ validateHostRendererSender (rejects plugin-ui-shell frames),
+    // mirroring close-all-detached / resize-for-mode. The payload is
+    // runtime-validated fail-closed (serverId non-empty; resourceUri `ui://`);
+    // the cardId + viewKey are minted host-side in openDetachedMcpApp.
+    ipcMain.handle(CHANNELS.mcp.openDetached, (event: IpcMainInvokeEvent, arg: unknown) => {
+      if (!validateHostRendererSender(event)) {
+        auditUnauthorized(auditLogger, CHANNELS.mcp.openDetached, event);
+        return UNAUTHORIZED_FRAME;
+      }
+      const payload = (arg as { payload?: unknown } | undefined)?.payload as McpUiPayload | undefined;
+      if (
+        !payload ||
+        typeof payload.serverId !== "string" ||
+        payload.serverId.trim().length === 0 ||
+        typeof payload.resourceUri !== "string" ||
+        !payload.resourceUri.startsWith("ui://")
+      ) {
+        return { ok: false, error: "invalid-payload" };
+      }
+      try {
+        const win = this.openDetachedMcpApp(payload);
+        return { ok: true, windowId: win.id };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    });
+
+    // #885 b2 — the detached host renderer fetches its stored payload on mount.
+    // Read-only but host-only (host-populated registry) ⇒ validateHostRendererSender.
+    ipcMain.handle(CHANNELS.mcp.detachedPayload, (event: IpcMainInvokeEvent, viewKey: unknown) => {
+      if (!validateHostRendererSender(event)) {
+        auditUnauthorized(auditLogger, CHANNELS.mcp.detachedPayload, event);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (typeof viewKey !== "string") return null;
+      return this.getMcpDetachedPayload(viewKey);
     });
 
     ipcMain.handle("lvis:window:close-detached", (event: IpcMainInvokeEvent) => {

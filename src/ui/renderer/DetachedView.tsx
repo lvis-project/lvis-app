@@ -22,6 +22,8 @@ import { RoutinePanel } from "./components/RoutinePanel.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { WorkBoardPanel } from "./components/WorkBoardPanel.js";
 import { StarredView } from "./components/StarredView.js";
+import { McpAppView } from "./components/McpAppView.js";
+import type { McpUiPayload } from "../../mcp/types.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
 import { useStarred } from "./hooks/use-starred.js";
@@ -61,6 +63,53 @@ function SnapEdgeHighlight() {
       aria-hidden="true"
     />
   );
+}
+
+// ─── Detached MCP-app (#885 b2) ────────────────────────────────────────────────
+
+/**
+ * Detached MCP-app card. Extracted as a NAMED component (not an inline branch
+ * inside `DetachedContent`) so its hooks run unconditionally at the top level —
+ * `DetachedContent` has early `return`s above, and adding `useState`/`useEffect`
+ * inside a branch after them would violate the Rules of Hooks. The `McpUiPayload`
+ * cannot ride the `#detached/<viewKey>` URL fragment (no `resourceUri`/`csp`), so
+ * it is fetched from the host-owned WindowManager registry on mount. Keyed by
+ * `viewKey` at the call site, so navigation remounts and re-fetches cleanly.
+ */
+function DetachedMcpApp({ viewKey }: { viewKey: string }) {
+  const { t } = useTranslation();
+  const [payload, setPayload] = useState<McpUiPayload | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoaded(false);
+    void window.lvis.mcp
+      .getDetachedPayload(viewKey)
+      .then((p) => {
+        if (cancelled) return;
+        setPayload(p);
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPayload(null);
+        setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewKey]);
+
+  if (!loaded) return null;
+  if (!payload) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
+        {t("detachedView.unknownView", { viewKey })}
+      </div>
+    );
+  }
+  return <McpAppView payload={payload} />;
 }
 
 // ─── Content dispatcher ───────────────────────────────────────────────────────
@@ -145,6 +194,13 @@ function DetachedContent({ viewKey }: ContentProps) {
     );
   }
 
+  // #885 b2 — MCP-app card: branchless early dispatch BEFORE the plugin branch.
+  // Hooks live inside DetachedMcpApp (keyed by viewKey) so they never run after
+  // this component's early returns.
+  if (viewKey.startsWith("mcp-app:")) {
+    return <DetachedMcpApp key={viewKey} viewKey={viewKey} />;
+  }
+
   // Plugin view: viewKey = "plugin:<pluginId>:<extensionId>"
   // In detached mode, render without host chrome to avoid title duplication.
   if (viewKey.startsWith("plugin:")) {
@@ -160,16 +216,17 @@ function DetachedContent({ viewKey }: ContentProps) {
 }
 
 export function getDetachedShellClassName(viewKey: string): string {
-  if (viewKey.startsWith("plugin:")) {
+  if (viewKey.startsWith("plugin:") || viewKey.startsWith("mcp-app:")) {
     return "flex h-screen flex-col overflow-hidden text-foreground";
   }
   return "flex h-screen flex-col overflow-hidden bg-background text-foreground";
 }
 
 export function getDetachedMainClassName(viewKey: string): string {
-  // Plugin webviews own their detached-view canvas. Host padding/background leaks
-  // the LVIS shell theme around translucent plugin panels, so keep them full-bleed.
-  if (viewKey.startsWith("plugin:")) {
+  // Plugin + MCP-app webviews own their detached-view canvas. Host
+  // padding/background leaks the LVIS shell theme around the sandboxed panel, so
+  // keep them full-bleed.
+  if (viewKey.startsWith("plugin:") || viewKey.startsWith("mcp-app:")) {
     return "flex min-h-0 flex-1 flex-col overflow-hidden";
   }
   return "flex min-h-0 flex-1 flex-col overflow-hidden p-4";
