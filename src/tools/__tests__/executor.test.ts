@@ -35,7 +35,7 @@ import type { RiskClassifier } from "../../permissions/reviewer/risk-classifier.
 import { HookRunner } from "../../hooks/hook-runner.js";
 import { BashAstValidator } from "../../main/bash-ast-validator.js";
 import { buildPluginToolsForTest } from "../../plugins/__tests__/plugin-tool-test-fixture.js";
-import type { PluginManifest } from "../../plugins/types.js";
+import type { NormalizedManifest } from "../../plugins/types.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 import { mcpToolToTool } from "../../mcp/mcp-tool-adapter.js";
 import {
@@ -3201,18 +3201,18 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       name: "adapter-plugin",
       version: "1.0.0",
       main: "entry.js",
-      tools: ["adapter_write"],
-      toolSchemas: {
-        adapter_write: {
+      tools: [
+        {
+          name: "adapter_write",
           description: "Adapter write fixture",
-          category: "write",
           inputSchema: {
             type: "object",
             properties: { value: { type: "string" } },
           },
+          _meta: { ui: { visibility: ["model"] } },
         },
-      },
-    } as PluginManifest;
+      ],
+    } as unknown as NormalizedManifest;
     const registry = new ToolRegistry();
     for (const tool of buildPluginToolsForTest(
       { call: pluginCall } as unknown as PluginRuntime,

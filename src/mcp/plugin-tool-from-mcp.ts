@@ -92,20 +92,24 @@ function readCategory(meta: Record<string, unknown>, toolName: string): PluginTo
   if (typeof value === "string" && (PLUGIN_TOOL_CATEGORIES as readonly string[]).includes(value)) {
     return value as PluginToolCategory;
   }
-  // DEFAULT-STRICT: an authority-less tool registers as write-equivalent
-  // rather than failing the whole plugin load. The host derives the real
-  // effective category per invocation; a warn is logged so the missing
-  // declaration is visible during shadow-mode reconciliation.
-  log.warn(
-    {
-      event: "plugin-tool-missing-category",
-      toolName,
-      declared: value,
-      declaredType: typeof value,
-      appliedDefault: DEFAULT_STRICT_CATEGORY,
-    },
-    "discovered plugin tool declares no authoritative category — applying default-strict baseline",
-  );
+  // #885 v6 — `category` is structurally REMOVED from the contract (Q3), so an
+  // ABSENT category is the expected steady state (every tool, every load) — warn
+  // there would spam ~60+ lines per boot forever. Warn ONLY on a PRESENT-but-
+  // malformed declaration (a real error); stay silent on the v6-expected absent
+  // case. Either way the write-equivalent default-strict baseline applies; the
+  // host derives the effective category per invocation (`inspectHostRisk`).
+  if (value !== undefined) {
+    log.warn(
+      {
+        event: "plugin-tool-invalid-category",
+        toolName,
+        declared: value,
+        declaredType: typeof value,
+        appliedDefault: DEFAULT_STRICT_CATEGORY,
+      },
+      "discovered plugin tool declares a malformed category — applying default-strict baseline",
+    );
+  }
   return DEFAULT_STRICT_CATEGORY;
 }
 
@@ -115,11 +119,6 @@ function readPathFields(meta: Record<string, unknown>): string[] | undefined {
     return value as string[];
   }
   return undefined;
-}
-
-function readBoolean(meta: Record<string, unknown>, key: string): boolean | undefined {
-  const value = meta[`${LVIS_META_PREFIX}${key}`];
-  return typeof value === "boolean" ? value : undefined;
 }
 
 /**
@@ -142,7 +141,10 @@ export function mcpToolToPluginTool(
     category,
     pluginId,
     pathFields: readPathFields(meta),
-    writesToOwnSandbox: readBoolean(meta, "writesToOwnSandbox"),
+    // #885 v6 — `writesToOwnSandbox` promotion DELETED (§3.2/§5): the flag was an
+    // untrusted self-claim; the reviewer auto-LOW now keys on the HOST-computed
+    // sandbox-containment derivation, never a manifest value. `Tool.writesToOwnSandbox`
+    // is no longer populated from the wire (the field type is a Phase-R deletion).
     version: readString(meta, "version"),
     deprecatedSince: readString(meta, "deprecatedSince"),
     replacedBy: readString(meta, "replacedBy"),

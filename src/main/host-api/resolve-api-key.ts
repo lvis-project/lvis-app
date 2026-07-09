@@ -83,7 +83,8 @@ export interface ResolveApiKeyRequest {
 
 export interface ResolveApiKeyDeps {
   pluginId: string;
-  manifest: PluginManifest;
+  // #885 v6 — reads only `hostSecrets` (shared by legacy + normalized manifests).
+  manifest: Pick<PluginManifest, "hostSecrets">;
   manifestSha256?: string;
   settingsService: Pick<SettingsService, "get" | "getSecret">;
   auditLogger: Pick<AuditLogger, "log">;

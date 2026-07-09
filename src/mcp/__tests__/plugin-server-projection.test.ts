@@ -3,117 +3,103 @@ import {
   annotationsForCategory,
   manifestToDiscoverResult,
   manifestToolsToMcpTools,
-  toolSchemaToMcpTool,
 } from "../plugin-server-projection.js";
-import type { PluginManifest } from "../../plugins/types.js";
+import type { NormalizedManifest } from "../../plugins/types.js";
 
-const BASE_MANIFEST: PluginManifest = {
+// #885 v6 — the projection now reads the NORMALIZED pure `Tool[]` (manifest ==
+// wire) and filters to model-visible tools.
+const BASE_MANIFEST: NormalizedManifest = {
   id: "com.example.meeting",
   name: "Meeting",
   version: "2.1.0",
   entry: "dist/hostPlugin.js",
   description: "Records and summarizes meetings",
-  tools: ["meeting_start", "meeting_export"],
-  toolSchemas: {
-    meeting_start: {
+  tools: [
+    {
+      name: "meeting_start",
       description: "Start recording",
-      category: "shell",
       inputSchema: { type: "object", properties: { room: { type: "string" } }, required: ["room"] },
+      _meta: { ui: { visibility: ["model"] } },
     },
-    meeting_export: {
+    {
+      name: "meeting_export",
       description: "Export the transcript to a path",
-      category: "write",
-      pathFields: ["path"],
-      workerId: "export-worker",
-      writesToOwnSandbox: true,
-      version: "3.0.0",
-      deprecatedSince: "2.0.0",
-      replacedBy: "meeting_export_v2",
       inputSchema: { type: "object", properties: { path: { type: "string" } } },
+      _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
     },
-  },
+    {
+      // UI-only (the auth/upload-quad case) — must be EXCLUDED from the LLM registry.
+      name: "meeting_upload_chunk",
+      description: "Upload a staged chunk",
+      inputSchema: { type: "object", properties: {} },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    {
+      // dual — projected, visibility explicit.
+      name: "meeting_toggle",
+      description: "Toggle recording",
+      inputSchema: { type: "object", properties: {} },
+      _meta: { ui: { visibility: ["model", "app"] } },
+    },
+  ],
 };
 
-describe("plugin-server-projection — toolSchema → MCP Tool (#1230 §3.3)", () => {
-  it("relabels the inputSchema dialect to JSON Schema 2020-12", () => {
-    const tool = toolSchemaToMcpTool("meeting_start", BASE_MANIFEST.toolSchemas!.meeting_start, "2.1.0");
-    expect(tool.inputSchema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
-    // body keywords preserved
-    expect(tool.inputSchema.properties).toEqual({ room: { type: "string" } });
-    expect(tool.inputSchema.required).toEqual(["room"]);
+describe("plugin-server-projection — normalized Tool[] → MCP tools/list (#885 v6)", () => {
+  it("relabels the inputSchema dialect to JSON Schema 2020-12, preserving body keywords", () => {
+    const start = manifestToolsToMcpTools(BASE_MANIFEST).find((t) => t.name === "meeting_start")!;
+    expect(start.inputSchema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+    expect(start.inputSchema.properties).toEqual({ room: { type: "string" } });
+    expect(start.inputSchema.required).toEqual(["room"]);
   });
 
-  it("carries the authoritative category in reverse-DNS _meta (NOT a reserved mcp prefix)", () => {
-    const tool = toolSchemaToMcpTool("meeting_start", BASE_MANIFEST.toolSchemas!.meeting_start, "2.1.0");
-    expect(tool._meta["xyz.lvis/category"]).toBe("shell");
-    // §8: no LVIS key may use an mcp/modelcontextprotocol second label.
-    for (const key of Object.keys(tool._meta)) {
-      expect(key.startsWith("xyz.lvis/")).toBe(true);
-      expect(key).not.toMatch(/(^|\.)(mcp|modelcontextprotocol)\//);
+  it("emits _meta.ui.visibility EXPLICITLY on every projected tool", () => {
+    const tools = manifestToolsToMcpTools(BASE_MANIFEST);
+    for (const t of tools) {
+      expect(Array.isArray(t._meta.ui.visibility)).toBe(true);
+      expect(t._meta.ui.visibility.length).toBeGreaterThan(0);
+    }
+    expect(tools.find((t) => t.name === "meeting_toggle")!._meta.ui.visibility).toEqual(["model", "app"]);
+  });
+
+  it("EXCLUDES app-only (UI-only/auth) tools from the LLM registry (#1554 registry-exclusion)", () => {
+    const names = manifestToolsToMcpTools(BASE_MANIFEST).map((t) => t.name);
+    // model-only + dual project, in manifest order; app-only excluded.
+    expect(names).toEqual(["meeting_start", "meeting_export", "meeting_toggle"]);
+    expect(names).not.toContain("meeting_upload_chunk");
+  });
+
+  it("carries pathFields in _meta iff declared, and emits NONE of the removed proprietary keys / annotations", () => {
+    const tools = manifestToolsToMcpTools(BASE_MANIFEST);
+    const start = tools.find((t) => t.name === "meeting_start")!;
+    const exp = tools.find((t) => t.name === "meeting_export")!;
+    expect((start._meta as Record<string, unknown>)["xyz.lvis/pathFields"]).toBeUndefined();
+    expect(exp._meta["xyz.lvis/pathFields"]).toEqual(["path"]);
+    for (const t of tools) {
+      const meta = t._meta as Record<string, unknown>;
+      // removed fields never ride the wire
+      expect(meta["xyz.lvis/category"]).toBeUndefined();
+      expect(meta["xyz.lvis/version"]).toBeUndefined();
+      expect(meta["xyz.lvis/writesToOwnSandbox"]).toBeUndefined();
+      expect(meta["xyz.lvis/workerId"]).toBeUndefined();
+      expect(meta["xyz.lvis/deprecatedSince"]).toBeUndefined();
+      expect(meta["xyz.lvis/replacedBy"]).toBeUndefined();
+      // host never projects (untrusted) annotations
+      expect((t as Record<string, unknown>).annotations).toBeUndefined();
+      // only `ui` + reverse-DNS xyz.lvis/* keys; never a reserved mcp second label.
+      for (const key of Object.keys(meta)) {
+        expect(key === "ui" || key.startsWith("xyz.lvis/")).toBe(true);
+        expect(key).not.toMatch(/(^|\.)(mcp|modelcontextprotocol)\//);
+      }
     }
   });
 
-  it("default-strict: a toolSchema entry without category projects write-equivalent (loads, no throw)", () => {
-    // host-classifies-risk: category is optional. A manifest that omits it
-    // must still load and project a valid (write-equivalent) declared category.
-    const tool = toolSchemaToMcpTool(
-      "uncategorized_tool",
-      {
-        description: "no category declared",
-        inputSchema: { type: "object", properties: {} },
-      },
-      "1.0.0",
-    );
-    expect(tool._meta["xyz.lvis/category"]).toBe("write");
-    // annotations reflect the write-equivalent baseline (destructive, not read-only)
-    expect(tool.annotations.readOnlyHint).toBe(false);
-    expect(tool.annotations.destructiveHint).toBe(true);
-  });
-
-  it("falls back the tool version to the manifest version when omitted, else uses the tool's own", () => {
-    const start = toolSchemaToMcpTool("meeting_start", BASE_MANIFEST.toolSchemas!.meeting_start, "2.1.0");
-    expect(start._meta["xyz.lvis/version"]).toBe("2.1.0"); // inherits manifest version
-    const exp = toolSchemaToMcpTool("meeting_export", BASE_MANIFEST.toolSchemas!.meeting_export, "2.1.0");
-    expect(exp._meta["xyz.lvis/version"]).toBe("3.0.0"); // tool's own version
-  });
-
-  it("carries optional policy fields in _meta only when present", () => {
-    const start = toolSchemaToMcpTool("meeting_start", BASE_MANIFEST.toolSchemas!.meeting_start, "2.1.0");
-    expect(start._meta["xyz.lvis/pathFields"]).toBeUndefined();
-    expect(start._meta["xyz.lvis/workerId"]).toBeUndefined();
-    expect(start._meta["xyz.lvis/writesToOwnSandbox"]).toBeUndefined();
-
-    const exp = toolSchemaToMcpTool("meeting_export", BASE_MANIFEST.toolSchemas!.meeting_export, "2.1.0");
-    expect(exp._meta["xyz.lvis/pathFields"]).toEqual(["path"]);
-    expect(exp._meta["xyz.lvis/workerId"]).toBe("export-worker");
-    expect(exp._meta["xyz.lvis/writesToOwnSandbox"]).toBe(true);
-    expect(exp._meta["xyz.lvis/deprecatedSince"]).toBe("2.0.0");
-    expect(exp._meta["xyz.lvis/replacedBy"]).toBe("meeting_export_v2");
-  });
-
-  it("projects category → ToolAnnotations hints (interop only)", () => {
+  it("annotationsForCategory retains the interop mapping (retained for Phase-R, no longer wired)", () => {
     expect(annotationsForCategory("read")).toEqual({
       readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false,
     });
     expect(annotationsForCategory("write")).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(annotationsForCategory("shell")).toMatchObject({ destructiveHint: true });
     expect(annotationsForCategory("network")).toMatchObject({ openWorldHint: true, readOnlyHint: false });
-  });
-});
-
-describe("plugin-server-projection — manifest → tools/list (#1230 §3.3)", () => {
-  it("projects every tool that has a schema, in manifest order", () => {
-    const tools = manifestToolsToMcpTools(BASE_MANIFEST);
-    expect(tools.map((t) => t.name)).toEqual(["meeting_start", "meeting_export"]);
-  });
-
-  it("skips a declared tool that has no toolSchemas entry (UI-only / mis-declared)", () => {
-    const manifest: PluginManifest = {
-      ...BASE_MANIFEST,
-      tools: ["meeting_start", "ui_only_method"],
-    };
-    const tools = manifestToolsToMcpTools(manifest);
-    expect(tools.map((t) => t.name)).toEqual(["meeting_start"]);
   });
 });
 
@@ -132,7 +118,7 @@ describe("plugin-server-projection — manifest → server/discover (#1230 §3.2
 
   it("declares the MCP Apps extension only when the manifest ships UI", () => {
     expect(manifestToDiscoverResult(BASE_MANIFEST).capabilities.extensions).toBeUndefined();
-    const withUi: PluginManifest = {
+    const withUi: NormalizedManifest = {
       ...BASE_MANIFEST,
       ui: [{ slot: "sidebar", entry: "ui/panel.js", title: "Meeting" } as never],
     };
@@ -143,9 +129,8 @@ describe("plugin-server-projection — manifest → server/discover (#1230 §3.2
   });
 
   it("does NOT project the advisory manifest.capabilities[] into MCP ServerCapabilities", () => {
-    const withCaps: PluginManifest = { ...BASE_MANIFEST, capabilities: ["meeting-recorder", "mail-source"] };
+    const withCaps: NormalizedManifest = { ...BASE_MANIFEST, capabilities: ["meeting-recorder", "mail-source"] };
     const discover = manifestToDiscoverResult(withCaps);
-    // capabilities map has only `tools` (derived from tools[]); no kebab tags leak in.
     expect(Object.keys(discover.capabilities)).toEqual(["tools"]);
     expect(JSON.stringify(discover.capabilities)).not.toContain("meeting-recorder");
   });

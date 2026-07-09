@@ -42,7 +42,7 @@ import type {
   OpenAuthWindowBaseOptions,
   OpenAuthWindowFinalUrlResult,
   PluginHostApi,
-  PluginManifest,
+  NormalizedManifest,
 } from "../../../plugins/types.js";
 import type { SettingsService } from "../../../data/settings-store.js";
 import type { RoutinesStore } from "../../../main/routines-store.js";
@@ -120,7 +120,7 @@ export interface CreateHostApiFactoryDeps {
  */
 export function createHostApiFactory(
   deps: CreateHostApiFactoryDeps,
-): (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi {
+): (pluginId: string, manifest: NormalizedManifest, pluginDataDir: string) => PluginHostApi {
   const {
     getPluginRuntime,
     lateBinding,
@@ -143,7 +143,7 @@ export function createHostApiFactory(
     routinesStore,
   } = deps;
 
-  return (pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi => {
+  return (pluginId: string, manifest: NormalizedManifest, pluginDataDir: string): PluginHostApi => {
     // Lazy binding — resolve the eventual `pluginRuntime` assignment (this
     // closure only runs during startAll, after the barrel assigns it). All
     // body references below read this single resolved value; `pluginRuntime` is

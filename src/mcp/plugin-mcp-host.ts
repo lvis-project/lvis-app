@@ -32,7 +32,7 @@ import { lintToolInputSchema } from "../plugins/tool-schema-lint.js";
 import { createLogger } from "../lib/logger.js";
 import type { Tool } from "../tools/base.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import type { PluginManifest } from "../plugins/types.js";
+import type { NormalizedManifest } from "../plugins/types.js";
 import type { McpUiPayload } from "./types.js";
 
 const log = createLogger("plugin-mcp-host");
@@ -91,7 +91,7 @@ export class PluginMcpHost {
    * manifest is projected into the in-process {@link PluginMcpServer}.
    */
   static loopback(
-    manifest: PluginManifest,
+    manifest: NormalizedManifest,
     delegate: PluginToolDelegate,
     toolRegistry: ToolRegistry,
   ): PluginMcpHost {
