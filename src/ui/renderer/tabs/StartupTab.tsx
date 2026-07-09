@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Switch } from "../../../components/ui/switch.js";
+import { Label } from "../../../components/ui/label.js";
+import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { getApi } from "../api-client.js";
@@ -27,6 +29,9 @@ export function StartupTab() {
   const [toggleWindow, setToggleWindow] = useState<string | null>(null);
   const [launchAtStartup, setLaunchAtStartup] = useState(false);
   const [launchMinimized, setLaunchMinimized] = useState(false);
+  // Default mirrors `DEFAULT_SETTINGS.system.closeBehavior` so the radio group
+  // renders the correct selection even before `settings` arrives.
+  const [closeBehavior, setCloseBehavior] = useState<"hide-to-tray" | "quit">("hide-to-tray");
   const [capturing, setCapturing] = useState(false);
   const captureInputRef = useRef<HTMLDivElement | null>(null);
 
@@ -35,6 +40,7 @@ export function StartupTab() {
     setToggleWindow(s.shortcuts?.toggleWindow ?? null);
     setLaunchAtStartup(s.system?.launchAtStartup ?? false);
     setLaunchMinimized(s.system?.launchMinimized ?? false);
+    setCloseBehavior(s.system?.closeBehavior ?? "hide-to-tray");
     setLoaded(true);
   }, []);
 
@@ -58,7 +64,7 @@ export function StartupTab() {
   );
 
   const persistSystem = useCallback(
-    (next: { launchAtStartup?: boolean; launchMinimized?: boolean }) => {
+    (next: { launchAtStartup?: boolean; launchMinimized?: boolean; closeBehavior?: "hide-to-tray" | "quit" }) => {
       void api.updateSettings({ system: next });
     },
     [api],
@@ -88,6 +94,15 @@ export function StartupTab() {
     (value: boolean) => {
       setLaunchMinimized(value);
       persistSystem({ launchMinimized: value });
+    },
+    [persistSystem],
+  );
+
+  const handleCloseBehaviorChange = useCallback(
+    (value: string) => {
+      if (value !== "hide-to-tray" && value !== "quit") return;
+      setCloseBehavior(value);
+      persistSystem({ closeBehavior: value });
     },
     [persistSystem],
   );
@@ -240,6 +255,37 @@ export function StartupTab() {
             data-testid="startup-launch-minimized"
           />
         </div>
+      </SettingsSection>
+
+      {/* Window close behavior (moved from the former General tab) */}
+      <SettingsSection
+        title={t("generalTab.systemBehaviorTitle")}
+        description={t("generalTab.systemBehaviorDescription")}
+      >
+        <RadioGroup
+          value={closeBehavior}
+          onValueChange={handleCloseBehaviorChange}
+          className="gap-3"
+        >
+          <div className="flex items-start gap-3 rounded-md border bg-card/(--opacity-half) p-3">
+            <RadioGroupItem value="hide-to-tray" id="close-hide-to-tray" className="mt-0.5" />
+            <Label htmlFor="close-hide-to-tray" className="cursor-pointer">
+              <div className="font-medium">{t("generalTab.hideToTrayLabel")}</div>
+              <div className="text-xs text-muted-foreground">
+                {t("generalTab.hideToTrayDescription")}
+              </div>
+            </Label>
+          </div>
+          <div className="flex items-start gap-3 rounded-md border bg-card/(--opacity-half) p-3">
+            <RadioGroupItem value="quit" id="close-quit" className="mt-0.5" />
+            <Label htmlFor="close-quit" className="cursor-pointer">
+              <div className="font-medium">{t("generalTab.quitLabel")}</div>
+              <div className="text-xs text-muted-foreground">
+                {t("generalTab.quitDescription")}
+              </div>
+            </Label>
+          </div>
+        </RadioGroup>
       </SettingsSection>
     </div>
   );

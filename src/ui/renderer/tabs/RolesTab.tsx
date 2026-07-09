@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
@@ -10,22 +10,11 @@ import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { useTranslation } from "../../../i18n/react.js";
 
-type Section = "agents" | "memory" | "preferences" | "roles" | "preview";
-
-const SECTIONS: Array<{ id: Section; labelKey: string }> = [
-  { id: "agents", labelKey: "rolesTab.sectionAgents" },
-  { id: "memory", labelKey: "rolesTab.sectionMemory" },
-  { id: "preferences", labelKey: "rolesTab.sectionPreferences" },
-  { id: "roles", labelKey: "rolesTab.sectionRoles" },
-  { id: "preview", labelKey: "rolesTab.sectionPreview" },
-];
-
 const EMPTY_DRAFT: RolePreset = { id: "", name: "", systemPromptAdd: "" };
 
 export function RolesTab({ api }: { api: LvisApi }) {
   const { t } = useTranslation();
   const notifySaved = useNotifySaved();
-  const [section, setSection] = useState<Section>("agents");
   const [rolePresets, setRolePresets] = useState<RolePreset[]>([]);
   const [draft, setDraft] = useState<RolePreset>(EMPTY_DRAFT);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -280,8 +269,6 @@ export function RolesTab({ api }: { api: LvisApi }) {
     }
   };
 
-  const selectedSection = useMemo(() => SECTIONS.find((item) => item.id === section), [section]);
-  const sectionLabel = (item: { id: Section; labelKey: string }) => t(item.labelKey);
   const preferencesBusy = saving === "preferences" || saving === "refresh-preferences";
 
   return (
@@ -291,103 +278,94 @@ export function RolesTab({ api }: { api: LvisApi }) {
         description={t("rolesTab.pageDescription")}
       />
 
-      <SettingsSection title={t("rolesTab.sectionSourceTitle")}>
-        <div className="flex flex-wrap gap-2">
-          {SECTIONS.map((item) => (
-            <Button key={item.id} type="button" size="sm" variant={section === item.id ? "default" : "outline"} onClick={() => setSection(item.id)}>
-              {sectionLabel(item)}
-            </Button>
-          ))}
-        </div>
-
-        <div className="min-h-[420px] rounded-md border border-border/(--opacity-intense) bg-background/(--opacity-strong) p-3">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="text-sm font-semibold">{selectedSection ? sectionLabel(selectedSection) : null}</div>
-            {loading ? <Badge variant="secondary">{t("rolesTab.loadingBadge")}</Badge> : null}
+      {/* Inline sections (converted from the former button-based sub-nav):
+          Agents / Memory / Preferences / Roles / Preview are stacked and all
+          visible, so the whole memory + persona surface scrolls as one page. */}
+      <SettingsSection
+        title={t("rolesTab.sectionAgents")}
+        badge={loading ? <Badge variant="secondary">{t("rolesTab.loadingBadge")}</Badge> : undefined}
+      >
+        <div className="space-y-3">
+          <Textarea value={agentsDraft} onChange={(event) => setAgentsDraft(event.target.value)} className="min-h-[320px] font-mono text-xs" />
+          <div className="flex justify-end">
+            <Button size="sm" onClick={saveAgents} disabled={saving === "agents"}>{saving === "agents" ? t("rolesTab.savingLabel") : t("rolesTab.saveAgentsButton")}</Button>
           </div>
+        </div>
+      </SettingsSection>
 
-          {section === "agents" ? (
-            <div className="space-y-3">
-              <Textarea value={agentsDraft} onChange={(event) => setAgentsDraft(event.target.value)} className="min-h-[320px] font-mono text-xs" />
-              <div className="flex justify-end">
-                <Button size="sm" onClick={saveAgents} disabled={saving === "agents"}>{saving === "agents" ? t("rolesTab.savingLabel") : t("rolesTab.saveAgentsButton")}</Button>
-              </div>
-            </div>
-          ) : null}
-
-          {section === "memory" ? (
-            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_320px]">
-              <Textarea value={memoryIndex} onChange={(event) => setMemoryIndex(event.target.value)} className="min-h-[420px] font-mono text-xs" />
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Textarea value={quickMemory} maxLength={520} onChange={(event) => setQuickMemory(event.target.value)} placeholder={t("rolesTab.quickMemoryPlaceholder")} className="min-h-[120px] text-xs" />
-                  <div className="text-right text-[11px] text-muted-foreground">{quickMemory.length}/520</div>
-                  <Textarea value={quickLinks} onChange={(event) => setQuickLinks(event.target.value)} placeholder={t("rolesTab.referenceLinkPlaceholder")} className="min-h-[70px] text-xs" />
-                  <div className="flex justify-end gap-2">
-                    <Button size="sm" variant="outline" onClick={refreshMemoryIndex} disabled={saving === "memory-index"}>{t("rolesTab.reloadButton")}</Button>
-                    <Button size="sm" variant="outline" onClick={saveMemoryIndex} disabled={saving === "memory-index-save"}>{t("rolesTab.saveMemoryButton")}</Button>
-                    <Button size="sm" onClick={saveQuickMemory} disabled={!quickMemory.trim() || saving === "quick-memory"}>{t("rolesTab.saveToSectionButton")}</Button>
-                  </div>
-                </div>
-                <div className="space-y-2 border-t border-border/(--opacity-stronger) pt-3">
-                  <Input value={detailMemoryTitle} onChange={(event) => setDetailMemoryTitle(event.target.value)} placeholder={t("rolesTab.detailMemoryTitlePlaceholder")} />
-                  <Textarea value={detailMemory} onChange={(event) => setDetailMemory(event.target.value)} placeholder={t("rolesTab.detailMemoryPlaceholder")} className="min-h-[110px] text-xs" />
-                  <Textarea value={detailLinks} onChange={(event) => setDetailLinks(event.target.value)} placeholder={t("rolesTab.referenceLinkPlaceholder")} className="min-h-[70px] text-xs" />
-                  <div className="flex justify-end">
-                    <Button size="sm" onClick={saveDetailedMemory} disabled={!detailMemoryTitle.trim() || !detailMemory.trim() || saving === "detail-memory"}>{t("rolesTab.saveDetailMemoryButton")}</Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {section === "preferences" ? (
-            <div className="space-y-3">
-              <Textarea value={userPrefsDraft} onChange={(event) => setUserPrefsDraft(event.target.value)} className="min-h-[320px] font-mono text-xs" />
+      <SettingsSection title={t("rolesTab.sectionMemory")}>
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_320px]">
+          <Textarea value={memoryIndex} onChange={(event) => setMemoryIndex(event.target.value)} className="min-h-[420px] font-mono text-xs" />
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Textarea value={quickMemory} maxLength={520} onChange={(event) => setQuickMemory(event.target.value)} placeholder={t("rolesTab.quickMemoryPlaceholder")} className="min-h-[120px] text-xs" />
+              <div className="text-right text-[11px] text-muted-foreground">{quickMemory.length}/520</div>
+              <Textarea value={quickLinks} onChange={(event) => setQuickLinks(event.target.value)} placeholder={t("rolesTab.referenceLinkPlaceholder")} className="min-h-[70px] text-xs" />
               <div className="flex justify-end gap-2">
-                <Button size="sm" variant="outline" onClick={refreshUserPrefs} disabled={preferencesBusy}>{saving === "refresh-preferences" ? t("rolesTab.refreshingLabel") : t("rolesTab.refreshWithLlmButton")}</Button>
-                <Button size="sm" onClick={saveUserPrefs} disabled={preferencesBusy}>{saving === "preferences" ? t("rolesTab.savingLabel") : t("rolesTab.saveUserPrefsButton")}</Button>
+                <Button size="sm" variant="outline" onClick={refreshMemoryIndex} disabled={saving === "memory-index"}>{t("rolesTab.reloadButton")}</Button>
+                <Button size="sm" variant="outline" onClick={saveMemoryIndex} disabled={saving === "memory-index-save"}>{t("rolesTab.saveMemoryButton")}</Button>
+                <Button size="sm" onClick={saveQuickMemory} disabled={!quickMemory.trim() || saving === "quick-memory"}>{t("rolesTab.saveToSectionButton")}</Button>
               </div>
             </div>
-          ) : null}
-
-          {section === "roles" ? (
-            <div className="space-y-3">
-              <div className="space-y-2">
-                {rolePresets.map((preset) => (
-                  <div key={preset.id} className="rounded-md border border-border/(--opacity-stronger) p-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium">
-                          {preset.name}
-                          {preset.isDefault ? <Badge variant="secondary" className="ml-2 text-[10px]">{t("rolesTab.defaultBadge")}</Badge> : null}
-                        </div>
-                        <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{preset.systemPromptAdd || t("rolesTab.noRolePrompt")}</div>
-                      </div>
-                      <div className="flex shrink-0 gap-1">
-                        <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => startEdit(preset)} disabled={!rolesLoaded || Boolean(preset.isDefault)}>{t("rolesTab.editButton")}</Button>
-                        {!preset.isDefault ? <Button size="sm" variant="ghost" className="h-7 text-[11px] text-destructive" onClick={() => void removePreset(preset.id)} disabled={!rolesLoaded}>{t("rolesTab.deleteButton")}</Button> : null}
-                      </div>
-                    </div>
-                  </div>
-                ))}
+            <div className="space-y-2 border-t border-border/(--opacity-stronger) pt-3">
+              <Input value={detailMemoryTitle} onChange={(event) => setDetailMemoryTitle(event.target.value)} placeholder={t("rolesTab.detailMemoryTitlePlaceholder")} />
+              <Textarea value={detailMemory} onChange={(event) => setDetailMemory(event.target.value)} placeholder={t("rolesTab.detailMemoryPlaceholder")} className="min-h-[110px] text-xs" />
+              <Textarea value={detailLinks} onChange={(event) => setDetailLinks(event.target.value)} placeholder={t("rolesTab.referenceLinkPlaceholder")} className="min-h-[70px] text-xs" />
+              <div className="flex justify-end">
+                <Button size="sm" onClick={saveDetailedMemory} disabled={!detailMemoryTitle.trim() || !detailMemory.trim() || saving === "detail-memory"}>{t("rolesTab.saveDetailMemoryButton")}</Button>
               </div>
-              <div className="rounded-md border border-border/(--opacity-stronger) p-3">
-                <div className="mb-2 text-sm font-medium">{editingId ? t("rolesTab.editPromptHeading") : t("rolesTab.newRolePromptHeading")}</div>
-                <div className="space-y-2">
-                  <Input placeholder={t("rolesTab.namePlaceholder")} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
-                  <Textarea placeholder={t("rolesTab.systemPromptPlaceholder")} value={draft.systemPromptAdd} onChange={(event) => setDraft({ ...draft, systemPromptAdd: event.target.value })} className="min-h-[90px]" />
-                  <div className="flex justify-end gap-2">
-                    {editingId ? <Button size="sm" variant="ghost" onClick={cancelEdit}>{t("rolesTab.cancelButton")}</Button> : null}
-                    <Button size="sm" onClick={() => void saveDraft()} disabled={!rolesLoaded || !draft.name.trim() || saving === "roles"}>{editingId ? t("rolesTab.updateButton") : t("rolesTab.addButton")}</Button>
+            </div>
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title={t("rolesTab.sectionPreferences")}>
+        <div className="space-y-3">
+          <Textarea value={userPrefsDraft} onChange={(event) => setUserPrefsDraft(event.target.value)} className="min-h-[320px] font-mono text-xs" />
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="outline" onClick={refreshUserPrefs} disabled={preferencesBusy}>{saving === "refresh-preferences" ? t("rolesTab.refreshingLabel") : t("rolesTab.refreshWithLlmButton")}</Button>
+            <Button size="sm" onClick={saveUserPrefs} disabled={preferencesBusy}>{saving === "preferences" ? t("rolesTab.savingLabel") : t("rolesTab.saveUserPrefsButton")}</Button>
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title={t("rolesTab.sectionRoles")}>
+        <div className="space-y-3">
+          <div className="space-y-2">
+            {rolePresets.map((preset) => (
+              <div key={preset.id} className="rounded-md border border-border/(--opacity-stronger) p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">
+                      {preset.name}
+                      {preset.isDefault ? <Badge variant="secondary" className="ml-2 text-[10px]">{t("rolesTab.defaultBadge")}</Badge> : null}
+                    </div>
+                    <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{preset.systemPromptAdd || t("rolesTab.noRolePrompt")}</div>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => startEdit(preset)} disabled={!rolesLoaded || Boolean(preset.isDefault)}>{t("rolesTab.editButton")}</Button>
+                    {!preset.isDefault ? <Button size="sm" variant="ghost" className="h-7 text-[11px] text-destructive" onClick={() => void removePreset(preset.id)} disabled={!rolesLoaded}>{t("rolesTab.deleteButton")}</Button> : null}
                   </div>
                 </div>
               </div>
+            ))}
+          </div>
+          <div className="rounded-md border border-border/(--opacity-stronger) p-3">
+            <div className="mb-2 text-sm font-medium">{editingId ? t("rolesTab.editPromptHeading") : t("rolesTab.newRolePromptHeading")}</div>
+            <div className="space-y-2">
+              <Input placeholder={t("rolesTab.namePlaceholder")} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+              <Textarea placeholder={t("rolesTab.systemPromptPlaceholder")} value={draft.systemPromptAdd} onChange={(event) => setDraft({ ...draft, systemPromptAdd: event.target.value })} className="min-h-[90px]" />
+              <div className="flex justify-end gap-2">
+                {editingId ? <Button size="sm" variant="ghost" onClick={cancelEdit}>{t("rolesTab.cancelButton")}</Button> : null}
+                <Button size="sm" onClick={() => void saveDraft()} disabled={!rolesLoaded || !draft.name.trim() || saving === "roles"}>{editingId ? t("rolesTab.updateButton") : t("rolesTab.addButton")}</Button>
+              </div>
             </div>
-          ) : null}
+          </div>
+        </div>
+      </SettingsSection>
 
-          {section === "preview" ? (
-            <pre className="overflow-auto rounded-md bg-muted/(--opacity-half) p-3 text-xs leading-5">
+      <SettingsSection title={t("rolesTab.sectionPreview")}>
+        <pre className="overflow-auto rounded-md bg-muted/(--opacity-half) p-3 text-xs leading-5">
 {`AGENTS.md                  -> project / org / agent operating context
 memories/MEMORY.md          -> urgent memory, references, and saved-memory index
 memories/*.md               -> detailed long-term memories with references
@@ -400,13 +378,11 @@ Idle:
 Turn:
   system prompt reads AGENTS.md + user-preferences.md + MEMORY.md + memories/*.md
   selected persona prompt is injected as a per-turn system prompt section`}
-            </pre>
-          ) : null}
-        </div>
-
-        {status ? <div className="text-xs text-muted-foreground">{status}</div> : null}
-        {error ? <div className="whitespace-pre-line text-xs text-destructive">{error}</div> : null}
+        </pre>
       </SettingsSection>
+
+      {status ? <div className="text-xs text-muted-foreground">{status}</div> : null}
+      {error ? <div className="whitespace-pre-line text-xs text-destructive">{error}</div> : null}
     </div>
   );
 }

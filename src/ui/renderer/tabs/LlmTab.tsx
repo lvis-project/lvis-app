@@ -24,7 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../../components/ui/dialog.js";
-import { Loader2, RefreshCw, Store } from "lucide-react";
+import { KeyRound, Loader2, LogOut, RefreshCw, Store } from "lucide-react";
 import {
   REASONING_EFFORT_STEPS,
   VENDORS,
@@ -62,6 +62,23 @@ import { formatIpcError } from "../format-ipc-error.js";
 export interface FallbackEntry {
   provider: string;
   model: string;
+}
+
+/** Extract the user honorific ("호칭: …") from MEMORY.md for the account card. */
+function extractHonorific(userPrefsMd: string): string | null {
+  const m = userPrefsMd.match(/(?:사용자\s*)?호칭\s*[:：]\s*(.+)/);
+  return m ? m[1].trim().split(/\s+/)[0] : null;
+}
+
+/** First non-metadata line of MEMORY.md as a short preview. */
+function extractIntroPreview(userPrefsMd: string): string | null {
+  const lines = userPrefsMd
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#") && !line.startsWith("-"));
+  if (lines.length === 0) return null;
+  const first = lines[0];
+  return first.length > 120 ? first.slice(0, 117) + "…" : first;
 }
 
 
@@ -318,6 +335,13 @@ export interface LlmTabProps {
   onSave?: () => void;
   saving?: boolean;
   settingsLoaded?: boolean;
+  /**
+   * Account/auth management (relocated from the former General tab onto this
+   * Model surface so login + key + account live together). Fired after a
+   * successful logout / when the user asks to re-enter their activation key.
+   */
+  onLogout?: () => void;
+  onReactivateDemo?: () => void;
 }
 
 /**
@@ -598,6 +622,8 @@ export function LlmTab(props: LlmTabProps) {
     onSave,
     saving = false,
     settingsLoaded = true,
+    onLogout,
+    onReactivateDemo,
   } = props;
   const { t } = useTranslation();
   const selectedMarketplaceProviderPreset = vendor === "openai-compatible" && marketplaceProviderPresetId
@@ -947,12 +973,193 @@ export function LlmTab(props: LlmTabProps) {
   const hostMapChanged = hostResolverMap !== loadedHostResolverMap;
   const hostMapEntryCount = parseHostResolverMap(hostResolverMap).length;
 
+  // ── Account identity + auth management (relocated from the former General
+  //    tab). Honorific/intro come from MEMORY.md; provider/authMode/key state
+  //    reuse the props already hydrated here so no second settings fetch is
+  //    needed. Logout deletes the active vendor secret, clears the demo
+  //    session, and resets authMode to manual before handing off to onLogout.
+  const [userPrefs, setUserPrefs] = useState<string>("");
+  useEffect(() => {
+    let alive = true;
+    void api.memoryGetUserPrefs().then(
+      (prefs) => { if (alive) setUserPrefs(prefs); },
+      () => { /* MEMORY.md read is non-fatal for the account card */ },
+    );
+    return () => { alive = false; };
+  }, [api]);
+  const honorific = useMemo(() => extractHonorific(userPrefs), [userPrefs]);
+  const intro = useMemo(() => extractIntroPreview(userPrefs), [userPrefs]);
+  const avatarInitial = (honorific?.slice(0, 1) ?? vendor.slice(0, 1) ?? "?").toUpperCase();
+
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+
+  const performLogout = useCallback(async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    setLogoutError(null);
+    try {
+      const activeVendor = vendor;
+      if (activeVendor.length > 0) {
+        try {
+          const activeCredentialId =
+            activeVendor === "openai-compatible" && marketplaceProviderPresetId
+              ? marketplaceProviderPresetSecretId(marketplaceProviderPresetId)
+              : activeVendor;
+          await api.deleteApiKey(activeCredentialId);
+        } catch {
+          // Logout is a credential-deletion operation. If the active vendor
+          // secret remains, resetting onboarding would create a false logged-
+          // out state while privileged credentials are still present.
+          setLogoutError(t("generalTab.errorDeleteApiKey"));
+          return;
+        }
+      }
+      const cleared = await api.demo.clearDemo();
+      if (!cleared.ok) {
+        setLogoutError(t("generalTab.errorDeleteDemoCredentials"));
+        return;
+      }
+      // Reset authMode to "manual" so the form immediately shows the full
+      // manual state after logout — the login session is gone.
+      await api.updateSettings({ llm: { authMode: "manual" }, features: { onboardingCompleted: false } });
+      setLogoutConfirmOpen(false);
+      onLogout?.();
+    } catch {
+      setLogoutError(t("generalTab.errorLogout"));
+    } finally {
+      setLoggingOut(false);
+    }
+  }, [api, loggingOut, onLogout, marketplaceProviderPresetId, vendor, t]);
+
+  const handleLogoutClick = useCallback(() => {
+    setLogoutError(null);
+    setLogoutConfirmOpen(true);
+  }, []);
+
+  const handleReactivateClick = useCallback(() => {
+    onReactivateDemo?.();
+  }, [onReactivateDemo]);
+
   return (
     <div className="space-y-6">
       <SettingsPageHeader
         title={t("llmTab.pageTitle")}
         description={t("llmTab.pageDescription")}
       />
+
+      {/* Account identity + auth management (relocated from the former General
+          tab so login + key + account live on one surface). */}
+      <SettingsSection
+        title={t("generalTab.accountTitle")}
+        description={t("generalTab.accountDescription")}
+      >
+        <div className="flex items-start gap-4">
+          <div
+            className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary/(--opacity-soft) text-lg font-semibold text-primary"
+            aria-hidden="true"
+          >
+            {avatarInitial}
+          </div>
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-base font-semibold">{honorific ?? t("generalTab.nameNotSet")}</p>
+              {vendor && (
+                <Badge variant="secondary" className="text-[10px] uppercase">
+                  {vendor}
+                </Badge>
+              )}
+              {authMode === "login" ? (
+                <Badge variant="default" className="text-[10px]">
+                  {t("generalTab.loginModeBadge")}
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-[10px]">
+                  {t("generalTab.apiKeyModeBadge")}
+                </Badge>
+              )}
+              {hasKey && (
+                <Badge variant="secondary" className="text-[10px]">
+                  {t("generalTab.keyRegisteredBadge")}
+                </Badge>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground" data-testid="general-tab-intro">
+              {intro ?? t("generalTab.introNotSet")}
+            </p>
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t("generalTab.authManagementTitle")}
+        description={t("generalTab.authManagementDescription")}
+      >
+        <div className="flex flex-col gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="justify-start"
+            onClick={handleReactivateClick}
+            disabled={!onReactivateDemo}
+            data-testid="general-tab-reactivate-demo"
+          >
+            <KeyRound className="mr-2 size-4" aria-hidden={true} />
+            {t("generalTab.reactivateDemoButton")}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            className="justify-start"
+            onClick={handleLogoutClick}
+            disabled={!onLogout || loggingOut}
+            data-testid="general-tab-logout"
+          >
+            <LogOut className="mr-2 size-4" aria-hidden={true} />
+            {t("generalTab.logoutButton")}
+          </Button>
+        </div>
+      </SettingsSection>
+
+      <Dialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
+        <DialogContent size="sm" data-testid="general-tab-logout-confirm">
+          <DialogHeader>
+            <DialogTitle>{t("generalTab.logoutConfirmTitle")}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {t("generalTab.logoutConfirmBody")}
+          </p>
+          {logoutError && (
+            <p
+              role="alert"
+              className="rounded-md bg-destructive/(--opacity-subtle) px-3 py-2 text-sm text-destructive"
+              data-testid="general-tab-logout-error"
+            >
+              {logoutError}
+            </p>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setLogoutConfirmOpen(false)}
+              disabled={loggingOut}
+            >
+              {t("generalTab.cancelButton")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void performLogout()}
+              disabled={loggingOut}
+              data-testid="general-tab-logout-confirm-button"
+            >
+              {loggingOut ? t("generalTab.processingLabel") : t("generalTab.logoutConfirmButton")}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Relaunch confirmation dialog — shown before applying host map changes */}
       <Dialog
@@ -1054,16 +1261,11 @@ export function LlmTab(props: LlmTabProps) {
             </RadioGroup>
           </div>
 
-          {/* Login-mode status + action row — shown only when authMode === "login" */}
+          {/* Login-mode action row — shown only when authMode === "login". The
+              logged-in / key state now lives in the consolidated account
+              section above, so this row no longer repeats that badge. */}
           {isLoginMode && (
             <div className="space-y-2" data-testid="llm-tab:login-section">
-              <div className="flex items-center gap-2">
-                {hasKey ? (
-                  <Badge variant="default" className="text-xs">{t("llmTab.loggedIn")}</Badge>
-                ) : (
-                  <Badge variant="secondary" className="text-xs">{t("llmTab.loginRequired")}</Badge>
-                )}
-              </div>
               <Button
                 size="sm"
                 variant="outline"
@@ -1077,13 +1279,13 @@ export function LlmTab(props: LlmTabProps) {
                 {t("llmTab.loginAutoConfig")}
               </p>
               {/* Edit access is gated on logging out. Logout is owned by the
-                  single GeneralTab.performLogout path (which deletes the active
+                  account section's performLogout path above (deletes the active
                   vendor secret, clears the demo session, and persists
                   llm.authMode="manual"). We deliberately do NOT offer a local
                   authMode toggle here: setting renderer state to "manual"
                   without persisting would desync the UI from the stored
                   llm.authMode and revert on the next mount. Point the user at
-                  the canonical logout instead. */}
+                  the account-section logout instead. */}
               <p
                 className="text-[11px] text-muted-foreground"
                 data-testid="llm-tab:logout-hint"

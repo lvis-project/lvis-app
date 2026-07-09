@@ -31,7 +31,13 @@ export interface LoginModalProps {
    */
   onSuccess?: (vendor: string, result: LoginMockupSuccess) => void;
 
-
+  /**
+   * Opens the INLINE settings panel on the given tab (default LLM). The
+   * modal's "bring your own API key" affordances call this instead of the
+   * removed detached settings window so every settings-open lands inline and
+   * is appMode-aware. Optional so standalone/test mounts stay valid.
+   */
+  onOpenSettings?: (tab?: string) => void;
 
   forceActivation?: boolean;
 }

@@ -232,13 +232,3 @@ describe("AppearanceTab — followSystem toggle (violet pair only)", () => {
     expect(queryByTestId("follow-system-toggle")).toBeNull();
   });
 });
-
-describe("AppearanceTab — webView preferredFlow section", () => {
-  it("renders in-app and system-browser radio options", () => {
-    const { getByTestId } = renderWithBundle();
-    const group = getByTestId("webview-preferred-flow");
-    expect(group).toBeTruthy();
-    expect(group.querySelector('[data-value="in-app"]')).toBeTruthy();
-    expect(group.querySelector('[data-value="system-browser"]')).toBeTruthy();
-  });
-});

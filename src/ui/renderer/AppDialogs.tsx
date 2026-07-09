@@ -30,6 +30,7 @@ type Api = ReturnType<typeof getApi>;
  */
 export function AppDialogs({
   api,
+  onOpenSettings,
   deferredQueueOpen,
   onDeferredQueueOpenChange,
   approvalQueue,
@@ -51,6 +52,9 @@ export function AppDialogs({
   onComposerSeedText,
 }: {
   api: Api;
+  /** Route the LoginModal's "bring your own key" affordance to the inline
+   *  settings panel (LLM tab) — there is no detached settings window anymore. */
+  onOpenSettings: (tab?: string) => void;
   deferredQueueOpen: boolean;
   onDeferredQueueOpenChange: (open: boolean) => void;
   approvalQueue: Parameters<typeof ApprovalDialog>[0]["queue"];
@@ -91,6 +95,7 @@ export function AppDialogs({
       />
       <LoginModal
         api={api}
+        onOpenSettings={onOpenSettings}
         open={chainStage === "login"}
         onOpenChange={(next) => {
           if (chainStage !== "login") return;
@@ -110,6 +115,7 @@ export function AppDialogs({
 
       <LoginModal
         api={api}
+        onOpenSettings={onOpenSettings}
         open={reactivationOpen}
         forceActivation
         onOpenChange={(next) => {
