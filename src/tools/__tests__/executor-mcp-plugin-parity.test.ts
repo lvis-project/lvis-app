@@ -41,13 +41,11 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { DeferredQueue } from "../../permissions/reviewer/deferred-queue.js";
-import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
-import { PermissionManager } from "../../permissions/permission-manager.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { createDynamicTool } from "../base.js";
 import { ToolExecutor, type ToolCallMeta, type ToolExecutorCallbacks } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
+import { makePermissionManager } from "./executor-reviewer-fixtures.js";
 
 // ── Fixtures — two tools identical in name/schema/handler, differing ONLY in
 //    source identity (the whole point: any pipeline-step difference must reduce
@@ -86,18 +84,6 @@ function mcpRegistry(executeSpy: ReturnType<typeof vi.fn>): ToolRegistry {
     execute: async (rawInput) => ({ output: await executeSpy(rawInput), isError: false }),
   }));
   return registry;
-}
-
-function makePermissionManager(dir: string, classifySpy: ReturnType<typeof vi.fn>): PermissionManager {
-  const permMgr = new PermissionManager(join(dir, "permissions.json"));
-  permMgr.setMode("default");
-  permMgr.setInteractiveAutoApprove("low");
-  permMgr.setReviewer({
-    classifier: { classify: classifySpy },
-    cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
-    deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
-  });
-  return permMgr;
 }
 
 // ── Audit readers ────────────────────────────────────────────────────────────
