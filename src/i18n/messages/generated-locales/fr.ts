@@ -2463,7 +2463,7 @@ export const frMessages: Record<string, string> = {
   "settingsContent.tabPermissions": "Autorisations",
   "settingsContent.tabPluginConfig": "Paramètres du plugin",
   "settingsContent.tabPluginPerf": "Performances des plugins",
-  "settingsContent.tabRoles": "Rôles",
+  "settingsContent.tabRoles": "Mémoire / Personas",
   "settingsContent.tabUsage": "Usage",
   "settingsContent.tabWeb": "Web / Navigation",
   "settingsWindow.documentTitle": "Paramètres LVIS",

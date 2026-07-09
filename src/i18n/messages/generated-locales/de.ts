@@ -2463,7 +2463,7 @@ export const deMessages: Record<string, string> = {
   "settingsContent.tabPermissions": "Berechtigungen",
   "settingsContent.tabPluginConfig": "Plugin-Einstellungen",
   "settingsContent.tabPluginPerf": "Plugin-Leistung",
-  "settingsContent.tabRoles": "Rollen",
+  "settingsContent.tabRoles": "Speicher / Personas",
   "settingsContent.tabUsage": "Verwendung",
   "settingsContent.tabWeb": "Web / Browsen",
   "settingsWindow.documentTitle": "LVIS-Einstellungen",

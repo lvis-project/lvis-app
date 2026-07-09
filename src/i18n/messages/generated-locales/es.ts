@@ -2463,7 +2463,7 @@ export const esMessages: Record<string, string> = {
   "settingsContent.tabPermissions": "Permisos",
   "settingsContent.tabPluginConfig": "Configuración del complemento",
   "settingsContent.tabPluginPerf": "Rendimiento del complemento",
-  "settingsContent.tabRoles": "Roles",
+  "settingsContent.tabRoles": "Memoria / Personas",
   "settingsContent.tabUsage": "Uso",
   "settingsContent.tabWeb": "Web / Navegación",
   "settingsWindow.documentTitle": "Configuración LVIS",
