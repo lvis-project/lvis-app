@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.5.0 — 2026-07-10
+
+**Plugin Contract v6** (#885) — plugin manifests move to a pure Model Context Protocol `Tool[]` surface, external MCP servers gain per-server isolation, and the host derives every governance signal itself instead of trusting a plugin self-claim. This release is the `minAppVersion` floor for the v6 contract — the marketplace publishes v6 plugins as `requires.minAppVersion: 0.5.0`. Already-installed legacy plugins keep working across the upgrade: the host still reads the legacy manifest shape and compiles it forward at load time. The legacy readers are removed in a later `0.6.0` release, after the migration window — bundling that removal here would break plugins installed before the upgrade.
+
+### Plugin contract
+
+- **Pure MCP `Tool[]` manifest** (`@lvis/plugin-sdk` v6.0.0; host PR #1562, #1563, #1564) — a manifest declares tools as `{name, title?, description?, inputSchema, outputSchema?, icons?, _meta?}`. Per-tool surface visibility is `_meta.ui.visibility: Array<"model"|"app">` (SEP-1865); the one LVIS-proprietary key is `_meta["xyz.lvis/pathFields"]`. `normalizeManifest` is the single legacy-shape reader — it compiles the old `tools[]` + `toolSchemas` + `uiActions` triple into pure `Tool[]`, materializes an absent visibility to the safe `["model","app"]` default, and rejects an explicit empty visibility.
+- **Host-derived governance** (PR #1564) — tool ownership, `writesToOwnSandbox`, and model-vs-app routing are computed by the host from the manifest, never read from a plugin self-claim; the ownership map is built from model-visible tools only, so the auth trio can never widen access control.
+- **First-party plugins republished** on the pure v6 shape, with per-surface set-equality proven against each plugin's legacy manifest.
+
+### MCP isolation
+
+- **Per-server partition + teardown** (PR #1565) — each external MCP server renders in an isolated `mcp-app:<hex>:<cardId>` partition backed by an injective, fail-closed server-id encoding; detached MCP windows are swept on kill-switch / config-removal / disconnect-all, and their storage is cleared on teardown.
+- **Execution-parity regression lock** (PR #1566) — external MCP tools and in-process plugin loopback tools traverse the one `ToolExecutor` pipeline and converge at the same governed chokepoints (Layer-1 deny, ApprovalGate, audit, effect-ledger). A low-trust foreign MCP peer is categorically excluded from the reviewer auto-approve lane and escalates straight to the ApprovalGate — it is never silently auto-approved.
+
 ## v0.4.7 — 2026-07-09
 
 Packaging fix-forward for the failed `v0.4.5` and `v0.4.6` tags. Ships the entire `v0.4.6` payload (see below) — neither of those tags produced a GitHub Release, so `v0.4.4` was the last published build.
