@@ -306,7 +306,7 @@ describe("App smoke (Phase 1 infra)", () => {
   });
 });
 
-describe("Settings inline (work mode) vs detached (chat mode)", () => {
+describe("Settings inline (all modes)", () => {
   it("renders Settings inline, marks the sidebar item active, and returns home", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
@@ -347,7 +347,7 @@ describe("Settings inline (work mode) vs detached (chat mode)", () => {
     );
   });
 
-  it("detaches Settings to its own window in chat mode (unchanged path)", async () => {
+  it("renders Settings inline in chat mode too (no detached window)", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
@@ -358,10 +358,13 @@ describe("Settings inline (work mode) vs detached (chat mode)", () => {
       fireEvent.click(container.querySelector('[data-testid="sidebar-settings"]')!);
     });
 
-    // Chat mode keeps the existing detached BrowserWindow path; nothing renders
-    // inline.
-    await waitFor(() => expect(api.openSettingsWindow).toHaveBeenCalled());
-    expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeFalsy();
+    // settings-inline-overhaul: Settings is an always-inline panel in EVERY app
+    // mode — chat mode no longer detaches a BrowserWindow. The inline surface
+    // renders and the detached-window IPC must never fire.
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
+    );
+    expect(api.openSettingsWindow).not.toHaveBeenCalled();
   });
 });
 
