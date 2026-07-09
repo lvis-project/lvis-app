@@ -42,7 +42,7 @@ import type {
   OpenAuthWindowBaseOptions,
   OpenAuthWindowFinalUrlResult,
   PluginHostApi,
-  PluginManifest,
+  NormalizedManifest,
 } from "../../../plugins/types.js";
 import type { SettingsService } from "../../../data/settings-store.js";
 import type { RoutinesStore } from "../../../main/routines-store.js";
@@ -120,7 +120,7 @@ export interface CreateHostApiFactoryDeps {
  */
 export function createHostApiFactory(
   deps: CreateHostApiFactoryDeps,
-): (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi {
+): (pluginId: string, manifest: NormalizedManifest, pluginDataDir: string) => PluginHostApi {
   const {
     getPluginRuntime,
     lateBinding,
@@ -143,7 +143,7 @@ export function createHostApiFactory(
     routinesStore,
   } = deps;
 
-  return (pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi => {
+  return (pluginId: string, manifest: NormalizedManifest, pluginDataDir: string): PluginHostApi => {
     // Lazy binding — resolve the eventual `pluginRuntime` assignment (this
     // closure only runs during startAll, after the barrel assigns it). All
     // body references below read this single resolved value; `pluginRuntime` is
@@ -742,7 +742,8 @@ export function createHostApiFactory(
       // `pluginId` bound from THIS hostApi instance (a plugin can never name
       // another plugin's namespace). A future host-routed tool producer must
       // prove that its call path actually uses this worker before setting
-      // Tool.workerId; manifest `toolSchemas.workerId` alone is advisory.
+      // Tool.workerId; a plugin-self-claimed worker id is advisory only (#885 v6
+      // removed the manifest field — normalize drops any legacy `workerId`).
       spawnWorker: (workerSpec) => {
         return spawnWorker({ ...workerSpec, pluginId });
       },

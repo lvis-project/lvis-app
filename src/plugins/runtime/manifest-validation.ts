@@ -6,7 +6,15 @@
 
 import { readFile } from "node:fs/promises";
 import type { ValidateFunction } from "ajv";
-import type { PluginManifest, InstallPolicy } from "../types.js";
+import type {
+  PluginManifest,
+  InstallPolicy,
+  NormalizedManifest,
+  RawPluginManifest,
+  Tool,
+} from "../types.js";
+import { normalizeManifest } from "../types.js";
+import { toolVisibility, isModelVisible } from "./tool-visibility.js";
 import { createLogger } from "../../lib/logger.js";
 import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
 import {
@@ -136,6 +144,88 @@ function schemaAcceptsCategorylessToolSchema(validator: ValidateFunction): boole
   return ok === true;
 }
 
+/**
+ * #885 v6 — POSITIVE probe: the SDK schema natively ACCEPTS a pure MCP `Tool[]`
+ * object carrying explicit `_meta.ui.visibility`. Without a v6 SDK the `oneOf`
+ * pure arm is absent and every migrated (or normalized-legacy) manifest would
+ * fail load, so this is gated the same way as the other native-field probes.
+ */
+function schemaAcceptsPureToolObject(validator: ValidateFunction): boolean {
+  const ok = validator({
+    id: "pure-tool-plugin",
+    name: "Pure Tool Plugin",
+    version: "1.0.0",
+    description: "Pure MCP Tool object fixture.",
+    publisher: "LVIS",
+    entry: "dist/index.js",
+    tools: [
+      {
+        name: "pure_ping",
+        description: "Pure ping tool fixture.",
+        inputSchema: { type: "object", properties: {} },
+        _meta: { ui: { visibility: ["model"] } },
+      },
+    ],
+  });
+  return ok === true;
+}
+
+/**
+ * #885 v6 — NEGATIVE-strictness guard (opposite polarity to the accept-probes):
+ * the SDK schema must REJECT a pure tool that carries a v6-removed field
+ * (`writesToOwnSandbox`/`category`/`workerId`/per-tool `version`). A too-permissive
+ * schema would let an untrusted self-claim ride the wire even though the host no
+ * longer reads it — the removal must be enforced at the shape boundary, not just
+ * dropped by `normalizeManifest`.
+ */
+function schemaRejectsPureToolWithRemovedField(validator: ValidateFunction): boolean {
+  const rejected = validator({
+    id: "removed-field-plugin",
+    name: "Removed Field Plugin",
+    version: "1.0.0",
+    description: "Pure tool carrying a removed field fixture.",
+    publisher: "LVIS",
+    entry: "dist/index.js",
+    tools: [
+      {
+        name: "leaky_tool",
+        description: "Declares a removed field.",
+        inputSchema: { type: "object", properties: {} },
+        writesToOwnSandbox: true,
+        _meta: { ui: { visibility: ["model"] } },
+      },
+    ],
+  });
+  return rejected === false;
+}
+
+/**
+ * #885 v6 — NEGATIVE-strictness guard: the SDK schema must REJECT an explicit
+ * empty `_meta.ui.visibility: []` (a tool reachable by neither surface). This is
+ * the `minItems: 1` gate that guarantees `[]` never reaches `normalizeManifest`
+ * or `toolVisibility` — there is exactly ONE resolution for missing visibility
+ * (`[]` → REJECT), never a silent widen to governed-dual (SoT §2.2, u2 §1.4.2).
+ */
+function schemaRejectsEmptyVisibility(validator: ValidateFunction): boolean {
+  const rejected = validator({
+    id: "empty-visibility-plugin",
+    name: "Empty Visibility Plugin",
+    version: "1.0.0",
+    description: "Pure tool with empty visibility fixture.",
+    publisher: "LVIS",
+    entry: "dist/index.js",
+    tools: [
+      {
+        name: "unreachable_tool",
+        description: "Reachable by neither surface.",
+        inputSchema: { type: "object", properties: {} },
+        _meta: { ui: { visibility: [] } },
+      },
+    ],
+  });
+  return rejected === false;
+}
+
 export function normalizeInstallPolicy(
   source: Partial<Pick<PluginManifest, "installPolicy">> | undefined,
 ): InstallPolicy {
@@ -145,7 +235,7 @@ export function normalizeInstallPolicy(
   return "user";
 }
 
-export function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
+export function getDeclaredEmittedEvents(manifest: Pick<PluginManifest, "emittedEvents">): string[] {
   if (!Array.isArray(manifest.emittedEvents)) return [];
   return [...new Set(
     manifest.emittedEvents.filter((e): e is string => typeof e === "string" && e.length > 0),
@@ -156,10 +246,12 @@ export function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
  * Lazy-load + compile the SDK plugin manifest schema into an AJV validator.
  * The SDK schema is the manifest shape SOT; if it cannot be resolved or
  * compiled, plugin loading must fail closed. Do not mutate the SDK schema in
- * the host. As of @lvis/plugin-sdk v5.21.0, the helper must natively accept
+ * the host. As of @lvis/plugin-sdk v6.0.0, the helper must natively accept
  * every host-required manifest field (`networkAccess.allowPrivateNetworks`,
- * `toolSchemas.*.workerId`, marketplace-provider secret grants, and
- * category-less tool schemas).
+ * `toolSchemas.*.workerId`, marketplace-provider secret grants, category-less
+ * tool schemas, AND the pure MCP `Tool[]` object with `_meta.ui.visibility`),
+ * and must be strict enough to REJECT a pure tool carrying a v6-removed field
+ * or an empty `visibility: []` (the negative-strictness guards below).
  */
 export async function buildManifestValidator(): Promise<ValidateFunction> {
   type SdkModule = { compileManifestValidator?: () => ValidateFunction };
@@ -172,7 +264,7 @@ export async function buildManifestValidator(): Promise<ValidateFunction> {
 
   if (typeof sdk.compileManifestValidator !== "function") {
     throw new Error(
-      "SDK plugin manifest validator unavailable: @lvis/plugin-sdk does not export compileManifestValidator(); update @lvis/plugin-sdk to v5.21.0 or newer.",
+      "SDK plugin manifest validator unavailable: @lvis/plugin-sdk does not export compileManifestValidator(); update @lvis/plugin-sdk to v6.0.0 or newer.",
     );
   }
 
@@ -193,10 +285,28 @@ export async function buildManifestValidator(): Promise<ValidateFunction> {
       ? ""
       : "llm.marketplaceProvider.<presetId>.apiKey",
     schemaAcceptsCategorylessToolSchema(validator) ? "" : "category-less toolSchemas",
+    schemaAcceptsPureToolObject(validator) ? "" : "pure MCP Tool[] object (_meta.ui.visibility)",
   ].filter(Boolean);
   if (missingNativeFields.length > 0) {
     throw new Error(
-      `SDK plugin manifest validator is missing native support for ${missingNativeFields.join(", ")}; update @lvis/plugin-sdk to v5.21.0 or newer.`,
+      `SDK plugin manifest validator is missing native support for ${missingNativeFields.join(", ")}; update @lvis/plugin-sdk to v6.0.0 or newer.`,
+    );
+  }
+  // Separate negative-strictness assertions (opposite polarity to the accept
+  // gate above — each must REJECT). A too-permissive schema would let a removed
+  // self-claim field or an unreachable empty-visibility tool through the shape
+  // boundary; fail closed loudly so the contract can't silently regress.
+  const strictnessGaps = [
+    schemaRejectsPureToolWithRemovedField(validator)
+      ? ""
+      : "a pure tool carrying a removed field (writesToOwnSandbox/category/workerId/version) must be rejected",
+    schemaRejectsEmptyVisibility(validator)
+      ? ""
+      : "an empty _meta.ui.visibility: [] must be rejected (minItems:1)",
+  ].filter(Boolean);
+  if (strictnessGaps.length > 0) {
+    throw new Error(
+      `SDK plugin manifest validator is too permissive: ${strictnessGaps.join("; ")}; update @lvis/plugin-sdk to v6.0.0 or newer.`,
     );
   }
   return validator;
@@ -205,13 +315,16 @@ export async function buildManifestValidator(): Promise<ValidateFunction> {
 /**
  * Parse and fully validate a plugin.json manifest file.
  *
- * Runs SDK AJV schema validation followed by host cross-field MUST checks.
+ * Runs SDK AJV schema validation, then compiles the (legacy or pure) manifest
+ * to the pure v6 form via `normalizeManifest` (the SINGLE legacy-shape reader,
+ * SoT §3.1), then runs host cross-field MUST checks against the normalized
+ * `Tool[]`. Returns the {@link NormalizedManifest} every host consumer reads.
  * Throws with a descriptive message on any failure.
  */
 export async function parsePluginJson(
   path: string,
   validator: ValidateFunction,
-): Promise<PluginManifest> {
+): Promise<NormalizedManifest> {
   // Detailed, per-field error messages shaped as
   //   "Invalid plugin manifest '<pluginId>' at '<fieldPath>': <reason>. Example: <correction>"
   const raw = await readFile(path, "utf-8");
@@ -299,7 +412,26 @@ export async function parsePluginJson(
     // Now we name the offending field(s) and append a reinstall hint when
     // it's the additional-property case (typical when SDK schema tightens
     // and a stale plugin install carries a deprecated field).
-    const ajvErrors = validator.errors ?? [];
+    const rawAjvErrors = validator.errors ?? [];
+    // #885 v6 — `tools` is a `oneOf` (legacy `string[]` | pure `Tool[]`). When the
+    // author WROTE the pure form (`tools[0]` is an object), the legacy arm's
+    // "/tools/N must be string" + the "must match exactly one schema in oneOf"
+    // errors are pure NOISE that bury the real pure-arm violation. Filter them so
+    // the user sees only the actionable pure-arm error(s).
+    // `validator` is an AJV type-guard, so inside this `!validator(parsed)` block
+    // TS narrows `parsed` to `never` — read `tools` back through a cast.
+    const toolsRaw = (parsed as { tools?: unknown }).tools;
+    const isPureShape = Array.isArray(toolsRaw) && typeof toolsRaw[0] === "object";
+    const filteredAjvErrors = isPureShape
+      ? rawAjvErrors.filter(
+          (e) =>
+            !(e.keyword === "type" && /^\/tools\/\d+$/.test(e.instancePath) && e.message === "must be string") &&
+            !(e.keyword === "oneOf" && e.instancePath === "/tools"),
+        )
+      : rawAjvErrors;
+    // Never let the filter swallow the entire message (defensive — a pure-shape
+    // failure always retains ≥1 pure-arm error, but fall back if it somehow does not).
+    const ajvErrors = filteredAjvErrors.length > 0 ? filteredAjvErrors : rawAjvErrors;
     const additionalProps: string[] = [];
     for (const e of ajvErrors) {
       if (e.keyword === "additionalProperties") {
@@ -370,7 +502,11 @@ export async function parsePluginJson(
     fail("entry", "must be a non-empty relative path to the plugin ESM entry", `"entry": "dist/index.js"`);
   }
   if (!Array.isArray(parsed.tools)) {
-    fail("tools", "must be an array of tool name strings", `"tools": ["sample_ping"]`);
+    fail(
+      "tools",
+      "must be an array (legacy tool-name strings, or pure MCP tool objects)",
+      `"tools": [{ "name": "sample_ping", "inputSchema": { "type": "object", "properties": {} } }]`,
+    );
   }
   if (typeof parsed.description !== "string" || parsed.description.length === 0) {
     fail(
@@ -386,20 +522,51 @@ export async function parsePluginJson(
     );
   }
 
-  // Tool names exposed to LLMs must satisfy ^[a-zA-Z_][a-zA-Z0-9_]*$ (vendor requirement).
+  // #885 v6 — the SINGLE legacy-shape reader (SoT §3.1). Compile the AJV-validated
+  // manifest (legacy `tools: string[]` + `toolSchemas` + `uiActions`, OR pure MCP
+  // `Tool[]`) into the pure `NormalizedManifest` every host check below reads. A
+  // legacy manifest emits ONE load-time notice (legacy-shape + dropped removed
+  // fields); a pure manifest passes through silently. From here on all tool checks
+  // read the normalized `manifest.tools: Tool[]` — never `parsed.tools`.
+  const manifest = normalizeManifest(parsed as RawPluginManifest, (notice) => {
+    log.warn(
+      {
+        event: "plugin-manifest-legacy-shape",
+        pluginId: notice.pluginId,
+        droppedFields: notice.droppedFields,
+      },
+      `plugin '${notice.pluginId}' uses the legacy tools[]/toolSchemas/uiActions manifest shape — ` +
+        `compiled to the pure MCP Tool[] form at load` +
+        (notice.droppedFields.length > 0
+          ? ` (dropped removed fields: ${notice.droppedFields.join(", ")})`
+          : "") +
+        `. Migrate to the pure form (docs/architecture/plugin-contract-v6-design.md).`,
+    );
+  });
+
+  // Tool names exposed to LLMs must satisfy ^[a-zA-Z_][a-zA-Z0-9_]*$ (vendor
+  // requirement — kept as defence-in-depth vs a stale SDK schema, same rationale
+  // as the hostSecrets/version re-checks). One pass also builds the by-name index
+  // reused by the auth/keyword cross-field checks and REJECTS duplicate names:
+  // the old three-map shape got name-uniqueness for free (object keys), but two
+  // `tools[]` objects may now share a `name`, which would throw at runtime in the
+  // loader methodMap and make the auth/keyword lookups ambiguous (u2 §1.4.1).
   const TOOL_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-  for (let i = 0; i < parsed.tools.length; i += 1) {
-    const method = parsed.tools[i];
-    if (typeof method !== "string") {
-      fail(`tools[${i}]`, "must be a string", `"tools": ["sample_tool"]`);
-    }
-    if (!TOOL_NAME_PATTERN.test(method)) {
+  const byName = new Map<string, Tool>();
+  for (let i = 0; i < manifest.tools.length; i += 1) {
+    const tool = manifest.tools[i];
+    const name = tool?.name;
+    if (typeof name !== "string" || !TOOL_NAME_PATTERN.test(name)) {
       throw new Error(
-        `Invalid tool name '${method}' in plugin '${pid}' at 'tools[${i}]' (${path}): ` +
+        `Invalid tool name '${String(name)}' in plugin '${pid}' at 'tools[${i}].name' (${path}): ` +
         `tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). ` +
-        `Example: "tools": ["sample_tool"] (not "sample.tool")`,
+        `Example: "tools": [{ "name": "sample_tool", ... }] (not "sample.tool")`,
       );
     }
+    if (byName.has(name)) {
+      fail(`tools[${i}].name`, `duplicate tool name '${name}'`, `each tools[] entry needs a unique name`);
+    }
+    byName.set(name, tool);
   }
 
   // Surface any remaining testMode flag in a protected plugin manifest.
@@ -433,116 +600,49 @@ export async function parsePluginJson(
     }
   }
 
-  // §B-3 — UI action structural validation. UI action methods may be
-  // runtime-only and therefore do not need to appear in tools[]; tools[] is
-  // the LLM-facing registration surface.
-  const uiActionsRaw: unknown = parsed.uiActions;
-  const uiActionNames: string[] = [];
-  if (uiActionsRaw !== undefined) {
-    if (
-      uiActionsRaw === null ||
-      typeof uiActionsRaw !== "object" ||
-      Array.isArray(uiActionsRaw)
-    ) {
-      fail(
-        "uiActions",
-        "must be an object keyed by UI-invokable runtime method name",
-        `"uiActions": { "summary_get": { "description": "Fetch the visible summary" } }`,
-      );
-    }
-    const uiActions = uiActionsRaw as Record<string, unknown>;
-    for (const [method, spec] of Object.entries(uiActions)) {
-      if (!TOOL_NAME_PATTERN.test(method)) {
-        throw new Error(
-          `Invalid UI action method name '${method}' in plugin '${pid}' at 'uiActions.${method}' (${path}): ` +
-          `method names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). ` +
-          `Example: "uiActions": { "sample_upload_chunk": {} } (not "sample.upload.chunk")`,
-        );
-      }
-      if (
-        spec === null ||
-        typeof spec !== "object" ||
-        Array.isArray(spec)
-      ) {
-        fail(
-          `uiActions.${method}`,
-          "must be an object",
-          `"uiActions": { "${method}": { "description": "User-triggered action" } }`,
-        );
-      }
-      uiActionNames.push(method);
-    }
-  }
-  const uiInvokable = new Set(uiActionNames);
-
-  // #1554 — UNCONDITIONAL tools[] ∩ uiActions overlap guard. A method declared
-  // in BOTH tools[] and uiActions is dual-declared: it is reachable as an
-  // LLM/plugin tool (the governed ToolExecutor path) AND as a uiActions runtime
-  // method. That is LEGITIMATE (6 first-party plugins overlap 2-24 methods
-  // today) precisely BECAUSE `plugin-tool-invocation.ts` fail-closes a
-  // dual-declared method to the governed path — `isUiOnlyRuntimeInvocation`
-  // routes to the uiActions bypass only when the method is NOT in tools[]
-  // (`manifest.tools?.includes(toolName) !== true`), so the overlap never
-  // silently reaches the reviewer-skipping bypass. The pre-#1554 overlap check
-  // lived only inside `if (parsed.auth)` and covered only the 3 auth tool
-  // names, so a plugin with no `auth` block had ZERO overlap visibility.
-  //
-  // Soft warn (not `fail()`) to match the auth-event / notificationEvents drift
-  // pattern above and below — it documents the invariant without breaking the
-  // legitimately-overlapping first-party plugins. The warn names the
-  // overlapping methods and states they stay on the governed ToolExecutor path.
-  if (Array.isArray(parsed.tools) && uiInvokable.size > 0) {
-    // EXCLUDE the auth tool names (statusTool/loginTool/logoutTool) from this
-    // general overlap set: they have their own STRICTER rule below — a hard
-    // `fail()` if they appear in tools[] at all. Without this exclusion the same
-    // auth method would get two contradictory verdicts: this soft
-    // "...This is allowed" warn AND the auth block's hard fail (#1554
-    // cluster-review MINOR). The general warn is for NON-auth dual declarations,
-    // which are legitimately allowed.
-    const authToolNames = new Set(
-      ([parsed.auth?.statusTool, parsed.auth?.loginTool, parsed.auth?.logoutTool] as Array<unknown>)
-        .filter((v): v is string => typeof v === "string" && v.length > 0),
-    );
-    const overlap = parsed.tools.filter(
-      (name): name is string =>
-        typeof name === "string" && uiInvokable.has(name) && !authToolNames.has(name),
-    );
-    if (overlap.length > 0) {
-      const names = overlap.map((n) => `'${n}'`).join(", ");
-      log.warn(
-        `Plugin manifest '${pid}': method(s) ${names} appear in BOTH tools[] and uiActions — ` +
-          `they stay on the governed ToolExecutor path (a dual-declared method is fail-closed to ` +
-          `the executor by plugin-tool-invocation.ts, never the uiActions runtime bypass). This is ` +
-          `allowed; the warning documents the invariant. See architecture.md §9.4a.`,
-      );
-    }
-  }
-
-  // Plugin auth UI surface (architecture.md §9.4a) — auth.{statusTool,
-  // loginTool, logoutTool?} must all be members of uiActions. AJV cannot express
-  // cross-surface membership without a custom
-  // keyword, so this lives alongside the other hand-rolled cross-field checks.
-  if (parsed.auth) {
-    const authToolKeys: Array<"statusTool" | "loginTool" | "logoutTool"> = [
-      "statusTool",
-      "loginTool",
-      "logoutTool",
-    ];
-    for (const key of authToolKeys) {
-      const value = parsed.auth[key];
-      if (value === undefined) continue; // logoutTool is optional
-      if (typeof value !== "string") {
+  // #885 v6 — auth trio visibility (u2-host-consumers §1.2). Replaces BOTH the
+  // old `auth ∈ uiActions` check AND the #1554 `auth ∉ tools[]` leak guard (and
+  // supersedes the old tools[]∩uiActions overlap warn — a dual method is now ONE
+  // object with visibility ["model","app"], so the overlap shape no longer
+  // exists) with ONE intra-object array read per auth ref. Each ref must name a
+  // declared tool whose visibility is EXACTLY ["app"]: `exactlyApp` folds app ∈
+  // vis (old-A: UI-invokable) AND model ∉ vis (old-B / #1554: never
+  // model-callable). A dual ["model","app"] auth tool is REJECTED — that IS the
+  // load-bearing #1554 invariant ("a 'model' tool NEVER reaches the uiActions
+  // bypass"), now enforced at declaration time. `toolVisibility` is a pure reader
+  // (normalize already materialized any omitted visibility to dual UPSTREAM), so
+  // an auth tool that forgot to declare visibility arrives here as explicit dual
+  // → fails `exactlyApp` → rejected (fail-closed; a silently-defaulted auth tool
+  // must never become model-callable). See architecture.md §9.4a.
+  if (manifest.auth) {
+    for (const key of ["statusTool", "loginTool", "logoutTool"] as const) {
+      const ref = manifest.auth[key];
+      if (ref === undefined) continue; // logoutTool is optional
+      if (typeof ref !== "string") {
         fail(
           `auth.${key}`,
           "must be a string",
           `"auth": { "statusTool": "ms_status", "loginTool": "ms_login" }`,
         );
       }
-      if (!uiInvokable.has(value)) {
+      const tool = byName.get(ref);
+      if (!tool) {
         fail(
           `auth.${key}`,
-          `tool '${value}' is not declared in uiActions`,
-        `add "${value}" to uiActions so the host UI surface can invoke it`,
+          `references tool '${ref}' which is not declared in tools[]`,
+          `add a tools[] entry named '${ref}' with "_meta": { "ui": { "visibility": ["app"] } }`,
+        );
+      }
+      // `fail()` returns never; re-assert the binding — narrowing through the
+      // local `fail` arrow is lossy in this file (see the hostSecrets re-assert).
+      const authTool: Tool = tool as Tool;
+      const vis = toolVisibility(authTool);
+      const exactlyApp = vis.length === 1 && vis[0] === "app";
+      if (!exactlyApp) {
+        fail(
+          `auth.${key}`,
+          `tool '${ref}' must have visibility exactly ["app"] (host-managed auth is UI-only, never model-callable) — got ${JSON.stringify(vis)}`,
+          `set "_meta": { "ui": { "visibility": ["app"] } } on the '${ref}' tool`,
         );
       }
     }
@@ -576,63 +676,26 @@ export async function parsePluginJson(
       }
     }
 
-    // architecture.md §9.4a: auth is a HOST-managed lifecycle, not an LLM
-    // capability. The auth tools (statusTool/loginTool/logoutTool) are invoked
-    // only through the host UI surface (callFromUi, gated by uiActions) and
-    // must NOT appear in tools[] — tools[] is the LLM-facing registration
-    // surface, and listing an auth tool there would expose sign-in/sign-out as
-    // an agent-callable tool. They belong in uiActions only.
-    //
-    // Hard fail: both shipped auth plugins (lge-api, ms-graph) are migrated —
-    // their auth tools live in uiActions only, never tools[] — so rejecting
-    // can no longer break a mid-migration plugin. This is the SOLE guard against
-    // a regression silently re-exposing auth as an LLM tool: `tools[]` is
-    // projected to the model verbatim (manifestToolsToMcpTools), and there is no
-    // CI gate for this (naming-gate covers process-metadata identifiers only).
-    const authToolNames = ([
-      parsed.auth.statusTool,
-      parsed.auth.loginTool,
-      parsed.auth.logoutTool,
-    ] as Array<unknown>).filter((v): v is string => typeof v === "string" && v.length > 0);
-    const leakedAuthTools = Array.isArray(parsed.tools)
-      ? authToolNames.filter((name) => parsed.tools.includes(name))
-      : [];
-    if (leakedAuthTools.length > 0) {
-      const names = leakedAuthTools.map((n) => `'${n}'`).join(", ");
-      fail(
-        "tools",
-        `auth tool(s) ${names} must not appear in tools[] — auth is a host-managed lifecycle, not an LLM-callable tool`,
-        `remove ${names} from tools[] (keep them in uiActions only). See architecture.md §9.4a`,
-      );
-    }
+    // NOTE (#885 v6): the old #1554 `auth ∉ tools[]` hard-fail is folded into
+    // the `exactlyApp` visibility check above — an auth tool declared with
+    // model-visibility (the pure-form analog of "appears in tools[]") is
+    // rejected by `exactlyApp` (`model ∉ vis` required). No separate leak guard.
   }
 
-  // keywords[].skillId must be in tools[].
+  // #885 v6 — keywords[].skillId must name a MODEL-VISIBLE tool (a skill keyword
+  // maps to an LLM-invocable tool). Replaces the old `parsed.tools.includes(sk)`
+  // string membership with a normalized-Tool[] lookup + visibility read. The
+  // legacy `toolSchemas` key ⊆ tools ∪ uiActions check is DELETED — structurally
+  // impossible now that every tool IS its own object (no separate schema map).
   const kw = Array.isArray(parsed.keywords) ? parsed.keywords : [];
   for (let i = 0; i < kw.length; i += 1) {
     const sk = kw[i]?.skillId;
-    if (typeof sk !== "string" || !parsed.tools.includes(sk)) {
+    const tool = typeof sk === "string" ? byName.get(sk) : undefined;
+    if (!tool || !isModelVisible(tool)) {
       fail(
         `keywords[${i}].skillId`,
-        `"${String(sk)}" not in tools[]`,
-        `add '${String(sk)}' to tools[] or fix the skillId`,
-      );
-    }
-  }
-
-  // A toolSchemas entry must back either an LLM tool (tools[]) OR a UI-only
-  // method (uiActions). Auth methods (login/logout/status) are UI-invokable —
-  // NOT LLM tools (host-managed auth lifecycle) — yet keep a schema so the host
-  // can render the auth surface and validate the UI's payload (e.g. the login
-  // `force` flag). Allowing UI-invokable methods here is what lets auth live outside
-  // tools[] without dropping its schema.
-  const schemaKeys = parsed.toolSchemas ? Object.keys(parsed.toolSchemas) : [];
-  for (const k of schemaKeys) {
-    if (!parsed.tools.includes(k) && !uiInvokable.has(k)) {
-      fail(
-        `toolSchemas['${k}']`,
-        `key not in tools[] or uiActions`,
-        `remove the key or add '${k}' to tools[] or uiActions`,
+        `"${String(sk)}" must name a model-visible tool (a skill keyword maps to an LLM-invocable tool)`,
+        `add a tools[] entry '${String(sk)}' whose visibility includes "model", or fix the skillId`,
       );
     }
   }
@@ -732,5 +795,5 @@ export async function parsePluginJson(
     }
   }
 
-  return parsed;
+  return manifest;
 }

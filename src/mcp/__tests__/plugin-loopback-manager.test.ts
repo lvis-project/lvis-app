@@ -8,25 +8,26 @@ import { PluginLoopbackManager } from "../plugin-loopback-manager.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { manifestIntegrityState } from "../../permissions/manifest-integrity.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
-import type { PluginManifest } from "../../plugins/types.js";
+import type { NormalizedManifest } from "../../plugins/types.js";
 
 beforeEach(() => manifestIntegrityState.resetForTests());
 
-function manifest(id: string, tools: string[]): PluginManifest {
+// #885 v6 — the loopback consumes the NORMALIZED pure `Tool[]`. Each tool is one
+// model-visible object; category is host-derived (the wire carries none).
+function manifest(id: string, tools: string[]): NormalizedManifest {
   return {
     id,
     name: id,
     version: "1.0.0",
     entry: "dist/index.js",
     description: id,
-    tools,
-    toolSchemas: Object.fromEntries(
-      tools.map((t) => [
-        t,
-        { description: t, category: "read", inputSchema: { type: "object", properties: {} } },
-      ]),
-    ),
-  } as PluginManifest;
+    tools: tools.map((t) => ({
+      name: t,
+      description: t,
+      inputSchema: { type: "object", properties: {} },
+      _meta: { ui: { visibility: ["model"] } },
+    })),
+  };
 }
 
 function fakeRuntime(): PluginRuntime {
@@ -37,20 +38,27 @@ function fakeRuntime(): PluginRuntime {
 }
 
 /**
- * A category-less manifest. Under host-classifies-risk this loads as
- * write-equivalent (default-strict) rather than throwing — used to pin that
- * the missing-category hard-fail is gone.
+ * A tool that (in the pre-v6 world) omitted `category`. Under host-classifies-risk
+ * it loads at the write-equivalent default-strict baseline rather than throwing —
+ * used to pin that the missing-category hard-fail is gone. In v6 category is gone
+ * from the contract entirely, so every loopback tool registers as write-equivalent.
  */
-function categorylessManifest(id: string, tool: string): PluginManifest {
+function categorylessManifest(id: string, tool: string): NormalizedManifest {
   return {
     id,
     name: id,
     version: "2.0.0",
     entry: "dist/index.js",
     description: id,
-    tools: [tool],
-    toolSchemas: { [tool]: { description: tool, inputSchema: { type: "object", properties: {} } } },
-  } as unknown as PluginManifest;
+    tools: [
+      {
+        name: tool,
+        description: tool,
+        inputSchema: { type: "object", properties: {} },
+        _meta: { ui: { visibility: ["model"] } },
+      },
+    ],
+  };
 }
 
 describe("PluginLoopbackManager", () => {

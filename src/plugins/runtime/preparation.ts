@@ -15,7 +15,7 @@
  * clobbered by a late-arriving prepared start.
  */
 import { dirname } from "node:path";
-import type { PluginAccessSpec, PluginManifest } from "../types.js";
+import type { PluginAccessSpec, NormalizedManifest } from "../types.js";
 import type { ManifestLoadPlan, SinglePluginStartResult } from "./types.js";
 import type {
   PluginPreparationProgressInput,
@@ -39,7 +39,7 @@ interface PreparationTrackerDeps {
   ) => Promise<void> | void | null | undefined;
   instantiateAndStartSinglePlugin: (
     plan: ManifestLoadPlan,
-    manifest: PluginManifest,
+    manifest: NormalizedManifest,
     approvedPluginAccess: PluginAccessSpec | undefined,
     opts: { skipPreparation?: boolean; cacheBust?: boolean; shouldCommit?: () => boolean },
   ) => Promise<SinglePluginStartResult>;
@@ -65,7 +65,7 @@ export class PreparationTracker {
    */
   deferStart(
     plan: ManifestLoadPlan,
-    manifest: PluginManifest,
+    manifest: NormalizedManifest,
     approvedPluginAccess: PluginAccessSpec | undefined,
     startOpts: { cacheBust?: boolean } = {},
   ): boolean {
@@ -157,7 +157,7 @@ export class PreparationTracker {
     });
   }
 
-  private markPreparationFailed(manifest: PluginManifest, err: unknown): void {
+  private markPreparationFailed(manifest: NormalizedManifest, err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
     this.preparingPluginIds.delete(manifest.id);
     this.preparationStatuses.delete(manifest.id);

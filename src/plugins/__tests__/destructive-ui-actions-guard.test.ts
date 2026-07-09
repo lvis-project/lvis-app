@@ -162,11 +162,18 @@ describe("callFromUi scope enforcement", () => {
       manifestPaths: [],
     });
     const internals = rt as unknown as {
-      plugins: Map<string, { manifest: { uiActions: Record<string, unknown> } }>;
+      plugins: Map<string, { manifest: unknown }>;
       methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
     };
+    // #885 v6 — normalized manifest: foo_get is UI-invokable (visibility ["app"]),
+    // foo_delete is model-only (["model"]) so it is NOT a declared UI action.
     internals.plugins.set("test.plugin", {
-      manifest: { uiActions: { foo_get: {} } },
+      manifest: {
+        tools: [
+          { name: "foo_get", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["app"] } } },
+          { name: "foo_delete", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model"] } } },
+        ],
+      },
     } as unknown as never);
     internals.methodMap.set("foo_delete", {
       pluginId: "test.plugin",
@@ -192,11 +199,16 @@ describe("callFromUi scope enforcement", () => {
       manifestPaths: [],
     });
     const internals = rt as unknown as {
-      plugins: Map<string, { manifest: { uiActions: Record<string, unknown> } }>;
+      plugins: Map<string, { manifest: unknown }>;
       methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
     };
+    // #885 v6 — foo_get is a declared UI action (visibility ["app"]).
     internals.plugins.set("test.plugin", {
-      manifest: { uiActions: { foo_get: {} } },
+      manifest: {
+        tools: [
+          { name: "foo_get", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["app"] } } },
+        ],
+      },
     } as unknown as never);
     internals.methodMap.set("foo_get", {
       pluginId: "test.plugin",

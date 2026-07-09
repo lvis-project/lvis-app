@@ -1,21 +1,21 @@
 import { describe, it, expect, vi } from "vitest";
 import { PluginMcpServer, type PluginToolDelegate } from "../plugin-mcp-server.js";
-import type { PluginManifest } from "../../plugins/types.js";
+import type { NormalizedManifest } from "../../plugins/types.js";
 
-const MANIFEST: PluginManifest = {
+const MANIFEST: NormalizedManifest = {
   id: "com.example.fs",
   name: "FS",
   version: "1.0.0",
   entry: "dist/p.js",
   description: "files",
-  tools: ["fs_read"],
-  toolSchemas: {
-    fs_read: {
+  tools: [
+    {
+      name: "fs_read",
       description: "Read a file",
-      category: "read",
       inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      _meta: { ui: { visibility: ["model"] } },
     },
-  },
+  ],
 };
 
 function req(method: string, params?: Record<string, unknown>) {
@@ -43,14 +43,16 @@ describe("PluginMcpServer — RC server methods (#1230 §3.1)", () => {
     });
   });
 
-  it("answers tools/list with projected tools (category in _meta)", async () => {
+  it("answers tools/list with projected tools (explicit _meta.ui.visibility, no wire category)", async () => {
     const res = (await server.handle(req("tools/list", { ...RC_META }))).result as {
       resultType: string;
       tools: Array<{ name: string; _meta: Record<string, unknown> }>;
     };
     expect(res.resultType).toBe("complete");
     expect(res.tools.map((t) => t.name)).toEqual(["fs_read"]);
-    expect(res.tools[0]._meta["xyz.lvis/category"]).toBe("read");
+    // #885 v6 — visibility is emitted explicitly; category is REMOVED from the wire.
+    expect((res.tools[0]._meta as { ui: { visibility: string[] } }).ui.visibility).toEqual(["model"]);
+    expect(res.tools[0]._meta["xyz.lvis/category"]).toBeUndefined();
   });
 
   it("dispatches tools/call to the delegate and wraps a complete CallToolResult", async () => {
