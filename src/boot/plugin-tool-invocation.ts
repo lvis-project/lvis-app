@@ -3,8 +3,6 @@ import {
   type PluginRuntime,
   type PluginToolInvocationContext,
 } from "../plugins/runtime.js";
-import { runWithCeiling } from "../tools/executor-ceiling.js";
-import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 
 type RuntimeManifestView = Pick<PluginRuntime, "listPluginManifests">;
 
@@ -55,32 +53,26 @@ export function uiOnlyRuntimeInvocationRequiresUserAction(
  * {@link isUiOnlyRuntimeInvocation} that `toolName` is a uiActions-only method
  * before delegating here.
  *
- * Two responsibilities:
- *   1. Enforce the user-activation requirement for non-status uiActions.
- *   2. Run the runtime handler under the global tool-execution ceiling so a
- *      hung uiActions handler cannot block the renderer caller forever. This
- *      is the same governed-timeout guarantee the ToolExecutor path enforces —
- *      the UI-only bypass must NOT skip it (CLAUDE.md §Tool Execution Timeout
- *      Policy: every tool path passes through `runWithCeiling`).
+ * Responsibility: enforce the user-activation requirement for non-status
+ * uiActions (and the #1556 nested plugin-origin clarity error), then delegate
+ * to `PluginRuntime.callDeclaredUiAction`.
  *
- * Ceiling parity note (CLAUDE.md "ceiling 에 Promise.race 만 쓰고 AbortController
- * 안 wire" caveat): the governed executor path (ToolExecutor.executeAll →
- * plugin loopback `tools/call` → PluginRuntime.call → `handler(payload)`) does
- * NOT propagate its abort signal into the plugin handler — the handler
- * receives only `payload`, never a signal (see mcp/plugin-tool-from-mcp.ts
- * `execute()` and PluginRuntime.call). Its ceiling therefore only unblocks the
- * *caller*, leaving a hung handler's work detached. We match that exact parity
- * here: ceiling the caller so the renderer is never stuck, and do NOT invent a
- * handler-abort mechanism the executor path itself lacks. `ceilingMs` defaults
- * to the SOT; it is a parameter solely so tests can exercise the ceiling with a
- * small value without weakening the SOT.
+ * The global tool-execution ceiling is NOT applied here. It now lives
+ * STRUCTURALLY inside `PluginRuntime.callDeclaredUiAction` — the sole entry
+ * point of the uiActions bypass — so a hung uiActions handler cannot block the
+ * renderer caller forever regardless of how boot wires this dispatch (CLAUDE.md
+ * §Tool Execution Timeout Policy: every tool path passes through
+ * `runWithCeiling`). Relocating the ceiling to the runtime method closes the
+ * regression class where a future revert of the boot wiring back to a direct
+ * `callDeclaredUiAction` call would silently drop the cap. See
+ * `callDeclaredUiAction`'s abort-parity note for why the ceiling only unblocks
+ * the caller and does not abort the detached handler work.
  */
 export async function dispatchUiOnlyRuntimeInvocation(
   pluginRuntime: UiOnlyRuntimeView,
   toolName: string,
   input: Record<string, unknown>,
   context: PluginToolInvocationContext,
-  ceilingMs: number = TOOL_TIMEOUT_POLICY.globalCeilingMs,
 ): Promise<unknown> {
   if (
     uiOnlyRuntimeInvocationRequiresUserAction(pluginRuntime, toolName, context) &&
@@ -107,14 +99,8 @@ export async function dispatchUiOnlyRuntimeInvocation(
     }
     throw new Error(`UI action '${toolName}' requires an active user activation`);
   }
-  const outcome = await runWithCeiling(
-    () => pluginRuntime.callDeclaredUiAction(toolName, input),
-    ceilingMs,
-    undefined,
-    toolName,
-  );
-  if (!outcome.ok) {
-    throw outcome.error;
-  }
-  return outcome.value;
+  // The global tool-execution ceiling is enforced structurally inside
+  // `callDeclaredUiAction` (see its docstring) — not here — so this dispatch
+  // stays a thin gate.
+  return pluginRuntime.callDeclaredUiAction(toolName, input);
 }

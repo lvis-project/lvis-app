@@ -26,10 +26,12 @@ import type { Actor, PluginDeploymentGuard } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
 import { appVersionSatisfiesMin } from "../../shared/semver-compare.js";
 import { getLvisAppVersion } from "../../shared/app-version.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
 import { isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
+import { runWithCeiling } from "../../tools/executor-ceiling.js";
 import { runStartWithTimeout, SessionActivationTracker } from "./lifecycle-timeout.js";
 
 import {
@@ -1556,8 +1558,28 @@ export class PluginRuntime {
    * Invoke a plugin method declared as a UI action directly against the runtime,
    * enforcing the `manifest.uiActions` allowlist. Used by the boot plugin-tool
    * executor for UI-only runtime methods that bypass the reviewer surface.
+   *
+   * This bypass skips the ToolExecutor and therefore its Step-6
+   * `runWithCeiling` cap, so the ceiling is enforced STRUCTURALLY here — at the
+   * sole entry point of the bypass — rather than in the boot wiring that reaches
+   * it. Any caller of this method is capped regardless of how boot dispatches to
+   * it, closing the regression class where a future revert of the boot wiring
+   * back to a direct call would silently drop the ceiling (CLAUDE.md §Tool
+   * Execution Timeout Policy: every tool path passes through `runWithCeiling`).
+   *
+   * Abort-parity note: like the governed executor path, the ceiling only
+   * unblocks the *caller* — `PluginRuntime.call` hands the handler only
+   * `payload`, never an abort signal, so a hung handler's work stays detached.
+   * We match that exact parity and do NOT invent a handler-abort mechanism the
+   * executor path itself lacks. `ceilingMs` defaults to the SOT
+   * (`TOOL_TIMEOUT_POLICY.globalCeilingMs`) and is a parameter solely so tests
+   * can exercise the ceiling with a small value without weakening the SOT.
    */
-  async callDeclaredUiAction(method: string, payload?: unknown): Promise<unknown> {
+  async callDeclaredUiAction(
+    method: string,
+    payload?: unknown,
+    ceilingMs: number = TOOL_TIMEOUT_POLICY.globalCeilingMs,
+  ): Promise<unknown> {
     const entry = this.methodMap.get(method);
     if (!entry) {
       this.throwIfToolOwnerNotReady(method);
@@ -1574,7 +1596,16 @@ export class PluginRuntime {
       pluginId: entry.pluginId,
       method,
     });
-    return this.call(method, payload);
+    const outcome = await runWithCeiling(
+      () => this.call(method, payload),
+      ceilingMs,
+      undefined,
+      method,
+    );
+    if (!outcome.ok) {
+      throw outcome.error;
+    }
+    return outcome.value;
   }
 
   /**

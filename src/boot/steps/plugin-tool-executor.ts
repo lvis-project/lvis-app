@@ -100,10 +100,14 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
       if (isUiOnlyRuntimeInvocation(pluginRuntime, toolName, context, effectiveOrigin)) {
         // UI-only runtime bypass — routes to the runtime handler directly
-        // (skipping the ToolExecutor) but MUST still pass the governed
-        // `runWithCeiling` cap so a hung uiActions handler cannot block the
-        // renderer caller forever. The user-activation gate + ceiling live in
-        // `dispatchUiOnlyRuntimeInvocation` (see its ceiling-parity note).
+        // (skipping the ToolExecutor and its Step-6 ceiling). The governed
+        // `runWithCeiling` cap is NOT re-added here: it is enforced
+        // STRUCTURALLY inside `PluginRuntime.callDeclaredUiAction` (the sole
+        // entry point of the bypass), so a hung uiActions handler cannot block
+        // the renderer caller even if this dispatch is ever reverted to a
+        // direct `pluginRuntime.callDeclaredUiAction(...)` call. The
+        // user-activation gate + the #1556 nested-origin error live in
+        // `dispatchUiOnlyRuntimeInvocation`.
         return dispatchUiOnlyRuntimeInvocation(
           pluginRuntime,
           toolName,
