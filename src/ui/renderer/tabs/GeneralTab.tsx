@@ -276,16 +276,6 @@ export function GeneralTab({
       <SettingsSection
         title={t("generalTab.accountTitle")}
         description={t("generalTab.accountDescription")}
-        actions={
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            onClick={() => onNavigate("llm")}
-          >
-            {t("generalTab.modelSettingsButton")}
-          </Button>
-        }
       >
         <div className="flex items-start gap-4">
           <div

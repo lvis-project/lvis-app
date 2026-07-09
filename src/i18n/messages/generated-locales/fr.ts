@@ -1347,7 +1347,6 @@ export const frMessages: Record<string, string> = {
   "generalTab.marketplaceNotConfigured": "L'URL du serveur Marketplace n'est pas configurée",
   "generalTab.marketplaceNotConnected": "Non connecté",
   "generalTab.marketplaceOnline": "En ligne",
-  "generalTab.modelSettingsButton": "Paramètres du modèle →",
   "generalTab.nameNotSet": "Nom non défini",
   "generalTab.notYetSynced": "Pas encore synchronisé",
   "generalTab.osLabel": "Système d'exploitation",
