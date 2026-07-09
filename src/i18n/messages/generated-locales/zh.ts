@@ -2458,6 +2458,7 @@ export const zhMessages: Record<string, string> = {
   "settingsContent.tabGeneral": "一般的",
   "settingsContent.tabLlm": "模型",
   "settingsContent.tabMarketplace": "市场",
+  "settingsContent.tabAbout": "关于",
   "settingsContent.tabMcp": "MCP服务器",
   "settingsContent.tabPermissions": "权限",
   "settingsContent.tabPluginConfig": "插件设置",
