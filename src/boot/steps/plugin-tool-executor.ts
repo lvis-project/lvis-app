@@ -28,8 +28,8 @@ import {
   runWithInvocationOrigin,
 } from "../../plugins/runtime/origin-chain.js";
 import {
+  dispatchUiOnlyRuntimeInvocation,
   isUiOnlyRuntimeInvocation,
-  uiOnlyRuntimeInvocationRequiresUserAction,
 } from "../plugin-tool-invocation.js";
 import type { BootContext } from "../context.js";
 
@@ -99,13 +99,17 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     return runWithInvocationOrigin(context.origin, context.parentOrigin, async () => {
       const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
       if (isUiOnlyRuntimeInvocation(pluginRuntime, toolName, context, effectiveOrigin)) {
-        if (
-          uiOnlyRuntimeInvocationRequiresUserAction(pluginRuntime, toolName, context) &&
-          context.userAction !== true
-        ) {
-          throw new Error(`UI action '${toolName}' requires an active user activation`);
-        }
-        return pluginRuntime.callDeclaredUiAction(toolName, toPluginToolInput(payload));
+        // UI-only runtime bypass — routes to the runtime handler directly
+        // (skipping the ToolExecutor) but MUST still pass the governed
+        // `runWithCeiling` cap so a hung uiActions handler cannot block the
+        // renderer caller forever. The user-activation gate + ceiling live in
+        // `dispatchUiOnlyRuntimeInvocation` (see its ceiling-parity note).
+        return dispatchUiOnlyRuntimeInvocation(
+          pluginRuntime,
+          toolName,
+          toPluginToolInput(payload),
+          context,
+        );
       }
 
       const [result] = await pluginSurfaceExecutor.executeAll(

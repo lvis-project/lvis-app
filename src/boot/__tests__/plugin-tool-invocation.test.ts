@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  dispatchUiOnlyRuntimeInvocation,
   isUiOnlyRuntimeInvocation,
   uiOnlyRuntimeInvocationRequiresUserAction,
 } from "../plugin-tool-invocation.js";
@@ -121,5 +122,61 @@ describe("plugin UI-only runtime invocation", () => {
         { origin: "ui", ownerPluginId: "meeting" },
       ),
     ).toBe(true);
+  });
+});
+
+// #1553 — the UI-only bypass must still pass through the governed
+// `runWithCeiling` cap so a hung uiActions handler cannot block the renderer
+// caller forever. `dispatchUiOnlyRuntimeInvocation` accepts a `ceilingMs`
+// test seam (default = TOOL_TIMEOUT_POLICY.globalCeilingMs) so we can prove
+// the ceiling without waiting the real 120s and without weakening the SOT.
+describe("dispatchUiOnlyRuntimeInvocation — ceiling on the uiActions bypass", () => {
+  function runtimeWithHandler(
+    manifest: {
+      tools?: string[];
+      uiActions?: Record<string, { description?: string }>;
+      auth?: { statusTool: string; loginTool: string; logoutTool?: string };
+    },
+    callDeclaredUiAction: (method: string, payload?: unknown) => Promise<unknown>,
+  ) {
+    return {
+      listPluginManifests: () => [{ pluginId: "meeting", manifest }],
+      callDeclaredUiAction,
+    } as any;
+  }
+
+  it("rejects at the global ceiling when the uiActions handler never resolves (caller does not hang)", async () => {
+    const runtime = runtimeWithHandler(
+      { tools: ["meeting_upload_file"], uiActions: { meeting_stage_upload_begin: {} } },
+      // Never resolves — simulates a hung uiActions handler.
+      () => new Promise<never>(() => {}),
+    );
+
+    await expect(
+      dispatchUiOnlyRuntimeInvocation(
+        runtime,
+        "meeting_stage_upload_begin",
+        {},
+        { origin: "ui", ownerPluginId: "meeting", userAction: true },
+        5, // small ceiling via the test seam — the SOT default is untouched
+      ),
+    ).rejects.toThrow(/exceeded global ceiling \(5ms\): meeting_stage_upload_begin/);
+  });
+
+  it("returns the handler value when it resolves within the ceiling", async () => {
+    const runtime = runtimeWithHandler(
+      { tools: ["meeting_upload_file"], uiActions: { meeting_stage_upload_begin: {} } },
+      async (_method, payload) => ({ echoed: payload }),
+    );
+
+    await expect(
+      dispatchUiOnlyRuntimeInvocation(
+        runtime,
+        "meeting_stage_upload_begin",
+        { chunk: 1 },
+        { origin: "ui", ownerPluginId: "meeting", userAction: true },
+        5_000,
+      ),
+    ).resolves.toEqual({ echoed: { chunk: 1 } });
   });
 });
