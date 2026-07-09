@@ -1,12 +1,19 @@
 /**
  * html-preview-partition unit tests
  *
- * Verifies that installHtmlPreviewPartitionBlock() registers a webRequest
- * handler that allows data:/blob:/about:blank and cancels everything else.
+ * Verifies:
+ *  - installHtmlPreviewPartitionBlock() registers the strict inline-only gate on
+ *    `lvis-render-html` and NO LONGER touches any `lvis-mcp-app` partition (the
+ *    boot-time shared MCP-app install was removed in #885 b1);
+ *  - installMcpAppPartitionPolicy(serverId) lazily installs the CDN allowlist on
+ *    the per-server `lvis-mcp-app:<hex>` partition and is idempotent;
+ *  - installPluginPartitionPolicy() still wires the sandboxed <webview> preload +
+ *    network block.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
+import { mcpAppPartitionName, MCP_APP_PARTITION_PREFIX } from "../../shared/mcp-app-partition.js";
 
 const __dirnameLocal = dirname(fileURLToPath(import.meta.url));
 const pluginShellHtmlUrl = pathToFileURL(resolve(__dirnameLocal, "..", "..", "plugin-ui-shell.html")).toString();
@@ -42,12 +49,13 @@ const mockPluginSession = {
 
 import {
   installHtmlPreviewPartitionBlock,
+  installMcpAppPartitionPolicy,
   installPluginPartitionPolicy,
 } from "../html-preview-partition.js";
 
 const mockSessionApi = {
   fromPartition: vi.fn((partition: string) => {
-    if (partition === "lvis-mcp-app") return mockMcpSession as unknown as Electron.Session;
+    if (partition.startsWith(MCP_APP_PARTITION_PREFIX)) return mockMcpSession as unknown as Electron.Session;
     if (partition.startsWith("persist:plugin:")) return mockPluginSession as unknown as Electron.Session;
     return mockSession as unknown as Electron.Session;
   }),
@@ -96,52 +104,71 @@ describe("installHtmlPreviewPartitionBlock", () => {
     installHtmlPreviewPartitionBlock(mockSessionApi);
   });
 
-  it("calls session.fromPartition with the correct partition name", () => {
+  it("installs ONLY the strict inline-only gate on lvis-render-html (no boot-time mcp-app install)", () => {
     expect(mockSessionApi.fromPartition).toHaveBeenCalledWith("lvis-render-html");
-    expect(mockSessionApi.fromPartition).toHaveBeenCalledWith("lvis-mcp-app");
-  });
-
-  it("registers a webRequest.onBeforeRequest handler", () => {
+    // The bare `lvis-mcp-app` boot install is GONE — per-server partitions are
+    // installed lazily in the readUiResource chokepoint instead.
+    const partitions = mockSessionApi.fromPartition.mock.calls.map((c) => c[0] as string);
+    expect(partitions).toEqual(["lvis-render-html"]);
+    expect(partitions.some((p) => p.startsWith(MCP_APP_PARTITION_PREFIX))).toBe(false);
     expect(mockOnBeforeRequest).toHaveBeenCalledOnce();
-    expect(mockOnBeforeRequestMcp).toHaveBeenCalledOnce();
-    expect(mockOnBeforeRequest.mock.calls[0][0]).toBeTypeOf("function");
+    expect(mockOnBeforeRequestMcp).not.toHaveBeenCalled();
   });
 
-  it("allows data: URLs", () => {
+  it("allows data:/blob:/about:blank on the render-html gate", () => {
     expect(invokeHandler("data:text/html;charset=utf-8,hello")).toEqual({ cancel: false });
-  });
-
-  it("allows blob: URLs", () => {
     expect(invokeHandler("blob:null/abc-123")).toEqual({ cancel: false });
-  });
-
-  it("allows about:blank", () => {
     expect(invokeHandler("about:blank")).toEqual({ cancel: false });
   });
 
-  it("blocks http URLs", () => {
+  it("blocks http/https/file/ftp/unknown on the render-html gate", () => {
     expect(invokeHandler("http://example.com/evil")).toEqual({ cancel: true });
-  });
-
-  it("blocks https URLs", () => {
     expect(invokeHandler("https://attacker.example/exfil")).toEqual({ cancel: true });
-  });
-
-  it("allows CDN https URLs only for MCP apps", () => {
+    // CDN hosts are NOT allowed on the render-html partition — only on mcp-app.
     expect(invokeHandler("https://cdn.jsdelivr.net/npm/vue")).toEqual({ cancel: true });
-    expect(invokeMcpHandler("https://cdn.jsdelivr.net/npm/vue")).toEqual({ cancel: false });
-  });
-
-  it("blocks file URLs", () => {
     expect(invokeHandler("file:///etc/passwd")).toEqual({ cancel: true });
-  });
-
-  it("blocks ftp URLs", () => {
     expect(invokeHandler("ftp://ftp.example.com/data")).toEqual({ cancel: true });
+    expect(invokeHandler("custom-scheme://something")).toEqual({ cancel: true });
+  });
+});
+
+describe("installMcpAppPartitionPolicy (#885 b1 — lazy per-server CDN gate)", () => {
+  beforeEach(() => {
+    mockOnBeforeRequestMcp.mockClear();
+    mockSessionApi.fromPartition.mockClear();
   });
 
-  it("blocks unknown scheme URLs", () => {
-    expect(invokeHandler("custom-scheme://something")).toEqual({ cancel: true });
+  it("installs the CDN allowlist on the per-server lvis-mcp-app:<hex> partition", () => {
+    // Unique serverId avoids the module-level installedMcpAppPartitions Set
+    // short-circuit from other tests.
+    installMcpAppPartitionPolicy("github-a", mockSessionApi);
+    expect(mockSessionApi.fromPartition).toHaveBeenCalledWith(mcpAppPartitionName("github-a"));
+    expect(mockOnBeforeRequestMcp).toHaveBeenCalledOnce();
+  });
+
+  it("allows only CDN https + inline schemes, blocks everything else", () => {
+    installMcpAppPartitionPolicy("github-b", mockSessionApi);
+    expect(invokeMcpHandler("https://cdn.jsdelivr.net/npm/vue")).toEqual({ cancel: false });
+    expect(invokeMcpHandler("https://unpkg.com/x")).toEqual({ cancel: false });
+    expect(invokeMcpHandler("data:text/html,x")).toEqual({ cancel: false });
+    expect(invokeMcpHandler("https://attacker.example/exfil")).toEqual({ cancel: true });
+    expect(invokeMcpHandler("http://cdn.jsdelivr.net/x")).toEqual({ cancel: true });
+    expect(invokeMcpHandler("file:///etc/passwd")).toEqual({ cancel: true });
+  });
+
+  it("is idempotent: re-installing the same server does not re-register the gate", () => {
+    installMcpAppPartitionPolicy("github-c", mockSessionApi);
+    installMcpAppPartitionPolicy("github-c", mockSessionApi);
+    expect(mockOnBeforeRequestMcp).toHaveBeenCalledOnce();
+  });
+
+  it("distinct servers get distinct partitions (injective encode)", () => {
+    installMcpAppPartitionPolicy("srv-x", mockSessionApi);
+    installMcpAppPartitionPolicy("srv-y", mockSessionApi);
+    const partitions = mockSessionApi.fromPartition.mock.calls.map((c) => c[0] as string);
+    expect(partitions).toContain(mcpAppPartitionName("srv-x"));
+    expect(partitions).toContain(mcpAppPartitionName("srv-y"));
+    expect(mcpAppPartitionName("srv-x")).not.toBe(mcpAppPartitionName("srv-y"));
   });
 });
 
@@ -154,8 +181,6 @@ describe("installPluginPartitionPolicy", () => {
   });
 
   it("registers plugin-preload.cjs via session.setPreloads (sandboxed <webview> requirement)", () => {
-    // Unique partition name avoids the module-level installedPluginPartitions
-    // Set short-circuit from prior test runs.
     installPluginPartitionPolicy("persist:plugin:abc123", {}, mockSessionApi);
 
     expect(mockSessionApi.fromPartition).toHaveBeenCalledWith("persist:plugin:abc123");
@@ -164,9 +189,6 @@ describe("installPluginPartitionPolicy", () => {
     const [preloadList] = mockSetPreloadsPlugin.mock.calls[0] as [string[]];
     expect(Array.isArray(preloadList)).toBe(true);
     expect(preloadList).toHaveLength(1);
-    // resolve(__dirname, "..", "plugin-preload.cjs") at runtime; in tests
-    // __dirname is `src/main/__tests__` so the resolved path ends with
-    // `src/plugin-preload.cjs`. Match flexibly across path separators.
     expect(preloadList[0]).toMatch(/plugin-preload\.cjs$/);
   });
 

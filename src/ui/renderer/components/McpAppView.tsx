@@ -2,8 +2,10 @@
  * McpAppView — MCP Apps spec §3 sandboxed UI renderer.
  *
  * Renders a `ui://` resource from an MCP server inside an Electron <webview>
- * (same sandboxing baseline as HtmlPreview, but in the dedicated
- * `lvis-mcp-app` partition with no nodeIntegration and contextIsolation=yes).
+ * (same sandboxing baseline as HtmlPreview, but in a dedicated per-server
+ * `lvis-mcp-app:<hex(serverId)>` partition with no nodeIntegration and
+ * contextIsolation=yes). The per-server partition (#885 b1) keeps each MCP
+ * server's cookie/localStorage/IndexedDB jar isolated from every other server.
  *
  * AppBridge (§3.4): the webview ↔ host channel uses JSON-RPC 2.0 over the
  * embedder window message channel, with host responses injected back into the
@@ -14,11 +16,12 @@
  *
  * The HTML is fetched lazily on first render via `lvis.mcp.readUiResource`.
  */
-import { createElement, useEffect, useMemo, useRef, useState } from "react";
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { McpUiPayload } from "../../../mcp/types.js";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle, PlugZap } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { wrapWithCsp } from "./mcp-app-csp.js";
+import { mcpAppPartitionName } from "../../../shared/mcp-app-partition.js";
 
 type BridgeMessage = { jsonrpc?: string; id?: number; method?: string; params?: unknown };
 type BridgeEventSource = MessageEventSource | null | undefined;
@@ -141,7 +144,12 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
   const { t } = useTranslation();
   const [htmlContent, setHtmlContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const webviewRef = useRef<HTMLElement | null>(null);
+  // b3.3 — disable-in-place on server disconnect. Lives INSIDE McpAppView so
+  // every mount site (inline preview rail + detached window) inherits it from
+  // one source. Reconnect does NOT auto-re-enable (§3.4): the user re-invokes
+  // the tool → a fresh McpUiPayload → a fresh card.
+  const [disabled, setDisabled] = useState(false);
+  const bridgeRef = useRef<ReturnType<typeof createMcpAppBridge> | null>(null);
 
   const height = payload.height ?? 300;
 
@@ -150,6 +158,10 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
     let cancelled = false;
     setHtmlContent(null);
     setError(null);
+    // A fresh payload (new card / re-invocation) starts enabled even if the
+    // previous serverId had disconnected; the disconnect event only disables
+    // the specific card that was live when it fired.
+    setDisabled(false);
 
     window.lvis.mcp.readUiResource(payload.serverId, payload.resourceUri)
       .then((html) => {
@@ -165,23 +177,33 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
     return () => { cancelled = true; };
   }, [payload]);
 
-  // Wire up the webview sandbox attributes
+  // b3 — subscribe to the main→renderer server-disconnected broadcast. When the
+  // payload's own server is torn down, disable in place (webview unmounts via
+  // the `disabled` render branch below; the transcript record is untouched).
   useEffect(() => {
-    const el = webviewRef.current as BridgeWebview | null;
-    if (!el) return;
-    el.setAttribute("partition", "lvis-mcp-app");
-    el.setAttribute("allowpopups", "false");
-    el.setAttribute(
-      "webpreferences",
-      "contextIsolation=yes, sandbox=yes, nodeIntegration=no, javascript=yes",
-    );
-    el.setAttribute("disablewebsecurity", "false");
+    const onServerDisconnected = window.lvis?.mcp?.onServerDisconnected;
+    if (typeof onServerDisconnected !== "function") return;
+    const unsub = onServerDisconnected((serverId: string) => {
+      if (serverId === payload.serverId) setDisabled(true);
+    });
+    return unsub;
+  }, [payload.serverId]);
 
-    const bridge = createMcpAppBridge(payload, el);
-    bridge.attach();
-    return () => {
-      bridge.detach();
-    };
+  // MAJOR-1 — attach the AppBridge via a ref callback keyed to the mounted node,
+  // NOT a post-mount `setAttribute` effect. Electron binds `partition` only when
+  // it is present BEFORE `src` loads, so the sandbox attributes are declared as
+  // `createElement` props (below); the bridge lifecycle rides the ref callback so
+  // it never races the conditional render.
+  const attachWebview = useCallback((node: HTMLElement | null) => {
+    if (bridgeRef.current) {
+      bridgeRef.current.detach();
+      bridgeRef.current = null;
+    }
+    if (node) {
+      const bridge = createMcpAppBridge(payload, node as unknown as BridgeWebview);
+      bridge.attach();
+      bridgeRef.current = bridge;
+    }
   }, [payload]);
 
   const dataUrl = useMemo(
@@ -199,7 +221,12 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
           {t("mcpAppView.sandboxBadge")}
         </span>
       </div>
-      {error ? (
+      {disabled ? (
+        <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height }} data-testid="mcp-app-disconnected">
+          <PlugZap className="h-3.5 w-3.5 flex-shrink-0" />
+          <span>{t("mcpAppView.serverDisconnected")}</span>
+        </div>
+      ) : error ? (
         <div className="flex items-center gap-2 px-3 py-3 text-[11px] text-destructive">
           <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
           <span>{error}</span>
@@ -211,8 +238,12 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
         </div>
       ) : (
         createElement("webview", {
-          ref: webviewRef,
+          ref: attachWebview,
           src: dataUrl,
+          partition: mcpAppPartitionName(payload.serverId),
+          allowpopups: "false",
+          webpreferences: "contextIsolation=yes, sandbox=yes, nodeIntegration=no, javascript=yes",
+          disablewebsecurity: "false",
           style: {
             width: "100%",
             height: `${height}px`,
