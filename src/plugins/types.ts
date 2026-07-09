@@ -151,6 +151,84 @@ export interface EventSubscription {
 }
 
 
+/* ============================================================================
+ * Plugin Contract v6 (#885) — pure MCP `Tool` object surface.
+ *
+ * These types define the v6 "manifest == wire" tool contract that supersedes the
+ * legacy `tools: string[]` + `toolSchemas` + `uiActions` triple. In phase a2 they
+ * are ADDITIVE: `PluginManifest.tools` stays `string[]` and host consumers keep
+ * reading the legacy shape until a4 rewires them through `normalizeManifest`.
+ * The SDK public surface (`@lvis/plugin-sdk`) mirrors these via `sync-from-host`.
+ * ==========================================================================*/
+
+/**
+ * MCP Apps SEP-1865 (`io.modelcontextprotocol/ui`) per-tool surface visibility.
+ * `"model"` = LLM-facing (projected into the agent tool list); `"app"` =
+ * UI-invokable (renderer IPC allowlist). A tool may be BOTH. Absent in an
+ * authored manifest ⇒ LVIS interprets it as `["model","app"]` (the STANDARD
+ * SEP-1865 default — LVIS hosts external MCP tools under the same `_meta.ui`
+ * semantics and does not host-privately reinterpret the standard default);
+ * `normalizeManifest` MATERIALIZES that default so every normalized/wire tool is
+ * explicit. `[]` is rejected at load.
+ */
+export interface McpToolUiMeta {
+  visibility?: Array<"model" | "app">;
+}
+
+/**
+ * The `_meta` block of an LVIS plugin `Tool`. Exactly two keys are recognized:
+ * the standard `ui` visibility block, and the SOLE remaining LVIS-proprietary
+ * key `xyz.lvis/pathFields`. Any other key is rejected by the manifest schema.
+ */
+export interface McpToolMeta {
+  /** SEP-1865 surface visibility. @optional */
+  ui?: McpToolUiMeta;
+  /**
+   * Input-schema argument names whose values are filesystem paths, fed into the
+   * HOST-side allowed-directories check. Dotted names address nested object
+   * fields. Untrusted routing hint: a lying declaration only ADDS host checks,
+   * never bypasses one. @optional
+   */
+  "xyz.lvis/pathFields"?: string[];
+}
+
+/**
+ * A tool a plugin exposes — the pure MCP `Tool` object (manifest == wire, §2.1/§2.2).
+ * `inputSchema`/`outputSchema` use JSON Schema dialect 2020-12 (the RC default when
+ * `$schema` is omitted). LVIS authoring subset of the pinned MCP `Tool`: the MCP
+ * `annotations` field is intentionally NOT authorable (untrusted self-claim); the
+ * host derives its own interop annotations at projection time. `outputSchema` IS
+ * authorable (standard, harmless).
+ */
+export interface Tool {
+  /** LLM/UI tool name. Must match `^[a-zA-Z_][a-zA-Z0-9_]*$` (≤64). */
+  name: string;
+  /** Optional human display title. @optional */
+  title?: string;
+  /** LLM-facing description (when/what/returns). ≥10 chars when present. @optional */
+  description?: string;
+  /** JSON Schema 2020-12 input schema. */
+  inputSchema: {
+    $schema?: string;
+    type: "object";
+    properties: Record<string, unknown>;
+    required?: string[];
+    additionalProperties?: boolean;
+  };
+  /** Optional JSON Schema 2020-12 structured-output schema (standard MCP field). @optional */
+  outputSchema?: {
+    $schema?: string;
+    type: "object";
+    properties?: Record<string, unknown>;
+    required?: string[];
+    additionalProperties?: boolean;
+  };
+  /** MCP icons (2025-11-25). @optional */
+  icons?: Array<{ src: string; mimeType?: string; sizes?: string }>;
+  /** Surface visibility + the one LVIS-proprietary key. @optional */
+  _meta?: McpToolMeta;
+}
+
 export interface PluginManifest {
 
   id: string;
@@ -339,6 +417,137 @@ export interface PluginManifest {
     read?: string[];
   };
 }
+
+/**
+ * A raw manifest as read from disk during the compat window — `tools` may be the
+ * legacy `string[]` OR the pure `Tool[]`, and the legacy `toolSchemas`/`uiActions`
+ * maps may still be present. Input type of `normalizeManifest`. Collapses to the
+ * pure `PluginManifest` at Phase R.
+ */
+export type RawPluginManifest = Omit<PluginManifest, "tools"> & {
+  tools: string[] | Tool[];
+};
+
+/**
+ * The manifest AFTER `normalizeManifest` — the pure-form SoT every host consumer
+ * reads (SoT §3.1 invariant). `toolSchemas`/`uiActions` are ELIMINATED; each tool
+ * is one pure `Tool` whose `_meta.ui.visibility` is always explicit and non-empty.
+ */
+export type NormalizedManifest = Omit<
+  PluginManifest,
+  "tools" | "toolSchemas" | "uiActions"
+> & {
+  tools: Tool[];
+};
+
+/** One load-time notice emitted by `normalizeManifest` (≤1 per plugin). @see normalizeManifest */
+export interface NormalizeNotice {
+  pluginId: string;
+  /** `legacy-shape` = the manifest used the deprecated string[]+toolSchemas+uiActions form. */
+  kind: "legacy-shape";
+  /** Removed tool fields that were present and dropped (deduped across tools). */
+  droppedFields: Array<
+    "category" | "workerId" | "writesToOwnSandbox" | "version" | "deprecatedSince" | "replacedBy"
+  >;
+}
+
+/** Optional caller sink for `normalizeManifest`'s single legacy-shape notice. */
+export type NormalizeReporter = (notice: NormalizeNotice) => void;
+
+/**
+ * The single legacy-shape reader (SoT §3.1 invariant). Compiles a `RawPluginManifest`
+ * into the pure `NormalizedManifest` every host consumer reads:
+ * - Pure input (`tools[0]` is an object) → passthrough; materialize an absent
+ *   `_meta.ui.visibility` to the STANDARD `["model","app"]`; REJECT an explicit `[]`
+ *   (R6 fail-closed — never widened to dual); strip any stray legacy maps.
+ * - Legacy input (`tools[0]` is a string, or empty `[]`) → build pure `Tool[]` by
+ *   joining `toolSchemas`, compiling surface membership to `_meta.ui.visibility`
+ *   (tools-only→`["model"]`, dual→`["model","app"]`, uiActions-only→`["app"]`),
+ *   moving `pathFields`→`_meta["xyz.lvis/pathFields"]`, and DROPPING the removed
+ *   fields (`category`/`workerId`/`writesToOwnSandbox`/`version`/`deprecatedSince`/
+ *   `replacedBy`) with one `report` notice.
+ * Pure (no IO); `report` is the only side channel. Throws a loud load-error on an
+ * explicit empty `visibility` (non-total by design — matches U2 §1.4.2).
+ */
+export const normalizeManifest = (
+  raw: RawPluginManifest,
+  report?: NormalizeReporter,
+): NormalizedManifest => {
+  const DUAL: Array<"model" | "app"> = ["model", "app"];
+
+  const stripLegacyMaps = (m: RawPluginManifest) => {
+    // Strip both legacy maps + the union-typed `tools` symmetrically so the
+    // returned rest is exactly `Omit<PluginManifest,"tools"|"toolSchemas"|"uiActions">`.
+    const { toolSchemas: _s, uiActions: _u, tools: _t, ...rest } = m;
+    return rest;
+  };
+
+  // ---- Pure input (v6): materialize visibility default; REJECT explicit [] ----
+  const isLegacy = raw.tools.length === 0 || typeof raw.tools[0] === "string";
+  if (!isLegacy) {
+    const tools = (raw.tools as Tool[]).map((t): Tool => {
+      const vis = t._meta?.ui?.visibility;
+      if (vis === undefined) {
+        return { ...t, _meta: { ...t._meta, ui: { ...t._meta?.ui, visibility: DUAL } } };
+      }
+      if (vis.length === 0) {
+        throw new Error(
+          `[normalizeManifest] plugin '${raw.id}' tool '${t.name}': _meta.ui.visibility is [] — ` +
+            "a tool must be reachable by ≥1 surface; empty is rejected (SoT §2.2/§2.3)",
+        );
+      }
+      return t;
+    });
+    return { ...stripLegacyMaps(raw), tools };
+  }
+
+  // ---- Legacy input: compile pure Tool[] from tools[]/uiActions/toolSchemas ----
+  const names = raw.tools as string[];
+  const uiNames = Object.keys(raw.uiActions ?? {});
+  const schemas = raw.toolSchemas ?? {};
+  const removed = [
+    "category", "workerId", "writesToOwnSandbox", "version", "deprecatedSince", "replacedBy",
+  ] as const;
+  const dropped = new Set<NormalizeNotice["droppedFields"][number]>();
+
+  const deriveVisibility = (inModel: boolean, inApp: boolean): Array<"model" | "app"> => {
+    if (inModel && inApp) return ["model", "app"];
+    if (inModel) return ["model"];
+    if (inApp) return ["app"];
+    // R6 defense-in-depth: a legacy name only reaches here via tools[] or
+    // uiActions, so this is unreachable for a valid manifest — but throw so every
+    // would-be-empty visibility fails closed identically (SoT §2.3).
+    throw new Error(
+      `[normalizeManifest] plugin '${raw.id}': a tool is reachable by neither surface ` +
+        "(not in tools[] nor uiActions) — every tool needs ≥1 surface (SoT §2.3)",
+    );
+  };
+
+  const allNames = [...names, ...uiNames.filter((n) => !names.includes(n))];
+  const tools: Tool[] = allNames.map((name): Tool => {
+    const schema = schemas[name];
+    const meta: McpToolMeta = {
+      ui: { visibility: deriveVisibility(names.includes(name), uiNames.includes(name)) },
+    };
+    if (schema?.pathFields && schema.pathFields.length > 0) {
+      meta["xyz.lvis/pathFields"] = schema.pathFields;
+    }
+    if (schema) {
+      for (const f of removed) {
+        if ((schema as Record<string, unknown>)[f] !== undefined) dropped.add(f);
+      }
+    }
+    return {
+      name,
+      ...(schema?.description !== undefined ? { description: schema.description } : {}),
+      inputSchema: schema?.inputSchema ?? { type: "object" as const, properties: {} },
+      _meta: meta,
+    };
+  });
+
+  report?.({ pluginId: raw.id, kind: "legacy-shape", droppedFields: [...dropped] });
+  return { ...stripLegacyMaps(raw), tools };
+};
 
 /**
  * §9.2 Track B — declarative settings schema. JSON Schema draft-07 subset
