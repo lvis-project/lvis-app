@@ -407,7 +407,17 @@ export function SettingsContent({
               const Icon = item.icon;
               const isPermissions = item.value === "permissions";
               return (
-                <TabsTrigger key={item.value} value={item.value} className={sideTriggerCls}>
+                <TabsTrigger
+                  key={item.value}
+                  value={item.value}
+                  className={sideTriggerCls}
+                  // Radix fires `onValueChange` only when the value actually
+                  // changes, so tapping the ALREADY-active category in the
+                  // narrow list would never drill in. Drill on any activation
+                  // (TabsTrigger is a button, so this also covers keyboard
+                  // Enter/Space); inert on wide.
+                  onClick={() => { if (isNarrow) setMobileDepth("detail"); }}
+                >
                   <Icon className={navIconCls} aria-hidden="true" />
                   <span className="min-w-0 truncate">{t(item.labelKey)}</span>
                   {isPermissions && pendingPermissions > 0 && (
