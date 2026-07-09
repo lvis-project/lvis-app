@@ -9,11 +9,12 @@ import { sanitizePluginConfig, sanitizePluginConfigKey } from "../../../shared/p
 import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { InstallInFlight, InstallPhase, InstallProgressPayload } from "../hooks/use-plugin-marketplace.js";
-import type { MarketplaceItem, PluginCardSummary, PluginMarketplaceUninstallOptions } from "../types.js";
+import type { LvisApi, MarketplaceItem, PluginCardSummary, PluginMarketplaceUninstallOptions } from "../types.js";
 import { PluginAuthSection } from "../components/PluginAuthSection.js";
 import { usePluginAuthStatuses } from "../hooks/use-plugin-auth-status.js";
 import { PluginUninstallDialog } from "../dialogs/PluginUninstallDialog.js";
 import { PluginConfigSchemaForm } from "./PluginConfigSchemaForm.js";
+import { PluginPerfTab } from "./PluginPerfTab.js";
 import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
@@ -182,7 +183,7 @@ function entriesToConfig(entries: KV[]): Record<string, unknown> {
   return sanitizePluginConfig(out);
 }
 
-export function PluginConfigTab() {
+export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
   const { t } = useTranslation();
   // Pull the dialog-wide "저장되었습니다" notifier so every successful
   // plugin-config write — manual key/value editor save, schema-form save,
@@ -1143,6 +1144,14 @@ export function PluginConfigTab() {
               <p className="text-xs text-muted-foreground">{t("pluginConfigTab.selectPluginHint")}</p>
             )}
           </div>
+        </div>
+      )}
+      {/* Performance section — the former standalone plugin-perf tab was
+          merged here ("성능만 병합"); it renders as a section below the
+          config content and pulls its own perf stats via the api. */}
+      {api && (
+        <div className="shrink-0 border-t border-border/(--opacity-medium) pt-6">
+          <PluginPerfTab api={api} />
         </div>
       )}
       </div>
