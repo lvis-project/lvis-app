@@ -408,9 +408,12 @@ export function McpTab() {
           <div className="rounded-md bg-destructive/(--opacity-soft) px-3 py-2 text-sm text-destructive">{error}</div>
         )}
 
-        {/* ── Section A: 서버 목록 ────────────────────── */}
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-foreground">{t("mcpTab.pageTitle")}</h3>
+        {/* ── Section A: 서버 목록 ──────────────────────
+            The page header (SettingsPageHeader above) already titles this
+            surface "MCP"; the server-list toolbar must NOT repeat that title
+            (the duplicate `mcpTab.pageTitle` h3 was the "MCP twice" report).
+            Just the refresh/add toolbar, right-aligned. */}
+        <div className="flex items-center justify-end">
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => void fetchAll()} disabled={loading}>
               {t("mcpTab.refreshButton")}
