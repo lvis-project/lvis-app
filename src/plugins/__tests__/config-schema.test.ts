@@ -272,7 +272,14 @@ describe("toolSchemas authority metadata", () => {
       const file = join(dir, "plugin.json");
       await writeFile(file, JSON.stringify(manifest), "utf-8");
       const parsed = await parsePluginJson(file, validator);
-      expect(parsed.toolSchemas?.worker_ping?.workerId).toBe("main-worker");
+      // #885 v6 — the SDK schema still natively ACCEPTS the legacy
+      // `toolSchemas.*.workerId` field (the manifest loads), but normalizeManifest
+      // DROPS it: the pure tool carries no workerId and the toolSchemas map is gone.
+      const tool = parsed.tools.find((t) => t.name === "worker_ping");
+      expect(tool).toBeDefined();
+      expect(tool?._meta?.ui?.visibility).toEqual(["model"]);
+      expect((parsed as Record<string, unknown>).toolSchemas).toBeUndefined();
+      expect((tool as Record<string, unknown> | undefined)?.workerId).toBeUndefined();
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -1,30 +1,29 @@
 /**
- * #1554 — manifest-validation must carry a GENERAL, unconditional tools[] ∩
- * uiActions overlap guard, not only the auth-tool-name overlap check nested
- * inside `if (parsed.auth)`. A plugin with no `auth` block previously had zero
- * overlap visibility.
+ * #885 v6 (#1554 lineage) — the governed-vs-bypass invariant is now enforced by
+ * the pure tool-object VISIBILITY, not the old `tools[] ∩ uiActions` soft-warn
+ * (which is DELETED — a dual method is one object, so the overlap shape no longer
+ * exists).
  *
- * The guard is a SOFT WARN (not a hard fail): a dual-declared method is
- * legitimate because `plugin-tool-invocation.ts` fail-closes it to the governed
- * ToolExecutor path (never the uiActions runtime bypass). The warn documents
- * that invariant; it must NOT break the first-party plugins that legitimately
- * overlap. The logger routes warn -> console.warn, so we spy on console.warn.
+ *  - A legacy DUAL-declared method (in BOTH `tools[]` and `uiActions`) normalizes
+ *    to ONE `Tool` with visibility `["model","app"]` — it loads fine and, being
+ *    model-visible, stays on the governed executor (`isUiOnly=false`).
+ *  - An AUTH tool that resolves model-visible (the pure-form analog of "leaked
+ *    into tools[]") is REJECTED by the auth-visibility check (must be exactly
+ *    `["app"]`) — the #1554 "auth is never model-callable" invariant, now
+ *    enforced at the tool-object level rather than by a cross-surface check.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildManifestValidator, parsePluginJson } from "../manifest-validation.js";
 
-describe("manifest tools[] ∩ uiActions overlap — unconditional soft warn (#1554)", () => {
+describe("#885 v6 — dual-declared visibility (the #1554 governed-vs-bypass invariant)", () => {
   let workDir: string;
-  let warnSpy: ReturnType<typeof vi.spyOn>;
   beforeEach(async () => {
-    workDir = await mkdtemp(join(tmpdir(), "tools-uiactions-overlap-"));
-    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    workDir = await mkdtemp(join(tmpdir(), "tools-visibility-"));
   });
   afterEach(async () => {
-    warnSpy.mockRestore();
     await rm(workDir, { recursive: true, force: true });
   });
 
@@ -45,18 +44,7 @@ describe("manifest tools[] ∩ uiActions overlap — unconditional soft warn (#1
     return path;
   }
 
-  function overlapWarned(method: string): boolean {
-    return warnSpy.mock.calls.some((args) =>
-      args.some(
-        (a) =>
-          typeof a === "string" &&
-          a.includes("BOTH tools[] and uiActions") &&
-          a.includes(method),
-      ),
-    );
-  }
-
-  it("DOES warn when a method appears in BOTH tools[] and uiActions with NO auth block", async () => {
+  it("compiles a legacy dual-declared method to ONE Tool with visibility [model, app]", async () => {
     const validator = await buildManifestValidator();
     const path = await writeManifest({
       tools: ["shared_method", "t_one"],
@@ -64,35 +52,39 @@ describe("manifest tools[] ∩ uiActions overlap — unconditional soft warn (#1
         shared_method: { description: "dual-declared" },
         ui_only_method: {},
       },
-      // deliberately NO `auth` block — this is the gap #1554 closes
+      // deliberately NO `auth` block — this exercises the general (non-auth) case.
     });
-    await parsePluginJson(path, validator);
-    expect(overlapWarned("shared_method")).toBe(true);
-    // The purely UI-only method must NOT be reported as an overlap.
-    expect(overlapWarned("ui_only_method")).toBe(false);
+    const manifest = await parsePluginJson(path, validator);
+    // dual → ["model","app"] → model-visible → governed (never the bypass).
+    expect(manifest.tools.find((t) => t.name === "shared_method")?._meta?.ui?.visibility).toEqual([
+      "model",
+      "app",
+    ]);
+    // tools[]-only → ["model"]; uiActions-only → ["app"].
+    expect(manifest.tools.find((t) => t.name === "t_one")?._meta?.ui?.visibility).toEqual(["model"]);
+    expect(manifest.tools.find((t) => t.name === "ui_only_method")?._meta?.ui?.visibility).toEqual([
+      "app",
+    ]);
   });
 
-  it("does NOT warn when tools[] and uiActions are disjoint", async () => {
+  it("keeps tools[]-only and uiActions-only disjoint methods on their own surfaces", async () => {
     const validator = await buildManifestValidator();
     const path = await writeManifest({
       tools: ["t_one"],
       uiActions: { ui_only_method: {} },
     });
-    await parsePluginJson(path, validator);
-    expect(overlapWarned("ui_only_method")).toBe(false);
-    expect(overlapWarned("t_one")).toBe(false);
+    const manifest = await parsePluginJson(path, validator);
+    expect(manifest.tools.find((t) => t.name === "t_one")?._meta?.ui?.visibility).toEqual(["model"]);
+    expect(manifest.tools.find((t) => t.name === "ui_only_method")?._meta?.ui?.visibility).toEqual([
+      "app",
+    ]);
   });
 
-  // #1554 cluster-review MINOR — an auth tool leaked into tools[] must not get
-  // TWO contradictory verdicts (this soft "...allowed" overlap warn AND the auth
-  // block's hard fail). The general overlap warn now EXCLUDES the auth tool
-  // names; the auth block's stricter hard-fail is the sole verdict on them. A
-  // non-auth dual declaration in the same manifest must still warn.
-  it("excludes auth tools from the general overlap warn (their hard-fail owns the verdict) but still warns a non-auth overlap", async () => {
+  it("REJECTS an auth tool that resolves model-visible (the #1554 'auth never model-callable' invariant)", async () => {
     const validator = await buildManifestValidator();
     const path = await writeManifest({
-      // ms_status is the auth statusTool leaked into tools[] (the violation the
-      // auth block hard-fails); shared_method is a legitimate non-auth overlap.
+      // ms_status is declared in BOTH tools[] and uiActions → dual ["model","app"];
+      // an auth tool MUST be exactly ["app"], so this is rejected at load.
       tools: ["ms_status", "shared_method"],
       uiActions: {
         ms_status: {},
@@ -102,13 +94,8 @@ describe("manifest tools[] ∩ uiActions overlap — unconditional soft warn (#1
       auth: { statusTool: "ms_status", loginTool: "ms_login" },
       emittedEvents: ["overlap-test.auth.changed"],
     });
-    // The auth block hard-fails the leaked auth tool — the sole verdict on it.
     await expect(parsePluginJson(path, validator)).rejects.toThrow(
-      /must not appear in tools\[\]/,
+      /must have visibility exactly \["app"\]/,
     );
-    // The non-auth dual declaration still warns (fires before the hard fail) ...
-    expect(overlapWarned("shared_method")).toBe(true);
-    // ... but the auth tool is NOT double-flagged by the general overlap warn.
-    expect(overlapWarned("ms_status")).toBe(false);
   });
 });

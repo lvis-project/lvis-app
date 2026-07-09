@@ -1,109 +1,69 @@
 /**
- * Regression lock: declared `toolSchemas[name].category` propagation through the
- * LIVE first-party plugin registration path (the loopback-MCP pipeline that
- * `boot/steps/plugin-runtime.ts` wires via `PluginLoopbackManager.syncAll`).
+ * #885 v6 — per-tool `category` is REMOVED from the plugin contract (Q3). The
+ * loopback forward projection no longer emits `_meta["xyz.lvis/category"]`, so
+ * the reverse projection registers EVERY plugin tool at the write-equivalent
+ * default-strict baseline. The effective category is derived HOST-side per
+ * invocation (`resolveEnforcedCategory` / `inspectHostRisk`), NOT from the wire.
  *
- * Why this test exists — production incident (2026-06-26 permission audit):
- * every first-party plugin tool was recorded with `category:"write"` and denied
- * by the Layer-5 reviewer ("reviewer high: write path not declared" / "no
- * isolation"), EVEN tools the source manifest declares `category:"read"`
- * (`msgraph_calendar_today`, `msgraph_email_list`, `lge_meeting_availability`,
- * `lge_profile_info`, `work_assistant_list_detectors`). Builtins (`web_search`,
- * `web_fetch`) were unaffected (declared `read` → allow).
- *
- * Root cause was NOT this pipeline: the forward projection
- * (`manifestToolsToMcpTools` → `_meta["xyz.lvis/category"]`) and the reverse
- * projection (`mcpToolToPluginTool` → `readCategory`) faithfully round-trip a
- * DECLARED category. The denial came from the INSTALLED/published plugin
- * manifests having shed the per-tool `category` field entirely (it became
- * optional under host-classifies-risk). With the field ABSENT the forward
- * projection applies `DEFAULT_STRICT_CATEGORY = "write"`, and with
- * `hostClassifiesRisk` OFF (default) `ToolExecutor.resolveEnforcedCategory`
- * returns that declared `write` unchanged → reviewer denies.
- *
- * This test pins all three legs of the contract through the REAL production
- * path (`PluginMcpHost.loopback().start()` → `ToolRegistry`) so the pipeline can
- * never silently:
- *   - lose a declared `read` (the bug the incident was first mis-attributed to),
- *   - lose a declared `write`, or
- *   - classify an UNDECLARED tool anywhere other than the safe default-strict
- *     `write` baseline (a silent downgrade to `read` would be a security defect;
- *     a throw would regress the host-classifies-risk "category is optional" load
- *     contract).
+ * This pins the security-preserving property that the 2026-06-26 permission
+ * incident cared about: a plugin tool can NEVER register as `read` on the wire
+ * (a silent downgrade would be a defect). The safe `write` baseline is now
+ * UNIFORM across every plugin tool, and the whole plugin still loads (a missing
+ * declaration was never — and is no longer — a hard fail).
  */
 import { describe, it, expect, vi } from "vitest";
 import { PluginMcpHost } from "../plugin-mcp-host.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import type { PluginToolDelegate } from "../plugin-mcp-server.js";
-import type { PluginManifest } from "../../plugins/types.js";
+import type { NormalizedManifest } from "../../plugins/types.js";
 
-/**
- * A manifest that mirrors the production shape: one tool that DECLARES
- * `category:"read"`, one that declares `category:"write"`, and one that OMITS
- * the category (the published-manifest state that triggered the incident).
- */
-const MANIFEST = {
+const MANIFEST: NormalizedManifest = {
   id: "com.example.mixed",
   name: "Mixed",
   version: "3.1.0",
   entry: "dist/index.js",
-  description: "mixed-category ops",
-  tools: ["mixed_read", "mixed_write", "mixed_undeclared"],
-  toolSchemas: {
-    mixed_read: {
-      description: "Declared read",
-      category: "read",
+  description: "mixed-shape ops",
+  tools: [
+    {
+      name: "mixed_read",
+      description: "read-shaped op",
       inputSchema: { type: "object", properties: { q: { type: "string" } } },
+      _meta: { ui: { visibility: ["model"] } },
     },
-    mixed_write: {
-      description: "Declared write",
-      category: "write",
+    {
+      name: "mixed_write",
+      description: "write-shaped op",
       inputSchema: { type: "object", properties: { body: { type: "string" } } },
+      _meta: { ui: { visibility: ["model"] } },
     },
-    // No `category` — exactly the installed/published-manifest state behind the
-    // 2026-06-26 incident.
-    mixed_undeclared: {
-      description: "No declared category",
+    {
+      name: "mixed_undeclared",
+      description: "no wire category",
       inputSchema: { type: "object", properties: { q: { type: "string" } } },
+      _meta: { ui: { visibility: ["model"] } },
     },
-  },
-} as unknown as PluginManifest;
+  ],
+};
 
 const okDelegate: PluginToolDelegate = vi.fn(async (name) => ({
   content: [{ type: "text", text: `ran ${name}` }],
 }));
 
-describe("declared category propagation — loopback-MCP plugin tools (production path)", () => {
-  it("a manifest-declared read tool registers with Tool.category === 'read'", async () => {
+describe("#885 v6 — loopback plugin tools register write-equivalent (category is host-derived)", () => {
+  it("registers the whole plugin, and EVERY tool at the write-equivalent baseline (never silently read)", async () => {
     const registry = new ToolRegistry();
-    await PluginMcpHost.loopback(MANIFEST, okDelegate, registry).start();
-
-    const read = registry.findByName("mixed_read");
-    expect(read?.source).toBe("plugin");
-    expect(read?.category).toBe("read");
-    expect(read?.isReadOnly({})).toBe(true);
-  });
-
-  it("a manifest-declared write tool registers with Tool.category === 'write'", async () => {
-    const registry = new ToolRegistry();
-    await PluginMcpHost.loopback(MANIFEST, okDelegate, registry).start();
-
-    const write = registry.findByName("mixed_write");
-    expect(write?.category).toBe("write");
-    expect(write?.isReadOnly({})).toBe(false);
-  });
-
-  it("an undeclared-category tool falls to the default-strict 'write' baseline (NOT read, no throw)", async () => {
-    const registry = new ToolRegistry();
-    // The whole plugin must still register (host-classifies-risk: category is
-    // optional) — a missing declaration must not abort the load.
     const registered = await PluginMcpHost.loopback(MANIFEST, okDelegate, registry).start();
+    // Category is optional (host-classifies-risk) — the whole plugin still loads.
     expect(registered).toEqual(["mixed_read", "mixed_write", "mixed_undeclared"]);
 
-    const undeclared = registry.findByName("mixed_undeclared");
-    expect(undeclared?.category).toBe("write");
-    // Critical security invariant: undeclared MUST NOT be classified as read.
-    expect(undeclared?.category).not.toBe("read");
-    expect(undeclared?.isReadOnly({})).toBe(false);
+    for (const name of registered) {
+      const tool = registry.findByName(name);
+      expect(tool?.source).toBe("plugin");
+      // v6: the wire carries no category → uniform write-equivalent baseline.
+      expect(tool?.category).toBe("write");
+      // Security invariant: a plugin tool is NEVER silently classified read.
+      expect(tool?.category).not.toBe("read");
+      expect(tool?.isReadOnly({})).toBe(false);
+    }
   });
 });

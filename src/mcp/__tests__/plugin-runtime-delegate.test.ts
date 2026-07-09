@@ -16,7 +16,7 @@ import {
   manifestIntegrityState,
 } from "../../permissions/manifest-integrity.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
-import type { PluginManifest } from "../../plugins/types.js";
+import type { NormalizedManifest } from "../../plugins/types.js";
 import { sessionContext } from "../../engine/session-context.js";
 
 beforeEach(() => manifestIntegrityState.resetForTests());
@@ -105,21 +105,21 @@ describe("pluginRuntimeToolDelegate — fail-closed gate parity", () => {
   });
 });
 
-const MANIFEST: PluginManifest = {
+const MANIFEST: NormalizedManifest = {
   id: PLUGIN_ID,
   name: "Notes",
   version: "1.0.0",
   entry: "dist/index.js",
   description: "notes",
-  tools: ["notes_read"],
-  toolSchemas: {
-    notes_read: {
+  tools: [
+    {
+      name: "notes_read",
       description: "Read",
-      category: "read",
       inputSchema: { type: "object", properties: { q: { type: "string" } } },
+      _meta: { ui: { visibility: ["model"] } },
     },
-  },
-} as PluginManifest;
+  ],
+};
 
 describe("pluginRuntimeToolDelegate — Gate 4: session-scoped on-demand activation", () => {
   // *** THIS is the mutation-detecting test ***

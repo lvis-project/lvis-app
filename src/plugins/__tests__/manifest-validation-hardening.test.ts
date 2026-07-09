@@ -90,7 +90,7 @@ describe("runtime manifest validation hardening", () => {
     };
   }
 
-  it("1) keywords[].skillId not in tools[] fails load", async () => {
+  it("1) keywords[].skillId that names no model-visible tool fails load", async () => {
     await writePlugin("p-kw", {
       tools: ["pkw_hello", "pkw_bad", "pkw_good"],
       keywords: [{ keyword: "회의", skillId: "p_kw_missing" }],
@@ -103,12 +103,19 @@ describe("runtime manifest validation hardening", () => {
       cap.restore();
     }
     expect(runtime.listPluginIds()).toHaveLength(0);
+    // #885 v6 — the message is now "must name a model-visible tool".
     expect(
-      cap.errors.some((e) => /keywords\[0\]\.skillId.*p_kw_missing.*not in tools\[\]/.test(e)),
+      cap.errors.some((e) =>
+        /keywords\[0\]\.skillId.*p_kw_missing.*must name a model-visible tool/.test(e),
+      ),
     ).toBe(true);
   });
 
-  it("2) toolSchemas key not in tools[] fails load", async () => {
+  it("2) #885 v6 — a legacy orphan toolSchemas key (not in tools[]) is DROPPED by normalize, not a hard fail", async () => {
+    // The old "toolSchemas key ⊆ tools[] ∪ uiActions" hard-fail is DELETED
+    // (structurally impossible in the pure shape). A legacy orphan schema — an
+    // entry backing neither a tool[] nor a uiAction — is simply dropped by
+    // normalizeManifest, so the plugin still LOADS (no cross-field rejection).
     await writePlugin("p-ts", {
       tools: ["pts_hello", "pts_bad", "pts_good"],
       toolSchemas: {
@@ -126,10 +133,9 @@ describe("runtime manifest validation hardening", () => {
     } finally {
       cap.restore();
     }
-    expect(runtime.listPluginIds()).toHaveLength(0);
-    expect(
-      cap.errors.some((e) => /toolSchemas\[.*p_ts_ghost.*\].*not in tools\[\]/.test(e)),
-    ).toBe(true);
+    expect(runtime.listPluginIds()).toContain("p-ts");
+    // No orphan-key cross-field rejection.
+    expect(cap.errors.some((e) => /p_ts_ghost.*not in tools\[\]/.test(e))).toBe(false);
   });
 
   it("3) notificationEvents.event not in eventSubscriptions → soft warn, plugin still loads", async () => {
