@@ -74,6 +74,19 @@ export async function dispatchUiOnlyRuntimeInvocation(
   input: Record<string, unknown>,
   context: PluginToolInvocationContext,
 ): Promise<unknown> {
+  // Defense-in-depth (cluster-review security LOW): this function is exported
+  // and trusts its caller to have routed here via `isUiOnlyRuntimeInvocation`,
+  // which fail-closes a `tools[]`-declared method to the governed ToolExecutor
+  // path. Re-assert that not-in-tools[] invariant at the boundary itself so a
+  // future caller that forgets the predicate cannot smuggle a governed tool
+  // through the reviewer-skipping uiActions bypass. Cheap: the same owner
+  // manifest resolution the gate below already performs.
+  const ownerManifest = findOwnerManifest(pluginRuntime, context.ownerPluginId);
+  if (ownerManifest?.tools?.includes(toolName) === true) {
+    throw new Error(
+      `'${toolName}' is a tools[] method; refusing ungoverned uiActions dispatch`,
+    );
+  }
   if (
     uiOnlyRuntimeInvocationRequiresUserAction(pluginRuntime, toolName, context) &&
     context.userAction !== true

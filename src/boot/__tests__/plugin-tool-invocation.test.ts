@@ -279,3 +279,65 @@ describe("dispatchUiOnlyRuntimeInvocation — nested plugin-origin ctx.callTool 
     ).rejects.toThrow(/requires an active user activation/);
   });
 });
+
+// Defense-in-depth (cluster-review security LOW) — dispatchUiOnlyRuntimeInvocation
+// is exported and must re-assert the not-in-tools[] routing invariant at the
+// boundary, not merely trust the caller's isUiOnlyRuntimeInvocation predicate. A
+// caller that mis-routes a tools[]-declared method here must be refused BEFORE
+// the reviewer-skipping uiActions bypass runs.
+describe("dispatchUiOnlyRuntimeInvocation — boundary routing gate (security defense-in-depth)", () => {
+  it("refuses a tools[] method even when the caller mis-routes it to the bypass", async () => {
+    let handlerCalled = false;
+    const runtime = {
+      listPluginManifests: () => [
+        {
+          pluginId: "meeting",
+          manifest: {
+            // dual-declared: present in BOTH tools[] and uiActions
+            tools: ["meeting_upload_file"],
+            uiActions: { meeting_upload_file: {} },
+          },
+        },
+      ],
+      callDeclaredUiAction: async () => {
+        handlerCalled = true;
+        return "unreached";
+      },
+    } as any;
+
+    await expect(
+      dispatchUiOnlyRuntimeInvocation(
+        runtime,
+        "meeting_upload_file",
+        {},
+        { origin: "ui", ownerPluginId: "meeting", userAction: true },
+      ),
+    ).rejects.toThrow(/is a tools\[\] method; refusing ungoverned uiActions dispatch/);
+    // The bypass handler is never reached — the boundary gate fails closed.
+    expect(handlerCalled).toBe(false);
+  });
+
+  it("allows a uiActions-only method (not in tools[]) through the bypass", async () => {
+    const runtime = {
+      listPluginManifests: () => [
+        {
+          pluginId: "meeting",
+          manifest: {
+            tools: ["meeting_upload_file"],
+            uiActions: { meeting_stage_upload_begin: {} },
+          },
+        },
+      ],
+      callDeclaredUiAction: async (_method: string, payload: unknown) => ({ ok: payload }),
+    } as any;
+
+    await expect(
+      dispatchUiOnlyRuntimeInvocation(
+        runtime,
+        "meeting_stage_upload_begin",
+        { chunk: 2 },
+        { origin: "ui", ownerPluginId: "meeting", userAction: true },
+      ),
+    ).resolves.toEqual({ ok: { chunk: 2 } });
+  });
+});
