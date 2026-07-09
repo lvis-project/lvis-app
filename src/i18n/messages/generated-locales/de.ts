@@ -731,6 +731,7 @@ export const deMessages: Record<string, string> = {
   "chatTab.conversationOptimizationDescription": "Fasst den älteren Verlauf in langen Gesprächen automatisch zusammen, um den Kontext zu speichern.",
   "chatTab.conversationOptimizationTitle": "Gesprächsoptimierung",
   "chatTab.description": "Konfigurieren Sie automatische Komprimierung, Stream-Glättung und experimentelle Funktionen",
+  "chatTab.experimentalBadge": "Experimentell",
   "chatTab.experimentalDescription": "Änderungen werden sofort wirksam.",
   "chatTab.experimentalTitle": "Präferenzen",
   "chatTab.idleRefreshHint": "Sendet während IDLE_SCAN AGENTS.md, MEMORY.md und Memories/*.md an den LLM, um user-preferences.md zu aktualisieren. Die Standardeinstellung ist EIN.",
