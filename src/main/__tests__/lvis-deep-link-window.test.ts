@@ -38,7 +38,11 @@ vi.mock("../../shared/network-access.js", () => ({
   buildNetworkAccessAcknowledgement: vi.fn(() => undefined),
   hasNetworkAccessDisclosure: vi.fn(() => false),
 }));
-vi.mock("../settings-window.js", () => ({ openSettingsWindow: vi.fn() }));
+// The mcp-login branch routes to the inline settings panel via
+// `activateInlineSettings` (settings-inline-overhaul) — mock it so this test
+// stays isolated from app-menu.js's heavy transitive graph (tray/window-manager
+// /electron Menu), which would otherwise fail the bare `await import`.
+vi.mock("../app-menu.js", () => ({ activateInlineSettings: vi.fn() }));
 vi.mock("../main-window.js", () => ({
   createWindow: (...a: unknown[]) => createWindow(...a),
   getAppWindows: vi.fn(() => []),
