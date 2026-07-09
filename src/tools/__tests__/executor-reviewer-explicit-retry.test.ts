@@ -3,12 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { DeferredQueue } from "../../permissions/reviewer/deferred-queue.js";
-import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
-import { PermissionManager } from "../../permissions/permission-manager.js";
 import { createDynamicTool } from "../base.js";
 import { ToolExecutor, type ToolPermissionContext } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
+import { makePermissionManager } from "./executor-reviewer-fixtures.js";
 
 function userPermissionContext(
   overrides: Partial<ToolPermissionContext> = {},
@@ -34,18 +32,6 @@ function makeReviewedNetworkProbe(name: string, executeSpy: ReturnType<typeof vi
     }),
   }));
   return registry;
-}
-
-function makePermissionManager(dir: string, classifySpy: ReturnType<typeof vi.fn>): PermissionManager {
-  const permMgr = new PermissionManager(join(dir, "permissions.json"));
-  permMgr.setMode("default");
-  permMgr.setInteractiveAutoApprove("low");
-  permMgr.setReviewer({
-    classifier: { classify: classifySpy },
-    cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
-    deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
-  });
-  return permMgr;
 }
 
 describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
