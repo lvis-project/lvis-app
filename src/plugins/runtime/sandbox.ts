@@ -157,7 +157,8 @@ export function buildPluginContext(opts: {
   pluginRoot: string;
   hostRoot: string;
   pluginDataDir: string;
-  manifest: PluginManifest;
+  // #885 v6 — reads only `config`/`configSchema` (shared by legacy + normalized).
+  manifest: Pick<PluginManifest, "config" | "configSchema">;
   configOverrides: Record<string, Record<string, unknown>>;
   hostApi: PluginHostApi;
 }) {

@@ -484,7 +484,7 @@ export class ToolExecutor {
     sensitivePathsAdjacent: string[],
     context: ToolPermissionContext,
     evaluationContext: PermissionEvaluationContext,
-    sandboxAttestation: { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
+    sandboxAttestation: { ownerPluginSandboxRoot?: string },
     callbacks: ToolExecutorCallbacks | undefined,
     meta: ToolCallMeta,
     approvalPurpose: ApprovalPurposeSuggestion | undefined,
@@ -524,7 +524,7 @@ export class ToolExecutor {
     sensitivePathsAdjacent: string[],
     context: ToolPermissionContext,
     evaluationContext: PermissionEvaluationContext,
-    sandboxAttestation: { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
+    sandboxAttestation: { ownerPluginSandboxRoot?: string },
     callbacks: ToolExecutorCallbacks | undefined,
     meta: ToolCallMeta,
     approvalPurpose: ApprovalPurposeSuggestion | undefined,
@@ -561,7 +561,7 @@ export class ToolExecutor {
     sensitivePathsAdjacent: string[],
     context: ToolPermissionContext,
     approvalCacheKey: string | undefined,
-    sandboxAttestation: { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
+    sandboxAttestation: { ownerPluginSandboxRoot?: string },
     mcpServerId?: string,
     workerId?: string,
     pluginId?: string,
@@ -1548,10 +1548,10 @@ export class ToolExecutor {
           layer: permissionResult.layer,
         };
       }
+      // #885 v6 (§5.3): the untrusted `tool.writesToOwnSandbox` self-claim is no
+      // longer threaded to the reviewer — the auto-LOW keys solely on the
+      // HOST-computed `ownerPluginSandboxRoot` + host-verified path containment.
       const sandboxAttestation = {
-        ...(tool.writesToOwnSandbox !== undefined
-          ? { writesToOwnSandbox: tool.writesToOwnSandbox }
-          : {}),
         ...(tool.pluginId
           ? { ownerPluginSandboxRoot: pathResolve(lvisHome(), "plugins", tool.pluginId) }
           : {}),

@@ -53,7 +53,13 @@ describe("buildManifestValidator — SDK schema SOT", () => {
   });
 
   it("uses the SDK helper unchanged when native host-required probes pass", async () => {
-    const sdkValidator = vi.fn(() => true);
+    // #885 v6 — the accept-probes must PASS (return true) and the two
+    // negative-strictness fixtures must be REJECTED (return false), else
+    // buildManifestValidator fails closed as "too permissive".
+    const sdkValidator = vi.fn(
+      (manifest: { id?: string }) =>
+        manifest.id !== "removed-field-plugin" && manifest.id !== "empty-visibility-plugin",
+    );
     const compileManifestValidator = vi.fn(() => sdkValidator);
 
     vi.doMock("@lvis/plugin-sdk", () => ({
@@ -65,7 +71,30 @@ describe("buildManifestValidator — SDK schema SOT", () => {
 
     expect(compileManifestValidator).toHaveBeenCalledTimes(1);
     expect(validator).toBe(sdkValidator);
-    expect(sdkValidator).toHaveBeenCalledTimes(4);
+    // 5 accept-probes (+ pure MCP Tool[]) + 2 negative-strictness guards.
+    expect(sdkValidator).toHaveBeenCalledTimes(7);
+  });
+
+  it("#885 v6 — fails closed when the SDK helper rejects the pure MCP Tool[] object", async () => {
+    const sdkValidator = vi.fn((manifest: { id?: string }) => manifest.id !== "pure-tool-plugin");
+    const compileManifestValidator = vi.fn(() => sdkValidator);
+
+    vi.doMock("@lvis/plugin-sdk", () => ({ compileManifestValidator }));
+
+    const { buildManifestValidator } = await import("../manifest-validation.js");
+    await expect(buildManifestValidator()).rejects.toThrow(/pure MCP Tool\[\] object/);
+  });
+
+  it("#885 v6 — fails closed when the SDK helper is too permissive (accepts a removed field / empty visibility)", async () => {
+    // Accepts EVERYTHING, including the two negative-strictness fixtures →
+    // the strictness guards must trip and reject with a 'too permissive' error.
+    const sdkValidator = vi.fn(() => true);
+    const compileManifestValidator = vi.fn(() => sdkValidator);
+
+    vi.doMock("@lvis/plugin-sdk", () => ({ compileManifestValidator }));
+
+    const { buildManifestValidator } = await import("../manifest-validation.js");
+    await expect(buildManifestValidator()).rejects.toThrow(/too permissive/);
   });
 
   it("fails closed when the SDK helper rejects toolSchema worker bindings", async () => {

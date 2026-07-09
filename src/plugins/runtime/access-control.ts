@@ -99,8 +99,9 @@ export function assertEventEmitAccess(opts: {
 }
 
 /**
- * Enforce the renderer→plugin allowlist: only methods declared in
- * `manifest.uiActions` may be invoked from the UI IPC bridge.
+ * Enforce the renderer→plugin allowlist: only tools whose `_meta.ui.visibility`
+ * includes `"app"` (#885 v6 — app-visible / dual) may be invoked from the UI IPC
+ * bridge. `uiInvokable` is derived by `declaredUiInvokableMethods`.
  */
 export function assertUiActionInvokable(opts: {
   method: string;
@@ -110,7 +111,7 @@ export function assertUiActionInvokable(opts: {
   if (!opts.uiInvokable.includes(opts.method)) {
     throw new Error(
       `Method '${opts.method}' is not declared as a UI action for plugin '${opts.pluginId}'. ` +
-        `Declare it in manifest.uiActions to allow renderer invocation.`,
+        `Give its tools[] entry "_meta":{"ui":{"visibility":["app"]}} (or ["model","app"]) to allow renderer invocation.`,
     );
   }
 }

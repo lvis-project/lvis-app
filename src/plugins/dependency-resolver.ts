@@ -11,7 +11,9 @@ import type { PluginManifest } from "./types.js";
  * Collect the set of capability tags from a list of installed plugin manifests.
  * Manifests without a `capabilities` array contribute nothing.
  */
-export function installedCapabilities(manifests: PluginManifest[]): Set<string> {
+export function installedCapabilities(
+  manifests: ReadonlyArray<Pick<PluginManifest, "capabilities">>,
+): Set<string> {
   const caps = new Set<string>();
   for (const m of manifests) {
     if (Array.isArray(m.capabilities)) {
@@ -34,7 +36,7 @@ export function installedCapabilities(manifests: PluginManifest[]): Set<string> 
  */
 export function resolveDependencies(
   required: string[],
-  installed: PluginManifest[],
+  installed: ReadonlyArray<Pick<PluginManifest, "capabilities">>,
 ): { ok: true } | { ok: false; missing: string[] } {
   if (required.length === 0) return { ok: true };
   const available = installedCapabilities(installed);
