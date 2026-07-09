@@ -579,10 +579,6 @@ export function SettingsContent({
               onLogout={() => {
                 void api.auth.broadcastLogoutReset?.();
               }}
-              onReactivateDemo={() => {
-                void api.auth.broadcastReactivateDemo?.();
-                void api.window?.closeDetached?.();
-              }}
             />
           </TabsContent>
 
