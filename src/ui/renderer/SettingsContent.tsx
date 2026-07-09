@@ -508,20 +508,7 @@ export function SettingsContent({
         )}
 
           <TabsContent value="general" className="flex-1 min-h-0 outline-none">
-            <GeneralTab
-              api={api}
-              onLogout={() => {
-
-
-                void api.auth.broadcastLogoutReset?.();
-              }}
-              onReactivateDemo={() => {
-
-
-                void api.auth.broadcastReactivateDemo?.();
-                void api.window?.closeDetached?.();
-              }}
-            />
+            <GeneralTab api={api} />
           </TabsContent>
 
           <TabsContent value="llm" className="flex-1 min-h-0 outline-none">
@@ -575,6 +562,13 @@ export function SettingsContent({
               }}
               saving={s.saving}
               settingsLoaded={s.settingsLoaded}
+              onLogout={() => {
+                void api.auth.broadcastLogoutReset?.();
+              }}
+              onReactivateDemo={() => {
+                void api.auth.broadcastReactivateDemo?.();
+                void api.window?.closeDetached?.();
+              }}
             />
           </TabsContent>
 
