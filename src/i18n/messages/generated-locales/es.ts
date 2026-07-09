@@ -2458,6 +2458,7 @@ export const esMessages: Record<string, string> = {
   "settingsContent.tabGeneral": "General",
   "settingsContent.tabLlm": "Modelo",
   "settingsContent.tabMarketplace": "Mercado",
+  "settingsContent.tabAbout": "Acerca de",
   "settingsContent.tabMcp": "Servidor MCP",
   "settingsContent.tabPermissions": "Permisos",
   "settingsContent.tabPluginConfig": "Configuración del complemento",

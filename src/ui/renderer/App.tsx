@@ -157,7 +157,7 @@ export function App() {
   // view to return to via the back-to-home affordance. In chat mode Settings
   // detaches to its own BrowserWindow instead (see onOpenSettings), so these
   // only drive the work-mode activeView==="settings" inline render.
-  const [settingsTab, setSettingsTab] = useState("general");
+  const [settingsTab, setSettingsTab] = useState("llm");
   const settingsReturnViewRef = useRef("home");
   // Workspace mode (Chat / Work) + coupled shell layout state. appMode is the
   // SOLE authority for inline-vs-detached; the hook owns the seed-before-paint

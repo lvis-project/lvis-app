@@ -2458,6 +2458,7 @@ export const jaMessages: Record<string, string> = {
   "settingsContent.tabGeneral": "一般的な",
   "settingsContent.tabLlm": "モデル",
   "settingsContent.tabMarketplace": "市場",
+  "settingsContent.tabAbout": "情報",
   "settingsContent.tabMcp": "MCPサーバー",
   "settingsContent.tabPermissions": "権限",
   "settingsContent.tabPluginConfig": "プラグイン設定",

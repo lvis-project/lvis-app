@@ -2458,6 +2458,7 @@ export const frMessages: Record<string, string> = {
   "settingsContent.tabGeneral": "Général",
   "settingsContent.tabLlm": "Modèle",
   "settingsContent.tabMarketplace": "Marché",
+  "settingsContent.tabAbout": "À propos",
   "settingsContent.tabMcp": "Serveur MCP",
   "settingsContent.tabPermissions": "Autorisations",
   "settingsContent.tabPluginConfig": "Paramètres du plugin",
