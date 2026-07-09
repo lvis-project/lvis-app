@@ -1347,7 +1347,6 @@ export const zhMessages: Record<string, string> = {
   "generalTab.marketplaceNotConfigured": "未配置市场服务器 URL",
   "generalTab.marketplaceNotConnected": "未连接",
   "generalTab.marketplaceOnline": "在线的",
-  "generalTab.modelSettingsButton": "模型设置 →",
   "generalTab.nameNotSet": "名称未设置",
   "generalTab.notYetSynced": "尚未同步",
   "generalTab.osLabel": "操作系统",

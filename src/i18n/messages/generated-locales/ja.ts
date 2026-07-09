@@ -1347,7 +1347,6 @@ export const jaMessages: Record<string, string> = {
   "generalTab.marketplaceNotConfigured": "マーケットプレイスサーバーのURLが設定されていません",
   "generalTab.marketplaceNotConnected": "接続されていません",
   "generalTab.marketplaceOnline": "オンライン",
-  "generalTab.modelSettingsButton": "機種設定 →",
   "generalTab.nameNotSet": "名前が設定されていません",
   "generalTab.notYetSynced": "まだ同期されていません",
   "generalTab.osLabel": "OS",
