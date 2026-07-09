@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "../../i18n/react.js";
 import { Button } from "../../components/ui/button.js";
 import { Tabs, VerticalTabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
@@ -17,7 +17,12 @@ import {
   Store,
   LayoutDashboard,
   Rocket,
+  ChevronLeft,
+  ChevronRight,
+  type LucideIcon,
 } from "lucide-react";
+import { cn } from "../../lib/utils.js";
+import { useContainerNarrow } from "./hooks/use-container-narrow.js";
 import { SavedToastFloating, SavedToastProvider } from "./contexts/saved-toast.js";
 import type { LvisApi } from "./types.js";
 import { RolesTab } from "./tabs/RolesTab.js";
@@ -37,8 +42,59 @@ import { StartupTab } from "./tabs/StartupTab.js";
 import { LoginModal } from "./components/LoginModal.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
 import { useDebouncedSave } from "./hooks/use-debounced-save.js";
-import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
+import { normalizeSettingsTab, type SettingsTab } from "../../shared/settings-tabs.js";
 import type { MarketplacePackageFilter } from "../../shared/marketplace-package-sections.js";
+
+type SettingsNavItem = { value: SettingsTab; icon: LucideIcon; labelKey: string };
+
+/**
+ * Grouped, data-driven settings navigation. Re-grouping or re-ordering is a
+ * pure data edit here — the wide sidebar and the narrow mobile depth-1 list
+ * both iterate this single array, so the two layouts can never drift. The
+ * values, icons and labelKeys are exactly the 14 pre-existing tabs, only
+ * grouped (no tab was moved between panes here — that is a separate task).
+ */
+const SETTINGS_NAV: { group: string; items: SettingsNavItem[] }[] = [
+  {
+    group: "settingsContent.groupAccountModel",
+    items: [
+      { value: "general", icon: LayoutDashboard, labelKey: "settingsContent.tabGeneral" },
+      { value: "llm", icon: Brain, labelKey: "settingsContent.tabLlm" },
+      { value: "usage", icon: BarChart3, labelKey: "settingsContent.tabUsage" },
+    ],
+  },
+  {
+    group: "settingsContent.groupApp",
+    items: [
+      { value: "appearance", icon: Palette, labelKey: "settingsContent.tabAppearance" },
+      { value: "chat", icon: MessageSquare, labelKey: "settingsContent.tabChat" },
+      { value: "web", icon: Globe, labelKey: "settingsContent.tabWeb" },
+      { value: "startup", icon: Rocket, labelKey: "settingsContent.tabStartup" },
+    ],
+  },
+  {
+    group: "settingsContent.groupPermRoles",
+    items: [
+      { value: "permissions", icon: Shield, labelKey: "settingsContent.tabPermissions" },
+      { value: "roles", icon: UserCog, labelKey: "settingsContent.tabRoles" },
+    ],
+  },
+  {
+    group: "settingsContent.groupPlugins",
+    items: [
+      { value: "marketplace", icon: Store, labelKey: "settingsContent.tabMarketplace" },
+      { value: "plugin-config", icon: Puzzle, labelKey: "settingsContent.tabPluginConfig" },
+      { value: "plugin-perf", icon: Gauge, labelKey: "settingsContent.tabPluginPerf" },
+      { value: "mcp", icon: Server, labelKey: "settingsContent.tabMcp" },
+    ],
+  },
+  {
+    group: "settingsContent.groupAdvanced",
+    items: [
+      { value: "audit", icon: FileSearch, labelKey: "settingsContent.tabAudit" },
+    ],
+  },
+];
 
 /**
  * Inline save bar rendered at the bottom of each tab that holds a
@@ -154,6 +210,9 @@ export function SettingsContent({
     const normalized = normalizeSettingsTab(nextTab);
     if (normalized === "marketplace") setMarketplaceFilter("all");
     setTab(normalized);
+    // Committing a category (click, or Enter in manual/narrow mode) drops into
+    // depth-2 detail on narrow; inert on wide (both regions stay visible).
+    setMobileDepth("detail");
   }, []);
 
   // Flush any pending debounced save when the user closes the window or
@@ -219,6 +278,48 @@ export function SettingsContent({
     rightPaneRef.current?.scrollTo({ top: 0, behavior: "instant" });
   }, [tab]);
 
+  // ── Responsive shell ────────────────────────────────────────────────────
+  // Panel-width (not viewport) responsive switch: the inline Settings panel can
+  // be narrow on a wide display (split view / small window), so we measure the
+  // panel root itself. Below ~640px (≈ Tailwind `sm`) the w-48 sidebar + content
+  // master-detail is too cramped, so we collapse to a mobile 2-depth stack.
+  // `useContainerNarrow`'s 60px dead-band (enter 640 / exit 700) keeps a drag
+  // near the boundary from flip-flopping, and it reports wide (isNarrow=false)
+  // under jsdom where ResizeObserver is absent — unit tests keep the
+  // master-detail layout unchanged.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const { isNarrow } = useContainerNarrow(rootRef, { enter: 640, exit: 700 });
+
+  // Narrow-only 2-depth navigation. Depth 1 = the grouped category list;
+  // depth 2 = one selected pane + a back bar. Default "list": a freshly opened
+  // narrow panel shows the category list first, and the outer return-to-app back
+  // button (PageShell, rendered above SettingsContent) stays the primary escape
+  // from depth 1. Selecting a category marks it "detail"; on wide that is inert,
+  // but it means a later narrowing lands on the actively-selected pane instead
+  // of bouncing back to the list. On resize narrow→wide the depth is ignored
+  // (both regions show); wide→narrow reuses the retained depth.
+  const [mobileDepth, setMobileDepth] = useState<"list" | "detail">("list");
+  const mobileBackRef = useRef<HTMLButtonElement>(null);
+
+  // Focus hand-off across the narrow depth transition so keyboard focus never
+  // lands in a `display:none` region. Entering detail focuses the back button;
+  // returning to the list focuses the active category trigger. The prev-depth
+  // guard means resizing into narrow (or first mount) never steals focus — only
+  // a real user-driven depth change moves it.
+  const prevDepthRef = useRef(mobileDepth);
+  useEffect(() => {
+    const prev = prevDepthRef.current;
+    prevDepthRef.current = mobileDepth;
+    if (!isNarrow || prev === mobileDepth) return;
+    if (mobileDepth === "detail") {
+      mobileBackRef.current?.focus();
+    } else {
+      rootRef.current
+        ?.querySelector<HTMLElement>('[role="tab"][data-state="active"]')
+        ?.focus();
+    }
+  }, [mobileDepth, isNarrow]);
+
   // Sidebar trigger style: full-width row, left-aligned, active row uses
   // accent background to read like a real selected list item rather than
   // the horizontal pill-tab style Radix ships by default. `data-[state=active]`
@@ -241,9 +342,17 @@ export function SettingsContent({
   return (
     <SavedToastProvider value={notifySaved}>
     <Tabs
+      ref={rootRef}
       orientation="vertical"
+      // Keyboard activation: automatic on wide (arrowing a trigger instantly
+      // reveals its pane beside the list). Manual on narrow so arrowing browses
+      // the depth-1 category list without committing into a pane on every key —
+      // Enter/click commits and drops into depth-2 detail.
+      activationMode={isNarrow ? "manual" : "automatic"}
       value={tab}
       onValueChange={handleTabValueChange}
+      // `data-settings-layout` exposes the panel-width layout mode for tests.
+      data-settings-layout={isNarrow ? "narrow" : "wide"}
       // No gap: sidebar and content share a single border (right edge of
       // the sidebar) so the layout reads as two regions of the dialog,
       // not two stacked cards. Simplified per user direction
@@ -256,14 +365,21 @@ export function SettingsContent({
           immediately after clicking Save. */}
       <SavedToastFloating at={savedAt} />
 
-      {/* Sidebar — fixed column, scrolls independently if the trigger list
-          ever grows beyond the available height. The list stays put when
-          the right pane scrolls (the headline ux complaint that motivated
-          the sidebar conversion).
-          Outer div owns the column width + border-r so the version footer
-          can sit below the nav list as a sibling (Radix TabsList only
-          accepts TabsTrigger children). */}
-      <div className="flex h-full w-48 shrink-0 flex-col border-r">
+      {/* Nav column. Wide: fixed sidebar (w-48 + border-r) that scrolls
+          independently and stays put while the right pane scrolls. Narrow: the
+          full-width depth-1 category list (no divider — it is the whole view),
+          hidden at depth-2 detail.
+          Outer div owns the column width so the version footer can sit below
+          the nav list as a sibling (Radix TabsList only accepts TabsTrigger
+          children). */}
+      <div
+        data-testid={isNarrow ? "settings-mobile-list" : undefined}
+        className={cn(
+          "flex h-full flex-col",
+          isNarrow ? "w-full" : "w-48 shrink-0 border-r",
+          isNarrow && mobileDepth === "detail" && "hidden",
+        )}
+      >
       {/* Sidebar settings header. `pt-6` mirrors the right-pane stack
           (scroll pt-2 + TabsContent mt-2 + SettingsPageHeader pt-2 = 24)
           so the sidebar h2 baseline aligns with the right-pane h2 of
@@ -279,67 +395,41 @@ export function SettingsContent({
         aria-label={t("settingsContent.sidebarAriaLabel")}
         className="flex-1 overflow-y-auto"
       >
-        <TabsTrigger value="general" className={sideTriggerCls}>
-          <LayoutDashboard className={navIconCls} aria-hidden="true" />
-          {t("settingsContent.tabGeneral")}
-        </TabsTrigger>
-        <TabsTrigger value="llm" className={sideTriggerCls}>
-          <Brain className={navIconCls} aria-hidden="true" />
-          {t("settingsContent.tabLlm")}
-        </TabsTrigger>
-        <TabsTrigger value="appearance" className={sideTriggerCls}>
-          <Palette className={navIconCls} aria-hidden="true" />
-          {t("settingsContent.tabAppearance")}
-        </TabsTrigger>
-        <TabsTrigger value="chat" className={sideTriggerCls}>
-          <MessageSquare className={navIconCls} aria-hidden="true" />
-          {t("settingsContent.tabChat")}
-        </TabsTrigger>
-        <TabsTrigger value="web" className={sideTriggerCls}>
-          <Globe className={navIconCls} aria-hidden="true" />
-          {t("settingsContent.tabWeb")}
-        </TabsTrigger>
-        <TabsTrigger value="startup" className={sideTriggerCls}>
-          <Rocket className={navIconCls} aria-hidden="true" />
-          {t("settingsContent.tabStartup")}
-        </TabsTrigger>
-        <TabsTrigger value="permissions" className={sideTriggerCls}>
-          <Shield className={navIconCls} aria-hidden="true" />
-          {t("settingsContent.tabPermissions")}
-          {pendingPermissions > 0 && (
-            <span className="ml-auto rounded-full bg-destructive px-1.5 py-0.5 text-[10px] leading-none text-destructive-foreground">
-              {pendingPermissions}
-            </span>
-          )}
-        </TabsTrigger>
-        <TabsTrigger value="roles" className={sideTriggerCls}>
-          <UserCog className={navIconCls} aria-hidden="true" />
-          {t("settingsContent.tabRoles")}
-        </TabsTrigger>
-        <TabsTrigger value="usage" className={sideTriggerCls}>
-          <BarChart3 className={navIconCls} aria-hidden="true" />
-          {t("settingsContent.tabUsage")}
-        </TabsTrigger>
-        <TabsTrigger value="audit" className={sideTriggerCls}>
-          <FileSearch className={navIconCls} aria-hidden="true" />
-          {t("settingsContent.tabAudit")}
-        </TabsTrigger>
-        <TabsTrigger value="plugin-perf" className={sideTriggerCls}>
-          <Gauge className={navIconCls} aria-hidden="true" />
-          {t("settingsContent.tabPluginPerf")}
-        </TabsTrigger>
-        <TabsTrigger value="mcp" className={sideTriggerCls}>
-          <Server className={navIconCls} aria-hidden="true" />
-          {t("settingsContent.tabMcp")}
-        </TabsTrigger>
-        <TabsTrigger value="plugin-config" className={sideTriggerCls}>
-          <Puzzle className={navIconCls} aria-hidden="true" />
-          {t("settingsContent.tabPluginConfig")}
-        </TabsTrigger>
-        <TabsTrigger value="marketplace" className={sideTriggerCls}>
-          <Store className={navIconCls} aria-hidden="true" />
-          {t("settingsContent.tabMarketplace")}
-        </TabsTrigger>
+        {SETTINGS_NAV.map((group) => (
+          <Fragment key={group.group}>
+            {/* Group header: uppercase, muted, small mono. Non-focusable (a
+                plain generic element, skipped by the tablist roving focus) so
+                arrow keys still move only between triggers. */}
+            <div className="select-none px-3 pb-1 pt-3 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground first:pt-0">
+              {t(group.group)}
+            </div>
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              const isPermissions = item.value === "permissions";
+              return (
+                <TabsTrigger key={item.value} value={item.value} className={sideTriggerCls}>
+                  <Icon className={navIconCls} aria-hidden="true" />
+                  <span className="min-w-0 truncate">{t(item.labelKey)}</span>
+                  {isPermissions && pendingPermissions > 0 && (
+                    <span
+                      className={cn(
+                        "rounded-full bg-destructive px-1.5 py-0.5 text-[10px] leading-none text-destructive-foreground",
+                        !isNarrow && "ml-auto",
+                      )}
+                    >
+                      {pendingPermissions}
+                    </span>
+                  )}
+                  {/* Narrow depth-1 rows read as a drill-in list: trailing
+                      chevron cues the tap-to-detail affordance. */}
+                  {isNarrow && (
+                    <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  )}
+                </TabsTrigger>
+              );
+            })}
+          </Fragment>
+        ))}
       </VerticalTabsList>
       {/* Version footer — fills dead space at the bottom of the sidebar
           tastefully. Static text only; no IPC needed. */}
@@ -365,7 +455,30 @@ export function SettingsContent({
           wrapper's pt-2, plus SettingsPageHeader's pt-2 lands h2 at
           the same Y as the sidebar first trigger text — both well
           below the title bar. */}
-      <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
+      <div
+        className={cn(
+          "flex flex-1 min-w-0 flex-col overflow-hidden",
+          // Narrow depth-1 (list) hides the pane; depth-2 shows only the pane.
+          isNarrow && mobileDepth === "list" && "hidden",
+        )}
+      >
+      {/* Narrow depth-2 back bar — returns to the depth-1 category list. The
+          outer PageShell back button (return to app) stays above this. */}
+      {isNarrow && (
+        <div className="flex shrink-0 items-center border-b px-2 py-2">
+          <button
+            ref={mobileBackRef}
+            type="button"
+            onClick={() => setMobileDepth("list")}
+            aria-label={t("settingsContent.mobileBackAria")}
+            data-testid="settings-mobile-back"
+            className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/(--opacity-strong) hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+          >
+            <ChevronLeft className="size-4 shrink-0" aria-hidden="true" />
+            {t("settingsContent.sidebarHeading")}
+          </button>
+        </div>
+      )}
       <div ref={rightPaneRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto [scrollbar-gutter:stable] px-8 pt-2 pb-8 lvis-settings-scroll">
         {s.lastSaveError && (
           <div
