@@ -731,6 +731,7 @@ export const jaMessages: Record<string, string> = {
   "chatTab.conversationOptimizationDescription": "長い会話の古い履歴を自動的に要約してコンテキストを保存します。",
   "chatTab.conversationOptimizationTitle": "会話の最適化",
   "chatTab.description": "自動圧縮、ストリーム スムージング、実験的な機能を構成する",
+  "chatTab.experimentalBadge": "実験的",
   "chatTab.experimentalDescription": "変更はすぐに有効になります。",
   "chatTab.experimentalTitle": "設定",
   "chatTab.idleRefreshHint": "IDLE_SCAN 中に、AGENTS.md、MEMORY.md、memory/*.md を LLM に送信して user-preferences.md を更新します。デフォルトはオンです。",
