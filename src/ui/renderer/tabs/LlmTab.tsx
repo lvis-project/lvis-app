@@ -3,7 +3,6 @@ import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
-import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
 import {
   Select,
   SelectContent,
@@ -120,7 +119,6 @@ type ModelListState =
 interface ProviderSelectProps {
   value: string;
   onValueChange: (value: string) => void;
-  includeDemo?: boolean;
   triggerId?: string;
   triggerClassName?: string;
   triggerTestId?: string;
@@ -142,7 +140,6 @@ function normalizeProviderSearch(value: string): string {
 function ProviderSelect({
   value,
   onValueChange,
-  includeDemo = false,
   triggerId,
   triggerClassName,
   triggerTestId,
@@ -152,30 +149,19 @@ function ProviderSelect({
 }: ProviderSelectProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
-  const demoLabel = t("llmTab.demoVendor");
   const marketplaceProviderIdSet = useMemo(
     () => new Set(marketplaceProviderIds),
     [marketplaceProviderIds],
   );
 
   const options = useMemo(
-    () => [
-      ...(includeDemo
-        ? [{
-            id: DEMO_VENDOR_VALUE,
-            label: demoLabel,
-            searchText: `${DEMO_VENDOR_VALUE} ${demoLabel}`,
-            marketplaceInstalled: false,
-          }]
-        : []),
-      ...vendorOptions.map((vendor) => ({
-        id: vendor.id,
-        label: vendor.label,
-        searchText: `${vendor.id} ${vendor.label}`,
-        marketplaceInstalled: marketplaceProviderIdSet.has(vendor.id),
-      })),
-    ],
-    [demoLabel, includeDemo, marketplaceProviderIdSet, vendorOptions],
+    () => vendorOptions.map((vendor) => ({
+      id: vendor.id,
+      label: vendor.label,
+      searchText: `${vendor.id} ${vendor.label}`,
+      marketplaceInstalled: marketplaceProviderIdSet.has(vendor.id),
+    })),
+    [marketplaceProviderIdSet, vendorOptions],
   );
 
   const normalizedQuery = normalizeProviderSearch(query);
@@ -267,35 +253,20 @@ export interface LlmTabProps {
   keyInput: string;
   setKeyInput: (v: string) => void;
   /**
-   * #893 — Top-level auth mode. `"manual"` (default) renders the vendor
-   * dropdown + full per-vendor form (API key, baseUrl, model, vertex…);
-   * `"login"` renders the same fields but in a disabled state showing the
-   * active login-session values. Persisted at `llm.authMode` (top-level,
-   * not per-vendor).
+   * #893 — Top-level auth mode, persisted at `llm.authMode`. The settings
+   * Model tab is manual-only now (the login/demo auth toggle was removed —
+   * product decision "①안"), so this is INFORMATIONAL here: it only drives
+   * the Account section badge (login-mode = active trial key vs api-key
+   * mode). Existing demo users keep `authMode: "login"` until they enter
+   * their own key and save (see use-settings-orchestration `save("llm")`).
    */
   authMode: "manual" | "login";
-  setAuthMode: (mode: "manual" | "login") => void;
   marketplaceProviderPresetId?: string;
   marketplaceProviderPresets?: readonly MarketplaceInstalledProviderPreset[];
   onSelectMarketplaceProviderPreset?: (preset: MarketplaceInstalledProviderPreset) => void;
   onClearMarketplaceProviderPreset?: () => void;
-  /** Fired when the user clicks the "Login" button in the auth-mode section. */
-  onOpenLogin?: () => void;
   /** Opens Settings → Marketplace with the provider package filter active. */
   onOpenMarketplace?: () => void;
-  /**
-   * True when a demo session is currently hydrated
-   * (`api.demo.status().activated`). Combined with authMode/vendor it drives
-   * whether the provider dropdown shows the synthetic "데모 체험" entry as
-   * selected.
-   */
-  demoActive: boolean;
-  /**
-   * Fired when the user picks the synthetic "데모 체험" entry from the provider
-   * dropdown. The handler restores the demo pointer if a session is already
-   * active, or kicks off embedded activation (via the login modal) otherwise.
-   */
-  onSelectDemo: () => void | Promise<void>;
   model: string;
   setModel: (v: string) => void;
   enableThinking: boolean;
@@ -594,15 +565,11 @@ export function LlmTab(props: LlmTabProps) {
     keyInput,
     setKeyInput,
     authMode,
-    setAuthMode,
     marketplaceProviderPresetId = "",
     marketplaceProviderPresets = [],
     onSelectMarketplaceProviderPreset,
     onClearMarketplaceProviderPreset,
-    onOpenLogin,
     onOpenMarketplace,
-    demoActive,
-    onSelectDemo,
     model,
     setModel,
     enableThinking,
@@ -791,7 +758,6 @@ export function LlmTab(props: LlmTabProps) {
     () => modelEntryMap(activeModelList?.entries),
     [activeModelList],
   );
-  const isLoginMode = authMode === "login";
   const marketplaceProviderPresetOptions = useMemo(
     () => providerOptionsForPresets(marketplaceProviderPresets),
     [marketplaceProviderPresets],
@@ -843,7 +809,7 @@ export function LlmTab(props: LlmTabProps) {
     [marketplaceProviderIds, marketplaceProviderPresetOptions, vendor],
   );
   useEffect(() => {
-    if (!settingsLoaded || isLoginMode) return;
+    if (!settingsLoaded) return;
     const timer = window.setTimeout(() => {
       void requestModelList(vendor, {
         baseUrl: activeModelListBaseUrl,
@@ -855,7 +821,6 @@ export function LlmTab(props: LlmTabProps) {
   }, [
     activeModelListBaseUrl,
     activeModelListCredentialScope,
-    isLoginMode,
     activeModelDiscoveryPolicy,
     requestModelList,
     settingsLoaded,
@@ -917,50 +882,31 @@ export function LlmTab(props: LlmTabProps) {
     }
   }, [api, hostResolverMap, t]);
 
-  // The dropdown shows "데모 체험" as selected only when the demo SESSION is
-  // hydrated AND it is the active provider (login mode + azure-foundry, the
-  // fixed demo vendor). Otherwise the real selected vendor is shown.
-  const isDemoSelected = demoActive && isLoginMode && vendor === "azure-foundry";
-  const displayVendor = isDemoSelected
-    ? DEMO_VENDOR_VALUE
-    : selectedMarketplaceProviderPreset
-      ? marketplaceProviderPresetSecretId(selectedMarketplaceProviderPreset.providerId)
-      : vendor;
+  const displayVendor = selectedMarketplaceProviderPreset
+    ? marketplaceProviderPresetSecretId(selectedMarketplaceProviderPreset.providerId)
+    : vendor;
   const isMarketplaceProviderSelected =
     marketplaceProviderIds.includes(vendor) || Boolean(selectedMarketplaceProviderPreset);
   const handleVendorChange = useCallback(
     (v: string) => {
-      if (v === DEMO_VENDOR_VALUE) {
-        void onSelectDemo();
-        return;
-      }
       const preset = marketplaceProviderPresets.find(
         (entry) => marketplaceProviderPresetSecretId(entry.providerId) === v,
       );
       if (preset) {
         onSelectMarketplaceProviderPreset?.(preset);
-        if (isLoginMode) setAuthMode("manual");
         onImmediateChange?.();
         return;
       }
-      // Real vendor picked. If we were in a login/demo session, this is an
-      // explicit switch out → back to manual mode for the chosen vendor. We do
-      // NOT clear the demo session (it stays in .env.demo); the user can
-      // re-select "데모 체험" later to restore it.
       onClearMarketplaceProviderPreset?.();
       setVendor(v);
-      if (isLoginMode) setAuthMode("manual");
       onImmediateChange?.();
     },
     [
       marketplaceProviderPresets,
       onClearMarketplaceProviderPreset,
       onImmediateChange,
-      onSelectDemo,
       onSelectMarketplaceProviderPreset,
-      setAuthMode,
       setVendor,
-      isLoginMode,
     ],
   );
   // Requirement D — only allow Apply when the host map has ACTUALLY changed
@@ -1191,11 +1137,9 @@ export function LlmTab(props: LlmTabProps) {
       </Dialog>
 
       {/* Section A — 공급자 구성.
-          When `authMode === "login"` the vendor dropdown and every per-vendor
-          field are rendered in a visually disabled state showing the active
-          login-session values — they are not removed from the DOM. This gives
-          the user context about what is currently active and makes it clear
-          that logging out will restore edit access. */}
+          Manual-only surface: the user configures their own API key / provider.
+          The login/demo auth toggle was removed (product decision "①안") — the
+          onboarding demo activation flow lives outside settings. */}
       <SettingsSection
         title={t("llmTab.providerConfig")}
         id="llm-providers"
@@ -1217,74 +1161,12 @@ export function LlmTab(props: LlmTabProps) {
           className="space-y-3"
           data-testid="llm-tab:section-providers"
         >
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">{t("llmTab.authMethod")}</Label>
-            <RadioGroup
-              value={authMode}
-              onValueChange={(v) => {
-                if (v === "manual" || v === "login") {
-                  setAuthMode(v);
-                  // Login success owns provider/model persistence; avoid a stale manual-mode autosave.
-                  if (v === "manual") {
-                    onImmediateChange?.();
-                  }
-                }
-              }}
-              className="flex gap-4"
-              data-testid="llm-tab:auth-mode"
-            >
-              <div className="flex items-center gap-2">
-                <RadioGroupItem value="manual" id="auth-mode-manual" />
-                <Label htmlFor="auth-mode-manual" className="text-xs">{t("llmTab.authManual")}</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem value="login" id="auth-mode-login" />
-                <Label htmlFor="auth-mode-login" className="text-xs">Login</Label>
-              </div>
-            </RadioGroup>
-          </div>
-
-          {/* Login-mode action row — shown only when authMode === "login". The
-              logged-in / key state now lives in the consolidated account
-              section above, so this row no longer repeats that badge. */}
-          {isLoginMode && (
-            <div className="space-y-2" data-testid="llm-tab:login-section">
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 text-xs"
-                data-testid="llm-tab:open-login"
-                onClick={() => onOpenLogin?.()}
-              >
-                Login
-              </Button>
-              <p className="text-[11px] text-muted-foreground">
-                {t("llmTab.loginAutoConfig")}
-              </p>
-              {/* Edit access is gated on logging out. Logout is owned by the
-                  account section's performLogout path above (deletes the active
-                  vendor secret, clears the demo session, and persists
-                  llm.authMode="manual"). We deliberately do NOT offer a local
-                  authMode toggle here: setting renderer state to "manual"
-                  without persisting would desync the UI from the stored
-                  llm.authMode and revert on the next mount. Point the user at
-                  the account-section logout instead. */}
-              <p
-                className="text-[11px] text-muted-foreground"
-                data-testid="llm-tab:logout-hint"
-              >
-                {t("llmTab.logoutToEdit")}
-              </p>
-            </div>
-          )}
-
-          {/* Provider selector — ALWAYS enabled (even in login/demo). It is the
-              single provider switcher, including the synthetic demo entry;
-              only the detail fields below stay login-gated. */}
+          {/* Provider selector — the single provider switcher for the manual
+              API-key configuration. */}
           <div className="space-y-2">
             <Label htmlFor="vendor-select" className="flex items-center gap-2">
               {t("llmTab.vendor")}
-              {!isLoginMode && <ImmediateBadge />}
+              <ImmediateBadge />
               {isMarketplaceProviderSelected && (
                 <span
                   className="inline-flex h-5 items-center rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground"
@@ -1297,7 +1179,6 @@ export function LlmTab(props: LlmTabProps) {
             <ProviderSelect
               value={displayVendor}
               onValueChange={handleVendorChange}
-              includeDemo
               triggerId="vendor-select"
               triggerClassName="w-full"
               placeholder={t("llmTab.vendorPlaceholder")}
@@ -1308,17 +1189,11 @@ export function LlmTab(props: LlmTabProps) {
               ]}
             />
           </div>
-          {/* Provider detail form — disabled when authMode === "login". */}
+          {/* Provider detail form — the manual API-key configuration. */}
           <div
-            className={isLoginMode ? "pointer-events-none opacity-50 select-none space-y-3" : "space-y-3"}
-            {...(isLoginMode ? { "aria-disabled": "true" as const } : {})}
+            className="space-y-3"
             data-testid="llm-tab:manual-section"
           >
-            {isLoginMode && (
-              <p className="text-[11px] text-muted-foreground italic">
-                {t("llmTab.loginModeDisabledHint")}
-              </p>
-            )}
             {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
               <div className="space-y-2">
                 <Label className="text-sm font-medium">
@@ -1332,7 +1207,6 @@ export function LlmTab(props: LlmTabProps) {
                     setBaseUrl(e.target.value);
                   }}
                   placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
-                  disabled={isLoginMode}
                   readOnly={endpointLockedToMarketplacePreset}
                 />
                 <p className="text-[11px] text-muted-foreground">
@@ -1365,7 +1239,6 @@ export function LlmTab(props: LlmTabProps) {
                     value={vertexProject}
                     onChange={(e) => setVertexProject(e.target.value)}
                     placeholder="my-gcp-project"
-                    disabled={isLoginMode}
                   />
                 </div>
                 <div className="space-y-1">
@@ -1376,7 +1249,6 @@ export function LlmTab(props: LlmTabProps) {
                     value={vertexLocation}
                     onChange={(e) => setVertexLocation(e.target.value)}
                     placeholder={t("llmTab.vertexLocationPlaceholder")}
-                    disabled={isLoginMode}
                   />
                 </div>
               </div>
@@ -1399,7 +1271,7 @@ export function LlmTab(props: LlmTabProps) {
                       {activeProviderRequiresApiKey ? t("llmTab.apiKeyNotSet") : t("llmTab.optional")}
                     </Badge>
                   )}
-                  {hasKey && !isLoginMode && (
+                  {hasKey && (
                     <Button
                       size="sm"
                       variant="ghost"
@@ -1416,7 +1288,6 @@ export function LlmTab(props: LlmTabProps) {
                   placeholder={hasKey ? t("llmTab.replaceKey") : vendorInfo.placeholder}
                   value={keyInput}
                   onChange={(e) => setKeyInput(e.target.value)}
-                  disabled={isLoginMode}
                 />
               </div>
             )}
@@ -1452,7 +1323,7 @@ export function LlmTab(props: LlmTabProps) {
                         className="h-7 w-7 p-0"
                         aria-label={t("llmTab.modelSync")}
                         data-testid="llm-tab:model-sync"
-                        disabled={isLoginMode || activeModelList?.status === "loading"}
+                        disabled={activeModelList?.status === "loading"}
                         onClick={() => void requestModelList(vendor, {
                           baseUrl: activeModelListBaseUrl,
                           credentialScope: activeModelListCredentialScope,
@@ -1473,7 +1344,6 @@ export function LlmTab(props: LlmTabProps) {
               <Select
                 value={activeModelValue}
                 onValueChange={setModel}
-                disabled={isLoginMode}
               >
                 <SelectTrigger
                   id="model-select"
@@ -1527,54 +1397,43 @@ export function LlmTab(props: LlmTabProps) {
       </SettingsSection>
 
       {/* Section — Host Resolver Map.
-          Only editable in manual mode. In login mode the map is read-only
-          (demo uses LVIS_DEMO_HOST_MAP and this field has no effect). A
-          dedicated Apply button triggers the relaunch confirm dialog because
+          A dedicated Apply button triggers the relaunch confirm dialog because
           host-resolver-rules cannot be changed at runtime. */}
       <SettingsSection
         title={t("llmTab.hostResolverMapTitle")}
         id="llm-host-resolver"
       >
         <div className="space-y-2" data-testid="llm-tab:host-resolver-section">
-          {isLoginMode ? (
-            <p className="text-[11px] text-muted-foreground italic">
-              {t("llmTab.hostResolverMapLoginDisabled")}
-            </p>
-          ) : (
-            <p className="text-[11px] text-muted-foreground">
-              {t("llmTab.hostResolverMapDesc")}
-            </p>
-          )}
+          <p className="text-[11px] text-muted-foreground">
+            {t("llmTab.hostResolverMapDesc")}
+          </p>
           <Textarea
             data-testid="llm-host-resolver-map-input"
             value={hostResolverMap}
             onChange={(e) => setHostResolverMap(e.target.value)}
             placeholder={t("llmTab.hostResolverMapPlaceholder")}
-            disabled={isLoginMode}
             rows={5}
             className="font-mono text-xs"
             aria-label={t("llmTab.hostResolverMapTitle")}
           />
-          {!isLoginMode && hostMapEntryCount > 0 && (
+          {hostMapEntryCount > 0 && (
             <p className="text-[11px] text-muted-foreground">
               {hostMapEntryCount === 1
                 ? t("llmTab.entryCountSingular", { count: hostMapEntryCount })
                 : t("llmTab.entryCountPlural", { count: hostMapEntryCount })}
             </p>
           )}
-          {!isLoginMode && (
-            <div className="flex justify-end">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleHostMapApply}
-                disabled={saving || !settingsLoaded || !hostMapChanged}
-                data-testid="llm-tab:apply-host-map"
-              >
-                {t("llmTab.hostResolverMapApply")}
-              </Button>
-            </div>
-          )}
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleHostMapApply}
+              disabled={saving || !settingsLoaded || !hostMapChanged}
+              data-testid="llm-tab:apply-host-map"
+            >
+              {t("llmTab.hostResolverMapApply")}
+            </Button>
+          </div>
         </div>
       </SettingsSection>
 
