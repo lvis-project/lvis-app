@@ -37,7 +37,6 @@ import { PluginConfigTab } from "./tabs/PluginConfigTab.js";
 import { MarketplaceTab } from "./tabs/MarketplaceTab.js";
 import { AboutTab } from "./tabs/AboutTab.js";
 import { StartupTab } from "./tabs/StartupTab.js";
-import { LoginModal } from "./components/LoginModal.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
 import { useDebouncedSave } from "./hooks/use-debounced-save.js";
 import { normalizeSettingsTab, type SettingsTab } from "../../shared/settings-tabs.js";
@@ -174,36 +173,6 @@ export function SettingsContent({
   // change and edit a sibling tab; close lives on the Dialog X / Esc.
   const llmSave = useDebouncedSave(() => void s.save("llm"));
 
-  const [loginOpen, setLoginOpen] = useState(false);
-
-  // provider dropdown. Hydrated from api.demo.status() on mount + after any
-  // login (a successful login may be a demo activation).
-  const [demoActive, setDemoActive] = useState(false);
-  const refreshDemoActive = useCallback(() => {
-    void api.demo.status().then(
-      (st) => setDemoActive(st.ok && st.activated === true),
-      () => {},
-    );
-  }, [api]);
-  useEffect(() => {
-    refreshDemoActive();
-  }, [refreshDemoActive]);
-
-  // hydrated, just restore the pointer (no modal). Otherwise open the login
-  // modal, whose conversational variant auto-activates the build-embedded key.
-  const handleSelectDemo = useCallback(async () => {
-    const st = await api.demo.status().catch(() => null);
-    if (st?.ok && st.activated) {
-      s.setVendor("azure-foundry");
-      s.setAuthMode("login");
-      setDemoActive(true);
-      return;
-    }
-    llmSave.cancel();
-    s.invalidateLlmDraftSaves();
-    s.setKeyInput("");
-    setLoginOpen(true);
-  }, [api, s, llmSave]);
   const chatSave = useDebouncedSave(() => void s.save("chat"));
   const webSave = useDebouncedSave(() => void s.save("web"));
   const marketplaceSave = useDebouncedSave(() => void s.save("marketplace"));
@@ -541,20 +510,11 @@ export function SettingsContent({
               keyInput={s.keyInput}
               setKeyInput={s.setKeyInput}
               authMode={s.authMode}
-              setAuthMode={s.setAuthMode}
               marketplaceProviderPresetId={s.marketplaceProviderPresetId}
               marketplaceProviderPresets={s.marketplaceProviderPresets}
               onSelectMarketplaceProviderPreset={s.selectMarketplaceProviderPreset}
               onClearMarketplaceProviderPreset={s.clearMarketplaceProviderPreset}
-              onOpenLogin={() => {
-                llmSave.cancel();
-                s.invalidateLlmDraftSaves();
-                s.setKeyInput("");
-                setLoginOpen(true);
-              }}
               onOpenMarketplace={() => openMarketplaceTab("provider")}
-              demoActive={demoActive}
-              onSelectDemo={handleSelectDemo}
               model={s.model}
               setModel={s.setModel}
               enableThinking={s.enableThinking}
@@ -660,35 +620,6 @@ export function SettingsContent({
       </div>
       </div>
     </Tabs>
-    <LoginModal
-      api={api}
-      open={loginOpen}
-      onOpenChange={setLoginOpen}
-      onSuccess={(activatedVendor, result) => {
-        llmSave.cancel();
-        s.invalidateLlmDraftSaves();
-        s.setKeyInput("");
-        // #893 — backend decides vendor; mirror it back into the dialog
-        // state so the user lands on the now-active vendor without a
-        // settings reload.
-        s.setVendor(activatedVendor);
-        s.setAuthMode("login");
-        s.setHasKey(true);
-        if (result.model !== undefined) s.setModel(result.model);
-        if (result.baseUrl !== undefined) s.setBaseUrl(result.baseUrl);
-        if (result.vertexProject !== undefined) s.setVertexProject(result.vertexProject);
-        if (result.vertexLocation !== undefined) s.setVertexLocation(result.vertexLocation);
-        void api.getSettings().then((settings) => {
-          const provider = settings.llm.provider;
-          s.hydrateLlmFromSettings(settings);
-          void api.hasApiKey(provider).then((hasKey) => s.setHasKey(hasKey));
-        });
-        // A successful login may be a demo activation — refresh so the provider
-
-        refreshDemoActive();
-        onSaved();
-      }}
-    />
     </SavedToastProvider>
   );
 }
