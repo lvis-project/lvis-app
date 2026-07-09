@@ -492,8 +492,20 @@ export async function parsePluginJson(
   // legitimately-overlapping first-party plugins. The warn names the
   // overlapping methods and states they stay on the governed ToolExecutor path.
   if (Array.isArray(parsed.tools) && uiInvokable.size > 0) {
+    // EXCLUDE the auth tool names (statusTool/loginTool/logoutTool) from this
+    // general overlap set: they have their own STRICTER rule below — a hard
+    // `fail()` if they appear in tools[] at all. Without this exclusion the same
+    // auth method would get two contradictory verdicts: this soft
+    // "...This is allowed" warn AND the auth block's hard fail (#1554
+    // cluster-review MINOR). The general warn is for NON-auth dual declarations,
+    // which are legitimately allowed.
+    const authToolNames = new Set(
+      ([parsed.auth?.statusTool, parsed.auth?.loginTool, parsed.auth?.logoutTool] as Array<unknown>)
+        .filter((v): v is string => typeof v === "string" && v.length > 0),
+    );
     const overlap = parsed.tools.filter(
-      (name): name is string => typeof name === "string" && uiInvokable.has(name),
+      (name): name is string =>
+        typeof name === "string" && uiInvokable.has(name) && !authToolNames.has(name),
     );
     if (overlap.length > 0) {
       const names = overlap.map((n) => `'${n}'`).join(", ");
