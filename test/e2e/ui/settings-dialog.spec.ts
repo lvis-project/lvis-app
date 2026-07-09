@@ -1,39 +1,34 @@
 import { test, expect } from './fixtures';
 import { closeSettingsWindow, openSettingsWindow } from './settings-window';
 
-test('native settings window opens and closes', async ({ app, mainWindow, t }) => {
+/**
+ * Inline settings smoke (settings-inline-overhaul).
+ *
+ * Settings no longer detaches to its own BrowserWindow in any app mode — it is
+ * an always-inline panel inside the main window. The old spec here asserted the
+ * detached window's document title and that the *detached* window kept its own
+ * Edit menu for copy/paste accelerators. Both are gone with the window:
+ *   - there is no separate window title to assert;
+ *   - copy/paste in settings inputs now rides the main window's application
+ *     menu (Menu.setApplicationMenu carries {role:'copy'|'paste'}) plus
+ *     Chromium's native input handling — a general main-window capability that
+ *     every input-filling spec already exercises, not something specific to
+ *     this surface.
+ *
+ * What remains worth pinning is that the inline panel opens to the requested
+ * tab and that Back leaves it.
+ */
+test('inline settings opens to the requested tab and closes back', async ({ app, mainWindow, t }) => {
   const settingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
 
-  await expect(settingsWindow).toHaveTitle(t('settingsWindow.documentTitle'));
-  await expect(settingsWindow.getByRole('tab', { name: t('settingsContent.tabChat') })).toHaveAttribute(
-    'data-state',
-    'active',
-  );
+  // Scope to the settings panel — the main window's own sidebar has a "Chats"
+  // tab whose accessible name would otherwise also match `name: 'Chat'` and
+  // trip strict mode.
+  const settingsPanel = settingsWindow.locator('[data-settings-layout]');
+  await expect(
+    settingsPanel.getByRole('tab', { name: t('settingsContent.tabChat'), exact: true }),
+  ).toHaveAttribute('data-state', 'active');
 
-  await closeSettingsWindow(app, settingsWindow);
-});
-
-test('native settings window preserves standard copy and paste shortcuts', async ({ app, mainWindow }) => {
-  const settingsWindow = await openSettingsWindow(app, mainWindow, 'llm');
-  const shortcut = process.platform === 'darwin' ? 'Meta' : 'Control';
-  const pastedValue = 'settings-copy-paste-e2e-value';
-  // The model field is now a <select>; use the plain-text Endpoint/baseUrl input
-  // to exercise the native window's copy/paste edit-menu roles.
-  const textInput = settingsWindow.getByTestId('llm-base-url-input');
-
-  await app.evaluate(({ clipboard }, value) => {
-    clipboard.writeText(value);
-  }, pastedValue);
-
-  await textInput.fill('');
-  await textInput.focus();
-  await settingsWindow.keyboard.press(`${shortcut}+V`);
-  await expect(textInput).toHaveValue(pastedValue);
-
-  await settingsWindow.keyboard.press(`${shortcut}+A`);
-  await settingsWindow.keyboard.press(`${shortcut}+C`);
-  const copied = await app.evaluate(({ clipboard }) => clipboard.readText());
-  expect(copied).toBe(pastedValue);
-
+  // Back navigation leaves the settings view (the sidebar heading disappears).
   await closeSettingsWindow(app, settingsWindow);
 });
