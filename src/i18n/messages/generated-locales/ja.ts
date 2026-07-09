@@ -2465,7 +2465,7 @@ export const jaMessages: Record<string, string> = {
   "settingsContent.tabPluginPerf": "プラグインのパフォーマンス",
   "settingsContent.tabRoles": "役割",
   "settingsContent.tabUsage": "使用法",
-  "settingsContent.tabWeb": "検索(Web)",
+  "settingsContent.tabWeb": "ウェブ / ブラウジング",
   "settingsWindow.documentTitle": "LVIS 設定",
   "sidebar.ariaLabel": "プライマリナビゲーション",
   "sidebar.authRequiredAriaLabel": "認証が必要です",
