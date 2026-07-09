@@ -2458,6 +2458,7 @@ export const deMessages: Record<string, string> = {
   "settingsContent.tabGeneral": "Allgemein",
   "settingsContent.tabLlm": "Modell",
   "settingsContent.tabMarketplace": "Marktplatz",
+  "settingsContent.tabAbout": "Über",
   "settingsContent.tabMcp": "MCP-Server",
   "settingsContent.tabPermissions": "Berechtigungen",
   "settingsContent.tabPluginConfig": "Plugin-Einstellungen",

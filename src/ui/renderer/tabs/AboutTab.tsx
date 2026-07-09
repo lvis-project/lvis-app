@@ -6,7 +6,7 @@ import type { LvisApi } from "../types.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 
-export interface GeneralTabProps {
+export interface AboutTabProps {
   api: LvisApi;
 }
 
@@ -35,7 +35,13 @@ function platformLabel(platform: NodeJS.Platform): string {
   }
 }
 
-export function GeneralTab({ api }: GeneralTabProps) {
+/**
+ * AboutTab — the emptied-out former General tab, now holding only System Info
+ * (OS / app version / tech stack / data path). Account, workspace stats, and
+ * auth management were relocated to the Model + Usage surfaces. System-Info
+ * testids are kept stable (general-tab-*) for continuity with existing specs.
+ */
+export function AboutTab({ api }: AboutTabProps) {
   const { t } = useTranslation();
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
 
@@ -62,15 +68,12 @@ export function GeneralTab({ api }: GeneralTabProps) {
   return (
     <div className="space-y-6">
       <SettingsPageHeader
-        title={t("generalTab.pageTitle")}
-        description={t("generalTab.pageDescription")}
+        title={t("settingsContent.tabAbout")}
+        description={t("generalTab.systemInfoDescription")}
       />
 
       {/* ── 시스템 정보 ─────────────────────────────── */}
-      <SettingsSection
-        title={t("generalTab.systemInfoTitle")}
-        description={t("generalTab.systemInfoDescription")}
-      >
+      <SettingsSection title={t("generalTab.systemInfoTitle")}>
         <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
           <div className="flex items-start gap-3 rounded-md border bg-card/(--opacity-half) p-3">
             <Cpu className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden={true} />

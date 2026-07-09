@@ -14,7 +14,7 @@ import {
   Server,
   Puzzle,
   Store,
-  LayoutDashboard,
+  Info,
   Rocket,
   ChevronLeft,
   ChevronRight,
@@ -35,7 +35,7 @@ import { WebTab } from "./tabs/WebTab.js";
 import { McpTab } from "./tabs/McpTab.js";
 import { PluginConfigTab } from "./tabs/PluginConfigTab.js";
 import { MarketplaceTab } from "./tabs/MarketplaceTab.js";
-import { GeneralTab } from "./tabs/GeneralTab.js";
+import { AboutTab } from "./tabs/AboutTab.js";
 import { StartupTab } from "./tabs/StartupTab.js";
 import { LoginModal } from "./components/LoginModal.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
@@ -49,14 +49,13 @@ type SettingsNavItem = { value: SettingsTab; icon: LucideIcon; labelKey: string 
  * Grouped, data-driven settings navigation. Re-grouping or re-ordering is a
  * pure data edit here — the wide sidebar and the narrow mobile depth-1 list
  * both iterate this single array, so the two layouts can never drift. The
- * values, icons and labelKeys are exactly the 14 pre-existing tabs, only
- * grouped (no tab was moved between panes here — that is a separate task).
+ * former "general" tab was split (account → Model, stats → Usage, system info
+ * → the "about" tab appended to the Advanced group).
  */
 const SETTINGS_NAV: { group: string; items: SettingsNavItem[] }[] = [
   {
     group: "settingsContent.groupAccountModel",
     items: [
-      { value: "general", icon: LayoutDashboard, labelKey: "settingsContent.tabGeneral" },
       { value: "llm", icon: Brain, labelKey: "settingsContent.tabLlm" },
       { value: "usage", icon: BarChart3, labelKey: "settingsContent.tabUsage" },
     ],
@@ -89,6 +88,7 @@ const SETTINGS_NAV: { group: string; items: SettingsNavItem[] }[] = [
     group: "settingsContent.groupAdvanced",
     items: [
       { value: "audit", icon: FileSearch, labelKey: "settingsContent.tabAudit" },
+      { value: "about", icon: Info, labelKey: "settingsContent.tabAbout" },
     ],
   },
 ];
@@ -127,7 +127,7 @@ function TabSaveBar({
 export function SettingsContent({
   api,
   onSaved,
-  initialTab = "general",
+  initialTab = "llm",
 }: {
   api: LvisApi;
   onSaved: () => void;
@@ -507,8 +507,8 @@ export function SettingsContent({
           </div>
         )}
 
-          <TabsContent value="general" className="flex-1 min-h-0 outline-none">
-            <GeneralTab api={api} />
+          <TabsContent value="about" className="flex-1 min-h-0 outline-none">
+            <AboutTab api={api} />
           </TabsContent>
 
           <TabsContent value="llm" className="flex-1 min-h-0 outline-none">
