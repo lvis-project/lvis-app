@@ -163,6 +163,30 @@ visibility — it stays host-side, exactly as today.
 host security verdict.** `capabilities[]` stays a separate manifest array (dependency-tag axis, deliberately
 not a tool-object field; kept out of MCP projection).
 
+### 2.4a Two host-reader migrations found in the completeness census (2026-07-09)
+
+The first-pass census enumerated the projection/gate/runtime-method readers but missed two direct
+`manifest.tools`(string[]) / `manifest.toolSchemas` readers. Both break under `Tool[]` and are part of a4:
+
+- **`knownToolOwners`** (`runtime/index.ts:415,457,1018`, teardowns `:408-409,1090-1091`, clear `:1942`)
+  iterates `manifest.tools` and keys a `Map<toolName,pluginId>`. Under `Tool[]` the key becomes an object,
+  so a4 must read `.map(t => t.name)`. **Security decision — MODEL-ONLY** (`filter(isModelVisible).map(name)`):
+  this map feeds `resolveToolOwner` (`:1523` — `methodMap.get(m)?.pluginId ?? knownToolOwners.get(m)`, so it
+  is only the pre-runtime `??` fallback; `methodMap` carries ALL names incl. UI-only and is authoritative at
+  runtime) → `assertPluginToolAccess` (plugin-to-plugin access control) and `throwIfToolOwnerNotReady`
+  (`:2012`, which already early-returns for a UI-only method today). Today's `tools`(string[]) is model-facing
+  only, so a naive all-names `.map` would silently add the app-only auth trio to the ownership map — an
+  access-control widening. Model-only reproduces today's EXACT set (byte-for-byte behavior-preserving) and
+  loses no UI-only ownership resolution (methodMap covers it). Verified against real code + critic-u2b.
+- **`buildPluginCard`** (`runtime/cards.ts:24,28,35,48-50`) filters `allTools` as if elements were names and
+  sources card descriptions from `manifest.toolSchemas[name].description` (a field v6 deletes). a4 retargets:
+  filter on `t.name` with an `isModelVisible` pre-filter (card stays LLM-facing, auth tools hidden as today),
+  descriptions from `tool.description`, `PluginCard.tools`(string[]) = the filtered names.
+- **Writer counterpart (Phase R):** `marketplace.ts` `buildInstalledManifest` (`:1564-1603`) mirrors catalog
+  fields into the on-disk `plugin.json` — `:1588 manifest.uiActions` and `:1591 manifest.toolSchemas` are
+  DELETED in R (`:1577 tools` retargets to the pure `Tool[]` mirror). Caught by the §3.3 sweep + tsc tripwire
+  when the `PluginMarketplaceItem` fields are removed.
+
 ### 2.5 External-reference evidence (field-minimization audit)
 
 The 2026-07-09 second-round decisions are grounded in an external audit of MCP (core + Apps SEP-1865),
@@ -203,8 +227,12 @@ BOTH shapes (a `oneOf` on `tools`: legacy `string[]` vs MCP `Tool[]`).
   logged once per plugin at load during the window so authors notice).
 - New input (`tools[0]` is an object) → pass through verbatim (**no translation — manifest IS the wire shape**).
 - **Invariant:** `normalizeManifest` is the ONLY code that reads legacy `toolSchemas`/`uiActions`; every
-  consumer (`manifestToolsToMcpTools`, `declaredRuntimeMethods`, the gate) reads the normalized `Tool[]`.
-  The compat surface is excisable in one file — no `(x as any)` leaks to call sites.
+  consumer reads the normalized `Tool[]`. The full host-reader set (census-verified 2026-07-09) is:
+  `manifestToolsToMcpTools`, `declaredRuntimeMethods`/`declaredUiInvokableMethods`, the governed-vs-bypass
+  gate, **`knownToolOwners` population (`runtime/index.ts:415,457,1018` + teardowns `:408-409,1090-1091`)**,
+  and **`buildPluginCard` (`runtime/cards.ts:24,28,35,48-50`)**. The last two were missed by the first-pass
+  census and are load-bearing (§2.4a). The compat surface is excisable in one file — no `(x as any)` leaks
+  to call sites.
 
 ### 3.2 Removal gate (must be GREEN before Phase R)
 
@@ -220,6 +248,8 @@ Delete from host: `types.ts` `toolSchemas?`/`uiActions?`/`PluginUiActionSpec` **
 plumbing — the host-side derivations in `sandbox-capability.ts`/`permission-manager.ts` stay, now fed only by
 runtime state); the `oneOf` legacy branch + cross-field checks in `manifest-validation.ts` (incl. the workerId
 native-field probes); legacy branches in `plugin-loader.ts`/`plugin-server-projection.ts`/`plugin-tool-invocation.ts`;
+the legacy-mirror **writer** `marketplace.ts` `buildInstalledManifest` (`:1588 manifest.uiActions`, `:1591
+manifest.toolSchemas` — deleted; `:1577 tools` already writes the pure `Tool[]` mirror);
 the dormant `deprecatedSince`/`replacedBy` redirect machinery in `tools/base.ts`/`tools/registry.ts` (no producer).
 Delete from SDK: `toolSchemas`/`uiActions`/`PluginUiActionSpec` + the `oneOf` + removed-field schema in
 `schemas/plugin-manifest.schema.json`.
@@ -271,7 +301,7 @@ can never see a `Tool[]`).
 |---|---|---|
 | **a1** | This design doc → maintainer sign-off | agreement (done, §0 — three rounds 2026-07-09) |
 | **a2 (SDK v6)** | MCP `Tool` type + `tools: string[] \| Tool[]` `oneOf` schema + `normalizeManifest` compat (legacy → pure form, removed fields dropped with a load-time notice) + the `engines.lvisHost`-style host-compat field | SDK tests; host validator native-field probes updated |
-| **a4** | Host: `normalizeManifest` wired into `parsePluginJson` (incl. the :391-403 string-loop rewrite); intra-object auth/visibility checks replace cross-field checks; `manifestToolsToMcpTools`/`declaredRuntimeMethods`/gate read the normalized `Tool[]`; `writesToOwnSandbox` verdict input replaced by the host-side containment derivation; host-compat gate enforced | full vitest + pre-push |
+| **a4** | Host: `normalizeManifest` wired into `parsePluginJson` (incl. the :391-403 string-loop rewrite); intra-object auth/visibility checks replace cross-field checks; ALL host readers migrated to the normalized `Tool[]` — `manifestToolsToMcpTools`/`declaredRuntimeMethods`/gate **+ `knownToolOwners` (MODEL-ONLY, §2.4a) + `buildPluginCard`**; `writesToOwnSandbox` verdict input replaced by the host-side containment derivation (self-invalidates the `toolPolicyIdentity` cache); host-compat gate enforced; `readCategory` warn only on present-but-malformed (silent on v6-absent) | full vitest + pre-push |
 | **a3** | Migrate 6 first-party manifests + template to the pure form; bump each to SDK v6. **Marketplace publication held until the a4 host is GA** (pre-a4 hosts cannot load pure manifests) | each loads + registers on an a4 host; per-surface SET-equality invariant (model-set == old `tools[]`, app-set == old `uiActions` keys); tsc/vitest green |
 | **b1+b2+b3** | Per-server partition + detached viewKey + disconnect teardown (b1 lands with b2 — the `will-attach-webview` allowlist couples them) | Playwright e2e (renderer) + cluster review (touches `src/main`, IPC trust boundary) |
 | **b4** | Executor parity regression test + docs (no behavior change) | test asserts mcp==plugin traversal |
@@ -288,9 +318,13 @@ can never see a `Tool[]`).
   from the migration set.
 - b1 lazy per-server CDN-allowlist registration: confirm the `webRequest` filter can be (re)installed for a
   dynamic partition name without leaking a prior server's allowlist.
-- a4: the host-side `writesToOwnSandbox` derivation replaces the reviewer input — verify the reviewer
-  cache-identity change (the flag participated in `approvalCacheKey` identity, `permission-manager.ts:1107`)
-  invalidates cleanly.
+- a4: the host-side `writesToOwnSandbox` derivation replaces the reviewer input. **Cache-identity RESOLVED
+  (verified 2026-07-09):** the flag participated in `toolPolicyIdentity` (`verdict-cache.ts:156`); removing it
+  mutates the canonical JSON of every entry → sha256 differs → all old-shape keys are unreachable (mass
+  re-classify, no stale HIT). `ownerPluginSandboxRoot` (`:157`) is retained; user-approval memory keyed on
+  `finalInput` is untouched. The dead→live auto-LOW flip runs in `RuleBasedRiskClassifier` independently of
+  `hostClassifiesRisk`, so it also reaches OFF users — R1 confirms no plugin depends on the own-sandbox-write
+  round-trip (census: 0 declarations); ship-as-is, no feature flag (Q4).
 - Cluster review is REQUIRED for the (b) phase (sensitive `src/main` + IPC boundary).
 
 ## References (file:line + external evidence)
