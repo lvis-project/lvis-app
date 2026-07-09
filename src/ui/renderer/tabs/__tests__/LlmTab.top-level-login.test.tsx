@@ -1,15 +1,12 @@
 /**
- * LlmTab top-level login toggle UI tests.
+ * LlmTab manual-only Model-tab UI tests.
  *
- * Verifies that when `authMode === "login"` the LlmTab renders the vendor
- * dropdown and per-vendor fields in a DISABLED state (not removed from the
- * DOM) — the user sees the active login-session values and understands that
- * logging out will restore edit access.
- *
- * When `authMode === "manual"` the full per-vendor form is enabled and
- * editable.
- *
- * Also verifies the host-resolver map textarea renders in both modes.
+ * ①안 — the settings login/demo auth affordances were removed. The Model tab
+ * is manual-only now: the vendor dropdown + per-vendor fields (API key,
+ * baseUrl, model, vertex…) and the host-resolver map are ALWAYS enabled and
+ * editable, regardless of the persisted `authMode`. A former demo/login user
+ * (authMode="login") still sees the editable manual form; `authMode` only
+ * drives the Account section badge now.
  */
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
@@ -42,7 +39,6 @@ function Harness({
   initialMarketplaceProviderPresetId = "",
   initialHasKey = false,
   onLogout,
-  onReactivateDemo,
 }: {
   initialAuthMode: "manual" | "login";
   initialHostResolverMap?: string;
@@ -58,7 +54,7 @@ function Harness({
   onLogout?: () => void;
   onReactivateDemo?: () => void;
 }) {
-  const [authMode, setAuthMode] = useState<"manual" | "login">(initialAuthMode);
+  const [authMode] = useState<"manual" | "login">(initialAuthMode);
   const [vendor, setVendor] = useState(initialVendor);
   const [keyInput, setKeyInput] = useState("");
   const [model, setModel] = useState("gpt-5.4-mini");
@@ -90,7 +86,6 @@ function Harness({
         keyInput={keyInput}
         setKeyInput={setKeyInput}
         authMode={authMode}
-        setAuthMode={setAuthMode}
         marketplaceProviderPresetId={marketplaceProviderPresetId}
         marketplaceProviderPresets={marketplaceProviderPresets}
         onSelectMarketplaceProviderPreset={(preset) => {
@@ -100,7 +95,6 @@ function Harness({
           setModel(preset.defaultModel);
         }}
         onClearMarketplaceProviderPreset={() => setMarketplaceProviderPresetId("")}
-        onOpenLogin={vi.fn()}
         onOpenMarketplace={onOpenMarketplace}
         model={model}
         setModel={setModel}
@@ -118,32 +112,31 @@ function Harness({
         onSaved={vi.fn()}
         settingsLoaded={settingsLoaded}
         onLogout={onLogout}
-        onReactivateDemo={onReactivateDemo}
       />
     </TooltipProvider>
   );
 }
 
-describe("LlmTab — top-level login toggle UI", () => {
-  it("renders manual-section as disabled when authMode='login'", () => {
-    const { container } = render(<Harness initialAuthMode="login" />);
-    // Login status section is visible.
-    expect(container.querySelector('[data-testid="llm-tab:login-section"]')).not.toBeNull();
-    // Login button present.
-    expect(container.querySelector('[data-testid="llm-tab:open-login"]')).not.toBeNull();
-    // Manual section IS in the DOM but marked aria-disabled.
+describe("LlmTab — manual-only Model tab", () => {
+  // ①안 — the login/demo affordances were removed. Even for a former demo/login
+  // user (authMode="login") the manual API-key section renders ENABLED and there
+  // is no login section: the settings surface is manual-only.
+  it("renders the manual section enabled with no login section, even when authMode='login'", () => {
+    const { container } = render(<Harness initialAuthMode="login" initialVendor="openai" />);
+    // No login section / login button in the settings surface anymore.
+    expect(container.querySelector('[data-testid="llm-tab:login-section"]')).toBeNull();
+    expect(container.querySelector('[data-testid="llm-tab:open-login"]')).toBeNull();
+    // Manual section IS in the DOM and NOT aria-disabled.
     const manualSection = container.querySelector('[data-testid="llm-tab:manual-section"]');
     expect(manualSection).not.toBeNull();
-    expect(manualSection?.getAttribute("aria-disabled")).toBe("true");
-    // Vendor select rendered but disabled.
-    const vendorTrigger = container.querySelector('#vendor-select');
-    expect(vendorTrigger).not.toBeNull();
-    // Model selector rendered.
+    expect(manualSection?.getAttribute("aria-disabled")).not.toBe("true");
+    // Vendor select + model selector rendered.
+    expect(container.querySelector('#vendor-select')).not.toBeNull();
     expect(container.querySelector('[data-testid="llm-model-select"]')).not.toBeNull();
-    // API key input disabled.
+    // API key input is editable (not disabled).
     const keyInput = container.querySelector('[data-testid="llm-api-key-input"]') as HTMLInputElement | null;
     expect(keyInput).not.toBeNull();
-    expect(keyInput?.disabled).toBe(true);
+    expect(keyInput?.disabled).toBe(false);
   });
 
   it("renders vendor dropdown and per-vendor fields enabled when authMode='manual'", () => {
@@ -857,11 +850,11 @@ describe("LlmTab — top-level login toggle UI", () => {
     expect(await screen.findByText("router/free-model")).toBeInTheDocument();
   });
 
-  it("host-resolver map textarea is disabled in login mode", () => {
+  it("host-resolver map textarea is enabled even for a former login/demo user", () => {
     const { container } = render(<Harness initialAuthMode="login" />);
     const textarea = container.querySelector('[data-testid="llm-host-resolver-map-input"]') as HTMLTextAreaElement | null;
     expect(textarea).not.toBeNull();
-    expect(textarea?.disabled).toBe(true);
+    expect(textarea?.disabled).toBe(false);
   });
 
   it("host-resolver map textarea is enabled in manual mode", () => {
@@ -871,9 +864,9 @@ describe("LlmTab — top-level login toggle UI", () => {
     expect(textarea?.disabled).toBe(false);
   });
 
-  it("apply-host-map button shown only in manual mode", () => {
+  it("apply-host-map button is shown regardless of authMode", () => {
     const { container: loginContainer } = render(<Harness initialAuthMode="login" />);
-    expect(loginContainer.querySelector('[data-testid="llm-tab:apply-host-map"]')).toBeNull();
+    expect(loginContainer.querySelector('[data-testid="llm-tab:apply-host-map"]')).not.toBeNull();
 
     const { container: manualContainer } = render(<Harness initialAuthMode="manual" />);
     expect(manualContainer.querySelector('[data-testid="llm-tab:apply-host-map"]')).not.toBeNull();
@@ -953,35 +946,19 @@ describe("LlmTab — top-level login toggle UI", () => {
     expect(section?.textContent).toContain("2");
   });
 
-  it("toggles between manual and login via the auth-mode radio group", () => {
-    const { container } = render(<Harness initialAuthMode="manual" />);
-    // Manual mode: no login section, manual section not disabled.
-    expect(container.querySelector('[data-testid="llm-tab:login-section"]')).toBeNull();
-    const manualBefore = container.querySelector('[data-testid="llm-tab:manual-section"]');
-    expect(manualBefore?.getAttribute("aria-disabled")).not.toBe("true");
+  // ①안 — the auth-mode radio group and the login-section (with its logout
+  // hint) were removed from the settings surface entirely. There is no toggle
+  // into login mode here anymore; logout lives in the Account section header
+  // (covered by "LlmTab — account + auth management" below).
+  it("no longer renders the auth-mode radio or login section in any mode", () => {
+    const { container: manualContainer } = render(<Harness initialAuthMode="manual" />);
+    expect(manualContainer.querySelector('[data-testid="llm-tab:auth-mode"]')).toBeNull();
+    expect(manualContainer.querySelector('#auth-mode-login')).toBeNull();
 
-    // Click the Login radio.
-    const loginRadio = container.querySelector('#auth-mode-login') as HTMLElement;
-    fireEvent.click(loginRadio);
-
-    // After toggle: login section present, manual section disabled.
-    expect(container.querySelector('[data-testid="llm-tab:login-section"]')).not.toBeNull();
-    const manualAfter = container.querySelector('[data-testid="llm-tab:manual-section"]');
-    expect(manualAfter?.getAttribute("aria-disabled")).toBe("true");
-  });
-
-  // (1) The login-mode logout affordance must not desync renderer state from
-  // persisted llm.authMode. The old local `setAuthMode("manual")` button is
-  // removed; only a hint pointing at the canonical GeneralTab logout remains.
-  it("renders a logout hint (not a local toggle button) in login mode", () => {
-    const { container } = render(<Harness initialAuthMode="login" />);
-    // The broken local-only logout affordance is gone.
-    expect(container.querySelector('[data-testid="llm-tab:logout-to-edit"]')).toBeNull();
-    // A static hint directing the user to the canonical logout is present.
-    const hint = container.querySelector('[data-testid="llm-tab:logout-hint"]');
-    expect(hint).not.toBeNull();
-    // It is a non-interactive paragraph, not a button.
-    expect(hint?.tagName.toLowerCase()).toBe("p");
+    const { container: loginContainer } = render(<Harness initialAuthMode="login" />);
+    expect(loginContainer.querySelector('[data-testid="llm-tab:auth-mode"]')).toBeNull();
+    expect(loginContainer.querySelector('[data-testid="llm-tab:login-section"]')).toBeNull();
+    expect(loginContainer.querySelector('[data-testid="llm-tab:logout-hint"]')).toBeNull();
   });
 
   // (2) When api.applyHostMap rejects, the relaunch confirm dialog must stay
@@ -1114,19 +1091,13 @@ describe("LlmTab — account + auth management", () => {
     return api as unknown as HarnessApi;
   }
 
-  it("renders 인증 관리 buttons (reactivate + logout) in the account section", async () => {
-    render(<Harness initialAuthMode="login" onLogout={() => {}} onReactivateDemo={() => {}} />);
-    const reactivate = await screen.findByTestId("general-tab-reactivate-demo");
+  it("renders the logout button in the account section", async () => {
+    render(<Harness initialAuthMode="login" onLogout={() => {}} />);
     const logout = await screen.findByTestId("general-tab-logout");
-    expect(reactivate.textContent).toContain("활성화 키 재입력");
     expect(logout.textContent).toContain("로그아웃");
-  });
-
-  it("invokes onReactivateDemo when the 활성화 키 재입력 button is clicked", async () => {
-    const onReactivateDemo = vi.fn();
-    render(<Harness initialAuthMode="login" onReactivateDemo={onReactivateDemo} />);
-    fireEvent.click(await screen.findByTestId("general-tab-reactivate-demo"));
-    expect(onReactivateDemo).toHaveBeenCalledTimes(1);
+    // The redundant "Re-enter activation key" button was removed — login /
+    // re-activation is a single flow via the "Login" auth method.
+    expect(screen.queryByTestId("general-tab-reactivate-demo")).toBeNull();
   });
 
   it("로그아웃 → confirm → active vendor 의 deleteApiKey + demo clear + onboardingCompleted=false + onLogout", async () => {
@@ -1138,7 +1109,6 @@ describe("LlmTab — account + auth management", () => {
         initialVendor="openai"
         api={api}
         onLogout={onLogout}
-        onReactivateDemo={() => {}}
       />,
     );
     fireEvent.click(await screen.findByTestId("general-tab-logout"));
@@ -1169,7 +1139,6 @@ describe("LlmTab — account + auth management", () => {
         initialMarketplaceProviderPresetId={presetId}
         api={api}
         onLogout={onLogout}
-        onReactivateDemo={() => {}}
       />,
     );
     fireEvent.click(await screen.findByTestId("general-tab-logout"));
