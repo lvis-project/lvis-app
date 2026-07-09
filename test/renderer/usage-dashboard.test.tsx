@@ -42,11 +42,72 @@ function usageDashboardApi(overrides: Partial<typeof MOCK_SUMMARY> = {}) {
   return api;
 }
 
-async function renderDashboard(api = usageDashboardApi()) {
+async function renderDashboard(api = usageDashboardApi(), onNavigate: (tab: any) => void = () => {}) {
   const { UsageDashboard } = await import("../../src/ui/renderer/components/UsageDashboard.js");
-  const result = render(<UsageDashboard api={api as any} />);
+  const result = render(<UsageDashboard api={api as any} onNavigate={onNavigate} />);
   return { ...result, api };
 }
+
+// Workspace stat cards + marketplace status were relocated onto the Usage
+// surface (from the former General tab). They render via WorkspaceStatsSection
+// inside UsageDashboard, keeping useWorkspaceStats as the data source.
+function workspaceStatsApi(overrides: Record<string, unknown> = {}) {
+  const { api } = makeMockLvisApi({
+    usage: MOCK_SUMMARY,
+    pluginUiExtensions: [{ pluginId: "a" }, { pluginId: "b" }],
+    pluginCards: [
+      { id: "a", name: "A", description: "", sampleTools: [], capabilities: [], tools: ["t1", "t2"] },
+      { id: "b", name: "B", description: "", sampleTools: [], capabilities: [], tools: ["t3"] },
+    ],
+    agentProfiles: { agents: [{ name: "agent1" }, { name: "agent2" }] },
+    skills: { skills: [{ name: "skill1" }] },
+    personaPrompts: [{ id: "persona1", name: "Persona", systemPromptAdd: "Act as persona." }],
+    ...(overrides as Record<string, unknown>),
+  });
+  api.getUsageRange = vi.fn(async () => MOCK_SUMMARY);
+  api.exportUsageCsv = vi.fn(async () => ({ ok: true, filePath: "/tmp/lvis-usage.csv" }));
+  return api;
+}
+
+describe("UsageDashboard — workspace stats section", () => {
+  it("renders all 5 workspace stat cards with their counts", async () => {
+    const { findByTestId } = await renderDashboard(workspaceStatsApi() as any);
+    const plugin = await findByTestId("general-tab-card-plugin");
+    const tool = await findByTestId("general-tab-card-tool");
+    const agent = await findByTestId("general-tab-card-agent");
+    const skill = await findByTestId("general-tab-card-skill");
+    const role = await findByTestId("general-tab-card-role");
+    await waitFor(() => {
+      expect(plugin.textContent).toContain("2");
+      expect(tool.textContent).toContain("3");
+      expect(agent.textContent).toContain("2");
+      expect(skill.textContent).toContain("1");
+      expect(role.textContent).toContain("1");
+    });
+  });
+
+  it("renders the marketplace status pill with the resolved online state", async () => {
+    const api = workspaceStatsApi({ marketplacePing: { configured: true, online: true } });
+    const { findByTestId } = await renderDashboard(api as any);
+    const status = await findByTestId("general-tab-marketplace-status");
+    await waitFor(() => expect(status.textContent).toContain("정상"));
+  });
+
+  it("renders 미연결 when the marketplace is not configured", async () => {
+    const api = workspaceStatsApi({ marketplacePing: { configured: false, online: false } });
+    const { findByTestId } = await renderDashboard(api as any);
+    const status = await findByTestId("general-tab-marketplace-status");
+    await waitFor(() => expect(status.textContent).toContain("미연결"));
+  });
+
+  it("calls onNavigate(plugin-config) when the 플러그인 card is clicked", async () => {
+    const onNavigate = vi.fn();
+    const { findByTestId } = await renderDashboard(workspaceStatsApi() as any, onNavigate);
+    const plugin = await findByTestId("general-tab-card-plugin");
+    fireEvent.click(plugin);
+    expect(onNavigate).toHaveBeenCalledWith("plugin-config");
+  });
+});
 
 describe("UsageDashboard", () => {
   it("renders without crashing", async () => {

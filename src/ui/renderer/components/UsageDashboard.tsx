@@ -6,8 +6,10 @@ import { formatCost, formatTokens } from "../utils/cost-format.js";
 import type { LvisApi, UsageSummaryShape, UsageTrendPt } from "../types.js";
 import { Sparkline } from "./Sparkline.js";
 import { SettingsPageHeader } from "./SettingsPageHeader.js";
+import { WorkspaceStatsSection } from "./WorkspaceStatsSection.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { t } from "../../../i18n/runtime.js";
+import type { SettingsTab } from "../../../shared/settings-tabs.js";
 
 type Preset = "7d" | "30d" | "90d" | "all" | "custom";
 
@@ -92,7 +94,13 @@ function buildCsvRows(summary: UsageSummaryShape): Array<Record<string, string |
   return rows;
 }
 
-export function UsageDashboard({ api }: { api: LvisApi }) {
+export function UsageDashboard({
+  api,
+  onNavigate,
+}: {
+  api: LvisApi;
+  onNavigate: (tab: SettingsTab) => void;
+}) {
   const { t } = useTranslation();
   const [summary, setSummary] = useState<UsageSummaryShape | null>(null);
   const [loading, setLoading] = useState(true);
@@ -135,10 +143,16 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
     />
   );
 
+  // Workspace statistics (relocated from the former General tab) sit at the top
+  // of the Usage surface and stay visible regardless of the usage-summary
+  // fetch state, since they own their own loading via useWorkspaceStats.
+  const workspaceStats = <WorkspaceStatsSection api={api} onNavigate={onNavigate} />;
+
   if (loading) {
     return (
       <div className="space-y-5">
         {header}
+        {workspaceStats}
         <div className="py-6 text-center text-sm text-muted-foreground">{t("usageDashboard.loading")}</div>
       </div>
     );
@@ -147,6 +161,7 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
     return (
       <div className="space-y-5">
         {header}
+        {workspaceStats}
         <div className="py-6 text-center text-sm text-muted-foreground">{t("usageDashboard.loadError")}</div>
       </div>
     );
@@ -165,6 +180,7 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
   return (
     <div className="space-y-5" data-testid="usage-dashboard">
       {header}
+      {workspaceStats}
       <Card>
         <CardHeader className="pb-1 pt-3 px-3 flex-row items-center justify-between">
           <CardTitle className="text-xs text-muted-foreground">{t("usageDashboard.periodSelect")}</CardTitle>

@@ -510,7 +510,6 @@ export function SettingsContent({
           <TabsContent value="general" className="flex-1 min-h-0 outline-none">
             <GeneralTab
               api={api}
-              onNavigate={(nextTab) => setTab(normalizeSettingsTab(nextTab))}
               onLogout={() => {
 
 
@@ -627,7 +626,12 @@ export function SettingsContent({
           <TabsContent value="startup" className="flex-1 min-h-0 outline-none"><StartupTab /></TabsContent>
           <TabsContent value="permissions" className="flex-1 min-h-0 outline-none"><PermissionsTab /></TabsContent>
           <TabsContent value="roles" className="flex-1 min-h-0 outline-none"><RolesTab api={api} /></TabsContent>
-          <TabsContent value="usage" className="flex-1 min-h-0 outline-none"><UsageDashboard api={api} /></TabsContent>
+          <TabsContent value="usage" className="flex-1 min-h-0 outline-none">
+            <UsageDashboard
+              api={api}
+              onNavigate={(nextTab) => setTab(normalizeSettingsTab(nextTab))}
+            />
+          </TabsContent>
           <TabsContent value="audit" className="flex-1 min-h-0 outline-none"><AuditTab /></TabsContent>
           <TabsContent value="mcp" className="flex-1 min-h-0 outline-none"><McpTab /></TabsContent>
           <TabsContent value="plugin-config" className="flex-1 min-h-0 outline-none"><PluginConfigTab api={api} /></TabsContent>
