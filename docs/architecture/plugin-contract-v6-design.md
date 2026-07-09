@@ -107,16 +107,21 @@ Real-manifest scale (per-surface, verified 2026-07-09): meeting declares 28 `too
   **schema-REJECTED in the manifest** — this is security-mandated, not minimization: plugin-authored
   `readOnlyHint`/`destructiveHint` are exactly the untrusted self-claims Q4 removed; the host derives its
   own interop annotations at projection time and never reads inbound ones (`plugin-server-projection.ts`).
-- **Host compatibility gate — REUSE `requires.minAppVersion` (design-u1 discovery, orchestrator-verified):**
-  the mechanism already exists and is live-enforced — `manifest-validation.ts:655-667` validates it
-  (stable SemVer, fail-loud) and the host "enforces compatibility at install + load against this value"
-  (compareSemver gate); the SDK schema (`plugin-manifest.schema.json:564`) and SDK types carry it, and
-  `lvis-plugin-local-indexer` already declares it. Every a3 pure-form manifest declares
-  `requires.minAppVersion: "<the a4 host release version>"`, so **pre-a4 hosts cleanly refuse the update
-  at install/load with a version error** instead of a confusing schema failure. No new field is invented
-  (single SoT). Belt-and-suspenders choreography stays: a3 marketplace publication is held until the a4
-  host is GA. (Supersedes the earlier `engines.lvisHost` sketch — that premise assumed no gate existed;
-  the grep missed the differently-named existing field.)
+- **Host compatibility gate — REUSE `requires.minAppVersion` (design-u1/design-u4 discovery, verified):**
+  the mechanism already exists and is live-**enforced** — install-preflight at `marketplace.ts:733-737`
+  (`incompatible-app-version`) AND load/activate at `runtime/index.ts:2056-2060` (`markIncompatibleAppVersion`);
+  `manifest-validation.ts:655-667` is the SemVer *format* re-validation only. The SDK schema
+  (`plugin-manifest.schema.json:564`) + SDK types (`index.ts:469-473`) carry it, and
+  `lvis-plugin-local-indexer` already ships `minAppVersion:"0.4.2"`. Every a3 pure-form manifest declares
+  `requires.minAppVersion: "<the a4 host release version>"`, so a **pre-a4 host refuses the update at the
+  marketplace install preflight — BEFORE any tools parsing — with a clean version error**, not a confusing
+  schema failure. It is an **a3-manifest policy, NOT schema-required on the pure arm** (over-coupling the
+  tool-shape axis to the version axis, and the preflight is the real gate anyway); therefore a3/marketplace
+  **publish-time CI enforces the floor** (reject a pure-form manifest lacking `requires.minAppVersion >=`
+  the a4 host version) so the policy is not merely advisory. No new field is invented (single SoT).
+  Belt-and-suspenders: a3 marketplace publication is held until the a4 host is GA. (Supersedes the earlier
+  `engines.lvisHost` sketch — that premise assumed no gate existed; the grep missed the differently-named
+  existing field.)
 
 ### 2.3 Preserving the #1554/#1556 governed-vs-bypass invariant (single-source)
 
