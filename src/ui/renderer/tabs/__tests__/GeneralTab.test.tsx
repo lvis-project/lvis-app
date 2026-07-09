@@ -51,43 +51,9 @@ function generalTabApi(overrides: Partial<LvisApi> = {}): LvisApi {
 }
 
 describe("GeneralTab", () => {
-  it("renders all 5 workspace stat cards with their counts", async () => {
-    const api = generalTabApi();
-    const { findByTestId } = render(<GeneralTab api={api} onNavigate={() => {}} />);
-    const plugin = await findByTestId("general-tab-card-plugin");
-    const tool = await findByTestId("general-tab-card-tool");
-    const agent = await findByTestId("general-tab-card-agent");
-    const skill = await findByTestId("general-tab-card-skill");
-    const role = await findByTestId("general-tab-card-role");
-
-    await waitFor(() => {
-      expect(plugin.textContent).toContain("2");
-      expect(tool.textContent).toContain("3");
-      expect(agent.textContent).toContain("2");
-      expect(skill.textContent).toContain("1");
-      expect(role.textContent).toContain("1");
-    });
-  });
-
-  it("renders marketplace status pill with the resolved online state", async () => {
-    const api = generalTabApi();
-    const { findByTestId } = render(<GeneralTab api={api} onNavigate={() => {}} />);
-    const status = await findByTestId("general-tab-marketplace-status");
-    await waitFor(() => expect(status.textContent).toContain("정상"));
-  });
-
-  it("calls onNavigate(plugin-config) when the 플러그인 card is clicked", async () => {
-    const api = generalTabApi();
-    const onNavigate = vi.fn();
-    const { findByTestId } = render(<GeneralTab api={api} onNavigate={onNavigate} />);
-    const plugin = await findByTestId("general-tab-card-plugin");
-    fireEvent.click(plugin);
-    expect(onNavigate).toHaveBeenCalledWith("plugin-config");
-  });
-
   it("renders the resolved app version + data path", async () => {
     const api = generalTabApi();
-    const { findByTestId, findByText } = render(<GeneralTab api={api} onNavigate={() => {}} />);
+    const { findByTestId, findByText } = render(<GeneralTab api={api} />);
     const version = await findByTestId("general-tab-app-version");
     await waitFor(() => expect(version.textContent).toContain("v0.2.3"));
     // The data path is informational text; assert presence via the
@@ -97,7 +63,7 @@ describe("GeneralTab", () => {
 
   it("renders the resolved 기반 기술 stack (Electron / Node / Chromium / V8)", async () => {
     const api = generalTabApi();
-    const { findByTestId } = render(<GeneralTab api={api} onNavigate={() => {}} />);
+    const { findByTestId } = render(<GeneralTab api={api} />);
     const electron = await findByTestId("general-tab-stack-electron");
     const node = await findByTestId("general-tab-stack-node");
     const chrome = await findByTestId("general-tab-stack-chrome");
@@ -110,20 +76,11 @@ describe("GeneralTab", () => {
     });
   });
 
-  it("renders 미연결 when marketplace is not configured", async () => {
-    const api = generalTabApi({
-      pingMarketplace: vi.fn().mockResolvedValue({ configured: false, online: false }),
-    });
-    const { findByTestId } = render(<GeneralTab api={api} onNavigate={() => {}} />);
-    const status = await findByTestId("general-tab-marketplace-status");
-    await waitFor(() => expect(status.textContent).toContain("미연결"));
-  });
-
   // 2026-05-20 — 인증 관리 section: 로그아웃 / 활성화 키 재입력
   it("renders 인증 관리 buttons (reactivate + logout)", async () => {
     const api = generalTabApi();
     const { findByTestId } = render(
-      <GeneralTab api={api} onNavigate={() => {}} onLogout={() => {}} onReactivateDemo={() => {}} />,
+      <GeneralTab api={api} onLogout={() => {}} onReactivateDemo={() => {}} />,
     );
     const reactivate = await findByTestId("general-tab-reactivate-demo");
     const logout = await findByTestId("general-tab-logout");
@@ -135,7 +92,7 @@ describe("GeneralTab", () => {
     const api = generalTabApi();
     const onReactivateDemo = vi.fn();
     const { findByTestId } = render(
-      <GeneralTab api={api} onNavigate={() => {}} onReactivateDemo={onReactivateDemo} />,
+      <GeneralTab api={api} onReactivateDemo={onReactivateDemo} />,
     );
     fireEvent.click(await findByTestId("general-tab-reactivate-demo"));
     expect(onReactivateDemo).toHaveBeenCalledTimes(1);
@@ -144,12 +101,12 @@ describe("GeneralTab", () => {
   it("로그아웃 클릭 → confirm dialog → 확인 시 active vendor 의 deleteApiKey + demo clear + onboardingCompleted=false + onLogout", async () => {
     const api = generalTabApi();
     const onLogout = vi.fn();
-    const { findByTestId, queryByTestId } = render(
-      <GeneralTab api={api} onNavigate={() => {}} onLogout={onLogout} onReactivateDemo={() => {}} />,
+    const { findByTestId, findByText, queryByTestId } = render(
+      <GeneralTab api={api} onLogout={onLogout} onReactivateDemo={() => {}} />,
     );
-    // settings 가 fetch 되어 provider 가 채워진 뒤 클릭하도록 stat card 가
-    // 먼저 render 되었는지 기다린다.
-    await findByTestId("general-tab-card-plugin");
+    // settings 가 fetch 되어 provider 가 채워진 뒤 클릭하도록 account 의
+    // provider 배지가 먼저 render 되었는지 기다린다.
+    await findByText("openai");
 
     fireEvent.click(await findByTestId("general-tab-logout"));
     const confirm = await findByTestId("general-tab-logout-confirm-button");
@@ -183,10 +140,10 @@ describe("GeneralTab", () => {
       }),
     });
     const onLogout = vi.fn();
-    const { findByTestId } = render(
-      <GeneralTab api={api} onNavigate={() => {}} onLogout={onLogout} onReactivateDemo={() => {}} />,
+    const { findByTestId, findByText } = render(
+      <GeneralTab api={api} onLogout={onLogout} onReactivateDemo={() => {}} />,
     );
-    await findByTestId("general-tab-card-plugin");
+    await findByText("openai-compatible");
 
     fireEvent.click(await findByTestId("general-tab-logout"));
     fireEvent.click(await findByTestId("general-tab-logout-confirm-button"));
@@ -210,10 +167,10 @@ describe("GeneralTab", () => {
       } as unknown as LvisApi["demo"],
     });
     const onLogout = vi.fn();
-    const { findByTestId } = render(
-      <GeneralTab api={api} onNavigate={() => {}} onLogout={onLogout} />,
+    const { findByTestId, findByText } = render(
+      <GeneralTab api={api} onLogout={onLogout} />,
     );
-    await findByTestId("general-tab-card-plugin");
+    await findByText("openai");
     fireEvent.click(await findByTestId("general-tab-logout"));
     fireEvent.click(await findByTestId("general-tab-logout-confirm-button"));
     await findByTestId("general-tab-logout-error");
@@ -225,10 +182,10 @@ describe("GeneralTab", () => {
       deleteApiKey: vi.fn().mockRejectedValue(new Error("keychain failed")),
     });
     const onLogout = vi.fn();
-    const { findByTestId } = render(
-      <GeneralTab api={api} onNavigate={() => {}} onLogout={onLogout} />,
+    const { findByTestId, findByText } = render(
+      <GeneralTab api={api} onLogout={onLogout} />,
     );
-    await findByTestId("general-tab-card-plugin");
+    await findByText("openai");
     fireEvent.click(await findByTestId("general-tab-logout"));
     fireEvent.click(await findByTestId("general-tab-logout-confirm-button"));
 
