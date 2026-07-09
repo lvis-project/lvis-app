@@ -2463,7 +2463,7 @@ export const jaMessages: Record<string, string> = {
   "settingsContent.tabPermissions": "権限",
   "settingsContent.tabPluginConfig": "プラグイン設定",
   "settingsContent.tabPluginPerf": "プラグインのパフォーマンス",
-  "settingsContent.tabRoles": "役割",
+  "settingsContent.tabRoles": "メモリ / ペルソナ",
   "settingsContent.tabUsage": "使用法",
   "settingsContent.tabWeb": "ウェブ / ブラウジング",
   "settingsWindow.documentTitle": "LVIS 設定",

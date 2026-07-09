@@ -2463,7 +2463,7 @@ export const zhMessages: Record<string, string> = {
   "settingsContent.tabPermissions": "权限",
   "settingsContent.tabPluginConfig": "插件设置",
   "settingsContent.tabPluginPerf": "插件性能",
-  "settingsContent.tabRoles": "角色",
+  "settingsContent.tabRoles": "记忆 / 角色",
   "settingsContent.tabUsage": "用法",
   "settingsContent.tabWeb": "网页 / 浏览",
   "settingsWindow.documentTitle": "路视设置",
