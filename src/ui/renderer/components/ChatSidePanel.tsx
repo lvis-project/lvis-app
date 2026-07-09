@@ -469,7 +469,21 @@ function PreviewBody({
             </div>
           ) : null}
         </dl>
-        <CopyButton value={rawText} />
+        {/* #885 b2 — detach is INLINE-only (Q5): a detached window's own
+            McpAppView chrome must not offer a second, meaningless "detach". */}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="chat-side-panel-mcp-detach"
+            onClick={() => void window.lvis.mcp.openDetached(target.payload)}
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            <span>{t("chatPreviewRail.detach")}</span>
+          </Button>
+          <CopyButton value={rawText} />
+        </div>
       </div>
     );
   }

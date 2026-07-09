@@ -9,17 +9,20 @@
  * Allowed: data:, blob:, about:blank (inline content only)
  * Blocked: http, https, file, ftp, and any other scheme
  *
- * ─── MCP App partition (`lvis-mcp-app`) ──────────────────────────────────────
+ * ─── Per-server MCP App partition (`lvis-mcp-app:<hex(serverId)>`) ────────────
  * MCP Apps are authored by trusted plugins (not raw LLM output), so they are
  * allowed to load scripts/styles from known CDN domains:
  *   cdn.jsdelivr.net, unpkg.com, cdnjs.cloudflare.com,
  *   fonts.googleapis.com, fonts.gstatic.com
- * All other https hosts and all non-https schemes remain blocked.
+ * All other https hosts and all non-https schemes remain blocked. Each MCP
+ * server gets its OWN partition (#885 b1); the CDN gate is installed lazily
+ * per-server via `installMcpAppPartitionPolicy` (idempotent), NOT once at boot.
  */
 import { createRequire } from "node:module";
 import { dirname, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RENDER_HTML_PARTITION } from "../shared/render-html-preview.js";
+import { mcpAppPartitionName } from "../shared/mcp-app-partition.js";
 import { installPluginAssetProtocolHandler, PLUGIN_ASSET_SCHEME } from "./plugin-asset-protocol.js";
 
 // ESM equivalent of CommonJS `__dirname`. The original code referenced
@@ -102,6 +105,38 @@ function installCdnAllowlist(ses: Electron.Session): void {
  */
 const installedPluginPartitions = new Set<string>();
 
+/**
+ * Tracked per-server MCP-app partitions (b1). Same idempotency discipline as
+ * `installedPluginPartitions`: re-installing the CDN gate for a partition that
+ * already has it is a no-op, so a card re-render / detach never stacks a second
+ * `onBeforeRequest` handler on the same session.
+ */
+const installedMcpAppPartitions = new Set<string>();
+
+/**
+ * #885 b1 — lazy per-server MCP-app partition policy.
+ *
+ * Installs the CDN allowlist network gate on `lvis-mcp-app:<enc(serverId)>`.
+ * Called from the `lvis:mcp:ui-resource` IPC handler — the single main-side
+ * chokepoint every card render (inline AND detached) passes through — BEFORE
+ * the resource is read, so the gate is present before the webview mounts and
+ * issues its first network request. Idempotent via `installedMcpAppPartitions`.
+ *
+ * Fail-closed: a `fromPartition` failure throws (No-Fallback) so the card
+ * surfaces an error rather than rendering on an ungated partition. The meta-CSP
+ * (`mcp-app-csp.ts`) remains the primary control; this webRequest gate is
+ * defense-in-depth.
+ */
+export function installMcpAppPartitionPolicy(
+  serverId: string,
+  sessionApi: SessionApi = getElectronSession(),
+): void {
+  const partitionName = mcpAppPartitionName(serverId);
+  if (installedMcpAppPartitions.has(partitionName)) return;
+  installedMcpAppPartitions.add(partitionName);
+  installCdnAllowlist(sessionApi.fromPartition(partitionName));
+}
+
 function isAllowedPluginShellFile(url: URL): boolean {
   if (url.protocol !== "file:") return false;
   try {
@@ -154,9 +189,11 @@ export function installPluginPartitionPolicy(
 }
 
 export function installHtmlPreviewPartitionBlock(sessionApi: SessionApi = getElectronSession()): void {
-  // ── 1. LLM-authored HTML: strict inline-only partition ──
+  // LLM-authored HTML: strict inline-only partition.
+  //
+  // The MCP-app CDN gate is NO LONGER installed here — it is a PER-SERVER
+  // partition (b1) installed lazily in the `lvis:mcp:ui-resource` chokepoint
+  // via `installMcpAppPartitionPolicy`. There is no bare `lvis-mcp-app`
+  // partition anymore.
   installStrictInlineOnly(sessionApi.fromPartition(RENDER_HTML_PARTITION));
-
-  // ── 2. MCP App HTML: trusted plugin UI with limited CDN allowlist ──
-  installCdnAllowlist(sessionApi.fromPartition("lvis-mcp-app"));
 }
