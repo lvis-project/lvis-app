@@ -72,7 +72,14 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
       description: "Test fixture.",
       publisher: "Test fixture",
       entry: "index.js",
-      tools: ["test_ping"],
+      tools: [
+        {
+          name: "test_ping",
+          description: "Test ping tool fixture.",
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model"] } },
+        },
+      ],
       configSchema: {
         properties: {
           enabled: { type: "boolean", default: true, title: "Enable" },
@@ -145,76 +152,15 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
   });
 });
 
-describe("toolSchemas authority metadata", () => {
-  function manifestWithToolSchema(toolSchema: Record<string, unknown>) {
-    return {
-      id: "test-plugin",
-      name: "Test",
-      version: "1.0.0",
-      description: "Test fixture.",
-      publisher: "Test fixture",
-      entry: "index.js",
-      tools: ["test_ping"],
-      toolSchemas: {
-        test_ping: toolSchema,
-      },
-    };
-  }
-
-  it("AJV strict accepts category and dotted pathFields from the SDK schema", async () => {
-    const ajv = buildAjv();
-    const validate = ajv.compile(await loadHostManifestSchema());
-    const ok = validate(manifestWithToolSchema({
-      description: "Test ping reads a nested path for permission checks.",
-      category: "read",
-      pathFields: ["opts.output"],
-      inputSchema: {
-        type: "object",
-        properties: {
-          opts: {
-            type: "object",
-            properties: { output: { type: "string" } },
-            required: ["output"],
-          },
-        },
-      },
-    }));
-    if (!ok) {
-      // eslint-disable-next-line no-console
-      console.error("AJV errors:", validate.errors);
-    }
-    expect(ok).toBe(true);
-  });
-
-  it("host schema accepts toolSchemas without a category", async () => {
-    // The host owns risk classification (default-strict at runtime), so the
-    // native SDK schema accepts manifests that omit the deprecated per-tool
-    // category. A category, when present, must still validate (see above).
-    const ajv = buildAjv();
-    const validate = ajv.compile(await loadHostManifestSchema());
-    const ok = validate(manifestWithToolSchema({
-      description: "Test ping has no permission category.",
-      inputSchema: { type: "object", properties: {} },
-    }));
-    if (!ok) {
-      // eslint-disable-next-line no-console
-      console.error("AJV errors:", validate.errors);
-    }
-    expect(ok).toBe(true);
-  });
-
-  it("AJV strict rejects invalid category and malformed pathFields", async () => {
-    const ajv = buildAjv();
-    const validate = ajv.compile(await loadHostManifestSchema());
-    const ok = validate(manifestWithToolSchema({
-      description: "Test ping has invalid authority metadata.",
-      category: "dangerous",
-      pathFields: ["opts..output"],
-      inputSchema: { type: "object", properties: {} },
-    }));
-    expect(ok).toBe(false);
-  });
-
+// #885 v6.1.0 — the "toolSchemas authority metadata" describe block (per-tool
+// `category` + `toolSchemas.pathFields` declared via the legacy `toolSchemas`
+// map) was removed here: the SDK's pure Tool[] schema collapse now rejects
+// `toolSchemas` and per-tool `category` outright (additionalProperties), and
+// the host already stopped reading them in #885 Phase R. Current authority
+// metadata is `tool._meta["xyz.lvis/pathFields"]` — covered by
+// normalize-manifest.test.ts. Category is never declared; the host classifies
+// risk itself (see architecture.md §6.3 / CLAUDE.md Permission Policy).
+describe("pure Tool authority metadata — no toolSchemas, category, or workerId", () => {
   it("end-to-end: parsePluginJson loads a category-less manifest on the host", async () => {
     const { buildManifestValidator, parsePluginJson } = await import(
       "../runtime/manifest-validation.js"
@@ -344,8 +290,8 @@ describe("US-B1 regression — baseline manifest WITHOUT configSchema still vali
   it("AJV strict accepts a manifest that omits configSchema (legacy plugins)", async () => {
     const ajv = buildAjv();
     const validate = ajv.compile(await loadHostManifestSchema());
-    // Replicates the shape of the existing meeting / local-indexer / ms-graph
-    // manifests — no configSchema, but heavy use of toolSchemas and
+    // Replicates the shape of the current (post-#885 v6) meeting / local-indexer
+    // / ms-graph manifests — no configSchema, but heavy use of pure Tool[] +
     // capabilities. Must keep loading without modification (DoD §4).
     const ok = validate({
       id: "meeting-recorder",
@@ -354,30 +300,30 @@ describe("US-B1 regression — baseline manifest WITHOUT configSchema still vali
       description: "Test fixture.",
       publisher: "Test fixture",
       entry: "dist/index.js",
-      tools: ["meeting_start", "meeting_stop"],
-      uiActions: { meeting_start: {} },
+      tools: [
+        {
+          name: "meeting_start",
+          description: "Begin a new recording session and stream chunks.",
+          inputSchema: {
+            type: "object",
+            properties: { sessionId: { type: "string" } },
+            required: ["sessionId"],
+          },
+          _meta: { ui: { visibility: ["model"] } },
+        },
+        {
+          name: "meeting_stop",
+          description: "Stop the current recording session and finalize.",
+          inputSchema: {
+            type: "object",
+            properties: { sessionId: { type: "string" } },
+            required: ["sessionId"],
+          },
+          _meta: { ui: { visibility: ["model"] } },
+        },
+      ],
       capabilities: ["meeting-recorder"],
       eventSubscriptions: ["calendar.event.started"],
-      toolSchemas: {
-        meeting_start: {
-          description: "Begin a new recording session and stream chunks.",
-          category: "write",
-          inputSchema: {
-            type: "object",
-            properties: { sessionId: { type: "string" } },
-            required: ["sessionId"],
-          },
-        },
-        meeting_stop: {
-          description: "Stop the current recording session and finalize.",
-          category: "write",
-          inputSchema: {
-            type: "object",
-            properties: { sessionId: { type: "string" } },
-            required: ["sessionId"],
-          },
-        },
-      },
     });
     if (!ok) {
       // eslint-disable-next-line no-console
