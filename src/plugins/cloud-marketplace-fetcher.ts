@@ -31,7 +31,6 @@ import { mapNetworkAccessGrant } from "../shared/network-access.js";
 import type {
   McpAuthMetadata,
   PluginMarketplaceItem,
-  PluginUiExtension,
   RequiresSpec,
   SignatureEnvelope,
 } from "./types.js";
@@ -74,11 +73,7 @@ interface ServerCatalogRow {
   packageSpec?: string;
   package_name?: string;
   packageName?: string;
-  methods?: unknown;
   category?: string;
-  default_config?: Record<string, unknown>;
-  defaultConfig?: Record<string, unknown>;
-  ui?: unknown;
   install_policy?: string;
   installPolicy?: string;
   dependencies?: unknown;
@@ -447,14 +442,6 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
       row.packageSpec ??
       (version ? `${packageName}@${version}` : packageName);
 
-    const tools = Array.isArray(row.methods)
-      ? (row.methods as unknown[]).filter((m): m is string => typeof m === "string")
-      : [];
-
-    const ui = Array.isArray(row.ui)
-      ? (row.ui as PluginUiExtension[])
-      : undefined;
-
     const item: PluginMarketplaceItem = {
       id,
       slug: typeof row.slug === "string" ? row.slug : undefined,
@@ -462,14 +449,8 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
       description: row.description ?? "",
       packageSpec,
       packageName,
-      tools,
     };
 
-    const defaultConfig = row.default_config ?? row.defaultConfig;
-    if (defaultConfig && typeof defaultConfig === "object") {
-      item.defaultConfig = defaultConfig;
-    }
-    if (ui) item.ui = ui;
     const installPolicy = row.install_policy ?? row.installPolicy;
     if (installPolicy === "admin") {
       item.installPolicy = "admin";
