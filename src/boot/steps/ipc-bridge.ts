@@ -60,7 +60,11 @@ export function makeCoalescingSend(
   };
 }
 
-/** Collect plugin emitted event types from manifest.emittedEvents. */
+/**
+ * Collect plugin emitted event types from `manifest.emittedEvents`, plus the
+ * host-derived `${id}.auth.changed` for any manifest that declares an `auth`
+ * block (R3, 0.5.2).
+ */
 function collectPluginEventTypes(pluginRuntime: PluginRuntime): Set<string> {
   const types = new Set<string>();
   for (const { manifest } of pluginRuntime.listPluginManifests()) {
@@ -69,6 +73,18 @@ function collectPluginEventTypes(pluginRuntime: PluginRuntime): Set<string> {
       for (const t of raw["emittedEvents"] as unknown[]) {
         if (typeof t === "string" && t.trim()) types.add(t.trim());
       }
+    }
+    // R3 — when a manifest declares `auth`, host-derive `${id}.auth.changed`
+    // and bridge it even if the author omitted it from emittedEvents[], so
+    // plugin authors need not re-list the fixed derived name. The renderer's
+    // `usePluginAuthStatuses` subscribes via the LITERAL manifest id
+    // (architecture.md §9.4a — NO `_`↔`-` normalization), so the derived name
+    // uses `manifest.id` verbatim: a plugin with id `foo-bar` emits
+    // `foo-bar.auth.changed`, never `foo_bar.auth.changed`. The Set dedupes
+    // against an author who still lists it, so the bridge registers exactly once.
+    const id = manifest.id;
+    if (raw["auth"] && typeof id === "string" && id.length > 0) {
+      types.add(`${id}.auth.changed`);
     }
   }
   return types;
