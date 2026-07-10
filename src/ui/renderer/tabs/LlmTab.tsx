@@ -36,6 +36,7 @@ import { parseHostResolverMap } from "../../../shared/host-resolver-map.js";
 import {
   canUseLlmVendorWithoutApiKey,
   isLLMVendor,
+  isOpenAICompatibleVendor,
   isRetiredLlmModel,
 } from "../../../shared/llm-vendor-defaults.js";
 import {
@@ -401,18 +402,45 @@ function modelDiscoveryPolicyUsesSeededOptions(
   return modelDiscoveryPolicy === "manual" || modelDiscoveryPolicy === "static";
 }
 
+/**
+ * The openai-compatible provider family (built-in vendor + marketplace
+ * presets). For these, the model catalog is endpoint-defined, so the dropdown
+ * must be populated ONLY by a live /models handshake — never a hardcoded
+ * seed — unless the provider's discovery policy opts into a static/seeded list.
+ */
+function isOpenAICompatibleFamilyVendor(vendorId: string): boolean {
+  return isLLMVendor(vendorId) && isOpenAICompatibleVendor(vendorId);
+}
+
 function modelOptionsFor(
   vendorId: string,
   selectedModel: string,
   syncedOptions?: readonly string[],
   info: ProviderOption | VendorOption = getVendorInfo(vendorId),
+  modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy,
 ): string[] {
-  const options = syncedOptions && syncedOptions.length > 0
-    ? [...syncedOptions]
-    : [...info.modelOptions];
-  const defaultModel = info.defaultModel.trim();
-  if (defaultModel && !options.includes(defaultModel)) {
-    options.unshift(defaultModel);
+  const hasSynced = Boolean(syncedOptions && syncedOptions.length > 0);
+  // Handshake-only: for openai-compatible-family providers whose discovery
+  // policy is not seeded (static/manual), never fall back to the static
+  // `info.modelOptions` seed or the seeded default model. The list stays empty
+  // until a live /models fetch succeeds; only the user's persisted selection is
+  // surfaced so an already-configured provider still shows its saved model.
+  const handshakeOnly =
+    !hasSynced &&
+    isOpenAICompatibleFamilyVendor(vendorId) &&
+    !modelDiscoveryPolicyUsesSeededOptions(modelDiscoveryPolicy);
+
+  const options = hasSynced
+    ? [...(syncedOptions ?? [])]
+    : handshakeOnly
+      ? []
+      : [...info.modelOptions];
+
+  if (!handshakeOnly) {
+    const defaultModel = info.defaultModel.trim();
+    if (defaultModel && !options.includes(defaultModel)) {
+      options.unshift(defaultModel);
+    }
   }
 
   const currentModel = selectedModel.trim();
@@ -753,6 +781,7 @@ export function LlmTab(props: LlmTabProps) {
     activeModelValue,
     activeSyncedModelOptions,
     vendorInfo,
+    activeModelDiscoveryPolicy,
   );
   const activeModelEntryById = useMemo(
     () => modelEntryMap(activeModelList?.entries),

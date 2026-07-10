@@ -497,7 +497,13 @@ const CORE_DEFAULT_MODEL = {
   copilot: "gpt-5.4-mini",
   "azure-foundry": "gpt-5.4-mini",
   "vertex-ai": "gemini-2.5-flash",
-  "openai-compatible": "Qwen3.6-35B-A3B-NVFP4",
+  // Handshake-only: no static default. A fresh openai-compatible block ships
+  // with an EMPTY model so the runtime treats it as "not configured" until the
+  // user selects a model fetched live from their endpoint's /models handshake
+  // (LlmTab `modelOptionsFor` + `buildProvider` not-configured guard). Shipping
+  // a concrete id here previously sent an LVIS-cluster model id to arbitrary
+  // endpoints that don't serve it, failing every first call with a 400/404.
+  "openai-compatible": "",
 } as const;
 
 const DEFAULT_MODEL: Record<LLMVendor, string> = Object.freeze({
@@ -558,9 +564,12 @@ const CORE_VENDOR_MODEL_OPTIONS = {
     ],
     // Self-hosted OpenAI-compatible endpoints (vLLM / SGLang / llama.cpp …),
     // including a LiteLLM gateway that fronts several backends behind one /v1
-    // and routes by model id. The list seeds the dropdown with the known LVIS
-    // cluster models; users point baseUrl at their own gateway/server.
-    "openai-compatible": ["Qwen3.6-35B-A3B-NVFP4", "Nemotron-3-Nano-30B-A3B-FP8"],
+    // and routes by model id. Endpoint-defined and heterogeneous, so there is
+    // NO static catalog: the dropdown is populated live from the user's /models
+    // handshake (LlmTab `modelOptionsFor` is handshake-only for this vendor).
+    // A hardcoded seed here previously rendered LVIS-cluster models before any
+    // endpoint was entered and pre-selected a fabricated default id.
+    "openai-compatible": [],
   } as const;
 
 const PRESET_VENDOR_MODEL_OPTIONS = Object.fromEntries(

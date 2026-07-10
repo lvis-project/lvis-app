@@ -6,7 +6,11 @@ import {
   isModelComplexityLevel,
   resolveModelForComplexity,
 } from "../model-complexity-map.js";
-import { LLM_VENDORS, type LLMVendor } from "../llm-vendor-defaults.js";
+import {
+  LLM_VENDOR_MODEL_OPTIONS,
+  LLM_VENDORS,
+  type LLMVendor,
+} from "../llm-vendor-defaults.js";
 
 describe("model-complexity-map", () => {
   describe("MODEL_COMPLEXITY_MAP coverage", () => {
@@ -21,13 +25,21 @@ describe("model-complexity-map", () => {
 
     it("declares every complexity tier per vendor", () => {
       for (const vendor of LLM_VENDORS) {
+        // Handshake-only vendors (openai-compatible) have no static catalog, so
+        // every tier maps to the empty model → parent-model fallback. Vendors
+        // with a static catalog must map each tier to a non-empty model id.
+        const handshakeOnly = LLM_VENDOR_MODEL_OPTIONS[vendor].length === 0;
         for (const level of MODEL_COMPLEXITY_LEVELS) {
           const model = MODEL_COMPLEXITY_MAP[vendor][level];
           expect(
             typeof model,
             `${vendor}/${level} must be a string`,
           ).toBe("string");
-          expect(model.length).toBeGreaterThan(0);
+          if (handshakeOnly) {
+            expect(model, `${vendor}/${level} handshake-only tier must be empty`).toBe("");
+          } else {
+            expect(model.length).toBeGreaterThan(0);
+          }
         }
       }
     });
@@ -71,8 +83,16 @@ describe("model-complexity-map", () => {
       for (const vendor of LLM_VENDORS) {
         for (const level of MODEL_COMPLEXITY_LEVELS) {
           const resolved = resolveModelForComplexity(vendor, level);
-          expect(resolved).toBe(MODEL_COMPLEXITY_MAP[vendor][level]);
+          // Handshake-only vendors map to the empty model, which resolves to
+          // null (parent-model fallback) rather than an empty-string id.
+          expect(resolved).toBe(MODEL_COMPLEXITY_MAP[vendor][level] || null);
         }
+      }
+    });
+
+    it("openai-compatible resolves every tier to null (handshake-only → parent model)", () => {
+      for (const level of MODEL_COMPLEXITY_LEVELS) {
+        expect(resolveModelForComplexity("openai-compatible", level)).toBeNull();
       }
     });
 
