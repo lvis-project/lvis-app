@@ -340,8 +340,6 @@ export async function parsePluginJson(
         if (typeof ext.exportName !== "string" || ext.exportName.length === 0) missing.push("exportName");
       } else if (kind === "embedded-page") {
         if (typeof ext.page !== "string" || ext.page.length === 0) missing.push("page");
-      } else if (kind === "action") {
-        if (typeof ext.tool !== "string" || ext.tool.length === 0) missing.push("tool");
       }
       if (missing.length > 0) {
         fail(
@@ -349,9 +347,7 @@ export async function parsePluginJson(
           `kind="${String(kind)}" missing required field(s): ${missing.join(", ")}`,
           kind === "embedded-module"
             ? `"ui": [{ "kind": "embedded-module", "entry": "dist/ui.js", "exportName": "PluginUi" }]`
-            : kind === "action"
-              ? `"ui": [{ "kind": "action", "tool": "open_inbox" }]`
-              : `"ui": [{ "kind": "embedded-page", "page": "settings" }]`,
+            : `"ui": [{ "kind": "embedded-page", "page": "settings" }]`,
         );
       }
     }
