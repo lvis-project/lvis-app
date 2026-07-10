@@ -29,7 +29,11 @@ import { methodEffect } from "../../../permissions/effect-kind.js";
 import type { PluginRegistryEntry } from "../../../plugins/types.js";
 import { createPluginStorage } from "../../../plugins/storage.js";
 import { shouldBlockPluginSecretRead } from "../../../plugins/secret-shape.js";
-import { canEmitEvent, requiredCapabilityForEmit } from "../../../plugins/capabilities.js";
+import {
+  canEmitEvent,
+  requiredCapabilityForEmit,
+  CAPABILITY_EXTERNAL_AUTH_CONSUMER,
+} from "../../../plugins/capabilities.js";
 import { OVERLAY_V1 } from "../../../shared/ipc-channels.js";
 import {
   emitPluginConfigChange,
@@ -646,7 +650,7 @@ export function createHostApiFactory(
           effect: methodEffect(methodSnapshot),
           ...(effectTarget !== undefined ? { target: effectTarget } : {}),
         });
-        if (!manifest.capabilities?.includes("external-auth-consumer")) {
+        if (!manifest.capabilities?.includes(CAPABILITY_EXTERNAL_AUTH_CONSUMER)) {
           auditEgressDeny("capability", "capability external-auth-consumer not declared");
           throw new Error(
             `[plugin:${pluginId}] capability not declared: external-auth-consumer (hostFetch)`,
@@ -786,7 +790,7 @@ export function createHostApiFactory(
         })();
         const cookieHostCount = Array.isArray(opts.cookieHosts) ? opts.cookieHosts.length : 0;
 
-        if (!manifest.capabilities?.includes("external-auth-consumer")) {
+        if (!manifest.capabilities?.includes(CAPABILITY_EXTERNAL_AUTH_CONSUMER)) {
           try {
             bootAuditLogger.log({
               timestamp: new Date().toISOString(),
@@ -874,7 +878,7 @@ export function createHostApiFactory(
             return "[invalid-url]";
           }
         })();
-        if (!manifest.capabilities?.includes("external-auth-consumer")) {
+        if (!manifest.capabilities?.includes(CAPABILITY_EXTERNAL_AUTH_CONSUMER)) {
           try {
             bootAuditLogger.log({
               timestamp: new Date().toISOString(),
@@ -943,7 +947,7 @@ export function createHostApiFactory(
       // `openAuthWindow` cannot silently SSO via residual IdP cookies.
       // Capability + partition allow-list mirror `openAuthWindow`.
       clearAuthPartition: async (partition: string): Promise<void> => {
-        if (!manifest.capabilities?.includes("external-auth-consumer")) {
+        if (!manifest.capabilities?.includes(CAPABILITY_EXTERNAL_AUTH_CONSUMER)) {
           try {
             bootAuditLogger.log({
               timestamp: new Date().toISOString(),
