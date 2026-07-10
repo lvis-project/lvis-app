@@ -44,5 +44,8 @@ test('openai-compatible model dropdown shows no hardcoded seed before an endpoin
   await expect(settingsWindow.getByText('Qwen3.6-35B-A3B-NVFP4')).toHaveCount(0);
   await expect(settingsWindow.getByText('Nemotron-3-Nano-30B-A3B-FP8')).toHaveCount(0);
 
+  // Dismiss the open Select popover before leaving — its overlay would
+  // otherwise intercept the settings Back-button click during teardown.
+  await settingsWindow.keyboard.press('Escape');
   await closeSettingsWindow(app, settingsWindow);
 });
