@@ -22,10 +22,10 @@ import { isAppVisible } from "./tool-visibility.js";
 import { buildImportUrl } from "./sandbox.js";
 
 /**
- * #885 v6 — the UI-invokable method names a manifest declares: the normalized
- * `Tool[]` whose `_meta.ui.visibility` includes "app" (replaces the old
- * `uiActions` keys). Set-equivalent to today's {UI-only ∪ dual} allowlist that
- * feeds the renderer IPC bridge (`assertUiActionInvokable`).
+ * #885 v6 — the app-visible method names a manifest declares: the normalized
+ * `Tool[]` whose `_meta.ui.visibility` includes "app". This is the app-visible
+ * tool allowlist that feeds the renderer IPC bridge (`assertUiActionInvokable`) —
+ * the {app-only ∪ dual} set.
  */
 export function declaredUiInvokableMethods(
   manifest: Pick<NormalizedManifest, "tools">,
@@ -36,7 +36,8 @@ export function declaredUiInvokableMethods(
 /**
  * #885 v6 — every runtime-invokable method name (model / app / dual is now one
  * `Tool` object). De-duped defensively though `parsePluginJson` already rejects
- * duplicate names at load. Set-equivalent to today's `tools[] ∪ uiActions`.
+ * duplicate names at load. This is the full declared-tool set (the model-visible
+ * ∪ app-visible tool union).
  */
 export function declaredRuntimeMethods(manifest: Pick<NormalizedManifest, "tools">): string[] {
   return [...new Set((manifest.tools ?? []).map((t) => t.name))];

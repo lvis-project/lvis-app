@@ -175,8 +175,8 @@ export function usePluginViewRouting({
         const view = pluginViews.find((v) => toViewKey(v) === key);
         if (!view) return;
         // kind="action" entries never open a panel/window — host directly
-        // dispatches the declared tool. uiActions allowlist is enforced
-        // downstream in runtime/index.ts:callFromUi. Active view state is
+        // dispatches the declared tool. The app-visible tool allowlist is
+        // enforced downstream in runtime/index.ts:callFromUi. Active view state is
         // intentionally NOT changed so the user stays on whatever they
         // were looking at (chat / settings / etc.). slot==="sidebar" 는
         // (현재 schema 키 — 사용자에게는 "플러그인 패널") 강제하지만
