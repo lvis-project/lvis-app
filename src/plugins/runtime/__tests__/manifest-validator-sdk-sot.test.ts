@@ -53,12 +53,14 @@ describe("buildManifestValidator — SDK schema SOT", () => {
   });
 
   it("uses the SDK helper unchanged when native host-required probes pass", async () => {
-    // #885 v6 — the accept-probes must PASS (return true) and the two
+    // #885 v6.1.0 — the accept-probes must PASS (return true) and the three
     // negative-strictness fixtures must be REJECTED (return false), else
     // buildManifestValidator fails closed as "too permissive".
     const sdkValidator = vi.fn(
       (manifest: { id?: string }) =>
-        manifest.id !== "removed-field-plugin" && manifest.id !== "empty-visibility-plugin",
+        manifest.id !== "removed-field-plugin"
+        && manifest.id !== "empty-visibility-plugin"
+        && manifest.id !== "ui-action-kind-plugin",
     );
     const compileManifestValidator = vi.fn(() => sdkValidator);
 
@@ -73,8 +75,47 @@ describe("buildManifestValidator — SDK schema SOT", () => {
     expect(validator).toBe(sdkValidator);
     // #885 Phase R — the workerId/category-less legacy toolSchemas accept-probes
     // were removed; now 3 accept-probes (networkAccess.allowPrivateNetworks,
-    // marketplace-provider secret, pure MCP Tool[]) + 2 negative-strictness guards.
-    expect(sdkValidator).toHaveBeenCalledTimes(5);
+    // marketplace-provider secret, pure MCP Tool[]) + 3 negative-strictness guards
+    // (removed field / empty visibility / removed ui[].kind="action", added v6.1.0).
+    expect(sdkValidator).toHaveBeenCalledTimes(6);
+  });
+
+  it("#885 v6.1.0 — fails closed on a v6.0.0-style permissive validator (still accepts ui[].kind=\"action\") and passes once the SDK closes the gap", async () => {
+    // Interim-permissiveness window (cluster-review MINOR #1): a v6.0.0-style
+    // SDK schema already rejects the older two strictness fixtures but has not
+    // yet closed the ui[].kind="action" gap — buildManifestValidator must still
+    // fail closed as "too permissive" until the SDK schema catches up.
+    const permissiveValidator = vi.fn(
+      (manifest: { id?: string }) =>
+        manifest.id !== "removed-field-plugin" && manifest.id !== "empty-visibility-plugin",
+    );
+    vi.doMock("@lvis/plugin-sdk", () => ({
+      compileManifestValidator: () => permissiveValidator,
+    }));
+
+    const { buildManifestValidator: buildWithPermissiveSdk } = await import("../manifest-validation.js");
+    await expect(buildWithPermissiveSdk()).rejects.toThrow(
+      /a ui extension declaring the removed kind:"action" must be rejected/,
+    );
+
+    vi.resetModules();
+    vi.doUnmock("@lvis/plugin-sdk");
+
+    // The real v6.1.0-strict SDK closes the gap: all three strictness fixtures
+    // are rejected, so buildManifestValidator returns the SDK validator unchanged.
+    const strictValidator = vi.fn(
+      (manifest: { id?: string }) =>
+        manifest.id !== "removed-field-plugin"
+        && manifest.id !== "empty-visibility-plugin"
+        && manifest.id !== "ui-action-kind-plugin",
+    );
+    vi.doMock("@lvis/plugin-sdk", () => ({
+      compileManifestValidator: () => strictValidator,
+    }));
+
+    const { buildManifestValidator: buildWithStrictSdk } = await import("../manifest-validation.js");
+    const validator = await buildWithStrictSdk();
+    expect(validator).toBe(strictValidator);
   });
 
   it("#885 v6 — fails closed when the SDK helper rejects the pure MCP Tool[] object", async () => {
