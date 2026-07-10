@@ -7,7 +7,7 @@
  * (b) the DEFENSIVE fail-closed backstop: a tool that reaches a consumer WITHOUT
  * explicit visibility (a normalization-contract violation) resolves to the
  * MINIMAL GOVERNED surface `["model"]` — NEVER app-only, so it can never reach
- * the ungoverned uiActions bypass — and warns loudly. This is NOT the semantic
+ * the ungoverned app-only dispatch path — and warns loudly. This is NOT the semantic
  * default (`["model","app"]`, which lives only in normalize).
  */
 import { describe, it, expect, vi } from "vitest";

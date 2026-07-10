@@ -150,7 +150,8 @@ export interface EventSubscription {
  * Plugin Contract v6 (#885) — pure MCP `Tool` object surface.
  *
  * These types define the v6 "manifest == wire" tool contract. Phase R removed the
- * legacy `tools: string[]` + `toolSchemas` + `uiActions` triple entirely:
+ * legacy triple — a `string[]` tool list plus separate `toolSchemas` and per-tool
+ * app-action maps — entirely:
  * `PluginManifest.tools` is now `Tool[]` and every host consumer reads surface
  * visibility off each tool's `_meta.ui.visibility` (materialized once by
  * `normalizeManifest`). The SDK public surface (`@lvis/plugin-sdk`) mirrors these
@@ -235,7 +236,7 @@ export interface PluginManifest {
 
 
   /** Pure MCP `Tool` objects (manifest == wire). Surface visibility lives in each
-   *  tool's `_meta.ui.visibility`; there is no separate `uiActions`/`toolSchemas`. */
+   *  tool's `_meta.ui.visibility`; there is no separate app-action map or schema map. */
   tools: Tool[];
 
   description: string;
@@ -664,7 +665,7 @@ export interface PluginMarketplaceItem {
    * The catalog row's advertised tool NAMES (the marketplace API `methods`
    * list) — discovery/display metadata, NOT a manifest. The authoritative pure
    * `Tool[]` lives in the installed plugin.json read from the verified zip; the
-   * removed `uiActions`/`toolSchemas` catalog mirrors are gone (#885 Phase R).
+   * old app-action / schema catalog mirrors are gone (#885 Phase R).
    */
   tools: string[];
   /** Latest stable version string (semver). Present in remote catalog; may be absent in local mock. */

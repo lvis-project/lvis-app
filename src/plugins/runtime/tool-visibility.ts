@@ -25,7 +25,7 @@ export type ToolSurface = "model" | "app";
  * DEFENSIVE ASSERT (fail-closed): reaching the fall-through means a broken/absent
  * normalization step let a tool through with no explicit visibility. We resolve
  * to the MINIMAL GOVERNED surface `["model"]` — it denies app-invocability, so
- * the tool can NEVER reach the ungoverned uiActions bypass (isUiOnly=false),
+ * the tool can NEVER reach the ungoverned app-only dispatch path (isUiOnly=false),
  * while staying LLM-reachable through the governed executor. This is NOT the
  * semantic default (that is `["model","app"]` and lives only in normalize); it
  * is a fail-closed backstop, and we warn loudly so the contract violation is
@@ -55,6 +55,6 @@ export const isAppVisible = (t: McpTool): boolean => toolVisibility(t).includes(
  * 1:1 restatement of SoT §2.3: `visibility.includes("app") && !visibility.includes("model")`.
  * The load-bearing #1554/#1556 governed-vs-bypass discriminator — a `model`-visible
  * tool (model-only or dual) is `isUiOnly === false` in every path, so it NEVER
- * reaches the `callDeclaredUiAction` bypass.
+ * reaches the `callDeclaredAppOnlyTool` bypass.
  */
 export const isUiOnly = (t: McpTool): boolean => isAppVisible(t) && !isModelVisible(t);

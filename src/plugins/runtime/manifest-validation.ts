@@ -543,16 +543,17 @@ export async function parsePluginJson(
     }
   }
 
-  // #885 v6 — auth trio visibility (u2-host-consumers §1.2). Replaces BOTH the
-  // old `auth ∈ uiActions` check AND the #1554 `auth ∉ tools[]` leak guard (and
-  // supersedes the old tools[]∩uiActions overlap warn — a dual method is now ONE
-  // object with visibility ["model","app"], so the overlap shape no longer
-  // exists) with ONE intra-object array read per auth ref. Each ref must name a
-  // declared tool whose visibility is EXACTLY ["app"]: `exactlyApp` folds app ∈
-  // vis (old-A: UI-invokable) AND model ∉ vis (old-B / #1554: never
-  // model-callable). A dual ["model","app"] auth tool is REJECTED — that IS the
-  // load-bearing #1554 invariant ("a 'model' tool NEVER reaches the uiActions
-  // bypass"), now enforced at declaration time. `toolVisibility` is a pure reader
+  // #885 v6 — auth trio visibility (u2-host-consumers §1.2). Enforces that each
+  // auth-lifecycle tool is app-only-visibility — never model-visible — with ONE
+  // intra-object array read per auth ref. This single rule consolidates the pre-v6
+  // #1554 leak guard (auth must never be model-callable) and the pre-v6
+  // auth-must-be-app-visible check (a dual method is now ONE object with visibility
+  // ["model","app"], so the old overlap shape no longer exists). Each ref must name
+  // a declared tool whose visibility is EXACTLY ["app"]: `exactlyApp` folds app ∈
+  // vis (UI-invokable) AND model ∉ vis (#1554: never model-callable). A dual
+  // ["model","app"] auth tool is REJECTED — that IS the load-bearing #1554
+  // invariant ("a 'model' tool NEVER reaches the app-only dispatch path"), now
+  // enforced at declaration time. `toolVisibility` is a pure reader
   // (normalize already materialized any omitted visibility to dual UPSTREAM), so
   // an auth tool that forgot to declare visibility arrives here as explicit dual
   // → fails `exactlyApp` → rejected (fail-closed; a silently-defaulted auth tool
@@ -628,7 +629,7 @@ export async function parsePluginJson(
   // #885 v6 — keywords[].skillId must name a MODEL-VISIBLE tool (a skill keyword
   // maps to an LLM-invocable tool). Replaces the old `parsed.tools.includes(sk)`
   // string membership with a normalized-Tool[] lookup + visibility read. The
-  // legacy `toolSchemas` key ⊆ tools ∪ uiActions check is DELETED — structurally
+  // legacy `toolSchemas` key ⊆ all-declared-tools check is DELETED — structurally
   // impossible now that every tool IS its own object (no separate schema map).
   const kw = Array.isArray(parsed.keywords) ? parsed.keywords : [];
   for (let i = 0; i < kw.length; i += 1) {

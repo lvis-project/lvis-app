@@ -12,14 +12,14 @@ import { createLogger } from "../../lib/logger.js";
 const log = createLogger("sandbox");
 
 /**
- * uiActions safety model.
+ * App-visible tool safety model.
  *
- * `uiActions` is a structural renderer allowlist, not a risk classifier:
- * mutating-looking names are accepted at manifest load, but renderer calls are
- * re-checked against the owning manifest at runtime. UI-only actions other
- * than auth status polling require a fresh browser user activation before the
- * host invokes the handler, and LLM-facing tools still use the normal executor
- * permission/audit path.
+ * The app-visible tool allowlist is a structural renderer allowlist, not a risk
+ * classifier: mutating-looking names are accepted at manifest load, but renderer
+ * calls are re-checked against the owning manifest at runtime. App-only actions
+ * other than auth status polling require a fresh browser user activation before
+ * the host invokes the handler, and model-visible tools still use the normal
+ * executor permission/audit path.
  */
 
 /**
