@@ -17,7 +17,6 @@ import { toolVisibility, isModelVisible } from "./tool-visibility.js";
 import { createLogger } from "../../lib/logger.js";
 import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
 import {
-  MARKETPLACE_PROVIDER_PRESET_ID_MAX_LENGTH,
   marketplaceProviderPresetIdFromSecretKey,
 } from "../../shared/marketplace-package-assets.js";
 
@@ -42,11 +41,6 @@ export const STABLE_SEMVER_RE =
  * install a wider allowlist via a stale SDK build.
  */
 const LLM_API_KEY_PATTERN = /^llm\.apiKey\.[a-z]+(?:-[a-z]+)*$/;
-const MARKETPLACE_PROVIDER_PRESET_ID_SCHEMA_PATTERN_SOURCE =
-  `[A-Za-z0-9][A-Za-z0-9._-]{0,${MARKETPLACE_PROVIDER_PRESET_ID_MAX_LENGTH - 1}}`;
-export const HOST_SECRETS_KEY_PATTERN_SOURCE =
-  `^(?:llm\\.apiKey\\.[a-z]+(?:-[a-z]+)*|llm\\.marketplaceProvider\\.${MARKETPLACE_PROVIDER_PRESET_ID_SCHEMA_PATTERN_SOURCE}\\.apiKey)$`;
-export const HOST_SECRETS_KEY_PATTERN = new RegExp(HOST_SECRETS_KEY_PATTERN_SOURCE);
 const log = createLogger("plugin-runtime");
 
 function isAllowedHostSecretKey(value: unknown): value is string {
