@@ -76,7 +76,6 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
           description: "Note plugin",
           packageName: "@acme/notes",
           packageSpec: "@acme/notes@1.2.3",
-          methods: ["notes.add", "notes.list"],
           installPolicy: "user",
           dependencies: ["calendar"],
           publisher: "Acme",
@@ -99,7 +98,6 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
       name: "Acme Notes",
       packageName: "@acme/notes",
       packageSpec: "@acme/notes@1.2.3",
-      tools: ["notes.add", "notes.list"],
       installPolicy: "user",
       dependencies: ["calendar"],
       publisher: "Acme",
@@ -613,7 +611,6 @@ describe("CloudMarketplaceFetcher (private-network path)", () => {
           description: "d",
           packageName: "@local/x",
           packageSpec: "@local/x@0.0.1",
-          methods: [],
         },
       ]),
     );
@@ -677,8 +674,6 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     expect(p.packageName).toBe("lvis-plugin-meeting");
     // packageSpec synthesized as slug@version
     expect(p.packageSpec).toBe("lvis-plugin-meeting@0.1.0");
-    // tools defaults to [] when methods is absent
-    expect(p.tools).toEqual([]);
     expect(p.installPolicy).toBe("admin");
     expect(p.dependencies).toEqual(["calendar", "email", "meeting"]);
     expect(p.version).toBe("0.1.0");
