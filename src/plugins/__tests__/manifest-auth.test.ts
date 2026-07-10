@@ -11,7 +11,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import * as AjvModule from "ajv";
 import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
@@ -34,8 +34,9 @@ import { parsePluginJson } from "../runtime/manifest-validation.js";
 // real schema on disk + the real `parsePluginJson` cross-field path.
 let TEST_VALIDATOR: ValidateFunction | null = null;
 beforeAll(() => {
-  const schemaPath = createRequire(import.meta.url).resolve(
-    "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
+  // Host-owned manifest schema SOT (ph2).
+  const schemaPath = fileURLToPath(
+    new URL("../../../schemas/plugin-manifest.schema.json", import.meta.url),
   );
   const schema = JSON.parse(readFileSync(schemaPath, "utf-8"));
   const AjvAny = AjvModule as unknown as { default?: unknown };

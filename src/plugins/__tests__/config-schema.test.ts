@@ -16,7 +16,7 @@ import { readFile, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import {
   applyConfigDefaults,
   isSecretProperty,
@@ -32,8 +32,10 @@ import {
 } from "../config-change-bus.js";
 import type { PluginConfigSchema } from "../types.js";
 
-const SCHEMA_PATH = createRequire(import.meta.url).resolve(
-  "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
+// Host-owned manifest schema SOT (ph2) — resolved relative to this test file
+// so it works regardless of cwd and no longer depends on the SDK package.
+const SCHEMA_PATH = fileURLToPath(
+  new URL("../../../schemas/plugin-manifest.schema.json", import.meta.url),
 );
 
 function buildAjv() {
@@ -48,9 +50,9 @@ function buildAjv() {
 
 async function loadHostManifestSchema() {
   const raw = await readFile(SCHEMA_PATH, "utf-8");
-  // As of @lvis/plugin-sdk v5.21.0 the manifest schema natively carries the
-  // host-required fields and makes per-tool `category` optional, so tests
-  // compile the SDK schema verbatim — the same shape the runtime enforces.
+  // The host-owned manifest schema carries the host-required fields natively, so
+  // tests compile it verbatim — the same shape (and the same file) the runtime
+  // `buildManifestValidator()` enforces.
   return JSON.parse(raw);
 }
 

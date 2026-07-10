@@ -1,11 +1,23 @@
 /**
- * Manifest validation — SDK schema SOT + host cross-field MUST/SHOULD checks.
+ * Manifest validation — host-owned schema SOT + host cross-field MUST/SHOULD
+ * checks. The manifest shape is validated against the vendored
+ * `schemas/plugin-manifest.schema.json` (ph2 — host owns the schema; no runtime
+ * `@lvis/plugin-sdk` import).
  *
  * Exported for unit testing and reuse by the PluginRuntime class.
  */
 
 import { readFile } from "node:fs/promises";
+import * as AjvModule from "ajv";
+import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
+// Host-owned manifest-shape SOT (ph2). The schema is imported as a
+// bundler-visible JSON module so it inlines into the packaged main bundle —
+// no runtime disk read, so no electron-builder `files`/asar gap can leave the
+// packaged app unable to resolve it. The `schemas/plugin-manifest.schema.json`
+// file is byte-identical to the SDK's former canonical copy; the SDK now
+// mirrors from here (host is SOT).
+import manifestSchema from "../../../schemas/plugin-manifest.schema.json" with { type: "json" };
 import type {
   PluginManifest,
   InstallPolicy,
@@ -24,9 +36,9 @@ export { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../t
 
 /**
  * Stable SemVer pattern (MAJOR.MINOR.PATCH, no leading zeros, no pre-release,
- * no build metadata). Single source of this regex inside lvis-app — also
- * mirrored in `lvis-plugin-sdk/schemas/plugin-manifest.schema.json` and the
- * per-plugin `publish.yml` tag-validation step. Updating any of those copies
+ * no build metadata). This TS const mirrors the `version` / `minAppVersion`
+ * pattern in the host-owned `schemas/plugin-manifest.schema.json` (the SOT) and
+ * the per-plugin `publish.yml` tag-validation step. Updating any of those copies
  * MUST update the others (cross-repo, see `host-plugin-contract-sync` rule).
  */
 export const STABLE_SEMVER_RE =
@@ -35,8 +47,8 @@ export const STABLE_SEMVER_RE =
 /**
  * #893 — Allow-listed host secret key pattern. A plugin manifest's
  * `hostSecrets.read[]` entries MUST match one of these host-owned LLM secret
- * key shapes. Mirrors the SDK JSON-schema constraint so a plugin cannot
- * install a wider allowlist via a stale SDK build.
+ * key shapes. Mirrors the JSON-schema constraint as defence-in-depth so a
+ * plugin manifest cannot install a wider allowlist than the schema permits.
  */
 const LLM_API_KEY_PATTERN = /^llm\.apiKey\.[a-z]+(?:-[a-z]+)*$/;
 const log = createLogger("plugin-runtime");
@@ -62,144 +74,25 @@ export function formatUnknownErrorMessage(err: unknown): string {
   return String(err);
 }
 
-function schemaAcceptsNetworkAccessAllowPrivateNetworks(validator: ValidateFunction): boolean {
-  const ok = validator({
-    id: "private-network-plugin",
-    name: "Private Network Plugin",
-    version: "1.0.0",
-    description: "Private network fixture.",
-    publisher: "LVIS",
-    entry: "dist/index.js",
-    tools: [],
-    networkAccess: {
-      allowedDomains: ["intranet.example.com"],
-      allowPrivateNetworks: true,
-      reasoning: "Host-mediated intranet access.",
-    },
-  });
-  return ok === true;
-}
-
-function schemaAcceptsMarketplaceProviderHostSecret(validator: ValidateFunction): boolean {
-  const ok = validator({
-    id: "marketplace-provider-secret",
-    name: "Marketplace Provider Secret Plugin",
-    version: "1.0.0",
-    description: "Marketplace provider secret fixture.",
-    publisher: "LVIS",
-    entry: "dist/index.js",
-    tools: [],
-    hostSecrets: {
-      read: ["llm.marketplaceProvider.future-router.apiKey"],
-    },
-  });
-  return ok === true;
+interface AjvCtor {
+  new (opts?: unknown): {
+    compile: (schema: unknown) => ValidateFunction;
+  };
 }
 
 /**
- * #885 v6 — POSITIVE probe: the SDK schema natively ACCEPTS a pure MCP `Tool[]`
- * object carrying explicit `_meta.ui.visibility`. Without a v6 SDK the `oneOf`
- * pure arm is absent and every migrated (or normalized-legacy) manifest would
- * fail load, so this is gated the same way as the other native-field probes.
+ * Resolve the AJV constructor / `addFormats` across CJS/ESM interop. AJV ships
+ * its concrete class as either `module.default` (ESM) or `module.exports`
+ * (CJS); the same interop dance the host already uses in `config-schema.ts`.
  */
-function schemaAcceptsPureToolObject(validator: ValidateFunction): boolean {
-  const ok = validator({
-    id: "pure-tool-plugin",
-    name: "Pure Tool Plugin",
-    version: "1.0.0",
-    description: "Pure MCP Tool object fixture.",
-    publisher: "LVIS",
-    entry: "dist/index.js",
-    tools: [
-      {
-        name: "pure_ping",
-        description: "Pure ping tool fixture.",
-        inputSchema: { type: "object", properties: {} },
-        _meta: { ui: { visibility: ["model"] } },
-      },
-    ],
-  });
-  return ok === true;
+function resolveAjv(): AjvCtor {
+  const mod = AjvModule as unknown as { default?: unknown };
+  return (mod.default ?? AjvModule) as AjvCtor;
 }
 
-/**
- * #885 v6 — NEGATIVE-strictness guard (opposite polarity to the accept-probes):
- * the SDK schema must REJECT a pure tool that carries a v6-removed field
- * (`writesToOwnSandbox`/`category`/`workerId`/per-tool `version`). A too-permissive
- * schema would let an untrusted self-claim ride the wire even though the host no
- * longer reads it — the removal must be enforced at the shape boundary, not just
- * dropped during host-side materialization.
- */
-function schemaRejectsPureToolWithRemovedField(validator: ValidateFunction): boolean {
-  const rejected = validator({
-    id: "removed-field-plugin",
-    name: "Removed Field Plugin",
-    version: "1.0.0",
-    description: "Pure tool carrying a removed field fixture.",
-    publisher: "LVIS",
-    entry: "dist/index.js",
-    tools: [
-      {
-        name: "leaky_tool",
-        description: "Declares a removed field.",
-        inputSchema: { type: "object", properties: {} },
-        writesToOwnSandbox: true,
-        _meta: { ui: { visibility: ["model"] } },
-      },
-    ],
-  });
-  return rejected === false;
-}
-
-/**
- * #885 v6 — NEGATIVE-strictness guard: the SDK schema must REJECT an explicit
- * empty `_meta.ui.visibility: []` (a tool reachable by neither surface). This is
- * the `minItems: 1` gate that guarantees `[]` never reaches host-side
- * materialization or `toolVisibility` — there is exactly ONE resolution for missing visibility
- * (`[]` → REJECT), never a silent widen to governed-dual (SoT §2.2, u2 §1.4.2).
- */
-function schemaRejectsEmptyVisibility(validator: ValidateFunction): boolean {
-  const rejected = validator({
-    id: "empty-visibility-plugin",
-    name: "Empty Visibility Plugin",
-    version: "1.0.0",
-    description: "Pure tool with empty visibility fixture.",
-    publisher: "LVIS",
-    entry: "dist/index.js",
-    tools: [
-      {
-        name: "unreachable_tool",
-        description: "Reachable by neither surface.",
-        inputSchema: { type: "object", properties: {} },
-        _meta: { ui: { visibility: [] } },
-      },
-    ],
-  });
-  return rejected === false;
-}
-
-/**
- * #885 v6.1.0 — NEGATIVE-strictness guard: the SDK schema must REJECT a `ui[]`
- * extension declaring the removed `kind:"action"` surface (an icon that
- * dispatched a declared tool with no panel — see `PluginUiExtension` in
- * `../types.ts`). App-invokable behavior is now expressed by a tool's
- * `_meta.ui.visibility`, so a schema that still accepts this shape would let
- * a plugin ship dead-on-arrival config the host can no longer route.
- */
-function schemaRejectsUiActionKind(validator: ValidateFunction): boolean {
-  const rejected = validator({
-    id: "ui-action-kind-plugin",
-    name: "UI Action Kind Plugin",
-    version: "1.0.0",
-    description: "Removed ui[].kind=\"action\" fixture.",
-    publisher: "LVIS",
-    entry: "dist/index.js",
-    tools: [],
-    ui: [
-      { id: "a", slot: "sidebar", kind: "action", title: "x", tool: "t" },
-    ],
-  });
-  return rejected === false;
+function resolveAddFormats(): (a: unknown) => void {
+  const mod = AddFormatsModule as unknown as { default?: unknown };
+  return (mod.default ?? AddFormatsModule) as (a: unknown) => void;
 }
 
 export function normalizeInstallPolicy(
@@ -219,76 +112,41 @@ export function getDeclaredEmittedEvents(manifest: Pick<PluginManifest, "emitted
 }
 
 /**
- * Lazy-load + compile the SDK plugin manifest schema into an AJV validator.
- * The SDK schema is the manifest shape SOT; if it cannot be resolved or
- * compiled, plugin loading must fail closed. Do not mutate the SDK schema in
- * the host. As of @lvis/plugin-sdk v6.1.0, the helper must natively accept
- * every host-required manifest field (`networkAccess.allowPrivateNetworks`,
- * marketplace-provider secret grants, AND the pure MCP `Tool[]` object with
- * `_meta.ui.visibility`), and must be strict enough to REJECT a pure tool
- * carrying a v6-removed field, an empty `visibility: []`, or a `ui[]`
- * extension declaring the removed `kind:"action"` surface (the
- * negative-strictness guards below).
+ * Compile the host-owned plugin manifest schema into an AJV validator.
+ *
+ * ph2 — the manifest-shape SOT is now `schemas/plugin-manifest.schema.json`,
+ * vendored into the host and imported as a bundler-visible JSON module (see the
+ * top-of-file import). The host no longer imports `@lvis/plugin-sdk` at runtime,
+ * so plugin loading no longer depends on the SDK package or its pinned version
+ * (which removes the former circular host→SDK runtime edge + validator-version
+ * skew). If the schema cannot be compiled, plugin loading must fail closed.
+ *
+ * AJV options mirror the SDK's former `compileManifestValidator()` exactly
+ * (`strict` + `strictRequired:false` + `allErrors` + `allowUnionTypes`, plus
+ * `ajv-formats`), so behavior is unchanged from the last host↔SDK-pinned build.
+ * The former runtime accept/reject probes (which guarded against a stale SDK
+ * schema) are gone — a host-vendored schema cannot be version-skewed — and are
+ * re-expressed as test-time assertions against this compiled validator
+ * (`manifest-validator-host-sot.test.ts`).
  */
 export async function buildManifestValidator(): Promise<ValidateFunction> {
-  type SdkModule = { compileManifestValidator?: () => ValidateFunction };
-  let sdk: SdkModule;
   try {
-    sdk = (await import("@lvis/plugin-sdk")) as unknown as SdkModule;
+    const AjvCtor = resolveAjv();
+    const ajv = new AjvCtor({
+      strict: true,
+      strictRequired: false,
+      allErrors: true,
+      allowUnionTypes: true,
+    });
+    resolveAddFormats()(ajv);
+    return ajv.compile(manifestSchema);
   } catch (err) {
-    throw new Error(`SDK plugin manifest validator unavailable: ${formatUnknownErrorMessage(err)}`);
-  }
-
-  if (typeof sdk.compileManifestValidator !== "function") {
+    // Fail closed — an uncompilable schema aborts plugin loading rather than
+    // degrading to an unvalidated (permissive) load path.
     throw new Error(
-      "SDK plugin manifest validator unavailable: @lvis/plugin-sdk does not export compileManifestValidator(); update @lvis/plugin-sdk to v6.0.0 or newer.",
+      `Host plugin manifest validator failed to compile: ${formatUnknownErrorMessage(err)}`,
     );
   }
-
-  let validator: ValidateFunction;
-  try {
-    validator = sdk.compileManifestValidator();
-  } catch (err) {
-    throw new Error(
-      `SDK plugin manifest validator failed to compile: ${formatUnknownErrorMessage(err)}`,
-    );
-  }
-  const missingNativeFields = [
-    schemaAcceptsNetworkAccessAllowPrivateNetworks(validator)
-      ? ""
-      : "networkAccess.allowPrivateNetworks",
-    schemaAcceptsMarketplaceProviderHostSecret(validator)
-      ? ""
-      : "llm.marketplaceProvider.<presetId>.apiKey",
-    schemaAcceptsPureToolObject(validator) ? "" : "pure MCP Tool[] object (_meta.ui.visibility)",
-  ].filter(Boolean);
-  if (missingNativeFields.length > 0) {
-    throw new Error(
-      `SDK plugin manifest validator is missing native support for ${missingNativeFields.join(", ")}; update @lvis/plugin-sdk to v6.1.0 or newer.`,
-    );
-  }
-  // Separate negative-strictness assertions (opposite polarity to the accept
-  // gate above — each must REJECT). A too-permissive schema would let a removed
-  // self-claim field, an unreachable empty-visibility tool, or a removed ui[]
-  // surface through the shape boundary; fail closed loudly so the contract
-  // can't silently regress.
-  const strictnessGaps = [
-    schemaRejectsPureToolWithRemovedField(validator)
-      ? ""
-      : "a pure tool carrying a removed field (writesToOwnSandbox/category/workerId/version) must be rejected",
-    schemaRejectsEmptyVisibility(validator)
-      ? ""
-      : "an empty _meta.ui.visibility: [] must be rejected (minItems:1)",
-    schemaRejectsUiActionKind(validator)
-      ? ""
-      : "a ui extension declaring the removed kind:\"action\" must be rejected",
-  ].filter(Boolean);
-  if (strictnessGaps.length > 0) {
-    throw new Error(
-      `SDK plugin manifest validator is too permissive: ${strictnessGaps.join("; ")}; update @lvis/plugin-sdk to v6.1.0 or newer.`,
-    );
-  }
-  return validator;
 }
 
 /**
