@@ -78,37 +78,12 @@ export interface Tool {
    */
   readonly pathFields?: readonly string[];
   /**
-   * Issue #664 P1 — manifest-declared self-attestation that every value
-   * resolved through `pathFields` stays inside the owning plugin's
-   * sandbox root (`~/.lvis/plugins/<pluginId>/`). When true AND the
-   * runtime verifies that every resolved path is inside the owner
-   * sandbox, the reviewer auto-LOWs the verdict so plugin tools can
-   * touch their own data dir without round-tripping the user. The
-   * runtime still verifies path containment — a tool that declares the
-   * flag but emits an out-of-sandbox path falls back to the normal
-   * write rules. Only meaningful for `category === "write"` and
-   * `pluginId` is set.
-   */
-  readonly writesToOwnSandbox?: boolean;
-  /**
    * §6.4 Tool versioning — semver string (e.g. "1.0.0"). Required so the
    * registry can pick the latest implementation when multiple versions of the
-   * same tool are registered and so deprecation metadata has a concrete
-   * baseline. Hand-written tools default to "1.0.0" via {@link ZodTool}.
+   * same tool are registered. Hand-written tools default to "1.0.0" via
+   * {@link ZodTool}.
    */
   readonly version: string;
-  /**
-   * Semver string marking when this tool was deprecated. When present, the
-   * registry emits a warning on every invocation lookup so callers can
-   * observe usage during the migration window. Undefined = active tool.
-   */
-  readonly deprecatedSince?: string;
-  /**
-   * Name of the tool that replaces this one. When set, registry lookups for
-   * the deprecated name transparently redirect to the replacement tool so
-   * existing callers keep working through the deprecation window.
-   */
-  readonly replacedBy?: string;
   /**
    * Optional user-approval cache identity for authority-sensitive tools.
    *
@@ -155,12 +130,8 @@ export abstract class ZodTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny>
   readonly pluginId?: string;
   readonly workerId?: string;
   readonly mcpServerId?: string;
-  /** Issue #664 P1 — sandbox-write self-attestation (see {@link Tool.writesToOwnSandbox}). */
-  readonly writesToOwnSandbox?: boolean;
   /** §6.4 — default version for hand-written builtins. Override via `override readonly version = "2.0.0"`. */
   readonly version: string = "1.0.0";
-  readonly deprecatedSince?: string;
-  readonly replacedBy?: string;
 
   toJsonSchema(): unknown {
     // zod v4 ships with native JSON Schema export.
@@ -208,14 +179,8 @@ export interface DynamicToolSpec {
   workerId?: string;
   mcpServerId?: string;
   pathFields?: readonly string[];
-  /** Issue #664 P1 — sandbox-write self-attestation (see {@link Tool.writesToOwnSandbox}). */
-  writesToOwnSandbox?: boolean;
   /** §6.4 — semver. Defaults to "1.0.0" when omitted. */
   version?: string;
-  /** §6.4 — semver string marking deprecation; enables warn on lookup. */
-  deprecatedSince?: string;
-  /** §6.4 — replacement tool name; enables transparent redirect. */
-  replacedBy?: string;
   /** Permission policy #634 — per-tool approval cache identity. */
   approvalCacheKey?: (input: unknown, ctx?: Pick<ToolExecutionContext, "cwd">) => string | undefined;
   /** Raw JSON Schema — used when no Zod schema is available (plugin/MCP). */
@@ -247,10 +212,7 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     workerId: spec.workerId,
     mcpServerId: spec.mcpServerId,
     pathFields: spec.pathFields,
-    writesToOwnSandbox: spec.writesToOwnSandbox,
     version: spec.version ?? "1.0.0",
-    deprecatedSince: spec.deprecatedSince,
-    replacedBy: spec.replacedBy,
     approvalCacheKey: spec.approvalCacheKey,
     toJsonSchema: () => spec.jsonSchema,
     isReadOnly: spec.isReadOnly ?? ((): boolean => false),

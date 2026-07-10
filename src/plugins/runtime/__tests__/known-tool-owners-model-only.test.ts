@@ -23,18 +23,22 @@ import { normalizeManifest } from "../../types.js";
 const HOST_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 const PLUGIN_ID = "auth-plugin";
 
-// REAL parse→normalize: a legacy manifest compiled to the pure Tool[] form.
-//   ap_list             — tools[]-only         → ["model"]         (model-only)
-//   ap_toggle           — tools[] ∩ uiActions  → ["model","app"]   (dual)
-//   ap_status / ap_login — uiActions-only, auth refs → ["app"]     (app-only auth trio)
+// Pure v6 manifest normalized (visibility materialized):
+//   ap_list             — ["model"]         (model-only)
+//   ap_toggle           — ["model","app"]   (dual)
+//   ap_status / ap_login — ["app"]          (app-only auth trio)
 const MANIFEST = normalizeManifest({
   id: PLUGIN_ID,
   name: "Auth Plugin",
   version: "1.0.0",
   entry: "dist/index.js",
   description: "x",
-  tools: ["ap_list", "ap_toggle"],
-  uiActions: { ap_toggle: {}, ap_status: {}, ap_login: {} },
+  tools: [
+    { name: "ap_list", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model"] } } },
+    { name: "ap_toggle", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } },
+    { name: "ap_status", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["app"] } } },
+    { name: "ap_login", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["app"] } } },
+  ],
   auth: { statusTool: "ap_status", loginTool: "ap_login" },
 });
 

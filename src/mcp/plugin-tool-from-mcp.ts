@@ -13,8 +13,9 @@
  * so this reverse projection registers the write-equivalent default-strict
  * baseline and the effective category is derived host-side per invocation.
  * `writesToOwnSandbox` is no longer promoted (the reviewer auto-LOW keys on the
- * host-computed sandbox-containment). The `version`/`deprecatedSince`/`replacedBy`
- * reads are inert (the wire no longer carries them) — Phase-R deletions.
+ * host-computed sandbox-containment). The per-tool `version`/`deprecatedSince`/
+ * `replacedBy` fields left the Tool contract entirely (Phase-R deletions), so the
+ * wire carries none and this reverse projection reads none.
  *
  * Trust boundary: `_meta["xyz.lvis/workerId"]` is intentionally NOT promoted to
  * `Tool.workerId` here. Loopback `tools/call` executes through
@@ -85,11 +86,6 @@ export type PluginMcpInvoke = (
   args: Record<string, unknown>,
 ) => Promise<{ text: string; uiPayload?: McpUiPayload; rawResult?: { value: unknown } }>;
 
-function readString(meta: Record<string, unknown>, key: string): string | undefined {
-  const value = meta[`${LVIS_META_PREFIX}${key}`];
-  return typeof value === "string" ? value : undefined;
-}
-
 function readCategory(meta: Record<string, unknown>, toolName: string): PluginToolCategory {
   const value = meta[`${LVIS_META_PREFIX}category`];
   if (typeof value === "string" && (PLUGIN_TOOL_CATEGORIES as readonly string[]).includes(value)) {
@@ -144,13 +140,10 @@ export function mcpToolToPluginTool(
     category,
     pluginId,
     pathFields: readPathFields(meta),
-    // #885 v6 — `writesToOwnSandbox` promotion DELETED (§3.2/§5): the flag was an
-    // untrusted self-claim; the reviewer auto-LOW now keys on the HOST-computed
-    // sandbox-containment derivation, never a manifest value. `Tool.writesToOwnSandbox`
-    // is no longer populated from the wire (the field type is a Phase-R deletion).
-    version: readString(meta, "version"),
-    deprecatedSince: readString(meta, "deprecatedSince"),
-    replacedBy: readString(meta, "replacedBy"),
+    // #885 v6 — the wire carries no `writesToOwnSandbox`/`version`/`deprecatedSince`/
+    // `replacedBy` (all Phase-R deletions from the Tool contract). The reviewer
+    // auto-LOW keys on host-computed sandbox-containment, never a manifest value,
+    // and `createDynamicTool` applies the default "1.0.0" tool version.
     jsonSchema: tool.inputSchema,
     isReadOnly: () => category === "read",
     execute: async (rawInput) => {

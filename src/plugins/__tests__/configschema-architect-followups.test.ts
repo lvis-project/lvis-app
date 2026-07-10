@@ -137,7 +137,7 @@ describe("US-3c.2 — PluginRuntime.restartPlugin", () => {
       description: "Test fixture.",
       publisher: "Test fixture",
       entry: "entry.mjs",
-      tools: [methodName],
+      tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
     };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
