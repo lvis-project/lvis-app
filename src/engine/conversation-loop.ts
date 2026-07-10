@@ -59,7 +59,7 @@ import type {
   ToolExposureMetrics,
   ProviderRequestDiagnostics,
 } from "./turn/types.js";
-export type { TurnCallbacks, TurnStopReason, TurnResult, ConversationLoopDeps } from "./turn/types.js";
+export type { TurnCallbacks, TurnResult, ConversationLoopDeps } from "./turn/types.js";
 
 
 

@@ -4,8 +4,7 @@
  * Two concerns:
  *  1. `KNOWN_CAPABILITIES` — closed vocabulary for manifest.capabilities[].
  *     Unknown entries fail schema validation so typos do not silently
- *     "grant" nothing. `ENFORCED_CAPABILITIES` records which capabilities
- *     are currently gated at runtime vs merely advisory.
+ *     "grant" nothing.
  *  2. `PUBLIC_EVENT_NAMESPACES` / `PLUGIN_PRIVATE_NAMESPACES` — restrict
  *     which host events a plugin may subscribe to and emit.
  *
@@ -51,117 +50,6 @@ export const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set([
   // triggerConversation() now routes to OverlayContext staging instead of spawning
   // a fresh ConversationLoop. Capability gates the same method as before.
   "host:overlay",
-]);
-
-/**
- * Runtime enforcement policy per capability. Keys mirror KNOWN_CAPABILITIES;
- * `enforcement=advisory` entries carry empty `gates` by convention.
- */
-export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new Map([
-  [
-    "ms-graph-consumer",
-    {
-      description:
-        "Self-identification label for plugins that consume Microsoft Graph. Host-side provider-auth HostApi methods are not part of the app contract, so this capability is advisory only.",
-      enforcement: "advisory",
-      gates: [],
-    },
-  ],
-  [
-    "external-auth-consumer",
-    {
-      description:
-        "Required to open interactive login BrowserWindows and harvest cookies via openAuthWindow. Gated because this spawns a real Chromium window and exposes session cookies to the plugin.",
-      enforcement: "enforced",
-      gates: ["openAuthWindow"],
-    },
-  ],
-  [
-    "mail-source",
-    {
-      description: "Required to emit host events under the email.* namespace.",
-      enforcement: "enforced",
-      gates: ["event:email.*"],
-    },
-  ],
-  [
-    "calendar-source",
-    {
-      description: "Required to emit host events under the calendar.* namespace.",
-      enforcement: "enforced",
-      gates: ["event:calendar.*"],
-    },
-  ],
-  [
-    "routine-provider",
-    {
-      description:
-        "Advisory — signals the plugin provides routine execution tools (wakeup, schedule, shutdown) consumable by the host Routine runtime.",
-      enforcement: "advisory",
-      gates: [],
-    },
-  ],
-  [
-    "meeting-recorder",
-    {
-      description: "Required to emit host events under the meeting.* namespace.",
-      enforcement: "enforced",
-      gates: ["event:meeting.*"],
-    },
-  ],
-  [
-    "knowledge-index",
-    {
-      description: "Required to emit host events under the index.* namespace.",
-      enforcement: "enforced",
-      gates: ["event:index.*"],
-    },
-  ],
-  [
-    "background-watcher",
-    {
-      description:
-        "Advisory — signals the plugin boots long-running pollers/watchers in its own start() lifecycle. Not gated at runtime today.",
-      enforcement: "advisory",
-      gates: [],
-    },
-  ],
-  [
-    "worker-client",
-    {
-      description:
-        "Advisory — signals the plugin wraps an external process (e.g. Python uv runtime). Not gated at runtime today.",
-      enforcement: "advisory",
-      gates: [],
-    },
-  ],
-  [
-    "document-indexer",
-    {
-      description:
-        "Advisory — signals the plugin can accept on-demand file paths for indexing via a supported scan tool. Used by host capability resolver for drag & drop IPC routing.",
-      enforcement: "advisory",
-      gates: [],
-    },
-  ],
-  [
-    "lifecycle-observer",
-    {
-      description:
-        "Advisory (v3.x) — signals the plugin uses getInstalledPluginIds() or onPluginsChanged() to observe peer-plugin lifecycle. Not enforced at runtime yet; declare it now for forward-compatibility when enforcement is added.",
-      enforcement: "advisory",
-      gates: [],
-    },
-  ],
-  [
-    "host:overlay",
-    {
-      description:
-        "Plugin may call hostApi.triggerConversation() as an Overlay Runner. The host holds the spec in OverlayContext staging (fresh ConversationLoop is NOT started). User confirm inserts the prompt as a user message into main chat via the imported_trigger mechanism. Required because the overlay surface lets plugins inject text the user sees before any LLM turn — must be curated.",
-      enforcement: "enforced",
-      gates: ["triggerConversation"],
-    },
-  ],
 ]);
 
 /**

@@ -16,7 +16,7 @@ import {
 import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
 import type { ProviderErrorDiagnostics } from "./provider-error-diagnostics.js";
 export type { LLMVendor };
-export { LLM_VENDORS, isLLMVendor } from "../../shared/llm-vendor-defaults.js";
+export { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
 
 /**
  * Optional per-message metadata for lifecycle bookkeeping (auto-compact, mark-stale,
