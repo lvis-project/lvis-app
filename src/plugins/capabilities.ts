@@ -11,28 +11,6 @@
  * Sources of truth re-exported for plugin-development docs — do not fork.
  */
 
-/**
- * Capability status summary used by host policy and governance docs.
- *
- * - `enforced`: runtime check exists (HostApi method refuses / event dropped
- *   when capability is missing).
- * - `advisory`: declared in manifests today but not enforced at runtime.
- *   Tracked so ops can audit plugin intent; future phases may harden.
- */
-export type CapabilityEnforcement = "enforced" | "advisory";
-
-export interface CapabilityPolicy {
-  /** Short human-readable description (shown in audit output). */
-  description: string;
-  /** enforced = runtime gate active; advisory = declared but not blocking. */
-  enforcement: CapabilityEnforcement;
-  /**
-   * HostApi method names or event namespace prefixes gated by this
-   * capability. Empty when the capability is purely advisory.
-   */
-  gates: string[];
-}
-
 /** Closed set of capability strings accepted in manifest.capabilities[]. */
 export const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set([
   "ms-graph-consumer",

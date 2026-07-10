@@ -661,38 +661,23 @@ export interface PluginMarketplaceItem {
   description: string;
   packageSpec: string;
   packageName: string;
-  /**
-   * The catalog row's advertised tool NAMES (the marketplace API `methods`
-   * list) — discovery/display metadata, NOT a manifest. The authoritative pure
-   * `Tool[]` lives in the installed plugin.json read from the verified zip; the
-   * old app-action / schema catalog mirrors are gone (#885 Phase R).
-   */
-  tools: string[];
   /** Latest stable version string (semver). Present in remote catalog; may be absent in local mock. */
   version?: string;
   /** SHA-256 of the latest stable marketplace artifact. Used to invalidate stale same-version cache entries. */
   artifactSha256?: string;
   /** S8 — release channel. "stable" (default) or "canary". */
   channel?: "stable" | "canary";
-  defaultConfig?: Record<string, unknown>;
-  ui?: PluginUiExtension[];
+  /**
+   * Catalog-declared capabilities, kept as the trusted "expected" side of the
+   * install-time integrity cross-check in `assertInstalledManifestMatchesCatalog`
+   * (the `external-auth-consumer` TOCTOU guard). The lvis-marketplace server does
+   * not populate this field today, so the guard's expected value is the
+   * conservative empty set — a tampered zip cannot silently gain
+   * `external-auth-consumer` beyond what the catalog advertises.
+   */
   capabilities?: string[];
-  keywords?: Array<{ keyword: string; skillId: string }>;
   auth?: PluginAuthSpec;
   networkAccess?: PluginManifest["networkAccess"];
-  emittedEvents?: string[];
-  /**
-   * Mirrors `PluginManifest.notificationEvents` so marketplace cards can
-   * render the same field. See PluginManifest JSDoc above for semantics.
-   * `bypassFocusGate` (#843) on marketplace items is informational only;
-   * the runtime contract is enforced by the manifest field at install time.
-   */
-  notificationEvents?: Array<{
-    event: string;
-    titleField?: string;
-    bodyField?: string;
-    bypassFocusGate?: boolean;
-  }>;
   installPolicy?: InstallPolicy;
   dependencies?: Array<string | DependencySpec>;
   pluginAccess?: PluginAccessSpec;
