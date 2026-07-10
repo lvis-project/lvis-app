@@ -27,7 +27,7 @@
  *  - `manifest.capabilities[]` (advisory kebab-case dependency tags) are
  *    LVIS-internal and are NOT projected into MCP `ServerCapabilities`.
  */
-import type { NormalizedManifest, PluginToolCategory, Tool as McpTool } from "../plugins/types.js";
+import type { NormalizedManifest, Tool as McpTool } from "../plugins/types.js";
 import { toolVisibility, isModelVisible } from "../plugins/runtime/tool-visibility.js";
 
 /** The RC protocol revision LVIS plugin-servers speak. */
@@ -35,18 +35,6 @@ const MCP_PROTOCOL_VERSION = "2026-07-28";
 
 /** JSON Schema 2020-12 dialect URI (the RC default for tool inputSchema). */
 const JSON_SCHEMA_2020_12 = "https://json-schema.org/draft/2020-12/schema";
-
-/**
- * MCP `ToolAnnotations` (hints only — NOT authoritative). #885 v6 — no longer
- * projected onto the wire (the host derives its own interop annotations); retained
- * for the Phase-R deletion sweep only.
- */
-export interface McpToolAnnotations {
-  readOnlyHint: boolean;
-  destructiveHint: boolean;
-  idempotentHint: boolean;
-  openWorldHint: boolean;
-}
 
 /**
  * An MCP `Tool` projected from one normalized `Tool`. #885 v6 — `annotations` is
@@ -83,20 +71,6 @@ export interface McpDiscoverProjection {
     extensions?: Record<string, unknown>;
   };
   instructions: string;
-}
-
-/**
- * Project the LVIS permission `category` to MCP `ToolAnnotations` hints. #885 v6 —
- * category is removed from the contract, so this is no longer wired into the
- * forward projection; retained for the Phase-R deletion sweep only.
- */
-export function annotationsForCategory(category: PluginToolCategory): McpToolAnnotations {
-  return {
-    readOnlyHint: category === "read",
-    destructiveHint: category === "write" || category === "shell",
-    idempotentHint: category === "read",
-    openWorldHint: category === "network",
-  };
 }
 
 /**

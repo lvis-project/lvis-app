@@ -8,7 +8,7 @@ import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
 import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
-import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource, PluginUiExtension } from "./types.js";
+import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource, PluginUiExtension, Tool } from "./types.js";
 import { IncompatibleAppVersionError, MissingDependenciesError, MissingPluginDependenciesError } from "./types.js";
 import { appVersionSatisfiesMin } from "../shared/semver-compare.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
@@ -1569,12 +1569,26 @@ export class PluginMarketplaceService {
       ui?: PluginUiExtension[];
     },
   ): Record<string, unknown> {
+    // #885 Phase R — the catalog row (`PluginMarketplaceItem.tools`) carries tool
+    // NAMES only (string[], display/discovery metadata), but the host loader now
+    // requires pure MCP Tool OBJECTS and rejects a non-object `tools[i]`. When the
+    // installed zip ships no plugin.json we synthesize this manifest ourselves, so
+    // materialize each catalog name into a minimal dual-visibility Tool — otherwise
+    // the host would WRITE a manifest its own `parsePluginJson` pre-v6 guard then
+    // rejects (with a nonsensical "upgrade @lvis/plugin-sdk v6" for host-authored
+    // content). A zip that DOES ship plugin.json overwrites this with the
+    // authoritative pure form. Typed `Tool[]` so tsc covers the shape.
+    const tools: Tool[] = plugin.tools.map((name) => ({
+      name,
+      inputSchema: { type: "object", properties: {} },
+      _meta: { ui: { visibility: ["model", "app"] as Array<"model" | "app"> } },
+    }));
     const manifest: Record<string, unknown> = {
       id: plugin.id,
       name: plugin.name,
       version: options.version,
       entry: options.entry,
-      tools: plugin.tools,
+      tools,
       config: plugin.defaultConfig ?? {},
       // §3-B rollback: persist the npm package name into the installed manifest
       // so rollbackPlugin() can reinstall cached versions without consulting
@@ -1585,10 +1599,8 @@ export class PluginMarketplaceService {
     if (options.ui && options.ui.length > 0) manifest.ui = options.ui;
     if (plugin.capabilities && plugin.capabilities.length > 0) manifest.capabilities = plugin.capabilities;
     if (plugin.keywords && plugin.keywords.length > 0) manifest.keywords = plugin.keywords;
-    if (plugin.uiActions && Object.keys(plugin.uiActions).length > 0) manifest.uiActions = plugin.uiActions;
     if (plugin.emittedEvents && plugin.emittedEvents.length > 0) manifest.emittedEvents = plugin.emittedEvents;
     if (plugin.notificationEvents && plugin.notificationEvents.length > 0) manifest.notificationEvents = plugin.notificationEvents;
-    if (plugin.toolSchemas && Object.keys(plugin.toolSchemas).length > 0) manifest.toolSchemas = plugin.toolSchemas;
     if (plugin.installPolicy) manifest.installPolicy = plugin.installPolicy;
     if (plugin.dependencies && plugin.dependencies.length > 0) manifest.dependencies = plugin.dependencies;
     if (plugin.pluginAccess) manifest.pluginAccess = plugin.pluginAccess;

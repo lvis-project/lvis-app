@@ -1,8 +1,9 @@
 /**
  * #885 v6 (#1554 lineage) — the governed-vs-bypass invariant is now enforced by
- * the pure tool-object VISIBILITY, not the old `tools[] ∩ uiActions` soft-warn
- * (which is DELETED — a dual method is one object, so the overlap shape no longer
- * exists).
+ * the pure tool-object VISIBILITY, not the old `tools[] ∩ uiActions` overlap
+ * soft-warn (removed in #885 Phase R — a dual method is one `Tool` object, so the
+ * overlap shape no longer exists; this file was renamed from
+ * `manifest-tools-uiactions-overlap.test.ts` to reflect that).
  *
  *  - A legacy DUAL-declared method (in BOTH `tools[]` and `uiActions`) normalizes
  *    to ONE `Tool` with visibility `["model","app"]` — it loads fine and, being
@@ -17,6 +18,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildManifestValidator, parsePluginJson } from "../manifest-validation.js";
+import { compileLegacyToolSurface } from "../../__tests__/test-helpers.js";
 
 describe("#885 v6 — dual-declared visibility (the #1554 governed-vs-bypass invariant)", () => {
   let workDir: string;
@@ -29,6 +31,12 @@ describe("#885 v6 — dual-declared visibility (the #1554 governed-vs-bypass inv
 
   async function writeManifest(extra: Record<string, unknown>): Promise<string> {
     const path = join(workDir, "plugin.json");
+    const { tools, uiActions, ...restExtra } = extra as {
+      tools?: string[];
+      uiActions?: Record<string, { description?: string }>;
+    } & Record<string, unknown>;
+    // Pure v6: compile the legacy tools[]/uiActions surface into Tool[] with
+    // explicit visibility (dual→[model,app], tools-only→[model], ui-only→[app]).
     await writeFile(
       path,
       JSON.stringify({
@@ -38,7 +46,8 @@ describe("#885 v6 — dual-declared visibility (the #1554 governed-vs-bypass inv
         version: "1.0.0",
         entry: "dist/p.js",
         publisher: "LVIS",
-        ...extra,
+        ...restExtra,
+        tools: compileLegacyToolSurface({ tools, uiActions }),
       }),
     );
     return path;

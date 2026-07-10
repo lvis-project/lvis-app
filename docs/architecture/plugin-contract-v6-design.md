@@ -89,7 +89,7 @@ Real-manifest scale (per-surface, verified 2026-07-09): meeting declares 28 `too
   diverge. This is **safe by construction**: the default can only ever produce GOVERNED access — a
   defaulted tool is dual (`model`+`app`), and the "model wins" host routing sends every webview invocation
   of a dual tool through the governed `ToolExecutor` (Layer-1 denies, reviewer, approval gate with
-  genuine-user-activation semantics, audit). The **ungoverned** uiActions runtime bypass still requires an
+  genuine-user-activation semantics, audit). The **ungoverned** app-only dispatch bypass still requires an
   **explicit app-only declaration** (`["app"]` without `"model"`) — the security-critical surface remains
   opt-in and can never arise from the default (fail-closed by construction).
   The absent case is resolved to an explicit array ONCE at manifest load (`normalizeManifest` output is
@@ -129,7 +129,7 @@ Real-manifest scale (per-surface, verified 2026-07-09): meeting declares 28 `too
 |---|---|---|---|
 | LLM-only | `tools[]` only | `["model"]` (explicit; the legacy converter emits this for `tools[]`-only methods) | governed ToolExecutor |
 | Dual (24/28 meeting) | `tools[] ∩ uiActions` | `["model","app"]` (also the resolved value when `_meta.ui` is absent — standard default) | **governed** (model wins — fail-closed, matches #1554) |
-| UI-only (auth, upload chunks) | `uiActions` only + schema | `["app"]` (always explicit — never reachable via the default) | uiActions runtime bypass (ceiling-capped per #1553) |
+| UI-only (auth, upload chunks) | `uiActions` only + schema (pre-v6) | `["app"]` (always explicit — never reachable via the default) | app-only dispatch bypass (ceiling-capped per #1553) |
 | Neither | — | `[]` | rejected at load |
 
 ```ts
@@ -291,7 +291,7 @@ Deleting the `tools` union type statically proves no fallback branch survives.
   converge at the governed gate. Locked by `executor-mcp-plugin-parity.test.ts` (asserts gate/audit/
   effect-ledger convergence + the classify-lane fork as the only sanctioned divergence) + documented in
   `architecture.md §Tool Governance → "MCP↔plugin execution parity (invariant)"`. The #1553/#1554/#1556
-  `uiActions` bypass has **no MCP analog** (external servers have no `uiActions`).
+  app-only dispatch bypass has **no MCP analog** (external servers have no app-visible tools).
 - **(b5) Ratified model.** In-process plugins → `persist:plugin:<hash>` (storage-bearing, trusted);
   out-of-process MCP servers → `lvis-mcp-app:<serverId>` (b1) — the same per-extension isolation principle,
   differing only by persistence/trust boundary.

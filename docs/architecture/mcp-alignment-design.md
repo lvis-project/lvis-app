@@ -88,8 +88,14 @@ The **LVIS host becomes an MCP _host_** that runs **one MCP client per loaded pl
 
 ### 3.3 `toolSchemas` → `Tool`
 
+> **Status (removed in #885 Phase R):** this is the earlier alignment sketch. The final v6 contract
+> (`plugin-contract-v6-design.md`) **deleted** the `toolSchemas` map — each tool is a pure MCP `Tool`
+> object — and **removed** per-tool `category` from the manifest entirely (Q3: host-classifies-risk;
+> a plugin grading its own danger is not a control). `pathFields` is the sole surviving LVIS key, at
+> `_meta["xyz.lvis/pathFields"]`. Read the mapping below as historical.
+
 - `name` keeps the existing underscore LLM tool name. `inputSchema` migrates draft-07 → 2020-12.
-- **Category stays the SOT** under `_meta["xyz.lvis/category"]`; project to `ToolAnnotations` (`readOnlyHint`/`destructiveHint`/`openWorldHint`) for interop only — host policy reads `_meta`, never inbound annotations.
+- **Category** (this sketch kept it as SOT under `_meta["xyz.lvis/category"]`; **superseded** — removed in #885 Phase R); interop `ToolAnnotations` (`readOnlyHint`/`destructiveHint`/`openWorldHint`) are host-derived — host policy reads `_meta`, never inbound annotations.
 - `pathFields`/`writesToOwnSandbox`/`version`/`deprecatedSince`/`replacedBy` → `_meta["xyz.lvis/*"]`.
 - `tools/call`→`CallToolResult{content[],structuredContent?,isError?}` wrapped `resultType:"complete"`; tool failures use `isError:true` (not JSON-RPC errors) — matches LVIS's executor result model.
 - **No-Fallback field-sweep:** `toolSchemas` entries are `additionalProperties:false` (M4 fixture contract). Adding `outputSchema`/`_meta` carriers means SDK schema + host validator + fixtures move in **one PR** (repo field-addition-sweep + No-Fallback rules).

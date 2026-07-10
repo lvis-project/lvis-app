@@ -26,7 +26,8 @@ export function buildPluginCard(
   // (the ToolRegistry-visible set) is itself model-facing, so the pre-filter is a
   // no-op when it is provided; it matters for the `visibleNames === null` fallback
   // (listPluginCards with no registry), keeping app-only auth tools from surfacing
-  // as "tools" in the settings/marketplace UI (as today — they were in uiActions).
+  // as "tools" in the settings/marketplace UI (they are app-only-visibility, not
+  // model-facing).
   const modelTools = (manifest.tools ?? []).filter(isModelVisible);
   const filteredTools = !state.active
     ? []
