@@ -2112,6 +2112,8 @@ export const frMessages: Record<string, string> = {
   "pluginConfigTab.doctorGrantMismatchDescription": "Doctor a vérifié que l'artifact manifest téléchargé ne correspond pas au grant approuvé par le catalogue. Cet état ne peut pas être réparé localement ; réinstallez après la republication du paquet marketplace avec des grants correspondants, ou supprimez l'installation locale.",
   "pluginConfigTab.doctorManifestValidationTitle": "Échec de validation du manifest du plugin",
   "pluginConfigTab.doctorManifestValidationDescription": "Le manifest du plugin ne correspond pas au schéma actuel. Consultez l'erreur de champ détaillée ci-dessous, puis réinstallez un paquet marketplace mis à jour ou supprimez l'installation locale.",
+  "pluginConfigTab.doctorIncompatibleAppTitle": "Mise à jour de l'application requise",
+  "pluginConfigTab.doctorIncompatibleAppDescription": "Ce plugin nécessite une version plus récente de LVIS. La réinstallation n'aidera pas : mettez à jour l'application, puis rechargez le plugin. Vous pouvez aussi le supprimer.",
   "pluginConfigTab.doctorFailureDetailLabel": "Détail de l'erreur",
   "pluginConfigTab.errorDoctor": "Échec de Doctor pour le plugin",
   "pluginConfigTab.successDoctor": "{displayName} réparé",
