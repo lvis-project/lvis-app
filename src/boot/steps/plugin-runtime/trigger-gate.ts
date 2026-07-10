@@ -13,6 +13,7 @@ import type {
   ConversationTriggerSpec,
 } from "../../../plugins/types.js";
 import { OVERLAY_TRIGGER_SOURCE_PATTERN, isOverlayTriggerOrigin } from "../../../shared/overlay-trigger-source.js";
+import { CAPABILITY_HOST_OVERLAY } from "../../../plugins/capabilities.js";
 import { stripLeadingSlash } from "../../../shared/slash-sanitizer.js";
 import { stripUntrustedTags } from "../../../lib/strip-untrusted-tags.js";
 import { t } from "../../../i18n/index.js";
@@ -309,7 +310,7 @@ export function evaluateTriggerSpec(
     } catch { /* audit must not break host */ }
   };
 
-  if (!capabilities.includes("host:overlay")) {
+  if (!capabilities.includes(CAPABILITY_HOST_OVERLAY)) {
     auditDeny("reason=capability_denied");
     return {
       kind: "deny",
