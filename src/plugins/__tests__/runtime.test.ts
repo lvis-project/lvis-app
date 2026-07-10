@@ -325,9 +325,9 @@ describe("PluginRuntime.disable", () => {
     errSpy.mockRestore();
   });
 
-  it("callFromUi rejects methods not declared in manifest.uiActions", async () => {
-    // Renderer-originated plugin calls must only reach methods the plugin
-    // explicitly exposes via manifest.uiActions. Everything else has to go
+  it("callFromUi rejects tools not declared app-visible in _meta.ui.visibility", async () => {
+    // Renderer-originated plugin calls must only reach app-visible tools — the
+    // ones whose `_meta.ui.visibility` includes "app". Everything else has to go
     // through ConversationLoop (scope + permission + expansion caps).
     const pluginDir = join(installedDir, "ui-actions");
     await mkdir(pluginDir, { recursive: true });

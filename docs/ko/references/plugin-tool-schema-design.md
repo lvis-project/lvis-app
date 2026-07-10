@@ -1,8 +1,16 @@
 # Plugin Schema Design — LVIS
 
-**Status:** v4
+**Status:** v4 — **pre-v6 (legacy), removed in #885 Phase R** (아래 배너)
 **Updated:** 2026-04-18
 **Architect 승인:** manifest signature + uiActions + capability taxonomy + AJV 검증 플로우
+
+> **⚠️ pre-v6 (legacy) — removed in #885 Phase R:** 이 문서의 tool 계약
+> (`tools: string[]` + `toolSchemas` map + `uiActions` map + per-tool `category`) 은
+> #885 Phase R 에서 삭제됐다. 현행 v6 계약은 pure MCP `Tool[]` — 각 tool 은
+> `{ name, description, inputSchema, _meta? }`, renderer 노출은 `_meta.ui.visibility`,
+> path 판정은 `_meta["xyz.lvis/pathFields"]`, per-tool category 는 host 분류(manifest 필드 삭제).
+> 현행 계약은 [`plugin-contract-v6-design.md`](../architecture/plugin-contract-v6-design.md).
+> 아래 `toolSchemas`/`uiActions` 규격은 historical 로 읽을 것.
 
 ---
 
