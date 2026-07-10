@@ -61,6 +61,11 @@
   - The new `executive-graphite` bundle is the reference restrained dark theme: warm graphite chrome, teal work accent, amber branch/caution accent, and limited secondary emphasis.
 - Typography:
   - Use system UI text for renderer surfaces and monospace only for code, paths, commands, counters, and technical metadata.
+  - Type scale (matches shipped de-facto usage — `text-xs` dominates dense surfaces):
+    - `text-xs` (12px): default body inside dense panels, lists, metadata, and chrome.
+    - `text-sm` (14px): comfortable body, control labels, dialog copy.
+    - `text-base` (16px): lead paragraphs only; rare by design.
+    - `text-lg` and above: page titles and section headers only — never inside repeated items.
   - No viewport-scaled type and no negative letter spacing in app UI.
   - Compact panels use compact headings; hero-scale type belongs only to real hero surfaces, which the app generally should not need.
 - Spacing/layout rhythm:
@@ -71,12 +76,21 @@
   - Product cards stay at 8px radius or less unless an existing primitive requires otherwise.
   - Floating auxiliary surfaces may use 12px radius when they need clear separation.
   - Elevation uses `--surface-hairline`, `--elevation-raised`, and `--elevation-floating` rather than raw `shadow-xl`/`shadow-2xl`.
+- Stacking (z-order ladder):
+  - Canvas content stays at `z-0`–`z-30` (sticky headers/rails at `z-10`–`z-30`).
+  - Docked auxiliary panels use `z-40`; all floating overlays (dialog, popover, command picker, tooltip, toast) share the `z-50` band and rely on portal/mount order within it.
+  - Arbitrary escapes (`z-[9000]`-style) are drift, not a tier — fold the remaining outliers back into the ladder when touched.
 - Motion:
   - Use `--motion-fast`, `--motion-base`, `--motion-slow`, `--motion-ease-out`, and `--motion-ease-standard`.
   - `prefers-reduced-motion` is authoritative.
 - Imagery/iconography:
   - Use lucide icons for actions and categories when available.
+  - Icon sizes (de-facto standard): 14px (`h-3.5 w-3.5`) is the default in dense chrome and buttons; 12px (`h-3 w-3`) inline beside captions/metadata; 16px (`h-4 w-4`) in comfortable rows and dialogs. Larger sizes are reserved for identity marks (plugin/app icons), not actions.
   - Avoid visible text where a familiar icon plus tooltip communicates the control more cleanly.
+- Data display:
+  - Numeric columns and counters use `tabular-nums` so digits align and layouts stay stable while values tick.
+  - Truncation is intentional: single-line cells use `truncate`; multi-line summaries clamp at 1–2 lines (`line-clamp-1/2`). Paths and identifiers truncate with a tooltip carrying the full value; prefer keeping the tail (filename) visible.
+  - Timestamps are compact and locale-aware; relative time may be used in activity feeds but absolute time must be recoverable (tooltip or detail).
 
 ## Components
 - Existing components to reuse: shadcn primitives in `src/components/ui/*`, theme provider, semantic token utilities, lucide icons, existing tooltip/popover/dialog primitives.
@@ -96,6 +110,24 @@
   - Shared primitives own focus, disabled state, base radius, and control structure.
   - Feature components own domain layout and data density.
   - Theme bundles own palette choices, not component behavior.
+
+## Plugin surfaces (shared guide for plugin authors)
+Plugin UIs are **free**: the SDK ships no UI components, tokens, or style checks. This section is the philosophy and the small set of hard boundaries that keep a free plugin UI feeling native inside the workbench.
+
+### What crosses the webview boundary today
+- Plugin panels render in isolated webviews. The host provides **only the shared font stack** (`plugin-ui-shell.html`, mirroring `src/shared/host-font-stack.ts`). The app's semantic tokens (`bg-card` etc.), Tailwind setup, and theme bundles do **not** reach plugin webviews — bring your own styling.
+- Host theme (light/dark) and UI language are **not yet signaled** across the boundary; both are open design items (see Open questions). Until then, choose a self-contained palette that holds up regardless of the host theme, and keep your strings externalized so a locale signal can be adopted later.
+
+### Chrome ownership
+- The host draws the page chrome: sidebar entry, `PageShell` title/back control for plugin pages, and panel framing. **Do not draw a second page title bar or back button inside your panel** — your surface starts inside the content area.
+- Detached windows and side-panel docking are host decisions; the same panel markup must work in both.
+
+### Mandatory / recommended / free
+| Level | Items |
+|---|---|
+| **Mandatory** | Works at the 448px panel floor (mobile-class base; verify at 448/640/1024). No horizontal page scroll. Keyboard-reachable essential actions with visible focus. WCAG AA text contrast. `prefers-reduced-motion` respected. No second page chrome. |
+| **Recommended** | The philosophy in this document: operator-workbench feel, dense 4/8/12/16 rhythm, restrained accent (accent = work/selection, status colors literal), compact type scale, icons+tooltips over label noise, literal operational copy. |
+| **Free** | Layout, component library, visual identity inside the panel, iconography style, brand accents — anything not listed above. A plugin may look like itself. |
 
 ## Token System Assessment
 - Decision: keep the existing semantic token and bundle registry architecture. It is structurally sound and already supports multi-theme contrast tests.
@@ -156,6 +188,11 @@ Tiers map 1:1 onto the Tailwind default scale already used across the renderer (
 - Success: use success semantics sparingly; avoid celebratory motion.
 - Disabled: preserve legibility and explain disabled controls through tooltip or adjacent status only when the reason is not obvious.
 - Offline/slow network: keep local app navigation responsive and isolate remote failure to the affected operation.
+- Notification hierarchy (pick the narrowest surface that fits):
+  - **Inline status** next to the affected control — the default for operation results.
+  - **Toast** for transient confirmations of a user-initiated action (e.g. saved); auto-dismissing, never load-bearing.
+  - **Banner** for persistent, page-scoped conditions that need action (e.g. update available); dismissible, stays until resolved.
+  - **OS notification** only for events the user must see while the window is unfocused; always mirrored by in-app state.
 
 ## Content voice
 - Tone: concise, operational, literal.
@@ -185,3 +222,5 @@ Tiers map 1:1 onto the Tailwind default scale already used across the renderer (
 
 ## Open questions
 - Should typography scale tokens be promoted once Japanese/Chinese visual QA identifies repeated density adjustments?
+- Plugin webview theme signal: should the host inject a minimal semantic-variable set (or a light/dark signal) into plugin webviews so free-form plugin UIs can follow the host theme? Design pending — today plugins receive only the font stack.
+- Plugin locale signal (i18n wiring): plugins should be able to FOLLOW the host UI language (strings externalized; no language is mandated), but no locale getter/change signal crosses the runtime or webview boundary yet. Wiring design pending; reviewed 2026-07-10.
