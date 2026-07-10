@@ -2112,6 +2112,8 @@ export const deMessages: Record<string, string> = {
   "pluginConfigTab.doctorGrantMismatchDescription": "Doctor hat bestätigt, dass das heruntergeladene artifact manifest nicht mit dem kataloggenehmigten grant übereinstimmt. Dieser Zustand kann lokal nicht repariert werden; installieren Sie erneut, nachdem das Marketplace-Paket mit passenden grants erneut veröffentlicht wurde, oder entfernen Sie die lokale Installation.",
   "pluginConfigTab.doctorManifestValidationTitle": "Plugin-manifest-Validierung fehlgeschlagen",
   "pluginConfigTab.doctorManifestValidationDescription": "Das Plugin-manifest entspricht nicht dem aktuellen Schema. Prüfen Sie den detaillierten Feldfehler unten und installieren Sie dann ein aktualisiertes Marketplace-Paket erneut oder entfernen Sie die lokale Installation.",
+  "pluginConfigTab.doctorIncompatibleAppTitle": "App-Update erforderlich",
+  "pluginConfigTab.doctorIncompatibleAppDescription": "Dieses Plugin benötigt eine neuere Version von LVIS. Eine Neuinstallation hilft nicht — aktualisiere die App und lade das Plugin dann neu. Du kannst es auch entfernen.",
   "pluginConfigTab.doctorFailureDetailLabel": "Fehlerdetail",
   "pluginConfigTab.errorDoctor": "Plugin Doctor fehlgeschlagen",
   "pluginConfigTab.successDoctor": "{displayName} repariert",
