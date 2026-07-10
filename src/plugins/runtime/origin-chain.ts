@@ -15,18 +15,19 @@
  * the sign-in popup forever (#664 reproducer).
  *
  * Constraint (#1556): this stickiness only makes the inner call *foreground*;
- * it does NOT make a `uiActions`-only inner method reachable. For the inner
+ * it does NOT make an app-only-visibility inner method reachable. For the inner
  * `ctx.callTool("<inner_auth_tool>")` above to actually run, `inner_auth_tool`
- * must be declared in the owner plugin's `tools[]` (the governed ToolExecutor
- * path). A uiActions-only *non-status* method cannot be invoked from a
- * plugin-origin `ctx.callTool` — HostApi.callTool never forwards `userAction`,
- * so the user-activation gate can never be satisfied, and forwarding it is
- * intentionally out of scope (no shipped first-party plugin nests into
- * uiActions this way). Attempting it throws the explicit "uiActions-only method
- * cannot be invoked from a plugin-origin ctx.callTool" error from
- * `boot/plugin-tool-invocation.ts` (dispatchUiOnlyRuntimeInvocation), NOT a
- * generic activation error. The auth *statusTool* is the exception: its
- * `uiOnlyRuntimeInvocationRequiresUserAction` returns false, so it skips the
+ * must be model-visible in the owner plugin's `tools[]` (the governed
+ * ToolExecutor path). An app-only-visibility *non-status* method cannot be
+ * invoked from a plugin-origin `ctx.callTool` — HostApi.callTool never forwards
+ * `userAction`, so the user-activation gate can never be satisfied, and
+ * forwarding it is intentionally out of scope (no shipped first-party plugin
+ * nests into an app-only method this way). Attempting it throws the explicit
+ * "app-only-visibility method … cannot be invoked from a plugin-origin
+ * ctx.callTool" error from `boot/plugin-tool-invocation.ts`
+ * (dispatchAppOnlyRuntimeInvocation), NOT a generic activation error. The auth
+ * *statusTool* is the exception: its
+ * `appOnlyRuntimeInvocationRequiresUserAction` returns false, so it skips the
  * user-activation gate and DOES run on a plugin-origin chain (status polling is
  * a host-managed read, not a user-gesture action). See architecture.md §9.4a.
  *

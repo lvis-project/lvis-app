@@ -1595,7 +1595,7 @@ export class PluginRuntime {
    * (`TOOL_TIMEOUT_POLICY.globalCeilingMs`) and is a parameter solely so tests
    * can exercise the ceiling with a small value without weakening the SOT.
    */
-  async callDeclaredUiAction(
+  async callDeclaredAppOnlyTool(
     method: string,
     payload?: unknown,
     ceilingMs: number = TOOL_TIMEOUT_POLICY.globalCeilingMs,

@@ -28,8 +28,8 @@ import {
   runWithInvocationOrigin,
 } from "../../plugins/runtime/origin-chain.js";
 import {
-  dispatchUiOnlyRuntimeInvocation,
-  isUiOnlyRuntimeInvocation,
+  dispatchAppOnlyRuntimeInvocation,
+  isAppOnlyRuntimeInvocation,
 } from "../plugin-tool-invocation.js";
 import type { BootContext } from "../context.js";
 
@@ -98,17 +98,17 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     // a UI→wrapper→inner chain stays UI all the way down.
     return runWithInvocationOrigin(context.origin, context.parentOrigin, async () => {
       const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
-      if (isUiOnlyRuntimeInvocation(pluginRuntime, toolName, context, effectiveOrigin)) {
-        // UI-only runtime bypass — routes to the runtime handler directly
+      if (isAppOnlyRuntimeInvocation(pluginRuntime, toolName, context, effectiveOrigin)) {
+        // App-only dispatch path — routes to the runtime handler directly
         // (skipping the ToolExecutor and its Step-6 ceiling). The governed
         // `runWithCeiling` cap is NOT re-added here: it is enforced
-        // STRUCTURALLY inside `PluginRuntime.callDeclaredUiAction` (the sole
-        // entry point of the bypass), so a hung uiActions handler cannot block
+        // STRUCTURALLY inside `PluginRuntime.callDeclaredAppOnlyTool` (the sole
+        // entry point of the bypass), so a hung app-only handler cannot block
         // the renderer caller even if this dispatch is ever reverted to a
-        // direct `pluginRuntime.callDeclaredUiAction(...)` call. The
+        // direct `pluginRuntime.callDeclaredAppOnlyTool(...)` call. The
         // user-activation gate + the #1556 nested-origin error live in
-        // `dispatchUiOnlyRuntimeInvocation`.
-        return dispatchUiOnlyRuntimeInvocation(
+        // `dispatchAppOnlyRuntimeInvocation`.
+        return dispatchAppOnlyRuntimeInvocation(
           pluginRuntime,
           toolName,
           toPluginToolInput(payload),
