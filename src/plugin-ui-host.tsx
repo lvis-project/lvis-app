@@ -33,7 +33,7 @@ export type PluginUiExtensionView = {
   extension: {
     id: string;
     slot: "sidebar";
-    kind: "embedded-module" | "embedded-page" | "info-card" | "action";
+    kind: "embedded-module" | "embedded-page" | "info-card";
     displayName?: string;
     title: string;
     description?: string;
@@ -41,8 +41,6 @@ export type PluginUiExtensionView = {
     entry?: string;
     exportName?: string;
     page?: string;
-
-    tool?: string;
     /**
      * Detached-window geometry hints. Applied only when the host opens this
      * extension in a separate BrowserWindow; whether it detaches at all is
@@ -253,16 +251,6 @@ export function PluginUiHostView({
     }
     if (view.extension.kind === "embedded-page") {
       setErrorText(t("be_pluginUiHost.legacyIframeNotSupported"));
-      setLoading(false);
-      return;
-    }
-    // action entries never produce a panel — App.tsx 의 handleViewSelect 가
-    // 플러그인 패널 click 시 곧장 callPluginMethod 디스패치하고 active view 도
-    // 안 바꾸므로 정상 경로에서는 여기 도달하지 않는다. 다만 다른 caller
-    // (keyboard shortcut, command palette 등) 가 action view 를 잘못 전달했을
-    // 때 panel chrome (Card 헤더 + border) 이 회귀로 뜨지 않도록 fail-safe.
-    if (view.extension.kind === "action") {
-      setErrorText(t("be_pluginUiHost.actionKindNoPanel"));
       setLoading(false);
       return;
     }

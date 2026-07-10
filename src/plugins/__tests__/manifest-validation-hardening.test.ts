@@ -197,40 +197,10 @@ describe("runtime manifest validation hardening", () => {
     ).toBe(true);
   });
 
-  it("4c) ui[] kind=\"action\" without tool fails load", async () => {
-    await writePlugin("p-action-bad", {
-      tools: ["pab_hello", "pab_bad", "pab_good"],
-      ui: [
-        { id: "a", slot: "sidebar", kind: "action", title: "A" },
-      ],
-    });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
-    const cap = captureErrors();
-    try {
-      await runtime.load();
-    } finally {
-      cap.restore();
-    }
-    expect(runtime.listPluginIds()).not.toContain("p-action-bad");
-    expect(
-      cap.errors.some((e) =>
-        /ui\[0\].*kind="action" missing required field\(s\): tool/.test(e),
-      ),
-    ).toBe(true);
-  });
-
-  it("4d) ui[] kind=\"action\" with valid tool loads", async () => {
-    await writePlugin("p-action-ok", {
-      tools: ["my_tool"],
-      ui: [
-        { id: "a", slot: "sidebar", kind: "action", title: "A", tool: "my_tool" },
-      ],
-      uiActions: { my_tool: {} },
-    });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
-    await runtime.load();
-    expect(runtime.listPluginIds()).toContain("p-action-ok");
-  });
+  // #885 v6 (0.5.2): the ui[].kind="action" cases (4c "without tool fails",
+  // 4d "with valid tool loads") were removed with the action kind itself —
+  // app-invokable behavior is now a tool's `_meta.ui.visibility`, so there is
+  // no action-arm cross-field validation left to exercise.
 
   it("4b) ui[] non-plain-object entries fail load instead of being dropped", async () => {
     await writePlugin("p-ui-bad", {

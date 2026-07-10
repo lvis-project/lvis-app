@@ -34,6 +34,7 @@ import {
   requiredCapabilityForEmit,
   CAPABILITY_EXTERNAL_AUTH_CONSUMER,
 } from "../../../plugins/capabilities.js";
+import { applyConfigDefaults } from "../../../plugins/config-schema.js";
 import { OVERLAY_V1 } from "../../../shared/ipc-channels.js";
 import {
   emitPluginConfigChange,
@@ -218,11 +219,19 @@ export function createHostApiFactory(
           // plugin's own config can shadow a host-injected value (rare, but
           // useful for test fixtures and explicit per-plugin overrides),
           // while shipping a sensible default for plugins that don't set it.
-          const merged = {
+          //
+          // AB1 — apply `configSchema` defaults as the LOWEST layer (under
+          // manifest.config < wildcard < saved settings). Without this the live
+          // getter returned `undefined` for a schema-defaulted key that the user
+          // hasn't set, while `ctx.config` (built via applyConfigDefaults in
+          // runtime/sandbox.ts) returned the author-declared default — the two
+          // now agree. applyConfigDefaults only backfills keys still undefined,
+          // so it never changes the precedence of the higher layers.
+          const merged = applyConfigDefaults(manifest.configSchema, {
             ...(manifest.config ?? {}),
             ...(pluginRuntime.getWildcardConfigOverride?.() ?? {}),
             ...(settingsService.getPluginConfig(pluginId) ?? {}),
-          };
+          });
           return merged[key] as T | undefined;
         },
         set: async <T = unknown>(key: string, value: T): Promise<void> => {
