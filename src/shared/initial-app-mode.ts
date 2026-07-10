@@ -23,8 +23,6 @@ export const INITIAL_APP_MODE_ARG_PREFIX = "--lvis-initial-app-mode=";
  */
 export type InitialAppMode = "chat" | "work";
 
-export const APP_MODES: readonly InitialAppMode[] = ["chat", "work"];
-
 /**
  * Legacy persisted / argv value from builds before the Action → Work rename.
  * Boundary readers normalize it to `"work"`; app internals should not store or
@@ -43,8 +41,4 @@ export function normalizeAppMode(value: unknown): InitialAppMode | null {
   if (value === "chat" || value === "work") return value;
   if (value === LEGACY_ACTION_APP_MODE) return "work";
   return null;
-}
-
-export function isAppMode(value: unknown): value is InitialAppMode {
-  return value === "chat" || value === "work";
 }
