@@ -1,8 +1,8 @@
 /**
  * #885 v6 (§0) — the single host reader `toolVisibility` + its derived predicates.
  *
- * The primitive is a pure READER: `normalizeManifest` (U1) is the SOLE defaulting
- * site, so post-normalize every tool carries an explicit non-empty visibility.
+ * The primitive is a pure READER: `parsePluginJson` (U1) is the SOLE defaulting
+ * site, so post-materialize every tool carries an explicit non-empty visibility.
  * These tests pin (a) explicit arrays are returned verbatim with no warn, and
  * (b) the DEFENSIVE fail-closed backstop: a tool that reaches a consumer WITHOUT
  * explicit visibility (a normalization-contract violation) resolves to the

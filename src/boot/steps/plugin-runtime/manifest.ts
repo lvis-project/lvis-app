@@ -7,8 +7,8 @@
  */
 import type { PluginManifest } from "../../../plugins/types.js";
 
-// #885 v6 — accepts both the legacy `PluginManifest` and the pure
-// `NormalizedManifest` (both carry `config`); only shared fields are read.
+// #885 v6 — reads only fields shared across manifest shapes (`config`), so it
+// accepts any manifest object that carries them.
 export function declaresHostManagedPythonRuntime(
   manifest: Pick<PluginManifest, "config">,
 ): boolean {

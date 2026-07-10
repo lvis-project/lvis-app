@@ -10,7 +10,7 @@ import { ToolRegistry } from "../../tools/registry.js";
 import { PluginMcpServer, type PluginToolDelegate } from "../plugin-mcp-server.js";
 import { LoopbackTransport } from "../loopback-transport.js";
 import type { McpGovernancePolicy } from "../types.js";
-import type { NormalizedManifest } from "../../plugins/types.js";
+import type { PluginManifest } from "../../plugins/types.js";
 import { governanceWithPolicy } from "./test-helpers.js";
 
 afterEach(() => vi.restoreAllMocks());
@@ -45,7 +45,7 @@ function approvingPolicy(id: string, command: string): McpGovernancePolicy {
   };
 }
 
-const MANIFEST: NormalizedManifest = {
+const MANIFEST: PluginManifest = {
   id: "com.example.fs",
   name: "FS",
   version: "1.0.0",

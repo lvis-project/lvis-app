@@ -151,41 +151,10 @@ export interface EventSubscription {
  * legacy triple — a `string[]` tool list plus separate `toolSchemas` and per-tool
  * app-action maps — entirely:
  * `PluginManifest.tools` is now `Tool[]` and every host consumer reads surface
- * visibility off each tool's `_meta.ui.visibility` (materialized once by
- * `normalizeManifest`). The SDK public surface (`@lvis/plugin-sdk`) mirrors these
- * via `sync-from-host`.
+ * visibility off each tool's `_meta.ui.visibility` (materialized once at manifest
+ * load by `parsePluginJson`). The SDK public surface (`@lvis/plugin-sdk`) mirrors
+ * these via `sync-from-host`.
  * ==========================================================================*/
-
-/**
- * MCP Apps SEP-1865 (`io.modelcontextprotocol/ui`) per-tool surface visibility.
- * `"model"` = LLM-facing (projected into the agent tool list); `"app"` =
- * UI-invokable (renderer IPC allowlist). A tool may be BOTH. Absent in an
- * authored manifest ⇒ LVIS interprets it as `["model","app"]` (the STANDARD
- * SEP-1865 default — LVIS hosts external MCP tools under the same `_meta.ui`
- * semantics and does not host-privately reinterpret the standard default);
- * `normalizeManifest` MATERIALIZES that default so every normalized/wire tool is
- * explicit. `[]` is rejected at load.
- */
-export interface McpToolUiMeta {
-  visibility?: Array<"model" | "app">;
-}
-
-/**
- * The `_meta` block of an LVIS plugin `Tool`. Exactly two keys are recognized:
- * the standard `ui` visibility block, and the SOLE remaining LVIS-proprietary
- * key `xyz.lvis/pathFields`. Any other key is rejected by the manifest schema.
- */
-export interface McpToolMeta {
-  /** SEP-1865 surface visibility. @optional */
-  ui?: McpToolUiMeta;
-  /**
-   * Input-schema argument names whose values are filesystem paths, fed into the
-   * HOST-side allowed-directories check. Dotted names address nested object
-   * fields. Untrusted routing hint: a lying declaration only ADDS host checks,
-   * never bypasses one. @optional
-   */
-  "xyz.lvis/pathFields"?: string[];
-}
 
 /**
  * A tool a plugin exposes — the pure MCP `Tool` object (manifest == wire, §2.1/§2.2).
@@ -220,8 +189,23 @@ export interface Tool {
   };
   /** MCP icons (2025-11-25). @optional */
   icons?: Array<{ src: string; mimeType?: string; sizes?: string }>;
-  /** Surface visibility + the one LVIS-proprietary key. @optional */
-  _meta?: McpToolMeta;
+  /**
+   * Surface visibility + the one LVIS-proprietary key. Exactly two keys are
+   * recognized: the standard `ui` visibility block, and the SOLE remaining
+   * LVIS-proprietary key `xyz.lvis/pathFields`. Any other key is rejected by the
+   * manifest schema. @optional
+   */
+  _meta?: {
+    /** SEP-1865 surface visibility. @optional */
+    ui?: { visibility?: Array<"model" | "app"> };
+    /**
+     * Input-schema argument names whose values are filesystem paths, fed into the
+     * HOST-side allowed-directories check. Dotted names address nested object
+     * fields. Untrusted routing hint: a lying declaration only ADDS host checks,
+     * never bypasses one. @optional
+     */
+    "xyz.lvis/pathFields"?: string[];
+  };
 }
 
 export interface PluginManifest {
@@ -229,8 +213,9 @@ export interface PluginManifest {
   id: string;
   /**
    * Human-readable display name. Schema-OPTIONAL (#885 v6): an authored manifest
-   * may omit it. `normalizeManifest` materializes `name ?? id` so every host
-   * consumer reads a guaranteed string off {@link NormalizedManifest}.
+   * may omit it. `parsePluginJson` materializes `name ?? id` at load, so a parsed
+   * manifest always carries a name at runtime; consumers that may also see an
+   * unparsed manifest fall back to `name ?? id`.
    */
   name?: string;
   version: string;
@@ -353,52 +338,6 @@ export interface PluginManifest {
     read?: string[];
   };
 }
-
-/**
- * The manifest AFTER `normalizeManifest` — the pure-form SoT every host consumer
- * reads. Each tool is one pure `Tool` whose `_meta.ui.visibility` is always
- * explicit and non-empty (the standard `["model","app"]` default is materialized
- * at load). Structurally a `PluginManifest` whose `tools` visibility is
- * materialized; kept as a distinct name so consumers signal they read the
- * normalized form.
- *
- * `name` is REQUIRED here even though it is schema-optional on the raw
- * `PluginManifest`: `normalizeManifest` materializes `name ?? id`, so every
- * consumer of the normalized form reads a guaranteed string.
- */
-export type NormalizedManifest = Omit<PluginManifest, "tools" | "name"> & {
-  tools: Tool[];
-  name: string;
-};
-
-/**
- * Materialize every tool's surface visibility into the pure-form SoT every host
- * consumer reads (SoT §2.3). Two defaulting sites, both pure (no IO):
- *   1. a tool that omits `_meta.ui.visibility` gets the STANDARD SEP-1865
- *      default `["model","app"]`; an explicit `[]` is REJECTED (R6 fail-closed —
- *      never widened to dual). `tool-visibility.ts` depends on this being the
- *      sole tool-visibility defaulting step, so output tools ALWAYS carry an
- *      explicit non-empty `_meta.ui.visibility`.
- *   2. `name` defaults to `id` when the (now schema-optional) manifest omits it,
- *      so every consumer of {@link NormalizedManifest} reads a guaranteed string.
- */
-export const normalizeManifest = (manifest: PluginManifest): NormalizedManifest => {
-  const DUAL: Array<"model" | "app"> = ["model", "app"];
-  const tools = manifest.tools.map((t): Tool => {
-    const vis = t._meta?.ui?.visibility;
-    if (vis === undefined) {
-      return { ...t, _meta: { ...t._meta, ui: { ...t._meta?.ui, visibility: DUAL } } };
-    }
-    if (vis.length === 0) {
-      throw new Error(
-        `[normalizeManifest] plugin '${manifest.id}' tool '${t.name}': _meta.ui.visibility is [] — ` +
-          "a tool must be reachable by ≥1 surface; empty is rejected (SoT §2.2/§2.3)",
-      );
-    }
-    return t;
-  });
-  return { ...manifest, tools, name: manifest.name ?? manifest.id };
-};
 
 /**
  * §9.2 Track B — declarative settings schema. JSON Schema draft-07 subset
