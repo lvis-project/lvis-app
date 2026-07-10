@@ -23,8 +23,6 @@ export const MARKETPLACE_PUBLIC_KEYS: Readonly<Record<string, string>> = Object.
   "prod-v1": "JnmneLJZ3G9TiC+JU0naTDlOdIHC07PB+BToCIarL8E=",
 });
 
-export const MARKETPLACE_PRIMARY_KEY_ID = "prod-v1" as const;
-
 /**
  * #893 Stage 2 — Trust roots for the marketplace whitelist registry.
  *

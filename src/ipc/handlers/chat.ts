@@ -454,9 +454,9 @@ export function handleChatGetHistory(deps: IpcDeps) {
  *
  * Session-addressing note (#1409): this is a read that intentionally SUCCEEDS
  * for a non-active `sessionId` — it is the sidebar's preview path and never
- * changes the active session. It therefore does NOT fail closed with
- * {@link import("../../contract/app-contract.js").SESSION_NOT_ADDRESSABLE};
- * behavior is preserved as-is (it never retargets the active session, so there
+ * changes the active session. It therefore does NOT fail closed with the
+ * `session-not-active` code; behavior is preserved as-is (it never retargets
+ * the active session, so there
  * is no cross-session mutation risk). See the C10 report for the session
  * addressing audit.
  */
