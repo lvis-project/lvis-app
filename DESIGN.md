@@ -115,8 +115,9 @@
 Plugin UIs are **free**: the SDK ships no UI components, tokens, or style checks. This section is the philosophy and the small set of hard boundaries that keep a free plugin UI feeling native inside the workbench.
 
 ### What crosses the webview boundary today
-- Plugin panels render in isolated webviews. The host provides **only the shared font stack** (`plugin-ui-shell.html`, mirroring `src/shared/host-font-stack.ts`). The app's semantic tokens (`bg-card` etc.), Tailwind setup, and theme bundles do **not** reach plugin webviews — bring your own styling.
-- Host theme (light/dark) and UI language are **not yet signaled** across the boundary; both are open design items (see Open questions). Until then, choose a self-contained palette that holds up regardless of the host theme, and keep your strings externalized so a locale signal can be adopted later.
+- Plugin panels render in isolated webviews. The shell injects **only the shared font stack** (`plugin-ui-shell.html`, mirroring `src/shared/host-font-stack.ts`). The app's semantic tokens (`bg-card` etc.), Tailwind setup, and theme bundles do **not** reach plugin webviews — bring your own styling.
+- Host theme IS available, as an **opt-in event**: the host broadcasts the sticky `host.theme.changed` event carrying the `--lvis-*` token payload (replayed on subscribe — `src/plugin-preload.ts`; payload contract `src/shared/plugin-ui-tokens.ts`). A plugin may subscribe and apply those variables to follow the host theme, or ignore it and ship a self-contained palette that holds up on any host theme — both are legitimate. The SDK no longer ships the subscriber helper; vendor your own if you opt in.
+- UI language is **not signaled** across the boundary (open design item — see Open questions). Keep your strings externalized so a locale signal can be adopted later.
 
 ### Chrome ownership
 - The host draws the page chrome: sidebar entry, `PageShell` title/back control for plugin pages, and panel framing. **Do not draw a second page title bar or back button inside your panel** — your surface starts inside the content area.
@@ -222,5 +223,5 @@ Tiers map 1:1 onto the Tailwind default scale already used across the renderer (
 
 ## Open questions
 - Should typography scale tokens be promoted once Japanese/Chinese visual QA identifies repeated density adjustments?
-- Plugin webview theme signal: should the host inject a minimal semantic-variable set (or a light/dark signal) into plugin webviews so free-form plugin UIs can follow the host theme? Design pending — today plugins receive only the font stack.
+- Plugin webview theme signal, long-term shape: the sticky `host.theme.changed` event already carries the full `--lvis-*` token payload (opt-in, see Plugin surfaces). Open: is that full token payload the stable long-term contract, or should it narrow to a minimal light/dark + semantic-variable signal now that the SDK no longer ships token helpers? Design pending.
 - Plugin locale signal (i18n wiring): plugins should be able to FOLLOW the host UI language (strings externalized; no language is mandated), but no locale getter/change signal crosses the runtime or webview boundary yet. Wiring design pending; reviewed 2026-07-10.
