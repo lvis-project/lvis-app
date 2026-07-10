@@ -44,6 +44,10 @@ function handle(req) {
                 properties: { msg: { type: "string" } },
                 required: ["msg"],
               },
+              // #885: this self-declared category is DELIBERATELY still sent —
+              // the host ignores it (a plugin can lie) and registers the
+              // default-strict "write" baseline. Kept to prove the reverse
+              // projection does NOT honor a wire-declared category.
               _meta: { "xyz.lvis/category": "read", "xyz.lvis/version": "1.0.0" },
             },
           ],

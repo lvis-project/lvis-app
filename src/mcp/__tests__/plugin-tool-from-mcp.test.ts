@@ -6,8 +6,10 @@
  *   - sources `pathFields` from `_meta`,
  *   - NEVER populates `Tool.writesToOwnSandbox` (the untrusted self-claim is gone —
  *     the reviewer auto-LOW keys on host-computed containment instead),
- *   - reads an ABSENT category as the write-equivalent baseline WITHOUT warning
- *     (v6-expected steady state), warning only on a present-but-malformed one,
+ *   - registers EVERY tool at the write-equivalent baseline, ignoring any wire
+ *     `category` entirely (#885 dropped the category reader — loopback emits no
+ *     category and an out-of-process plugin's wire category is not trusted; host
+ *     `inspectHostRisk` is the effective SOT),
  *   - carries `source: "plugin"` + `pluginId` for the §6.3 permission pipeline.
  */
 import { describe, it, expect, vi } from "vitest";
@@ -48,12 +50,6 @@ const MANIFEST: NormalizedManifest = {
     },
   ],
 };
-
-function warnedMalformedCategory(spy: ReturnType<typeof vi.spyOn>): boolean {
-  return spy.mock.calls.some((args) =>
-    args.some((a) => typeof a === "string" && /malformed category/.test(a)),
-  );
-}
 
 describe("mcpToolToPluginTool — v6 reverse projection from _meta", () => {
   const invoke = vi.fn(async (name: string) => ({ text: `ran ${name}` }));
@@ -99,34 +95,27 @@ describe("mcpToolToPluginTool — v6 reverse projection from _meta", () => {
     expect(result).toEqual({ output: "disk full", isError: true });
   });
 
-  it("#885 v6 — an ABSENT category is v6-expected: write-equivalent WITHOUT a warn (no boot-spam)", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
+  it("#885 v6 — the wire `category` is fully ignored: absent, valid, or malformed all register write-equivalent", () => {
+    // #885 dropped the per-tool category reader: the host ignores any wire
+    // `_meta["xyz.lvis/category"]` (loopback sends none; an out-of-process
+    // plugin's is not trusted), so the reverse projection pins every tool to the
+    // write-equivalent baseline unconditionally. Security invariant preserved —
+    // a wire "read" can NEVER silently downgrade a plugin tool; the host
+    // `inspectHostRisk` classifier is the effective SOT.
+    const wireMetas: Array<Record<string, unknown>> = [
+      { ui: { visibility: ["model"] } }, // absent category
+      { "xyz.lvis/category": "read" }, // a valid-looking wire "read" is ignored
+      { "xyz.lvis/category": 42 }, // malformed
+    ];
+    for (const _meta of wireMetas) {
       const tool = mcpToolToPluginTool(
         PLUGIN_ID,
-        { name: "rogue", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model"] } } },
+        { name: "rogue", inputSchema: { type: "object", properties: {} }, _meta },
         invoke,
       );
       expect(tool.category).toBe("write");
+      expect(tool.category).not.toBe("read");
       expect(tool.isReadOnly({})).toBe(false);
-      expect(warnedMalformedCategory(warnSpy)).toBe(false); // absent → silent
-    } finally {
-      warnSpy.mockRestore();
-    }
-  });
-
-  it("#885 v6 — a PRESENT-but-malformed category returns write-equivalent AND warns (real declaration error)", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const tool = mcpToolToPluginTool(
-        PLUGIN_ID,
-        { name: "rogue", inputSchema: { type: "object", properties: {} }, _meta: { "xyz.lvis/category": 42 } },
-        invoke,
-      );
-      expect(tool.category).toBe("write");
-      expect(warnedMalformedCategory(warnSpy)).toBe(true);
-    } finally {
-      warnSpy.mockRestore();
     }
   });
 });

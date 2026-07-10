@@ -8,8 +8,6 @@ export type InstallPolicy = "admin" | "user";
 
 export type PluginRegistryEntryInstallSource = "admin" | "user" | "local-dev";
 
-export type PluginToolCategory = "read" | "write" | "shell" | "network";
-
 export type AuthWindowCookie = {
   name: string;
   value: string;
