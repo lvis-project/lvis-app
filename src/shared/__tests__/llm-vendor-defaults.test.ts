@@ -203,7 +203,16 @@ describe("LLM vendor defaults", () => {
 
   it("includes each provider's default model in its dropdown options", () => {
     for (const v of LLM_VENDORS) {
-      expect(LLM_VENDOR_MODEL_OPTIONS[v]).toContain(LLM_VENDOR_DEFAULTS[v].model);
+      const options = LLM_VENDOR_MODEL_OPTIONS[v];
+      const defaultModel = LLM_VENDOR_DEFAULTS[v].model;
+      // Handshake-only providers (openai-compatible) ship no static catalog and
+      // no default model — the list is fetched live from the endpoint's /models
+      // handshake, so there is nothing to cross-check here.
+      if (options.length === 0) {
+        expect(defaultModel, `${v} handshake-only default must be empty`).toBe("");
+        continue;
+      }
+      expect(options).toContain(defaultModel);
     }
   });
 });
