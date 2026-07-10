@@ -114,14 +114,12 @@ const EXPLICIT_MODEL_COMPLEXITY_MAP: Partial<
     mid: "gemini-2.5-flash",
     high: "gemini-2.5-pro",
   }),
-  // Custom OpenAI-compatible endpoints are endpoint-defined; every tier resolves
-  // to the primary cluster model (the dropdown's default), which must also be
-  // present in LLM_VENDOR_MODEL_OPTIONS[vendor].
-  "openai-compatible": Object.freeze({
-    low: "Qwen3.6-35B-A3B-NVFP4",
-    mid: "Qwen3.6-35B-A3B-NVFP4",
-    high: "Qwen3.6-35B-A3B-NVFP4",
-  }),
+  // Custom OpenAI-compatible endpoints are endpoint-defined and handshake-only:
+  // there is no static catalog to map tiers against (see
+  // LLM_VENDOR_MODEL_OPTIONS["openai-compatible"] === []). Deliberately absent
+  // here → `defaultComplexityMapForVendor` yields the empty default model →
+  // `resolveModelForComplexity` returns null → the sub-agent runs on the
+  // parent loop's active (user-selected) model. Never send a fabricated tier id.
 };
 
 function defaultComplexityMapForVendor(
@@ -144,8 +142,9 @@ export const MODEL_COMPLEXITY_MAP: Readonly<
 
 /**
  * Resolve `(vendor, level)` to a concrete model ID. Returns `null` when
- * either argument is missing or the tier is undefined for that vendor —
- * the caller must apply the design-intent parent-model fallback.
+ * either argument is missing, the tier is undefined for that vendor, or the
+ * vendor is handshake-only (empty catalog → empty mapped model) — in every
+ * case the caller must apply the design-intent parent-model fallback.
  */
 export function resolveModelForComplexity(
   vendor: LLMVendor | null | undefined,
@@ -154,7 +153,10 @@ export function resolveModelForComplexity(
   if (!vendor || !level) return null;
   const vendorMap = MODEL_COMPLEXITY_MAP[vendor];
   if (!vendorMap) return null;
-  return vendorMap[level] ?? null;
+  // `|| null` (not `?? null`): handshake-only vendors (openai-compatible) map
+  // every tier to the empty default model, which must resolve to the
+  // parent-model fallback, not an empty-string model id.
+  return vendorMap[level] || null;
 }
 
 /**
@@ -183,6 +185,10 @@ export function findOrphanedComplexityModels(): Array<{
     const options = LLM_VENDOR_MODEL_OPTIONS[vendor];
     for (const level of MODEL_COMPLEXITY_LEVELS) {
       const model = tiers[level];
+      // Handshake-only vendors (openai-compatible) have no static catalog and
+      // map every tier to the empty model → parent-model fallback. There is no
+      // catalog entry to verify, so they are not orphans.
+      if (!model) continue;
       if (!options.includes(model)) {
         orphans.push({ vendor, level, model });
       }

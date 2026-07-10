@@ -156,6 +156,84 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
     );
   });
 
+  it("does not create an OpenAI-compatible provider when no model is configured", async () => {
+    const createProvider = vi.fn(() => ({
+      vendor: "openai-compatible" as const,
+      streamTurn: async function* () {},
+    }));
+    vi.doMock("../llm/provider-factory.js", () => ({
+      createProvider,
+      secretKeyFor: (vendor: string) => `llm.apiKey.${vendor}`,
+    }));
+    const { ConversationLoop } = await import("../conversation-loop.js");
+
+    const toolRegistry = new ToolRegistry();
+    const settings = fakeLlmSettings({
+      provider: "openai-compatible",
+      model: "",
+    });
+    settings.vendors["openai-compatible"].baseUrl = "http://localhost:8000/v1";
+
+    new ConversationLoop(({
+      settingsService: {
+        get: () => settings,
+        getSecret: () => null,
+      },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+
+    // Handshake-only: an empty model means "not configured" — never send a
+    // fabricated/seed id to the endpoint. The user must pick from the live list.
+    expect(createProvider).not.toHaveBeenCalled();
+  });
+
+  it("drops a stored API key for a keyless local (http) OpenAI-compatible endpoint", async () => {
+    const createProvider = vi.fn(() => ({
+      vendor: "openai-compatible" as const,
+      streamTurn: async function* () {},
+    }));
+    vi.doMock("../llm/provider-factory.js", () => ({
+      createProvider,
+      secretKeyFor: (vendor: string) => `llm.apiKey.${vendor}`,
+    }));
+    const { ConversationLoop } = await import("../conversation-loop.js");
+
+    const toolRegistry = new ToolRegistry();
+    const settings = fakeLlmSettings({
+      provider: "openai-compatible",
+      model: "team/model",
+    });
+    settings.vendors["openai-compatible"].baseUrl = "http://localhost:8000/v1";
+
+    new ConversationLoop(({
+      settingsService: {
+        get: () => settings,
+        getSecret: () => "stored-key",
+      },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+
+    // Part C — never attach a bearer token to a non-https (local) endpoint: it
+    // would leak in plaintext and trip the adapter's credentialed-baseUrl https
+    // guard. Keyless-capable local providers run without a key.
+    expect(createProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vendor: "openai-compatible",
+        apiKey: "",
+        model: "team/model",
+        baseUrl: "http://localhost:8000/v1",
+      }),
+    );
+  });
+
   it("uses the selected marketplace provider preset key for OpenAI-compatible providers", async () => {
     const createProvider = vi.fn(() => ({
       vendor: "openai-compatible" as const,
