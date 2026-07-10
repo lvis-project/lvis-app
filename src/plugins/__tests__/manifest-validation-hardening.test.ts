@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../runtime.js";
 import { mkdtempSync } from "node:fs";
+import { compileLegacyToolSurface } from "./test-helpers.js";
 
 describe("runtime manifest validation hardening", () => {
   let testDir: string;
@@ -51,7 +52,7 @@ describe("runtime manifest validation hardening", () => {
   };
 }`;
     await writeFile(join(pluginDir, "entry.mjs"), entrySource ?? defaultEntry, "utf-8");
-    const manifest = {
+    const manifest: Record<string, unknown> = {
       id,
       name: id,
       version: "1.0.0",
@@ -61,6 +62,18 @@ describe("runtime manifest validation hardening", () => {
       tools: [`${id}_hello`, `${id}_bad`, `${id}_good`],
       ...manifestOverrides,
     };
+    // Pure v6: compile any legacy tools[]/uiActions/toolSchemas surface into Tool[]
+    // (an orphan toolSchemas key not in tools[]/uiActions is naturally dropped).
+    const toolNames = Array.isArray(manifest.tools)
+      ? (manifest.tools as unknown[]).filter((t): t is string => typeof t === "string")
+      : [];
+    manifest.tools = compileLegacyToolSurface({
+      tools: toolNames,
+      uiActions: manifest.uiActions as Record<string, { description?: string }> | undefined,
+      toolSchemas: manifest.toolSchemas as Record<string, Record<string, unknown>> | undefined,
+    });
+    delete manifest.uiActions;
+    delete manifest.toolSchemas;
     await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
     await mkdir(join(testDir, "plugins"), { recursive: true });
     await writeFile(

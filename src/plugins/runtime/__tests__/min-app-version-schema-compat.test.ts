@@ -32,7 +32,7 @@ describe("manifest requires.minAppVersion — real SDK-schema validator path", (
         description: "x",
         version: "1.0.0",
         entry: "dist/p.js",
-        tools: ["t_one"],
+        tools: [{ name: "t_one", description: "t_one tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         ...extra,
       }),
     );

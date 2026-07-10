@@ -83,22 +83,47 @@ describe("manifest validation — auth cross-field", () => {
   });
 
   async function writeManifest(extra: Record<string, unknown>): Promise<void> {
-    const base = {
+    const merged: Record<string, unknown> = {
       id: "test-plugin",
       name: "Test Plugin",
       version: "1.0.0",
       description: "auth fixture",
       publisher: "tests",
       entry: "dist/hostPlugin.js",
-      // Migrated shape: auth tools live in uiActions[] ONLY, never tools[]
-      // (tools[] is the LLM-facing surface). The leak-rejection test overrides
-      // `tools` explicitly to re-introduce the pre-migration violation.
+      // Pure v6: auth tools are app-only Tool objects (visibility ["app"]),
+      // never model-visible. Tests express the surface as legacy tools[]/uiActions
+      // name lists; this helper compiles them into the pure Tool[] the host reads.
+      // The leak-rejection test puts an auth name in tools[] → model-visible → the
+      // auth-visibility check rejects it.
       tools: [],
       uiActions: { test_status: {}, test_login: {}, test_signout: {} },
       ...extra,
     };
+    const names: string[] = Array.isArray(merged.tools)
+      ? (merged.tools as unknown[]).filter((t): t is string => typeof t === "string")
+      : [];
+    const uiNames =
+      merged.uiActions && typeof merged.uiActions === "object"
+        ? Object.keys(merged.uiActions as Record<string, unknown>)
+        : [];
+    const all = [...names, ...uiNames.filter((n) => !names.includes(n))];
+    const tools = all.map((name) => ({
+      name,
+      description: `${name} tool`,
+      inputSchema: { type: "object", properties: {} },
+      _meta: {
+        ui: {
+          visibility: [
+            ...(names.includes(name) ? ["model"] : []),
+            ...(uiNames.includes(name) ? ["app"] : []),
+          ],
+        },
+      },
+    }));
+    delete merged.uiActions;
+    merged.tools = tools;
     await mkdir(testDir, { recursive: true });
-    await writeFile(manifestPath, JSON.stringify(base, null, 2), "utf-8");
+    await writeFile(manifestPath, JSON.stringify(merged, null, 2), "utf-8");
   }
 
   it("accepts manifest with auth tools all in uiActions", async () => {

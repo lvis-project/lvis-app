@@ -13,25 +13,39 @@ import {
 } from "../../plugins/runtime/origin-chain.js";
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 import { normalizeManifest } from "../../plugins/types.js";
-import type { NormalizedManifest } from "../../plugins/types.js";
+import type { NormalizedManifest, Tool } from "../../plugins/types.js";
 
 // #885 v6 — the gate reads the NORMALIZED manifest (`Tool[]` + `_meta.ui.visibility`).
-// These fixtures declare the LEGACY shape and run it through the real
-// `normalizeManifest`, so each test exercises legacy→pure parity exactly as
-// production does (tools[]-only→["model"], uiActions-only→["app"], both→dual).
+// The pure `tools: string[]` + `uiActions` legacy reader was removed in Phase R,
+// so these fixtures compile surface membership into each tool's explicit
+// `_meta.ui.visibility` here (tools[]-only→["model"], uiActions-only→["app"],
+// both→dual), then run the pure manifest through the real `normalizeManifest`.
 function normalize(spec: {
   tools?: string[];
   uiActions?: Record<string, { description?: string }>;
   auth?: { statusTool: string; loginTool: string; logoutTool?: string };
 }): NormalizedManifest {
+  const names = spec.tools ?? [];
+  const uiNames = Object.keys(spec.uiActions ?? {});
+  const allNames = [...names, ...uiNames.filter((n) => !names.includes(n))];
+  const tools: Tool[] = allNames.map((name) => {
+    const visibility: Array<"model" | "app"> = [
+      ...(names.includes(name) ? (["model"] as const) : []),
+      ...(uiNames.includes(name) ? (["app"] as const) : []),
+    ];
+    return {
+      name,
+      inputSchema: { type: "object" as const, properties: {} },
+      _meta: { ui: { visibility } },
+    };
+  });
   return normalizeManifest({
     id: "meeting",
     name: "Meeting",
     version: "1.0.0",
     entry: "index.js",
     description: "test fixture",
-    tools: spec.tools ?? [],
-    ...(spec.uiActions ? { uiActions: spec.uiActions } : {}),
+    tools,
     ...(spec.auth ? { auth: spec.auth } : {}),
   });
 }

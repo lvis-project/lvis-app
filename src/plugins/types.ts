@@ -95,7 +95,7 @@ export interface PluginAccessSpec {
 export interface PluginAuthSpec {
   /** Human-readable label shown next to the badge (defaults to plugin `name`). */
   label?: string;
-  /** uiActions tool returning {@link PluginAuthStatus}. */
+  /** Name of an app-visible tool returning {@link PluginAuthStatus}. */
   statusTool: string;
 
   loginTool: string;
@@ -134,11 +134,6 @@ export interface PluginAuthStatus {
   account?: string;
 }
 
-export interface PluginUiActionSpec {
-  /** Short human-readable action description for tooling/catalogues. */
-  description?: string;
-}
-
 export interface EventSubscriptionHint {
   category: "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system";
   priority: "high" | "medium" | "low";
@@ -154,11 +149,12 @@ export interface EventSubscription {
 /* ============================================================================
  * Plugin Contract v6 (#885) — pure MCP `Tool` object surface.
  *
- * These types define the v6 "manifest == wire" tool contract that supersedes the
- * legacy `tools: string[]` + `toolSchemas` + `uiActions` triple. In phase a2 they
- * are ADDITIVE: `PluginManifest.tools` stays `string[]` and host consumers keep
- * reading the legacy shape until a4 rewires them through `normalizeManifest`.
- * The SDK public surface (`@lvis/plugin-sdk`) mirrors these via `sync-from-host`.
+ * These types define the v6 "manifest == wire" tool contract. Phase R removed the
+ * legacy `tools: string[]` + `toolSchemas` + `uiActions` triple entirely:
+ * `PluginManifest.tools` is now `Tool[]` and every host consumer reads surface
+ * visibility off each tool's `_meta.ui.visibility` (materialized once by
+ * `normalizeManifest`). The SDK public surface (`@lvis/plugin-sdk`) mirrors these
+ * via `sync-from-host`.
  * ==========================================================================*/
 
 /**
@@ -238,7 +234,9 @@ export interface PluginManifest {
 
 
 
-  tools: string[];
+  /** Pure MCP `Tool` objects (manifest == wire). Surface visibility lives in each
+   *  tool's `_meta.ui.visibility`; there is no separate `uiActions`/`toolSchemas`. */
+  tools: Tool[];
 
   description: string;
   config?: Record<string, unknown>;
@@ -271,12 +269,6 @@ export interface PluginManifest {
 
 
   eventSubscriptions?: string[] | EventSubscription[];
-  /**
-   * Plugin panel/user-interface action surface. Keys are runtime method names
-   * the renderer may invoke directly as user-initiated UI actions. This is
-   * separate from `tools[]`, which remains the LLM-facing surface.
-   */
-  uiActions?: Record<string, PluginUiActionSpec>;
 
 
 
@@ -309,66 +301,6 @@ export interface PluginManifest {
    * (5000ms).
    */
   startupTimeoutMs?: number;
-
-
-
-  toolSchemas?: Record<
-    string,
-    {
-      description: string;
-      /**
-       * Permission category — now OPTIONAL (host-classifies-risk,
-       * project_permission_review_redesign). A plugin grading its own danger
-       * is not a control (MCP spec: a server can lie), so the host no longer
-       * requires it and never trusts it as the authority: the effective
-       * category is derived host-side per invocation (`inspectHostRisk`). When
-       * omitted, the host applies a write-equivalent default-strict baseline.
-       * Still accepted (and projected to `_meta` for shadow-mode
-       * reconciliation) when a plugin declares it. `meta` is host-only.
-       */
-      category?: PluginToolCategory;
-      /** Filesystem argument names that must be checked against allowed directories. */
-      pathFields?: string[];
-      /**
-       * Advisory host-spawned worker identity for tools intended to run in a
-       * long-lived worker started through `hostApi.spawnWorker`. This manifest
-       * field is not an execution proof: the loopback MCP registration path
-       * must not promote it to `Tool.workerId` unless the host routes the actual
-       * tool invocation through that worker. Reviewer ASRT relaxation is allowed
-       * only from a host-owned Tool descriptor whose call path is worker-backed.
-       */
-      workerId?: string;
-      /**
-       * Issue #664 P1 — sandbox-write self-attestation. When true AND the
-       * runtime verifies that every resolved `pathFields` value stays
-       * inside the owning plugin's sandbox root
-       * (`~/.lvis/plugins/<pluginId>/`), the reviewer auto-LOWs the
-       * verdict so plugins can write to their own data dir without
-       * round-tripping the user. The runtime still verifies path
-       * containment — a tool that declares the flag but emits an
-       * out-of-sandbox path falls back to the normal write rules.
-       */
-      writesToOwnSandbox?: boolean;
-      /**
-       * §6.4 Tool versioning — optional semver string for this tool. When
-       * omitted, the plugin manifest's top-level `version` is used as the
-       * tool version so plugins that ship tools in lock-step with their
-       * release don't need to repeat themselves.
-       */
-      version?: string;
-      /** §6.4 — semver string marking deprecation; triggers runtime warn. */
-      deprecatedSince?: string;
-      /** §6.4 — name of the replacement tool (transparent redirect). */
-      replacedBy?: string;
-      inputSchema: {
-        $schema?: string;
-        type: "object";
-        properties: Record<string, unknown>;
-        required?: string[];
-        additionalProperties?: boolean;
-      };
-    }
-  >;
 
   /**
    * §9.2 Track B — declarative settings schema. When present, the host
@@ -419,140 +351,47 @@ export interface PluginManifest {
 }
 
 /**
- * A raw manifest as read from disk during the compat window — `tools` may be the
- * legacy `string[]` OR the pure `Tool[]`, and the legacy `toolSchemas`/`uiActions`
- * maps may still be present. Input type of `normalizeManifest`. Collapses to the
- * pure `PluginManifest` at Phase R.
- */
-export type RawPluginManifest = Omit<PluginManifest, "tools"> & {
-  tools: string[] | Tool[];
-};
-
-/**
  * The manifest AFTER `normalizeManifest` — the pure-form SoT every host consumer
- * reads (SoT §3.1 invariant). `toolSchemas`/`uiActions` are ELIMINATED; each tool
- * is one pure `Tool` whose `_meta.ui.visibility` is always explicit and non-empty.
+ * reads. Each tool is one pure `Tool` whose `_meta.ui.visibility` is always
+ * explicit and non-empty (the standard `["model","app"]` default is materialized
+ * at load). Structurally a `PluginManifest` whose `tools` visibility is
+ * materialized; kept as a distinct name so consumers signal they read the
+ * normalized form.
  */
-export type NormalizedManifest = Omit<
-  PluginManifest,
-  "tools" | "toolSchemas" | "uiActions"
-> & {
+export type NormalizedManifest = Omit<PluginManifest, "tools"> & {
   tools: Tool[];
 };
 
-/** One load-time notice emitted by `normalizeManifest` (≤1 per plugin). @see normalizeManifest */
-export interface NormalizeNotice {
-  pluginId: string;
-  /** `legacy-shape` = the manifest used the deprecated string[]+toolSchemas+uiActions form. */
-  kind: "legacy-shape";
-  /** Removed tool fields that were present and dropped (deduped across tools). */
-  droppedFields: Array<
-    "category" | "workerId" | "writesToOwnSandbox" | "version" | "deprecatedSince" | "replacedBy"
-  >;
-}
-
-/** Optional caller sink for `normalizeManifest`'s single legacy-shape notice. */
-export type NormalizeReporter = (notice: NormalizeNotice) => void;
-
 /**
- * The single legacy-shape reader (SoT §3.1 invariant). Compiles a `RawPluginManifest`
- * into the pure `NormalizedManifest` every host consumer reads:
- * - Pure input (`tools[0]` is an object) → passthrough; materialize an absent
- *   `_meta.ui.visibility` to the STANDARD `["model","app"]`; REJECT an explicit `[]`
- *   (R6 fail-closed — never widened to dual); strip any stray legacy maps.
- * - Legacy input (`tools[0]` is a string, or empty `[]`) → build pure `Tool[]` by
- *   joining `toolSchemas`, compiling surface membership to `_meta.ui.visibility`
- *   (tools-only→`["model"]`, dual→`["model","app"]`, uiActions-only→`["app"]`),
- *   moving `pathFields`→`_meta["xyz.lvis/pathFields"]`, and DROPPING the removed
- *   fields (`category`/`workerId`/`writesToOwnSandbox`/`version`/`deprecatedSince`/
- *   `replacedBy`) with one `report` notice.
- * Pure (no IO); `report` is the only side channel. Throws a loud load-error on an
- * explicit empty `visibility` (non-total by design — matches U2 §1.4.2).
+ * Materialize every tool's surface visibility into the pure-form SoT every host
+ * consumer reads (SoT §2.3). The ONE defaulting site: a tool that omits
+ * `_meta.ui.visibility` gets the STANDARD SEP-1865 default `["model","app"]`; an
+ * explicit `[]` is REJECTED (R6 fail-closed — never widened to dual). Pure (no
+ * IO). `tool-visibility.ts` depends on this being the sole defaulting step, so
+ * its output tools ALWAYS carry an explicit non-empty `_meta.ui.visibility`.
  */
-export const normalizeManifest = (
-  raw: RawPluginManifest,
-  report?: NormalizeReporter,
-): NormalizedManifest => {
+export const normalizeManifest = (manifest: PluginManifest): NormalizedManifest => {
   const DUAL: Array<"model" | "app"> = ["model", "app"];
-
-  const stripLegacyMaps = (m: RawPluginManifest) => {
-    // Strip both legacy maps + the union-typed `tools` symmetrically so the
-    // returned rest is exactly `Omit<PluginManifest,"tools"|"toolSchemas"|"uiActions">`.
-    const { toolSchemas: _s, uiActions: _u, tools: _t, ...rest } = m;
-    return rest;
-  };
-
-  // ---- Pure input (v6): materialize visibility default; REJECT explicit [] ----
-  const isLegacy = raw.tools.length === 0 || typeof raw.tools[0] === "string";
-  if (!isLegacy) {
-    const tools = (raw.tools as Tool[]).map((t): Tool => {
-      const vis = t._meta?.ui?.visibility;
-      if (vis === undefined) {
-        return { ...t, _meta: { ...t._meta, ui: { ...t._meta?.ui, visibility: DUAL } } };
-      }
-      if (vis.length === 0) {
-        throw new Error(
-          `[normalizeManifest] plugin '${raw.id}' tool '${t.name}': _meta.ui.visibility is [] — ` +
-            "a tool must be reachable by ≥1 surface; empty is rejected (SoT §2.2/§2.3)",
-        );
-      }
-      return t;
-    });
-    return { ...stripLegacyMaps(raw), tools };
-  }
-
-  // ---- Legacy input: compile pure Tool[] from tools[]/uiActions/toolSchemas ----
-  const names = raw.tools as string[];
-  const uiNames = Object.keys(raw.uiActions ?? {});
-  const schemas = raw.toolSchemas ?? {};
-  const removed = [
-    "category", "workerId", "writesToOwnSandbox", "version", "deprecatedSince", "replacedBy",
-  ] as const;
-  const dropped = new Set<NormalizeNotice["droppedFields"][number]>();
-
-  const deriveVisibility = (inModel: boolean, inApp: boolean): Array<"model" | "app"> => {
-    if (inModel && inApp) return ["model", "app"];
-    if (inModel) return ["model"];
-    if (inApp) return ["app"];
-    // R6 defense-in-depth: a legacy name only reaches here via tools[] or
-    // uiActions, so this is unreachable for a valid manifest — but throw so every
-    // would-be-empty visibility fails closed identically (SoT §2.3).
-    throw new Error(
-      `[normalizeManifest] plugin '${raw.id}': a tool is reachable by neither surface ` +
-        "(not in tools[] nor uiActions) — every tool needs ≥1 surface (SoT §2.3)",
-    );
-  };
-
-  const allNames = [...names, ...uiNames.filter((n) => !names.includes(n))];
-  const tools: Tool[] = allNames.map((name): Tool => {
-    const schema = schemas[name];
-    const meta: McpToolMeta = {
-      ui: { visibility: deriveVisibility(names.includes(name), uiNames.includes(name)) },
-    };
-    if (schema?.pathFields && schema.pathFields.length > 0) {
-      meta["xyz.lvis/pathFields"] = schema.pathFields;
+  const tools = manifest.tools.map((t): Tool => {
+    const vis = t._meta?.ui?.visibility;
+    if (vis === undefined) {
+      return { ...t, _meta: { ...t._meta, ui: { ...t._meta?.ui, visibility: DUAL } } };
     }
-    if (schema) {
-      for (const f of removed) {
-        if ((schema as Record<string, unknown>)[f] !== undefined) dropped.add(f);
-      }
+    if (vis.length === 0) {
+      throw new Error(
+        `[normalizeManifest] plugin '${manifest.id}' tool '${t.name}': _meta.ui.visibility is [] — ` +
+          "a tool must be reachable by ≥1 surface; empty is rejected (SoT §2.2/§2.3)",
+      );
     }
-    return {
-      name,
-      ...(schema?.description !== undefined ? { description: schema.description } : {}),
-      inputSchema: schema?.inputSchema ?? { type: "object" as const, properties: {} },
-      _meta: meta,
-    };
+    return t;
   });
-
-  report?.({ pluginId: raw.id, kind: "legacy-shape", droppedFields: [...dropped] });
-  return { ...stripLegacyMaps(raw), tools };
+  return { ...manifest, tools };
 };
 
 /**
  * §9.2 Track B — declarative settings schema. JSON Schema draft-07 subset
- * (the same dialect already used by `toolSchemas` at line 113-136 above)
- * with one UI/storage hint: `format: "secret"` routes the field through
+ * (the same dialect a tool's `inputSchema` uses) with one UI/storage hint:
+ * `format: "secret"` routes the field through
  * `hostApi.setSecret` / `getSecret` so the cleartext `pluginConfigs`
  * record never sees the value.
  */
@@ -821,6 +660,12 @@ export interface PluginMarketplaceItem {
   description: string;
   packageSpec: string;
   packageName: string;
+  /**
+   * The catalog row's advertised tool NAMES (the marketplace API `methods`
+   * list) — discovery/display metadata, NOT a manifest. The authoritative pure
+   * `Tool[]` lives in the installed plugin.json read from the verified zip; the
+   * removed `uiActions`/`toolSchemas` catalog mirrors are gone (#885 Phase R).
+   */
   tools: string[];
   /** Latest stable version string (semver). Present in remote catalog; may be absent in local mock. */
   version?: string;
@@ -832,7 +677,6 @@ export interface PluginMarketplaceItem {
   ui?: PluginUiExtension[];
   capabilities?: string[];
   keywords?: Array<{ keyword: string; skillId: string }>;
-  uiActions?: Record<string, PluginUiActionSpec>;
   auth?: PluginAuthSpec;
   networkAccess?: PluginManifest["networkAccess"];
   emittedEvents?: string[];
@@ -852,7 +696,6 @@ export interface PluginMarketplaceItem {
   dependencies?: Array<string | DependencySpec>;
   pluginAccess?: PluginAccessSpec;
   publisher?: string;
-  toolSchemas?: PluginManifest["toolSchemas"];
   /** S14: dependency capabilities this plugin requires. */
   requires?: RequiresSpec;
   /**

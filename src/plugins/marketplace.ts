@@ -1585,10 +1585,8 @@ export class PluginMarketplaceService {
     if (options.ui && options.ui.length > 0) manifest.ui = options.ui;
     if (plugin.capabilities && plugin.capabilities.length > 0) manifest.capabilities = plugin.capabilities;
     if (plugin.keywords && plugin.keywords.length > 0) manifest.keywords = plugin.keywords;
-    if (plugin.uiActions && Object.keys(plugin.uiActions).length > 0) manifest.uiActions = plugin.uiActions;
     if (plugin.emittedEvents && plugin.emittedEvents.length > 0) manifest.emittedEvents = plugin.emittedEvents;
     if (plugin.notificationEvents && plugin.notificationEvents.length > 0) manifest.notificationEvents = plugin.notificationEvents;
-    if (plugin.toolSchemas && Object.keys(plugin.toolSchemas).length > 0) manifest.toolSchemas = plugin.toolSchemas;
     if (plugin.installPolicy) manifest.installPolicy = plugin.installPolicy;
     if (plugin.dependencies && plugin.dependencies.length > 0) manifest.dependencies = plugin.dependencies;
     if (plugin.pluginAccess) manifest.pluginAccess = plugin.pluginAccess;

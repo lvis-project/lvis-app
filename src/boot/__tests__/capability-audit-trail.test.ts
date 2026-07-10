@@ -94,7 +94,14 @@ describe("M4 — capability violation audit trail", () => {
       description: "Test fixture.",
       publisher: "Test fixture",
       entry: "entry.mjs",
-      tools: [toolName],
+      tools: [
+        {
+          name: toolName,
+          description: `${toolName} test tool`,
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model", "app"] } },
+        },
+      ],
       ...extra,
     };
     await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");

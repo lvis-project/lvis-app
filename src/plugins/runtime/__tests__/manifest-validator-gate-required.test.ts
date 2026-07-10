@@ -24,7 +24,7 @@ describe("parsePluginJson — SDK schema validator required", () => {
         name: "Validator Test",
         version: "1.0.0",
         entry: "dist/index.js",
-        tools: ["validator_ping"],
+        tools: [{ name: "validator_ping", description: "validator_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         description: "Validator required test plugin",
         publisher: "Test",
       }),
@@ -57,7 +57,7 @@ describe("parsePluginJson — SDK schema validator required", () => {
         name: "Validator Test",
         version: "1.0.0",
         entry: "dist/index.js",
-        tools: ["validator_ping"],
+        tools: [{ name: "validator_ping", description: "validator_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         description: "Validator required test plugin",
         publisher: "Test",
         installPolicy: "root",
@@ -69,7 +69,7 @@ describe("parsePluginJson — SDK schema validator required", () => {
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(/schema validation failed/);
   });
 
-  it("#885 v6 — compiles a legacy UI-only method (uiActions) to an app-only Tool, drops the uiActions map", async () => {
+  it("#885 v6 — a pure app-only Tool loads and carries no uiActions map", async () => {
     await writeFile(
       manifestPath,
       JSON.stringify({
@@ -77,8 +77,13 @@ describe("parsePluginJson — SDK schema validator required", () => {
         name: "Validator Test",
         version: "1.0.0",
         entry: "dist/index.js",
-        tools: [],
-        uiActions: { ui_upload_chunk: {} },
+        tools: [
+          {
+            name: "ui_upload_chunk",
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["app"] } },
+          },
+        ],
         description: "Validator UI-only runtime method test plugin",
         publisher: "Test",
       }),
@@ -87,14 +92,13 @@ describe("parsePluginJson — SDK schema validator required", () => {
 
     const validator = await buildManifestValidator();
     const manifest = await parsePluginJson(manifestPath, validator);
-    // The legacy uiActions map is ELIMINATED; the method is now ONE Tool object
-    // carrying explicit app-only visibility (the pure-form equivalent).
+    // Pure form: no uiActions map; the method is ONE Tool object with app-only visibility.
     expect((manifest as Record<string, unknown>).uiActions).toBeUndefined();
     const tool = manifest.tools.find((t) => t.name === "ui_upload_chunk");
     expect(tool?._meta?.ui?.visibility).toEqual(["app"]);
   });
 
-  it("#885 v6 — a legacy uiActions-only method loads (no toolSchemas entry) as an app-only Tool", async () => {
+  it("#885 v6 — a pure app-only Tool with a description loads", async () => {
     await writeFile(
       manifestPath,
       JSON.stringify({
@@ -102,10 +106,14 @@ describe("parsePluginJson — SDK schema validator required", () => {
         name: "Validator Test",
         version: "1.0.0",
         entry: "dist/index.js",
-        tools: [],
-        uiActions: {
-          ui_upload_chunk: { description: "Upload a staged chunk from the panel" },
-        },
+        tools: [
+          {
+            name: "ui_upload_chunk",
+            description: "Upload a staged chunk from the panel",
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["app"] } },
+          },
+        ],
         description: "Validator UI action runtime method test plugin",
         publisher: "Test",
       }),
@@ -119,7 +127,7 @@ describe("parsePluginJson — SDK schema validator required", () => {
     expect(tool?._meta?.ui?.visibility).toEqual(["app"]);
   });
 
-  it("#885 v6 — legacy auth tools (declared in uiActions) compile to app-only Tools that pass the auth-visibility check", async () => {
+  it("#885 v6 — pure app-only auth tools pass the auth-visibility check", async () => {
     await writeFile(
       manifestPath,
       JSON.stringify({
@@ -127,11 +135,10 @@ describe("parsePluginJson — SDK schema validator required", () => {
         name: "Validator Test",
         version: "1.0.0",
         entry: "dist/index.js",
-        tools: [],
-        uiActions: {
-          auth_status: {},
-          auth_login: {},
-        },
+        tools: [
+          { name: "auth_status", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["app"] } } },
+          { name: "auth_login", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["app"] } } },
+        ],
         auth: {
           statusTool: "auth_status",
           loginTool: "auth_login",
