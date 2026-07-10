@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.5.1 — 2026-07-10
+
+Follow-up to the v0.5.0 Plugin Contract v6 release: the legacy manifest readers are removed (brought forward from the originally-planned `0.6.0`), a self-healing Plugin Doctor replaces the migration time-gate, and several LLM provider call paths are fixed. This is a patch release — the legacy-reader removal is dead-code excision, not a contract change; the v6 wire contract is unchanged from v0.5.0.
+
+### Plugin contract — legacy readers removed (#1572)
+
+- **`normalizeManifest` is now a pure-form materializer, not a legacy compiler** — the old `tools[]` (name strings) + `toolSchemas` + `uiActions` reader is deleted. A manifest declares tools only as pure MCP `Tool[]`; `normalizeManifest` just materializes an absent `_meta.ui.visibility` to the safe `["model","app"]` default and rejects an explicit empty visibility. A pre-v6 manifest now fails closed at load with an actionable "upgrade to `@lvis/plugin-sdk` v6" message that names the offending tool index, instead of being silently compiled forward.
+- **Why this is safe ahead of the planned `0.6.0` window** — the v0.5.0 note deferred this removal until every installed plugin had migrated. The new Plugin Doctor (below) makes that time-gate unnecessary: a plugin that fails to load on the pure-v6 reader is diagnosed and auto-reinstalled from the marketplace at its latest (v6) version, so there is no broken-plugin window to wait out.
+- **Vocabulary sweep** — the `uiActions` / `toolSchemas` terms are gone from code, error strings, and documentation. Per-tool surface visibility lives only in `_meta.ui.visibility` (SEP-1865) and the sole LVIS-proprietary key is `_meta["xyz.lvis/pathFields"]`.
+
+### Plugin Doctor — cause-aware auto-repair (#1573)
+
+- **A failed plugin diagnoses itself and attempts a fix** — on load failure the host classifies the cause (`manifest-validation-error`, `catalog-grant-mismatch`, `incompatible-app-version`) and, for reinstall-fixable causes, automatically reinstalls the plugin from the marketplace at its latest version. Non-fixable causes (e.g. an app-version floor the current host cannot satisfy) surface the specific cause instead of a blind retry, and leave the manual Remove path in place.
+
+### LLM providers (#1575)
+
+- **OpenAI-compatible model list is handshake-only** — the custom OpenAI-compatible vendor no longer ships a hardcoded seed model id (it previously advertised an internal cluster model before any endpoint address was entered, which 400/404'd against arbitrary endpoints). The model dropdown now populates only from a live `GET <baseUrl>/models` handshake; an unconfigured endpoint is treated as "not configured" rather than sending a fabricated model id. The sub-agent model-complexity map drops the same seed so tier resolution falls back to the parent loop's active model.
+- **Stop leaking vLLM `chat_template_kwargs` to commercial gateways** — the per-request `chat_template_kwargs.enable_thinking` flag is now scoped to the self-hosted vLLM class (openai-compatible / ollama / lmstudio / litellm) instead of every openai-compatible-shaped vendor, so requests to OpenRouter and other commercial gateways no longer carry a field that 400/422'd the strict ones. `finish_reason=length` continuation support is widened to the same self-hosted class from a single shared predicate, keeping the request-shaping and capability sides from drifting.
+- **No bearer token on plaintext-local endpoints** — a keyless-capable provider pointed at an `http://` (non-TLS) endpoint no longer attaches a stored or placeholder API key.
+
 ## v0.5.0 — 2026-07-10
 
 **Plugin Contract v6** (#885) — plugin manifests move to a pure Model Context Protocol `Tool[]` surface, external MCP servers gain per-server isolation, and the host derives every governance signal itself instead of trusting a plugin self-claim. This release is the `minAppVersion` floor for the v6 contract — the marketplace publishes v6 plugins as `requires.minAppVersion: 0.5.0`. Already-installed legacy plugins keep working across the upgrade: the host still reads the legacy manifest shape and compiles it forward at load time. The legacy readers are removed in a later `0.6.0` release, after the migration window — bundling that removal here would break plugins installed before the upgrade.
