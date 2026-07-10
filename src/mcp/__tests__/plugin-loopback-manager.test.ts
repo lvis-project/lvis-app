@@ -8,13 +8,13 @@ import { PluginLoopbackManager } from "../plugin-loopback-manager.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { manifestIntegrityState } from "../../permissions/manifest-integrity.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
-import type { NormalizedManifest } from "../../plugins/types.js";
+import type { PluginManifest } from "../../plugins/types.js";
 
 beforeEach(() => manifestIntegrityState.resetForTests());
 
 // #885 v6 — the loopback consumes the NORMALIZED pure `Tool[]`. Each tool is one
 // model-visible object; category is host-derived (the wire carries none).
-function manifest(id: string, tools: string[]): NormalizedManifest {
+function manifest(id: string, tools: string[]): PluginManifest {
   return {
     id,
     name: id,
@@ -43,7 +43,7 @@ function fakeRuntime(): PluginRuntime {
  * used to pin that the missing-category hard-fail is gone. In v6 category is gone
  * from the contract entirely, so every loopback tool registers as write-equivalent.
  */
-function categorylessManifest(id: string, tool: string): NormalizedManifest {
+function categorylessManifest(id: string, tool: string): PluginManifest {
   return {
     id,
     name: id,

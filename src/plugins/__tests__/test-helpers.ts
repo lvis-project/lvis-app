@@ -43,8 +43,8 @@ export function pureTools(...names: string[]): Tool[] {
 
 /**
  * Compile a legacy `{ tools: string[], uiActions, toolSchemas }` surface into the
- * pure v6 `Tool[]` — the same derivation the removed `normalizeManifest` legacy
- * branch performed. Visibility: model if in `tools[]`, app if in `uiActions`;
+ * pure v6 `Tool[]` — the same derivation the removed pre-v6 legacy-shape reader
+ * performed. Visibility: model if in `tools[]`, app if in `uiActions`;
  * description/inputSchema sourced from `toolSchemas`/`uiActions`; non-empty
  * `pathFields` moved to `_meta["xyz.lvis/pathFields"]`; removed fields dropped.
  * Tests that historically declared the legacy surface use this to emit the pure

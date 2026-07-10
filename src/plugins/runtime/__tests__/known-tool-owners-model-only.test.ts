@@ -18,7 +18,7 @@ import { describe, it, expect } from "vitest";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PluginRuntime } from "../../runtime.js";
-import { normalizeManifest } from "../../types.js";
+import type { PluginManifest } from "../../types.js";
 
 const HOST_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 const PLUGIN_ID = "auth-plugin";
@@ -27,7 +27,7 @@ const PLUGIN_ID = "auth-plugin";
 //   ap_list             — ["model"]         (model-only)
 //   ap_toggle           — ["model","app"]   (dual)
 //   ap_status / ap_login — ["app"]          (app-only auth trio)
-const MANIFEST = normalizeManifest({
+const MANIFEST: PluginManifest = {
   id: PLUGIN_ID,
   name: "Auth Plugin",
   version: "1.0.0",
@@ -40,7 +40,7 @@ const MANIFEST = normalizeManifest({
     { name: "ap_login", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["app"] } } },
   ],
   auth: { statusTool: "ap_status", loginTool: "ap_login" },
-});
+};
 
 const MODEL_VISIBLE = ["ap_list", "ap_toggle"]; // today's exact ownership set
 const AUTH_TRIO = ["ap_status", "ap_login"]; // app-only — must NEVER own

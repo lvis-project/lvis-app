@@ -26,7 +26,7 @@ import { PluginMcpHost } from "./plugin-mcp-host.js";
 import { pluginRuntimeToolDelegate } from "./plugin-runtime-delegate.js";
 import { createLogger } from "../lib/logger.js";
 import type { PluginRuntime } from "../plugins/runtime.js";
-import type { NormalizedManifest } from "../plugins/types.js";
+import type { PluginManifest } from "../plugins/types.js";
 
 const log = createLogger("plugin-loopback-manager");
 
@@ -46,7 +46,7 @@ export class PluginLoopbackManager {
    * throws with the PREVIOUS registration left fully intact (no zero-tools
    * window). Returns the registered natural tool names.
    */
-  async start(manifest: NormalizedManifest): Promise<string[]> {
+  async start(manifest: PluginManifest): Promise<string[]> {
     const previous = this.hosts.get(manifest.id);
     const host = PluginMcpHost.loopback(
       manifest,
@@ -88,7 +88,7 @@ export class PluginLoopbackManager {
    * start throws (e.g. an invalid manifest) is logged and skipped so one bad
    * plugin never aborts the whole boot.
    */
-  async syncAll(entries: Array<{ pluginId: string; manifest: NormalizedManifest }>): Promise<void> {
+  async syncAll(entries: Array<{ pluginId: string; manifest: PluginManifest }>): Promise<void> {
     const present = new Set(entries.map((e) => e.pluginId));
     for (const pluginId of this.list()) {
       if (!present.has(pluginId)) await this.stop(pluginId);
