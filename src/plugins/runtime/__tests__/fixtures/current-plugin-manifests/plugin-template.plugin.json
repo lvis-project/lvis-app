@@ -8,7 +8,6 @@
   "installPolicy": "user",
   "tools": [],
   "capabilities": [],
-  "toolSchemas": {},
   "ui": [],
   "configSchema": {
     "properties": {
