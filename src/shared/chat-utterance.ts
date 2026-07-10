@@ -30,17 +30,3 @@ export type ChatUtteranceMode =
   | "abort-then-start"
   | "guide"
   | "stop";
-
-/**
- * Type guard for runtime validation at the preload→main boundary. IPC
- * payloads arrive as `unknown` after the contextBridge so each handler must
- * narrow before forwarding to engine code.
- */
-export function isChatUtteranceMode(value: unknown): value is ChatUtteranceMode {
-  return (
-    value === "start" ||
-    value === "abort-then-start" ||
-    value === "guide" ||
-    value === "stop"
-  );
-}

@@ -1269,7 +1269,7 @@ lvis-app/src/
 ├── contract/      # #1409 public wire contract SOT
 │   └── app-contract.ts (CHANNELS + PUBLIC_CHANNELS allowlist + gesture 분류
 │       + INTERNAL_HOST_CHANNELS out-of-tree 분류),
-│       events.ts (AppEvent union), trust-origin.ts
+│       trust-origin.ts
 │
 ├── api/           # #1409 external surface — dispatcher + loopback server (#1436)
 │   ├── local-api.ts         # dispatch({channel,args,origin}) over PUBLIC_CHANNELS;

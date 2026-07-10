@@ -111,7 +111,7 @@ src/
                                 (channel names + PUBLIC_CHANNELS allowlist +
                                 gesture classification + session addressing +
                                 INTERNAL_HOST_CHANNELS out-of-tree classification),
-                                events.ts (AppEvent union), trust-origin.ts.
+                                trust-origin.ts.
 
   api/                        — #1409 external surface (#1436): local-api.ts
                                 dispatch({channel,args,origin}) over the same

@@ -826,16 +826,6 @@ export type PluginLifecycleEvent =
   | { type: "_future"; readonly __exhaustive: never };
 
 /**
- * Payload shape for the `plugin.installed` / `plugin.uninstalled` host
- * event-bus emissions (consumed internally by `onPluginsChanged` and by
- * any host-side telemetry subscriber). Mirror of `PluginLifecycleEvent`
- * minus the `type` field — the event type lives in the event name.
- */
-export type PluginLifecycleEventPayload =
-  | { pluginId: string; source: "marketplace" | "local-dev" }
-  | { pluginId: string };
-
-/**
  * The spec a plugin hands `PluginHostApi.spawnWorker`. `pluginId` is NOT part of
  * the spec — the host binds it from the calling hostApi instance, so a plugin
  * cannot spawn a worker under another plugin's namespace. (The host-internal
@@ -1392,13 +1382,6 @@ export interface ConversationTriggerResult {
    */
   eventId?: string;
 }
-
-/**
- * Canonical alias for the tool-handler function type exposed
- * through `@lvis/plugin-sdk`. Kept identical to `PluginToolHandler` so the SDK
- * surface can evolve without breaking the existing runtime name.
- */
-export type PluginMethodHandler = PluginToolHandler;
 
 export interface PluginRuntimeContext {
   pluginId: string;
