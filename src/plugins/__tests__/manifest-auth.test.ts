@@ -227,11 +227,12 @@ describe("manifest validation — auth cross-field", () => {
     );
   });
 
-  it("warns when manifest declares 'auth' but emittedEvents missing ${id}.auth.changed (lvis-plugin-agent-hub#131)", async () => {
-    // architecture.md §9.4a: host's `usePluginAuthStatuses` subscribes to
-    // `${manifest.id}.auth.changed` literally — without the matching
-    // emittedEvents[] entry the host event-bridge skips the renderer
-    // forward and the badge stays stuck on the boot snapshot.
+  it("R3 — does NOT warn when emittedEvents omits ${id}.auth.changed (host auto-derives the bridge)", async () => {
+    // architecture.md §9.4a: the renderer's `usePluginAuthStatuses` subscribes
+    // to `${manifest.id}.auth.changed` literally. R3 — the host now derives +
+    // bridges that exact name from `manifest.auth` (see collectPluginEventTypes
+    // in boot/steps/ipc-bridge.ts), so an omitted declaration is no longer a
+    // problem and the validator must not nag about it.
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       await writeManifest({
@@ -240,15 +241,13 @@ describe("manifest validation — auth cross-field", () => {
           loginTool: "test_login",
           logoutTool: "test_signout",
         },
-        // emittedEvents intentionally omitted — replicates the agent-hub
-        // 0.4.0 state where the plugin emitted under `agent_hub.*` but the
-        // manifest never declared the dash form.
+        // emittedEvents intentionally omitted — the burden-reducing case R3
+        // targets: the host derives `test-plugin.auth.changed` regardless.
       });
       const validator = TEST_VALIDATOR;
       await parsePluginJson(manifestPath, validator);
       const warnMessages = warnSpy.mock.calls.map((c) => c.join(" "));
-      expect(warnMessages.some((m) => m.includes("test-plugin.auth.changed"))).toBe(true);
-      expect(warnMessages.some((m) => m.includes("emittedEvents[] is missing"))).toBe(true);
+      expect(warnMessages.some((m) => m.includes("auth.changed"))).toBe(false);
     } finally {
       warnSpy.mockRestore();
     }
@@ -273,10 +272,12 @@ describe("manifest validation — auth cross-field", () => {
     }
   });
 
-  it("warns when emittedEvents declares the WRONG transformed name (the literal #131 regression)", async () => {
-    // Pin the exact bug class: manifest id contains a dash but author
-    // mirrors their tool prefix (underscore) in the event declaration.
-    // Validator must still warn that the dash form is missing.
+  it("R3 — does NOT warn even when emittedEvents declares the WRONG (underscore) form (#131 class eliminated)", async () => {
+    // The exact #131 bug class: manifest id has a dash but the author mirrors
+    // their underscore tool prefix in the event declaration. Pre-R3 the
+    // validator warned the dash form was missing. R3 — the host derives the
+    // correct `test-plugin.auth.changed` from `manifest.auth` regardless of
+    // what the author declared, so the badge works and the validator is silent.
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       await writeManifest({
@@ -284,16 +285,12 @@ describe("manifest validation — auth cross-field", () => {
           statusTool: "test_status",
           loginTool: "test_login",
         },
-        // Note the underscore — this would PASS a naive "any auth.changed
-        // entry exists" check but still leave the host hook silent because
-        // the host subscribes to the literal manifest id (`test-plugin`).
-        emittedEvents: ["test_plugin.auth.changed"],
+        emittedEvents: ["test_plugin.auth.changed"], // underscore — wrong form
       });
       const validator = TEST_VALIDATOR;
       await parsePluginJson(manifestPath, validator);
       const warnMessages = warnSpy.mock.calls.map((c) => c.join(" "));
-      expect(warnMessages.some((m) => m.includes("test-plugin.auth.changed"))).toBe(true);
-      expect(warnMessages.some((m) => m.includes("emittedEvents[] is missing"))).toBe(true);
+      expect(warnMessages.some((m) => m.includes("emittedEvents[] is missing"))).toBe(false);
     } finally {
       warnSpy.mockRestore();
     }

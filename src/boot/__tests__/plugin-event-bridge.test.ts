@@ -31,7 +31,9 @@ function makeFakeWindow() {
   };
 }
 
-function makeRuntime(manifests: Array<{ id: string; emittedEvents?: string[] }>) {
+function makeRuntime(
+  manifests: Array<{ id: string; emittedEvents?: string[]; auth?: PluginManifest["auth"] }>,
+) {
   return {
     listPluginManifests: () =>
       manifests.map((m) => ({
@@ -43,6 +45,7 @@ function makeRuntime(manifests: Array<{ id: string; emittedEvents?: string[] }>)
           entry: "index.js",
           tools: [],
           emittedEvents: m.emittedEvents,
+          ...(m.auth !== undefined ? { auth: m.auth } : {}),
         } satisfies Partial<PluginManifest> as unknown as PluginManifest,
       })),
   };
@@ -154,6 +157,70 @@ describe("plugin event bridge — manifest.emittedEvents", () => {
 
     // Should fire exactly once, not twice
     expect(win._sent).toHaveLength(1);
+
+    dispose();
+  });
+});
+
+// ─── R3 — host-derived <id>.auth.changed (exercises the REAL bridge) ──────────
+
+describe("plugin event bridge — host-derived <id>.auth.changed (R3)", () => {
+  const AUTH: PluginManifest["auth"] = { statusTool: "x_status", loginTool: "x_login" };
+
+  it("bridges ${id}.auth.changed when auth is declared but emittedEvents omits it", () => {
+    const win = makeFakeWindow();
+    const runtime = makeRuntime([{ id: "ms-graph", auth: AUTH }]); // no emittedEvents[]
+    const dispose = registerPluginEventBridge(runtime as unknown as never, win as unknown as never);
+
+    emitEvent("ms-graph.auth.changed", { authenticated: true });
+
+    expect(win._sent).toHaveLength(1);
+    expect(win._sent[0].eventType).toBe("ms-graph.auth.changed");
+    expect(win._sent[0].channel).toBe("lvis:plugin:event");
+
+    dispose();
+  });
+
+  it("preserves the LITERAL dashed manifest id (no `_`<->`-` normalization)", () => {
+    const win = makeFakeWindow();
+    const runtime = makeRuntime([{ id: "foo-bar", auth: AUTH }]);
+    const dispose = registerPluginEventBridge(runtime as unknown as never, win as unknown as never);
+
+    // The dash form is bridged...
+    emitEvent("foo-bar.auth.changed", { authenticated: false });
+    // ...the underscore-mirrored form is NOT (that would be the #131 regression).
+    emitEvent("foo_bar.auth.changed", { authenticated: false });
+
+    expect(win._sent).toHaveLength(1);
+    expect(win._sent[0].eventType).toBe("foo-bar.auth.changed");
+
+    dispose();
+  });
+
+  it("dedupes when the author ALSO lists ${id}.auth.changed in emittedEvents (registers once)", () => {
+    const win = makeFakeWindow();
+    const runtime = makeRuntime([
+      { id: "lge-api", auth: AUTH, emittedEvents: ["lge-api.auth.changed"] },
+    ]);
+    const dispose = registerPluginEventBridge(runtime as unknown as never, win as unknown as never);
+
+    emitEvent("lge-api.auth.changed", { authenticated: true });
+
+    // Exactly one forward — the derived name deduped against the declared one.
+    expect(win._sent).toHaveLength(1);
+    expect(win._sent[0].eventType).toBe("lge-api.auth.changed");
+
+    dispose();
+  });
+
+  it("does NOT derive auth.changed for a plugin without an auth block", () => {
+    const win = makeFakeWindow();
+    const runtime = makeRuntime([{ id: "plain-plugin" }]); // no auth, no emittedEvents
+    const dispose = registerPluginEventBridge(runtime as unknown as never, win as unknown as never);
+
+    emitEvent("plain-plugin.auth.changed", { authenticated: true });
+
+    expect(win._sent).toHaveLength(0);
 
     dispose();
   });
