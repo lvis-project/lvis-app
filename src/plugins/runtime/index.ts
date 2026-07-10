@@ -38,7 +38,6 @@ import { runStartWithTimeout, SessionActivationTracker } from "./lifecycle-timeo
 import {
   buildManifestValidator,
   getDeclaredEmittedEvents,
-  normalizeInstallPolicy,
   parsePluginJson,
 } from "./manifest-validation.js";
 import {
@@ -78,11 +77,9 @@ const log = createLogger("plugin-runtime");
 const START_FAILURE_STOP_TIMEOUT_MS = 2_000;
 
 export { runStartWithTimeout };
-export { declaredUiInvokableMethods };
 export type { PluginPerfStats };
 
 export type { InstallPolicy };
-export { normalizeInstallPolicy, getDeclaredEmittedEvents };
 export { resolveManifestLoadPlan, readEnabledManifestSnapshots };
 
 // Re-export public interface types so callers that do
