@@ -22,6 +22,7 @@ import { installReceiptPath, listFilesRecursive, verifyInstallReceipt } from "./
 import { canonicalJSON } from "./whitelist/canonical-json.js";
 import type { PluginInstallReceipt } from "./plugin-install-receipt.js";
 import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
+import { CAPABILITY_EXTERNAL_AUTH_CONSUMER } from "./capabilities.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 import type { PluginInstallFailureKind } from "../shared/plugin-install-failure.js";
 import { createLogger } from "../lib/logger.js";
@@ -102,7 +103,7 @@ function shaOfCatalogItem(item: PluginMarketplaceItem): string {
 function hasExternalAuthConsumerCapability(source: {
   capabilities?: readonly string[];
 }): boolean {
-  return source.capabilities?.includes("external-auth-consumer") === true;
+  return source.capabilities?.includes(CAPABILITY_EXTERNAL_AUTH_CONSUMER) === true;
 }
 
 function classifyInstallFailure(message: string): PluginInstallFailureKind | undefined {
