@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildManifestValidator, parsePluginJson } from "../manifest-validation.js";
 
-describe("manifest requires.minAppVersion — real SDK-schema validator path", () => {
+describe("manifest requires.minAppVersion — host-owned schema validator path", () => {
   let workDir: string;
   beforeEach(async () => {
     workDir = await mkdtemp(join(tmpdir(), "min-app-version-compat-"));

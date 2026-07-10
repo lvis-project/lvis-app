@@ -123,7 +123,6 @@ const buildOptions = {
     // would break the prebuild `.node` resolution the same way better-sqlite3
     // / ASRT would — keep it external so it ships as a real node_modules entry.
     "node-pty",
-    "@lvis/plugin-sdk",
     "@sentry/electron",
     "fsevents",
     // Pino transports spawn worker_threads via thread-stream and resolve the
