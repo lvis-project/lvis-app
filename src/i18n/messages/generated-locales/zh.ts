@@ -2112,6 +2112,8 @@ export const zhMessages: Record<string, string> = {
   "pluginConfigTab.doctorGrantMismatchDescription": "Doctor 已确认下载的 artifact manifest 与目录批准的 grant 不匹配。此状态无法在本地修复；请在市场包以匹配的 grant 重新发布后重新安装，或移除本地安装。",
   "pluginConfigTab.doctorManifestValidationTitle": "插件 manifest 验证失败",
   "pluginConfigTab.doctorManifestValidationDescription": "插件 manifest 与当前 schema 不匹配。请查看下面的详细字段错误，然后重新安装更新后的市场包或移除本地安装。",
+  "pluginConfigTab.doctorIncompatibleAppTitle": "需要更新应用",
+  "pluginConfigTab.doctorIncompatibleAppDescription": "此插件需要更高版本的 LVIS。重新安装无法解决问题，请先更新应用再重新加载插件。你也可以将其移除。",
   "pluginConfigTab.doctorFailureDetailLabel": "错误详情",
   "pluginConfigTab.errorDoctor": "插件 Doctor 失败",
   "pluginConfigTab.successDoctor": "{displayName} 已修复",
