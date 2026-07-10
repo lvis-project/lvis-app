@@ -227,7 +227,12 @@ export interface Tool {
 export interface PluginManifest {
 
   id: string;
-  name: string;
+  /**
+   * Human-readable display name. Schema-OPTIONAL (#885 v6): an authored manifest
+   * may omit it. `normalizeManifest` materializes `name ?? id` so every host
+   * consumer reads a guaranteed string off {@link NormalizedManifest}.
+   */
+  name?: string;
   version: string;
   entry: string;
 
@@ -356,18 +361,26 @@ export interface PluginManifest {
  * at load). Structurally a `PluginManifest` whose `tools` visibility is
  * materialized; kept as a distinct name so consumers signal they read the
  * normalized form.
+ *
+ * `name` is REQUIRED here even though it is schema-optional on the raw
+ * `PluginManifest`: `normalizeManifest` materializes `name ?? id`, so every
+ * consumer of the normalized form reads a guaranteed string.
  */
-export type NormalizedManifest = Omit<PluginManifest, "tools"> & {
+export type NormalizedManifest = Omit<PluginManifest, "tools" | "name"> & {
   tools: Tool[];
+  name: string;
 };
 
 /**
  * Materialize every tool's surface visibility into the pure-form SoT every host
- * consumer reads (SoT §2.3). The ONE defaulting site: a tool that omits
- * `_meta.ui.visibility` gets the STANDARD SEP-1865 default `["model","app"]`; an
- * explicit `[]` is REJECTED (R6 fail-closed — never widened to dual). Pure (no
- * IO). `tool-visibility.ts` depends on this being the sole defaulting step, so
- * its output tools ALWAYS carry an explicit non-empty `_meta.ui.visibility`.
+ * consumer reads (SoT §2.3). Two defaulting sites, both pure (no IO):
+ *   1. a tool that omits `_meta.ui.visibility` gets the STANDARD SEP-1865
+ *      default `["model","app"]`; an explicit `[]` is REJECTED (R6 fail-closed —
+ *      never widened to dual). `tool-visibility.ts` depends on this being the
+ *      sole tool-visibility defaulting step, so output tools ALWAYS carry an
+ *      explicit non-empty `_meta.ui.visibility`.
+ *   2. `name` defaults to `id` when the (now schema-optional) manifest omits it,
+ *      so every consumer of {@link NormalizedManifest} reads a guaranteed string.
  */
 export const normalizeManifest = (manifest: PluginManifest): NormalizedManifest => {
   const DUAL: Array<"model" | "app"> = ["model", "app"];
@@ -384,7 +397,7 @@ export const normalizeManifest = (manifest: PluginManifest): NormalizedManifest 
     }
     return t;
   });
-  return { ...manifest, tools };
+  return { ...manifest, tools, name: manifest.name ?? manifest.id };
 };
 
 /**
@@ -450,7 +463,12 @@ export interface PluginConfigSchemaProperty {
 export interface PluginUiExtension {
   id: string;
   slot: "sidebar";
-  kind: "embedded-module" | "embedded-page" | "info-card" | "action";
+  /**
+   * Panel surface kind. The `"action"` kind (an icon that dispatched a declared
+   * tool with no panel) was removed in #885 v6 along with its `tool` field —
+   * app-invokable behavior is now expressed by a tool's `_meta.ui.visibility`.
+   */
+  kind: "embedded-module" | "embedded-page" | "info-card";
   displayName?: string;
   title: string;
   description?: string;
@@ -458,10 +476,6 @@ export interface PluginUiExtension {
   entry?: string;
   exportName?: string;
   page?: string;
-
-
-
-  tool?: string;
   /**
    * Detached-window geometry hints. Used only when the host opens this
    * extension in a magnetic-snap BrowserWindow; the decision to detach is
