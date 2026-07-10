@@ -11,8 +11,16 @@
  * Sources of truth re-exported for plugin-development docs — do not fork.
  */
 
-/** Closed set of capability strings accepted in manifest.capabilities[]. */
-export const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set([
+/**
+ * Closed vocabulary of capability strings accepted in manifest.capabilities[].
+ *
+ * Declared as a `const` tuple so it backs BOTH the runtime membership set
+ * (`KNOWN_CAPABILITIES`) and the compile-time {@link CapabilityId} union. The
+ * host-consumed id constants below are typed to that union, so a typo in a
+ * host-side capability gate is a `tsc` error instead of a silent gate against
+ * an id no manifest can ever declare.
+ */
+export const KNOWN_CAPABILITY_IDS = [
   "ms-graph-consumer",
   "external-auth-consumer",
   "mail-source",
@@ -28,7 +36,27 @@ export const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set([
   // triggerConversation() now routes to OverlayContext staging instead of spawning
   // a fresh ConversationLoop. Capability gates the same method as before.
   "host:overlay",
-]);
+] as const;
+
+/** Compile-time union of every valid capability id (typo-safety for gates). */
+export type CapabilityId = (typeof KNOWN_CAPABILITY_IDS)[number];
+
+/** Closed set of capability strings accepted in manifest.capabilities[]. */
+export const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set(KNOWN_CAPABILITY_IDS);
+
+/**
+ * Capability ids CONSUMED by host-internal capability gates. Every host-side
+ * gate references one of these named constants instead of an inline string
+ * literal, so all gate sites share a single typo-safe source for the id.
+ *
+ * These are NOT a re-introduction of the deleted `ENFORCED_CAPABILITIES` map:
+ * they carry NO enforcement policy (which method is gated, fail-closed vs
+ * fail-open), only the id string itself. Enforcement logic stays inline at each
+ * gate. Typed as {@link CapabilityId}, so any drift from KNOWN_CAPABILITY_IDS
+ * is a compile error.
+ */
+export const CAPABILITY_EXTERNAL_AUTH_CONSUMER: CapabilityId = "external-auth-consumer";
+export const CAPABILITY_HOST_OVERLAY: CapabilityId = "host:overlay";
 
 /**
  * Map of event namespace prefix → capability required to EMIT events in that
