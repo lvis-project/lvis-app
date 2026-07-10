@@ -9,147 +9,8 @@
   "entry": "dist/hostPlugin.js",
   "description": "회의 녹음·음성 전사(STT)·요약 생성 플러그인. 녹음 시작/중지, 실시간 오디오 청크 전사(OpenAI Whisper), AI 요약·하이라이트·액션 아이템 자동 추출. 액션 아이템은 meeting.summary.created 이벤트의 actionItems 페이로드로 broadcast 되며, 요약은 로컬 SessionStore(JSON)에 영속화. MS Teams·Zoom 등 회의 후처리 지원.",
   "tools": [
-    "meeting_start",
-    "batch_processing_audio",
-    "meeting_push_chunk",
-    "meeting_stop",
-    "meeting_transcript",
-    "meeting_sessions",
-    "meeting_previous_sessions",
-    "meeting_sessions_by_category",
-    "meeting_categories",
-    "meeting_register_category",
-    "meeting_session_detail",
-    "meeting_related_sessions",
-    "meeting_upload_file",
-    "meeting_open_prep",
-    "meeting_register_manual_meeting",
-    "meeting_register_scheduled_meeting",
-    "meeting_register_scheduled_meetings",
-    "meeting_get_prep",
-    "meeting_bulk_upsert_preps",
-    "meeting_list_preps",
-    "meeting_delete_prep",
-    "meeting_cancel",
-    "meeting_open_url",
-    "meeting_update_summary",
-    "meeting_update_session_category",
-    "meeting_link_sessions",
-    "meeting_unlink_sessions",
-    "meeting_regenerate_summary"
-  ],
-  "capabilities": [
-    "meeting-recorder",
-    "external-auth-consumer"
-  ],
-  "networkAccess": {
-    "allowedDomains": [
-      "openai.azure.com",
-      "cognitiveservices.azure.com",
-      "services.ai.azure.com",
-      "api.openai.com"
-    ],
-    "reasoning": "STT transcription egress to Azure OpenAI / OpenAI Whisper endpoints via host-mediated fetch."
-  },
-  "uiActions": {
-    "meeting_start": {},
-    "batch_processing_audio": {},
-    "meeting_push_chunk": {},
-    "meeting_stop": {},
-    "meeting_transcript": {},
-    "meeting_sessions": {},
-    "meeting_previous_sessions": {},
-    "meeting_sessions_by_category": {},
-    "meeting_categories": {},
-    "meeting_register_category": {},
-    "meeting_session_detail": {},
-    "meeting_related_sessions": {},
-    "meeting_upload_file": {},
-    "meeting_stage_upload_begin": {},
-    "meeting_stage_upload_chunk": {},
-    "meeting_stage_upload_finish": {},
-    "meeting_stage_upload_cancel": {},
-    "meeting_open_prep": {},
-    "meeting_get_prep": {},
-    "meeting_bulk_upsert_preps": {},
-    "meeting_list_preps": {},
-    "meeting_cancel": {},
-    "meeting_open_url": {},
-    "meeting_update_summary": {},
-    "meeting_update_session_category": {},
-    "meeting_link_sessions": {},
-    "meeting_unlink_sessions": {},
-    "meeting_regenerate_summary": {}
-  },
-  "eventSubscriptions": [
     {
-      "type": "host.theme.changed"
-    }
-  ],
-  "emittedEvents": [
-    "meeting.started",
-    "meeting.ended",
-    "meeting.transcript.updated",
-    "meeting.summary.created",
-    "meeting.summary.degraded",
-    "meeting.error",
-    "meeting.prep.opened",
-    "meeting.prep.registered"
-  ],
-  "startupTimeoutMs": 5000,
-  "keywords": [
-    {
-      "keyword": "녹음시작",
-      "skillId": "meeting_start"
-    },
-    {
-      "keyword": "전사",
-      "skillId": "meeting_transcript"
-    },
-    {
-      "keyword": "요약",
-      "skillId": "meeting_stop"
-    },
-    {
-      "keyword": "STT",
-      "skillId": "meeting_start"
-    },
-    {
-      "keyword": "음성메모",
-      "skillId": "meeting_start"
-    }
-  ],
-  "notificationEvents": [
-    {
-      "event": "meeting.summary.created",
-      "titleField": "title",
-      "bodyField": "summary"
-    },
-    {
-      "event": "meeting.summary.degraded",
-      "titleField": "title",
-      "bodyField": "body"
-    }
-  ],
-  "ui": [
-    {
-      "id": "meeting-control",
-      "slot": "sidebar",
-      "kind": "embedded-module",
-      "displayName": "미팅",
-      "title": "Meeting Recorder",
-      "description": "회의 세션 시작/청크 주입/종료/전사 조회를 테스트합니다.",
-      "entry": "dist/ui/meeting-control.js",
-      "exportName": "default",
-      "window": {
-        "width": 860,
-        "height": 760,
-        "minHeight": 680
-      }
-    }
-  ],
-  "toolSchemas": {
-    "meeting_start": {
+      "name": "meeting_start",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n녹음 시작 tool입니다. 회의가 시작되거나 사용자가 녹음을 요청할 때 호출합니다. floating recorder 창을 열고 마이크/시스템 오디오 캡처, STT 파이프라인을 시작합니다. 사용 시기: 사용자가 '녹음 시작해줘', '회의록 받아줘', '회의 녹음해줘'라고 할 때. 별도로 batch_processing_audio 를 호출하지 마세요. 종료는 사용자가 Done 을 누르거나 meeting_stop 을 호출합니다. 이 tool 은 예정 회의를 등록하지 않으므로, 일정 저장은 register/open_prep 계열을 사용하세요. 반환: { ok, reused }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -178,9 +39,18 @@
           "sessionId"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "batch_processing_audio": {
+    {
+      "name": "batch_processing_audio",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n내부/고급용: 이미 확보한 오디오를 PCM 청크로 나눠 전사·요약하는 배치 처리 세션을 초기화합니다. 일반 사용자의 '녹음 시작', '회의록 받아줘' 요청에는 사용하지 말고 meeting_start 를 사용하세요. 이 tool 은 플로팅 창, 마이크, 시스템 오디오 캡처를 열지 않습니다. 사용 시기: 외부 시스템이나 UI 대용량 업로드 경로가 자체 오디오 소스를 가지고 meeting_push_chunk 로 PCM 청크를 직접 보낼 때. 입력: sessionId, context?. 반환: { sessionId, started, mode, sampleRate }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -213,9 +83,18 @@
           "sessionId"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_push_chunk": {
+    {
+      "name": "meeting_push_chunk",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n내부 전용: 이미 시작된 회의 세션에 PCM16LE 모노 오디오 청크를 추가합니다. 사용자 자연어 요청에서 직접 호출하지 않습니다. 사용 시기: batch_processing_audio 로 만든 세션에 외부 캡처 루프가 raw PCM 을 흘려보낼 때. 일반 녹음은 meeting_start 가 플로팅 창에서 캡처와 push 를 자동 처리합니다. 반환: { sessionId, mode: \"batch\", added }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -265,9 +144,18 @@
           "chunk"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_stop": {
+    {
+      "name": "meeting_stop",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n진행 중인 녹음 세션을 종료하고 최종 회의록을 생성합니다. 사용 시기: 사용자가 '회의 끝났어', '녹음 중지', '회의록 만들어줘'라고 할 때. 사용하지 말 것: 요약 없이 버릴 때는 meeting_cancel, 이미 끝난 회의록만 조회할 때는 meeting_session_detail. lengthTier 로 회의록 길이를 조정할 수 있습니다. 반환: { title, summary, highlights, actionItems, createdAt, lengthTier }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -291,9 +179,18 @@
           "sessionId"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_transcript": {
+    {
+      "name": "meeting_transcript",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n특정 녹음 세션의 전체 전사 텍스트를 시간순으로 조회합니다. 사용 시기: '그 회의에서 누가 뭐라고 했지?', '몇 분쯤 나온 발언이야?'처럼 원문/타임스탬프가 필요할 때. 요약만 필요하면 meeting_session_detail 을 사용하세요. 반환: TranscriptSegment[].",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -308,18 +205,36 @@
           "sessionId"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_sessions": {
+    {
+      "name": "meeting_sessions",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n완료된 회의록 목록을 가져옵니다. 사용 시기: 사용자가 '최근 회의록 보여줘', '지난 회의 목록'처럼 어떤 회의록을 볼지 고르려 할 때. 본문 전사/요약은 포함하지 않으므로, 사용자가 특정 항목을 고르면 meeting_session_detail 을 이어서 호출하세요. 반환: SessionMetadata[].",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {},
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_previous_sessions": {
+    {
+      "name": "meeting_previous_sessions",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n이전 완료 회의록을 조회합니다. 사용 시기: 사용자가 '이 회의 이전 회의 찾아줘', '지난번 같은 카테고리 회의 보여줘'라고 할 때. sessionId 를 주면 해당 회의보다 이전 createdAt 기준으로 찾고, beforeCreatedAt/category/limit 으로도 필터링할 수 있습니다. 반환: SessionMetadata[].",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -343,9 +258,18 @@
           }
         },
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_sessions_by_category": {
+    {
+      "name": "meeting_sessions_by_category",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n카테고리별 완료 회의록을 조회합니다. 사용 시기: 사용자가 '프로젝트 카테고리 회의 보여줘', '1:1 회의록만 찾아줘'라고 할 때. 카테고리는 필수이며 비어 있으면 사용자에게 먼저 어떤 카테고리로 조회할지 물어보세요. 반환: SessionMetadata[] 또는 { ok:false, needsCategorySelection, categories }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -361,18 +285,36 @@
           }
         },
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_categories": {
+    {
+      "name": "meeting_categories",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n등록된 회의 카테고리 목록을 조회합니다. 사용 시기: 다른 플러그인이 새 회의 카테고리를 등록하려 하거나 사용자가 카테고리를 고르려 할 때. 새 카테고리를 바로 만들지 말고 먼저 이 tool 로 기존 목록을 보여준 뒤 사용자 확인 후 meeting_register_category 를 호출하세요. 반환: { categories }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {},
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_register_category": {
+    {
+      "name": "meeting_register_category",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n새 회의 카테고리를 등록합니다. 사용 시기: meeting_categories 로 기존 카테고리를 조회한 뒤 사용자가 새 카테고리 등록을 명확히 승인했을 때만 호출하세요. 예약 회의 등록 중 unknownCategories 응답을 받으면 이 tool 로 카테고리를 등록한 뒤 다시 예약 회의를 등록합니다. 반환: { ok, category, categories }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -387,9 +329,18 @@
           "category"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_session_detail": {
+    {
+      "name": "meeting_session_detail",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n완료된 회의록 1건의 상세 데이터를 조회합니다. 사용 시기: 사용자가 목록에서 회의록을 골랐거나 '그 회의록 자세히 보여줘'라고 할 때. 요약, 중간 요약, 전체 전사를 한 번에 반환합니다. 존재하지 않으면 null. 반환: { sessionId, context, transcript, intermediateSummaries, finalSummary, finalized, createdAt, updatedAt }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -404,9 +355,18 @@
           "sessionId"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_related_sessions": {
+    {
+      "name": "meeting_related_sessions",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n완료된 회의록 1건에 연결된 관련 회의 목록을 조회합니다. 사용 시기: 사용자가 '이 회의랑 이어진 회의 보여줘', '관련 회의 뭐가 있어?'라고 할 때. 회의를 새로 연결하려면 meeting_link_sessions 를 사용하세요. 반환: SessionMetadata[].",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -421,9 +381,18 @@
           "sessionId"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_upload_file": {
+    {
+      "name": "meeting_upload_file",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n이미 녹음된 오디오/비디오 파일로 회의록을 생성합니다. 사용 시기: 사용자가 mp3, wav, m4a, mp4, webm, ogg, flac 파일을 주며 '이 파일로 회의록 만들어줘'라고 할 때. 실시간 녹음 세션에는 사용하지 않습니다. 파일은 25MB 이하가 권장됩니다. 반환: { sessionId, transcript, finalSummary }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -476,18 +445,18 @@
           "file"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_get_prep": {
-      "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n현재 UI가 보고 있거나 가장 가까운 예정 회의 1건의 '회의 전 안내' 정보를 조회합니다. 사용 시기: '오늘 회의 뭐야?', '다음 회의 정보 보여줘'처럼 단일 예정 회의가 필요할 때. 여러 예정 회의를 보여줘야 하면 meeting_list_preps 를 사용하세요. 녹음 시작/회의록 생성은 하지 않습니다. 반환: MeetingContext 또는 null.",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {},
-        "additionalProperties": false
-      }
-    },
-    "meeting_open_prep": {
+    {
+      "name": "meeting_open_prep",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n회의 시작 직전에 회의 전 안내 카드 1건을 저장하고 즉시 사이드바에 표시합니다. context.category 는 필수입니다. 카테고리가 없으면 저장하지 않고 needsCategorySelection 을 반환하므로 사용자에게 카테고리를 물어본 뒤 다시 호출하세요. 사용자가 '녹음 시작해줘'라고 요청한 경우에는 이 tool 이 아니라 meeting_start 를 사용하세요. 이 tool 은 녹음을 시작하지 않고 캘린더 일정도 만들지 않습니다. 반환: { ok, contextId }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -503,9 +472,151 @@
           "context"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_register_scheduled_meeting": {
+    {
+      "name": "meeting_register_manual_meeting",
+      "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n사용자가 채팅에서 직접 말한 예정 미팅 1건을 등록합니다. 사용 시기: '오늘 3시에 로봇 싱크 등록해줘', '참석자는 지수, 민재야'처럼 title/time/participants 를 사용자가 직접 제공할 때. category 와 회의 안건 (agenda 또는 agendaText 중 하나) 은 필수입니다. 사용자가 카테고리·안건을 말하지 않았다면 이 tool 을 호출하기 전에 먼저 물어보세요. previousSummary (이전 회의 요약) 은 선택 — 같은 주제의 직전 회의가 있으면 함께 등록해서 회의 전 안내 카드에 'previous meeting' 으로 표시됩니다. 이미 캘린더/회의실/화상회의 시스템에서 만들어진 일정 1건을 가져오는 경우는 meeting_register_scheduled_meeting 을 사용하세요. 이 tool 은 녹음을 시작하지 않고 원본 캘린더 일정도 만들지 않습니다. 반환: { ok, id, source: 'manual', focusInUi }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "선택 stable id. 생략하면 title, scheduledStart, organizer 등으로 결정적 id 를 생성합니다."
+          },
+          "title": {
+            "type": "string",
+            "description": "필수. 사용자가 말한 미팅 제목."
+          },
+          "scheduledStart": {
+            "type": "string",
+            "description": "필수. 시작 시각. ISO-8601 timezone 포함 권장. 예: 2026-05-20T15:00:00+09:00."
+          },
+          "scheduledEnd": {
+            "type": "string",
+            "description": "선택. 종료 시각. 생략해도 upcoming list 에 표시됩니다."
+          },
+          "organizer": {
+            "type": "string",
+            "description": "선택. 주최자 표시 이름."
+          },
+          "location": {
+            "type": "string",
+            "description": "선택. 회의 장소 또는 회의실명."
+          },
+          "description": {
+            "type": "string",
+            "description": "선택. 회의 설명, 초대 본문, 메모."
+          },
+          "category": {
+            "type": "string",
+            "description": "필수. 회의 카테고리. 기존 카테고리와 맞으면 해당 카테고리의 최근 회의록 요약이 회의 전 안내에 자동 표시됩니다. 값이 없으면 사용자에게 반드시 물어보세요. 새 카테고리라면 먼저 meeting_categories 로 조회한 뒤 meeting_register_category 로 등록해야 합니다."
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "선택. 참석자 표시 이름 배열."
+          },
+          "agenda": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "필수. UI의 '오늘 회의 안건'에 표시할 회의 안건 배열. 최소 1개, 최대 50개. agendaText / agendaItems / meetingAgenda / todayAgenda 도 받지만 가능하면 agenda 배열로 전달하세요."
+          },
+          "agendaText": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192,
+            "description": "선택. agenda 미제공 시 줄바꿈/bullet 텍스트를 자동 split. agenda 가 제공되면 무시."
+          },
+          "previousSummary": {
+            "type": "object",
+            "description": "선택. 같은 주제의 직전 회의 요약. UI 의 회의 전 안내 카드에 'previous meeting' 으로 표시. 사용자가 명시적으로 알려준 경우만 첨부 — 자동으로 추측하지 마세요. 이미 등록된 같은 카테고리 과거 회의 요약은 자동 첨부되지 않으므로 사용자가 명시한 텍스트만 사용.",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "description": "선택. 이전 회의 제목."
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384,
+                "description": "필수. 이전 회의 요약 텍스트."
+              }
+            },
+            "required": [
+              "summary"
+            ],
+            "additionalProperties": false
+          },
+          "conference": {
+            "type": "object",
+            "description": "선택. 사용자가 참여 링크나 접속 정보를 함께 제공했을 때의 화상회의 정보.",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "webex",
+                  "zoom",
+                  "teams",
+                  "other"
+                ]
+              },
+              "joinUrl": {
+                "type": "string"
+              },
+              "accessCode": {
+                "type": "string"
+              },
+              "password": {
+                "type": "string"
+              },
+              "hostDisplayName": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "focusInUi": {
+            "type": "boolean",
+            "description": "기본 true. false 면 저장만 하고 현재 회의 전 안내 카드로 전환하지 않습니다."
+          }
+        },
+        "required": [
+          "title",
+          "scheduledStart",
+          "category",
+          "agenda"
+        ],
+        "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model"
+          ]
+        }
+      }
+    },
+    {
+      "name": "meeting_register_scheduled_meeting",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관. 사용 시기: 사용자가 명시적으로 '미팅 플러그인에 등록', '녹음할 예정 회의로 요청', 회의실 예약/화상회의 생성/캘린더 이벤트 생성 직후 그 결과를 미팅 플러그인에도 등록하라고 '요청한 경우'에만 호출합니다. 호출 금지: 사용자가 단순히 회의 관련 메일/캘린더 내용을 보여주거나, 메일 요약/질문/답장 작성만 요청한 경우. 회의 관련 메일이 있다는 이유만으로 자동 호출하지 마세요. 입력은 context, event, 또는 title/scheduledStart 같은 top-level 회의 필드 중 편한 형태로 전달할 수 있으며, 회의 category 와 회의 안건(agenda/agendaText, 또는 사용자가 등록하라고 지정한 원문 안건 섹션)이 반드시 필요합니다. 회의 정보가 전혀 없거나 등록 의사가 불명확하면 이 tool 을 호출하지 말고 사용자에게 먼저 물어보세요. category 가 없으면 저장하지 않고 { ok:false, needsCategorySelection, categories, suggestions } 를 반환하므로 사용자에게 카테고리를 물어본 뒤 다시 호출하세요. agenda 를 찾지 못하면 { ok:false, needsAgenda } 를 반환하므로 메일 내용이나 지난 회의 후속 조치에서 안건을 확보해 다시 호출하세요. Webex 회의로 보이면 webexUrl 또는 conference.joinUrl 도 반드시 전달하세요. 새 카테고리라면 meeting_categories 로 기존 목록을 보여주고 사용자 확인 후 meeting_register_category 를 먼저 호출하세요. 참석자는 선택 정보입니다. 권장 사용자 문구: \"해당 미팅에 대해 녹음을 진행하실 거라면, 미팅 플러그인에도 일정을 등록해두겠습니다.\" 이 tool 은 원본 일정 생성도 녹음 시작도 하지 않습니다. 반환: { ok, id, source, focusInUi }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -646,9 +757,17 @@
           }
         },
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model"
+          ]
+        }
       }
     },
-    "meeting_register_scheduled_meetings": {
+    {
+      "name": "meeting_register_scheduled_meetings",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n이미 외부에서 만들어진 예정 회의 여러 건을 한 번에 저장합니다. 사용 시기: 사용자가 명시적으로 여러 회의를 미팅 플러그인 upcoming list 에 등록하라고 요청했거나, 캘린더 동기화/회의실 예약 결과/화상회의 생성 결과를 bulk 로 등록하는 자동화가 실행될 때만 호출합니다. 호출 금지: 사용자가 단순히 회의 관련 메일/캘린더 내용을 보여주거나, 메일 요약/질문/답장 작성만 요청한 경우. 회의 관련 메일이 있다는 이유만으로 자동 호출하지 마세요. 필수 입력: meetings 또는 events 중 하나이며, 각 회의 category 와 agenda/agendaText 또는 사용자가 등록하라고 지정한 원문 안건 섹션도 반드시 필요합니다. Webex 회의라면 webexUrl 또는 conference.joinUrl 도 반드시 전달하세요. 둘 다 없으면 이 tool 을 호출하지 말고 사용자에게 먼저 물어보세요. 하나라도 category 가 없으면 저장하지 않고 { ok:false, needsCategorySelection, categories, suggestions } 를 반환하므로 사용자에게 카테고리를 물어본 뒤 다시 호출하세요. 하나라도 agenda 가 없으면 { ok:false, needsAgenda } 를 반환합니다. 새 카테고리라면 meeting_categories 로 기존 목록을 보여주고 사용자 확인 후 meeting_register_category 를 먼저 호출하세요. 사용자 요청으로 1건을 직접 등록하면 meeting_register_manual_meeting, 외부 생성 결과 1건만 등록하면 meeting_register_scheduled_meeting, 즉시 화면 표시가 목적이면 meeting_open_prep 을 사용하세요. 이 tool 은 원본 일정 생성도 녹음 시작도 하지 않습니다. 반환: { ok, ids, count, source }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -682,9 +801,35 @@
           }
         },
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model"
+          ]
+        }
       }
     },
-    "meeting_bulk_upsert_preps": {
+    {
+      "name": "meeting_get_prep",
+      "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n현재 UI가 보고 있거나 가장 가까운 예정 회의 1건의 '회의 전 안내' 정보를 조회합니다. 사용 시기: '오늘 회의 뭐야?', '다음 회의 정보 보여줘'처럼 단일 예정 회의가 필요할 때. 여러 예정 회의를 보여줘야 하면 meeting_list_preps 를 사용하세요. 녹음 시작/회의록 생성은 하지 않습니다. 반환: MeetingContext 또는 null.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
+      }
+    },
+    {
+      "name": "meeting_bulk_upsert_preps",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n저수준 bulk upsert: 회의 전 안내(prep) 여러 건을 그대로 저장/갱신합니다. 일반 LLM 선택에서는 meeting_register_scheduled_meetings 를 우선 사용하세요. 각 prep.category 는 필수입니다. 비어 있으면 저장하지 않고 needsCategorySelection 을 반환하므로 사용자에게 카테고리를 물어본 뒤 다시 호출하세요. UI 포커스를 바꾸지 않고 녹음도 시작하지 않습니다. 반환: { ids, count }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -702,18 +847,36 @@
           "preps"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_list_preps": {
+    {
+      "name": "meeting_list_preps",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n저장된 예정 회의/회의 전 안내 목록을 시간순으로 조회합니다. 사용 시기: '예정된 회의 다 보여줘', '회의 목록'처럼 여러 항목을 보여줘야 할 때. 가장 가까운 1건만 필요하면 meeting_get_prep 를 사용하세요. 녹음 세션/완료 회의록 목록은 meeting_sessions 입니다. 반환: MeetingContext[].",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {},
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_delete_prep": {
+    {
+      "name": "meeting_delete_prep",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n예정 회의/회의 전 안내 1건을 삭제합니다. 사용 시기: 사용자가 '그 예정 회의 빼줘', 캘린더가 cancelled 이벤트를 보낸 경우. 완료된 회의록이나 진행 중 녹음 세션은 삭제하지 않습니다. 진행 중 녹음 폐기는 meeting_cancel 입니다. 반환: { deleted: boolean }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -728,26 +891,17 @@
           "id"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model"
+          ]
+        }
       }
     },
-    "meeting_open_url": {
-      "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\nWebex 회의가 연결된 예정 회의에서 전달받은 정확한 Webex joinUrl 만 기본 브라우저로 엽니다. 사용 시기: context.conference.type 이 webex 이고 joinUrl 이 https://*.webex.com/... 형태로 존재하며 사용자가 회의 참여를 요청했을 때만 호출하세요. Zoom/Teams/일반 URL/추측 URL에는 호출하지 마세요. 이 tool 은 녹음 시작, 일정 등록, 회의록 생성을 하지 않습니다. 반환: { ok }.",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string",
-            "format": "uri"
-          }
-        },
-        "required": [
-          "url"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "meeting_cancel": {
+    {
+      "name": "meeting_cancel",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n진행 중인 녹음 세션을 요약 없이 폐기합니다. 사용 시기: 사용자가 '녹음 취소', '실수로 시작했어'라고 할 때. meeting_stop 과 달리 회의록을 만들지 않고 현재 세션 데이터를 삭제합니다. 이미 완료된 회의록 삭제나 예정 회의 삭제에는 사용하지 않습니다. 예정 회의 삭제는 meeting_delete_prep 입니다. 반환: { ok }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -762,9 +916,44 @@
           "sessionId"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_update_summary": {
+    {
+      "name": "meeting_open_url",
+      "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\nWebex 회의가 연결된 예정 회의에서 전달받은 정확한 Webex joinUrl 만 기본 브라우저로 엽니다. 사용 시기: context.conference.type 이 webex 이고 joinUrl 이 https://*.webex.com/... 형태로 존재하며 사용자가 회의 참여를 요청했을 때만 호출하세요. Zoom/Teams/일반 URL/추측 URL에는 호출하지 마세요. 이 tool 은 녹음 시작, 일정 등록, 회의록 생성을 하지 않습니다. 반환: { ok }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
+      }
+    },
+    {
+      "name": "meeting_update_summary",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n이미 완료된 회의록의 제목/요약/하이라이트/액션 아이템을 수정합니다. 사용 시기: 사용자가 '이 회의록 제목 바꿔줘', 인라인 편집 저장을 요청할 때. 누락 필드는 기존 값을 유지합니다. 아직 종료되지 않은 녹음 세션에는 사용할 수 없습니다. 먼저 meeting_stop 또는 meeting_regenerate_summary 가 필요합니다. 반환: 갱신된 finalSummary.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -802,9 +991,17 @@
         ],
         "additionalProperties": false
       },
-      "pathFields": []
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
+      }
     },
-    "meeting_update_session_category": {
+    {
+      "name": "meeting_update_session_category",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n완료된 회의록 1건의 카테고리를 변경합니다. 사용 시기: 사용자가 '이 회의 카테고리를 프로젝트로 바꿔줘', 회의록 목록 UI에서 카테고리 셀렉트를 변경할 때. category 는 필수이며 비어 있으면 저장하지 않고 needsCategorySelection 을 반환합니다. 반환: { ok, sessionId, category }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -824,9 +1021,18 @@
           "category"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_link_sessions": {
+    {
+      "name": "meeting_link_sessions",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n완료된 회의록 2건을 서로 관련 회의로 연결합니다. 사용 시기: 사용자가 '이 회의랑 저 회의 연결해줘', '후속 회의로 묶어줘'라고 할 때. 양방향으로 저장되며 원문/요약 내용은 변경하지 않습니다. 반환: { ok, sessionId, targetSessionId, linked, relatedSessionIds }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -846,9 +1052,18 @@
           "targetSessionId"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_unlink_sessions": {
+    {
+      "name": "meeting_unlink_sessions",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n서로 연결된 완료 회의록 2건의 관련 회의 링크를 해제합니다. 사용 시기: 사용자가 '이 회의 연결 끊어줘', '관련 회의에서 빼줘'라고 할 때. 양방향 링크를 제거하며 원문/요약 내용은 변경하지 않습니다. 반환: { ok, sessionId, targetSessionId, linked, relatedSessionIds }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -868,9 +1083,18 @@
           "targetSessionId"
         ],
         "additionalProperties": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
       }
     },
-    "meeting_regenerate_summary": {
+    {
+      "name": "meeting_regenerate_summary",
       "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n이미 완료된 회의의 전사는 그대로 두고 최종 회의록만 다시 생성합니다. 사용 시기: 사용자가 '회의록 다시 만들어줘', '요약 다시 뽑아줘', '더 길게 다시 정리해줘'라고 할 때. 진행 중인 녹음을 끝내는 용도가 아니며, 녹음 종료는 meeting_stop 입니다. 반환: 새 finalSummary.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -895,134 +1119,152 @@
         ],
         "additionalProperties": false
       },
-      "pathFields": []
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
+      }
     },
-    "meeting_register_manual_meeting": {
-      "description": "회의실(공간/시설 단위 자원) 예약·조회와 무관.\n사용자가 채팅에서 직접 말한 예정 미팅 1건을 등록합니다. 사용 시기: '오늘 3시에 로봇 싱크 등록해줘', '참석자는 지수, 민재야'처럼 title/time/participants 를 사용자가 직접 제공할 때. category 와 회의 안건 (agenda 또는 agendaText 중 하나) 은 필수입니다. 사용자가 카테고리·안건을 말하지 않았다면 이 tool 을 호출하기 전에 먼저 물어보세요. previousSummary (이전 회의 요약) 은 선택 — 같은 주제의 직전 회의가 있으면 함께 등록해서 회의 전 안내 카드에 'previous meeting' 으로 표시됩니다. 이미 캘린더/회의실/화상회의 시스템에서 만들어진 일정 1건을 가져오는 경우는 meeting_register_scheduled_meeting 을 사용하세요. 이 tool 은 녹음을 시작하지 않고 원본 캘린더 일정도 만들지 않습니다. 반환: { ok, id, source: 'manual', focusInUi }.",
+    {
+      "name": "meeting_stage_upload_begin",
       "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "선택 stable id. 생략하면 title, scheduledStart, organizer 등으로 결정적 id 를 생성합니다."
-          },
-          "title": {
-            "type": "string",
-            "description": "필수. 사용자가 말한 미팅 제목."
-          },
-          "scheduledStart": {
-            "type": "string",
-            "description": "필수. 시작 시각. ISO-8601 timezone 포함 권장. 예: 2026-05-20T15:00:00+09:00."
-          },
-          "scheduledEnd": {
-            "type": "string",
-            "description": "선택. 종료 시각. 생략해도 upcoming list 에 표시됩니다."
-          },
-          "organizer": {
-            "type": "string",
-            "description": "선택. 주최자 표시 이름."
-          },
-          "location": {
-            "type": "string",
-            "description": "선택. 회의 장소 또는 회의실명."
-          },
-          "description": {
-            "type": "string",
-            "description": "선택. 회의 설명, 초대 본문, 메모."
-          },
-          "category": {
-            "type": "string",
-            "description": "필수. 회의 카테고리. 기존 카테고리와 맞으면 해당 카테고리의 최근 회의록 요약이 회의 전 안내에 자동 표시됩니다. 값이 없으면 사용자에게 반드시 물어보세요. 새 카테고리라면 먼저 meeting_categories 로 조회한 뒤 meeting_register_category 로 등록해야 합니다."
-          },
-          "participants": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "선택. 참석자 표시 이름 배열."
-          },
-          "agenda": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "maxLength": 512
-            },
-            "minItems": 1,
-            "maxItems": 50,
-            "description": "필수. UI의 '오늘 회의 안건'에 표시할 회의 안건 배열. 최소 1개, 최대 50개. agendaText / agendaItems / meetingAgenda / todayAgenda 도 받지만 가능하면 agenda 배열로 전달하세요."
-          },
-          "agendaText": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 8192,
-            "description": "선택. agenda 미제공 시 줄바꿈/bullet 텍스트를 자동 split. agenda 가 제공되면 무시."
-          },
-          "previousSummary": {
-            "type": "object",
-            "description": "선택. 같은 주제의 직전 회의 요약. UI 의 회의 전 안내 카드에 'previous meeting' 으로 표시. 사용자가 명시적으로 알려준 경우만 첨부 — 자동으로 추측하지 마세요. 이미 등록된 같은 카테고리 과거 회의 요약은 자동 첨부되지 않으므로 사용자가 명시한 텍스트만 사용.",
-            "properties": {
-              "title": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256,
-                "description": "선택. 이전 회의 제목."
-              },
-              "summary": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 16384,
-                "description": "필수. 이전 회의 요약 텍스트."
-              }
-            },
-            "required": [
-              "summary"
-            ],
-            "additionalProperties": false
-          },
-          "conference": {
-            "type": "object",
-            "description": "선택. 사용자가 참여 링크나 접속 정보를 함께 제공했을 때의 화상회의 정보.",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "webex",
-                  "zoom",
-                  "teams",
-                  "other"
-                ]
-              },
-              "joinUrl": {
-                "type": "string"
-              },
-              "accessCode": {
-                "type": "string"
-              },
-              "password": {
-                "type": "string"
-              },
-              "hostDisplayName": {
-                "type": "string"
-              }
-            },
-            "additionalProperties": false
-          },
-          "focusInUi": {
-            "type": "boolean",
-            "description": "기본 true. false 면 저장만 하고 현재 회의 전 안내 카드로 전환하지 않습니다."
-          }
-        },
-        "required": [
-          "title",
-          "scheduledStart",
-          "category",
-          "agenda"
-        ],
-        "additionalProperties": false
+        "properties": {}
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "app"
+          ]
+        }
+      }
+    },
+    {
+      "name": "meeting_stage_upload_chunk",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "app"
+          ]
+        }
+      }
+    },
+    {
+      "name": "meeting_stage_upload_finish",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "app"
+          ]
+        }
+      }
+    },
+    {
+      "name": "meeting_stage_upload_cancel",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "app"
+          ]
+        }
       }
     }
+  ],
+  "capabilities": [
+    "meeting-recorder",
+    "external-auth-consumer"
+  ],
+  "networkAccess": {
+    "allowedDomains": [
+      "openai.azure.com",
+      "cognitiveservices.azure.com",
+      "services.ai.azure.com",
+      "api.openai.com"
+    ],
+    "reasoning": "STT transcription egress to Azure OpenAI / OpenAI Whisper endpoints via host-mediated fetch."
   },
+  "eventSubscriptions": [
+    {
+      "type": "host.theme.changed"
+    }
+  ],
+  "emittedEvents": [
+    "meeting.started",
+    "meeting.ended",
+    "meeting.transcript.updated",
+    "meeting.summary.created",
+    "meeting.summary.degraded",
+    "meeting.error",
+    "meeting.prep.opened",
+    "meeting.prep.registered"
+  ],
+  "startupTimeoutMs": 5000,
+  "keywords": [
+    {
+      "keyword": "녹음시작",
+      "skillId": "meeting_start"
+    },
+    {
+      "keyword": "전사",
+      "skillId": "meeting_transcript"
+    },
+    {
+      "keyword": "요약",
+      "skillId": "meeting_stop"
+    },
+    {
+      "keyword": "STT",
+      "skillId": "meeting_start"
+    },
+    {
+      "keyword": "음성메모",
+      "skillId": "meeting_start"
+    }
+  ],
+  "notificationEvents": [
+    {
+      "event": "meeting.summary.created",
+      "titleField": "title",
+      "bodyField": "summary"
+    },
+    {
+      "event": "meeting.summary.degraded",
+      "titleField": "title",
+      "bodyField": "body"
+    }
+  ],
+  "ui": [
+    {
+      "id": "meeting-control",
+      "slot": "sidebar",
+      "kind": "embedded-module",
+      "displayName": "미팅",
+      "title": "Meeting Recorder",
+      "description": "회의 세션 시작/청크 주입/종료/전사 조회를 테스트합니다.",
+      "entry": "dist/ui/meeting-control.js",
+      "exportName": "default",
+      "window": {
+        "width": 860,
+        "height": 760,
+        "minHeight": 680
+      }
+    }
+  ],
   "hostSecrets": {
     "read": [
       "llm.apiKey.openai",

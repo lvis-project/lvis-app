@@ -43,7 +43,7 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
         name: "SE Plugin",
         version: "1.0.0",
         entry: "entry.mjs",
-        tools: ["se_ping"],
+        tools: [{ name: "se_ping", description: "se_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         description: "set-enabled test",
         publisher: "Test",
       }),

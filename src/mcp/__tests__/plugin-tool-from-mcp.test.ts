@@ -58,7 +58,7 @@ function warnedMalformedCategory(spy: ReturnType<typeof vi.spyOn>): boolean {
 describe("mcpToolToPluginTool — v6 reverse projection from _meta", () => {
   const invoke = vi.fn(async (name: string) => ({ text: `ran ${name}` }));
 
-  it("sources pathFields from _meta and NEVER populates writesToOwnSandbox / version / deprecation (removed from the wire)", () => {
+  it("sources pathFields from _meta and applies the default tool version (removed self-claim fields are gone from the contract)", () => {
     const tools = manifestToolsToMcpTools(MANIFEST).map((t) => mcpToolToPluginTool(PLUGIN_ID, t, invoke));
     const read = tools.find((t) => t.name === "files_read")!;
     const write = tools.find((t) => t.name === "files_write")!;
@@ -75,13 +75,10 @@ describe("mcpToolToPluginTool — v6 reverse projection from _meta", () => {
       // the reverse projection registers the write-equivalent baseline.
       expect(t.category).toBe("write");
       expect(t.isReadOnly({})).toBe(false);
-      // removed self-claims never reach the canonical Tool.
-      expect(t.writesToOwnSandbox).toBeUndefined();
+      // workerId is host-derived (never promoted from the manifest wire).
       expect(t.workerId).toBeUndefined();
-      expect(t.deprecatedSince).toBeUndefined();
-      expect(t.replacedBy).toBeUndefined();
       // the wire carries no per-tool version — `createDynamicTool` applies its
-      // "1.0.0" default (NOT a manifest read; per-tool version was removed).
+      // "1.0.0" default (per-tool version left the Tool contract entirely).
       expect(t.version).toBe("1.0.0");
     }
   });

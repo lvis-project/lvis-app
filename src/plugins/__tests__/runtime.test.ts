@@ -50,7 +50,7 @@ describe("PluginRuntime.disable", () => {
       registryPath,
     }, {
       id,
-      tools: [methodName],
+      tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
       entrySource: makeTestPluginEntrySource({ [methodName]: JSON.stringify(`hi-${id}`) }),
       manifest,
     });
@@ -80,7 +80,7 @@ describe("PluginRuntime.disable", () => {
       registryPath,
     }, {
       id,
-      tools: [methodName],
+      tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
       entrySource,
       manifest,
     });
@@ -169,7 +169,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: pluginId, name: "Test", version: "1.0.0", entry: "entry.mjs", tools: ["com_example_test_hello"], description: "Test plugin fixture.", publisher: "Test fixture" };
+    const manifest = { id: pluginId, name: "Test", version: "1.0.0", entry: "entry.mjs", tools: [{ name: "com_example_test_hello", description: "com_example_test_hello tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }], description: "Test plugin fixture.", publisher: "Test fixture" };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeTestPluginRegistry({ registryPath }, [{ id: pluginId, manifestPath, enabled: true }]);
@@ -281,7 +281,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "no-description", name: "No Desc", version: "1.0.0", entry: "entry.mjs", tools: ["no_desc_ping"] };
+    const manifest = { id: "no-description", name: "No Desc", version: "1.0.0", entry: "entry.mjs", tools: [{ name: "no_desc_ping", description: "no_desc_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }] };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeTestPluginRegistry({ registryPath }, [{ id: "no-description", manifestPath, enabled: true }]);
@@ -309,7 +309,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "empty-description", name: "Empty Desc", version: "1.0.0", entry: "entry.mjs", tools: ["empty_desc_ping"], description: "", publisher: "Test fixture" };
+    const manifest = { id: "empty-description", name: "Empty Desc", version: "1.0.0", entry: "entry.mjs", tools: [{ name: "empty_desc_ping", description: "empty_desc_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }], description: "", publisher: "Test fixture" };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeTestPluginRegistry({ registryPath }, [{ id: "empty-description", manifestPath, enabled: true }]);
@@ -325,9 +325,9 @@ describe("PluginRuntime.disable", () => {
     errSpy.mockRestore();
   });
 
-  it("callFromUi rejects methods not declared in manifest.uiActions", async () => {
-    // Renderer-originated plugin calls must only reach methods the plugin
-    // explicitly exposes via manifest.uiActions. Everything else has to go
+  it("callFromUi rejects tools not declared app-visible in _meta.ui.visibility", async () => {
+    // Renderer-originated plugin calls must only reach app-visible tools — the
+    // ones whose `_meta.ui.visibility` includes "app". Everything else has to go
     // through ConversationLoop (scope + permission + expansion caps).
     const pluginDir = join(installedDir, "ui-actions");
     await mkdir(pluginDir, { recursive: true });
@@ -356,8 +356,12 @@ describe("PluginRuntime.disable", () => {
         description: "Test fixture.",
         publisher: "Test fixture",
         entry: "entry.mjs",
-        tools: ["uic_get", "uic_private"],
-        uiActions: { uic_get: {} },
+        tools: [
+          // uic_get is UI-invokable (dual) — reachable from callFromUi.
+          { name: "uic_get", description: "uic_get tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } },
+          // uic_private is model-only — NOT reachable from the UI bypass.
+          { name: "uic_private", description: "uic_private tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model"] } } },
+        ],
       }),
       "utf-8",
     );
@@ -412,8 +416,10 @@ describe("PluginRuntime.disable", () => {
         description: "Test fixture.",
         publisher: "Test fixture",
         entry: "entry.mjs",
-        tools: [],
-        uiActions: { uio_upload_chunk: {} },
+        // UI-only method: app-only visibility, not model-visible (not an LLM tool).
+        tools: [
+          { name: "uio_upload_chunk", description: "uio_upload_chunk tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["app"] } } },
+        ],
       }),
       "utf-8",
     );
@@ -467,7 +473,7 @@ describe("PluginRuntime.disable", () => {
         description: "Test fixture.",
         publisher: "Test fixture",
         entry: "entry.mjs",
-        tools: ["meta_ping"],
+        tools: [{ name: "meta_ping", description: "meta_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         capabilities: ["worker-client"],
       }),
       "utf-8",
@@ -500,7 +506,7 @@ describe("PluginRuntime.disable", () => {
       const manifestPath = join(pluginDir, "plugin.json");
       await writeFile(
         manifestPath,
-        JSON.stringify({ id: "calltool-plugin", name: "calltool-plugin", version: "1.0.0", entry: "entry.mjs", tools: ["calltool_ping"], description: "Test fixture.", publisher: "Test fixture" }),
+        JSON.stringify({ id: "calltool-plugin", name: "calltool-plugin", version: "1.0.0", entry: "entry.mjs", tools: [{ name: "calltool_ping", description: "calltool_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }], description: "Test fixture.", publisher: "Test fixture" }),
         "utf-8",
       );
       await writeTestPluginRegistry({ registryPath }, [{ id: "calltool-plugin", manifestPath, enabled: true }]);
@@ -551,7 +557,7 @@ describe("PluginRuntime.disable", () => {
       const manifestPath = join(pluginDir, "plugin.json");
       await writeFile(
         manifestPath,
-        JSON.stringify({ id: "calltool-delegate", name: "calltool-delegate", version: "1.0.0", entry: "entry.mjs", tools: ["calltool_echo"], description: "Test fixture.", publisher: "Test fixture" }),
+        JSON.stringify({ id: "calltool-delegate", name: "calltool-delegate", version: "1.0.0", entry: "entry.mjs", tools: [{ name: "calltool_echo", description: "calltool_echo tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }], description: "Test fixture.", publisher: "Test fixture" }),
         "utf-8",
       );
       await writeTestPluginRegistry({ registryPath }, [{ id: "calltool-delegate", manifestPath, enabled: true }]);
@@ -618,7 +624,7 @@ describe("PluginRuntime.disable", () => {
           description: "Test fixture.",
           publisher: "Test fixture",
           entry: "entry.mjs",
-          tools: [methodName],
+          tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
           ...extraManifest,
         }),
         "utf-8",
@@ -703,7 +709,7 @@ describe("PluginRuntime.disable", () => {
         publisher: "Test fixture",
         installPolicy: "user",
         entry: relative(pluginDir, entryPath),
-        tools: [methodName],
+        tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         ...extraManifest,
       };
       await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
@@ -911,7 +917,7 @@ describe("PluginRuntime.disable", () => {
         description: "Test fixture.",
         publisher: "Test fixture",
         entry: "entry.mjs",
-        tools: ["cap_provider_ping"],
+        tools: [{ name: "cap_provider_ping", description: "cap_provider_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         capabilities: ["calendar-source"],
       }),
       "utf-8",
@@ -941,7 +947,7 @@ describe("PluginRuntime.disable", () => {
         description: "Test fixture.",
         publisher: "Test fixture",
         entry: "entry.mjs",
-        tools: ["needs_calendar_ping"],
+        tools: [{ name: "needs_calendar_ping", description: "needs_calendar_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         requires: { capabilities: ["calendar-source", "mail-source"] },
       }),
       "utf-8",
@@ -1013,7 +1019,7 @@ describe("PluginRuntime registry trusted-path", () => {
         description: "Test fixture.",
         publisher: "Test fixture",
         entry: "entry.mjs",
-        tools: [`${id.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`],
+        tools: [{ name: `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`, description: "minimal ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
       }),
       "utf-8",
     );
@@ -1118,7 +1124,7 @@ export default async function createPlugin(ctx) {
 `,
       "utf-8",
     );
-    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [methodName], description: "Test fixture.", publisher: "Test fixture" };
+    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }], description: "Test fixture.", publisher: "Test fixture" };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     return manifestPath;
@@ -1142,7 +1148,7 @@ export default async function createPlugin() {
 `,
       "utf-8",
     );
-    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [methodName], description: "Start failure fixture.", publisher: "Test fixture" };
+    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }], description: "Start failure fixture.", publisher: "Test fixture" };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     return { manifestPath, stoppedPath };
@@ -1171,7 +1177,7 @@ export default async function createPlugin({ hostApi }) {
 `,
       "utf-8",
     );
-    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [methodName], description: "Start failure fixture.", publisher: "Test fixture" };
+    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }], description: "Start failure fixture.", publisher: "Test fixture" };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     return { manifestPath, stoppedPath };
@@ -1778,7 +1784,7 @@ export default async function createPlugin() {
           name: pluginId,
           version: "1.0.0",
           entry: "entry.mjs",
-          tools: [methodName],
+          tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
           description: "stale start fixture",
           publisher: "Test fixture",
         }),
@@ -1829,7 +1835,7 @@ export default async function createPlugin() {
           name: pluginId,
           version: "1.0.1",
           entry: "entry.mjs",
-          tools: [methodName],
+          tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
           description: "fresh start fixture",
           publisher: "Test fixture",
         }),
@@ -2120,7 +2126,7 @@ export default async function createPlugin() { return {}; }`,
         name: "Broken Entry",
         version: "1.0.0",
         entry: "entry.mjs",
-        tools: ["broken_entry_hello"],
+        tools: [{ name: "broken_entry_hello", description: "broken_entry_hello tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         description: "test fixture for addPlugin import-fail rollback signal",
         publisher: "test",
       }),
@@ -2161,7 +2167,7 @@ export default async function createPlugin() {
       id: "p-update", name: "Update", version: "1.0.0",
       description: "regression fixture",
       publisher: "Test fixture",
-      entry: "entry-v1.mjs", tools: ["p_update_ping"],
+      entry: "entry-v1.mjs", tools: [{ name: "p_update_ping", description: "p_update_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
       configSchema: {
         properties: {
           endpoint: { type: "string", title: "endpoint" },
@@ -2198,7 +2204,7 @@ export default async function createPlugin() {
       id: "p-update", name: "Update", version: "2.0.0",
       description: "regression fixture v2",
       publisher: "Test fixture",
-      entry: "entry-v2.mjs", tools: ["p_update_ping"],
+      entry: "entry-v2.mjs", tools: [{ name: "p_update_ping", description: "p_update_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
       configSchema: {
         properties: {
           baseUrl: { type: "string", title: "baseUrl" },
@@ -2248,7 +2254,7 @@ export default async function createPlugin() {
           description: `schema fixture ${version}`,
           publisher: "Test fixture",
           entry: "entry.mjs",
-          tools: [toolName],
+          tools: [{ name: toolName, description: `${toolName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
           configSchema: {
             properties: {
               [fieldName]: { type: "string", title: fieldName },
@@ -2321,7 +2327,7 @@ describe("PluginRuntime lifecycle plog emission", () => {
       registryPath,
     }, {
       id,
-      tools: [methodName],
+      tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
       entrySource: makeTestPluginEntrySource({ [methodName]: JSON.stringify("hi") }),
     });
     return manifestPath;

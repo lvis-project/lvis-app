@@ -71,8 +71,10 @@ describe("buildManifestValidator — SDK schema SOT", () => {
 
     expect(compileManifestValidator).toHaveBeenCalledTimes(1);
     expect(validator).toBe(sdkValidator);
-    // 5 accept-probes (+ pure MCP Tool[]) + 2 negative-strictness guards.
-    expect(sdkValidator).toHaveBeenCalledTimes(7);
+    // #885 Phase R — the workerId/category-less legacy toolSchemas accept-probes
+    // were removed; now 3 accept-probes (networkAccess.allowPrivateNetworks,
+    // marketplace-provider secret, pure MCP Tool[]) + 2 negative-strictness guards.
+    expect(sdkValidator).toHaveBeenCalledTimes(5);
   });
 
   it("#885 v6 — fails closed when the SDK helper rejects the pure MCP Tool[] object", async () => {
@@ -97,18 +99,10 @@ describe("buildManifestValidator — SDK schema SOT", () => {
     await expect(buildManifestValidator()).rejects.toThrow(/too permissive/);
   });
 
-  it("fails closed when the SDK helper rejects toolSchema worker bindings", async () => {
-    const sdkValidator = vi.fn((manifest: { id?: string }) => manifest.id !== "worker-plugin");
-    const compileManifestValidator = vi.fn(() => sdkValidator);
-
-    vi.doMock("@lvis/plugin-sdk", () => ({
-      compileManifestValidator,
-    }));
-
-    const { buildManifestValidator } = await import("../manifest-validation.js");
-
-    await expect(buildManifestValidator()).rejects.toThrow(/toolSchemas\.\*\.workerId/);
-  });
+  // NOTE (#885 Phase R): the "rejects toolSchema worker bindings" and
+  // "rejects category-less tool schemas" probes were removed — those legacy
+  // `toolSchemas`-map fields no longer exist, so buildManifestValidator no longer
+  // probes for them. Their tests were removed with the probes.
 
   it("fails closed when the SDK helper rejects private-network manifests", async () => {
     const sdkValidator = vi.fn((manifest: { id?: string }) => manifest.id !== "private-network-plugin");
@@ -121,19 +115,6 @@ describe("buildManifestValidator — SDK schema SOT", () => {
     const { buildManifestValidator } = await import("../manifest-validation.js");
 
     await expect(buildManifestValidator()).rejects.toThrow(/networkAccess\.allowPrivateNetworks/);
-  });
-
-  it("fails closed when the SDK helper rejects category-less tool schemas", async () => {
-    const sdkValidator = vi.fn((manifest: { id?: string }) => manifest.id !== "categoryless-tool-plugin");
-    const compileManifestValidator = vi.fn(() => sdkValidator);
-
-    vi.doMock("@lvis/plugin-sdk", () => ({
-      compileManifestValidator,
-    }));
-
-    const { buildManifestValidator } = await import("../manifest-validation.js");
-
-    await expect(buildManifestValidator()).rejects.toThrow(/category-less toolSchemas/);
   });
 
   it("fails closed when the SDK helper rejects marketplace-provider host secrets", async () => {

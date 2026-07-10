@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  annotationsForCategory,
   manifestToDiscoverResult,
   manifestToolsToMcpTools,
 } from "../plugin-server-projection.js";
@@ -93,14 +92,6 @@ describe("plugin-server-projection — normalized Tool[] → MCP tools/list (#88
     }
   });
 
-  it("annotationsForCategory retains the interop mapping (retained for Phase-R, no longer wired)", () => {
-    expect(annotationsForCategory("read")).toEqual({
-      readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false,
-    });
-    expect(annotationsForCategory("write")).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(annotationsForCategory("shell")).toMatchObject({ destructiveHint: true });
-    expect(annotationsForCategory("network")).toMatchObject({ openWorldHint: true, readOnlyHint: false });
-  });
 });
 
 describe("plugin-server-projection — manifest → server/discover (#1230 §3.2)", () => {

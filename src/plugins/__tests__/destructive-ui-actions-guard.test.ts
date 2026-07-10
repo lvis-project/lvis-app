@@ -23,6 +23,7 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { PluginRuntime } from "../runtime.js";
+import { compileLegacyToolSurface } from "./test-helpers.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -40,8 +41,9 @@ async function writeTempPlugin(opts: {
     description: "Test fixture.",
     publisher: "Test fixture",
     entry: "dist/index.js",
-    tools: opts.tools,
-    uiActions: opts.uiActions,
+    // Pure v6: the legacy tools[]/uiActions surface is compiled to Tool objects
+    // with explicit visibility (uiActions-only → ["app"]).
+    tools: compileLegacyToolSurface({ tools: opts.tools, uiActions: opts.uiActions as Record<string, { description?: string }> }),
     installPolicy: opts.installPolicy,
   };
   writeFileSync(join(root, "plugin.json"), JSON.stringify(manifest, null, 2));
@@ -84,19 +86,10 @@ describe("uiActions runtime-method validation", () => {
     await expect(parse(manifestPath)).resolves.toBeDefined();
   });
 
-  it("rejects non-string uiActions entries", async () => {
-    const manifestPath = await writeTempPlugin({
-      installPolicy: "user",
-      tools: ["foo_get"],
-      uiActions: [123 as unknown as string],
-    });
-    const rt = new PluginRuntime({
-      hostRoot: resolve(__dirname, "..", "..", ".."),
-      manifestPaths: [manifestPath],
-    });
-    const parse = (rt as unknown as { readManifest(p: string): Promise<unknown> }).readManifest.bind(rt);
-    await expect(parse(manifestPath)).rejects.toThrow(/uiActions/);
-  });
+  // NOTE (#885 Phase R): the "rejects non-string uiActions entries" test was
+  // removed — `uiActions` is no longer a manifest field; surface membership is
+  // expressed by each Tool's `_meta.ui.visibility`, so there is no uiActions-map
+  // structural validation left to exercise.
 
   it("accepts when every uiActions entry is also declared in tools[]", async () => {
     const manifestPath = await writeTempPlugin({
