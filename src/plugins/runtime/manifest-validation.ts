@@ -466,6 +466,25 @@ export async function parsePluginJson(
       `"tools": [{ "name": "sample_ping", "inputSchema": { "type": "object", "properties": {} } }]`,
     );
   }
+  // #885 Phase R — pure v6 only. Each `tools[]` entry MUST be an MCP Tool OBJECT.
+  // A pre-v6 manifest declared `tools` as a list of name STRINGS (paired with the
+  // now-removed `toolSchemas`/`uiActions` maps). Reject it here with an actionable
+  // message instead of letting it fall through to the downstream tool-name loop,
+  // which would spread a bare string into a nameless object and throw the
+  // confusing "Invalid tool name 'undefined'" (security-review nitpick a). The
+  // installed SDK validator may still accept the legacy shape during the migration
+  // window, so this host-side guard is the loud, author-facing fail-closed point.
+  const preV6ToolIdx = (parsed.tools as unknown[]).findIndex(
+    (t) => typeof t !== "object" || t === null || Array.isArray(t),
+  );
+  if (preV6ToolIdx !== -1) {
+    fail(
+      `tools[${preV6ToolIdx}]`,
+      "must be an MCP Tool object — this plugin targets a pre-v6 contract " +
+        "(legacy tools[] name strings + toolSchemas/uiActions); upgrade to @lvis/plugin-sdk v6",
+      `"tools": [{ "name": "sample_ping", "inputSchema": { "type": "object", "properties": {} } }]`,
+    );
+  }
   if (typeof parsed.description !== "string" || parsed.description.length === 0) {
     fail(
       "description",
