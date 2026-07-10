@@ -9,9 +9,12 @@
  * `_meta["xyz.lvis/pathFields"]`, NOT from a second direct manifest read; the
  * manifest is projected to MCP exactly once (forward).
  *
- * #885 v6: `category` is REMOVED from the contract (Q3) — the wire carries none,
- * so this reverse projection registers the write-equivalent default-strict
- * baseline and the effective category is derived host-side per invocation.
+ * #885: per-tool `category` is REMOVED from the contract (Q3). The in-process
+ * loopback forward projection emits none; an out-of-process plugin may still put
+ * `_meta["xyz.lvis/category"]` on the wire, but the host does NOT trust it — this
+ * reverse projection ignores any wire category and registers the write-equivalent
+ * default-strict baseline, with the effective category derived host-side per
+ * invocation.
  * `writesToOwnSandbox` is no longer promoted (the reviewer auto-LOW keys on the
  * host-computed sandbox-containment). The per-tool `version`/`deprecatedSince`/
  * `replacedBy` fields left the Tool contract entirely (Phase-R deletions), so the
@@ -27,36 +30,25 @@
  * MCP servers, which are foreign network peers → hardcoded `category:"network"`,
  * `source:"mcp"`, and the `mcp_{server}_` namespace. A first-party plugin's
  * loopback server is the SAME plugin: it keeps its natural tool name (no
- * namespace), `source:"plugin"`, its `pluginId`, and its DECLARED category. The
- * two adapters intentionally diverge because the trust models differ.
+ * namespace), `source:"plugin"`, and its `pluginId`. Neither adapter trusts a
+ * plugin's self-declared category — this one applies the default-strict `"write"`
+ * baseline; they otherwise diverge because the trust models differ.
  *
  * DEFAULT-STRICT (host-classifies-risk, project_permission_review_redesign):
- * a tool whose `_meta` carries no valid `xyz.lvis/category` no longer throws.
- * A plugin grading its own danger is not a control (MCP spec: a server can
- * lie), so a missing/invalid declaration is treated as `"write"` — the safe,
- * write-equivalent baseline that asks foreground / routes to the reviewer
- * headless. The authoritative effective category is derived host-side per
- * invocation (`inspectHostRisk`); the declared value recorded here (or the
- * strict default when absent) feeds shadow-mode reconciliation only.
+ * #885 — the host does NOT trust a plugin's self-declared per-tool category.
+ * The in-process loopback forward projection stopped emitting
+ * `_meta["xyz.lvis/category"]`, and an out-of-process plugin that still puts one
+ * on the wire is ignored too, so this reverse projection unconditionally
+ * registers the write-equivalent default-strict baseline. A plugin grading its
+ * own danger is not a control (MCP spec: a server can lie); the effective
+ * category is derived host-side per invocation (`inspectHostRisk`), never from a
+ * plugin self-declaration.
  */
 import { createDynamicTool, type Tool } from "../tools/base.js";
-import type { PluginToolCategory } from "../plugins/types.js";
-import { createLogger } from "../lib/logger.js";
 import type { McpUiPayload } from "./types.js";
-
-const log = createLogger("plugin-tool-from-mcp");
 
 /** Reverse-DNS prefix for LVIS-private `_meta` keys (must mirror the forward projection). */
 const LVIS_META_PREFIX = "xyz.lvis/";
-
-const PLUGIN_TOOL_CATEGORIES: readonly PluginToolCategory[] = ["read", "write", "shell", "network"];
-
-/**
- * Write-equivalent baseline applied when a discovered plugin tool declares no
- * authoritative category. The deliberate safe default, NOT a bug-papering
- * fallback: the host never auto-classifies an undeclared tool down to read.
- */
-const DEFAULT_STRICT_CATEGORY: PluginToolCategory = "write";
 
 /**
  * The minimal shape this adapter consumes from a discovered MCP tool. Over a
@@ -86,32 +78,6 @@ export type PluginMcpInvoke = (
   args: Record<string, unknown>,
 ) => Promise<{ text: string; uiPayload?: McpUiPayload; rawResult?: { value: unknown } }>;
 
-function readCategory(meta: Record<string, unknown>, toolName: string): PluginToolCategory {
-  const value = meta[`${LVIS_META_PREFIX}category`];
-  if (typeof value === "string" && (PLUGIN_TOOL_CATEGORIES as readonly string[]).includes(value)) {
-    return value as PluginToolCategory;
-  }
-  // #885 v6 — `category` is structurally REMOVED from the contract (Q3), so an
-  // ABSENT category is the expected steady state (every tool, every load) — warn
-  // there would spam ~60+ lines per boot forever. Warn ONLY on a PRESENT-but-
-  // malformed declaration (a real error); stay silent on the v6-expected absent
-  // case. Either way the write-equivalent default-strict baseline applies; the
-  // host derives the effective category per invocation (`inspectHostRisk`).
-  if (value !== undefined) {
-    log.warn(
-      {
-        event: "plugin-tool-invalid-category",
-        toolName,
-        declared: value,
-        declaredType: typeof value,
-        appliedDefault: DEFAULT_STRICT_CATEGORY,
-      },
-      "discovered plugin tool declares a malformed category — applying default-strict baseline",
-    );
-  }
-  return DEFAULT_STRICT_CATEGORY;
-}
-
 function readPathFields(meta: Record<string, unknown>): string[] | undefined {
   const value = meta[`${LVIS_META_PREFIX}pathFields`];
   if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
@@ -131,7 +97,12 @@ export function mcpToolToPluginTool(
   invoke: PluginMcpInvoke,
 ): Tool {
   const meta = tool._meta ?? {};
-  const category = readCategory(meta, tool.name);
+  // #885 — the host does NOT trust a plugin's self-declared per-tool category.
+  // Loopback plugins emit none; an out-of-process plugin may still put
+  // `_meta["xyz.lvis/category"]` on the wire, but it is ignored either way and
+  // every plugin tool registers at the write-equivalent default-strict baseline.
+  // The real per-invocation classifier is host-side `inspectHostRisk`.
+  const category = "write";
 
   return createDynamicTool({
     name: tool.name,
@@ -145,7 +116,7 @@ export function mcpToolToPluginTool(
     // auto-LOW keys on host-computed sandbox-containment, never a manifest value,
     // and `createDynamicTool` applies the default "1.0.0" tool version.
     jsonSchema: tool.inputSchema,
-    isReadOnly: () => category === "read",
+    isReadOnly: () => false, // unconditional write baseline — never read-only
     execute: async (rawInput) => {
       let parsed: unknown = rawInput ?? {};
       if (typeof parsed === "string") {
