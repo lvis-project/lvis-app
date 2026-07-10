@@ -10,7 +10,6 @@ import type {
   PluginManifest,
   InstallPolicy,
   NormalizedManifest,
-  RawPluginManifest,
   Tool,
 } from "../types.js";
 import { normalizeManifest } from "../types.js";
@@ -71,26 +70,6 @@ export function formatUnknownErrorMessage(err: unknown): string {
   return String(err);
 }
 
-function schemaAcceptsToolSchemaWorkerId(validator: ValidateFunction): boolean {
-  const ok = validator({
-    id: "worker-plugin",
-    name: "Worker Plugin",
-    version: "1.0.0",
-    description: "Worker plugin fixture.",
-    publisher: "LVIS",
-    entry: "dist/index.js",
-    tools: ["worker_ping"],
-    toolSchemas: {
-      worker_ping: {
-        description: "Worker ping tool fixture.",
-        workerId: "main-worker",
-        inputSchema: { type: "object", properties: {} },
-      },
-    },
-  });
-  return ok === true;
-}
-
 function schemaAcceptsNetworkAccessAllowPrivateNetworks(validator: ValidateFunction): boolean {
   const ok = validator({
     id: "private-network-plugin",
@@ -120,25 +99,6 @@ function schemaAcceptsMarketplaceProviderHostSecret(validator: ValidateFunction)
     tools: [],
     hostSecrets: {
       read: ["llm.marketplaceProvider.future-router.apiKey"],
-    },
-  });
-  return ok === true;
-}
-
-function schemaAcceptsCategorylessToolSchema(validator: ValidateFunction): boolean {
-  const ok = validator({
-    id: "categoryless-tool-plugin",
-    name: "Categoryless Tool Plugin",
-    version: "1.0.0",
-    description: "Categoryless tool schema fixture.",
-    publisher: "LVIS",
-    entry: "dist/index.js",
-    tools: ["categoryless_ping"],
-    toolSchemas: {
-      categoryless_ping: {
-        description: "Categoryless ping tool fixture.",
-        inputSchema: { type: "object", properties: {} },
-      },
     },
   });
   return ok === true;
@@ -248,10 +208,10 @@ export function getDeclaredEmittedEvents(manifest: Pick<PluginManifest, "emitted
  * compiled, plugin loading must fail closed. Do not mutate the SDK schema in
  * the host. As of @lvis/plugin-sdk v6.0.0, the helper must natively accept
  * every host-required manifest field (`networkAccess.allowPrivateNetworks`,
- * `toolSchemas.*.workerId`, marketplace-provider secret grants, category-less
- * tool schemas, AND the pure MCP `Tool[]` object with `_meta.ui.visibility`),
- * and must be strict enough to REJECT a pure tool carrying a v6-removed field
- * or an empty `visibility: []` (the negative-strictness guards below).
+ * marketplace-provider secret grants, AND the pure MCP `Tool[]` object with
+ * `_meta.ui.visibility`), and must be strict enough to REJECT a pure tool
+ * carrying a v6-removed field or an empty `visibility: []` (the
+ * negative-strictness guards below).
  */
 export async function buildManifestValidator(): Promise<ValidateFunction> {
   type SdkModule = { compileManifestValidator?: () => ValidateFunction };
@@ -280,11 +240,9 @@ export async function buildManifestValidator(): Promise<ValidateFunction> {
     schemaAcceptsNetworkAccessAllowPrivateNetworks(validator)
       ? ""
       : "networkAccess.allowPrivateNetworks",
-    schemaAcceptsToolSchemaWorkerId(validator) ? "" : "toolSchemas.*.workerId",
     schemaAcceptsMarketplaceProviderHostSecret(validator)
       ? ""
       : "llm.marketplaceProvider.<presetId>.apiKey",
-    schemaAcceptsCategorylessToolSchema(validator) ? "" : "category-less toolSchemas",
     schemaAcceptsPureToolObject(validator) ? "" : "pure MCP Tool[] object (_meta.ui.visibility)",
   ].filter(Boolean);
   if (missingNativeFields.length > 0) {
@@ -504,7 +462,7 @@ export async function parsePluginJson(
   if (!Array.isArray(parsed.tools)) {
     fail(
       "tools",
-      "must be an array (legacy tool-name strings, or pure MCP tool objects)",
+      "must be an array of pure MCP tool objects",
       `"tools": [{ "name": "sample_ping", "inputSchema": { "type": "object", "properties": {} } }]`,
     );
   }
@@ -522,27 +480,12 @@ export async function parsePluginJson(
     );
   }
 
-  // #885 v6 — the SINGLE legacy-shape reader (SoT §3.1). Compile the AJV-validated
-  // manifest (legacy `tools: string[]` + `toolSchemas` + `uiActions`, OR pure MCP
-  // `Tool[]`) into the pure `NormalizedManifest` every host check below reads. A
-  // legacy manifest emits ONE load-time notice (legacy-shape + dropped removed
-  // fields); a pure manifest passes through silently. From here on all tool checks
-  // read the normalized `manifest.tools: Tool[]` — never `parsed.tools`.
-  const manifest = normalizeManifest(parsed as RawPluginManifest, (notice) => {
-    log.warn(
-      {
-        event: "plugin-manifest-legacy-shape",
-        pluginId: notice.pluginId,
-        droppedFields: notice.droppedFields,
-      },
-      `plugin '${notice.pluginId}' uses the legacy tools[]/toolSchemas/uiActions manifest shape — ` +
-        `compiled to the pure MCP Tool[] form at load` +
-        (notice.droppedFields.length > 0
-          ? ` (dropped removed fields: ${notice.droppedFields.join(", ")})`
-          : "") +
-        `. Migrate to the pure form (docs/architecture/plugin-contract-v6-design.md).`,
-    );
-  });
+  // #885 v6 — materialize each tool's `_meta.ui.visibility` into the pure
+  // `NormalizedManifest` every host check below reads (the standard
+  // `["model","app"]` default is filled in here, an explicit `[]` is rejected).
+  // From here on all tool checks read the normalized `manifest.tools: Tool[]` —
+  // never `parsed.tools`.
+  const manifest = normalizeManifest(parsed);
 
   // Tool names exposed to LLMs must satisfy ^[a-zA-Z_][a-zA-Z0-9_]*$ (vendor
   // requirement — kept as defence-in-depth vs a stale SDK schema, same rationale

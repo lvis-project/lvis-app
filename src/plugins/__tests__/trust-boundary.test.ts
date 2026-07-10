@@ -70,7 +70,7 @@ describe("Phase 1 — plugin trust boundary", () => {
       description: "Test fixture.",
       publisher: "Test fixture",
       entry: "entry.mjs",
-      tools: ["tb_ping"],
+      tools: [{ name: "tb_ping", description: "tb_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
     };
     if (opts?.installPolicy) manifest.installPolicy = opts.installPolicy;
     const manifestPath = join(pluginDir, "plugin.json");

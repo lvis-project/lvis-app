@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { PluginRuntime } from "../runtime.js";
+import { compileLegacyToolSurface } from "./test-helpers.js";
 
 function writePlugin(root: string, id: string, opts: {
   name: string;
@@ -50,9 +51,10 @@ function writePlugin(root: string, id: string, opts: {
     icon: opts.icon,
     iconText: opts.iconText,
     networkAccess: opts.networkAccess,
-    tools: opts.tools,
+    // Pure v6: per-tool descriptions carried by the Tool object (compiled from the
+    // legacy toolSchemas map); no separate toolSchemas map in the written manifest.
+    tools: compileLegacyToolSurface({ tools: opts.tools, toolSchemas: opts.toolSchemas }),
     ui: opts.ui,
-    toolSchemas: opts.toolSchemas,
   };
   writeFileSync(join(dir, "plugin.json"), JSON.stringify(manifest));
   const handlers = opts.tools

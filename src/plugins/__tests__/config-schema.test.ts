@@ -224,16 +224,17 @@ describe("toolSchemas authority metadata", () => {
       id: "category-less-plugin",
       name: "Category-less",
       version: "1.0.0",
-      description: "A manifest whose toolSchemas omit the declared category.",
+      description: "A manifest whose tools carry no permission category.",
       publisher: "Test fixture",
       entry: "dist/index.js",
-      tools: ["test_ping"],
-      toolSchemas: {
-        test_ping: {
+      tools: [
+        {
+          name: "test_ping",
           description: "Test ping with no permission category.",
           inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model", "app"] } },
         },
-      },
+      ],
     };
     const dir = await mkdtemp(join(realpathSync(tmpdir()), "manifest-cat-less-"));
     try {
@@ -246,7 +247,7 @@ describe("toolSchemas authority metadata", () => {
     }
   });
 
-  it("end-to-end: parsePluginJson accepts toolSchemas workerId via native SDK schema", async () => {
+  it("end-to-end: parsePluginJson loads a pure model-only tool carrying no workerId", async () => {
     const { buildManifestValidator, parsePluginJson } = await import(
       "../runtime/manifest-validation.js"
     );
@@ -255,26 +256,25 @@ describe("toolSchemas authority metadata", () => {
       id: "worker-aware-plugin",
       name: "Worker aware",
       version: "1.0.0",
-      description: "A manifest whose tool schema declares a host-spawned worker id.",
+      description: "A manifest with a pure model-only tool (no worker self-claim).",
       publisher: "Test fixture",
       entry: "dist/index.js",
-      tools: ["worker_ping"],
-      toolSchemas: {
-        worker_ping: {
+      // #885 Phase R — per-tool `workerId` (and the whole toolSchemas map) left the
+      // manifest contract; a pure Tool never carries a worker self-claim.
+      tools: [
+        {
+          name: "worker_ping",
           description: "Worker ping with explicit worker substrate identity.",
-          workerId: "main-worker",
           inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model"] } },
         },
-      },
+      ],
     };
     const dir = await mkdtemp(join(realpathSync(tmpdir()), "manifest-worker-id-"));
     try {
       const file = join(dir, "plugin.json");
       await writeFile(file, JSON.stringify(manifest), "utf-8");
       const parsed = await parsePluginJson(file, validator);
-      // #885 v6 — the SDK schema still natively ACCEPTS the legacy
-      // `toolSchemas.*.workerId` field (the manifest loads), but normalizeManifest
-      // DROPS it: the pure tool carries no workerId and the toolSchemas map is gone.
       const tool = parsed.tools.find((t) => t.name === "worker_ping");
       expect(tool).toBeDefined();
       expect(tool?._meta?.ui?.visibility).toEqual(["model"]);
