@@ -17,7 +17,10 @@ import type {
   StreamTurnParams,
   ToolSchema,
 } from "../types.js";
-import { isOpenAICompatibleVendor } from "../../../shared/llm-vendor-defaults.js";
+import {
+  isOpenAICompatibleVendor,
+  isSelfHostedVllmVendor,
+} from "../../../shared/llm-vendor-defaults.js";
 import { genericToModelMessages } from "./message-mapper.js";
 import { fullStreamToStreamEvent } from "./stream-mapper.js";
 import { mapAiSdkErrorToLvis } from "./error-mapper.js";
@@ -256,14 +259,21 @@ export class VercelUnifiedProvider implements LLMProvider {
             }
           : undefined;
 
-      // OpenAI-compatible (vLLM/SGLang) reasoning toggle. Standard OpenAI Chat
+      // Self-hosted vLLM/SGLang reasoning toggle. Standard OpenAI Chat
       // Completions has no reasoning switch, but vLLM honors a per-request
       // `chat_template_kwargs.enable_thinking` that the model's chat template
       // reads. The @ai-sdk openai-compatible provider forwards unknown keys
       // under providerOptions[name] into the request body, so each request
       // carries its own flag — multi-user safe: the server is stateless, so
       // one user with thinking ON and another with it OFF never interfere.
-      if (isOpenAICompatibleVendor(slot)) {
+      //
+      // GUARD IS `isSelfHostedVllmVendor`, NOT `isOpenAICompatibleVendor`: the
+      // commercial OpenAI-compatible gateways (openrouter/groq/together/…) also
+      // route through createOpenAICompatible, but they do NOT run a vLLM chat
+      // template — a top-level `chat_template_kwargs` field 400/422s the strict
+      // ones and is a silent no-op on the lenient ones. Only the self-hosted
+      // class gets it; that is what made OpenRouter requests fail.
+      if (isSelfHostedVllmVendor(slot)) {
         const compatOptions: Record<string, unknown> = {
           chat_template_kwargs: {
             enable_thinking: params.enableThinking === true,

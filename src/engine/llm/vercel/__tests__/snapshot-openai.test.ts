@@ -790,6 +790,56 @@ describe("VercelUnifiedProvider openai-compatible", () => {
     vi.doUnmock("@ai-sdk/openai-compatible");
   });
 
+  it("does NOT forward chat_template_kwargs to commercial gateways (openrouter/groq)", async () => {
+    // Commercial OpenAI-compatible gateways route through createOpenAICompatible
+    // but do not run a vLLM chat template. A top-level chat_template_kwargs field
+    // 400/422s the strict ones and no-ops the lenient ones — the OpenRouter
+    // breakage. providerOptions["lvis-compat"] must be absent entirely.
+    for (const vendor of ["openrouter", "groq"] as const) {
+      vi.resetModules();
+      const streamTextSpy = vi.fn(() => ({
+        stream: (async function* () {
+          yield {
+            type: "finish",
+            finishReason: "stop",
+            totalUsage: { inputTokens: 1, outputTokens: 1 },
+          };
+        })(),
+      }));
+      vi.doMock("ai", async () => {
+        const actual = await vi.importActual<typeof import("ai")>("ai");
+        return { ...actual, streamText: streamTextSpy };
+      });
+      vi.doMock("@ai-sdk/openai-compatible", () => ({
+        createOpenAICompatible: vi.fn(() => vi.fn(() => ({ __mock: "compat" }))),
+      }));
+
+      const { VercelUnifiedProvider } = await import("../adapter.js");
+      const provider = new VercelUnifiedProvider(
+        vendor,
+        "k",
+        "https://gateway.example/v1",
+      );
+
+      await collect(
+        provider.streamTurn({
+          model: "some/model",
+          systemPrompt: "sys",
+          messages: [{ role: "user", content: "hi" }],
+          // Even with thinking ON the toggle must not leak to the gateway.
+          enableThinking: true,
+        }),
+      );
+
+      const callArg = streamTextSpy.mock.calls[0]![0] as Record<string, unknown>;
+      expect(callArg.providerOptions, `${vendor} must not carry providerOptions`)
+        .toBeUndefined();
+
+      vi.doUnmock("ai");
+      vi.doUnmock("@ai-sdk/openai-compatible");
+    }
+  });
+
   it("injects continue_final_message + add_generation_prompt:false when continuationPrefill is set", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({

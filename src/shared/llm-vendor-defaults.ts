@@ -447,6 +447,36 @@ export function isApiKeyOptionalLlmVendor(v: LLMVendor): boolean {
   return API_KEY_OPTIONAL_LLM_VENDOR_IDS.has(v);
 }
 
+/**
+ * Self-hosted vLLM / llama.cpp / Ollama / LM Studio class — the OpenAI-compatible
+ * endpoints that actually honor vLLM's nonstandard request extensions:
+ *   - `chat_template_kwargs.enable_thinking` (per-request reasoning toggle), and
+ *   - `continue_final_message` (zero-seam finish_reason=length continuation).
+ *
+ * DELIBERATELY narrower than {@link isOpenAICompatibleVendor}: the commercial
+ * OpenAI-compatible gateways (openrouter / groq / together / fireworks /
+ * deepseek / mistral / xai / …) reject or silently ignore these top-level
+ * fields, so forwarding `chat_template_kwargs` to them 400/422s or no-ops. Only
+ * the self-hosted class below runs a chat template that reads them, so it is the
+ * single SOT for BOTH the adapter's `chat_template_kwargs` guard and the
+ * length-continuation capability (`vendorSupportsLengthContinuation`).
+ *
+ * This intentionally mirrors {@link API_KEY_OPTIONAL_LLM_VENDOR_IDS} today but is
+ * a distinct concept (vLLM extension support, not credential-optionality) and
+ * must stay independently editable — a future keyless commercial gateway would
+ * belong in one set but not the other.
+ */
+const SELF_HOSTED_VLLM_VENDOR_IDS = new Set<LLMVendor>([
+  "openai-compatible",
+  "litellm",
+  "ollama",
+  "lmstudio",
+]);
+
+export function isSelfHostedVllmVendor(v: LLMVendor): boolean {
+  return SELF_HOSTED_VLLM_VENDOR_IDS.has(v);
+}
+
 export function canUseLlmVendorWithoutApiKey(
   vendor: LLMVendor,
   block: Pick<LLMVendorSettings, "baseUrl">,
@@ -497,7 +527,13 @@ const CORE_DEFAULT_MODEL = {
   copilot: "gpt-5.4-mini",
   "azure-foundry": "gpt-5.4-mini",
   "vertex-ai": "gemini-2.5-flash",
-  "openai-compatible": "Qwen3.6-35B-A3B-NVFP4",
+  // Handshake-only: no static default. A fresh openai-compatible block ships
+  // with an EMPTY model so the runtime treats it as "not configured" until the
+  // user selects a model fetched live from their endpoint's /models handshake
+  // (LlmTab `modelOptionsFor` + `buildProvider` not-configured guard). Shipping
+  // a concrete id here previously sent an LVIS-cluster model id to arbitrary
+  // endpoints that don't serve it, failing every first call with a 400/404.
+  "openai-compatible": "",
 } as const;
 
 const DEFAULT_MODEL: Record<LLMVendor, string> = Object.freeze({
@@ -558,9 +594,12 @@ const CORE_VENDOR_MODEL_OPTIONS = {
     ],
     // Self-hosted OpenAI-compatible endpoints (vLLM / SGLang / llama.cpp …),
     // including a LiteLLM gateway that fronts several backends behind one /v1
-    // and routes by model id. The list seeds the dropdown with the known LVIS
-    // cluster models; users point baseUrl at their own gateway/server.
-    "openai-compatible": ["Qwen3.6-35B-A3B-NVFP4", "Nemotron-3-Nano-30B-A3B-FP8"],
+    // and routes by model id. Endpoint-defined and heterogeneous, so there is
+    // NO static catalog: the dropdown is populated live from the user's /models
+    // handshake (LlmTab `modelOptionsFor` is handshake-only for this vendor).
+    // A hardcoded seed here previously rendered LVIS-cluster models before any
+    // endpoint was entered and pre-selected a fabricated default id.
+    "openai-compatible": [],
   } as const;
 
 const PRESET_VENDOR_MODEL_OPTIONS = Object.fromEntries(
