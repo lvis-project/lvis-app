@@ -23,6 +23,7 @@ import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { buildNetworkAccessAcknowledgement } from "../../../shared/network-access.js";
+import { isReinstallFixableFailureKind } from "../../../shared/plugin-install-failure.js";
 
 type KV = { key: string; value: string };
 
@@ -514,11 +515,19 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
   }, [showBanner, refreshPlugins, t]);
 
   const handleDoctorPlugin = useCallback(async (plugin: PluginCardSummary) => {
-    if (plugin.installFailureKind === "catalog-grant-mismatch") {
+    // Cause-aware Doctor. NOT-locally-fixable failures (catalog↔grant mismatch,
+    // app-version incompatibility) cannot be repaired by reinstalling — a
+    // reinstall re-fetches the same broken/too-new package and re-fails. Show
+    // the diagnosis and leave Remove as the user-initiated exit.
+    if (!isReinstallFixableFailureKind(plugin.installFailureKind)) {
       showBanner("success", t("pluginConfigTab.successDoctorDiagnostic", { displayName: plugin.name }));
       await refreshPlugins();
       return;
     }
+    // Reinstall-fixable failure (stale/pre-v6 on-disk manifest, missing/corrupt
+    // files, generic load error) → automatically attempt reinstalling the latest
+    // marketplace version. One attempt, no loop: on failure we surface the cause
+    // and the Remove button in the Doctor panel stays available as the fallback.
     setDoctoringId(plugin.id);
     try {
       const installKey = await resolvePluginDoctorInstallKey(plugin);
@@ -529,6 +538,9 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
           })
         : await getHostMarketplaceApi().installMarketplacePlugin(installKey);
       if (!result.ok) {
+        // Auto-repair could not complete (no marketplace version, latest still
+        // invalid, network unreachable). Fall back to naming the cause; Remove
+        // remains the user-initiated exit.
         showBanner("error", result.message ?? result.error ?? t("pluginConfigTab.errorDoctor"));
         return;
       }
@@ -863,16 +875,20 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
                         <p className="text-xs font-medium text-destructive">
                           {selectedPlugin.installFailureKind === "catalog-grant-mismatch"
                             ? t("pluginConfigTab.doctorGrantMismatchTitle")
-                            : selectedPlugin.installFailureKind === "manifest-validation-error"
-                              ? t("pluginConfigTab.doctorManifestValidationTitle")
-                              : t("pluginConfigTab.doctorTitle")}
+                            : selectedPlugin.installFailureKind === "incompatible-app-version"
+                              ? t("pluginConfigTab.doctorIncompatibleAppTitle")
+                              : selectedPlugin.installFailureKind === "manifest-validation-error"
+                                ? t("pluginConfigTab.doctorManifestValidationTitle")
+                                : t("pluginConfigTab.doctorTitle")}
                         </p>
                         <p className="text-[11px] text-destructive/(--opacity-intense)">
                           {selectedPlugin.installFailureKind === "catalog-grant-mismatch"
                             ? t("pluginConfigTab.doctorGrantMismatchDescription")
-                            : selectedPlugin.installFailureKind === "manifest-validation-error"
-                              ? t("pluginConfigTab.doctorManifestValidationDescription")
-                              : t("pluginConfigTab.doctorDescription")}
+                            : selectedPlugin.installFailureKind === "incompatible-app-version"
+                              ? t("pluginConfigTab.doctorIncompatibleAppDescription")
+                              : selectedPlugin.installFailureKind === "manifest-validation-error"
+                                ? t("pluginConfigTab.doctorManifestValidationDescription")
+                                : t("pluginConfigTab.doctorDescription")}
                         </p>
                         {selectedPlugin.installFailureMessage ? (
                           <div className="mt-2 rounded border border-destructive/(--opacity-muted) bg-background/(--opacity-muted) px-2 py-1.5">

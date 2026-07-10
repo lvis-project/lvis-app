@@ -275,6 +275,138 @@ describe("PluginConfigTab", () => {
     });
   });
 
+  it("completes Doctor diagnostics without reinstalling when the app is too old", async () => {
+    const broken = {
+      id: "meeting",
+      name: "Meeting",
+      description: "Marketplace install failed: plugin requires LVIS >= 999.0.0, current 0.5.0",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      installAliases: ["lvis-plugin-meeting"],
+      installFailureKind: "incompatible-app-version" as const,
+      installFailureMessage: "plugin requires LVIS >= 999.0.0, current 0.5.0",
+      loadStatus: "failed" as const,
+    };
+    const cards = vi.fn().mockResolvedValue([broken]);
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:meeting")).toBeInTheDocument();
+    });
+    expect(screen.getByText("앱 업데이트 필요")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("plugin-config:doctor:meeting"));
+
+    await waitFor(() => {
+      // NOT reinstall-fixable → no reinstall attempt, diagnostic only.
+      expect(mockInstall).not.toHaveBeenCalled();
+      expect(cards).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("Meeting 진단 완료")).toBeInTheDocument();
+    });
+  });
+
+  it("auto-reinstalls when a failed load is a reinstall-fixable manifest schema error", async () => {
+    const broken = {
+      id: "meeting",
+      name: "Meeting",
+      description: "Plugin manifest could not be loaded.",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      installAliases: ["lvis-plugin-meeting"],
+      installFailureKind: "manifest-validation-error" as const,
+      installFailureMessage:
+        "[manifest:meeting] schema validation failed (/tmp/plugin.json): / unknown property: 'startupTools'",
+      loadStatus: "failed" as const,
+    };
+    const repaired = { ...broken, installFailureKind: undefined, installFailureMessage: undefined, loadStatus: "loaded" as const };
+    const cards = vi.fn()
+      .mockResolvedValueOnce([broken])
+      .mockResolvedValueOnce([repaired]);
+    mockInstall.mockResolvedValue({ ok: true as const, pluginId: "meeting" });
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:meeting")).toBeInTheDocument();
+    });
+    expect(screen.getByText("플러그인 manifest 검증 실패")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("plugin-config:doctor:meeting"));
+
+    await waitFor(() => {
+      // Reinstall-fixable → Doctor auto-attempts reinstall of the latest version.
+      expect(mockInstall).toHaveBeenCalledWith("lvis-plugin-meeting");
+      expect(cards).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("Meeting 복구 완료")).toBeInTheDocument();
+    });
+  });
+
+  it("falls back to the failure detail when auto-repair reinstall fails", async () => {
+    const broken = {
+      id: "meeting",
+      name: "Meeting",
+      description: "Plugin manifest could not be loaded.",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      installAliases: ["lvis-plugin-meeting"],
+      installFailureKind: "manifest-validation-error" as const,
+      installFailureMessage: "[manifest:meeting] schema validation failed",
+      loadStatus: "failed" as const,
+    };
+    const cards = vi.fn().mockResolvedValue([broken]);
+    mockInstall.mockResolvedValue({
+      ok: false as const,
+      error: "plugin-not-found",
+      message: "Plugin not found in marketplace: meeting",
+    });
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:meeting")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("plugin-config:doctor:meeting"));
+
+    await waitFor(() => {
+      expect(mockInstall).toHaveBeenCalledWith("lvis-plugin-meeting");
+      // Graceful fallback: the reinstall failure is surfaced; Remove stays available.
+      expect(screen.getByText("Plugin not found in marketplace: meeting")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Meeting 복구 완료")).toBeNull();
+  });
+
   it("shows manifest validation field details in the Doctor panel", async () => {
     const broken = {
       id: "ms-graph",

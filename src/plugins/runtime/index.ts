@@ -276,6 +276,18 @@ export class PluginRuntime {
   private readonly knownEventOwners = new Map<string, string>();
   private readonly failedPluginIds = new Set<string>();
   private readonly failedPluginStubs = new Map<string, { name: string; description: string }>();
+  /**
+   * Structured load-failure classification for the Plugin Doctor, keyed by the
+   * plugin id (or the registry-id hint when the manifest never parsed).
+   * Populated by {@link markFailed}; only surfaced on cards whose `loadStatus`
+   * is `"failed"`, and cleared when the plugin loads successfully. Lets the
+   * Doctor tell reinstall-fixable failures (stale/pre-v6 schema manifest) apart
+   * from not-locally-fixable ones (app-version incompatibility).
+   */
+  private readonly loadFailureInfo = new Map<
+    string,
+    { installFailureKind?: PluginInstallFailureKind; installFailureMessage?: string }
+  >();
   private readonly disabledPluginIds = new Set<string>();
   /**
    * #1176 active/inactive — plugins toggled inactive at runtime via
@@ -504,6 +516,19 @@ export class PluginRuntime {
           this.markFailed(plan.pluginIdHint, {
             name: plan.pluginIdHint,
             description: "Plugin manifest could not be loaded.",
+          }, {
+            // A schema-invalid on-disk manifest (e.g. a pre-v6 shape rejected
+            // after #885 Phase R) is repaired by reinstalling the latest
+            // marketplace version, which ships a valid manifest. Reuse the
+            // marketplace `manifest-validation-error` kind so the Doctor shows
+            // the same "manifest validation failed" diagnosis and offers the
+            // reinstall auto-repair. Missing/corrupt/unreadable manifests stay
+            // unclassified (generic reinstall-fixable) but still surface the
+            // underlying reason as the Doctor failure detail.
+            ...(reason === "manifest_schema"
+              ? { installFailureKind: "manifest-validation-error" as const }
+              : {}),
+            installFailureMessage: (err as Error).message,
           });
         }
         continue;
@@ -515,6 +540,7 @@ export class PluginRuntime {
         enabledManifestSnapshots.get(manifest.id)?.approvedPluginAccess ?? plan.approvedPluginAccess;
       this.knownPluginManifests.set(manifest.id, manifest);
       this.failedPluginStubs.delete(manifest.id);
+      this.loadFailureInfo.delete(manifest.id);
       // #1176 M1 fix: inactive plugins (enabled=false) are LOADED just like
       // active ones — only model exposure is gated. Seed inactivePluginIds here
       // so isPluginEnabled() is correct immediately after boot; the boot
@@ -1115,6 +1141,7 @@ export class PluginRuntime {
     }
     this.failedPluginIds.delete(pluginId);
     this.failedPluginStubs.delete(pluginId);
+    this.loadFailureInfo.delete(pluginId);
     this.disabledPluginIds.delete(pluginId);
     this.pluginUiRevisions.delete(pluginId);
 
@@ -1360,6 +1387,7 @@ export class PluginRuntime {
     });
     this.markPluginUiRevision(manifest.id);
     this.failedPluginIds.delete(manifest.id);
+    this.loadFailureInfo.delete(manifest.id);
     this.disabledPluginIds.delete(manifest.id);
 
     this.perf.recordStartup(manifest.id, startupMs);
@@ -1856,16 +1884,29 @@ export class PluginRuntime {
             ? "disabled"
             : null;
       if (!loadStatus) continue;
-      cards.set(pluginId, buildPluginCard(pluginId, manifest, loadStatus, visibleNames, {
+      const card = buildPluginCard(pluginId, manifest, loadStatus, visibleNames, {
         active,
         runtimeLoaded,
       }, {
         preparationStatus: this.preparation.getStatus(pluginId),
         installAliases: this.getPluginInstallAliases(pluginId),
-      }));
+      });
+      // A plugin that parsed its manifest but failed a later load phase (entry
+      // path, factory import, min-app-version gate, …) carries its Doctor
+      // classification here so the settings UI can offer the right repair.
+      if (loadStatus === "failed") {
+        const info = this.loadFailureInfo.get(pluginId);
+        if (info?.installFailureKind) card.installFailureKind = info.installFailureKind;
+        if (info?.installFailureMessage) card.installFailureMessage = info.installFailureMessage;
+      }
+      cards.set(pluginId, card);
     }
     for (const [pluginId, stub] of this.failedPluginStubs) {
       if (cards.has(pluginId)) continue;
+      // Manifest never parsed (schema-invalid / missing / corrupt on-disk shape)
+      // — surface the classification so the Doctor auto-repairs a reinstall-
+      // fixable cause instead of leaving the user to guess.
+      const info = this.loadFailureInfo.get(pluginId);
       cards.set(pluginId, {
         id: pluginId,
         name: stub.name,
@@ -1876,6 +1917,8 @@ export class PluginRuntime {
         loadStatus: "failed",
         active: false,
         runtimeLoaded: false,
+        ...(info?.installFailureKind ? { installFailureKind: info.installFailureKind } : {}),
+        ...(info?.installFailureMessage ? { installFailureMessage: info.installFailureMessage } : {}),
       });
     }
     return [...cards.values()];
@@ -2004,6 +2047,7 @@ export class PluginRuntime {
     this.methodMap.clear();
     this.failedPluginIds.clear();
     this.failedPluginStubs.clear();
+    this.loadFailureInfo.clear();
     this.disabledPluginIds.clear();
     this.preparation.clear();
     this.pendingRestarts.clear();
@@ -2093,11 +2137,15 @@ export class PluginRuntime {
   private markFailed(
     pluginId: string,
     stub?: { name: string; description: string },
+    failure?: { installFailureKind?: PluginInstallFailureKind; installFailureMessage?: string },
   ): void {
     this.failedPluginIds.add(pluginId);
     this.disabledPluginIds.delete(pluginId);
     if (stub) {
       this.failedPluginStubs.set(pluginId, stub);
+    }
+    if (failure && (failure.installFailureKind || failure.installFailureMessage)) {
+      this.loadFailureInfo.set(pluginId, failure);
     }
   }
 
@@ -2127,6 +2175,12 @@ export class PluginRuntime {
     this.markFailed(manifest.id, {
       name: manifest.name,
       description: `plugin requires LVIS >= ${minAppVersion}, current ${currentAppVersion}`,
+    }, {
+      // NOT locally reinstall-fixable — the marketplace ships the same too-new
+      // package, so a reinstall re-throws. The Doctor must fall back to a
+      // diagnosis directing the user to update the app.
+      installFailureKind: "incompatible-app-version",
+      installFailureMessage: `plugin requires LVIS >= ${minAppVersion}, current ${currentAppVersion}`,
     });
     return true;
   }
