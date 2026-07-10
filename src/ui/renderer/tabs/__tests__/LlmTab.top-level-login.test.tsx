@@ -32,6 +32,7 @@ function Harness({
   loadedHostResolverMap = "",
   initialVendor = "openai",
   initialBaseUrl = "",
+  initialModel = "gpt-5.4-mini",
   settingsLoaded = true,
   api,
   onOpenMarketplace,
@@ -45,6 +46,7 @@ function Harness({
   loadedHostResolverMap?: string;
   initialVendor?: string;
   initialBaseUrl?: string;
+  initialModel?: string;
   settingsLoaded?: boolean;
   api?: HarnessApi;
   onOpenMarketplace?: () => void;
@@ -57,7 +59,7 @@ function Harness({
   const [authMode] = useState<"manual" | "login">(initialAuthMode);
   const [vendor, setVendor] = useState(initialVendor);
   const [keyInput, setKeyInput] = useState("");
-  const [model, setModel] = useState("gpt-5.4-mini");
+  const [model, setModel] = useState(initialModel);
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [vertexProject, setVertexProject] = useState("");
   const [vertexLocation, setVertexLocation] = useState("");
@@ -848,6 +850,78 @@ describe("LlmTab — manual-only Model tab", () => {
     fireEvent.keyDown(modelTrigger!, { key: "ArrowDown" });
 
     expect(await screen.findByText("router/free-model")).toBeInTheDocument();
+  });
+
+  // Handshake-only: the openai-compatible model dropdown must be EMPTY before
+  // an endpoint is entered — no hardcoded seed. Previously it rendered the
+  // LVIS-cluster seed (Qwen3.6-.../Nemotron-...) before any address was typed.
+  it("openai-compatible shows no hardcoded seed models before an endpoint is entered", async () => {
+    const api = llmTabApi();
+    const { container } = render(
+      <Harness
+        initialAuthMode="manual"
+        initialVendor="openai-compatible"
+        initialModel=""
+        initialBaseUrl=""
+        api={api}
+      />,
+    );
+    // No live handshake fires without a base URL, and nothing is shown.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+    expect(api.listLlmModels).not.toHaveBeenCalled();
+
+    const modelTrigger = container.querySelector(
+      '[data-testid="llm-model-select"]',
+    ) as HTMLElement | null;
+    expect(modelTrigger).not.toBeNull();
+    fireEvent.mouseDown(modelTrigger!);
+    fireEvent.keyDown(modelTrigger!, { key: "ArrowDown" });
+
+    // The former hardcoded LVIS-cluster seed is gone.
+    expect(screen.queryByText("Qwen3.6-35B-A3B-NVFP4")).toBeNull();
+    expect(screen.queryByText("Nemotron-3-Nano-30B-A3B-FP8")).toBeNull();
+  });
+
+  it("openai-compatible populates the model dropdown from the live handshake, not a seed", async () => {
+    const api = llmTabApi();
+    (api.listLlmModels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      vendor: "openai-compatible",
+      endpoint: "https://vllm.example/v1/models",
+      models: ["team/qwen-real", "team/nemotron-real"],
+      fetchedAt: "2026-07-08T00:00:00.000Z",
+    });
+
+    const { container } = render(
+      <Harness
+        initialAuthMode="manual"
+        initialVendor="openai-compatible"
+        initialModel=""
+        initialBaseUrl="https://vllm.example/v1"
+        api={api}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(api.listLlmModels).toHaveBeenCalledWith({
+        vendor: "openai-compatible",
+        baseUrl: "https://vllm.example/v1",
+      }),
+    );
+
+    const modelTrigger = container.querySelector(
+      '[data-testid="llm-model-select"]',
+    ) as HTMLElement | null;
+    expect(modelTrigger).not.toBeNull();
+    fireEvent.mouseDown(modelTrigger!);
+    fireEvent.keyDown(modelTrigger!, { key: "ArrowDown" });
+
+    expect(await screen.findByText("team/qwen-real")).toBeInTheDocument();
+    expect(screen.getByText("team/nemotron-real")).toBeInTheDocument();
+    // Live list only — never the hardcoded seed.
+    expect(screen.queryByText("Qwen3.6-35B-A3B-NVFP4")).toBeNull();
   });
 
   it("host-resolver map textarea is enabled even for a former login/demo user", () => {
