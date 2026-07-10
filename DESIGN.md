@@ -122,12 +122,32 @@
 - Localization: UI must remain stable for Japanese, Chinese, Korean, English, Spanish, French, and German strings.
 
 ## Responsive behavior
-- Supported devices: desktop Electron windows with resizable width, including narrow laptop layouts.
-- Layout adaptations:
-  - Primary navigation may compact, but it must not duplicate route ownership.
-  - Floating panels must clamp to viewport width and height.
-  - Text inside controls must wrap or truncate intentionally without overlapping adjacent controls.
-- Touch/hover differences: hover is enhancement only; all essential actions remain click/keyboard accessible.
+
+### Support boundary
+- LVIS is a **desktop-only** product: the sole runtime is a resizable desktop Electron window. There are no phone or tablet builds, no touch-first target, and no separate mobile app planned.
+- Even so, every surface is designed **responsively across window widths**, using tablet/mobile-class width tiers as design boundaries. This is not aspirational: the enforced floors already put real surfaces inside phone-class widths — the main window clamps at **460px** (`MAIN_WINDOW_MIN_WIDTH`, `src/main/main-window-bounds.ts`) and a plugin side panel renders at **448px** (`SIDE_PANEL_MIN_WIDTH`, `src/shared/side-panel.ts`). A surface that only works at laptop width is a defect, not a nice-to-have gap.
+
+### Width tiers (the shared breakpoint system)
+Tiers map 1:1 onto the Tailwind default scale already used across the renderer (`sm:`/`md:`/`lg:` — no custom overrides), so the design language and the implementation utilities never diverge:
+
+| Tier | Window/pane width | Tailwind | What must hold |
+|---|---|---|---|
+| **Mobile-class** | `< 640px` (floor: 448/460px) | base (mobile-first) | The **mandatory baseline**. Single-column layout; primary navigation compacts; every essential action reachable; no horizontal scroll of the page body; floating panels clamp to the viewport. Plugin panels live here whenever docked as a side panel. |
+| **Tablet-class** | `640–1023px` | `sm:` / `md:` | Two-pane layouts may appear (list + detail, chat + rail). Density increases; controls may gain labels that were icon-only at mobile-class. Typical for half-screen window snapping and narrow laptops. |
+| **Desktop-class** | `≥ 1024px` | `lg:` | Full workbench: sidebar + canvas + right-side action/activity surfaces concurrently. Multi-column settings and wide tables are allowed only here. |
+
+- **Author mobile-first**: style for the mobile-class base, then enhance upward with `sm:`/`md:`/`lg:`. Never author a desktop-only layout and patch it downward.
+- Tier checks are on **container/window width**, not device detection — a desktop window dragged narrow IS the mobile-class experience.
+- Plugin authors: treat **448px** as your panel's hard floor and design the panel's base layout for mobile-class; a plugin page promoted to the main canvas may assume tablet-class and up. Verify at 448px, 640px, and 1024px before shipping.
+
+### Layout adaptations
+- Primary navigation may compact, but it must not duplicate route ownership.
+- Floating panels must clamp to viewport width and height.
+- Text inside controls must wrap or truncate intentionally without overlapping adjacent controls.
+- Wide content (tables, code, diagrams) scrolls inside its own container — the page body never scrolls horizontally.
+
+### Touch/hover
+- Hover is enhancement only; all essential actions remain click/keyboard accessible. Touch input is tolerated (hover-independent affordances), never a design target.
 
 ## Interaction states
 - Loading: use compact progress or status text near the affected control.
