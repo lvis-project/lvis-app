@@ -17,7 +17,10 @@
  *   - Azure Foundry / Vertex AI — defer to underlying model name.
  */
 import type { LLMVendor } from "./types.js";
-import { isOpenAICompatibleVendor } from "../../shared/llm-vendor-defaults.js";
+import {
+  isOpenAICompatibleVendor,
+  isSelfHostedVllmVendor,
+} from "../../shared/llm-vendor-defaults.js";
 import type {
   MarketplaceInstalledProviderPreset,
   MarketplaceProviderPackageAsset,
@@ -84,17 +87,21 @@ export function supportsVision(vendor: LLMVendor, model: string): boolean {
  * finish_reason=length CONTINUATION capability. When a round ends truncated
  * (stopReason "max_tokens") the conversation loop re-invokes the model to
  * CONTINUE the partial answer instead of showing it cut off. The mechanism is
- * vendor-specific; v1 ships only the vLLM/openai-compatible path (native
- * `continue_final_message`, zero-seam). Other vendors fall back to the existing
- * truncation notice until their prefill path is wired:
+ * vLLM's native `continue_final_message` (zero-seam), so it lights up for the
+ * self-hosted vLLM class ({@link isSelfHostedVllmVendor}: openai-compatible +
+ * ollama + lmstudio + litellm) — NOT the commercial OpenAI-compatible gateways
+ * (openrouter/groq/…), which do not honor `continue_final_message`. Other
+ * vendors fall back to the existing truncation notice until their prefill path
+ * is wired:
  *   - claude  → assistant-prefill (blocked while extended thinking is ON)
  *   - openai/gemini/copilot/azure-foundry/vertex → append partial + "continue"
  *     user reprompt + host stitch
- * This predicate is the SINGLE seam: extend it (and add the matching adapter
- * branch) to light up another vendor.
+ * Shares the {@link isSelfHostedVllmVendor} SOT with the adapter's
+ * `chat_template_kwargs`/`continue_final_message` guard so the request-shaping
+ * side and the capability side can never drift.
  */
 export function vendorSupportsLengthContinuation(vendor: LLMVendor): boolean {
-  return vendor === "openai-compatible";
+  return isSelfHostedVllmVendor(vendor);
 }
 
 export function providerPackageSupportsReviewerAdapter(

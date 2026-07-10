@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   providerPackageSupportsReviewerAdapter,
   supportsVision,
+  vendorSupportsLengthContinuation,
 } from "../vendor-capabilities.js";
 
 describe("supportsVision", () => {
@@ -44,6 +45,25 @@ describe("supportsVision", () => {
   it("copilot routing falls back by model name", () => {
     expect(supportsVision("copilot", "gpt-4.1")).toBe(true);
     expect(supportsVision("copilot", "gpt-3.5-turbo")).toBe(false);
+  });
+});
+
+describe("vendorSupportsLengthContinuation", () => {
+  it("lights up for the self-hosted vLLM class (native continue_final_message)", () => {
+    expect(vendorSupportsLengthContinuation("openai-compatible")).toBe(true);
+    expect(vendorSupportsLengthContinuation("ollama")).toBe(true);
+    expect(vendorSupportsLengthContinuation("lmstudio")).toBe(true);
+    expect(vendorSupportsLengthContinuation("litellm")).toBe(true);
+  });
+
+  it("is OFF for commercial gateways and non-self-hosted vendors", () => {
+    // Commercial OpenAI-compatible gateways do not honor continue_final_message.
+    expect(vendorSupportsLengthContinuation("openrouter")).toBe(false);
+    expect(vendorSupportsLengthContinuation("groq")).toBe(false);
+    expect(vendorSupportsLengthContinuation("together")).toBe(false);
+    expect(vendorSupportsLengthContinuation("openai")).toBe(false);
+    expect(vendorSupportsLengthContinuation("claude")).toBe(false);
+    expect(vendorSupportsLengthContinuation("gemini")).toBe(false);
   });
 });
 

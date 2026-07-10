@@ -17,6 +17,7 @@ import {
   isDefaultVisibleLLMVendor,
   isMarketplaceEligibleLLMVendor,
   isRetiredLlmModel,
+  isSelfHostedVllmVendor,
   normalizeLlmVendorModel,
 } from "../llm-vendor-defaults.js";
 
@@ -152,6 +153,27 @@ describe("LLM vendor defaults", () => {
     expect(isApiKeyOptionalLlmVendor("lmstudio")).toBe(true);
     expect(isApiKeyOptionalLlmVendor("openrouter")).toBe(false);
     expect(isApiKeyOptionalLlmVendor("openai")).toBe(false);
+  });
+
+  it("classifies only the self-hosted vLLM class for vLLM request extensions", () => {
+    // The endpoints that actually honor chat_template_kwargs +
+    // continue_final_message.
+    expect(isSelfHostedVllmVendor("openai-compatible")).toBe(true);
+    expect(isSelfHostedVllmVendor("litellm")).toBe(true);
+    expect(isSelfHostedVllmVendor("ollama")).toBe(true);
+    expect(isSelfHostedVllmVendor("lmstudio")).toBe(true);
+    // Commercial OpenAI-compatible gateways route through the same adapter but
+    // do NOT run a vLLM chat template — they must be excluded so the adapter
+    // never leaks chat_template_kwargs to them (the OpenRouter 400/422 bug).
+    expect(isSelfHostedVllmVendor("openrouter")).toBe(false);
+    expect(isSelfHostedVllmVendor("groq")).toBe(false);
+    expect(isSelfHostedVllmVendor("together")).toBe(false);
+    expect(isSelfHostedVllmVendor("deepseek")).toBe(false);
+    expect(isSelfHostedVllmVendor("mistral")).toBe(false);
+    expect(isSelfHostedVllmVendor("xai")).toBe(false);
+    // Non-openai-compatible vendors are false too.
+    expect(isSelfHostedVllmVendor("openai")).toBe(false);
+    expect(isSelfHostedVllmVendor("claude")).toBe(false);
   });
 
   it("requires a configured base URL before treating a provider as keyless-ready", () => {
