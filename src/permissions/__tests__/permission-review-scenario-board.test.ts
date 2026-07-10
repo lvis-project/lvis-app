@@ -366,7 +366,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
           _meta: { ui: { visibility: ["model"] } },
         },
       ],
-    } as unknown as NormalizedManifest;
+    } as unknown as PluginManifest;
     const runtime = { call: vi.fn() } as unknown as PluginRuntime;
     const tools = buildPluginToolsForTest(runtime, "bad-plugin", manifest);
     expect(tools).toHaveLength(1);

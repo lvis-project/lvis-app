@@ -9,10 +9,8 @@ import type { ValidateFunction } from "ajv";
 import type {
   PluginManifest,
   InstallPolicy,
-  NormalizedManifest,
   Tool,
 } from "../types.js";
-import { normalizeManifest } from "../types.js";
 import { toolVisibility, isModelVisible } from "./tool-visibility.js";
 import { createLogger } from "../../lib/logger.js";
 import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
@@ -130,7 +128,7 @@ function schemaAcceptsPureToolObject(validator: ValidateFunction): boolean {
  * (`writesToOwnSandbox`/`category`/`workerId`/per-tool `version`). A too-permissive
  * schema would let an untrusted self-claim ride the wire even though the host no
  * longer reads it — the removal must be enforced at the shape boundary, not just
- * dropped by `normalizeManifest`.
+ * dropped during host-side materialization.
  */
 function schemaRejectsPureToolWithRemovedField(validator: ValidateFunction): boolean {
   const rejected = validator({
@@ -156,8 +154,8 @@ function schemaRejectsPureToolWithRemovedField(validator: ValidateFunction): boo
 /**
  * #885 v6 — NEGATIVE-strictness guard: the SDK schema must REJECT an explicit
  * empty `_meta.ui.visibility: []` (a tool reachable by neither surface). This is
- * the `minItems: 1` gate that guarantees `[]` never reaches `normalizeManifest`
- * or `toolVisibility` — there is exactly ONE resolution for missing visibility
+ * the `minItems: 1` gate that guarantees `[]` never reaches host-side
+ * materialization or `toolVisibility` — there is exactly ONE resolution for missing visibility
  * (`[]` → REJECT), never a silent widen to governed-dual (SoT §2.2, u2 §1.4.2).
  */
 function schemaRejectsEmptyVisibility(validator: ValidateFunction): boolean {
@@ -294,18 +292,49 @@ export async function buildManifestValidator(): Promise<ValidateFunction> {
 }
 
 /**
+ * Materialize a validated manifest into the pure form every host consumer reads
+ * (SoT §2.3). Two defaulting sites, both pure (no IO):
+ *   1. a tool that omits `_meta.ui.visibility` gets the STANDARD SEP-1865
+ *      default `["model","app"]`; an explicit `[]` is REJECTED (R6 fail-closed —
+ *      never widened to dual). `tool-visibility.ts` depends on this being the
+ *      sole tool-visibility defaulting step, so output tools ALWAYS carry an
+ *      explicit non-empty `_meta.ui.visibility`.
+ *   2. `name` defaults to `id` when the (schema-optional) manifest omits it, so
+ *      a parsed manifest always carries a name at runtime.
+ * Formerly a standalone exported helper in `../types.js`; inlined here as the
+ * single load-time materializer now that no other consumer needs it.
+ */
+function materializeManifest(manifest: PluginManifest): PluginManifest {
+  const DUAL: Array<"model" | "app"> = ["model", "app"];
+  const tools = manifest.tools.map((t): Tool => {
+    const vis = t._meta?.ui?.visibility;
+    if (vis === undefined) {
+      return { ...t, _meta: { ...t._meta, ui: { ...t._meta?.ui, visibility: DUAL } } };
+    }
+    if (vis.length === 0) {
+      throw new Error(
+        `[manifest:${manifest.id}] tool '${t.name}': _meta.ui.visibility is [] — ` +
+          "a tool must be reachable by ≥1 surface; empty is rejected (SoT §2.2/§2.3)",
+      );
+    }
+    return t;
+  });
+  return { ...manifest, tools, name: manifest.name ?? manifest.id };
+}
+
+/**
  * Parse and fully validate a plugin.json manifest file.
  *
- * Runs SDK AJV schema validation, then compiles the (legacy or pure) manifest
- * to the pure v6 form via `normalizeManifest` (the SINGLE legacy-shape reader,
- * SoT §3.1), then runs host cross-field MUST checks against the normalized
- * `Tool[]`. Returns the {@link NormalizedManifest} every host consumer reads.
- * Throws with a descriptive message on any failure.
+ * Runs SDK AJV schema validation, then materializes each tool's surface
+ * visibility and the `name` default via `materializeManifest` (SoT §3.1), then
+ * runs host cross-field MUST checks against the pure `Tool[]`. Returns the
+ * fully-materialized {@link PluginManifest} every host consumer reads. Throws
+ * with a descriptive message on any failure.
  */
 export async function parsePluginJson(
   path: string,
   validator: ValidateFunction,
-): Promise<NormalizedManifest> {
+): Promise<PluginManifest> {
   // Detailed, per-field error messages shaped as
   //   "Invalid plugin manifest '<pluginId>' at '<fieldPath>': <reason>. Example: <correction>"
   const raw = await readFile(path, "utf-8");
@@ -518,12 +547,12 @@ export async function parsePluginJson(
     );
   }
 
-  // #885 v6 — materialize each tool's `_meta.ui.visibility` into the pure
-  // `NormalizedManifest` every host check below reads (the standard
-  // `["model","app"]` default is filled in here, an explicit `[]` is rejected).
-  // From here on all tool checks read the normalized `manifest.tools: Tool[]` —
+  // #885 v6 — materialize each tool's `_meta.ui.visibility` (and the `name`
+  // default) into the pure `PluginManifest` every host check below reads (the
+  // standard `["model","app"]` default is filled in here, an explicit `[]` is
+  // rejected). From here on all tool checks read `manifest.tools: Tool[]` —
   // never `parsed.tools`.
-  const manifest = normalizeManifest(parsed);
+  const manifest = materializeManifest(parsed);
 
   // Tool names exposed to LLMs must satisfy ^[a-zA-Z_][a-zA-Z0-9_]*$ (vendor
   // requirement — kept as defence-in-depth vs a stale SDK schema, same rationale

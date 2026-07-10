@@ -12,7 +12,7 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { PluginMcpHost } from "../plugin-mcp-host.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import type { PluginToolDelegate } from "../plugin-mcp-server.js";
-import type { NormalizedManifest } from "../../plugins/types.js";
+import type { PluginManifest } from "../../plugins/types.js";
 import {
   __resetActiveSandboxCapabilityForTest,
   __resetWrappedPluginWorkersForTest,
@@ -22,7 +22,7 @@ import {
 } from "../../permissions/sandbox-capability.js";
 
 // #885 v6 — the loopback consumes the NORMALIZED pure `Tool[]` (manifest == wire).
-const MANIFEST: NormalizedManifest = {
+const MANIFEST: PluginManifest = {
   id: "com.example.notes",
   name: "Notes",
   version: "1.4.2",
@@ -162,7 +162,7 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
   });
 
   it("drops a tool whose inputSchema fails the #1182 provider-strict lint (parity)", async () => {
-    const badManifest: NormalizedManifest = {
+    const badManifest: PluginManifest = {
       id: "com.example.bad",
       name: "Bad",
       version: "1.0.0",

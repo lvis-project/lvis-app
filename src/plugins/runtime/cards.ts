@@ -6,14 +6,14 @@
  * The runtime resolves load-status, visibility, preparation status, and
  * install aliases, then delegates the shaping here.
  */
-import type { NormalizedManifest } from "../types.js";
+import type { PluginManifest } from "../types.js";
 import { normalizeInstallPolicy } from "./manifest-validation.js";
 import { isModelVisible } from "./tool-visibility.js";
 import type { PluginCard, PluginPreparationStatus } from "./index.js";
 
 export function buildPluginCard(
   pluginId: string,
-  manifest: NormalizedManifest,
+  manifest: PluginManifest,
   loadStatus: PluginCard["loadStatus"],
   visibleNames: Set<string> | null,
   state: { active: boolean; runtimeLoaded: boolean },
@@ -54,7 +54,7 @@ export function buildPluginCard(
   const uiExtensions = manifest.ui?.filter((extension) => extension.slot === "sidebar");
   return {
     id: pluginId,
-    name: manifest.name,
+    name: manifest.name ?? manifest.id,
     description,
     sampleTools,
     tools: filteredNames,

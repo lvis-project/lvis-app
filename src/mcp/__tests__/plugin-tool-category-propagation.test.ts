@@ -15,9 +15,9 @@ import { describe, it, expect, vi } from "vitest";
 import { PluginMcpHost } from "../plugin-mcp-host.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import type { PluginToolDelegate } from "../plugin-mcp-server.js";
-import type { NormalizedManifest } from "../../plugins/types.js";
+import type { PluginManifest } from "../../plugins/types.js";
 
-const MANIFEST: NormalizedManifest = {
+const MANIFEST: PluginManifest = {
   id: "com.example.mixed",
   name: "Mixed",
   version: "3.1.0",

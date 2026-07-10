@@ -3,11 +3,11 @@ import {
   manifestToDiscoverResult,
   manifestToolsToMcpTools,
 } from "../plugin-server-projection.js";
-import type { NormalizedManifest } from "../../plugins/types.js";
+import type { PluginManifest } from "../../plugins/types.js";
 
 // #885 v6 — the projection now reads the NORMALIZED pure `Tool[]` (manifest ==
 // wire) and filters to model-visible tools.
-const BASE_MANIFEST: NormalizedManifest = {
+const BASE_MANIFEST: PluginManifest = {
   id: "com.example.meeting",
   name: "Meeting",
   version: "2.1.0",
@@ -109,7 +109,7 @@ describe("plugin-server-projection — manifest → server/discover (#1230 §3.2
 
   it("declares the MCP Apps extension only when the manifest ships UI", () => {
     expect(manifestToDiscoverResult(BASE_MANIFEST).capabilities.extensions).toBeUndefined();
-    const withUi: NormalizedManifest = {
+    const withUi: PluginManifest = {
       ...BASE_MANIFEST,
       ui: [{ slot: "sidebar", entry: "ui/panel.js", title: "Meeting" } as never],
     };
@@ -120,7 +120,7 @@ describe("plugin-server-projection — manifest → server/discover (#1230 §3.2
   });
 
   it("does NOT project the advisory manifest.capabilities[] into MCP ServerCapabilities", () => {
-    const withCaps: NormalizedManifest = { ...BASE_MANIFEST, capabilities: ["meeting-recorder", "mail-source"] };
+    const withCaps: PluginManifest = { ...BASE_MANIFEST, capabilities: ["meeting-recorder", "mail-source"] };
     const discover = manifestToDiscoverResult(withCaps);
     expect(Object.keys(discover.capabilities)).toEqual(["tools"]);
     expect(JSON.stringify(discover.capabilities)).not.toContain("meeting-recorder");

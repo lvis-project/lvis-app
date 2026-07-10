@@ -35,7 +35,7 @@ import type { RiskClassifier } from "../../permissions/reviewer/risk-classifier.
 import { HookRunner } from "../../hooks/hook-runner.js";
 import { BashAstValidator } from "../../main/bash-ast-validator.js";
 import { buildPluginToolsForTest } from "../../plugins/__tests__/plugin-tool-test-fixture.js";
-import type { NormalizedManifest } from "../../plugins/types.js";
+import type { PluginManifest } from "../../plugins/types.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 import { mcpToolToTool } from "../../mcp/mcp-tool-adapter.js";
 import {
@@ -3212,7 +3212,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
           _meta: { ui: { visibility: ["model"] } },
         },
       ],
-    } as unknown as NormalizedManifest;
+    } as unknown as PluginManifest;
     const registry = new ToolRegistry();
     for (const tool of buildPluginToolsForTest(
       { call: pluginCall } as unknown as PluginRuntime,

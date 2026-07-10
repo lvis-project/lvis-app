@@ -16,7 +16,6 @@ import type {
   PluginConfigSchema,
   PluginHostApi,
   PluginManifest,
-  NormalizedManifest,
   PluginToolHandler,
   PluginUiExtension,
   RuntimePlugin,
@@ -195,7 +194,7 @@ export type PluginToolInvocationDelegate = (
 
 export interface PluginStartPreparationContext {
   pluginId: string;
-  manifest: NormalizedManifest;
+  manifest: PluginManifest;
   manifestPath: string;
   pluginRoot: string;
   reportProgress?: (status: PluginPreparationProgressInput) => void;
@@ -208,7 +207,7 @@ export interface PluginRuntimeOptions {
   pluginsRoot?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
   /** Plugin-scoped HostApi factory — injected by boot.ts */
-  createHostApi?: (pluginId: string, manifest: NormalizedManifest, pluginDataDir: string) => PluginHostApi;
+  createHostApi?: (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi;
   deploymentGuard?: PluginDeploymentGuard;
   installReceiptCacheRoot?: string;
   auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
@@ -254,7 +253,7 @@ export class PluginRuntime {
   private readonly registryPath?: string;
   private readonly pluginsRoot?: string;
   private readonly configStore: ConfigOverrideStore;
-  private readonly createHostApi?: (pluginId: string, manifest: NormalizedManifest, pluginDataDir: string) => PluginHostApi;
+  private readonly createHostApi?: (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly installReceiptCacheRoot?: string;
   private readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
@@ -266,7 +265,7 @@ export class PluginRuntime {
   private readonly methodMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
   private readonly perf = new PerfStatsTracker();
   private readonly disposers = new Map<string, Array<() => void>>();
-  private readonly knownPluginManifests = new Map<string, NormalizedManifest>();
+  private readonly knownPluginManifests = new Map<string, PluginManifest>();
   private readonly knownPluginAccessGrants = new Map<string, PluginAccessSpec | undefined>();
   private readonly knownInstallAliases = new Map<string, Set<string>>();
   private readonly knownToolOwners = new Map<string, string>();
@@ -337,7 +336,7 @@ export class PluginRuntime {
     return this.manifestValidator;
   }
 
-  private async readManifest(path: string): Promise<NormalizedManifest> {
+  private async readManifest(path: string): Promise<PluginManifest> {
     const validator = await this.getManifestValidator();
     try {
       return await parsePluginJson(path, validator);
@@ -363,7 +362,7 @@ export class PluginRuntime {
     return ensurePluginDataDir(pluginId, pluginRoot, this.pluginsRoot);
   }
 
-  private buildHostApi(pluginId: string, manifest: NormalizedManifest, pluginDataDir: string): PluginHostApi {
+  private buildHostApi(pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi {
     const hostApi = this.createHostApi?.(pluginId, manifest, pluginDataDir) ?? createNoopHostApi(pluginId, pluginDataDir);
     // Defence-in-depth: PluginHostApi.storage is required but partial hostApi
     // objects from test harnesses may omit it.
@@ -383,7 +382,7 @@ export class PluginRuntime {
     return this.pluginUiRevisions.get(pluginId) ?? this.markPluginUiRevision(pluginId);
   }
 
-  private buildPluginUiEntryUrl(pluginId: string, manifest: NormalizedManifest, entryPath: string): string {
+  private buildPluginUiEntryUrl(pluginId: string, manifest: PluginManifest, entryPath: string): string {
     const url = new URL(buildImportUrl(entryPath));
     url.searchParams.set("lvisPluginVersion", manifest.version ?? "0");
     url.searchParams.set("lvisRuntimeRevision", String(this.getPluginUiRevision(pluginId)));
@@ -409,7 +408,7 @@ export class PluginRuntime {
 
   private rememberPluginManifest(
     pluginId: string,
-    manifest: NormalizedManifest,
+    manifest: PluginManifest,
     approvedPluginAccess: PluginAccessSpec | undefined,
   ): void {
     this.knownPluginManifests.set(pluginId, manifest);
@@ -499,7 +498,7 @@ export class PluginRuntime {
           continue;
         }
       }
-      let manifest: NormalizedManifest;
+      let manifest: PluginManifest;
       try {
         manifest = await this.readManifest(manifestPath);
       } catch (err) {
@@ -573,7 +572,7 @@ export class PluginRuntime {
             missing: dependencyResult.missing,
           });
           this.markFailed(manifest.id, {
-            name: manifest.name,
+            name: manifest.name ?? manifest.id,
             description: `Missing capabilities: ${dependencyResult.missing.join(", ")}`,
           });
           continue;
@@ -810,7 +809,7 @@ export class PluginRuntime {
     if (!integrityResult.ok) {
       return "failed";
     }
-    let manifest: NormalizedManifest;
+    let manifest: PluginManifest;
     try {
       manifest =
         snapshot?.manifest ??
@@ -1218,7 +1217,7 @@ export class PluginRuntime {
    */
   private async instantiateAndStartSinglePlugin(
     plan: ManifestLoadPlan,
-    manifest: NormalizedManifest,
+    manifest: PluginManifest,
     approvedPluginAccess: PluginAccessSpec | undefined,
     opts: { skipPreparation?: boolean; cacheBust?: boolean; shouldCommit?: () => boolean } = {},
   ): Promise<SinglePluginStartResult> {
@@ -1254,7 +1253,7 @@ export class PluginRuntime {
           missing: dependencyResult.missing,
         });
         this.markFailed(manifest.id, {
-          name: manifest.name,
+          name: manifest.name ?? manifest.id,
           description: `Missing capabilities: ${dependencyResult.missing.join(", ")}`,
         });
         return "failed";
@@ -1845,7 +1844,7 @@ export class PluginRuntime {
     }
   }
 
-  getPluginManifest(pluginId: string): NormalizedManifest | undefined {
+  getPluginManifest(pluginId: string): PluginManifest | undefined {
     return this.plugins.get(pluginId)?.manifest ?? this.knownPluginManifests.get(pluginId);
   }
 
@@ -1921,8 +1920,8 @@ export class PluginRuntime {
     return [...cards.values()];
   }
 
-  listPluginManifests(): Array<{ pluginId: string; manifest: NormalizedManifest }> {
-    const result: Array<{ pluginId: string; manifest: NormalizedManifest }> = [];
+  listPluginManifests(): Array<{ pluginId: string; manifest: PluginManifest }> {
+    const result: Array<{ pluginId: string; manifest: PluginManifest }> = [];
     for (const pluginId of this.preparation.preparingIds()) {
       const manifest = this.knownPluginManifests.get(pluginId);
       if (manifest) result.push({ pluginId, manifest });
@@ -2156,7 +2155,7 @@ export class PluginRuntime {
    * The failed-stub `description` carries the English IPC error message; the
    * renderer maps the `incompatible-app-version` code to the Korean copy.
    */
-  private markIncompatibleAppVersion(manifest: NormalizedManifest): boolean {
+  private markIncompatibleAppVersion(manifest: PluginManifest): boolean {
     const minAppVersion = manifest.requires?.minAppVersion;
     if (!minAppVersion) return false;
     const currentAppVersion = getLvisAppVersion();
@@ -2170,7 +2169,7 @@ export class PluginRuntime {
       current: currentAppVersion,
     });
     this.markFailed(manifest.id, {
-      name: manifest.name,
+      name: manifest.name ?? manifest.id,
       description: `plugin requires LVIS >= ${minAppVersion}, current ${currentAppVersion}`,
     }, {
       // NOT locally reinstall-fixable — the marketplace ships the same too-new

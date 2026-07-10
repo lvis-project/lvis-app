@@ -13,7 +13,7 @@
  * logging exactly as before.
  */
 import type {
-  NormalizedManifest,
+  PluginManifest,
   PluginToolHandler,
   RuntimePlugin,
   RuntimePluginFactory,
@@ -28,7 +28,7 @@ import { buildImportUrl } from "./sandbox.js";
  * the {app-only ∪ dual} set.
  */
 export function declaredUiInvokableMethods(
-  manifest: Pick<NormalizedManifest, "tools">,
+  manifest: Pick<PluginManifest, "tools">,
 ): string[] {
   return (manifest.tools ?? []).filter(isAppVisible).map((t) => t.name);
 }
@@ -39,7 +39,7 @@ export function declaredUiInvokableMethods(
  * duplicate names at load. This is the full declared-tool set (the model-visible
  * ∪ app-visible tool union).
  */
-export function declaredRuntimeMethods(manifest: Pick<NormalizedManifest, "tools">): string[] {
+export function declaredRuntimeMethods(manifest: Pick<PluginManifest, "tools">): string[] {
   return [...new Set((manifest.tools ?? []).map((t) => t.name))];
 }
 
@@ -66,7 +66,7 @@ export async function importPluginFactory(
  * to `onMissingHandler` so the caller can emit its site-specific warning.
  */
 export function buildMethodMap(
-  manifest: Pick<NormalizedManifest, "tools">,
+  manifest: Pick<PluginManifest, "tools">,
   instance: RuntimePlugin,
   onMissingHandler: (toolName: string) => void,
 ): Map<string, PluginToolHandler> {

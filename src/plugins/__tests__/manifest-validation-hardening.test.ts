@@ -127,8 +127,8 @@ describe("runtime manifest validation hardening", () => {
   it("2) #885 v6 — a legacy orphan toolSchemas key (not in tools[]) is DROPPED by normalize, not a hard fail", async () => {
     // The old "toolSchemas key ⊆ tools[] ∪ uiActions" hard-fail is DELETED
     // (structurally impossible in the pure shape). A legacy orphan schema — an
-    // entry backing neither a tool[] nor a uiAction — is simply dropped by
-    // normalizeManifest, so the plugin still LOADS (no cross-field rejection).
+    // entry backing neither a tool[] nor a uiAction — is simply dropped during
+    // host-side materialization, so the plugin still LOADS (no cross-field rejection).
     await writePlugin("p-ts", {
       tools: ["pts_hello", "pts_bad", "pts_good"],
       toolSchemas: {
