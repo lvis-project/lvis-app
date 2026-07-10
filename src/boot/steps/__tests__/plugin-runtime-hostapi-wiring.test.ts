@@ -99,7 +99,7 @@ type CreateHostApi = (
   manifest: {
     id: string;
     config?: Record<string, unknown>;
-    configSchema?: { properties?: Record<string, { type?: string; format?: string }> };
+    configSchema?: { properties?: Record<string, { type?: string; format?: string; default?: unknown }> };
     capabilities?: string[];
   },
   pluginDataDir: string,
@@ -179,6 +179,35 @@ describe("HostApi.config.get merged-read precedence", () => {
     // Saved plugin config wins over wildcard wins over manifest default.
     expect(api.config.get("shared")).toBe("cfg");
     expect(api.config.get("missing")).toBeUndefined();
+  });
+
+  it("applies configSchema defaults as the lowest layer (AB1); higher layers still win", async () => {
+    const store = new Map<string, Record<string, unknown>>([
+      ["plugin-a", { savedKey: "saved" }],
+    ]);
+    const createHostApi = await initAndGetFactory(makeSettingsService(store));
+    const api = createHostApi(
+      "plugin-a",
+      {
+        id: "plugin-a",
+        config: {},
+        configSchema: {
+          properties: {
+            schemaOnly: { type: "string", default: "def" },
+            savedKey: { type: "string", default: "def" },
+          },
+        },
+      },
+      mkdtempSync("/tmp/lvis-cfg-def-"),
+    );
+
+    // Unset schema-defaulted key now returns the author-declared default
+    // (was `undefined` before AB1) — consistent with ctx.config.
+    expect(api.config.get("schemaOnly")).toBe("def");
+    // A saved value still wins over the schema default (precedence unchanged).
+    expect(api.config.get("savedKey")).toBe("saved");
+    // A key with neither a value nor a schema default is still undefined.
+    expect(api.config.get("nothing")).toBeUndefined();
   });
 });
 
