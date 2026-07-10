@@ -180,6 +180,30 @@ function schemaRejectsEmptyVisibility(validator: ValidateFunction): boolean {
   return rejected === false;
 }
 
+/**
+ * #885 v6.1.0 — NEGATIVE-strictness guard: the SDK schema must REJECT a `ui[]`
+ * extension declaring the removed `kind:"action"` surface (an icon that
+ * dispatched a declared tool with no panel — see `PluginUiExtension` in
+ * `../types.ts`). App-invokable behavior is now expressed by a tool's
+ * `_meta.ui.visibility`, so a schema that still accepts this shape would let
+ * a plugin ship dead-on-arrival config the host can no longer route.
+ */
+function schemaRejectsUiActionKind(validator: ValidateFunction): boolean {
+  const rejected = validator({
+    id: "ui-action-kind-plugin",
+    name: "UI Action Kind Plugin",
+    version: "1.0.0",
+    description: "Removed ui[].kind=\"action\" fixture.",
+    publisher: "LVIS",
+    entry: "dist/index.js",
+    tools: [],
+    ui: [
+      { id: "a", slot: "sidebar", kind: "action", title: "x", tool: "t" },
+    ],
+  });
+  return rejected === false;
+}
+
 export function normalizeInstallPolicy(
   source: Partial<Pick<PluginManifest, "installPolicy">> | undefined,
 ): InstallPolicy {
@@ -200,11 +224,12 @@ export function getDeclaredEmittedEvents(manifest: Pick<PluginManifest, "emitted
  * Lazy-load + compile the SDK plugin manifest schema into an AJV validator.
  * The SDK schema is the manifest shape SOT; if it cannot be resolved or
  * compiled, plugin loading must fail closed. Do not mutate the SDK schema in
- * the host. As of @lvis/plugin-sdk v6.0.0, the helper must natively accept
+ * the host. As of @lvis/plugin-sdk v6.1.0, the helper must natively accept
  * every host-required manifest field (`networkAccess.allowPrivateNetworks`,
  * marketplace-provider secret grants, AND the pure MCP `Tool[]` object with
  * `_meta.ui.visibility`), and must be strict enough to REJECT a pure tool
- * carrying a v6-removed field or an empty `visibility: []` (the
+ * carrying a v6-removed field, an empty `visibility: []`, or a `ui[]`
+ * extension declaring the removed `kind:"action"` surface (the
  * negative-strictness guards below).
  */
 export async function buildManifestValidator(): Promise<ValidateFunction> {
@@ -241,13 +266,14 @@ export async function buildManifestValidator(): Promise<ValidateFunction> {
   ].filter(Boolean);
   if (missingNativeFields.length > 0) {
     throw new Error(
-      `SDK plugin manifest validator is missing native support for ${missingNativeFields.join(", ")}; update @lvis/plugin-sdk to v6.0.0 or newer.`,
+      `SDK plugin manifest validator is missing native support for ${missingNativeFields.join(", ")}; update @lvis/plugin-sdk to v6.1.0 or newer.`,
     );
   }
   // Separate negative-strictness assertions (opposite polarity to the accept
   // gate above — each must REJECT). A too-permissive schema would let a removed
-  // self-claim field or an unreachable empty-visibility tool through the shape
-  // boundary; fail closed loudly so the contract can't silently regress.
+  // self-claim field, an unreachable empty-visibility tool, or a removed ui[]
+  // surface through the shape boundary; fail closed loudly so the contract
+  // can't silently regress.
   const strictnessGaps = [
     schemaRejectsPureToolWithRemovedField(validator)
       ? ""
@@ -255,10 +281,13 @@ export async function buildManifestValidator(): Promise<ValidateFunction> {
     schemaRejectsEmptyVisibility(validator)
       ? ""
       : "an empty _meta.ui.visibility: [] must be rejected (minItems:1)",
+    schemaRejectsUiActionKind(validator)
+      ? ""
+      : "a ui extension declaring the removed kind:\"action\" must be rejected",
   ].filter(Boolean);
   if (strictnessGaps.length > 0) {
     throw new Error(
-      `SDK plugin manifest validator is too permissive: ${strictnessGaps.join("; ")}; update @lvis/plugin-sdk to v6.0.0 or newer.`,
+      `SDK plugin manifest validator is too permissive: ${strictnessGaps.join("; ")}; update @lvis/plugin-sdk to v6.1.0 or newer.`,
     );
   }
   return validator;
