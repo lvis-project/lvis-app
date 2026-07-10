@@ -79,8 +79,13 @@ The **LVIS host becomes an MCP _host_** that runs **one MCP client per loaded pl
 
 ### 3.3 `toolSchemas` → `Tool`
 
+> **상태 (removed in #885 Phase R):** 초기 alignment 스케치다. 최종 v6 계약(`plugin-contract-v6-design.md`)은
+> `toolSchemas` map 을 **삭제**했고(각 tool 은 pure MCP `Tool` 객체), per-tool `category` 는 manifest 에서
+> **완전히 제거**되었다(Q3: host-classifies-risk — plugin 이 자기 위험도를 스스로 매기는 것은 control 이 아님).
+> `pathFields` 만 유일한 LVIS 키로 `_meta["xyz.lvis/pathFields"]` 에 남는다. 아래 매핑은 historical 로 읽을 것.
+
 - `name` keeps the existing underscore LLM tool name. `inputSchema` migrates draft-07 → 2020-12.
-- **Category stays the SOT** under `_meta["xyz.lvis/category"]`; project to `ToolAnnotations` (`readOnlyHint`/`destructiveHint`/`openWorldHint`) for interop only — host policy reads `_meta`, never inbound annotations.
+- **Category** (이 스케치는 `_meta["xyz.lvis/category"]` SOT 로 두었으나 **superseded** — removed in #885 Phase R); interop `ToolAnnotations` (`readOnlyHint`/`destructiveHint`/`openWorldHint`) 는 host 가 파생하며 host policy 는 `_meta` 만 읽고 inbound annotations 는 읽지 않는다.
 - `pathFields`/`writesToOwnSandbox`/`version`/`deprecatedSince`/`replacedBy` → `_meta["xyz.lvis/*"]`.
 - `tools/call`→`CallToolResult{content[],structuredContent?,isError?}` wrapped `resultType:"complete"`; tool failures use `isError:true` (not JSON-RPC errors) — matches LVIS's executor result model.
 - **No-Fallback field-sweep:** `toolSchemas` entries are `additionalProperties:false` (M4 fixture contract). Adding `outputSchema`/`_meta` carriers means SDK schema + host validator + fixtures move in **one PR** (repo field-addition-sweep + No-Fallback rules).

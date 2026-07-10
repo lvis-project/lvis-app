@@ -2,6 +2,7 @@
 
 > **Scope.** v3 mockup (`lvis-app/docs/design/agent-hub-work-board-v3.html`) 합의 결과를 production plugin 으로 구현. 기존 `lvis-plugin-agent-hub` repo 를 활용하고, host 측 §8 ApprovalGate 와 ms-graph plugin 의 calendar method 를 재사용한다. 본 계획은 9 Lane × 4 Wave 로 worker 격리 dispatch 를 가정한다.
 > **Status.** Plan only. 본 문서가 구현 코드를 포함하지 않는다. 각 lane 의 dispatch prompt 까지가 산출물.
+> **매니페스트 포맷 (removed in #885 Phase R):** 본 계획의 `tools[]` / `uiActions` / `toolSchemas` manifest 스니펫은 pre-v6 (legacy) 포맷이다. v6 에서는 pure `Tool[]` + `_meta.ui.visibility` 로 대체됐다 — 실제 구현 시 [`plugin-contract-v6-design.md`](../architecture/plugin-contract-v6-design.md) 를 따를 것.
 
 ---
 

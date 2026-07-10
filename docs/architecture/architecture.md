@@ -122,14 +122,18 @@ Key boundaries:
 
 - plugin code cannot invent its own identity when calling HostApi;
 - installed plugin assets are loaded through host-approved URLs;
-- plugin tools must declare schemas; manifest categories are optional metadata
-  and the host derives the effective category per invocation;
+- plugin tools must declare schemas (pure MCP `Tool` objects); per-tool category
+  is not a manifest field — the host classifies the effective category per
+  invocation;
 - plugin UI can render in host slots but cannot bypass permission review;
 - marketplace metadata should not override local policy or managed-plugin rules.
-- renderer-to-plugin method calls are allowlisted by `manifest.uiActions`;
-- a `uiActions`-only **non-status** method (declared in `uiActions` but not
-  `tools[]`) is driven by a direct UI activation only and cannot be invoked from
-  a plugin-origin `ctx.callTool` — declare it in `tools[]` for governed
+- renderer-to-plugin method calls are allowlisted by each tool's
+  `_meta.ui.visibility`: only app-visible tools (visibility includes `"app"` —
+  the union of app-only `["app"]` and dual `["model","app"]`) are
+  renderer-invokable;
+- an app-only **non-status** tool (visibility exactly `["app"]`) is driven by a
+  direct UI activation only and cannot be invoked from a plugin-origin
+  `ctx.callTool` — give it `"model"` visibility (`["model","app"]`) for governed
   model/plugin invocation (the auth `statusTool` is exempt: status polling skips
   the user-activation gate and runs on a plugin-origin chain) (#1556);
 - long-lived plugin workers are spawned only through HostApi `spawnWorker`;
@@ -178,8 +182,8 @@ medium-trust plugin may enter the lane (the reviewer classifier runs, keyed on
 the host-computed `ownerPluginSandboxRoot`) and, on any non-LOW verdict, escalates
 to the SAME gate. A low-trust foreign peer is therefore never silently
 auto-approved; both sources still converge at the user-facing gate. There is no
-MCP analog of the `uiActions` runtime bypass — external servers declare no UI
-surface. This whole invariant (deny/gate/audit/effect-ledger convergence plus the
+MCP analog of the app-only dispatch bypass — external servers declare no
+app-visible tools. This whole invariant (deny/gate/audit/effect-ledger convergence plus the
 trust-gated lane) is regression-locked by
 `src/tools/__tests__/executor-mcp-plugin-parity.test.ts`.
 

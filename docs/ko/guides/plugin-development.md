@@ -1,6 +1,15 @@
 # LVIS 플러그인 개발 가이드
 
-> **상태**: 최신 반영판 (2026-04-18)
+> **⚠️ pre-v6 (legacy) — removed in #885 Phase R:** 이 가이드는 pre-v6 매니페스트 포맷
+> (`tools: string[]` + `toolSchemas` map + `uiActions` map) 기준으로 쓰였다. #885 Phase R
+> 이후 tool 계약은 pure MCP `Tool[]` 하나로 통합됐다 — 각 tool 은
+> `{ name, description, inputSchema, _meta? }` 객체, renderer 노출은
+> `_meta.ui.visibility` (`["model"]`/`["app"]`/`["model","app"]`), path 판정은
+> `_meta["xyz.lvis/pathFields"]`, per-tool category 는 삭제(host 분류). 현행 계약·마이그레이션은
+> [`plugin-contract-v6-design.md`](../architecture/plugin-contract-v6-design.md) 를 따를 것.
+> 아래 `toolSchemas`/`uiActions` 예시는 historical 이며 그대로 작성하면 v6 host 로드에 실패한다.
+
+> **상태**: pre-v6 (2026-04-18) — 매니페스트 tool 포맷은 #885 Phase R 에서 pure `Tool[]` 로 대체됨 (위 배너)
 > **대상**: LVIS 플러그인 개발자
 > **선행 읽음**: [아키텍처 문서 §9](../architecture/architecture.md#9-plugin-system--ui-extension) · [CLAUDE.md](../../../CLAUDE.md)
 >
