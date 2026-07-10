@@ -31,22 +31,6 @@ const log = createLogger("tool-registry");
  */
 export const TOOL_SEARCH_TOOL_NAME = "tool_search";
 
-/**
- * §6.4 — internal event describing a deprecated-tool resolution via
- * {@link ToolRegistry.findByName}. Carries the requested/resolved context for
- * the `emitDeprecation` warning log. (The external observer/handler API was
- * removed — deprecation is surfaced via `log.warn` only, not a registered
- * listener.)
- */
-interface DeprecationEvent {
-  /** Name the caller requested. */
-  requested: string;
-  /** Resolved tool (may differ from requested when `replacedBy` redirect fires). */
-  resolved: Tool;
-  deprecatedSince: string;
-  replacedBy?: string;
-}
-
 export interface ToolSchemaEntry {
   name: string;
   description: string;
@@ -237,46 +221,17 @@ export class ToolRegistry {
   }
 
   /**
-   * §4.5.6 lookup — used by the executor's Step 1 (Lookup).
-   *
-   * Resolution order:
-   *   1. Look up the `name → latest` map entry.
-   *   2. If the resolved tool carries `replacedBy`, follow the redirect to
-   *      the replacement tool (one-hop only to avoid cycles) and emit a
-   *      deprecation event for the legacy name.
-   *   3. If the resolved tool carries `deprecatedSince` (with no redirect),
-   *      still emit a deprecation event so audit/telemetry can observe it.
+   * §4.5.6 lookup — used by the executor's Step 1 (Lookup). Returns the
+   * `name → latest` map entry (semver-latest for the name's owner), or
+   * `undefined` when unregistered.
    */
   findByName(name: string): Tool | undefined {
-    const hit = this.tools.get(name);
-    if (!hit) return undefined;
-    if (hit.replacedBy) {
-      const replacement = this.tools.get(hit.replacedBy);
-      if (replacement) {
-        this.emitDeprecation({
-          requested: name,
-          resolved: replacement,
-          deprecatedSince: hit.deprecatedSince ?? hit.version,
-          replacedBy: hit.replacedBy,
-        });
-        return replacement;
-      }
-    }
-    if (hit.deprecatedSince) {
-      this.emitDeprecation({
-        requested: name,
-        resolved: hit,
-        deprecatedSince: hit.deprecatedSince,
-        replacedBy: hit.replacedBy,
-      });
-    }
-    return hit;
+    return this.tools.get(name);
   }
 
   /**
-   * Pin a specific version — used by legacy callers that need the old
-   * behaviour during a deprecation window. Does NOT emit a deprecation
-   * event (caller has explicitly opted in).
+   * Pin a specific version — used by callers that need to resolve a specific
+   * registered version rather than the latest.
    */
   findByNameVersion(name: string, version: string): Tool | undefined {
     return this.versioned.get(name)?.get(version);
@@ -453,17 +408,9 @@ export class ToolRegistry {
 
   // ─── Private ──────────────────────────────────────
 
-  /**
-   * Pick the newest version from a version map, preferring active tools
-   * over deprecated ones. When every registered version is deprecated the
-   * newest deprecated tool wins — callers still see it but the deprecation
-   * observer fires on each lookup.
-   */
+  /** Pick the newest version (semver compare) from a version map. */
   private pickLatest(versionMap: Map<string, Tool>): Tool {
-    const tools = [...versionMap.values()];
-    const active = tools.filter((t) => !t.deprecatedSince);
-    const pool = active.length > 0 ? active : tools;
-    return pool.reduce((best, cur) =>
+    return [...versionMap.values()].reduce((best, cur) =>
       compareSemver(cur.version, best.version) > 0 ? cur : best,
     );
   }
@@ -503,13 +450,6 @@ export class ToolRegistry {
       return;
     }
     this.tools.set(name, this.pickLatest(versionMap));
-  }
-
-  private emitDeprecation(event: DeprecationEvent): void {
-    const redirect = event.replacedBy ? ` → ${event.replacedBy}` : "";
-    log.warn(
-      `deprecated tool call: ${event.requested}@${event.resolved.version} (deprecatedSince=${event.deprecatedSince})${redirect}`,
-    );
   }
 
   private assertNameOwnerCompatible(versionMap: Map<string, Tool>, tool: Tool): void {

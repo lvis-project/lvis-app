@@ -2,6 +2,7 @@
 
 > **Scope.** v3 mockup (`lvis-app/docs/design/agent-hub-work-board-v3.html`) 합의 결과를 production plugin 으로 구현. 기존 `lvis-plugin-agent-hub` repo 를 활용하고, host 측 §8 ApprovalGate 와 ms-graph plugin 의 calendar method 를 재사용한다. 본 계획은 9 Lane × 4 Wave 로 worker 격리 dispatch 를 가정한다.
 > **Status.** Plan only. 본 문서가 구현 코드를 포함하지 않는다. 각 lane 의 dispatch prompt 까지가 산출물.
+> **매니페스트 포맷 (removed in #885 Phase R):** 본 계획의 `tools[]` / `uiActions` / `toolSchemas` manifest 스니펫은 pre-v6 (legacy) 포맷이다. v6 에서는 pure `Tool[]` + `_meta.ui.visibility` 로 대체됐다 — 실제 구현 시 [`plugin-contract-v6-design.md`](../architecture/plugin-contract-v6-design.md) 를 따를 것.
 
 ---
 
@@ -332,14 +333,9 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
     "agent_hub_decide_approval_with_host"    // §8 ApprovalGate bridge wrapper
   ],
 
-  "uiActions": {
-    /* ... 기존 ... */
-    "agent_hub_my_work_board_v3": {},
-    "agent_hub_team_board_v3": {},
-    "agent_hub_today_team_schedule": {},
-    "agent_hub_briefing_summarize": {},
-    "agent_hub_decide_approval_with_host": {}
-  },
+  /* (pre-v6 스니펫 — v6 에서는 위 tools[] 를 Tool[] 로 만들고 각 tool 에
+     "_meta": { "ui": { "visibility": ["model","app"] } } 를 부여해 renderer 노출.
+     별도 uiActions map 은 #885 Phase R 에서 제거됨 — legacy.) */
 
   "ui": [
     {
@@ -429,7 +425,7 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
 |------|------|----------|
 | `version` 0.2.0 bump | Lane 1 | manifest + package.json + RELEASING.md |
 | `pluginAccess.plugins[].tools` 2건 추가 | Lane 4 | manifest + AJV schema sweep |
-| 신규 5 tool 추가 + uiActions 5건 | Lane 3+4+5 | tool handler 파일 + manifest 동기 |
+| 신규 5 tool 추가 (각 app-visible; pre-v6 uiActions 5건 — legacy) | Lane 3+4+5 | tool handler 파일 + manifest 동기 |
 | `ui.entry` 변경 + detached-window 설정 제거 | Lane 1, Lane 6 | manifest + tsup config + UI bundle 출력 경로 |
 | `configSchema` 4 key 추가 | Lane 1 + Lane 7 | manifest + hostPlugin.ts configSchemaKeys + Zustand store reader |
 | `emittedEvents` 2건 추가 | Lane 3, Lane 5 | manifest + emit site |
@@ -498,7 +494,7 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
 
 ### 5.3 `agent_hub_today_team_schedule`
 
-- **호출 source.** Direct (UI). LLM tool catalog 에는 노출하지 않음 (uiActions only — v3 layout 데이터 fetcher 라 LLM 이 부르면 토큰 낭비).
+- **호출 source.** Direct (UI). LLM tool catalog 에는 노출하지 않음 (app-only — `_meta.ui.visibility: ["app"]`; pre-v6 uiActions-only, legacy — v3 layout 데이터 fetcher 라 LLM 이 부르면 토큰 낭비).
 - **Input.**
   ```ts
   { teamCode?: string; date?: string /* ISO date, default today KST */; }
@@ -757,7 +753,7 @@ _lvis-plugin-agent-hub 측:_
 
 _lvis-app 측:_
 - `docs/architecture/architecture.md` §10 / §10.1 갱신 — Agent Hub plugin v0.2.0 의 v3 IA 반영. 기존 §10.0 readiness status 도 update (Pilot → v3 GA 직전).
-- (선택) `src/__tests__/plugin-loading.test.ts` — agent-hub 0.2.0 의 manifest snapshot 이 host AJV 통과하는지 확인. 새 tool 5건 + uiActions 5건 + detached-window 설정 제거 path.
+- (선택) `src/__tests__/plugin-loading.test.ts` — agent-hub 0.2.0 의 manifest snapshot 이 host AJV 통과하는지 확인. 새 tool 5건 (각 app-visible; pre-v6 uiActions 5건 — legacy) + detached-window 설정 제거 path.
 
 _lvis-marketplace 측:_
 - catalog entry 의 `versions` 항목에 `0.2.0` 추가. publish manifest 의 `dependencies[].pluginId="ms-graph"` `required=true` flip 이 marketplace UI 에 노출되게 한다 (사용자가 ms-graph 안 깔았을 때 install 막힘).
@@ -993,7 +989,7 @@ Deliverables (one PR titled "feat(agent-hub): v0.2.0 manifest + build skeleton f
    - pluginAccess.plugins[0].tools: keep existing + DO NOT add msgraph_calendar_list
      yet (Lane 4 will add). Keep ms-graph entry as-is for now.
    - tools[]: append the 5 new tool names listed in Section 4
-   - uiActions object: add the same 5 names as keys with `{}` specs
+   - (pre-v6, legacy) uiActions object: add the same 5 names — v6 에서는 각 tool 에 `_meta.ui.visibility` 부여
    - ui[0].entry: dist/ui/agent-hub-panel.js → dist/ui/agent-hub-panel-v3.js
    - ui[0]: REMOVE the detached-window settings block
    - configSchema.properties: add the 4 new keys per Section 4

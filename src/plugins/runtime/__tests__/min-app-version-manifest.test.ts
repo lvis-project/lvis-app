@@ -37,7 +37,7 @@ describe("manifest requires.minAppVersion validator", () => {
         description: { type: "string" },
         version: { type: "string", pattern: "^\\d+\\.\\d+\\.\\d+$" },
         entry: { type: "string" },
-        tools: { type: "array", items: { type: "string" } },
+        tools: { type: "array" },
         requires: { type: "object" },
       },
     });
@@ -53,7 +53,7 @@ describe("manifest requires.minAppVersion validator", () => {
         description: "x",
         version: "1.0.0",
         entry: "dist/p.js",
-        tools: ["t_one"],
+        tools: [{ name: "t_one", description: "t_one tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         ...extra,
       }),
     );

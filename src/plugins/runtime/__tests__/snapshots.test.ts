@@ -20,7 +20,7 @@ const VALID_MANIFEST = {
   name: "Snap",
   version: "1.0.0",
   entry: "dist/index.js",
-  tools: ["snap_ping"],
+  tools: [{ name: "snap_ping", description: "snap_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
   description: "Snapshot test plugin",
   publisher: "Test",
 };

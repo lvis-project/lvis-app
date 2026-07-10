@@ -171,4 +171,35 @@ describe("manifest-validation enriched error messages (#737)", () => {
     // The pattern source must appear in the error message
     expect(err!.message).toContain("\\\\d+\\\\.\\\\d+\\\\.\\\\d+");
   });
+
+  it("rejects a pre-v6 legacy string-tools manifest with an actionable upgrade message (#885 Phase R)", async () => {
+    const path = join(workDir, "plugin.json");
+    // A legacy pre-v6 manifest: `tools` is a list of name STRINGS. The lenient
+    // validator (mirroring an SDK still carrying the legacy oneOf arm) ACCEPTS
+    // it, so the host-side pure-v6 guard is the loud fail-closed point — it must
+    // name the offending index and point the author at @lvis/plugin-sdk v6,
+    // NOT fall through to the opaque "Invalid tool name 'undefined'".
+    await writeFile(
+      path,
+      JSON.stringify({
+        id: "legacy-plugin",
+        name: "Legacy",
+        description: "y",
+        version: "0.1.0",
+        entry: "dist/p.js",
+        tools: ["legacy_tool_a", "legacy_tool_b"],
+      }),
+    );
+
+    const validator = makeValidator(); // accepts string-item tools
+    const err = await parsePluginJson(path, validator).then(
+      () => null,
+      (e: Error) => e,
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect(err!.message).toContain("tools[0]");
+    expect(err!.message).toContain("pre-v6 contract");
+    expect(err!.message).toContain("@lvis/plugin-sdk v6");
+    expect(err!.message).not.toContain("Invalid tool name 'undefined'");
+  });
 });

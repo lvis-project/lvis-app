@@ -69,7 +69,7 @@ bun run test
 
 submodule 누락 시: `git submodule update --init --recursive`.
 
-매니페스트 작성 규칙(필수 필드, AJV 검증, toolSchemas)은 [`plugin-development.md`](./plugin-development.md#플러그인-매니페스트-pluginjson) 참고.
+매니페스트 작성 규칙(필수 필드, AJV 검증, tool 스키마 — v6 는 pure `Tool[]`)은 [`plugin-development.md`](./plugin-development.md#플러그인-매니페스트-pluginjson) 참고 (해당 가이드의 `toolSchemas`/`uiActions` 절은 pre-v6, #885 Phase R 에서 대체됨).
 
 ---
 

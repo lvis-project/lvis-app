@@ -1,17 +1,20 @@
 /**
- * §6.4 Tool Versioning + Deprecation — ToolRegistry behaviour.
+ * §6.4 Tool Versioning — ToolRegistry behaviour.
  *
  * Covers:
  *   - Registration with explicit versions
  *   - Duplicate (name, version) throws
  *   - Multi-version registration selects latest via semver compare
- *   - findByName emits deprecation event for deprecated tools
- *   - replacedBy triggers transparent redirect + deprecation event
- *   - findByNameVersion pins a specific legacy version without warn
+ *   - findByNameVersion pins a specific registered version
  *   - Default version "1.0.0" applied when spec omits it
  *   - unregisterByPlugin drops every version of that plugin's tools
+ *
+ * NOTE: the per-tool deprecation machinery (`deprecatedSince`/`replacedBy`
+ * redirect + warn) was removed in #885 Phase R — no builtin ever produced it —
+ * so the registry now selects the semver-latest version with no deprecation
+ * filtering, and those tests were removed with the feature.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool } from "../base.js";
@@ -20,8 +23,6 @@ function makeTool(
   name: string,
   opts: {
     version?: string;
-    deprecatedSince?: string;
-    replacedBy?: string;
     pluginId?: string;
     mcpServerId?: string;
     source?: "builtin" | "plugin" | "mcp";
@@ -34,8 +35,6 @@ function makeTool(
     pluginId: opts.pluginId,
     mcpServerId: opts.mcpServerId,
     version: opts.version,
-    deprecatedSince: opts.deprecatedSince,
-    replacedBy: opts.replacedBy,
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "", isError: false }),
   });
@@ -96,66 +95,12 @@ describe("§6.4 Tool Versioning — ToolRegistry", () => {
     ).toThrow(/missing mcpServerId/);
   });
 
-  it("findByNameVersion returns the pinned legacy version without deprecation warn", () => {
+  it("findByNameVersion returns the pinned version regardless of latest", () => {
     const r = new ToolRegistry();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    r.register(makeTool("foo", { version: "1.0.0", deprecatedSince: "2.0.0" }));
+    r.register(makeTool("foo", { version: "1.0.0" }));
     r.register(makeTool("foo", { version: "2.0.0" }));
     expect(r.findByNameVersion("foo", "1.0.0")?.version).toBe("1.0.0");
-    expect(warnSpy).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
-  });
-
-  it("prefers active tool over deprecated when both are registered", () => {
-    const r = new ToolRegistry();
-    r.register(makeTool("foo", { version: "2.0.0", deprecatedSince: "2.0.0" }));
-    r.register(makeTool("foo", { version: "1.5.0" }));
-    expect(r.findByName("foo")?.version).toBe("1.5.0");
-  });
-
-  it("warns on findByName for a deprecated tool", () => {
-    const r = new ToolRegistry();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    r.register(makeTool("old_tool", { version: "1.0.0", deprecatedSince: "1.5.0" }));
-    const resolved = r.findByName("old_tool");
-    expect(resolved?.name).toBe("old_tool");
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
-  });
-
-  it("replacedBy transparently redirects findByName to the replacement", () => {
-    const r = new ToolRegistry();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    r.register(
-      makeTool("old_name", {
-        version: "1.0.0",
-        deprecatedSince: "2.0.0",
-        replacedBy: "new_name",
-      }),
-    );
-    r.register(makeTool("new_name", { version: "2.0.0" }));
-
-    const resolved = r.findByName("old_name");
-    expect(resolved?.name).toBe("new_name");
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
-  });
-
-  it("falls back to deprecated tool when replacement is missing", () => {
-    const r = new ToolRegistry();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    r.register(
-      makeTool("old_name", {
-        version: "1.0.0",
-        deprecatedSince: "2.0.0",
-        replacedBy: "missing",
-      }),
-    );
-    const resolved = r.findByName("old_name");
-    expect(resolved?.name).toBe("old_name");
-    warnSpy.mockRestore();
+    expect(r.findByName("foo")?.version).toBe("2.0.0");
   });
 
   it("unregisterByPlugin removes every version contributed by that plugin", () => {
