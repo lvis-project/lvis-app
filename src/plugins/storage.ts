@@ -20,8 +20,6 @@ import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { PluginStorageError, type PluginStorage } from "./types.js";
 import { instrumentEffectsByPath } from "../permissions/hostapi-effect-recorder.js";
 
-export { PluginStorageError } from "./types.js";
-
 /**
  * Build a sandboxed `PluginStorage` instance pinned to `pluginDataDir`.
  *
