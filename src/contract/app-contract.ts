@@ -21,7 +21,6 @@ import {
   WORK_BOARD,
   SETTINGS,
   OVERLAY_V1,
-  SUGGESTED_REPLIES,
 } from "../shared/ipc-channels.js";
 
 // Re-export the pre-existing per-domain SOT groups so `src/contract/` is the
@@ -35,7 +34,6 @@ export {
   WORK_BOARD,
   SETTINGS,
   OVERLAY_V1,
-  SUGGESTED_REPLIES,
 };
 
 /**
@@ -416,13 +414,6 @@ export const CHANNELS = {
   },
 } as const;
 
-type ValuesOf<T> = T[keyof T];
-
-/** Every channel name defined on {@link CHANNELS} (union of all group values). */
-export type ChannelName = ValuesOf<{
-  [Group in keyof typeof CHANNELS]: ValuesOf<(typeof CHANNELS)[Group]>;
-}>;
-
 // ─── Versioned public contract ──────────────────────────────────────────────
 
 /**
@@ -595,32 +586,3 @@ export const INTERNAL_HOST_CHANNELS = {
     CHANNELS.update.skipVersion,
   ],
 } as const;
-
-// ─── Session addressing contract ────────────────────────────────────────────
-
-/**
- * Session-scoped channels: their leading `sessionId` argument MUST match the
- * currently-active conversation session. The handler NEVER silently retargets
- * to the active session when they diverge — it fails closed and returns
- * {@link SESSION_NOT_ADDRESSABLE}. This prevents a stale/foreign `sessionId`
- * (e.g. from a background renderer, a plugin, or an external caller) from
- * mutating or reading the wrong session.
- *
- * The C10 handlers adopt {@link SESSION_NOT_ADDRESSABLE} as the canonical
- * return code; today the handlers return per-site codes ("session-mismatch",
- * bare `null`) — behavior is unchanged in this commit, the constant is defined
- * for C10 to consume.
- */
-export const SESSION_SCOPED_CHANNELS = [
-  CHANNELS.chat.getHistory,
-  CHANNELS.chat.sessionHistory,
-  CHANNELS.chat.enterCheckpointView,
-  CHANNELS.chat.branchFromCheckpoint,
-  CHANNELS.chat.continueLastUser,
-] as const;
-
-/**
- * Canonical fail-closed error returned by session-scoped handlers when the
- * requested `sessionId` is not the active session (never silently retargeted).
- */
-export const SESSION_NOT_ADDRESSABLE = "session-not-active";
