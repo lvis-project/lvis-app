@@ -368,7 +368,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
           _meta: { ui: { visibility: ["model"] } },
         },
       ],
-    } as unknown as NormalizedManifest)) {
+    } as unknown as PluginManifest)) {
       toolRegistry.register(tool);
     }
 

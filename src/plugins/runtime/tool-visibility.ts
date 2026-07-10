@@ -4,7 +4,7 @@
  *
  * All four consumer classes (validator, loader, projection, gate) read surface
  * membership through THIS primitive so no consumer re-implements the default or
- * the membership test. `normalizeManifest` (U1) is the SOLE defaulting site — it
+ * the membership test. `parsePluginJson` (U1) is the SOLE defaulting site — it
  * materializes the STANDARD SEP-1865 default `["model","app"]` once at load, and
  * its output tools ALWAYS carry an explicit non-empty `_meta.ui.visibility`.
  * Therefore this host primitive is a pure READER, NOT a second defaulting site.
@@ -18,7 +18,7 @@ export type ToolSurface = "model" | "app";
 
 /**
  * READ a tool's explicit surface visibility. The default (`["model","app"]`,
- * SEP-1865 standard, round-3) is materialized ONCE by normalizeManifest (U1) —
+ * SEP-1865 standard, round-3) is materialized ONCE by parsePluginJson (U1) —
  * this function does NOT default. Post-normalize every tool carries an explicit
  * non-empty array, so the fall-through below is UNREACHABLE in the normal path.
  *
