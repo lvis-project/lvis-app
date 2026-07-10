@@ -8,7 +8,7 @@ import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
 import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
-import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource, PluginUiExtension, Tool } from "./types.js";
+import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource } from "./types.js";
 import { IncompatibleAppVersionError, MissingDependenciesError, MissingPluginDependenciesError } from "./types.js";
 import { appVersionSatisfiesMin } from "../shared/semver-compare.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
@@ -1503,8 +1503,8 @@ export class PluginMarketplaceService {
   /**
    * Orchestrate one verified-zip install: delegate download + extract to
    * the artifact store, then layer plugin-specific manifest steps on top
-   * (catalog-vs-zip validation, fallback manifest fabrication when the
-   * zip omits plugin.json). Returns the registry-relative manifest path.
+   * (catalog-vs-zip validation; a zip missing plugin.json is rejected).
+   * Returns the registry-relative manifest path.
    */
   private async installArtifact(
     plugin: PluginMarketplaceItem,
@@ -1527,28 +1527,28 @@ export class PluginMarketplaceService {
       } catch {
         // not in zip
       }
+      // Every published marketplace zip is required to ship its own plugin.json;
+      // the host never synthesizes one from catalog metadata. A verified artifact
+      // without a manifest is a broken/tampered package — fail loud rather than
+      // fabricate a manifest the loader would then have to trust.
       if (!zipHasManifest) {
-        const safeVersion = STABLE_SEMVER_RE.test(version) ? version : "0.0.0";
-        const manifest = this.buildInstalledManifest(plugin, {
-          version: safeVersion,
-          entry: "./dist/hostPlugin.js",
-        });
-        await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
-        extractedFiles.push("plugin.json");
-      } else {
-        const validateCatalogMetadata =
-          opts.validateCatalogMetadata ??
-          (!plugin.version ||
-            plugin.version === version ||
-            version === "latest");
-        await this.assertInstalledManifestMatchesCatalog(
-          plugin,
-          version,
-          manifestFile,
-          pluginDir,
-          validateCatalogMetadata,
+        await rm(pluginDir, { recursive: true, force: true });
+        throw new Error(
+          `plugin "${plugin.id}" verified artifact is missing plugin.json — every published marketplace zip must ship its own manifest`,
         );
       }
+      const validateCatalogMetadata =
+        opts.validateCatalogMetadata ??
+        (!plugin.version ||
+          plugin.version === version ||
+          version === "latest");
+      await this.assertInstalledManifestMatchesCatalog(
+        plugin,
+        version,
+        manifestFile,
+        pluginDir,
+        validateCatalogMetadata,
+      );
       await this.finalizeInstall(plugin.id, {
         version,
         installSource: "marketplace",
@@ -1567,60 +1567,6 @@ export class PluginMarketplaceService {
       }
       throw err;
     }
-  }
-
-  private buildInstalledManifest(
-    plugin: PluginMarketplaceItem,
-    options: {
-      version: string;
-      entry: string;
-      ui?: PluginUiExtension[];
-    },
-  ): Record<string, unknown> {
-    // #885 Phase R — the catalog row (`PluginMarketplaceItem.tools`) carries tool
-    // NAMES only (string[], display/discovery metadata), but the host loader now
-    // requires pure MCP Tool OBJECTS and rejects a non-object `tools[i]`. When the
-    // installed zip ships no plugin.json we synthesize this manifest ourselves, so
-    // materialize each catalog name into a minimal dual-visibility Tool — otherwise
-    // the host would WRITE a manifest its own `parsePluginJson` pre-v6 guard then
-    // rejects (with a nonsensical "upgrade @lvis/plugin-sdk v6" for host-authored
-    // content). A zip that DOES ship plugin.json overwrites this with the
-    // authoritative pure form. Typed `Tool[]` so tsc covers the shape.
-    const tools: Tool[] = plugin.tools.map((name) => ({
-      name,
-      inputSchema: { type: "object", properties: {} },
-      _meta: { ui: { visibility: ["model", "app"] as Array<"model" | "app"> } },
-    }));
-    const manifest: Record<string, unknown> = {
-      id: plugin.id,
-      name: plugin.name,
-      version: options.version,
-      entry: options.entry,
-      tools,
-      config: plugin.defaultConfig ?? {},
-      // §3-B rollback: persist the npm package name into the installed manifest
-      // so rollbackPlugin() can reinstall cached versions without consulting
-      // the live marketplace catalog.
-      packageName: plugin.packageName,
-    };
-    if (plugin.description) manifest.description = plugin.description;
-    if (options.ui && options.ui.length > 0) manifest.ui = options.ui;
-    if (plugin.capabilities && plugin.capabilities.length > 0) manifest.capabilities = plugin.capabilities;
-    if (plugin.keywords && plugin.keywords.length > 0) manifest.keywords = plugin.keywords;
-    if (plugin.emittedEvents && plugin.emittedEvents.length > 0) manifest.emittedEvents = plugin.emittedEvents;
-    if (plugin.notificationEvents && plugin.notificationEvents.length > 0) manifest.notificationEvents = plugin.notificationEvents;
-    if (plugin.installPolicy) manifest.installPolicy = plugin.installPolicy;
-    if (plugin.dependencies && plugin.dependencies.length > 0) manifest.dependencies = plugin.dependencies;
-    if (plugin.pluginAccess) manifest.pluginAccess = plugin.pluginAccess;
-    if (plugin.networkAccess) manifest.networkAccess = plugin.networkAccess;
-    // Persist `requires` when EITHER capabilities or a minAppVersion is
-    // declared so the load-time minAppVersion gate (runtime/index.ts) can
-    // re-check after install / app downgrade.
-    if (plugin.requires && (plugin.requires.capabilities.length > 0 || plugin.requires.minAppVersion)) {
-      manifest.requires = plugin.requires;
-    }
-    if (plugin.publisher) manifest.publisher = plugin.publisher;
-    return manifest;
   }
 
   private async assertInstalledManifestMatchesCatalog(
