@@ -16,7 +16,7 @@ import {
   manifestIntegrityState,
 } from "../../permissions/manifest-integrity.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
-import type { NormalizedManifest } from "../../plugins/types.js";
+import type { PluginManifest } from "../../plugins/types.js";
 import { sessionContext } from "../../engine/session-context.js";
 
 beforeEach(() => manifestIntegrityState.resetForTests());
@@ -105,7 +105,7 @@ describe("pluginRuntimeToolDelegate — fail-closed gate parity", () => {
   });
 });
 
-const MANIFEST: NormalizedManifest = {
+const MANIFEST: PluginManifest = {
   id: PLUGIN_ID,
   name: "Notes",
   version: "1.0.0",

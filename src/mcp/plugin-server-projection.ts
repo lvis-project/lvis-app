@@ -1,5 +1,5 @@
 /**
- * Pure projection: an LVIS normalized {@link NormalizedManifest} `Tool[]` → the
+ * Pure projection: an LVIS normalized {@link PluginManifest} `Tool[]` → the
  * MCP `2026-07-28` RC server shapes a plugin-as-MCP-server exposes
  * (`server/discover`'s `DiscoverResult` and `tools/list`'s `Tool[]`).
  *
@@ -27,7 +27,7 @@
  *  - `manifest.capabilities[]` (advisory kebab-case dependency tags) are
  *    LVIS-internal and are NOT projected into MCP `ServerCapabilities`.
  */
-import type { NormalizedManifest, Tool as McpTool } from "../plugins/types.js";
+import type { PluginManifest, Tool as McpTool } from "../plugins/types.js";
 import { toolVisibility, isModelVisible } from "../plugins/runtime/tool-visibility.js";
 
 /** The RC protocol revision LVIS plugin-servers speak. */
@@ -102,7 +102,7 @@ function toWireTool(tool: McpTool): McpToolProjection {
  * Every `Tool` has a mandatory `inputSchema`, so this reproduces the old
  * {name ∈ tools[] ∧ has schema} output set exactly — registry contents identical.
  */
-export function manifestToolsToMcpTools(manifest: NormalizedManifest): McpToolProjection[] {
+export function manifestToolsToMcpTools(manifest: PluginManifest): McpToolProjection[] {
   return (manifest.tools ?? []).filter(isModelVisible).map(toWireTool);
 }
 
@@ -113,7 +113,7 @@ export function manifestToolsToMcpTools(manifest: NormalizedManifest): McpToolPr
  * is NOT projected — it is LVIS-internal dependency metadata, not MCP
  * `ServerCapabilities` (§3.2).
  */
-export function manifestToDiscoverResult(manifest: NormalizedManifest): McpDiscoverProjection {
+export function manifestToDiscoverResult(manifest: PluginManifest): McpDiscoverProjection {
   const capabilities: McpDiscoverProjection["capabilities"] = {};
   if ((manifest.tools?.length ?? 0) > 0) {
     capabilities.tools = { listChanged: true };
@@ -129,7 +129,7 @@ export function manifestToDiscoverResult(manifest: NormalizedManifest): McpDisco
     resultType: "complete",
     supportedVersions: [MCP_PROTOCOL_VERSION],
     serverInfo: {
-      name: manifest.name,
+      name: manifest.name ?? manifest.id,
       version: manifest.version,
       description: manifest.description,
     },

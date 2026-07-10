@@ -15,7 +15,7 @@
  * server validates only the protocol version here (capability gating arrives
  * with the `governance-per-request` milestone).
  */
-import type { NormalizedManifest } from "../plugins/types.js";
+import type { PluginManifest } from "../plugins/types.js";
 import {
   manifestToDiscoverResult,
   manifestToolsToMcpTools,
@@ -65,7 +65,7 @@ interface JsonRpcResponseLike {
 
 export class PluginMcpServer {
   constructor(
-    private readonly manifest: NormalizedManifest,
+    private readonly manifest: PluginManifest,
     private readonly callTool: PluginToolDelegate,
   ) {}
 
