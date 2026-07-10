@@ -15,11 +15,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { mcpToolToPluginTool } from "../plugin-tool-from-mcp.js";
 import { manifestToolsToMcpTools } from "../plugin-server-projection.js";
-import type { NormalizedManifest } from "../../plugins/types.js";
+import type { PluginManifest } from "../../plugins/types.js";
 
 const PLUGIN_ID = "com.example.files";
 
-const MANIFEST: NormalizedManifest = {
+const MANIFEST: PluginManifest = {
   id: PLUGIN_ID,
   name: "Files",
   version: "2.3.0",

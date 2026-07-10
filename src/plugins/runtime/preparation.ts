@@ -15,7 +15,7 @@
  * clobbered by a late-arriving prepared start.
  */
 import { dirname } from "node:path";
-import type { PluginAccessSpec, NormalizedManifest } from "../types.js";
+import type { PluginAccessSpec, PluginManifest } from "../types.js";
 import type { ManifestLoadPlan, SinglePluginStartResult } from "./types.js";
 import type {
   PluginPreparationProgressInput,
@@ -39,7 +39,7 @@ interface PreparationTrackerDeps {
   ) => Promise<void> | void | null | undefined;
   instantiateAndStartSinglePlugin: (
     plan: ManifestLoadPlan,
-    manifest: NormalizedManifest,
+    manifest: PluginManifest,
     approvedPluginAccess: PluginAccessSpec | undefined,
     opts: { skipPreparation?: boolean; cacheBust?: boolean; shouldCommit?: () => boolean },
   ) => Promise<SinglePluginStartResult>;
@@ -65,7 +65,7 @@ export class PreparationTracker {
    */
   deferStart(
     plan: ManifestLoadPlan,
-    manifest: NormalizedManifest,
+    manifest: PluginManifest,
     approvedPluginAccess: PluginAccessSpec | undefined,
     startOpts: { cacheBust?: boolean } = {},
   ): boolean {
@@ -157,13 +157,13 @@ export class PreparationTracker {
     });
   }
 
-  private markPreparationFailed(manifest: NormalizedManifest, err: unknown): void {
+  private markPreparationFailed(manifest: PluginManifest, err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
     this.preparingPluginIds.delete(manifest.id);
     this.preparationStatuses.delete(manifest.id);
     this.preparationFailures.set(manifest.id, message);
     this.deps.markFailed(manifest.id, {
-      name: manifest.name,
+      name: manifest.name ?? manifest.id,
       description: `Plugin dependencies failed: ${message}`,
     });
     this.deps.onDisable?.(manifest.id);

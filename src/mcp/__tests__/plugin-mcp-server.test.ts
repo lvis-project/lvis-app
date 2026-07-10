@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { PluginMcpServer, type PluginToolDelegate } from "../plugin-mcp-server.js";
-import type { NormalizedManifest } from "../../plugins/types.js";
+import type { PluginManifest } from "../../plugins/types.js";
 
-const MANIFEST: NormalizedManifest = {
+const MANIFEST: PluginManifest = {
   id: "com.example.fs",
   name: "FS",
   version: "1.0.0",
