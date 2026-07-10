@@ -13,6 +13,7 @@ import type { SettingsService } from "../../data/settings-store.js";
 import {
   canUseLlmVendorWithoutApiKey,
   getLlmVendorSettings,
+  isOpenAICompatibleVendor,
 } from "../../shared/llm-vendor-defaults.js";
 import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
 import type { AiProviderPingResult } from "../../shared/ai-provider-ping.js";
@@ -59,6 +60,26 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
       return null;
     }
 
+    // Handshake-only providers (openai-compatible family) ship no default model
+    // (llm-vendor-defaults CORE_DEFAULT_MODEL["openai-compatible"] === ""). Treat
+    // an empty model as "not configured" so we never send a fabricated/seed id
+    // the endpoint does not serve — the user selects a model from the live
+    // /models handshake list first.
+    const effectiveModel = (deps.modelOverride ?? block.model ?? "").trim();
+    if (!effectiveModel && isOpenAICompatibleVendor(vendor)) {
+      return null;
+    }
+
+    // Part C — never attach a bearer token to a non-https (local) endpoint: it
+    // would leak the key in plaintext AND trip the adapter's credentialed-baseUrl
+    // https guard. Keyless-capable providers (ollama / lmstudio / openai-
+    // compatible / litellm, or keyless marketplace presets) run without a key
+    // over http, so drop any stored/placeholder key for http endpoints.
+    const baseUrlIsHttp = effectiveBaseUrl
+      ? !/^https:/i.test(effectiveBaseUrl.trim())
+      : false;
+    const providerApiKey = baseUrlIsHttp && canUseWithoutApiKey ? "" : (apiKey ?? "");
+
     try {
       const createLoopProvider = (config: ProviderConfig): LLMProvider =>
         createProvider({
@@ -78,11 +99,11 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
 
       const primary = createLoopProvider({
         vendor,
-        apiKey: apiKey ?? "",
+        apiKey: providerApiKey,
         // Sub-agent model override takes precedence over the vendor block's
         // configured model; falls back to block.model when no override is set
         // (parent loops and sub-agents without a resolved profile model).
-        model: deps.modelOverride ?? block.model,
+        model: effectiveModel,
         ...(effectiveBaseUrl ? { baseUrl: effectiveBaseUrl } : {}),
         ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
         ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
