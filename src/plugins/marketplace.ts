@@ -109,9 +109,17 @@ function classifyInstallFailure(message: string): PluginInstallFailureKind | und
   if (message.includes("schema validation failed") || message.includes("manifest validation")) {
     return "manifest-validation-error";
   }
-  return message.includes("artifact manifest") && message.includes("catalog-approved grant")
-    ? "catalog-grant-mismatch"
-    : undefined;
+  if (message.includes("artifact manifest") && message.includes("catalog-approved grant")) {
+    return "catalog-grant-mismatch";
+  }
+  // IncompatibleAppVersionError — "plugin requires LVIS >= x, current y". A
+  // reinstall re-fetches the same too-new package and re-throws, so the Doctor
+  // must fall back to a diagnosis (update the app) rather than loop on a
+  // reinstall that cannot succeed.
+  if (message.includes("plugin requires LVIS >=")) {
+    return "incompatible-app-version";
+  }
+  return undefined;
 }
 
 function assertNetworkAccessAcknowledgement(options: {

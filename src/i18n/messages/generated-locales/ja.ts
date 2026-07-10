@@ -2112,6 +2112,8 @@ export const jaMessages: Record<string, string> = {
   "pluginConfigTab.doctorGrantMismatchDescription": "Doctor は、ダウンロードされた artifact manifest がカタログ承認済み grant と一致しないことを確認しました。この状態はローカルでは修復できません。grant が一致するようにマーケットプレイスパッケージが再公開された後に再インストールするか、ローカルインストールを削除してください。",
   "pluginConfigTab.doctorManifestValidationTitle": "プラグイン manifest の検証に失敗しました",
   "pluginConfigTab.doctorManifestValidationDescription": "プラグイン manifest が現在のスキーマと一致しません。下の詳細なフィールドエラーを確認し、更新されたマーケットプレイスパッケージを再インストールするか、ローカルインストールを削除してください。",
+  "pluginConfigTab.doctorIncompatibleAppTitle": "アプリの更新が必要",
+  "pluginConfigTab.doctorIncompatibleAppDescription": "このプラグインはより新しいバージョンの LVIS を必要とします。再インストールしても解決しません。アプリを更新してからプラグインを再読み込みしてください。削除することもできます。",
   "pluginConfigTab.doctorFailureDetailLabel": "エラー詳細",
   "pluginConfigTab.errorDoctor": "プラグイン Doctor に失敗しました",
   "pluginConfigTab.successDoctor": "{displayName} を修復しました",
