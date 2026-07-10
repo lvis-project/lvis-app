@@ -1,8 +1,9 @@
 /**
  * #885 v6 (#1554 lineage) — the governed-vs-bypass invariant is now enforced by
- * the pure tool-object VISIBILITY, not the old `tools[] ∩ uiActions` soft-warn
- * (which is DELETED — a dual method is one object, so the overlap shape no longer
- * exists).
+ * the pure tool-object VISIBILITY, not the old `tools[] ∩ uiActions` overlap
+ * soft-warn (removed in #885 Phase R — a dual method is one `Tool` object, so the
+ * overlap shape no longer exists; this file was renamed from
+ * `manifest-tools-uiactions-overlap.test.ts` to reflect that).
  *
  *  - A legacy DUAL-declared method (in BOTH `tools[]` and `uiActions`) normalizes
  *    to ONE `Tool` with visibility `["model","app"]` — it loads fine and, being
