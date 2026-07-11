@@ -34,7 +34,9 @@ import { createOnSizeChange } from "./mcp-app-bridge/handlers/on-size-change.js"
 import { createOnCallTool } from "./mcp-app-bridge/handlers/on-call-tool.js";
 import { createOnMessage } from "./mcp-app-bridge/handlers/on-message.js";
 import { createOnRequestDisplayMode } from "./mcp-app-bridge/handlers/on-request-display-mode.js";
+import { createOnDownloadFile } from "./mcp-app-bridge/handlers/on-download-file.js";
 import type { McpUiMessageOutcome } from "../../../mcp/mcp-ui-message.js";
+import type { McpUiDownloadOutcome } from "../../../mcp/mcp-app-download.js";
 import type { McpUiDisplayMode } from "../../../shared/mcp-app-display-mode.js";
 
 /**
@@ -93,6 +95,15 @@ export interface McpAppBridgeDeps {
    * shell (`CHANNELS.mcp.openDetached`). No new window stack.
    */
   applyDisplayMode(mode: McpUiDisplayMode): Promise<McpUiDisplayMode>;
+  /**
+   * `ondownloadfile` sink — the app asked the host to save inline bytes it already
+   * possessed. Routed through the host's gated `CHANNELS.mcp.uiDownloadFile` IPC, which
+   * McpAppView binds to the card's `serverId`. Main decodes + bounds the payload, REJECTS
+   * any `resource_link` (the host never fetches an app-supplied URI), and puts the user's
+   * own save dialog in front of the write. A cancel resolves `{ ok: true }` — declining
+   * to save is not an error.
+   */
+  downloadFile(params: unknown): Promise<McpUiDownloadOutcome>;
 }
 
 /**
@@ -169,6 +180,15 @@ export function createMcpAppBridge(
       capability: { message: { text: {} } },
       register: (bridge) => {
         bridge.onmessage = createOnMessage({ postMessage: deps.postMessage });
+      },
+    },
+    // `ui/download-file` → advertises `downloadFile`. The handler gets the serverId-BOUND
+    // sink; main decodes the INLINE bytes, rejects any `resource_link` (the host does not
+    // fetch app-supplied URIs), and the user's save dialog authorizes the write.
+    {
+      capability: { downloadFile: {} },
+      register: (bridge) => {
+        bridge.ondownloadfile = createOnDownloadFile({ downloadFile: deps.downloadFile });
       },
     },
     // `ui/open-link` → advertises `openLinks`.

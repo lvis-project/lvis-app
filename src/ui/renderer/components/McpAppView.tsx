@@ -294,6 +294,10 @@ export function McpAppView({
           // applier maps a mode onto the host's EXISTING window seams (see above).
           getDisplayMode,
           applyDisplayMode,
+          // `ondownloadfile` is bound to the card's server (for the audit trail; the app
+          // names none). Main decodes the inline bytes, refuses to fetch any URI the app
+          // supplies, and the user's save dialog authorizes the write.
+          downloadFile: (params) => window.lvis.mcp.downloadFile(payload.serverId, params),
         },
       );
       bridgeRef.current = { bridge, transport, token: tokenFromProxyUrl(bundle.proxyUrl) };
