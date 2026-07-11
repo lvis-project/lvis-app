@@ -1,18 +1,20 @@
 /**
- * The HOST page for the handshake e2e — stands in for McpAppView's renderer role,
- * using the REAL production pieces: the upstream `AppBridge` (null-client, manual
- * handlers) driven over our `WebviewIpcTransport`.
+ * The HOST page for the handshake e2e.
  *
- * Everything below the transport (the privileged scheme, the sandbox-proxy
- * document, the relay preload, the inner sandboxed iframe) is the real production
- * code path, exercised inside a real Electron <webview>.
+ * It drives the SHIPPING renderer wiring — `createMcpAppBridge` from
+ * `src/ui/renderer/components/mcp-app-bridge.ts`, the exact function `McpAppView`
+ * uses — rather than standing up its own AppBridge. That is deliberate: the earlier
+ * version reimplemented the wiring here, so the gate proved the architecture but not
+ * how the renderer wires it (drop `onsandboxready`, swap two ctor args, or skip
+ * `connect()` and the product dies with the gate still green). Now a regression in the
+ * real wiring turns this gate red.
+ *
+ * Everything below the transport (the privileged scheme, the sandbox-proxy document,
+ * the relay preload, the inner sandboxed iframe) is the real production code path,
+ * exercised inside a real Electron <webview>.
  */
-import { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
-import { WebviewIpcTransport, type BridgeWebviewElement } from "../../../../src/ui/renderer/components/webview-ipc-transport.js";
-import {
-  INNER_SANDBOX_ATTR,
-  MCP_APP_HOST_INFO,
-} from "../../../../src/shared/mcp-app-bridge-contract.js";
+import { createMcpAppBridge } from "../../../../src/ui/renderer/components/mcp-app-bridge.js";
+import type { BridgeWebviewElement } from "../../../../src/ui/renderer/components/webview-ipc-transport.js";
 
 declare global {
   interface Window {
@@ -33,22 +35,24 @@ window.__startHandshake = ({ proxyUrl, partition, html }) => {
   webview.style.height = "300px";
   document.body.appendChild(webview);
 
-  const transport = new WebviewIpcTransport(webview as unknown as BridgeWebviewElement);
-  const bridge = new AppBridge(null, MCP_APP_HOST_INFO, { serverResources: {} }, { hostContext: {} });
+  // The shipping wiring. If `createMcpAppBridge` forgets `onsandboxready`, misorders
+  // the ctor args, or skips `connect()`, none of the markers below will ever fire.
+  const { bridge, connected } = createMcpAppBridge(
+    { serverId: "e2e-mcp-server" },
+    html,
+    webview as unknown as BridgeWebviewElement,
+  );
 
-  bridge.onsandboxready = () => {
-    console.log("E2E_HOST SANDBOX_READY");
-    void bridge.sendSandboxResourceReady({ html, sandbox: INNER_SANDBOX_ATTR });
-  };
+  // Prove the sandbox handshake actually reached the (production) bridge. We observe
+  // it via a SECOND `sandboxready` listener so we neither replace nor depend on the
+  // production `onsandboxready` handler — `addEventListener` composes with it.
+  bridge.addEventListener("sandboxready", () => console.log("E2E_HOST SANDBOX_READY"));
 
-  // THE GATE: this only fires if the unmodified inner App completed `ui/initialize`
-  // over the full chain — i.e. its postMessage really crossed out of the guest.
-  bridge.oninitialized = () => {
-    console.log("E2E_HOST HANDSHAKE_OK");
-  };
+  // THE GATE: fires only if the unmodified inner App completed `ui/initialize` over the
+  // full chain — i.e. its postMessage really crossed out of the guest.
+  bridge.oninitialized = () => console.log("E2E_HOST HANDSHAKE_OK");
 
-  bridge
-    .connect(transport)
+  connected
     .then(() => console.log("E2E_HOST BRIDGE_CONNECTED"))
     .catch((err: unknown) => console.log(`E2E_HOST BRIDGE_CONNECT_FAILED:${String(err)}`));
 };
