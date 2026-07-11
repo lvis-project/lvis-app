@@ -444,9 +444,9 @@ describe("PluginConfigTab", () => {
 
   it("resolves Doctor install id from marketplace when a failed plugin has no install alias", async () => {
     const broken = {
-      id: "lge-api",
-      name: "LGE API",
-      description: "LGE API plugin",
+      id: "ep-api",
+      name: "LVIS EP",
+      description: "LVIS EP plugin",
       publisher: "Test fixture",
       sampleTools: [],
       capabilities: [],
@@ -462,16 +462,16 @@ describe("PluginConfigTab", () => {
       .mockResolvedValueOnce([repaired]);
     const listMarketplacePlugins = vi.fn(async () => [
       {
-        id: "lvis-plugin-lge-api",
-        name: "LGE API",
-        description: "LGE API plugin",
-        packageSpec: "@lvis/lvis-plugin-lge-api",
+        id: "lvis-plugin-ep",
+        name: "LVIS EP",
+        description: "LVIS EP plugin",
+        packageSpec: "@lvis/lvis-plugin-ep",
         installed: false,
         enabled: false,
         pluginType: "plugin" as const,
       },
     ]);
-    mockInstall.mockResolvedValue({ ok: true as const, pluginId: "lge-api" });
+    mockInstall.mockResolvedValue({ ok: true as const, pluginId: "ep-api" });
     Object.defineProperty(window, "lvis", {
       value: {
         plugins: { cards },
@@ -491,16 +491,16 @@ describe("PluginConfigTab", () => {
     render(<PluginConfigTab />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("plugin-config:doctor-panel:lge-api")).toBeInTheDocument();
+      expect(screen.getByTestId("plugin-config:doctor-panel:ep-api")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTestId("plugin-config:doctor:lge-api"));
+    fireEvent.click(screen.getByTestId("plugin-config:doctor:ep-api"));
 
     await waitFor(() => {
       expect(listMarketplacePlugins).toHaveBeenCalledOnce();
-      expect(mockInstall).toHaveBeenCalledWith("lvis-plugin-lge-api");
+      expect(mockInstall).toHaveBeenCalledWith("lvis-plugin-ep");
       expect(cards).toHaveBeenCalledTimes(2);
-      expect(screen.getByText("LGE API 복구 완료")).toBeInTheDocument();
+      expect(screen.getByText("LVIS EP 복구 완료")).toBeInTheDocument();
     });
   });
 
