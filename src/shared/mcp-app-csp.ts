@@ -1,7 +1,30 @@
-import type { McpUiCspPolicy } from "../../../mcp/types.js";
-
-// MCP App renderer keeps a host-built CSP. `_meta.ui.csp` may add only
-// sanitized resource directives; fixed boundary directives stay locked down.
+/**
+ * MCP-App Content Security Policy — single source of truth.
+ *
+ * Lives in `shared/` because BOTH sides need it now: the main process emits it
+ * as a real `Content-Security-Policy` **response header** on the sandbox-proxy
+ * document (`main/mcp-app-protocol.ts`), and the renderer/tests reason about the
+ * same policy. It was previously renderer-only (`ui/renderer/components/`), back
+ * when the policy could only ride along as a `<meta>` tag inside a `data:` URL.
+ *
+ * ─── Why the header form is the SOT (measured, not assumed) ───────────────────
+ * The app HTML runs in an inner `<iframe sandbox="allow-scripts" srcdoc=...>`.
+ * A `srcdoc` document **INHERITS the embedding document's CSP**, and a `<meta>`
+ * CSP inside it can only ever **INTERSECT** — it can narrow, never widen. This
+ * was verified empirically in a real Electron <webview>: with the proxy header
+ * at `img-src 'none'`, an inner frame whose own meta said `img-src data:` was
+ * still blocked, citing the OUTER `img-src 'none'`.
+ *
+ * Consequence: the proxy's header IS the effective envelope for the app. It must
+ * therefore be the permissive SUPERSET (this module's DEFAULT + sanitized
+ * per-resource additions); the app cannot escape it.
+ *
+ * Note `frame-ancestors` is only meaningful in a header (it is spec-ignored in a
+ * `<meta>`). In a <webview> the proxy is a TOP-LEVEL browsing context, so it has
+ * no ancestors and the directive is inert — verified: `frame-ancestors 'none'`
+ * does not block the proxy. It is kept as deliberate defense-in-depth.
+ */
+import type { McpUiCspPolicy } from "../mcp/types.js";
 
 const DEFAULT_CSP_DIRECTIVES: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["default-src", ["'none'"]],
@@ -11,6 +34,10 @@ const DEFAULT_CSP_DIRECTIVES: ReadonlyArray<readonly [string, readonly string[]]
   ["font-src", ["data:", "https://fonts.gstatic.com", "https://cdn.jsdelivr.net", "https://unpkg.com"]],
   ["connect-src", ["'none'"]],
   ["media-src", ["'none'"]],
+  // The inner app frame is created by the host-owned relay preload as a
+  // `srcdoc` iframe. `frame-src` does NOT gate `srcdoc` (no URL is fetched) —
+  // verified empirically — so this stays locked to 'none' to block any *URL*
+  // framing the app itself might attempt.
   ["frame-src", ["'none'"]],
   ["worker-src", ["'none'"]],
   ["base-uri", ["'none'"]],
@@ -71,7 +98,13 @@ function mergeCspSources(base: readonly string[], additions: readonly string[]):
   return [...merged];
 }
 
-export function buildMcpCsp(policy?: McpUiCspPolicy): string {
+/**
+ * The effective policy as a raw directive string — the form emitted as the
+ * sandbox-proxy document's `Content-Security-Policy` **response header**, which
+ * the inner app frame then inherits. This is the SOT; the `<meta>` helpers below
+ * derive from it.
+ */
+export function buildMcpCspHeader(policy?: McpUiCspPolicy): string {
   const directives = new Map<string, string[]>(
     DEFAULT_CSP_DIRECTIVES.map(([name, sources]) => [name, [...sources]]),
   );
@@ -80,12 +113,17 @@ export function buildMcpCsp(policy?: McpUiCspPolicy): string {
     if (additions.length === 0) continue;
     directives.set(directive, mergeCspSources(directives.get(directive) ?? [], additions));
   }
-  const csp = [...directives.entries()]
+  return [...directives.entries()]
     .map(([name, sources]) => `${name} ${sources.join(" ")}`)
     .join("; ");
-  return `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
 }
 
+/** The same policy in `<meta http-equiv>` form. */
+export function buildMcpCsp(policy?: McpUiCspPolicy): string {
+  return `<meta http-equiv="Content-Security-Policy" content="${buildMcpCspHeader(policy)}">`;
+}
+
+/** Wrap a document in the meta form. Retained for CSP probe harnesses/tests. */
 export function wrapWithCsp(html: string, policy?: McpUiCspPolicy): string {
   const cspMeta = buildMcpCsp(policy);
   if (/<head[^>]*>/i.test(html)) {
