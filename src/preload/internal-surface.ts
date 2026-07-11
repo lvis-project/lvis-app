@@ -1103,6 +1103,14 @@ export function buildInternalApiSurface() {
     // outcome — declining to save is not a failure.
     downloadFile: async (serverId: string, params: unknown) =>
       ipcRenderer.invoke(CHANNELS.mcp.uiDownloadFile, serverId, params) as Promise<unknown>,
+    // MCP Apps `onupdatemodelcontext` — the app OVERWRITES its slot in the context the
+    // model will see on the NEXT turn. THREE bindings come from the TRUSTED renderer:
+    // `serverId` (the card's server), `sessionId` (the conversation it belongs to) and
+    // `cardId` (this card instance). The app supplies none, so it can neither overwrite
+    // another card's slot nor place context into a conversation the user has left. It
+    // never starts a turn.
+    postUiModelContext: async (serverId: string, sessionId: string, cardId: string, params: unknown) =>
+      ipcRenderer.invoke(CHANNELS.mcp.uiModelContext, serverId, sessionId, cardId, params) as Promise<unknown>,
     // Card unmount → free its sandbox-proxy session token (fire-and-forget).
     disposeUiSession: (token: string) => { void ipcRenderer.invoke(CHANNELS.mcp.disposeUiSession, token); },
     // #885 b2 — open an MCP-app card in a detached window (host mints the

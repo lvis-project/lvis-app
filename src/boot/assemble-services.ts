@@ -33,6 +33,9 @@ export function assembleAppServices(ctx: BootContext): AppServices {
     routeEngine: ctx.routeEngine,
     toolRegistry: ctx.toolRegistry,
     systemPromptBuilder: ctx.systemPromptBuilder,
+    // The same instance the prompt builder reads — the `mcp.uiModelContext` IPC is its
+    // only writer.
+    mcpAppModelContext: ctx.mcpAppModelContext,
     conversationLoop: ctx.conversationLoop,
     sideChatConversationLoop: ctx.sideChatConversationLoop,
     routineEngine: ctx.routineEngine,

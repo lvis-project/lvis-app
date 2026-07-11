@@ -59,6 +59,11 @@ window.__startHandshake = ({ proxyUrl, partition, html }) => {
         error: "not-wired-in-e2e-harness",
         message: "not wired in the e2e harness",
       }),
+      updateModelContext: async () => ({
+        ok: false as const,
+        error: "not-wired-in-e2e-harness",
+        message: "not wired in the e2e harness",
+      }),
     },
   );
 

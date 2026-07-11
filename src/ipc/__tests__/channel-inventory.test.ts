@@ -263,6 +263,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:mcp:servers",
         "lvis:mcp:ui-download-file",
         "lvis:mcp:ui-message",
+        "lvis:mcp:ui-model-context",
         "lvis:mcp:ui-resource",
         "lvis:memory:agents-md:get",
         "lvis:memory:agents-md:update",
