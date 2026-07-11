@@ -11,7 +11,7 @@
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, configure, fireEvent, render, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "../theme/ThemeProvider.js";
 import { AppearanceTab } from "../tabs/AppearanceTab.js";
 import {
@@ -19,6 +19,14 @@ import {
   DEFAULT_VISIBLE_BUNDLES,
 } from "../theme/index.js";
 import { makeMockLvisApi } from "../../../../test/renderer/mock-lvis-api.js";
+
+// Marketplace/legacy theme bundles (theme/bundles/index.ts) resolve via async
+// dynamic import. In isolation these tests pass well under the 1000ms default,
+// but a saturated full-suite run can starve the worker long enough to exceed it,
+// flaking the bundle-render `waitFor` checks (only under load — see the repo's
+// pre-push flaky-appearance-tab note). Give async assertions headroom so timing,
+// not correctness, stops deciding the result.
+configure({ asyncUtilTimeout: 5000 });
 
 afterEach(() => {
   document.documentElement.removeAttribute("data-theme-bundle");
