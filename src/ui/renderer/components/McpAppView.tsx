@@ -195,10 +195,14 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
         // so this callback stays keyed on [payload, bundle] (MAJOR-1 lifecycle).
         buildHostContextRef.current(),
         // React-owned adapters: resize drives card state; open-link reuses the host's
-        // existing effect-gated egress (`window.lvisApi.openExternalUrl`).
+        // existing effect-gated egress (`window.lvisApi.openExternalUrl`); call-tool
+        // is BOUND HERE to this card's `payload.serverId` — the app supplies only a
+        // tool name + args and has no channel through which to name a server. Main
+        // re-verifies ownership and runs the call through the host's risk/consent gate.
         {
           onResize: handleResize,
           openLink: (url) => getApi().openExternalUrl(url),
+          callTool: (name, args) => window.lvis.mcp.callTool(payload.serverId, name, args),
         },
       );
       bridgeRef.current = { bridge, transport, token: tokenFromProxyUrl(bundle.proxyUrl) };
