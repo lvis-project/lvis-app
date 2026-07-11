@@ -74,7 +74,7 @@ why a high ceiling is still needed for future large surfaces:
 | `agent-hub` | 43 |
 | `ms-graph` | 30 |
 | `meeting` | 29 |
-| `lge-api` | 29 |
+| `ep` | 29 |
 | `local-indexer` | 19 |
 
 ## Policy

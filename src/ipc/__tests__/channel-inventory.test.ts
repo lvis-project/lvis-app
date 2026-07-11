@@ -254,6 +254,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:mcp:config:path",
         "lvis:mcp:config:remove",
         "lvis:mcp:config:set-api-key",
+        "lvis:mcp:dispose-ui-session",
         "lvis:mcp:import:claude-desktop:apply",
         "lvis:mcp:import:claude-desktop:preview",
         "lvis:mcp:install-from-marketplace",

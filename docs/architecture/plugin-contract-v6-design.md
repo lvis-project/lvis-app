@@ -237,7 +237,7 @@ BOTH shapes (a `oneOf` on `tools`: legacy `string[]` vs MCP `Tool[]`).
 ### 3.2 Removal gate (must be GREEN before Phase R)
 
 1. All 6 first-party plugins + template publish pure-form manifests (a3):
-   `for r in meeting ms-graph work-assistant local-indexer lge-api git template; do node -e "process.exit(typeof require('../lvis-plugin-'+process.argv[1]+'/plugin.json').tools[0]==='object'?0:1)" "$r" || echo "NOT MIGRATED: $r"; done`
+   `for r in meeting ms-graph work-assistant local-indexer ep git template; do node -e "process.exit(typeof require('../lvis-plugin-'+process.argv[1]+'/plugin.json').tools[0]==='object'?0:1)" "$r" || echo "NOT MIGRATED: $r"; done`
 2. Marketplace catalog re-published; installed-manifest scan on a test profile shows zero legacy shapes.
 3. `PluginMarketplaceItem.toolSchemas`/`.tools` consumers migrated (`types.ts:615,646`, SDK).
 
@@ -316,7 +316,7 @@ can never see a `Tool[]`).
 
 **Cross-repo sweep (must move in-session per CLAUDE.md §Cross-repo contract sync):**
 `lvis-app` (host) · `lvis-plugin-sdk` (v5.22.0 → **v6**) · 6 plugins (`meeting`, `ms-graph`, `work-assistant`,
-`local-indexer`, `lge-api`, `git`) · `lvis-plugin-template` · `lvis-marketplace` (catalog
+`local-indexer`, `ep`, `git`) · `lvis-plugin-template` · `lvis-marketplace` (catalog
 `PluginMarketplaceItem.tools`/`.toolSchemas` mirror + publisher schema).
 
 ## 6. Open items (non-blocking)

@@ -22,6 +22,7 @@ import {
   PUBLIC_EVENT_NAMESPACES,
   KNOWN_CAPABILITIES,
 } from "../../plugins/capabilities.js";
+import { getDeclaredEmittedEvents } from "../../plugins/runtime/manifest-validation.js";
 import { registerManifestEventSubscriptions } from "../plugins.js";
 import { mkdtempSync } from "node:fs";
 
@@ -63,19 +64,28 @@ describe("capabilities module namespace policy", () => {
     expect(requiredCapabilityForEmit("random.event")).toBeUndefined();
   });
 
-  it("KNOWN_CAPABILITIES contains all documented entries", () => {
-    for (const cap of [
+  it("KNOWN_CAPABILITIES is the reduced host-ENFORCED set (Ph1/Ph2)", () => {
+    // After the capabilities reduction the enforced vocab is exactly the two
+    // strings the host gates on at runtime.
+    expect([...KNOWN_CAPABILITIES].sort()).toEqual(
+      ["external-auth-consumer", "host:overlay"].sort(),
+    );
+    // The 5 dead strings, the 4 event-source strings (now inferred from
+    // emittedEvents), and worker-client (a live free-form discovery key, not a
+    // host-enforced gate) are all gone from the enforced vocab.
+    for (const removed of [
       "ms-graph-consumer",
-      "external-auth-consumer",
+      "background-watcher",
+      "document-indexer",
+      "lifecycle-observer",
+      "routine-provider",
+      "worker-client",
       "mail-source",
       "calendar-source",
       "meeting-recorder",
       "knowledge-index",
-      "background-watcher",
-      "worker-client",
-      "document-indexer",
     ]) {
-      expect(KNOWN_CAPABILITIES.has(cap)).toBe(true);
+      expect(KNOWN_CAPABILITIES.has(removed)).toBe(false);
     }
   });
 
@@ -86,18 +96,18 @@ describe("capabilities module namespace policy", () => {
     }
   });
 
-  it("HOST-only namespaces reject plugin emit regardless of declared capabilities", () => {
+  it("HOST-only namespaces reject plugin emit regardless of declared emittedEvents", () => {
     // `plugin.*` is reserved for host-side emit (lifecycle: plugin.installed,
     // plugin.uninstalled). A plugin spoofing `plugin.installed` could trick
     // work-assistant's onPluginsChanged subscribers into reacting to fake
-    // lifecycle. Gate here.
+    // lifecycle. Gate here — the host-only check short-circuits before the
+    // emittedEvents inference, so no declaration can unlock a host-only emit.
     expect(canEmitEvent("plugin.installed", [])).toBe(false);
     expect(canEmitEvent("plugin.uninstalled", [])).toBe(false);
-    expect(canEmitEvent("plugin.installed", ["mail-source", "calendar-source"])).toBe(false);
-    // Sentinel host-only capability would not unlock either; no capability
-    // declarable in a plugin manifest grants `plugin.*` emit.
-    expect(canEmitEvent("plugin.installed", ["host-internal-cap-that-does-not-exist"])).toBe(false);
-    expect(canEmitEvent("host.theme.changed", ["meeting-recorder"])).toBe(false);
+    // Even declaring the exact host-only event in emittedEvents does not unlock it.
+    expect(canEmitEvent("plugin.installed", ["plugin.installed"])).toBe(false);
+    expect(canEmitEvent("plugin.installed", ["email.new", "calendar.event"])).toBe(false);
+    expect(canEmitEvent("host.theme.changed", ["host.theme.changed"])).toBe(false);
   });
 });
 
@@ -265,7 +275,11 @@ describe("capability emit gate", () => {
     await rm(testDir, { recursive: true, force: true });
   });
 
-  async function writePlugin(id: string, capabilities: string[]): Promise<void> {
+  async function writePlugin(
+    id: string,
+    emittedEvents: string[],
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
     const pluginDir = join(installedDir, id);
     await mkdir(pluginDir, { recursive: true });
     const toolName = `${id.replace(/-/g, "_")}_ping`;
@@ -291,7 +305,8 @@ describe("capability emit gate", () => {
           _meta: { ui: { visibility: ["model", "app"] } },
         },
       ],
-      capabilities,
+      emittedEvents,
+      ...extra,
     };
     await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
     await mkdir(join(testDir, "plugins"), { recursive: true });
@@ -306,30 +321,31 @@ describe("capability emit gate", () => {
   }
 
   /**
-   * Mirrors the boot.ts emitEvent closure for testability. Plugin lacking the
-   * required capability → drop + warn. Plugin declaring it → pass through.
+   * Mirrors the createHostApi emitEvent closure for testability, using the
+   * production `canEmitEvent` predicate. A plugin that did not DECLARE the gated
+   * namespace in `emittedEvents` → drop + warn; a plugin declaring it → pass
+   * through. (`required` is the internal effect label used for the warn/audit.)
    */
   function makeEmitGate(runtime: PluginRuntime, pluginId: string) {
     const emitted: Array<{ type: string; data: unknown }> = [];
     const warns: string[] = [];
     const guardedEmit = (type: string, data?: unknown) => {
-      const required = requiredCapabilityForEmit(type);
-      if (required) {
-        const manifest = runtime.getPluginManifest(pluginId);
-        if (!manifest?.capabilities?.includes(required)) {
-          warns.push(
-            `plugin:${pluginId} emitEvent('${type}') dropped — missing capability '${required}'`,
-          );
-          return;
-        }
+      const manifest = runtime.getPluginManifest(pluginId);
+      const declaredEmittedEvents = manifest ? getDeclaredEmittedEvents(manifest) : [];
+      if (!canEmitEvent(type, declaredEmittedEvents)) {
+        const required = requiredCapabilityForEmit(type);
+        warns.push(
+          `plugin:${pluginId} emitEvent('${type}') dropped — missing capability '${required}'`,
+        );
+        return;
       }
       emitted.push({ type, data });
     };
     return { guardedEmit, emitted, warns };
   }
 
-  it("drops email.* emission from a plugin lacking mail-source capability", async () => {
-    await writePlugin("p-no-mail", ["worker-client"]); // unrelated cap
+  it("drops email.* emission from a plugin that did not declare the email namespace", async () => {
+    await writePlugin("p-no-mail", ["custom.ping"]); // declares an unrelated namespace
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
@@ -340,8 +356,8 @@ describe("capability emit gate", () => {
     expect(warns.some((w) => /missing capability 'mail-source'/.test(w))).toBe(true);
   });
 
-  it("passes email.* emission from a plugin declaring mail-source", async () => {
-    await writePlugin("p-mail", ["mail-source"]);
+  it("passes email.* emission from a plugin declaring email.* in emittedEvents", async () => {
+    await writePlugin("p-mail", ["email.new"]);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
@@ -353,10 +369,9 @@ describe("capability emit gate", () => {
   });
 
   it("does not gate emit when the namespace has no EVENT_NAMESPACE_CAPABILITY entry", async () => {
-    // Random plugin-owned namespace (neutral) — capability emit gate
-    // is a no-op. Trust comes from HostApi pluginId binding (the
-    // runtime overwrites payload.pluginId with the bound runtime id),
-    // not from a manifest-declared capability.
+    // Random plugin-owned namespace (neutral) — the emit gate is a no-op.
+    // Trust comes from HostApi pluginId binding (the runtime overwrites
+    // payload.pluginId with the bound runtime id), not from a declared namespace.
     await writePlugin("p-custom", []);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
@@ -366,5 +381,46 @@ describe("capability emit gate", () => {
 
     expect(emitted).toEqual([{ type: "custom.event", data: { foo: 1 } }]);
     expect(warns).toEqual([]);
+  });
+
+  it("loads a plugin declaring legacy/unknown capability strings under the relaxed schema", async () => {
+    // worker-client is a live free-form host discovery key; mail-source and an
+    // arbitrary unknown string are harmless no-ops. All must VALIDATE + LOAD
+    // (free-form schema), not be rejected the way the old closed enum would.
+    await writePlugin("p-legacy", [], {
+      capabilities: ["worker-client", "mail-source", "totally-legacy-cap"],
+    });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    await runtime.load();
+
+    const manifest = runtime.getPluginManifest("p-legacy");
+    expect(manifest).toBeDefined();
+    expect(manifest?.capabilities).toEqual([
+      "worker-client",
+      "mail-source",
+      "totally-legacy-cap",
+    ]);
+  });
+
+  it("suppresses email.* emit from a plugin declaring the legacy mail-source CAPABILITY but no emittedEvents (no capability fallback)", async () => {
+    // Scenario (c): before the capabilities reduction, email.* emit was gated on
+    // the `mail-source` CAPABILITY. Post-reduction, emit authorization is
+    // inferred ONLY from `emittedEvents`. A plugin still shipping the legacy
+    // capability while declaring NO email.* in emittedEvents must have the emit
+    // SUPPRESSED — the capability must not silently re-unlock it. Every (b) test
+    // sets no capabilities at all, so a capability-fallback regression would slip
+    // past them; this fixture (capabilities include mail-source, emittedEvents
+    // empty) is the guard.
+    await writePlugin("p-legacy", [], {
+      capabilities: ["worker-client", "mail-source", "totally-legacy-cap"],
+    });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    await runtime.load();
+
+    const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p-legacy");
+    guardedEmit("email.new", { subject: "hi" });
+
+    expect(emitted).toHaveLength(0);
+    expect(warns.some((w) => /missing capability 'mail-source'/.test(w))).toBe(true);
   });
 });
