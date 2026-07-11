@@ -37,6 +37,9 @@ import { createMcpAppBridge } from "./mcp-app-bridge.js";
 // style-variable vocabulary). React-free so it stays importable by the e2e gate.
 import { buildMcpAppHostContext } from "./mcp-app-host-context.js";
 import type { BridgeWebviewElement, WebviewIpcTransport } from "./webview-ipc-transport.js";
+// `openExternalUrl` (the `onopenlink` egress path) lives on `window.lvisApi`, reached
+// through the renderer's `getApi()` — NOT `window.lvis` (a curated subset without it).
+import { getApi } from "../api-client.js";
 
 /** Extract the `?t=<token>` proxy-session token from a `lvis-mcp-app://` URL. */
 function tokenFromProxyUrl(proxyUrl: string): string | null {
@@ -191,8 +194,12 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
         // Seed the initial standard host context. Read the latest builder via ref
         // so this callback stays keyed on [payload, bundle] (MAJOR-1 lifecycle).
         buildHostContextRef.current(),
-        // React-owned adapters: resize drives card state.
-        { onResize: handleResize },
+        // React-owned adapters: resize drives card state; open-link reuses the host's
+        // existing effect-gated egress (`window.lvisApi.openExternalUrl`).
+        {
+          onResize: handleResize,
+          openLink: (url) => getApi().openExternalUrl(url),
+        },
       );
       bridgeRef.current = { bridge, transport, token: tokenFromProxyUrl(bundle.proxyUrl) };
     }

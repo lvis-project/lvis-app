@@ -44,9 +44,9 @@ window.__startHandshake = ({ proxyUrl, partition, html }) => {
     // This gate exercises the sandbox handshake, not theming: an empty standard
     // host context matches the prior behavior (previously `{ hostContext: {} }`).
     {},
-    // The handshake never sends `ui/notifications/size-changed`, so this adapter is an
-    // inert no-op here — present only to satisfy the signature.
-    { onResize: () => {} },
+    // The handshake never sends `ui/open-link` or `ui/notifications/size-changed`, so
+    // these adapters are inert no-ops here — present only to satisfy the signature.
+    { onResize: () => {}, openLink: async () => ({ ok: false }) },
   );
 
   // Prove the sandbox handshake actually reached the (production) bridge. We observe
