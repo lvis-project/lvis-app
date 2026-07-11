@@ -1,6 +1,6 @@
 /**
  * #885 v6 — per-tool `category` is REMOVED from the plugin contract (Q3). The
- * loopback forward projection no longer emits `_meta["xyz.lvis/category"]`, so
+ * loopback forward projection no longer emits `_meta["lvisai/category"]`, so
  * the reverse projection registers EVERY plugin tool at the write-equivalent
  * default-strict baseline. The effective category is derived HOST-side per
  * invocation (`resolveEnforcedCategory` / `inspectHostRisk`), NOT from the wire.
