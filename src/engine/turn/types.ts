@@ -215,6 +215,8 @@ export interface ConversationLoopDeps {
   keywordEngine: KeywordEngine;
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
+  /** Host-owned capability; omitted/false surfaces cannot accept background parent delivery. */
+  supportsA2AParentDelivery?: boolean;
   memoryManager: MemoryManager;
   /**
    * Notify all renderer windows that the directory config mutated.

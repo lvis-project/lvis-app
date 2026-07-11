@@ -39,7 +39,11 @@ import { ToolRegistry, TOOL_SEARCH_TOOL_NAME } from "../registry.js";
 import { registerRequestPluginMetaTool, registerToolSearchMetaTool } from "../../boot/tools.js";
 
 function ctx(sessionId = "session-x"): ToolExecutionContext {
-  return { cwd: process.cwd(), extraAllowedDirectories: [], metadata: { sessionId } };
+  return {
+    cwd: process.cwd(),
+    extraAllowedDirectories: [],
+    metadata: { sessionId, supportsA2AParentDelivery: true },
+  };
 }
 
 describe("ask_user_question tool", () => {
@@ -469,6 +473,53 @@ describe("agent_spawn tool", () => {
     expect(r.isError).toBe(true);
   });
 
+  it.each([undefined, false])("fails closed before runner lookup when background parent delivery is %s", async (capability) => {
+    const getRunner = vi.fn();
+    const emit = vi.fn();
+    const tool = createAgentSpawnTool({ getRunner, emit });
+    const metadata: Record<string, unknown> = { sessionId: "session-x" };
+    if (capability !== undefined) metadata.supportsA2AParentDelivery = capability;
+
+    const result = await tool.execute(
+      {
+        title: "background",
+        instructions: "work",
+        background: true,
+        supportsA2AParentDelivery: true,
+      },
+      { cwd: process.cwd(), extraAllowedDirectories: [], metadata },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.output)).toEqual({
+      error: "background-parent-unsupported",
+      message: "Background sub-agent delivery is unavailable for this conversation surface.",
+      taskState: "TASK_STATE_REJECTED",
+    });
+    expect(getRunner).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("keeps the spawn-depth hard stop ahead of background capability checks", async () => {
+    const getRunner = vi.fn();
+    const emit = vi.fn();
+    const tool = createAgentSpawnTool({ getRunner, emit });
+    const result = await tool.execute(
+      { title: "nested", instructions: "work", background: true },
+      {
+        cwd: process.cwd(),
+        extraAllowedDirectories: [],
+        metadata: { sessionId: "session-x", spawnDepth: 1 },
+      },
+    );
+
+    expect(JSON.parse(result.output)).toMatchObject({
+      error: "agent_spawn cannot be invoked from a sub-agent",
+      taskState: "TASK_STATE_REJECTED",
+    });
+    expect(getRunner).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
+  });
   it("forwards to runner and emits start/done events", async () => {
     const events: Array<{ type: string; spawnId: string }> = [];
     const tool = createAgentSpawnTool({
@@ -509,6 +560,41 @@ describe("agent_spawn tool", () => {
     expect(types).toContain("done");
   });
 
+  it("treats a structurally returned blocked foreground run as rejected/error", async () => {
+    const events: AgentSpawnEvent[] = [];
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        spawn: async () => ({
+          summary: "prompt refused",
+          toolCallCount: 0,
+          turnCount: 0,
+          childSessionId: "child-blocked",
+          entries: [],
+          ok: true,
+          stopReason: "blocked" as const,
+        }),
+      }) as never,
+      emit: (event) => events.push(event),
+    });
+
+    const result = await tool.execute(
+      { title: "blocked", instructions: "attempt work" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.output)).toEqual({
+      error: "prompt refused",
+      taskState: "TASK_STATE_REJECTED",
+    });
+    expect(events.at(-1)).toMatchObject({
+      type: "error",
+      status: "error",
+      taskState: "TASK_STATE_REJECTED",
+      message: "prompt refused",
+      childSessionId: "child-blocked",
+    });
+  });
   it("preserves a budget suspension in the tool result and renders the done event as waiting", async () => {
     const events: AgentSpawnEvent[] = [];
     const deliverToParent = vi.fn();
@@ -732,6 +818,57 @@ describe("agent_spawn tool", () => {
       });
       expect(delivery.message.parts[0]?.text).toContain("Input required");
     }
+  });
+  it("emits blocked background runs as rejected errors and still pushes the Message", async () => {
+    const events: AgentSpawnEvent[] = [];
+    const deliverToParent = vi.fn(async () => ({
+      ok: true as const,
+      disposition: "mailbox" as const,
+      messageId: "blocked-message",
+    }));
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        spawn: async () => ({
+          summary: "prompt refused",
+          toolCallCount: 0,
+          turnCount: 0,
+          childSessionId: "child-blocked-bg",
+          entries: [],
+          ok: true,
+          stopReason: "blocked" as const,
+        }),
+        deliverToParent,
+      }) as never,
+      emit: (event) => events.push(event),
+    });
+
+    const handle = await tool.execute(
+      { title: "blocked", instructions: "attempt work", background: true },
+      ctx(),
+    );
+    expect(handle.isError).toBe(false);
+
+    const deadline = Date.now() + 1000;
+    while (deliverToParent.mock.calls.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    expect(events.at(-1)).toMatchObject({
+      type: "error",
+      status: "error",
+      taskState: "TASK_STATE_REJECTED",
+      message: "prompt refused",
+      childSessionId: "child-blocked-bg",
+    });
+    expect(deliverToParent).toHaveBeenCalledWith(expect.objectContaining({
+      parentSessionId: "session-x",
+      childSessionId: "child-blocked-bg",
+      message: expect.objectContaining({
+        metadata: expect.objectContaining({
+          taskState: "TASK_STATE_REJECTED",
+        }),
+      }),
+    }));
   });
   it("background mode preserves interrupted status through interrupt, status, and terminal event", async () => {
     let spawnId = "";

@@ -1,3 +1,5 @@
+import type { SubAgentRunStatus, SubAgentSuspension } from "./subagent-events.js";
+
 /**
  * A2A v1.0 core ProtoJSON types and state helpers (types-only; no SDK runtime).
  * Enum values and camelCase fields mirror lf.a2a.v1 at tag v1.0.0.
@@ -187,9 +189,7 @@ export interface A2ATaskStatusUpdateEvent {
   metadata?: A2AJsonObject;
 }
 
-export type A2ASubAgentRunState =
-  | "submitted" | "running" | "waiting" | "done"
-  | "error" | "interrupted" | "rejected";
+export type A2ASubAgentRunState = "submitted" | SubAgentRunStatus | "rejected";
 export const A2A_SUB_AGENT_RUN_STATE_MAP = Object.freeze({
   submitted: A2ATaskState.SUBMITTED,
   running: A2ATaskState.WORKING,
@@ -203,10 +203,26 @@ export function projectSubAgentRunState(state: A2ASubAgentRunState): A2AProjecte
   return A2A_SUB_AGENT_RUN_STATE_MAP[state];
 }
 
+export const A2A_TASK_STATE_RUN_STATUS_MAP = Object.freeze({
+  [A2ATaskState.SUBMITTED]: "running",
+  [A2ATaskState.WORKING]: "running",
+  [A2ATaskState.INPUT_REQUIRED]: "waiting",
+  [A2ATaskState.COMPLETED]: "done",
+  [A2ATaskState.FAILED]: "error",
+  [A2ATaskState.CANCELED]: "interrupted",
+  [A2ATaskState.REJECTED]: "error",
+} satisfies Readonly<Record<A2AProjectedTaskState, SubAgentRunStatus>>);
+
+export function subAgentRunStatusFromTaskState(
+  taskState: A2AProjectedTaskState,
+): SubAgentRunStatus {
+  return A2A_TASK_STATE_RUN_STATUS_MAP[taskState];
+}
+
 export interface A2ASubAgentResultLike {
   ok: boolean;
   stopReason?: string;
-  suspension?: { reason: "budget" | "question"; prompt?: string; resumeId: string };
+  suspension?: SubAgentSuspension;
   /** Temporary compatibility alias for pre-suspension results. */
   incomplete?: boolean;
   resumeExhausted?: boolean;
@@ -215,13 +231,17 @@ export interface A2ASubAgentResultLike {
 export function projectSubAgentResultState(
   result: A2ASubAgentResultLike,
 ): A2AProjectedTaskState {
+  let runState: A2ASubAgentRunState;
   if (result.resumeExhausted || result.stopReason === "blocked") {
-    return A2ATaskState.REJECTED;
+    runState = "rejected";
+  } else if (result.stopReason === "interrupted") {
+    runState = "interrupted";
+  } else if (!result.ok) {
+    runState = "error";
+  } else if (result.suspension || result.incomplete === true || result.stopReason === "round-cap") {
+    runState = "waiting";
+  } else {
+    runState = "done";
   }
-  if (result.stopReason === "interrupted") return A2ATaskState.CANCELED;
-  if (!result.ok) return A2ATaskState.FAILED;
-  if (result.suspension || result.incomplete === true || result.stopReason === "round-cap") {
-    return A2ATaskState.INPUT_REQUIRED;
-  }
-  return A2ATaskState.COMPLETED;
+  return projectSubAgentRunState(runState);
 }

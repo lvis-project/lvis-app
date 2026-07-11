@@ -247,6 +247,8 @@ export interface ExecuteOptions {
    * SubAgentRunner registry strip).
    */
   spawnDepth?: number;
+  /** Host-owned capability for background child-to-parent delivery. */
+  supportsA2AParentDelivery?: boolean;
   /** Internal, DLP-masked source label for receiver-side approval prompts. */
   approvalReasonPrefix?: string;
   abortSignal?: AbortSignal;
@@ -635,6 +637,7 @@ export class ToolExecutor {
       sessionId,
       overlayTriggerOrigin,
       spawnDepth,
+      supportsA2AParentDelivery,
       approvalReasonPrefix,
       abortSignal,
       toolResultChunkReader,
@@ -1994,6 +1997,7 @@ export class ToolExecutor {
         // C3(b): spawn depth visible to tools — `agent_spawn` reads this
         // and refuses when >= 1 (a sub-agent cannot itself spawn).
         spawnDepth: spawnDepth ?? 0,
+        supportsA2AParentDelivery: supportsA2AParentDelivery === true,
         // Tool 자기 호출의 stable id — 렌더러가 inline UI 카드 (sub-agent 등)
         // 를 ToolGroupCard 옆에 join 할 때 키로 사용. agent_spawn 이 emit 하는
         // 라이프사이클 이벤트에 함께 실어 보냄.

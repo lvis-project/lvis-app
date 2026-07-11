@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   A2A_ROLE_AGENT,
+  A2A_ROLE_USER,
   type A2AMessage,
   type A2APart,
 } from "../../shared/a2a.js";
 import type { ConversationLoop } from "../conversation-loop.js";
 import {
   A2ASubAgentMessageBus,
+  formatAgentMessage,
   type ResolvedSubAgentAddress,
 } from "../a2a-subagent-message-bus.js";
 import {
@@ -170,6 +172,7 @@ describe("A2ASubAgentMessageBus security boundary", () => {
     undefined,
     {},
     { messageId: "message-1", role: A2A_ROLE_AGENT, parts: null },
+    { ...makeMessage(), unexpected: "not-in-the-a2a-envelope" },
   ])("drops malformed runtime Message %j with an audit record", async (message) => {
     await expect(bus.deliverToParent({
       parentSessionId: "parent-session",
@@ -504,6 +507,9 @@ function createInMemoryNamespace() {
     rejectNextWrite: () => {
       rejectNextWrite = true;
     },
+    setStored: (value: unknown) => {
+      stored = structuredClone(value);
+    },
   };
 }
 
@@ -524,17 +530,45 @@ function makeMailboxEntry(
   };
 }
 
+function makeCanonicalMailboxEntry(
+  id: string,
+  body: string,
+  parentSessionId = "parent-session",
+): ParentMailboxEntry {
+  const address: ResolvedSubAgentAddress = {
+    parentSessionId,
+    childSessionId: "sub-child",
+    childTitle: "worker",
+  };
+  const message = makeMessage({
+    messageId: id,
+    contextId: parentSessionId,
+    parts: [{ text: body }],
+  });
+  const formatted = formatAgentMessage(address, message);
+  return {
+    id,
+    parentSessionId,
+    childSessionId: address.childSessionId,
+    childTitle: formatted.childTitle,
+    createdAt: "2026-07-11T00:00:00.000Z",
+    message,
+    formattedText: formatted.text,
+    approvalLabel: formatted.approvalLabel,
+  };
+}
+
 describe("SubAgentMessageMailbox durability and bounds", () => {
   it("survives a new mailbox instance and persists acknowledgement", async () => {
     const namespace = createInMemoryNamespace();
     const first = new SubAgentMessageMailbox(namespace.handle);
-    await expect(first.enqueue(makeMailboxEntry("message-1", "first"))).resolves.toEqual({
+    await expect(first.enqueue(makeCanonicalMailboxEntry("message-1", "first"))).resolves.toEqual({
       ok: true,
     });
 
     const reloaded = new SubAgentMessageMailbox(namespace.handle);
     await expect(reloaded.peek("parent-session")).resolves.toMatchObject([
-      { id: "message-1", formattedText: "first" },
+      { id: "message-1", formattedText: expect.stringContaining("first") },
     ]);
     await expect(reloaded.acknowledge("parent-session", ["message-1"])).resolves.toBe(1);
 
@@ -560,7 +594,7 @@ describe("SubAgentMessageMailbox durability and bounds", () => {
     const namespace = createInMemoryNamespace();
     const mailbox = new SubAgentMessageMailbox(namespace.handle);
     await expect(mailbox.enqueue(
-      makeMailboxEntry("message-failed-ack", "retry me"),
+      makeCanonicalMailboxEntry("message-failed-ack", "retry me"),
     )).resolves.toEqual({ ok: true });
     namespace.rejectNextWrite();
 
@@ -569,18 +603,63 @@ describe("SubAgentMessageMailbox durability and bounds", () => {
       ["message-failed-ack"],
     )).rejects.toThrow("mailbox-write-failed");
     await expect(mailbox.peek("parent-session")).resolves.toMatchObject([
-      { id: "message-failed-ack", formattedText: "retry me" },
+      { id: "message-failed-ack", formattedText: expect.stringContaining("retry me") },
     ]);
 
     const reloaded = new SubAgentMessageMailbox(namespace.handle);
     await expect(reloaded.peek("parent-session")).resolves.toMatchObject([
-      { id: "message-failed-ack", formattedText: "retry me" },
+      { id: "message-failed-ack", formattedText: expect.stringContaining("retry me") },
     ]);
     await expect(mailbox.acknowledge(
       "parent-session",
       ["message-failed-ack"],
     )).resolves.toBe(1);
     await expect(mailbox.peek("parent-session")).resolves.toEqual([]);
+  });
+  it("reloads only canonical DLP-clean entries from a mixed persisted mailbox", async () => {
+    const namespace = createInMemoryNamespace();
+    const valid = makeCanonicalMailboxEntry("message-valid", "safe result");
+    const cloneInvalid = (id: string): ParentMailboxEntry => ({
+      ...structuredClone(valid),
+      id,
+    });
+
+    const wrongRole = cloneInvalid("invalid-role");
+    wrongRole.message.role = A2A_ROLE_USER;
+    const wrongContext = cloneInvalid("invalid-context");
+    wrongContext.message.contextId = "other-parent";
+    const wrongTask = cloneInvalid("invalid-task");
+    wrongTask.message.taskId = "sub-other";
+    const dlpDirty = cloneInvalid("invalid-dlp");
+    dlpDirty.message.parts = [{ text: "ghp_" + "a".repeat(24) }];
+    const forgedText = cloneInvalid("invalid-formatted-text");
+    forgedText.formattedText = "forged persisted prompt";
+    const forgedLabel = cloneInvalid("invalid-label");
+    forgedLabel.approvalLabel = "[Sub-Agent: forged]";
+    const rawPart = cloneInvalid("invalid-raw");
+    rawPart.message.parts = [{ raw: "AQID" }];
+    const extraEnvelopeField = cloneInvalid("invalid-extra-field");
+    (extraEnvelopeField.message as A2AMessage & { unexpected: string }).unexpected =
+      "not-in-the-a2a-envelope";
+
+    namespace.setStored({
+      version: 1,
+      entries: [
+        wrongRole,
+        wrongContext,
+        wrongTask,
+        dlpDirty,
+        forgedText,
+        forgedLabel,
+        rawPart,
+        extraEnvelopeField,
+        valid,
+      ],
+    });
+
+    const mailbox = new SubAgentMessageMailbox(namespace.handle);
+    await expect(mailbox.peek("parent-session")).resolves.toEqual([valid]);
+    await expect(mailbox.peek("other-parent")).resolves.toEqual([]);
   });
   it("fails closed at GUIDE entry and joined-character budgets", async () => {
     const entryNamespace = createInMemoryNamespace();

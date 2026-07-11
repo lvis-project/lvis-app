@@ -8,6 +8,7 @@
 import { vi, type Mock } from "vitest";
 import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
 import type { ChatEntry, StreamEvent } from "../../src/lib/chat-stream-state.js";
+import type { AgentSpawnEvent as SharedAgentSpawnEvent } from "../../src/shared/subagent-events.js";
 
 export type MockLvisApi = Record<string, Mock>;
 
@@ -18,20 +19,7 @@ type HistoryMock = {
   messages: unknown[];
 };
 
-type AgentSpawnEvent = {
-  spawnId: string;
-  type: "start" | "activity" | "done" | "error";
-  status?: "running" | "waiting" | "done" | "error" | "interrupted";
-  suspension?: { reason: "budget" | "question"; prompt?: string; resumeId: string };
-  title?: string;
-  instructions?: string;
-  entries?: ChatEntry[];
-  summary?: string;
-  toolCallCount?: number;
-  message?: string;
-  toolUseId?: string;
-  childSessionId?: string;
-};
+type AgentSpawnEvent = SharedAgentSpawnEvent<ChatEntry>;
 
 type ApiOverrides = {
   settings?: unknown;
