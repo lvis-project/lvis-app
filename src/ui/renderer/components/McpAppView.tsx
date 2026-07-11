@@ -23,15 +23,19 @@
  * Message path:
  *   AppBridge ⇄ WebviewIpcTransport ⇄ <webview> ipc ⇄ relay preload ⇄ inner App
  */
-import { createElement, useCallback, useEffect, useRef, useState } from "react";
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { McpUiPayload, McpUiResourceBundle } from "../../../mcp/types.js";
 import { Loader2, AlertCircle, PlugZap } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { mcpAppPartitionName } from "../../../shared/mcp-app-partition.js";
+import { useTheme, findBundle, bundleToPluginTokens, DEFAULT_BUNDLE_ID } from "../theme/index.js";
 // The host-side wiring lives in its own React-free module so the real-<webview> e2e
 // gate can import and exercise THE SHIPPING WIRING rather than a look-alike copy.
 import { createMcpAppBridge } from "./mcp-app-bridge.js";
+// Standard ext-apps `McpUiHostContext` builder (theme/locale/timeZone → standard
+// style-variable vocabulary). React-free so it stays importable by the e2e gate.
+import { buildMcpAppHostContext } from "./mcp-app-host-context.js";
 import type { BridgeWebviewElement, WebviewIpcTransport } from "./webview-ipc-transport.js";
 
 /** Extract the `?t=<token>` proxy-session token from a `lvis-mcp-app://` URL. */
@@ -44,7 +48,11 @@ function tokenFromProxyUrl(proxyUrl: string): string | null {
 }
 
 export function McpAppView({ payload }: { payload: McpUiPayload }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  // Host theme sources for the standard `McpUiHostContext`: shell (light/dark) and
+  // the active bundle id (drives the curated `--lvis-*` token map we translate to
+  // the standard style-variable vocabulary — never leaking `--lvis-*` to the app).
+  const { resolved, effectiveBundleId } = useTheme();
   const [bundle, setBundle] = useState<McpUiResourceBundle | null>(null);
   const [error, setError] = useState<string | null>(null);
   // b3.3 — disable-in-place on server disconnect. Lives INSIDE McpAppView so
@@ -55,6 +63,28 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
   const bridgeRef = useRef<{ bridge: AppBridge; transport: WebviewIpcTransport; token: string | null } | null>(null);
 
   const height = payload.height ?? 300;
+
+  // Host IANA time zone — stable for the app's lifetime; read once.
+  const timeZone = useMemo(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+    [],
+  );
+
+  // Build the STANDARD `McpUiHostContext` from the current host theme + locale +
+  // time zone. `findBundle` may return undefined mid lazy-load — fall back to the
+  // always-resident default bundle, and if even that is missing (never in practice)
+  // emit no style variables rather than throw.
+  const buildHostContext = useCallback(() => {
+    const activeBundle = findBundle(effectiveBundleId) ?? findBundle(DEFAULT_BUNDLE_ID);
+    const tokens = activeBundle ? bundleToPluginTokens(activeBundle) : {};
+    return buildMcpAppHostContext({ shell: resolved, tokens, locale, timeZone });
+  }, [resolved, effectiveBundleId, locale, timeZone]);
+
+  // Hold the latest builder in a ref so the ref-callback bridge lifecycle
+  // (`attachWebview`, keyed only on [payload, bundle]) can seed the initial context
+  // at mount without re-subscribing on every theme/locale change.
+  const buildHostContextRef = useRef(buildHostContext);
+  buildHostContextRef.current = buildHostContext;
 
   // Fetch the ui:// resource via IPC on first render. Main installs the partition
   // policy (declared-origin network gate + sandbox-proxy protocol handler + relay
@@ -115,10 +145,22 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
         payload,
         bundle.html,
         node as unknown as BridgeWebviewElement,
+        // Seed the initial standard host context. Read the latest builder via ref
+        // so this callback stays keyed on [payload, bundle] (MAJOR-1 lifecycle).
+        buildHostContextRef.current(),
       );
       bridgeRef.current = { bridge, transport, token: tokenFromProxyUrl(bundle.proxyUrl) };
     }
   }, [payload, bundle]);
+
+  // Push host-context updates to a mounted bridge when the theme shell, active
+  // bundle, or locale changes. `setHostContext` auto-diffs and only notifies the
+  // view of changed fields (no-op on the mount pass, which matches the seed).
+  useEffect(() => {
+    const current = bridgeRef.current;
+    if (!current) return;
+    current.bridge.setHostContext(buildHostContextRef.current());
+  }, [resolved, effectiveBundleId, locale]);
 
   return (
     <div className="mt-2 overflow-hidden rounded border bg-background">

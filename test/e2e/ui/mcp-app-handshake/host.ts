@@ -41,6 +41,9 @@ window.__startHandshake = ({ proxyUrl, partition, html }) => {
     { serverId: "e2e-mcp-server" },
     html,
     webview as unknown as BridgeWebviewElement,
+    // This gate exercises the sandbox handshake, not theming: an empty standard
+    // host context matches the prior behavior (previously `{ hostContext: {} }`).
+    {},
   );
 
   // Prove the sandbox handshake actually reached the (production) bridge. We observe
