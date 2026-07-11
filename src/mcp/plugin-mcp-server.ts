@@ -20,11 +20,17 @@ import {
   manifestToDiscoverResult,
   manifestToolsToMcpTools,
 } from "./plugin-server-projection.js";
+import {
+  MCP_APP_MIME_TYPE,
+  type PluginUiResourceProvider,
+} from "./plugin-ui-resource-provider.js";
+import type { McpUiResourceMeta } from "./types.js";
 
 const MCP_PROTOCOL_VERSION = "2026-07-28";
 const META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion";
 
 const RPC_METHOD_NOT_FOUND = -32601;
+const RPC_RESOURCE_NOT_FOUND = -32002;
 const RPC_INVALID_PARAMS = -32602;
 const RPC_UNSUPPORTED_PROTOCOL_VERSION = -32004;
 
@@ -67,6 +73,12 @@ export class PluginMcpServer {
   constructor(
     private readonly manifest: PluginManifest,
     private readonly callTool: PluginToolDelegate,
+    /**
+     * Serves this plugin's declared `ui://` resources (MCP App cards). Absent
+     * when the plugin ships no `uiResources[]`; a `resources/read` then always
+     * fails-closed with `-32002`, and `resources/list` returns an empty set.
+     */
+    private readonly uiResources?: PluginUiResourceProvider,
   ) {}
 
   /**
@@ -93,6 +105,62 @@ export class PluginMcpServer {
           id,
           result: { resultType: "complete", tools: manifestToolsToMcpTools(this.manifest) },
         };
+
+      case "resources/list":
+        return {
+          jsonrpc: "2.0",
+          id,
+          result: { resultType: "complete", resources: this.uiResources?.list() ?? [] },
+        };
+
+      case "resources/read": {
+        const params = request.params ?? {};
+        const uri = params.uri;
+        if (typeof uri !== "string") {
+          return {
+            jsonrpc: "2.0",
+            id,
+            error: { code: RPC_INVALID_PARAMS, message: "resources/read requires a string 'uri'" },
+          };
+        }
+        // Fail-closed: no provider ⇒ this plugin serves no ui:// resource. The
+        // provider itself enforces own-namespace-only + declared-only + path
+        // containment (the single chokepoint), so a denied/undeclared/escaping
+        // uri surfaces here as `-32002` — never a served body.
+        if (!this.uiResources) {
+          return {
+            jsonrpc: "2.0",
+            id,
+            error: { code: RPC_RESOURCE_NOT_FOUND, message: `Resource not found: ${uri}` },
+          };
+        }
+        try {
+          const resource = await this.uiResources.read(uri);
+          const ui: McpUiResourceMeta = {};
+          if (resource.csp !== undefined) ui.csp = resource.csp;
+          if (resource.permissions !== undefined) ui.permissions = resource.permissions;
+          const content: Record<string, unknown> = {
+            uri,
+            mimeType: MCP_APP_MIME_TYPE,
+            text: resource.html,
+          };
+          if (ui.csp !== undefined || ui.permissions !== undefined) content._meta = { ui };
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: { resultType: "complete", contents: [content] },
+          };
+        } catch (err) {
+          return {
+            jsonrpc: "2.0",
+            id,
+            error: {
+              code: RPC_RESOURCE_NOT_FOUND,
+              message: err instanceof Error ? err.message : String(err),
+            },
+          };
+        }
+      }
 
       case "tools/call": {
         const params = request.params ?? {};

@@ -3,7 +3,10 @@
  * The boot cutover seam: start on enable, stop on disable, idempotent reload,
  * stopAll on shutdown — driving real PluginMcpHosts over a real ToolRegistry.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PluginLoopbackManager } from "../plugin-loopback-manager.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { manifestIntegrityState } from "../../permissions/manifest-integrity.js";
@@ -182,5 +185,75 @@ describe("PluginLoopbackManager", () => {
     expect(mgr.list()).toEqual([]);
     expect(registry.findByName("a_one")).toBeUndefined();
     expect(registry.findByName("b_one")).toBeUndefined();
+  });
+});
+
+describe("PluginLoopbackManager — ui:// resource serving (readUiResource)", () => {
+  let root: string;
+
+  /** A runtime whose plugin root is a real temp dir holding `dist/card.html`. */
+  function rootedRuntime(): PluginRuntime {
+    return {
+      isPluginEnabled: () => true,
+      call: vi.fn(async (name: string) => `ran ${name}`),
+      getPluginRoot: () => root,
+    } as unknown as PluginRuntime;
+  }
+
+  function uiManifest(id: string): PluginManifest {
+    return {
+      ...manifest(id, ["card_open"]),
+      uiResources: [
+        {
+          uri: `ui://${id}/card.html`,
+          html: "dist/card.html",
+          csp: { connectDomains: ["https://api.example.com"] },
+        },
+      ],
+    };
+  }
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "lvis-loopback-ui-"));
+    mkdirSync(join(root, "dist"), { recursive: true });
+    writeFileSync(join(root, "dist", "card.html"), "<h1>served</h1>", "utf-8");
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("serves a plugin's OWN declared ui:// resource (html + declared csp)", async () => {
+    const mgr = new PluginLoopbackManager(rootedRuntime(), new ToolRegistry());
+    await mgr.start(uiManifest("com.cards"));
+
+    const res = await mgr.readUiResource("com.cards", "ui://com.cards/card.html");
+    expect(res.html).toBe("<h1>served</h1>");
+    expect(res.csp).toEqual({ connectDomains: ["https://api.example.com"] });
+  });
+
+  it("rejects a cross-plugin uri authority (own-namespace-only, fail-closed)", async () => {
+    const mgr = new PluginLoopbackManager(rootedRuntime(), new ToolRegistry());
+    await mgr.start(uiManifest("com.cards"));
+
+    await expect(
+      mgr.readUiResource("com.cards", "ui://com.evil/card.html"),
+    ).rejects.toThrow(/own namespace/i);
+  });
+
+  it("rejects an undeclared uri in the plugin's own namespace", async () => {
+    const mgr = new PluginLoopbackManager(rootedRuntime(), new ToolRegistry());
+    await mgr.start(uiManifest("com.cards"));
+
+    await expect(
+      mgr.readUiResource("com.cards", "ui://com.cards/nope.html"),
+    ).rejects.toThrow(/no declared ui:\/\/ resource/i);
+  });
+
+  it("throws when no loopback host runs for the plugin", async () => {
+    const mgr = new PluginLoopbackManager(rootedRuntime(), new ToolRegistry());
+    await expect(
+      mgr.readUiResource("com.absent", "ui://com.absent/card.html"),
+    ).rejects.toThrow(/no running loopback host/i);
   });
 });
