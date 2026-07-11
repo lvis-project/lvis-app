@@ -1,0 +1,802 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sdk.lvisai.xyz/schemas/plugin.schema.json",
+  "title": "LVIS Plugin Manifest",
+  "description": "Validates plugin.json manifest files for LVIS plugins (§9)",
+  "type": "object",
+  "required": [
+    "id",
+    "version",
+    "entry",
+    "tools",
+    "description"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "format": "uri",
+      "description": "JSON Schema URL identifying the manifest schema version this plugin targets."
+    },
+    "id": {
+      "type": "string",
+      "description": "Plugin unique identifier. Kebab-case (lowercase letters, digits, hyphens). Min 3 chars — 2-char names reserved for future system namespaces. Example: \"my-plugin\".",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "minLength": 3,
+      "maxLength": 128
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 280,
+      "description": "Short human-readable summary used in the inactive-plugin catalog LLM sees in the system prompt."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "description": "Stable SemVer (MAJOR.MINOR.PATCH, no leading zeros). Pre-release / build-metadata suffixes are not supported on the marketplace publish channel — the per-plugin publish.yml rejects them at tag time. Aligning the schema with that gate so AJV fails earlier."
+    },
+    "entry": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tools": {
+      "description": "LLM- and app-visible tool surface: an array of pure MCP Tool objects (manifest == wire, #885). Each tool's `_meta.ui.visibility` declares model and/or app reachability. An empty `[]` is valid for template / MCP-server manifests that expose no plugin-authored tools.",
+      "type": "array",
+      "minItems": 0,
+      "items": { "$ref": "#/definitions/tool" }
+    },
+    "config": {
+      "type": "object"
+    },
+    "ui": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "slot",
+          "kind",
+          "title"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "slot": {
+            "enum": [
+              "sidebar"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "embedded-module",
+              "embedded-page",
+              "info-card"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "defaults": {
+            "type": "object"
+          },
+          "entry": {
+            "type": "string"
+          },
+          "exportName": {
+            "type": "string"
+          },
+          "page": {
+            "type": "string"
+          },
+          "window": {
+            "type": "object",
+            "description": "Optional detachable-window defaults for this UI extension. When present the host creates a detached BrowserWindow for this view using these dimensions / snap hints.",
+            "additionalProperties": false,
+            "properties": {
+              "width": {
+                "type": "integer",
+                "minimum": 120,
+                "maximum": 3840,
+                "description": "Initial window width in DIP pixels"
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 80,
+                "maximum": 2160,
+                "description": "Initial window height in DIP pixels"
+              },
+              "minWidth": {
+                "type": "integer",
+                "minimum": 80
+              },
+              "minHeight": {
+                "type": "integer",
+                "minimum": 60
+              },
+              "resizable": {
+                "type": "boolean"
+              },
+              "alwaysOnTop": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "description": "UI extensions. Kind-specific required fields (embedded-module: entry+exportName; embedded-page: page) are enforced at runtime with hard-fail — invalid entries fail manifest load, the plugin does NOT register."
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "keyword",
+          "skillId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skillId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "description": "Closed vocabulary — see src/plugins/capabilities.ts (KNOWN_CAPABILITIES). Unknown values fail validation so typos don't silently grant nothing.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "ms-graph-consumer",
+          "external-auth-consumer",
+          "mail-source",
+          "calendar-source",
+          "routine-provider",
+          "meeting-recorder",
+          "knowledge-index",
+          "background-watcher",
+          "worker-client",
+          "document-indexer",
+          "lifecycle-observer",
+          "host:overlay"
+        ]
+      }
+    },
+    "networkAccess": {
+      "type": "object",
+      "description": "Tier A host-mediated egress allow-list. hostApi.hostFetch may only reach hosts matching allowedDomains (dot-boundary suffix match). Deny-by-default: absent or empty = no egress.",
+      "additionalProperties": false,
+      "required": ["allowedDomains"],
+      "properties": {
+        "allowedDomains": {
+          "type": "array",
+          "description": "Hostnames the plugin may reach via hostApi.hostFetch. Dot-boundary suffix-match allow-list ('openai.azure.com' allows 'x.openai.azure.com' but not 'openai.azure.com.attacker.com'). Lowercase ASCII hostnames, >=1 dot, RFC1035 label/length bounds; wildcards / URLs / ports / whitespace / IDN-punycode (xn--*) / bare public suffixes are rejected — mirrors the host's load-time validator and the auth.partitionDomains rules so manifest-publish surfaces them before runtime. Max 16. The host re-validates at every hostFetch call.",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "allOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$",
+                "minLength": 3,
+                "maxLength": 253
+              },
+              {
+                "not": {
+                  "enum": ["com", "net", "org", "kr", "co.kr", "or.kr", "go.kr", "io", "ai", "dev", "app"]
+                }
+              },
+              {
+                "not": { "type": "string", "pattern": "(^|\\.)xn--" }
+              }
+            ]
+          }
+        },
+        "reasoning": {
+          "type": "string",
+          "description": "Human-readable justification surfaced to the user at install for the requested egress."
+        },
+        "allowPrivateNetworks": {
+          "type": "boolean",
+          "description": "Governance opt-in for allow-listed intranet/private-network egress. Applies to host-mediated hostApi.hostFetch and explicitly documented browser/direct intranet exceptions; loopback/link-local/metadata addresses remain denied by host guards where applicable."
+        }
+      }
+    },
+    "eventSubscriptions": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hint": {
+                "type": "object",
+                "required": [
+                  "category",
+                  "priority",
+                  "title"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "task",
+                      "note",
+                      "session",
+                      "meeting",
+                      "email",
+                      "calendar",
+                      "system"
+                    ]
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "high",
+                      "medium",
+                      "low"
+                    ]
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "emittedEvents": {
+      "type": "array",
+      "description": "Event types this plugin emits.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "hostSecrets": {
+      "type": "object",
+      "description": "Explicit allowlist of host-managed LLM secrets the plugin reads via hostApi.getSecret. Default deny when unset.",
+      "additionalProperties": false,
+      "properties": {
+        "read": {
+          "type": "array",
+          "description": "Secret keys this plugin is permitted to read. Accepted forms: llm.apiKey.<vendor> or llm.marketplaceProvider.<presetId>.apiKey. Marketplace preset ids follow the host provider-preset id contract. Bounded (maxItems=32, per-item maxLength=111) to prevent registry-level DoS via oversized manifests.",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:llm\\.apiKey\\.[a-z]+(-[a-z]+)*|llm\\.marketplaceProvider\\.[A-Za-z0-9][A-Za-z0-9._-]{0,79}\\.apiKey)$",
+            "maxLength": 111
+          },
+          "maxItems": 32,
+          "uniqueItems": true,
+          "default": []
+        }
+      }
+    },
+    "startupTimeoutMs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 60000,
+      "description": "Hard startup() timeout (ms). Exceeding plugins are fail-soft dropped. Default slow warning threshold is 5000ms."
+    },
+    "auth": {
+      "type": "object",
+      "description": "Optional declarative auth contract. Lets the host render a generic 'authentication required / signed in' badge + login/logout button in Settings → 플러그인 설정 without baking plugin-specific auth code into the host. The plugin still owns its OAuth/cookie flow (see architecture.md §9.4a 'Plugin-Owned OAuth Authentication'); the host only invokes the named tools and listens for the auth-changed event. Each of the tool names referenced here MUST be the `name` of an app-visible tool in `tools[]` (its `_meta.ui.visibility` includes `\"app\"`); the host value-validates this against the normalized Tool[]. On state transitions (login success, logout, token refresh failure) the plugin SHOULD emit an event named `<pluginId>.auth.changed` so the host UI can refresh without polling.",
+      "additionalProperties": false,
+      "required": [
+        "statusTool",
+        "loginTool"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Human-readable label for the auth surface, shown next to the badge (e.g. 'Microsoft 계정', 'LGE 포털'). Defaults to the plugin's `name` if omitted.",
+          "maxLength": 64
+        },
+        "statusTool": {
+          "type": "string",
+          "description": "Name of an app-visible tool in `tools[]` (its `_meta.ui.visibility` includes `\"app\"`) returning `{ authenticated: boolean, account?: string }`. Host invokes on Settings tab mount and after every `<pluginId>.auth.changed` event.",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "maxLength": 64
+        },
+        "loginTool": {
+          "type": "string",
+          "description": "Name of an app-visible tool in `tools[]` (its `_meta.ui.visibility` includes `\"app\"`) the host invokes when the user clicks the '로그인' button. The plugin owns the actual auth flow (e.g. MSAL interactive, openAuthWindow); the host only triggers it.",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "maxLength": 64
+        },
+        "logoutTool": {
+          "type": "string",
+          "description": "Optional name of an app-visible tool in `tools[]` (its `_meta.ui.visibility` includes `\"app\"`) the host invokes when the user clicks the '로그아웃' button. Omit to render a sign-in-only surface (e.g. plugins that don't support runtime sign-out).",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "maxLength": 64
+        },
+        "partitionDomains": {
+          "type": "array",
+          "description": "Hostnames the plugin may open inside its `persist:plugin-auth:<pluginId>` partition via `hostApi.openAuthPartitionViewer`. Treated as a dot-boundary suffix-match allow-list (e.g. `outlook.office.com` matches `mail.outlook.office.com` but not `outlook.office.com.attacker.com`). Schema rules: lowercase ASCII hostnames only, each entry MUST contain ≥1 dot (single-label hosts like `localhost` are rejected to avoid blanket subdomain matching), per RFC 1035 each label is bounded to 63 chars and the whole hostname to 253. Wildcards / URLs / port suffixes / whitespace / NUL / IDN-punycode labels (`xn--*`) are rejected. The host's load-time validator additionally rejects bare public suffixes (`com`, `co.kr`, `or.kr`, `go.kr`, `kr`, `net`, `org`, `io`, `ai`, `dev`, `app`); those rejections are mirrored here so manifest-publish surfaces them before runtime. Length cap 16 prevents an over-broad consent surface. The host re-validates this list at every viewer-open call.",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "allOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$",
+                "minLength": 3,
+                "maxLength": 253
+              },
+              {
+                "not": {
+                  "enum": [
+                    "com", "net", "org", "kr", "co.kr", "or.kr", "go.kr",
+                    "io", "ai", "dev", "app"
+                  ]
+                }
+              },
+              {
+                "not": { "type": "string", "pattern": "(^|\\.)xn--" }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "notificationEvents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "event"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "type": "string",
+            "minLength": 1
+          },
+          "titleField": {
+            "type": "string"
+          },
+          "bodyField": {
+            "type": "string"
+          },
+          "bypassFocusGate": {
+            "type": "boolean",
+            "description": "When true, this event bypasses the host focus-gate AND cooldown-gate suppression and always fires an OS-level notification regardless of LVIS window focus state or recent prior emits from the same plugin. The host additionally promotes urgent=true for bypass events (sound + critical urgency) unless the caller explicitly opts out. Use for critical flows (meeting capture, security alerts) where the user must be notified out-of-band. Refs lvis-project/lvis-app#843."
+          }
+        }
+      }
+    },
+    "installPolicy": {
+      "enum": [
+        "admin",
+        "user"
+      ]
+    },
+    "dependencies": {
+      "type": "array",
+      "description": "Plugin dependencies that should be installed or considered with this plugin. This is not a delivery mode.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "object",
+            "required": [
+              "pluginId"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "pluginId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "versionRange": {
+                "type": "string",
+                "minLength": 1
+              },
+              "required": {
+                "type": "boolean"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "pluginAccess": {
+      "type": "object",
+      "required": [
+        "plugins"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "plugins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "pluginId"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "pluginId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              }
+            }
+          }
+        },
+        "agentApprovalScopes": {
+          "type": "array",
+          "description": "§8 P0 security — approval action scopes this plugin is permitted to issue and respond to via hostApi.agentApproval. Omitted or empty array means no approval scopes allowed (host enforces empty-list semantics). Known values: 'agent_file_share', 'agent_task_delegate', 'agent_external_api_call'.",
+          "default": [],
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "requires": {
+      "type": "object",
+      "description": "Runtime prerequisites declared by the plugin",
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "minAppVersion": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "description": "Minimum LVIS app version (plain SemVer MAJOR.MINOR.PATCH, not a range) required to load this plugin. The host refuses to install (hard block before download) and refuses to activate (skips start(), surfaces a non-dismissable \"needs newer app\" state) when the running app is older. Omit for no minimum (compatible with all app versions)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "llmKeySource": {
+      "type": "string",
+      "enum": ["host", "plugin", "none"],
+      "default": "none",
+      "description": "Whether this plugin uses host-managed LLM keys (host), its own keys (plugin), or no LLM at all (none). The 'host' source requires marketplace whitelist authorization at runtime."
+    },
+    "publisher": {
+      "type": "string",
+      "minLength": 1
+    },
+    "packageName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "npm package name persisted into installed manifests by PluginMarketplaceService for rollback support. Not authored by plugin developers."
+    },
+    "icon": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Optional Lucide icon name (PascalCase, e.g. 'Mic', 'FileText'). Host dynamically looks up the named export from lucide-react and renders it as a monochrome stroke icon in the plugin grid popover. Unknown names fall back to the 'Plug' icon. Full list: https://lucide.dev/icons/"
+    },
+    "iconText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4,
+      "description": "Optional short text (1-4 chars) rendered inside the plugin grid avatar — e.g. 'EP', 'MTG'. Takes precedence over `icon` when both are declared. Use when no Lucide glyph matches the plugin's domain identity."
+    },
+    "python": {
+      "type": "object",
+      "description": "Optional Python runtime co-deployment metadata. Host installs declared requirements when managedBy is lvis-app.",
+      "additionalProperties": false,
+      "properties": {
+        "managedBy": {
+          "type": "string",
+          "enum": [
+            "lvis-app",
+            "self"
+          ]
+        },
+        "requirementsLock": {
+          "type": "string",
+          "minLength": 1
+        },
+        "interpreter": {
+          "type": "string"
+        }
+      }
+    },
+    "configSchema": {
+      "type": "object",
+      "description": "§9.2 Track B — declarative settings schema. JSON Schema draft-07 subset rendered as a typed form in PluginConfigTab. format:'secret' routes the value through the encrypted keychain instead of cleartext pluginConfigs.",
+      "required": [
+        "properties"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "$schema": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "string",
+                  "number",
+                  "integer",
+                  "boolean",
+                  "array"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "default": {
+                "description": "Default value for the form field. Outer JSON byte-size cap is enforced server-side (see marketplace publisher.py); the schema bounds object/array primitives so a pathological default can't blow up the catalog.",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 1024
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "array",
+                    "maxItems": 64
+                  },
+                  {
+                    "type": "object",
+                    "maxProperties": 32
+                  }
+                ]
+              },
+              "enum": {
+                "type": "array"
+              },
+              "minimum": {
+                "type": "number"
+              },
+              "maximum": {
+                "type": "number"
+              },
+              "minLength": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxLength": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "pattern": {
+                "type": "string"
+              },
+              "format": {
+                "type": "string",
+                "enum": [
+                  "secret",
+                  "uri",
+                  "email",
+                  "date-time"
+                ]
+              },
+              "items": {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "string",
+                      "number",
+                      "integer",
+                      "boolean"
+                    ]
+                  },
+                  "enum": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "required": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "customPanel": {
+          "type": "object",
+          "required": [
+            "entry",
+            "exportName"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "entry": {
+              "type": "string",
+              "minLength": 1
+            },
+            "exportName": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "author": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Plugin author — individual maintainer name or contact (distinct from `publisher`, which is the publishing organization). Surfaced in catalog / IDE intellisense; not used for permission decisions."
+    },
+    "uiSlots": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*$",
+        "maxLength": 64
+      },
+      "description": "Top-level advertisement of UI slot names this plugin participates in. Marketplace metadata only — actual extension binding lives in `ui[].slot`. Kebab-case identifiers, ≤32 entries."
+    }
+  },
+  "definitions": {
+    "tool": {
+      "$comment": "PURE (v6) MCP Tool object — manifest == wire (#885). additionalProperties:false rejects the removed legacy fields (category/workerId/writesToOwnSandbox/version/deprecatedSince/replacedBy); they are not Tool properties.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "inputSchema"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "maxLength": 64
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": {
+          "type": "string",
+          "minLength": 10
+        },
+        "inputSchema": {
+          "type": "object",
+          "required": ["type", "properties"],
+          "properties": {
+            "$schema": { "type": "string" },
+            "type": { "const": "object" },
+            "properties": { "type": "object" },
+            "required": { "type": "array", "items": { "type": "string" } },
+            "additionalProperties": { "type": "boolean" }
+          }
+        },
+        "outputSchema": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "$schema": { "type": "string" },
+            "type": { "const": "object" },
+            "properties": { "type": "object" },
+            "required": { "type": "array", "items": { "type": "string" } },
+            "additionalProperties": { "type": "boolean" }
+          }
+        },
+        "icons": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["src"],
+            "properties": {
+              "src": { "type": "string" },
+              "mimeType": { "type": "string" },
+              "sizes": { "type": "string" }
+            }
+          }
+        },
+        "_meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ui": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "visibility": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "enum": ["model", "app"] }
+                }
+              }
+            },
+            "xyz.lvis/pathFields": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

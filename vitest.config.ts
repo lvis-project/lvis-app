@@ -128,9 +128,8 @@ export default defineConfig({
   resolve: {
     dedupe: ["react", "react-dom"],
     extensions: [".ts", ".tsx", ".mjs", ".js", ".jsx", ".json"],
-    // SDK is installed from GitHub — its prepare (tsup) script may not run
-    // in CI without trusted-dependencies. Point vitest directly at the SDK
-    // TypeScript sources so the dist/ absence does not break test imports.
+    // Pin react / ajv / pino to their concrete entry files so vitest resolves a
+    // single copy regardless of how the importer specifies them.
     alias: {
       "react/jsx-dev-runtime": rootPath("node_modules/react/jsx-dev-runtime.js"),
       "react/jsx-runtime": rootPath("node_modules/react/jsx-runtime.js"),
@@ -140,9 +139,6 @@ export default defineConfig({
       "ajv-formats": rootPath("node_modules/ajv-formats/dist/index.js"),
       ajv: rootPath("node_modules/ajv/dist/ajv.js"),
       pino: rootPath("node_modules/pino/pino.js"),
-      "@lvis/plugin-sdk/ui/tokens": rootPath("node_modules/@lvis/plugin-sdk/src/ui/tokens/index.ts"),
-      "@lvis/plugin-sdk/ui": rootPath("node_modules/@lvis/plugin-sdk/src/ui/index.ts"),
-      "@lvis/plugin-sdk": rootPath("node_modules/@lvis/plugin-sdk/src/index.ts"),
     },
   },
 });
