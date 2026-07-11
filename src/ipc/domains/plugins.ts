@@ -36,6 +36,7 @@ import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
 import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
 import { installMcpAppPartitionPolicy } from "../../main/html-preview-partition.js";
 import { createMcpAppProxySession, disposeMcpAppProxySession } from "../../main/mcp-app-protocol.js";
+import { resolveMcpUiBackend } from "../../mcp/mcp-ui-backend-resolver.js";
 import type { McpUiResourceBundle } from "../../mcp/types.js";
 import {
   installMarketplacePluginWithLifecycle,
@@ -1092,11 +1093,22 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // on the partition, so both are in place before the webview navigates.
     installMcpAppPartitionPolicy(serverId);
 
+    // SoT resolution: a first-party plugin runs as an in-process loopback MCP
+    // server (serverId === pluginId) that is NEVER in mcpManager.clients, so try
+    // the loopback host FIRST, else the external MCP client registry. ONE
+    // resolver, shared with the later oncalltool seam — no duplicated backend
+    // branch.
+    const backend = resolveMcpUiBackend(serverId, {
+      loopback: deps.pluginLoopbackManager,
+      mcpManager: deps.mcpManager,
+    });
+
     // The resource carries its OWN `_meta.ui.csp` — main reads it here and never
     // accepts one from the renderer. A compromised renderer must not be able to
     // forge a permissive policy and widen the envelope that contains the untrusted
     // app HTML. Per-resource, so one card's declared domains never leak to another.
-    const resource = await deps.mcpManager.readUiResource(serverId, uri);
+    // Plugin-served HTML rides the SAME sandbox-proxy + main-computed CSP path.
+    const resource = await backend.readUiResource(uri);
     const proxyUrl = createMcpAppProxySession(serverId, resource.csp);
     return { proxyUrl, html: resource.html } satisfies McpUiResourceBundle;
   });

@@ -269,6 +269,7 @@ export async function bootstrap(
     lateBinding,
     runPluginShutdownHandlers,
     pluginPaths,
+    loopbackManager,
   } = await initPluginRuntime({
     projectRoot,
     settingsService,
@@ -299,6 +300,7 @@ export async function bootstrap(
   ctx.lateBinding = lateBinding;
   ctx.runPluginShutdownHandlers = runPluginShutdownHandlers;
   ctx.pluginPaths = pluginPaths;
+  ctx.pluginLoopbackManager = loopbackManager;
 
   // Workflow system tools (S1+S2) — services constructed up-front so the
   // tool registry can register them in one pass below. Late bindings
