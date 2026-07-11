@@ -11,7 +11,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { emitEvent as emitHostEvent } from "../../boot/types.js";
-import { HOST_ONLY_EMIT_NAMESPACES, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
+import { HOST_ONLY_EMIT_NAMESPACES, canEmitEvent, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
+import { getDeclaredEmittedEvents } from "../../plugins/runtime/manifest-validation.js";
 import { stripSecretFields } from "../../plugins/config-schema.js";
 import { shouldBlockPluginSecretRead, validateApiKeyLikeSecretValue } from "../../plugins/secret-shape.js";
 import { emitPluginConfigChange, SECRET_REDACTED_SENTINEL } from "../../plugins/config-change-bus.js";
@@ -1605,8 +1606,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (HOST_ONLY_EMIT_NAMESPACES.has(namespacePrefix)) {
       return { ok: false, error: `host-only-namespace:${namespacePrefix}` };
     }
-    const requiredCap = requiredCapabilityForEmit(type);
-    if (requiredCap && !manifest.capabilities?.includes(requiredCap)) {
+    // Emit authorization for gated event-source namespaces is inferred from the
+    // manifest's declared emittedEvents, not a separately-declared capability
+    // (same predicate as the SDK hostApi.emitEvent path). The error code keeps
+    // the `missing-capability:` prefix for renderer/preload compatibility.
+    if (!canEmitEvent(type, getDeclaredEmittedEvents(manifest))) {
+      const requiredCap = requiredCapabilityForEmit(type);
       return { ok: false, error: `missing-capability:${requiredCap}` };
     }
     try {

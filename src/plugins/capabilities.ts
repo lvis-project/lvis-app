@@ -2,9 +2,11 @@
  * Capability policy + event namespace allowlist.
  *
  * Two concerns:
- *  1. `KNOWN_CAPABILITIES` — closed vocabulary for manifest.capabilities[].
- *     Unknown entries fail schema validation so typos do not silently
- *     "grant" nothing.
+ *  1. `KNOWN_CAPABILITIES` — the closed set of capability strings the host
+ *     ENFORCES at runtime (external-auth-consumer, host:overlay). The manifest
+ *     schema accepts any format-valid string (NOT an enum), so legacy/unknown
+ *     capability strings on already-installed manifests still validate and load
+ *     as harmless no-ops (see the reduction note on KNOWN_CAPABILITY_IDS below).
  *  2. `PUBLIC_EVENT_NAMESPACES` / `PLUGIN_PRIVATE_NAMESPACES` — restrict
  *     which host events a plugin may subscribe to and emit.
  *
@@ -12,29 +14,34 @@
  */
 
 /**
- * Closed vocabulary of capability strings accepted in manifest.capabilities[].
+ * The closed set of capability strings the host ENFORCES at runtime.
  *
- * Declared as a `const` tuple so it backs BOTH the runtime membership set
- * (`KNOWN_CAPABILITIES`) and the compile-time {@link CapabilityId} union. The
- * host-consumed id constants below are typed to that union, so a typo in a
- * host-side capability gate is a `tsc` error instead of a silent gate against
- * an id no manifest can ever declare.
+ * Capabilities reduction (Ph1/Ph2) narrowed this from a 12-string vocabulary to
+ * the two the host actually gates on:
+ *  - 5 DEAD strings (ms-graph-consumer, background-watcher, document-indexer,
+ *    lifecycle-observer, routine-provider) had zero read sites and were removed.
+ *  - 4 event-source strings (mail-source, calendar-source, meeting-recorder,
+ *    knowledge-index) are no longer author-declared — emit authorization is now
+ *    INFERRED from the plugin's `emittedEvents` namespace ({@link canEmitEvent}).
+ *    They survive only as internal effect labels in EVENT_NAMESPACE_CAPABILITY.
+ *  - `worker-client` is NOT dead: it is a live host discovery key
+ *    (`findPluginIdByCapability` in boot/tools.ts wires knowledge tools to the
+ *    local-indexer). But it is matched as a plain declared string, not a
+ *    host-enforced gate, so it is not in this enforced set. It — like any legacy
+ *    capability string — remains a valid free-form manifest declaration.
+ *
+ * The manifest schema (`schemas/plugin-manifest.schema.json`) NO LONGER mirrors
+ * this as an enum: it accepts any format-valid string so an installed manifest
+ * declaring a removed/legacy string still validates and loads rather than being
+ * rejected. This const still backs BOTH the runtime membership set
+ * (`KNOWN_CAPABILITIES`) and the compile-time {@link CapabilityId} union, so a
+ * typo in one of the host's own enforced-capability gates is a `tsc` error.
  */
 export const KNOWN_CAPABILITY_IDS = [
-  "ms-graph-consumer",
   "external-auth-consumer",
-  "mail-source",
-  "calendar-source",
-  "routine-provider",
-  "meeting-recorder",
-  "knowledge-index",
-  "background-watcher",
-  "worker-client",
-  "document-indexer",
-  "lifecycle-observer",
   // host:overlay — plugin may call triggerConversation() as overlay runner.
-  // triggerConversation() now routes to OverlayContext staging instead of spawning
-  // a fresh ConversationLoop. Capability gates the same method as before.
+  // triggerConversation() routes to OverlayContext staging instead of spawning
+  // a fresh ConversationLoop. Capability gates the same method (trigger-gate.ts).
   "host:overlay",
 ] as const;
 
@@ -59,17 +66,23 @@ export const CAPABILITY_EXTERNAL_AUTH_CONSUMER: CapabilityId = "external-auth-co
 export const CAPABILITY_HOST_OVERLAY: CapabilityId = "host:overlay";
 
 /**
- * Map of event namespace prefix → capability required to EMIT events in that
- * namespace. Plugins without the capability have their emissions dropped
- * (log.warn + no fan-out).
+ * Map of gated event-namespace prefix → the internal effect LABEL for emitting
+ * in that namespace.
+ *
+ * This is NO LONGER an author-declared capability: a plugin authorizes itself
+ * to emit `email.*` by DECLARING an `email.*` entry in `emittedEvents`
+ * ({@link canEmitEvent}), not by listing `mail-source` in `capabilities`. The
+ * label survives only as (a) the gated-namespace detector
+ * ({@link requiredCapabilityForEmit}) and (b) the `required=` field of the
+ * emit-denied audit trail. A prefix present here means "gated"; absent means
+ * "freely emittable".
  *
  * `task` namespace is absent — host-side TaskDeadlinePoller and TaskService
  * were removed in 2026-05. Task ownership now lives in plugins.
  * Plugin-owned namespaces (single publisher pinned by HostApi pluginId
- * identity) are intentionally NOT capability-gated here — host stays
- * agnostic to plugin ids (open-source-readiness). Plugin-bus event
- * subscribers receive a load-time namespace-drift warn instead, treated
- * as informational.
+ * identity) are intentionally NOT gated here — host stays agnostic to plugin
+ * ids (open-source-readiness). Plugin-bus event subscribers receive a
+ * load-time namespace-drift warn instead, treated as informational.
  */
 export const EVENT_NAMESPACE_CAPABILITY: ReadonlyMap<string, string> = new Map([
   ["email", "mail-source"],
@@ -155,8 +168,11 @@ export function categorizeEvent(eventType: string): string {
 }
 
 /**
- * Returns the capability required to emit an event of this type, or
- * undefined when the namespace is not gated.
+ * Returns the internal effect label for emitting an event of this type, or
+ * undefined when the namespace is not gated. Used to detect gated namespaces
+ * and to label the emit-denied audit trail — this is NOT an author-declarable
+ * capability (authorization is inferred from `emittedEvents`, see
+ * {@link canEmitEvent}).
  */
 export function requiredCapabilityForEmit(eventType: string): string | undefined {
   const prefix = eventType.split(".")[0] ?? "";
@@ -164,24 +180,36 @@ export function requiredCapabilityForEmit(eventType: string): string | undefined
 }
 
 /**
- * Pure capability-gating predicate for event emission.
+ * Pure gating predicate for plugin event emission.
  *
- * Returns true when the plugin is allowed to emit `eventType`; false when the
- * event namespace requires a capability the plugin does not declare.
+ * Returns true when the plugin may emit `eventType`; false when the namespace
+ * is host-reserved, or is a gated event-source namespace the plugin has not
+ * DECLARED in `emittedEvents`.
  *
- * Extracted as a standalone function so both the production `createHostApi`
- * and unit tests can import and verify the same logic rather than each
- * implementing their own guard.
+ * Emit authorization for the gated namespaces (email/calendar/meeting/index) is
+ * INFERRED from the plugin's declared `emittedEvents`: a plugin declaring
+ * `emittedEvents: ["email.new"]` may emit any `email.*` WITHOUT a separate
+ * `mail-source` capability. The security property is preserved and fail-closed:
+ * a plugin may only emit in a gated namespace it declared; an undeclared gated
+ * namespace is suppressed. Non-gated namespaces stay freely emittable (trust
+ * comes from the HostApi pluginId binding + the owner gate in
+ * `assertPluginEventEmitAccess`); host-reserved namespaces are always denied.
+ *
+ * Extracted as a standalone function so both production emit paths
+ * (`createHostApi` + the plugin-webview IPC bridge) and unit tests verify the
+ * same logic rather than each implementing their own guard.
  */
 export function canEmitEvent(
   eventType: string,
-  capabilities: readonly string[],
+  emittedEvents: readonly string[],
 ): boolean {
   const prefix = eventType.split(".")[0] ?? "";
   if (HOST_ONLY_EMIT_NAMESPACES.has(prefix)) return false;
-  const requiredCap = requiredCapabilityForEmit(eventType);
-  if (!requiredCap) return true;
-  return capabilities.includes(requiredCap);
+  if (!requiredCapabilityForEmit(eventType)) return true;
+  // Gated event-source namespace — the plugin must have DECLARED an event in
+  // this namespace via emittedEvents (its namespace declaration replaces the
+  // previously-required capability declaration).
+  return emittedEvents.some((e) => (e.split(".")[0] ?? "") === prefix);
 }
 
 /**
