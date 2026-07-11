@@ -97,12 +97,14 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
       output: 'notes_read:{"path":"/a.md"}',
       isError: false,
       metadata: {
-        uiPayload: {
-          resourceUri: "ui://notes/read.html",
-          csp: { connectSrc: ["https://api.example.com"] },
-        },
+        uiPayload: { resourceUri: "ui://notes/read.html" },
       },
     });
+    // A `csp` on the TOOL result is IGNORED — per spec it lives on the RESOURCE, and
+    // main derives the sandbox-proxy CSP header from there.
+    expect(
+      (result.metadata as { uiPayload?: Record<string, unknown> }).uiPayload,
+    ).not.toHaveProperty("csp");
   });
 
   it("keeps manifest workerId inert on the loopback path even when a worker marker exists", async () => {

@@ -14,6 +14,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { mcpAppPartitionName, MCP_APP_PARTITION_PREFIX } from "../../shared/mcp-app-partition.js";
+import {
+  createMcpAppProxySession,
+  _resetMcpAppProxySessions,
+} from "../mcp-app-protocol.js";
 
 const __dirnameLocal = dirname(fileURLToPath(import.meta.url));
 const pluginShellHtmlUrl = pathToFileURL(resolve(__dirnameLocal, "..", "..", "plugin-ui-shell.html")).toString();
@@ -147,7 +151,7 @@ describe("installMcpAppPartitionPolicy (#885 b1 — lazy per-server CDN gate)", 
     mockProtocolHandleMcp.mockClear();
   });
 
-  it("installs the CDN allowlist on the per-server lvis-mcp-app:<hex> partition", () => {
+  it("installs the network gate on the per-server lvis-mcp-app:<hex> partition", () => {
     // Unique serverId avoids the module-level installedMcpAppPartitions Set
     // short-circuit from other tests.
     installMcpAppPartitionPolicy("github-a", mockSessionApi);
@@ -155,17 +159,36 @@ describe("installMcpAppPartitionPolicy (#885 b1 — lazy per-server CDN gate)", 
     expect(mockOnBeforeRequestMcp).toHaveBeenCalledOnce();
   });
 
-  it("allows only CDN https + inline schemes + the sandbox-proxy scheme, blocks everything else", () => {
+  it("is deny-by-default: blocks UNDECLARED https hosts, including the old hardcoded CDNs", () => {
+    // The gate used to hardcode 5 CDNs, which GRANTED hosts no app had declared —
+    // the spec's No-Loosening MUST says the host MUST NOT allow undeclared domains.
     installMcpAppPartitionPolicy("github-b", mockSessionApi);
-    expect(invokeMcpHandler("https://cdn.jsdelivr.net/npm/vue")).toEqual({ cancel: false });
-    expect(invokeMcpHandler("https://unpkg.com/x")).toEqual({ cancel: false });
-    expect(invokeMcpHandler("data:text/html,x")).toEqual({ cancel: false });
-    // The host-owned sandbox-proxy document. Without this the gate cancels the
-    // proxy navigation and the card never loads (caught by the real-webview e2e).
-    expect(invokeMcpHandler("lvis-mcp-app://abc/proxy.html?t=tok")).toEqual({ cancel: false });
+    expect(invokeMcpHandler("https://cdn.jsdelivr.net/npm/vue")).toEqual({ cancel: true });
+    expect(invokeMcpHandler("https://unpkg.com/x")).toEqual({ cancel: true });
     expect(invokeMcpHandler("https://attacker.example/exfil")).toEqual({ cancel: true });
     expect(invokeMcpHandler("http://cdn.jsdelivr.net/x")).toEqual({ cancel: true });
     expect(invokeMcpHandler("file:///etc/passwd")).toEqual({ cancel: true });
+    // Local inline schemes stay open — not exfiltration channels.
+    expect(invokeMcpHandler("data:text/html,x")).toEqual({ cancel: false });
+    // The host-owned sandbox-proxy document. Without this the gate cancels the proxy
+    // navigation and the card never loads (caught by the real-webview e2e).
+    expect(invokeMcpHandler("lvis-mcp-app://abc/proxy.html?t=tok")).toEqual({ cancel: false });
+  });
+
+  it("opens ONLY the origins that server's own resource declared (CSP ↔ network lockstep)", () => {
+    // Previously the CSP could permit a declared `connectDomains` host while this gate
+    // silently cancelled it, so declared network access could never actually work.
+    _resetMcpAppProxySessions();
+    createMcpAppProxySession("github-declared", {
+      connectDomains: ["https://api.example.com"],
+    });
+    installMcpAppPartitionPolicy("github-declared", mockSessionApi);
+
+    expect(invokeMcpHandler("https://api.example.com/v1/data")).toEqual({ cancel: false });
+    // A host the resource did NOT declare stays blocked...
+    expect(invokeMcpHandler("https://other.example.com/x")).toEqual({ cancel: true });
+    // ...and so does another server's declared host (the set is per-server).
+    expect(invokeMcpHandler("https://cdn.jsdelivr.net/x")).toEqual({ cancel: true });
   });
 
   it("installs the host-owned relay preload via setPreloads (sandboxed <webview> requirement)", () => {

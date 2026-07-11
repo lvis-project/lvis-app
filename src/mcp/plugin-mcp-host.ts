@@ -60,7 +60,7 @@ interface RcToolCallResult {
       slot?: string;
       height?: number;
       title?: string;
-      csp?: McpUiPayload["csp"];
+      // No `csp` — per spec it lives on the RESOURCE, not the tool result.
     };
     [key: string]: unknown;
   };
@@ -233,7 +233,7 @@ export class PluginMcpHost {
           slot: (uiMeta.slot as McpUiPayload["slot"]) ?? "chat",
           height: uiMeta.height,
           title: uiMeta.title,
-          csp: uiMeta.csp,
+          // No `csp` — spec puts it on the RESOURCE, and main derives it there.
         }
       : undefined;
     // Box the raw plugin return value iff the server included it (success path),

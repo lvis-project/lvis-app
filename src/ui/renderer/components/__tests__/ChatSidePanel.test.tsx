@@ -508,9 +508,9 @@ describe("ChatSidePanel", () => {
 
     fireEvent.click(screen.getByTestId("chat-side-panel-launcher-preview"));
     await waitFor(() => {
-      // 3rd arg is the server's declared CSP policy (undefined here); main
-      // sanitizes it and emits it as the proxy document's CSP response header.
-      expect(readUiResource).toHaveBeenCalledWith("server-a", "ui://server-a/card", undefined);
+      // Only (serverId, uri). The CSP is NOT a renderer-supplied argument: main
+      // derives it from the resource's own _meta.ui.csp that it just fetched.
+      expect(readUiResource).toHaveBeenCalledWith("server-a", "ui://server-a/card");
     });
     const webview = await waitFor(() => {
       const el = container.querySelector("webview");
