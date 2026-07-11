@@ -1483,10 +1483,12 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
       return new Response("unexpected", { status: 500 });
     });
     await withApps.client.connect();
-    expect((await withApps.client.callTool("q", {})).uiPayload).toMatchObject({
-      resourceUri: "ui://app/p.html",
-      csp: { connectSrc: ["https://api.example.com"] },
-    });
+    const uiPayload = (await withApps.client.callTool("q", {})).uiPayload;
+    expect(uiPayload).toMatchObject({ resourceUri: "ui://app/p.html" });
+    // A `csp` on the TOOL result is IGNORED. Per spec it lives on the RESOURCE
+    // (`resources/read` content item `_meta.ui`), and main derives the sandbox-proxy
+    // CSP header from there — never from a tool result, and never from the renderer.
+    expect(uiPayload).not.toHaveProperty("csp");
     await withApps.client.disconnect();
 
     // Same _meta.ui from a server that did NOT advertise Apps → ignored (gate).

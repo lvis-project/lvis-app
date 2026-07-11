@@ -74,7 +74,7 @@ export function createMcpAppBridge(
   // resources/read from the app → the same main-process chokepoint that gated and
   // fetched this card (the partition policy is already installed for this server).
   bridge.onreadresource = async ({ uri }) => {
-    const bundle = await window.lvis.mcp.readUiResource(payload.serverId, uri, payload.csp);
+    const bundle = await window.lvis.mcp.readUiResource(payload.serverId, uri);
     return {
       contents: [{ uri, mimeType: "text/html;profile=mcp-app", text: bundle.html }],
     };
@@ -109,7 +109,7 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
     // the specific card that was live when it fired.
     setDisabled(false);
 
-    window.lvis.mcp.readUiResource(payload.serverId, payload.resourceUri, payload.csp)
+    window.lvis.mcp.readUiResource(payload.serverId, payload.resourceUri)
       .then((next) => {
         if (cancelled) return;
         setBundle(next);
