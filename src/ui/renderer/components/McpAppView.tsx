@@ -70,7 +70,24 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
   const [disabled, setDisabled] = useState(false);
   const bridgeRef = useRef<{ bridge: AppBridge; transport: WebviewIpcTransport; token: string | null } | null>(null);
 
-  const height = payload.height ?? 300;
+  // `payload.height` is only the INITIAL seed now (and the loading/disconnected
+  // placeholder height). The live <webview> dimensions move to state so the app's
+  // `ui/notifications/size-changed` (via the injected `onResize` adapter) can grow the
+  // card with its content. `width` stays undefined → the webview keeps its responsive
+  // `100%` default until the app declares a width.
+  const initialHeight = payload.height ?? 300;
+  const [size, setSize] = useState<{ width?: number; height: number }>({ height: initialHeight });
+
+  // `onsizechange` adapter injected into the bridge: apply a content-driven resize,
+  // preserving whichever dimension the notification omitted. Stable identity so the
+  // ref-callback bridge lifecycle (keyed on [payload, bundle]) never re-creates the
+  // bridge for a resize.
+  const handleResize = useCallback((next: { width?: number; height?: number }) => {
+    setSize((prev) => ({
+      width: next.width ?? prev.width,
+      height: next.height ?? prev.height,
+    }));
+  }, []);
 
   // Host IANA time zone — stable for the app's lifetime; read once.
   const timeZone = useMemo(
@@ -121,6 +138,9 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
     // previous serverId had disconnected; the disconnect event only disables
     // the specific card that was live when it fired.
     setDisabled(false);
+    // Re-seed the live card size from the new payload; the app will resize it again
+    // via `ui/notifications/size-changed` once it renders.
+    setSize({ height: payload.height ?? 300 });
 
     window.lvis.mcp.readUiResource(payload.serverId, payload.resourceUri)
       .then((next) => {
@@ -171,10 +191,12 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
         // Seed the initial standard host context. Read the latest builder via ref
         // so this callback stays keyed on [payload, bundle] (MAJOR-1 lifecycle).
         buildHostContextRef.current(),
+        // React-owned adapters: resize drives card state.
+        { onResize: handleResize },
       );
       bridgeRef.current = { bridge, transport, token: tokenFromProxyUrl(bundle.proxyUrl) };
     }
-  }, [payload, bundle]);
+  }, [payload, bundle, handleResize]);
 
   // Push host-context updates to a mounted bridge when the theme shell, active
   // bundle, or locale changes. `setHostContext` auto-diffs and only notifies the
@@ -194,7 +216,7 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
         </span>
       </div>
       {disabled ? (
-        <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height }} data-testid="mcp-app-disconnected">
+        <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height: initialHeight }} data-testid="mcp-app-disconnected">
           <PlugZap className="h-3.5 w-3.5 flex-shrink-0" />
           <span>{t("mcpAppView.serverDisconnected")}</span>
         </div>
@@ -204,7 +226,7 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
           <span>{error}</span>
         </div>
       ) : !bundle ? (
-        <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height }}>
+        <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height: initialHeight }}>
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           <span>{t("mcpAppView.loading")}</span>
         </div>
@@ -222,8 +244,17 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
           webpreferences: "contextIsolation=yes, sandbox=yes, nodeIntegration=no, javascript=yes",
           disablewebsecurity: "false",
           style: {
-            width: "100%",
-            height: `${height}px`,
+            // Grow with the app's reported content size (basic-host's resize intent)
+            // but never exceed the card container. Expressed as an explicit px size +
+            // `max*: 100%` rather than `min(<content>px, 100%)`: a percentage inside
+            // `min()` resolves to `auto` when the card's parent has an indefinite
+            // height and collapses the webview, whereas a definite px size capped by
+            // `max-height`/`max-width` grows safely and no-ops when unconstrained.
+            // `width` stays a plain `100%` until the app declares one.
+            width: size.width != null ? `${size.width}px` : "100%",
+            maxWidth: "100%",
+            height: `${size.height}px`,
+            maxHeight: "100%",
             border: 0,
             display: "flex",
             background: "transparent",

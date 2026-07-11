@@ -211,3 +211,28 @@ describe("McpAppView — standard McpUiHostContext wiring (P0)", () => {
     expect(createMcpAppBridgeMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("McpAppView — app-driven resize adapter (P1a)", () => {
+  it("seeds the webview at payload height, then grows it when the app reports a size change", async () => {
+    const { container } = renderCard(payload("github"));
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+    const node = () => webviewNode(container) as HTMLElement;
+
+    // Initial seed = payload.height ?? 300.
+    expect(node().style.height).toBe("300px");
+    expect(node().style.width).toBe("100%");
+
+    // The bridge factory received an onResize adapter (5th arg); drive a resize.
+    const deps = createMcpAppBridgeMock.mock.calls[0]![4] as {
+      onResize: (next: { width?: number; height?: number }) => void;
+    };
+    act(() => {
+      deps.onResize({ height: 512 });
+    });
+    await waitFor(() => expect((webviewNode(container) as HTMLElement).style.height).toBe("512px"));
+    // …without re-creating the bridge (resize is a state update, not a re-mount)…
+    expect(createMcpAppBridgeMock).toHaveBeenCalledTimes(1);
+    // …and a height-only notification leaves width responsive.
+    expect(node().style.width).toBe("100%");
+  });
+});

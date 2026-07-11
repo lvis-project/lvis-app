@@ -29,6 +29,7 @@ import { MCP_APP_HOST_INFO } from "../../../shared/mcp-app-bridge-contract.js";
 import { WebviewIpcTransport, type BridgeWebviewElement } from "./webview-ipc-transport.js";
 import { createOnSandboxReady } from "./mcp-app-bridge/handlers/on-sandbox-ready.js";
 import { createOnReadResource } from "./mcp-app-bridge/handlers/on-read-resource.js";
+import { createOnSizeChange } from "./mcp-app-bridge/handlers/on-size-change.js";
 
 /**
  * The exact `McpUiHostCapabilities` shape the `AppBridge` ctor's 3rd arg expects,
@@ -36,6 +37,19 @@ import { createOnReadResource } from "./mcp-app-bridge/handlers/on-read-resource
  * `McpUiHostCapabilities` collapses under NodeNext — see the handler modules.)
  */
 type McpAppHostCapabilities = ConstructorParameters<typeof AppBridge>[2];
+
+/**
+ * React-owned adapters injected by McpAppView. This module stays React-free (the e2e
+ * gate imports it), so any handler that needs renderer state or a preload surface
+ * receives it here rather than reaching for React/globals.
+ */
+export interface McpAppBridgeDeps {
+  /**
+   * `onsizechange` sink — the app reported a content-driven size; McpAppView owns
+   * the live card dimensions (React state) and clamps them.
+   */
+  onResize(next: { width?: number; height?: number }): void;
+}
 
 /**
  * Wire an `AppBridge` to a freshly mounted <webview> for one card.
@@ -61,6 +75,7 @@ export function createMcpAppBridge(
   html: string,
   el: BridgeWebviewElement,
   hostContext: McpUiHostContext,
+  deps: McpAppBridgeDeps,
 ): { bridge: AppBridge; transport: WebviewIpcTransport; connected: Promise<void> } {
   const transport = new WebviewIpcTransport(el);
 
@@ -90,6 +105,12 @@ export function createMcpAppBridge(
       capability: { serverResources: {} },
       register: (bridge) => {
         bridge.onreadresource = createOnReadResource({ serverId: payload.serverId });
+      },
+    },
+    // `ui/notifications/size-changed` (View → Host notification — no capability).
+    {
+      register: (bridge) => {
+        bridge.onsizechange = createOnSizeChange({ onResize: deps.onResize });
       },
     },
   ];
