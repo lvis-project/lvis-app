@@ -322,7 +322,7 @@
       "properties": {
         "label": {
           "type": "string",
-          "description": "Human-readable label for the auth surface, shown next to the badge (e.g. 'Microsoft 계정', 'LGE 포털'). Defaults to the plugin's `name` if omitted.",
+          "description": "Human-readable label for the auth surface, shown next to the badge (e.g. 'Microsoft 계정', '사내 포털'). Defaults to the plugin's `name` if omitted.",
           "maxLength": 64
         },
         "statusTool": {
