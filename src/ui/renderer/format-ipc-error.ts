@@ -194,6 +194,16 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // ── Audit demo throttle (pre-existing in audit.ts) ──
   "rate-limited": "formatIpcError.rateLimited",
 
+  // ── MCP Apps — the card's own IPCs (mcp.callTool / mcp.uiMessage) ──
+  // A card's `oncalltool` may only run a tool its OWN server owns, and the host may
+  // deny (or the tool may fail) at the risk/consent gate. `onmessage` needs the
+  // notification service to be running for its popup path.
+  "cross-server-call-denied": "formatIpcError.crossServerCallDenied",
+  "invalid-server-id": "formatIpcError.invalidServerId",
+  "invalid-tool-name": "formatIpcError.invalidToolName",
+  "tool-call-failed": "formatIpcError.toolCallFailed",
+  "notification-unavailable": "formatIpcError.notificationUnavailable",
+
   // ── Misc IO / system ──
   "no-window": "formatIpcError.noWindow",
   "invalid-request-id": "formatIpcError.invalidRequestId",
