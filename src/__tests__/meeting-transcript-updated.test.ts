@@ -3,7 +3,7 @@
  *
  * Verifies:
  *  1. meeting.transcript.updated is in the public event namespace (classifySubscription = "public")
- *  2. meeting plugin with "meeting-recorder" capability can emit meeting.transcript.updated
+ *  2. meeting plugin declaring meeting.* in emittedEvents can emit meeting.transcript.updated
  *  3. Three simulated chunk events are received by an onEvent subscriber in order
  *  4. The webContents.send forwarding logic (§35 boot.ts wiring) is exercised end-to-end
  */
@@ -17,14 +17,15 @@ import {
 } from "../plugins/capabilities.js";
 
 /**
- * Build a capability-gated emitter using the production `canEmitEvent`
+ * Build an emittedEvents-gated emitter using the production `canEmitEvent`
  * predicate from capabilities.ts. This exercises the same gating logic as
- * createHostApi without duplicating the implementation.
+ * createHostApi without duplicating the implementation. The second arg is the
+ * plugin's declared `emittedEvents`.
  */
-function makeGatedEmitFn(pluginId: string, capabilities: string[]) {
+function makeGatedEmitFn(pluginId: string, emittedEvents: string[]) {
   return (type: string, data?: Record<string, unknown>) => {
-    if (!canEmitEvent(type, capabilities)) {
-      return; // dropped — capability missing (same as createHostApi)
+    if (!canEmitEvent(type, emittedEvents)) {
+      return; // dropped — namespace not declared in emittedEvents (same as createHostApi)
     }
     emitEvent(type, { pluginId, ...(data ?? {}) });
   };
@@ -35,7 +36,9 @@ describe("meeting.transcript.updated — namespace + capability", () => {
     expect(classifySubscription("meeting.transcript.updated")).toBe("public");
   });
 
-  it("requires meeting-recorder capability to emit meeting.transcript.updated", () => {
+  it("maps meeting.transcript.updated to the meeting-recorder effect label", () => {
+    // The internal effect label survives for the emit-denied audit trail even
+    // though authorization is now inferred from emittedEvents.
     const requiredCap = requiredCapabilityForEmit("meeting.transcript.updated");
     expect(requiredCap).toBe("meeting-recorder");
   });
@@ -57,7 +60,7 @@ describe("meeting.transcript.updated — event bus delivery (3 chunks)", () => {
   });
 
   it("delivers 3 chunk events with increasing chunkIndex", () => {
-    const emit = makeGatedEmitFn("meeting", ["meeting-recorder"]);
+    const emit = makeGatedEmitFn("meeting", ["meeting.transcript.updated"]);
 
     for (let i = 0; i < 3; i++) {
       emit("meeting.transcript.updated", {
@@ -78,7 +81,7 @@ describe("meeting.transcript.updated — event bus delivery (3 chunks)", () => {
   });
 
   it("delivers isFinal: true event on stop", () => {
-    const emit = makeGatedEmitFn("meeting", ["meeting-recorder"]);
+    const emit = makeGatedEmitFn("meeting", ["meeting.transcript.updated"]);
 
     emit("meeting.transcript.updated", {
       meetingId: "sess-final",
@@ -92,8 +95,8 @@ describe("meeting.transcript.updated — event bus delivery (3 chunks)", () => {
     expect(d.isFinal).toBe(true);
   });
 
-  it("drops meeting.transcript.updated if plugin lacks meeting-recorder capability", () => {
-    const emit = makeGatedEmitFn("rogue-plugin", []); // no capabilities
+  it("drops meeting.transcript.updated if plugin did not declare the meeting namespace", () => {
+    const emit = makeGatedEmitFn("rogue-plugin", []); // no emittedEvents declaration
 
     emit("meeting.transcript.updated", {
       meetingId: "sess-rogue",
@@ -123,7 +126,7 @@ describe("meeting.transcript.updated — webContents.send forwarding simulation"
       }
     });
 
-    const emit = makeGatedEmitFn("meeting", ["meeting-recorder"]);
+    const emit = makeGatedEmitFn("meeting", ["meeting.transcript.updated"]);
     emit("meeting.transcript.updated", { meetingId: "sess-ipc", newSegmentIndex: 0, newSegment: { original: "Hello" }, isFinal: false });
     emit("meeting.transcript.updated", { meetingId: "sess-ipc", newSegmentIndex: 1, newSegment: { original: "World" }, isFinal: false });
     emit("meeting.transcript.updated", { meetingId: "sess-ipc", newSegmentIndex: 2, newSegment: { original: "Final" }, isFinal: true });

@@ -35,6 +35,7 @@ import {
   requiredCapabilityForEmit,
   CAPABILITY_EXTERNAL_AUTH_CONSUMER,
 } from "../../../plugins/capabilities.js";
+import { getDeclaredEmittedEvents } from "../../../plugins/runtime/manifest-validation.js";
 import { applyConfigDefaults } from "../../../plugins/config-schema.js";
 import { OVERLAY_V1 } from "../../../shared/ipc-channels.js";
 import {
@@ -300,15 +301,15 @@ export function createHostApiFactory(
       emitEvent: (type, data) => {
         plog("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, eventType: type }, "checking emit capability");
         const manifest = pluginRuntime?.getPluginManifest(pluginId);
-        const manifestCapabilities = manifest?.capabilities ?? [];
-        if (!canEmitEvent(type, manifestCapabilities)) {
+        const declaredEmittedEvents = manifest ? getDeclaredEmittedEvents(manifest) : [];
+        if (!canEmitEvent(type, declaredEmittedEvents)) {
           const requiredCap = requiredCapabilityForEmit(type);
           try {
             bootAuditLogger.log({
               timestamp: new Date().toISOString(),
               sessionId: "plugin",
               type: "error",
-              input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${requiredCap} actual=${manifestCapabilities.join("|")}`,
+              input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${requiredCap} declaredEmittedEvents=${declaredEmittedEvents.join("|")}`,
             });
           } catch { /* audit must not break host */ }
           plog("warn", { pluginId, phase: PluginPhase.CAPABILITY_DENY, capability: requiredCap ?? type, eventType: type, reason: "missing_capability" }, "capability denied");
