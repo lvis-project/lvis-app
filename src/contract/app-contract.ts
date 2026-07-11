@@ -171,6 +171,15 @@ export const CHANNELS = {
     configSetApiKey: "lvis:mcp:config:set-api-key",
     configRemove: "lvis:mcp:config:remove",
     uiResource: "lvis:mcp:ui-resource",
+    // MCP Apps `oncalltool` — an app calls a tool on ITS OWN server (the renderer
+    // supplies the card's serverId; the app never names one). INTERNAL, same posture
+    // as the MCP-app channels below: absent from PUBLIC_CHANNELS /
+    // EXTERNAL_MUTATION_CHANNELS / CHANNEL_GESTURE, so no external origin can reach
+    // it (fail-closed isPublicChannel). Registered in ipc/domains/plugins.ts and
+    // gated on validateHostRendererSender (state-mutating: it runs a tool). The call
+    // itself is NOT authorized by the channel — it runs the same risk/consent gate as
+    // any host tool call.
+    callTool: "lvis:mcp:call-tool",
     catalogList: "lvis:mcp:catalog:list",
     installFromMarketplace: "lvis:mcp:install-from-marketplace",
     importClaudeDesktopPreview: "lvis:mcp:import:claude-desktop:preview",

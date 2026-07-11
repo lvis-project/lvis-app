@@ -225,6 +225,17 @@ export type McpServerConfigDto = DistributiveOmit<
   "apiKey" | "headers" | "env" | "args" | "sandboxRoot"
 >;
 
+/**
+ * MCP Apps spec `McpUiToolVisibility` — WHO may call a tool.
+ * - `"model"`: the agent may call it.
+ * - `"app"`: the tool's OWN app (this server's `ui://` card) may call it.
+ *
+ * Structurally mirrors the upstream type rather than importing it (same reason as
+ * {@link McpUiResourceCsp}: this crosses the main/preload/renderer boundary and
+ * ext-apps' `.d.ts` extensionless imports do not resolve under NodeNext).
+ */
+export type McpUiToolVisibility = "model" | "app";
+
 export interface McpToolSchema {
   name: string;
   description: string;
@@ -232,6 +243,19 @@ export interface McpToolSchema {
     type: "object";
     properties: Record<string, unknown>;
     required?: string[];
+  };
+  /**
+   * MCP Apps spec `_meta.ui` on a TOOL (`McpUiToolMeta`). Only `visibility` is
+   * read by the host: it is the spec's gate on app→server `tools/call` — a host
+   * MUST reject an app's call to a tool whose visibility does not include
+   * `"app"`. Absent ⇒ the spec default `["model","app"]`, materialized ONCE at
+   * ingestion in `mcp-tool-adapter.ts` (the external-server analog of
+   * `parsePluginJson`'s U1 defaulting site) so no downstream reader defaults.
+   */
+  _meta?: {
+    ui?: {
+      visibility?: McpUiToolVisibility[];
+    };
   };
 }
 
@@ -400,3 +424,19 @@ export interface McpUiResourceBundle {
   /** The app HTML, mounted into the inner sandboxed iframe by the relay preload. */
   html: string;
 }
+
+/**
+ * Result of an MCP App's `tools/call` on its OWN server, as it crosses
+ * main → preload → renderer (`CHANNELS.mcp.callTool`).
+ *
+ * Deliberately an OUTCOME, not a thrown error: every denial (cross-server,
+ * app-visibility, permission/consent) and every tool failure comes back as
+ * `{ ok: false }` with a kebab-case code + English message, which the bridge
+ * handler turns into an MCP-style `{ isError: true, content: [...] }`
+ * `CallToolResult` for the app. `result` is the host tool layer's raw value
+ * (a rendered text string for external MCP tools; whatever the plugin method
+ * returned on the loopback path).
+ */
+export type McpUiToolCallOutcome =
+  | { ok: true; result: unknown }
+  | { ok: false; error: string; message?: string };

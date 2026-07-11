@@ -38,6 +38,7 @@ export function assembleAppServices(ctx: BootContext): AppServices {
     routineEngine: ctx.routineEngine,
     mcpManager: ctx.mcpManager,
     pluginLoopbackManager: ctx.pluginLoopbackManager,
+    getPluginToolInvoker: () => ctx.lateBinding.pluginToolInvokerRef.fn,
     mcpArtifactStore: ctx.mcpArtifactStore,
     agentArtifactStore: ctx.agentArtifactStore,
     skillArtifactStore: ctx.skillArtifactStore,
