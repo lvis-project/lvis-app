@@ -14,6 +14,7 @@ const { FakeAppBridge } = vi.hoisted(() => {
     hostContext: unknown;
     onsandboxready?: unknown;
     onreadresource?: unknown;
+    onsizechange?: unknown;
     connectCalled = false;
     handlersAtConnect: Record<string, boolean> = {};
 
@@ -34,6 +35,7 @@ const { FakeAppBridge } = vi.hoisted(() => {
       this.handlersAtConnect = {
         onsandboxready: typeof this.onsandboxready === "function",
         onreadresource: typeof this.onreadresource === "function",
+        onsizechange: typeof this.onsizechange === "function",
       };
       return Promise.resolve();
     }
@@ -50,7 +52,13 @@ type FakeBridge = InstanceType<typeof FakeAppBridge>;
 const fakeEl = { send: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() };
 
 function build() {
-  return createMcpAppBridge({ serverId: "s1" }, "<html><body>card</body></html>", fakeEl as never, {});
+  return createMcpAppBridge(
+    { serverId: "s1" },
+    "<html><body>card</body></html>",
+    fakeEl as never,
+    {},
+    { onResize: vi.fn() },
+  );
 }
 
 beforeEach(() => {
@@ -73,7 +81,11 @@ describe("createMcpAppBridge — every handler registers before connect()", () =
     const fake = bridge as unknown as FakeBridge;
 
     expect(fake.connectCalled).toBe(true);
-    expect(fake.handlersAtConnect).toEqual({ onsandboxready: true, onreadresource: true });
+    expect(fake.handlersAtConnect).toEqual({
+      onsandboxready: true,
+      onreadresource: true,
+      onsizechange: true,
+    });
   });
 
   it("returns a bridge with each handler wired as a function", () => {
@@ -81,5 +93,6 @@ describe("createMcpAppBridge — every handler registers before connect()", () =
     const fake = bridge as unknown as FakeBridge;
     expect(typeof fake.onsandboxready).toBe("function");
     expect(typeof fake.onreadresource).toBe("function");
+    expect(typeof fake.onsizechange).toBe("function");
   });
 });
