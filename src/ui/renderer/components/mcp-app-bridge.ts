@@ -24,13 +24,14 @@ import { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
 // mcp-app-host-context.ts for the full rationale, including the concrete
 // extensionless-chain errors this file's `AppBridge` value import interacted with).
 import type { McpUiHostContext } from "./mcp-app-host-context.js";
-import type { McpUiPayload } from "../../../mcp/types.js";
+import type { McpUiPayload, McpUiToolCallOutcome } from "../../../mcp/types.js";
 import { MCP_APP_HOST_INFO } from "../../../shared/mcp-app-bridge-contract.js";
 import { WebviewIpcTransport, type BridgeWebviewElement } from "./webview-ipc-transport.js";
 import { createOnSandboxReady } from "./mcp-app-bridge/handlers/on-sandbox-ready.js";
 import { createOnReadResource } from "./mcp-app-bridge/handlers/on-read-resource.js";
 import { createOnOpenLink } from "./mcp-app-bridge/handlers/on-open-link.js";
 import { createOnSizeChange } from "./mcp-app-bridge/handlers/on-size-change.js";
+import { createOnCallTool } from "./mcp-app-bridge/handlers/on-call-tool.js";
 
 /**
  * The exact `McpUiHostCapabilities` shape the `AppBridge` ctor's 3rd arg expects,
@@ -56,6 +57,15 @@ export interface McpAppBridgeDeps {
    * `{ ok: true }` when opened, `{ ok: false }` when the host declined.
    */
   openLink(url: string): Promise<{ ok: boolean }>;
+  /**
+   * `oncalltool` invoker — runs a tool on the card's OWN server through the host's
+   * gated `CHANNELS.mcp.callTool` IPC (risk classification → reviewer/approval →
+   * audit). McpAppView binds it to `payload.serverId`: the SERVER BINDING is
+   * structural, so the app supplies only a tool name + arguments and can never
+   * address another server. Resolves to an outcome — `{ ok: false }` is a host
+   * denial or a tool error, which the handler renders as an MCP error result.
+   */
+  callTool(name: string, args: Record<string, unknown>): Promise<McpUiToolCallOutcome>;
 }
 
 /**
@@ -92,8 +102,8 @@ export function createMcpAppBridge(
   // `McpUiHostCapabilities` is derived from the SAME list that drives registration,
   // by design: advertising a capability whose handler isn't wired (or wiring a
   // handler we never advertised) is a latent, silent bug. Add a handler here and both
-  // the capabilities and the wiring move in lockstep — e.g. a future `oncalltool`
-  // adds `{ capability: { serverTools: {} }, register: … }`.
+  // the capabilities and the wiring move in lockstep — as `oncalltool` did: ONE entry
+  // (`{ capability: { serverTools: {} }, register: … }`) and nothing else in here.
   //
   // `register` takes the constructed `bridge` because `onsandboxready` must answer on
   // it; registration therefore runs AFTER construction, still before `connect()`.
@@ -112,6 +122,16 @@ export function createMcpAppBridge(
       capability: { serverResources: {} },
       register: (bridge) => {
         bridge.onreadresource = createOnReadResource({ serverId: payload.serverId });
+      },
+    },
+    // `tools/call` on the card's OWN server → advertises `serverTools`. The handler
+    // gets the serverId-BOUND invoker (McpAppView closed it over `payload.serverId`),
+    // so the app names only a tool; main re-verifies the tool is owned by that server
+    // and runs it through the host's risk/consent gate.
+    {
+      capability: { serverTools: {} },
+      register: (bridge) => {
+        bridge.oncalltool = createOnCallTool({ callTool: deps.callTool });
       },
     },
     // `ui/open-link` → advertises `openLinks`.
