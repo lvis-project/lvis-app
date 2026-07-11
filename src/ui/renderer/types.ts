@@ -5,7 +5,7 @@ import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { Locale } from "../../i18n/locale.js";
 import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
-import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload } from "../../mcp/types.js";
+import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceBundle } from "../../mcp/types.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defaults.js";
@@ -1685,8 +1685,15 @@ export type LvisMcpApi = {
   addConfig: (config: McpServerConfig) => Promise<{ connected: boolean; warning?: string }>;
   setApiKey: (id: string, apiKey: string) => Promise<{ connected: boolean; warning?: string }>;
   removeConfig: (id: string) => Promise<void>;
-  /** MCP Apps UI resource fetch. */
-  readUiResource: (serverId: string, uri: string) => Promise<string>;
+  /**
+   * MCP Apps UI resource fetch. Returns the sandbox-proxy URL to navigate the
+   * <webview> to, plus the app HTML to hand the proxy over the bridge. `csp` is
+   * the server's declared policy; main sanitizes it and emits it as the proxy
+   * document's CSP response header.
+   */
+  readUiResource: (serverId: string, uri: string) => Promise<McpUiResourceBundle>;
+  /** Free a card's sandbox-proxy session token on unmount (fire-and-forget). */
+  disposeUiSession: (token: string) => void;
   /** #885 b2 — open an MCP-app card in a detached window (host mints cardId/viewKey). */
   openDetached: (payload: McpUiPayload) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
   /** #885 b2 — detached renderer fetches its stored payload on mount. */

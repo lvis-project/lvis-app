@@ -2021,9 +2021,9 @@ Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* �
   hard-assert 하므로 prune drift 가 빌드를 깬다. 런타임 resolver
   (`getSrtWinPath()` 등) 는 미변경.
 - **Plugin egress SOT**: `local-indexer` 의 long-lived Python worker provider
-  egress 는 broker + `hostApi.hostFetch` chokepoint 로 수렴한다. `ep-api` 는
+  egress 는 broker + `hostApi.hostFetch` chokepoint 로 수렴한다. `ep` 는
   Python worker 가 없고 Playwright 브라우저 SSO + 사내망 HTTP/HTTPS endpoint 를
-  직접 다루는 예외이므로, 허용 호스트는 `lvis-plugin-ep-api/plugin.json` 의
+  직접 다루는 예외이므로, 허용 호스트는 `lvis-plugin-ep/plugin.json` 의
   `networkAccess.allowedDomains` 가 SOT 이다 (§9 plugin egress 참조).
 
 **Files:** `src/permissions/asrt-sandbox.ts` (어댑터 + NETWORK ENFORCEMENT
@@ -2916,9 +2916,9 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
   (hard-throw 안 함).
 - **Plugin egress SOT**: `lvis-plugin-local-indexer` 의 Python worker provider
   egress 는 broker 가 host-side upstream 을 고정하고 `hostApi.hostFetch`
-  (Tier A NetworkGuard) 로 호출한다. `lvis-plugin-ep-api` 는 Python worker 가
+  (Tier A NetworkGuard) 로 호출한다. `lvis-plugin-ep` 는 Python worker 가
   없고 Playwright 브라우저 SSO + 사내망 HTTP/HTTPS endpoint 를 직접 다루는
-  예외이므로, `lvis-plugin-ep-api/plugin.json` 의 `networkAccess.allowedDomains`
+  예외이므로, `lvis-plugin-ep/plugin.json` 의 `networkAccess.allowedDomains`
   가 허용 호스트 SOT 이다. 새 direct egress 는 manifest allow-list 없이 추가하지
   않는다.
 - **Apache attribution / 라이선스**: ASRT (`@anthropic-ai/sandbox-runtime`) 는

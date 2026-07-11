@@ -10,6 +10,8 @@ import type {
   McpStdioServerConfig,
   McpToolSchema,
   McpUiPayload,
+  McpUiResourceMeta,
+  McpUiResourceRead,
 } from "./types.js";
 import type { McpGovernance } from "./mcp-governance.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -172,7 +174,8 @@ interface McpToolCallResult {
       slot?: string;
       height?: number;
       title?: string;
-      csp?: McpUiPayload["csp"];
+      // No `csp` — per spec it lives on the RESOURCE, not the tool result. A server
+      // that puts one here is ignored (see readResource).
     };
     [key: string]: unknown;
   };
@@ -609,7 +612,6 @@ export class McpClient {
         slot: (uiMeta.slot as McpUiPayload["slot"]) ?? "chat",
         height: uiMeta.height,
         title: uiMeta.title,
-        csp: uiMeta.csp,
       };
     }
     return { text, uiPayload };
@@ -697,13 +699,21 @@ export class McpClient {
    * Fetch a `ui://` resource from the MCP server via `resources/read`.
    * Returns the text content of the first text blob in the response.
    */
-  async readResource(uri: string): Promise<string> {
+  async readResource(uri: string): Promise<McpUiResourceRead> {
     if (this.state.status !== "connected" || !this.transport?.isAlive()) {
       throw new Error(`[mcp-client] ${t("be_mcpClient.serverNotConnected", { id: this.config.id })}`);
     }
 
     interface McpResourceReadResult {
-      contents: Array<{ type?: string; text?: string; blob?: string; uri?: string; mimeType?: string }>;
+      contents: Array<{
+        type?: string;
+        text?: string;
+        blob?: string;
+        uri?: string;
+        mimeType?: string;
+        /** MCP Apps: the resource's own security metadata (csp / permissions). */
+        _meta?: { ui?: McpUiResourceMeta };
+      }>;
     }
 
     const result = await this.sendRequest<McpResourceReadResult>("resources/read", { uri });
@@ -711,7 +721,13 @@ export class McpClient {
     if (!textPart?.text) {
       throw new Error(`[mcp-client] ${t("be_mcpClient.resourceReadNoText", { uri })}`);
     }
-    return textPart.text;
+
+    // §3.7 permission gate — same rule as tool `_meta.ui`: ignore the ui extension
+    // unless the server advertised it at discovery. Fail-closed, so an un-advertised
+    // server cannot open its own CSP.
+    const meta = this.appsUiAdvertised ? textPart._meta?.ui : undefined;
+
+    return { html: textPart.text, csp: meta?.csp, permissions: meta?.permissions };
   }
 
   // ─── JSON-RPC Transport ─────────────────────────────

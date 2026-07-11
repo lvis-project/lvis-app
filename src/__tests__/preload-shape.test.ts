@@ -124,6 +124,7 @@ describe("preload contextBridge world shape lock", () => {
           ],
           "mcp": [
             "addConfig",
+            "disposeUiSession",
             "getConfigPath",
             "getConfigs",
             "getDetachedPayload",
@@ -310,6 +311,7 @@ describe("preload contextBridge world shape lock", () => {
           ],
           "mcp": [
             "addConfig",
+            "disposeUiSession",
             "getConfigPath",
             "getConfigs",
             "getDetachedPayload",

@@ -687,6 +687,32 @@ export class PluginStorageError extends Error {
 }
 
 /**
+ * Thrown by {@link PluginStorage.writeEncrypted} / {@link PluginStorage.readEncrypted}
+ * when OS-level encryption is unavailable — Electron `safeStorage` reports
+ * `isEncryptionAvailable() === false`, or the main-process `safeStorage` API
+ * cannot be reached at all.
+ *
+ * FAIL-CLOSED, No-Fallback: the encrypted variants NEVER read or write plaintext
+ * when encryption is unavailable. A dynamically-acquired secret must not silently
+ * land on disk unprotected, so the call throws instead of degrading. Plugin
+ * authors can branch on this class via `instanceof`; `name` is always
+ * `"PluginStorageEncryptionUnavailableError"` and `code` is the stable
+ * kebab-case `"encryption-unavailable"` for callers that prefer string matching
+ * across realm boundaries.
+ */
+export class PluginStorageEncryptionUnavailableError extends Error {
+  readonly code = "encryption-unavailable";
+  readonly pluginId: string;
+  constructor(pluginId: string) {
+    super(
+      `[plugin-storage:${pluginId}] OS encryption is unavailable — encrypted storage cannot be used (no plaintext fallback)`,
+    );
+    this.name = "PluginStorageEncryptionUnavailableError";
+    this.pluginId = pluginId;
+  }
+}
+
+/**
  * Supported text encodings for PluginStorage read/write operations.
  * Defined explicitly to avoid leaking @types/node into the SDK public surface.
  */
@@ -741,6 +767,31 @@ export interface PluginStorage {
   exists(relPath: string): Promise<boolean>;
   /** Ensure a directory exists (recursive mkdir). */
   mkdir(relPath: string): Promise<void>;
+  /**
+   * Encrypt `plaintext` with the host's OS keychain (Electron `safeStorage`) and
+   * write the ciphertext bytes to `relPath`, inside the same sandboxed
+   * `pluginDataDir` root as every other method — identical absolute-path /
+   * lexical `..` / symlink-escape rejection applies. Parent directories are
+   * created as needed.
+   *
+   * Intended for DYNAMICALLY-ACQUIRED secrets/tokens a plugin obtains at runtime
+   * (OAuth/MSAL token caches, harvested session material) — this is the plugin's
+   * own encrypted-at-rest store. Contrast with {@link PluginHostApi.getSecret},
+   * which reads HOST-PROVISIONED config secrets declared in the manifest.
+   *
+   * FAIL-CLOSED: if OS encryption is unavailable this throws
+   * {@link PluginStorageEncryptionUnavailableError} and writes NOTHING — the
+   * plaintext is never persisted unprotected (No-Fallback rule).
+   */
+  writeEncrypted(relPath: string, plaintext: string): Promise<void>;
+  /**
+   * Read the ciphertext previously written by {@link writeEncrypted} at `relPath`
+   * and return the decrypted UTF-8 plaintext. Throws ENOENT if the file does not
+   * exist (same contract as {@link readText}); throws
+   * {@link PluginStorageEncryptionUnavailableError} if OS encryption is
+   * unavailable — it never returns raw ciphertext or a plaintext guess.
+   */
+  readEncrypted(relPath: string): Promise<string>;
 }
 
 /**
@@ -1100,9 +1151,46 @@ export interface PluginHostApi {
    *
    * Plugins SHOULD use this for "view this link" affordances (calendar webLink,
    * help docs, etc.) instead of calling `shell.openExternal` directly — that
-   * bypasses the user's stated preference and breaks the §B1 toggle.
+   * bypasses the user's stated preference and breaks the §B1 toggle. The host
+   * validates the scheme is http(s) (file:/javascript:/etc. are rejected with an
+   * English error) before routing.
+   *
+   * **Required (not `?`-optional)** — promoted in lockstep with the host wiring
+   * (SDK v8 regenerates this surface; see `openAuthPartitionViewer` for the
+   * lockstep-shipping convention). Replaces the SDK runtime `getShell` shim so
+   * plugins never reach Electron `shell.openExternal` directly. A missing host
+   * wiring throws loudly rather than being silently optional-chained.
    */
-  openExternalUrl?(url: string): Promise<void>;
+  openExternalUrl(url: string): Promise<void>;
+
+  /**
+   * Probe whether the OS resolver knows a host that only exists on a PRIVATE
+   * network (corporate intranet / VPN / lab subnet). Resolves `true` when
+   * `dns.lookup(host)` succeeds before the deadline, `false` on `ENOTFOUND` or
+   * timeout — on-corp DNS resolves the private host, off-corp DNS returns
+   * `ENOTFOUND`, and the async asymmetry is the signal.
+   *
+   * Semantics (ported from the SDK's `detectViaPrivateDnsProbe`, replacing that
+   * runtime shim): a `dns.lookup` race against a `timeoutMs` deadline (default
+   * 1500ms, host-clamped to sane bounds); fail-SAFE to `false` on timeout (a slow
+   * user gate is worse than a false-negative); same-host in-flight dedup whose
+   * lifetime is bound to the UNDERLYING lookup; NO result cache (corp↔off-corp
+   * transitions must be observed live); an unref'd timer that never keeps the
+   * event loop alive past app exit.
+   *
+   * `host` MUST be a bare hostname — a non-empty string with no scheme, port,
+   * path, userinfo, or whitespace; URLs and `host:port` are rejected.
+   *
+   * This is a UX HINT, NOT a trust boundary. A local DNS spoof or split-DNS
+   * environment can make an attacker-controlled host resolve `true`; plugins MUST
+   * enforce real trust downstream (cookie/origin level) and never treat a `true`
+   * here as authorization.
+   *
+   * **Required (not `?`-optional)** — declared in lockstep with the host wiring
+   * (SDK v8 regen follows). A missing host wiring throws loudly instead of being
+   * silently optional-chained.
+   */
+  probePrivateHost(host: string, opts?: { timeoutMs?: number }): Promise<boolean>;
 
   /**
    * §B3 — Read a host-level user preference exposed via the explicit
