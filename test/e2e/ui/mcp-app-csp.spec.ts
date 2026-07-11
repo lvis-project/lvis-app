@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { wrapWithCsp } from "../../../src/ui/renderer/components/mcp-app-csp.js";
+import { wrapWithCsp } from "../../../src/shared/mcp-app-csp.js";
 
 type CspProbeResult = {
   allowed: "ok" | "blocked";

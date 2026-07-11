@@ -298,6 +298,27 @@ export interface McpUiPayload {
   height?: number;
   /** Human-readable title shown in the webview title bar. */
   title?: string;
-  /** Optional `_meta.ui.csp` renderer policy. Sanitized by `McpAppView`. */
+  /** Optional `_meta.ui.csp` renderer policy. Sanitized in main by `buildMcpCspHeader`. */
   csp?: McpUiCspPolicy;
+}
+
+/**
+ * What `lvis.mcp.readUiResource` returns — everything a card needs to render one
+ * MCP App through the sandbox-proxy.
+ *
+ * It is a bundle rather than a bare HTML string because the two halves are now
+ * delivered over different channels: the proxy DOCUMENT is navigated to (and
+ * carries the CSP header the app inherits), while the app HTML travels over the
+ * JSON-RPC bridge as `ui/notifications/sandbox-resource-ready`. Main mints both
+ * together so they cannot drift.
+ */
+export interface McpUiResourceBundle {
+  /**
+   * `lvis-mcp-app://<hex(serverId)>/proxy.html?t=<token>` — the host-owned
+   * sandbox-proxy document for this card. The token selects the CSP main serves
+   * it with; it is host-minted and bound to the serverId.
+   */
+  proxyUrl: string;
+  /** The app HTML, mounted into the inner sandboxed iframe by the relay preload. */
+  html: string;
 }
