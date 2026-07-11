@@ -28,6 +28,7 @@ import { recordEffect } from "../../../permissions/effect-ledger.js";
 import { methodEffect } from "../../../permissions/effect-kind.js";
 import type { PluginRegistryEntry } from "../../../plugins/types.js";
 import { createPluginStorage } from "../../../plugins/storage.js";
+import { probePrivateHost } from "../../../plugins/private-host-probe.js";
 import { shouldBlockPluginSecretRead } from "../../../plugins/secret-shape.js";
 import {
   canEmitEvent,
@@ -781,6 +782,15 @@ export function createHostApiFactory(
       getAppPreference: <T = unknown>(key: string): T | undefined => {
         return readAppPreference(pluginId, key) as T | undefined;
       },
+      // ─── Corp-network presence probe ───────────────────────────────────
+      // Lands the SDK `runtime/network.ts#detectViaPrivateDnsProbe` shim in
+      // hostApi so plugins never reach `dns.lookup` (or a raw corp-network
+      // presence probe) directly. Pure DNS race with host-side host validation
+      // + timeout clamping; UX hint only, NOT a trust boundary (see the impl
+      // header). Module-level dedup/no-cache/unref'd-timer semantics live in
+      // private-host-probe.ts.
+      probePrivateHost: (host: string, opts?: { timeoutMs?: number }): Promise<boolean> =>
+        probePrivateHost(host, opts),
       // ─── External portal interactive auth (cookie collection) ──────────
       // Gated by the `external-auth-consumer` capability. Cookies are sensitive
       // assets, so calls are rejected without declarative opt-in. Both denial
