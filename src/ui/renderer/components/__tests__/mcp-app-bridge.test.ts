@@ -14,6 +14,7 @@ const { FakeAppBridge } = vi.hoisted(() => {
     hostContext: unknown;
     onsandboxready?: unknown;
     onreadresource?: unknown;
+    onopenlink?: unknown;
     onsizechange?: unknown;
     connectCalled = false;
     handlersAtConnect: Record<string, boolean> = {};
@@ -35,6 +36,7 @@ const { FakeAppBridge } = vi.hoisted(() => {
       this.handlersAtConnect = {
         onsandboxready: typeof this.onsandboxready === "function",
         onreadresource: typeof this.onreadresource === "function",
+        onopenlink: typeof this.onopenlink === "function",
         onsizechange: typeof this.onsizechange === "function",
       };
       return Promise.resolve();
@@ -57,7 +59,7 @@ function build() {
     "<html><body>card</body></html>",
     fakeEl as never,
     {},
-    { onResize: vi.fn() },
+    { onResize: vi.fn(), openLink: vi.fn(async () => ({ ok: true })) },
   );
 }
 
@@ -66,17 +68,20 @@ beforeEach(() => {
 });
 
 describe("createMcpAppBridge — capabilities are derived from the single active-handler set", () => {
-  it("advertises exactly the capabilities whose handlers are wired (serverResources), nothing else", () => {
+  it("advertises exactly the capabilities whose handlers are wired (serverResources + openLinks), nothing else", () => {
     const { bridge } = build();
-    // onreadresource → serverResources. The sandbox handler advertises nothing. No
-    // serverTools / message / downloadFile leak in — a capability without a wired
-    // handler would be a latent, silent bug.
-    expect((bridge as unknown as FakeBridge).capabilities).toEqual({ serverResources: {} });
+    // onreadresource → serverResources, onopenlink → openLinks. The sandbox + size
+    // handlers advertise nothing. No serverTools / message / downloadFile leak in — a
+    // capability without a wired handler would be a latent, silent bug.
+    expect((bridge as unknown as FakeBridge).capabilities).toEqual({
+      serverResources: {},
+      openLinks: {},
+    });
   });
 });
 
 describe("createMcpAppBridge — every handler registers before connect()", () => {
-  it("has all handlers present at the moment connect() is called", () => {
+  it("has all four handlers present at the moment connect() is called", () => {
     const { bridge } = build();
     const fake = bridge as unknown as FakeBridge;
 
@@ -84,6 +89,7 @@ describe("createMcpAppBridge — every handler registers before connect()", () =
     expect(fake.handlersAtConnect).toEqual({
       onsandboxready: true,
       onreadresource: true,
+      onopenlink: true,
       onsizechange: true,
     });
   });
@@ -93,6 +99,7 @@ describe("createMcpAppBridge — every handler registers before connect()", () =
     const fake = bridge as unknown as FakeBridge;
     expect(typeof fake.onsandboxready).toBe("function");
     expect(typeof fake.onreadresource).toBe("function");
+    expect(typeof fake.onopenlink).toBe("function");
     expect(typeof fake.onsizechange).toBe("function");
   });
 });
