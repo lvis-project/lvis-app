@@ -3,10 +3,7 @@
  * The boot cutover seam: start on enable, stop on disable, idempotent reload,
  * stopAll on shutdown — driving real PluginMcpHosts over a real ToolRegistry.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PluginLoopbackManager } from "../plugin-loopback-manager.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { manifestIntegrityState } from "../../permissions/manifest-integrity.js";
@@ -189,14 +186,19 @@ describe("PluginLoopbackManager", () => {
 });
 
 describe("PluginLoopbackManager — ui:// resource serving (readUiResource)", () => {
-  let root: string;
-
-  /** A runtime whose plugin root is a real temp dir holding `dist/card.html`. */
-  function rootedRuntime(): PluginRuntime {
+  /**
+   * Content-serving: the PLUGIN serves the card bytes through
+   * `PluginRuntime.readUiResource` (host-gated + host-bounded there). No plugin
+   * root, no disk fixture — the host reads no plugin file on this path.
+   */
+  function cardRuntime(): PluginRuntime {
     return {
       isPluginEnabled: () => true,
       call: vi.fn(async (name: string) => `ran ${name}`),
-      getPluginRoot: () => root,
+      readUiResource: vi.fn(async (_pluginId: string, uri: string) => {
+        if (!uri.endsWith("/card.html")) throw new Error(`plugin has no card '${uri}'`);
+        return "<h1>served</h1>";
+      }),
     } as unknown as PluginRuntime;
   }
 
@@ -206,52 +208,48 @@ describe("PluginLoopbackManager — ui:// resource serving (readUiResource)", ()
       uiResources: [
         {
           uri: `ui://${id}/card.html`,
-          html: "dist/card.html",
           csp: { connectDomains: ["https://api.example.com"] },
         },
       ],
     };
   }
 
-  beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "lvis-loopback-ui-"));
-    mkdirSync(join(root, "dist"), { recursive: true });
-    writeFileSync(join(root, "dist", "card.html"), "<h1>served</h1>", "utf-8");
-  });
-
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
-  });
-
-  it("serves a plugin's OWN declared ui:// resource (html + declared csp)", async () => {
-    const mgr = new PluginLoopbackManager(rootedRuntime(), new ToolRegistry());
+  it("serves a plugin's OWN declared ui:// resource (plugin html + manifest-declared csp)", async () => {
+    const runtime = cardRuntime();
+    const mgr = new PluginLoopbackManager(runtime, new ToolRegistry());
     await mgr.start(uiManifest("com.cards"));
 
     const res = await mgr.readUiResource("com.cards", "ui://com.cards/card.html");
     expect(res.html).toBe("<h1>served</h1>");
     expect(res.csp).toEqual({ connectDomains: ["https://api.example.com"] });
+    expect(runtime.readUiResource).toHaveBeenCalledWith("com.cards", "ui://com.cards/card.html");
   });
 
   it("rejects a cross-plugin uri authority (own-namespace-only, fail-closed)", async () => {
-    const mgr = new PluginLoopbackManager(rootedRuntime(), new ToolRegistry());
+    const runtime = cardRuntime();
+    const mgr = new PluginLoopbackManager(runtime, new ToolRegistry());
     await mgr.start(uiManifest("com.cards"));
 
     await expect(
       mgr.readUiResource("com.cards", "ui://com.evil/card.html"),
     ).rejects.toThrow(/own namespace/i);
+    // The plugin is never asked to serve another namespace's card.
+    expect(runtime.readUiResource).not.toHaveBeenCalled();
   });
 
   it("rejects an undeclared uri in the plugin's own namespace", async () => {
-    const mgr = new PluginLoopbackManager(rootedRuntime(), new ToolRegistry());
+    const runtime = cardRuntime();
+    const mgr = new PluginLoopbackManager(runtime, new ToolRegistry());
     await mgr.start(uiManifest("com.cards"));
 
     await expect(
       mgr.readUiResource("com.cards", "ui://com.cards/nope.html"),
     ).rejects.toThrow(/no declared ui:\/\/ resource/i);
+    expect(runtime.readUiResource).not.toHaveBeenCalled();
   });
 
   it("throws when no loopback host runs for the plugin", async () => {
-    const mgr = new PluginLoopbackManager(rootedRuntime(), new ToolRegistry());
+    const mgr = new PluginLoopbackManager(cardRuntime(), new ToolRegistry());
     await expect(
       mgr.readUiResource("com.absent", "ui://com.absent/card.html"),
     ).rejects.toThrow(/no running loopback host/i);

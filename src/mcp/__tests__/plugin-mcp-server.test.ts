@@ -111,16 +111,11 @@ describe("PluginMcpServer — resources/read + resources/list (ui:// serving sea
   const delegate: PluginToolDelegate = vi.fn(async () => ({
     content: [{ type: "text", text: "unused" }],
   }));
-  const ROOT = "/plugins/com.example.fs";
   const CARD_URI = "ui://com.example.fs/card.html";
   const provider = createPluginUiResourceProvider({
     pluginId: "com.example.fs",
-    pluginRoot: ROOT,
-    declarations: [
-      { uri: CARD_URI, html: "dist/card.html", csp: { connectDomains: ["https://api.example.com"] } },
-    ],
-    realpath: async (p: string) => p,
-    readFile: async () => "<h1>card</h1>",
+    declarations: [{ uri: CARD_URI, csp: { connectDomains: ["https://api.example.com"] } }],
+    readHtml: async () => "<h1>card</h1>",
   });
 
   it("serves a declared ui:// resource with mcp-app mime + the resource's own _meta.ui csp", async () => {

@@ -205,17 +205,14 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
   it("readUiResource round-trips resources/read through the loopback to the provider", async () => {
     const provider = createPluginUiResourceProvider({
       pluginId: "com.example.notes",
-      pluginRoot: "/plugins/com.example.notes",
       declarations: [
         {
           uri: "ui://com.example.notes/read.html",
-          html: "dist/read.html",
           csp: { connectDomains: ["https://api.example.com"] },
           permissions: { clipboardWrite: {} },
         },
       ],
-      realpath: async (p: string) => p,
-      readFile: async () => "<h1>note</h1>",
+      readHtml: async () => "<h1>note</h1>",
     });
     const host = PluginMcpHost.loopback(
       MANIFEST,
@@ -236,10 +233,8 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
   it("readUiResource rejects a cross-namespace uri (fail-closed, no served body)", async () => {
     const provider = createPluginUiResourceProvider({
       pluginId: "com.example.notes",
-      pluginRoot: "/plugins/com.example.notes",
-      declarations: [{ uri: "ui://com.example.notes/read.html", html: "dist/read.html" }],
-      realpath: async (p: string) => p,
-      readFile: async () => "<h1>note</h1>",
+      declarations: [{ uri: "ui://com.example.notes/read.html" }],
+      readHtml: async () => "<h1>note</h1>",
     });
     const host = PluginMcpHost.loopback(
       MANIFEST,

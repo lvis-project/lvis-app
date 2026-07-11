@@ -71,6 +71,10 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     ).toBe(true);
   });
 
+  // "Declared POLICY, served CONTENT": a uiResources[] entry declares the uri +
+  // the resource's security policy. The card HTML is NOT a manifest field — the
+  // plugin serves its own bytes (RuntimePlugin.readUiResource), so `uri` is the
+  // only required member.
   it("accepts a uiResources[] ui:// serving declaration (csp buckets + permissions)", async () => {
     const validator = await buildManifestValidator();
     expect(
@@ -85,11 +89,26 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         uiResources: [
           {
             uri: "ui://ui-resource-plugin/card.html",
-            html: "dist/cards/card.html",
             csp: { connectDomains: ["https://api.example.com"], resourceDomains: [] },
             permissions: { clipboardWrite: {} },
           },
         ],
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts a uiResources[] entry declaring only its uri (policy is optional)", async () => {
+    const validator = await buildManifestValidator();
+    expect(
+      validator({
+        id: "ui-resource-bare",
+        name: "UI Resource Bare",
+        version: "1.0.0",
+        description: "uiResources entry with no declared policy.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+        uiResources: [{ uri: "ui://ui-resource-bare/card.html" }],
       }),
     ).toBe(true);
   });
@@ -106,24 +125,27 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         entry: "dist/index.js",
         tools: [],
         uiResources: [
-          { uri: "ui://ui-resource-bad/card.html", html: "dist/card.html", cspHeader: "default-src 'none'" },
+          { uri: "ui://ui-resource-bad/card.html", cspHeader: "default-src 'none'" },
         ],
       }),
     ).toBe(false);
   });
 
-  it("rejects a uiResources[] entry missing the required html", async () => {
+  // The removed `html` member is now an unknown sub-property: a manifest still
+  // shipping a disk path is REJECTED, not silently tolerated (the host no longer
+  // reads plugin files, so an ignored `html` would be a lie in the manifest).
+  it("rejects a uiResources[] entry still declaring the removed html path", async () => {
     const validator = await buildManifestValidator();
     expect(
       validator({
-        id: "ui-resource-nohtml",
-        name: "UI Resource No HTML",
+        id: "ui-resource-legacy",
+        name: "UI Resource Legacy",
         version: "1.0.0",
-        description: "uiResources entry missing html.",
+        description: "uiResources entry with the removed html path.",
         publisher: "LVIS",
         entry: "dist/index.js",
         tools: [],
-        uiResources: [{ uri: "ui://ui-resource-nohtml/card.html" }],
+        uiResources: [{ uri: "ui://ui-resource-legacy/card.html", html: "dist/cards/card.html" }],
       }),
     ).toBe(false);
   });
@@ -317,7 +339,6 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
     uiResources: [
       {
         uri: "ui://full-featured-plugin/card.html",
-        html: "dist/cards/card.html",
         csp: { connectDomains: ["https://api.example.com"] },
         permissions: { clipboardWrite: {} },
       },
@@ -357,7 +378,6 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       expect(parsed.networkAccess?.allowedDomains).toEqual(["api.example.com"]);
       expect(parsed.uiResources?.[0]).toEqual({
         uri: "ui://full-featured-plugin/card.html",
-        html: "dist/cards/card.html",
         csp: { connectDomains: ["https://api.example.com"] },
         permissions: { clipboardWrite: {} },
       });

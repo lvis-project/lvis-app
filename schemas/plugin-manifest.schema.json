@@ -139,24 +139,18 @@
     },
     "uiResources": {
       "type": "array",
-      "description": "MCP App ui:// resources this plugin serves (distinct from `ui[]`, which declares host-mounted React sidebar panels). Each entry maps a `ui://<pluginId>/<path>` uri to an HTML card shipped in the plugin's dist/ plus that resource's OWN _meta.ui security metadata (csp/permissions). When a tool result carries `_meta.ui.resourceUri` matching one of these uris, the loopback host SERVES the declared HTML through the same sandbox-proxy + main-computed CSP path as an external MCP server's ui:// resource. Security (enforced fail-closed at serve time): the uri authority MUST equal the plugin id (own-namespace-only), the html path MUST resolve inside the plugin root (path-containment), and main COMPUTES the CSP header from csp/permissions — the plugin never supplies a policy header string.",
+      "description": "MCP App ui:// resources this plugin serves (distinct from `ui[]`, which declares host-mounted React sidebar panels). DECLARED POLICY, SERVED CONTENT: each entry declares a `ui://<pluginId>/<path>` uri plus that resource's OWN _meta.ui security policy (csp/permissions); the card HTML itself is served by the plugin at read time (`RuntimePlugin.readUiResource(uri)`), exactly as an external MCP server answers resources/read with bytes — the host never reads a plugin-declared disk path. When a tool result carries `_meta.ui.resourceUri` matching one of these uris, the loopback host asks the plugin for the HTML and renders it through the same sandbox-proxy + main-computed CSP path as an external MCP server's ui:// resource. Security (enforced fail-closed at serve time): the uri authority MUST equal the plugin id (own-namespace-only), the uri MUST be declared here (declared-only — this is what binds served content to a reviewed csp), and main COMPUTES the CSP header from csp/permissions — the plugin never supplies a policy header string. csp/permissions stay in the manifest (not on the hook's return) so they are statically reviewable and covered by manifestSha256.",
       "maxItems": 64,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["uri", "html"],
+        "required": ["uri"],
         "properties": {
           "uri": {
             "type": "string",
             "description": "ui://<pluginId>/<path>. Authority MUST equal the declaring plugin's id (re-checked fail-closed at serve time).",
             "pattern": "^ui://[a-z0-9][a-z0-9.-]*/.+",
             "maxLength": 512
-          },
-          "html": {
-            "type": "string",
-            "description": "HTML file shipped in the plugin's dist/, path RELATIVE to the plugin root. Must resolve inside the root (containment-checked at read; absolute paths and `..` escapes are rejected).",
-            "minLength": 1,
-            "maxLength": 1024
           },
           "csp": { "$ref": "#/definitions/mcpUiResourceCsp" },
           "permissions": { "$ref": "#/definitions/mcpUiResourcePermissions" }
