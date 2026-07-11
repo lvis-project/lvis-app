@@ -71,6 +71,63 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     ).toBe(true);
   });
 
+  it("accepts a uiResources[] ui:// serving declaration (csp buckets + permissions)", async () => {
+    const validator = await buildManifestValidator();
+    expect(
+      validator({
+        id: "ui-resource-plugin",
+        name: "UI Resource Plugin",
+        version: "1.0.0",
+        description: "Plugin serving a ui:// MCP App card.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+        uiResources: [
+          {
+            uri: "ui://ui-resource-plugin/card.html",
+            html: "dist/cards/card.html",
+            csp: { connectDomains: ["https://api.example.com"], resourceDomains: [] },
+            permissions: { clipboardWrite: {} },
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects a uiResources[] entry with an unknown sub-property (additionalProperties:false)", async () => {
+    const validator = await buildManifestValidator();
+    expect(
+      validator({
+        id: "ui-resource-bad",
+        name: "UI Resource Bad",
+        version: "1.0.0",
+        description: "uiResources entry with a stray field.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+        uiResources: [
+          { uri: "ui://ui-resource-bad/card.html", html: "dist/card.html", cspHeader: "default-src 'none'" },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects a uiResources[] entry missing the required html", async () => {
+    const validator = await buildManifestValidator();
+    expect(
+      validator({
+        id: "ui-resource-nohtml",
+        name: "UI Resource No HTML",
+        version: "1.0.0",
+        description: "uiResources entry missing html.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+        uiResources: [{ uri: "ui://ui-resource-nohtml/card.html" }],
+      }),
+    ).toBe(false);
+  });
+
   it("accepts a marketplace-provider host secret grant", async () => {
     const validator = await buildManifestValidator();
     expect(
@@ -257,6 +314,14 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
         page: "settings",
       },
     ],
+    uiResources: [
+      {
+        uri: "ui://full-featured-plugin/card.html",
+        html: "dist/cards/card.html",
+        csp: { connectDomains: ["https://api.example.com"] },
+        permissions: { clipboardWrite: {} },
+      },
+    ],
     configSchema: {
       properties: {
         enabled: { type: "boolean", default: true, title: "Enable" },
@@ -290,6 +355,12 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       expect(parsed.auth?.logoutTool).toBe("ff_logout");
       expect(parsed.requires?.minAppVersion).toBe("1.0.0");
       expect(parsed.networkAccess?.allowedDomains).toEqual(["api.example.com"]);
+      expect(parsed.uiResources?.[0]).toEqual({
+        uri: "ui://full-featured-plugin/card.html",
+        html: "dist/cards/card.html",
+        csp: { connectDomains: ["https://api.example.com"] },
+        permissions: { clipboardWrite: {} },
+      });
 
       const search = parsed.tools.find((t) => t.name === "ff_search");
       expect(search?._meta?.ui?.visibility).toEqual(["model", "app"]);
