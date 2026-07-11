@@ -3,8 +3,9 @@
  *
  * Every MCP server's UI card (`ui://` resource) runs in a dedicated,
  * per-server Electron session partition for storage isolation. Main registers
- * the CDN network gate per partition (via `installMcpAppPartitionPolicy`) and
- * the renderer sets the `partition=` attribute on the `<webview>`. Both sides
+ * the partition policy (declared-origin network gate + sandbox-proxy protocol
+ * handler + relay preload) via `installMcpAppPartitionPolicy`, and the renderer
+ * sets the `partition=` attribute on the `<webview>`. Both sides
  * MUST agree on the mapping — drift would route a webview to a partition the
  * main process never policy-registered.
  *
@@ -29,6 +30,17 @@
  */
 
 export const MCP_APP_PARTITION_PREFIX = "lvis-mcp-app:";
+
+/**
+ * Privileged URL scheme for the host-owned sandbox-proxy document
+ * (`lvis-mcp-app://<hex(serverId)>/proxy.html?t=<token>`). Lives here — the pure,
+ * DOM/Electron-free partition module — so both `main/mcp-app-protocol.ts` (which
+ * registers + serves it) and `main/webview-navigation-policy.ts` (a pure policy
+ * module that must allow it) share one SOT without either pulling in the other's
+ * Electron/crypto deps. NB: the string equals `MCP_APP_PARTITION_PREFIX` minus its
+ * trailing colon — same token, two different layers (URL scheme vs partition name).
+ */
+export const MCP_APP_SCHEME = "lvis-mcp-app";
 
 /**
  * Defensive upper bound on the raw serverId length. Enforced at BOTH

@@ -35,6 +35,8 @@ import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
 import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
 import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
 import { installMcpAppPartitionPolicy } from "../../main/html-preview-partition.js";
+import { createMcpAppProxySession, disposeMcpAppProxySession } from "../../main/mcp-app-protocol.js";
+import type { McpUiResourceBundle } from "../../mcp/types.js";
 import {
   installMarketplacePluginWithLifecycle,
   startInstalledPluginWithLifecycle,
@@ -1078,14 +1080,34 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
   ipcMain.handle(CHANNELS.mcp.uiResource, async (e, serverId: string, uri: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.uiResource, e); return UNAUTHORIZED_FRAME; }
-    // b1 — install the per-server CDN network gate BEFORE the resource is read.
+    // b1 — install the per-server network gate BEFORE the resource is read. (It is
+    // the deny-by-default declared-origin gate now, not the old CDN allowlist.)
     // This is the single chokepoint every card render (inline + detached) passes
     // through, and the webview only mounts after this promise resolves, so the
     // gate is guaranteed present before the guest's first request. Fail-closed:
     // an invalid/over-length serverId throws out of encodeMcpServerId here rather
     // than rendering on an ungated partition (No-Fallback).
+    //
+    // This ALSO installs the sandbox-proxy protocol handler and the relay preload
+    // on the partition, so both are in place before the webview navigates.
     installMcpAppPartitionPolicy(serverId);
-    return deps.mcpManager.readUiResource(serverId, uri);
+
+    // The resource carries its OWN `_meta.ui.csp` — main reads it here and never
+    // accepts one from the renderer. A compromised renderer must not be able to
+    // forge a permissive policy and widen the envelope that contains the untrusted
+    // app HTML. Per-resource, so one card's declared domains never leak to another.
+    const resource = await deps.mcpManager.readUiResource(serverId, uri);
+    const proxyUrl = createMcpAppProxySession(serverId, resource.csp);
+    return { proxyUrl, html: resource.html } satisfies McpUiResourceBundle;
+  });
+
+  // Card unmount → free its proxy-session token promptly, so a long chat with many
+  // cards does not let the global LRU evict a STILL-MOUNTED card's token (which would
+  // 404 that card's next reload). Idempotent; a bad/absent token is a no-op.
+  ipcMain.handle(CHANNELS.mcp.disposeUiSession, (e, token: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.disposeUiSession, e); return UNAUTHORIZED_FRAME; }
+    if (typeof token === "string" && token.length > 0) disposeMcpAppProxySession(token);
+    return { ok: true as const };
   });
 
   ipcMain.handle(CHANNELS.mcp.catalogList, async (e) => {
