@@ -9,7 +9,11 @@
  */
 import { randomUUID } from "node:crypto";
 import { createDynamicTool, type Tool } from "./base.js";
-import type { SubAgentRunner } from "../engine/subagent-runner.js";
+import type {
+  SubAgentRunner,
+  SubAgentSpawnResult,
+  SubAgentSuspension,
+} from "../engine/subagent-runner.js";
 import {
   AGENT_NAME_ALLOWLIST,
   type LoadedAgentProfile,
@@ -17,6 +21,48 @@ import {
 import { t } from "../i18n/index.js";
 
 import type { ChatEntry } from "../lib/chat-stream-state.js";
+import {
+  A2A_ROLE_AGENT,
+  projectSubAgentResultState,
+  type A2AMessage,
+} from "../shared/a2a.js";
+
+function backgroundResultText(result: SubAgentSpawnResult): string {
+  const summary = result.error ?? result.summary;
+  if (!result.suspension) return summary;
+  const requestedInput = result.suspension.reason === "question"
+    ? result.suspension.prompt ?? "answer the sub-agent question"
+    : "send any message to continue, or treat this partial result as done";
+  return `${summary}\n\n[Input required: ${requestedInput}]`;
+}
+
+function createBackgroundResultMessage(
+  result: SubAgentSpawnResult,
+  parentSessionId: string,
+  spawnId: string,
+): A2AMessage {
+  const suspension = result.suspension;
+  return {
+    messageId: randomUUID(),
+    role: A2A_ROLE_AGENT,
+    parts: [{ text: backgroundResultText(result) }],
+    contextId: parentSessionId,
+    taskId: result.childSessionId,
+    metadata: {
+      taskState: projectSubAgentResultState(result),
+      spawnId,
+      ...(suspension
+        ? {
+            suspension: {
+              reason: suspension.reason,
+              resumeId: suspension.resumeId,
+              ...(suspension.prompt ? { prompt: suspension.prompt } : {}),
+            },
+          }
+        : {}),
+    },
+  };
+}
 
 export interface AgentSpawnEvent {
   spawnId: string;
@@ -48,7 +94,9 @@ export interface AgentSpawnEvent {
   toolCallCount?: number;
   message?: string;
   /** Terminal display state. `done` events may carry `interrupted`. */
-  status?: "running" | "done" | "error" | "interrupted";
+  status?: "running" | "waiting" | "done" | "error" | "interrupted";
+  /** Typed terminate-and-resume state for INPUT_REQUIRED runs. */
+  suspension?: SubAgentSuspension;
   /**
    * The `tool_use` id of the `agent_spawn` invocation that triggered this
    * spawn. Set on the `start` event so the renderer can attach the sub-agent
@@ -257,22 +305,44 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         if (background) {
           const runPromise = run();
           void runPromise
-            .then((result) => {
+            .then(async (result) => {
+              linkedChildSessionId = result.childSessionId;
               if (result.ok === false) {
                 const message = result.error ?? result.summary;
-                deps.emit({ spawnId, type: "error", message, ...promptPayload, ...linkedPayload() });
-                return;
+                deps.emit({
+                  spawnId,
+                  type: "error",
+                  message,
+                  ...promptPayload,
+                  childSessionId: result.childSessionId,
+                });
+              } else {
+                deps.emit({
+                  spawnId,
+                  type: "done",
+                  status: result.suspension
+                    ? "waiting"
+                    : result.stopReason === "interrupted"
+                      ? "interrupted"
+                      : "done",
+                  ...(result.suspension ? { suspension: result.suspension } : {}),
+                  summary: result.summary,
+                  toolCallCount: result.toolCallCount,
+                  entries: result.entries,
+                  ...promptPayload,
+                  childSessionId: result.childSessionId,
+                });
               }
-              linkedChildSessionId = result.childSessionId;
-              deps.emit({
-                spawnId,
-                type: "done",
-                status: result.stopReason === "interrupted" ? "interrupted" : "done",
-                summary: result.summary,
-                toolCallCount: result.toolCallCount,
-                entries: result.entries,
-                ...promptPayload,
+
+              const parentSessionId = originSessionId ?? "";
+              await runner.deliverToParent({
+                parentSessionId,
                 childSessionId: result.childSessionId,
+                message: createBackgroundResultMessage(
+                  result,
+                  parentSessionId,
+                  spawnId,
+                ),
               });
             })
             .catch((err) => {
@@ -311,7 +381,8 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         deps.emit({
           spawnId,
           type: "done",
-          status: result.stopReason === "interrupted" ? "interrupted" : "done",
+          status: result.suspension ? "waiting" : result.stopReason === "interrupted" ? "interrupted" : "done",
+          ...(result.suspension ? { suspension: result.suspension } : {}),
           summary: result.summary,
           toolCallCount: result.toolCallCount,
           entries: result.entries,
@@ -327,6 +398,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             agentName: profile?.name,
             childSessionId: result.childSessionId,
             ...(result.stopReason ? { stopReason: result.stopReason } : {}),
+            ...(result.suspension ? { suspension: result.suspension } : {}),
             // Cut-off resume signal (Claude Code "the sub-agent ran out of
             // turns and didn't finish" pattern). When the child hit its
             // host-assigned round budget, `summary` is PARTIAL — surface that

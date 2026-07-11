@@ -4,6 +4,7 @@
  * turn state (history, provider, usage, lastRound/lastContext token fields,
  * guidance queue) stays on the ConversationLoop instance, accessed via `self`.
  */
+import { randomUUID } from "node:crypto";
 import type { LoopContext } from "./loop-context.js";
 import type { TurnCallbacks, TurnStopReason, ToolScope } from "./types.js";
 import type { LLMVendor, TokenUsage, TokenUsageByModel, ToolSchema } from "../llm/types.js";
@@ -29,6 +30,86 @@ import { MAX_TOOL_CALLS_PER_ROUND } from "../../shared/subagent-policy.js";
 import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
 
 const log = createLogger("lvis");
+
+interface InterceptedMetaGateResult {
+  approved: ToolUseBlock[];
+  denied: Array<{
+    toolUseId: string;
+    toolName: string;
+    content: string;
+  }>;
+}
+
+function isApprovalChoiceAllowed(choice: string): boolean {
+  return choice === "allow-once" || choice === "allow-session" || choice === "allow-always";
+}
+
+async function gateCrossAgentInterceptedMetaTools(
+  self: LoopContext,
+  toolUses: ToolUseBlock[],
+  approvalReasonPrefix: string | undefined,
+  trustOrigin: ToolTrustOrigin,
+  sessionId: string,
+): Promise<InterceptedMetaGateResult> {
+  if (!approvalReasonPrefix) return { approved: toolUses, denied: [] };
+
+  const approved: ToolUseBlock[] = [];
+  const denied: InterceptedMetaGateResult["denied"] = [];
+  for (const toolUse of toolUses) {
+    if (toolUse.name !== REQUEST_PLUGIN_TOOL && toolUse.name !== TOOL_SEARCH_TOOL) {
+      approved.push(toolUse);
+      continue;
+    }
+
+    const gate = self.deps.approvalGate;
+    let allowed = false;
+    if (!gate) {
+      self.auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId,
+        type: "error",
+        input: `cross-agent-meta-approval-unavailable:${toolUse.name}`,
+      });
+    } else {
+      try {
+        const decision = await gate.requestAndWait({
+          id: randomUUID(),
+          category: "tool",
+          kind: "tool",
+          toolName: toolUse.name,
+          toolCategory: "meta",
+          args: toolUse.input,
+          reason: `${approvalReasonPrefix} cross-agent message requested ${toolUse.name}`,
+          source: "builtin",
+          createdAt: Date.now(),
+          isReadOnly: false,
+          mode: "ask_all",
+          trustOrigin,
+        });
+        allowed = isApprovalChoiceAllowed(decision.choice);
+      } catch {
+        self.auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId,
+          type: "error",
+          input: `cross-agent-meta-approval-failed:${toolUse.name}`,
+        });
+      }
+    }
+
+    if (allowed) {
+      approved.push(toolUse);
+    } else {
+      denied.push({
+        toolUseId: toolUse.id,
+        toolName: toolUse.name,
+        content: `cross-agent-approval-denied: ${toolUse.name}`,
+      });
+    }
+  }
+
+  return { approved, denied };
+}
 
 
 
@@ -78,6 +159,20 @@ const INTRA_TURN_PRESERVE_RECENT_RESULTS = 2 * MAX_TOOL_CALLS_PER_ROUND;
 // so short turns don't pay the mark overhead.
 const MICRO_COMPACT_FLOOR_FACTOR = 0.5;
 
+const MULTIPLE_SUB_AGENT_APPROVAL_PREFIX = "[Sub-Agent: multiple sources]";
+
+function mergeApprovalReasonPrefixes(
+  current: string | undefined,
+  queued: readonly (string | undefined)[],
+): string | undefined {
+  const values = new Set(
+    [current, ...queued].filter((value): value is string => Boolean(value)),
+  );
+  if (values.size === 0) return undefined;
+  if (values.size === 1) return values.values().next().value;
+  return MULTIPLE_SUB_AGENT_APPROVAL_PREFIX;
+}
+
 export async function queryLoop(
   self: LoopContext,
     initialSystemPrompt: string,
@@ -89,6 +184,7 @@ export async function queryLoop(
       maxRounds?: number;
       sessionIdOverride?: string;
       spawnDepth?: number;
+      approvalReasonPrefix?: string;
       inputOrigin: ChatInputOrigin;
       toolTrustOrigin: ToolTrustOrigin;
       permissionUserIntent?: string;
@@ -113,6 +209,7 @@ export async function queryLoop(
     );
     const model = activeBlock.model;
     let systemPrompt = initialSystemPrompt;
+    let activeApprovalReasonPrefix = bounds.approvalReasonPrefix;
     let servingVendorProvider: LLMVendor = llmSettings.provider;
     let servingVendorModel = model;
     const usageByModel: TokenUsageByModel[] = [];
@@ -273,18 +370,29 @@ export async function queryLoop(
         // `GUIDE_JOINED_MAX_CHARS` and the truncation is surfaced via a
         // leading marker so the LLM doesn't get confused by missing
         // context.
-        let joined = self.guidanceQueue.join("\n\n");
+        let joined = self.guidanceQueue.map((entry) => entry.text).join("\n\n");
         let truncatedCount = 0;
         const kept = [...self.guidanceQueue];
+        const dropped = [];
         while (joined.length > GUIDE_JOINED_MAX_CHARS && kept.length > 1) {
-          kept.shift();
+          const removed = kept.shift();
+          if (removed) dropped.push(removed);
           truncatedCount += 1;
-          joined = kept.join("\n\n");
+          joined = kept.map((entry) => entry.text).join("\n\n");
         }
         if (truncatedCount > 0) {
           joined = t("be_conversationLoop.guidanceTruncationMarker", { count: truncatedCount, joined });
         }
+        activeApprovalReasonPrefix = mergeApprovalReasonPrefixes(
+          activeApprovalReasonPrefix,
+          kept.map((entry) => entry.approvalReasonPrefix),
+        );
         self.guidanceQueue = [];
+        if (dropped.length > 0) {
+          await Promise.allSettled(
+            dropped.map((entry) => entry.onDropped?.("joined-limit")),
+          );
+        }
         const injectedContent = t("be_conversationLoop.guidanceInjectionHeader", { joined });
         // Critic round 2 M1: run preflight BEFORE appending the guide so
         // compaction targets the older history and never accidentally
@@ -324,6 +432,7 @@ export async function queryLoop(
           role: "user",
           content: injectedContent,
         });
+        await Promise.allSettled(kept.map((entry) => entry.onInjected?.()));
         callbacks?.onGuidanceInjected?.(joined);
         self.tracer.step("GUIDANCE_INJECTED", { round, len: joined.length });
       }
@@ -781,10 +890,32 @@ export async function queryLoop(
         id: tc.id, name: tc.name, input: tc.input,
       }));
 
+      const interceptedMetaGate = await gateCrossAgentInterceptedMetaTools(
+        self,
+        toolUses,
+        activeApprovalReasonPrefix,
+        toolTrustOrigin,
+        effectiveSessionId,
+      );
+      for (const denied of interceptedMetaGate.denied) {
+        self.history.append({
+          role: "tool_result",
+          toolUseId: denied.toolUseId,
+          toolName: denied.toolName,
+          content: denied.content,
+          isError: true,
+        });
+        allToolCalls.push({
+          name: denied.toolName,
+          input: toolUses.find((toolUse) => toolUse.id === denied.toolUseId)?.input ?? {},
+          result: denied.content,
+        });
+      }
+
       // Snapshot the session-activation set so we can audit exactly the
       // disabled plugins this turn newly session-activated (one event each).
       const sessionActivatedBefore = new Set(self.sessionActivatedPluginIds);
-      const pluginOutcome = handleRequestPlugin(toolUses, {
+      const pluginOutcome = handleRequestPlugin(interceptedMetaGate.approved, {
         turnExpansions: pluginExpansions,
         sessionExpansions: self.sessionPluginExpansions,
         activePluginIds: scope.activePluginIds,
@@ -962,6 +1093,7 @@ export async function queryLoop(
           // The executor uses this to refuse `agent_spawn` calls inside an
           // already-spawned sub-agent (depth >= 1).
           spawnDepth: bounds?.spawnDepth,
+          approvalReasonPrefix: activeApprovalReasonPrefix,
           // Threading the turn's abort signal lets long-blocking tools
           // (`ask_user_question`) honor the user's 중단 button instead of
           // hanging until their internal timeout.

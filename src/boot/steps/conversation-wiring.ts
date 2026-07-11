@@ -31,6 +31,8 @@ import { readPermissionSettings } from "../../permissions/permission-settings-st
 import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "../../ipc/domains/permissions.js";
 import { PreferenceRefreshService } from "../../memory/preference-refresh-service.js";
 import { SubAgentRunner } from "../../engine/subagent-runner.js";
+import { A2ASubAgentMessageBus } from "../../engine/a2a-subagent-message-bus.js";
+import { SubAgentMessageMailbox } from "../../engine/subagent-message-mailbox.js";
 import { createWorkBoardEngine, type WorkBoardEngine } from "../../core/work-board-engine.js";
 import { createWorkBoardReporter, type WorkBoardReporter } from "../../work-board/work-report.js";
 import { appendMemory } from "../../work-board/work-memory.js";
@@ -217,6 +219,19 @@ export function wireConversation(ctx: BootContext): void {
   });
   subAgentMemoryManager.load();
 
+  const subAgentMessageMailbox = new SubAgentMessageMailbox(
+    openFeatureNamespace("subagent-messaging"),
+  );
+  const subAgentMessageBus = new A2ASubAgentMessageBus({
+    parentLoop: conversationLoop,
+    mailbox: subAgentMessageMailbox,
+    settingsService,
+    auditLogger: bootAuditLogger,
+    resolveChildAddress: (parentSessionId, childSessionId) =>
+      subAgentRunnerRef.fn?.resolveSubAgentAddress(parentSessionId, childSessionId)
+      ?? Promise.resolve(null),
+  });
+
   // Workflow system tools — late bindings now that ConversationLoop exists.
   // SubAgentRunner reuses the parent loop's deps (LLM, registry, gates) but
   // a fresh ConversationLoop is constructed per spawn inside the runner.
@@ -240,6 +255,7 @@ export function wireConversation(ctx: BootContext): void {
     },
     toolRegistry,
     subAgentMemoryManager,
+    messageBus: subAgentMessageBus,
   });
   // skill_load no longer mutates conversation history. The body is registered
   // into SkillOverlay for the current user-turn window and read by

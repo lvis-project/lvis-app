@@ -2,6 +2,7 @@
 export const en = {
   "subAgentCard.statusError": "Error",
   "subAgentCard.statusInterrupted": "Interrupted",
+  "subAgentCard.statusWaiting": "Waiting",
   "subAgentCard.statusDone": "Done",
   "subAgentCard.statusRunning": "Running",
   "subAgentCard.summaryLabel": "Summary",
@@ -13,6 +14,7 @@ export const en = {
 export const ko: Record<keyof typeof en, string> = {
   "subAgentCard.statusError": "오류",
   "subAgentCard.statusInterrupted": "중단됨",
+  "subAgentCard.statusWaiting": "대기 중",
   "subAgentCard.statusDone": "완료",
   "subAgentCard.statusRunning": "실행 중",
   "subAgentCard.summaryLabel": "요약",

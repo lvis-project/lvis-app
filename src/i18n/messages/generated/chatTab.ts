@@ -16,6 +16,8 @@ export const en = {
   "chatTab.experimentalDescription": "Changes take effect immediately.",
   "chatTab.idleRefreshLabel": "Auto-refresh idle preferences",
   "chatTab.idleRefreshHint": "During IDLE_SCAN, sends AGENTS.md, MEMORY.md, and memories/*.md to the LLM to update user-preferences.md. Default is ON.",
+  "chatTab.subAgentWakeLabel": "Autonomously wake parent for sub-agent messages",
+  "chatTab.subAgentWakeHint": "When an idle parent receives a queued background sub-agent message, start a new turn through the prompt gate. Default is OFF.",
   "chatTab.privacyTitle": "Privacy",
   "chatTab.privacyDescription": "Configure privacy behavior before chat messages are sent.",
 } as const;
@@ -36,6 +38,8 @@ export const ko: Record<keyof typeof en, string> = {
   "chatTab.experimentalDescription": "설정 즉시 반영됩니다.",
   "chatTab.idleRefreshLabel": "idle 선호도 자동 갱신",
   "chatTab.idleRefreshHint": "IDLE_SCAN 동안 AGENTS.md, MEMORY.md, memories/*.md를 LLM에 보내 user-preferences.md를 갱신합니다. 기본값은 ON입니다.",
+  "chatTab.subAgentWakeLabel": "서브에이전트 메시지로 부모 자동 깨우기",
+  "chatTab.subAgentWakeHint": "유휴 부모가 백그라운드 서브에이전트 메시지를 받으면 프롬프트 게이트를 거쳐 새 턴을 시작합니다. 기본값은 꺼짐입니다.",
   "chatTab.privacyTitle": "프라이버시",
   "chatTab.privacyDescription": "채팅 전송 전 개인정보 보호 동작을 설정합니다.",
 };

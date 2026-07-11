@@ -50,6 +50,14 @@ import type { ChatEntry } from "../lib/chat-stream-state.js";
 import { serializeHistoryMessage, type SerializedHistoryMessage } from "../shared/chat-history.js";
 import { isToolResultStubContent } from "../shared/tool-result-stub.js";
 import type { GenericMessage } from "./llm/types.js";
+import type {
+  A2ASubAgentMessageBus,
+  DeliverToParentInput,
+  DeliverToParentResult,
+  ParentWakeHandler,
+  ResolvedSubAgentAddress,
+} from "./a2a-subagent-message-bus.js";
+import type { ParentMailboxEntry } from "./subagent-message-mailbox.js";
 
 const log = createLogger("lvis");
 
@@ -101,6 +109,14 @@ export interface SubAgentActivityUpdate {
   toolCallCount: number;
 }
 
+export type SubAgentSuspensionReason = "budget" | "question";
+
+export interface SubAgentSuspension {
+  reason: SubAgentSuspensionReason;
+  prompt?: string;
+  resumeId: string;
+}
+
 export interface SubAgentSpawnResult {
   summary: string;
   toolCallCount: number;
@@ -133,6 +149,13 @@ export interface SubAgentSpawnResult {
    */
   stopReason?: import("./turn/types.js").TurnStopReason;
   /**
+   * A resumable terminate-and-return wait. Budget and question waits share
+   * the same mechanism; the typed reason tells the caller how to continue.
+   */
+  suspension?: SubAgentSuspension;
+  /**
+   * Temporary compatibility alias derived from suspension.
+   *
    * `true` when the child hit its host-assigned round budget (stopReason
    * "round-cap") before producing a natural end_turn — i.e. the sub-agent ran
    * out of rounds with WORK STILL PENDING. `summary` then holds the PARTIAL
@@ -172,7 +195,7 @@ export interface SubAgentSpawnCallbacks {
   onError?: (message: string) => void;
 }
 
-export type SubAgentRunStatus = "running" | "done" | "error" | "interrupted";
+export type SubAgentRunStatus = "running" | "waiting" | "done" | "error" | "interrupted";
 
 export interface SubAgentRunSnapshot {
   spawnId?: string;
@@ -187,6 +210,7 @@ export interface SubAgentRunSnapshot {
   summary?: string;
   error?: string;
   stopReason?: import("./turn/types.js").TurnStopReason;
+  suspension?: SubAgentSuspension;
 }
 
 export interface PersistedSubAgentTranscriptRequest {
@@ -219,6 +243,7 @@ interface TrackedSubAgentRun {
   summary?: string;
   error?: string;
   stopReason?: import("./turn/types.js").TurnStopReason;
+  suspension?: SubAgentSuspension;
   abort?: () => void;
 }
 
@@ -236,6 +261,8 @@ export interface SubAgentRunnerDeps {
    * valid session id. Mirrors the `sideChatMemoryManager` isolation pattern.
    */
   subAgentMemoryManager: MemoryManager;
+  /** Optional until boot wiring is constructed; all absent-bus delivery fails closed. */
+  messageBus?: A2ASubAgentMessageBus;
 }
 
 // Sub-agent round budget. The child runs on the same ConversationLoop whose
@@ -281,6 +308,16 @@ const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>([
 const MAX_RESUMES = 3;
 const CUMULATIVE_ROUNDS_CEILING = 4 * MAX_TURNS_CAP;
 const MAX_TRACKED_RUNS = 100;
+const BUDGET_SUSPENSION_PROMPT =
+  "Send any message to continue, or treat the partial result as done.";
+
+function createBudgetSuspension(resumeId: string): SubAgentSuspension {
+  return {
+    reason: "budget",
+    prompt: BUDGET_SUSPENSION_PROMPT,
+    resumeId,
+  };
+}
 
 /**
  * Build the child loop's session id. It MUST satisfy MemoryManager's
@@ -449,6 +486,68 @@ function hideUnhydratedToolResultStub(message: GenericMessage): GenericMessage {
 export class SubAgentRunner {
   constructor(private readonly deps: SubAgentRunnerDeps) {}
 
+  deliverToParent(input: DeliverToParentInput): Promise<DeliverToParentResult> {
+    const bus = this.deps.messageBus;
+    if (!bus) {
+      log.warn(
+        { parentSessionId: input.parentSessionId, childSessionId: input.childSessionId },
+        "a2a message dropped: message bus unavailable",
+      );
+      return Promise.resolve({
+        ok: false,
+        disposition: "dropped",
+        reason: "message-bus-unavailable",
+      });
+    }
+    return bus.deliverToParent(input);
+  }
+
+  peekParentMailbox(parentSessionId: string): Promise<ParentMailboxEntry[]> {
+    return this.deps.messageBus?.peekParentMailbox(parentSessionId) ?? Promise.resolve([]);
+  }
+
+  acknowledgeParentMailbox(
+    parentSessionId: string,
+    ids: readonly string[],
+  ): Promise<number> {
+    return this.deps.messageBus?.acknowledgeParentMailbox(parentSessionId, ids)
+      ?? Promise.resolve(0);
+  }
+
+  setParentWakeHandler(handler: ParentWakeHandler | null): void {
+    this.deps.messageBus?.setWakeHandler(handler);
+  }
+
+  /**
+   * Resolve a host-minted child address from persisted metadata. The bus checks
+   * parentSessionId equality and audits cross-origin drops before delivery.
+   */
+  async resolveSubAgentAddress(
+    parentSessionId: string,
+    childSessionId: string,
+  ): Promise<ResolvedSubAgentAddress | null> {
+    if (!isValidSessionId(childSessionId)) return null;
+    const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(childSessionId);
+    if (
+      meta?.sessionKind !== "subagent"
+      || !meta.originSessionId
+      || !meta.subAgentTitle
+    ) {
+      return null;
+    }
+    if (meta.originSessionId !== parentSessionId) {
+      log.warn(
+        { parentSessionId, childSessionId },
+        "a2a address resolution observed a cross-origin child",
+      );
+    }
+    return {
+      parentSessionId: meta.originSessionId,
+      childSessionId,
+      childTitle: meta.subAgentTitle,
+    };
+  }
+
   /**
    * Per-`childSessionId` in-flight lock. `resume()` loads metadata, runs a
    * turn, then rewrites the metadata (`resumeCount`/`cumulativeRounds`). That
@@ -565,6 +664,7 @@ export class SubAgentRunner {
       ...(run.summary !== undefined ? { summary: run.summary } : {}),
       ...(run.error !== undefined ? { error: run.error } : {}),
       ...(run.stopReason !== undefined ? { stopReason: run.stopReason } : {}),
+      ...(run.suspension !== undefined ? { suspension: run.suspension } : {}),
     };
   }
 
@@ -611,15 +711,18 @@ export class SubAgentRunner {
     result: SubAgentSpawnResult,
   ): void {
     const patch: Partial<Omit<TrackedSubAgentRun, "spawnId" | "childSessionId" | "title" | "startedAt">> = {
-      status: result.stopReason === "interrupted"
-        ? "interrupted"
-        : result.ok
-          ? "done"
-          : "error",
+      status: result.suspension !== undefined || result.incomplete === true
+        ? "waiting"
+        : result.stopReason === "interrupted"
+          ? "interrupted"
+          : result.ok
+            ? "done"
+            : "error",
       toolCallCount: result.toolCallCount,
       turnCount: result.turnCount,
       entries: result.entries,
       stopReason: result.stopReason,
+      suspension: result.suspension,
     };
     if (result.ok) {
       patch.summary = result.summary;
@@ -808,6 +911,31 @@ export class SubAgentRunner {
       title: input.title,
       abort: () => child.abortCurrentTurn(),
     });
+    // Persist resume metadata (PR-B) alongside the child JSONL before provider
+    // validation and the first turn, into the SAME isolated subagent namespace (child loop's
+    // MemoryManager). run-turn's saveSession writes the JSONL; this writes the
+    // .meta.json sibling. `sessionKind: "subagent"` lets listing/rotation
+    // distinguish sub-agent sessions from main/routine. The scoped tool surface
+    // (`scopedTools`, the resolved allowlist the child was frozen with) is the
+    // exact set PR-C's resume must re-scope to — permission is frozen at spawn,
+    // not re-granted on resume. `resumeCount`/`cumulativeRounds` init to 0 for
+    // PR-D's loop guards. No resume logic here — this is metadata foundation.
+    await this.deps.subAgentMemoryManager.saveSessionMetadata(childSessionId, {
+      sessionKind: "subagent",
+      sourceTools: scopedTools.map((tool) => tool.name),
+      ...(input.profileModel !== undefined ? { profileModel: input.profileModel } : {}),
+      ...(input.profileMode !== undefined ? { profileMode: input.profileMode } : {}),
+      ...(input.originSessionId !== undefined ? { originSessionId: input.originSessionId } : {}),
+      ...(input.toolUseId !== undefined ? { originToolUseId: input.toolUseId } : {}),
+      ...(input.spawnId !== undefined ? { spawnId: input.spawnId } : {}),
+      subAgentTitle: input.title,
+      budgetResumeCount: 0,
+      questionAnswerCount: 0,
+      // Legacy alias kept in sync during the compatibility window.
+      resumeCount: 0,
+      cumulativeRounds: 0,
+    });
+
     if (!child.hasProvider()) {
       const msg = "sub-agent: LLM provider not configured";
       const result: SubAgentSpawnResult = {
@@ -864,28 +992,6 @@ export class SubAgentRunner {
       ? `${modePreamble}\n\n${input.instructions}`
       : input.instructions;
     let assistantRounds = 0;
-
-    // Persist resume metadata (PR-B) alongside the child JSONL BEFORE the turn
-    // runs, into the SAME isolated subagent namespace (child loop's
-    // MemoryManager). run-turn's saveSession writes the JSONL; this writes the
-    // .meta.json sibling. `sessionKind: "subagent"` lets listing/rotation
-    // distinguish sub-agent sessions from main/routine. The scoped tool surface
-    // (`scopedTools`, the resolved allowlist the child was frozen with) is the
-    // exact set PR-C's resume must re-scope to — permission is frozen at spawn,
-    // not re-granted on resume. `resumeCount`/`cumulativeRounds` init to 0 for
-    // PR-D's loop guards. No resume logic here — this is metadata foundation.
-    await this.deps.subAgentMemoryManager.saveSessionMetadata(childSessionId, {
-      sessionKind: "subagent",
-      sourceTools: scopedTools.map((tool) => tool.name),
-      ...(input.profileModel !== undefined ? { profileModel: input.profileModel } : {}),
-      ...(input.profileMode !== undefined ? { profileMode: input.profileMode } : {}),
-      ...(input.originSessionId !== undefined ? { originSessionId: input.originSessionId } : {}),
-      ...(input.toolUseId !== undefined ? { originToolUseId: input.toolUseId } : {}),
-      ...(input.spawnId !== undefined ? { spawnId: input.spawnId } : {}),
-      subAgentTitle: input.title,
-      resumeCount: 0,
-      cumulativeRounds: 0,
-    });
 
     try {
       // C3(a): pass `maxRounds` so queryLoop terminates cleanly between
@@ -948,14 +1054,11 @@ export class SubAgentRunner {
       failureReason = msg;
     }
 
-    // Commit 2: record the spawn's OWN assistant-round count into
-    // cumulativeRounds. The pre-turn write above seeded it at 0; without this
-    // update a resume chain would start counting from 0 as if the original
-    // spawn spent no rounds, making CUMULATIVE_ROUNDS_CEILING inaccurate. This
-    // is a FULL-OVERWRITE write (saveSessionMetadata does not merge), so we
-    // re-supply every field the pre-turn write set. Only on a clean run (ok) —
-    // a failed/threw spawn leaves the seeded 0 (no real rounds to account).
-    if (ok) {
+    // Record every assistant round the spawn actually completed. The callbacks
+    // remain observable even if a later provider/tool step throws, so a partial
+    // failure must not erase already-consumed work from the cumulative bound.
+    // Waiting without an assistant round leaves the pre-turn zero untouched.
+    if (turn > 0) {
       await this.deps.subAgentMemoryManager.saveSessionMetadata(childSessionId, {
         sessionKind: "subagent",
         sourceTools: scopedTools.map((tool) => tool.name),
@@ -965,6 +1068,9 @@ export class SubAgentRunner {
         ...(input.toolUseId !== undefined ? { originToolUseId: input.toolUseId } : {}),
         ...(input.spawnId !== undefined ? { spawnId: input.spawnId } : {}),
         subAgentTitle: input.title,
+        budgetResumeCount: 0,
+        questionAnswerCount: 0,
+        // Legacy alias kept in sync during the compatibility window.
         resumeCount: 0,
         cumulativeRounds: turn,
       });
@@ -983,7 +1089,13 @@ export class SubAgentRunner {
       ...(childStopReason ? { stopReason: childStopReason } : {}),
       // A clean-but-budget-capped run: the child returned real partial work
       // (ok === true) but stopped on its round budget, so the task is unfinished.
-      ...(ok && childStopReason === "round-cap" ? { incomplete: true } : {}),
+      ...(ok && childStopReason === "round-cap"
+        ? {
+            suspension: createBudgetSuspension(child.sessionId),
+            // Derived compatibility alias for pre-suspension consumers.
+            incomplete: true,
+          }
+        : {}),
     };
     this.finalizeRun(trackedRun, result);
     return result;
@@ -1029,6 +1141,8 @@ export class SubAgentRunner {
    * @param originSessionId  The calling session's id (ctx.metadata.sessionId
    *                  in agent-spawn.ts). Matched against the tag embedded in
    *                  `resumeId` to refuse cross-session hijack attempts.
+   * @param resumeReason Internal accounting axis. ph1 callers use the default
+   *                  budget reason; ph2 question answers use question.
    */
   async resume(
     resumeId: string,
@@ -1037,6 +1151,7 @@ export class SubAgentRunner {
     callbacks?: SubAgentSpawnCallbacks,
     originSessionId?: string,
     spawnId?: string,
+    resumeReason: SubAgentSuspensionReason = "budget",
   ): Promise<SubAgentSpawnResult> {
     // In-flight lock: fail-closed if a resume for THIS session is already
     // running. Checked before any load so two concurrent resumes cannot both
@@ -1056,7 +1171,15 @@ export class SubAgentRunner {
       };
     }
 
-    const runPromise = this.runResume(resumeId, continuationInstructions, title, callbacks, originSessionId, spawnId);
+    const runPromise = this.runResume(
+      resumeId,
+      continuationInstructions,
+      title,
+      callbacks,
+      originSessionId,
+      spawnId,
+      resumeReason,
+    );
     this.inFlight.set(resumeId, runPromise);
     try {
       return await runPromise;
@@ -1070,9 +1193,10 @@ export class SubAgentRunner {
     resumeId: string,
     continuationInstructions: string,
     title: string,
-    callbacks?: SubAgentSpawnCallbacks,
-    originSessionId?: string,
-    spawnId?: string,
+    callbacks: SubAgentSpawnCallbacks | undefined,
+    originSessionId: string | undefined,
+    spawnId: string | undefined,
+    resumeReason: SubAgentSuspensionReason,
   ): Promise<SubAgentSpawnResult> {
     const fail = (msg: string, extra?: Partial<SubAgentSpawnResult>): SubAgentSpawnResult => {
       callbacks?.onError?.(msg);
@@ -1095,28 +1219,12 @@ export class SubAgentRunner {
       return fail(`sub-agent resume: invalid resumeId "${resumeId}"`);
     }
 
-    // 1b. Origin binding — refuse cross-session hijack BEFORE loading any
-    //     history. The id format is `sub-<originTag8>-<uuid>` where originTag8
-    //     is sha256(originSessionId).hex.slice(0,8). Extract that tag and
-    //     compare it to what THIS caller's origin hashes to.
-    //
-    //     Why this is safe to do on the id alone (without consulting metadata):
-    //     the tag is embedded at spawn time in the id itself, so an attacker
-    //     must both know the tag AND forge a regex-valid sub-<tag>-<uuid> form
-    //     to pass `isValidSessionId`. The tag is non-reversible (sha256), so
-    //     guessing it for an unknown originSessionId is computationally
-    //     infeasible.
-    //
-    //     Session ID stability: `originSessionId` in agent-spawn.ts comes from
-    //     `ctx.metadata.sessionId`, which is `sessionIdOverride ?? self.sessionId`
-    //     in query-loop (run-turn.ts:66). For the PARENT conversation loop (not
-    //     a sub-agent), there is no `sessionIdOverride`, so it is `self.sessionId`
-    //     — the field assigned once at `newConversation` / `loadSession` and
-    //     never mutated during a conversation. Compaction creates a checkpoint
-    //     snapshot but does NOT change `self.sessionId`. Therefore the tag
-    //     computed at spawn time and the tag computed at resume time are
-    //     identical within the same conversation, and the check correctly allows
-    //     a legitimate same-conversation resume while refusing a cross-session one.
+    // 1b. Origin-tag early reject — the id format is
+    //     `sub-<sha256(origin)[:8]>-<uuid>`. The short tag is a stable routing
+    //     hint, not an identity proof: it is only 32 bits and a caller that
+    //     already knows a child id also knows its tag. It cheaply rejects clear
+    //     mismatches before metadata IO; the exact persisted `originSessionId`
+    //     comparison below is the authorization source of truth.
     {
       // Distinguishing pattern: origin-tagged ids are `sub-<8hex>-<uuid>` where
       // uuid starts with another 8-hex segment (`sub-<8hex>-<8hex>-<4hex>-...`).
@@ -1147,13 +1255,25 @@ export class SubAgentRunner {
         `sub-agent resume: session "${resumeId}" is not a sub-agent (kind=${meta.sessionKind ?? "unknown"})`,
       );
     }
+    // The short id tag is only an early-reject aid. Persisted metadata is the
+    // identity source of truth and must match exactly, including missing sides.
+    if (meta.originSessionId !== originSessionId) {
+      return fail("sub-agent resume: origin session metadata does not match caller");
+    }
 
     // 2. Loop guards (Commit 2). Refuse BEFORE running any turn.
-    const priorResumeCount = meta.resumeCount ?? 0;
+    const legacyResumeCount = meta.resumeCount ?? 0;
+    // Only budget continuations consume MAX_RESUMES. Future question answers
+    // increment questionAnswerCount instead; cumulativeRounds still bounds all work.
+    const priorBudgetResumeCount = Math.max(
+      meta.budgetResumeCount ?? 0,
+      legacyResumeCount,
+    );
+    const priorQuestionAnswerCount = meta.questionAnswerCount ?? 0;
     const priorCumulativeRounds = meta.cumulativeRounds ?? 0;
-    if (priorResumeCount >= MAX_RESUMES) {
+    if (resumeReason === "budget" && priorBudgetResumeCount >= MAX_RESUMES) {
       return fail(
-        `sub-agent resume: exhausted (resumeCount=${priorResumeCount} >= ${MAX_RESUMES})`,
+        `sub-agent resume: exhausted (budgetResumeCount=${priorBudgetResumeCount} >= ${MAX_RESUMES})`,
         { resumeExhausted: true },
       );
     }
@@ -1166,10 +1286,15 @@ export class SubAgentRunner {
 
     // 3. Re-derive the round budget from the FROZEN profile mode (same
     //    resolution spawn used, minus the host `maxRounds` override which is a
-    //    spawn-time-only knob). A resume gets a fresh per-turn budget.
+    //    spawn-time-only knob). The cumulative ceiling is a hard total bound,
+    //    so a near-ceiling resume receives only the remaining rounds.
     const modeResult = resolveAgentMode(meta.profileMode);
     const requestedRounds = modeResult.config.maxToolRoundsHint ?? MAX_TURNS_DEFAULT;
-    const cappedRounds = Math.max(1, Math.min(MAX_TURNS_CAP, requestedRounds));
+    const remainingRounds = CUMULATIVE_ROUNDS_CEILING - priorCumulativeRounds;
+    const cappedRounds = Math.max(
+      1,
+      Math.min(MAX_TURNS_CAP, requestedRounds, remainingRounds),
+    );
 
     // 4. Reconstruct child deps from the FROZEN scope. meta.sourceTools is the
     //    ONLY scope source — passed as a non-null explicit list so buildChildDeps
@@ -1295,17 +1420,18 @@ export class SubAgentRunner {
       failureReason = msg;
     }
 
-    // 6. Commit 2: update counters. saveSessionMetadata is FULL-OVERWRITE (not
-    //    merge), so spread the loaded meta to preserve sourceTools/profile*
-    //    (dropping them would corrupt the frozen scope on the NEXT resume) and
-    //    bump resumeCount by 1 + cumulativeRounds by this turn's round count.
-    //    Only on a clean run — a failed run spent no accountable rounds and must
-    //    not consume a resume slot.
-    if (ok) {
+    // 6. Persist counters with full-overwrite semantics. A completed resume
+    // advances only its typed counter. A failed run does not consume a resume
+    // slot, but every assistant round completed before the failure still counts
+    // toward the cumulative hard bound. A zero-round wait adds no rounds.
+    if (ok || turn > 0) {
       await this.deps.subAgentMemoryManager.saveSessionMetadata(resumeId, {
         ...meta,
         sessionKind: "subagent",
-        resumeCount: priorResumeCount + 1,
+        budgetResumeCount: priorBudgetResumeCount + (ok && resumeReason === "budget" ? 1 : 0),
+        questionAnswerCount: priorQuestionAnswerCount + (ok && resumeReason === "question" ? 1 : 0),
+        // Legacy alias remains the budget-resume count during migration.
+        resumeCount: priorBudgetResumeCount + (ok && resumeReason === "budget" ? 1 : 0),
         cumulativeRounds: priorCumulativeRounds + turn,
       });
     }
@@ -1319,7 +1445,13 @@ export class SubAgentRunner {
       ok,
       ...(ok ? {} : { error: failureReason ?? lastText }),
       ...(childStopReason ? { stopReason: childStopReason } : {}),
-      ...(ok && childStopReason === "round-cap" ? { incomplete: true } : {}),
+      ...(ok && childStopReason === "round-cap"
+        ? {
+            suspension: createBudgetSuspension(child.sessionId),
+            // Derived compatibility alias for pre-suspension consumers.
+            incomplete: true,
+          }
+        : {}),
     };
     this.finalizeRun(trackedRun, result);
     return result;

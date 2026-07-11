@@ -290,9 +290,15 @@ export interface SessionMetadata {
   /** User-visible sub-agent title. Stored separately from `title`, which is capped for session lists. */
   subAgentTitle?: string;
   /**
-   * Number of times this sub-agent session has been resumed. Initialized to 0
-   * on spawn. PR-D's MAX_RESUMES loop guard reads this to refuse a fork-bomb
-   * via the resume axis.
+   * Number of budget continuations consumed by this sub-agent session.
+   * MAX_RESUMES applies only to this counter.
+   */
+  budgetResumeCount?: number;
+  /** Number of question answers accepted; independent from MAX_RESUMES. */
+  questionAnswerCount?: number;
+  /**
+   * Legacy compatibility alias for budgetResumeCount. Old metadata may contain
+   * only this field; the runner fail-closes on the greater compatible value.
    */
   resumeCount?: number;
   /**
@@ -546,6 +552,12 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
   const resumeCount = typeof raw.resumeCount === "number" && Number.isInteger(raw.resumeCount) && raw.resumeCount >= 0
     ? raw.resumeCount
     : undefined;
+  const budgetResumeCount = typeof raw.budgetResumeCount === "number" && Number.isInteger(raw.budgetResumeCount) && raw.budgetResumeCount >= 0
+    ? raw.budgetResumeCount
+    : undefined;
+  const questionAnswerCount = typeof raw.questionAnswerCount === "number" && Number.isInteger(raw.questionAnswerCount) && raw.questionAnswerCount >= 0
+    ? raw.questionAnswerCount
+    : undefined;
   const cumulativeRounds = typeof raw.cumulativeRounds === "number" && Number.isInteger(raw.cumulativeRounds) && raw.cumulativeRounds >= 0
     ? raw.cumulativeRounds
     : undefined;
@@ -575,6 +587,8 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     originToolUseId,
     spawnId,
     subAgentTitle,
+    budgetResumeCount,
+    questionAnswerCount,
     resumeCount,
     cumulativeRounds,
   };
