@@ -40,6 +40,9 @@ import type { BridgeWebviewElement, WebviewIpcTransport } from "./webview-ipc-tr
 // `openExternalUrl` (the `onopenlink` egress path) lives on `window.lvisApi`, reached
 // through the renderer's `getApi()` — NOT `window.lvis` (a curated subset without it).
 import { getApi } from "../api-client.js";
+// The card's ORIGIN chat session — the second binding `onmessage` needs (see below).
+// Optional: this component also mounts outside the chat subtree.
+import { useOptionalChatContext } from "../context/ChatContext.js";
 
 /** Extract the `?t=<token>` proxy-session token from a `lvis-mcp-app://` URL. */
 function tokenFromProxyUrl(proxyUrl: string): string | null {
@@ -64,6 +67,21 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
   const themeCtx = useOptionalTheme();
   const resolved = themeCtx?.resolved ?? "light";
   const effectiveBundleId = themeCtx?.effectiveBundleId ?? DEFAULT_BUNDLE_ID;
+
+  // ── The card's ORIGIN session — the `onmessage` session binding ───────────────
+  // A card belongs to the chat session it was rendered in. We latch the FIRST session
+  // id we see (not the live one) so the binding is the card's origin, and main can
+  // compare it against the conversation loop's current session: a message from a card
+  // whose session is no longer live must never be injected into the conversation the
+  // user navigated to — it degrades to a notification (one rule, main-side).
+  //
+  // Surfaces with no chat session (detached window, isolated harness) leave this empty,
+  // which is not a session id and therefore never matches — the same fail-safe branch.
+  const chatCtx = useOptionalChatContext();
+  const originSessionIdRef = useRef("");
+  if (originSessionIdRef.current === "" && chatCtx?.currentSessionId) {
+    originSessionIdRef.current = chatCtx.currentSessionId;
+  }
   const [bundle, setBundle] = useState<McpUiResourceBundle | null>(null);
   const [error, setError] = useState<string | null>(null);
   // b3.3 — disable-in-place on server disconnect. Lives INSIDE McpAppView so
@@ -203,6 +221,11 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
           onResize: handleResize,
           openLink: (url) => getApi().openExternalUrl(url),
           callTool: (name, args) => window.lvis.mcp.callTool(payload.serverId, name, args),
+          // `onmessage` is bound to BOTH the card's server and the card's origin
+          // session. The app names neither, so it can neither impersonate another
+          // server nor speak into a conversation the user has left.
+          postMessage: (params) =>
+            window.lvis.mcp.postUiMessage(payload.serverId, originSessionIdRef.current, params),
         },
       );
       bridgeRef.current = { bridge, transport, token: tokenFromProxyUrl(bundle.proxyUrl) };
