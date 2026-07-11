@@ -29,7 +29,7 @@ import type { McpUiPayload, McpUiResourceBundle } from "../../../mcp/types.js";
 import { Loader2, AlertCircle, PlugZap } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { mcpAppPartitionName } from "../../../shared/mcp-app-partition.js";
-import { useTheme, findBundle, bundleToPluginTokens, DEFAULT_BUNDLE_ID } from "../theme/index.js";
+import { useOptionalTheme, findBundle, bundleToPluginTokens, DEFAULT_BUNDLE_ID } from "../theme/index.js";
 // The host-side wiring lives in its own React-free module so the real-<webview> e2e
 // gate can import and exercise THE SHIPPING WIRING rather than a look-alike copy.
 import { createMcpAppBridge } from "./mcp-app-bridge.js";
@@ -52,7 +52,15 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
   // Host theme sources for the standard `McpUiHostContext`: shell (light/dark) and
   // the active bundle id (drives the curated `--lvis-*` token map we translate to
   // the standard style-variable vocabulary — never leaking `--lvis-*` to the app).
-  const { resolved, effectiveBundleId } = useTheme();
+  // `useOptionalTheme` (NOT `useTheme`): McpAppView is mounted from surfaces that may
+  // lack a ThemeProvider ancestor (isolated card/preview test harnesses; and it keeps
+  // the card robust in any detached mount). A throwing `useTheme()` here would crash
+  // the whole render tree of any such host. With no provider it falls back to the
+  // light default bundle — which only happens in isolation, since the app root always
+  // mounts a real ThemeProvider.
+  const themeCtx = useOptionalTheme();
+  const resolved = themeCtx?.resolved ?? "light";
+  const effectiveBundleId = themeCtx?.effectiveBundleId ?? DEFAULT_BUNDLE_ID;
   const [bundle, setBundle] = useState<McpUiResourceBundle | null>(null);
   const [error, setError] = useState<string | null>(null);
   // b3.3 — disable-in-place on server disconnect. Lives INSIDE McpAppView so
