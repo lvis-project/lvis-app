@@ -20,6 +20,7 @@ import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import type { UserContentPart } from "../../engine/llm/types.js";
 import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
+import { parseAppMessageEnvelope } from "../../shared/mcp-app-message-source.js";
 import {
   createStreamingFilter,
   stripSuggestedReplies,
@@ -73,9 +74,16 @@ export async function runStreamedTurn(
 ): Promise<TurnResult> {
   const send = (payload: unknown) =>
     sink(channels.stream, { streamId, ...((payload as Record<string, unknown>) ?? {}) });
-  const originSource = options.inputOrigin === "plugin-emitted"
-    ? parseImportedTriggerEnvelope(input)
-    : null;
+  // The turn's ORIGIN SOURCE — read from the input's provenance envelope, never from a
+  // separate flag. `overlay:*` for a plugin trigger, `app:*` for an MCP App's confirmed
+  // `ui/message`. It becomes the permission manager's staged-origin (write/shell/network
+  // forced to ask) and the transcript's provenance marker.
+  const originSource =
+    options.inputOrigin === "plugin-emitted"
+      ? parseImportedTriggerEnvelope(input)
+      : options.inputOrigin === "app-emitted"
+        ? parseAppMessageEnvelope(input)
+        : null;
   // Per-turn streaming filter for the <suggested_replies> block. Withholds
   // chunks that could be (or are) part of the trailing tag, surfaces the
   // parsed list when the turn ends. See
