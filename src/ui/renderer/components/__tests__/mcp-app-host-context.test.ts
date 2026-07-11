@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildMcpAppHostContext } from "../mcp-app-host-context.js";
+import { MCP_APP_AVAILABLE_DISPLAY_MODES } from "../../../../shared/mcp-app-display-mode.js";
 // NOTE: an anti-drift pin against the upstream `McpUiHostContext` type is deferred
 // (see the `it.todo` below). The upstream type cannot be imported under
 // `moduleResolution: NodeNext` today — the package's extensionless re-exports
@@ -46,6 +47,7 @@ describe("buildMcpAppHostContext", () => {
       tokens: LIGHT_TOKENS,
       locale: "en",
       timeZone: "America/New_York",
+      displayMode: "inline",
     });
 
     expect(ctx.theme).toBe("light");
@@ -61,11 +63,48 @@ describe("buildMcpAppHostContext", () => {
       tokens: DARK_TOKENS,
       locale: "ko",
       timeZone: "Asia/Seoul",
+      displayMode: "fullscreen",
     });
 
     expect(ctx.theme).toBe("dark");
     expect(ctx.locale).toBe("ko");
     expect(ctx.timeZone).toBe("Asia/Seoul");
+    // The card's CURRENT mode is whatever the mount applied (here: the detached shell).
+    expect(ctx.displayMode).toBe("fullscreen");
+  });
+
+  it("advertises exactly the display modes the host can apply — the handler's SoT", () => {
+    const ctx = buildMcpAppHostContext({
+      shell: "light",
+      tokens: LIGHT_TOKENS,
+      locale: "en",
+      timeZone: "UTC",
+      displayMode: "inline",
+    });
+
+    // `pip` is NOT advertised (no second, always-on-top window stack exists), and the
+    // list must be exactly `MCP_APP_AVAILABLE_DISPLAY_MODES` — the same SoT
+    // `onrequestdisplaymode` checks a request against. Advertising a mode the handler
+    // would refuse (or refusing one we advertised) is the drift this pin exists for.
+    expect(ctx.availableDisplayModes).toEqual([...MCP_APP_AVAILABLE_DISPLAY_MODES]);
+    expect(ctx.availableDisplayModes).not.toContain("pip");
+    expect(ctx.displayMode).toBe("inline");
+  });
+
+  it("hands out a COPY of the advertised set, never the host's own constant", () => {
+    const ctx = buildMcpAppHostContext({
+      shell: "light",
+      tokens: {},
+      locale: "en",
+      timeZone: "UTC",
+      displayMode: "inline",
+    });
+
+    // The context object crosses to a guest-facing surface; a mutation of it must not
+    // reach back into the module constant every other card reads.
+    expect(ctx.availableDisplayModes).not.toBe(MCP_APP_AVAILABLE_DISPLAY_MODES);
+    ctx.availableDisplayModes?.push("pip");
+    expect(MCP_APP_AVAILABLE_DISPLAY_MODES).not.toContain("pip");
   });
 
   it("translates LVIS tokens to the standard style-variable vocabulary", () => {
@@ -74,6 +113,7 @@ describe("buildMcpAppHostContext", () => {
       tokens: LIGHT_TOKENS,
       locale: "en",
       timeZone: "UTC",
+      displayMode: "inline",
     });
     const variables: Record<string, string | undefined> = styles?.variables ?? {};
 
@@ -110,6 +150,7 @@ describe("buildMcpAppHostContext", () => {
       tokens: DARK_TOKENS,
       locale: "en",
       timeZone: "UTC",
+      displayMode: "inline",
     });
     const variables: Record<string, string | undefined> = styles?.variables ?? {};
 
@@ -123,6 +164,7 @@ describe("buildMcpAppHostContext", () => {
       tokens: LIGHT_TOKENS,
       locale: "en",
       timeZone: "UTC",
+      displayMode: "inline",
     });
     const keys = Object.keys(styles?.variables ?? {});
 
@@ -148,6 +190,7 @@ describe("buildMcpAppHostContext", () => {
       tokens: LIGHT_TOKENS,
       locale: "en",
       timeZone: "UTC",
+      displayMode: "inline",
     });
     const variables: Record<string, string | undefined> = styles?.variables ?? {};
 
@@ -162,6 +205,7 @@ describe("buildMcpAppHostContext", () => {
       tokens: { ...LIGHT_TOKENS, "--lvis-font-family": "Inter, sans-serif" },
       locale: "en",
       timeZone: "UTC",
+      displayMode: "inline",
     });
     expect(withFamily.styles?.variables?.["--font-sans"]).toBe("Inter, sans-serif");
 
@@ -170,6 +214,7 @@ describe("buildMcpAppHostContext", () => {
       tokens: LIGHT_TOKENS,
       locale: "en",
       timeZone: "UTC",
+      displayMode: "inline",
     });
     expect(withoutFamily.styles?.variables?.["--font-sans"]).toBeUndefined();
   });
@@ -180,6 +225,7 @@ describe("buildMcpAppHostContext", () => {
       tokens: {},
       locale: "en",
       timeZone: "UTC",
+      displayMode: "inline",
     });
 
     expect(ctx.styles).toBeUndefined();

@@ -714,14 +714,21 @@ export class WindowManager {
    * can never influence the viewKey; the payload is stored in
    * `_mcpDetachedPayloads` for the detached renderer to fetch on mount (the URL
    * fragment cannot carry `resourceUri`/`csp`). Returns the opened window.
+   *
+   * `opts.maximize` is the ONLY thing the MCP-app `ui/request-display-mode`
+   * "fullscreen" arm adds to this path: the detached shell IS the host's fullscreen
+   * presentation, so the mode change reuses this seam rather than introducing a second
+   * window stack. The user's own detach button passes nothing and keeps the canvas
+   * default size.
    */
-  openDetachedMcpApp(payload: McpUiPayload): BrowserWindow {
+  openDetachedMcpApp(payload: McpUiPayload, opts?: { maximize?: boolean }): BrowserWindow {
     const cardId = randomUUID();
     const viewKey = mcpAppViewKey(payload.serverId, cardId);
     this._mcpDetachedPayloads.set(viewKey, payload);
     const win = this.openDetachedTab(viewKey);
     // viewKeyLabel() has no useful title for an mcp-app key; use the payload's.
     win.setTitle(`LVIS — ${payload.title ?? "MCP App"}`);
+    if (opts?.maximize === true) win.maximize();
     return win;
   }
 
@@ -1228,8 +1235,12 @@ export class WindowManager {
       ) {
         return { ok: false, error: "invalid-payload" };
       }
+      // `maximize` — the `ui/request-display-mode` "fullscreen" arm. Coerced to a
+      // strict boolean here: it is a window-layout hint and nothing else, so a
+      // malformed value degrades to the canvas default rather than being rejected.
+      const maximize = (arg as { maximize?: unknown } | undefined)?.maximize === true;
       try {
-        const win = this.openDetachedMcpApp(payload);
+        const win = this.openDetachedMcpApp(payload, { maximize });
         return { ok: true, windowId: win.id };
       } catch (err) {
         return { ok: false, error: (err as Error).message };

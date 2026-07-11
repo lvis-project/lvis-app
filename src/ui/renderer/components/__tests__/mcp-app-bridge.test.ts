@@ -15,8 +15,10 @@ const { FakeAppBridge } = vi.hoisted(() => {
     onsandboxready?: unknown;
     onreadresource?: unknown;
     oncalltool?: unknown;
+    onmessage?: unknown;
     onopenlink?: unknown;
     onsizechange?: unknown;
+    onrequestdisplaymode?: unknown;
     connectCalled = false;
     handlersAtConnect: Record<string, boolean> = {};
 
@@ -38,8 +40,10 @@ const { FakeAppBridge } = vi.hoisted(() => {
         onsandboxready: typeof this.onsandboxready === "function",
         onreadresource: typeof this.onreadresource === "function",
         oncalltool: typeof this.oncalltool === "function",
+        onmessage: typeof this.onmessage === "function",
         onopenlink: typeof this.onopenlink === "function",
         onsizechange: typeof this.onsizechange === "function",
+        onrequestdisplaymode: typeof this.onrequestdisplaymode === "function",
       };
       return Promise.resolve();
     }
@@ -66,6 +70,8 @@ function build() {
       openLink: vi.fn(async () => ({ ok: true })),
       callTool: vi.fn(async () => ({ ok: true as const, result: "ok" })),
       postMessage: vi.fn(async () => ({ ok: true as const, disposition: "queued" as const })),
+      getDisplayMode: vi.fn(() => "inline" as const),
+      applyDisplayMode: vi.fn(async () => "inline" as const),
     },
   );
 }
@@ -79,8 +85,11 @@ describe("createMcpAppBridge — capabilities are derived from the single active
     const { bridge } = build();
     // onreadresource → serverResources, oncalltool → serverTools, onmessage →
     // message.text, onopenlink → openLinks. The sandbox + size handlers advertise
-    // nothing. No downloadFile / updateModelContext / sampling leaks in — a capability
-    // without a wired handler would be a latent, silent bug.
+    // nothing — and neither does `onrequestdisplaymode`: ext-apps'
+    // `McpUiHostCapabilities` has NO display-mode key, so that handler advertises
+    // itself through the host context's `availableDisplayModes` instead.
+    // No updateModelContext / sampling leaks in — a capability without a wired handler
+    // would be a latent, silent bug.
     expect((bridge as unknown as FakeBridge).capabilities).toEqual({
       serverResources: {},
       serverTools: {},
@@ -91,7 +100,7 @@ describe("createMcpAppBridge — capabilities are derived from the single active
 });
 
 describe("createMcpAppBridge — every handler registers before connect()", () => {
-  it("has all six handlers present at the moment connect() is called", () => {
+  it("has every handler present at the moment connect() is called", () => {
     const { bridge } = build();
     const fake = bridge as unknown as FakeBridge;
 
@@ -100,8 +109,10 @@ describe("createMcpAppBridge — every handler registers before connect()", () =
       onsandboxready: true,
       onreadresource: true,
       oncalltool: true,
+      onmessage: true,
       onopenlink: true,
       onsizechange: true,
+      onrequestdisplaymode: true,
     });
   });
 
@@ -111,7 +122,9 @@ describe("createMcpAppBridge — every handler registers before connect()", () =
     expect(typeof fake.onsandboxready).toBe("function");
     expect(typeof fake.onreadresource).toBe("function");
     expect(typeof fake.oncalltool).toBe("function");
+    expect(typeof fake.onmessage).toBe("function");
     expect(typeof fake.onopenlink).toBe("function");
     expect(typeof fake.onsizechange).toBe("function");
+    expect(typeof fake.onrequestdisplaymode).toBe("function");
   });
 });

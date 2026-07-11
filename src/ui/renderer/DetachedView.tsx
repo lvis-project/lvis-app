@@ -109,7 +109,11 @@ function DetachedMcpApp({ viewKey }: { viewKey: string }) {
       </div>
     );
   }
-  return <McpAppView payload={payload} />;
+  // The detached shell IS the host's `fullscreen` presentation (see
+  // shared/mcp-app-display-mode.ts): a card mounted here starts in that mode, so its
+  // host context reports `fullscreen` and an `inline` request from the app closes the
+  // shell rather than re-opening one.
+  return <McpAppView payload={payload} displayMode="fullscreen" />;
 }
 
 // ─── Content dispatcher ───────────────────────────────────────────────────────
