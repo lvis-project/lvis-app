@@ -10,9 +10,10 @@
  * Scenario 3  — calendar.event.upcoming → meeting reactive subscription
  *               (NOT wired yet — documented skip with reason comment)
  * Scenario 4  — memory.private.secret   → event bus rejects (private namespace)
- * Scenario 5  — email.new emitted without mail-source capability → dropped
- * Scenario 5b — email.new with mail-source capability → delivered
- * Scenario 10 — capability gate: email plugin cannot emit meeting.* events
+ * Scenario 5  — email.new emitted by a plugin that did not declare the email
+ *               namespace in emittedEvents → dropped
+ * Scenario 5b — email.new emitted by a plugin declaring email.* → delivered
+ * Scenario 10 — emit gate: email plugin (declares email.*) cannot emit meeting.*
  *
  * Scenarios 6–9 and 11 removed: they tested locally-defined helpers (HTML
  * escape, OData escape, idempotency, PATCH-vs-POST, namespace duplicates) that
@@ -28,6 +29,7 @@ import { emitEvent, onEvent, offEvent } from "../boot/types.js";
 
 // ─── Capability helpers ───────────────────────────────────────────────────────
 import {
+  canEmitEvent,
   requiredCapabilityForEmit,
   classifySubscription,
   PUBLIC_EVENT_NAMESPACES,
@@ -38,13 +40,15 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Minimal stub that mimics the capability-gated emitEvent logic from
- * boot.ts §createHostApi, without touching Electron or a real PluginRuntime.
+ * Minimal stub that mimics the emittedEvents-gated emitEvent logic from
+ * createHostApi (via the production `canEmitEvent` predicate), without touching
+ * Electron or a real PluginRuntime. The second arg is the plugin's declared
+ * `emittedEvents`; a gated namespace it did not declare is dropped + warned.
  */
-function makeStubEmitEvent(pluginId: string, capabilities: string[]) {
+function makeStubEmitEvent(pluginId: string, emittedEvents: string[]) {
   return (type: string, data?: Record<string, unknown>) => {
-    const requiredCap = requiredCapabilityForEmit(type);
-    if (requiredCap && !capabilities.includes(requiredCap)) {
+    if (!canEmitEvent(type, emittedEvents)) {
+      const requiredCap = requiredCapabilityForEmit(type);
       console.warn(
         `[lvis] plugin:${pluginId} emitEvent('${type}') dropped — missing capability '${requiredCap}'`,
       );
@@ -71,7 +75,8 @@ describe("Sprint 4-D T4 — cross-plugin event flow (host event bus)", () => {
     const calendarHandler = vi.fn();
     disposers.push(onEvent("meeting.summary.created", calendarHandler));
 
-    const meetingEmit = makeStubEmitEvent("meeting", ["meeting-recorder"]);
+    // meeting plugin declares the meeting namespace via emittedEvents.
+    const meetingEmit = makeStubEmitEvent("meeting", ["meeting.summary.created"]);
 
     const payload = {
       sessionId: "sess-001",
@@ -98,7 +103,8 @@ describe("Sprint 4-D T4 — cross-plugin event flow (host event bus)", () => {
     const calendarHandler = vi.fn();
     disposers.push(onEvent("email.invite.detected", calendarHandler));
 
-    const emailEmit = makeStubEmitEvent("email", ["mail-source"]);
+    // email plugin declares the email namespace via emittedEvents.
+    const emailEmit = makeStubEmitEvent("email", ["email.invite.detected"]);
 
     const payload = {
       messageId: "msg-abc",
@@ -177,15 +183,15 @@ describe("Sprint 4-D T4 — cross-plugin event flow (host event bus)", () => {
     expect(PUBLIC_EVENT_NAMESPACES.has("settings")).toBe(false);
   });
 
-  // ─── Scenario 5: capability gate on emit ────────────────────────────────
-  it("Scenario 5 — plugin without mail-source capability cannot emit email.new", () => {
+  // ─── Scenario 5: emit gate — undeclared namespace ───────────────────────
+  it("Scenario 5 — plugin that did not declare the email namespace cannot emit email.new", () => {
     const spy = vi.fn();
     disposers.push(onEvent("email.new", spy));
 
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    // Plugin without mail-source capability (e.g., meeting plugin).
-    const meetingEmit = makeStubEmitEvent("meeting", ["meeting-recorder"]);
+    // meeting plugin declares only the meeting namespace (not email) via emittedEvents.
+    const meetingEmit = makeStubEmitEvent("meeting", ["meeting.summary.created"]);
     meetingEmit("email.new", { subject: "Test" });
 
     // Event must NOT fan out to any subscriber.
@@ -199,15 +205,15 @@ describe("Sprint 4-D T4 — cross-plugin event flow (host event bus)", () => {
     warnSpy.mockRestore();
   });
 
-  // ─── Scenario 10: capability gate — meeting-recorder cannot emit meeting.* ─
-  it("Scenario 10 — plugin without meeting-recorder capability cannot emit meeting.*", () => {
+  // ─── Scenario 10: emit gate — email plugin cannot emit meeting.* ─────────
+  it("Scenario 10 — plugin that did not declare the meeting namespace cannot emit meeting.*", () => {
     const spy = vi.fn();
     disposers.push(onEvent("meeting.summary.created", spy));
 
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    // Email plugin does NOT have meeting-recorder capability
-    const emailEmit = makeStubEmitEvent("email", ["mail-source"]);
+    // email plugin declares only the email namespace (not meeting) via emittedEvents.
+    const emailEmit = makeStubEmitEvent("email", ["email.new"]);
     emailEmit("meeting.summary.created", { sessionId: "fake", summary: "fake" });
 
     // Must be dropped — missing capability
@@ -219,12 +225,12 @@ describe("Sprint 4-D T4 — cross-plugin event flow (host event bus)", () => {
     warnSpy.mockRestore();
   });
 
-  // ─── Bonus: capability gate allows legitimate emit ───────────────────────
-  it("Scenario 5b — plugin WITH mail-source capability can emit email.new", () => {
+  // ─── Bonus: emit gate allows a declared namespace ────────────────────────
+  it("Scenario 5b — plugin declaring email.* in emittedEvents can emit email.new", () => {
     const spy = vi.fn();
     disposers.push(onEvent("email.new", spy));
 
-    const emailEmit = makeStubEmitEvent("email", ["mail-source"]);
+    const emailEmit = makeStubEmitEvent("email", ["email.new"]);
     emailEmit("email.new", { subject: "Hello" });
 
     expect(spy).toHaveBeenCalledTimes(1);
