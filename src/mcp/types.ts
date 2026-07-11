@@ -346,18 +346,26 @@ export interface McpUiResourceRead {
  * paths converge on the SAME {@link McpUiResourceRead} model (HTML + the
  * resource's OWN declared csp/permissions).
  *
- * A plugin ships an HTML card in its `dist/` and lists it here (manifest
- * `uiResources[]`). When one of its tool results carries
- * `_meta.ui.resourceUri === "<this uri>"`, the loopback host SERVES the declared
- * HTML through the same sandbox-proxy + main-computed CSP path as an
- * external-server resource.
+ * "Declared POLICY, served CONTENT": the manifest declares the uri and the
+ * resource's security policy; the CONTENT comes from the plugin itself
+ * (`RuntimePlugin.readUiResource`), exactly as an external MCP server answers
+ * `resources/read` with bytes. The host never resolves or reads a
+ * plugin-declared disk path — the plugin IS the MCP server, the host relays.
+ *
+ * Why csp/permissions stay in the MANIFEST and are NOT returned by the hook: they
+ * are security POLICY — static, schema-validated, reviewable before any plugin
+ * code runs, and covered by `manifestSha256`. A runtime-supplied policy could
+ * present a narrow CSP at review and widen it at serve time.
  *
  * Security invariants (enforced fail-closed at serve time — see
- * `plugin-ui-resource-provider.ts`):
+ * `plugin-ui-resource-provider.ts`, the single chokepoint):
  *  - `uri` authority MUST equal the declaring plugin's id — a plugin can only
- *    serve its OWN `ui://` namespace (own-namespace-only).
- *  - `html` is a path RELATIVE to the plugin root and MUST resolve inside it
- *    (path-containment checked; absolute paths / `..` escapes rejected).
+ *    serve its OWN `ui://` namespace (own-namespace-only). Load-bearing: the
+ *    serverId keys the sandbox-proxy origin, its partition, and the network
+ *    `declaredOriginsByServer` union, so a plugin must not police its own
+ *    namespace.
+ *  - the uri MUST be one this manifest declared (declared-only) — this is what
+ *    binds served content to the csp the host computes the CSP header from.
  *  - `csp` / `permissions` are the resource's OWN declared policy. Main COMPUTES
  *    the sandbox-proxy CSP header from them; the plugin never supplies a policy
  *    HEADER STRING, and the renderer can never inject one.
@@ -365,8 +373,6 @@ export interface McpUiResourceRead {
 export interface PluginUiResourceDecl {
   /** `ui://<pluginId>/<path>` — authority MUST equal the declaring plugin's id. */
   uri: string;
-  /** HTML file shipped in the plugin's `dist/`; path RELATIVE to the plugin root. */
-  html: string;
   /** The resource's own declared CSP (spec `McpUiResourceCsp`). @optional */
   csp?: McpUiResourceCsp;
   /** Sandbox permissions the resource requests (spec `McpUiResourcePermissions`). @optional */

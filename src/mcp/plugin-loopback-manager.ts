@@ -88,25 +88,23 @@ export class PluginLoopbackManager {
 
   /**
    * Build the per-plugin `ui://` resource provider from the manifest's
-   * `uiResources[]` + the plugin's install root. Returns `undefined` when the
-   * plugin declares no MCP App resources (the common case) so the loopback host
-   * serves none. A declared-but-rootless plugin (root not yet known) is logged
-   * and served none rather than throwing — a card render then fails-closed at
-   * read time with the standard not-found error.
+   * `uiResources[]`. Returns `undefined` when the plugin declares no MCP App
+   * resources (the common case) so the loopback host serves none.
+   *
+   * The provider is a pure policy gate (own-namespace + declared-only); the CONTENT
+   * comes from the plugin itself via `runtime.readUiResource`, which applies the
+   * runtime-state gates and bounds the hook. The host reads no plugin file here.
    */
   private buildUiResourceProvider(
     manifest: PluginManifest,
   ): PluginUiResourceProvider | undefined {
     const declarations = manifest.uiResources;
     if (!declarations || declarations.length === 0) return undefined;
-    const pluginRoot = this.runtime.getPluginRoot(manifest.id);
-    if (!pluginRoot) {
-      log.warn(
-        `loopback plugin '${manifest.id}' declares ${declarations.length} ui:// resource(s) but its plugin root is unknown — not serving them`,
-      );
-      return undefined;
-    }
-    return createPluginUiResourceProvider({ pluginId: manifest.id, pluginRoot, declarations });
+    return createPluginUiResourceProvider({
+      pluginId: manifest.id,
+      declarations,
+      readHtml: (uri) => this.runtime.readUiResource(manifest.id, uri),
+    });
   }
 
   /** Stop a plugin's host and unregister its tools. No-op if not running. */

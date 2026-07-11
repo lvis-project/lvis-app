@@ -32,6 +32,8 @@ import { isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
 import { runWithCeiling } from "../../tools/executor-ceiling.js";
+import { manifestIntegrityState } from "../../permissions/manifest-integrity.js";
+import { sessionContext } from "../../engine/session-context.js";
 import { runStartWithTimeout, SessionActivationTracker } from "./lifecycle-timeout.js";
 
 import {
@@ -74,6 +76,15 @@ import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
 const log = createLogger("plugin-runtime");
 const START_FAILURE_STOP_TIMEOUT_MS = 2_000;
+
+/**
+ * Hard cap on the HTML one {@link RuntimePlugin.readUiResource} call may return
+ * (see {@link PluginRuntime.readUiResource}). An MCP App card inlines its own
+ * JS/CSS, so it is legitimately large — but it is a CARD, not a payload channel:
+ * bounding it keeps a runaway hook from ballooning the render path. Exported so
+ * the test pins the boundary rather than re-deriving it.
+ */
+export const MAX_UI_RESOURCE_HTML_BYTES = 4 * 1024 * 1024;
 
 export { runStartWithTimeout };
 export type { PluginPerfStats };
@@ -1681,6 +1692,89 @@ export class PluginRuntime {
       ownerPluginId: entry.pluginId,
       userAction: options?.userAction === true,
     });
+  }
+
+  /**
+   * Serve one of a plugin's manifest-declared `ui://` MCP App cards by asking the
+   * PLUGIN for the HTML ({@link RuntimePlugin.readUiResource}). The plugin is the
+   * MCP server — it serves its own resource bytes; the host relays them. The host
+   * therefore never resolves or reads a plugin-declared disk path, which is what
+   * removed the realpath-containment layer this method replaces.
+   *
+   * The caller ({@link createPluginUiResourceProvider}) has ALREADY enforced the
+   * serving policy — own-namespace authority + declared-only — so this method's
+   * job is the RUNTIME-STATE gate plus bounding the hook:
+   *
+   *  - the same fail-closed gates `pluginRuntimeToolDelegate` applies to
+   *    `tools/call` (registry-enabled OR session-activated for the calling ALS
+   *    session; not manifest-integrity-disabled), so a disabled plugin cannot
+   *    render a card any more than it can run a tool;
+   *  - a `pluginUiResourceReadMs` ceiling (SOT: TOOL_TIMEOUT_POLICY) — a plugin
+   *    hook, unlike a file read, can hang; the user is waiting on a card;
+   *  - a hard HTML size cap, so a runaway hook cannot balloon the render path.
+   *
+   * Every failure throws — the loopback server maps it to `-32002` and no body is
+   * ever served.
+   *
+   * `ceilingMs` defaults to the SOT and is a parameter solely so tests can exercise
+   * the ceiling with a small value without weakening it (same seam as
+   * {@link callDeclaredAppOnlyTool}).
+   */
+  async readUiResource(
+    pluginId: string,
+    uri: string,
+    ceilingMs: number = TOOL_TIMEOUT_POLICY.pluginUiResourceReadMs,
+  ): Promise<string> {
+    // Gate parity with pluginRuntimeToolDelegate (Gate 4): registry-enabled OR
+    // session-activated for the CALLING session (read from the ALS store;
+    // fail-closed when absent).
+    const sessionId = sessionContext.getStore()?.sessionId;
+    if (
+      !this.isPluginEnabled(pluginId) &&
+      !(sessionId !== undefined && this.isSessionActivated(sessionId, pluginId))
+    ) {
+      throw new Error(
+        `Plugin '${pluginId}' is inactive; its ui:// resources are unavailable until the plugin is re-enabled.`,
+      );
+    }
+    if (manifestIntegrityState.isDisabled(pluginId)) {
+      throw new Error(
+        `Plugin '${pluginId}' was disabled after a manifest integrity violation. Reinstall the plugin to re-enable.`,
+      );
+    }
+
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) {
+      throw new Error(`Plugin '${pluginId}' is not loaded; cannot serve '${uri}'.`);
+    }
+    const readUiResource = plugin.instance.readUiResource;
+    if (typeof readUiResource !== "function") {
+      throw new Error(
+        `Plugin '${pluginId}' declares ui:// resources but does not implement readUiResource(); cannot serve '${uri}'.`,
+      );
+    }
+
+    const outcome = await runWithCeiling(
+      async () => readUiResource.call(plugin.instance, uri),
+      ceilingMs,
+      undefined,
+      `${pluginId}.readUiResource`,
+    );
+    if (!outcome.ok) throw outcome.error;
+
+    const html = outcome.value;
+    if (typeof html !== "string") {
+      throw new Error(
+        `Plugin '${pluginId}' readUiResource('${uri}') returned ${typeof html}, expected the card HTML as a string.`,
+      );
+    }
+    const bytes = Buffer.byteLength(html, "utf-8");
+    if (bytes > MAX_UI_RESOURCE_HTML_BYTES) {
+      throw new Error(
+        `Plugin '${pluginId}' readUiResource('${uri}') returned ${bytes} bytes, over the ${MAX_UI_RESOURCE_HTML_BYTES}-byte card limit.`,
+      );
+    }
+    return html;
   }
 
   getMethodMap(): ReadonlyMap<string, { pluginId: string; handler: PluginToolHandler }> {
