@@ -119,7 +119,10 @@ export function manifestToDiscoverResult(manifest: PluginManifest): McpDiscoverP
     capabilities.tools = { listChanged: true };
   }
   const extensions: Record<string, unknown> = {};
-  if ((manifest.ui?.length ?? 0) > 0) {
+  // Advertise the MCP Apps extension when the plugin ships EITHER a host-mounted
+  // sidebar panel (`ui[]`) OR a served `ui://` MCP App card (`uiResources[]`).
+  // The latter is what the loopback `resources/read` serving seam keys off.
+  if ((manifest.ui?.length ?? 0) > 0 || (manifest.uiResources?.length ?? 0) > 0) {
     extensions["io.modelcontextprotocol/ui"] = { mimeTypes: ["text/html;profile=mcp-app"] };
   }
   if (Object.keys(extensions).length > 0) {

@@ -24,9 +24,14 @@
 import { ToolRegistry } from "../tools/registry.js";
 import { PluginMcpHost } from "./plugin-mcp-host.js";
 import { pluginRuntimeToolDelegate } from "./plugin-runtime-delegate.js";
+import {
+  createPluginUiResourceProvider,
+  type PluginUiResourceProvider,
+} from "./plugin-ui-resource-provider.js";
 import { createLogger } from "../lib/logger.js";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { PluginManifest } from "../plugins/types.js";
+import type { McpUiResourceRead } from "./types.js";
 
 const log = createLogger("plugin-loopback-manager");
 
@@ -52,6 +57,7 @@ export class PluginLoopbackManager {
       manifest,
       pluginRuntimeToolDelegate(this.runtime, manifest.id),
       this.toolRegistry,
+      this.buildUiResourceProvider(manifest),
     );
     // host.start() is registry-read-only until its final atomic swap; if it
     // throws, `previous` (and its registered tools) are untouched.
@@ -62,6 +68,45 @@ export class PluginLoopbackManager {
     if (previous) await previous.dispose();
     log.info(`loopback plugin '${manifest.id}' registered ${names.length} tool(s): ${names.join(", ")}`);
     return names;
+  }
+
+  /**
+   * Serve a `ui://` resource from a running plugin's loopback host — the plugin
+   * arm of the unified UI-resource resolver (see `mcp-ui-backend-resolver.ts`).
+   * Fail-closed: an unknown plugin, an undeclared uri, or a cross-namespace uri
+   * throws (never a served body). Own-namespace enforcement lives in the host's
+   * `PluginUiResourceProvider`, so the render path (which passes `serverId ===
+   * pluginId`) can only ever reach this plugin's OWN declared resources.
+   */
+  async readUiResource(pluginId: string, uri: string): Promise<McpUiResourceRead> {
+    const host = this.hosts.get(pluginId);
+    if (!host) {
+      throw new Error(`[plugin-loopback] no running loopback host for plugin '${pluginId}'`);
+    }
+    return host.readUiResource(uri);
+  }
+
+  /**
+   * Build the per-plugin `ui://` resource provider from the manifest's
+   * `uiResources[]` + the plugin's install root. Returns `undefined` when the
+   * plugin declares no MCP App resources (the common case) so the loopback host
+   * serves none. A declared-but-rootless plugin (root not yet known) is logged
+   * and served none rather than throwing — a card render then fails-closed at
+   * read time with the standard not-found error.
+   */
+  private buildUiResourceProvider(
+    manifest: PluginManifest,
+  ): PluginUiResourceProvider | undefined {
+    const declarations = manifest.uiResources;
+    if (!declarations || declarations.length === 0) return undefined;
+    const pluginRoot = this.runtime.getPluginRoot(manifest.id);
+    if (!pluginRoot) {
+      log.warn(
+        `loopback plugin '${manifest.id}' declares ${declarations.length} ui:// resource(s) but its plugin root is unknown — not serving them`,
+      );
+      return undefined;
+    }
+    return createPluginUiResourceProvider({ pluginId: manifest.id, pluginRoot, declarations });
   }
 
   /** Stop a plugin's host and unregister its tools. No-op if not running. */
