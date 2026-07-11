@@ -124,7 +124,7 @@ describe("openAuthWindow — visible-window dedup", () => {
       url: "https://sso.example.com/login",
       completionUrlPatterns: [COMPLETION],
       cookieHosts: [COOKIE_HOST],
-      windowTitle: "portal login",
+      windowTitle: "Internal Portal Login",
       persistPartition: PARTITION,
       timeoutMs: 10_000,
     };
@@ -162,7 +162,7 @@ describe("openAuthWindow — visible-window dedup", () => {
       url: "https://sso.example.com/login",
       completionUrlPatterns: [COMPLETION],
       cookieHosts: [COOKIE_HOST],
-      windowTitle: "portal login",
+      windowTitle: "Internal Portal Login",
       persistPartition: PARTITION,
       timeoutMs: 10_000,
     });
@@ -176,7 +176,7 @@ describe("openAuthWindow — visible-window dedup", () => {
       url: "https://sso.example.com/login",
       completionUrlPatterns: [COMPLETION],
       cookieHosts: [COOKIE_HOST],
-      windowTitle: "portal login",
+      windowTitle: "Internal Portal Login",
       persistPartition: PARTITION,
       show: false,
       timeoutMs: 5_000,
