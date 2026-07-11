@@ -5,6 +5,7 @@ import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { Locale } from "../../i18n/locale.js";
 import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
+import type { McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defaults.js";
@@ -1718,6 +1719,17 @@ export type LvisMcpApi = {
     name: string,
     args: Record<string, unknown>,
   ) => Promise<McpUiToolCallOutcome>;
+  /**
+   * MCP Apps `onmessage` (`ui/message`). `serverId` + `sessionId` are bound by the
+   * renderer from the card (never by the app). Main decides the path: notification,
+   * round-boundary guidance, or a user-gated staging card. The outcome carries NO
+   * conversation content back.
+   */
+  postUiMessage: (
+    serverId: string,
+    sessionId: string,
+    params: unknown,
+  ) => Promise<McpUiMessageOutcome>;
   /** Free a card's sandbox-proxy session token on unmount (fire-and-forget). */
   disposeUiSession: (token: string) => void;
   /** #885 b2 — open an MCP-app card in a detached window (host mints cardId/viewKey). */

@@ -65,6 +65,7 @@ function build() {
       onResize: vi.fn(),
       openLink: vi.fn(async () => ({ ok: true })),
       callTool: vi.fn(async () => ({ ok: true as const, result: "ok" })),
+      postMessage: vi.fn(async () => ({ ok: true as const, disposition: "queued" as const })),
     },
   );
 }
@@ -74,22 +75,23 @@ beforeEach(() => {
 });
 
 describe("createMcpAppBridge — capabilities are derived from the single active-handler set", () => {
-  it("advertises exactly the capabilities whose handlers are wired (serverResources + openLinks), nothing else", () => {
+  it("advertises exactly the capabilities whose handlers are wired, nothing else", () => {
     const { bridge } = build();
-    // onreadresource → serverResources, oncalltool → serverTools, onopenlink →
-    // openLinks. The sandbox + size handlers advertise nothing. No message /
-    // downloadFile / updateModelContext leak in — a capability without a wired
-    // handler would be a latent, silent bug.
+    // onreadresource → serverResources, oncalltool → serverTools, onmessage →
+    // message.text, onopenlink → openLinks. The sandbox + size handlers advertise
+    // nothing. No downloadFile / updateModelContext / sampling leaks in — a capability
+    // without a wired handler would be a latent, silent bug.
     expect((bridge as unknown as FakeBridge).capabilities).toEqual({
       serverResources: {},
       serverTools: {},
+      message: { text: {} },
       openLinks: {},
     });
   });
 });
 
 describe("createMcpAppBridge — every handler registers before connect()", () => {
-  it("has all five handlers present at the moment connect() is called", () => {
+  it("has all six handlers present at the moment connect() is called", () => {
     const { bridge } = build();
     const fake = bridge as unknown as FakeBridge;
 
