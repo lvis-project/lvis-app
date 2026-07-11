@@ -223,7 +223,7 @@ never clobbered (unit-tested via an injectable set). **The live flip = populate
 the SOT with a pilot id + wire `PluginLoopbackManager` into the boot step's
 onEnable/onDisable + 3-agent cluster review (permission/boot trust boundary) +
 Playwright e2e.** No bundled first-party plugin exists (all are in-house
-marketplace repos; installed here: `lge-api`, `local-indexer`), so the pilot is an
+marketplace repos; installed here: `ep`, `local-indexer`), so the pilot is an
 environment/product choice. Until the SOT is populated, behavior is unchanged.
 
 **`governance-per-request` (5) — client half DONE; gating half gated.** `McpClient`
@@ -288,7 +288,7 @@ the SDK schema requires `category` (category-less plugins already failed load).
 Historical note (the earlier blocker analysis, now resolved): the SDK manifest schema
 (`@lvis/plugin-sdk/schemas/plugin-manifest.schema.json`) lists `category` in
 `toolSchemas.*.required`, so the category-less installed plugins (`local-indexer`,
-`lge-api`) ALREADY fail AJV manifest validation at load and register nothing today
+`ep`) ALREADY fail AJV manifest validation at load and register nothing today
 — removing the legacy registration path would NOT break them (they don't load
 either way). So M9 is not blocked on "breaking installed plugins." It IS gated, per
 this doc's own §5 entry, on **(a) the signed-zip artifact format finalized** (a §6
