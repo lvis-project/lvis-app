@@ -580,9 +580,10 @@ export class WindowManager {
         // `additionalArguments` into <webview> guests, the plugin sandbox
         // would NOT receive `--lvis-initial-theme=` (which carries host
         // theme cache). Plugin webviews already get theme via the
-        // `host.theme.changed` event, never via argv. The MCP-app webview uses
-        // NO Electron preload (data: URL + an injected bridge script), so
-        // stripping preload here is a no-op-safe hardening for it too.
+        // `host.theme.changed` event, never via argv. The MCP-app webview's
+        // relay preload is installed via `session.setPreloads()` on the partition
+        // (not the attribute), so stripping the ATTRIBUTE preload here does not
+        // touch it — a no-op-safe hardening for that path too.
         delete prefs.additionalArguments;
         prefs.nodeIntegration = false;
         prefs.nodeIntegrationInWorker = false;
@@ -594,9 +595,10 @@ export class WindowManager {
         prefs.sandbox = true;
         // Partition-allowlist gate. Only two host-controlled prefixes are
         // policy-registered: `persist:plugin:<slug>` (installPluginPartitionPolicy,
-        // sets preload + network block) and `lvis-mcp-app:<hex>` (b1
-        // installMcpAppPartitionPolicy, sets the CDN network gate in the
-        // readUiResource chokepoint). A guest with any other `partition=` value
+        // sets preload + network block) and `lvis-mcp-app:<hex>`
+        // (installMcpAppPartitionPolicy: declared-origin network gate + sandbox-proxy
+        // protocol handler + relay preload, in the readUiResource chokepoint). A
+        // guest with any other `partition=` value
         // would skip that policy and regain unrestricted navigation/network
         // access, so block the attach entirely rather than rewriting the
         // partition — silently changing it would yield an ungated webview.

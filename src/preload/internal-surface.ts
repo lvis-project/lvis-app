@@ -1080,7 +1080,9 @@ export function buildInternalApiSurface() {
     addConfig: async (config: McpServerConfig) => ipcRenderer.invoke(CHANNELS.mcp.configAdd, config),
     setApiKey: async (id: string, apiKey: string) => ipcRenderer.invoke(CHANNELS.mcp.configSetApiKey, id, apiKey),
     removeConfig: async (id: string) => ipcRenderer.invoke(CHANNELS.mcp.configRemove, id),
-    readUiResource: async (serverId: string, uri: string) => ipcRenderer.invoke(CHANNELS.mcp.uiResource, serverId, uri) as Promise<string>,
+    readUiResource: async (serverId: string, uri: string) => ipcRenderer.invoke(CHANNELS.mcp.uiResource, serverId, uri) as Promise<unknown>,
+    // Card unmount → free its sandbox-proxy session token (fire-and-forget).
+    disposeUiSession: (token: string) => { void ipcRenderer.invoke(CHANNELS.mcp.disposeUiSession, token); },
     // #885 b2 — open an MCP-app card in a detached window (host mints the
     // cardId + viewKey; renderer only supplies the payload it already holds).
     openDetached: async (payload: McpUiPayload) =>

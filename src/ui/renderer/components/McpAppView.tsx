@@ -1,162 +1,68 @@
 /**
  * McpAppView — MCP Apps spec §3 sandboxed UI renderer.
  *
- * Renders a `ui://` resource from an MCP server inside an Electron <webview>
- * (same sandboxing baseline as HtmlPreview, but in a dedicated per-server
- * `lvis-mcp-app:<hex(serverId)>` partition with no nodeIntegration and
- * contextIsolation=yes). The per-server partition (#885 b1) keeps each MCP
- * server's cookie/localStorage/IndexedDB jar isolated from every other server.
+ * Renders a `ui://` resource from an MCP server through the upstream
+ * `@modelcontextprotocol/ext-apps` `AppBridge`, inside an Electron <webview> on a
+ * dedicated per-server `lvis-mcp-app:<hex(serverId)>` partition (#885 b1 storage
+ * isolation), with no nodeIntegration and contextIsolation=yes.
  *
- * AppBridge (§3.4): the webview ↔ host channel uses JSON-RPC 2.0 over the
- * embedder window message channel, with host responses injected back into the
- * guest via `webview.executeJavaScript()`.
- * Currently supported methods:
- *   - `mcp/ping` → `{ pong: true }`
- *   - `mcp/getContext` → `{ serverId, resourceUri, title }`
+ * ─── The double-iframe sandbox proxy ─────────────────────────────────────────
+ * The <webview> does NOT load the app HTML directly. It loads a host-owned,
+ * script-free **sandbox-proxy document** served from the privileged
+ * `lvis-mcp-app://` scheme with a real CSP response header. The host-owned relay
+ * preload running in that document then mounts the app HTML into an INNER
+ * `<iframe sandbox="allow-scripts" srcdoc>`.
  *
- * The HTML is fetched lazily on first render via `lvis.mcp.readUiResource`.
+ * That indirection is the whole point. An ext-apps guest connects with the default
+ * `PostMessageTransport(window.parent, window.parent)`. A <webview> guest is a
+ * TOP-LEVEL document, so `window.parent === window` and the app would post to
+ * ITSELF — which is exactly why the previous hand-rolled bridge here was dead. In
+ * the inner frame `window.parent` is the proxy: a real, different, opaque-origin
+ * frame. So postMessage genuinely crosses and the app runs COMPLETELY UNMODIFIED.
+ *
+ * Message path:
+ *   AppBridge ⇄ WebviewIpcTransport ⇄ <webview> ipc ⇄ relay preload ⇄ inner App
  */
-import { createElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { McpUiPayload } from "../../../mcp/types.js";
+import { createElement, useCallback, useEffect, useRef, useState } from "react";
+import type { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
+import type { McpUiPayload, McpUiResourceBundle } from "../../../mcp/types.js";
 import { Loader2, AlertCircle, PlugZap } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
-import { wrapWithCsp } from "./mcp-app-csp.js";
 import { mcpAppPartitionName } from "../../../shared/mcp-app-partition.js";
+// The host-side wiring lives in its own React-free module so the real-<webview> e2e
+// gate can import and exercise THE SHIPPING WIRING rather than a look-alike copy.
+import { createMcpAppBridge } from "./mcp-app-bridge.js";
+import type { BridgeWebviewElement, WebviewIpcTransport } from "./webview-ipc-transport.js";
 
-type BridgeMessage = { jsonrpc?: string; id?: number; method?: string; params?: unknown };
-type BridgeEventSource = MessageEventSource | null | undefined;
-type BridgeWebview = EventTarget & {
-  setAttribute(name: string, value: string): void;
-  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void;
-  removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void;
-  executeJavaScript?: (code: string) => Promise<unknown>;
-  contentWindow?: BridgeEventSource;
-};
-
-// ─── AppBridge injection ─────────────────────────────
-
-/**
- * Minimal AppBridge script injected into the MCP App's webview page.
- * Provides `window.McpBridge.request(method, params)` → Promise.
- * Host-side handler responds by executing `window.postMessage(...)` inside the
- * guest page so the bridge can resolve the pending request Promise.
- */
-function buildBridgeScript(payload: McpUiPayload): string {
-  const ctx = JSON.stringify({ serverId: payload.serverId, resourceUri: payload.resourceUri, title: payload.title ?? "" });
-  return `
-<script>
-(function(){
-  var _pending = {};
-  var _id = 0;
-  window.McpBridge = {
-    context: ${ctx},
-    request: function(method, params) {
-      return new Promise(function(resolve, reject) {
-        var id = ++_id;
-        _pending[id] = { resolve: resolve, reject: reject };
-        window.parent.postMessage({ jsonrpc: '2.0', id: id, method: method, params: params || {} }, '*');
-      });
-    }
-  };
-  window.addEventListener('message', function(ev) {
-    var msg = ev.data;
-    if (!msg || msg.jsonrpc !== '2.0' || !msg.id) return;
-    var p = _pending[msg.id];
-    if (!p) return;
-    delete _pending[msg.id];
-    if (msg.error) p.reject(new Error(msg.error.message));
-    else p.resolve(msg.result);
-  });
-})();
-</script>`;
-}
-
-function injectBridge(html: string, payload: McpUiPayload): string {
-  const bridgeScript = buildBridgeScript(payload);
-  if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/<head[^>]*>/i, (m) => `${m}${bridgeScript}`);
+/** Extract the `?t=<token>` proxy-session token from a `lvis-mcp-app://` URL. */
+function tokenFromProxyUrl(proxyUrl: string): string | null {
+  try {
+    return new URL(proxyUrl).searchParams.get("t");
+  } catch {
+    return null;
   }
-  return `<!doctype html><html><head>${bridgeScript}</head><body>${html}</body></html>`;
 }
-
-export function createMcpAppBridge(payload: McpUiPayload, el: BridgeWebview) {
-  const sendBridgeResponse = (message: unknown) => {
-    const json = JSON.stringify(message);
-    void el.executeJavaScript?.(`window.postMessage(${json}, "*");`).catch(() => undefined);
-  };
-
-  const handleBridgeMessage = (msg: BridgeMessage) => {
-    if (!msg?.id || !msg?.method) return;
-
-    let result: unknown;
-    switch (msg.method) {
-      case "mcp/ping":
-        result = { pong: true };
-        break;
-      case "mcp/getContext":
-        result = { serverId: payload.serverId, resourceUri: payload.resourceUri, title: payload.title ?? "" };
-        break;
-      default:
-        sendBridgeResponse({
-          jsonrpc: "2.0",
-          id: msg.id,
-          error: { code: -32601, message: "Method not found" },
-        });
-        return;
-    }
-
-    sendBridgeResponse({ jsonrpc: "2.0", id: msg.id, result });
-  };
-
-  const handleWindowMessage = (event: MessageEvent) => {
-    const guestWindow = el.contentWindow;
-    if (!guestWindow || event.source !== guestWindow) return;
-    handleBridgeMessage(event.data as BridgeMessage);
-  };
-
-  const handleIpcMessage = (ev: Event) => {
-    const event = ev as CustomEvent & { channel?: string; args?: unknown[] };
-    if (event.channel !== "mcp-bridge") return;
-    handleBridgeMessage(event.args?.[0] as BridgeMessage);
-  };
-
-  const attach = () => {
-    window.addEventListener("message", handleWindowMessage);
-    el.addEventListener("ipc-message", handleIpcMessage);
-  };
-
-  const detach = () => {
-    window.removeEventListener("message", handleWindowMessage);
-    el.removeEventListener("ipc-message", handleIpcMessage);
-  };
-
-  return {
-    attach,
-    detach,
-    handleWindowMessage,
-    handleIpcMessage,
-  };
-}
-
-// ─── Component ───────────────────────────────────────
 
 export function McpAppView({ payload }: { payload: McpUiPayload }) {
   const { t } = useTranslation();
-  const [htmlContent, setHtmlContent] = useState<string | null>(null);
+  const [bundle, setBundle] = useState<McpUiResourceBundle | null>(null);
   const [error, setError] = useState<string | null>(null);
   // b3.3 — disable-in-place on server disconnect. Lives INSIDE McpAppView so
   // every mount site (inline preview rail + detached window) inherits it from
   // one source. Reconnect does NOT auto-re-enable (§3.4): the user re-invokes
   // the tool → a fresh McpUiPayload → a fresh card.
   const [disabled, setDisabled] = useState(false);
-  const bridgeRef = useRef<ReturnType<typeof createMcpAppBridge> | null>(null);
+  const bridgeRef = useRef<{ bridge: AppBridge; transport: WebviewIpcTransport; token: string | null } | null>(null);
 
   const height = payload.height ?? 300;
 
-  // Fetch the ui:// resource via IPC on first render
+  // Fetch the ui:// resource via IPC on first render. Main installs the partition
+  // policy (declared-origin network gate + sandbox-proxy protocol handler + relay
+  // preload) and mints the proxy session BEFORE returning, so all three are in place
+  // before the webview navigates.
   useEffect(() => {
     let cancelled = false;
-    setHtmlContent(null);
+    setBundle(null);
     setError(null);
     // A fresh payload (new card / re-invocation) starts enabled even if the
     // previous serverId had disconnected; the disconnect event only disables
@@ -164,10 +70,9 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
     setDisabled(false);
 
     window.lvis.mcp.readUiResource(payload.serverId, payload.resourceUri)
-      .then((html) => {
+      .then((next) => {
         if (cancelled) return;
-        const withBridge = injectBridge(html, payload);
-        setHtmlContent(wrapWithCsp(withBridge, payload.csp));
+        setBundle(next);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -196,22 +101,24 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
   // it never races the conditional render.
   const attachWebview = useCallback((node: HTMLElement | null) => {
     if (bridgeRef.current) {
-      bridgeRef.current.detach();
+      void bridgeRef.current.transport.close();
+      // Free the main-side sandbox-proxy session so its token isn't held until the
+      // global LRU evicts it (which, on a long chat with many cards, could evict a
+      // still-mounted card's token instead). Fire-and-forget; idempotent in main.
+      // Optional-chained: teardown can race a torn-down bridge surface (unmount).
+      const { token } = bridgeRef.current;
+      if (token) window.lvis?.mcp?.disposeUiSession?.(token);
       bridgeRef.current = null;
     }
-    if (node) {
-      const bridge = createMcpAppBridge(payload, node as unknown as BridgeWebview);
-      bridge.attach();
-      bridgeRef.current = bridge;
+    if (node && bundle) {
+      const { bridge, transport } = createMcpAppBridge(
+        payload,
+        bundle.html,
+        node as unknown as BridgeWebviewElement,
+      );
+      bridgeRef.current = { bridge, transport, token: tokenFromProxyUrl(bundle.proxyUrl) };
     }
-  }, [payload]);
-
-  const dataUrl = useMemo(
-    () => htmlContent
-      ? `data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`
-      : null,
-    [htmlContent],
-  );
+  }, [payload, bundle]);
 
   return (
     <div className="mt-2 overflow-hidden rounded border bg-background">
@@ -231,7 +138,7 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
           <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
           <span>{error}</span>
         </div>
-      ) : !dataUrl ? (
+      ) : !bundle ? (
         <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height }}>
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           <span>{t("mcpAppView.loading")}</span>
@@ -239,9 +146,14 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
       ) : (
         createElement("webview", {
           ref: attachWebview,
-          src: dataUrl,
+          src: bundle.proxyUrl,
           partition: mcpAppPartitionName(payload.serverId),
           allowpopups: "false",
+          // No `preload` attribute — under `sandbox=yes` it is silently ignored, and
+          // in the DETACHED window the will-attach-webview guard strips it too (the
+          // inline/main-window attach handler ignores this partition, so it does not).
+          // Either way the relay preload rides `session.setPreloads()` on the
+          // partition, which is the only mechanism that actually loads it.
           webpreferences: "contextIsolation=yes, sandbox=yes, nodeIntegration=no, javascript=yes",
           disablewebsecurity: "false",
           style: {
