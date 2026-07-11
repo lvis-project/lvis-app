@@ -15,6 +15,10 @@
  * thing.
  */
 import { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
+// `McpUiHostContext` comes from the local standard-type twin, not the package:
+// ext-apps 1.7.4's `.d.ts` re-export the spec types via extensionless imports that
+// don't resolve under NodeNext (see mcp-app-host-context.ts for the full rationale).
+import type { McpUiHostContext } from "./mcp-app-host-context.js";
 import type { McpUiPayload } from "../../../mcp/types.js";
 import { MCP_APP_HOST_INFO } from "../../../shared/mcp-app-bridge-contract.js";
 import { WebviewIpcTransport, type BridgeWebviewElement } from "./webview-ipc-transport.js";
@@ -32,13 +36,17 @@ export function createMcpAppBridge(
   payload: Pick<McpUiPayload, "serverId">,
   html: string,
   el: BridgeWebviewElement,
+  hostContext: McpUiHostContext,
 ): { bridge: AppBridge; transport: WebviewIpcTransport; connected: Promise<void> } {
   const transport = new WebviewIpcTransport(el);
   const bridge = new AppBridge(
     null,
     MCP_APP_HOST_INFO,
     { serverResources: {} },
-    { hostContext: {} },
+    // Standard ext-apps 4th-arg options: seed the initial host context (theme /
+    // styles / locale / timeZone / platform). Live updates go through
+    // `bridge.setHostContext(...)` on the McpAppView side.
+    { hostContext },
   );
 
   // The proxy announces it is ready for HTML; answer with the app document. The relay

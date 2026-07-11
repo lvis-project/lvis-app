@@ -1,10 +1,23 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
 import { render, screen, waitFor, act } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { McpAppView } from "../McpAppView.js";
+import { ThemeProvider } from "../../theme/index.js";
+import { DEFAULT_BUNDLE_ID } from "../../theme/index.js";
 import { mcpAppPartitionName } from "../../../../shared/mcp-app-partition.js";
 import type { McpUiPayload } from "../../../../mcp/types.js";
+
+// McpAppView reads `useTheme()`, so every render is wrapped in a ThemeProvider.
+// No `api` prop → no async settings hydrate; the default bundle is already cached
+// so the shell resolves synchronously.
+function ThemeWrapper({ children }: { children: ReactNode }) {
+  return <ThemeProvider initialBundleId={DEFAULT_BUNDLE_ID}>{children}</ThemeProvider>;
+}
+
+const renderCard = (payload: McpUiPayload) =>
+  render(<McpAppView payload={payload} />, { wrapper: ThemeWrapper });
 
 let disconnectHandler: ((serverId: string) => void) | null = null;
 // Main now returns a BUNDLE: the sandbox-proxy URL the <webview> navigates to,
@@ -50,7 +63,7 @@ function webviewNode(container: HTMLElement): Element | null {
 
 describe("McpAppView — MAJOR-1 per-server partition as a createElement PROP", () => {
   it("sets partition=lvis-mcp-app:<enc(serverId)> on the MOUNTED webview node", async () => {
-    const { container } = render(<McpAppView payload={payload("github")} />);
+    const { container } = renderCard(payload("github"));
     await waitFor(() => expect(webviewNode(container)).toBeTruthy());
     const node = webviewNode(container)!;
     // The whole point of the fix: the attribute must be present on the mounted
@@ -71,9 +84,9 @@ describe("McpAppView — MAJOR-1 per-server partition as a createElement PROP", 
   });
 
   it("distinct serverIds yield distinct partition attributes", async () => {
-    const a = render(<McpAppView payload={payload("github")} />);
+    const a = renderCard(payload("github"));
     await waitFor(() => expect(webviewNode(a.container)).toBeTruthy());
-    const b = render(<McpAppView payload={payload("gitlab")} />);
+    const b = renderCard(payload("gitlab"));
     await waitFor(() => expect(webviewNode(b.container)).toBeTruthy());
 
     const pa = webviewNode(a.container)!.getAttribute("partition");
@@ -86,7 +99,7 @@ describe("McpAppView — MAJOR-1 per-server partition as a createElement PROP", 
 
 describe("McpAppView — b3 disable-in-place on disconnect", () => {
   it("swaps the webview for a placeholder when its own server disconnects", async () => {
-    const { container } = render(<McpAppView payload={payload("github")} />);
+    const { container } = renderCard(payload("github"));
     await waitFor(() => expect(webviewNode(container)).toBeTruthy());
 
     act(() => {
@@ -99,7 +112,7 @@ describe("McpAppView — b3 disable-in-place on disconnect", () => {
   });
 
   it("ignores a disconnect for a DIFFERENT server", async () => {
-    const { container } = render(<McpAppView payload={payload("github")} />);
+    const { container } = renderCard(payload("github"));
     await waitFor(() => expect(webviewNode(container)).toBeTruthy());
 
     act(() => {
