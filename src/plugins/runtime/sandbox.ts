@@ -132,6 +132,10 @@ export function createNoopHostApi(
     callLlm: async () => { throw new Error("LLM not available in noop context"); },
     logEvent: () => {},
     onShutdown: () => {},
+    openExternalUrl: async () => { throw new Error("openExternalUrl not available in noop context"); },
+    // Fail-safe to false (no corp network) — a probe should never throw the
+    // caller's flow; matches hasRoutineBySource's graceful noop default.
+    probePrivateHost: async () => false,
     openAuthWindow: async () => { throw new Error("openAuthWindow not available in noop context"); },
     openAuthPartitionViewer: async () => { throw new Error("openAuthPartitionViewer not available in noop context"); },
     clearAuthPartition: async () => { throw new Error("clearAuthPartition not available in noop context"); },
