@@ -24,6 +24,9 @@ const mcpAppChannels = [
   // `oncalltool` — an app runs a tool on its own server. The most sensitive of the
   // set (it EXECUTES), so it must never be publicly reachable either.
   CHANNELS.mcp.callTool,
+  // `onmessage` — an app pushes text into the conversation (or the notification
+  // surface). Mutates conversation state, so it is internal for the same reason.
+  CHANNELS.mcp.uiMessage,
 ];
 
 describe("#885 MCP-app channels are internal (fail-closed)", () => {
@@ -33,6 +36,7 @@ describe("#885 MCP-app channels are internal (fail-closed)", () => {
     expect(CHANNELS.mcp.serverDisconnected).toBe("lvis:mcp:server-disconnected");
     expect(CHANNELS.mcp.disposeUiSession).toBe("lvis:mcp:dispose-ui-session");
     expect(CHANNELS.mcp.callTool).toBe("lvis:mcp:call-tool");
+    expect(CHANNELS.mcp.uiMessage).toBe("lvis:mcp:ui-message");
   });
 
   it("no MCP-app channel leaks into PUBLIC_CHANNELS", () => {

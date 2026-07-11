@@ -180,6 +180,15 @@ export const CHANNELS = {
     // itself is NOT authorized by the channel — it runs the same risk/consent gate as
     // any host tool call.
     callTool: "lvis:mcp:call-tool",
+    // MCP Apps `onmessage` (`ui/message`) — the app asks for its text to enter the
+    // conversation, or (with `_meta["lvisai/notification"]`) the notification surface.
+    // The renderer binds the card's `serverId` AND its origin session id; the app
+    // supplies neither. INTERNAL, same posture as `callTool`: absent from
+    // PUBLIC_CHANNELS / EXTERNAL_MUTATION_CHANNELS / CHANNEL_GESTURE (fail-closed
+    // isPublicChannel). Registered in ipc/domains/plugins.ts and gated on
+    // validateHostRendererSender — it mutates conversation state (queues guidance /
+    // stages a user-gated card) and fires OS notifications.
+    uiMessage: "lvis:mcp:ui-message",
     catalogList: "lvis:mcp:catalog:list",
     installFromMarketplace: "lvis:mcp:install-from-marketplace",
     importClaudeDesktopPreview: "lvis:mcp:import:claude-desktop:preview",
