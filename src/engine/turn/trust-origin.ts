@@ -24,6 +24,13 @@ export function initialToolTrustOrigin(inputOrigin: ChatInputOrigin, turnInput: 
   if (inputOrigin === "plugin-emitted") {
     return "plugin-emitted";
   }
+  // An MCP App's `ui/message` keeps its OWN provenance through the tool layer — it is
+  // neither the user's keyboard nor a plugin. Every consumer treats it as non-user
+  // (`isUserKeyboardOrigin` is false), and the turn additionally carries the `app:*`
+  // staged origin, which forces write/shell/network tools to ask.
+  if (inputOrigin === "app-emitted") {
+    return "app-emitted";
+  }
   return "llm-tool-arg";
 }
 

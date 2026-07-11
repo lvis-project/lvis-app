@@ -21,6 +21,7 @@ import type { GenericMessage } from "../../engine/llm/types.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { TurnResult } from "../../engine/conversation-loop.js";
 import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
+import { parseAppMessageEnvelope } from "../../shared/mcp-app-message-source.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
@@ -210,9 +211,15 @@ export function parseChatSendPayload(
   if (candidate.inputOrigin === "user-keyboard" && candidate.userActivation !== true) {
     return { ok: false, error: "user-keyboard-required" };
   }
-  const originSource = parseImportedTriggerEnvelope(candidate.input);
-  if (candidate.inputOrigin === "plugin-emitted" && !originSource) {
+  if (candidate.inputOrigin === "plugin-emitted" && !parseImportedTriggerEnvelope(candidate.input)) {
     return { ok: false, error: "missing-plugin-envelope" };
+  }
+  // An `app-emitted` send is an MCP App's `ui/message` that the USER confirmed from the
+  // staging card. The envelope is the provenance mechanism, so a send that claims the
+  // origin without carrying it is rejected here — the one place a claimed origin is
+  // checked against the text (mirrors the plugin envelope rule directly above).
+  if (candidate.inputOrigin === "app-emitted" && !parseAppMessageEnvelope(candidate.input)) {
+    return { ok: false, error: "missing-app-envelope" };
   }
   const personaPrompt = normalizePersonaPromptId(candidate.inputOrigin, candidate.personaPromptId);
   if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
