@@ -13,6 +13,7 @@ import type { KeywordEngine } from "../core/keyword-engine.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
+import type { McpAppModelContextStore } from "../mcp/mcp-app-model-context.js";
 import type { ConversationLoop } from "../engine/conversation-loop.js";
 import type { RoutineEngine } from "../core/routine-engine.js";
 import type { McpManager } from "../mcp/mcp-manager.js";
@@ -74,6 +75,14 @@ export interface AppServices {
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
   systemPromptBuilder: SystemPromptBuilder;
+  /**
+   * MCP-app `ui/update-model-context` slots — ONE instance shared by its only two
+   * consumers: the gated IPC (`mcp.uiModelContext`) writes a card's slot, and the
+   * SystemPromptBuilder's "MCP App Context" source reads the active session's slots at
+   * turn build. No push path exists between them, which is precisely why an app context
+   * update can never trigger a turn.
+   */
+  mcpAppModelContext: McpAppModelContextStore;
   conversationLoop: ConversationLoop;
   /**
    * Side-chat (workspace rail) — a SECOND, independently-streaming

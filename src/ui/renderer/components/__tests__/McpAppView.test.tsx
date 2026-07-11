@@ -54,6 +54,16 @@ const disposeUiSession = vi.fn();
 const openDetached = vi.fn(async () => ({ ok: true as const, windowId: 7 }));
 /** The gated save path behind `ondownloadfile`. */
 const downloadFile = vi.fn(async () => ({ ok: true as const, disposition: "saved" as const }));
+/**
+ * The gated per-card context slot behind `onupdatemodelcontext`. Declared with its real
+ * arity so the assertions below can read the THREE renderer-supplied bindings positionally.
+ */
+const postUiModelContext = vi.fn(
+  async (_serverId: string, _sessionId: string, _cardId: string, _params: unknown) => ({
+    ok: true as const,
+    disposition: "stored" as const,
+  }),
+);
 
 function stubLvis() {
   disconnectHandler = null;
@@ -63,6 +73,7 @@ function stubLvis() {
       disposeUiSession,
       openDetached,
       downloadFile,
+      postUiModelContext,
       onServerDisconnected: (handler: (serverId: string) => void) => {
         disconnectHandler = handler;
         return () => {
@@ -374,5 +385,48 @@ describe("McpAppView — download sink is BOUND to the card's server", () => {
     await deps.downloadFile(params);
 
     expect(downloadFile).toHaveBeenCalledWith("github", params);
+  });
+});
+
+describe("McpAppView — model-context sink is BOUND to server + session + card", () => {
+  it("supplies all three bindings the app cannot name, plus the spec params", async () => {
+    postUiModelContext.mockClear();
+    const { container } = renderCard(payload("github"));
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+    const deps = createMcpAppBridgeMock.mock.calls[0]![4] as {
+      updateModelContext: (params: unknown) => Promise<{ ok: boolean }>;
+    };
+
+    const params = { content: [{ type: "text", text: "cart: 3 items" }] };
+    await deps.updateModelContext(params);
+
+    expect(postUiModelContext).toHaveBeenCalledTimes(1);
+    const [serverId, sessionId, cardId, forwarded] = postUiModelContext.mock.calls[0]!;
+    expect(serverId).toBe("github");
+    // No ChatContext in this harness → the origin session is empty, which is never the
+    // live session id, so main drops the update. Fail-safe, same as `onmessage`.
+    expect(sessionId).toBe("");
+    // A card id the RENDERER minted: stable, non-empty, and never named by the app.
+    expect(cardId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(forwarded).toEqual(params);
+  });
+
+  it("gives two mounted cards DIFFERENT ids, so one cannot overwrite the other's slot", async () => {
+    postUiModelContext.mockClear();
+    const first = renderCard(payload("github"));
+    await waitFor(() => expect(webviewNode(first.container)).toBeTruthy());
+    const second = renderCard(payload("github"));
+    await waitFor(() => expect(webviewNode(second.container)).toBeTruthy());
+
+    const depsOf = (index: number) =>
+      createMcpAppBridgeMock.mock.calls[index]![4] as {
+        updateModelContext: (params: unknown) => Promise<{ ok: boolean }>;
+      };
+    await depsOf(0).updateModelContext({ content: [] });
+    await depsOf(1).updateModelContext({ content: [] });
+
+    const cardIdA = postUiModelContext.mock.calls[0]![2];
+    const cardIdB = postUiModelContext.mock.calls[1]![2];
+    expect(cardIdA).not.toBe(cardIdB);
   });
 });

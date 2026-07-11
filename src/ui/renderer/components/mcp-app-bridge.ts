@@ -35,8 +35,10 @@ import { createOnCallTool } from "./mcp-app-bridge/handlers/on-call-tool.js";
 import { createOnMessage } from "./mcp-app-bridge/handlers/on-message.js";
 import { createOnRequestDisplayMode } from "./mcp-app-bridge/handlers/on-request-display-mode.js";
 import { createOnDownloadFile } from "./mcp-app-bridge/handlers/on-download-file.js";
+import { createOnUpdateModelContext } from "./mcp-app-bridge/handlers/on-update-model-context.js";
 import type { McpUiMessageOutcome } from "../../../mcp/mcp-ui-message.js";
 import type { McpUiDownloadOutcome } from "../../../mcp/mcp-app-download.js";
+import type { McpUiModelContextOutcome } from "../../../mcp/mcp-app-model-context.js";
 import type { McpUiDisplayMode } from "../../../shared/mcp-app-display-mode.js";
 
 /**
@@ -104,6 +106,14 @@ export interface McpAppBridgeDeps {
    * to save is not an error.
    */
   downloadFile(params: unknown): Promise<McpUiDownloadOutcome>;
+  /**
+   * `onupdatemodelcontext` sink — the app OVERWROTE the context it wants the model to
+   * have NEXT turn. Routed through the host's gated `CHANNELS.mcp.uiModelContext` IPC,
+   * which McpAppView binds to the card's `serverId`, its origin session, and its card id.
+   * Main stores it as untrusted DATA in that card's one slot; the slot is read at the
+   * next prompt build, so this can never start a turn.
+   */
+  updateModelContext(params: unknown): Promise<McpUiModelContextOutcome>;
 }
 
 /**
@@ -180,6 +190,18 @@ export function createMcpAppBridge(
       capability: { message: { text: {} } },
       register: (bridge) => {
         bridge.onmessage = createOnMessage({ postMessage: deps.postMessage });
+      },
+    },
+    // `ui/update-model-context` → advertises `updateModelContext: { text, structuredContent }`
+    // — exactly the two modalities main SERIALIZES into the prompt (text blocks, and
+    // structured content as fenced JSON). Advertising `image`/`audio`/`resource` here
+    // would invite a payload the host silently drops.
+    {
+      capability: { updateModelContext: { text: {}, structuredContent: {} } },
+      register: (bridge) => {
+        bridge.onupdatemodelcontext = createOnUpdateModelContext({
+          updateModelContext: deps.updateModelContext,
+        });
       },
     },
     // `ui/download-file` → advertises `downloadFile`. The handler gets the serverId-BOUND

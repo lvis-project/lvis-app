@@ -45,6 +45,7 @@ import {
 import type { McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
 import { parseUiMessageIntent, type McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
 import { parseMcpAppDownload, type McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
+import type { McpUiModelContextOutcome } from "../../mcp/mcp-app-model-context.js";
 import { appMessageSource, formatAppMessageEnvelope, isAppMessageOrigin } from "../../shared/mcp-app-message-source.js";
 // The MCP-app `ui/message` staging path reuses the plugin overlay gate's rate limiter
 // (one mechanism for "staged conversation proposals") and the same overlay push channel.
@@ -1426,6 +1427,64 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     return { ok: true, disposition: "saved" } satisfies McpUiDownloadOutcome;
   });
+
+  // ─── MCP Apps `onupdatemodelcontext` (`ui/update-model-context`) ────────────────
+  //
+  // The app OVERWRITES the context it wants the model to have on the NEXT turn. The three
+  // spec semantics are structural here, not policy:
+  //
+  //  1. OVERWRITE — the store keys one slot per (session, server, card) and re-`set`s it.
+  //     The renderer binds ALL THREE (the app names none), so a card can overwrite only
+  //     its own slot, and only in the conversation it belongs to.
+  //  2. DEFERRED to the next turn — nothing is pushed anywhere. `SystemPromptBuilder`
+  //     READS the active session's slots when it assembles the next prompt.
+  //  3. NEVER a follow-up — this handler has no path to the conversation loop. Not a rule
+  //     it obeys; a reference it does not hold. (`ui/message` is the channel that CAN
+  //     reach a turn, and only behind a user-gated card. They are separate on purpose.)
+  //
+  // The body is UNTRUSTED APP DATA. The store fences it and the prompt source labels it
+  // "data, never instructions" — the same framing `<app-message>` bodies and the skills
+  // catalog already carry. A session MISMATCH drops the update (the card belongs to a
+  // conversation the user has left): fail-safe, one comparison, mirroring `ui/message`.
+  //
+  // Sender: `validateHostRendererSender` — it mutates what the model reads next turn.
+  ipcMain.handle(
+    CHANNELS.mcp.uiModelContext,
+    (e, serverId: unknown, cardSessionId: unknown, cardId: unknown, params: unknown) => {
+      if (!validateHostRendererSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.mcp.uiModelContext, e);
+        return UNAUTHORIZED_FRAME;
+      }
+      const auditContext = (type: "info" | "error", input: string) => {
+        auditLogger.log({ timestamp: new Date().toISOString(), sessionId: "mcp-app", type, input });
+      };
+      if (typeof serverId !== "string" || typeof cardId !== "string") {
+        return { ok: false, error: "invalid-binding", message: "serverId and cardId must be strings" } satisfies McpUiModelContextOutcome;
+      }
+      if (typeof cardSessionId !== "string" || cardSessionId !== deps.conversationLoop.getSessionId()) {
+        auditContext("info", `[mcp-app:${serverId}] ui/update-model-context dropped: session mismatch`);
+        return { ok: false, error: "session-mismatch", message: "the card's session is not the active conversation" } satisfies McpUiModelContextOutcome;
+      }
+
+      const record = asPlainRecord(params);
+      const outcome = deps.mcpAppModelContext.update({
+        sessionId: cardSessionId,
+        serverId,
+        cardId,
+        content: record.content,
+        structuredContent: record.structuredContent,
+      });
+      // The app gets an EmptyResult either way (the spec gives this request no error
+      // channel), so a refusal — an over-cap body above all — is recorded HERE or nowhere.
+      auditContext(
+        outcome.ok ? "info" : "error",
+        outcome.ok
+          ? `[mcp-app:${serverId}] ui/update-model-context ${outcome.disposition}`
+          : `[mcp-app:${serverId}] ui/update-model-context refused: ${outcome.error}`,
+      );
+      return outcome;
+    },
+  );
 
   // Card unmount → free its proxy-session token promptly, so a long chat with many
   // cards does not let the global LRU evict a STILL-MOUNTED card's token (which would

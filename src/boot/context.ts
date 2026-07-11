@@ -49,6 +49,7 @@ import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import type { MarketplaceFetcher, PluginMarketplaceService } from "../plugins/marketplace.js";
 import type { PluginArtifactStore } from "../plugins/plugin-artifact-store.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
+import type { McpAppModelContextStore } from "../mcp/mcp-app-model-context.js";
 import type { RoutineEngine } from "../core/routine-engine.js";
 import type { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ConversationLoop } from "../engine/conversation-loop.js";
@@ -138,6 +139,12 @@ export interface BootContext {
 
   // ── Prompt / reviewer wiring ───────────────────────────────────────────────
   systemPromptBuilder: SystemPromptBuilder;
+  /**
+   * MCP-app `ui/update-model-context` slots. ONE instance, two consumers, and that is the
+   * whole design: the gated IPC WRITES a card's slot, and the SystemPromptBuilder source
+   * READS the active session's slots at turn build. Nothing pushes.
+   */
+  mcpAppModelContext: McpAppModelContextStore;
   rewireReviewerAgent: () => void;
 
   // ── Hooks + plugin tool execution surface ──────────────────────────────────

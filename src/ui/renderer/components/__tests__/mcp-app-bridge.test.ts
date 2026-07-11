@@ -17,6 +17,7 @@ const { FakeAppBridge } = vi.hoisted(() => {
     oncalltool?: unknown;
     onmessage?: unknown;
     ondownloadfile?: unknown;
+    onupdatemodelcontext?: unknown;
     onopenlink?: unknown;
     onsizechange?: unknown;
     onrequestdisplaymode?: unknown;
@@ -43,6 +44,7 @@ const { FakeAppBridge } = vi.hoisted(() => {
         oncalltool: typeof this.oncalltool === "function",
         onmessage: typeof this.onmessage === "function",
         ondownloadfile: typeof this.ondownloadfile === "function",
+        onupdatemodelcontext: typeof this.onupdatemodelcontext === "function",
         onopenlink: typeof this.onopenlink === "function",
         onsizechange: typeof this.onsizechange === "function",
         onrequestdisplaymode: typeof this.onrequestdisplaymode === "function",
@@ -75,6 +77,7 @@ function build() {
       getDisplayMode: vi.fn(() => "inline" as const),
       applyDisplayMode: vi.fn(async () => "inline" as const),
       downloadFile: vi.fn(async () => ({ ok: true as const, disposition: "saved" as const })),
+      updateModelContext: vi.fn(async () => ({ ok: true as const, disposition: "stored" as const })),
     },
   );
 }
@@ -97,6 +100,7 @@ describe("createMcpAppBridge — capabilities are derived from the single active
       serverResources: {},
       serverTools: {},
       message: { text: {} },
+      updateModelContext: { text: {}, structuredContent: {} },
       downloadFile: {},
       openLinks: {},
     });
@@ -115,6 +119,7 @@ describe("createMcpAppBridge — every handler registers before connect()", () =
       oncalltool: true,
       onmessage: true,
       ondownloadfile: true,
+      onupdatemodelcontext: true,
       onopenlink: true,
       onsizechange: true,
       onrequestdisplaymode: true,
@@ -129,6 +134,7 @@ describe("createMcpAppBridge — every handler registers before connect()", () =
     expect(typeof fake.oncalltool).toBe("function");
     expect(typeof fake.onmessage).toBe("function");
     expect(typeof fake.ondownloadfile).toBe("function");
+    expect(typeof fake.onupdatemodelcontext).toBe("function");
     expect(typeof fake.onopenlink).toBe("function");
     expect(typeof fake.onsizechange).toBe("function");
     expect(typeof fake.onrequestdisplaymode).toBe("function");
