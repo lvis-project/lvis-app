@@ -160,23 +160,10 @@
     },
     "capabilities": {
       "type": "array",
-      "description": "Closed vocabulary — see src/plugins/capabilities.ts (KNOWN_CAPABILITIES). Unknown values fail validation so typos don't silently grant nothing.",
+      "description": "Free-form capability declarations (format-validated, NOT a closed enum). The host ENFORCES only two at runtime — 'external-auth-consumer' and 'host:overlay' (see src/plugins/capabilities.ts KNOWN_CAPABILITY_IDS). Every other string is a harmless self-declaration (e.g. the live 'worker-client' host discovery key, or legacy strings on already-installed manifests). Kept free-form — rather than an enum — so an installed manifest declaring a removed/legacy capability still validates and loads instead of being rejected at schema validation. Emit authorization for event-source namespaces (email/calendar/meeting/index) is inferred from emittedEvents, not from a capability here. The pattern is format hygiene only (blocks uppercase/whitespace/garbage), not a vocabulary.",
       "items": {
         "type": "string",
-        "enum": [
-          "ms-graph-consumer",
-          "external-auth-consumer",
-          "mail-source",
-          "calendar-source",
-          "routine-provider",
-          "meeting-recorder",
-          "knowledge-index",
-          "background-watcher",
-          "worker-client",
-          "document-indexer",
-          "lifecycle-observer",
-          "host:overlay"
-        ]
+        "pattern": "^[a-z][a-z0-9:-]*$"
       }
     },
     "networkAccess": {
@@ -322,7 +309,7 @@
       "properties": {
         "label": {
           "type": "string",
-          "description": "Human-readable label for the auth surface, shown next to the badge (e.g. 'Microsoft 계정', 'LGE 포털'). Defaults to the plugin's `name` if omitted.",
+          "description": "Human-readable label for the auth surface, shown next to the badge (e.g. 'Microsoft 계정', '사내 포털'). Defaults to the plugin's `name` if omitted.",
           "maxLength": 64
         },
         "statusTool": {

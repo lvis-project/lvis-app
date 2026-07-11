@@ -15,7 +15,8 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../../plugins/runtime.js";
-import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
+import { canEmitEvent, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
+import { getDeclaredEmittedEvents } from "../../plugins/runtime/manifest-validation.js";
 import { registerManifestEventSubscriptions } from "../plugins.js";
 import type { AuditEntry } from "../../audit/audit-logger.js";
 import { mkdtempSync } from "node:fs";
@@ -29,8 +30,10 @@ function collectingAudit() {
 }
 
 /**
- * Mirror the boot.ts emit closure that gates + audit-logs capability violations.
- * Duplicated here because boot.ts builds it inline inside createHostApi.
+ * Mirror the createHostApi emit closure that gates + audit-logs emit denials.
+ * Duplicated here because createHostApi builds it inline. Authorization for a
+ * gated namespace is inferred from the manifest's declared emittedEvents; the
+ * internal effect label (`required`) is retained for the audit trail.
  */
 function makeGuardedEmit(
   runtime: PluginRuntime,
@@ -39,18 +42,17 @@ function makeGuardedEmit(
 ) {
   const emitted: Array<{ type: string; data: unknown }> = [];
   const emit = (type: string, data?: unknown): void => {
-    const required = requiredCapabilityForEmit(type);
-    if (required) {
-      const manifest = runtime.getPluginManifest(pluginId);
-      if (!manifest?.capabilities?.includes(required)) {
-        auditLogger.log({
-          timestamp: new Date().toISOString(),
-          sessionId: "plugin",
-          type: "error",
-          input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${required} actual=${(manifest?.capabilities ?? []).join("|")}`,
-        });
-        return;
-      }
+    const manifest = runtime.getPluginManifest(pluginId);
+    const declaredEmittedEvents = manifest ? getDeclaredEmittedEvents(manifest) : [];
+    if (!canEmitEvent(type, declaredEmittedEvents)) {
+      const required = requiredCapabilityForEmit(type);
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "plugin",
+        type: "error",
+        input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${required} declaredEmittedEvents=${declaredEmittedEvents.join("|")}`,
+      });
+      return;
     }
     emitted.push({ type, data });
   };
@@ -128,7 +130,7 @@ describe("M4 — capability violation audit trail", () => {
   }
 
   it("emitEvent without required capability writes an audit error", async () => {
-    await writePlugin("p-no-mail", { capabilities: ["worker-client"] });
+    await writePlugin("p-no-mail", { emittedEvents: ["custom.ping"] });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
@@ -144,7 +146,7 @@ describe("M4 — capability violation audit trail", () => {
   });
 
   it("legitimate emit with the right capability does NOT audit-log", async () => {
-    await writePlugin("p-mail", { capabilities: ["mail-source"] });
+    await writePlugin("p-mail", { emittedEvents: ["email.new"] });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
@@ -157,7 +159,7 @@ describe("M4 — capability violation audit trail", () => {
   });
 
   it("neutral namespace emit (no capability required) does NOT audit-log", async () => {
-    await writePlugin("p-any", { capabilities: [] });
+    await writePlugin("p-any", { emittedEvents: [] });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 

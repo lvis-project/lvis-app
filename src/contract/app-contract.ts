@@ -185,6 +185,11 @@ export const CHANNELS = {
     openDetached: "lvis:mcp:open-detached",
     detachedPayload: "lvis:mcp:detached-payload",
     serverDisconnected: "lvis:mcp:server-disconnected",
+    // Renderer → main on card unmount: dispose the sandbox-proxy session so its token
+    // is freed promptly instead of waiting for the global LRU to evict it. INTERNAL,
+    // same posture as the three above. Idempotent and harmless — worst case a stale
+    // token 404s a dead card's reload.
+    disposeUiSession: "lvis:mcp:dispose-ui-session",
   },
   /** Plugin webview bridge (lvis:plugin:*) — sandboxed plugin-frame origin. */
   pluginBridge: {

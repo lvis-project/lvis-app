@@ -462,7 +462,12 @@ describe("ChatSidePanel", () => {
   });
 
   it("renders MCP app payloads through McpAppView in a preview tab", async () => {
-    const readUiResource = vi.fn(async () => "<main>MCP preview card</main>");
+    // Main returns a bundle: the sandbox-proxy URL to navigate to + the app HTML
+    // (which now travels over the bridge, not in the document URL).
+    const readUiResource = vi.fn(async () => ({
+      proxyUrl: "lvis-mcp-app://7365727665722d61/proxy.html?t=tok",
+      html: "<main>MCP preview card</main>",
+    }));
     vi.stubGlobal("lvis", {
       mcp: { readUiResource },
     });
@@ -503,6 +508,8 @@ describe("ChatSidePanel", () => {
 
     fireEvent.click(screen.getByTestId("chat-side-panel-launcher-preview"));
     await waitFor(() => {
+      // Only (serverId, uri). The CSP is NOT a renderer-supplied argument: main
+      // derives it from the resource's own _meta.ui.csp that it just fetched.
       expect(readUiResource).toHaveBeenCalledWith("server-a", "ui://server-a/card");
     });
     const webview = await waitFor(() => {
@@ -510,7 +517,12 @@ describe("ChatSidePanel", () => {
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });
-    expect(webview.getAttribute("src")).toContain("MCP%20preview%20card");
+    // The webview navigates to the host-owned sandbox-proxy document. The app HTML
+    // is NO LONGER percent-encoded into the URL — it now travels over the bridge as
+    // `ui/notifications/sandbox-resource-ready`, so it neither hits the ~2MB
+    // data:-URL cap nor lands in an opaque-origin document.
+    expect(webview.getAttribute("src")).toBe("lvis-mcp-app://7365727665722d61/proxy.html?t=tok");
+    expect(webview.getAttribute("src")).not.toContain("MCP%20preview%20card");
   });
 
   it("file-browser tab renders the project-roots browser and a scrollable tab strip (diagnosis ②③)", () => {

@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload } from "./types.js";
+import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceRead } from "./types.js";
 import { McpGovernance } from "./mcp-governance.js";
 import { McpClient, scrubSecrets } from "./mcp-client.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -311,10 +311,11 @@ export class McpManager {
   // ─── MCP Apps UI Resource ────────────────────────────
 
   /**
-   * Fetch a `ui://` resource from the given MCP server.
-   * Delegates to {@link McpClient.readResource}.
+   * Fetch a `ui://` resource from the given MCP server — the HTML plus the
+   * resource's OWN declared `_meta.ui` (csp / permissions), which main uses to build
+   * that card's sandbox-proxy CSP header. Delegates to {@link McpClient.readResource}.
    */
-  async readUiResource(serverId: string, uri: string): Promise<string> {
+  async readUiResource(serverId: string, uri: string): Promise<McpUiResourceRead> {
     const client = this.clients.get(serverId);
     if (!client) {
       throw new Error(`[mcp-manager] ${t("be_mcpManager.serverNotFound", { serverId })}`);

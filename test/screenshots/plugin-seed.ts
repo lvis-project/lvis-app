@@ -88,7 +88,7 @@ export function resolvePluginSourceRoot(repoRoot: string, probeSlug = 'lvis-plug
 
 /** Map a manifest id (e.g. "local-indexer") to its sibling repo slug. */
 function repoSlugForPlugin(id: string, sourceRoot: string): string | null {
-  // Most repos are `lvis-plugin-<id>`; ms-graph/lge-api follow the same rule.
+  // Most repos are `lvis-plugin-<id>`; ms-graph/ep follow the same rule.
   const candidates = [`lvis-plugin-${id}`, id];
   for (const slug of candidates) {
     if (fs.existsSync(path.join(sourceRoot, slug, 'plugin.json'))) return slug;

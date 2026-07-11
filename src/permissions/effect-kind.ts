@@ -79,6 +79,7 @@ export type ChokepointKind =
   | "getInstalledPluginIds" // reads the loaded-plugin id list
   | "hasRoutineBySource" // prefix-scoped boolean probe of the routines SOT
   | "getAppPreference" // reads an allow-listed host preference
+  | "probePrivateHost" // DNS presence probe (UX hint; no persistence, no egress body)
   | "resolveApiKey" // leases/reads a host-managed credential (no persisted mutation)
   | "logEvent" // routes to the host AuditLogger (the telemetry channel itself)
   // FAIL-CLOSED sentinel — recorded for any hostApi method PATH absent from
@@ -140,6 +141,7 @@ export const CHOKEPOINT_EFFECT: Record<StaticChokepointKind, Effect> = {
   getInstalledPluginIds: "read",
   hasRoutineBySource: "read",
   getAppPreference: "read",
+  probePrivateHost: "read",
   resolveApiKey: "read",
   logEvent: "read",
   // FAIL-CLOSED — an unmapped hostApi method is conservatively MUTATING.
@@ -302,6 +304,11 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   "storage.writeJson": { kind: "storageWrite", async: true, targetFromArgs: firstStringArg },
   "storage.rm": { kind: "storageRm", async: true, targetFromArgs: firstStringArg },
   "storage.mkdir": { kind: "storageMkdir", async: true, targetFromArgs: firstStringArg },
+  // Encrypted-at-rest variants — same read/write classes as the plaintext
+  // methods. writeEncrypted is an async write so it auto-joins GATED_EFFECT_PATHS
+  // (effect-boundary approval, identical to storage.write); readEncrypted is a read.
+  "storage.writeEncrypted": { kind: "storageWrite", async: true, targetFromArgs: firstStringArg },
+  "storage.readEncrypted": { kind: "storageRead", targetFromArgs: firstStringArg },
   // ─── config.* ─────────────────────────────────────────────────────────────
   "config.get": { kind: "config.get", targetFromArgs: firstStringArg },
   "config.set": { kind: "config.set", async: true, targetFromArgs: firstStringArg },
@@ -312,6 +319,9 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   // Idempotency SOT probe — `source` arg is a non-secret forensic descriptor.
   hasRoutineBySource: { kind: "hasRoutineBySource", targetFromArgs: firstStringArg },
   getAppPreference: { kind: "getAppPreference", targetFromArgs: firstStringArg },
+  // Corp-network DNS presence probe — a read (no persistence / no egress body);
+  // the bare hostname is a non-secret forensic descriptor.
+  probePrivateHost: { kind: "probePrivateHost", targetFromArgs: firstStringArg },
   resolveApiKey: { kind: "resolveApiKey", targetFromArgs: objectStringField("purpose") },
   callTool: { kind: "callTool", targetFromArgs: firstStringArg },
   emitEvent: { kind: "emitEvent", targetFromArgs: firstStringArg },

@@ -45,4 +45,14 @@ describe("global webview navigation policy", () => {
     expect(decision({ url: "data:text/html,ok" })).toBe(false);
     expect(decision({ url: "about:blank" })).toBe(false);
   });
+
+  it("allows the host-owned lvis-mcp-app:// sandbox-proxy scheme", () => {
+    // Without this branch the fallback (data:/about: only) would BLOCK a
+    // page-initiated re-navigation / crash-recovery reload of the proxy document,
+    // silently breaking the card. protocol.handle already fail-closes on a bad token
+    // or authority mismatch, so allowing the scheme here is safe.
+    expect(decision({ url: "lvis-mcp-app://abc123/proxy.html?t=tok" })).toBe(false);
+    // A look-alike that only starts with the string but isn't the scheme is still blocked.
+    expect(decision({ url: "https://lvis-mcp-app.evil.example/" })).toBe(true);
+  });
 });

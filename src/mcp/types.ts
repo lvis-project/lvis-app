@@ -259,20 +259,60 @@ export type ValidationResult =
  */
 export type McpUiSlot = "chat" | "sidebar" | "tool-result";
 
-export interface McpUiCspPolicy {
-  /**
-   * Host-sanitized renderer CSP additions. Keys may be camelCase here; the
-   * renderer also tolerates kebab-case wire keys from `_meta.ui.csp`.
-   */
-  scriptSrc?: string[];
-  styleSrc?: string[];
-  imgSrc?: string[];
-  fontSrc?: string[];
-  connectSrc?: string[];
-  mediaSrc?: string[];
-  frameSrc?: string[];
-  workerSrc?: string[];
-  [directive: string]: unknown;
+/**
+ * A UI resource's declared CSP — the MCP Apps spec shape (`McpUiResourceCsp`).
+ *
+ * Deliberately **domain buckets, not CSP directive names**. The previous host type
+ * was keyed by directive (`scriptSrc`/`connectSrc`/…), which meant a spec-conformant
+ * server's `connectDomains` was silently dropped and its network access denied.
+ *
+ * Lives on the RESOURCE (`resources/read` content item `_meta.ui`), never on the
+ * tool result — the tool's `_meta.ui` carries only `resourceUri` + rendering hints.
+ *
+ * Kept structurally identical to upstream `McpUiResourceCsp` rather than imported
+ * from it: this type crosses the main/preload/renderer boundary, and ext-apps 1.7.4's
+ * `.d.ts` files use extensionless relative imports that do not resolve under
+ * `moduleResolution: NodeNext`. `__tests__/mcp-app-csp.test.ts` pins it against the
+ * upstream type so a spec change fails the suite instead of drifting silently.
+ */
+export interface McpUiResourceCsp {
+  /** Origins for network requests (fetch/XHR/WebSocket) → `connect-src`. */
+  connectDomains?: string[];
+  /** Origins for images, scripts, stylesheets, fonts, media → those five directives. */
+  resourceDomains?: string[];
+  /** Origins for nested iframes → `frame-src`. */
+  frameDomains?: string[];
+  /** Allowed base URIs for the document → `base-uri`. */
+  baseUriDomains?: string[];
+}
+
+/**
+ * Sandbox permissions a UI resource requests (spec `McpUiResourcePermissions`).
+ * Each maps to a Permission-Policy feature on the inner iframe. Absent ⇒ denied.
+ */
+export interface McpUiResourcePermissions {
+  camera?: Record<string, never>;
+  microphone?: Record<string, never>;
+  geolocation?: Record<string, never>;
+  clipboardWrite?: Record<string, never>;
+}
+
+/** The security-relevant `_meta.ui` a UI resource carries (spec `McpUiResourceMeta`). */
+export interface McpUiResourceMeta {
+  csp?: McpUiResourceCsp;
+  permissions?: McpUiResourcePermissions;
+}
+
+/**
+ * What `resources/read` yields for a UI resource: the HTML plus the resource's OWN
+ * declared security metadata. `readResource` previously returned a bare string and
+ * dropped `_meta` entirely, which is why the CSP had to be (wrongly) sourced from the
+ * tool result. Main builds the sandbox-proxy CSP header from this.
+ */
+export interface McpUiResourceRead {
+  html: string;
+  csp?: McpUiResourceCsp;
+  permissions?: McpUiResourcePermissions;
 }
 
 /**
@@ -298,6 +338,31 @@ export interface McpUiPayload {
   height?: number;
   /** Human-readable title shown in the webview title bar. */
   title?: string;
-  /** Optional `_meta.ui.csp` renderer policy. Sanitized by `McpAppView`. */
-  csp?: McpUiCspPolicy;
+  // NOTE: deliberately NO `csp` here. Per spec, `csp`/`permissions` live on the
+  // RESOURCE (`resources/read` content item `_meta.ui`), not on the tool result, and
+  // the CSP must never round-trip through the renderer — a compromised renderer
+  // could forge a permissive policy and widen the envelope containing the untrusted
+  // app. Main derives it from the resource it just fetched. A `csp` on a tool result
+  // is ignored.
+}
+
+/**
+ * What `lvis.mcp.readUiResource` returns — everything a card needs to render one
+ * MCP App through the sandbox-proxy.
+ *
+ * It is a bundle rather than a bare HTML string because the two halves are now
+ * delivered over different channels: the proxy DOCUMENT is navigated to (and
+ * carries the CSP header the app inherits), while the app HTML travels over the
+ * JSON-RPC bridge as `ui/notifications/sandbox-resource-ready`. Main mints both
+ * together so they cannot drift.
+ */
+export interface McpUiResourceBundle {
+  /**
+   * `lvis-mcp-app://<hex(serverId)>/proxy.html?t=<token>` — the host-owned
+   * sandbox-proxy document for this card. The token selects the CSP main serves
+   * it with; it is host-minted and bound to the serverId.
+   */
+  proxyUrl: string;
+  /** The app HTML, mounted into the inner sandboxed iframe by the relay preload. */
+  html: string;
 }

@@ -28,12 +28,14 @@ import { recordEffect } from "../../../permissions/effect-ledger.js";
 import { methodEffect } from "../../../permissions/effect-kind.js";
 import type { PluginRegistryEntry } from "../../../plugins/types.js";
 import { createPluginStorage } from "../../../plugins/storage.js";
+import { probePrivateHost } from "../../../plugins/private-host-probe.js";
 import { shouldBlockPluginSecretRead } from "../../../plugins/secret-shape.js";
 import {
   canEmitEvent,
   requiredCapabilityForEmit,
   CAPABILITY_EXTERNAL_AUTH_CONSUMER,
 } from "../../../plugins/capabilities.js";
+import { getDeclaredEmittedEvents } from "../../../plugins/runtime/manifest-validation.js";
 import { applyConfigDefaults } from "../../../plugins/config-schema.js";
 import { OVERLAY_V1 } from "../../../shared/ipc-channels.js";
 import {
@@ -299,15 +301,15 @@ export function createHostApiFactory(
       emitEvent: (type, data) => {
         plog("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, eventType: type }, "checking emit capability");
         const manifest = pluginRuntime?.getPluginManifest(pluginId);
-        const manifestCapabilities = manifest?.capabilities ?? [];
-        if (!canEmitEvent(type, manifestCapabilities)) {
+        const declaredEmittedEvents = manifest ? getDeclaredEmittedEvents(manifest) : [];
+        if (!canEmitEvent(type, declaredEmittedEvents)) {
           const requiredCap = requiredCapabilityForEmit(type);
           try {
             bootAuditLogger.log({
               timestamp: new Date().toISOString(),
               sessionId: "plugin",
               type: "error",
-              input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${requiredCap} actual=${manifestCapabilities.join("|")}`,
+              input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${requiredCap} declaredEmittedEvents=${declaredEmittedEvents.join("|")}`,
             });
           } catch { /* audit must not break host */ }
           plog("warn", { pluginId, phase: PluginPhase.CAPABILITY_DENY, capability: requiredCap ?? type, eventType: type, reason: "missing_capability" }, "capability denied");
@@ -780,6 +782,45 @@ export function createHostApiFactory(
       },
       getAppPreference: <T = unknown>(key: string): T | undefined => {
         return readAppPreference(pluginId, key) as T | undefined;
+      },
+      // ─── Corp-network presence probe ───────────────────────────────────
+      // Lands the SDK `runtime/network.ts#detectViaPrivateDnsProbe` shim in
+      // hostApi so plugins never reach `dns.lookup` (or a raw corp-network
+      // presence probe) directly. Pure DNS race with host-side host validation
+      // + timeout clamping; UX hint only, NOT a trust boundary (see the impl
+      // header). Module-level dedup/no-cache/unref'd-timer semantics live in
+      // private-host-probe.ts.
+      //
+      // Durable audit: the probe is classified `read`, so it never reaches the
+      // executor's AuditLogger path — yet it is a network-adjacent oracle that
+      // reveals which INTERNAL host a plugin is targeting. Record host + outcome
+      // here (the host chokepoint) so operators keep a trail. The host is capped
+      // to 64 chars so an attacker-controlled name cannot bloat the JSONL, and
+      // the audit write is best-effort (must never break the probe).
+      probePrivateHost: async (host: string, opts?: { timeoutMs?: number }): Promise<boolean> => {
+        const auditHost = (typeof host === "string" ? host : String(host)).slice(0, 64);
+        try {
+          const resolved = await probePrivateHost(host, opts);
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "tool_call",
+              input: `[plugin:${pluginId}] probe_private_host host=${auditHost} resolved=${resolved}`,
+            });
+          } catch { /* audit must not break host */ }
+          return resolved;
+        } catch (err) {
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "warn",
+              input: `[plugin:${pluginId}] probe_private_host_rejected host=${auditHost} reason=${(err as Error).message.slice(0, 120)}`,
+            });
+          } catch { /* audit must not break host */ }
+          throw err;
+        }
       },
       // ─── External portal interactive auth (cookie collection) ──────────
       // Gated by the `external-auth-consumer` capability. Cookies are sensitive

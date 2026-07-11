@@ -124,4 +124,7 @@ module.exports = [
   renderer,
   preloadConfig("preload", "src/preload.ts", "preload.cjs"),
   preloadConfig("pluginPreload", "src/plugin-preload.ts", "plugin-preload.cjs"),
+  // MCP-App sandbox-proxy relay. Installed via session.setPreloads() on the
+  // per-server `lvis-mcp-app:<hex>` partition (see html-preview-partition.ts).
+  preloadConfig("mcpAppPreload", "src/mcp-app-preload.ts", "mcp-app-preload.cjs"),
 ];

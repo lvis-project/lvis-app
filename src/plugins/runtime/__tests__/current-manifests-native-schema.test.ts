@@ -7,7 +7,7 @@
  * The fixtures under `fixtures/current-plugin-manifests/` are verbatim copies of
  * the published `plugin.json` for each active plugin (fetched via `gh api`) at
  * the time of the v5.13.0 → v5.18.0 SDK bump:
- *   ms-graph 0.3.36, lge-api 0.17.23, meeting 0.5.27, work-assistant 0.10.3,
+ *   ms-graph 0.3.36, ep-api 0.17.23, meeting 0.5.27, work-assistant 0.10.3,
  *   local-indexer 0.5.1, plugin-template 0.1.1.
  *
  * This pins the migration claim: v5.21.0 carries hostSecrets, networkAccess,
@@ -30,7 +30,7 @@ const fixturesDir = join(
 
 const EXPECTED_IDS: Record<string, string> = {
   "ms-graph.plugin.json": "ms-graph",
-  "lge-api.plugin.json": "lge-api",
+  "ep-api.plugin.json": "ep-api",
   "meeting.plugin.json": "meeting",
   "work-assistant.plugin.json": "work-assistant",
   "local-indexer.plugin.json": "local-indexer",
