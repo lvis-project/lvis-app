@@ -198,6 +198,15 @@ export const CHANNELS = {
     // Registered in ipc/domains/plugins.ts and gated on validateHostRendererSender —
     // state-mutating (it writes a file the user picked).
     uiDownloadFile: "lvis:mcp:ui-download-file",
+    // MCP Apps `onupdatemodelcontext` (`ui/update-model-context`) — the app OVERWRITES the
+    // context slot the model will see on the NEXT turn. It can never start one (the store
+    // has no reference to the conversation loop), and the body is carried as untrusted
+    // DATA. The renderer binds serverId + sessionId + cardId; the app supplies none.
+    // INTERNAL, same posture as `callTool` / `uiMessage`: absent from PUBLIC_CHANNELS /
+    // EXTERNAL_MUTATION_CHANNELS / CHANNEL_GESTURE (fail-closed isPublicChannel).
+    // Registered in ipc/domains/plugins.ts and gated on validateHostRendererSender — it
+    // mutates what the model reads next turn.
+    uiModelContext: "lvis:mcp:ui-model-context",
     catalogList: "lvis:mcp:catalog:list",
     installFromMarketplace: "lvis:mcp:install-from-marketplace",
     importClaudeDesktopPreview: "lvis:mcp:import:claude-desktop:preview",

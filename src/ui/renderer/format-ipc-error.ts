@@ -200,6 +200,9 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // notification service to be running for its popup path.
   "cross-server-call-denied": "formatIpcError.crossServerCallDenied",
   "invalid-server-id": "formatIpcError.invalidServerId",
+  // `onupdatemodelcontext` — the renderer binds serverId + session + cardId; a malformed
+  // binding is a host bug, and the card cannot be identified.
+  "invalid-binding": "formatIpcError.invalidBinding",
   "invalid-tool-name": "formatIpcError.invalidToolName",
   "tool-call-failed": "formatIpcError.toolCallFailed",
   "notification-unavailable": "formatIpcError.notificationUnavailable",

@@ -100,6 +100,13 @@ export function McpAppView({
   if (originSessionIdRef.current === "" && chatCtx?.currentSessionId) {
     originSessionIdRef.current = chatCtx.currentSessionId;
   }
+
+  // ── The card's IDENTITY — the third `onupdatemodelcontext` binding ────────────
+  // `ui/update-model-context` OVERWRITES one slot per card, so main needs to know WHICH
+  // card is speaking. The id is minted HERE, in the trusted renderer, once per mount: the
+  // app never sees it and cannot name one, so it can only ever overwrite its own slot.
+  const cardIdRef = useRef("");
+  if (cardIdRef.current === "") cardIdRef.current = crypto.randomUUID();
   const [bundle, setBundle] = useState<McpUiResourceBundle | null>(null);
   const [error, setError] = useState<string | null>(null);
   // b3.3 — disable-in-place on server disconnect. Lives INSIDE McpAppView so
@@ -298,6 +305,17 @@ export function McpAppView({
           // names none). Main decodes the inline bytes, refuses to fetch any URI the app
           // supplies, and the user's save dialog authorizes the write.
           downloadFile: (params) => window.lvis.mcp.downloadFile(payload.serverId, params),
+          // `onupdatemodelcontext` is bound to the card's server, its origin session, AND
+          // this card instance. The app names none of the three, so it can overwrite only
+          // its OWN slot, only in the conversation it belongs to. Main reads that slot at
+          // the next prompt build — nothing here can start a turn.
+          updateModelContext: (params) =>
+            window.lvis.mcp.postUiModelContext(
+              payload.serverId,
+              originSessionIdRef.current,
+              cardIdRef.current,
+              params,
+            ),
         },
       );
       bridgeRef.current = { bridge, transport, token: tokenFromProxyUrl(bundle.proxyUrl) };

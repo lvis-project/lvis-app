@@ -30,6 +30,9 @@ const mcpAppChannels = [
   // `ondownloadfile` — an app saves inline bytes through the user's save dialog. It
   // WRITES A FILE, so it must never be publicly reachable.
   CHANNELS.mcp.uiDownloadFile,
+  // `onupdatemodelcontext` — an app overwrites what the model reads on the next turn.
+  // Mutates model-facing state, so it is internal for the same reason.
+  CHANNELS.mcp.uiModelContext,
 ];
 
 describe("#885 MCP-app channels are internal (fail-closed)", () => {
@@ -41,6 +44,7 @@ describe("#885 MCP-app channels are internal (fail-closed)", () => {
     expect(CHANNELS.mcp.callTool).toBe("lvis:mcp:call-tool");
     expect(CHANNELS.mcp.uiMessage).toBe("lvis:mcp:ui-message");
     expect(CHANNELS.mcp.uiDownloadFile).toBe("lvis:mcp:ui-download-file");
+    expect(CHANNELS.mcp.uiModelContext).toBe("lvis:mcp:ui-model-context");
   });
 
   it("no MCP-app channel leaks into PUBLIC_CHANNELS", () => {
