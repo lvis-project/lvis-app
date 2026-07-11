@@ -19,6 +19,7 @@ vi.mock("node:dns/promises", () => ({
 import {
   probePrivateHost,
   __resetPrivateHostProbeInFlightForTests,
+  MAX_INFLIGHT_DISTINCT_HOSTS,
 } from "../private-host-probe.js";
 
 describe("probePrivateHost", () => {
@@ -106,6 +107,48 @@ describe("probePrivateHost", () => {
     // @ts-expect-error — runtime guard
     await expect(probePrivateHost(undefined)).rejects.toThrow(TypeError);
     expect(mockLookup).not.toHaveBeenCalled();
+  });
+
+  it("rejects IP literals — an IP resolves numerically and never reaches dns.lookup", async () => {
+    // IPv4 dotted-quads pass the bare-hostname regex, so they must be caught by
+    // the dedicated IP guard; otherwise `dns.lookup("10.0.0.1")` would resolve
+    // the address without a network round-trip and return `true` off-corp too,
+    // degrading the probe into a plain liveness oracle.
+    for (const ip of ["10.0.0.1", "127.0.0.1", "169.254.169.254", "8.8.8.8", "0.0.0.0"]) {
+      await expect(probePrivateHost(ip)).rejects.toThrow(/IP literal/);
+    }
+    expect(mockLookup).not.toHaveBeenCalled();
+  });
+
+  it("rejects a new distinct host once the concurrent in-flight cap is reached (DoS bound)", async () => {
+    // Every lookup hangs so each distinct host stays in the in-flight map,
+    // filling it to the cap. The next DISTINCT host must be rejected with an
+    // explicit throw (not a fail-safe `false`), while same-host callers stay
+    // deduped and unaffected by the cap.
+    mockLookup.mockReturnValue(new Promise(() => {}) as unknown as Promise<never>);
+    const pending: Array<Promise<boolean>> = [];
+    for (let i = 0; i < MAX_INFLIGHT_DISTINCT_HOSTS; i++) {
+      pending.push(probePrivateHost(`host-${i}.example.com`, { timeoutMs: 5000 }));
+    }
+    // Each probe registers its dedup entry SYNCHRONOUSLY before returning, so
+    // the in-flight map is already filled to the cap here (even though the
+    // actual dns.lookup call is deferred to a microtask).
+    //
+    // A host ALREADY in flight is served from the map — the cap does not apply
+    // and no new lookup is dispatched (dedup short-circuits before the bound).
+    pending.push(probePrivateHost("host-0.example.com", { timeoutMs: 5000 }));
+    // A genuinely new distinct host exceeds the cap → explicit refusal, thrown
+    // before reaching dns.lookup.
+    await expect(
+      probePrivateHost("overflow.example.com", { timeoutMs: 5000 }),
+    ).rejects.toThrow(/too many concurrent/);
+    // Let the deferred lookups fire: only the cap-many distinct hosts dispatch a
+    // lookup — the deduped repeat and the rejected overflow never do.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockLookup).toHaveBeenCalledTimes(MAX_INFLIGHT_DISTINCT_HOSTS);
+    // The hung probes resolve to false at their (unref'd) deadline; nothing
+    // rejects, but attach a no-op so no promise dangles unobserved.
+    pending.forEach((p) => void p.then(() => {}));
   });
 
   it("rejects non-bare hostnames — URLs, host:port, paths, userinfo, whitespace", async () => {
