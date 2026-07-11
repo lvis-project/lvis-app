@@ -21,6 +21,9 @@ const mcpAppChannels = [
   CHANNELS.mcp.detachedPayload,
   CHANNELS.mcp.serverDisconnected,
   CHANNELS.mcp.disposeUiSession,
+  // `oncalltool` — an app runs a tool on its own server. The most sensitive of the
+  // set (it EXECUTES), so it must never be publicly reachable either.
+  CHANNELS.mcp.callTool,
 ];
 
 describe("#885 MCP-app channels are internal (fail-closed)", () => {
@@ -29,6 +32,7 @@ describe("#885 MCP-app channels are internal (fail-closed)", () => {
     expect(CHANNELS.mcp.detachedPayload).toBe("lvis:mcp:detached-payload");
     expect(CHANNELS.mcp.serverDisconnected).toBe("lvis:mcp:server-disconnected");
     expect(CHANNELS.mcp.disposeUiSession).toBe("lvis:mcp:dispose-ui-session");
+    expect(CHANNELS.mcp.callTool).toBe("lvis:mcp:call-tool");
   });
 
   it("no MCP-app channel leaks into PUBLIC_CHANNELS", () => {

@@ -72,6 +72,18 @@ export interface Tool {
   readonly workerId?: string;
   readonly mcpServerId?: string;
   /**
+   * MCP Apps — may this tool's OWN app call it (`_meta.ui.visibility` ∋ `"app"`)?
+   *
+   * The spec's MUST for an app-initiated `tools/call`, materialized ONCE per tool
+   * at ingestion (`mcp-tool-adapter.ts` for external MCP servers, which applies the
+   * spec default `["model","app"]` when the server declares nothing). The
+   * `oncalltool` external backend is the SOLE reader and fails closed on
+   * `undefined` — builtin/plugin registry tools leave this unset, and the plugin
+   * loopback path enforces the same MUST through `assertUiActionInvokable`
+   * instead (its own manifest-declared visibility), never through this field.
+   */
+  readonly appInvokable?: boolean;
+  /**
    * Manifest-declared filesystem path fields. Used by the executor's
    * Layer 0/1 path policy for dynamic plugin/MCP tools whose argument names
    * are not the built-in `path | file_path | filePath` convention.
@@ -178,6 +190,8 @@ export interface DynamicToolSpec {
   pluginId?: string;
   workerId?: string;
   mcpServerId?: string;
+  /** MCP Apps app→server `tools/call` gate — see {@link Tool.appInvokable}. */
+  appInvokable?: boolean;
   pathFields?: readonly string[];
   /** §6.4 — semver. Defaults to "1.0.0" when omitted. */
   version?: string;
@@ -211,6 +225,7 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     pluginId: spec.pluginId,
     workerId: spec.workerId,
     mcpServerId: spec.mcpServerId,
+    appInvokable: spec.appInvokable,
     pathFields: spec.pathFields,
     version: spec.version ?? "1.0.0",
     approvalCacheKey: spec.approvalCacheKey,

@@ -323,6 +323,20 @@ export class McpManager {
     return client.readResource(uri);
   }
 
+  /**
+   * The name a server-local tool is REGISTERED under in the §6.4 ToolRegistry
+   * (`mcp_<prefix>_<name>`) — governance namespacing is the SoT, so this only
+   * delegates. An MCP App names its server's tools by their SERVER-LOCAL name
+   * (it knows nothing about host namespacing); the `oncalltool` external backend
+   * uses this to find the GATED registry `Tool` the executor must run. It never
+   * proves ownership on its own (an unapproved server namespaces to a passthrough
+   * name) — the registry entry's `mcpServerId` is what binds the tool to the card's
+   * server.
+   */
+  namespacedToolName(serverId: string, toolName: string): string {
+    return this.governance.applyToolNamespace(serverId, toolName);
+  }
+
   // ─── Config Mutation ────────────────────────────────
 
   /** 설정 파일의 현재 서버 목록 반환 (renderer-safe DTO) */

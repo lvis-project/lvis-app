@@ -1,7 +1,8 @@
 /**
- * `resolveMcpUiBackend` — the ONE serverId→backend resolution the render IPC (and
- * the later oncalltool IPC) share. Proves the loopback-FIRST-then-external order
- * and that the returned backend closes over the serverId.
+ * `resolveMcpUiBackend` — the ONE serverId→backend resolution the render IPC and the
+ * `oncalltool` IPC share. Proves the loopback-FIRST-then-external order for BOTH the
+ * `ui://` read and the tool call (one branch, both paths), and that every returned
+ * backend member closes over the serverId (an app can never address another server).
  */
 import { describe, it, expect, vi } from "vitest";
 import { resolveMcpUiBackend } from "../mcp-ui-backend-resolver.js";
@@ -14,9 +15,13 @@ function sources(running: string[]) {
   const loopback = {
     has: vi.fn((id: string) => running.includes(id)),
     readUiResource: vi.fn(async (_id: string, _uri: string) => LOOPBACK_READ),
+    resolveToolOwner: vi.fn((_id: string, _tool: string) => "acme-cards"),
+    callTool: vi.fn(async (_id: string, _tool: string, _args: Record<string, unknown>) => "loopback-result"),
   };
   const mcpManager = {
     readUiResource: vi.fn(async (_id: string, _uri: string) => EXTERNAL_READ),
+    resolveToolOwner: vi.fn((_id: string, _tool: string) => "github"),
+    callTool: vi.fn(async (_id: string, _tool: string, _args: Record<string, unknown>) => "external-result"),
   };
   return { loopback, mcpManager };
 }
@@ -48,5 +53,46 @@ describe("resolveMcpUiBackend — loopback-first then external", () => {
     await resolveMcpUiBackend("dual", s).readUiResource("ui://dual/x.html");
     expect(s.loopback.readUiResource).toHaveBeenCalledOnce();
     expect(s.mcpManager.readUiResource).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveMcpUiBackend — callTool takes the SAME loopback-first resolution", () => {
+  it("routes an app's tools/call to the plugin loopback source when one owns the id", async () => {
+    const s = sources(["acme-cards"]);
+    const backend = resolveMcpUiBackend("acme-cards", s);
+
+    expect(backend.resolveToolOwner("acme_open")).toBe("acme-cards");
+    await expect(backend.callTool("acme_open", { id: 1 })).resolves.toBe("loopback-result");
+
+    // Bound to the resolved serverId — the caller never passes one.
+    expect(s.loopback.resolveToolOwner).toHaveBeenCalledWith("acme-cards", "acme_open");
+    expect(s.loopback.callTool).toHaveBeenCalledWith("acme-cards", "acme_open", { id: 1 });
+    expect(s.mcpManager.callTool).not.toHaveBeenCalled();
+    expect(s.mcpManager.resolveToolOwner).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the external source for a server with no loopback host", async () => {
+    const s = sources([]);
+    const backend = resolveMcpUiBackend("github", s);
+
+    expect(backend.resolveToolOwner("query")).toBe("github");
+    await expect(backend.callTool("query", { q: "x" })).resolves.toBe("external-result");
+
+    expect(s.mcpManager.callTool).toHaveBeenCalledWith("github", "query", { q: "x" });
+    expect(s.loopback.callTool).not.toHaveBeenCalled();
+  });
+
+  it("resolves the render and the call path to the SAME source (one branch, not two)", async () => {
+    const s = sources(["acme-cards"]);
+    const backend = resolveMcpUiBackend("acme-cards", s);
+
+    await backend.readUiResource("ui://acme-cards/x.html");
+    await backend.callTool("acme_open", {});
+
+    // A duplicated resolution rule would let these two diverge; they cannot here.
+    expect(s.loopback.readUiResource).toHaveBeenCalledOnce();
+    expect(s.loopback.callTool).toHaveBeenCalledOnce();
+    expect(s.mcpManager.readUiResource).not.toHaveBeenCalled();
+    expect(s.mcpManager.callTool).not.toHaveBeenCalled();
   });
 });

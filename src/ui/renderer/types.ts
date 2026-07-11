@@ -4,7 +4,7 @@
 import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { Locale } from "../../i18n/locale.js";
 import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
-import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceBundle } from "../../mcp/types.js";
+import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defaults.js";
@@ -1708,6 +1708,16 @@ export type LvisMcpApi = {
    * document's CSP response header.
    */
   readUiResource: (serverId: string, uri: string) => Promise<McpUiResourceBundle>;
+  /**
+   * MCP Apps `oncalltool` — run a tool on the card's OWN server through the host's
+   * risk/consent gate. `serverId` comes from the card payload the renderer holds,
+   * never from the app. Denials and tool failures come back as `{ ok: false }`.
+   */
+  callTool: (
+    serverId: string,
+    name: string,
+    args: Record<string, unknown>,
+  ) => Promise<McpUiToolCallOutcome>;
   /** Free a card's sandbox-proxy session token on unmount (fire-and-forget). */
   disposeUiSession: (token: string) => void;
   /** #885 b2 — open an MCP-app card in a detached window (host mints cardId/viewKey). */
