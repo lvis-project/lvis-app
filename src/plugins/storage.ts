@@ -14,10 +14,15 @@
  * importing `node:fs` directly — this is the framework boundary for
  * plugin-owned data.
  */
+import { safeStorage } from "electron";
 import { realpathSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { PluginStorageError, type PluginStorage } from "./types.js";
+import {
+  PluginStorageEncryptionUnavailableError,
+  PluginStorageError,
+  type PluginStorage,
+} from "./types.js";
 import { instrumentEffectsByPath } from "../permissions/hostapi-effect-recorder.js";
 
 /**
@@ -245,6 +250,48 @@ export function createPluginStorage(
     async mkdir(rel) {
       const target = await guard(rel);
       await mkdir(target, { recursive: true });
+    },
+
+    // ─── Encrypted-at-rest variants (Electron safeStorage) ─────────────────
+    // Ciphertext is written through the SAME sandboxed `guard()` machinery as
+    // every plaintext method, so absolute-path / lexical `..` / symlink-escape
+    // rejection applies identically. Intended for dynamically-acquired plugin
+    // secrets/tokens (OAuth/MSAL caches) — the plugin's own encrypted store,
+    // distinct from host-provisioned `hostApi.getSecret` config secrets.
+    //
+    // FAIL-CLOSED, No-Fallback: when OS encryption is unavailable (safeStorage
+    // reports false, or electron `safeStorage` is unreachable) both methods
+    // throw {@link PluginStorageEncryptionUnavailableError} — the encrypted
+    // variants NEVER read or write plaintext. The availability check runs AFTER
+    // `guard()` so a path-escape attempt still surfaces as a PluginStorageError
+    // (path rejection wins over the encryption check), and BEFORE any disk write
+    // so an unavailable-encryption call leaves no file behind.
+    async writeEncrypted(rel, plaintext) {
+      if (typeof plaintext !== "string") {
+        throw new PluginStorageError(
+          "writeEncrypted requires string plaintext",
+          pluginId,
+          String(rel),
+        );
+      }
+      const target = await guard(rel);
+      if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
+        throw new PluginStorageEncryptionUnavailableError(pluginId);
+      }
+      const ciphertext = safeStorage.encryptString(plaintext);
+      await ensureParent(target);
+      await writeFile(target, ciphertext);
+    },
+
+    async readEncrypted(rel) {
+      const target = await guard(rel);
+      if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
+        throw new PluginStorageEncryptionUnavailableError(pluginId);
+      }
+      // Raw ciphertext bytes; readFile throws ENOENT for a missing file, matching
+      // readText's contract.
+      const ciphertext = await readFile(target);
+      return safeStorage.decryptString(Buffer.from(ciphertext));
     },
   };
   return instrumentEffectsByPath(raw, "storage");
