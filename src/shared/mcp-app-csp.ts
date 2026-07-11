@@ -101,9 +101,21 @@ function sanitizeDeclaredOrigin(raw: unknown): string | undefined {
 function readBucket(csp: McpUiResourceCsp | undefined, bucket: keyof McpUiResourceCsp): string[] {
   const raw = csp?.[bucket];
   if (!Array.isArray(raw)) return [];
-  return raw
-    .map((origin) => sanitizeDeclaredOrigin(origin))
-    .filter((origin): origin is string => origin !== undefined);
+  const kept: string[] = [];
+  for (const entry of raw) {
+    const origin = sanitizeDeclaredOrigin(entry);
+    if (origin !== undefined) {
+      kept.push(origin);
+    } else if (typeof entry === "string" && entry.length > 0) {
+      // Fail-closed is the safe direction, but a CONFORMANT server can be surprised:
+      // the spec's `resourceDomains` explicitly allows wildcard subdomains
+      // (`https://*.cloudflare.com`), which we drop. Emit a signal so a dropped-but-
+      // legitimate origin is diagnosable rather than a silent blank. We do NOT start
+      // allowing wildcards here — that needs a deliberate No-Loosening analysis.
+      console.warn(`[mcp-app-csp] dropped non-conforming declared origin in ${bucket}: ${entry}`);
+    }
+  }
+  return kept;
 }
 
 /**

@@ -233,7 +233,7 @@ export function installPluginPartitionPolicy(
 export function installHtmlPreviewPartitionBlock(sessionApi: SessionApi = getElectronSession()): void {
   // LLM-authored HTML: strict inline-only partition.
   //
-  // The MCP-app CDN gate is NO LONGER installed here — it is a PER-SERVER
+  // The MCP-app partition policy is NOT installed here — it is a PER-SERVER
   // partition (b1) installed lazily in the `lvis:mcp:ui-resource` chokepoint
   // via `installMcpAppPartitionPolicy`. There is no bare `lvis-mcp-app`
   // partition anymore.

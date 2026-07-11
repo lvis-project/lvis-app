@@ -16,7 +16,7 @@
  */
 import { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { McpUiPayload } from "../../../mcp/types.js";
-import { INNER_SANDBOX_ATTR, MCP_APP_HOST_INFO } from "../../../shared/mcp-app-bridge-contract.js";
+import { MCP_APP_HOST_INFO } from "../../../shared/mcp-app-bridge-contract.js";
 import { WebviewIpcTransport, type BridgeWebviewElement } from "./webview-ipc-transport.js";
 
 /**
@@ -55,7 +55,10 @@ export function createMcpAppBridge(
   // single listener, and the runtime JS is unaffected. Worth an upstream issue; NOT
   // worth forking.
   bridge.onsandboxready = () => {
-    void bridge.sendSandboxResourceReady({ html, sandbox: INNER_SANDBOX_ATTR });
+    // No `sandbox` field: the relay preload OWNS the inner iframe's sandbox attribute
+    // (always `allow-scripts`, opaque origin) and never consumes a wire value — a
+    // containment flag must not be renderer-governed. Sending one would be dead data.
+    void bridge.sendSandboxResourceReady({ html });
   };
 
   // resources/read from the app → the same main-process chokepoint that gated and
