@@ -790,8 +790,38 @@ export function createHostApiFactory(
       // + timeout clamping; UX hint only, NOT a trust boundary (see the impl
       // header). Module-level dedup/no-cache/unref'd-timer semantics live in
       // private-host-probe.ts.
-      probePrivateHost: (host: string, opts?: { timeoutMs?: number }): Promise<boolean> =>
-        probePrivateHost(host, opts),
+      //
+      // Durable audit: the probe is classified `read`, so it never reaches the
+      // executor's AuditLogger path — yet it is a network-adjacent oracle that
+      // reveals which INTERNAL host a plugin is targeting. Record host + outcome
+      // here (the host chokepoint) so operators keep a trail. The host is capped
+      // to 64 chars so an attacker-controlled name cannot bloat the JSONL, and
+      // the audit write is best-effort (must never break the probe).
+      probePrivateHost: async (host: string, opts?: { timeoutMs?: number }): Promise<boolean> => {
+        const auditHost = (typeof host === "string" ? host : String(host)).slice(0, 64);
+        try {
+          const resolved = await probePrivateHost(host, opts);
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "tool_call",
+              input: `[plugin:${pluginId}] probe_private_host host=${auditHost} resolved=${resolved}`,
+            });
+          } catch { /* audit must not break host */ }
+          return resolved;
+        } catch (err) {
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "warn",
+              input: `[plugin:${pluginId}] probe_private_host_rejected host=${auditHost} reason=${(err as Error).message.slice(0, 120)}`,
+            });
+          } catch { /* audit must not break host */ }
+          throw err;
+        }
+      },
       // ─── External portal interactive auth (cookie collection) ──────────
       // Gated by the `external-auth-consumer` capability. Cookies are sensitive
       // assets, so calls are rejected without declarative opt-in. Both denial
