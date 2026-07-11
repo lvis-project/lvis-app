@@ -215,6 +215,16 @@ function invoke(channel: string, ...args: unknown[]): unknown {
   return invokeRegisteredHandler(handlers, channel, ...args);
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("lvis:chat:get-verbatim-tool-result", () => {
@@ -821,6 +831,52 @@ describe("lvis:chat:fork", () => {
       expect.arrayContaining([expect.objectContaining({ toolUseId: "tu-art", content: rawContent })]),
     );
   });
+
+  it("holds a session-mutation lease across fork persistence awaits", async () => {
+    const loop = makeConversationLoop("session-fork-source", [
+      { role: "user", content: "source prompt" },
+      { role: "assistant", content: "source answer" },
+    ]);
+    loop.loadSession.mockReturnValue(true);
+    const deps = await setupHandlers(loop);
+    const firstSaveEntered = deferred<void>();
+    const firstSaveGate = deferred<void>();
+    let saveCallCount = 0;
+    deps.memoryManager.saveSession.mockImplementation(async () => {
+      saveCallCount += 1;
+      if (saveCallCount === 1) {
+        firstSaveEntered.resolve(undefined);
+        await firstSaveGate.promise;
+      }
+    });
+
+    const forkPromise = invoke("lvis:chat:fork", undefined) as Promise<unknown>;
+
+    // The mutation lease is visible before the deferred fork factory starts.
+    await expect(invoke("lvis:chat:send", {
+      input: "must not enter fork",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    })).resolves.toEqual({ error: "streaming-active" });
+
+    await firstSaveEntered.promise;
+    await expect(invoke("lvis:chat:new")).resolves.toEqual({
+      ok: false,
+      error: "streaming-active",
+    });
+    await expect(invoke("lvis:chat:session-resume", "session-fork-source")).resolves.toEqual(
+      expect.objectContaining({ ok: false, error: "streaming-active" }),
+    );
+    expect(loop.runTurn).not.toHaveBeenCalled();
+    expect(loop.newConversation).not.toHaveBeenCalled();
+    expect(loop.resetAndResume).not.toHaveBeenCalled();
+
+    firstSaveGate.resolve(undefined);
+    await expect(forkPromise).resolves.toEqual({
+      ok: true,
+      sessionId: expect.any(String),
+    });
+  });
 });
 
 describe("lvis:chat:continue-last-user", () => {
@@ -974,6 +1030,51 @@ describe("lvis:chat:send provenance", () => {
     );
   });
 
+  it("rejects the original input when the session changes during persona resolution", async () => {
+    const loop = makeConversationLoop("session-before-persona", []);
+    const personaEntered = deferred<void>();
+    const personaGate = deferred<{
+      id: string;
+      name: string;
+      systemPromptAdd: string;
+    }>();
+    const personaPromptStore = {
+      get: vi.fn(() => {
+        personaEntered.resolve(undefined);
+        return personaGate.promise;
+      }),
+    };
+    const runner = {
+      peekParentMailbox: vi.fn(),
+      acknowledgeParentMailbox: vi.fn(),
+    };
+    await setupHandlers(loop, {
+      personaPromptStore,
+      getSubAgentRunner: () => runner,
+    });
+
+    const sendPromise = invoke("lvis:chat:send", {
+      input: "must stay in the original session",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+      personaPromptId: "reviewer",
+    }) as Promise<unknown>;
+
+    await personaEntered.promise;
+    loop.getSessionId.mockReturnValue("session-after-persona");
+    personaGate.resolve({
+      id: "reviewer",
+      name: "Reviewer",
+      systemPromptAdd: "Current file prompt.",
+    });
+
+    await expect(sendPromise).resolves.toEqual({
+      ok: false,
+      error: "session-mismatch",
+    });
+    expect(loop.runTurn).not.toHaveBeenCalled();
+    expect(runner.peekParentMailbox).not.toHaveBeenCalled();
+  });
   it("fails closed when selected personaPromptId is missing from the prompt store", async () => {
     const loop = makeConversationLoop("session-provenance", []);
     const personaPromptStore = { get: vi.fn(async () => null) };
@@ -1209,6 +1310,77 @@ describe("sub-agent parent mailbox on manual turns", () => {
     );
     expect(acknowledgeParentMailbox).toHaveBeenCalledWith("parent-session", ["message-1"]);
   });
+
+  it("holds the turn lease from mailbox peek through ACK and blocks session mutation", async () => {
+    const loop = makeConversationLoop("parent-session", []);
+    loop.runTurn.mockResolvedValue({
+      text: "parent response",
+      toolCalls: [],
+      route: "default",
+      stopReason: "end_turn",
+    });
+    const peekGate = deferred<Array<{ id: string; formattedText: string; approvalLabel: string }>>();
+    const peekEntered = deferred<void>();
+    const ackGate = deferred<number>();
+    const ackEntered = deferred<void>();
+    let reentrantNew: Promise<unknown> | undefined;
+    const runner = {
+      peekParentMailbox: vi.fn(() => {
+        // This re-entrant mutation observes whether trackStreamTurn published
+        // its lease before executing the mailbox factory.
+        reentrantNew = invoke("lvis:chat:new") as Promise<unknown>;
+        peekEntered.resolve(undefined);
+        return peekGate.promise;
+      }),
+      acknowledgeParentMailbox: vi.fn(() => {
+        ackEntered.resolve(undefined);
+        return ackGate.promise;
+      }),
+    };
+    const deps = await setupHandlers(loop, { getSubAgentRunner: () => runner });
+
+    const sendPromise = invoke("lvis:chat:send", {
+      input: "Consume child result",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    }) as Promise<unknown>;
+
+    await peekEntered.promise;
+    await expect(reentrantNew).resolves.toEqual({ ok: false, error: "streaming-active" });
+    await expect(invoke("lvis:chat:session-resume", "parent-session")).resolves.toEqual(
+      expect.objectContaining({ ok: false, error: "streaming-active" }),
+    );
+    await expect(invoke("lvis:chat:fork", undefined)).resolves.toEqual({
+      ok: false,
+      sessionId: null,
+      error: "streaming-active",
+    });
+    expect(loop.newConversation).not.toHaveBeenCalled();
+    expect(loop.resetAndResume).not.toHaveBeenCalled();
+    expect(deps.memoryManager.saveSession).not.toHaveBeenCalled();
+
+    peekGate.resolve([{
+      id: "message-lease",
+      formattedText: "[Sub-Agent: Researcher]\nfinished",
+      approvalLabel: "[Sub-Agent: Researcher]",
+    }]);
+    await ackEntered.promise;
+
+    // ACK is part of the same lease, so switching sessions is still forbidden
+    // after the LLM turn has returned but before durable removal completes.
+    await expect(invoke("lvis:chat:new")).resolves.toEqual({
+      ok: false,
+      error: "streaming-active",
+    });
+    expect(loop.newConversation).not.toHaveBeenCalled();
+
+    ackGate.resolve(1);
+    await sendPromise;
+    expect(runner.acknowledgeParentMailbox).toHaveBeenCalledWith(
+      "parent-session",
+      ["message-lease"],
+    );
+  });
 });
 
 
@@ -1253,40 +1425,53 @@ describe("sub-agent autonomous parent wake", () => {
     expect(acknowledgeParentMailbox).toHaveBeenCalledWith("parent-session", ["message-1"]);
   });
 
-  it("single-flights autonomous wake against a concurrent user send", async () => {
+  it("single-flights autonomous wake before mailbox peek starts", async () => {
     const loop = makeConversationLoop("parent-session", []);
     (loop as any).hasActiveTurn = vi.fn(() => false);
     let finishTurn!: (result: any) => void;
     loop.runTurn.mockReturnValue(new Promise((resolve) => { finishTurn = resolve; }));
     let wakeHandler: ((parentSessionId: string) => Promise<void>) | undefined;
+    const peekGate = deferred<Array<{ id: string; formattedText: string; approvalLabel: string }>>();
+    const peekEntered = deferred<void>();
     const acknowledgeParentMailbox = vi.fn(async () => 1);
     const runner = {
       setParentWakeHandler: vi.fn((handler: typeof wakeHandler) => { wakeHandler = handler; }),
-      peekParentMailbox: vi.fn(async () => [{
-        id: "message-1",
-        formattedText: "[Sub-Agent: Researcher]\nfinished",
-        approvalLabel: "[Sub-Agent: Researcher]",
-      }]),
+      peekParentMailbox: vi.fn(() => {
+        peekEntered.resolve(undefined);
+        return peekGate.promise;
+      }),
       acknowledgeParentMailbox,
     };
     await setupHandlers(loop, { getSubAgentRunner: () => runner });
 
     const wakePromise = wakeHandler!("parent-session");
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(loop.runTurn).toHaveBeenCalledTimes(1);
+
+    // trackStreamTurn publishes the lease synchronously, before its deferred
+    // factory begins mailbox I/O.
     await expect(invoke("lvis:chat:send", {
       input: "concurrent user message",
       inputOrigin: "user-keyboard",
       userActivation: true,
     })).resolves.toEqual({ error: "streaming-active" });
+    await expect(invoke("lvis:chat:new")).resolves.toEqual({
+      ok: false,
+      error: "streaming-active",
+    });
+
+    await peekEntered.promise;
+    expect(loop.runTurn).not.toHaveBeenCalled();
+    peekGate.resolve([{
+      id: "message-1",
+      formattedText: "[Sub-Agent: Researcher]\nfinished",
+      approvalLabel: "[Sub-Agent: Researcher]",
+    }]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(loop.runTurn).toHaveBeenCalledTimes(1);
-    expect(runner.peekParentMailbox).toHaveBeenCalledTimes(1);
 
     finishTurn({ text: "done", toolCalls: [], route: "default", stopReason: "end_turn" });
     await wakePromise;
     expect(acknowledgeParentMailbox).toHaveBeenCalledTimes(1);
   });
-
   it("does not start or acknowledge when the requested parent is not current", async () => {
     const loop = makeConversationLoop("current-parent", []);
     (loop as typeof loop & { hasActiveTurn: ReturnType<typeof vi.fn> }).hasActiveTurn = vi.fn(() => false);

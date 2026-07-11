@@ -179,6 +179,8 @@ export interface ConversationDeps {
   keywordEngine: KeywordEngine;
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
+  /** Host-owned capability; defaults false when omitted. */
+  supportsA2AParentDelivery?: boolean;
   memoryManager: MemoryManager;
   permissionManager: PermissionManager;
   routineEngine: RoutineEngine;
@@ -434,6 +436,7 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     keywordEngine: deps.keywordEngine,
     routeEngine: deps.routeEngine,
     toolRegistry: deps.toolRegistry,
+    supportsA2AParentDelivery: deps.supportsA2AParentDelivery === true,
     memoryManager: deps.memoryManager,
     permissionManager: deps.permissionManager,
     broadcastPermissionConfigChanged: deps.broadcastPermissionConfigChanged,

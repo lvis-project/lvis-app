@@ -1,5 +1,6 @@
 import type { FeatureNamespaceHandle } from "../main/storage/feature-namespace.js";
 import type { A2AMessage } from "../shared/a2a.js";
+import { canonicalizeAgentMessage } from "./a2a-subagent-message-codec.js";
 import {
   GUIDE_JOINED_MAX_CHARS,
   GUIDE_MAX_CHARS,
@@ -37,6 +38,17 @@ export type ParentMailboxEnqueueResult =
         | "tracked-parent-budget";
     };
 
+const MAILBOX_ENTRY_KEYS = new Set([
+  "id",
+  "parentSessionId",
+  "childSessionId",
+  "childTitle",
+  "createdAt",
+  "message",
+  "formattedText",
+  "approvalLabel",
+]);
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -48,18 +60,47 @@ function isSafeString(value: unknown, maxLength = GUIDE_MAX_CHARS): value is str
     && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value);
 }
 
-function isMailboxEntry(value: unknown): value is ParentMailboxEntry {
-  if (!isRecord(value)) return false;
-  return isSafeString(value.id, 256)
-    && isSafeString(value.parentSessionId, 256)
-    && isSafeString(value.childSessionId, 256)
-    && isSafeString(value.childTitle, 256)
-    && isSafeString(value.createdAt, 64)
-    && isSafeString(value.formattedText)
-    && isSafeString(value.approvalLabel, 512)
-    && isRecord(value.message);
-}
+function normalizeMailboxEntry(value: unknown): ParentMailboxEntry | null {
+  if (!isRecord(value)
+    || !Object.keys(value).every((key) => MAILBOX_ENTRY_KEYS.has(key))
+    || !isSafeString(value.id, 256)
+    || !isSafeString(value.parentSessionId, 256)
+    || !isSafeString(value.childSessionId, 256)
+    || !isSafeString(value.childTitle, 256)
+    || !isSafeString(value.createdAt, 64)
+    || !isSafeString(value.formattedText)
+    || !isSafeString(value.approvalLabel, 512)) {
+    return null;
+  }
+  const timestamp = new Date(value.createdAt);
+  if (Number.isNaN(timestamp.getTime()) || timestamp.toISOString() !== value.createdAt) {
+    return null;
+  }
 
+  const canonical = canonicalizeAgentMessage({
+    parentSessionId: value.parentSessionId,
+    childSessionId: value.childSessionId,
+    childTitle: value.childTitle,
+  }, value.message);
+  if (!canonical.ok
+    || canonical.detectionCount !== 0
+    || canonical.childTitle !== value.childTitle
+    || canonical.approvalLabel !== value.approvalLabel
+    || canonical.formattedText !== value.formattedText) {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    parentSessionId: value.parentSessionId,
+    childSessionId: value.childSessionId,
+    childTitle: canonical.childTitle,
+    createdAt: value.createdAt,
+    message: canonical.message,
+    formattedText: canonical.formattedText,
+    approvalLabel: canonical.approvalLabel,
+  };
+}
 function normalizeMailbox(raw: unknown): PersistedParentMailbox {
   if (!isRecord(raw) || raw.version !== MAILBOX_VERSION || !Array.isArray(raw.entries)) {
     return { version: MAILBOX_VERSION, entries: [] };
@@ -71,8 +112,9 @@ function normalizeMailbox(raw: unknown): PersistedParentMailbox {
   const perParentChars = new Map<string, number>();
 
   for (const candidate of raw.entries) {
-    if (!isMailboxEntry(candidate)) continue;
-    const parentId = candidate.parentSessionId;
+    const entry = normalizeMailboxEntry(candidate);
+    if (!entry) continue;
+    const parentId = entry.parentSessionId;
     if (!parentIds.has(parentId) && parentIds.size >= MAX_TRACKED_PARENT_MAILBOXES) continue;
 
     const count = perParentCount.get(parentId) ?? 0;
@@ -80,13 +122,13 @@ function normalizeMailbox(raw: unknown): PersistedParentMailbox {
 
     const priorChars = perParentChars.get(parentId) ?? 0;
     const separatorChars = count > 0 ? 2 : 0;
-    const nextChars = priorChars + separatorChars + candidate.formattedText.length;
+    const nextChars = priorChars + separatorChars + entry.formattedText.length;
     if (nextChars > GUIDE_JOINED_MAX_CHARS) continue;
 
     parentIds.add(parentId);
     perParentCount.set(parentId, count + 1);
     perParentChars.set(parentId, nextChars);
-    entries.push(structuredClone(candidate));
+    entries.push(structuredClone(entry));
   }
 
   return { version: MAILBOX_VERSION, entries };

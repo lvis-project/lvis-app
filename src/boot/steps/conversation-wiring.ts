@@ -136,6 +136,7 @@ export function wireConversation(ctx: BootContext): void {
     keywordEngine,
     routeEngine,
     toolRegistry,
+    supportsA2AParentDelivery: true,
     memoryManager,
     permissionManager,
     routineEngine,

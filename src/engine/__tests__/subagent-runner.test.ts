@@ -248,6 +248,59 @@ describe("SubAgentRunner — maxRounds bound", () => {
 
 // ─── 2) sourceTools allowlist ─────────────────────────
 
+describe("SubAgentRunner — projected terminal status", () => {
+  it("projects a structurally returned blocked turn as rejected/error", async () => {
+    const toolRegistry = new ToolRegistry();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { refreshProvider: () => void },
+        "refreshProvider",
+      )
+      .mockImplementation(() => undefined);
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockResolvedValue({
+        text: "prompt refused",
+        toolCalls: [],
+        route: "default",
+        stopReason: "blocked",
+      });
+
+    try {
+      const result = await runner.spawn({
+        title: "blocked",
+        instructions: "attempt work",
+        originSessionId: "parent-session",
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        stopReason: "blocked",
+        summary: "prompt refused",
+      });
+      expect(runner.getRunStatus(result.childSessionId, "parent-session")).toMatchObject({
+        status: "error",
+        taskState: "TASK_STATE_REJECTED",
+        error: "prompt refused",
+      });
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+      runTurnSpy.mockRestore();
+    }
+  });
+});
 describe("SubAgentRunner — sourceTools allowlist", () => {
   it("filters tools so a not-listed tool is unavailable to the LLM", async () => {
     const toolRegistry = new ToolRegistry();

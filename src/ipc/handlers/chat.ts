@@ -416,10 +416,14 @@ export async function handleChatSend(
   ctx: ChatSendContext,
 ): Promise<TurnResult | { ok: false; error: string }> {
   const { conversationLoop, settingsService, auditLogger, personaPromptStore } = deps;
+  const expectedSessionId = conversationLoop.getSessionId();
   const parsed = parseChatSendPayload(payload);
   if (!parsed.ok) return { ok: false, error: parsed.error };
   const { input, attachments, inputOrigin, personaPromptId } = parsed.payload;
   const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId);
+  if (conversationLoop.getSessionId() !== expectedSessionId) {
+    return { ok: false, error: "session-mismatch" };
+  }
   if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
   // queue-auto inputOrigin is automatic intake from accumulated explicit user input.
   // It runs outside the user gesture context, triggered by the IPC stream-done event,
@@ -439,11 +443,14 @@ export async function handleChatSend(
   // sees garbage.
   const validated = validateUserContentParts(attachments);
   const effective = sanitizeOutgoingInput(settingsService, ctx.sink, input);
-  const mailboxTurn = inputOrigin === "user-keyboard" || inputOrigin === "queue-auto"
-    ? await prepareParentMailboxTurn(deps)
-    : null;
   const streamId = ctx.allocateStreamId();
   return ctx.trackStreamTurn(async () => {
+    // The mailbox snapshot belongs to the same lease as the receiving turn.
+    // Taking it before trackStreamTurn allowed session mutation (new/resume/
+    // fork) to switch the loop while durable child guidance was being read.
+    const mailboxTurn = inputOrigin === "user-keyboard" || inputOrigin === "queue-auto"
+      ? await prepareParentMailboxTurn(deps)
+      : null;
     const result = await runStreamedTurn(
       conversationLoop,
       effective,
