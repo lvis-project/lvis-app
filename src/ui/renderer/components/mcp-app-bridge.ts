@@ -32,6 +32,8 @@ import { createOnReadResource } from "./mcp-app-bridge/handlers/on-read-resource
 import { createOnOpenLink } from "./mcp-app-bridge/handlers/on-open-link.js";
 import { createOnSizeChange } from "./mcp-app-bridge/handlers/on-size-change.js";
 import { createOnCallTool } from "./mcp-app-bridge/handlers/on-call-tool.js";
+import { createOnMessage } from "./mcp-app-bridge/handlers/on-message.js";
+import type { McpUiMessageOutcome } from "../../../mcp/mcp-ui-message.js";
 
 /**
  * The exact `McpUiHostCapabilities` shape the `AppBridge` ctor's 3rd arg expects,
@@ -66,6 +68,15 @@ export interface McpAppBridgeDeps {
    * denial or a tool error, which the handler renders as an MCP error result.
    */
   callTool(name: string, args: Record<string, unknown>): Promise<McpUiToolCallOutcome>;
+  /**
+   * `onmessage` sink — the app asked for its `ui/message` to reach the user. Routed
+   * through the host's gated `CHANNELS.mcp.uiMessage` IPC. McpAppView binds it to the
+   * card's `serverId` AND the card's origin session id: BOTH bindings are structural,
+   * so the app can address neither another server nor another conversation. Main owns
+   * the turn policy (notification / round-boundary guidance / user-gated card) and
+   * answers with an outcome only — never conversation content.
+   */
+  postMessage(params: unknown): Promise<McpUiMessageOutcome>;
 }
 
 /**
@@ -132,6 +143,16 @@ export function createMcpAppBridge(
       capability: { serverTools: {} },
       register: (bridge) => {
         bridge.oncalltool = createOnCallTool({ callTool: deps.callTool });
+      },
+    },
+    // `ui/message` → advertises `message: { text: {} }` (text only: the host takes no
+    // other content kind into a turn). The handler gets the serverId- AND session-BOUND
+    // poster (McpAppView closed over both), so the app addresses neither a server nor a
+    // conversation; main owns the turn policy and answers `{ isError? }` only.
+    {
+      capability: { message: { text: {} } },
+      register: (bridge) => {
+        bridge.onmessage = createOnMessage({ postMessage: deps.postMessage });
       },
     },
     // `ui/open-link` → advertises `openLinks`.

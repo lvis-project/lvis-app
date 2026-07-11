@@ -124,6 +124,7 @@ describe("preload contextBridge world shape lock", () => {
           ],
           "mcp": [
             "addConfig",
+            "callTool",
             "disposeUiSession",
             "getConfigPath",
             "getConfigs",
@@ -131,6 +132,7 @@ describe("preload contextBridge world shape lock", () => {
             "kill",
             "onServerDisconnected",
             "openDetached",
+            "postUiMessage",
             "readUiResource",
             "removeConfig",
             "servers",
@@ -311,6 +313,7 @@ describe("preload contextBridge world shape lock", () => {
           ],
           "mcp": [
             "addConfig",
+            "callTool",
             "disposeUiSession",
             "getConfigPath",
             "getConfigs",
@@ -318,6 +321,7 @@ describe("preload contextBridge world shape lock", () => {
             "kill",
             "onServerDisconnected",
             "openDetached",
+            "postUiMessage",
             "readUiResource",
             "removeConfig",
             "servers",

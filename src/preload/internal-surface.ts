@@ -1088,6 +1088,14 @@ export function buildInternalApiSurface() {
     // handler turns into an MCP-style `CallToolResult`.
     callTool: async (serverId: string, name: string, args: Record<string, unknown>) =>
       ipcRenderer.invoke(CHANNELS.mcp.callTool, serverId, name, args) as Promise<unknown>,
+    // MCP Apps `onmessage` — the app asks for its text to enter the conversation (or the
+    // notification surface). BOTH bindings come from the TRUSTED renderer: `serverId`
+    // (the card's server) and `sessionId` (the chat session the card belongs to). The
+    // app supplies neither, so it can neither impersonate another server nor address a
+    // conversation the user has navigated away from — main re-checks the session against
+    // the live loop and falls back to a notification on mismatch.
+    postUiMessage: async (serverId: string, sessionId: string, params: unknown) =>
+      ipcRenderer.invoke(CHANNELS.mcp.uiMessage, serverId, sessionId, params) as Promise<unknown>,
     // Card unmount → free its sandbox-proxy session token (fire-and-forget).
     disposeUiSession: (token: string) => { void ipcRenderer.invoke(CHANNELS.mcp.disposeUiSession, token); },
     // #885 b2 — open an MCP-app card in a detached window (host mints the
