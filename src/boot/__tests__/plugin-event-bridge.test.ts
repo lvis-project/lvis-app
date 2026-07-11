@@ -200,15 +200,15 @@ describe("plugin event bridge — host-derived <id>.auth.changed (R3)", () => {
   it("dedupes when the author ALSO lists ${id}.auth.changed in emittedEvents (registers once)", () => {
     const win = makeFakeWindow();
     const runtime = makeRuntime([
-      { id: "lge-api", auth: AUTH, emittedEvents: ["lge-api.auth.changed"] },
+      { id: "ep-api", auth: AUTH, emittedEvents: ["ep-api.auth.changed"] },
     ]);
     const dispose = registerPluginEventBridge(runtime as unknown as never, win as unknown as never);
 
-    emitEvent("lge-api.auth.changed", { authenticated: true });
+    emitEvent("ep-api.auth.changed", { authenticated: true });
 
     // Exactly one forward — the derived name deduped against the declared one.
     expect(win._sent).toHaveLength(1);
-    expect(win._sent[0].eventType).toBe("lge-api.auth.changed");
+    expect(win._sent[0].eventType).toBe("ep-api.auth.changed");
 
     dispose();
   });

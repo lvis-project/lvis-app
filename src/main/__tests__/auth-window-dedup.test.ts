@@ -101,7 +101,7 @@ wirePluginAuthPartitionPersistence({
   onError: vi.fn(),
 });
 
-const PARTITION = "persist:plugin-auth:lge-api";
+const PARTITION = "persist:plugin-auth:ep-api";
 const COMPLETION = "portal.example.com/auth/callback";
 const COOKIE_HOST = "portal.example.com";
 
@@ -124,7 +124,7 @@ describe("openAuthWindow — visible-window dedup", () => {
       url: "https://sso.example.com/login",
       completionUrlPatterns: [COMPLETION],
       cookieHosts: [COOKIE_HOST],
-      windowTitle: "LGE Login",
+      windowTitle: "Internal Portal Login",
       persistPartition: PARTITION,
       timeoutMs: 10_000,
     };
@@ -162,7 +162,7 @@ describe("openAuthWindow — visible-window dedup", () => {
       url: "https://sso.example.com/login",
       completionUrlPatterns: [COMPLETION],
       cookieHosts: [COOKIE_HOST],
-      windowTitle: "LGE Login",
+      windowTitle: "Internal Portal Login",
       persistPartition: PARTITION,
       timeoutMs: 10_000,
     });
@@ -176,7 +176,7 @@ describe("openAuthWindow — visible-window dedup", () => {
       url: "https://sso.example.com/login",
       completionUrlPatterns: [COMPLETION],
       cookieHosts: [COOKIE_HOST],
-      windowTitle: "LGE Login",
+      windowTitle: "Internal Portal Login",
       persistPartition: PARTITION,
       show: false,
       timeoutMs: 5_000,

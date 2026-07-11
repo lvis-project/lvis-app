@@ -14,7 +14,7 @@
       "required": false
     },
     {
-      "pluginId": "lge-api",
+      "pluginId": "ep-api",
       "required": false
     }
   ],
@@ -52,14 +52,14 @@
         ]
       },
       {
-        "pluginId": "lge-api",
+        "pluginId": "ep-api",
         "events": [
-          "lge-api.video-conference.reserved"
+          "ep-api.video-conference.reserved"
         ]
       }
     ]
   },
-  "publisher": "LG Electronics IT",
+  "publisher": "LVIS Official",
   "entry": "dist/hostPlugin.js",
   "description": "사용자가 요청하기 전에 먼저 제안하는 LVIS 의 능동 업무 도우미. 다른 플러그인들과 신호를 주고받아 업무 흐름에 필요한 보조를 적시에 제공합니다.",
   "tools": [
@@ -167,9 +167,9 @@
       "meetingDetectorAllowedSenderDomains": {
         "type": "array",
         "title": "회의 메일 허용 발신 도메인 목록",
-        "description": "proactive 회의/결재/액션/답장 감지가 활성화될 사내 메일 도메인 목록. 기본값 `[\"lge.com\"]` — LG 사내 메일을 즉시 감지. 빈 배열로 명시 설정하면 모든 메일이 무시됩니다 (fail-closed). 컨슈머 도메인(gmail.com 등)은 보안상 추가하지 마세요. 와일드카드 `*` 한 줄로 모든 발신자 통과 가능 — dev/personal 사용 한정 (prompt-injection 위험 ↑).",
+        "description": "proactive 회의/결재/액션/답장 감지가 활성화될 사내 메일 도메인 목록. 기본값 `[\"example.com\"]` — 사내 메일을 즉시 감지. 빈 배열로 명시 설정하면 모든 메일이 무시됩니다 (fail-closed). 컨슈머 도메인(gmail.com 등)은 보안상 추가하지 마세요. 와일드카드 `*` 한 줄로 모든 발신자 통과 가능 — dev/personal 사용 한정 (prompt-injection 위험 ↑).",
         "default": [
-          "lge.com"
+          "example.com"
         ],
         "items": {
           "type": "string"
@@ -223,7 +223,7 @@
     "calendar.event.conflict.detected",
     "work_board.work_item.due_soon",
     "ms-graph.auth.changed",
-    "lge-api.video-conference.reserved"
+    "ep-api.video-conference.reserved"
   ],
   "emittedEvents": [
     "work_assistant.alert.mail-action",

@@ -4,7 +4,7 @@
   "version": "0.3.37",
   "icon": "Mail",
   "installPolicy": "admin",
-  "publisher": "LG Electronics IT",
+  "publisher": "LVIS Official",
   "entry": "dist/hostPlugin.js",
   "description": "Microsoft Graph 통합 플러그인 — Outlook 이메일 + Outlook 캘린더 (calendar/email 두 플러그인을 통합). MS Graph API 기반 폴링 watcher, 답장 작성, 일정 충돌 감지, 반복 패턴 분석.",
   "tools": [
@@ -876,7 +876,7 @@
       "environment": {
         "type": "string",
         "title": "기본 MS 환경",
-        "description": "Microsoft 환경 (external=공용 엔드포인트 / corporate=LG 사내 테넌트). 기본값은 external 이지만 cold-boot 시 사내망 DNS 신호가 감지되면 corporate 가 자동 적용됩니다. 명시 corporate 또는 플러그인 패널 1-클릭(savedEnv) 이 자동 감지보다 우선합니다.",
+        "description": "Microsoft 환경 (external=공용 엔드포인트 / corporate=사내 테넌트). 기본값은 external 이지만 cold-boot 시 사내망 DNS 신호가 감지되면 corporate 가 자동 적용됩니다. 명시 corporate 또는 플러그인 패널 1-클릭(savedEnv) 이 자동 감지보다 우선합니다.",
         "enum": [
           "external",
           "corporate"
@@ -893,14 +893,14 @@
       "corporateClientId": {
         "type": "string",
         "title": "Corporate 앱 Client ID",
-        "description": "LG Electronics 테넌트용 앱 등록 Client ID (GUID 형식). 비워두면 번들 기본값을 사용합니다.",
+        "description": "사내 테넌트용 앱 등록 Client ID (GUID 형식). 비워두면 번들 기본값을 사용합니다.",
         "default": "6c03089a-96c8-4515-bc01-4fd7a0936cea",
         "pattern": "^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
       },
       "corporateTenantId": {
         "type": "string",
         "title": "Corporate Tenant ID",
-        "description": "LG Electronics Azure AD 디렉터리(테넌트) ID (GUID 형식). 비워두면 번들 기본값을 사용합니다.",
+        "description": "사내 Azure AD 디렉터리(테넌트) ID (GUID 형식). 비워두면 번들 기본값을 사용합니다.",
         "default": "5069cde4-642a-45c0-8094-d0c2dec10be3",
         "pattern": "^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
       },

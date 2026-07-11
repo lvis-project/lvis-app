@@ -153,7 +153,7 @@ with a precise blocker beats a misleading placeholder capture.
 `mp-*` (marketplace), `ah-dashboard`/`ah-workboard`/`ah-worklog`/`ah-inbox`/
 `ah-report`/`ah-subscription` (Agent Hub **server** dashboard — distinct from
 the `agent-hub-my-work`/`agent-hub-team-board` **plugin** panel keys, which
-render inside this Electron app), and `ep-*` (LGE internal EP portal) are
+render inside this Electron app), and `ep-*` (internal EP portal) are
 **web/server screens** rendered by a separate Next.js app, not the Electron
 host. They are intentionally absent from `matrix.ts`'s `scenarios` map
 entirely (listed separately in `WEB_SERVER_KEYS_OUT_OF_SCOPE` for

@@ -48,7 +48,7 @@ Shipped in 0.5.0: per-server MCP partitions with injective fail-closed encoding 
 
 ### 2.5 First-party migration ✅
 
-All 7 first-party plugins are pure v6 (verified 2026-07-10): git 0.1.9 (24 tools), lge-api 0.17.27 (29), local-indexer 0.5.20 (13), meeting 0.5.30 (32), ms-graph 0.3.39 (30), work-assistant 0.10.7 (3), template 0.1.3 (0 tools). None carries `toolSchemas`/`uiActions`/`ui[].kind:"action"`; all pre-validate clean against the collapsed schema.
+All 7 first-party plugins are pure v6 (verified 2026-07-10): git 0.1.9 (24 tools), ep 0.17.27 (29), local-indexer 0.5.20 (13), meeting 0.5.30 (32), ms-graph 0.3.39 (30), work-assistant 0.10.7 (3), template 0.1.3 (0 tools). None carries `toolSchemas`/`uiActions`/`ui[].kind:"action"`; all pre-validate clean against the collapsed schema.
 
 ## 3. Honest divergences from the initial design
 
