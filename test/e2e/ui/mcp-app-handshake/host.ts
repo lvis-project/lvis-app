@@ -44,6 +44,9 @@ window.__startHandshake = ({ proxyUrl, partition, html }) => {
     // This gate exercises the sandbox handshake, not theming: an empty standard
     // host context matches the prior behavior (previously `{ hostContext: {} }`).
     {},
+    // The handshake never sends `ui/notifications/size-changed`, so this adapter is an
+    // inert no-op here — present only to satisfy the signature.
+    { onResize: () => {} },
   );
 
   // Prove the sandbox handshake actually reached the (production) bridge. We observe
