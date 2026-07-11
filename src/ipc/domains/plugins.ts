@@ -1080,7 +1080,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
   ipcMain.handle(CHANNELS.mcp.uiResource, async (e, serverId: string, uri: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.uiResource, e); return UNAUTHORIZED_FRAME; }
-    // b1 — install the per-server CDN network gate BEFORE the resource is read.
+    // b1 — install the per-server network gate BEFORE the resource is read. (It is
+    // the deny-by-default declared-origin gate now, not the old CDN allowlist.)
     // This is the single chokepoint every card render (inline + detached) passes
     // through, and the webview only mounts after this promise resolves, so the
     // gate is guaranteed present before the guest's first request. Fail-closed:
