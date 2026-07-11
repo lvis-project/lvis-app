@@ -12,6 +12,7 @@ import { estimateTokens } from "../shared/token-estimate.js";
 import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
+import { isAppMessageOrigin } from "../shared/mcp-app-message-source.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import type { ProjectIdentity } from "../shared/project-identity.js";
 
@@ -529,6 +530,32 @@ export class SystemPromptBuilder {
           // 사용자가 트리거를 수락하면 (UI 의 \"확인하기\" 버튼) 다음 절차를 따르세요. 이 행동 가이드는 *시스템* 이 정의하므로 trigger 본문에 다시 적힐 필요가 없습니다 — 본문은 (제목/발신자/emailId 같은) 메타정보 위주로만 짧게 옵니다.
           t("be_systemPromptBuilder.overlayTriggerOriginProceedIfValid"),
           "</overlay-trigger-origin-guidance>",
+        ].join("\n");
+      },
+    });
+
+    // ④-c App Message Origin Guidance (per-turn, conditional)
+    //
+    // Emitted ONLY when the turn's origin source is `app:*` — the text came from an
+    // MCP App's `ui/message` (a sandboxed, UNTRUSTED iframe), either confirmed by the
+    // user from the staging card or injected mid-turn as guidance. Distinct from the
+    // overlay block above because the trust story is different: an overlay prompt is a
+    // first-party plugin's templated suggestion, whereas this body is arbitrary text
+    // authored by a third-party app's UI. The hard gate (write/shell/network forced to
+    // ask, `isStagedTurnOrigin`) applies to both; this is the model-facing half.
+    this.sources.push({
+      id: 4.65,
+      name: "App Message Origin Guidance",
+      refresh: "per-turn",
+      build: () => {
+        const source = this.originSource;
+        if (!isAppMessageOrigin(source)) return "";
+        return [
+          "<app-message-origin-guidance priority=\"high\">",
+          t("be_systemPromptBuilder.appMessageOriginNotDirectInput", { source: source ?? "" }),
+          t("be_systemPromptBuilder.appMessageOriginUntrusted"),
+          t("be_systemPromptBuilder.appMessageOriginConfirmBeforeAction"),
+          "</app-message-origin-guidance>",
         ].join("\n");
       },
     });
