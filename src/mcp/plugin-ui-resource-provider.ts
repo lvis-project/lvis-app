@@ -3,28 +3,28 @@
  * MCP App HTML cards (the PLUGIN arm of the `ui://` serving seam,
  * mcp-alignment-design.md §3.x).
  *
- * A plugin ships an HTML card in its `dist/` and declares it in
- * `manifest.uiResources[]` ({@link PluginUiResourceDecl}). This provider turns
- * that declaration + the plugin root into the `resources/list` / `resources/read`
- * answers the loopback {@link PluginMcpServer} returns, so a plugin-served card
- * flows through the SAME sandbox-proxy + main-computed CSP path as an
- * external MCP server's `ui://` resource — BOTH converge on {@link McpUiResourceRead}.
+ * "Declared POLICY, served CONTENT": a plugin declares a card's `uri` + its
+ * security policy (`csp` / `permissions`) in `manifest.uiResources[]`
+ * ({@link PluginUiResourceDecl}), and serves the card's BYTES itself
+ * (`RuntimePlugin.readUiResource`, injected here as {@link readHtml}). The plugin
+ * IS the MCP server — servers serve their own resources; the host relays. That is
+ * exactly what the EXTERNAL arm already does (`resources/read` returns bytes), so
+ * both arms converge on {@link McpUiResourceRead}.
  *
- * This is the SINGLE chokepoint that enforces the serving security invariants,
- * fail-closed (no layered guards elsewhere):
- *  1. own-namespace-only — `uri` authority MUST equal this plugin's id, so a
- *     plugin can never serve another plugin's (or an external server's) namespace;
- *  2. declared-only — the `uri` MUST be one the manifest declared;
- *  3. path-containment — the HTML file MUST resolve INSIDE the plugin root
- *     (realpath-checked, mirroring `plugin-asset-protocol.ts`); absolute paths,
- *     `..` escapes, and symlinks pointing outside the root are rejected.
+ * This module is therefore PURE: no fs, no path, no platform. It is the single
+ * fail-closed POLICY gate on the serving seam, and nothing else:
+ *  1. own-namespace-only — `uri` authority MUST equal this plugin's id. Load-bearing
+ *     beyond mere hygiene: the serverId keys the sandbox-proxy origin, its partition,
+ *     and the `declaredOriginsByServer` network union — a plugin must not police its
+ *     own namespace;
+ *  2. declared-only — the `uri` MUST be one the manifest declared. This binds the
+ *     served content to the manifest-declared `csp` main computes the CSP header
+ *     from, so a plugin cannot serve a card under a policy it never declared;
+ *  3. attach the manifest's policy — never the hook's.
  *
- * The declared `csp` / `permissions` ride back on the resource's `_meta.ui` so
- * main COMPUTES the sandbox-proxy CSP header from them — the plugin never hands
- * the host a policy header string.
+ * The host no longer resolves or reads a plugin-declared disk path, so the realpath
+ * containment layer that used to guard that read is gone with the read itself.
  */
-import { realpath as fsRealpath, readFile as fsReadFile } from "node:fs/promises";
-import path from "node:path";
 import type { McpUiResourceRead, PluginUiResourceDecl } from "./types.js";
 
 /** The MCP Apps HTML profile mime the host renders `ui://` resources as. */
@@ -40,22 +40,24 @@ export interface PluginUiResourceProvider {
   /** The `ui://` resources this plugin declares (for `resources/list`). */
   list(): PluginUiResourceListing[];
   /**
-   * Serve one declared resource: its HTML plus the resource's OWN csp/permissions.
-   * Fail-closed — throws when `uri`'s authority is not this plugin, when the uri
-   * is not declared, or when the HTML path escapes the plugin root.
+   * Serve one declared resource: the plugin's HTML plus the resource's OWN
+   * manifest-declared csp/permissions. Fail-closed — throws when `uri`'s authority
+   * is not this plugin, when the uri is not declared, or when the plugin's
+   * `readHtml` hook rejects (it is host-bounded: timeout + size cap).
    */
   read(uri: string): Promise<McpUiResourceRead>;
 }
 
 export interface CreatePluginUiResourceProviderInput {
   pluginId: string;
-  /** Absolute plugin install root; the HTML path resolves relative to it. */
-  pluginRoot: string;
   declarations: readonly PluginUiResourceDecl[];
-  /** Injectable for tests. Defaults to `fs.readFile(..., "utf-8")`. */
-  readFile?: (absPath: string) => Promise<string>;
-  /** Injectable for tests. Defaults to `fs.realpath`. */
-  realpath?: (targetPath: string) => Promise<string>;
+  /**
+   * Ask THIS plugin for a declared card's HTML. Called only after the two policy
+   * gates pass. Wired to `PluginRuntime.readUiResource`, which applies the runtime
+   * gates (enabled / session-activated, manifest integrity) and bounds the hook
+   * (timeout + size cap) — this module stays pure.
+   */
+  readHtml: (uri: string) => Promise<string>;
 }
 
 /**
@@ -77,35 +79,12 @@ function uiAuthority(uri: string): string | null {
 export function createPluginUiResourceProvider(
   input: CreatePluginUiResourceProviderInput,
 ): PluginUiResourceProvider {
-  const { pluginId, pluginRoot } = input;
-  const readFile = input.readFile ?? ((abs: string) => fsReadFile(abs, "utf-8"));
-  const realpath = input.realpath ?? fsRealpath;
+  const { pluginId, readHtml } = input;
 
   // Declared uri → declaration. A duplicate uri resolves last-write-wins
   // (deterministic); the serving gate reads only from this indexed set.
   const byUri = new Map<string, PluginUiResourceDecl>();
   for (const decl of input.declarations) byUri.set(decl.uri, decl);
-
-  async function loadContainedHtml(relHtml: string): Promise<string> {
-    // Lexical fail-closed BEFORE touching the fs: no absolute paths, no NULs.
-    if (typeof relHtml !== "string" || relHtml.length === 0 || relHtml.includes("\0")) {
-      throw new Error(`[plugin-ui-resource:${pluginId}] invalid html path`);
-    }
-    if (path.isAbsolute(relHtml)) {
-      throw new Error(`[plugin-ui-resource:${pluginId}] html path must be relative to the plugin root`);
-    }
-    // Realpath containment — the resolved asset MUST stay inside the (realpath'd)
-    // plugin root, so a `..` chain or an escaping symlink cannot read out-of-root.
-    // `path.resolve` normalizes the root to one canonical absolute form so the
-    // `startsWith` compare is separator/drive-consistent on every platform.
-    const realRoot = path.resolve(await realpath(pluginRoot));
-    const realAsset = await realpath(path.resolve(realRoot, relHtml));
-    const rootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
-    if (realAsset !== realRoot && !realAsset.startsWith(rootWithSep)) {
-      throw new Error(`[plugin-ui-resource:${pluginId}] html path escapes the plugin root`);
-    }
-    return readFile(realAsset);
-  }
 
   return {
     list() {
@@ -123,8 +102,8 @@ export function createPluginUiResourceProvider(
       if (!decl) {
         throw new Error(`[plugin-ui-resource:${pluginId}] no declared ui:// resource '${uri}'`);
       }
-      // (3) path-containment + read.
-      const html = await loadContainedHtml(decl.html);
+      // (3) the plugin serves the content; the MANIFEST supplies the policy.
+      const html = await readHtml(uri);
       return {
         html,
         ...(decl.csp !== undefined ? { csp: decl.csp } : {}),

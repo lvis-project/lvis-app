@@ -236,14 +236,16 @@ export interface PluginManifest {
   /**
    * MCP App `ui://` resources this plugin serves — the plugin→host serving
    * contract for interactive HTML cards (distinct from `ui[]`, which declares
-   * host-mounted React sidebar panels). Each entry maps a `ui://<pluginId>/<path>`
-   * uri to an HTML file shipped in the plugin's `dist/` plus that resource's OWN
-   * `_meta.ui` security metadata (csp / permissions). When a tool result carries
-   * `_meta.ui.resourceUri` matching one of these uris, the loopback host SERVES
-   * the declared HTML through the same sandbox-proxy + main-computed CSP path as
-   * an external MCP server's `ui://` resource. See {@link PluginUiResourceDecl}
-   * for the security invariants (own-namespace-only, path-containment,
-   * host-computed CSP). @optional
+   * host-mounted React sidebar panels). Each entry declares a
+   * `ui://<pluginId>/<path>` uri plus that resource's OWN `_meta.ui` security
+   * POLICY (csp / permissions). The CONTENT is served by the plugin itself
+   * ({@link RuntimePlugin.readUiResource}) — "declared policy, served content".
+   *
+   * When a tool result carries `_meta.ui.resourceUri` matching one of these uris,
+   * the loopback host asks the plugin for the card HTML and renders it through the
+   * same sandbox-proxy + main-computed CSP path as an external MCP server's
+   * `ui://` resource. See {@link PluginUiResourceDecl} for the security invariants
+   * (own-namespace-only, declared-only, host-computed CSP). @optional
    */
   uiResources?: PluginUiResourceDecl[];
   keywords?: Array<{ keyword: string; skillId: string }>;
@@ -1447,6 +1449,21 @@ export interface RuntimePlugin {
   start?: () => Promise<void> | void;
   stop?: () => Promise<void> | void;
   handlers: Record<string, PluginToolHandler>;
+  /**
+   * Serve one of THIS plugin's manifest-declared `ui://` cards. The plugin IS the
+   * MCP server, so it serves its own resource bytes — the host relays them (it
+   * never resolves or reads a plugin-declared disk path itself).
+   *
+   * Called only for a `uri` the manifest declared in `uiResources[]` and whose
+   * authority the host already verified (own-namespace-only). Returns the card
+   * HTML. `csp` / `permissions` come from the MANIFEST — never from here: they are
+   * security policy, statically reviewable and covered by `manifestSha256`, so a
+   * hook cannot present a narrow CSP at review and widen it at runtime.
+   *
+   * Bounded by the host at the single {@link PluginRuntime.readUiResource}
+   * chokepoint (timeout + HTML size cap, fail-closed). @optional
+   */
+  readUiResource?: (uri: string) => Promise<string> | string;
 }
 
 export type RuntimePluginFactory = (context: PluginRuntimeContext) => Promise<RuntimePlugin> | RuntimePlugin;
