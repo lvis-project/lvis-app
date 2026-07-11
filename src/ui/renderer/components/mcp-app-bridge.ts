@@ -15,9 +15,10 @@
  * thing.
  */
 import { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
-// `McpUiHostContext` comes from the local standard-type twin, not the package:
-// ext-apps 1.7.4's `.d.ts` re-export the spec types via extensionless imports that
-// don't resolve under NodeNext (see mcp-app-host-context.ts for the full rationale).
+// `McpUiHostContext` comes from the local standard-type twin, not the package —
+// a drift-safety/hygiene choice for types, not a strict compile necessity (see
+// mcp-app-host-context.ts for the full rationale, including the concrete
+// extensionless-chain errors this file's `AppBridge` value import interacted with).
 import type { McpUiHostContext } from "./mcp-app-host-context.js";
 import type { McpUiPayload } from "../../../mcp/types.js";
 import { MCP_APP_HOST_INFO } from "../../../shared/mcp-app-bridge-contract.js";

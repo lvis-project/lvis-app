@@ -16,13 +16,29 @@
  * ─── Standard types re-declared locally ─────────────────────────────────────
  * The `McpUiTheme` / `McpUiStyleVariableKey` / `McpUiStyles` / `McpUiHostContext`
  * twins below are structurally identical to `@modelcontextprotocol/ext-apps`
- * `spec.types.ts`. They are NOT imported from the package because ext-apps 1.7.4's
- * `.d.ts` re-export the spec types through EXTENSIONLESS `export * from "./types"`,
- * which does not resolve under `moduleResolution: NodeNext` (the same reason the
- * host re-declares `McpUiResourceCsp` in `src/mcp/types.ts`, and the same class of
- * issue documented in `mcp-app-bridge.ts`). `__tests__/mcp-app-host-context.test.ts`
- * pins these twins against the upstream package so a spec change fails the suite
- * instead of drifting silently.
+ * `spec.types.ts`, but are NOT imported from the package. This is a drift-safety
+ * / hygiene choice for TYPES, not a strict compile necessity: a plain type-only
+ * import — `import type { McpUiHostContext } from "@modelcontextprotocol/ext-apps"`
+ * — DOES typecheck (see the pin below and in
+ * `__tests__/mcp-app-host-context.test.ts`), because `skipLibCheck` and the
+ * package's `spec.types.js`-suffixed internal re-exports mostly paper over its
+ * extensionless `export * from "./types"` chain for pure type positions.
+ *
+ * What genuinely and reliably fails under `moduleResolution: NodeNext` is
+ * VALUE/member-level resolution through that same extensionless chain — e.g.
+ * `AppBridge`'s base class `ProtocolWithEvents` is invisible to TypeScript here
+ * (the concrete, load-bearing case documented in `mcp-app-bridge.ts`). Combining
+ * several spec-type imports from the `/app-bridge` subpath alongside a VALUE
+ * import of `AppBridge` from the same subpath did also throw real `TS2460`/
+ * `TS2305` errors during this change — a symptom of the same extensionless-chain
+ * fragility, just not a blanket "type imports never resolve" rule.
+ *
+ * Re-declaring the twins here avoids coupling this module's compile-time safety
+ * to that resolution-order-dependent behavior, and keeps it free of any package
+ * import so it stays trivially portable to the e2e gate. The same rationale the
+ * host already applies to `McpUiResourceCsp` in `src/mcp/types.ts`.
+ * `__tests__/mcp-app-host-context.test.ts` pins these twins against the upstream
+ * package so a real spec change fails the suite instead of drifting silently.
  */
 
 /** @see ext-apps `McpUiTheme` */
