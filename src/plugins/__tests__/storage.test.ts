@@ -2,7 +2,7 @@
  * Sandboxed PluginStorage — verifies path-traversal guards, ENOENT handling,
  * and JSON helpers stay scoped to pluginDataDir.
  */
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -242,6 +242,27 @@ describe("createPluginStorage encrypted-at-rest variants", () => {
     const s = createPluginStorage("p", dataDir);
     await expect(s.readEncrypted("missing.enc")).rejects.toMatchObject({ code: "ENOENT" });
   });
+
+  // POSIX-only: mode bits are meaningful on mac/linux, a no-op on Windows.
+  // Pins the storage-namespace rule (0o700 dir / 0o600 file) so the secret
+  // ciphertext can never regress to world/group-readable — and asserts the same
+  // uniform rule for the plaintext writers + explicit mkdir.
+  it.skipIf(process.platform === "win32")(
+    "created files are 0o600 inside 0o700 dirs (encrypted + plaintext, POSIX)",
+    async () => {
+      const s = createPluginStorage("p", dataDir);
+      await s.writeEncrypted("auth/token.enc", "secret");
+      expect(statSync(join(dataDir, "auth", "token.enc")).mode & 0o777).toBe(0o600);
+      expect(statSync(join(dataDir, "auth")).mode & 0o777).toBe(0o700);
+
+      await s.write("plain/notes.txt", "hi");
+      expect(statSync(join(dataDir, "plain", "notes.txt")).mode & 0o777).toBe(0o600);
+      expect(statSync(join(dataDir, "plain")).mode & 0o777).toBe(0o700);
+
+      await s.mkdir("madedir");
+      expect(statSync(join(dataDir, "madedir")).mode & 0o777).toBe(0o700);
+    },
+  );
 
   it("path-escape rejection applies to the encrypted variants too", async () => {
     // Absolute + lexical .. escapes.
