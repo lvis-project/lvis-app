@@ -37,7 +37,7 @@ const EXPECTED_IDS: Record<string, string> = {
   "plugin-template.plugin.json": "your-plugin-id",
 };
 
-describe("current plugin manifests — native @lvis/plugin-sdk v5.21.0 schema acceptance", () => {
+describe("current plugin manifests — host-owned schema acceptance", () => {
   const files = readdirSync(fixturesDir)
     .filter((f) => f.endsWith(".plugin.json"))
     .sort();

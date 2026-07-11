@@ -8,14 +8,15 @@
  * gate ever runs — i.e., the feature looks broken with no useful error.
  */
 import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { KNOWN_CAPABILITIES } from "../capabilities.js";
 
 describe("capability schema/runtime sync", () => {
   it("schema enum equals KNOWN_CAPABILITIES", async () => {
-    const schemaPath = createRequire(import.meta.url).resolve(
-      "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
+    // Host-owned manifest schema SOT (ph2).
+    const schemaPath = fileURLToPath(
+      new URL("../../../schemas/plugin-manifest.schema.json", import.meta.url),
     );
     const raw = await readFile(schemaPath, "utf-8");
     const schema = JSON.parse(raw) as {

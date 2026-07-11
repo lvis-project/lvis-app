@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildManifestValidator, parsePluginJson } from "../manifest-validation.js";
 
-describe("manifest networkAccess (Tier A) — real SDK-schema validator path", () => {
+describe("manifest networkAccess (Tier A) — host-owned schema validator path", () => {
   let workDir: string;
 
   beforeEach(async () => {
