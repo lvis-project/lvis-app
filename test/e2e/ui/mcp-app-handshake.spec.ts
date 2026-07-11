@@ -13,7 +13,24 @@
  *
  * Everything under the transport is production code — the privileged scheme, the
  * sandbox-proxy document + CSP response header, the relay preload installed via
- * session.setPreloads(), and the inner sandboxed iframe.
+ * session.setPreloads(), and the inner sandboxed iframe. The host page drives the
+ * SHIPPING renderer wiring (`createMcpAppBridge`, the same function `McpAppView`
+ * calls), so a regression in that wiring turns this gate red.
+ *
+ * ─── What this gate proves, and what it does NOT ─────────────────────────────
+ * PROVES (verified by mutation: each of these broken one at a time turns it RED):
+ *   - `createMcpAppBridge` sets `onsandboxready` and answers with the app HTML,
+ *   - the `AppBridge` constructor args are in the right order (the M1 bug class),
+ *   - `bridge.connect(transport)` is actually called,
+ *   - the sandbox-proxy → relay-preload → inner-srcdoc → unmodified-App chain
+ *     completes `ui/initialize` with no self-echo.
+ * Does NOT prove (out of scope for this PoC; follow-up milestone):
+ *   - RUNTIME app→host callbacks — `onreadresource` / `oncalltool`. Under scope S
+ *     (third-party apps must work) those are real paths that would break silently
+ *     if mis-wired; they are not exercised here.
+ *   - a LIVE MCP server. We hand the app HTML into the harness instead of doing a
+ *     real `resources/read` — a legitimate stub boundary that mirrors production
+ *     (McpAppView also receives the HTML from the IPC, not from the bridge).
  */
 import { test, expect } from "@playwright/test";
 import { _electron as electron } from "playwright";

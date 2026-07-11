@@ -24,64 +24,15 @@
  *   AppBridge ⇄ WebviewIpcTransport ⇄ <webview> ipc ⇄ relay preload ⇄ inner App
  */
 import { createElement, useCallback, useEffect, useRef, useState } from "react";
-import { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
+import type { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { McpUiPayload, McpUiResourceBundle } from "../../../mcp/types.js";
 import { Loader2, AlertCircle, PlugZap } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { mcpAppPartitionName } from "../../../shared/mcp-app-partition.js";
-import { INNER_SANDBOX_ATTR, MCP_APP_HOST_INFO } from "../../../shared/mcp-app-bridge-contract.js";
-import { WebviewIpcTransport, type BridgeWebviewElement } from "./webview-ipc-transport.js";
-
-/**
- * Wire an `AppBridge` to a freshly mounted <webview> for one card.
- *
- * `_client` is `null` (client is the FIRST ctor arg): we do not hand ext-apps an
- * MCP `Client` — the real client lives in the main process — so handlers are
- * registered manually and proxied over our existing IPC. `Client` is deliberately
- * never imported as a value; that would drag `sdk/client/index.js` (and with it
- * eventsource/express/hono) into the renderer bundle.
- */
-export function createMcpAppBridge(
-  payload: McpUiPayload,
-  html: string,
-  el: BridgeWebviewElement,
-): { bridge: AppBridge; transport: WebviewIpcTransport; connected: Promise<void> } {
-  const transport = new WebviewIpcTransport(el);
-  const bridge = new AppBridge(
-    null,
-    MCP_APP_HOST_INFO,
-    { serverResources: {} },
-    { hostContext: {} },
-  );
-
-  // The proxy announces it is ready for HTML; answer with the app document. The
-  // relay preload mounts it into the inner sandboxed iframe, after which the App
-  // inside performs `ui/initialize` over this same transport.
-  //
-  // Upstream prefers `addEventListener("sandboxready", …)`, but that member is
-  // inherited from `ProtocolWithEvents` and ext-apps 1.7.4's own `.d.ts` files use
-  // EXTENSIONLESS relative imports (`from "./events"`), which do not resolve under
-  // `moduleResolution: NodeNext` — so the base class, and every member it brings,
-  // is invisible to TypeScript here (our `skipLibCheck` merely hides the .d.ts
-  // error). Members declared directly on `AppBridge` resolve fine, so we use the
-  // singular setter. It is marked @deprecated but is a supported API with
-  // identical semantics for a single listener, and the runtime JS is unaffected.
-  // Worth an upstream issue; NOT worth forking.
-  bridge.onsandboxready = () => {
-    void bridge.sendSandboxResourceReady({ html, sandbox: INNER_SANDBOX_ATTR });
-  };
-
-  // resources/read from the app → the same main-process chokepoint that gated and
-  // fetched this card (the partition policy is already installed for this server).
-  bridge.onreadresource = async ({ uri }) => {
-    const bundle = await window.lvis.mcp.readUiResource(payload.serverId, uri);
-    return {
-      contents: [{ uri, mimeType: "text/html;profile=mcp-app", text: bundle.html }],
-    };
-  };
-
-  return { bridge, transport, connected: bridge.connect(transport) };
-}
+// The host-side wiring lives in its own React-free module so the real-<webview> e2e
+// gate can import and exercise THE SHIPPING WIRING rather than a look-alike copy.
+import { createMcpAppBridge } from "./mcp-app-bridge.js";
+import type { BridgeWebviewElement, WebviewIpcTransport } from "./webview-ipc-transport.js";
 
 export function McpAppView({ payload }: { payload: McpUiPayload }) {
   const { t } = useTranslation();
