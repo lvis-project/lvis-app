@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import { RENDER_HTML_PARTITION } from "../shared/render-html-preview.js";
 import { mcpAppPartitionName } from "../shared/mcp-app-partition.js";
 import { installPluginAssetProtocolHandler, PLUGIN_ASSET_SCHEME } from "./plugin-asset-protocol.js";
+import { installMcpAppProtocolHandler, MCP_APP_SCHEME } from "./mcp-app-protocol.js";
 
 // ESM equivalent of CommonJS `__dirname`. The original code referenced
 // `__dirname` directly, which is undefined under `"type": "module"` and
@@ -67,6 +68,15 @@ function installCdnAllowlist(ses: Electron.Session): void {
   ses.webRequest.onBeforeRequest((details, callback) => {
     try {
       const url = new URL(details.url);
+      // The host-owned sandbox-proxy document itself. Served exclusively by our
+      // own `protocol.handle`, which fail-closes on an unknown token or an
+      // authority that does not match that token's serverId — so this cannot be
+      // used to reach anything the host did not mint. Without this the gate
+      // cancels the proxy navigation and the card never loads.
+      if (url.protocol === `${MCP_APP_SCHEME}:`) {
+        callback({ cancel: false });
+        return;
+      }
       if (url.protocol === "data:" || url.protocol === "blob:" || url.protocol === "about:") {
         callback({ cancel: false });
         return;
@@ -134,7 +144,27 @@ export function installMcpAppPartitionPolicy(
   const partitionName = mcpAppPartitionName(serverId);
   if (installedMcpAppPartitions.has(partitionName)) return;
   installedMcpAppPartitions.add(partitionName);
-  installCdnAllowlist(sessionApi.fromPartition(partitionName));
+
+  const ses = sessionApi.fromPartition(partitionName);
+  installCdnAllowlist(ses);
+
+  // Serves the host-owned sandbox-proxy document (`lvis-mcp-app://…/proxy.html`)
+  // with its Content-Security-Policy RESPONSE HEADER — the envelope the inner app
+  // frame inherits.
+  installMcpAppProtocolHandler(partitionName, ses);
+
+  // The sandbox-proxy relay preload. As with the plugin partition, `setPreloads`
+  // is the ONLY path that works: the `preload=` attribute is silently ignored
+  // when `webpreferences="sandbox=yes"`, and the `will-attach-webview` guards
+  // strip the attribute anyway (they cannot see, and do not affect, session
+  // preloads). Registered here — before any webview for this server begins
+  // loading — because attach-time hooks do not work (see
+  // `boot/steps/plugin-runtime.ts`: `webPreferences.preload` is `undefined` there).
+  //
+  // Host-resolved path only. An MCP server can never nominate a preload — that
+  // would be a Node escape. At runtime __dirname is `dist/src/main/`, so
+  // "../mcp-app-preload.cjs" resolves to `dist/src/mcp-app-preload.cjs`.
+  ses.setPreloads([resolve(__dirname, "..", "mcp-app-preload.cjs")]);
 }
 
 function isAllowedPluginShellFile(url: URL): boolean {

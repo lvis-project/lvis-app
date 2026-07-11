@@ -25,6 +25,8 @@ const mockOnBeforeRequestMcp = vi.fn();
 const mockOnBeforeRequestPlugin = vi.fn();
 const mockSetPreloadsPlugin = vi.fn();
 const mockProtocolHandlePlugin = vi.fn();
+const mockSetPreloadsMcp = vi.fn();
+const mockProtocolHandleMcp = vi.fn();
 const mockSession = {
   webRequest: {
     onBeforeRequest: mockOnBeforeRequest,
@@ -35,7 +37,12 @@ const mockMcpSession = {
   webRequest: {
     onBeforeRequest: mockOnBeforeRequestMcp,
   },
-  setPreloads: vi.fn(),
+  // The MCP-app partition now also carries the sandbox-proxy relay preload and
+  // the `lvis-mcp-app://` protocol handler that serves the proxy document.
+  setPreloads: mockSetPreloadsMcp,
+  protocol: {
+    handle: mockProtocolHandleMcp,
+  },
 };
 const mockPluginSession = {
   webRequest: {
@@ -136,6 +143,8 @@ describe("installMcpAppPartitionPolicy (#885 b1 — lazy per-server CDN gate)", 
   beforeEach(() => {
     mockOnBeforeRequestMcp.mockClear();
     mockSessionApi.fromPartition.mockClear();
+    mockSetPreloadsMcp.mockClear();
+    mockProtocolHandleMcp.mockClear();
   });
 
   it("installs the CDN allowlist on the per-server lvis-mcp-app:<hex> partition", () => {
@@ -146,14 +155,33 @@ describe("installMcpAppPartitionPolicy (#885 b1 — lazy per-server CDN gate)", 
     expect(mockOnBeforeRequestMcp).toHaveBeenCalledOnce();
   });
 
-  it("allows only CDN https + inline schemes, blocks everything else", () => {
+  it("allows only CDN https + inline schemes + the sandbox-proxy scheme, blocks everything else", () => {
     installMcpAppPartitionPolicy("github-b", mockSessionApi);
     expect(invokeMcpHandler("https://cdn.jsdelivr.net/npm/vue")).toEqual({ cancel: false });
     expect(invokeMcpHandler("https://unpkg.com/x")).toEqual({ cancel: false });
     expect(invokeMcpHandler("data:text/html,x")).toEqual({ cancel: false });
+    // The host-owned sandbox-proxy document. Without this the gate cancels the
+    // proxy navigation and the card never loads (caught by the real-webview e2e).
+    expect(invokeMcpHandler("lvis-mcp-app://abc/proxy.html?t=tok")).toEqual({ cancel: false });
     expect(invokeMcpHandler("https://attacker.example/exfil")).toEqual({ cancel: true });
     expect(invokeMcpHandler("http://cdn.jsdelivr.net/x")).toEqual({ cancel: true });
     expect(invokeMcpHandler("file:///etc/passwd")).toEqual({ cancel: true });
+  });
+
+  it("installs the host-owned relay preload via setPreloads (sandboxed <webview> requirement)", () => {
+    // The `preload=` ATTRIBUTE is silently ignored under sandbox=yes and is stripped
+    // by the will-attach-webview guards, so session.setPreloads is the only path.
+    // The path must be host-resolved — an MCP server can never nominate a preload.
+    installMcpAppPartitionPolicy("github-preload", mockSessionApi);
+    expect(mockSetPreloadsMcp).toHaveBeenCalledOnce();
+    const [paths] = mockSetPreloadsMcp.mock.calls[0] as [string[]];
+    expect(paths).toHaveLength(1);
+    expect(paths[0].endsWith("mcp-app-preload.cjs")).toBe(true);
+  });
+
+  it("registers the lvis-mcp-app:// protocol handler that serves the sandbox proxy", () => {
+    installMcpAppPartitionPolicy("github-proto", mockSessionApi);
+    expect(mockProtocolHandleMcp).toHaveBeenCalledWith("lvis-mcp-app", expect.any(Function));
   });
 
   it("is idempotent: re-installing the same server does not re-register the gate", () => {

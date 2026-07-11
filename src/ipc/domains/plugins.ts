@@ -35,6 +35,8 @@ import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
 import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
 import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
 import { installMcpAppPartitionPolicy } from "../../main/html-preview-partition.js";
+import { createMcpAppProxySession } from "../../main/mcp-app-protocol.js";
+import type { McpUiCspPolicy, McpUiResourceBundle } from "../../mcp/types.js";
 import {
   installMarketplacePluginWithLifecycle,
   startInstalledPluginWithLifecycle,
@@ -1076,7 +1078,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configRemove, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.removeConfig(serverId);
   });
-  ipcMain.handle(CHANNELS.mcp.uiResource, async (e, serverId: string, uri: string) => {
+  ipcMain.handle(CHANNELS.mcp.uiResource, async (e, serverId: string, uri: string, csp?: McpUiCspPolicy) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.uiResource, e); return UNAUTHORIZED_FRAME; }
     // b1 — install the per-server CDN network gate BEFORE the resource is read.
     // This is the single chokepoint every card render (inline + detached) passes
@@ -1084,8 +1086,18 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // gate is guaranteed present before the guest's first request. Fail-closed:
     // an invalid/over-length serverId throws out of encodeMcpServerId here rather
     // than rendering on an ungated partition (No-Fallback).
+    //
+    // This ALSO installs the sandbox-proxy protocol handler and the relay preload
+    // on the partition, so both are in place before the webview navigates.
     installMcpAppPartitionPolicy(serverId);
-    return deps.mcpManager.readUiResource(serverId, uri);
+
+    const html = await deps.mcpManager.readUiResource(serverId, uri);
+    // The CSP is materialized HERE, in main, and sanitized on the way in — the
+    // renderer cannot hand us a policy string, only the server's declared policy
+    // object. It is emitted as the proxy document's response header, which the
+    // inner app frame inherits and can only narrow.
+    const proxyUrl = createMcpAppProxySession(serverId, csp);
+    return { proxyUrl, html } satisfies McpUiResourceBundle;
   });
 
   ipcMain.handle(CHANNELS.mcp.catalogList, async (e) => {

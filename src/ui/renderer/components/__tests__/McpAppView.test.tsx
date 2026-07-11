@@ -7,7 +7,12 @@ import { mcpAppPartitionName } from "../../../../shared/mcp-app-partition.js";
 import type { McpUiPayload } from "../../../../mcp/types.js";
 
 let disconnectHandler: ((serverId: string) => void) | null = null;
-const readUiResource = vi.fn(async () => "<html><body>card</body></html>");
+// Main now returns a BUNDLE: the sandbox-proxy URL the <webview> navigates to,
+// plus the app HTML that is handed to the proxy over the bridge (never in the URL).
+const readUiResource = vi.fn(async (serverId: string) => ({
+  proxyUrl: `lvis-mcp-app://${Buffer.from(serverId, "utf8").toString("hex")}/proxy.html?t=tok-${serverId}`,
+  html: "<html><body>card</body></html>",
+}));
 
 function stubLvis() {
   disconnectHandler = null;
@@ -52,7 +57,15 @@ describe("McpAppView — MAJOR-1 per-server partition as a createElement PROP", 
     // Sandbox posture also declared as creation-time props.
     expect(node.getAttribute("webpreferences")).toContain("contextIsolation=yes");
     expect(node.getAttribute("webpreferences")).toContain("sandbox=yes");
-    expect(node.getAttribute("src")?.startsWith("data:text/html")).toBe(true);
+    // The webview now navigates to the host-owned sandbox-proxy document on the
+    // privileged scheme — NOT a `data:` URL carrying the app HTML. The app HTML
+    // travels over the bridge instead, so it never hits the ~2MB data:-URL cap and
+    // the document gets a real origin + a real CSP response header.
+    expect(node.getAttribute("src")?.startsWith("lvis-mcp-app://")).toBe(true);
+    expect(node.getAttribute("src")).not.toContain("data:text/html");
+    // No preload ATTRIBUTE: it is silently ignored under sandbox=yes and stripped
+    // by the will-attach guards. The relay preload rides session.setPreloads().
+    expect(node.getAttribute("preload")).toBeNull();
   });
 
   it("distinct serverIds yield distinct partition attributes", async () => {
