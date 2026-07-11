@@ -28,7 +28,7 @@ type InsertImportedTriggerEntry = ReturnType<typeof useChatState>["insertImporte
  */
 export type HandleAskRefFn = (
   q: string,
-  mode?: "default" | "trigger-import",
+  mode?: "default" | "trigger-import" | "app-message",
   userIntent?: UserKeyboardIntentSnapshot,
 ) => Promise<void>;
 
@@ -166,34 +166,42 @@ export function useRoutineOverlay({
     return () => { unsubShow(); unsubDismiss(); };
   }, [api]);
 
-  // Plugin overlay primary action handler (user confirm → main chat insert).
+  // Insertion-overlay primary action handler (user confirm → main chat insert).
   // Called from OverlayCardRegion with the OverlayItem.id after OverlayContext.dismiss()
   // has already removed the item from the queue. overlayItemsRef still holds it.
+  //
+  // Two staged sources land here, and BOTH are non-user-authored: a plugin overlay
+  // trigger and an MCP App's `ui/message` that arrived with no turn in flight. The
+  // click is the gate — neither may start a turn on its own. They differ only in
+  // provenance, which rides the envelope already inside `pendingPrompt` and the send
+  // mode (→ `plugin-emitted` / `app-emitted` trust origin in main).
   const handlePluginPrimaryAction = useCallback(
     async (overlayItemId: string) => {
       const item = overlayItemsRef.current.get(overlayItemId);
       if (!item) return;
 
-      const { source, pendingPrompt, summary, title } = item;
-      if (source.kind !== "plugin" || !pendingPrompt) return;
+      const { source, pendingPrompt, summary } = item;
+      if (source.kind === "routine" || !pendingPrompt) return;
 
       // Clean up lookup ref
       overlayItemsRef.current.delete(overlayItemId);
 
-      // Insert as imported_trigger entry — overlay trigger provenance preserved,
-      // NOT a plain user bubble (architecture §9 plugin provenance contract)
+      // Insert as imported_trigger entry — staged provenance preserved, NOT a plain
+      // user bubble (architecture §9 plugin provenance contract; same rule for apps).
       insertImportedTriggerEntry({
         sessionId: source.eventId,
-        pluginId: source.pluginId,
+        source: source.kind === "plugin" ? `plugin:${source.pluginId}` : `app:${source.serverId}`,
         prompt: pendingPrompt,
         summary,
-        title,
       });
 
-      // Start the main ConversationLoop turn immediately (user-in-the-loop
-      // confirm → auto-process). trigger-import mode skips the user-bubble
-      // append since the imported_trigger marker already represents the prompt.
-      void handleAskRef.current(pendingPrompt, "trigger-import");
+      // Start the main ConversationLoop turn (user-in-the-loop confirm →
+      // auto-process). Both modes skip the user-bubble append since the
+      // imported_trigger marker already represents the staged prompt.
+      void handleAskRef.current(
+        pendingPrompt,
+        source.kind === "plugin" ? "trigger-import" : "app-message",
+      );
     },
     [insertImportedTriggerEntry, handleAskRef],
   );

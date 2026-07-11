@@ -73,9 +73,12 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
     );
   }
 
-  if (active.source.kind === "plugin") {
-    // Plugin insertion variant — user confirm → main chat insert.
+  // Insertion variants — plugin overlay trigger and MCP-app `ui/message`. Both stage a
+  // `pendingPrompt` that only a user CLICK turns into a chat turn; they differ solely in
+  // provenance (the envelope in `pendingPrompt` and the badge below).
+  if (active.source.kind === "plugin" || active.source.kind === "app") {
     const pluginFiredAt = active.createdAt ?? new Date().toISOString();
+    const kind = active.source.kind;
     return (
       <div
         data-testid="overlay-card-region"
@@ -99,7 +102,7 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
               onPluginPrimaryAction(active.id);
             }}
             primaryActionLabel={active.primaryActionLabel ?? t("overlayCardRegion.confirm")}
-            kind="plugin"
+            kind={kind}
           />
         </div>
       </div>
