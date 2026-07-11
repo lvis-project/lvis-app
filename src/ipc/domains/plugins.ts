@@ -35,7 +35,7 @@ import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
 import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
 import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
 import { installMcpAppPartitionPolicy } from "../../main/html-preview-partition.js";
-import { createMcpAppProxySession } from "../../main/mcp-app-protocol.js";
+import { createMcpAppProxySession, disposeMcpAppProxySession } from "../../main/mcp-app-protocol.js";
 import type { McpUiResourceBundle } from "../../mcp/types.js";
 import {
   installMarketplacePluginWithLifecycle,
@@ -1099,6 +1099,15 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const resource = await deps.mcpManager.readUiResource(serverId, uri);
     const proxyUrl = createMcpAppProxySession(serverId, resource.csp);
     return { proxyUrl, html: resource.html } satisfies McpUiResourceBundle;
+  });
+
+  // Card unmount → free its proxy-session token promptly, so a long chat with many
+  // cards does not let the global LRU evict a STILL-MOUNTED card's token (which would
+  // 404 that card's next reload). Idempotent; a bad/absent token is a no-op.
+  ipcMain.handle(CHANNELS.mcp.disposeUiSession, (e, token: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.disposeUiSession, e); return UNAUTHORIZED_FRAME; }
+    if (typeof token === "string" && token.length > 0) disposeMcpAppProxySession(token);
+    return { ok: true as const };
   });
 
   ipcMain.handle(CHANNELS.mcp.catalogList, async (e) => {

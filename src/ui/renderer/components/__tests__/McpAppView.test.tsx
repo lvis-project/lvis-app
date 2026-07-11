@@ -13,12 +13,14 @@ const readUiResource = vi.fn(async (serverId: string) => ({
   proxyUrl: `lvis-mcp-app://${Buffer.from(serverId, "utf8").toString("hex")}/proxy.html?t=tok-${serverId}`,
   html: "<html><body>card</body></html>",
 }));
+const disposeUiSession = vi.fn();
 
 function stubLvis() {
   disconnectHandler = null;
   vi.stubGlobal("lvis", {
     mcp: {
       readUiResource,
+      disposeUiSession,
       onServerDisconnected: (handler: (serverId: string) => void) => {
         disconnectHandler = handler;
         return () => {

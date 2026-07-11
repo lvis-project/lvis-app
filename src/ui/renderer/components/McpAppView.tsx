@@ -34,6 +34,15 @@ import { mcpAppPartitionName } from "../../../shared/mcp-app-partition.js";
 import { createMcpAppBridge } from "./mcp-app-bridge.js";
 import type { BridgeWebviewElement, WebviewIpcTransport } from "./webview-ipc-transport.js";
 
+/** Extract the `?t=<token>` proxy-session token from a `lvis-mcp-app://` URL. */
+function tokenFromProxyUrl(proxyUrl: string): string | null {
+  try {
+    return new URL(proxyUrl).searchParams.get("t");
+  } catch {
+    return null;
+  }
+}
+
 export function McpAppView({ payload }: { payload: McpUiPayload }) {
   const { t } = useTranslation();
   const [bundle, setBundle] = useState<McpUiResourceBundle | null>(null);
@@ -43,14 +52,14 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
   // one source. Reconnect does NOT auto-re-enable (§3.4): the user re-invokes
   // the tool → a fresh McpUiPayload → a fresh card.
   const [disabled, setDisabled] = useState(false);
-  const bridgeRef = useRef<{ bridge: AppBridge; transport: WebviewIpcTransport } | null>(null);
+  const bridgeRef = useRef<{ bridge: AppBridge; transport: WebviewIpcTransport; token: string | null } | null>(null);
 
   const height = payload.height ?? 300;
 
   // Fetch the ui:// resource via IPC on first render. Main installs the partition
-  // policy (CDN gate + sandbox-proxy protocol handler + relay preload) and mints
-  // the proxy session BEFORE returning, so all three are in place before the
-  // webview navigates.
+  // policy (declared-origin network gate + sandbox-proxy protocol handler + relay
+  // preload) and mints the proxy session BEFORE returning, so all three are in place
+  // before the webview navigates.
   useEffect(() => {
     let cancelled = false;
     setBundle(null);
@@ -93,6 +102,12 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
   const attachWebview = useCallback((node: HTMLElement | null) => {
     if (bridgeRef.current) {
       void bridgeRef.current.transport.close();
+      // Free the main-side sandbox-proxy session so its token isn't held until the
+      // global LRU evicts it (which, on a long chat with many cards, could evict a
+      // still-mounted card's token instead). Fire-and-forget; idempotent in main.
+      // Optional-chained: teardown can race a torn-down bridge surface (unmount).
+      const { token } = bridgeRef.current;
+      if (token) window.lvis?.mcp?.disposeUiSession?.(token);
       bridgeRef.current = null;
     }
     if (node && bundle) {
@@ -101,7 +116,7 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
         bundle.html,
         node as unknown as BridgeWebviewElement,
       );
-      bridgeRef.current = { bridge, transport };
+      bridgeRef.current = { bridge, transport, token: tokenFromProxyUrl(bundle.proxyUrl) };
     }
   }, [payload, bundle]);
 
@@ -134,9 +149,11 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
           src: bundle.proxyUrl,
           partition: mcpAppPartitionName(payload.serverId),
           allowpopups: "false",
-          // No `preload` attribute — it is silently ignored under sandbox=yes and
-          // is stripped by the will-attach-webview guards anyway. The relay preload
-          // is installed on the PARTITION via session.setPreloads().
+          // No `preload` attribute — under `sandbox=yes` it is silently ignored, and
+          // in the DETACHED window the will-attach-webview guard strips it too (the
+          // inline/main-window attach handler ignores this partition, so it does not).
+          // Either way the relay preload rides `session.setPreloads()` on the
+          // partition, which is the only mechanism that actually loads it.
           webpreferences: "contextIsolation=yes, sandbox=yes, nodeIntegration=no, javascript=yes",
           disablewebsecurity: "false",
           style: {

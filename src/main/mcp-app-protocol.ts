@@ -30,9 +30,9 @@ import type { Session } from "electron";
 import { randomUUID } from "node:crypto";
 import type { McpUiResourceCsp } from "../mcp/types.js";
 import { buildMcpCspHeader, declaredOrigins } from "../shared/mcp-app-csp.js";
-import { encodeMcpServerId } from "../shared/mcp-app-partition.js";
+import { encodeMcpServerId, MCP_APP_SCHEME } from "../shared/mcp-app-partition.js";
 
-export const MCP_APP_SCHEME = "lvis-mcp-app";
+export { MCP_APP_SCHEME };
 
 /** Must run before `app.ready` (see `early-boot-env.ts`). */
 export function registerMcpAppProtocolScheme(
@@ -64,10 +64,13 @@ const proxySessions = new Map<string, ProxySession>();
  *
  * The partition's `webRequest` gate consults this so the NETWORK layer grants exactly
  * what the CSP grants. It is a per-SERVER union because an Electron partition (and
- * thus its webRequest gate) is per-server, while the CSP is per-resource. That is a
- * safe asymmetry: the CSP is the tighter, per-frame gate and is enforced inside the
- * app's own document, so the network union can only ever be a coarse outer floor —
- * never a way for one resource to actually reach another's declared host.
+ * thus its webRequest gate) is per-server, while the CSP is per-resource. Be precise
+ * about what that costs: within ONE server, the union does let resource A's frame
+ * reach a host only resource B declared — it is the per-frame CSP, not this gate,
+ * that keeps them apart. What the gate strictly guarantees is server ISOLATION: it
+ * is never a way for one server to reach ANOTHER SERVER's declared host, and it never
+ * grants a host no resource declared. Tightening to strict per-resource network
+ * gating would require per-resource partitions (follow-up).
  */
 const declaredOriginsByServer = new Map<string, Set<string>>();
 

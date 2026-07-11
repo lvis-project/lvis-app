@@ -125,18 +125,26 @@ describe("WebviewIpcTransport", () => {
 });
 
 describe("MCP-App CSP (per-resource envelope, built in main)", () => {
-  it("our McpUiResourceCsp is assignable to the upstream spec type (anti-drift pin)", () => {
-    // We re-declare the spec shape locally because ext-apps' .d.ts files use
-    // extensionless relative imports that don't resolve under NodeNext. This pin
-    // makes an upstream shape change a compile error here, not a silent drift.
-    const ours: McpUiResourceCsp = {
+  it("an UPSTREAM-typed CSP round-trips through buildMcpCspHeader into the right directives", () => {
+    // We re-declare the spec shape locally (ext-apps' .d.ts use extensionless imports
+    // that don't resolve under NodeNext). A one-directional `assignable-to` pin would
+    // NOT catch an optional-field RENAME (connectDomains → connectOrigins) — the exact
+    // bucket-name drift class that caused the original bug, since all fields are
+    // optional. So construct the value as the UPSTREAM type and feed it through our
+    // builder: if upstream renames a bucket, this stops routing and the assertion fails.
+    const upstream: UpstreamMcpUiResourceCsp = {
       connectDomains: ["https://api.example.com"],
       resourceDomains: ["https://cdn.example.com"],
       frameDomains: ["https://frame.example.com"],
       baseUriDomains: ["https://base.example.com"],
     };
-    const upstream: UpstreamMcpUiResourceCsp = ours;
-    expect(upstream.connectDomains).toEqual(["https://api.example.com"]);
+    const ours: McpUiResourceCsp = upstream; // still must be assignable both ways
+    const header = buildMcpCspHeader(ours);
+
+    expect(header).toContain("connect-src https://api.example.com");
+    expect(header).toContain("script-src 'unsafe-inline' https://cdn.example.com");
+    expect(header).toContain("frame-src https://frame.example.com");
+    expect(header).toContain("base-uri https://base.example.com");
   });
 
   it("defaults are RESTRICTIVE — no https: wildcard, no hardcoded CDN allowlist", () => {
