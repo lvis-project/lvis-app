@@ -1,43 +1,62 @@
 /**
  * MCP-App Content Security Policy — single source of truth.
  *
- * Lives in `shared/` because BOTH sides need it now: the main process emits it
- * as a real `Content-Security-Policy` **response header** on the sandbox-proxy
- * document (`main/mcp-app-protocol.ts`), and the renderer/tests reason about the
- * same policy. It was previously renderer-only (`ui/renderer/components/`), back
- * when the policy could only ride along as a `<meta>` tag inside a `data:` URL.
+ * Built in the MAIN process ONLY, from the RESOURCE's own `_meta.ui.csp` that main
+ * just fetched via `resources/read`. It is emitted as the sandbox-proxy document's
+ * `Content-Security-Policy` **response header**.
  *
- * ─── Why the header form is the SOT (measured, not assumed) ───────────────────
- * The app HTML runs in an inner `<iframe sandbox="allow-scripts" srcdoc=...>`.
- * A `srcdoc` document **INHERITS the embedding document's CSP**, and a `<meta>`
- * CSP inside it can only ever **INTERSECT** — it can narrow, never widen. This
- * was verified empirically in a real Electron <webview>: with the proxy header
- * at `img-src 'none'`, an inner frame whose own meta said `img-src data:` was
- * still blocked, citing the OUTER `img-src 'none'`.
+ * ─── Why main, and never the renderer ────────────────────────────────────────
+ * This CSP is the containment boundary for code we do not trust (server-authored
+ * HTML). Its input must therefore never round-trip through the renderer: a
+ * compromised renderer could forge a permissive policy object and widen the very
+ * envelope that contains the untrusted app. Derive it in main; never accept it
+ * renderer-forwarded.
  *
- * Consequence: the proxy's header IS the effective envelope for the app. It must
- * therefore be the permissive SUPERSET (this module's DEFAULT + sanitized
- * per-resource additions); the app cannot escape it.
+ * ─── Why the header is the effective ceiling (measured, not assumed) ─────────
+ * The app HTML runs in an inner `<iframe sandbox="allow-scripts" srcdoc=...>`. A
+ * `srcdoc` document INHERITS the embedding document's CSP, and a `<meta>` CSP
+ * inside it can only ever INTERSECT — narrow, never widen. Verified in a real
+ * Electron <webview>: with the proxy header at `img-src 'none'`, an inner frame
+ * whose own meta declared `img-src data:` was still blocked, citing the OUTER policy.
+ *
+ * Consequence: the header IS the ceiling, so it must be built **per resource** —
+ * restrictive default + ONLY that resource's declared domains. A blanket permissive
+ * superset would silently grant every app every other app's allowances, violating
+ * the spec's No-Loosening MUST (the host MUST NOT allow undeclared domains).
+ *
+ * ─── Spec shape: domain BUCKETS, not directive names ─────────────────────────
+ * `McpUiResourceCsp` declares `connectDomains` / `resourceDomains` / `frameDomains`
+ * / `baseUriDomains`. The previous host type was keyed by CSP *directive* names
+ * (`scriptSrc`/`connectSrc`/…), so a spec-conformant server's `connectDomains` was
+ * silently DROPPED. Consuming the spec shape is what fixes that.
  *
  * Note `frame-ancestors` is only meaningful in a header (it is spec-ignored in a
- * `<meta>`). In a <webview> the proxy is a TOP-LEVEL browsing context, so it has
- * no ancestors and the directive is inert — verified: `frame-ancestors 'none'`
- * does not block the proxy. It is kept as deliberate defense-in-depth.
+ * `<meta>`). In a <webview> the proxy is a TOP-LEVEL browsing context, so it has no
+ * ancestors and the directive is inert — verified: `frame-ancestors 'none'` does not
+ * block the proxy. Kept as deliberate defense-in-depth.
  */
-import type { McpUiCspPolicy } from "../mcp/types.js";
+import type { McpUiResourceCsp } from "../mcp/types.js";
 
+/**
+ * Restrictive floor. Every network-capable directive starts at `'none'`; only the
+ * resource's own declared domains open it.
+ *
+ * `'unsafe-inline'` for script/style is intentional and is not the hole here: the
+ * app is an opaque-origin sandboxed frame with no same-origin server, and inline
+ * script is how MCP Apps are authored. `data:`/`blob:` are local, not exfiltration
+ * channels. There is deliberately NO `https:` wildcard and NO hardcoded CDN
+ * allowlist — either would let any app reach hosts it never declared.
+ */
 const DEFAULT_CSP_DIRECTIVES: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["default-src", ["'none'"]],
-  ["script-src", ["'unsafe-inline'", "https://cdn.jsdelivr.net", "https://unpkg.com", "https://cdnjs.cloudflare.com"]],
-  ["style-src", ["'unsafe-inline'", "data:", "https://cdn.jsdelivr.net", "https://unpkg.com", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"]],
-  ["img-src", ["data:", "blob:", "https:"]],
-  ["font-src", ["data:", "https://fonts.gstatic.com", "https://cdn.jsdelivr.net", "https://unpkg.com"]],
+  ["script-src", ["'unsafe-inline'"]],
+  ["style-src", ["'unsafe-inline'", "data:"]],
+  ["img-src", ["data:", "blob:"]],
+  ["font-src", ["data:"]],
+  ["media-src", ["data:", "blob:"]],
   ["connect-src", ["'none'"]],
-  ["media-src", ["'none'"]],
-  // The inner app frame is created by the host-owned relay preload as a
-  // `srcdoc` iframe. `frame-src` does NOT gate `srcdoc` (no URL is fetched) —
-  // verified empirically — so this stays locked to 'none' to block any *URL*
-  // framing the app itself might attempt.
+  // `frame-src` does NOT gate the inner `srcdoc` app frame (no URL is fetched) —
+  // verified empirically — so this only constrains URL-framing the app attempts.
   ["frame-src", ["'none'"]],
   ["worker-src", ["'none'"]],
   ["base-uri", ["'none'"]],
@@ -45,29 +64,30 @@ const DEFAULT_CSP_DIRECTIVES: ReadonlyArray<readonly [string, readonly string[]]
   ["frame-ancestors", ["'none'"]],
 ];
 
-const CSP_METADATA_DIRECTIVES: ReadonlyArray<readonly [string, keyof McpUiCspPolicy, string]> = [
-  ["script-src", "scriptSrc", "script-src"],
-  ["style-src", "styleSrc", "style-src"],
-  ["img-src", "imgSrc", "img-src"],
-  ["font-src", "fontSrc", "font-src"],
-  ["connect-src", "connectSrc", "connect-src"],
-  ["media-src", "mediaSrc", "media-src"],
-  ["frame-src", "frameSrc", "frame-src"],
-  ["worker-src", "workerSrc", "worker-src"],
+/**
+ * Spec bucket → the CSP directives it opens. `resourceDomains` is defined as
+ * "origins for static resources (images, scripts, stylesheets, fonts, media)", so it
+ * fans out across all five.
+ */
+const BUCKET_TO_DIRECTIVES: ReadonlyArray<readonly [keyof McpUiResourceCsp, readonly string[]]> = [
+  ["connectDomains", ["connect-src"]],
+  ["resourceDomains", ["script-src", "style-src", "img-src", "font-src", "media-src"]],
+  ["frameDomains", ["frame-src"]],
+  ["baseUriDomains", ["base-uri"]],
 ];
 
-const CSP_METADATA_LITERAL_SOURCES = new Map<string, ReadonlySet<string>>([
-  ["img-src", new Set(["data:", "blob:"])],
-  ["font-src", new Set(["data:"])],
-  ["media-src", new Set(["data:", "blob:"])],
-  ["worker-src", new Set(["blob:"])],
-]);
-
-function sanitizeCspSource(raw: unknown, directive: string): string | undefined {
+/**
+ * Only absolute `https://` origins survive. Rejects wildcards, bare schemes,
+ * credentials, and anything containing separators that could smuggle a second
+ * directive into the header.
+ */
+function sanitizeDeclaredOrigin(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
   const source = raw.trim();
-  if (CSP_METADATA_LITERAL_SOURCES.get(directive)?.has(source)) return source;
-  if (source.endsWith(":") || source.includes("*") || source.includes(";") || /\s/.test(source)) return undefined;
+  if (source.length === 0) return undefined;
+  if (source.endsWith(":") || source.includes("*") || source.includes(";") || /\s/.test(source)) {
+    return undefined;
+  }
   try {
     const url = new URL(source);
     if (url.protocol !== "https:" || url.username || url.password || !url.hostname) return undefined;
@@ -77,55 +97,71 @@ function sanitizeCspSource(raw: unknown, directive: string): string | undefined 
   }
 }
 
-function readMetadataSources(
-  policy: McpUiCspPolicy | undefined,
-  directive: string,
-  camelKey: keyof McpUiCspPolicy,
-  kebabKey: string,
-): string[] {
-  if (!policy) return [];
-  const raw = policy[camelKey] ?? policy[kebabKey];
+/** The sanitized origins a resource declared in one bucket. */
+function readBucket(csp: McpUiResourceCsp | undefined, bucket: keyof McpUiResourceCsp): string[] {
+  const raw = csp?.[bucket];
   if (!Array.isArray(raw)) return [];
   return raw
-    .map((source) => sanitizeCspSource(source, directive))
-    .filter((source): source is string => source !== undefined);
+    .map((origin) => sanitizeDeclaredOrigin(origin))
+    .filter((origin): origin is string => origin !== undefined);
 }
 
-function mergeCspSources(base: readonly string[], additions: readonly string[]): string[] {
+/**
+ * Every sanitized origin a resource declared, across all buckets.
+ *
+ * The main-process `webRequest` gate on the partition uses this so the NETWORK layer
+ * grants exactly what the CSP grants. Without it the two layers drift: the CSP would
+ * permit a declared `connectDomains` host while the gate silently cancelled the
+ * request, so a conformant server's declared network access would never work.
+ */
+export function declaredOrigins(csp?: McpUiResourceCsp): string[] {
+  const origins = new Set<string>();
+  for (const [bucket] of BUCKET_TO_DIRECTIVES) {
+    for (const origin of readBucket(csp, bucket)) origins.add(origin);
+  }
+  return [...origins];
+}
+
+function addSources(base: readonly string[], additions: readonly string[]): string[] {
   const merged = new Set(base);
   for (const source of additions) merged.add(source);
+  // `'none'` is meaningless — and invalid — alongside a real source.
   if (merged.size > 1) merged.delete("'none'");
   return [...merged];
 }
 
 /**
- * The effective policy as a raw directive string — the form emitted as the
- * sandbox-proxy document's `Content-Security-Policy` **response header**, which
- * the inner app frame then inherits. This is the SOT; the `<meta>` helpers below
- * derive from it.
+ * The effective policy for ONE resource, as a raw directive string — the form
+ * emitted as that resource's sandbox-proxy `Content-Security-Policy` header.
+ *
+ * @param csp The RESOURCE's declared `_meta.ui.csp`. A `csp` found on a TOOL result
+ *   is ignored by callers: per spec, `csp`/`permissions` live on the resource, while
+ *   the tool's `_meta.ui` carries only `resourceUri` + rendering hints.
  */
-export function buildMcpCspHeader(policy?: McpUiCspPolicy): string {
+export function buildMcpCspHeader(csp?: McpUiResourceCsp): string {
   const directives = new Map<string, string[]>(
     DEFAULT_CSP_DIRECTIVES.map(([name, sources]) => [name, [...sources]]),
   );
-  for (const [directive, camelKey, kebabKey] of CSP_METADATA_DIRECTIVES) {
-    const additions = readMetadataSources(policy, directive, camelKey, kebabKey);
-    if (additions.length === 0) continue;
-    directives.set(directive, mergeCspSources(directives.get(directive) ?? [], additions));
+  for (const [bucket, targets] of BUCKET_TO_DIRECTIVES) {
+    const declared = readBucket(csp, bucket);
+    if (declared.length === 0) continue;
+    for (const directive of targets) {
+      directives.set(directive, addSources(directives.get(directive) ?? [], declared));
+    }
   }
   return [...directives.entries()]
     .map(([name, sources]) => `${name} ${sources.join(" ")}`)
     .join("; ");
 }
 
-/** The same policy in `<meta http-equiv>` form. */
-export function buildMcpCsp(policy?: McpUiCspPolicy): string {
-  return `<meta http-equiv="Content-Security-Policy" content="${buildMcpCspHeader(policy)}">`;
+/** The same policy in `<meta http-equiv>` form. Used by CSP probe harnesses/tests. */
+export function buildMcpCsp(csp?: McpUiResourceCsp): string {
+  return `<meta http-equiv="Content-Security-Policy" content="${buildMcpCspHeader(csp)}">`;
 }
 
 /** Wrap a document in the meta form. Retained for CSP probe harnesses/tests. */
-export function wrapWithCsp(html: string, policy?: McpUiCspPolicy): string {
-  const cspMeta = buildMcpCsp(policy);
+export function wrapWithCsp(html: string, csp?: McpUiResourceCsp): string {
+  const cspMeta = buildMcpCsp(csp);
   if (/<head[^>]*>/i.test(html)) {
     return html.replace(/<head[^>]*>/i, (m) => `${m}${cspMeta}`);
   }

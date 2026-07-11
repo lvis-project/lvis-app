@@ -28,8 +28,8 @@
  */
 import type { Session } from "electron";
 import { randomUUID } from "node:crypto";
-import type { McpUiCspPolicy } from "../mcp/types.js";
-import { buildMcpCspHeader } from "../shared/mcp-app-csp.js";
+import type { McpUiResourceCsp } from "../mcp/types.js";
+import { buildMcpCspHeader, declaredOrigins } from "../shared/mcp-app-csp.js";
 import { encodeMcpServerId } from "../shared/mcp-app-partition.js";
 
 export const MCP_APP_SCHEME = "lvis-mcp-app";
@@ -60,6 +60,23 @@ type ProxySession = {
 const proxySessions = new Map<string, ProxySession>();
 
 /**
+ * serverId → every origin that server's resources have declared so far.
+ *
+ * The partition's `webRequest` gate consults this so the NETWORK layer grants exactly
+ * what the CSP grants. It is a per-SERVER union because an Electron partition (and
+ * thus its webRequest gate) is per-server, while the CSP is per-resource. That is a
+ * safe asymmetry: the CSP is the tighter, per-frame gate and is enforced inside the
+ * app's own document, so the network union can only ever be a coarse outer floor —
+ * never a way for one resource to actually reach another's declared host.
+ */
+const declaredOriginsByServer = new Map<string, Set<string>>();
+
+/** Does `origin` appear in any resource this server declared? (network gate) */
+export function isDeclaredOriginForServer(serverId: string, origin: string): boolean {
+  return declaredOriginsByServer.get(serverId)?.has(origin) ?? false;
+}
+
+/**
  * A session is consumed within milliseconds — the webview navigates to the proxy
  * URL immediately after minting — so the live set is tiny. This bound keeps the
  * registry from growing without limit across a long chat (Map preserves insertion
@@ -71,10 +88,17 @@ const MAX_PROXY_SESSIONS = 64;
  * Mint a proxy session for one card render and return the URL the `<webview>`
  * should load. The token selects the CSP the proxy document is served with.
  */
-export function createMcpAppProxySession(serverId: string, policy?: McpUiCspPolicy): string {
+export function createMcpAppProxySession(serverId: string, csp?: McpUiResourceCsp): string {
   const authority = encodeMcpServerId(serverId); // fail-closed on empty/over-length
   const token = randomUUID();
-  proxySessions.set(token, { serverId, csp: buildMcpCspHeader(policy) });
+  proxySessions.set(token, { serverId, csp: buildMcpCspHeader(csp) });
+
+  // Keep the network gate in lockstep with the CSP: whatever this resource declared
+  // (and only that) becomes reachable at the webRequest layer too.
+  const origins = declaredOriginsByServer.get(serverId) ?? new Set<string>();
+  for (const origin of declaredOrigins(csp)) origins.add(origin);
+  declaredOriginsByServer.set(serverId, origins);
+
   while (proxySessions.size > MAX_PROXY_SESSIONS) {
     const oldest = proxySessions.keys().next().value;
     if (oldest === undefined) break;
@@ -91,6 +115,7 @@ export function disposeMcpAppProxySession(token: string): void {
 /** Test seam. */
 export function _resetMcpAppProxySessions(): void {
   proxySessions.clear();
+  declaredOriginsByServer.clear();
 }
 
 /**
