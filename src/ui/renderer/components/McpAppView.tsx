@@ -76,7 +76,22 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
   // emit no style variables rather than throw.
   const buildHostContext = useCallback(() => {
     const activeBundle = findBundle(effectiveBundleId) ?? findBundle(DEFAULT_BUNDLE_ID);
-    const tokens = activeBundle ? bundleToPluginTokens(activeBundle) : {};
+    const tokens: Record<string, string> = activeBundle ? { ...bundleToPluginTokens(activeBundle) } : {};
+
+    // `bundleToPluginTokens` never carries `--lvis-font-family` — ThemeProvider
+    // writes it directly onto `document.documentElement.style`, decoupled from the
+    // bundle token map, only when the user picked a custom font (see
+    // ThemeProvider's `applySettingsAppearance`). Read the LIVE computed value so
+    // the `--font-sans` mapping reflects an actual user override instead of never
+    // firing. Deliberately NOT the default HOST_FONT_STACK: apps with no override
+    // should fall back to their own font, not inherit LVIS's default stack.
+    if (typeof document !== "undefined") {
+      const family = getComputedStyle(document.documentElement)
+        .getPropertyValue("--lvis-font-family")
+        .trim();
+      if (family) tokens["--lvis-font-family"] = family;
+    }
+
     return buildMcpAppHostContext({ shell: resolved, tokens, locale, timeZone });
   }, [resolved, effectiveBundleId, locale, timeZone]);
 
