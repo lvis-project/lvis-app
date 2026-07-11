@@ -11,6 +11,7 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { PluginMcpHost } from "../plugin-mcp-host.js";
 import { ToolRegistry } from "../../tools/registry.js";
+import { createPluginUiResourceProvider } from "../plugin-ui-resource-provider.js";
 import type { PluginToolDelegate } from "../plugin-mcp-server.js";
 import type { PluginManifest } from "../../plugins/types.js";
 import {
@@ -199,5 +200,54 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
     const host = PluginMcpHost.loopback(MANIFEST, delegate, new ToolRegistry());
     await host.start();
     await expect(host.start()).rejects.toThrow(/already started/);
+  });
+
+  it("readUiResource round-trips resources/read through the loopback to the provider", async () => {
+    const provider = createPluginUiResourceProvider({
+      pluginId: "com.example.notes",
+      pluginRoot: "/plugins/com.example.notes",
+      declarations: [
+        {
+          uri: "ui://com.example.notes/read.html",
+          html: "dist/read.html",
+          csp: { connectDomains: ["https://api.example.com"] },
+          permissions: { clipboardWrite: {} },
+        },
+      ],
+      realpath: async (p: string) => p,
+      readFile: async () => "<h1>note</h1>",
+    });
+    const host = PluginMcpHost.loopback(
+      MANIFEST,
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+      new ToolRegistry(),
+      provider,
+    );
+    await host.start();
+
+    const res = await host.readUiResource("ui://com.example.notes/read.html");
+    expect(res).toEqual({
+      html: "<h1>note</h1>",
+      csp: { connectDomains: ["https://api.example.com"] },
+      permissions: { clipboardWrite: {} },
+    });
+  });
+
+  it("readUiResource rejects a cross-namespace uri (fail-closed, no served body)", async () => {
+    const provider = createPluginUiResourceProvider({
+      pluginId: "com.example.notes",
+      pluginRoot: "/plugins/com.example.notes",
+      declarations: [{ uri: "ui://com.example.notes/read.html", html: "dist/read.html" }],
+      realpath: async (p: string) => p,
+      readFile: async () => "<h1>note</h1>",
+    });
+    const host = PluginMcpHost.loopback(
+      MANIFEST,
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+      new ToolRegistry(),
+      provider,
+    );
+    await host.start();
+    await expect(host.readUiResource("ui://other-plugin/read.html")).rejects.toThrow(/own namespace/i);
   });
 });

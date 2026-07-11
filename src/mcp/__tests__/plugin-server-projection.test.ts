@@ -119,6 +119,17 @@ describe("plugin-server-projection — manifest → server/discover (#1230 §3.2
     });
   });
 
+  it("declares the MCP Apps extension when the manifest ships a served ui:// card (uiResources)", () => {
+    const withUiResources: PluginManifest = {
+      ...BASE_MANIFEST,
+      uiResources: [{ uri: "ui://com.example.meeting/card.html", html: "dist/card.html" }],
+    };
+    const discover = manifestToDiscoverResult(withUiResources);
+    expect(discover.capabilities.extensions).toMatchObject({
+      "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] },
+    });
+  });
+
   it("does NOT project the advisory manifest.capabilities[] into MCP ServerCapabilities", () => {
     const withCaps: PluginManifest = { ...BASE_MANIFEST, capabilities: ["meeting-recorder", "mail-source"] };
     const discover = manifestToDiscoverResult(withCaps);
