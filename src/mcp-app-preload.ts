@@ -46,6 +46,27 @@ function isSandboxProxyFrame(): boolean {
   return window.parent === window && window.location.protocol === "lvis-mcp-app:";
 }
 
+/**
+ * Build the inner app iframe. Exported and side-effect-free (creates a detached
+ * element, no `window`) so the security-critical invariant below is unit-testable.
+ *
+ * The `sandbox` attribute is set to `INNER_SANDBOX_ATTR` UNCONDITIONALLY — the
+ * preload OWNS it and never consumes a value from the wire. This is the same class
+ * of trust boundary the CSP fix closed: the app HTML (and, before this fix, a
+ * `sandbox` string) arrives via `sendSandboxResourceReady`, i.e. renderer-forwarded,
+ * and a forged `allow-same-origin` here would collapse the opaque-origin containment
+ * that keeps the untrusted app from reaching this proxy frame. So the wire cannot
+ * influence it. (No live escalation exists today — the untrusted app cannot set this
+ * field, and the main-derived CSP + network gate still bind the frame — but a
+ * containment flag must not be renderer-governed, full stop.)
+ */
+export function createInnerAppFrame(doc: Document, html: string): HTMLIFrameElement {
+  const frame = doc.createElement("iframe");
+  frame.setAttribute("sandbox", INNER_SANDBOX_ATTR);
+  frame.srcdoc = html;
+  return frame;
+}
+
 if (isSandboxProxyFrame()) {
   let inner: HTMLIFrameElement | null = null;
 
@@ -54,25 +75,12 @@ if (isSandboxProxyFrame()) {
     inner?.contentWindow?.postMessage(frame, "*");
   };
 
-  /**
-   * Mount the app HTML. `srcdoc` + `sandbox="allow-scripts"` (no
-   * `allow-same-origin`) ⇒ opaque origin. The frame INHERITS the proxy document's
-   * CSP response header, which main computed as the effective envelope; the app's
-   * own `<meta>` CSP can only narrow it further, never widen it.
-   */
-  const mountApp = (params: { html?: unknown; sandbox?: unknown }): void => {
+  /** Mount the app HTML into the inner frame (see `createInnerAppFrame`). */
+  const mountApp = (params: { html?: unknown }): void => {
     if (typeof params?.html !== "string") return;
     if (inner) inner.remove();
-    const frame = document.createElement("iframe");
-    frame.setAttribute(
-      "sandbox",
-      typeof params.sandbox === "string" && params.sandbox.length > 0
-        ? params.sandbox
-        : INNER_SANDBOX_ATTR,
-    );
-    frame.srcdoc = params.html;
-    document.body.appendChild(frame);
-    inner = frame;
+    inner = createInnerAppFrame(document, params.html);
+    document.body.appendChild(inner);
   };
 
   // ── Host → guest ────────────────────────────────────────────────────────────
@@ -81,7 +89,7 @@ if (isSandboxProxyFrame()) {
     // The sandbox-resource-ready notification is addressed to the PROXY, not the
     // app. Consume it; never forward it inward.
     if (frame.method === SANDBOX_RESOURCE_READY) {
-      mountApp((frame.params ?? {}) as { html?: unknown; sandbox?: unknown });
+      mountApp((frame.params ?? {}) as { html?: unknown });
       return;
     }
     forwardToInner(frame);

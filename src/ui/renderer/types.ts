@@ -1708,6 +1708,8 @@ export type LvisMcpApi = {
    * document's CSP response header.
    */
   readUiResource: (serverId: string, uri: string) => Promise<McpUiResourceBundle>;
+  /** Free a card's sandbox-proxy session token on unmount (fire-and-forget). */
+  disposeUiSession: (token: string) => void;
   /** #885 b2 — open an MCP-app card in a detached window (host mints cardId/viewKey). */
   openDetached: (payload: McpUiPayload) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
   /** #885 b2 — detached renderer fetches its stored payload on mount. */

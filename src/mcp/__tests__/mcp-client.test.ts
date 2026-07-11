@@ -1503,6 +1503,59 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     await noApps.client.disconnect();
   });
 
+  it("readResource: surfaces the RESOURCE's own _meta.ui (csp/permissions), gated by advertise", async () => {
+    // The CSP main builds comes from HERE — the resources/read content item's
+    // `_meta.ui` — not from the tool result. And it is fail-closed: a server that did
+    // not advertise the ui extension has its csp/permissions dropped, so it cannot
+    // open its own containment envelope.
+    const readResult = {
+      contents: [
+        {
+          uri: "ui://app/p.html",
+          mimeType: "text/html;profile=mcp-app",
+          text: "<h1>app</h1>",
+          _meta: {
+            ui: {
+              csp: { connectDomains: ["https://api.example.com"] },
+              permissions: { clipboardWrite: {} },
+            },
+          },
+        },
+      ],
+    };
+    const discoverWithApps = {
+      ...RC_DISCOVER_RESULT,
+      capabilities: { tools: {}, extensions: { "io.modelcontextprotocol/ui": {} } },
+    };
+
+    const withApps = rcHttpClient("apps-res", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, discoverWithApps);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "resources/read") return jsonRpcResponse(id, readResult);
+      return new Response("unexpected", { status: 500 });
+    });
+    await withApps.client.connect();
+    const advertised = await withApps.client.readResource("ui://app/p.html");
+    expect(advertised).toEqual({
+      html: "<h1>app</h1>",
+      csp: { connectDomains: ["https://api.example.com"] },
+      permissions: { clipboardWrite: {} },
+    });
+    await withApps.client.disconnect();
+
+    // Same content from a server that did NOT advertise Apps → csp/permissions DROPPED.
+    const noApps = rcHttpClient("noapps-res", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "resources/read") return jsonRpcResponse(id, readResult);
+      return new Response("unexpected", { status: 500 });
+    });
+    await noApps.client.connect();
+    const unadvertised = await noApps.client.readResource("ui://app/p.html");
+    expect(unadvertised).toEqual({ html: "<h1>app</h1>", csp: undefined, permissions: undefined });
+    await noApps.client.disconnect();
+  });
+
   it("MRTR runaway guard: a server stuck on input_required fails after the round bound", async () => {
     const resolver = vi.fn(async () => ({ action: "accept" }));
     const { client } = rcHttpClient(

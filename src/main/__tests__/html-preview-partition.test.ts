@@ -5,8 +5,9 @@
  *  - installHtmlPreviewPartitionBlock() registers the strict inline-only gate on
  *    `lvis-render-html` and NO LONGER touches any `lvis-mcp-app` partition (the
  *    boot-time shared MCP-app install was removed in #885 b1);
- *  - installMcpAppPartitionPolicy(serverId) lazily installs the CDN allowlist on
- *    the per-server `lvis-mcp-app:<hex>` partition and is idempotent;
+ *  - installMcpAppPartitionPolicy(serverId) lazily installs the per-server policy
+ *    (declared-origin network gate + sandbox-proxy protocol handler + relay preload)
+ *    on the `lvis-mcp-app:<hex>` partition and is idempotent;
  *  - installPluginPartitionPolicy() still wires the sandboxed <webview> preload +
  *    network block.
  */
@@ -143,7 +144,7 @@ describe("installHtmlPreviewPartitionBlock", () => {
   });
 });
 
-describe("installMcpAppPartitionPolicy (#885 b1 — lazy per-server CDN gate)", () => {
+describe("installMcpAppPartitionPolicy (#885 b1 — lazy per-server partition policy)", () => {
   beforeEach(() => {
     mockOnBeforeRequestMcp.mockClear();
     mockSessionApi.fromPartition.mockClear();
