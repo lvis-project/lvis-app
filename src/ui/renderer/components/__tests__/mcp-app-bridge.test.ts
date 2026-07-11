@@ -16,6 +16,7 @@ const { FakeAppBridge } = vi.hoisted(() => {
     onreadresource?: unknown;
     oncalltool?: unknown;
     onmessage?: unknown;
+    ondownloadfile?: unknown;
     onopenlink?: unknown;
     onsizechange?: unknown;
     onrequestdisplaymode?: unknown;
@@ -41,6 +42,7 @@ const { FakeAppBridge } = vi.hoisted(() => {
         onreadresource: typeof this.onreadresource === "function",
         oncalltool: typeof this.oncalltool === "function",
         onmessage: typeof this.onmessage === "function",
+        ondownloadfile: typeof this.ondownloadfile === "function",
         onopenlink: typeof this.onopenlink === "function",
         onsizechange: typeof this.onsizechange === "function",
         onrequestdisplaymode: typeof this.onrequestdisplaymode === "function",
@@ -72,6 +74,7 @@ function build() {
       postMessage: vi.fn(async () => ({ ok: true as const, disposition: "queued" as const })),
       getDisplayMode: vi.fn(() => "inline" as const),
       applyDisplayMode: vi.fn(async () => "inline" as const),
+      downloadFile: vi.fn(async () => ({ ok: true as const, disposition: "saved" as const })),
     },
   );
 }
@@ -84,16 +87,17 @@ describe("createMcpAppBridge — capabilities are derived from the single active
   it("advertises exactly the capabilities whose handlers are wired, nothing else", () => {
     const { bridge } = build();
     // onreadresource → serverResources, oncalltool → serverTools, onmessage →
-    // message.text, onopenlink → openLinks. The sandbox + size handlers advertise
-    // nothing — and neither does `onrequestdisplaymode`: ext-apps'
-    // `McpUiHostCapabilities` has NO display-mode key, so that handler advertises
-    // itself through the host context's `availableDisplayModes` instead.
-    // No updateModelContext / sampling leaks in — a capability without a wired handler
-    // would be a latent, silent bug.
+    // message.text, ondownloadfile → downloadFile, onopenlink → openLinks. The sandbox +
+    // size handlers advertise nothing — and neither does `onrequestdisplaymode`:
+    // ext-apps' `McpUiHostCapabilities` has NO display-mode key, so that handler
+    // advertises itself through the host context's `availableDisplayModes` instead.
+    // No sampling leaks in — a capability without a wired handler would be a latent,
+    // silent bug.
     expect((bridge as unknown as FakeBridge).capabilities).toEqual({
       serverResources: {},
       serverTools: {},
       message: { text: {} },
+      downloadFile: {},
       openLinks: {},
     });
   });
@@ -110,6 +114,7 @@ describe("createMcpAppBridge — every handler registers before connect()", () =
       onreadresource: true,
       oncalltool: true,
       onmessage: true,
+      ondownloadfile: true,
       onopenlink: true,
       onsizechange: true,
       onrequestdisplaymode: true,
@@ -123,6 +128,7 @@ describe("createMcpAppBridge — every handler registers before connect()", () =
     expect(typeof fake.onreadresource).toBe("function");
     expect(typeof fake.oncalltool).toBe("function");
     expect(typeof fake.onmessage).toBe("function");
+    expect(typeof fake.ondownloadfile).toBe("function");
     expect(typeof fake.onopenlink).toBe("function");
     expect(typeof fake.onsizechange).toBe("function");
     expect(typeof fake.onrequestdisplaymode).toBe("function");

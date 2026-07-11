@@ -8,7 +8,7 @@ import { dialog, ipcMain, webContents } from "electron";
 import { t } from "../../i18n/index.js";
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { emitEvent as emitHostEvent } from "../../boot/types.js";
@@ -44,6 +44,7 @@ import {
 } from "../../mcp/mcp-ui-tool-call.js";
 import type { McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
 import { parseUiMessageIntent, type McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
+import { parseMcpAppDownload, type McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
 import { appMessageSource, formatAppMessageEnvelope, isAppMessageOrigin } from "../../shared/mcp-app-message-source.js";
 // The MCP-app `ui/message` staging path reuses the plugin overlay gate's rate limiter
 // (one mechanism for "staged conversation proposals") and the same overlay push channel.
@@ -1354,6 +1355,76 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     sendToWindow(win, OVERLAY_V1.show, overlayItem, log);
     auditMcpApp("info", `[mcp-app:${serverId}] ui/message → staged for user confirmation (no active turn)`);
     return { ok: true, disposition: "staged" } satisfies McpUiMessageOutcome;
+  });
+
+  // ─── MCP Apps `ondownloadfile` (`ui/download-file`) — the app saves a file ──────
+  //
+  // The straight line: app → bridge (`ondownloadfile`) → renderer (binds the CARD's
+  // serverId) → THIS channel → `parseMcpAppDownload` → `dialog.showSaveDialog` → write.
+  //
+  // The security invariant, enforced in exactly ONE place: THE HOST NEVER FETCHES A URI
+  // ON AN UNTRUSTED APP'S BEHALF. `parseMcpAppDownload` rejects `resource_link` outright
+  // (the ext-apps JSDoc's `window.open(item.uri)` would make the host a confused deputy —
+  // an egress channel with the host's network identity, reachable from a sandboxed iframe
+  // without any of the gates a tool call takes). What survives the parse is INLINE bytes
+  // the app already possessed, size-capped before decode, count-capped, with a filename
+  // that cannot pre-fill a traversal. Nothing downstream re-checks any of it.
+  //
+  // The AUTHORIZATION for the write is the user's own save dialog — the same
+  // `dialog.showSaveDialog` seam the diagnostics bundle / transcript export / usage CSV
+  // use. No new save path, no host-chosen destination, no silent write. A CANCEL is
+  // therefore a normal outcome, NOT an error (the spec's `isError` must not be raised for
+  // it), and it aborts the remaining files: the user declined.
+  //
+  // Sender: `validateHostRendererSender` — state-mutating (it writes a file), exactly
+  // like `mcp.callTool` / `mcp.uiMessage`.
+  ipcMain.handle(CHANNELS.mcp.uiDownloadFile, async (e, serverId: unknown, params: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.mcp.uiDownloadFile, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const auditDownload = (type: "info" | "error", input: string) => {
+      auditLogger.log({ timestamp: new Date().toISOString(), sessionId: "mcp-app", type, input });
+    };
+    if (typeof serverId !== "string" || !serverId.trim()) {
+      return { ok: false, error: "invalid-server-id", message: "serverId must be a non-empty string" } satisfies McpUiDownloadOutcome;
+    }
+
+    const parsed = parseMcpAppDownload(params);
+    if (parsed.kind === "invalid") {
+      auditDownload("error", `[mcp-app:${serverId}] ui/download-file rejected: ${parsed.error}`);
+      return { ok: false, error: parsed.error, message: parsed.message } satisfies McpUiDownloadOutcome;
+    }
+
+    const win = getMainWindow();
+    for (const file of parsed.files) {
+      const extension = file.filename.includes(".") ? file.filename.split(".").pop() ?? "" : "";
+      const dialogOptions = {
+        // User-facing dialog copy — Korean per the IPC/UI language convention.
+        title: "MCP 앱 파일 저장",
+        defaultPath: file.filename,
+        ...(extension ? { filters: [{ name: extension.toUpperCase(), extensions: [extension] }] } : {}),
+      };
+      const result = win && !win.isDestroyed()
+        ? await dialog.showSaveDialog(win, dialogOptions)
+        : await dialog.showSaveDialog(dialogOptions);
+      if (result.canceled || !result.filePath) {
+        auditDownload("info", `[mcp-app:${serverId}] ui/download-file cancelled by user`);
+        return { ok: true, disposition: "cancelled" } satisfies McpUiDownloadOutcome;
+      }
+      await writeFile(result.filePath, file.bytes);
+      // Forensic record: an app-authored file landed on the user's disk. The path is
+      // redacted (home dir / username stripped) exactly like the diagnostics export.
+      auditDownload(
+        "info",
+        `[mcp-app:${serverId}] ui/download-file saved ${JSON.stringify({
+          bytes: file.bytes.byteLength,
+          mimeType: file.mimeType,
+          path: redactFsPath(result.filePath),
+        })}`,
+      );
+    }
+    return { ok: true, disposition: "saved" } satisfies McpUiDownloadOutcome;
   });
 
   // Card unmount → free its proxy-session token promptly, so a long chat with many

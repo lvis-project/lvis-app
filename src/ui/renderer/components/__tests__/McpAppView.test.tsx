@@ -52,6 +52,8 @@ const readUiResource = vi.fn(async (serverId: string) => ({
 const disposeUiSession = vi.fn();
 /** The EXISTING detach seam — the `onrequestdisplaymode` "fullscreen" arm reuses it. */
 const openDetached = vi.fn(async () => ({ ok: true as const, windowId: 7 }));
+/** The gated save path behind `ondownloadfile`. */
+const downloadFile = vi.fn(async () => ({ ok: true as const, disposition: "saved" as const }));
 
 function stubLvis() {
   disconnectHandler = null;
@@ -60,6 +62,7 @@ function stubLvis() {
       readUiResource,
       disposeUiSession,
       openDetached,
+      downloadFile,
       onServerDisconnected: (handler: (serverId: string) => void) => {
         disconnectHandler = handler;
         return () => {
@@ -355,5 +358,21 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
 
     await expect(act(() => seededDisplayDeps().applyDisplayMode("inline"))).resolves.toBe("inline");
     expect(openDetached).not.toHaveBeenCalled();
+  });
+});
+
+describe("McpAppView — download sink is BOUND to the card's server", () => {
+  it("passes the card's serverId (the app names none) plus the spec params, untouched", async () => {
+    downloadFile.mockClear();
+    const { container } = renderCard(payload("github"));
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+    const deps = createMcpAppBridgeMock.mock.calls[0]![4] as {
+      downloadFile: (params: unknown) => Promise<{ ok: boolean }>;
+    };
+
+    const params = { contents: [{ type: "resource", resource: { uri: "ui://card/a.csv", text: "a,b" } }] };
+    await deps.downloadFile(params);
+
+    expect(downloadFile).toHaveBeenCalledWith("github", params);
   });
 });

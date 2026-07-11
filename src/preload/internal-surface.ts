@@ -1096,6 +1096,13 @@ export function buildInternalApiSurface() {
     // the live loop and falls back to a notification on mismatch.
     postUiMessage: async (serverId: string, sessionId: string, params: unknown) =>
       ipcRenderer.invoke(CHANNELS.mcp.uiMessage, serverId, sessionId, params) as Promise<unknown>,
+    // MCP Apps `ondownloadfile` — the app hands over inline bytes; main decodes, bounds,
+    // and shows a save dialog. `serverId` is bound by the TRUSTED renderer (for the audit
+    // trail; the app names no server). Main NEVER fetches an app-supplied URI, so nothing
+    // here can be turned into an egress channel. A user cancel comes back as a non-error
+    // outcome — declining to save is not a failure.
+    downloadFile: async (serverId: string, params: unknown) =>
+      ipcRenderer.invoke(CHANNELS.mcp.uiDownloadFile, serverId, params) as Promise<unknown>,
     // Card unmount → free its sandbox-proxy session token (fire-and-forget).
     disposeUiSession: (token: string) => { void ipcRenderer.invoke(CHANNELS.mcp.disposeUiSession, token); },
     // #885 b2 — open an MCP-app card in a detached window (host mints the

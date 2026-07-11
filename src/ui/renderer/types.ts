@@ -6,6 +6,7 @@ import type { Locale } from "../../i18n/locale.js";
 import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
 import type { McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
+import type { McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defaults.js";
@@ -1730,6 +1731,14 @@ export type LvisMcpApi = {
     sessionId: string,
     params: unknown,
   ) => Promise<McpUiMessageOutcome>;
+  /**
+   * MCP Apps `ondownloadfile` (`ui/download-file`). `serverId` is bound by the renderer
+   * from the card. Main decodes the app's INLINE bytes, bounds them, and puts the user's
+   * save dialog in front of the write; it never fetches an app-supplied URI (a
+   * `resource_link` is rejected). A user cancel is `{ ok: true, disposition: "cancelled" }`
+   * — not an error.
+   */
+  downloadFile: (serverId: string, params: unknown) => Promise<McpUiDownloadOutcome>;
   /** Free a card's sandbox-proxy session token on unmount (fire-and-forget). */
   disposeUiSession: (token: string) => void;
   /**
