@@ -326,4 +326,49 @@ describe("useSettingsOrchestration", () => {
     expect(payload.llm.vendors).toBeUndefined();
     expect(api.setApiKey).not.toHaveBeenCalled();
   });
-});
+  it("defaults autonomous sub-agent wake off and persists an opt-in immediately", async () => {
+    const settings = makeSettings();
+    const updated: AppSettings = {
+      ...settings,
+      features: { subAgentAutonomousWake: true },
+    };
+    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
+    Object.assign(api, {
+      updateSettings: vi.fn(async () => updated),
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+    });
+    const onSaved = vi.fn();
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, onSaved)
+    );
+
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+    expect(result.current.subAgentAutonomousWake).toBe(false);
+
+    act(() => {
+      result.current.setSubAgentAutonomousWake(true);
+    });
+
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalledWith({
+      features: { subAgentAutonomousWake: true },
+    }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(result.current.subAgentAutonomousWake).toBe(true);
+  });
+
+  it("hydrates autonomous sub-agent wake from persisted settings", async () => {
+    const settings = makeSettings();
+    settings.features = { subAgentAutonomousWake: true };
+    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
+    Object.assign(api, {
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+    });
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, vi.fn())
+    );
+
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+    expect(result.current.subAgentAutonomousWake).toBe(true);
+  });});

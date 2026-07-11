@@ -44,6 +44,8 @@ import {
   resolvePersonaRolePrompt,
   sanitizeOutgoingInput,
   markMainActiveAfterTurn,
+  prepareParentMailboxTurn,
+  acknowledgeParentMailboxAfterTurn,
   resolveChatNewProjectPayload,
 } from "../handlers/chat.js";
 import { getDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
@@ -368,6 +370,9 @@ export function registerChatHandlers(deps: IpcDeps): void {
   let activeStreamTurn: Promise<TurnResult> | null = null;
   let nextStreamId = 0;
   const trackStreamTurn = (factory: () => Promise<TurnResult>) => {
+    if (activeStreamTurn !== null) {
+      return Promise.reject(new Error("streaming-active"));
+    }
     const turnPromise = factory().finally(() => {
       if (activeStreamTurn === turnPromise) activeStreamTurn = null;
     });
@@ -400,14 +405,73 @@ export function registerChatHandlers(deps: IpcDeps): void {
     });
   };
 
+  // D3 opt-in wake is registered once the parent stream coordinator exists.
+  // It never changes the active session: a race with user navigation or a
+  // manual turn leaves the durable mailbox untouched for a later user turn.
+  type WakeAwareRunner = {
+    setParentWakeHandler?: (handler: (parentSessionId: string) => Promise<void>) => void;
+  };
+  const wakeAwareRunner = deps.getSubAgentRunner?.() as WakeAwareRunner | undefined;
+  if (typeof wakeAwareRunner?.setParentWakeHandler === "function") {
+    wakeAwareRunner.setParentWakeHandler(async (parentSessionId) => {
+      if (
+        conversationLoop.getSessionKind() !== "main"
+        || conversationLoop.getSessionId() !== parentSessionId
+        || activeStreamTurn !== null
+        || conversationLoop.hasActiveTurn()
+      ) {
+        return;
+      }
+
+      const mailboxTurn = await prepareParentMailboxTurn(deps);
+      if (
+        !mailboxTurn
+        || mailboxTurn.parentSessionId !== parentSessionId
+        || conversationLoop.getSessionId() !== parentSessionId
+        || activeStreamTurn !== null
+        || conversationLoop.hasActiveTurn()
+      ) {
+        return;
+      }
+
+      const win = getMainWindow();
+      const sink = buildSink(win?.webContents);
+      const streamId = allocateStreamId();
+      await trackStreamTurn(async () => {
+        const result = await runStreamedTurn(
+          conversationLoop,
+          mailboxTurn.initialGuidance,
+          sink,
+          streamId,
+          {
+            ...STREAM_TURN_OPTIONS,
+            inputOrigin: "agent-message",
+            approvalReasonPrefix: mailboxTurn.approvalReasonPrefix,
+          },
+        );
+        if (conversationLoop.getSessionId() !== parentSessionId) return result;
+        await markMainActiveAfterTurn(deps, mailboxTurn.initialGuidance);
+        await acknowledgeParentMailboxAfterTurn(deps, mailboxTurn, result);
+        return result;
+      });
+    });
+  }
   // PUBLIC lvis:chat:send — thin wrapper: trust boundary + sink construction,
   // logic in handlers/chat.ts. The stream/redact/fallback frames the renderer
   // receives are byte-identical to the pre-C10 fan-out.
   ipcMain.handle(CHANNELS.chat.send, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.send, e); return UNAUTHORIZED_FRAME; }
+    if (activeStreamTurn !== null) return { error: "streaming-active" };
     const win = getMainWindow();
     const sink = buildSink(win?.webContents);
-    return handleChatSend(deps, payload, { sink, allocateStreamId, trackStreamTurn });
+    try {
+      return await handleChatSend(deps, payload, { sink, allocateStreamId, trackStreamTurn });
+    } catch (error) {
+      if (error instanceof Error && error.message === "streaming-active") {
+        return { error: "streaming-active" };
+      }
+      throw error;
+    }
   });
 
   // "guide" — non-interrupting mid-stream direction adjustment. Queues

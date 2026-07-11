@@ -553,9 +553,11 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     });
     restore();
     const resumeId = spawn.childSessionId;
-    // Force resumeCount to the ceiling directly in metadata (full overwrite).
-    const meta = subStore.loadSessionMetadata(resumeId)!;
-    await subStore.saveSessionMetadata(resumeId, { ...meta, resumeCount: 3 });
+    // Simulate legacy metadata that predates the split counters.
+    const legacyMeta = { ...subStore.loadSessionMetadata(resumeId)! };
+    delete legacyMeta.budgetResumeCount;
+    delete legacyMeta.questionAnswerCount;
+    await subStore.saveSessionMetadata(resumeId, { ...legacyMeta, resumeCount: 3 });
 
     // A provider that would fail the test if a turn actually ran.
     const guard = new ScriptedProvider([
@@ -572,6 +574,55 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     } finally {
       restore2();
     }
+  });
+
+  it("counts question answers separately from the budget-resume ceiling", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    let restore = patchProvider(cleanSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "question-counter",
+      instructions: "do",
+      sourceTools: ["noop"],
+      maxRounds: 2,
+    });
+    restore();
+
+    const meta = subStore.loadSessionMetadata(spawn.childSessionId)!;
+    await subStore.saveSessionMetadata(spawn.childSessionId, {
+      ...meta,
+      budgetResumeCount: 3,
+      questionAnswerCount: 4,
+      resumeCount: 3,
+    });
+
+    restore = patchProvider(cleanSpawnProvider());
+    try {
+      const resumed = await runner.resume(
+        spawn.childSessionId,
+        "the answer",
+        "question-counter",
+        undefined,
+        undefined,
+        undefined,
+        "question",
+      );
+      expect(resumed.ok).toBe(true);
+    } finally {
+      restore();
+    }
+
+    const updated = subStore.loadSessionMetadata(spawn.childSessionId)!;
+    expect(updated.budgetResumeCount).toBe(3);
+    expect(updated.resumeCount).toBe(3);
+    expect(updated.questionAnswerCount).toBe(5);
   });
 
   // ── 7) cumulative ceiling ───────────────────────────
@@ -612,6 +663,202 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     }
   });
 
+
+
+  it("caps a near-ceiling resume to the remaining round and waiting adds no extra rounds", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    let restore = patchProvider(cleanSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "near-ceiling",
+      instructions: "do",
+      sourceTools: ["noop"],
+      maxRounds: 2,
+    });
+    restore();
+
+    const resumeId = spawn.childSessionId;
+    const meta = subStore.loadSessionMetadata(resumeId)!;
+    await subStore.saveSessionMetadata(resumeId, {
+      ...meta,
+      budgetResumeCount: 0,
+      questionAnswerCount: 4,
+      resumeCount: 0,
+      cumulativeRounds: 119,
+    });
+
+    let observedMaxRounds: number | undefined;
+    const originalRunTurn = ConversationLoop.prototype.runTurn;
+    restore = patchProvider(cleanSpawnProvider());
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(async (...args: Parameters<typeof originalRunTurn>) => {
+        const callbacks = args[1] as
+          | {
+              onAssistantRound?: (round: { thought?: string; text: string }) => void;
+            }
+          | undefined;
+        observedMaxRounds = (args[3] as { maxRounds?: number } | undefined)?.maxRounds;
+        callbacks?.onAssistantRound?.({ text: "last allowed round" });
+        return {
+          text: "partial at cumulative ceiling",
+          toolCalls: [],
+          stopReason: "round-cap",
+        } as Awaited<ReturnType<typeof originalRunTurn>>;
+      });
+
+    try {
+      const waiting = await runner.resume(resumeId, "continue", "near-ceiling");
+      expect(waiting.ok).toBe(true);
+      expect(waiting.turnCount).toBe(1);
+      expect(waiting.stopReason).toBe("round-cap");
+      expect(waiting.suspension).toMatchObject({ reason: "budget", resumeId });
+      expect(observedMaxRounds).toBe(1);
+
+      const atCeiling = subStore.loadSessionMetadata(resumeId)!;
+      expect(atCeiling.cumulativeRounds).toBe(120);
+      expect(atCeiling.budgetResumeCount).toBe(1);
+      expect(atCeiling.resumeCount).toBe(1);
+      expect(atCeiling.questionAnswerCount).toBe(4);
+
+      const refused = await runner.resume(resumeId, "continue again", "near-ceiling");
+      expect(refused.ok).toBe(false);
+      expect(refused.resumeExhausted).toBe(true);
+      expect(refused.turnCount).toBe(0);
+      expect(runTurnSpy).toHaveBeenCalledTimes(1);
+      expect(subStore.loadSessionMetadata(resumeId)?.cumulativeRounds).toBe(120);
+    } finally {
+      runTurnSpy.mockRestore();
+      restore();
+    }
+  });
+
+
+  it("accounts assistant rounds completed before a spawn throws", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    const originalRunTurn = ConversationLoop.prototype.runTurn;
+    const restore = patchProvider(cleanSpawnProvider());
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(async (...args: Parameters<typeof originalRunTurn>) => {
+        const callbacks = args[1] as
+          | {
+              onAssistantRound?: (round: { thought?: string; text: string }) => void;
+            }
+          | undefined;
+        callbacks?.onAssistantRound?.({ text: "completed before failure" });
+        throw new Error("partial spawn failure");
+      });
+
+    let spawn: Awaited<ReturnType<SubAgentRunner["spawn"]>>;
+    try {
+      spawn = await runner.spawn({
+        title: "partial-spawn",
+        instructions: "do",
+        sourceTools: ["noop"],
+        maxRounds: 3,
+      });
+    } finally {
+      runTurnSpy.mockRestore();
+      restore();
+    }
+
+    expect(spawn.ok).toBe(false);
+    expect(spawn.turnCount).toBe(1);
+    expect(spawn.error).toContain("partial spawn failure");
+    expect(subStore.loadSessionMetadata(spawn.childSessionId)).toMatchObject({
+      budgetResumeCount: 0,
+      questionAnswerCount: 0,
+      resumeCount: 0,
+      cumulativeRounds: 1,
+    });
+  });
+
+
+  it("accounts partial-failure rounds without merging budget and question counters", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    let restore = patchProvider(cleanSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "partial-resume",
+      instructions: "do",
+      sourceTools: ["noop"],
+      maxRounds: 2,
+    });
+    restore();
+
+    const resumeId = spawn.childSessionId;
+    const meta = subStore.loadSessionMetadata(resumeId)!;
+    await subStore.saveSessionMetadata(resumeId, {
+      ...meta,
+      budgetResumeCount: 1,
+      questionAnswerCount: 7,
+      resumeCount: 1,
+      cumulativeRounds: 10,
+    });
+
+    const originalRunTurn = ConversationLoop.prototype.runTurn;
+    restore = patchProvider(cleanSpawnProvider());
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(async (...args: Parameters<typeof originalRunTurn>) => {
+        const callbacks = args[1] as
+          | {
+              onAssistantRound?: (round: { thought?: string; text: string }) => void;
+            }
+          | undefined;
+        callbacks?.onAssistantRound?.({ text: "completed before resume failure" });
+        throw new Error("partial resume failure");
+      });
+
+    let resumed: Awaited<ReturnType<SubAgentRunner["resume"]>>;
+    try {
+      resumed = await runner.resume(
+        resumeId,
+        "answer the child",
+        "partial-resume",
+        undefined,
+        undefined,
+        undefined,
+        "question",
+      );
+    } finally {
+      runTurnSpy.mockRestore();
+      restore();
+    }
+
+    expect(resumed.ok).toBe(false);
+    expect(resumed.turnCount).toBe(1);
+    expect(resumed.error).toContain("partial resume failure");
+    expect(subStore.loadSessionMetadata(resumeId)).toMatchObject({
+      budgetResumeCount: 1,
+      questionAnswerCount: 7,
+      resumeCount: 1,
+      cumulativeRounds: 11,
+    });
+  });
   // ── 8) concurrent-resume lock ───────────────────────
   it("fail-closes a second concurrent resume of the same session (one runs, one rejected, one counter save)", async () => {
     const toolRegistry = new ToolRegistry();
@@ -665,6 +912,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     // The single successful resume bumped resumeCount to 1 (not 2 — the lost
     // update the lock prevents).
     expect(subStore.loadSessionMetadata(resumeId)?.resumeCount).toBe(1);
+    expect(subStore.loadSessionMetadata(resumeId)?.budgetResumeCount).toBe(1);
   });
 
   // ── 10) namespace isolation ─────────────────────────
@@ -756,7 +1004,14 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     // fix in this commit; previously left at 0 → inaccurate resume-chain ceiling).
     expect(afterSpawn.cumulativeRounds).toBe(spawn.turnCount);
     expect(afterSpawn.resumeCount).toBe(0);
+    expect(afterSpawn.budgetResumeCount).toBe(0);
+    expect(afterSpawn.questionAnswerCount).toBe(0);
     const resumeId = spawn.childSessionId;
+    // Question answers are a separate axis and must not consume MAX_RESUMES.
+    await subStore.saveSessionMetadata(resumeId, {
+      ...afterSpawn,
+      questionAnswerCount: 7,
+    });
 
     // Resume spends 1 round.
     const resumeProvider = new ScriptedProvider([
@@ -777,6 +1032,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const afterResume = subStore.loadSessionMetadata(resumeId)!;
     // +1 resume, +turnCount rounds.
     expect(afterResume.resumeCount).toBe(1);
+    expect(afterResume.budgetResumeCount).toBe(1);
+    expect(afterResume.questionAnswerCount).toBe(7);
     expect(afterResume.cumulativeRounds).toBe(afterSpawn.cumulativeRounds! + resumed.turnCount);
     // Full-overwrite spread preserved the frozen scope + profile fields — a
     // dropped spread would corrupt the scope for the NEXT resume.
@@ -859,6 +1116,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     await subStore.saveSessionMetadata(resumeId, {
       sessionKind: "subagent",
       sourceTools: ["noop"],
+      originSessionId: originA,
       resumeCount: 0,
       cumulativeRounds: 0,
     });
@@ -894,6 +1152,54 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(result.summary).toContain("legitimate resume");
     } finally {
       restoreResume();
+    }
+  });
+
+  it("rejects a tag-matching id when persisted origin metadata mismatches", async () => {
+    const { createHash, randomUUID } = await import("node:crypto");
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    const callerOrigin = "session-A";
+    const tag = createHash("sha256").update(callerOrigin).digest("hex").slice(0, 8);
+    const resumeId = "sub-" + tag + "-" + randomUUID();
+    await subStore.saveSessionMetadata(resumeId, {
+      sessionKind: "subagent",
+      sourceTools: ["noop"],
+      originSessionId: "session-collision-target",
+      budgetResumeCount: 0,
+      questionAnswerCount: 0,
+      resumeCount: 0,
+      cumulativeRounds: 0,
+    });
+    await subStore.saveSession(resumeId, []);
+
+    const guardProvider = new ScriptedProvider([
+      [
+        { type: "text_delta", text: "MUST-NOT-RUN" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const restore = patchProvider(guardProvider);
+    try {
+      const result = await runner.resume(
+        resumeId,
+        "collision attempt",
+        "attacker",
+        undefined,
+        callerOrigin,
+      );
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/origin session metadata does not match caller/i);
+      expect(guardProvider.turnsServed).toBe(0);
+    } finally {
+      restore();
     }
   });
 

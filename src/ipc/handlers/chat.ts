@@ -20,6 +20,7 @@ import { redactForLLM } from "../../audit/dlp-filter.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { TurnResult } from "../../engine/conversation-loop.js";
+import type { ParentMailboxEntry } from "../../engine/subagent-message-mailbox.js";
 import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
@@ -39,6 +40,104 @@ export const SESSION_KIND_VALUES = new Set<SessionKind | "all">(["main", "routin
 const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
 const MAX_PROJECT_ROOT_CHARS = 2_048;
 const MAX_PROJECT_NAME_CHARS = 120;
+
+const NON_ACKNOWLEDGING_STOP_REASONS = new Set([
+  "blocked",
+  "interrupted",
+  "context-error",
+  "stream-error",
+]);
+
+export interface ParentMailboxTurn {
+  parentSessionId: string;
+  entryIds: string[];
+  initialGuidance: string;
+  approvalReasonPrefix: string;
+}
+
+interface ParentMailboxRunner {
+  peekParentMailbox(parentSessionId: string): Promise<ParentMailboxEntry[]>;
+  acknowledgeParentMailbox(parentSessionId: string, entryIds: readonly string[]): Promise<unknown>;
+}
+
+function getParentMailboxRunner(deps: IpcDeps): ParentMailboxRunner | undefined {
+  const runner = deps.getSubAgentRunner?.() as Partial<ParentMailboxRunner> | undefined;
+  return runner
+    && typeof runner.peekParentMailbox === "function"
+    && typeof runner.acknowledgeParentMailbox === "function"
+    ? runner as ParentMailboxRunner
+    : undefined;
+}
+
+function mailboxApprovalPrefix(entries: readonly ParentMailboxEntry[]): string {
+  const labels = [...new Set(entries.map((entry) => entry.approvalLabel))];
+  return labels.length === 1 ? labels[0]! : "[Sub-Agent: multiple sources]";
+}
+
+/**
+ * Snapshot the current main-session mailbox without switching sessions.
+ * The snapshot remains durable until a receiving turn acknowledges every id.
+ */
+export async function prepareParentMailboxTurn(deps: IpcDeps): Promise<ParentMailboxTurn | null> {
+  const { conversationLoop } = deps;
+  if (conversationLoop.getSessionKind() !== "main") return null;
+  const parentSessionId = conversationLoop.getSessionId();
+  const runner = getParentMailboxRunner(deps);
+  if (!runner) return null;
+
+  let entries: ParentMailboxEntry[];
+  try {
+    entries = await runner.peekParentMailbox(parentSessionId);
+  } catch (err) {
+    deps.auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: parentSessionId,
+      type: "error",
+      input: `subagent-mailbox-peek-failed:${(err as Error).message}`,
+    });
+    return null;
+  }
+  if (
+    entries.length === 0
+    || conversationLoop.getSessionKind() !== "main"
+    || conversationLoop.getSessionId() !== parentSessionId
+  ) {
+    return null;
+  }
+
+  return {
+    parentSessionId,
+    entryIds: entries.map((entry) => entry.id),
+    initialGuidance: entries.map((entry) => entry.formattedText).join("\n\n"),
+    approvalReasonPrefix: mailboxApprovalPrefix(entries),
+  };
+}
+
+/** Acknowledge only after the snapshotted parent actually consumed the turn. */
+export async function acknowledgeParentMailboxAfterTurn(
+  deps: IpcDeps,
+  mailboxTurn: ParentMailboxTurn | null,
+  result: TurnResult,
+): Promise<void> {
+  if (
+    !mailboxTurn
+    || result.route === "command"
+    || NON_ACKNOWLEDGING_STOP_REASONS.has(result.stopReason ?? "")
+  ) return;
+  if (deps.conversationLoop.getSessionId() !== mailboxTurn.parentSessionId) return;
+  const runner = getParentMailboxRunner(deps);
+  if (!runner) return;
+  try {
+    await runner.acknowledgeParentMailbox(mailboxTurn.parentSessionId, mailboxTurn.entryIds);
+  } catch (err) {
+    deps.auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: mailboxTurn.parentSessionId,
+      type: "error",
+      input: `subagent-mailbox-ack-failed:${(err as Error).message}`,
+    });
+  }
+}
 
 export interface ChatSessionProjectPayload {
   projectRoot?: string;
@@ -340,6 +439,9 @@ export async function handleChatSend(
   // sees garbage.
   const validated = validateUserContentParts(attachments);
   const effective = sanitizeOutgoingInput(settingsService, ctx.sink, input);
+  const mailboxTurn = inputOrigin === "user-keyboard" || inputOrigin === "queue-auto"
+    ? await prepareParentMailboxTurn(deps)
+    : null;
   const streamId = ctx.allocateStreamId();
   return ctx.trackStreamTurn(async () => {
     const result = await runStreamedTurn(
@@ -352,9 +454,16 @@ export async function handleChatSend(
         attachments: validated,
         inputOrigin,
         ...(personaPrompt.rolePrompt ? { rolePrompt: personaPrompt.rolePrompt } : {}),
+        ...(mailboxTurn
+          ? {
+              initialGuidance: mailboxTurn.initialGuidance,
+              approvalReasonPrefix: mailboxTurn.approvalReasonPrefix,
+            }
+          : {}),
       },
     );
     await markMainActiveAfterTurn(deps, effective);
+    await acknowledgeParentMailboxAfterTurn(deps, mailboxTurn, result);
     return result;
   });
 }
