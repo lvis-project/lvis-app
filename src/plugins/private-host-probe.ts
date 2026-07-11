@@ -32,6 +32,7 @@
  * `true` here as authorization.
  */
 import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 
 export interface ProbePrivateHostOptions {
   /** Race deadline before falling through to `false`. Default 1500ms, clamped. */
@@ -49,6 +50,17 @@ const MAX_TIMEOUT_MS = 10_000;
  * must not reach `dns.lookup`.
  */
 const NON_BARE_HOSTNAME = /[\s/:@?#\\]/;
+
+/**
+ * Concurrent DISTINCT-host cap. `inFlightByHost` dedups same-host callers for
+ * free, but a flood of DISTINCT slow hostnames would otherwise pile unbounded
+ * `getaddrinfo` work onto the libuv threadpool. Once this many distinct hosts
+ * are already in flight, a genuinely new host is REJECTED (throw, not a
+ * fail-safe `false`) so the caller sees an explicit refusal rather than a
+ * misleading "host is not on the corp network". Same-host callers never count
+ * against the cap (they are served the existing in-flight promise).
+ */
+export const MAX_INFLIGHT_DISTINCT_HOSTS = 32;
 
 const inFlightByHost = new Map<string, Promise<boolean>>();
 
@@ -68,6 +80,18 @@ export async function probePrivateHost(
       "probePrivateHost: host must be a bare hostname (no scheme, port, path, userinfo, or whitespace)",
     );
   }
+  // Reject IP literals. `dns.lookup("10.0.0.1")` resolves the address
+  // NUMERICALLY without any network round-trip, so it returns `true` on- AND
+  // off-corp — defeating the on-corp-resolves / off-corp-ENOTFOUND asymmetry
+  // this probe relies on and turning an IP argument into a plain liveness
+  // oracle. Only a NAME that DNS must actually resolve carries the signal.
+  // (IPv6 literals already fail the bare-hostname check on their `:`; this
+  // additionally catches IPv4 dotted-quads, which pass that check.)
+  if (isIP(host) !== 0) {
+    throw new TypeError(
+      "probePrivateHost: host must be a bare hostname, not an IP literal (an IP resolves numerically without a DNS round-trip, defeating the corp-presence signal)",
+    );
+  }
 
   // Clamp to sane bounds; fall back to the default for NaN / non-number /
   // non-positive input (a malformed timeout must never throw or hang).
@@ -81,6 +105,16 @@ export async function probePrivateHost(
   // lookup, not the race outcome (see header).
   const existing = inFlightByHost.get(host);
   if (existing) return existing;
+
+  // DoS bound — only a genuinely NEW distinct host reaches here (same-host
+  // callers returned above at zero cost). Refuse to start an unbounded number
+  // of concurrent distinct lookups; throw (rather than fail-safe to `false`) so
+  // the caller can tell "we declined to probe" from "the host isn't on corp".
+  if (inFlightByHost.size >= MAX_INFLIGHT_DISTINCT_HOSTS) {
+    throw new Error(
+      `probePrivateHost: too many concurrent distinct-host probes in flight (cap ${MAX_INFLIGHT_DISTINCT_HOSTS}); retry once in-flight probes settle`,
+    );
+  }
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   // Wrap the lookup in `Promise.resolve().then(...)` so a synchronous throw from
