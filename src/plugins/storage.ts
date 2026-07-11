@@ -25,6 +25,16 @@ import {
 } from "./types.js";
 import { instrumentEffectsByPath } from "../permissions/hostapi-effect-recorder.js";
 
+// Storage-namespace permission bits (CLAUDE.md §Storage Namespace per Feature):
+// plugin data directories are 0o700 and files 0o600, so a plugin's persisted
+// data — including encrypted secret/token blobs — is never group/world-readable.
+// The same rule the host's other main-process stores enforce (auth-partition
+// store, python-runtime). POSIX-meaningful; a no-op on Windows. Mode is honoured
+// only when the entry is CREATED (an existing file/dir keeps its mode), which is
+// why every create site sets it — the first write pins the restrictive mode.
+const PLUGIN_DIR_MODE = 0o700;
+const PLUGIN_FILE_MODE = 0o600;
+
 /**
  * Build a sandboxed `PluginStorage` instance pinned to `pluginDataDir`.
  *
@@ -165,7 +175,7 @@ export function createPluginStorage(
   }
 
   async function ensureParent(absPath: string): Promise<void> {
-    await mkdir(dirname(absPath), { recursive: true });
+    await mkdir(dirname(absPath), { recursive: true, mode: PLUGIN_DIR_MODE });
   }
 
   // Effect ledger (observability) — PluginStorage is the PRIMARY host-mediated
@@ -209,16 +219,19 @@ export function createPluginStorage(
       const target = await guard(rel);
       await ensureParent(target);
       if (typeof data === "string") {
-        await writeFile(target, data, encoding ?? "utf-8");
+        await writeFile(target, data, { encoding: encoding ?? "utf-8", mode: PLUGIN_FILE_MODE });
       } else {
-        await writeFile(target, data);
+        await writeFile(target, data, { mode: PLUGIN_FILE_MODE });
       }
     },
 
     async writeJson<T>(rel: string, value: T, indent = 2): Promise<void> {
       const target = await guard(rel);
       await ensureParent(target);
-      await writeFile(target, JSON.stringify(value, null, indent), "utf-8");
+      await writeFile(target, JSON.stringify(value, null, indent), {
+        encoding: "utf-8",
+        mode: PLUGIN_FILE_MODE,
+      });
     },
 
     async rm(rel, options) {
@@ -249,7 +262,7 @@ export function createPluginStorage(
 
     async mkdir(rel) {
       const target = await guard(rel);
-      await mkdir(target, { recursive: true });
+      await mkdir(target, { recursive: true, mode: PLUGIN_DIR_MODE });
     },
 
     // ─── Encrypted-at-rest variants (Electron safeStorage) ─────────────────
@@ -280,7 +293,8 @@ export function createPluginStorage(
       }
       const ciphertext = safeStorage.encryptString(plaintext);
       await ensureParent(target);
-      await writeFile(target, ciphertext);
+      // 0o600 — the ciphertext is a secret blob; keep it owner-only at rest.
+      await writeFile(target, ciphertext, { mode: PLUGIN_FILE_MODE });
     },
 
     async readEncrypted(rel) {
