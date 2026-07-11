@@ -1100,10 +1100,14 @@ export function buildInternalApiSurface() {
     disposeUiSession: (token: string) => { void ipcRenderer.invoke(CHANNELS.mcp.disposeUiSession, token); },
     // #885 b2 — open an MCP-app card in a detached window (host mints the
     // cardId + viewKey; renderer only supplies the payload it already holds).
-    openDetached: async (payload: McpUiPayload) =>
-      ipcRenderer.invoke(CHANNELS.mcp.openDetached, { payload }) as Promise<
-        { ok: true; windowId: number } | { ok: false; error: string }
-      >,
+    // `maximize` is the `onrequestdisplaymode` "fullscreen" arm riding the SAME seam:
+    // the detached shell IS the host's fullscreen presentation, so the mode change is
+    // a flag on the existing detach, not a new window path.
+    openDetached: async (payload: McpUiPayload, opts?: { maximize?: boolean }) =>
+      ipcRenderer.invoke(CHANNELS.mcp.openDetached, {
+        payload,
+        maximize: opts?.maximize === true,
+      }) as Promise<{ ok: true; windowId: number } | { ok: false; error: string }>,
     // #885 b2 — the detached host renderer fetches its stored payload on mount.
     getDetachedPayload: async (viewKey: string) =>
       ipcRenderer.invoke(CHANNELS.mcp.detachedPayload, viewKey) as Promise<McpUiPayload | null>,

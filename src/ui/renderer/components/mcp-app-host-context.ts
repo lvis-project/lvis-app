@@ -41,6 +41,18 @@
  * package so a real spec change fails the suite instead of drifting silently.
  */
 
+// `McpUiDisplayMode` is the ONE standard type NOT re-declared below: the host's
+// supported SET (`MCP_APP_AVAILABLE_DISPLAY_MODES`) and the predicate the
+// `onrequestdisplaymode` handler checks a request against are the same fact as the
+// `availableDisplayModes` this module publishes, so the type and those values share a
+// single SoT module (repo-local — no package import, so the module stays portable).
+import {
+  MCP_APP_AVAILABLE_DISPLAY_MODES,
+  type McpUiDisplayMode,
+} from "../../../shared/mcp-app-display-mode.js";
+
+export type { McpUiDisplayMode };
+
 /** @see ext-apps `McpUiTheme` */
 export type McpUiTheme = "light" | "dark";
 
@@ -145,6 +157,10 @@ export interface McpUiHostContext {
   [key: string]: unknown;
   theme?: McpUiTheme;
   styles?: McpUiHostStyles;
+  /** How the card is presented RIGHT NOW — updated after every applied mode change. */
+  displayMode?: McpUiDisplayMode;
+  /** The modes the app may ask for. `ui/request-display-mode` honours exactly these. */
+  availableDisplayModes?: McpUiDisplayMode[];
   locale?: string;
   timeZone?: string;
   platform?: "web" | "desktop" | "mobile";
@@ -217,6 +233,13 @@ export interface McpAppHostContextInput {
   locale: string;
   /** IANA time zone (e.g. "America/New_York"). */
   timeZone: string;
+  /**
+   * The card's CURRENT display mode. McpAppView owns it (a card mounts inline; a
+   * detached window IS the fullscreen presentation) and re-publishes the context
+   * through `bridge.setHostContext(...)` after every applied change, which is how the
+   * app learns the mode actually took effect.
+   */
+  displayMode: McpUiDisplayMode;
 }
 
 /**
@@ -225,7 +248,7 @@ export interface McpAppHostContextInput {
  * variables — never a `--lvis-*` key.
  */
 export function buildMcpAppHostContext(input: McpAppHostContextInput): McpUiHostContext {
-  const { shell, tokens, locale, timeZone } = input;
+  const { shell, tokens, locale, timeZone, displayMode } = input;
 
   const variables: Partial<Record<McpUiStyleVariableKey, string>> = {};
   for (const [source, target] of TOKEN_TO_STYLE_KEY) {
@@ -238,6 +261,12 @@ export function buildMcpAppHostContext(input: McpAppHostContextInput): McpUiHost
   const theme: McpUiTheme = shell;
   const context: McpUiHostContext = {
     theme,
+    displayMode,
+    // The host's advertised set — the SAME SoT the `onrequestdisplaymode` handler
+    // checks a request against, so "what the app may ask for" and "what the host will
+    // apply" are one fact. Copied (not aliased) so a guest-facing context object can
+    // never hand out a reference to the host's frozen constant.
+    availableDisplayModes: [...MCP_APP_AVAILABLE_DISPLAY_MODES],
     locale,
     timeZone,
     // Electron desktop host with a pointer, no touch.

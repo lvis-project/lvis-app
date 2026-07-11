@@ -36,6 +36,12 @@ import { createMcpAppBridge } from "./mcp-app-bridge.js";
 // Standard ext-apps `McpUiHostContext` builder (theme/locale/timeZone → standard
 // style-variable vocabulary). React-free so it stays importable by the e2e gate.
 import { buildMcpAppHostContext } from "./mcp-app-host-context.js";
+// The display-mode SoT: what the host advertises (`availableDisplayModes`) AND what
+// the `onrequestdisplaymode` handler will accept — one module, so they cannot drift.
+import {
+  MCP_APP_DEFAULT_DISPLAY_MODE,
+  type McpUiDisplayMode,
+} from "../../../shared/mcp-app-display-mode.js";
 import type { BridgeWebviewElement, WebviewIpcTransport } from "./webview-ipc-transport.js";
 // `openExternalUrl` (the `onopenlink` egress path) lives on `window.lvisApi`, reached
 // through the renderer's `getApi()` — NOT `window.lvis` (a curated subset without it).
@@ -53,7 +59,19 @@ function tokenFromProxyUrl(proxyUrl: string): string | null {
   }
 }
 
-export function McpAppView({ payload }: { payload: McpUiPayload }) {
+export function McpAppView({
+  payload,
+  /**
+   * The mode this MOUNT presents the card in. A transcript card is `inline` (the
+   * default); the DETACHED window is the host's `fullscreen` presentation and passes
+   * it explicitly (DetachedView). Everything else about display mode — the advertised
+   * set, the request check — is the shared SoT module.
+   */
+  displayMode: mountDisplayMode = MCP_APP_DEFAULT_DISPLAY_MODE,
+}: {
+  payload: McpUiPayload;
+  displayMode?: McpUiDisplayMode;
+}) {
   const { t, locale } = useTranslation();
   // Host theme sources for the standard `McpUiHostContext`: shell (light/dark) and
   // the active bundle id (drives the curated `--lvis-*` token map we translate to
@@ -110,6 +128,48 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
     }));
   }, []);
 
+  // ── `onrequestdisplaymode` — the card's APPLIED mode ──────────────────────────
+  // State drives the host context we publish; the ref is what the bridge handler reads
+  // at call time (a stale closure would answer with a mode the card has already left).
+  const [displayMode, setDisplayMode] = useState<McpUiDisplayMode>(mountDisplayMode);
+  const displayModeRef = useRef(displayMode);
+  displayModeRef.current = displayMode;
+  const getDisplayMode = useCallback(() => displayModeRef.current, []);
+
+  // Apply a SUPPORTED mode (the handler filters the rest against the advertised SoT)
+  // and resolve to the mode ACTUALLY applied — the previous one when the host declined.
+  //
+  // Both arms ride the EXISTING detached-shell seam; neither builds a window path:
+  //   · fullscreen → `mcp.openDetached(payload, { maximize: true })`. The shell is
+  //     single-instance by policy, so this navigates the one detached window rather
+  //     than spawning another.
+  //   · inline     → close that shell (`window.closeAllDetached`, the same sweep work
+  //     mode uses). Under the single-instance policy it IS "close the detached shell",
+  //     and it is the exact inverse of the fullscreen arm — reachable from the inline
+  //     card and from inside the detached window alike (main closes every tracked
+  //     detached tab regardless of sender, and auth windows are never tracked).
+  const applyDisplayMode = useCallback(
+    async (mode: McpUiDisplayMode): Promise<McpUiDisplayMode> => {
+      const current = displayModeRef.current;
+      if (mode === current) return current;
+
+      if (mode === "fullscreen") {
+        const result = await window.lvis.mcp.openDetached(payload, { maximize: true });
+        // Host declined (invalid payload / window failure): the card did not move.
+        if (!result?.ok) return current;
+      } else {
+        // Optional-chained like every other `api.window` call site: the surface is
+        // absent in isolated harnesses, and "there is no detached shell" is exactly
+        // the state an inline request wants anyway.
+        await getApi().window?.closeAllDetached();
+      }
+      displayModeRef.current = mode;
+      setDisplayMode(mode);
+      return mode;
+    },
+    [payload],
+  );
+
   // Host IANA time zone — stable for the app's lifetime; read once.
   const timeZone = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -138,8 +198,8 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
       if (family) tokens["--lvis-font-family"] = family;
     }
 
-    return buildMcpAppHostContext({ shell: resolved, tokens, locale, timeZone });
-  }, [resolved, effectiveBundleId, locale, timeZone]);
+    return buildMcpAppHostContext({ shell: resolved, tokens, locale, timeZone, displayMode });
+  }, [resolved, effectiveBundleId, locale, timeZone, displayMode]);
 
   // Hold the latest builder in a ref so the ref-callback bridge lifecycle
   // (`attachWebview`, keyed only on [payload, bundle]) can seed the initial context
@@ -162,6 +222,10 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
     // Re-seed the live card size from the new payload; the app will resize it again
     // via `ui/notifications/size-changed` once it renders.
     setSize({ height: payload.height ?? 300 });
+    // A fresh payload is a fresh card: it presents in THIS mount's mode again, whatever
+    // the previous card had talked the host into.
+    displayModeRef.current = mountDisplayMode;
+    setDisplayMode(mountDisplayMode);
 
     window.lvis.mcp.readUiResource(payload.serverId, payload.resourceUri)
       .then((next) => {
@@ -174,7 +238,7 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
       });
 
     return () => { cancelled = true; };
-  }, [payload]);
+  }, [payload, mountDisplayMode]);
 
   // b3 — subscribe to the main→renderer server-disconnected broadcast. When the
   // payload's own server is torn down, disable in place (webview unmounts via
@@ -226,20 +290,27 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
           // server nor speak into a conversation the user has left.
           postMessage: (params) =>
             window.lvis.mcp.postUiMessage(payload.serverId, originSessionIdRef.current, params),
+          // `onrequestdisplaymode` — the card's mode is McpAppView's state, and the
+          // applier maps a mode onto the host's EXISTING window seams (see above).
+          getDisplayMode,
+          applyDisplayMode,
         },
       );
       bridgeRef.current = { bridge, transport, token: tokenFromProxyUrl(bundle.proxyUrl) };
     }
-  }, [payload, bundle, handleResize]);
+  }, [payload, bundle, handleResize, getDisplayMode, applyDisplayMode]);
 
   // Push host-context updates to a mounted bridge when the theme shell, active
   // bundle, or locale changes. `setHostContext` auto-diffs and only notifies the
   // view of changed fields (no-op on the mount pass, which matches the seed).
+  // `displayMode` rides the same push: after `applyDisplayMode` commits, the app is
+  // told the mode that actually took effect — the notification half of the answer the
+  // `onrequestdisplaymode` result already carried.
   useEffect(() => {
     const current = bridgeRef.current;
     if (!current) return;
     current.bridge.setHostContext(buildHostContextRef.current());
-  }, [resolved, effectiveBundleId, locale]);
+  }, [resolved, effectiveBundleId, locale, displayMode]);
 
   return (
     <div className="mt-2 overflow-hidden rounded border bg-background">

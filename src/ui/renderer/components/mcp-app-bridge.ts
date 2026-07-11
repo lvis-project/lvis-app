@@ -33,7 +33,9 @@ import { createOnOpenLink } from "./mcp-app-bridge/handlers/on-open-link.js";
 import { createOnSizeChange } from "./mcp-app-bridge/handlers/on-size-change.js";
 import { createOnCallTool } from "./mcp-app-bridge/handlers/on-call-tool.js";
 import { createOnMessage } from "./mcp-app-bridge/handlers/on-message.js";
+import { createOnRequestDisplayMode } from "./mcp-app-bridge/handlers/on-request-display-mode.js";
 import type { McpUiMessageOutcome } from "../../../mcp/mcp-ui-message.js";
+import type { McpUiDisplayMode } from "../../../shared/mcp-app-display-mode.js";
 
 /**
  * The exact `McpUiHostCapabilities` shape the `AppBridge` ctor's 3rd arg expects,
@@ -77,6 +79,20 @@ export interface McpAppBridgeDeps {
    * answers with an outcome only — never conversation content.
    */
   postMessage(params: unknown): Promise<McpUiMessageOutcome>;
+  /**
+   * `onrequestdisplaymode` reader — the card's CURRENT mode. McpAppView owns the
+   * state; the handler answers with this whenever it did not (or could not) move the
+   * card, which is the spec's contract for an unavailable mode.
+   */
+  getDisplayMode(): McpUiDisplayMode;
+  /**
+   * `onrequestdisplaymode` applier — move the card to a SUPPORTED mode (the handler
+   * never calls this for one the host does not advertise) and resolve to the mode
+   * actually applied. McpAppView maps it onto the host's EXISTING window seams:
+   * `inline` is the in-transcript <webview>, `fullscreen` is the maximized detached
+   * shell (`CHANNELS.mcp.openDetached`). No new window stack.
+   */
+  applyDisplayMode(mode: McpUiDisplayMode): Promise<McpUiDisplayMode>;
 }
 
 /**
@@ -160,6 +176,21 @@ export function createMcpAppBridge(
       capability: { openLinks: {} },
       register: (bridge) => {
         bridge.onopenlink = createOnOpenLink({ openLink: deps.openLink });
+      },
+    },
+    // `ui/request-display-mode` → NO `McpUiHostCapabilities` key exists for display
+    // mode (checked against ext-apps `spec.types.d.ts`: the interface carries
+    // openLinks / downloadFile / serverTools / serverResources / logging / sandbox /
+    // updateModelContext / message / sampling — and nothing else). The advertisement
+    // for this one is the HOST CONTEXT's `availableDisplayModes`, published by
+    // `buildMcpAppHostContext` from the same SoT the handler enforces. So: a
+    // capability-less entry, exactly like the two notification handlers.
+    {
+      register: (bridge) => {
+        bridge.onrequestdisplaymode = createOnRequestDisplayMode({
+          getMode: deps.getDisplayMode,
+          applyMode: deps.applyDisplayMode,
+        });
       },
     },
     // `ui/notifications/size-changed` (View → Host notification — no capability).
