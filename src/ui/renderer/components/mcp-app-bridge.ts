@@ -131,9 +131,11 @@ export interface McpAppBridgeDeps {
  * `moduleResolution: NodeNext` — so the base class, and every member it brings, is
  * invisible to TypeScript here (`skipLibCheck` merely hides the .d.ts error). Members
  * declared directly on `AppBridge` resolve fine, so every handler below uses the
- * singular setter: marked @deprecated but a supported API with identical single-
- * listener semantics, and the runtime JS is unaffected. Reverts to `addEventListener`
- * once modelcontextprotocol/ext-apps#705 lands. NOT worth forking.
+ * singular setter: upstream marks it deprecated, but it is a supported API with
+ * identical single-listener semantics and the runtime JS is unaffected. (Spelling
+ * that tag out here would make TS parse it as this function's own JSDoc tag and
+ * mark every call site deprecated.) Reverts to `addEventListener` once
+ * modelcontextprotocol/ext-apps#705 lands. NOT worth forking.
  */
 export function createMcpAppBridge(
   payload: Pick<McpUiPayload, "serverId">,
