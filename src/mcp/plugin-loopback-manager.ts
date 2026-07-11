@@ -53,11 +53,16 @@ export class PluginLoopbackManager {
    */
   async start(manifest: PluginManifest): Promise<string[]> {
     const previous = this.hosts.get(manifest.id);
+    // The provider is the SINGLE registry of this plugin's declared ui:// cards:
+    // it gates SERVING (resources/read) and its `list()` gates TRIGGERING (a tool
+    // result's `_meta.ui.resourceUri`). One declaration set, both directions.
+    const uiResources = this.buildUiResourceProvider(manifest);
+    const declaredUiUris = new Set(uiResources?.list().map((r) => r.uri) ?? []);
     const host = PluginMcpHost.loopback(
       manifest,
-      pluginRuntimeToolDelegate(this.runtime, manifest.id),
+      pluginRuntimeToolDelegate(this.runtime, manifest.id, declaredUiUris),
       this.toolRegistry,
-      this.buildUiResourceProvider(manifest),
+      uiResources,
     );
     // host.start() is registry-read-only until its final atomic swap; if it
     // throws, `previous` (and its registered tools) are untouched.

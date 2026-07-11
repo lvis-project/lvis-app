@@ -380,6 +380,28 @@ export interface PluginUiResourceDecl {
 }
 
 /**
+ * The MCP Apps TOOL-RESULT `_meta.ui` extension (spec §3.2) — how a server says
+ * "render this card with my result". These are the STANDARD `_meta.ui.*` keys, not
+ * an `xyz.lvis/*` vendor extension, so both arms declare a card identically: an
+ * external MCP server puts it on its `CallToolResult`, and a first-party plugin
+ * puts it on its handler's return value (the loopback delegate lifts it onto the
+ * wire, see `plugin-runtime-delegate.ts`).
+ *
+ * Deliberately NO `csp` — per spec that lives on the RESOURCE, and main derives the
+ * header there ({@link McpUiResourceMeta}). A `csp` on a tool result is ignored.
+ */
+export interface McpUiToolMeta {
+  /** `ui://<serverId>/<path>` — the card to render. */
+  resourceUri: string;
+  /** Preferred render slot — defaults to `"chat"` when omitted. @optional */
+  slot?: McpUiSlot;
+  /** Preferred height in pixels. @optional */
+  height?: number;
+  /** Human-readable title shown in the webview title bar. @optional */
+  title?: string;
+}
+
+/**
  * Payload produced by an MCP tool that declares a UI extension.
  *
  * MCP Apps spec §3.2 — a tool response may carry `_meta.ui` to request
