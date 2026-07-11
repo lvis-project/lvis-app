@@ -401,4 +401,26 @@ describe("capability emit gate", () => {
       "totally-legacy-cap",
     ]);
   });
+
+  it("suppresses email.* emit from a plugin declaring the legacy mail-source CAPABILITY but no emittedEvents (no capability fallback)", async () => {
+    // Scenario (c): before the capabilities reduction, email.* emit was gated on
+    // the `mail-source` CAPABILITY. Post-reduction, emit authorization is
+    // inferred ONLY from `emittedEvents`. A plugin still shipping the legacy
+    // capability while declaring NO email.* in emittedEvents must have the emit
+    // SUPPRESSED — the capability must not silently re-unlock it. Every (b) test
+    // sets no capabilities at all, so a capability-fallback regression would slip
+    // past them; this fixture (capabilities include mail-source, emittedEvents
+    // empty) is the guard.
+    await writePlugin("p-legacy", [], {
+      capabilities: ["worker-client", "mail-source", "totally-legacy-cap"],
+    });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    await runtime.load();
+
+    const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p-legacy");
+    guardedEmit("email.new", { subject: "hi" });
+
+    expect(emitted).toHaveLength(0);
+    expect(warns.some((w) => /missing capability 'mail-source'/.test(w))).toBe(true);
+  });
 });
