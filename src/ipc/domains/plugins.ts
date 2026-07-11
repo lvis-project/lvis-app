@@ -37,7 +37,11 @@ import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js"
 import { installMcpAppPartitionPolicy } from "../../main/html-preview-partition.js";
 import { createMcpAppProxySession, disposeMcpAppProxySession } from "../../main/mcp-app-protocol.js";
 import { resolveMcpUiBackend } from "../../mcp/mcp-ui-backend-resolver.js";
-import type { McpUiResourceBundle } from "../../mcp/types.js";
+import {
+  createExternalToolCallSource,
+  createLoopbackToolCallSource,
+} from "../../mcp/mcp-ui-tool-call.js";
+import type { McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
 import {
   installMarketplacePluginWithLifecycle,
   startInstalledPluginWithLifecycle,
@@ -1048,6 +1052,31 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     return true;
   }
 
+  // ── The ONE `serverId → backend` source set (SoT) ─────────────────────────
+  // Both MCP-App IPCs — the card RENDER (`mcp.uiResource`) and the app's own
+  // `tools/call` (`mcp.callTool`) — resolve through `resolveMcpUiBackend` over THIS
+  // object, so the loopback-first rule exists in exactly one place and the two paths
+  // can never disagree about who owns a serverId. The tool-call halves come from
+  // `mcp-ui-tool-call.ts`; nothing here branches on backend kind.
+  const mcpUiSources = {
+    loopback: {
+      has: (serverId: string) => deps.pluginLoopbackManager.has(serverId),
+      readUiResource: (serverId: string, uri: string) =>
+        deps.pluginLoopbackManager.readUiResource(serverId, uri),
+      ...createLoopbackToolCallSource(pluginRuntime),
+    },
+    mcpManager: {
+      readUiResource: (serverId: string, uri: string) => deps.mcpManager.readUiResource(serverId, uri),
+      ...createExternalToolCallSource({
+        namespacedToolName: (serverId, toolName) => deps.mcpManager.namespacedToolName(serverId, toolName),
+        findTool: (name) => deps.toolRegistry.findByName(name),
+        // Late binding: the plugin-surface ToolExecutor is installed by a boot step
+        // that runs AFTER IPC registration, so resolve it per call, never capture it.
+        getInvoker: () => deps.getPluginToolInvoker(),
+      }),
+    },
+  };
+
   ipcMain.handle(CHANNELS.mcp.servers, (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.servers, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.listServers();
@@ -1096,12 +1125,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // SoT resolution: a first-party plugin runs as an in-process loopback MCP
     // server (serverId === pluginId) that is NEVER in mcpManager.clients, so try
     // the loopback host FIRST, else the external MCP client registry. ONE
-    // resolver, shared with the later oncalltool seam — no duplicated backend
+    // resolver, shared with the oncalltool seam below — no duplicated backend
     // branch.
-    const backend = resolveMcpUiBackend(serverId, {
-      loopback: deps.pluginLoopbackManager,
-      mcpManager: deps.mcpManager,
-    });
+    const backend = resolveMcpUiBackend(serverId, mcpUiSources);
 
     // The resource carries its OWN `_meta.ui.csp` — main reads it here and never
     // accepts one from the renderer. A compromised renderer must not be able to
@@ -1111,6 +1137,81 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const resource = await backend.readUiResource(uri);
     const proxyUrl = createMcpAppProxySession(serverId, resource.csp);
     return { proxyUrl, html: resource.html } satisfies McpUiResourceBundle;
+  });
+
+  // ─── MCP Apps `oncalltool` — an app calls a tool on ITS OWN server ──────────
+  //
+  // The straight line: app → bridge (`oncalltool`) → renderer (binds the CARD's
+  // serverId) → THIS channel → `resolveMcpUiBackend` → the backend's gated call
+  // path → ToolExecutor → `inspectHostRisk` → reviewer/approval → audit.
+  //
+  // Invariants, each enforced exactly ONCE:
+  //  1. Server binding — STRUCTURAL. The app never names a server: `serverId` is the
+  //     card's own `payload.serverId`, supplied by the trusted renderer, and the
+  //     resolver binds every backend method to it. Nothing downstream re-derives it.
+  //  2. Tool owner == serverId — HERE, one comparison, backend-kind agnostic
+  //     (`resolveToolOwner` is the plugin runtime's method map on the loopback arm
+  //     and the registry entry's `mcpServerId` on the external arm). A call for
+  //     another server's tool, a host builtin, or an unknown name is denied.
+  //  3. App-visibility (`_meta.ui.visibility` ∋ "app") — the SPEC MUST, enforced
+  //     inside each backend's call path: `assertUiActionInvokable` (loopback) /
+  //     the `appInvokable` check (external). NOT re-checked here: one site per path.
+  //  4. Risk + consent — the SAME ToolExecutor gate every host tool call takes. No
+  //     new classifier, no bypass. `userAction` is never set (see mcp-ui-tool-call.ts):
+  //     a gesture claim from inside an untrusted iframe is not verifiable.
+  //
+  // Sender: `validateHostRendererSender` (NOT the base `validateSender` the read-only
+  // render channel uses) — this channel RUNS A TOOL, so it takes the mutating-channel
+  // validator (fails closed on an empty frame URL, rejects plugin-ui-shell frames),
+  // exactly like `plugins.call` and `mcp.openDetached`. The MCP-app <webview> itself
+  // is on the `lvis-mcp-app:` scheme and could never pass either validator.
+  ipcMain.handle(CHANNELS.mcp.callTool, async (e, serverId: unknown, name: unknown, args: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.mcp.callTool, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (typeof serverId !== "string" || !serverId.trim()) {
+      return { ok: false, error: "invalid-server-id", message: "serverId must be a non-empty string" } satisfies McpUiToolCallOutcome;
+    }
+    if (typeof name !== "string" || !name.trim()) {
+      return { ok: false, error: "invalid-tool-name", message: "tool name must be a non-empty string" } satisfies McpUiToolCallOutcome;
+    }
+
+    const backend = resolveMcpUiBackend(serverId, mcpUiSources);
+
+    // Invariant 2 — the card's server must OWN the tool it asks for.
+    const owner = backend.resolveToolOwner(name);
+    if (owner !== serverId) {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "mcp-app",
+        type: "error",
+        input: `[mcp-app:${serverId}] cross-server call denied: tool='${name}' owner='${owner ?? "unknown"}'`,
+      });
+      return {
+        ok: false,
+        error: "cross-server-call-denied",
+        message: `Tool '${name}' is not owned by MCP server '${serverId}'`,
+      } satisfies McpUiToolCallOutcome;
+    }
+
+    try {
+      // Invariants 3 + 4 live inside this call (visibility MUST, then the gate).
+      const result = await backend.callTool(name, asPlainRecord(args));
+      return { ok: true, result } satisfies McpUiToolCallOutcome;
+    } catch (err) {
+      // Every rejection — app-visibility denial, permission/consent denial, tool
+      // error — surfaces as ONE outcome the bridge renders as an MCP-style
+      // `{ isError: true }` CallToolResult. Never a raw throw across the bridge.
+      const message = errMessage(err);
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "mcp-app",
+        type: "error",
+        input: `[mcp-app:${serverId}] tools/call denied or failed: tool='${name}' reason='${message}'`,
+      });
+      return { ok: false, error: "tool-call-failed", message } satisfies McpUiToolCallOutcome;
+    }
   });
 
   // Card unmount → free its proxy-session token promptly, so a long chat with many

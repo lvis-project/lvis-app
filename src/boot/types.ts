@@ -5,7 +5,7 @@
  * on the same map. Keeps boot.ts and boot/plugins.ts in sync without a
  * circular dependency.
  */
-import type { PluginRuntime } from "../plugins/runtime.js";
+import type { PluginRuntime, PluginToolInvocationDelegate } from "../plugins/runtime.js";
 import type { PluginMarketplaceService } from "../plugins/marketplace.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
@@ -91,6 +91,18 @@ export interface AppServices {
    * `serverId === pluginId` is NEVER in `mcpManager.clients` (external-only).
    */
   pluginLoopbackManager: PluginLoopbackManager;
+  /**
+   * The gated tool-invocation delegate (the plugin-surface `ToolExecutor` →
+   * `inspectHostRisk` → reviewer/approval → audit), read LAZILY: it is a late
+   * binding installed by the `plugin-tool-executor` boot step, so a consumer
+   * registered earlier (the IPC domains) must resolve it per call, not capture it.
+   *
+   * Sole consumer today: the `oncalltool` IPC's EXTERNAL arm, which runs a foreign
+   * MCP server's namespaced registry `Tool` through the same executor the model's
+   * calls take. Plugin (loopback) tools do NOT come through here — they keep going
+   * through `PluginRuntime.callFromUi`, which installs this same delegate itself.
+   */
+  getPluginToolInvoker: () => PluginToolInvocationDelegate | null;
   /**
    * §FU#259 — artifact store rooted at `userData/mcp-servers/`.
    * Constructed at boot when the marketplace fetcher supports verified

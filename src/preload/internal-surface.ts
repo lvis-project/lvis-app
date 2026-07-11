@@ -1081,6 +1081,13 @@ export function buildInternalApiSurface() {
     setApiKey: async (id: string, apiKey: string) => ipcRenderer.invoke(CHANNELS.mcp.configSetApiKey, id, apiKey),
     removeConfig: async (id: string) => ipcRenderer.invoke(CHANNELS.mcp.configRemove, id),
     readUiResource: async (serverId: string, uri: string) => ipcRenderer.invoke(CHANNELS.mcp.uiResource, serverId, uri) as Promise<unknown>,
+    // MCP Apps `oncalltool` — the app calls a tool on ITS OWN server. `serverId` is
+    // supplied by the TRUSTED renderer from the card's payload (the app has no
+    // channel to name a server), and main re-checks that the tool is actually owned
+    // by it. Never resolves to a thrown error: main returns an outcome the bridge
+    // handler turns into an MCP-style `CallToolResult`.
+    callTool: async (serverId: string, name: string, args: Record<string, unknown>) =>
+      ipcRenderer.invoke(CHANNELS.mcp.callTool, serverId, name, args) as Promise<unknown>,
     // Card unmount → free its sandbox-proxy session token (fire-and-forget).
     disposeUiSession: (token: string) => { void ipcRenderer.invoke(CHANNELS.mcp.disposeUiSession, token); },
     // #885 b2 — open an MCP-app card in a detached window (host mints the
