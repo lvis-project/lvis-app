@@ -52,7 +52,7 @@ describe("PluginMcpServer — RC server methods (#1230 §3.1)", () => {
     expect(res.tools.map((t) => t.name)).toEqual(["fs_read"]);
     // #885 v6 — visibility is emitted explicitly; category is REMOVED from the wire.
     expect((res.tools[0]._meta as { ui: { visibility: string[] } }).ui.visibility).toEqual(["model"]);
-    expect(res.tools[0]._meta["xyz.lvis/category"]).toBeUndefined();
+    expect(res.tools[0]._meta["lvisai/category"]).toBeUndefined();
   });
 
   it("dispatches tools/call to the delegate and wraps a complete CallToolResult", async () => {

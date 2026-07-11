@@ -8,7 +8,7 @@ Follow-up to the v0.5.0 Plugin Contract v6 release: the legacy manifest readers 
 
 - **`normalizeManifest` is now a pure-form materializer, not a legacy compiler** — the old `tools[]` (name strings) + `toolSchemas` + `uiActions` reader is deleted. A manifest declares tools only as pure MCP `Tool[]`; `normalizeManifest` just materializes an absent `_meta.ui.visibility` to the safe `["model","app"]` default and rejects an explicit empty visibility. A pre-v6 manifest now fails closed at load with an actionable "upgrade to `@lvis/plugin-sdk` v6" message that names the offending tool index, instead of being silently compiled forward.
 - **Why this is safe ahead of the planned `0.6.0` window** — the v0.5.0 note deferred this removal until every installed plugin had migrated. The new Plugin Doctor (below) makes that time-gate unnecessary: a plugin that fails to load on the pure-v6 reader is diagnosed and auto-reinstalled from the marketplace at its latest (v6) version, so there is no broken-plugin window to wait out.
-- **Vocabulary sweep** — the `uiActions` / `toolSchemas` terms are gone from code, error strings, and documentation. Per-tool surface visibility lives only in `_meta.ui.visibility` (SEP-1865) and the sole LVIS-proprietary key is `_meta["xyz.lvis/pathFields"]`.
+- **Vocabulary sweep** — the `uiActions` / `toolSchemas` terms are gone from code, error strings, and documentation. Per-tool surface visibility lives only in `_meta.ui.visibility` (SEP-1865) and the sole LVIS-proprietary key is `_meta["lvisai/pathFields"]`.
 
 ### Plugin Doctor — cause-aware auto-repair (#1573)
 
@@ -26,7 +26,7 @@ Follow-up to the v0.5.0 Plugin Contract v6 release: the legacy manifest readers 
 
 ### Plugin contract
 
-- **Pure MCP `Tool[]` manifest** (`@lvis/plugin-sdk` v6.0.0; host PR #1562, #1563, #1564) — a manifest declares tools as `{name, title?, description?, inputSchema, outputSchema?, icons?, _meta?}`. Per-tool surface visibility is `_meta.ui.visibility: Array<"model"|"app">` (SEP-1865); the one LVIS-proprietary key is `_meta["xyz.lvis/pathFields"]`. `normalizeManifest` is the single legacy-shape reader — it compiles the old `tools[]` + `toolSchemas` + `uiActions` triple into pure `Tool[]`, materializes an absent visibility to the safe `["model","app"]` default, and rejects an explicit empty visibility.
+- **Pure MCP `Tool[]` manifest** (`@lvis/plugin-sdk` v6.0.0; host PR #1562, #1563, #1564) — a manifest declares tools as `{name, title?, description?, inputSchema, outputSchema?, icons?, _meta?}`. Per-tool surface visibility is `_meta.ui.visibility: Array<"model"|"app">` (SEP-1865); the one LVIS-proprietary key is `_meta["lvisai/pathFields"]`. `normalizeManifest` is the single legacy-shape reader — it compiles the old `tools[]` + `toolSchemas` + `uiActions` triple into pure `Tool[]`, materializes an absent visibility to the safe `["model","app"]` default, and rejects an explicit empty visibility.
 - **Host-derived governance** (PR #1564) — tool ownership, `writesToOwnSandbox`, and model-vs-app routing are computed by the host from the manifest, never read from a plugin self-claim; the ownership map is built from model-visible tools only, so the auth trio can never widen access control.
 - **First-party plugins republished** on the pure v6 shape, with per-surface set-equality proven against each plugin's legacy manifest.
 

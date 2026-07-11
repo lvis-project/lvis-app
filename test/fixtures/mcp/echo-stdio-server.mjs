@@ -48,6 +48,10 @@ function handle(req) {
               // the host ignores it (a plugin can lie) and registers the
               // default-strict "write" baseline. Kept to prove the reverse
               // projection does NOT honor a wire-declared category.
+              // transitional: also intentionally uses the LEGACY reverse-DNS
+              // `xyz.lvis/*` prefix — this fixture stands in for an out-of-process
+              // plugin that has not yet migrated to `lvisai/*`, proving the host
+              // still tolerates (and ignores) legacy `_meta` from a real subprocess.
               _meta: { "xyz.lvis/category": "read", "xyz.lvis/version": "1.0.0" },
             },
           ],
