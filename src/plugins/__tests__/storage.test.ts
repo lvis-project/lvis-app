@@ -2,11 +2,35 @@
  * Sandboxed PluginStorage — verifies path-traversal guards, ENOENT handling,
  * and JSON helpers stay scoped to pluginDataDir.
  */
-import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Reversible fake safeStorage seam. `encryptString` wraps the plaintext in a
+// recognizable envelope (so the on-disk bytes are demonstrably NOT plaintext),
+// `decryptString` unwraps it; `enc.available` toggles the isEncryptionAvailable
+// gate per test. Mirrors the settings-store.test.ts electron-mock pattern.
+const mockedElectron = vi.hoisted(() => {
+  const enc = { available: true };
+  return {
+    enc,
+    safeStorage: {
+      isEncryptionAvailable: vi.fn(() => enc.available),
+      encryptString: vi.fn((s: string) => Buffer.from(`ENC(${s})`, "utf-8")),
+      decryptString: vi.fn((b: Buffer) => {
+        const raw = Buffer.from(b).toString("utf-8");
+        const m = /^ENC\(([\s\S]*)\)$/.exec(raw);
+        if (!m) throw new Error("decryptString: not ciphertext produced by this seam");
+        return m[1];
+      }),
+    },
+  };
+});
+vi.mock("electron", () => ({ safeStorage: mockedElectron.safeStorage }));
+
 import { createPluginStorage } from "../storage.js";
+import { PluginStorageEncryptionUnavailableError } from "../types.js";
 
 const dirLinkType = process.platform === "win32" ? "junction" : "dir";
 
@@ -160,5 +184,81 @@ describe("createPluginStorage error shape", () => {
       expect(message).toContain("plugin-storage:meeting");
       expect(message).toContain("..");
     }
+  });
+});
+
+describe("createPluginStorage encrypted-at-rest variants", () => {
+  beforeEach(() => {
+    mockedElectron.enc.available = true;
+    mockedElectron.safeStorage.encryptString.mockClear();
+    mockedElectron.safeStorage.decryptString.mockClear();
+  });
+
+  it("writeEncrypted → readEncrypted round-trips through safeStorage and never writes plaintext", async () => {
+    const s = createPluginStorage("p", dataDir);
+    const secret = "s3cr3t-token-値";
+    await s.writeEncrypted("auth/token.enc", secret);
+
+    expect(mockedElectron.safeStorage.encryptString).toHaveBeenCalledWith(secret);
+    // On-disk bytes are the ciphertext envelope, NOT the plaintext.
+    const onDisk = readFileSync(join(dataDir, "auth", "token.enc"), "utf-8");
+    expect(onDisk).toBe(`ENC(${secret})`);
+    expect(onDisk).not.toBe(secret);
+
+    expect(await s.readEncrypted("auth/token.enc")).toBe(secret);
+  });
+
+  it("writeEncrypted fails closed when encryption is unavailable and creates NO file", async () => {
+    mockedElectron.enc.available = false;
+    const s = createPluginStorage("p", dataDir);
+    await expect(s.writeEncrypted("nope.enc", "secret")).rejects.toBeInstanceOf(
+      PluginStorageEncryptionUnavailableError,
+    );
+    // The plaintext was never persisted (no-fallback rule).
+    expect(existsSync(join(dataDir, "nope.enc"))).toBe(false);
+    expect(mockedElectron.safeStorage.encryptString).not.toHaveBeenCalled();
+  });
+
+  it("the thrown error carries the stable kebab-case code", async () => {
+    mockedElectron.enc.available = false;
+    const s = createPluginStorage("meeting", dataDir);
+    await s.writeEncrypted("x.enc", "y").catch((err: unknown) => {
+      expect(err).toBeInstanceOf(PluginStorageEncryptionUnavailableError);
+      expect((err as PluginStorageEncryptionUnavailableError).code).toBe("encryption-unavailable");
+      expect((err as Error).name).toBe("PluginStorageEncryptionUnavailableError");
+    });
+  });
+
+  it("readEncrypted fails closed when encryption is unavailable (even if the file exists)", async () => {
+    const s = createPluginStorage("p", dataDir);
+    await s.writeEncrypted("auth/token.enc", "secret"); // encryption available here
+    mockedElectron.enc.available = false;
+    await expect(s.readEncrypted("auth/token.enc")).rejects.toBeInstanceOf(
+      PluginStorageEncryptionUnavailableError,
+    );
+  });
+
+  it("readEncrypted throws ENOENT for a missing file (matches readText)", async () => {
+    const s = createPluginStorage("p", dataDir);
+    await expect(s.readEncrypted("missing.enc")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("path-escape rejection applies to the encrypted variants too", async () => {
+    // Absolute + lexical .. escapes.
+    const s = createPluginStorage("p", dataDir);
+    await expect(s.writeEncrypted("/etc/passwd", "x")).rejects.toThrow(
+      /absolute paths are not allowed/,
+    );
+    await expect(s.readEncrypted(join("..", "escape.enc"))).rejects.toThrow(
+      /escapes plugin storage root/,
+    );
+
+    // Symlink escape: planting a junction inside dataDir that points outside.
+    writeFileSync(join(outsideDir, "loot.txt"), "untouched", "utf-8");
+    symlinkSync(outsideDir, join(dataDir, "escape"), dirLinkType);
+    await expect(s.writeEncrypted(join("escape", "loot.txt"), "tampered")).rejects.toThrow(
+      /symlink escapes plugin storage root/,
+    );
+    expect(readFileSync(join(outsideDir, "loot.txt"), "utf-8")).toBe("untouched");
   });
 });
