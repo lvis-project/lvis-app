@@ -212,7 +212,15 @@ describe("McpAppView — standard McpUiHostContext wiring (P0)", () => {
   });
 });
 
-describe("McpAppView — app-driven resize adapter (P1a)", () => {
+describe("McpAppView — app-driven resize + open-link adapters (P1a)", () => {
+  /** The `deps` (5th) arg createMcpAppBridge was seeded with on the first mount. */
+  function seededDeps() {
+    return createMcpAppBridgeMock.mock.calls[0]![4] as {
+      onResize: (next: { width?: number; height?: number }) => void;
+      openLink: (url: string) => Promise<{ ok: boolean }>;
+    };
+  }
+
   it("seeds the webview at payload height, then grows it when the app reports a size change", async () => {
     const { container } = renderCard(payload("github"));
     await waitFor(() => expect(webviewNode(container)).toBeTruthy());
@@ -222,17 +230,27 @@ describe("McpAppView — app-driven resize adapter (P1a)", () => {
     expect(node().style.height).toBe("300px");
     expect(node().style.width).toBe("100%");
 
-    // The bridge factory received an onResize adapter (5th arg); drive a resize.
-    const deps = createMcpAppBridgeMock.mock.calls[0]![4] as {
-      onResize: (next: { width?: number; height?: number }) => void;
-    };
+    // Driving the injected onsizechange sink updates the live <webview> height…
     act(() => {
-      deps.onResize({ height: 512 });
+      seededDeps().onResize({ height: 512 });
     });
     await waitFor(() => expect((webviewNode(container) as HTMLElement).style.height).toBe("512px"));
     // …without re-creating the bridge (resize is a state update, not a re-mount)…
     expect(createMcpAppBridgeMock).toHaveBeenCalledTimes(1);
     // …and a height-only notification leaves width responsive.
     expect(node().style.width).toBe("100%");
+  });
+
+  it("routes onopenlink through window.lvisApi.openExternalUrl (the gated egress), returning ok", async () => {
+    const openExternalUrl = vi.fn(async () => ({ ok: true }));
+    vi.stubGlobal("lvisApi", { openExternalUrl });
+
+    const { container } = renderCard(payload("github"));
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+
+    const result = await seededDeps().openLink("https://example.com");
+
+    expect(openExternalUrl).toHaveBeenCalledWith("https://example.com");
+    expect(result).toEqual({ ok: true });
   });
 });

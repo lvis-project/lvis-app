@@ -29,6 +29,7 @@ import { MCP_APP_HOST_INFO } from "../../../shared/mcp-app-bridge-contract.js";
 import { WebviewIpcTransport, type BridgeWebviewElement } from "./webview-ipc-transport.js";
 import { createOnSandboxReady } from "./mcp-app-bridge/handlers/on-sandbox-ready.js";
 import { createOnReadResource } from "./mcp-app-bridge/handlers/on-read-resource.js";
+import { createOnOpenLink } from "./mcp-app-bridge/handlers/on-open-link.js";
 import { createOnSizeChange } from "./mcp-app-bridge/handlers/on-size-change.js";
 
 /**
@@ -49,6 +50,12 @@ export interface McpAppBridgeDeps {
    * the live card dimensions (React state) and clamps them.
    */
   onResize(next: { width?: number; height?: number }): void;
+  /**
+   * `onopenlink` opener — routes an external URL through the host's existing
+   * effect-gated egress path (`window.lvisApi.openExternalUrl`). Resolves
+   * `{ ok: true }` when opened, `{ ok: false }` when the host declined.
+   */
+  openLink(url: string): Promise<{ ok: boolean }>;
 }
 
 /**
@@ -105,6 +112,13 @@ export function createMcpAppBridge(
       capability: { serverResources: {} },
       register: (bridge) => {
         bridge.onreadresource = createOnReadResource({ serverId: payload.serverId });
+      },
+    },
+    // `ui/open-link` → advertises `openLinks`.
+    {
+      capability: { openLinks: {} },
+      register: (bridge) => {
+        bridge.onopenlink = createOnOpenLink({ openLink: deps.openLink });
       },
     },
     // `ui/notifications/size-changed` (View → Host notification — no capability).
