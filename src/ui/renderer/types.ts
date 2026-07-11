@@ -1732,8 +1732,17 @@ export type LvisMcpApi = {
   ) => Promise<McpUiMessageOutcome>;
   /** Free a card's sandbox-proxy session token on unmount (fire-and-forget). */
   disposeUiSession: (token: string) => void;
-  /** #885 b2 — open an MCP-app card in a detached window (host mints cardId/viewKey). */
-  openDetached: (payload: McpUiPayload) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
+  /**
+   * #885 b2 — open an MCP-app card in a detached window (host mints cardId/viewKey).
+   *
+   * `maximize` is the `onrequestdisplaymode` "fullscreen" arm: the SAME detach seam,
+   * asked to land maximized. The user's detach button omits it and keeps the canvas
+   * default. No second window path exists for MCP-app cards.
+   */
+  openDetached: (
+    payload: McpUiPayload,
+    opts?: { maximize?: boolean },
+  ) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
   /** #885 b2 — detached renderer fetches its stored payload on mount. */
   getDetachedPayload: (viewKey: string) => Promise<McpUiPayload | null>;
   /** #885 b3 — subscribe to the server-disconnected broadcast; returns an unsubscribe fn. */
