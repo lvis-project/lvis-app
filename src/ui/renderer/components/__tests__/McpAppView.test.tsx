@@ -205,7 +205,7 @@ describe("McpAppView — standard McpUiHostContext wiring (P0)", () => {
     await waitFor(() => {
       const calls = fakeBridge.setHostContext.mock.calls;
       expect(calls.length).toBeGreaterThan(0);
-      expect((calls.at(-1)![0] as { theme?: string }).theme).toBe("dark");
+      expect((calls[calls.length - 1]![0] as { theme?: string }).theme).toBe("dark");
     });
     // The bridge was never re-created for a theme-only change.
     expect(createMcpAppBridgeMock).toHaveBeenCalledTimes(1);
