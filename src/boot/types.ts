@@ -16,6 +16,7 @@ import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type { ConversationLoop } from "../engine/conversation-loop.js";
 import type { RoutineEngine } from "../core/routine-engine.js";
 import type { McpManager } from "../mcp/mcp-manager.js";
+import type { PluginLoopbackManager } from "../mcp/plugin-loopback-manager.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import type { BashAstValidator } from "../main/bash-ast-validator.js";
 import type { AuditService } from "../main/audit-service.js";
@@ -83,6 +84,13 @@ export interface AppServices {
   sideChatConversationLoop?: ConversationLoop;
   routineEngine?: RoutineEngine;
   mcpManager: McpManager;
+  /**
+   * Owns each first-party plugin's in-process loopback MCP host. Backs the
+   * loopback-first arm of the render IPC's unified `ui://` resolver
+   * (`resolveMcpUiBackend`): a plugin's `ui://` card is served here because its
+   * `serverId === pluginId` is NEVER in `mcpManager.clients` (external-only).
+   */
+  pluginLoopbackManager: PluginLoopbackManager;
   /**
    * §FU#259 — artifact store rooted at `userData/mcp-servers/`.
    * Constructed at boot when the marketplace fetcher supports verified

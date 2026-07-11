@@ -54,6 +54,7 @@ import type { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ConversationLoop } from "../engine/conversation-loop.js";
 import type { PreferenceRefreshService } from "../memory/preference-refresh-service.js";
 import type { McpManager } from "../mcp/mcp-manager.js";
+import type { PluginLoopbackManager } from "../mcp/plugin-loopback-manager.js";
 import type { McpGovernance } from "../mcp/mcp-governance.js";
 import type { StarredStore } from "../data/starred-store.js";
 import type { FeedbackStore } from "../data/feedback-store.js";
@@ -162,6 +163,8 @@ export interface BootContext {
   // ── MCP + signed-artifact stores ───────────────────────────────────────────
   mcpGovernance: McpGovernance;
   mcpManager: McpManager;
+  /** Owns each plugin's loopback MCP host — the loopback-first arm of the render IPC's `ui://` resolver. */
+  pluginLoopbackManager: PluginLoopbackManager;
   mcpArtifactStore: PluginArtifactStore | undefined;
   agentArtifactStore: PluginArtifactStore | undefined;
   skillArtifactStore: PluginArtifactStore | undefined;

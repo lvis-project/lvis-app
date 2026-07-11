@@ -509,6 +509,7 @@ describe("bootstrap() integration lock", () => {
         "memoryManager",
         "notificationService",
         "personaPromptStore",
+        "pluginLoopbackManager",
         "pluginMarketplace",
         "pluginPaths",
         "pluginRuntime",

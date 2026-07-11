@@ -37,6 +37,7 @@ export function assembleAppServices(ctx: BootContext): AppServices {
     sideChatConversationLoop: ctx.sideChatConversationLoop,
     routineEngine: ctx.routineEngine,
     mcpManager: ctx.mcpManager,
+    pluginLoopbackManager: ctx.pluginLoopbackManager,
     mcpArtifactStore: ctx.mcpArtifactStore,
     agentArtifactStore: ctx.agentArtifactStore,
     skillArtifactStore: ctx.skillArtifactStore,

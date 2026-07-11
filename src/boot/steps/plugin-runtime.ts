@@ -209,6 +209,12 @@ export interface InitPluginRuntimeOutput {
   runPluginShutdownHandlers: () => Promise<void>;
   /** SoT — shared with MarketplaceService + post-boot update detector. */
   pluginPaths: ReturnType<typeof resolvePluginPaths>;
+  /**
+   * Owns each plugin's in-process loopback MCP host. Exposed so the render IPC's
+   * unified `ui://` resolver can try the loopback host (serverId === pluginId)
+   * before the external `mcpManager.clients` registry.
+   */
+  loopbackManager: PluginLoopbackManager;
 }
 
 /**
@@ -541,6 +547,7 @@ export async function initPluginRuntime(
     pluginShutdownHandlers,
     runPluginShutdownHandlers,
     pluginPaths,
+    loopbackManager,
   };
 }
 
