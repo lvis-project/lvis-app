@@ -84,7 +84,12 @@ describe("ToolGroupCard × McpAppView — uiPayload mount regression guard", () 
     // for the mount-presence assertion below but the stub keeps the test
     // honest by exercising the full effect chain.
     const lvisStub = {
-      mcp: { readUiResource: vi.fn().mockResolvedValue("<!doctype html><body>ok</body>") },
+      mcp: {
+        readUiResource: vi.fn().mockResolvedValue({
+          proxyUrl: "lvis-mcp-app://abc/proxy.html?t=tok",
+          html: "<!doctype html><body>ok</body>",
+        }),
+      },
     };
     // Don't trample any other window.lvis surfaces the renderer setup wires up.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

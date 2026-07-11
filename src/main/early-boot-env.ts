@@ -16,6 +16,7 @@ import { app, protocol } from "electron";
 import { createLogger } from "../lib/logger.js";
 import { ensureWorkspaceCwd } from "./ensure-workspace-cwd.js";
 import { registerPluginAssetProtocolScheme } from "./plugin-asset-protocol.js";
+import { registerMcpAppProtocolScheme } from "./mcp-app-protocol.js";
 import { captureDemoCredentials } from "./demo-credentials.js";
 import {
   loadEmbeddedDemoActivationSync,
@@ -40,6 +41,9 @@ export function runEarlyBootEnv(): void {
   log.info({ workspaceCwd }, "main: cwd anchored to ~/.lvis/workspace");
 
   registerPluginAssetProtocolScheme(protocol);
+  // Must also happen before `app.ready` — the MCP-app sandbox-proxy document is
+  // served from this scheme and needs `standard: true` for a real origin.
+  registerMcpAppProtocolScheme(protocol);
 
 
   if (process.platform === "linux" && process.env.WSL_DISTRO_NAME) {

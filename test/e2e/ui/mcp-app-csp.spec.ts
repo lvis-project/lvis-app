@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { wrapWithCsp } from "../../../src/ui/renderer/components/mcp-app-csp.js";
+import { wrapWithCsp } from "../../../src/shared/mcp-app-csp.js";
 
 type CspProbeResult = {
   allowed: "ok" | "blocked";
@@ -51,8 +51,11 @@ test("MCP App metadata CSP allows declared connect-src and blocks undeclared hos
 </body>
 </html>`;
 
+  // Spec shape: domain BUCKETS, not directive names. `connectDomains` → connect-src.
+  // (The old host type was keyed `connectSrc`, so a conformant server's
+  // `connectDomains` was silently dropped and its network access denied.)
   const wrapped = wrapWithCsp(probeHtml, {
-    connectSrc: ["https:", "https://allowed.example.com"],
+    connectDomains: ["https://allowed.example.com"],
   });
   const frameUrl = `data:text/html;charset=utf-8,${encodeURIComponent(wrapped)}`;
 
