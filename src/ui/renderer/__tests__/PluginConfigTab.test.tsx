@@ -445,8 +445,8 @@ describe("PluginConfigTab", () => {
   it("resolves Doctor install id from marketplace when a failed plugin has no install alias", async () => {
     const broken = {
       id: "ep-api",
-      name: "portal API",
-      description: "portal API plugin",
+      name: "LVIS EP",
+      description: "LVIS EP plugin",
       publisher: "Test fixture",
       sampleTools: [],
       capabilities: [],
@@ -462,10 +462,10 @@ describe("PluginConfigTab", () => {
       .mockResolvedValueOnce([repaired]);
     const listMarketplacePlugins = vi.fn(async () => [
       {
-        id: "lvis-plugin-ep-api",
-        name: "portal API",
-        description: "portal API plugin",
-        packageSpec: "@lvis/lvis-plugin-ep-api",
+        id: "lvis-plugin-ep",
+        name: "LVIS EP",
+        description: "LVIS EP plugin",
+        packageSpec: "@lvis/lvis-plugin-ep",
         installed: false,
         enabled: false,
         pluginType: "plugin" as const,
@@ -498,9 +498,9 @@ describe("PluginConfigTab", () => {
 
     await waitFor(() => {
       expect(listMarketplacePlugins).toHaveBeenCalledOnce();
-      expect(mockInstall).toHaveBeenCalledWith("lvis-plugin-ep-api");
+      expect(mockInstall).toHaveBeenCalledWith("lvis-plugin-ep");
       expect(cards).toHaveBeenCalledTimes(2);
-      expect(screen.getByText("portal API 복구 완료")).toBeInTheDocument();
+      expect(screen.getByText("LVIS EP 복구 완료")).toBeInTheDocument();
     });
   });
 
