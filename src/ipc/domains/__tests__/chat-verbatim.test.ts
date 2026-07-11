@@ -1170,3 +1170,141 @@ describe("lvis:chat:send provenance", () => {
     );
   });
 });
+
+describe("sub-agent parent mailbox on manual turns", () => {
+  it("joins durable child messages into the user's next parent turn and acknowledges them", async () => {
+    const loop = makeConversationLoop("parent-session", []);
+    loop.runTurn.mockResolvedValue({
+      text: "parent response",
+      toolCalls: [],
+      route: "default",
+      stopReason: "end_turn",
+    });
+    const acknowledgeParentMailbox = vi.fn(async () => 1);
+    const runner = {
+      peekParentMailbox: vi.fn(async () => [{
+        id: "message-1",
+        formattedText: "[Sub-Agent: Researcher]\nfinished",
+        approvalLabel: "[Sub-Agent: Researcher]",
+      }]),
+      acknowledgeParentMailbox,
+    };
+    await setupHandlers(loop, { getSubAgentRunner: () => runner });
+
+    await invoke("lvis:chat:send", {
+      input: "What changed?",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    });
+
+    expect(loop.runTurn).toHaveBeenCalledWith(
+      "What changed?",
+      expect.any(Object),
+      undefined,
+      expect.objectContaining({
+        inputOrigin: "user-keyboard",
+        initialGuidance: "[Sub-Agent: Researcher]\nfinished",
+        approvalReasonPrefix: "[Sub-Agent: Researcher]",
+      }),
+    );
+    expect(acknowledgeParentMailbox).toHaveBeenCalledWith("parent-session", ["message-1"]);
+  });
+});
+
+
+describe("sub-agent autonomous parent wake", () => {
+  it("starts a current idle parent turn through agent-message provenance and acknowledges after completion", async () => {
+    const loop = makeConversationLoop("parent-session", []);
+    (loop as typeof loop & { hasActiveTurn: ReturnType<typeof vi.fn> }).hasActiveTurn = vi.fn(() => false);
+    loop.runTurn.mockResolvedValue({
+      text: "parent response",
+      toolCalls: [],
+      route: "default",
+      stopReason: "end_turn",
+    });
+    let wakeHandler: ((parentSessionId: string) => Promise<void>) | undefined;
+    const acknowledgeParentMailbox = vi.fn(async () => 1);
+    const runner = {
+      setParentWakeHandler: vi.fn((handler: (parentSessionId: string) => Promise<void>) => {
+        wakeHandler = handler;
+      }),
+      peekParentMailbox: vi.fn(async () => [{
+        id: "message-1",
+        formattedText: "[Sub-Agent: Researcher]\nfinished",
+        approvalLabel: "[Sub-Agent: Researcher]",
+      }]),
+      acknowledgeParentMailbox,
+    };
+    await setupHandlers(loop, { getSubAgentRunner: () => runner });
+
+    expect(wakeHandler).toBeTypeOf("function");
+    await wakeHandler!("parent-session");
+
+    expect(loop.runTurn).toHaveBeenCalledWith(
+      "[Sub-Agent: Researcher]\nfinished",
+      expect.any(Object),
+      undefined,
+      expect.objectContaining({
+        inputOrigin: "agent-message",
+        approvalReasonPrefix: "[Sub-Agent: Researcher]",
+      }),
+    );
+    expect(loop.runTurn.mock.calls[0]?.[3]).not.toHaveProperty("initialGuidance");
+    expect(acknowledgeParentMailbox).toHaveBeenCalledWith("parent-session", ["message-1"]);
+  });
+
+  it("single-flights autonomous wake against a concurrent user send", async () => {
+    const loop = makeConversationLoop("parent-session", []);
+    (loop as any).hasActiveTurn = vi.fn(() => false);
+    let finishTurn!: (result: any) => void;
+    loop.runTurn.mockReturnValue(new Promise((resolve) => { finishTurn = resolve; }));
+    let wakeHandler: ((parentSessionId: string) => Promise<void>) | undefined;
+    const acknowledgeParentMailbox = vi.fn(async () => 1);
+    const runner = {
+      setParentWakeHandler: vi.fn((handler: typeof wakeHandler) => { wakeHandler = handler; }),
+      peekParentMailbox: vi.fn(async () => [{
+        id: "message-1",
+        formattedText: "[Sub-Agent: Researcher]\nfinished",
+        approvalLabel: "[Sub-Agent: Researcher]",
+      }]),
+      acknowledgeParentMailbox,
+    };
+    await setupHandlers(loop, { getSubAgentRunner: () => runner });
+
+    const wakePromise = wakeHandler!("parent-session");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(loop.runTurn).toHaveBeenCalledTimes(1);
+    await expect(invoke("lvis:chat:send", {
+      input: "concurrent user message",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    })).resolves.toEqual({ error: "streaming-active" });
+    expect(loop.runTurn).toHaveBeenCalledTimes(1);
+    expect(runner.peekParentMailbox).toHaveBeenCalledTimes(1);
+
+    finishTurn({ text: "done", toolCalls: [], route: "default", stopReason: "end_turn" });
+    await wakePromise;
+    expect(acknowledgeParentMailbox).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start or acknowledge when the requested parent is not current", async () => {
+    const loop = makeConversationLoop("current-parent", []);
+    (loop as typeof loop & { hasActiveTurn: ReturnType<typeof vi.fn> }).hasActiveTurn = vi.fn(() => false);
+    const acknowledgeParentMailbox = vi.fn(async () => 0);
+    let wakeHandler: ((parentSessionId: string) => Promise<void>) | undefined;
+    const runner = {
+      setParentWakeHandler: vi.fn((handler: (parentSessionId: string) => Promise<void>) => {
+        wakeHandler = handler;
+      }),
+      peekParentMailbox: vi.fn(async () => []),
+      acknowledgeParentMailbox,
+    };
+    await setupHandlers(loop, { getSubAgentRunner: () => runner });
+
+    await wakeHandler!("other-parent");
+
+    expect(loop.runTurn).not.toHaveBeenCalled();
+    expect(runner.peekParentMailbox).not.toHaveBeenCalled();
+    expect(acknowledgeParentMailbox).not.toHaveBeenCalled();
+  });
+});

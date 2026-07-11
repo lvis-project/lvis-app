@@ -1343,6 +1343,27 @@ describe("ChatSidePanel", () => {
     expect(row.textContent).not.toContain("done");
   });
 
+  it("subagent tab: renders a budget suspension as waiting, never done", () => {
+    const subAgentSpawns: SubAgentSpawn[] = [
+      {
+        spawnId: "wait-1",
+        title: "Paused agent",
+        status: "waiting",
+        suspension: { reason: "budget", resumeId: "child-waiting" },
+        entries: [],
+        toolCallCount: 0,
+      },
+    ];
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
+    );
+    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    const row = screen.getByTestId("chat-side-panel-subagent-row");
+    expect(row.textContent).toContain("대기 중");
+    expect(within(row).getByText("대기 중").className).toContain("text-warning");
+    expect(row.textContent).not.toContain("완료");
+    expect(row.textContent).not.toContain("waiting");
+  });
   it("subagent tab: renders interrupted as a localized status label", () => {
     const subAgentSpawns: SubAgentSpawn[] = [
       { spawnId: "stop-1", title: "Stopped agent", status: "interrupted", entries: [], toolCallCount: 0 },

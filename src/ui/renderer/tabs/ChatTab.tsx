@@ -15,6 +15,8 @@ export interface ChatTabProps {
   setStreamSmoothing: (v: "none" | "word" | "char") => void;
   idlePreferenceRefresh?: boolean;
   setIdlePreferenceRefresh?: (v: boolean) => void;
+  subAgentAutonomousWake?: boolean;
+  setSubAgentAutonomousWake?: (v: boolean) => void;
   piiRedactEnabled: boolean;
   onPiiRedactToggle: () => void;
   settingsLoaded: boolean;
@@ -29,6 +31,8 @@ export function ChatTab({
   setStreamSmoothing,
   idlePreferenceRefresh,
   setIdlePreferenceRefresh,
+  subAgentAutonomousWake,
+  setSubAgentAutonomousWake,
   piiRedactEnabled,
   onPiiRedactToggle,
   settingsLoaded,
@@ -117,6 +121,23 @@ export function ChatTab({
             <p className="text-sm font-medium">{t("chatTab.idleRefreshLabel")}</p>
             <p className="text-[11px] text-muted-foreground">
               {t("chatTab.idleRefreshHint")}
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 flex items-center gap-3 rounded-md border px-3 py-3">
+          <Checkbox
+            checked={subAgentAutonomousWake ?? false}
+            disabled={!settingsLoaded}
+            data-testid="subagent-autonomous-wake-toggle"
+            className="size-5"
+            onCheckedChange={(checked) => {
+              setSubAgentAutonomousWake?.(checked === true);
+            }}
+          />
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">{t("chatTab.subAgentWakeLabel")}</p>
+            <p className="text-[11px] text-muted-foreground">
+              {t("chatTab.subAgentWakeHint")}
             </p>
           </div>
         </div>

@@ -21,7 +21,8 @@ type HistoryMock = {
 type AgentSpawnEvent = {
   spawnId: string;
   type: "start" | "activity" | "done" | "error";
-  status?: "running" | "done" | "error" | "interrupted";
+  status?: "running" | "waiting" | "done" | "error" | "interrupted";
+  suspension?: { reason: "budget" | "question"; prompt?: string; resumeId: string };
   title?: string;
   instructions?: string;
   entries?: ChatEntry[];

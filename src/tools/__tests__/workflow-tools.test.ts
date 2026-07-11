@@ -25,6 +25,7 @@ import {
   createAgentInterruptTool,
   createAgentSpawnTool,
   createAgentStatusTool,
+  type AgentSpawnEvent,
 } from "../agent-spawn.js";
 import { createSkillLoadTool } from "../skill-load.js";
 import { createSkillListTool } from "../skill-list.js";
@@ -508,6 +509,48 @@ describe("agent_spawn tool", () => {
     expect(types).toContain("done");
   });
 
+  it("preserves a budget suspension in the tool result and renders the done event as waiting", async () => {
+    const events: AgentSpawnEvent[] = [];
+    const deliverToParent = vi.fn();
+    const suspension = {
+      reason: "budget" as const,
+      resumeId: "child-waiting",
+    };
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        spawn: async () => ({
+          summary: "partial work",
+          toolCallCount: 2,
+          turnCount: 30,
+          childSessionId: "child-waiting",
+          entries: [],
+          ok: true,
+          stopReason: "round-cap" as const,
+          suspension,
+          incomplete: true,
+        }),
+        deliverToParent,
+      }) as never,
+      emit: (event) => events.push(event),
+    });
+
+    const result = await tool.execute(
+      { title: "budgeted", instructions: "work until the assigned budget" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.output)).toMatchObject({
+      incomplete: true,
+      resumeId: "child-waiting",
+      suspension,
+    });
+    expect(events.find((event) => event.type === "done")).toMatchObject({
+      status: "waiting",
+      suspension,
+    });
+    expect(deliverToParent).not.toHaveBeenCalled();
+  });
   it("background mode returns a handle immediately and emits terminal event later", async () => {
     let resolveSpawn!: (value: {
       summary: string;
@@ -528,6 +571,11 @@ describe("agent_spawn tool", () => {
       resolveSpawn = resolve;
     });
     const events: Array<{ type: string; spawnId: string; childSessionId?: string }> = [];
+    const deliverToParent = vi.fn(async () => ({
+      ok: true as const,
+      disposition: "mailbox" as const,
+      messageId: "delivered-message",
+    }));
     const tool = createAgentSpawnTool({
       getRunner: () => ({
         spawn: async (input, callbacks) => {
@@ -535,6 +583,7 @@ describe("agent_spawn tool", () => {
           callbacks?.onLinked?.({ childSessionId: "child-bg" });
           return await spawnPromise;
         },
+        deliverToParent,
       }) as never,
       emit: (event) => {
         events.push({
@@ -575,8 +624,115 @@ describe("agent_spawn tool", () => {
       spawnId: parsed.spawnId,
       childSessionId: "child-bg",
     });
+    expect(deliverToParent).toHaveBeenCalledTimes(1);
+    expect(deliverToParent).toHaveBeenCalledWith(expect.objectContaining({
+      parentSessionId: "session-x",
+      childSessionId: "child-bg",
+      message: expect.objectContaining({
+        contextId: "session-x",
+        taskId: "child-bg",
+        role: "ROLE_AGENT",
+        parts: [{ text: "done later" }],
+        metadata: expect.objectContaining({
+          taskState: "TASK_STATE_COMPLETED",
+          spawnId: parsed.spawnId,
+        }),
+      }),
+    }));
   });
 
+  it.each([
+    [
+      "waiting",
+      {
+        summary: "partial work",
+        toolCallCount: 1,
+        turnCount: 30,
+        childSessionId: "child-state",
+        entries: [],
+        ok: true,
+        stopReason: "round-cap",
+        suspension: { reason: "budget", resumeId: "child-state" },
+        incomplete: true,
+      },
+      "TASK_STATE_INPUT_REQUIRED",
+    ],
+    [
+      "failed",
+      {
+        summary: "failed work",
+        error: "provider failed",
+        toolCallCount: 0,
+        turnCount: 0,
+        childSessionId: "child-state",
+        entries: [],
+        ok: false,
+      },
+      "TASK_STATE_FAILED",
+    ],
+    [
+      "rejected",
+      {
+        summary: "resume rejected",
+        error: "resume exhausted",
+        toolCallCount: 0,
+        turnCount: 0,
+        childSessionId: "child-state",
+        entries: [],
+        ok: false,
+        resumeExhausted: true,
+      },
+      "TASK_STATE_REJECTED",
+    ],
+  ] as const)("background mode delivers %s exactly once with its A2A task state", async (
+    _label,
+    spawnResult,
+    expectedState,
+  ) => {
+    const deliverToParent = vi.fn(async () => ({
+      ok: true as const,
+      disposition: "mailbox" as const,
+      messageId: "state-message",
+    }));
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        spawn: async () => spawnResult,
+        deliverToParent,
+      }) as never,
+      emit: vi.fn(),
+    });
+
+    const handle = await tool.execute(
+      { title: "state", instructions: "project state", background: true },
+      ctx(),
+    );
+    expect(handle.isError).toBe(false);
+
+    const deadline = Date.now() + 1000;
+    while (deliverToParent.mock.calls.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(deliverToParent).toHaveBeenCalledTimes(1);
+    const delivery = deliverToParent.mock.calls[0]![0];
+    expect(delivery).toMatchObject({
+      parentSessionId: "session-x",
+      childSessionId: "child-state",
+      message: {
+        contextId: "session-x",
+        taskId: "child-state",
+        role: "ROLE_AGENT",
+        metadata: expect.objectContaining({ taskState: expectedState }),
+      },
+    });
+    if (expectedState === "TASK_STATE_INPUT_REQUIRED") {
+      expect(delivery.message).toMatchObject({
+        metadata: expect.objectContaining({
+          suspension: { reason: "budget", resumeId: "child-state" },
+        }),
+      });
+      expect(delivery.message.parts[0]?.text).toContain("Input required");
+    }
+  });
   it("background mode preserves interrupted status through interrupt, status, and terminal event", async () => {
     let spawnId = "";
     let resolveSpawn!: () => void;
@@ -612,6 +768,11 @@ describe("agent_spawn tool", () => {
       entries: [],
     };
     const events: Array<{ type: string; spawnId: string; status?: string; childSessionId?: string }> = [];
+    const deliverToParent = vi.fn(async () => ({
+      ok: true as const,
+      disposition: "mailbox" as const,
+      messageId: "interrupted-message",
+    }));
     const runner = {
       spawn: async (input, callbacks) => {
         spawnId = input.spawnId ?? "";
@@ -619,6 +780,7 @@ describe("agent_spawn tool", () => {
         callbacks?.onLinked?.({ childSessionId: "child-bg" });
         return await spawnPromise;
       },
+      deliverToParent,
       listRunStatuses: (originSessionId: string) => (originSessionId === "session-x" ? [run] : []),
       getRunStatus: (id: string, originSessionId: string) =>
         id === spawnId && originSessionId === "session-x" ? run : null,
@@ -668,6 +830,12 @@ describe("agent_spawn tool", () => {
       childSessionId: "child-bg",
       status: "interrupted",
     });
+    expect(deliverToParent).toHaveBeenCalledTimes(1);
+    expect(deliverToParent).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.objectContaining({
+        metadata: expect.objectContaining({ taskState: "TASK_STATE_CANCELED" }),
+      }),
+    }));
   });
 
   it("emits the child entries snapshot on done and activity events without embedding it in the tool result", async () => {

@@ -161,6 +161,7 @@ describe("SubAgentRunner — maxRounds bound", () => {
         instructions: "do",
         sourceTools: ["noop"],
         maxRounds: 2,
+        originSessionId: "parent-session",
       });
       // R2-CR-2: tighten — `<=2` would also pass on a regression that bails
       // out at 0 or 1 rounds. The provider script emits 5 valid tool_use
@@ -181,6 +182,17 @@ describe("SubAgentRunner — maxRounds bound", () => {
       expect(result.ok).toBe(true);
       expect(result.incomplete).toBe(true);
       expect(result.stopReason).toBe("round-cap");
+      expect(result.suspension).toEqual({
+        reason: "budget",
+        prompt: "Send any message to continue, or treat the partial result as done.",
+        resumeId: result.childSessionId,
+      });
+      expect(
+        runner.getRunStatus(result.childSessionId, "parent-session"),
+      ).toMatchObject({
+        status: "waiting",
+        suspension: result.suspension,
+      });
     } finally {
       hasProviderSpy.mockRestore();
       refreshProviderSpy.mockRestore();
@@ -225,6 +237,7 @@ describe("SubAgentRunner — maxRounds bound", () => {
       expect(result.stopReason).toBe("end_turn");
       // Cut-off resume signal must be OFF: a finished turn is not incomplete.
       expect(result.incomplete).toBeFalsy();
+      expect(result.suspension).toBeUndefined();
       expect(result.summary).toContain("final answer");
     } finally {
       hasProviderSpy.mockRestore();
@@ -852,6 +865,56 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
     };
   }
 
+  it("persists routing metadata before provider validation so failed runs remain addressable", async () => {
+    const subAgentMemoryManager = new MemoryManager({
+      lvisDir: openFeatureNamespace("subagent").dir,
+    });
+    subAgentMemoryManager.load();
+    const toolRegistry = new ToolRegistry();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager,
+    });
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(false);
+
+    try {
+      const result = await runner.spawn({
+        title: "provider-missing",
+        instructions: "do",
+        originSessionId: "origin-missing",
+        maxRounds: 1,
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("provider not configured"),
+      });
+      expect(subAgentMemoryManager.loadSessionMetadata(result.childSessionId)).toMatchObject({
+        sessionKind: "subagent",
+        originSessionId: "origin-missing",
+        subAgentTitle: "provider-missing",
+        budgetResumeCount: 0,
+        questionAnswerCount: 0,
+        cumulativeRounds: 0,
+      });
+      await expect(
+        runner.resolveSubAgentAddress("origin-missing", result.childSessionId),
+      ).resolves.toEqual({
+        childSessionId: result.childSessionId,
+        parentSessionId: "origin-missing",
+        childTitle: "provider-missing",
+      });
+    } finally {
+      hasProviderSpy.mockRestore();
+    }
+  });
+
   it("tags the persisted sub-agent session `sessionKind: \"subagent\"` and round-trips the resume metadata fields", async () => {
     const subAgentMemoryManager = new MemoryManager({
       lvisDir: openFeatureNamespace("subagent").dir,
@@ -882,6 +945,8 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
       // spawn's OWN round count (PR-C Commit 2 fix: previously left at 0, which
       // made the resume-chain ceiling inaccurate). A clean 1-round spawn → 1.
       expect(meta?.resumeCount).toBe(0);
+      expect(meta?.budgetResumeCount).toBe(0);
+      expect(meta?.questionAnswerCount).toBe(0);
       expect(meta?.cumulativeRounds).toBe(result.turnCount);
       // The session surfaces in the isolated store's listing as a subagent.
       const listed = subAgentMemoryManager
@@ -911,6 +976,8 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
       expect(meta?.profileModel).toBeUndefined();
       expect(meta?.profileMode).toBeUndefined();
       expect(meta?.resumeCount).toBe(0);
+      expect(meta?.budgetResumeCount).toBe(0);
+      expect(meta?.questionAnswerCount).toBe(0);
       // cumulativeRounds records the spawn's own round count (PR-C Commit 2 fix).
       expect(meta?.cumulativeRounds).toBe(result.turnCount);
       // sourceTools falls back to the full (blocklist-stripped) parent surface,
@@ -984,5 +1051,37 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
       if (prevTrace === undefined) delete process.env.LVIS_TRACE;
       else process.env.LVIS_TRACE = prevTrace;
     }
+  });
+});
+
+describe("SubAgentRunner A2A bus facade", () => {
+  it("fails closed and returns inert mailbox results when boot has no bus", async () => {
+    const toolRegistry = new ToolRegistry();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+
+    await expect(runner.deliverToParent({
+      parentSessionId: "parent-session",
+      childSessionId: "sub-child",
+      message: {
+        messageId: "message-1",
+        contextId: "parent-session",
+        taskId: "sub-child",
+        role: "ROLE_AGENT",
+        parts: [{ text: "hello" }],
+      },
+    })).resolves.toEqual({
+      ok: false,
+      disposition: "dropped",
+      reason: "message-bus-unavailable",
+    });
+    await expect(runner.peekParentMailbox("parent-session")).resolves.toEqual([]);
+    await expect(
+      runner.acknowledgeParentMailbox("parent-session", ["message-1"]),
+    ).resolves.toBe(0);
+    expect(() => runner.setParentWakeHandler(null)).not.toThrow();
   });
 });

@@ -554,10 +554,12 @@ export function SettingsContent({
               setStreamSmoothing={s.setStreamSmoothing}
               idlePreferenceRefresh={s.idlePreferenceRefresh}
               setIdlePreferenceRefresh={s.setIdlePreferenceRefresh}
+              subAgentAutonomousWake={s.subAgentAutonomousWake}
+              setSubAgentAutonomousWake={s.setSubAgentAutonomousWake}
               piiRedactEnabled={s.piiRedactEnabled}
               settingsLoaded={s.settingsLoaded}
               // ChatTab wraps onPiiRedactToggle with onImmediateChange.
-              // idlePreferenceRefresh owns a separate `features` patch path,
+              // Feature toggles own separate `features` patch paths,
               // so it must not schedule the bulk chat payload.
               onPiiRedactToggle={() => s.setPiiRedactEnabled(!s.piiRedactEnabled)}
               onImmediateChange={chatSave.schedule}

@@ -23,7 +23,10 @@
  *   - `hasActiveTurn()` is `currentAbortController !== null`, set just before
  *     `queryLoop` and cleared in `runTurn`'s `finally`.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
@@ -32,6 +35,7 @@ import type { LLMProvider, StreamEvent } from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import { PermissionManager } from "../../permissions/permission-manager.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -53,7 +57,11 @@ class FakeProvider implements LLMProvider {
   }
 }
 
-function makeLoop(provider: LLMProvider): ConversationLoop {
+function makeLoop(
+  provider: LLMProvider,
+  overrides: Record<string, unknown> = {},
+  configureTools?: (toolRegistry: ToolRegistry) => void,
+): ConversationLoop {
   const toolRegistry = new ToolRegistry();
   toolRegistry.register(createDynamicTool({
     name: "noop_tool",
@@ -63,6 +71,7 @@ function makeLoop(provider: LLMProvider): ConversationLoop {
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "ok", isError: false }),
   }));
+  configureTools?.(toolRegistry);
   const loop = new ConversationLoop(({
     settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
     systemPromptBuilder: { build: () => "system" },
@@ -70,6 +79,7 @@ function makeLoop(provider: LLMProvider): ConversationLoop {
     routeEngine: new RouteEngine({ toolRegistry }),
     toolRegistry,
     memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    ...overrides,
   } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as { provider: LLMProvider | null }).provider = provider;
   return loop;
@@ -102,6 +112,8 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     };
     const loop = makeLoop(provider);
     const injected: string[] = [];
+    const dispositions: string[] = [];
+    let injectedAckFinished = false;
 
     // Schedule queueGuidance right after runTurn starts.
     const turnPromise = loop.runTurn(
@@ -113,12 +125,21 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     // Microtask ordering: by the time the first stream event resolves, the
     // controller has been set. Queue guidance now.
     await Promise.resolve();
-    loop.queueGuidance("더 짧게 요약");
+    loop.queueGuidanceWithDisposition("더 짧게 요약", {
+      onInjected: async () => {
+        await Promise.resolve();
+        dispositions.push("injected");
+        injectedAckFinished = true;
+      },
+      onDropped: (reason) => dispositions.push(`dropped:${reason}`),
+    });
     await turnPromise;
 
     expect(injected).toEqual(["더 짧게 요약"]);
+    expect(dispositions).toEqual(["injected"]);
+    expect(injectedAckFinished).toBe(true);
     const userMessages = getHistory(loop).filter((m) => m.role === "user");
-    expect(userMessages.some((m) => typeof m.content === "string" && m.content.includes("[방향 지시 — 진행 중 추가 입력]") && m.content.includes("더 짧게 요약"))).toBe(true);
+    expect(userMessages.some((m) => typeof m.content === "string" && m.content.includes("더 짧게 요약"))).toBe(true);
   });
 
   it("joins multiple queued utterances at the same boundary with blank-line separators", async () => {
@@ -181,6 +202,126 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     expect(dropped).toEqual([]);
   });
 
+  it("propagates injected A2A provenance to receiver ApprovalGate on the next round", async () => {
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent,
+        { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
+      ],
+      [
+        { type: "tool_call", id: "t2", name: "noop_tool", input: {} } as StreamEvent,
+        { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
+      ],
+      [
+        { type: "text_delta", text: "done" } as StreamEvent,
+        { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+      ],
+    ]);
+    const dir = mkdtempSync(join(tmpdir(), "lvis-a2a-guidance-gate-"));
+    const permissionManager = new PermissionManager(join(dir, "permissions.json"));
+    permissionManager.checkDetailed = () => ({
+      decision: "allow",
+      reason: "receiver auto-allow",
+      layer: 3,
+    });
+    const approvalGate = {
+      requestAndWait: vi.fn(async (request: { id: string }) => ({
+        requestId: request.id,
+        choice: "allow-once" as const,
+      })),
+    };
+    const loop = makeLoop(provider, {
+      permissionManager,
+      approvalGate,
+    });
+
+    try {
+      const turnPromise = loop.runTurn(
+        "start",
+        undefined,
+        undefined,
+        { inputOrigin: "user-keyboard" },
+      );
+      await Promise.resolve();
+      expect(loop.queueGuidanceWithDisposition(
+        "[Sub-Agent: researcher] finished",
+        { approvalReasonPrefix: "[Sub-Agent: researcher]" },
+      )).toBe("queued");
+      await turnPromise;
+
+      expect(approvalGate.requestAndWait).toHaveBeenCalledTimes(1);
+      expect(approvalGate.requestAndWait).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reason: "[Sub-Agent: researcher] receiver auto-allow",
+        }),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("gates intercepted request_plugin and tool_search calls with A2A provenance", async () => {
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "meta-1", name: "request_plugin", input: { pluginId: "missing" } } as StreamEvent,
+        { type: "tool_call", id: "meta-2", name: "tool_search", input: { query: "noop_tool" } } as StreamEvent,
+        { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
+      ],
+      [
+        { type: "text_delta", text: "done" } as StreamEvent,
+        { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+      ],
+    ]);
+    const approvalGate = {
+      requestAndWait: vi.fn(async (request: { id: string }) => ({
+        requestId: request.id,
+        choice: "allow-once" as const,
+      })),
+    };
+    const loop = makeLoop(
+      provider,
+      { approvalGate },
+      (toolRegistry) => {
+        for (const name of ["request_plugin", "tool_search"]) {
+          toolRegistry.register(createDynamicTool({
+            name,
+            description: name,
+            source: "builtin",
+            category: "read",
+            isReadOnly: () => true,
+            jsonSchema: { type: "object", properties: {} },
+            execute: async () => ({ output: "interception-regressed", isError: true }),
+          }));
+        }
+      },
+    );
+
+    await loop.runTurn(
+      "start",
+      undefined,
+      undefined,
+      {
+        inputOrigin: "agent-message",
+        initialGuidance: "[Sub-Agent: researcher] delivered work",
+        approvalReasonPrefix: "[Sub-Agent: researcher]",
+      },
+    );
+
+    expect(approvalGate.requestAndWait).toHaveBeenCalledTimes(2);
+    const requests = approvalGate.requestAndWait.mock.calls.map(([request]) => request);
+    expect(requests.map((request) => request.toolName).sort()).toEqual([
+      "request_plugin",
+      "tool_search",
+    ]);
+    for (const request of requests) {
+      expect(request).toMatchObject({
+        toolCategory: "meta",
+        isReadOnly: false,
+        mode: "ask_all",
+      });
+      expect(request.reason).toContain("[Sub-Agent: researcher]");
+    }
+  });
   it("rejects empty / oversized / no-active-turn cases by return code", () => {
     const provider = new FakeProvider([]);
     const loop = makeLoop(provider);
@@ -216,6 +357,7 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     const loop = makeLoop(provider);
     const injected: string[] = [];
     const dropped: string[] = [];
+    const dispositions: string[] = [];
     const turnPromise = loop.runTurn(
       "q",
       { onGuidanceInjected: (t) => injected.push(t), onGuidanceDropped: (t) => dropped.push(t) },
@@ -223,11 +365,15 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
       { inputOrigin: "user-keyboard", maxRounds: 1 },
     );
     await Promise.resolve();
-    loop.queueGuidance("late");
+    loop.queueGuidanceWithDisposition("late", {
+      onInjected: () => dispositions.push("injected"),
+      onDropped: (reason) => dispositions.push(`dropped:${reason}`),
+    });
     await turnPromise;
 
     expect(injected).toEqual([]);
     expect(dropped).toEqual(["late"]);
+    expect(dispositions).toEqual(["dropped:turn-ended"]);
   });
 
   it("`hasActiveTurn()` reflects in-flight runTurn for IPC gate", async () => {

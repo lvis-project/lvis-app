@@ -1921,6 +1921,7 @@ function BrowserWorkspace({
 function subAgentStatusTone(status: SubAgentSpawn["status"]): string {
   if (status === "error") return "text-destructive";
   if (status === "interrupted") return "text-warning";
+  if (status === "waiting") return "text-warning";
   if (status === "done") return "text-muted-foreground";
   return "text-warning";
 }
@@ -1934,6 +1935,7 @@ function subAgentStatusTone(status: SubAgentSpawn["status"]): string {
 function subAgentStatusLabel(status: SubAgentSpawn["status"], t: (key: string) => string): string {
   if (status === "error") return t("subAgentCard.statusError");
   if (status === "interrupted") return t("subAgentCard.statusInterrupted");
+  if (status === "waiting") return t("subAgentCard.statusWaiting");
   if (status === "done") return t("subAgentCard.statusDone");
   return t("subAgentCard.statusRunning");
 }
@@ -2051,7 +2053,9 @@ function SubAgentTranscriptDetail({
         <div className="py-1 text-xs text-muted-foreground">
           {spawn.status === "running"
             ? t("subAgentCard.statusRunning")
-            : t("subAgentCard.summaryLabel")}
+            : spawn.status === "waiting"
+              ? t("subAgentCard.statusWaiting")
+              : t("subAgentCard.summaryLabel")}
         </div>
       )}
       {spawn.errorMessage ? (

@@ -280,6 +280,8 @@ export type AppSettings = {
   /** Experimental feature flags — all default false. */
   features?: {
     idlePreferenceRefresh?: boolean;
+    /** Idle parents may start a gated turn for queued background sub-agent messages. Default false. */
+    subAgentAutonomousWake?: boolean;
     /** #893 — `true` after the user has dismissed the first-boot onboarding. */
     onboardingCompleted?: boolean;
     /**
@@ -1170,7 +1172,8 @@ export type LvisApi = {
     h: (event: {
       spawnId: string;
       type: "start" | "activity" | "done" | "error";
-      status?: "running" | "done" | "error" | "interrupted";
+      status?: "running" | "waiting" | "done" | "error" | "interrupted";
+      suspension?: { reason: "budget" | "question"; prompt?: string; resumeId: string };
       title?: string;
       instructions?: string;
       entries?: ChatEntry[];

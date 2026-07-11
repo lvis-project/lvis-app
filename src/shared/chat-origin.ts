@@ -2,6 +2,7 @@ export type ChatInputOrigin =
   | "user-keyboard"
   | "plugin-emitted"
   | "llm-tool-arg"
+  | "agent-message"
   | "file-content"
 
 

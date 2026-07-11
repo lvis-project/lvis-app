@@ -59,6 +59,10 @@ export async function runTurn(
        * before it reaches the LLM-visible registry.
        */
       spawnDepth?: number;
+      /** Internal provenance label prepended to ApprovalGate reasons. */
+      approvalReasonPrefix?: string;
+      /** DLP-masked durable child messages joined to this turn after the prompt gate. */
+      initialGuidance?: string;
       inputOrigin: ChatInputOrigin;
       rolePrompt?: ActiveRolePrompt;
     },
@@ -139,8 +143,11 @@ export async function runTurn(
     // (or a fail-closed timeout/error/bad-json/spawn-error) the turn is refused
     // and queryLoop NEVER runs. With NO matching trusted hook the dispatch
     // returns `allow` and the turn proceeds byte-identically to today.
+    const promptGateInput = options?.initialGuidance
+      ? `${turnInput}\n\n${options.initialGuidance}`
+      : turnInput;
     const promptGate = await self.fireUserPromptSubmit({
-      inputText: turnInput,
+      inputText: promptGateInput,
       inputOrigin,
       route: routeResult.route,
       classification: classification.type,
@@ -260,6 +267,14 @@ export async function runTurn(
       content: userContent,
       ...(Object.keys(userMeta).length > 0 ? { meta: userMeta } : {}),
     });
+    if (options?.initialGuidance) {
+      self.history.append({
+        role: "user",
+        content: t("be_conversationLoop.guidanceInjectionHeader", {
+          joined: options.initialGuidance,
+        }),
+      });
+    }
     // §4.5.2 step 5 — HISTORY_APPEND
     self.tracer.step("HISTORY_APPEND", { role: "user", historySize: self.history.length });
 
@@ -316,6 +331,7 @@ export async function runTurn(
             maxRounds: options?.maxRounds,
             sessionIdOverride: options?.sessionIdOverride,
             spawnDepth: options?.spawnDepth,
+            approvalReasonPrefix: options?.approvalReasonPrefix,
             inputOrigin,
             toolTrustOrigin,
             permissionUserIntent,
@@ -347,11 +363,15 @@ export async function runTurn(
       // drop invisible to end users and worse-UX than the old abort-and-
       // restart flow.
       if (self.guidanceQueue.length > 0) {
-        const droppedJoined = self.guidanceQueue.join("\n\n");
+        const dropped = self.guidanceQueue;
+        const droppedJoined = dropped.map((entry) => entry.text).join("\n\n");
         log.warn(
           `runTurn: ${self.guidanceQueue.length} guide utterance(s) queued but never reached a round boundary — dropping`,
         );
         self.guidanceQueue = [];
+        await Promise.allSettled(
+          dropped.map((entry) => entry.onDropped?.("turn-ended")),
+        );
         callbacks?.onGuidanceDropped?.(droppedJoined);
       }
     }

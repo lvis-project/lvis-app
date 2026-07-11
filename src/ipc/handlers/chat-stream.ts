@@ -68,6 +68,8 @@ export async function runStreamedTurn(
     attachments?: UserContentPart[];
     inputOrigin: ChatInputOrigin;
     rolePrompt?: ActiveRolePrompt;
+    initialGuidance?: string;
+    approvalReasonPrefix?: string;
   },
   channels: StreamTurnChannels = DEFAULT_STREAM_CHANNELS,
 ): Promise<TurnResult> {
@@ -194,6 +196,10 @@ export async function runStreamedTurn(
         : {}),
       inputOrigin: options.inputOrigin,
       ...(options.rolePrompt ? { rolePrompt: options.rolePrompt } : {}),
+      ...(options.initialGuidance ? { initialGuidance: options.initialGuidance } : {}),
+      ...(options.approvalReasonPrefix
+        ? { approvalReasonPrefix: options.approvalReasonPrefix }
+        : {}),
     },
   );
   const { trailing, suggestedReplies } = suggestedRepliesFilter.finish();

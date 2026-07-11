@@ -1491,6 +1491,154 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     expect(results[0].is_error).toBe(true);
     expect(results[0].content).toContain("Bash AST 차단");
   });
+  it("forces sub-agent message tool calls through the receiver ApprovalGate with provenance", async () => {
+    const executeSpy = vi.fn(async () => "read");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "a2a_read_probe",
+      description: "A2A receiver gate probe",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: await executeSpy(), isError: false }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({
+      decision: "allow",
+      reason: "would otherwise allow",
+      layer: 3,
+    });
+    const approvalGate = {
+      requestAndWait: vi.fn(async (req: { id: string }) => ({
+        requestId: req.id,
+        choice: "allow-once" as const,
+      })),
+    };
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      approvalGate as never,
+    );
+
+    const results = await executor.executeAll(
+      [{ id: "tu-a2a-receiver", name: "a2a_read_probe", input: {} }],
+      {
+        sessionId: "sess-a2a-receiver",
+        approvalReasonPrefix: "[Sub-Agent: researcher]",
+        permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }),
+      },
+    );
+
+    expect(results[0].is_error).toBeUndefined();
+    expect(executeSpy).toHaveBeenCalledOnce();
+    expect(approvalGate.requestAndWait).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "[Sub-Agent: researcher] would otherwise allow",
+      }),
+    );
+  });
+
+  it("re-elevates always-allow meta tools for sub-agent message provenance", async () => {
+    const executeSpy = vi.fn(async () => "asked");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "a2a_always_allow_meta_probe",
+      description: "A2A always-allow receiver gate probe",
+      source: "builtin",
+      category: "meta",
+      decisionOverride: "always-allow-with-audit",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: await executeSpy(), isError: false }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = vi.fn(() => ({
+      decision: "allow",
+      reason: "receiver meta auto-allow",
+      layer: 6,
+    }));
+    const approvalGate = {
+      requestAndWait: vi.fn(async (req: { id: string }) => ({
+        requestId: req.id,
+        choice: "allow-once" as const,
+      })),
+    };
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      approvalGate as never,
+    );
+
+    const results = await executor.executeAll(
+      [{ id: "tu-a2a-meta", name: "a2a_always_allow_meta_probe", input: {} }],
+      {
+        sessionId: "sess-a2a-meta",
+        approvalReasonPrefix: "[Sub-Agent: researcher]",
+        permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }),
+      },
+    );
+
+    expect(results[0].is_error).toBeUndefined();
+    expect(executeSpy).toHaveBeenCalledOnce();
+    expect(permMgr.checkDetailed).toHaveBeenCalledOnce();
+    expect(approvalGate.requestAndWait).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: "a2a_always_allow_meta_probe",
+        toolCategory: "meta",
+        isReadOnly: false,
+        reason: "[Sub-Agent: researcher] receiver meta auto-allow",
+      }),
+    );
+  });
+  it("preserves receiver deny rules for sub-agent message tool calls", async () => {
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "a2a_denied_probe",
+      description: "A2A receiver deny probe",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: await executeSpy(), isError: false }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({
+      decision: "deny",
+      reason: "receiver deny",
+      layer: 1,
+    });
+    const approvalGate = { requestAndWait: vi.fn() };
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      approvalGate as never,
+    );
+
+    const results = await executor.executeAll(
+      [{ id: "tu-a2a-denied", name: "a2a_denied_probe", input: {} }],
+      {
+        sessionId: "sess-a2a-denied",
+        approvalReasonPrefix: "[Sub-Agent: researcher]",
+        permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }),
+      },
+    );
+
+    expect(results[0].is_error).toBe(true);
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+  });
+
 });
 
 // ─── D4 §4.5.3 — ordered tool approval/execution ─────────────
