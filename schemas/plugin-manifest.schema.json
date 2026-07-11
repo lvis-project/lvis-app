@@ -137,6 +137,32 @@
       },
       "description": "UI extensions. Kind-specific required fields (embedded-module: entry+exportName; embedded-page: page) are enforced at runtime with hard-fail — invalid entries fail manifest load, the plugin does NOT register."
     },
+    "uiResources": {
+      "type": "array",
+      "description": "MCP App ui:// resources this plugin serves (distinct from `ui[]`, which declares host-mounted React sidebar panels). Each entry maps a `ui://<pluginId>/<path>` uri to an HTML card shipped in the plugin's dist/ plus that resource's OWN _meta.ui security metadata (csp/permissions). When a tool result carries `_meta.ui.resourceUri` matching one of these uris, the loopback host SERVES the declared HTML through the same sandbox-proxy + main-computed CSP path as an external MCP server's ui:// resource. Security (enforced fail-closed at serve time): the uri authority MUST equal the plugin id (own-namespace-only), the html path MUST resolve inside the plugin root (path-containment), and main COMPUTES the CSP header from csp/permissions — the plugin never supplies a policy header string.",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["uri", "html"],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "description": "ui://<pluginId>/<path>. Authority MUST equal the declaring plugin's id (re-checked fail-closed at serve time).",
+            "pattern": "^ui://[a-z0-9][a-z0-9.-]*/.+",
+            "maxLength": 512
+          },
+          "html": {
+            "type": "string",
+            "description": "HTML file shipped in the plugin's dist/, path RELATIVE to the plugin root. Must resolve inside the root (containment-checked at read; absolute paths and `..` escapes are rejected).",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "csp": { "$ref": "#/definitions/mcpUiResourceCsp" },
+          "permissions": { "$ref": "#/definitions/mcpUiResourcePermissions" }
+        }
+      }
+    },
     "keywords": {
       "type": "array",
       "items": {
@@ -783,6 +809,44 @@
             }
           }
         }
+      }
+    },
+    "mcpUiResourceCsp": {
+      "$comment": "MCP Apps spec `McpUiResourceCsp` — DOMAIN BUCKETS (not CSP directive names). Main derives the sandbox-proxy CSP header from these; the plugin never supplies a header string. Mirrors src/mcp/types.ts McpUiResourceCsp.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connectDomains": {
+          "type": "array",
+          "description": "Origins for network requests (fetch/XHR/WebSocket) -> connect-src.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "resourceDomains": {
+          "type": "array",
+          "description": "Origins for images, scripts, stylesheets, fonts, media.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "frameDomains": {
+          "type": "array",
+          "description": "Origins for nested iframes -> frame-src.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "baseUriDomains": {
+          "type": "array",
+          "description": "Allowed base URIs for the document -> base-uri.",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "mcpUiResourcePermissions": {
+      "$comment": "MCP Apps spec `McpUiResourcePermissions` — each key maps to a Permission-Policy feature on the inner iframe; an ABSENT key is denied. Present keys are empty objects. Mirrors src/mcp/types.ts McpUiResourcePermissions.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "camera": { "type": "object", "additionalProperties": false },
+        "microphone": { "type": "object", "additionalProperties": false },
+        "geolocation": { "type": "object", "additionalProperties": false },
+        "clipboardWrite": { "type": "object", "additionalProperties": false }
       }
     }
   }

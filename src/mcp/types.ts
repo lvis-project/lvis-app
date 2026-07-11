@@ -316,6 +316,40 @@ export interface McpUiResourceRead {
 }
 
 /**
+ * A first-party plugin's declaration of ONE `ui://` resource it serves — the
+ * plugin→host serving contract for MCP App cards. This is the plugin-side analog
+ * of an external MCP server's `resources/read` for a `ui://` resource, so BOTH
+ * paths converge on the SAME {@link McpUiResourceRead} model (HTML + the
+ * resource's OWN declared csp/permissions).
+ *
+ * A plugin ships an HTML card in its `dist/` and lists it here (manifest
+ * `uiResources[]`). When one of its tool results carries
+ * `_meta.ui.resourceUri === "<this uri>"`, the loopback host SERVES the declared
+ * HTML through the same sandbox-proxy + main-computed CSP path as an
+ * external-server resource.
+ *
+ * Security invariants (enforced fail-closed at serve time — see
+ * `plugin-ui-resource-provider.ts`):
+ *  - `uri` authority MUST equal the declaring plugin's id — a plugin can only
+ *    serve its OWN `ui://` namespace (own-namespace-only).
+ *  - `html` is a path RELATIVE to the plugin root and MUST resolve inside it
+ *    (path-containment checked; absolute paths / `..` escapes rejected).
+ *  - `csp` / `permissions` are the resource's OWN declared policy. Main COMPUTES
+ *    the sandbox-proxy CSP header from them; the plugin never supplies a policy
+ *    HEADER STRING, and the renderer can never inject one.
+ */
+export interface PluginUiResourceDecl {
+  /** `ui://<pluginId>/<path>` — authority MUST equal the declaring plugin's id. */
+  uri: string;
+  /** HTML file shipped in the plugin's `dist/`; path RELATIVE to the plugin root. */
+  html: string;
+  /** The resource's own declared CSP (spec `McpUiResourceCsp`). @optional */
+  csp?: McpUiResourceCsp;
+  /** Sandbox permissions the resource requests (spec `McpUiResourcePermissions`). @optional */
+  permissions?: McpUiResourcePermissions;
+}
+
+/**
  * Payload produced by an MCP tool that declares a UI extension.
  *
  * MCP Apps spec §3.2 — a tool response may carry `_meta.ui` to request

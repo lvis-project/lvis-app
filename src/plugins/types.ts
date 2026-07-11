@@ -1,5 +1,8 @@
 import type { MarketplacePackageType } from "../shared/assistant-context.js";
 import type { MarketplacePackageAsset } from "../shared/marketplace-package-assets.js";
+import type { PluginUiResourceDecl } from "../mcp/types.js";
+
+export type { PluginUiResourceDecl } from "../mcp/types.js";
 
 export type InstallPolicy = "admin" | "user";
 
@@ -230,6 +233,19 @@ export interface PluginManifest {
   description: string;
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];
+  /**
+   * MCP App `ui://` resources this plugin serves — the plugin→host serving
+   * contract for interactive HTML cards (distinct from `ui[]`, which declares
+   * host-mounted React sidebar panels). Each entry maps a `ui://<pluginId>/<path>`
+   * uri to an HTML file shipped in the plugin's `dist/` plus that resource's OWN
+   * `_meta.ui` security metadata (csp / permissions). When a tool result carries
+   * `_meta.ui.resourceUri` matching one of these uris, the loopback host SERVES
+   * the declared HTML through the same sandbox-proxy + main-computed CSP path as
+   * an external MCP server's `ui://` resource. See {@link PluginUiResourceDecl}
+   * for the security invariants (own-namespace-only, path-containment,
+   * host-computed CSP). @optional
+   */
+  uiResources?: PluginUiResourceDecl[];
   keywords?: Array<{ keyword: string; skillId: string }>;
 
 
