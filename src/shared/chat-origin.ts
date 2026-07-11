@@ -1,13 +1,26 @@
 export type ChatInputOrigin =
   | "user-keyboard"
   | "plugin-emitted"
+  /**
+   * MCP App (`ui/message`) — an untrusted sandboxed app frame asked for its text
+   * to enter the conversation. NEVER `user-keyboard`: the host cannot verify a
+   * gesture claim made inside an untrusted iframe, so app text is staged for an
+   * explicit user click (no active turn) or injected as round-boundary guidance
+   * (active turn), and its tool calls are treated as non-user provenance.
+   * Provenance travels in the `<app-message source="app:<serverId>">` envelope —
+   * see `shared/mcp-app-message-source.ts`.
+   */
+  | "app-emitted"
   | "llm-tool-arg"
   | "file-content"
 
 
   | "queue-auto";
 
-export type ChatSendInputOrigin = Extract<ChatInputOrigin, "user-keyboard" | "plugin-emitted" | "queue-auto">;
+export type ChatSendInputOrigin = Extract<
+  ChatInputOrigin,
+  "user-keyboard" | "plugin-emitted" | "app-emitted" | "queue-auto"
+>;
 export type TrustOriginWithUnknown = ChatInputOrigin | "unknown";
 
 export interface ChatSendPayload {
@@ -38,7 +51,12 @@ export function isUserKeyboardOrigin(origin: ChatInputOrigin): boolean {
 }
 
 export function isChatSendInputOrigin(value: unknown): value is ChatSendInputOrigin {
-  return value === "user-keyboard" || value === "plugin-emitted" || value === "queue-auto";
+  return (
+    value === "user-keyboard" ||
+    value === "plugin-emitted" ||
+    value === "app-emitted" ||
+    value === "queue-auto"
+  );
 }
 
 export function hasUserKeyboardIntent(value: unknown): value is UserKeyboardIntent {
