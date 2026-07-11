@@ -33,7 +33,7 @@ const MANIFEST: PluginManifest = {
       name: "notes_read",
       description: "Read a note",
       inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
-      _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
+      _meta: { ui: { visibility: ["model"] }, "lvisai/pathFields": ["path"] },
     },
     {
       name: "notes_save",
@@ -43,7 +43,7 @@ const MANIFEST: PluginManifest = {
         properties: { path: { type: "string" }, body: { type: "string" } },
         required: ["path"],
       },
-      _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
+      _meta: { ui: { visibility: ["model"] }, "lvisai/pathFields": ["path"] },
     },
   ],
 };
