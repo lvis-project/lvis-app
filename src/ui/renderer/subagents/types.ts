@@ -1,11 +1,15 @@
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+import type {
+  SubAgentRunStatus,
+  SubAgentSuspension,
+} from "../../../shared/subagent-events.js";
 
 export interface SubAgentSpawn {
   spawnId: string;
   title: string;
-  status: "running" | "waiting" | "done" | "error" | "interrupted";
+  status: SubAgentRunStatus;
   /** Typed terminate-and-resume state preserved from the agent_spawn done event. */
-  suspension?: { reason: "budget" | "question"; prompt?: string; resumeId: string };
+  suspension?: SubAgentSuspension;
   /** The prompt sent to the sub-agent, rendered as a user bubble in the viewer. */
   instructions?: string;
   /**

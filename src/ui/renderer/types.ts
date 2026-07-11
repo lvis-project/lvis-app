@@ -4,6 +4,7 @@
 import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { Locale } from "../../i18n/locale.js";
 import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
+import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload } from "../../mcp/types.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
@@ -1164,27 +1165,7 @@ export type LvisApi = {
     }) => void,
   ) => () => void;
   onAgentSpawnEvent: (
-    // Structurally mirrors `AgentSpawnEvent` in `tools/agent-spawn.ts`. The
-    // renderer can't import that module (it pulls Node built-ins), so the shape
-    // is duplicated here; both reference the pure `ChatEntry` model from
-    // `lib/chat-stream-state.ts`. `entries` is the FULL child transcript
-    // snapshot (idempotent replace on activity/done).
-    h: (event: {
-      spawnId: string;
-      type: "start" | "activity" | "done" | "error";
-      status?: "running" | "waiting" | "done" | "error" | "interrupted";
-      suspension?: { reason: "budget" | "question"; prompt?: string; resumeId: string };
-      title?: string;
-      instructions?: string;
-      entries?: ChatEntry[];
-      summary?: string;
-      toolCallCount?: number;
-      message?: string;
-      toolUseId?: string;
-      // JOIN KEY for unifying a spawn + its resumes into one transcript (see
-      // `AgentSpawnEvent.childSessionId` in `tools/agent-spawn.ts`).
-      childSessionId?: string;
-    }) => void,
+    h: (event: AgentSpawnEvent<ChatEntry>) => void,
   ) => () => void;
   onSkillLoaded: (
     h: (event: {

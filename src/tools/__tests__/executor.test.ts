@@ -109,6 +109,62 @@ function makeReadFileTool(
 
 // ─── Tests ───────────────────────────────────────────
 
+describe("ToolExecutor — A2A parent delivery capability provenance", () => {
+  it.each([
+    { hostCapability: true, rawCapability: false },
+    { hostCapability: false, rawCapability: true },
+  ])(
+    "passes host capability $hostCapability and ignores raw-input spoof $rawCapability",
+    async ({ hostCapability, rawCapability }) => {
+      const captures: Array<{
+        input: Record<string, unknown>;
+        metadata: Record<string, unknown>;
+      }> = [];
+      const registry = new ToolRegistry();
+      registry.register(createDynamicTool({
+        name: "capture_a2a_parent_delivery",
+        description: "Captures host-owned execution metadata.",
+        source: "builtin",
+        category: "read",
+        decisionOverride: "allow",
+        isReadOnly: () => true,
+        jsonSchema: {
+          type: "object",
+          properties: {
+            supportsA2AParentDelivery: { type: "boolean" },
+          },
+        },
+        execute: async (rawInput, ctx) => {
+          captures.push({
+            input: { ...rawInput },
+            metadata: { ...ctx.metadata },
+          });
+          return { output: "captured", isError: false };
+        },
+      }));
+      const executor = new ToolExecutor(registry);
+
+      const results = await executor.executeAll(
+        [{
+          id: "capture-a2a-capability",
+          name: "capture_a2a_parent_delivery",
+          input: { supportsA2AParentDelivery: rawCapability },
+        }],
+        {
+          sessionId: "parent-session",
+          supportsA2AParentDelivery: hostCapability,
+          permissionContext: userPermissionContext(),
+        },
+      );
+
+      expect(results[0]).toMatchObject({ content: "captured" });
+      expect(captures).toHaveLength(1);
+      expect(captures[0].metadata.supportsA2AParentDelivery).toBe(hostCapability);
+      expect(captures[0].input.supportsA2AParentDelivery).toBe(rawCapability);
+    },
+  );
+});
+
 /**
  * Sensitive-path hard-block fixtures in this block exercise behavior adapted
  * from OpenHarness's permission checker (MIT License):

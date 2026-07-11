@@ -367,17 +367,32 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return conversationLoop.pingProvider();
   });
 
+  const STREAMING_ACTIVE = "streaming-active" as const;
   let activeStreamTurn: Promise<TurnResult> | null = null;
+  let activeSessionMutation: Promise<unknown> | null = null;
   let nextStreamId = 0;
   const trackStreamTurn = (factory: () => Promise<TurnResult>) => {
-    if (activeStreamTurn !== null) {
-      return Promise.reject(new Error("streaming-active"));
+    if (activeStreamTurn !== null || activeSessionMutation !== null) {
+      return Promise.reject(new Error(STREAMING_ACTIVE));
     }
-    const turnPromise = factory().finally(() => {
+    // Publish the lease before factory code can run. Promise.resolve().then()
+    // defers even a synchronously-entering factory (for example mailbox peek),
+    // closing the re-entrant new/resume/fork TOCTOU window.
+    const turnPromise = Promise.resolve().then(factory).finally(() => {
       if (activeStreamTurn === turnPromise) activeStreamTurn = null;
     });
     activeStreamTurn = turnPromise;
     return turnPromise;
+  };
+  const trackSessionMutation = <T>(factory: () => Promise<T>): Promise<T> | null => {
+    if (activeStreamTurn !== null || activeSessionMutation !== null) return null;
+    // Acquire synchronously and execute after the lease is visible. The lease
+    // spans every await in fork/checkpoint persistence.
+    const mutationPromise = Promise.resolve().then(factory).finally(() => {
+      if (activeSessionMutation === mutationPromise) activeSessionMutation = null;
+    });
+    activeSessionMutation = mutationPromise;
+    return mutationPromise;
   };
   const allocateStreamId = () => ++nextStreamId;
   const streamTurn = async (
@@ -423,21 +438,22 @@ export function registerChatHandlers(deps: IpcDeps): void {
         return;
       }
 
-      const mailboxTurn = await prepareParentMailboxTurn(deps);
-      if (
-        !mailboxTurn
-        || mailboxTurn.parentSessionId !== parentSessionId
-        || conversationLoop.getSessionId() !== parentSessionId
-        || activeStreamTurn !== null
-        || conversationLoop.hasActiveTurn()
-      ) {
-        return;
-      }
-
       const win = getMainWindow();
       const sink = buildSink(win?.webContents);
       const streamId = allocateStreamId();
       await trackStreamTurn(async () => {
+        // Snapshot only after the turn lease is visible. A concurrent manual
+        // send or session mutation then fails closed before it can switch the
+        // loop or consume the same durable mailbox entries.
+        const mailboxTurn = await prepareParentMailboxTurn(deps);
+        if (
+          !mailboxTurn
+          || mailboxTurn.parentSessionId !== parentSessionId
+          || conversationLoop.getSessionId() !== parentSessionId
+          || conversationLoop.hasActiveTurn()
+        ) {
+          return { text: "", toolCalls: [], route: "default", stopReason: "blocked" };
+        }
         const result = await runStreamedTurn(
           conversationLoop,
           mailboxTurn.initialGuidance,
@@ -461,14 +477,16 @@ export function registerChatHandlers(deps: IpcDeps): void {
   // receives are byte-identical to the pre-C10 fan-out.
   ipcMain.handle(CHANNELS.chat.send, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.send, e); return UNAUTHORIZED_FRAME; }
-    if (activeStreamTurn !== null) return { error: "streaming-active" };
+    if (activeStreamTurn !== null || activeSessionMutation !== null) {
+      return { error: STREAMING_ACTIVE };
+    }
     const win = getMainWindow();
     const sink = buildSink(win?.webContents);
     try {
       return await handleChatSend(deps, payload, { sink, allocateStreamId, trackStreamTurn });
     } catch (error) {
-      if (error instanceof Error && error.message === "streaming-active") {
-        return { error: "streaming-active" };
+      if (error instanceof Error && error.message === STREAMING_ACTIVE) {
+        return { error: STREAMING_ACTIVE };
       }
       throw error;
     }
@@ -539,34 +557,36 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.chat.new, async (e, rawProject?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.new, e); return UNAUTHORIZED_FRAME; }
-    const parsed = resolveChatNewProjectPayload(rawProject, getDefaultWorkspaceRoot());
-    const resolved = resolveAuthorizedWorkspaceProject(parsed.projectRoot, parsed.projectName);
-    if (!resolved.authorized || !resolved.project) return PROJECT_NOT_ALLOWED;
-    const { project } = resolved;
-    conversationLoop.newConversation("main", project);
-    // Persist the resolved project identity to the new session's metadata at
-    // creation — mirroring startRoutineConversation — but ONLY when the user
-    // explicitly selected a real (non-default) project. A session created
-    // with no explicit project (the common case: plain "New Chat") runs
-    // against the default/base-directory binding internally (unaffected —
-    // conversationLoop.newConversation above already applied it for tool
-    // access) but must NOT be tagged with it in metadata: "no project" (null
-    // fields) is the normal persisted state, so the sidebar renders it as a
-    // plain ungrouped conversation and Insights buckets it under "No
-    // project" rather than a synthetic "default"/"Current Project" label
-    // (2026-07 "remove Current Project labeling" refinement). Full-overwrite
-    // is safe: the session is brand new.
-    if (!project.isDefault && (project.projectRoot || project.projectName)) {
-      await memoryManager.saveSessionMetadata(conversationLoop.getSessionId(), {
-        sessionKind: "main",
-        ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
-        ...(project.projectName ? { projectName: project.projectName } : {}),
-      });
-    }
-    await memoryManager.markMainActiveFresh();
-    return { ok: true };
+    const mutation = trackSessionMutation(async () => {
+      const parsed = resolveChatNewProjectPayload(rawProject, getDefaultWorkspaceRoot());
+      const resolved = resolveAuthorizedWorkspaceProject(parsed.projectRoot, parsed.projectName);
+      if (!resolved.authorized || !resolved.project) return PROJECT_NOT_ALLOWED;
+      const { project } = resolved;
+      conversationLoop.newConversation("main", project);
+      // Persist the resolved project identity to the new session's metadata at
+      // creation — mirroring startRoutineConversation — but ONLY when the user
+      // explicitly selected a real (non-default) project. A session created
+      // with no explicit project (the common case: plain "New Chat") runs
+      // against the default/base-directory binding internally (unaffected —
+      // conversationLoop.newConversation above already applied it for tool
+      // access) but must NOT be tagged with it in metadata: "no project" (null
+      // fields) is the normal persisted state, so the sidebar renders it as a
+      // plain ungrouped conversation and Insights buckets it under "No
+      // project" rather than a synthetic "default"/"Current Project" label
+      // (2026-07 "remove Current Project labeling" refinement). Full-overwrite
+      // is safe: the session is brand new.
+      if (!project.isDefault && (project.projectRoot || project.projectName)) {
+        await memoryManager.saveSessionMetadata(conversationLoop.getSessionId(), {
+          sessionKind: "main",
+          ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
+          ...(project.projectName ? { projectName: project.projectName } : {}),
+        });
+      }
+      await memoryManager.markMainActiveFresh();
+      return { ok: true as const };
+    });
+    return mutation ?? { ok: false as const, error: STREAMING_ACTIVE };
   });
-
   // PUBLIC lvis:chat:sessions — read-only; sender guard optional. On rejection
   // returns the same shape (active id + empty list) as before; logic delegated.
   ipcMain.handle(CHANNELS.chat.sessions, (e, opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown; kind?: unknown; routineId?: unknown; projectRoot?: unknown }) => {
@@ -606,15 +626,23 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (!isSafeSessionId(sessionId)) {
       return { ok: false, compacted: false, compactedAt: null, removedMessageCount: 0 };
     }
-    const result = conversationLoop.resetAndResume(sessionId);
-    if (result.ok && conversationLoop.getSessionKind() === "main") {
-      await memoryManager.markMainActiveResume(sessionId).catch((err: unknown) => {
-        log.warn("session-resume markMainActiveResume failed: %s", (err as Error).message);
-      });
-    }
-    return result;
+    const mutation = trackSessionMutation(async () => {
+      const result = conversationLoop.resetAndResume(sessionId);
+      if (result.ok && conversationLoop.getSessionKind() === "main") {
+        await memoryManager.markMainActiveResume(sessionId).catch((err: unknown) => {
+          log.warn("session-resume markMainActiveResume failed: %s", (err as Error).message);
+        });
+      }
+      return result;
+    });
+    return mutation ?? {
+      ok: false,
+      compacted: false,
+      compactedAt: null,
+      removedMessageCount: 0,
+      error: STREAMING_ACTIVE,
+    };
   });
-
   // PUBLIC lvis:chat:get-history — read-only, sender guard optional. Returns the
   // active session's serialized history; logic delegated.
   ipcMain.handle(CHANNELS.chat.getHistory, () => handleChatGetHistory(deps));
@@ -660,40 +688,42 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.chat.fork, async (e, messageIndex: number) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.fork, e); return UNAUTHORIZED_FRAME; }
-    const current = conversationLoop.getHistory().getMessages() as GenericMessage[];
-    let upto = current.length;
-    if (typeof messageIndex === "number" && messageIndex >= 0) {
-      const historyIndex = entryOrdinalToHistoryIndex(current, messageIndex);
-      if (historyIndex >= 0) upto = Math.min(historyIndex + 1, current.length);
-    }
-    let slice = current.slice(0, upto);
-    slice = removeOrphanToolUse(slice);
-    if (current.length > 0) {
-      await memoryManager.saveSession(conversationLoop.getSessionId(), current);
-    }
-    const newId = crypto.randomUUID();
-    const sourceSessionId = conversationLoop.getSessionId();
-    const forkSlice = memoryManager.rehydrateToolResultArtifacts(sourceSessionId, slice) as GenericMessage[];
-    await memoryManager.saveSession(newId, forkSlice);
-    const currentMeta = memoryManager.loadSessionMetadata(sourceSessionId);
-    await memoryManager.saveSessionMetadata(newId, {
-      sessionKind: currentMeta?.sessionKind ?? conversationLoop.getSessionKind(),
-      ...(currentMeta?.routineId ? { routineId: currentMeta.routineId } : {}),
-      ...(currentMeta?.routineTitle ? { routineTitle: currentMeta.routineTitle } : {}),
-      ...(currentMeta?.routineFiredAt ? { routineFiredAt: currentMeta.routineFiredAt } : {}),
-      ...(currentMeta?.projectRoot ? { projectRoot: currentMeta.projectRoot } : {}),
-      ...(currentMeta?.projectName ? { projectName: currentMeta.projectName } : {}),
-      ...(currentMeta?.summaryPreamble ? { summaryPreamble: currentMeta.summaryPreamble } : {}),
-    });
-    const loaded = conversationLoop.loadSession(newId);
-    if (loaded && conversationLoop.getSessionKind() === "main") {
-      await memoryManager.markMainActiveResume(newId).catch((err: unknown) => {
-        log.warn("chat:fork markMainActiveResume failed: %s", (err as Error).message);
+    const mutation = trackSessionMutation(async () => {
+      const current = conversationLoop.getHistory().getMessages() as GenericMessage[];
+      let upto = current.length;
+      if (typeof messageIndex === "number" && messageIndex >= 0) {
+        const historyIndex = entryOrdinalToHistoryIndex(current, messageIndex);
+        if (historyIndex >= 0) upto = Math.min(historyIndex + 1, current.length);
+      }
+      let slice = current.slice(0, upto);
+      slice = removeOrphanToolUse(slice);
+      if (current.length > 0) {
+        await memoryManager.saveSession(conversationLoop.getSessionId(), current);
+      }
+      const newId = crypto.randomUUID();
+      const sourceSessionId = conversationLoop.getSessionId();
+      const forkSlice = memoryManager.rehydrateToolResultArtifacts(sourceSessionId, slice) as GenericMessage[];
+      await memoryManager.saveSession(newId, forkSlice);
+      const currentMeta = memoryManager.loadSessionMetadata(sourceSessionId);
+      await memoryManager.saveSessionMetadata(newId, {
+        sessionKind: currentMeta?.sessionKind ?? conversationLoop.getSessionKind(),
+        ...(currentMeta?.routineId ? { routineId: currentMeta.routineId } : {}),
+        ...(currentMeta?.routineTitle ? { routineTitle: currentMeta.routineTitle } : {}),
+        ...(currentMeta?.routineFiredAt ? { routineFiredAt: currentMeta.routineFiredAt } : {}),
+        ...(currentMeta?.projectRoot ? { projectRoot: currentMeta.projectRoot } : {}),
+        ...(currentMeta?.projectName ? { projectName: currentMeta.projectName } : {}),
+        ...(currentMeta?.summaryPreamble ? { summaryPreamble: currentMeta.summaryPreamble } : {}),
       });
-    }
-    return { ok: loaded, sessionId: loaded ? newId : null };
+      const loaded = conversationLoop.loadSession(newId);
+      if (loaded && conversationLoop.getSessionKind() === "main") {
+        await memoryManager.markMainActiveResume(newId).catch((err: unknown) => {
+          log.warn("chat:fork markMainActiveResume failed: %s", (err as Error).message);
+        });
+      }
+      return { ok: loaded, sessionId: loaded ? newId : null };
+    });
+    return mutation ?? { ok: false, sessionId: null, error: STREAMING_ACTIVE };
   });
-
   const continueFromLastUserTurn = async (opts: {
     requireTerminalUser: boolean;
     restoreOnFailure: boolean;
@@ -934,7 +964,6 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.chat.branchFromCheckpoint, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.branchFromCheckpoint, e); return UNAUTHORIZED_FRAME; }
-    if (activeStreamTurn) return { error: "streaming-active" };
     const p = payload as { sessionId?: unknown; compactNum?: unknown };
     if (typeof p?.sessionId !== "string" || !Number.isSafeInteger(p?.compactNum) || (p.compactNum as number) < 0) {
       return { error: "invalid-args" };
@@ -942,13 +971,15 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (p.sessionId !== conversationLoop.getSessionId()) {
       return { error: "session-mismatch" };
     }
+    const mutation = trackSessionMutation(async () =>
+      conversationLoop.branchFromCheckpoint(p.compactNum as number));
+    if (!mutation) return { error: STREAMING_ACTIVE };
     try {
-      return await conversationLoop.branchFromCheckpoint(p.compactNum as number);
+      return await mutation;
     } catch (err) {
       return { error: (err as Error).message };
     }
   });
-
   // ─── Memory ─────────────────────────────────────
   ipcMain.handle(CHANNELS.memory.entriesList, (e, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesList, e); return UNAUTHORIZED_FRAME; }

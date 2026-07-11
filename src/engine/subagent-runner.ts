@@ -58,6 +58,22 @@ import type {
   ResolvedSubAgentAddress,
 } from "./a2a-subagent-message-bus.js";
 import type { ParentMailboxEntry } from "./subagent-message-mailbox.js";
+import {
+  projectSubAgentResultState,
+  projectSubAgentRunState,
+  subAgentRunStatusFromTaskState,
+  type A2AProjectedTaskState,
+} from "../shared/a2a.js";
+import type {
+  SubAgentRunStatus,
+  SubAgentSuspension,
+  SubAgentSuspensionReason,
+} from "../shared/subagent-events.js";
+export type {
+  SubAgentRunStatus,
+  SubAgentSuspension,
+  SubAgentSuspensionReason,
+} from "../shared/subagent-events.js";
 
 const log = createLogger("lvis");
 
@@ -107,14 +123,6 @@ export interface SubAgentActivityUpdate {
    */
   entries: ChatEntry[];
   toolCallCount: number;
-}
-
-export type SubAgentSuspensionReason = "budget" | "question";
-
-export interface SubAgentSuspension {
-  reason: SubAgentSuspensionReason;
-  prompt?: string;
-  resumeId: string;
 }
 
 export interface SubAgentSpawnResult {
@@ -195,13 +203,12 @@ export interface SubAgentSpawnCallbacks {
   onError?: (message: string) => void;
 }
 
-export type SubAgentRunStatus = "running" | "waiting" | "done" | "error" | "interrupted";
-
 export interface SubAgentRunSnapshot {
   spawnId?: string;
   childSessionId: string;
   title: string;
   status: SubAgentRunStatus;
+  taskState: A2AProjectedTaskState;
   startedAt: string;
   updatedAt: string;
   toolCallCount: number;
@@ -235,6 +242,7 @@ interface TrackedSubAgentRun {
   originSessionId?: string;
   title: string;
   status: SubAgentRunStatus;
+  taskState: A2AProjectedTaskState;
   startedAt: string;
   updatedAt: string;
   toolCallCount: number;
@@ -632,6 +640,7 @@ export class SubAgentRunner {
     run.abort();
     this.updateRun(run, {
       status: "interrupted",
+      taskState: projectSubAgentRunState("interrupted"),
       stopReason: "interrupted",
     });
     return {
@@ -656,6 +665,7 @@ export class SubAgentRunner {
       childSessionId: run.childSessionId,
       title: run.title,
       status: run.status,
+      taskState: run.taskState,
       startedAt: run.startedAt,
       updatedAt: run.updatedAt,
       toolCallCount: run.toolCallCount,
@@ -682,6 +692,9 @@ export class SubAgentRunner {
       ...(args.originSessionId ? { originSessionId: args.originSessionId } : {}),
       title: args.title,
       status: "running",
+      // The host handle is immediately active, while A2A remains SUBMITTED until
+      // provider validation succeeds and the child turn can enter WORKING.
+      taskState: projectSubAgentRunState("submitted"),
       startedAt: now,
       updatedAt: now,
       toolCallCount: 0,
@@ -710,24 +723,23 @@ export class SubAgentRunner {
     run: TrackedSubAgentRun,
     result: SubAgentSpawnResult,
   ): void {
+    const taskState = projectSubAgentResultState(result);
+    const status = subAgentRunStatusFromTaskState(taskState);
     const patch: Partial<Omit<TrackedSubAgentRun, "spawnId" | "childSessionId" | "title" | "startedAt">> = {
-      status: result.suspension !== undefined || result.incomplete === true
-        ? "waiting"
-        : result.stopReason === "interrupted"
-          ? "interrupted"
-          : result.ok
-            ? "done"
-            : "error",
+      status,
+      taskState,
       toolCallCount: result.toolCallCount,
       turnCount: result.turnCount,
       entries: result.entries,
       stopReason: result.stopReason,
       suspension: result.suspension,
     };
-    if (result.ok) {
-      patch.summary = result.summary;
-    } else {
+    if (status === "error") {
       patch.error = result.error ?? result.summary;
+      delete run.summary;
+    } else {
+      patch.summary = result.summary;
+      delete run.error;
     }
     delete run.abort;
     this.updateRun(run, patch);
@@ -954,6 +966,8 @@ export class SubAgentRunner {
       callbacks?.onError?.(msg);
       return result;
     }
+
+    this.updateRun(trackedRun, { taskState: projectSubAgentRunState("running") });
 
     let totalToolCalls = 0;
     let lastText = "";
@@ -1341,6 +1355,7 @@ export class SubAgentRunner {
       title,
       abort: () => child.abortCurrentTurn(),
     });
+    this.updateRun(trackedRun, { taskState: projectSubAgentRunState("running") });
 
     let totalToolCalls = 0;
     let lastText = "";
