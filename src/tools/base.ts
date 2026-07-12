@@ -84,6 +84,24 @@ export interface Tool {
    */
   readonly appInvokable?: boolean;
   /**
+   * MCP Apps — is this tool shown to the MODEL (`_meta.ui.visibility` ∋ `"model"`)?
+   *
+   * The OTHER half of the same one declaration, and the reason the two are separate
+   * bits rather than one: an app-only tool (`["app"]`) MUST still be a registry
+   * `Tool` — that is the only way it can run under `inspectHostRisk` → reviewer /
+   * approval → audit when its card calls it — while being ABSENT from the tool list
+   * handed to the LLM. Registry membership answers "what may execute under the
+   * gate"; THIS bit answers "what the model is shown". Conflating them is what made
+   * `["app"]` behave differently on the two arms.
+   *
+   * Materialized at the same two ingestion sites as {@link appInvokable}
+   * (`mcp-tool-adapter.ts` external, `plugin-tool-from-mcp.ts` loopback). Read in
+   * exactly ONE place — {@link isModelExposedTool}, behind the registry's
+   * model-facing listings. `undefined` ⇒ model-visible: a builtin never declares an
+   * MCP visibility and must not vanish from the model's tools.
+   */
+  readonly modelVisible?: boolean;
+  /**
    * Manifest-declared filesystem path fields. Used by the executor's
    * Layer 0/1 path policy for dynamic plugin/MCP tools whose argument names
    * are not the built-in `path | file_path | filePath` convention.
@@ -118,6 +136,21 @@ export interface Tool {
    * failures.
    */
   execute(rawInput: unknown, ctx: ToolExecutionContext): Promise<ToolResult>;
+}
+
+/**
+ * THE MODEL-EXPOSURE BOUNDARY — the single predicate deciding whether a registered
+ * tool appears in the list handed to the LLM. Applied in ONE place (the
+ * {@link ToolRegistry}'s model-facing listings), which is why it covers BOTH arms:
+ * a first-party plugin's loopback server and a foreign MCP server both reach the
+ * registry through an adapter that materializes {@link Tool.modelVisible}.
+ *
+ * It is deliberately NOT applied to {@link ToolRegistry.findByName} (the executor's
+ * lookup): an app-only tool is registered precisely so the governed executor CAN run
+ * it for its card. Hidden from the model ≠ absent from the gate.
+ */
+export function isModelExposedTool(tool: Pick<Tool, "modelVisible">): boolean {
+  return tool.modelVisible !== false;
 }
 
 /**
@@ -192,6 +225,8 @@ export interface DynamicToolSpec {
   mcpServerId?: string;
   /** MCP Apps app→server `tools/call` gate — see {@link Tool.appInvokable}. */
   appInvokable?: boolean;
+  /** MCP Apps model-exposure bit — see {@link Tool.modelVisible}. */
+  modelVisible?: boolean;
   pathFields?: readonly string[];
   /** §6.4 — semver. Defaults to "1.0.0" when omitted. */
   version?: string;
@@ -226,6 +261,7 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     workerId: spec.workerId,
     mcpServerId: spec.mcpServerId,
     appInvokable: spec.appInvokable,
+    modelVisible: spec.modelVisible,
     pathFields: spec.pathFields,
     version: spec.version ?? "1.0.0",
     approvalCacheKey: spec.approvalCacheKey,

@@ -95,6 +95,46 @@ describe("mcpToolToPluginTool — v6 reverse projection from _meta", () => {
     expect(result).toEqual({ output: "disk full", isError: true });
   });
 
+  it("materializes Tool.modelVisible from the wire's _meta.ui.visibility — app-only ⇒ registered but NOT model-exposed", () => {
+    // The one standard declaration the host reads back off this wire. It decides
+    // MODEL EXPOSURE only — never whether the tool is registered. An app-only tool
+    // MUST become a registry `Tool`: that is the only way its card's `tools/call`
+    // can run under inspectHostRisk → reviewer/approval → audit.
+    const manifest: PluginManifest = {
+      ...MANIFEST,
+      tools: [
+        { name: "files_read", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model"] } } },
+        { name: "files_toggle", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } },
+        { name: "files_ui_rows", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["app"] } } },
+      ],
+    };
+    const tools = manifestToolsToMcpTools(manifest).map((t) => mcpToolToPluginTool(PLUGIN_ID, t, invoke));
+
+    // Every declared tool round-trips into a registry `Tool` — app-only included.
+    expect(tools.map((t) => t.name)).toEqual(["files_read", "files_toggle", "files_ui_rows"]);
+    expect(tools.find((t) => t.name === "files_read")!.modelVisible).toBe(true);
+    expect(tools.find((t) => t.name === "files_toggle")!.modelVisible).toBe(true);
+    expect(tools.find((t) => t.name === "files_ui_rows")!.modelVisible).toBe(false);
+    // The app-visibility MUST stays with `assertUiActionInvokable` inside
+    // PluginRuntime.callFromApp (the plugin arm's single enforcement site), so this
+    // arm deliberately leaves `appInvokable` unset.
+    for (const t of tools) expect(t.appInvokable).toBeUndefined();
+  });
+
+  it("fail-closes to the minimal governed surface when the wire carries no valid visibility", () => {
+    // The forward projection always emits visibility explicitly, so an absent /
+    // malformed declaration here means a broken producer — resolve it to ["model"]
+    // (governed, LLM-reachable) rather than silently granting the app surface.
+    for (const _meta of [{}, { ui: { visibility: "app" } }, { ui: { visibility: [] } }, { ui: 7 }]) {
+      const tool = mcpToolToPluginTool(
+        PLUGIN_ID,
+        { name: "rogue", inputSchema: { type: "object", properties: {} }, _meta },
+        invoke,
+      );
+      expect(tool.modelVisible).toBe(true);
+    }
+  });
+
   it("#885 v6 — the wire `category` is fully ignored: absent, valid, or malformed all register write-equivalent", () => {
     // #885 dropped the per-tool category reader: the host ignores any wire
     // `_meta["xyz.lvis/category"]` (loopback sends none; an out-of-process

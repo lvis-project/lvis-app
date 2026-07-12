@@ -5,8 +5,9 @@ import {
 } from "../plugin-server-projection.js";
 import type { PluginManifest } from "../../plugins/types.js";
 
-// #885 v6 — the projection now reads the NORMALIZED pure `Tool[]` (manifest ==
-// wire) and filters to model-visible tools.
+// #885 v6 — the projection reads the NORMALIZED pure `Tool[]` (manifest == wire)
+// and projects ALL of them: a server's tools/list is its tools, and the audience of
+// each one rides on its own `_meta.ui.visibility`.
 const BASE_MANIFEST: PluginManifest = {
   id: "com.example.meeting",
   name: "Meeting",
@@ -27,7 +28,9 @@ const BASE_MANIFEST: PluginManifest = {
       _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
     },
     {
-      // UI-only (the auth/upload-quad case) — must be EXCLUDED from the LLM registry.
+      // APP-ONLY — serves the plugin's CARD, hidden from the model. It IS projected
+      // (that is how it becomes a governed registry `Tool`); the model never sees it
+      // because the registry's model-exposure boundary subtracts it.
       name: "meeting_upload_chunk",
       description: "Upload a staged chunk",
       inputSchema: { type: "object", properties: {} },
@@ -60,11 +63,19 @@ describe("plugin-server-projection — normalized Tool[] → MCP tools/list (#88
     expect(tools.find((t) => t.name === "meeting_toggle")!._meta.ui.visibility).toEqual(["model", "app"]);
   });
 
-  it("EXCLUDES app-only (UI-only/auth) tools from the LLM registry (#1554 registry-exclusion)", () => {
-    const names = manifestToolsToMcpTools(BASE_MANIFEST).map((t) => t.name);
-    // model-only + dual project, in manifest order; app-only excluded.
-    expect(names).toEqual(["meeting_start", "meeting_export", "meeting_toggle"]);
-    expect(names).not.toContain("meeting_upload_chunk");
+  it("PROJECTS app-only tools too, carrying their [\"app\"] visibility — the spec's own spelling, not a hole in tools/list", () => {
+    const tools = manifestToolsToMcpTools(BASE_MANIFEST);
+    // Every declared tool, in manifest order. The app-only one is what a card calls;
+    // withholding it from tools/list is what used to leave it with no registry
+    // `Tool`, hence no risk classifier / approval gate / audit row — so the app arm
+    // had to deny it outright. It is projected, and the visibility rides with it.
+    expect(tools.map((t) => t.name)).toEqual([
+      "meeting_start",
+      "meeting_export",
+      "meeting_upload_chunk",
+      "meeting_toggle",
+    ]);
+    expect(tools.find((t) => t.name === "meeting_upload_chunk")!._meta.ui.visibility).toEqual(["app"]);
   });
 
   it("carries pathFields in _meta iff declared, and emits NONE of the removed proprietary keys / annotations", () => {
