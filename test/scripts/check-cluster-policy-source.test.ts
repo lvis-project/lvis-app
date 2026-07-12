@@ -24,6 +24,17 @@ describe("trusted cluster policy workflow", () => {
     expect(workflow).not.toContain("issues: read");
     expect(workflow).not.toContain("issues: write");
     expect(workflow).toContain("PR-label DELETE returned 403");
+    expect(workflow).toContain(
+      `jq -er '.sensitive | if type == "boolean" then tostring else error("invalid .sensitive") end'`,
+    );
+    expect(workflow).toContain(
+      `jq -er '.violation | if type == "boolean" then tostring else error("invalid .violation") end'`,
+    );
+    expect(workflow).toContain(
+      `jq -er '.reason | if type == "string" then . else error("invalid .reason") end'`,
+    );
+    expect(workflow).not.toContain("jq -er '.sensitive'");
+    expect(workflow).not.toContain("jq -er '.violation'");
     expect(workflow).toContain("cancel-in-progress: false");
     expect(workflow).not.toContain("cancel-in-progress: true");
     expect(workflow).toContain("name: Trusted Cluster Policy Evaluation");
