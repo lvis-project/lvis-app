@@ -489,15 +489,14 @@ export function ToolApprovalDialog({
           <div className="space-y-3">
             <div className="grid min-w-0 gap-2 sm:grid-cols-2">
               <SummaryTile label={tHook("toolApprovalDialog.tileToolSource")}>
-                <code>{request.toolName}</code>
-                <br />
-                {tHook("toolApprovalDialog.sourcePrefix")}: {sourceLabel(source)}
-                {request.kind === "agent-action" && (
+                {/* Compact `source:tool` token (builtin:bash / {pluginId}:{tool})
+                    — one line so the dialog fits without scrolling. Origin +
+                    category still shown in the review box's 출처/판단 rows. */}
+                <code>{sourceToolToken(request)}</code>
+                {request.kind === "agent-action" && request.approvalScope && (
                   <>
                     <br />
-                    {tHook("toolApprovalDialog.pluginPrefix")}: <code>{request.sourcePluginId ?? tHook("toolApprovalDialog.unknown")}</code>
-                    <br />
-                    {tHook("toolApprovalDialog.approvalScopePrefix")}: <code>{request.approvalScope ?? tHook("toolApprovalDialog.unknown")}</code>
+                    {tHook("toolApprovalDialog.approvalScopePrefix")}: <code>{request.approvalScope}</code>
                   </>
                 )}
               </SummaryTile>
@@ -871,7 +870,6 @@ export function approvalReviewRows(
     rows.push(
       { label: t("toolApprovalDialog.rowCommand"), value: pickSummary(parsed, ["command", "cmd", "args", "script", "argv"], inputSummary), monospace: true, testId: "tool-approval-input" },
       { label: t("toolApprovalDialog.rowCwdEnv"), value: pickSummary(parsed, ["cwd", "workingDirectory", "env", "environment"], t("toolApprovalDialog.cwdEnvNotSpecified")), monospace: true },
-      { label: t("toolApprovalDialog.rowSideEffects"), value: t("toolApprovalDialog.sideEffectsNote") },
       { label: t("toolApprovalDialog.rowLimits"), value: formatEvaluationLimits(request.evaluationContext) },
     );
   } else {
@@ -885,11 +883,25 @@ export function approvalReviewRows(
 
   rows.push(
     { label: t("toolApprovalDialog.rowVerdict"), value: reviewer },
-    { label: t("toolApprovalDialog.rowChoice"), value: t("toolApprovalDialog.choiceDescription") },
   );
   return rows;
 }
 
 function sourceLabel(source: string): string {
   return SOURCE_BADGE[source] ?? source;
+}
+
+/**
+ * Compact `source:tool` identity for the Tool/Source tile — `builtin:bash`,
+ * `mcp:<tool>`, or `<pluginId>:<tool>` for a plugin (agent-action) call. One
+ * short token instead of the old three-line source/plugin/scope stack, so the
+ * approval dialog fits without scrolling. The origin + risk are still shown in
+ * the review box's 출처/판단 rows.
+ */
+function sourceToolToken(request: ApprovalRequest): string {
+  const tool = request.toolName;
+  if (request.kind === "agent-action" && request.sourcePluginId) {
+    return `${request.sourcePluginId}:${tool}`;
+  }
+  return `${request.source ?? "unknown"}:${tool}`;
 }
