@@ -49,6 +49,31 @@ describe("installer smoke and packaging discipline", () => {
     expect(agents).toContain("packaged-app smoke");
   });
 
+  it("locks cross-cutting review and Markdown gate contracts", () => {
+    const agents = readRepoFile("AGENTS.md");
+    const contributing = readRepoFile("CONTRIBUTING.md");
+    const pullRequestTemplate = readRepoFile(".github/pull_request_template.md");
+    const clusterWorkflow = readRepoFile(".github/workflows/cluster-detector.yml");
+
+    expect(agents).toContain("## Cross-cutting review gate");
+    expect(agents).toContain("architect, critic, and security");
+    expect(agents).toContain("reviewed HEAD SHA");
+    expect(agents).toContain("blocking findings");
+    expect(agents).toContain("`cluster-review-passed`");
+    expect(agents).toContain("failing cluster-detector workflow blocks merge");
+    expect(clusterWorkflow).toContain("cluster-review-passed");
+
+    for (const guidance of [agents, contributing, pullRequestTemplate]) {
+      expect(guidance).toContain("review-only Markdown");
+      expect(guidance).toMatch(/runtime/i);
+      expect(guidance).toMatch(/instruction/i);
+      expect(guidance).toMatch(/workflow/i);
+      expect(guidance).toMatch(/sensitive/i);
+    }
+    expect(agents).not.toContain("Markdown-only pushes");
+    expect(contributing).not.toContain("Markdown-only pushes");
+  });
+
   it("declares sonic-boom as a runtime dependency (log-file-sink imports it unbundled)", () => {
     // src/lib/log-file-sink.ts adds a top-level import from "sonic-boom" that
     // the packaged main process resolves directly from app.asar (unbundled
