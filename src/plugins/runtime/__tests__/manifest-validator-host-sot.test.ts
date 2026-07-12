@@ -126,14 +126,11 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     ).toBe(true);
   });
 
-  it("REJECTS a uiResources[] entry declaring `permissions` — the host does not model it", async () => {
-    // The spec's `permissions` (camera/mic/geolocation/clipboardWrite) delegates a
-    // powerful feature to the card's frame. That frame is `sandbox="allow-scripts"`
-    // with no `allow-same-origin` ⇒ an OPAQUE origin, which cannot be delegated one.
-    // The field used to be declared, threaded through the read model, and then dropped
-    // at the proxy-session mint — a knob an author could set that nothing honored. It
-    // is gone from the schema, so declaring it now fails validation LOUDLY instead of
-    // silently doing nothing.
+  it("accepts a uiResources[] entry declaring host-honorable `permissions` (camera/microphone/geolocation)", async () => {
+    // The inner app frame now carries `allow-same-origin` (spec origin requirement), so a
+    // declared permission can actually be delegated + honored. Main derives BOTH the frame
+    // `allow` attribute and the Electron session grant from this declaration; the accepted
+    // set is exactly what an e2e proved works (mcp-app-permissions.spec.ts).
     const validator = await buildManifestValidator();
     expect(
       validator({
@@ -147,11 +144,32 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         uiResources: [
           {
             uri: "ui://ui-resource-plugin/card.html",
-            permissions: { clipboardWrite: {} },
+            permissions: { camera: {}, microphone: {}, geolocation: {} },
           },
         ],
       }),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it("REJECTS a uiResources[] `permissions` key the host cannot honor (clipboardWrite / unknown) — fails LOUDLY", async () => {
+    // clipboardWrite is deliberately absent from the schema: measured, a script-initiated
+    // clipboard write is denied even when delegated, so accepting it would be an unhonored
+    // knob. `additionalProperties:false` on mcpUiResourcePermissions makes declaring it — or
+    // any unknown feature — fail validation loudly rather than silently doing nothing.
+    const validator = await buildManifestValidator();
+    const withPermission = (permissions: Record<string, unknown>) =>
+      validator({
+        id: "ui-resource-plugin",
+        name: "UI Resource Plugin",
+        version: "1.0.0",
+        description: "Plugin serving a ui:// MCP App card.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+        uiResources: [{ uri: "ui://ui-resource-plugin/card.html", permissions }],
+      });
+    expect(withPermission({ clipboardWrite: {} })).toBe(false);
+    expect(withPermission({ notARealFeature: {} })).toBe(false);
   });
 
   it("accepts a uiResources[] entry declaring only its uri (policy is optional)", async () => {
