@@ -21,6 +21,47 @@ function userPermissionContext(
 }
 
 describe("ToolExecutor.executeOne success shape", () => {
+  it("binds the required conversation cwd into the shared tool execution context", async () => {
+    const registry = new ToolRegistry();
+    const executionCwd = "C:\\workspace\\agent-connector";
+    let receivedCwd: string | undefined;
+    let receivedAllowedDirectories: string[] | undefined;
+    registry.register(createDynamicTool({
+      name: "shape_cwd",
+      description: "conversation cwd probe",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async (_input, ctx) => {
+        receivedCwd = ctx.cwd;
+        receivedAllowedDirectories = ctx.extraAllowedDirectories;
+        return { output: "ok", isError: false };
+      },
+    }));
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      new PermissionManager("/tmp/nonexistent-shape-cwd.json"),
+    );
+
+    const results = await executor.executeConversationTools(
+      [{ id: "tu-shape-cwd", name: "shape_cwd", input: {} }],
+      {
+        executionCwd,
+        sessionId: "sess-shape-cwd",
+        permissionContext: userPermissionContext(),
+      },
+    );
+
+    expect(results[0].content).toBe("ok");
+    expect(receivedCwd).toBe(executionCwd);
+    const normalizePath = (value: string) => value.replaceAll("\\", "/").toLowerCase();
+    const normalizedAllowedDirectories = receivedAllowedDirectories?.map(normalizePath);
+    expect(normalizedAllowedDirectories).toContain(normalizePath(executionCwd));
+    expect(normalizedAllowedDirectories).not.toContain(normalizePath(process.cwd()));
+  });
+
   it("read-only success returns { tool_use_id, content, durationMs } with no error/ui/raw fields", async () => {
     const registry = new ToolRegistry();
     registry.register(createDynamicTool({
