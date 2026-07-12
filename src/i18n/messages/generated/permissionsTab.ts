@@ -163,13 +163,15 @@ export const en = {
   "permissionsTab.osSandboxRuntimeReason": "Current runtime: {reason}",
   "permissionsTab.osSandboxToggleFailed": "Failed to change the OS tool sandbox setting.",
   "permissionsTab.osSandboxToggleError": "Error changing the OS tool sandbox setting: {message}",
-  // Windows srt-win consent flow
-  "permissionsTab.osSandboxWindowsConsentHeading": "One-time Windows setup required",
-  "permissionsTab.osSandboxWindowsConsentBody": "Windows OS isolation needs a one-time administrator install (one UAC prompt). No Windows sign-out is required. Filesystem and network confinement activate after the app restarts once setup is ready.",
-  "permissionsTab.osSandboxWindowsInstallButton": "Install now",
-  "permissionsTab.osSandboxWindowsInstalling": "Installing…",
-  "permissionsTab.osSandboxWindowsInstallCancelled": "Install cancelled. The OS tool sandbox stays off until the install completes.",
-  "permissionsTab.osSandboxWindowsInstallError": "Windows sandbox install error: {message}",
+  // Windows srt-win repair flow — the OS sandbox is normally provisioned at
+  // app-install time (NSIS customInstall), so this panel is a repair/re-provision
+  // fallback, not the first-time install path.
+  "permissionsTab.osSandboxWindowsConsentHeading": "Windows OS isolation needs repair",
+  "permissionsTab.osSandboxWindowsConsentBody": "The Windows OS sandbox is normally provisioned when LVIS is installed, so it is ready at first launch. It is not ready on this machine — re-run the one-time administrator setup (one UAC prompt) to repair it. No Windows sign-out is required. Filesystem and network confinement activate after the app restarts once setup is ready.",
+  "permissionsTab.osSandboxWindowsInstallButton": "Re-provision",
+  "permissionsTab.osSandboxWindowsInstalling": "Re-provisioning…",
+  "permissionsTab.osSandboxWindowsInstallCancelled": "Setup cancelled. The OS tool sandbox stays off until re-provisioning completes.",
+  "permissionsTab.osSandboxWindowsInstallError": "Windows sandbox setup error: {message}",
   "permissionsTab.osSandboxWindowsReloginHeading": "Windows setup incomplete",
   "permissionsTab.osSandboxWindowsReloginPending": "The sandbox user or WFP filters are not ready yet. Follow the ASRT instructions above, then restart the app.",
 
@@ -358,12 +360,12 @@ export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.osSandboxRuntimeReason": "현재 런타임: {reason}",
   "permissionsTab.osSandboxToggleFailed": "OS 도구 샌드박스 설정을 변경하지 못했습니다.",
   "permissionsTab.osSandboxToggleError": "OS 도구 샌드박스 설정 변경 중 오류: {message}",
-  "permissionsTab.osSandboxWindowsConsentHeading": "Windows 1회 설정 필요",
-  "permissionsTab.osSandboxWindowsConsentBody": "Windows OS 격리는 1회 관리자 설치(UAC 프롬프트 1회)가 필요합니다. Windows 로그아웃은 필요하지 않습니다. 설정이 준비된 뒤 앱을 재시작하면 파일시스템과 네트워크 격리가 활성화됩니다.",
-  "permissionsTab.osSandboxWindowsInstallButton": "지금 설치",
-  "permissionsTab.osSandboxWindowsInstalling": "설치 중…",
-  "permissionsTab.osSandboxWindowsInstallCancelled": "설치가 취소되었습니다. 설치가 완료될 때까지 OS 도구 샌드박스는 꺼진 상태로 유지됩니다.",
-  "permissionsTab.osSandboxWindowsInstallError": "Windows 샌드박스 설치 오류: {message}",
+  "permissionsTab.osSandboxWindowsConsentHeading": "Windows OS 격리 재설정 필요",
+  "permissionsTab.osSandboxWindowsConsentBody": "Windows OS 샌드박스는 보통 LVIS 설치 시 자동으로 준비되어 첫 실행부터 사용할 수 있습니다. 이 기기에서는 아직 준비되지 않았습니다 — 1회 관리자 설정(UAC 프롬프트 1회)을 다시 실행해 복구하세요. Windows 로그아웃은 필요하지 않습니다. 설정이 준비된 뒤 앱을 재시작하면 파일시스템과 네트워크 격리가 활성화됩니다.",
+  "permissionsTab.osSandboxWindowsInstallButton": "재설정",
+  "permissionsTab.osSandboxWindowsInstalling": "재설정 중…",
+  "permissionsTab.osSandboxWindowsInstallCancelled": "설정이 취소되었습니다. 재설정이 완료될 때까지 OS 도구 샌드박스는 꺼진 상태로 유지됩니다.",
+  "permissionsTab.osSandboxWindowsInstallError": "Windows 샌드박스 설정 오류: {message}",
   "permissionsTab.osSandboxWindowsReloginHeading": "Windows 설정 미완료",
   "permissionsTab.osSandboxWindowsReloginPending": "샌드박스 사용자 또는 WFP 필터가 아직 준비되지 않았습니다. 위 ASRT 안내를 따른 뒤 앱을 재시작하세요.",
 
