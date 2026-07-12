@@ -84,12 +84,12 @@ state durable constraints here and put detailed designs in their owning docs.
   findings exactly `None`.
 - `cluster-review-passed` is valid only when the workflow finds exactly one
   consistent current-HEAD row and marker per role. Only a fresh application of
-  that label can pass the gated run; a later PR metadata event requires
-  removing and reapplying it.
-- The required check executes policy code from the trusted base commit with a
-  read-only token. Its trusted label invalidator never checks out or runs pull
-  request content.
-- A new commit, body edit, base change, or reopen makes any retained label
+  that label can pass the gated run.
+- The required check evaluates trusted-base policy through read-only repository
+  and pull-request access and never checks out or executes pull-request content.
+  The only workflow writes are the fixed `Sensitive Area Cluster Check` status
+  on the event PR head and invalidation of the fixed `cluster-review-passed` label.
+- A new commit, any PR edit, base change, or reopen makes any retained label
   insufficient until all three roles review the current evidence. A missing
   label, invalid evidence, or failing workflow blocks merge. Never bypass the
   gate.
