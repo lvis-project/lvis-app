@@ -138,12 +138,13 @@ export class PluginMcpServer {
           const resource = await this.uiResources.read(uri);
           const ui: McpUiResourceMeta = {};
           if (resource.csp !== undefined) ui.csp = resource.csp;
+          if (resource.permissions !== undefined) ui.permissions = resource.permissions;
           const content: Record<string, unknown> = {
             uri,
             mimeType: MCP_APP_MIME_TYPE,
             text: resource.html,
           };
-          if (ui.csp !== undefined) content._meta = { ui };
+          if (ui.csp !== undefined || ui.permissions !== undefined) content._meta = { ui };
           return {
             jsonrpc: "2.0",
             id,
