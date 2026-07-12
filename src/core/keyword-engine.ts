@@ -4,6 +4,7 @@
 
 
 import { parseImportedTriggerEnvelope } from "../shared/overlay-trigger-source.js";
+import { parseAppMessageEnvelope } from "../shared/mcp-app-message-source.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -80,12 +81,16 @@ export class KeywordEngine {
   classify(input: string): InputClassification {
     const trimmed = input.trim();
 
-    // 0. Imported overlay trigger envelope — bypass skill-keyword
-    // matching. Shares its pattern with ipc-bridge.ts's
-    // originSource detection, the host gate, and the trigger
-    // executor's wrap (see shared/overlay-trigger-source.ts) so all
-    // gates agree on what counts as a valid envelope.
-    if (parseImportedTriggerEnvelope(trimmed) !== null) {
+    // 0. Staged-input envelope (plugin overlay trigger / MCP-app `ui/message`) —
+    // bypass skill-keyword matching. Shares its pattern with ipc-bridge.ts's
+    // originSource detection, the host gate, and the trigger executor's wrap (see
+    // shared/overlay-trigger-source.ts + shared/mcp-app-message-source.ts) so all
+    // gates agree on what counts as a valid envelope. Non-user-authored text must
+    // not steer host routing.
+    if (
+      parseImportedTriggerEnvelope(trimmed) !== null ||
+      parseAppMessageEnvelope(trimmed) !== null
+    ) {
       return { type: "general", input: trimmed };
     }
 

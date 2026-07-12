@@ -6,8 +6,9 @@
  */
 import { dialog, ipcMain, webContents } from "electron";
 import { t } from "../../i18n/index.js";
+import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { emitEvent as emitHostEvent } from "../../boot/types.js";
@@ -36,7 +37,23 @@ import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
 import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
 import { installMcpAppPartitionPolicy } from "../../main/html-preview-partition.js";
 import { createMcpAppProxySession, disposeMcpAppProxySession } from "../../main/mcp-app-protocol.js";
-import type { McpUiResourceBundle } from "../../mcp/types.js";
+import { resolveMcpUiBackend } from "../../mcp/mcp-ui-backend-resolver.js";
+import {
+  createExternalToolCallSource,
+  createLoopbackToolCallSource,
+} from "../../mcp/mcp-ui-tool-call.js";
+import type { McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
+import { parseUiMessageIntent, type McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
+import { parseMcpAppDownload, type McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
+import type { McpUiModelContextOutcome } from "../../mcp/mcp-app-model-context.js";
+import { appMessageSource, formatAppMessageEnvelope, isAppMessageOrigin } from "../../shared/mcp-app-message-source.js";
+// The MCP-app `ui/message` staging path reuses the plugin overlay gate's rate limiter
+// (one mechanism for "staged conversation proposals") and the same overlay push channel.
+import {
+  deriveOverlaySummaryForDisplay,
+  triggerConversationRateLimiter,
+} from "../../boot/steps/plugin-runtime/trigger-gate.js";
+import { OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import {
   installMarketplacePluginWithLifecycle,
   startInstalledPluginWithLifecycle,
@@ -683,7 +700,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle(CHANNELS.runtime.counts, (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.runtime.counts, e); return UNAUTHORIZED_FRAME; }
     return {
-      tools: deps.toolRegistry.size,
+      // The user-facing tool COUNT reflects the model's tools — getModelVisibleTools,
+      // not `size` (every registered tool). `size` now includes app-only tools + the
+      // auth trio (registry `Tool`s so their card call runs under the gate); counting
+      // them here would inflate "the model's tools" and softly disclose app-only names.
+      tools: deps.toolRegistry.getModelVisibleTools().length,
       plugins: pluginRuntime.listPluginIds().length,
       mcps: deps.mcpManager.listServers().filter((s) => s.status === "connected").length,
     };
@@ -1047,6 +1068,31 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     return true;
   }
 
+  // ── The ONE `serverId → backend` source set (SoT) ─────────────────────────
+  // Both MCP-App IPCs — the card RENDER (`mcp.uiResource`) and the app's own
+  // `tools/call` (`mcp.callTool`) — resolve through `resolveMcpUiBackend` over THIS
+  // object, so the loopback-first rule exists in exactly one place and the two paths
+  // can never disagree about who owns a serverId. The tool-call halves come from
+  // `mcp-ui-tool-call.ts`; nothing here branches on backend kind.
+  const mcpUiSources = {
+    loopback: {
+      has: (serverId: string) => deps.pluginLoopbackManager.has(serverId),
+      readUiResource: (serverId: string, uri: string) =>
+        deps.pluginLoopbackManager.readUiResource(serverId, uri),
+      ...createLoopbackToolCallSource(pluginRuntime),
+    },
+    mcpManager: {
+      readUiResource: (serverId: string, uri: string) => deps.mcpManager.readUiResource(serverId, uri),
+      ...createExternalToolCallSource({
+        namespacedToolName: (serverId, toolName) => deps.mcpManager.namespacedToolName(serverId, toolName),
+        findTool: (name) => deps.toolRegistry.findByName(name),
+        // Late binding: the plugin-surface ToolExecutor is installed by a boot step
+        // that runs AFTER IPC registration, so resolve it per call, never capture it.
+        getInvoker: () => deps.getPluginToolInvoker(),
+      }),
+    },
+  };
+
   ipcMain.handle(CHANNELS.mcp.servers, (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.servers, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.listServers();
@@ -1092,14 +1138,390 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // on the partition, so both are in place before the webview navigates.
     installMcpAppPartitionPolicy(serverId);
 
+    // SoT resolution: a first-party plugin runs as an in-process loopback MCP
+    // server (serverId === pluginId) that is NEVER in mcpManager.clients, so try
+    // the loopback host FIRST, else the external MCP client registry. ONE
+    // resolver, shared with the oncalltool seam below — no duplicated backend
+    // branch.
+    const backend = resolveMcpUiBackend(serverId, mcpUiSources);
+
     // The resource carries its OWN `_meta.ui.csp` — main reads it here and never
     // accepts one from the renderer. A compromised renderer must not be able to
     // forge a permissive policy and widen the envelope that contains the untrusted
     // app HTML. Per-resource, so one card's declared domains never leak to another.
-    const resource = await deps.mcpManager.readUiResource(serverId, uri);
+    // Plugin-served HTML rides the SAME sandbox-proxy + main-computed CSP path.
+    const resource = await backend.readUiResource(uri);
     const proxyUrl = createMcpAppProxySession(serverId, resource.csp);
     return { proxyUrl, html: resource.html } satisfies McpUiResourceBundle;
   });
+
+  // ─── MCP Apps `oncalltool` — an app calls a tool on ITS OWN server ──────────
+  //
+  // The straight line: app → bridge (`oncalltool`) → renderer (binds the CARD's
+  // serverId) → THIS channel → `resolveMcpUiBackend` → the backend's gated call
+  // path → ToolExecutor → `inspectHostRisk` → reviewer/approval → audit.
+  //
+  // Invariants, each enforced exactly ONCE:
+  //  1. Server binding — STRUCTURAL. The app never names a server: `serverId` is the
+  //     card's own `payload.serverId`, supplied by the trusted renderer, and the
+  //     resolver binds every backend method to it. Nothing downstream re-derives it.
+  //  2. Tool owner == serverId — HERE, one comparison, backend-kind agnostic
+  //     (`resolveToolOwner` is the plugin runtime's method map on the loopback arm
+  //     and the registry entry's `mcpServerId` on the external arm). A call for
+  //     another server's tool, a host builtin, or an unknown name is denied.
+  //  3. App-visibility (`_meta.ui.visibility` ∋ "app") — the SPEC MUST, enforced
+  //     inside each backend's call path: `assertUiActionInvokable` (loopback) /
+  //     the `appInvokable` check (external). NOT re-checked here: one site per path.
+  //  4. Risk + consent — the SAME ToolExecutor gate every host tool call takes, entered
+  //     under a DISTINCT `"mcp-app"` invocation origin. That origin is what makes the
+  //     claim structural rather than aspirational: the ungoverned dispatch an app-only
+  //     tool can otherwise reach (the manifest's `auth.statusTool` carve-out) is keyed
+  //     off the host's own origins, so an app-initiated call cannot enter it — only
+  //     registry tools, which are governed, are reachable from a card. No new classifier.
+  //     `userAction` is never set (see mcp-ui-tool-call.ts): a gesture claim made inside
+  //     an untrusted iframe is not verifiable.
+  //
+  // Sender: `validateHostRendererSender` (NOT the base `validateSender` the read-only
+  // render channel uses) — this channel RUNS A TOOL, so it takes the mutating-channel
+  // validator (fails closed on an empty frame URL, rejects plugin-ui-shell frames),
+  // exactly like `plugins.call` and `mcp.openDetached`. The MCP-app <webview> itself
+  // is on the `lvis-mcp-app:` scheme and could never pass either validator.
+  ipcMain.handle(CHANNELS.mcp.callTool, async (e, serverId: unknown, name: unknown, args: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.mcp.callTool, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (typeof serverId !== "string" || !serverId.trim()) {
+      return { ok: false, error: "invalid-server-id", message: "serverId must be a non-empty string" } satisfies McpUiToolCallOutcome;
+    }
+    if (typeof name !== "string" || !name.trim()) {
+      return { ok: false, error: "invalid-tool-name", message: "tool name must be a non-empty string" } satisfies McpUiToolCallOutcome;
+    }
+
+    const backend = resolveMcpUiBackend(serverId, mcpUiSources);
+
+    // Invariant 2 — the card's server must OWN the tool it asks for.
+    const owner = backend.resolveToolOwner(name);
+    if (owner !== serverId) {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "mcp-app",
+        type: "error",
+        input: `[mcp-app:${serverId}] cross-server call denied: tool='${name}' owner='${owner ?? "unknown"}'`,
+      });
+      return {
+        ok: false,
+        error: "cross-server-call-denied",
+        message: `Tool '${name}' is not owned by MCP server '${serverId}'`,
+      } satisfies McpUiToolCallOutcome;
+    }
+
+    try {
+      // Invariants 3 + 4 live inside this call (visibility MUST, then the gate).
+      const result = await backend.callTool(name, asPlainRecord(args));
+      return { ok: true, result } satisfies McpUiToolCallOutcome;
+    } catch (err) {
+      // Every rejection — app-visibility denial, permission/consent denial, tool
+      // error — surfaces as ONE outcome the bridge renders as an MCP-style
+      // `{ isError: true }` CallToolResult. Never a raw throw across the bridge.
+      const message = errMessage(err);
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "mcp-app",
+        type: "error",
+        input: `[mcp-app:${serverId}] tools/call denied or failed: tool='${name}' reason='${message}'`,
+      });
+      return { ok: false, error: "tool-call-failed", message } satisfies McpUiToolCallOutcome;
+    }
+  });
+
+  // ─── MCP Apps `onmessage` (`ui/message`) — the app speaks to the user or the model ──
+  //
+  // Two paths, chosen ONCE by `parseUiMessageIntent` (mcp/mcp-ui-message.ts):
+  //
+  //  A. NOTIFICATION (`_meta["lvisai/notification"]` on a content block) → the EXISTING
+  //     popup surface. `NotificationService.fire` already owns the focus gate, the
+  //     per-kind cooldown, title/body sanitization, and the audit row — we add none of
+  //     that here, and we let the app OVERRIDE none of it either: the app supplies text
+  //     to show, never the policy for showing it (see `notify` below). Never the
+  //     transcript; never a slash dispatch.
+  //
+  //  B. CONVERSATION. The app's text enters the ACTIVE conversation, but NEVER as if the
+  //     user typed it. Three invariants, one enforcement site each:
+  //
+  //     1. PROVENANCE — `formatAppMessageEnvelope` (shared/mcp-app-message-source.ts) is
+  //        the only builder of `<app-message source="app:<serverId>">`. Everything
+  //        downstream (turn origin, transcript marker, permission force-ask, keyword
+  //        bypass) reads provenance from that one envelope. It also strips a leading
+  //        slash, so app text can never dispatch a host command.
+  //     2. SESSION BINDING — HERE, one comparison. The renderer binds the card's ORIGIN
+  //        session id; if it is not the loop's current session the user has navigated
+  //        away, and we fall back to the notification path rather than inject into a
+  //        conversation they are no longer looking at. Fail-safe, one rule.
+  //     3. TURN POLICY — `queueGuidance` is the race-safe round-boundary seam and its
+  //        `no-active-turn` answer is the ATOMIC active-turn check (a separate
+  //        `hasActiveTurn()` probe would reopen the race it was written to close):
+  //          · active turn  → queued as guidance; the drain site (query-loop) sees the
+  //            app envelope and downgrades the rest of the turn to the app's origin, so
+  //            it is NOT treated as the user's own mid-stream guide.
+  //          · no active turn → USER-GATED. We stage an overlay card the user must
+  //            CLICK; confirming inserts the `imported_trigger` marker and starts the
+  //            turn with `app-emitted` origin. An app must NOT autonomously wake the
+  //            model: VS Code's MCP-Apps host only *fills* the chat box ("does not
+  //            auto-send"), ChatGPT fires only from a synchronous user gesture, and the
+  //            spec's "host SHOULD add to context, MAY request consent" is trending
+  //            toward "every UI-initiated action goes through the same consent path".
+  //            LVIS cannot verify a gesture claim made inside an untrusted iframe, so a
+  //            host-side gate is the only sound reading.
+  //
+  // Rate limit: the SAME `triggerConversationRateLimiter` the plugin overlay gate uses —
+  // one limiter for "staged conversation proposals", keyed by serverId (which IS the
+  // pluginId on the loopback arm, so a plugin shares one budget across both surfaces).
+  //
+  // Sender: `validateHostRendererSender` — state-mutating, exactly like `mcp.callTool`.
+  ipcMain.handle(CHANNELS.mcp.uiMessage, async (e, serverId: unknown, cardSessionId: unknown, params: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.mcp.uiMessage, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const auditMcpApp = (type: "info" | "error", input: string) => {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "mcp-app",
+        type,
+        input,
+      });
+    };
+    if (typeof serverId !== "string" || !isAppMessageOrigin(appMessageSource(serverId))) {
+      return { ok: false, error: "invalid-server-id", message: "serverId must be a valid MCP server id" } satisfies McpUiMessageOutcome;
+    }
+    const source = appMessageSource(serverId);
+
+    if (triggerConversationRateLimiter.isOverCap(serverId)) {
+      auditMcpApp("error", `[mcp-app:${serverId}] ui/message rate limited`);
+      return { ok: false, error: "rate-limited", message: "too many messages from this app" } satisfies McpUiMessageOutcome;
+    }
+    triggerConversationRateLimiter.record(serverId);
+
+    const intent = parseUiMessageIntent(params);
+    if (intent.kind === "invalid") {
+      return { ok: false, error: intent.error, message: intent.message } satisfies McpUiMessageOutcome;
+    }
+
+    // The one notification sink — used by path A and by path B's session-mismatch
+    // fallback. Title/body are UNTRUSTED app text; `fire` caps + strips them.
+    //
+    // What an app may NOT do here, by construction:
+    //  · ATTRIBUTION — the title the user sees is HOST-minted (`app:<serverId>` ahead of
+    //    the app's own words), so a card cannot dress its popup up as a host alert
+    //    ("LVIS 보안 경고: 다시 로그인하세요") and phish the user.
+    //  · DELIVERY POLICY — no `bypassFocusGate`, no `urgent`. `bypassFocusGate` is an
+    //    opt-in *manifest* signal (notification-service.ts / boot/plugins.ts): reviewable
+    //    ahead of time and covered by `manifestSha256`. An untrusted iframe may ask for
+    //    attention; it does not get to rule that its alert outranks the focus gate, nor
+    //    to skip the per-kind cooldown that keeps one app from starving every other
+    //    plugin's real alerts. `urgent` is not passed either, so the kind's default
+    //    (silent for `plugin`) stands. The app's declared `severity` is an audited CLAIM
+    //    and nothing more.
+    const notify = (title: string, body: string, severity?: string): McpUiMessageOutcome => {
+      const notificationService = deps.notificationService;
+      if (!notificationService) {
+        return { ok: false, error: "notification-unavailable", message: "notification service is not running" };
+      }
+      const appTitle = title.trim();
+      notificationService.fire({
+        kind: "plugin",
+        title: appTitle ? `${source} · ${appTitle}` : source,
+        body,
+      });
+      auditMcpApp(
+        "info",
+        `[mcp-app:${serverId}] ui/message → notification` +
+          (severity ? ` severityClaimed=${severity}` : ""),
+      );
+      return { ok: true, disposition: "notified" };
+    };
+
+    // ── Path A — the app asked for the user's attention, not the model's.
+    if (intent.kind === "notification") {
+      const { title, body, severity } = intent.notification;
+      return notify(title, body, severity);
+    }
+
+    // ── Path B — invariant 2: the card's session must still be the live one.
+    if (cardSessionId !== deps.conversationLoop.getSessionId()) {
+      auditMcpApp("info", `[mcp-app:${serverId}] ui/message session mismatch → notification fallback`);
+      // No app-authored title on this path — the source tag IS the title.
+      return notify("", intent.text);
+    }
+
+    const envelope = formatAppMessageEnvelope(intent.text, source);
+
+    // ── Path B — invariant 3: turn policy. `queueGuidance` IS the atomic check.
+    const queued = deps.conversationLoop.queueGuidance(envelope);
+    if (queued === "queued") {
+      auditMcpApp("info", `[mcp-app:${serverId}] ui/message → guidance queued (active turn)`);
+      return { ok: true, disposition: "queued" } satisfies McpUiMessageOutcome;
+    }
+    if (queued !== "no-active-turn") {
+      auditMcpApp("error", `[mcp-app:${serverId}] ui/message guidance rejected: ${queued}`);
+      return { ok: false, error: queued, message: `guidance rejected: ${queued}` } satisfies McpUiMessageOutcome;
+    }
+
+    // No active turn → stage the user-gated card. The renderer inserts the
+    // `imported_trigger` marker and starts the turn ONLY on the user's click.
+    //
+    // `summary` is what the OverlayCard SHOWS. It goes through the SAME display
+    // sanitizer the plugin overlay path uses (`deriveOverlaySummaryForDisplay` —
+    // `<untrusted-*>` strip + 2 000-char cap): one card, one rule, and the less-trusted
+    // source does not get the weaker one. The full text still rides `pendingPrompt`,
+    // where the envelope is the thing that carries provenance.
+    const eventId = randomUUID();
+    const overlayItem = {
+      id: `app:${serverId}:${eventId}`,
+      source: { kind: "app" as const, serverId, eventId },
+      title: serverId,
+      summary: deriveOverlaySummaryForDisplay({ prompt: intent.text }),
+      running: false,
+      pendingPrompt: envelope,
+      createdAt: new Date().toISOString(),
+    };
+    const win = getMainWindow();
+    if (!win || win.isDestroyed()) {
+      return { ok: false, error: "no-window", message: "host window is unavailable" } satisfies McpUiMessageOutcome;
+    }
+    sendToWindow(win, OVERLAY_V1.show, overlayItem, log);
+    auditMcpApp("info", `[mcp-app:${serverId}] ui/message → staged for user confirmation (no active turn)`);
+    return { ok: true, disposition: "staged" } satisfies McpUiMessageOutcome;
+  });
+
+  // ─── MCP Apps `ondownloadfile` (`ui/download-file`) — the app saves a file ──────
+  //
+  // The straight line: app → bridge (`ondownloadfile`) → renderer (binds the CARD's
+  // serverId) → THIS channel → `parseMcpAppDownload` → `dialog.showSaveDialog` → write.
+  //
+  // The security invariant, enforced in exactly ONE place: THE HOST NEVER FETCHES A URI
+  // ON AN UNTRUSTED APP'S BEHALF. `parseMcpAppDownload` rejects `resource_link` outright
+  // (the ext-apps JSDoc's `window.open(item.uri)` would make the host a confused deputy —
+  // an egress channel with the host's network identity, reachable from a sandboxed iframe
+  // without any of the gates a tool call takes). What survives the parse is INLINE bytes
+  // the app already possessed, size-capped before decode, count-capped, with a filename
+  // that cannot pre-fill a traversal. Nothing downstream re-checks any of it.
+  //
+  // The AUTHORIZATION for the write is the user's own save dialog — the same
+  // `dialog.showSaveDialog` seam the diagnostics bundle / transcript export / usage CSV
+  // use. No new save path, no host-chosen destination, no silent write. A CANCEL is
+  // therefore a normal outcome, NOT an error (the spec's `isError` must not be raised for
+  // it), and it aborts the remaining files: the user declined.
+  //
+  // Sender: `validateHostRendererSender` — state-mutating (it writes a file), exactly
+  // like `mcp.callTool` / `mcp.uiMessage`.
+  ipcMain.handle(CHANNELS.mcp.uiDownloadFile, async (e, serverId: unknown, params: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.mcp.uiDownloadFile, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const auditDownload = (type: "info" | "error", input: string) => {
+      auditLogger.log({ timestamp: new Date().toISOString(), sessionId: "mcp-app", type, input });
+    };
+    if (typeof serverId !== "string" || !serverId.trim()) {
+      return { ok: false, error: "invalid-server-id", message: "serverId must be a non-empty string" } satisfies McpUiDownloadOutcome;
+    }
+
+    const parsed = parseMcpAppDownload(params);
+    if (parsed.kind === "invalid") {
+      auditDownload("error", `[mcp-app:${serverId}] ui/download-file rejected: ${parsed.error}`);
+      return { ok: false, error: parsed.error, message: parsed.message } satisfies McpUiDownloadOutcome;
+    }
+
+    const win = getMainWindow();
+    for (const file of parsed.files) {
+      const extension = file.filename.includes(".") ? file.filename.split(".").pop() ?? "" : "";
+      const dialogOptions = {
+        // User-facing dialog copy — Korean per the IPC/UI language convention.
+        title: "MCP 앱 파일 저장",
+        defaultPath: file.filename,
+        ...(extension ? { filters: [{ name: extension.toUpperCase(), extensions: [extension] }] } : {}),
+      };
+      const result = win && !win.isDestroyed()
+        ? await dialog.showSaveDialog(win, dialogOptions)
+        : await dialog.showSaveDialog(dialogOptions);
+      if (result.canceled || !result.filePath) {
+        auditDownload("info", `[mcp-app:${serverId}] ui/download-file cancelled by user`);
+        return { ok: true, disposition: "cancelled" } satisfies McpUiDownloadOutcome;
+      }
+      await writeFile(result.filePath, file.bytes);
+      // Forensic record: an app-authored file landed on the user's disk. The path is
+      // redacted (home dir / username stripped) exactly like the diagnostics export.
+      auditDownload(
+        "info",
+        `[mcp-app:${serverId}] ui/download-file saved ${JSON.stringify({
+          bytes: file.bytes.byteLength,
+          mimeType: file.mimeType,
+          path: redactFsPath(result.filePath),
+        })}`,
+      );
+    }
+    return { ok: true, disposition: "saved" } satisfies McpUiDownloadOutcome;
+  });
+
+  // ─── MCP Apps `onupdatemodelcontext` (`ui/update-model-context`) ────────────────
+  //
+  // The app OVERWRITES the context it wants the model to have on the NEXT turn. The three
+  // spec semantics are structural here, not policy:
+  //
+  //  1. OVERWRITE — the store keys one slot per (session, server, card) and re-`set`s it.
+  //     The renderer binds ALL THREE (the app names none), so a card can overwrite only
+  //     its own slot, and only in the conversation it belongs to.
+  //  2. DEFERRED to the next turn — nothing is pushed anywhere. `SystemPromptBuilder`
+  //     READS the active session's slots when it assembles the next prompt.
+  //  3. NEVER a follow-up — this handler has no path to the conversation loop. Not a rule
+  //     it obeys; a reference it does not hold. (`ui/message` is the channel that CAN
+  //     reach a turn, and only behind a user-gated card. They are separate on purpose.)
+  //
+  // The body is UNTRUSTED APP DATA. The store fences it and the prompt source labels it
+  // "data, never instructions" — the same framing `<app-message>` bodies and the skills
+  // catalog already carry. A session MISMATCH drops the update (the card belongs to a
+  // conversation the user has left): fail-safe, one comparison, mirroring `ui/message`.
+  //
+  // Sender: `validateHostRendererSender` — it mutates what the model reads next turn.
+  ipcMain.handle(
+    CHANNELS.mcp.uiModelContext,
+    (e, serverId: unknown, cardSessionId: unknown, cardId: unknown, params: unknown) => {
+      if (!validateHostRendererSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.mcp.uiModelContext, e);
+        return UNAUTHORIZED_FRAME;
+      }
+      const auditContext = (type: "info" | "error", input: string) => {
+        auditLogger.log({ timestamp: new Date().toISOString(), sessionId: "mcp-app", type, input });
+      };
+      if (typeof serverId !== "string" || typeof cardId !== "string") {
+        return { ok: false, error: "invalid-binding", message: "serverId and cardId must be strings" } satisfies McpUiModelContextOutcome;
+      }
+      if (typeof cardSessionId !== "string" || cardSessionId !== deps.conversationLoop.getSessionId()) {
+        auditContext("info", `[mcp-app:${serverId}] ui/update-model-context dropped: session mismatch`);
+        return { ok: false, error: "session-mismatch", message: "the card's session is not the active conversation" } satisfies McpUiModelContextOutcome;
+      }
+
+      const record = asPlainRecord(params);
+      const outcome = deps.mcpAppModelContext.update({
+        sessionId: cardSessionId,
+        serverId,
+        cardId,
+        content: record.content,
+        structuredContent: record.structuredContent,
+      });
+      // The app gets an EmptyResult either way (the spec gives this request no error
+      // channel), so a refusal — an over-cap body above all — is recorded HERE or nowhere.
+      auditContext(
+        outcome.ok ? "info" : "error",
+        outcome.ok
+          ? `[mcp-app:${serverId}] ui/update-model-context ${outcome.disposition}`
+          : `[mcp-app:${serverId}] ui/update-model-context refused: ${outcome.error}`,
+      );
+      return outcome;
+    },
+  );
 
   // Card unmount → free its proxy-session token promptly, so a long chat with many
   // cards does not let the global LRU evict a STILL-MOUNTED card's token (which would

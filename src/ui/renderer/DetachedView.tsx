@@ -23,7 +23,7 @@ import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { WorkBoardPanel } from "./components/WorkBoardPanel.js";
 import { StarredView } from "./components/StarredView.js";
 import { McpAppView } from "./components/McpAppView.js";
-import type { McpUiPayload } from "../../mcp/types.js";
+import type { McpAppDetachedPayload } from "../../shared/mcp-app-detached-payload.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
 import { useStarred } from "./hooks/use-starred.js";
@@ -71,14 +71,15 @@ function SnapEdgeHighlight() {
  * Detached MCP-app card. Extracted as a NAMED component (not an inline branch
  * inside `DetachedContent`) so its hooks run unconditionally at the top level —
  * `DetachedContent` has early `return`s above, and adding `useState`/`useEffect`
- * inside a branch after them would violate the Rules of Hooks. The `McpUiPayload`
- * cannot ride the `#detached/<viewKey>` URL fragment (no `resourceUri`/`csp`), so
- * it is fetched from the host-owned WindowManager registry on mount. Keyed by
- * `viewKey` at the call site, so navigation remounts and re-fetches cleanly.
+ * inside a branch after them would violate the Rules of Hooks. The
+ * {@link McpAppDetachedPayload} cannot ride the `#detached/<viewKey>` URL fragment
+ * (no `resourceUri`/`csp`/origin session), so it is fetched from the host-owned
+ * WindowManager registry on mount. Keyed by `viewKey` at the call site, so navigation
+ * remounts and re-fetches cleanly.
  */
 function DetachedMcpApp({ viewKey }: { viewKey: string }) {
   const { t } = useTranslation();
-  const [payload, setPayload] = useState<McpUiPayload | null>(null);
+  const [record, setRecord] = useState<McpAppDetachedPayload | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -86,14 +87,14 @@ function DetachedMcpApp({ viewKey }: { viewKey: string }) {
     setLoaded(false);
     void window.lvis.mcp
       .getDetachedPayload(viewKey)
-      .then((p) => {
+      .then((next) => {
         if (cancelled) return;
-        setPayload(p);
+        setRecord(next);
         setLoaded(true);
       })
       .catch(() => {
         if (cancelled) return;
-        setPayload(null);
+        setRecord(null);
         setLoaded(true);
       });
     return () => {
@@ -102,14 +103,32 @@ function DetachedMcpApp({ viewKey }: { viewKey: string }) {
   }, [viewKey]);
 
   if (!loaded) return null;
-  if (!payload) {
+  if (!record) {
     return (
       <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
         {t("detachedView.unknownView", { viewKey })}
       </div>
     );
   }
-  return <McpAppView payload={payload} />;
+  // The detached shell IS the host's `fullscreen` presentation (see
+  // shared/mcp-app-display-mode.ts): a card mounted here starts — and stays — in that
+  // mode, so its host context reports `fullscreen` truthfully, and an `inline` request
+  // from the app closes this window (the inline card in the transcript comes back to
+  // life on the host's `detachedClosed` broadcast) rather than opening a second one.
+  //
+  // `originSessionId` is the whole reason the payload is a RECORD and not a bare
+  // `McpUiPayload`: this window's React root has NO ChatContextProvider (only
+  // MainContent mounts one), so a card here cannot recover its session from context.
+  // The host stamped the origin session into the record at detach time; threading it in
+  // is what keeps this card's `ui/message` / `ui/update-model-context` bound to a real
+  // conversation instead of being silently dropped forever on main's session check.
+  return (
+    <McpAppView
+      payload={record.payload}
+      displayMode="fullscreen"
+      originSessionId={record.originSessionId}
+    />
+  );
 }
 
 // ─── Content dispatcher ───────────────────────────────────────────────────────

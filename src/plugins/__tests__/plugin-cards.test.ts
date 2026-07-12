@@ -226,9 +226,11 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
     const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
     await runtime.load();
 
-    // Fake toolRegistry that only exposes filtered_a and filtered_c (filtered_b is denied)
+    // Fake toolRegistry that only exposes filtered_a and filtered_c (filtered_b is denied).
+    // listPluginCards feeds the MODEL-visible set (getModelVisibleTools) to the card UI —
+    // see the runtime's comment at that call site.
     const fakeRegistry = {
-      getVisibleTools: () => [{ name: "filtered_a" }, { name: "filtered_c" }],
+      getModelVisibleTools: () => [{ name: "filtered_a" }, { name: "filtered_c" }],
     };
 
     const cards = runtime.listPluginCards(fakeRegistry);
