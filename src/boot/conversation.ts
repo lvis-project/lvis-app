@@ -78,8 +78,14 @@ export function createSystemPromptBuilder(opts: {
    * as requestable; main chat omits it.
    */
   getActivatablePluginIds?: () => ReadonlySet<string>;
+  /**
+   * MCP-app `ui/update-model-context` reader — the active session's card slots, rendered
+   * as the `<mcp-app-context>` section. Optional: the routine / side-chat builders omit
+   * it (MCP-app cards live in the main chat), and the section then drops out entirely.
+   */
+  getAppModelContext?: (sessionId: string) => string;
 }): SystemPromptBuilder {
-  const { memoryManager, toolRegistry, pluginRuntime, getActiveSkillsSection, getAvailableSkills, getActivatablePluginIds } = opts;
+  const { memoryManager, toolRegistry, pluginRuntime, getActiveSkillsSection, getAvailableSkills, getActivatablePluginIds, getAppModelContext } = opts;
   return new SystemPromptBuilder({
     memoryManager,
     toolRegistry,
@@ -88,6 +94,7 @@ export function createSystemPromptBuilder(opts: {
     getActivatablePluginIds,
     getAvailableSkills,
     getActiveSkillsSection,
+    getAppModelContext,
     // Tutorial-X4 — User Onboarding Context source. Renderer writes the
     // synthesized markdown after MemorySeedDialog dismissal; reader is
     // file-backed so the conversation loop has no dependency on the

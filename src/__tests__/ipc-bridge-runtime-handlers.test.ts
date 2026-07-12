@@ -101,7 +101,13 @@ function makeServices(
     conversationLoop: makeMockConversationLoop(pm) as any,
     approvalGate: gate as any,
     mcpManager: { listServers: vi.fn(() => mcpServers), killSwitch: vi.fn() } as any,
-    toolRegistry: { setDenyRules: vi.fn(), size: toolRegistrySize } as any,
+    toolRegistry: {
+      setDenyRules: vi.fn(),
+      size: toolRegistrySize,
+      // runtime.counts reports "the model's tools" — model-visible only, never the
+      // executable superset that now includes app-only tools (the auth trio etc.).
+      getModelVisibleTools: () => Array.from({ length: toolRegistrySize }, () => ({})),
+    } as any,
     auditLogger: { log: vi.fn() } as any,
     idleScheduler: undefined,
     bashAstValidator: {} as any,

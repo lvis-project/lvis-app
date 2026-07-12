@@ -127,7 +127,7 @@ export function App() {
   // cycle) is what lets the two hooks reference each other safely.
   const handleAskRef = useRef<(
     q: string,
-    mode?: "default" | "trigger-import",
+    mode?: "default" | "trigger-import" | "app-message",
     userIntent?: UserKeyboardIntentSnapshot,
   ) => Promise<void>>(
     async () => { /* populated below */ },

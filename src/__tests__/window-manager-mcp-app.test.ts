@@ -17,6 +17,7 @@ import type { IpcMainInvokeEvent } from "electron";
 import { ALLOWED_VIEW_KEYS } from "../main/window-manager.js";
 import { mcpAppPartitionName, mcpAppViewKey } from "../shared/mcp-app-partition.js";
 import type { McpUiPayload } from "../mcp/types.js";
+import type { McpAppDetachedPayload } from "../shared/mcp-app-detached-payload.js";
 
 // ── fs mock ────────────────────────────────────────────────────────────────
 vi.mock("node:fs", async (importOriginal) => {
@@ -91,7 +92,12 @@ vi.mock("electron", () => {
     return instance;
   });
   (BrowserWindow as unknown as { fromWebContents: ReturnType<typeof vi.fn> }).fromWebContents = vi.fn(() => null);
-  (BrowserWindow as unknown as { fromId: ReturnType<typeof vi.fn> }).fromId = vi.fn(() => null);
+  // Resolve real mock instances so `getMainWindow()` works once a test registers one
+  // (the `detachedClosed` broadcast goes to the main window). Tests that never register
+  // a main window still get null, because `_mainWindowId` stays null.
+  (BrowserWindow as unknown as { fromId: ReturnType<typeof vi.fn> }).fromId = vi.fn(
+    (id: number) => mockWindowInstances.find((w) => w.id === id) ?? null,
+  );
 
   return {
     BrowserWindow,
@@ -110,6 +116,7 @@ vi.mock("electron", () => {
   };
 });
 
+import { BrowserWindow } from "electron";
 import { WindowManager } from "../main/window-manager.js";
 
 const trustedEvent = () =>
@@ -197,13 +204,32 @@ describe("openDetachedMcpApp + registry", () => {
   it("mints a host-side viewKey and stores the payload for retrieval", () => {
     const wm = makeManager();
     const p = payload("github", "ui://card/xyz");
-    wm.openDetachedMcpApp(p);
-    const viewKey = wm.listChildren()[0].viewKey;
+    const { viewKey } = wm.openDetachedMcpApp(p);
+    expect(wm.listChildren()[0].viewKey).toBe(viewKey);
     expect(viewKey.startsWith("mcp-app:")).toBe(true);
     expect(ALLOWED_VIEW_KEYS.test(viewKey)).toBe(true);
-    expect(wm.getMcpDetachedPayload(viewKey)).toEqual(p);
+    expect(wm.getMcpDetachedPayload(viewKey)).toEqual({ payload: p, originSessionId: "" });
     // window title comes from the payload path, not the raw viewKey
     expect(mockWindowInstances[0].title).toBe("LVIS — MCP App");
+  });
+
+  it("stamps the card's ORIGIN SESSION host-side — the detached card's only real binding", () => {
+    const wm = makeManager();
+    const { viewKey } = wm.openDetachedMcpApp(payload("github"), { originSessionId: "sess-abc" });
+    // The detached window has no ChatContext; this is where its `ui/message` /
+    // `ui/update-model-context` binding comes from. Main re-checks it against the live
+    // conversation on every use, so it binds — it does not authorize.
+    expect(wm.getMcpDetachedPayload(viewKey)?.originSessionId).toBe("sess-abc");
+  });
+
+  it("sanitizes an unusable session id to \"\" (fail-closed: the card's writes are dropped)", () => {
+    const wm = makeManager();
+    for (const bad of ["../../etc", "a b", "x".repeat(200), "", undefined]) {
+      const { viewKey } = wm.openDetachedMcpApp(payload("github"), {
+        originSessionId: bad as string | undefined,
+      });
+      expect(wm.getMcpDetachedPayload(viewKey)?.originSessionId, `sessionId=${String(bad)}`).toBe("");
+    }
   });
 
   it("returns null for an unknown viewKey", () => {
@@ -250,7 +276,12 @@ describe("closeDetachedMcpWindows (b3 scoped close)", () => {
   function injectChild(wm: WindowManager, id: number, viewKey: string, p?: McpUiPayload) {
     const win = { id, isDestroyed: vi.fn(() => false), close: vi.fn(), webContents: { id, once: vi.fn() } };
     (wm as unknown as { _children: Map<number, { window: typeof win; viewKey: string }> })._children.set(id, { window: win, viewKey });
-    if (p) (wm as unknown as { _mcpDetachedPayloads: Map<string, McpUiPayload> })._mcpDetachedPayloads.set(viewKey, p);
+    if (p) {
+      (wm as unknown as { _mcpDetachedPayloads: Map<string, McpAppDetachedPayload> })._mcpDetachedPayloads.set(
+        viewKey,
+        { payload: p, originSessionId: "" },
+      );
+    }
     return win;
   }
 
@@ -268,18 +299,68 @@ describe("closeDetachedMcpWindows (b3 scoped close)", () => {
     expect(b.close).not.toHaveBeenCalled();
     expect(plugin.close).not.toHaveBeenCalled();
     expect(wm.getMcpDetachedPayload(keyA)).toBeNull(); // purged
-    expect(wm.getMcpDetachedPayload(keyB)).toEqual(payload("gitlab")); // intact
+    expect(wm.getMcpDetachedPayload(keyB)).toEqual({ payload: payload("gitlab"), originSessionId: "" }); // intact
+  });
+});
+
+// ── the detached-gone broadcast (one live bridge per card) ─────────────────
+describe("detachedClosed broadcast", () => {
+  /** Registers a main window so `getMainWindow()` resolves, and returns its send spy. */
+  function withMainWindow(wm: WindowManager) {
+    const main = new (BrowserWindow as unknown as new (o: Record<string, unknown>) => {
+      id: number;
+      webContents: { send: ReturnType<typeof vi.fn> };
+    })({});
+    wm.registerMainWindow(main as never);
+    return main.webContents.send;
+  }
+
+  it("tells the main window when an mcp-app detached window CLOSES — that is what revives the inline card", () => {
+    const wm = makeManager();
+    const send = withMainWindow(wm);
+    const { viewKey } = wm.openDetachedMcpApp(payload("github"));
+
+    // The user closing the window with the X is indistinguishable, to the card, from the
+    // app's own `ui/request-display-mode: inline`. One event covers both.
+    mockWindowInstances[mockWindowInstances.length - 1].close();
+
+    expect(send).toHaveBeenCalledWith("lvis:mcp:detached-closed", { viewKey });
+    expect(wm.getMcpDetachedPayload(viewKey)).toBeNull();
+  });
+
+  it("also fires when the single-instance shell NAVIGATES away from the card", () => {
+    const wm = makeManager();
+    const send = withMainWindow(wm);
+    const { viewKey } = wm.openDetachedMcpApp(payload("github"));
+
+    wm.openDetachedTab("plugin:meeting:main"); // in-place navigation — no window close
+
+    expect(send).toHaveBeenCalledWith("lvis:mcp:detached-closed", { viewKey });
+  });
+
+  it("fires exactly once per card (the purge chokepoint is idempotent)", () => {
+    const wm = makeManager();
+    const send = withMainWindow(wm);
+    const { viewKey } = wm.openDetachedMcpApp(payload("github"));
+
+    wm.closeDetachedMcpWindows("github");
+    const closedEvents = send.mock.calls.filter(
+      (call) => call[0] === "lvis:mcp:detached-closed" && (call[1] as { viewKey: string }).viewKey === viewKey,
+    );
+    expect(closedEvents).toHaveLength(1);
   });
 });
 
 // ── IPC ────────────────────────────────────────────────────────────────────
-describe("lvis:mcp:open-detached IPC", () => {
-  function register() {
-    const wm = makeManager();
-    wm.registerIpc({ log: vi.fn() } as never);
-    return wm;
-  }
+/** Build a WindowManager with its MCP-app IPC handlers registered. Shared by the
+ * open-detached and close-detached suites. */
+function register() {
+  const wm = makeManager();
+  wm.registerIpc({ log: vi.fn() } as never);
+  return wm;
+}
 
+describe("lvis:mcp:open-detached IPC", () => {
   it("rejects an unauthorized sender", async () => {
     register();
     const handler = handleMap.get("lvis:mcp:open-detached")!;
@@ -300,22 +381,80 @@ describe("lvis:mcp:open-detached IPC", () => {
     expect(await handler(trustedEvent(), {})).toEqual({ ok: false, error: "invalid-payload" });
   });
 
-  it("opens a detached window for a valid payload", async () => {
+  it("opens a detached window for a valid payload and returns the host-minted viewKey", async () => {
     const wm = register();
     const handler = handleMap.get("lvis:mcp:open-detached")!;
-    const result = (await handler(trustedEvent(), { payload: payload("github") })) as { ok: boolean; windowId?: number };
+    const result = (await handler(trustedEvent(), { payload: payload("github") })) as {
+      ok: boolean;
+      windowId?: number;
+      viewKey?: string;
+    };
     expect(result.ok).toBe(true);
     expect(typeof result.windowId).toBe("number");
+    // The inline card that moved here keeps this key to recognize its own close event.
+    expect(result.viewKey).toBe(wm.listChildren()[0].viewKey);
     expect(wm.listChildren()[0].viewKey.startsWith("mcp-app:")).toBe(true);
   });
 
-  it("detached-payload read returns the stored payload and rejects unauthorized senders", async () => {
+  it("threads the renderer-bound origin session into the host-owned record", async () => {
+    const wm = register();
+    const handler = handleMap.get("lvis:mcp:open-detached")!;
+    const result = (await handler(trustedEvent(), {
+      payload: payload("github"),
+      sessionId: "sess-abc",
+    })) as { viewKey: string };
+    expect(wm.getMcpDetachedPayload(result.viewKey)?.originSessionId).toBe("sess-abc");
+  });
+
+  it("detached-payload read returns the stored record (payload + origin session) and rejects unauthorized senders", async () => {
     const wm = register();
     const p = payload("github", "ui://card/z");
-    wm.openDetachedMcpApp(p);
-    const viewKey = wm.listChildren()[0].viewKey;
+    const { viewKey } = wm.openDetachedMcpApp(p, { originSessionId: "sess-abc" });
     const read = handleMap.get("lvis:mcp:detached-payload")!;
-    expect(await read(trustedEvent(), viewKey)).toEqual(p);
+    expect(await read(trustedEvent(), viewKey)).toEqual({ payload: p, originSessionId: "sess-abc" });
     expect(await read(unauthorizedEvent(), viewKey)).toEqual({ ok: false, error: "unauthorized-frame" });
+  });
+});
+
+describe("lvis:mcp:close-detached IPC (the `inline` arm — SCOPED)", () => {
+  it("rejects unauthorized + plugin-ui-shell senders", async () => {
+    register();
+    const handler = handleMap.get("lvis:mcp:close-detached")!;
+    expect(await handler(unauthorizedEvent(), "github")).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(await handler(pluginShellEvent(), "github")).toEqual({ ok: false, error: "unauthorized-frame" });
+  });
+
+  it("rejects a missing/blank serverId (fail-closed)", async () => {
+    register();
+    const handler = handleMap.get("lvis:mcp:close-detached")!;
+    expect(await handler(trustedEvent(), "  ")).toEqual({ ok: false, error: "invalid-server-id" });
+    expect(await handler(trustedEvent(), 42)).toEqual({ ok: false, error: "invalid-server-id" });
+  });
+
+  it("closes only the named server's mcp-app window — an untrusted card cannot sweep the user's other detached views", async () => {
+    const wm = register();
+    const { viewKey } = wm.openDetachedMcpApp(payload("github"));
+    const mcpWindow = mockWindowInstances[mockWindowInstances.length - 1];
+
+    // A second, unrelated detached window (the single-instance shell would navigate, so
+    // inject it directly — the point is the SCOPE of the close, not the shell policy).
+    const other = {
+      id: 99,
+      isDestroyed: vi.fn(() => false),
+      close: vi.fn(),
+      getBounds: vi.fn(() => ({ x: 0, y: 0, width: 800, height: 600 })),
+      webContents: { id: 99, once: vi.fn() },
+    };
+    (wm as unknown as { _children: Map<number, { window: typeof other; viewKey: string }> })._children.set(99, {
+      window: other,
+      viewKey: "plugin:meeting:main",
+    });
+
+    const handler = handleMap.get("lvis:mcp:close-detached")!;
+    expect(await handler(trustedEvent(), "github")).toEqual({ ok: true });
+
+    expect(mcpWindow.close).toHaveBeenCalled();
+    expect(other.close).not.toHaveBeenCalled();
+    expect(wm.getMcpDetachedPayload(viewKey)).toBeNull();
   });
 });

@@ -113,7 +113,9 @@ export function resolveToolScope(
     for (const name of resetCarryForward ? [] : (state.lastTurnToolNames ?? [])) {
       if (inScopeToolNames.has(name)) activeToolNames.add(name);
     }
-    const registeredToolNames = new Set(deps.toolRegistry.getVisibleTools().map((tool) => tool.name));
+    // Same model-facing listing: a forced name the model may not be shown cannot be
+    // forced INTO the model's turn scope (its schema would be filtered out anyway).
+    const registeredToolNames = new Set(deps.toolRegistry.getModelVisibleTools().map((tool) => tool.name));
     for (const name of deps.forcedActiveToolNames ?? []) {
       if (registeredToolNames.has(name)) {
         activeToolNames.add(name);
@@ -135,7 +137,11 @@ export function resolveToolScope(
 export function scopedToolNameSet(deps: ConversationLoopDeps, activePluginIds: Set<string>): Set<string> {
     const includeMcp = deps.headless !== true;
     const names = new Set<string>();
-    for (const tool of deps.toolRegistry.getVisibleTools()) {
+    // MODEL-facing set (keyword preload, carry-forward, the eager-exposure ceiling),
+    // so it reads the registry's model-visible listing: an MCP Apps app-only tool is
+    // registered (its card's call must run under the gate) but the model never sees
+    // it, so it must not count toward the ceiling or be preloadable into the turn.
+    for (const tool of deps.toolRegistry.getModelVisibleTools()) {
       if (tool.source === "plugin") {
         if (tool.pluginId && activePluginIds.has(tool.pluginId)) names.add(tool.name);
       } else if (tool.source === "mcp" && includeMcp) {
