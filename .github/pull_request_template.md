@@ -41,9 +41,9 @@
 
 ## Cross-Cutting Review Gate
 
-Keep this section before any raw HTML opening tag; place raw HTML later in the PR body.
+Keep this section before any raw HTML token; place raw HTML later in the PR body.
 Complete only when `cluster-detector` requires independent review. All three
-reviews must cover the current PR HEAD. A new commit, body edit, base change,
+reviews must cover the current PR HEAD. A new commit, PR edit, base change,
 or reopen invalidates a retained label. Each visible row and hidden marker must
 use the same current HEAD SHA and verdict; a `GO` row requires blocking findings to be
 exactly `None`. The required check accepts attestation only on a fresh
