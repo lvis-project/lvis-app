@@ -31,6 +31,22 @@ describe("cluster review attestation", () => {
     });
   });
 
+  it("rejects marker substrings with noncanonical prefix or suffix text", () => {
+    const marker = `<!-- cluster-review:architect:${HEAD}:GO -->`;
+    const body = validBody().replace(marker, `prefix${marker}suffix`);
+    expect(evaluateClusterReviewAttestation(pullRequest({ body })).reason).toBe(
+      "invalid-marker",
+    );
+  });
+
+  it("rejects leftover template placeholders beside valid markers", () => {
+    const body = `${validBody()}
+<!-- cluster-review:architect:<40-char-head-sha>:GO -->`;
+    expect(evaluateClusterReviewAttestation(pullRequest({ body })).reason).toBe(
+      "invalid-marker",
+    );
+  });
+
   it("rejects a missing exemption label", () => {
     expect(evaluateClusterReviewAttestation(pullRequest({ labels: [] })).reason).toBe("missing-label");
   });

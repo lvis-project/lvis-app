@@ -73,6 +73,10 @@ describe("installer smoke and packaging discipline", () => {
     expect(clusterWorkflow).not.toContain("steps.exempt-check.outputs.exempt");
     expect(clusterWorkflow).toContain("AGENTS.md#cross-cutting-review-gate");
     expect(clusterWorkflow).not.toContain("CLAUDE.md §Cross-Cutting Review Gate");
+    expect(clusterWorkflow).not.toContain('2>/dev/null || echo ""');
+    expect(clusterWorkflow).not.toContain('2>/dev/null || echo "0"');
+    expect(clusterWorkflow).not.toContain("|| true");
+    expect(clusterWorkflow).toContain("exit 1");
 
     for (const role of ["architect", "critic", "security"]) {
       expect(pullRequestTemplate).toContain(
@@ -100,6 +104,9 @@ describe("installer smoke and packaging discipline", () => {
     expect(agents).toContain("Do not bypass hooks");
     expect(agents).toContain("Never push directly to `main`");
     expect(agents).toContain("same-PR field-addition");
+    expect(agents).toContain("A new IPC channel is one coherent change");
+    expect(agents).toContain("gh pr merge --merge");
+    expect(agents).toContain("squash merge is not allowed");
     expect(agents).not.toContain("Markdown-only pushes");
     expect(contributing).not.toContain("Markdown-only pushes");
   });

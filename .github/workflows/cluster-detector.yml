@@ -61,7 +61,7 @@ jobs:
 
           # ── 1. Check if this PR touches sensitive areas ──────────────────
           # Get changed files in this PR vs base
-          CHANGED_FILES=$(git diff --name-only "origin/${BASE_REF}...HEAD" 2>/dev/null || echo "")
+          CHANGED_FILES=$(git diff --name-only "origin/${BASE_REF}...HEAD")
 
           SENSITIVE_HIT=false
           for dir in "${SENSITIVE_DIRS[@]}"; do
@@ -87,9 +87,10 @@ jobs:
           if [ "$SENSITIVE_HIT" = "true" ]; then
             # Count commits in this PR that touch sensitive areas
             SENSITIVE_COMMIT_COUNT=0
+            PR_COMMITS=$(git log "origin/${BASE_REF}..HEAD" --format="%H")
             while IFS= read -r sha; do
               for dir in "${SENSITIVE_DIRS[@]}"; do
-                COMMIT_FILES=$(git diff-tree --no-commit-id -r --name-only "$sha" 2>/dev/null || true)
+                COMMIT_FILES=$(git diff-tree --no-commit-id -r --name-only "$sha")
                 if echo "$COMMIT_FILES" | grep -qE "^${dir}/[^/]" && \
                    ! echo "$COMMIT_FILES" | grep -qE "^${dir}/__tests__/"; then
                   SENSITIVE_COMMIT_COUNT=$((SENSITIVE_COMMIT_COUNT + 1))
@@ -100,7 +101,7 @@ jobs:
                   break
                 fi
               done
-            done < <(git log "origin/${BASE_REF}..HEAD" --format="%H" 2>/dev/null)
+            done <<< "$PR_COMMITS"
 
             if [ "$SENSITIVE_COMMIT_COUNT" -ge "$CLUSTER_THRESHOLD" ]; then
               BUNDLE_HIT=true
@@ -110,14 +111,11 @@ jobs:
           # ── 3. Check WINDOW_DAYS rolling window: ≥CLUSTER_THRESHOLD merged PRs ─
           WINDOW_HIT=false
           if [ "$SENSITIVE_HIT" = "true" ]; then
-            SINCE_DATE=$(date -d "${WINDOW_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-              || date -v-${WINDOW_DAYS}d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-              || echo "")
+            SINCE_DATE=$(date -d "${WINDOW_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ)
 
             if [ -n "$SINCE_DATE" ]; then
               # gh --jq does not forward jq --arg/--argjson flags, so pipe to jq
-              # separately. The || echo "0" guard ensures MERGED_COUNT is always
-              # a valid integer even if gh or jq fails.
+              # separately. Any API or parser failure is a blocking workflow error.
               DIRS_JSON=$(printf '%s\n' "${SENSITIVE_DIRS[@]}" | jq -R . | jq -s .)
               MERGED_COUNT=$(gh pr list \
                 --repo "$REPO" \
@@ -134,7 +132,7 @@ jobs:
                         | any(startswith($dirs[] + "/"))
                       )
                   ] | length
-                ' 2>/dev/null || echo "0")
+                ')
 
               if [ "${MERGED_COUNT:-0}" -ge "$CLUSTER_THRESHOLD" ]; then
                 WINDOW_HIT=true
@@ -212,6 +210,7 @@ jobs:
             -f context="cluster-detector" \
             -f description="Sensitive area cluster detected — Cross-Cutting Review Gate required" \
             -f target_url="https://github.com/${REPO}/blob/main/AGENTS.md#cross-cutting-review-gate"
+          exit 1
 
       - name: Set commit status — pass
         if: steps.cluster-check.outputs.violation != 'true'
@@ -227,7 +226,7 @@ jobs:
             -f context="cluster-detector" \
             -f description="No sensitive area cluster detected"
 
-      - name: Set commit status — pass (cluster review exempted)
+      - name: Set commit status — pass (current-head cluster review)
         if: steps.cluster-check.outputs.violation == 'true' && steps.cluster-attestation.outputs.attested == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
