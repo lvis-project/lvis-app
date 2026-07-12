@@ -356,11 +356,20 @@ describe("cluster review attestation", () => {
         pullRequest({ body: htmlWrappedTable }),
       ).reason,
     ).toBe("table-not-visible");
-    expect(
-      evaluateClusterReviewAttestation(
-        pullRequest({ body: "</details>\n" + validBody() }),
-      ),
-    ).toEqual({ attested: true, reason: "attested" });
+    for (const prefix of [
+      "<details\n",
+      '<details title="hidden\n',
+      "<?conceal\n",
+      "<!DOCTYPE\n",
+      "<![CDATA[\n",
+      "</details>\n",
+    ]) {
+      expect(
+        evaluateClusterReviewAttestation(
+          pullRequest({ body: prefix + validBody() }),
+        ).reason,
+      ).toBe("table-not-visible");
+    }
   });
 
   it("rejects malformed or duplicate Reviewed HEAD candidates", () => {
