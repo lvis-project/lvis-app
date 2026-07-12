@@ -60,12 +60,13 @@ export function isAppOnlyRuntimeInvocation(
  *
  * SCOPE: this is only ever consulted for a call that already reached the app-only
  * dispatch path, which `isAppOnlyRuntimeInvocation` restricts to the TRUSTED PANEL
- * origin. The carve-out is therefore NOT reachable from an MCP App — a card's
- * `origin: "mcp-app"` call never gets here (it fails closed in
- * `PluginRuntime.callFromApp` with `mcp-app-tool-not-app-callable`). That
- * containment is what stops an untrusted card from invoking the manifest's auth
- * status tool, with attacker-chosen arguments, with no risk check, no reviewer, no
- * approval and no audit row.
+ * origin. The carve-out is therefore NOT reachable from an MCP App: a card's
+ * `origin: "mcp-app"` call never selects that branch, so it never gets here — it
+ * goes to the governed executor instead (`PluginRuntime.callFromApp`), auth
+ * `statusTool` included. THE ORIGIN CHECK IS THE WHOLE CONTAINMENT, and it is why an
+ * untrusted card cannot invoke the manifest's auth-status tool with attacker-chosen
+ * arguments, with no risk check, no reviewer, no approval and no audit row: not
+ * because the call is refused, but because it can only arrive through the gate.
  */
 export function appOnlyRuntimeInvocationRequiresUserAction(
   pluginRuntime: RuntimeManifestView,

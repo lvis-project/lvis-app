@@ -38,9 +38,11 @@ function externalSource(tools: Tool[], invoker = vi.fn(async () => "tool-output"
   return { source, invoker };
 }
 
-describe("mcp-tool-adapter — app visibility is materialized ONCE, at ingestion", () => {
+describe("mcp-tool-adapter — BOTH visibility bits are materialized ONCE, at ingestion", () => {
   it("applies the MCP Apps spec default [\"model\",\"app\"] when the server declares nothing", () => {
-    expect(externalTool("github", "query").appInvokable).toBe(true);
+    const t = externalTool("github", "query");
+    expect(t.appInvokable).toBe(true);
+    expect(t.modelVisible).toBe(true);
   });
 
   it("honours an explicit app visibility (app-only and dual)", () => {
@@ -52,10 +54,28 @@ describe("mcp-tool-adapter — app visibility is materialized ONCE, at ingestion
     expect(externalTool("github", "query", ["model"]).appInvokable).toBe(false);
   });
 
-  it("fails closed on a malformed visibility declaration", () => {
-    expect(externalTool("github", "query", "app").appInvokable).toBe(false);
-    expect(externalTool("github", "query", ["app", "everyone"]).appInvokable).toBe(false);
-    expect(externalTool("github", "query", []).appInvokable).toBe(false);
+  it("marks an APP-ONLY tool as NOT model-visible — the spec says the model must not see it", () => {
+    // This is the external-arm half of the same declaration: `["app"]` is
+    // card-callable AND hidden from the model. The tool is still REGISTERED (that is
+    // what puts its card's call under the host gate); `modelVisible: false` is what
+    // subtracts it from the model's tool list, at the registry's one boundary.
+    const appOnly = externalTool("github", "list_rows", ["app"]);
+    expect(appOnly.appInvokable).toBe(true);
+    expect(appOnly.modelVisible).toBe(false);
+    // …and a dual/model tool stays exposed.
+    expect(externalTool("github", "query", ["model", "app"]).modelVisible).toBe(true);
+    expect(externalTool("github", "query", ["model"]).modelVisible).toBe(true);
+  });
+
+  it("fails closed on a malformed visibility declaration — no app surface, still model-governed", () => {
+    for (const malformed of ["app", ["app", "everyone"], []]) {
+      const t = externalTool("github", "query", malformed);
+      // An unrecognized shape must not silently widen the app surface…
+      expect(t.appInvokable).toBe(false);
+      // …and resolves to the shared minimal governed surface ["model"], so the tool
+      // stays LLM-reachable through the executor rather than becoming unreachable.
+      expect(t.modelVisible).toBe(true);
+    }
   });
 });
 
@@ -103,6 +123,19 @@ describe("external tool-call source — the SPEC MUST (visibility) and the gate"
     expect(invoker).toHaveBeenCalledWith("mcp_gh_query", { q: "x" }, { origin: "mcp-app", userAction: false });
   });
 
+  it("runs an APP-ONLY tool through the same GATED delegate — parity with the plugin arm", async () => {
+    // `["app"]` is the spec's spelling for a card-serving, model-hidden tool. On this
+    // arm it was always registered and callable; the plugin arm now behaves the same
+    // way. Both land on the executor — same origin, same no-gesture, same gate.
+    const { source, invoker } = externalSource([externalTool("github", "list_rows", ["app"])]);
+
+    await expect(source.callTool("github", "list_rows", { page: 2 })).resolves.toBe("tool-output");
+    expect(invoker).toHaveBeenCalledWith("mcp_gh_list_rows", { page: 2 }, {
+      origin: "mcp-app",
+      userAction: false,
+    });
+  });
+
   it("denies the call when the executor is not wired yet", async () => {
     const byName = new Map([["mcp_gh_query", externalTool("github", "query")]]);
     const source = createExternalToolCallSource({
@@ -126,7 +159,7 @@ describe("loopback tool-call source — plugin methods through callFromApp", () 
     expect(source.resolveToolOwner("acme-cards", "other_open")).toBeUndefined();
   });
 
-  it("delegates to callFromApp (visibility MUST + app-only deny + the gate) — NOT callFromUi", async () => {
+  it("delegates to callFromApp (visibility MUST + the gate) — NOT callFromUi", async () => {
     // The security-load-bearing wiring: a card is not the plugin's trusted panel,
     // so it must not take the panel's invocation path. `callFromUi` dispatches
     // `origin: "ui"`, the ONE origin from which the ungoverned app-only dispatch
@@ -163,21 +196,22 @@ describe("loopback tool-call source — plugin methods through callFromApp", () 
     );
   });
 
-  it("propagates callFromApp's app-only deny (the fail-closed card error) unchanged", async () => {
+  it("passes an APP-ONLY tool straight to callFromApp — no deny of its own", async () => {
+    // The source is a thin two-member seam: it does not know or care about
+    // visibility. `callFromApp` owns the spec MUST (`assertUiActionInvokable`) and
+    // the gate, and an app-only tool is a governed registry `Tool` now — so this
+    // call is dispatched, not refused. (Pre-fix the runtime threw
+    // `mcp-app-tool-not-app-callable` here, because an app-only tool had no registry
+    // entry and therefore no gate to run under.)
     const runtime = {
       resolveToolOwner: vi.fn(() => "acme-cards"),
-      callFromApp: vi.fn(async () => {
-        throw new Error(
-          "[mcp-app-tool-not-app-callable] Tool 'acme_auth_status' declares app-only visibility",
-        );
-      }),
+      callFromApp: vi.fn(async () => "governed-result"),
     };
     const source = createLoopbackToolCallSource(runtime);
 
-    // The IPC handler turns this rejection into an `{ ok: false }` outcome, which
-    // the bridge renders as an `isError` CallToolResult — never a raw throw.
-    await expect(source.callTool("acme-cards", "acme_auth_status", {})).rejects.toThrow(
-      /mcp-app-tool-not-app-callable/,
+    await expect(source.callTool("acme-cards", "acme_auth_status", { q: 1 })).resolves.toBe(
+      "governed-result",
     );
+    expect(runtime.callFromApp).toHaveBeenCalledWith("acme_auth_status", { q: 1 });
   });
 });

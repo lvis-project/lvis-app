@@ -17,22 +17,28 @@ const log = createLogger("plugin-runtime");
 export type ToolSurface = "model" | "app";
 
 /**
- * READ a tool's explicit surface visibility. The default (`["model","app"]`,
- * SEP-1865 standard, round-3) is materialized ONCE by parsePluginJson (U1) —
- * this function does NOT default. Post-normalize every tool carries an explicit
- * non-empty array, so the fall-through below is UNREACHABLE in the normal path.
+ * The MINIMAL GOVERNED surface, applied when a declaration is absent or malformed
+ * on a path whose producer is contractually required to emit one.
  *
- * DEFENSIVE ASSERT (fail-closed): reaching the fall-through means a broken/absent
- * normalization step let a tool through with no explicit visibility. We resolve
- * to the MINIMAL GOVERNED surface `["model"]` — it denies app-invocability, so
- * the tool can NEVER reach the ungoverned app-only dispatch path (isUiOnly=false),
- * while staying LLM-reachable through the governed executor. This is NOT the
- * semantic default (that is `["model","app"]` and lives only in normalize); it
- * is a fail-closed backstop, and we warn loudly so the contract violation is
- * visible rather than silent.
+ * It denies app-invocability — so the tool can NEVER reach the ungoverned app-only
+ * dispatch path (`isUiOnly` is false) — while staying LLM-reachable through the
+ * governed executor. This is NOT the semantic default (that is the SEP-1865
+ * `["model","app"]`, materialized only where a spec default legitimately applies:
+ * `parsePluginJson` for manifests, `mcp-tool-adapter` for foreign servers).
  */
-export function toolVisibility(tool: McpTool): ToolSurface[] {
-  const raw = tool._meta?.ui?.visibility;
+export const FAIL_CLOSED_SURFACE: readonly ToolSurface[] = ["model"];
+
+/**
+ * The ONE parser of a raw `_meta.ui.visibility` value — the membership test every
+ * consumer class shares, whether the value arrived typed (a normalized manifest
+ * `Tool`) or as an opaque wire `_meta` (`Record<string, unknown>` off `tools/list`).
+ *
+ * PURE and policy-free: returns the declared surfaces, or `null` when the value is
+ * absent/empty/not an array of the two known literals. Each ingestion site then
+ * applies its OWN documented policy for `null` (spec default vs fail-closed), which
+ * is the only thing that legitimately differs between arms.
+ */
+export function parseToolSurfaces(raw: unknown): ToolSurface[] | null {
   if (
     Array.isArray(raw) &&
     raw.length > 0 &&
@@ -40,12 +46,29 @@ export function toolVisibility(tool: McpTool): ToolSurface[] {
   ) {
     return raw as ToolSurface[];
   }
+  return null;
+}
+
+/**
+ * READ a tool's explicit surface visibility. The default (`["model","app"]`,
+ * SEP-1865 standard, round-3) is materialized ONCE by parsePluginJson (U1) —
+ * this function does NOT default. Post-normalize every tool carries an explicit
+ * non-empty array, so the fall-through below is UNREACHABLE in the normal path.
+ *
+ * DEFENSIVE ASSERT (fail-closed): reaching the fall-through means a broken/absent
+ * normalization step let a tool through with no explicit visibility. We resolve to
+ * {@link FAIL_CLOSED_SURFACE} and warn loudly so the contract violation is visible
+ * rather than silent.
+ */
+export function toolVisibility(tool: McpTool): ToolSurface[] {
+  const parsed = parseToolSurfaces(tool._meta?.ui?.visibility);
+  if (parsed) return parsed;
   log.warn(
     { event: "tool-visibility-missing", tool: tool.name },
     "tool reached a host consumer without explicit _meta.ui.visibility — " +
       "normalization-contract violation; applying fail-closed minimal surface [model]",
   );
-  return ["model"]; // fail-closed minimal governed surface — NOT the default
+  return [...FAIL_CLOSED_SURFACE];
 }
 
 export const isModelVisible = (t: McpTool): boolean => toolVisibility(t).includes("model");

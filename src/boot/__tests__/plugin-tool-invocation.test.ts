@@ -536,7 +536,7 @@ describe("invokePluginTool routing — app-origin calls land on the governed exe
     auth: { statusTool: "auth_status", loginTool: "meeting_stage_upload_begin" },
   };
 
-  it("app origin + app-only tool → governed executor branch (the runtime then denies it outright)", async () => {
+  it("app origin + app-only tool → governed executor branch (and the runtime dispatches it THERE)", async () => {
     const rt = realRuntime(spec);
     const ctx: PluginToolInvocationContext = {
       origin: "mcp-app",
@@ -544,9 +544,11 @@ describe("invokePluginTool routing — app-origin calls land on the governed exe
       userAction: false,
     };
     await expect(routeOf(rt, "meeting_stage_upload_begin", ctx)).resolves.toBe("governed-executor");
-    // …and the app arm never even dispatches it: PluginRuntime.callFromApp fails
-    // closed BEFORE the delegate, because an app-only tool is not a registry Tool.
-    // (Proven in plugins/runtime/__tests__/call-from-app.test.ts.)
+    // …and that branch is where the app arm actually sends it: an app-only tool is a
+    // §6.4 registry Tool (the loopback projects it), so PluginRuntime.callFromApp
+    // hands it to the executor — risk → reviewer/approval → audit — rather than
+    // denying it for want of a gate. What it never gets is the panel's ungoverned
+    // dispatch. (Proven in plugins/runtime/__tests__/call-from-app.test.ts.)
   });
 
   it("app origin + auth.statusTool → governed executor branch (the bypass is not selected)", async () => {
