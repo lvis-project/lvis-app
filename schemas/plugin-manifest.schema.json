@@ -139,7 +139,7 @@
     },
     "uiResources": {
       "type": "array",
-      "description": "MCP App ui:// resources this plugin serves (distinct from `ui[]`, which declares host-mounted React sidebar panels). DECLARED POLICY, SERVED CONTENT: each entry declares a `ui://<pluginId>/<path>` uri plus that resource's OWN _meta.ui security policy (csp/permissions); the card HTML itself is served by the plugin at read time (`RuntimePlugin.readUiResource(uri)`), exactly as an external MCP server answers resources/read with bytes — the host never reads a plugin-declared disk path. When a tool result carries `_meta.ui.resourceUri` matching one of these uris, the loopback host asks the plugin for the HTML and renders it through the same sandbox-proxy + main-computed CSP path as an external MCP server's ui:// resource. Security (enforced fail-closed at serve time): the uri authority MUST equal the plugin id (own-namespace-only), the uri MUST be declared here (declared-only — this is what binds served content to a reviewed csp), and main COMPUTES the CSP header from csp/permissions — the plugin never supplies a policy header string. csp/permissions stay in the manifest (not on the hook's return) so they are statically reviewable and covered by manifestSha256.",
+      "description": "MCP App ui:// resources this plugin serves (distinct from `ui[]`, which declares host-mounted React sidebar panels). DECLARED POLICY, SERVED CONTENT: each entry declares a `ui://<pluginId>/<path>` uri plus that resource's OWN _meta.ui security policy (csp); the card HTML itself is served by the plugin at read time (`RuntimePlugin.readUiResource(uri)`), exactly as an external MCP server answers resources/read with bytes — the host never reads a plugin-declared disk path. When a tool result carries `_meta.ui.resourceUri` matching one of these uris, the loopback host asks the plugin for the HTML and renders it through the same sandbox-proxy + main-computed CSP path as an external MCP server's ui:// resource. Security (enforced fail-closed at serve time): the uri authority MUST equal the plugin id (own-namespace-only), the uri MUST be declared here (declared-only — this is what binds served content to a reviewed csp), and main COMPUTES the CSP header from csp — the plugin never supplies a policy header string. The csp stays in the manifest (not on the hook's return) so it is statically reviewable and covered by manifestSha256. NOTE: the spec's `permissions` (camera/microphone/geolocation/clipboardWrite) is deliberately NOT modelled — the inner frame is sandbox=allow-scripts with no allow-same-origin, so it runs on an opaque origin and cannot be delegated a powerful feature. A card gets none.",
       "maxItems": 64,
       "items": {
         "type": "object",
@@ -152,8 +152,7 @@
             "pattern": "^ui://[a-z0-9][a-z0-9.-]*/.+",
             "maxLength": 512
           },
-          "csp": { "$ref": "#/definitions/mcpUiResourceCsp" },
-          "permissions": { "$ref": "#/definitions/mcpUiResourcePermissions" }
+          "csp": { "$ref": "#/definitions/mcpUiResourceCsp" }
         }
       }
     },
@@ -830,17 +829,6 @@
           "description": "Allowed base URIs for the document -> base-uri.",
           "items": { "type": "string", "minLength": 1 }
         }
-      }
-    },
-    "mcpUiResourcePermissions": {
-      "$comment": "MCP Apps spec `McpUiResourcePermissions` — each key maps to a Permission-Policy feature on the inner iframe; an ABSENT key is denied. Present keys are empty objects. Mirrors src/mcp/types.ts McpUiResourcePermissions.",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "camera": { "type": "object", "additionalProperties": false },
-        "microphone": { "type": "object", "additionalProperties": false },
-        "geolocation": { "type": "object", "additionalProperties": false },
-        "clipboardWrite": { "type": "object", "additionalProperties": false }
       }
     }
   }
