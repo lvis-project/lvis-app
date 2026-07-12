@@ -39,21 +39,20 @@ describe("installer smoke and packaging discipline", () => {
   });
 
   it("documents runtime package imports as dependencies, not devDependencies", () => {
-    const claude = readRepoFile("CLAUDE.md");
+    const agents = readRepoFile("AGENTS.md");
 
-    expect(claude).toContain("## Packaging Discipline (REQUIRED)");
-    expect(claude).toContain("unbundled runtime 코드에 새 top-level package import");
-    expect(claude).toContain("webpack/esbuild 로 dist asset에 번들되는 renderer/UI import");
-    expect(claude).toContain("`dependencies`");
-    expect(claude).toContain("`devDependencies`");
-    expect(claude).toContain("ERR_MODULE_NOT_FOUND");
-    expect(claude).toContain("adm-zip");
+    expect(agents).toContain("unbundled runtime code");
+    expect(agents).toContain("Renderer/UI-only");
+    expect(agents).toContain("webpack/esbuild");
+    expect(agents).toContain("`dependencies`");
+    expect(agents).toContain("`devDependencies`");
+    expect(agents).toContain("packaged-app smoke");
   });
 
   it("declares sonic-boom as a runtime dependency (log-file-sink imports it unbundled)", () => {
     // src/lib/log-file-sink.ts adds a top-level import from "sonic-boom" that
     // the packaged main process resolves directly from app.asar (unbundled
-    // runtime code). Packaging Discipline (CLAUDE.md) requires it in
+    // runtime code). The repository AGENTS.md contract requires it in
     // `dependencies`, NOT `devDependencies` — otherwise electron-builder prunes
     // it and the installed app crashes on first log write with
     // ERR_MODULE_NOT_FOUND (the PR #684 regression class). Assert the dependency
