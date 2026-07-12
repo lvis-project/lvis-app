@@ -29,6 +29,7 @@
  */
 import type { PluginManifest, Tool as McpTool } from "../plugins/types.js";
 import { toolVisibility, isModelVisible } from "../plugins/runtime/tool-visibility.js";
+import { observeLegacyMetaKey } from "./legacy-meta-telemetry.js";
 
 /** The RC protocol revision LVIS plugin-servers speak. */
 const MCP_PROTOCOL_VERSION = "2026-07-28";
@@ -80,14 +81,22 @@ export interface McpDiscoverProjection {
  * stray/removed proprietary key can ride the wire. `outputSchema` (standard MCP)
  * is passed through verbatim when present.
  */
-function toWireTool(tool: McpTool): McpToolProjection {
+function toWireTool(tool: McpTool, pluginId: string): McpToolProjection {
   const meta: McpToolProjection["_meta"] = { ui: { visibility: toolVisibility(tool) } };
   // Read the authored manifest key, preferring the new `lvisai/pathFields`;
   // transitional: fall back to the legacy `xyz.lvis/pathFields` until published
   // plugin manifests are migrated (then remove the fallback). The WIRE always
-  // emits ONLY the new key below.
-  const pathFields = tool._meta?.["lvisai/pathFields"] ?? tool._meta?.["xyz.lvis/pathFields"];
-  if (pathFields !== undefined) meta["lvisai/pathFields"] = pathFields;
+  // emits ONLY the new key below. This site reads the ON-DISK manifest, so a legacy
+  // hit here is the signal that this installed plugin has not yet rolled forward —
+  // the observable removal gate for the schema's legacy property.
+  const pathFields = tool._meta?.["lvisai/pathFields"];
+  const legacyPathFields = tool._meta?.["xyz.lvis/pathFields"];
+  if (pathFields !== undefined) {
+    meta["lvisai/pathFields"] = pathFields;
+  } else if (legacyPathFields !== undefined) {
+    observeLegacyMetaKey(pluginId, "pathFields");
+    meta["lvisai/pathFields"] = legacyPathFields;
+  }
   return {
     name: tool.name,
     ...(tool.title !== undefined ? { title: tool.title } : {}),
@@ -107,7 +116,7 @@ function toWireTool(tool: McpTool): McpToolProjection {
  * {name ∈ tools[] ∧ has schema} output set exactly — registry contents identical.
  */
 export function manifestToolsToMcpTools(manifest: PluginManifest): McpToolProjection[] {
-  return (manifest.tools ?? []).filter(isModelVisible).map(toWireTool);
+  return (manifest.tools ?? []).filter(isModelVisible).map((t) => toWireTool(t, manifest.id));
 }
 
 /**

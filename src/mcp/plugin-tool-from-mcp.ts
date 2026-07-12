@@ -46,6 +46,7 @@
  */
 import { createDynamicTool, type Tool } from "../tools/base.js";
 import type { McpUiPayload } from "./types.js";
+import { observeLegacyMetaKey } from "./legacy-meta-telemetry.js";
 
 /** Vendor prefix for LVIS-private `_meta` keys (must mirror the forward projection). */
 const LVIS_META_PREFIX = "lvisai/";
@@ -84,12 +85,18 @@ export type PluginMcpInvoke = (
   args: Record<string, unknown>,
 ) => Promise<{ text: string; uiPayload?: McpUiPayload; rawResult?: { value: unknown } }>;
 
-function readPathFields(meta: Record<string, unknown>): string[] | undefined {
+function readPathFields(meta: Record<string, unknown>, pluginId: string): string[] | undefined {
   // Prefer the new `lvisai/pathFields`; transitional: fall back to the legacy
   // `xyz.lvis/pathFields` until SDK+plugins are migrated (then remove the fallback).
+  // This reads the WIRE. On the loopback arm the forward projection already
+  // normalized legacy→new, so a legacy hit here can ONLY come from a genuinely
+  // out-of-process plugin still emitting the old key — the observable gate for the
+  // out-of-process population, distinct from the on-disk-manifest gate.
+  const preferred = meta[`${LVIS_META_PREFIX}pathFields`];
   const value =
-    meta[`${LVIS_META_PREFIX}pathFields`] ?? meta[`${LEGACY_LVIS_META_PREFIX}pathFields`];
+    preferred !== undefined ? preferred : meta[`${LEGACY_LVIS_META_PREFIX}pathFields`];
   if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
+    if (preferred === undefined) observeLegacyMetaKey(pluginId, "pathFields");
     return value as string[];
   }
   return undefined;
@@ -119,7 +126,7 @@ export function mcpToolToPluginTool(
     source: "plugin",
     category,
     pluginId,
-    pathFields: readPathFields(meta),
+    pathFields: readPathFields(meta, pluginId),
     // #885 v6 — the wire carries no `writesToOwnSandbox`/`version`/`deprecatedSince`/
     // `replacedBy` (all Phase-R deletions from the Tool contract). The reviewer
     // auto-LOW keys on host-computed sandbox-containment, never a manifest value,
