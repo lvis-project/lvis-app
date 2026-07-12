@@ -244,7 +244,42 @@ describe("cluster review attestation", () => {
     ).toBe("table-not-visible");
     expect(
       evaluateClusterReviewAttestation(
+        pullRequest({
+          body: "\\`\n<details>\n`\n" + validBody() + "\n</details>",
+        }),
+      ).reason,
+    ).toBe("table-not-visible");
+    expect(
+      evaluateClusterReviewAttestation(
+        pullRequest({
+          body: "`\n<details>\n\\`\n" + validBody() + "\n</details>",
+        }),
+      ).reason,
+    ).toBe("table-not-visible");
+    expect(
+      evaluateClusterReviewAttestation(
+        pullRequest({
+          body: "\\` literal\n`\n<details>\n`\n" + validBody(),
+        }),
+      ),
+    ).toEqual({ attested: true, reason: "attested" });
+    expect(
+      evaluateClusterReviewAttestation(
         pullRequest({ body: "`\n<details>\n`\n" + validBody() }),
+      ),
+    ).toEqual({ attested: true, reason: "attested" });
+    expect(
+      evaluateClusterReviewAttestation(
+        pullRequest({
+          body: "prefix\n    <details>\n\n" + validBody() + "\n</details>",
+        }),
+      ).reason,
+    ).toBe("table-not-visible");
+    expect(
+      evaluateClusterReviewAttestation(
+        pullRequest({
+          body: "    <details>\n\n" + validBody() + "\n</details>",
+        }),
       ),
     ).toEqual({ attested: true, reason: "attested" });
     expect(
