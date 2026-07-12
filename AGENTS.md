@@ -89,6 +89,10 @@ state durable constraints here and put detailed designs in their owning docs.
   and pull-request access and never checks out or executes pull-request content.
   The only workflow writes are the fixed `Sensitive Area Cluster Check` status
   on the event PR head and invalidation of the fixed `cluster-review-passed` label.
+- `.github/workflows/cluster-detector.yml` is the sole workflow allowed to use
+  `statuses: write` or the fixed status context. Branch protection pins the
+  GitHub Actions app rather than workflow identity, so peer workflows must not
+  share either write surface.
 - A new commit, any PR edit, base change, or reopen makes any retained label
   insufficient until all three roles review the current evidence. A missing
   label, invalid evidence, or failing workflow blocks merge. Never bypass the

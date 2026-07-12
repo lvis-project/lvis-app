@@ -11,6 +11,7 @@ describe("trusted cluster policy workflow", () => {
     );
 
     expect(workflow).toContain("pull_request_target:");
+    expect(workflow).toContain("branches: [main]");
     expect(workflow).not.toContain("\n  pull_request:\n");
     expect(workflow).toContain(
       "types: [opened, reopened, synchronize, edited, labeled, unlabeled]",
@@ -34,17 +35,16 @@ describe("trusted cluster policy workflow", () => {
     const snapshotIndex = workflow.indexOf("      - name: Capture live pull request snapshot");
     const checkoutIndex = workflow.indexOf("      - name: Checkout trusted cluster policy");
     const verifyIndex = workflow.indexOf("      - name: Verify trusted cluster policy checkout");
-    const revalidateIndex = workflow.indexOf(
-      "      - name: Revalidate live pull request snapshot",
-    );
-    const finalStatusIndex = workflow.indexOf("      - name: Publish final cluster status");
+    const finalizerIndex = workflow.indexOf("      - name: Finalize cluster policy status");
     expect(pendingIndex).toBe(workflow.indexOf("      - name:", stepsIndex));
     expect(invalidationIndex).toBeGreaterThan(pendingIndex);
     expect(snapshotIndex).toBeGreaterThan(invalidationIndex);
     expect(checkoutIndex).toBeGreaterThan(snapshotIndex);
     expect(verifyIndex).toBeGreaterThan(checkoutIndex);
-    expect(revalidateIndex).toBeGreaterThan(verifyIndex);
-    expect(finalStatusIndex).toBeGreaterThan(revalidateIndex);
+    expect(finalizerIndex).toBeGreaterThan(verifyIndex);
+    expect(workflow.match(/- name: Finalize cluster policy status/g)).toHaveLength(1);
+    expect(workflow).not.toContain("Revalidate live pull request snapshot");
+    expect(workflow).not.toContain("Publish final cluster status");
 
     expect(
       workflow.match(new RegExp("STATUS_CONTEXT: " + STATUS_CONTEXT, "g")),
@@ -77,20 +77,37 @@ describe("trusted cluster policy workflow", () => {
     );
     expect(workflow).toContain("persist-credentials: false");
 
-    const revalidationSection = workflow.slice(revalidateIndex, finalStatusIndex);
-    expect(revalidationSection).toContain("FINAL_DIGEST=");
-    expect(revalidationSection).toContain(
-      'if [ "$FINAL_DIGEST" != "$EXPECTED_DIGEST" ]',
+    const finalizer = workflow.slice(finalizerIndex);
+    const finalSnapshotFetchIndex = finalizer.indexOf(
+      'gh api "repos/${REPO}/pulls/${PR_NUMBER}"',
     );
-    expect(revalidationSection).toContain(
-      'if [ "$VIOLATION" = "true" ] && [ "$ATTESTED" = "true" ]',
+    const finalDigestIndex = finalizer.indexOf("FINAL_DIGEST=");
+    const finalAttestationIndex = finalizer.indexOf(
+      "node .cluster-policy/scripts/check-cluster-review-attestation.mjs",
     );
-    expect(revalidationSection).not.toContain("\n        if:");
-    expect(workflow).toContain("if: always()");
-    expect(workflow).toContain("JOB_STATUS: ${{ job.status }}");
-    expect(workflow).toContain('if [ "$JOB_STATUS" = "success" ]');
-    expect(workflow).toContain("STATUS_STATE=success");
-    expect(workflow).toContain("STATUS_STATE=failure");
+    const finalPostIndex = finalizer.indexOf(
+      'gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}"',
+    );
+    expect(finalSnapshotFetchIndex).toBeGreaterThan(-1);
+    expect(finalDigestIndex).toBeGreaterThan(finalSnapshotFetchIndex);
+    expect(finalAttestationIndex).toBeGreaterThan(finalDigestIndex);
+    expect(finalPostIndex).toBeGreaterThan(finalAttestationIndex);
+    expect(finalizer).toContain("if: always()");
+    expect(finalizer).toContain("PRIOR_JOB_STATUS: ${{ job.status }}");
+    expect(finalizer).toContain('elif [ "$PRIOR_JOB_STATUS" != "success" ]');
+    expect(finalizer).toContain(
+      'elif [ "$FINAL_DIGEST" != "$EXPECTED_DIGEST" ]',
+    );
+    expect(finalizer).toContain(
+      'elif [ "$VIOLATION" = "true" ] && [ "$ATTESTED" = "true" ]',
+    );
+    expect(finalizer).toContain("STATUS_STATE=failure");
+    expect(finalizer).toContain("STATUS_STATE=success");
+    expect(finalizer).toContain(
+      'if ! gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}"',
+    );
+    expect(finalizer).toContain('if [ "$FINALIZER_FAILED" -ne 0 ]');
+    expect(finalizer).toContain("exit 1");
 
     expect(workflow).toContain(
       ".cluster-policy/scripts/check-cluster-scope.mjs",
