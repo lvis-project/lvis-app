@@ -5,6 +5,8 @@
 
 
 
+import type { ToolSurface } from "../plugins/runtime/tool-visibility.js";
+
 export interface McpGovernancePolicy {
   version: string;
 
@@ -230,11 +232,13 @@ export type McpServerConfigDto = DistributiveOmit<
  * - `"model"`: the agent may call it.
  * - `"app"`: the tool's OWN app (this server's `ui://` card) may call it.
  *
- * Structurally mirrors the upstream type rather than importing it (same reason as
- * {@link McpUiResourceCsp}: this crosses the main/preload/renderer boundary and
- * ext-apps' `.d.ts` extensionless imports do not resolve under NodeNext).
+ * ONE declaration: this is an alias of {@link ToolSurface} (`plugins/runtime/
+ * tool-visibility.ts`, the host's single surface-visibility reader), which had the
+ * identical `"model" | "app"` union. A type-only import, so the reverse edge
+ * (tool-visibility.ts already imports this module's `Tool` type-only) is erased at
+ * runtime — no cycle.
  */
-export type McpUiToolVisibility = "model" | "app";
+export type McpUiToolVisibility = ToolSurface;
 
 export interface McpToolSchema {
   name: string;
