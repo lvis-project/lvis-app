@@ -153,10 +153,32 @@ function blankPreservingNewlines(text) {
 }
 
 function withoutMarkdownIndentedCode(text) {
-  return text
-    .split("\n")
-    .map((line) => /^(?: {4}|\t)/.test(line) ? blankPreservingNewlines(line) : line)
-    .join("\n");
+  const visibleLines = [];
+  let inIndentedCode = false;
+  let previousWasBlank = true;
+
+  for (const line of text.split("\n")) {
+    const isBlank = /^[ \t]*$/.test(line);
+    const isIndented = /^(?: {4}|\t)/.test(line);
+    if (inIndentedCode) {
+      if (isBlank || isIndented) {
+        visibleLines.push(blankPreservingNewlines(line));
+        previousWasBlank = isBlank;
+        continue;
+      }
+      inIndentedCode = false;
+    }
+
+    if (!isBlank && isIndented && previousWasBlank) {
+      inIndentedCode = true;
+      visibleLines.push(blankPreservingNewlines(line));
+    } else {
+      visibleLines.push(line);
+    }
+    previousWasBlank = isBlank;
+  }
+
+  return visibleLines.join("\n");
 }
 
 function isBackslashEscaped(text, index) {
@@ -180,6 +202,11 @@ function withoutMarkdownCodeSpans(text) {
     visible.push(text.slice(cursor, openingIndex));
 
     const openingLength = maximalBacktickRunLength(text, openingIndex);
+    if (isBackslashEscaped(text, openingIndex)) {
+      visible.push(text.slice(openingIndex, openingIndex + openingLength));
+      cursor = openingIndex + openingLength;
+      continue;
+    }
     let searchIndex = openingIndex + openingLength;
     let closingIndex = -1;
 
@@ -187,7 +214,10 @@ function withoutMarkdownCodeSpans(text) {
       const candidateIndex = text.indexOf("`", searchIndex);
       if (candidateIndex < 0) break;
       const candidateLength = maximalBacktickRunLength(text, candidateIndex);
-      if (candidateLength === openingLength) {
+      if (
+        candidateLength === openingLength
+        && !isBackslashEscaped(text, candidateIndex)
+      ) {
         closingIndex = candidateIndex;
         break;
       }
