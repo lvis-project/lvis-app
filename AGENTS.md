@@ -79,13 +79,20 @@ state durable constraints here and put detailed designs in their owning docs.
 - Sensitive cross-cutting work identified by `.github/workflows/cluster-detector.yml`
   or task scope requires independent architect, critic, and security reviews.
 - The PR template records architect, critic, and security verdicts, reviewed
-  HEAD SHAs, and blocking findings.
-- Each machine marker contains the exact current PR HEAD SHA and a `GO`
-  verdict. `cluster-review-passed` is valid only when the workflow finds
-  exactly one current-HEAD marker per role.
-- A new commit makes any retained label insufficient until all three roles
-  review the new HEAD. A missing label, invalid marker, or failing workflow
-  blocks merge. Never bypass the gate.
+  HEAD SHAs, and blocking findings. Each visible role row and hidden marker
+  agrees on the exact current PR HEAD SHA and verdict; a `GO` row has blocking
+  findings exactly `None`.
+- `cluster-review-passed` is valid only when the workflow finds exactly one
+  consistent current-HEAD row and marker per role. Only a fresh application of
+  that label can pass the gated run; a later PR metadata event requires
+  removing and reapplying it.
+- The required check executes policy code from the trusted base commit with a
+  read-only token. Its trusted label invalidator never checks out or runs pull
+  request content.
+- A new commit, body edit, base change, or reopen makes any retained label
+  insufficient until all three roles review the current evidence. A missing
+  label, invalid evidence, or failing workflow blocks merge. Never bypass the
+  gate.
 
 ## Validation: proportional during work, complete once at publish
 
