@@ -8,16 +8,29 @@
  * directly: `mcpManager.callTool` (raw `tools/call` on the wire) and a raw plugin
  * handler call both BYPASS the gate and are never used here.
  *
- * ── `userAction: false`, always ────────────────────────────────────────────────
+ * ── An MCP App is NOT the plugin's trusted panel ───────────────────────────────
  * An MCP App runs in an UNTRUSTED sandboxed iframe. A "the user clicked" claim
  * originating inside it is not verifiable by the host (the renderer's real
  * `navigator.userActivation` belongs to the host frame, not the guest, and the
  * guest can synthesize a call at any time). So an app-initiated call is NEVER
  * marked user-initiated: it must earn its consent from the approval gate like any
- * other non-user-initiated tool call. A consequence, and a good one: the
- * app-only-visibility plugin dispatch path (`callDeclaredAppOnlyTool`, which skips
- * the reviewer) requires a genuine user activation, so an MCP App can never reach
- * that ungoverned bypass — it fails closed with an activation error.
+ * other non-user-initiated tool call.
+ *
+ * Because a `userAction` claim is unverifiable here, the app does not get the
+ * panel's origin: the loopback source dispatches with `origin: "mcp-app"`
+ * (`PluginRuntime.callFromApp`), NOT `origin: "ui"` (`callFromUi`, the plugin's own
+ * first-party React panel). The ungoverned app-only plugin dispatch path
+ * (`callDeclaredAppOnlyTool`, which skips risk/reviewer/approval/audit) is entered
+ * only on a UI-EFFECTIVE chain (`isAppOnlyRuntimeInvocation` returns false for any
+ * other origin), so an app-origin call does not enter that path AT ALL — not
+ * "enters it and is stopped by a user-activation check". That distinction is the
+ * whole fix: the activation check has a carve-out (the manifest's
+ * `auth.statusTool`), and a card that could reach the path would slip through it.
+ *
+ * Consequence, intended: from an MCP App only tools that are ALSO model-visible
+ * (dual — the spec default when `_meta.ui.visibility` is omitted) are callable,
+ * because only those exist as §6.4 registry `Tool`s the governed executor can run.
+ * An APP-ONLY tool fails closed with `mcp-app-tool-not-app-callable`.
  */
 import type { Tool } from "../tools/base.js";
 import type { PluginToolInvocationDelegate } from "../plugins/runtime/index.js";
@@ -27,15 +40,13 @@ export interface PluginToolCallRuntime {
   /** `method → owning pluginId` (a loopback server's id IS its pluginId). */
   resolveToolOwner(method: string): string | undefined;
   /**
-   * The gated renderer→plugin invocation path. Enforces `assertUiActionInvokable`
-   * (the tool's `_meta.ui.visibility` MUST include `"app"` — the SPEC MUST for this
-   * backend, enforced there and nowhere else) and delegates to the ToolExecutor.
+   * The gated MCP-App→plugin invocation path (`origin: "mcp-app"`). Enforces
+   * `assertUiActionInvokable` (the tool's `_meta.ui.visibility` MUST include
+   * `"app"` — the SPEC MUST for this backend, enforced there and nowhere else),
+   * fails closed on an app-only tool, and delegates to the ToolExecutor. It takes
+   * no `userAction` argument: an app never has one.
    */
-  callFromUi(
-    method: string,
-    payload?: unknown,
-    options?: { userAction?: boolean },
-  ): Promise<unknown>;
+  callFromApp(method: string, payload?: unknown): Promise<unknown>;
 }
 
 /** What the external (foreign MCP server) source needs from the host. */
@@ -51,7 +62,8 @@ export interface ExternalToolCallDeps {
 /**
  * Loopback source — the card's server is a first-party plugin's in-process MCP
  * host, so its tools are plugin methods. Ownership comes from the runtime's method
- * map; the visibility MUST + the gate both live inside `callFromUi`.
+ * map; the visibility MUST, the app-only deny, and the gate all live inside
+ * `callFromApp`.
  */
 export function createLoopbackToolCallSource(runtime: PluginToolCallRuntime): {
   resolveToolOwner(serverId: string, toolName: string): string | undefined;
@@ -62,8 +74,9 @@ export function createLoopbackToolCallSource(runtime: PluginToolCallRuntime): {
     // plugin), so the owner is resolved from the NAME alone; the caller compares it
     // against the card's serverId.
     resolveToolOwner: (_serverId, toolName) => runtime.resolveToolOwner(toolName),
-    callTool: (_serverId, toolName, args) =>
-      runtime.callFromUi(toolName, args, { userAction: false }),
+    // `callFromApp`, never `callFromUi` — the app is not the plugin's panel (see
+    // the file header). No `userAction` argument exists on this path.
+    callTool: (_serverId, toolName, args) => runtime.callFromApp(toolName, args),
   };
 }
 
@@ -101,7 +114,7 @@ export function createExternalToolCallSource(deps: ExternalToolCallDeps): {
       // materialized once at ingestion (`mcp-tool-adapter`). Fail-closed on
       // `undefined`: a registry entry that never went through the adapter (a host
       // builtin) is not app-callable. The plugin arm's equivalent is
-      // `assertUiActionInvokable` inside `callFromUi` — one enforcement site each,
+      // `assertUiActionInvokable` inside `callFromApp` — one enforcement site each,
       // no layering.
       if (tool.appInvokable !== true) {
         throw new Error(
@@ -113,10 +126,12 @@ export function createExternalToolCallSource(deps: ExternalToolCallDeps): {
       if (!invoke) throw new Error("Tool executor is not wired; MCP App tool call denied");
 
       // The gated path: ToolExecutor → risk classification (`inspectHostRisk`;
-      // external MCP ⇒ "network") → reviewer/approval → audit. `origin: "ui"` (a
-      // foreground, non-headless call the user can be asked about) +
-      // `userAction: false` (see the file header).
-      return invoke(tool.name, args, { origin: "ui", userAction: false });
+      // external MCP ⇒ "network") → reviewer/approval → audit. `origin: "mcp-app"`
+      // — the SAME origin the loopback arm uses: a card is a card, whichever server
+      // backs it, and neither arm is the trusted panel. It is still a foreground
+      // (non-headless) call the user can be asked about; what it is NOT is a call
+      // that can claim a user gesture (`userAction` is never set — see the header).
+      return invoke(tool.name, args, { origin: "mcp-app", userAction: false });
     },
   };
 }
