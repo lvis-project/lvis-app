@@ -57,6 +57,12 @@ describe("trusted cluster policy transition", () => {
     );
 
     const transition = bridge.slice(transitionIndex);
+    const finalizerIndex = transition.indexOf(
+      "      - name: Finalize cluster policy status",
+    );
+    expect(finalizerIndex).toBeGreaterThan(-1);
+    const finalizer = transition.slice(finalizerIndex);
+
     expect(transition).toContain("github.event.pull_request.number == 1603");
     expect(transition).toContain(
       "github.event.pull_request.base.ref == 'main'",
@@ -110,6 +116,46 @@ describe("trusted cluster policy transition", () => {
     );
     expect(transition).toContain("FINALIZER_FAILED=1");
     expect(transition).toContain('elif [ "$PRIOR_JOB_STATUS" != "success" ]');
+
+    expect(finalizer).not.toContain("$VIOLATION");
+    expect(finalizer.match(/^\s*STATUS_STATE=success$/gm) ?? []).toHaveLength(1);
+
+    const digestIndex = finalizer.indexOf(
+      'elif [ "$FINAL_DIGEST" != "$EXPECTED_DIGEST" ]; then',
+    );
+    const attestedIndex = finalizer.indexOf(
+      'elif [ "$ATTESTED" = "true" ]; then',
+    );
+    const revalidateIndex = finalizer.indexOf(
+      "check-cluster-review-attestation.mjs",
+      attestedIndex,
+    );
+    const grepIndex = finalizer.indexOf(
+      'grep -Fxq "attested=true"',
+      revalidateIndex,
+    );
+    const successIndex = finalizer.indexOf(
+      "STATUS_STATE=success",
+      grepIndex,
+    );
+    const missingAttestationIndex = finalizer.indexOf(
+      "Current-head cluster review attestation is required for transition",
+      successIndex,
+    );
+    const statusPostIndex = finalizer.indexOf(
+      'gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}"',
+      missingAttestationIndex,
+    );
+
+    expect(attestedIndex).toBeGreaterThan(digestIndex);
+    expect(revalidateIndex).toBeGreaterThan(attestedIndex);
+    expect(grepIndex).toBeGreaterThan(revalidateIndex);
+    expect(successIndex).toBeGreaterThan(grepIndex);
+    expect(missingAttestationIndex).toBeGreaterThan(successIndex);
+    expect(statusPostIndex).toBeGreaterThan(missingAttestationIndex);
+    expect(
+      finalizer.slice(missingAttestationIndex, statusPostIndex),
+    ).not.toContain("STATUS_STATE=success");
   });
 
   it("limits the temporary status-write surface to two audited workflows", () => {
