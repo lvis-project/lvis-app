@@ -32,6 +32,10 @@ import {
   mcpAppViewKeyPrefix,
 } from "../shared/mcp-app-partition.js";
 import type { McpUiPayload } from "../mcp/types.js";
+import {
+  sanitizeMcpAppOriginSessionId,
+  type McpAppDetachedPayload,
+} from "../shared/mcp-app-detached-payload.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { resolveAppIconPath } from "./app-icon.js";
@@ -346,14 +350,17 @@ export class WindowManager {
   private _detachedShell: BrowserWindow | null = null;
   private _detachedShellViewKey: string | null = null;
   /**
-   * #885 b2 — host-owned registry of the `McpUiPayload` for each detached
-   * MCP-app card, keyed by its `mcp-app:<hex>:<cardId>` viewKey. The URL
-   * fragment (`#detached/<viewKey>`) cannot carry `resourceUri`/`csp`/`title`,
-   * so the detached renderer fetches its payload from here on mount via
-   * `getMcpDetachedPayload`. Purged on window-close, in-place navigation away,
-   * and on b3 scoped disconnect-close — so a stale payload never lingers.
+   * #885 b2 — host-owned registry of the {@link McpAppDetachedPayload} for each
+   * detached MCP-app card, keyed by its `mcp-app:<hex>:<cardId>` viewKey. The URL
+   * fragment (`#detached/<viewKey>`) cannot carry `resourceUri`/`csp`/`title` — nor
+   * the card's ORIGIN SESSION, which the detached window has no `ChatContext` to
+   * recover — so the detached renderer fetches the whole record from here on mount
+   * via `getMcpDetachedPayload`. Purged (and the main window notified) through the
+   * one `_releaseMcpDetachedCard` chokepoint on window-close, in-place navigation
+   * away, and b3 scoped disconnect-close — so a stale payload never lingers and the
+   * inline card always learns when its detached instance is gone.
    */
-  private _mcpDetachedPayloads = new Map<string, McpUiPayload>();
+  private _mcpDetachedPayloads = new Map<string, McpAppDetachedPayload>();
   /**
    * IDs of locked children that were hidden BY maximize (not by the user).
    * Used in the unmaximize handler to avoid accidentally restoring windows
@@ -472,7 +479,7 @@ export class WindowManager {
         // exit (restores the "stale payload never lingers" invariant).
         const outgoingViewKey = this._children.get(shell.id)?.viewKey ?? this._detachedShellViewKey;
         if (outgoingViewKey && isMcpAppViewKey(outgoingViewKey)) {
-          this._mcpDetachedPayloads.delete(outgoingViewKey);
+          this._releaseMcpDetachedCard(outgoingViewKey);
         }
         this._children.delete(shell.id);
         this._detachedShell = null;
@@ -495,7 +502,7 @@ export class WindowManager {
           const entry = this._children.get(shell.id);
           if (entry) {
             if (isMcpAppViewKey(entry.viewKey) && entry.viewKey !== viewKey) {
-              this._mcpDetachedPayloads.delete(entry.viewKey);
+              this._releaseMcpDetachedCard(entry.viewKey);
             }
             entry.viewKey = viewKey;
           }
@@ -658,7 +665,7 @@ export class WindowManager {
       // deleting the entry.
       const closingViewKey = this._children.get(child.id)?.viewKey;
       if (closingViewKey && isMcpAppViewKey(closingViewKey)) {
-        this._mcpDetachedPayloads.delete(closingViewKey);
+        this._releaseMcpDetachedCard(closingViewKey);
       }
       this._children.delete(child.id);
       if (this._detachedShell === child) {
@@ -713,39 +720,87 @@ export class WindowManager {
    * minted HOST-SIDE (`randomUUID`, charset-safe) so a renderer-supplied cardId
    * can never influence the viewKey; the payload is stored in
    * `_mcpDetachedPayloads` for the detached renderer to fetch on mount (the URL
-   * fragment cannot carry `resourceUri`/`csp`). Returns the opened window.
+   * fragment cannot carry `resourceUri`/`csp`/the origin session). Returns the opened
+   * window AND its host-minted viewKey.
+   *
+   * `opts.maximize` is the ONLY thing the MCP-app `ui/request-display-mode`
+   * "fullscreen" arm adds to this path: the detached shell IS the host's fullscreen
+   * presentation, so the mode change reuses this seam rather than introducing a second
+   * window stack. The user's own detach button passes nothing and keeps the canvas
+   * default size.
    */
-  openDetachedMcpApp(payload: McpUiPayload): BrowserWindow {
+  openDetachedMcpApp(
+    payload: McpUiPayload,
+    opts?: { maximize?: boolean; originSessionId?: string },
+  ): { window: BrowserWindow; viewKey: string } {
     const cardId = randomUUID();
     const viewKey = mcpAppViewKey(payload.serverId, cardId);
-    this._mcpDetachedPayloads.set(viewKey, payload);
+    // The card's session binding is stamped HERE, host-side, from the trusted
+    // renderer's latched origin session — never from the app (which has no channel
+    // to name one) and never from the tool result's `_meta.ui` (the field is a
+    // SIBLING of the payload, not a field on it). Anything unrecognizable degrades
+    // to "", which cannot match the live session and therefore only ever drops the
+    // card's writes. See shared/mcp-app-detached-payload.ts.
+    this._mcpDetachedPayloads.set(viewKey, {
+      payload,
+      originSessionId: sanitizeMcpAppOriginSessionId(opts?.originSessionId),
+    });
     const win = this.openDetachedTab(viewKey);
     // viewKeyLabel() has no useful title for an mcp-app key; use the payload's.
     win.setTitle(`LVIS — ${payload.title ?? "MCP App"}`);
-    return win;
+    if (opts?.maximize === true) win.maximize();
+    // The viewKey goes back to the caller: the inline card that just MOVED here needs
+    // it to recognize its own `detachedClosed` event and come back to life.
+    return { window: win, viewKey };
   }
 
   /** Backs the `lvis:mcp:detached-payload` read IPC. */
-  getMcpDetachedPayload(viewKey: string): McpUiPayload | null {
+  getMcpDetachedPayload(viewKey: string): McpAppDetachedPayload | null {
     return this._mcpDetachedPayloads.get(viewKey) ?? null;
   }
 
   /**
-   * b3 scoped close — on a server disconnect, close ONLY that server's detached
-   * MCP-app windows (matched by the `mcp-app:<hex(serverId)>:` viewKey prefix)
-   * and purge their stored payloads. Other detached windows (built-in / plugin /
-   * other MCP servers) are untouched. Modeled on `closeAllDetached` but scoped;
-   * auth windows never carry an `mcp-app:` viewKey so no auth guard is needed.
+   * The ONE place a detached MCP-app card's registry entry dies — window close,
+   * in-place navigation away, category-switch destroy, or b3 scoped
+   * disconnect-close all funnel here.
+   *
+   * Purging the payload is only half of it. The inline transcript card that moved
+   * into that window went DORMANT (its bridge + <webview> were torn down, so exactly
+   * one live bridge exists per card); it comes back only when the host tells it the
+   * window is gone. Emitting the event from the same chokepoint as the purge is what
+   * makes "the card is dormant" and "a detached instance exists" the same fact —
+   * closing the window with the X button revives the card exactly like the app's own
+   * `ui/request-display-mode: inline` does.
+   */
+  private _releaseMcpDetachedCard(viewKey: string): void {
+    if (!this._mcpDetachedPayloads.delete(viewKey)) return;
+    const main = this.getMainWindow();
+    if (!main || main.isDestroyed()) return;
+    // Guarded for the test fakes that stub BrowserWindow without a full webContents.
+    if (typeof main.webContents?.send !== "function") return;
+    main.webContents.send(CHANNELS.mcp.detachedClosed, { viewKey });
+  }
+
+  /**
+   * b3 scoped close — close ONLY the given server's detached MCP-app windows
+   * (matched by the `mcp-app:<hex(serverId)>:` viewKey prefix) and purge their
+   * stored payloads. Other detached windows (built-in / plugin / other MCP servers)
+   * are untouched. Modeled on `closeAllDetached` but scoped; auth windows never
+   * carry an `mcp-app:` viewKey so no auth guard is needed.
+   *
+   * Two callers, one meaning ("this server's detached cards go away"): the b3
+   * server-disconnect sink, and the `ui/request-display-mode: inline` arm — which
+   * MUST use this rather than `closeAllDetached`, or an untrusted card could close
+   * the user's unrelated detached windows.
    *
    * May throw synchronously if `serverId` is over-length (encode fail-closed) —
-   * the caller (the b3 sink) wraps this in try/catch so teardown still
-   * completes.
+   * both callers wrap this in try/catch so teardown still completes.
    */
   closeDetachedMcpWindows(serverId: string): void {
     const prefix = mcpAppViewKeyPrefix(serverId);
     for (const [, entry] of this._children) {
       if (!entry.viewKey.startsWith(prefix)) continue;
-      this._mcpDetachedPayloads.delete(entry.viewKey);
+      this._releaseMcpDetachedCard(entry.viewKey);
       if (!entry.window.isDestroyed()) entry.window.close();
     }
   }
@@ -1228,9 +1283,43 @@ export class WindowManager {
       ) {
         return { ok: false, error: "invalid-payload" };
       }
+      // `maximize` — the `ui/request-display-mode` "fullscreen" arm. Coerced to a
+      // strict boolean here: it is a window-layout hint and nothing else, so a
+      // malformed value degrades to the canvas default rather than being rejected.
+      const maximize = (arg as { maximize?: unknown } | undefined)?.maximize === true;
+      // `sessionId` — the card's ORIGIN chat session, supplied by the TRUSTED renderer
+      // (the app has no channel to name one) and sanitized fail-closed into the
+      // host-owned registry record. It is a BINDING, not an authorization: main
+      // re-checks it against the live conversation on every `ui/message` /
+      // `ui/update-model-context`, exactly as it does for an inline card.
+      const originSessionId = (arg as { sessionId?: unknown } | undefined)?.sessionId;
       try {
-        const win = this.openDetachedMcpApp(payload);
-        return { ok: true, windowId: win.id };
+        const { window: win, viewKey } = this.openDetachedMcpApp(payload, {
+          maximize,
+          originSessionId: typeof originSessionId === "string" ? originSessionId : "",
+        });
+        return { ok: true, windowId: win.id, viewKey };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    });
+
+    // The `ui/request-display-mode` "inline" arm — SCOPED to the requesting card's own
+    // server (never `closeAllDetached`, which would let an untrusted card close the
+    // user's unrelated detached windows). State-mutating + host-only ⇒
+    // validateHostRendererSender, exactly like `mcp.openDetached`.
+    ipcMain.handle(CHANNELS.mcp.closeDetached, (event: IpcMainInvokeEvent, serverId: unknown) => {
+      if (!validateHostRendererSender(event)) {
+        auditUnauthorized(auditLogger, CHANNELS.mcp.closeDetached, event);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (typeof serverId !== "string" || serverId.trim().length === 0) {
+        return { ok: false, error: "invalid-server-id" };
+      }
+      try {
+        // Throws on an over-length serverId (the viewKey encoder is fail-closed).
+        this.closeDetachedMcpWindows(serverId);
+        return { ok: true };
       } catch (err) {
         return { ok: false, error: (err as Error).message };
       }

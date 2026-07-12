@@ -23,6 +23,7 @@ import { markStaleToolResults, getModelPreflightThreshold, isContextLengthError 
 import { estimateRequestInputProjection } from "../request-input-projection.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
 import { GUIDE_JOINED_MAX_CHARS } from "./guidance-limits.js";
+import { parseAppMessageEnvelope } from "../../shared/mcp-app-message-source.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
 import { MAX_TOOL_CALLS_PER_ROUND } from "../../shared/subagent-policy.js";
@@ -181,6 +182,12 @@ export async function queryLoop(
     let knowledgeCallCount = 0;
     let roundIndex = 0;
     let toolTrustOrigin = bounds.toolTrustOrigin;
+    // The turn's STAGED origin (`overlay:*` / `app:*`), which forces write/shell/network
+    // tools to ask. It is a `let` because an MCP App can inject text mid-turn through
+    // the guidance queue: from that round on, the turn is no longer purely the user's,
+    // so the rest of it runs under the app's origin (see the drain site below). It only
+    // ever tightens — a staged origin is never cleared.
+    let stagedOrigin = overlayTriggerOrigin;
     // Single source for the session key used by on-demand plugin activation.
     // This MUST equal the value wrapped in `sessionContext.run({ sessionId })`
     // at the runTurn call site (i.e. `options.sessionIdOverride ?? self.sessionId`,
@@ -267,6 +274,20 @@ export async function queryLoop(
       // it would push a user message after the assistant prefill and break the
       // continue_final_message "last message is assistant" precondition.
       if (round > 0 && self.guidanceQueue.length > 0 && continuationPrefillText === undefined) {
+        // MCP-App guidance (`ui/message` while a turn was in flight) is NOT the user's
+        // own mid-stream guide: it arrives wrapped in `<app-message source="app:…">`,
+        // which is the provenance mechanism the whole feature reads. The moment any
+        // app-authored text enters this turn, the REST of the turn runs under that
+        // staged origin — the permission manager then forces every write/shell/network
+        // tool to ask, and tool provenance is recorded as `app-emitted` rather than the
+        // user's. Checked on the WHOLE queue before head-truncation can drop an entry.
+        const appGuidanceSource = self.guidanceQueue
+          .map((entry) => parseAppMessageEnvelope(entry))
+          .find((source): source is string => source !== null);
+        if (appGuidanceSource !== undefined) {
+          stagedOrigin = appGuidanceSource;
+          toolTrustOrigin = "app-emitted";
+        }
         // Truncate from the head — preserve the user's MOST RECENT guides
         // since older queued items may have been superseded. Worst case
         // (16 × 8000 chars = 128KB joined) is capped at
@@ -301,7 +322,7 @@ export async function queryLoop(
               estimateCurrent: () => self.estimateCurrentRequestProjection({
                 systemPrompt: self.buildSystemPromptForScope(
                   scope,
-                  overlayTriggerOrigin,
+                  stagedOrigin,
                   bounds.rolePrompt,
                   bounds.sessionIdOverride ?? self.sessionId,
                 ),
@@ -314,7 +335,7 @@ export async function queryLoop(
           if (compacted) {
             systemPrompt = self.buildSystemPromptForScope(
               scope,
-              overlayTriggerOrigin,
+              stagedOrigin,
               bounds.rolePrompt,
               bounds.sessionIdOverride ?? self.sessionId,
             );
@@ -957,7 +978,7 @@ export async function queryLoop(
           // Forward the turn's overlay trigger origin so write/shell/network tools
           // bypass `allow-always` cache and force a user-confirmation
           // modal — the hard gate for the overlay trigger's propose-only contract.
-          overlayTriggerOrigin: overlayTriggerOrigin ?? null,
+          overlayTriggerOrigin: stagedOrigin ?? null,
           // C3(b): carry spawn depth into ToolExecutionContext.metadata.
           // The executor uses this to refuse `agent_spawn` calls inside an
           // already-spawned sub-agent (depth >= 1).
@@ -1065,7 +1086,7 @@ export async function queryLoop(
       if (capResult.allowed.some((tu) => tu.name === "skill_load")) {
         systemPrompt = self.buildSystemPromptForScope(
           scope,
-          overlayTriggerOrigin,
+          stagedOrigin,
           bounds.rolePrompt,
           bounds.sessionIdOverride ?? self.sessionId,
         );

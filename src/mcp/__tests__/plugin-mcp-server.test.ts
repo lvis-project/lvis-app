@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { PluginMcpServer, type PluginToolDelegate } from "../plugin-mcp-server.js";
+import { createPluginUiResourceProvider } from "../plugin-ui-resource-provider.js";
 import type { PluginManifest } from "../../plugins/types.js";
 
 const MANIFEST: PluginManifest = {
@@ -103,5 +104,69 @@ describe("PluginMcpServer — RC server methods (#1230 §3.1)", () => {
   it("tolerates a request with no _meta protocol version (internal caller)", async () => {
     const res = await server.handle(req("tools/list"));
     expect(res.error).toBeUndefined();
+  });
+});
+
+describe("PluginMcpServer — resources/read + resources/list (ui:// serving seam)", () => {
+  const delegate: PluginToolDelegate = vi.fn(async () => ({
+    content: [{ type: "text", text: "unused" }],
+  }));
+  const CARD_URI = "ui://com.example.fs/card.html";
+  const provider = createPluginUiResourceProvider({
+    pluginId: "com.example.fs",
+    declarations: [{ uri: CARD_URI, csp: { connectDomains: ["https://api.example.com"] } }],
+    readHtml: async () => "<h1>card</h1>",
+  });
+
+  it("serves a declared ui:// resource with mcp-app mime + the resource's own _meta.ui csp", async () => {
+    const server = new PluginMcpServer(MANIFEST, delegate, provider);
+    const res = await server.handle(req("resources/read", { uri: CARD_URI, ...RC_META }));
+    expect(res.error).toBeUndefined();
+    expect(res.result).toEqual({
+      resultType: "complete",
+      contents: [
+        {
+          uri: CARD_URI,
+          mimeType: "text/html;profile=mcp-app",
+          text: "<h1>card</h1>",
+          _meta: { ui: { csp: { connectDomains: ["https://api.example.com"] } } },
+        },
+      ],
+    });
+  });
+
+  it("rejects a cross-plugin uri authority with -32002 (own-namespace-only, fail-closed)", async () => {
+    const server = new PluginMcpServer(MANIFEST, delegate, provider);
+    const res = await server.handle(
+      req("resources/read", { uri: "ui://other-plugin/card.html", ...RC_META }),
+    );
+    expect(res.result).toBeUndefined();
+    expect(res.error?.code).toBe(-32002);
+  });
+
+  it("rejects resources/read without a string uri (-32602)", async () => {
+    const server = new PluginMcpServer(MANIFEST, delegate, provider);
+    const res = await server.handle(req("resources/read", { ...RC_META }));
+    expect(res.error?.code).toBe(-32602);
+  });
+
+  it("fails-closed with -32002 when the plugin serves NO ui:// resources (no provider)", async () => {
+    const server = new PluginMcpServer(MANIFEST, delegate);
+    const res = await server.handle(req("resources/read", { uri: CARD_URI, ...RC_META }));
+    expect(res.error?.code).toBe(-32002);
+  });
+
+  it("lists declared resources; empty when no provider", async () => {
+    const withProvider = new PluginMcpServer(MANIFEST, delegate, provider);
+    const listed = (await withProvider.handle(req("resources/list", { ...RC_META }))).result as {
+      resources: Array<{ uri: string; mimeType: string }>;
+    };
+    expect(listed.resources).toEqual([{ uri: CARD_URI, mimeType: "text/html;profile=mcp-app" }]);
+
+    const noProvider = new PluginMcpServer(MANIFEST, delegate);
+    const empty = (await noProvider.handle(req("resources/list", { ...RC_META }))).result as {
+      resources: unknown[];
+    };
+    expect(empty.resources).toEqual([]);
   });
 });

@@ -63,6 +63,7 @@ import {
   createPermissionManager,
   createApprovalGate,
 } from "./boot/conversation.js";
+import { McpAppModelContextStore } from "./mcp/mcp-app-model-context.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { wireWhitelistRegistry } from "./boot/steps/whitelist-bootstrap.js";
 import { wireAnnouncementCheck, wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
@@ -269,6 +270,7 @@ export async function bootstrap(
     lateBinding,
     runPluginShutdownHandlers,
     pluginPaths,
+    loopbackManager,
   } = await initPluginRuntime({
     projectRoot,
     settingsService,
@@ -299,6 +301,7 @@ export async function bootstrap(
   ctx.lateBinding = lateBinding;
   ctx.runPluginShutdownHandlers = runPluginShutdownHandlers;
   ctx.pluginPaths = pluginPaths;
+  ctx.pluginLoopbackManager = loopbackManager;
 
   // Workflow system tools (S1+S2) — services constructed up-front so the
   // tool registry can register them in one pass below. Late bindings
@@ -315,12 +318,21 @@ export async function bootstrap(
   // §4.5.9: SystemPromptBuilder.
   // Skills use progressive disclosure: lightweight catalog every turn, full
   // bodies only after skill_load and only for the current user-turn window.
+  // MCP-app `ui/update-model-context` slots. Constructed HERE because it has exactly two
+  // consumers and they must share one instance: the builder below READS it at turn build,
+  // and the gated `mcp.uiModelContext` IPC (via AppServices) WRITES it. There is no third
+  // path — in particular none into the conversation loop, which is why an app's context
+  // update can never start a turn.
+  const mcpAppModelContext = new McpAppModelContextStore();
+  ctx.mcpAppModelContext = mcpAppModelContext;
+
   const systemPromptBuilder = createSystemPromptBuilder({
     memoryManager,
     toolRegistry,
     pluginRuntime,
     getAvailableSkills: () => ctx.skillStore.listCatalogSync(),
     getActiveSkillsSection: (sessionId) => ctx.skillOverlay.buildSection(sessionId),
+    getAppModelContext: (sessionId) => mcpAppModelContext.buildSection(sessionId),
   });
   ctx.systemPromptBuilder = systemPromptBuilder;
 

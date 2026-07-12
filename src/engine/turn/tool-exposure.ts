@@ -3,6 +3,14 @@
  *
  * `buildToolExposureMetrics` and `buildProviderRequestDiagnostics`, extracted
  * from `conversation-loop.ts` with their private source-count helpers.
+ *
+ * MODEL EXPOSURE: everything counted here is what the model is actually shown,
+ * because both inputs (`getToolSchemasForScope` / `getToolCatalogForScope`) run
+ * through the registry's ONE model-exposure boundary (`getModelVisibleTools` →
+ * `isModelExposedTool`). MCP Apps app-only tools (`_meta.ui.visibility: ["app"]`)
+ * are registered — their card's call must run under the gate — but never exposed,
+ * so they are absent from these metrics on BOTH arms (plugin loopback + external
+ * MCP server) without this module needing a filter of its own.
  */
 import type { GenericMessage, LLMVendor, ToolSchema } from "../llm/types.js";
 import type { ToolRegistry } from "../../tools/registry.js";
