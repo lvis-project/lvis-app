@@ -202,14 +202,10 @@ jobs:
           node .cluster-policy/scripts/check-cluster-review-attestation.mjs
           "$PR_SNAPSHOT" "$GITHUB_OUTPUT" "$GITHUB_EVENT_PATH"
 
-      - name: Enforce cluster review gate
-        if: >-
-          steps.cluster-check.outputs.violation == 'true' &&
-          steps.cluster-attestation.outputs.attested != 'true'
-        env:
-          REASON: ${{ steps.cluster-check.outputs.violation_reason }}
+      - name: Enforce transition cluster review attestation
+        if: steps.cluster-attestation.outputs.attested != 'true'
         run: |
-          echo "::error::Sensitive area cluster (${REASON}) requires current-head cluster review"
+          echo "::error::Cluster policy transition requires current-head cluster review"
           exit 1
 
       - name: Finalize cluster policy status
@@ -223,7 +219,6 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           STATUS_CONTEXT: Sensitive Area Cluster Check
-          VIOLATION: ${{ steps.cluster-check.outputs.violation }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
         run: |
           set -uo pipefail
@@ -261,7 +256,7 @@ jobs:
             elif [ "$FINAL_DIGEST" != "$EXPECTED_DIGEST" ]; then
               echo "::error::Pull request state changed during cluster review evaluation"
               FINALIZER_FAILED=1
-            elif [ "$VIOLATION" = "true" ] && [ "$ATTESTED" = "true" ]; then
+            elif [ "$ATTESTED" = "true" ]; then
               if ! node .cluster-policy/scripts/check-cluster-review-attestation.mjs \
                 "$FINAL_SNAPSHOT" "$FINAL_OUTPUT" "$GITHUB_EVENT_PATH"; then
                 echo "::error::Unable to revalidate cluster review attestation"
@@ -274,8 +269,8 @@ jobs:
                 STATUS_DESCRIPTION="Sensitive area cluster policy passed"
               fi
             else
-              STATUS_STATE=success
-              STATUS_DESCRIPTION="Sensitive area cluster policy passed"
+              echo "::error::Current-head cluster review attestation is required for transition"
+              FINALIZER_FAILED=1
             fi
           fi
 
