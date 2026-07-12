@@ -81,10 +81,26 @@ describe("isElectronPermissionGranted — the fail-closed session decision", () 
     expect(isElectronPermissionGranted({ microphone: {} }, "media", ["video", "audio"])).toBe(false);
   });
 
-  it("without a media kind, falls back to the coarse string match (the strict check is the request handler's)", () => {
-    // A `media` ask/check that carries no kind still requires SOME media feature declared.
-    expect(isElectronPermissionGranted({ microphone: {} }, "media")).toBe(true);
+  it("a `media` ask/check with an INDETERMINATE kind is fail-closed → DENIED (not a coarse-match grant)", () => {
+    // Regression guard for the fail-OPEN bug: previously a kindless `media` decision fell
+    // back to a coarse permission-string match and granted, so a mic-only card could be
+    // handed `media` for a CAMERA request whose `mediaTypes` arrived empty. Now: no
+    // resolvable kind ⇒ deny, for every media declaration.
+    expect(isElectronPermissionGranted({ microphone: {} }, "media")).toBe(false);
+    expect(isElectronPermissionGranted({ microphone: {} }, "media", [])).toBe(false);
+    expect(isElectronPermissionGranted({ camera: {} }, "media")).toBe(false);
+    expect(isElectronPermissionGranted({ camera: {} }, "media", [])).toBe(false);
+    expect(isElectronPermissionGranted({ camera: {}, microphone: {} }, "media", [])).toBe(false);
     expect(isElectronPermissionGranted({ geolocation: {} }, "media")).toBe(false);
+  });
+
+  it("the indeterminate-kind DENY is media-only: a kindless feature (geolocation) still grants on a declared match", () => {
+    // geolocation has no media kind, so the indeterminate-kind rule must NOT touch it — a
+    // declared match is the grant even though no kind is (or could be) supplied.
+    expect(isElectronPermissionGranted({ geolocation: {} }, "geolocation")).toBe(true);
+    expect(isElectronPermissionGranted({ geolocation: {}, microphone: {} }, "geolocation")).toBe(
+      true,
+    );
   });
 });
 

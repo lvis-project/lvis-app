@@ -20,6 +20,8 @@ import {
   formatUnknownErrorMessage,
   parsePluginJson,
 } from "../manifest-validation.js";
+import { MCP_APP_PERMISSION_FEATURES } from "../../../shared/mcp-app-permissions.js";
+import manifestSchema from "../../../../schemas/plugin-manifest.schema.json" with { type: "json" };
 
 describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
   it("compiles the host schema into a working validator", async () => {
@@ -170,6 +172,25 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
       });
     expect(withPermission({ clipboardWrite: {} })).toBe(false);
     expect(withPermission({ notARealFeature: {} })).toBe(false);
+  });
+
+  // LOCKSTEP GUARD (cluster critic MINOR-2): the schema's `mcpUiResourcePermissions`
+  // properties are a SECOND hand-maintained enumeration of the accepted permission set,
+  // and its `$comment` names MCP_APP_PERMISSION_FEATURES as the SOT — but nothing bound
+  // them, so a 5th feature added to the table (or the schema) without the other would
+  // drift silently. Bind them here: adding/removing a feature on either side fails this
+  // test instead of shipping a schema that accepts a feature the host cannot honor, or
+  // rejects one it can.
+  it("schema `mcpUiResourcePermissions` keys match MCP_APP_PERMISSION_FEATURES exactly (no silent drift)", () => {
+    const schemaKeys = Object.keys(
+      manifestSchema.definitions.mcpUiResourcePermissions.properties,
+    ).sort();
+    const sotKeys = MCP_APP_PERMISSION_FEATURES.map((f) => f.key).sort();
+    expect(schemaKeys).toEqual(sotKeys);
+    // Anchor the current accepted set so a change to EITHER side is visible in the diff,
+    // and clipboardWrite stays excluded on both.
+    expect(sotKeys).toEqual(["camera", "geolocation", "microphone"]);
+    expect(schemaKeys).not.toContain("clipboardWrite");
   });
 
   it("accepts a uiResources[] entry declaring only its uri (policy is optional)", async () => {

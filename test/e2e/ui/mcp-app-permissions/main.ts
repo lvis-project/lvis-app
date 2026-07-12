@@ -56,9 +56,14 @@ const ALL_FOUR: McpUiResourcePermissions = {
 
 // A PARTIAL declaration: microphone only. camera and microphone collapse into Electron's
 // single `media` permission, so the interesting fail-closed question is whether a card
-// that declared ONLY the microphone can nonetheless open the CAMERA. It cannot: the
-// host-computed `allow` attribute is `microphone` alone, so `getUserMedia({video})` is
-// refused by Permissions Policy before Electron's `media` grant is ever consulted.
+// that declared ONLY the microphone can nonetheless open the CAMERA. It cannot — but the
+// enforcer is the ELECTRON media-kind request handler, NOT the `allow` attribute. Measured
+// (this is exactly what the PR proved and built the kind handler to fix): for a same-origin
+// inner frame the `allow="microphone"` Permissions Policy does NOT gate camera vs mic, so
+// `getUserMedia({video})` was NOT refused by Permissions Policy. The split is enforced when
+// `isElectronPermissionGranted` matches the request's `details.mediaTypes` (`["video"]`)
+// against the declared kinds and finds the camera undeclared (see
+// src/shared/mcp-app-permissions.ts and mcp-app-permissions.spec.ts:44-47,190-195).
 const MIC_ONLY: McpUiResourcePermissions = { microphone: {} };
 
 registerMcpAppProtocolScheme(protocol);
