@@ -17,7 +17,7 @@ language should not be a barrier to participation.
 ## Development setup
 
 ```bash
-# Prerequisites: Node.js >= 18 and bun (https://bun.sh)
+# Prerequisites: Node.js >= 22.4 and bun (https://bun.sh)
 git clone https://github.com/lvis-project/lvis-app.git
 cd lvis-app
 bun install            # runs electron-rebuild + uv binary fetch
@@ -32,13 +32,20 @@ Electron's embedded Node is not on `PATH`, and the `postinstall` +
 ## Testing
 
 ```bash
-bun run typecheck      # tsc --noEmit
-bun run test           # vitest (full suite, ~4700 cases)
-bunx playwright test   # e2e (UI changes only)
+bunx vitest run path/to/affected.test.ts  # targeted tests while iterating
+bunx playwright test path/to/flow.spec.ts # changed UI flow only
 ```
 
-The pre-push hook enforces `bun run typecheck` + `bun run test` on every push.
-Failing the hook aborts the push; do not bypass with `--no-verify`.
+Use the smallest affected checks while iterating. For code-bearing changes and
+runtime, instruction, workflow, or sensitive-contract Markdown, the pre-push
+hook is the sole local full gate: it runs `bun run typecheck`, the full
+`bun run test`, and `bun run build` once. Only Markdown accepted by the
+hook's explicit review-only Markdown allowlist may skip those expensive gates; a `.md`
+suffix alone does not qualify. Do not duplicate the full trio around a
+successful push. If a check fails, fix it and rerun only the failed or
+invalidated checks before pushing again. Full Playwright E2E runs in CI/release
+validation; UI changes require the targeted local flow check above. Never
+bypass hooks with `--no-verify` or a hook-skip environment variable.
 
 ## Architecture
 
@@ -60,7 +67,7 @@ Plugin development guide: `docs/guides/plugin-development.md`.
 
 - Branch from `main`. Branch names: `feat/<scope>`, `fix/<scope>`,
   `chore/<scope>`, `docs/<scope>`.
-- One logical change per PR. Squash merge is the canonical merge mode.
+- One logical change per PR. Merge with `gh pr merge --merge`; do not squash.
 - PR description should explain *why* (motivation) more than *what*
   (the diff already shows what).
 - All PRs go through automated CI (typecheck + vitest + lint).
