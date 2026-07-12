@@ -79,6 +79,7 @@ describe("installer smoke and packaging discipline", () => {
         `<!-- cluster-review:${role}:<40-char-head-sha>:GO -->`,
       );
     }
+    expect(pullRequestTemplate).toContain("## Cross-Cutting Review Gate");
     expect(pullRequestTemplate).toContain("Reviewed HEAD: `<40-char-head-sha>`");
     expect(pullRequestTemplate).toContain("Blocking findings");
     expect(claude).toContain("[`AGENTS.md`](./AGENTS.md)");

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { evaluateClusterReviewAttestation } from "../../scripts/check-cluster-review-attestation.mjs";
 
@@ -19,6 +20,15 @@ function pullRequest({ body = validBody(), labels = [{ name: "cluster-review-pas
 describe("cluster review attestation", () => {
   it("accepts exactly one GO marker per role for the labeled current HEAD", () => {
     expect(evaluateClusterReviewAttestation(pullRequest())).toEqual({ attested: true, reason: "attested" });
+  });
+
+  it("accepts the completed repository template for the current HEAD", () => {
+    const body = readFileSync(".github/pull_request_template.md", "utf8")
+      .replaceAll("<40-char-head-sha>", HEAD);
+    expect(evaluateClusterReviewAttestation(pullRequest({ body }))).toEqual({
+      attested: true,
+      reason: "attested",
+    });
   });
 
   it("rejects a missing exemption label", () => {

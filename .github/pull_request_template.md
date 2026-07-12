@@ -39,7 +39,7 @@
 
 - Screenshots / traces / viewport notes:
 
-## Cross-Cutting Review Attestation
+## Cross-Cutting Review Gate
 
 Complete only when `cluster-detector` requires independent review. All three
 reviews must cover the current PR HEAD. A new commit invalidates every marker.
