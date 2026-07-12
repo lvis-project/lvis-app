@@ -51,10 +51,11 @@ function isInsideHtmlComment(text, index) {
 function isInsideMarkdownFence(text, index) {
   let openFence;
   for (const line of text.slice(0, index).split("\n")) {
-    const match = line.match(/^[ \t]{0,3}((?:`{3,})|(?:~{3,}))(.*)$/);
+    const match = line.match(/^ {0,3}((?:`{3,})|(?:~{3,}))(.*)$/);
     if (!match) continue;
     const marker = match[1];
     if (!openFence) {
+      if (marker[0] === "`" && match[2].includes("`")) continue;
       openFence = { character: marker[0], length: marker.length };
     } else if (
       marker[0] === openFence.character &&
