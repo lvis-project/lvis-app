@@ -4,7 +4,7 @@
 
 ## Title Check
 
-- Expected format: `<type>(<scope>): <summary>` (for example, `feat(marketplace): add user package install flow`).
+- Expected format: `{type}({scope}): {summary}` (for example, `feat(marketplace): add user package install flow`).
 
 ## Scope
 
@@ -29,15 +29,38 @@
 
 ## Validation
 
-- [ ] `bun run typecheck`
-- [ ] `bun run test`
-- [ ] `bun run build`
-- [ ] Targeted UI/E2E checks:
+- [ ] Targeted checks run while iterating (commands/results below):
+- [ ] Pre-push full gate passed, or the hook accepted this as allowlisted review-only Markdown with no runtime, instruction, workflow, or sensitive-contract impact:
+- [ ] Targeted changed-flow Playwright check, when UI behavior changed:
+- [ ] Full E2E is delegated to CI/release unless explicitly required locally:
 - [ ] Installer or packaged-app smoke, when packaging behavior changed:
 
 ## UI Evidence
 
 - Screenshots / traces / viewport notes:
+
+## Cross-Cutting Review Gate
+
+Keep this section before any raw HTML opening tag; place raw HTML later in the PR body.
+Complete only when `cluster-detector` requires independent review. All three
+reviews must cover the current PR HEAD. A new commit, body edit, base change,
+or reopen invalidates a retained label. Each visible row and hidden marker must
+use the same current HEAD SHA and verdict; a `GO` row requires blocking findings to be
+exactly `None`. The required check accepts attestation only on a fresh
+application of `cluster-review-passed`; any later PR metadata event requires
+removing and reapplying the label. Replace all placeholders below first.
+
+Reviewed HEAD: `<40-char-head-sha>`
+
+| Role | Reviewed HEAD SHA | Verdict | Blocking findings |
+|---|---|---|---|
+| Architect | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |
+| Critic | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |
+| Security | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |
+
+<!-- cluster-review:architect:<40-char-head-sha>:GO -->
+<!-- cluster-review:critic:<40-char-head-sha>:GO -->
+<!-- cluster-review:security:<40-char-head-sha>:GO -->
 
 ## Risk / Rollback
 
