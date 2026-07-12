@@ -1,5 +1,8 @@
 import type { MarketplacePackageType } from "../shared/assistant-context.js";
 import type { MarketplacePackageAsset } from "../shared/marketplace-package-assets.js";
+import type { PluginUiResourceDecl } from "../mcp/types.js";
+
+export type { PluginUiResourceDecl } from "../mcp/types.js";
 
 export type InstallPolicy = "admin" | "user";
 
@@ -190,10 +193,11 @@ export interface Tool {
   /** MCP icons (2025-11-25). @optional */
   icons?: Array<{ src: string; mimeType?: string; sizes?: string }>;
   /**
-   * Surface visibility + the one LVIS-proprietary key. Exactly two keys are
-   * recognized: the standard `ui` visibility block, and the SOLE remaining
-   * LVIS-proprietary key `xyz.lvis/pathFields`. Any other key is rejected by the
-   * manifest schema. @optional
+   * Surface visibility + the one LVIS-proprietary key. Recognized keys: the
+   * standard `ui` visibility block, and the SOLE remaining LVIS-proprietary key
+   * `lvisai/pathFields`. Any other key is rejected by the manifest schema.
+   * transitional: the legacy reverse-DNS `xyz.lvis/pathFields` is still accepted
+   * until published plugin manifests + the SDK are migrated (then remove). @optional
    */
   _meta?: {
     /** SEP-1865 surface visibility. @optional */
@@ -204,6 +208,8 @@ export interface Tool {
      * fields. Untrusted routing hint: a lying declaration only ADDS host checks,
      * never bypasses one. @optional
      */
+    "lvisai/pathFields"?: string[];
+    /** transitional: legacy reverse-DNS alias of `lvisai/pathFields` (remove post-migration). @optional */
     "xyz.lvis/pathFields"?: string[];
   };
 }
@@ -230,6 +236,21 @@ export interface PluginManifest {
   description: string;
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];
+  /**
+   * MCP App `ui://` resources this plugin serves — the plugin→host serving
+   * contract for interactive HTML cards (distinct from `ui[]`, which declares
+   * host-mounted React sidebar panels). Each entry declares a
+   * `ui://<pluginId>/<path>` uri plus that resource's OWN `_meta.ui` security
+   * POLICY (its csp). The CONTENT is served by the plugin itself
+   * ({@link RuntimePlugin.readUiResource}) — "declared policy, served content".
+   *
+   * When a tool result carries `_meta.ui.resourceUri` matching one of these uris,
+   * the loopback host asks the plugin for the card HTML and renders it through the
+   * same sandbox-proxy + main-computed CSP path as an external MCP server's
+   * `ui://` resource. See {@link PluginUiResourceDecl} for the security invariants
+   * (own-namespace-only, declared-only, host-computed CSP). @optional
+   */
+  uiResources?: PluginUiResourceDecl[];
   keywords?: Array<{ keyword: string; skillId: string }>;
 
 
@@ -1431,6 +1452,21 @@ export interface RuntimePlugin {
   start?: () => Promise<void> | void;
   stop?: () => Promise<void> | void;
   handlers: Record<string, PluginToolHandler>;
+  /**
+   * Serve one of THIS plugin's manifest-declared `ui://` cards. The plugin IS the
+   * MCP server, so it serves its own resource bytes — the host relays them (it
+   * never resolves or reads a plugin-declared disk path itself).
+   *
+   * Called only for a `uri` the manifest declared in `uiResources[]` and whose
+   * authority the host already verified (own-namespace-only). Returns the card
+   * HTML. The `csp` comes from the MANIFEST — never from here: it is security
+   * policy, statically reviewable and covered by `manifestSha256`, so a hook cannot
+   * present a narrow CSP at review and widen it at runtime.
+   *
+   * Bounded by the host at the single {@link PluginRuntime.readUiResource}
+   * chokepoint (timeout + HTML size cap, fail-closed). @optional
+   */
+  readUiResource?: (uri: string) => Promise<string> | string;
 }
 
 export type RuntimePluginFactory = (context: PluginRuntimeContext) => Promise<RuntimePlugin> | RuntimePlugin;

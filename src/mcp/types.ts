@@ -5,6 +5,8 @@
 
 
 
+import type { ToolSurface } from "../plugins/runtime/tool-visibility.js";
+
 export interface McpGovernancePolicy {
   version: string;
 
@@ -225,6 +227,19 @@ export type McpServerConfigDto = DistributiveOmit<
   "apiKey" | "headers" | "env" | "args" | "sandboxRoot"
 >;
 
+/**
+ * MCP Apps spec `McpUiToolVisibility` — WHO may call a tool.
+ * - `"model"`: the agent may call it.
+ * - `"app"`: the tool's OWN app (this server's `ui://` card) may call it.
+ *
+ * ONE declaration: this is an alias of {@link ToolSurface} (`plugins/runtime/
+ * tool-visibility.ts`, the host's single surface-visibility reader), which had the
+ * identical `"model" | "app"` union. A type-only import, so the reverse edge
+ * (tool-visibility.ts already imports this module's `Tool` type-only) is erased at
+ * runtime — no cycle.
+ */
+export type McpUiToolVisibility = ToolSurface;
+
 export interface McpToolSchema {
   name: string;
   description: string;
@@ -232,6 +247,19 @@ export interface McpToolSchema {
     type: "object";
     properties: Record<string, unknown>;
     required?: string[];
+  };
+  /**
+   * MCP Apps spec `_meta.ui` on a TOOL (`McpUiToolMeta`). Only `visibility` is
+   * read by the host: it is the spec's gate on app→server `tools/call` — a host
+   * MUST reject an app's call to a tool whose visibility does not include
+   * `"app"`. Absent ⇒ the spec default `["model","app"]`, materialized ONCE at
+   * ingestion in `mcp-tool-adapter.ts` (the external-server analog of
+   * `parsePluginJson`'s U1 defaulting site) so no downstream reader defaults.
+   */
+  _meta?: {
+    ui?: {
+      visibility?: McpUiToolVisibility[];
+    };
   };
 }
 
@@ -287,20 +315,19 @@ export interface McpUiResourceCsp {
 }
 
 /**
- * Sandbox permissions a UI resource requests (spec `McpUiResourcePermissions`).
- * Each maps to a Permission-Policy feature on the inner iframe. Absent ⇒ denied.
+ * The security-relevant `_meta.ui` a UI resource carries (spec `McpUiResourceMeta`).
+ *
+ * The spec also defines `permissions` (camera / microphone / geolocation /
+ * clipboardWrite, each a Permission-Policy feature on the inner iframe). LVIS does
+ * NOT model it: the inner frame is `sandbox="allow-scripts"` with no
+ * `allow-same-origin`, so it runs on an OPAQUE origin, and a powerful feature cannot
+ * be delegated to one. The field was declared here, threaded through the read model,
+ * and then dropped at the proxy-session mint — a knob plugin authors could set and
+ * nothing would honor. Absent ⇒ denied is the whole policy; a card gets no powerful
+ * features. Re-introduce it only together with the frame plumbing that proves it works.
  */
-export interface McpUiResourcePermissions {
-  camera?: Record<string, never>;
-  microphone?: Record<string, never>;
-  geolocation?: Record<string, never>;
-  clipboardWrite?: Record<string, never>;
-}
-
-/** The security-relevant `_meta.ui` a UI resource carries (spec `McpUiResourceMeta`). */
 export interface McpUiResourceMeta {
   csp?: McpUiResourceCsp;
-  permissions?: McpUiResourcePermissions;
 }
 
 /**
@@ -312,7 +339,66 @@ export interface McpUiResourceMeta {
 export interface McpUiResourceRead {
   html: string;
   csp?: McpUiResourceCsp;
-  permissions?: McpUiResourcePermissions;
+}
+
+/**
+ * A first-party plugin's declaration of ONE `ui://` resource it serves — the
+ * plugin→host serving contract for MCP App cards. This is the plugin-side analog
+ * of an external MCP server's `resources/read` for a `ui://` resource, so BOTH
+ * paths converge on the SAME {@link McpUiResourceRead} model (HTML + the
+ * resource's OWN declared csp).
+ *
+ * "Declared POLICY, served CONTENT": the manifest declares the uri and the
+ * resource's security policy; the CONTENT comes from the plugin itself
+ * (`RuntimePlugin.readUiResource`), exactly as an external MCP server answers
+ * `resources/read` with bytes. The host never resolves or reads a
+ * plugin-declared disk path — the plugin IS the MCP server, the host relays.
+ *
+ * Why the csp stays in the MANIFEST and is NOT returned by the hook: it is security
+ * POLICY — static, schema-validated, reviewable before any plugin code runs, and
+ * covered by `manifestSha256`. A runtime-supplied policy could present a narrow CSP
+ * at review and widen it at serve time.
+ *
+ * Security invariants (enforced fail-closed at serve time — see
+ * `plugin-ui-resource-provider.ts`, the single chokepoint):
+ *  - `uri` authority MUST equal the declaring plugin's id — a plugin can only
+ *    serve its OWN `ui://` namespace (own-namespace-only). Load-bearing: the
+ *    serverId keys the sandbox-proxy origin, its partition, and the network
+ *    `declaredOriginsByServer` union, so a plugin must not police its own
+ *    namespace.
+ *  - the uri MUST be one this manifest declared (declared-only) — this is what
+ *    binds served content to the csp the host computes the CSP header from.
+ *  - `csp` is the resource's OWN declared policy. Main COMPUTES the sandbox-proxy
+ *    CSP header from it; the plugin never supplies a policy HEADER STRING, and the
+ *    renderer can never inject one.
+ */
+export interface PluginUiResourceDecl {
+  /** `ui://<pluginId>/<path>` — authority MUST equal the declaring plugin's id. */
+  uri: string;
+  /** The resource's own declared CSP (spec `McpUiResourceCsp`). @optional */
+  csp?: McpUiResourceCsp;
+}
+
+/**
+ * The MCP Apps TOOL-RESULT `_meta.ui` extension (spec §3.2) — how a server says
+ * "render this card with my result". These are the STANDARD `_meta.ui.*` keys, not
+ * an `xyz.lvis/*` vendor extension, so both arms declare a card identically: an
+ * external MCP server puts it on its `CallToolResult`, and a first-party plugin
+ * puts it on its handler's return value (the loopback delegate lifts it onto the
+ * wire, see `plugin-runtime-delegate.ts`).
+ *
+ * Deliberately NO `csp` — per spec that lives on the RESOURCE, and main derives the
+ * header there ({@link McpUiResourceMeta}). A `csp` on a tool result is ignored.
+ */
+export interface McpUiToolMeta {
+  /** `ui://<serverId>/<path>` — the card to render. */
+  resourceUri: string;
+  /** Preferred render slot — defaults to `"chat"` when omitted. @optional */
+  slot?: McpUiSlot;
+  /** Preferred height in pixels. @optional */
+  height?: number;
+  /** Human-readable title shown in the webview title bar. @optional */
+  title?: string;
 }
 
 /**
@@ -366,3 +452,19 @@ export interface McpUiResourceBundle {
   /** The app HTML, mounted into the inner sandboxed iframe by the relay preload. */
   html: string;
 }
+
+/**
+ * Result of an MCP App's `tools/call` on its OWN server, as it crosses
+ * main → preload → renderer (`CHANNELS.mcp.callTool`).
+ *
+ * Deliberately an OUTCOME, not a thrown error: every denial (cross-server,
+ * app-visibility, permission/consent) and every tool failure comes back as
+ * `{ ok: false }` with a kebab-case code + English message, which the bridge
+ * handler turns into an MCP-style `{ isError: true, content: [...] }`
+ * `CallToolResult` for the app. `result` is the host tool layer's raw value
+ * (a rendered text string for external MCP tools; whatever the plugin method
+ * returned on the loopback path).
+ */
+export type McpUiToolCallOutcome =
+  | { ok: true; result: unknown }
+  | { ok: false; error: string; message?: string };

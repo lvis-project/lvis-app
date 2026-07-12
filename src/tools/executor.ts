@@ -6,7 +6,15 @@ import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { resolve as pathResolve } from "node:path";
 import type { Tool } from "./base.js";
+import { isModelExposedTool } from "./base.js";
 import type { ToolRegistry } from "./registry.js";
+// Effective invocation-origin SoT (AsyncLocalStorage). The plugin-surface executor
+// enters a `runWithInvocationOrigin` frame for every card/panel/plugin call, so this
+// is defined ("mcp-app" | "ui" | "plugin") ONLY on that path; the model's main-loop
+// executor runs in no frame → `undefined`. That is the one signal separating a
+// governed card/panel invocation from the model lane (MAJOR-1). Leaf module (imports
+// only node:async_hooks) — no cycle.
+import { currentInvocationOrigin } from "../plugins/runtime/origin-chain.js";
 import type {
   ToolSource,
   TrustLevel,
@@ -666,6 +674,41 @@ export class ToolExecutor {
     if (tool.pluginId) meta.pluginId = tool.pluginId;
     if (tool.workerId) meta.workerId = tool.workerId;
     if (tool.mcpServerId) meta.mcpServerId = tool.mcpServerId;
+
+    // ── MAJOR-1 (cluster review) — the model MUST NOT execute a tool hidden from it ──
+    // `findByName` deliberately does NOT filter `modelVisible` (an app-only tool is a
+    // registry `Tool` precisely so its CARD's governed call can run under the gate — see
+    // `isModelExposedTool` / `ToolRegistry.getModelVisibleTools`). That same resolution
+    // means a model `tool_use` naming an app-only tool — e.g. a prompt injection naming
+    // `<plugin>_auth_login`, whose handler spawns a credentialed auth BrowserWindow —
+    // would otherwise reach the handler. `modelVisible === false` means "hidden from the
+    // model" by definition, so the model has no legitimate reason to call it. The
+    // governed card/panel arms reach these tools through their OWN origins —
+    // `PluginRuntime.callFromApp` ("mcp-app") / `callFromUi` ("ui"), both entering the
+    // executor inside a `runWithInvocationOrigin` frame — so the effective invocation
+    // origin is the ONE discriminator: the model's main-loop executor runs in NO frame
+    // (`currentInvocationOrigin()` → `undefined`) and an LLM/plugin `ctx.callTool` is
+    // `"plugin"`; neither is a governed app surface, so both are refused here, at the ONE
+    // model-tool_use dispatch site. Fail-closed ALLOW-LIST (only the two governed origins
+    // pass — a future origin defaults to denied). Mirrors the `toolNotFound` deny above:
+    // the model-facing result is the same "not found" text (no disclosure that the hidden
+    // tool exists), audited as a `deny` — never a throw. The card-arm auth-trio deny in
+    // `callFromApp` is a SEPARATE, additional defense and is untouched.
+    if (!isModelExposedTool(tool)) {
+      const invocationOrigin = currentInvocationOrigin();
+      if (invocationOrigin !== "mcp-app" && invocationOrigin !== "ui") {
+        const durationMs = Date.now() - startTime;
+        const modelFacing = t("be_executor.toolNotFound", { name: toolUse.name });
+        const deny: PermissionCheckResult = {
+          decision: "deny",
+          reason: `model-hidden tool '${toolUse.name}' is not model-callable (origin: ${invocationOrigin ?? "model"})`,
+          layer: 0,
+        };
+        await this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, deny.reason, true, startTime, deny, Infinity, permissionContext, invocationCategory, executionCwd);
+        callbacks?.onToolEnd?.(toolUse.name, modelFacing, true, meta, undefined, durationMs);
+        return { tool_use_id: toolUse.id, content: modelFacing, is_error: true, durationMs };
+      }
+    }
 
     // ── C8: user-abort terminal helper moved to ./pipeline/invocation-context.ts.
     // Its wide capture surface (source/trust/invocationCategory/meta/callbacks/…)

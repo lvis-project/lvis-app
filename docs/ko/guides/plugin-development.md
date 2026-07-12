@@ -3,7 +3,7 @@
 > **매니페스트 tool 계약 = pure MCP `Tool[]` (#885 Phase R).** `tools` 는 각 원소가
 > `{ name, description, inputSchema, _meta? }` 인 Tool 객체 배열이다. renderer 노출은
 > `_meta.ui.visibility` (`["model"]`/`["app"]`/`["model","app"]`), filesystem path 판정은
-> `_meta["xyz.lvis/pathFields"]` 로 선언하며, per-tool category 는 manifest 필드가 아니라
+> `_meta["lvisai/pathFields"]` 로 선언하며, per-tool category 는 manifest 필드가 아니라
 > host 가 invocation 별로 분류한다. (pre-v6 의 `tools: string[]` + `toolSchemas` map +
 > `uiActions` map triple 은 이 하나로 통합·제거됐다 — legacy.) 설계 배경은
 > [`plugin-contract-v6-design.md`](../architecture/plugin-contract-v6-design.md).
@@ -104,7 +104,7 @@ interface Tool {
   inputSchema: { type: "object"; properties: ...; required?: string[]; additionalProperties?: boolean };
   _meta?: {
     ui?: { visibility: Array<"model" | "app"> };  // renderer 노출: model=LLM, app=renderer
-    "xyz.lvis/pathFields"?: string[];             // filesystem path 판정 SOT (유일한 LVIS 전용 키)
+    "lvisai/pathFields"?: string[];             // filesystem path 판정 SOT (유일한 LVIS 전용 키)
   };
 }
 ```

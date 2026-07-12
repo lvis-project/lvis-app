@@ -379,3 +379,207 @@ describe("dispatchAppOnlyRuntimeInvocation — boundary routing gate (security d
     ).resolves.toEqual({ ok: { chunk: 2 } });
   });
 });
+
+// ─── MCP App origin ("mcp-app") — the app-only bypass is UNREACHABLE ───────────
+//
+// An MCP App is untrusted HTML in a sandboxed iframe; it is NOT the plugin's
+// first-party React panel. It therefore dispatches with its OWN origin, and the
+// app-only dispatch predicate answers "ui" and nothing else. The point of testing
+// the PREDICATE (rather than only the runtime deny) is that this is the structural
+// half of the fix: even if a future manifest/visibility change made an app-only
+// tool look dispatchable, an app-origin chain still cannot select the bypass — and
+// therefore cannot reach the `auth.statusTool` user-activation carve-out, which is
+// what the verified exploit rode.
+describe("isAppOnlyRuntimeInvocation — an MCP App origin never selects the ungoverned bypass", () => {
+  const appOnlyRuntime = () =>
+    runtimeWithManifest({
+      tools: ["meeting_upload_file"],
+      uiActions: { meeting_stage_upload_begin: {}, auth_status: {} },
+      auth: { statusTool: "auth_status", loginTool: "meeting_stage_upload_begin" },
+    });
+
+  it("is false for an app-only tool called from an app (the panel's 'ui' answer is true)", () => {
+    expect(
+      isAppOnlyRuntimeInvocation(
+        appOnlyRuntime(),
+        "meeting_stage_upload_begin",
+        { origin: "mcp-app", ownerPluginId: "meeting", userAction: false },
+        "mcp-app",
+      ),
+    ).toBe(false);
+    // Same tool, trusted panel origin → still true (the panel path is NOT regressed).
+    expect(
+      isAppOnlyRuntimeInvocation(
+        appOnlyRuntime(),
+        "meeting_stage_upload_begin",
+        { origin: "ui", ownerPluginId: "meeting", userAction: true },
+        "ui",
+      ),
+    ).toBe(true);
+  });
+
+  it("REGRESSION PIN: is false for the manifest's auth.statusTool called from an app", () => {
+    // The exploited tool. `appOnlyRuntimeInvocationRequiresUserAction` returns
+    // FALSE for it (status polling has no gesture), so if an app-origin call could
+    // reach the app-only dispatch path, NOTHING would stop it. The origin check is
+    // what stops it — one level earlier, structurally.
+    expect(
+      appOnlyRuntimeInvocationRequiresUserAction(
+        appOnlyRuntime(),
+        "auth_status",
+        { origin: "mcp-app", ownerPluginId: "meeting" },
+      ),
+    ).toBe(false); // ← the carve-out still exists…
+    expect(
+      isAppOnlyRuntimeInvocation(
+        appOnlyRuntime(),
+        "auth_status",
+        { origin: "mcp-app", ownerPluginId: "meeting", userAction: false },
+        "mcp-app",
+      ),
+    ).toBe(false); // ← …and is unreachable from an app: the bypass is never selected.
+  });
+
+  it("is false for a dual-visibility tool called from an app (it takes the governed executor)", () => {
+    expect(
+      isAppOnlyRuntimeInvocation(
+        runtimeWithManifest({
+          tools: ["meeting_upload_file"],
+          uiActions: { meeting_upload_file: {} },
+        }),
+        "meeting_upload_file",
+        { origin: "mcp-app", ownerPluginId: "meeting", userAction: false },
+        "mcp-app",
+      ),
+    ).toBe(false);
+  });
+});
+
+// The chain must not be able to LAUNDER an app origin into the panel origin: if an
+// app-rooted chain could inherit "ui" from an outer frame (or decay to "plugin" on
+// a nested ctx.callTool), the structural guarantee above would hold only at depth 0.
+describe("runWithInvocationOrigin — an mcp-app chain cannot be laundered", () => {
+  it("keeps 'mcp-app' through a nested plugin-origin ctx.callTool hop", async () => {
+    await runWithInvocationOrigin("mcp-app", undefined, async () => {
+      expect(currentInvocationOrigin()).toBe("mcp-app");
+      // The inner hop HostApi.callTool builds: origin "plugin", no parentOrigin.
+      await runWithInvocationOrigin("plugin", undefined, async () => {
+        expect(currentInvocationOrigin()).toBe("mcp-app");
+      });
+    });
+  });
+
+  it("refuses to be re-labelled 'ui' by an inner frame's current or parentOrigin", async () => {
+    await runWithInvocationOrigin("mcp-app", undefined, async () => {
+      await runWithInvocationOrigin("ui", "ui", async () => {
+        expect(currentInvocationOrigin()).toBe("mcp-app");
+      });
+      await runWithInvocationOrigin("plugin", "ui", async () => {
+        expect(currentInvocationOrigin()).toBe("mcp-app");
+      });
+    });
+  });
+
+  it("still resolves a UI-rooted chain to 'ui' and a plugin-only chain to 'plugin' (#664 P2 intact)", async () => {
+    await runWithInvocationOrigin("ui", undefined, async () => {
+      await runWithInvocationOrigin("plugin", undefined, async () => {
+        expect(currentInvocationOrigin()).toBe("ui");
+      });
+    });
+    await runWithInvocationOrigin("plugin", undefined, async () => {
+      expect(currentInvocationOrigin()).toBe("plugin");
+    });
+  });
+});
+
+// End-to-end through the production dispatch shape (the same faithful repro of
+// boot/steps/plugin-tool-executor.ts's `invokePluginTool` used above), driven
+// against a REAL PluginRuntime: which BRANCH does an app-origin call take?
+describe("invokePluginTool routing — app-origin calls land on the governed executor, never the bypass", () => {
+  const HOST_ROOT_2 = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+
+  function realRuntime(spec: {
+    tools?: string[];
+    uiActions?: Record<string, { description?: string }>;
+    auth?: { statusTool: string; loginTool: string };
+  }): PluginRuntime {
+    const rt = new PluginRuntime({ hostRoot: HOST_ROOT_2, manifestPaths: [] });
+    const internals = rt as unknown as {
+      plugins: Map<string, { manifest: unknown }>;
+      methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
+    };
+    const m = normalize(spec);
+    internals.plugins.set("meeting", { manifest: m } as unknown as never);
+    for (const t of m.tools) {
+      internals.methodMap.set(t.name, { pluginId: "meeting", handler: async () => "raw-handler" });
+    }
+    return rt;
+  }
+
+  /** Faithful reproduction of the production invokePluginTool BRANCH selection. */
+  function routeOf(
+    rt: PluginRuntime,
+    toolName: string,
+    context: PluginToolInvocationContext,
+  ): Promise<"app-only-dispatch" | "governed-executor"> {
+    return runWithInvocationOrigin(context.origin, context.parentOrigin, async () => {
+      const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
+      return isAppOnlyRuntimeInvocation(rt, toolName, context, effectiveOrigin)
+        ? "app-only-dispatch"
+        : "governed-executor";
+    });
+  }
+
+  const spec = {
+    tools: ["meeting_upload_file"],
+    uiActions: { meeting_upload_file: {}, meeting_stage_upload_begin: {}, auth_status: {} },
+    auth: { statusTool: "auth_status", loginTool: "meeting_stage_upload_begin" },
+  };
+
+  it("app origin + app-only tool → governed executor branch (and the runtime dispatches it THERE)", async () => {
+    const rt = realRuntime(spec);
+    const ctx: PluginToolInvocationContext = {
+      origin: "mcp-app",
+      ownerPluginId: "meeting",
+      userAction: false,
+    };
+    await expect(routeOf(rt, "meeting_stage_upload_begin", ctx)).resolves.toBe("governed-executor");
+    // …and that branch is where the app arm actually sends it: an app-only tool is a
+    // §6.4 registry Tool (the loopback projects it), so PluginRuntime.callFromApp
+    // hands it to the executor — risk → reviewer/approval → audit — rather than
+    // denying it for want of a gate. What it never gets is the panel's ungoverned
+    // dispatch. (Proven in plugins/runtime/__tests__/call-from-app.test.ts.)
+  });
+
+  it("app origin + auth.statusTool → governed executor branch (the bypass is not selected)", async () => {
+    const rt = realRuntime(spec);
+    await expect(
+      routeOf(rt, "auth_status", { origin: "mcp-app", ownerPluginId: "meeting", userAction: false }),
+    ).resolves.toBe("governed-executor");
+  });
+
+  it("app origin + DUAL tool → governed executor branch", async () => {
+    const rt = realRuntime(spec);
+    await expect(
+      routeOf(rt, "meeting_upload_file", {
+        origin: "mcp-app",
+        ownerPluginId: "meeting",
+        userAction: false,
+      }),
+    ).resolves.toBe("governed-executor");
+  });
+
+  it("panel origin + app-only tool → app-only dispatch branch (unchanged, incl. the statusTool)", async () => {
+    const rt = realRuntime(spec);
+    await expect(
+      routeOf(rt, "meeting_stage_upload_begin", {
+        origin: "ui",
+        ownerPluginId: "meeting",
+        userAction: true,
+      }),
+    ).resolves.toBe("app-only-dispatch");
+    await expect(
+      routeOf(rt, "auth_status", { origin: "ui", ownerPluginId: "meeting" }),
+    ).resolves.toBe("app-only-dispatch");
+  });
+});
