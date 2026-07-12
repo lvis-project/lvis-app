@@ -1,12 +1,16 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { buildMcpAppHostContext } from "../mcp-app-host-context.js";
 import { MCP_APP_AVAILABLE_DISPLAY_MODES } from "../../../../shared/mcp-app-display-mode.js";
-// NOTE: an anti-drift pin against the upstream `McpUiHostContext` type is deferred
-// (see the `it.todo` below). The upstream type cannot be imported under
-// `moduleResolution: NodeNext` today — the package's extensionless re-exports
-// mis-resolve (TS2460), which is the very bug our upstream fix
-// modelcontextprotocol/ext-apps#705 addresses, and the reason
-// `mcp-app-host-context.ts` re-declares the twin locally.
+// The anti-drift pin (bottom of this file) is a TEXT diff of the shipped upstream
+// `.d.ts` against this repo's local twin — deliberately, not a type-level check. The
+// upstream types cannot be imported for member-level resolution under
+// `moduleResolution: NodeNext` (the package's extensionless re-exports mis-resolve —
+// modelcontextprotocol/ext-apps#705, the very reason `mcp-app-host-context.ts`
+// re-declares the twin), so a pin written with `import type` would depend on the thing
+// that is broken. Reading the two source texts does not.
 
 // A representative subset of the curated `--lvis-*` token map (values are the
 // resolved CSS strings `bundleToPluginTokens` produces). Deliberately omits some
@@ -234,9 +238,60 @@ describe("buildMcpAppHostContext", () => {
     expect(ctx.platform).toBe("desktop");
   });
 
-  // Anti-drift pin deferred: the two-way assignability check between the local twin
-  // and the upstream `McpUiHostContext` needs to import that upstream type, which
-  // does not resolve under NodeNext until modelcontextprotocol/ext-apps#705 lands
-  // (after which the local twin can be dropped entirely). Re-add the pin then.
-  it.todo("local McpUiHostContext twin stays structurally compatible with upstream (blocked by ext-apps#705)");
+});
+
+// ─── Anti-drift pin against the SHIPPED upstream package ──────────────────────
+//
+// `mcp-app-host-context.ts` re-declares the standard `McpUiStyleVariableKey`
+// vocabulary locally. That is the portability boundary of this whole feature: every key
+// we emit must be one an MCP App actually reads. A re-declared type drifts silently by
+// construction — upstream adds a key, ours does not, and nothing fails — so the twin is
+// PINNED here against the union in the installed
+// `@modelcontextprotocol/ext-apps/dist/src/spec.types.d.ts`.
+//
+// Text extraction rather than a type import: see the note at the top of this file.
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(HERE, "../../../../..");
+const UPSTREAM_SPEC_TYPES = resolve(
+  REPO_ROOT,
+  "node_modules/@modelcontextprotocol/ext-apps/dist/src/spec.types.d.ts",
+);
+const LOCAL_TWIN = resolve(HERE, "../mcp-app-host-context.ts");
+
+/** Pull the quoted members of the `McpUiStyleVariableKey` union out of a TS source text. */
+function styleVariableKeys(source: string): string[] {
+  const declaration = /McpUiStyleVariableKey\s*=([\s\S]*?);/.exec(source);
+  if (!declaration) throw new Error("McpUiStyleVariableKey union not found");
+  return [...declaration[1]!.matchAll(/"(--[a-z0-9-]+)"/gi)].map((m) => m[1]!);
+}
+
+describe("McpUiStyleVariableKey twin is pinned to upstream ext-apps", () => {
+  it("declares EXACTLY the upstream style-variable vocabulary (a spec change fails here)", () => {
+    const upstream = styleVariableKeys(readFileSync(UPSTREAM_SPEC_TYPES, "utf8"));
+    const local = styleVariableKeys(readFileSync(LOCAL_TWIN, "utf8"));
+
+    // Sanity: the extraction actually found a union, not an empty match.
+    expect(upstream.length).toBeGreaterThan(50);
+    // Order is irrelevant to a union; membership is not.
+    expect([...local].sort()).toEqual([...upstream].sort());
+  });
+
+  it("only ever maps LVIS tokens onto keys that exist upstream", () => {
+    const upstream = new Set(styleVariableKeys(readFileSync(UPSTREAM_SPEC_TYPES, "utf8")));
+    const emitted = Object.keys(
+      buildMcpAppHostContext({
+        shell: "light",
+        tokens: { ...LIGHT_TOKENS, "--lvis-font-family": "Inter, sans-serif" },
+        locale: "en",
+        timeZone: "UTC",
+        displayMode: "inline",
+      }).styles?.variables ?? {},
+    );
+
+    expect(emitted.length).toBeGreaterThan(0);
+    for (const key of emitted) {
+      expect(upstream.has(key), `not a standard ext-apps style key: ${key}`).toBe(true);
+    }
+  });
 });

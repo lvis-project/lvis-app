@@ -1634,6 +1634,7 @@ export const zhMessages: Record<string, string> = {
   "marketplaceUpdateBanner.updateButton": "更新",
   "marketplaceUpdateBanner.updating": "正在更新…",
   "mcpAppView.loading": "正在加载 MCP 应用程序...",
+  "mcpAppView.openInWindow": "已在单独的窗口中打开",
   "mcpAppView.sandboxBadge": "MCP · 隔离进程 · 受限网络",
   "mcpAppView.serverDisconnected": "MCP 服务器已断开连接",
   "mcpTab.addButton": "添加",

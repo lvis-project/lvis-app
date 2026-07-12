@@ -1634,6 +1634,7 @@ export const frMessages: Record<string, string> = {
   "marketplaceUpdateBanner.updateButton": "Mise à jour",
   "marketplaceUpdateBanner.updating": "Mise à jour…",
   "mcpAppView.loading": "Chargement de l'application MCP...",
+  "mcpAppView.openInWindow": "Ouverte dans une fenêtre séparée",
   "mcpAppView.sandboxBadge": "MCP · Processus isolé · Réseau restreint",
   "mcpAppView.serverDisconnected": "Serveur MCP déconnecté",
   "mcpTab.addButton": "Ajouter",
