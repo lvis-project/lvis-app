@@ -17,11 +17,12 @@ describe("trusted cluster policy workflow", () => {
       "types: [opened, reopened, synchronize, edited, labeled, unlabeled]",
     );
     expect(workflow).toContain("contents: read");
-    expect(workflow).toContain("pull-requests: read");
+    expect(workflow).toContain("pull-requests: write");
     expect(workflow).toContain("statuses: write");
-    expect(workflow).toContain("issues: write");
     expect(workflow).not.toContain("contents: write");
-    expect(workflow).not.toContain("pull-requests: write");
+    expect(workflow).not.toContain("pull-requests: read");
+    expect(workflow).not.toContain("issues: write");
+    expect(workflow).toContain("PR-label DELETE returned 403");
     expect(workflow).toContain("cancel-in-progress: false");
     expect(workflow).not.toContain("cancel-in-progress: true");
     expect(workflow).toContain("name: Trusted Cluster Policy Evaluation");
