@@ -37,6 +37,7 @@ import { SubAgentRunner } from "../subagent-runner.js";
 import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { createAgentSpawnTool } from "../../tools/agent-spawn.js";
+import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
 
 // ─── Test scaffolding ─────────────────────────────────
 
@@ -170,6 +171,16 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     ]);
   }
 
+  function waitingSpawnProvider(): ScriptedProvider {
+    return new ScriptedProvider(
+      Array.from({ length: 4 }, (_, index) => [
+        { type: "text_delta", text: "partial-" + index },
+        { type: "tool_call", id: "wait-" + index, name: "noop", input: {} },
+        { type: "message_complete", stopReason: "tool_use" },
+      ]),
+    );
+  }
+
   it("persists parent agent_spawn linkage and reloads the child transcript by explicit childSessionId", async () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
@@ -179,12 +190,13 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       toolRegistry,
       subAgentMemoryManager: subStore,
     });
-    const restore = patchProvider(cleanSpawnProvider());
+    const restore = patchProvider(waitingSpawnProvider());
     try {
       const result = await runner.spawn({
         title: "linked child",
         instructions: "collect evidence",
         sourceTools: ["noop"],
+        maxRounds: 2,
         originSessionId: "parent-session-1",
         toolUseId: "tool-use-1",
         spawnId: "spawn-1",
@@ -205,8 +217,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(transcript.ok).toBe(true);
       if (transcript.ok) {
         expect(transcript.childSessionId).toBe(result.childSessionId);
-        expect(transcript.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
-        expect(transcript.messages.at(-1)?.content).toContain("spawn answer");
+        expect(transcript.messages[0]?.role).toBe("user");
+        expect(transcript.messages.some((message) => message.role === "assistant")).toBe(true);
+        expect(transcript.messages.map((message) => message.content).join("\n")).toContain("partial-0");
       }
       expect(runner.listRunStatuses("parent-session-1").map((run) => run.childSessionId)).toEqual([
         result.childSessionId,
@@ -230,7 +243,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(directTranscript.ok).toBe(true);
       if (directTranscript.ok) {
         expect(directTranscript.childSessionId).toBe(result.childSessionId);
-        expect(directTranscript.messages.at(-1)?.content).toContain("spawn answer");
+        expect(directTranscript.messages.map((message) => message.content).join("\n")).toContain("partial-0");
       }
       const crossOriginDirectTranscript = runner.getPersistedTranscript({
         originSessionId: "other-parent-session",
@@ -303,6 +316,86 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     }
   });
 
+  it.each([
+    "TASK_STATE_COMPLETED",
+    "TASK_STATE_FAILED",
+    "TASK_STATE_CANCELED",
+    "TASK_STATE_REJECTED",
+  ] as const)("rejects persisted terminal state %s before linking or parent delivery", async (taskState) => {
+    const originSessionId = "parent-terminal-resume";
+    const deliverToParent = vi.fn();
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+      messageBus: { deliverToParent } as never,
+    });
+
+    let restore = patchProvider(waitingSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "terminal-resume",
+      instructions: "wait",
+      sourceTools: ["noop"],
+      maxRounds: 2,
+      originSessionId,
+    });
+    restore();
+    const meta = subStore.loadSessionMetadata(spawn.childSessionId)!;
+    await subStore.saveSessionMetadata(spawn.childSessionId, {
+      ...meta,
+      subAgentTaskState: taskState,
+      subAgentSuspensionReason: undefined,
+    });
+
+    const guard = cleanSpawnProvider();
+    restore = patchProvider(guard);
+    const events: AgentSpawnEvent[] = [];
+    const tool = createAgentSpawnTool({
+      getRunner: () => runner,
+      emit: (event) => events.push(event),
+    });
+    try {
+      const handleResult = await tool.execute(
+        {
+          title: "terminal-resume",
+          instructions: "must not run",
+          resumeId: spawn.childSessionId,
+          background: true,
+        },
+        {
+          cwd: process.cwd(),
+          extraAllowedDirectories: [],
+          metadata: {
+            sessionId: originSessionId,
+            spawnDepth: 0,
+            supportsA2AParentDelivery: true,
+          },
+        },
+      );
+      const handle = JSON.parse(handleResult.output) as Record<string, unknown>;
+      expect(handleResult.isError).toBe(false);
+      expect(handle.status).toBe("error");
+      expect(handle.taskState).toBe("TASK_STATE_FAILED");
+      expect(handle).not.toHaveProperty("childSessionId");
+
+      await vi.waitFor(() =>
+        expect(events.some((event) => event.type === "error")).toBe(true));
+      expect(guard.turnsServed).toBe(0);
+      expect(events.some((event) => event.type === "activity")).toBe(false);
+      expect(events.find((event) => event.type === "error"))
+        .not.toHaveProperty("childSessionId");
+      expect(deliverToParent).not.toHaveBeenCalled();
+      expect(subStore.loadSessionMetadata(spawn.childSessionId)).toMatchObject({
+        subAgentTaskState: taskState,
+        subAgentSuspensionReason: undefined,
+      });
+    } finally {
+      restore();
+    }
+  });
   // ── 1) full-history restore ─────────────────────────
   it("re-hydrates the original spawn's full history into the continuation turn (tool-pair valid, no loss)", async () => {
     const toolRegistry = new ToolRegistry();
@@ -323,8 +416,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         { type: "message_complete", stopReason: "tool_use" },
       ],
       [
-        { type: "text_delta", text: "spawn done" },
-        { type: "message_complete", stopReason: "end_turn" },
+        { type: "text_delta", text: "spawn waiting" },
+        { type: "tool_call", id: "tu-spawn-wait", name: "noop", input: {} },
+        { type: "message_complete", stopReason: "tool_use" },
       ],
     ]);
     let restore = patchProvider(spawnProvider);
@@ -398,7 +492,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentMemoryManager: subStore,
     });
 
-    let restore = patchProvider(cleanSpawnProvider());
+    let restore = patchProvider(waitingSpawnProvider());
     const spawn = await runner.spawn({
       title: "scoped",
       instructions: "do",
@@ -437,7 +531,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentMemoryManager: subStore,
     });
 
-    let restore = patchProvider(cleanSpawnProvider());
+    let restore = patchProvider(waitingSpawnProvider());
     const spawn = await runner.spawn({
       title: "frozen",
       instructions: "do",
@@ -491,7 +585,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentMemoryManager: subStore,
     });
 
-    let restore = patchProvider(cleanSpawnProvider());
+    let restore = patchProvider(waitingSpawnProvider());
     const spawn = await runner.spawn({
       title: "depth",
       instructions: "do",
@@ -544,7 +638,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentMemoryManager: subStore,
     });
 
-    const restore = patchProvider(cleanSpawnProvider());
+    const restore = patchProvider(waitingSpawnProvider());
     const spawn = await runner.spawn({
       title: "exhaust",
       instructions: "do",
@@ -553,9 +647,11 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     });
     restore();
     const resumeId = spawn.childSessionId;
-    // Force resumeCount to the ceiling directly in metadata (full overwrite).
-    const meta = subStore.loadSessionMetadata(resumeId)!;
-    await subStore.saveSessionMetadata(resumeId, { ...meta, resumeCount: 3 });
+    // Simulate legacy metadata that predates the split counters.
+    const legacyMeta = { ...subStore.loadSessionMetadata(resumeId)! };
+    delete legacyMeta.budgetResumeCount;
+    delete legacyMeta.questionAnswerCount;
+    await subStore.saveSessionMetadata(resumeId, { ...legacyMeta, resumeCount: 3 });
 
     // A provider that would fail the test if a turn actually ran.
     const guard = new ScriptedProvider([
@@ -574,6 +670,148 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     }
   });
 
+  it("counts question answers separately from the budget-resume ceiling", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    let restore = patchProvider(waitingSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "question-counter",
+      instructions: "do",
+      sourceTools: ["noop"],
+      maxRounds: 2,
+    });
+    restore();
+
+    const meta = subStore.loadSessionMetadata(spawn.childSessionId)!;
+    await subStore.saveSessionMetadata(spawn.childSessionId, {
+      ...meta,
+      budgetResumeCount: 3,
+      questionAnswerCount: 4,
+      resumeCount: 3,
+      subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      subAgentSuspensionReason: "question",
+    });
+
+    const resumeProvider = cleanSpawnProvider();
+    restore = patchProvider(resumeProvider);
+    try {
+      const onLinked = vi.fn();
+      const saveSpy = vi.spyOn(subStore, "saveSessionMetadata");
+      try {
+        const mismatch = await runner.resume(
+          spawn.childSessionId,
+          "wrong reason",
+          "question-counter",
+          { onLinked },
+          undefined,
+          "question-mismatch-attempt",
+          "budget",
+        );
+        expect(mismatch.ok).toBe(false);
+        expect(mismatch.error).toContain("suspension reason does not match caller");
+        expect(resumeProvider.turnsServed).toBe(0);
+        expect(onLinked).not.toHaveBeenCalled();
+        expect(saveSpy).not.toHaveBeenCalled();
+        expect(subStore.loadSessionMetadata(spawn.childSessionId)).toMatchObject({
+          subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+          subAgentSuspensionReason: "question",
+        });
+      } finally {
+        saveSpy.mockRestore();
+      }
+
+      const resumed = await runner.resume(
+        spawn.childSessionId,
+        "the answer",
+        "question-counter",
+        undefined,
+        undefined,
+        undefined,
+        "question",
+      );
+      expect(resumed.ok).toBe(true);
+    } finally {
+      restore();
+    }
+
+    const updated = subStore.loadSessionMetadata(spawn.childSessionId)!;
+    expect(updated.budgetResumeCount).toBe(3);
+    expect(updated.resumeCount).toBe(3);
+    expect(updated.questionAnswerCount).toBe(5);
+    expect(updated.subAgentTaskState).toBe("TASK_STATE_COMPLETED");
+    expect(updated.subAgentSuspensionReason).toBeUndefined();
+  });
+
+  it.each(["stream-error", "context-error"] as const)(
+    "projects a non-throwing resume %s as FAILED and keeps counters unchanged",
+    async (stopReason) => {
+      const originSessionId = "parent-resume-stop-";
+      const toolRegistry = new ToolRegistry();
+      toolRegistry.register(noopTool("noop"));
+      const subStore = makeSubStore();
+      const runner = new SubAgentRunner({
+        parentDeps: buildLoopDeps(toolRegistry),
+        toolRegistry,
+        subAgentMemoryManager: subStore,
+      });
+
+      let restore = patchProvider(waitingSpawnProvider());
+      const spawn = await runner.spawn({
+        title: `resume-${stopReason}`,
+        instructions: "wait",
+        sourceTools: ["noop"],
+        maxRounds: 2,
+        originSessionId,
+      });
+      restore();
+      const before = subStore.loadSessionMetadata(spawn.childSessionId)!;
+
+      restore = patchProvider(cleanSpawnProvider());
+      const runTurnSpy = vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue({
+        text: "",
+        toolCalls: [],
+        route: "default",
+        stopReason,
+      });
+      try {
+        const resumed = await runner.resume(
+          spawn.childSessionId,
+          "continue",
+          `resume-${stopReason}`,
+          undefined,
+          originSessionId,
+        );
+        expect(resumed).toMatchObject({
+          ok: false,
+          error: `sub-agent resume stopped with ${stopReason}`,
+          stopReason,
+          turnCount: 0,
+        });
+        expect(runner.getRunStatus(spawn.childSessionId, originSessionId)).toMatchObject({
+          status: "error",
+          taskState: "TASK_STATE_FAILED",
+          error: `sub-agent resume stopped with ${stopReason}`,
+        });
+        expect(subStore.loadSessionMetadata(spawn.childSessionId)).toMatchObject({
+          budgetResumeCount: before.budgetResumeCount,
+          questionAnswerCount: before.questionAnswerCount,
+          cumulativeRounds: before.cumulativeRounds,
+          subAgentTaskState: "TASK_STATE_FAILED",
+          subAgentSuspensionReason: undefined,
+        });
+      } finally {
+        runTurnSpy.mockRestore();
+        restore();
+      }
+    },
+  );
   // ── 7) cumulative ceiling ───────────────────────────
   it("refuses a resume when cumulativeRounds >= CUMULATIVE_ROUNDS_CEILING (no turn run)", async () => {
     const toolRegistry = new ToolRegistry();
@@ -585,7 +823,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentMemoryManager: subStore,
     });
 
-    const restore = patchProvider(cleanSpawnProvider());
+    const restore = patchProvider(waitingSpawnProvider());
     const spawn = await runner.spawn({
       title: "ceiling",
       instructions: "do",
@@ -612,8 +850,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     }
   });
 
-  // ── 8) concurrent-resume lock ───────────────────────
-  it("fail-closes a second concurrent resume of the same session (one runs, one rejected, one counter save)", async () => {
+
+
+  it("caps a near-ceiling resume to the remaining round and waiting adds no extra rounds", async () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
     const subStore = makeSubStore();
@@ -623,7 +862,204 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentMemoryManager: subStore,
     });
 
-    let restore = patchProvider(cleanSpawnProvider());
+    let restore = patchProvider(waitingSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "near-ceiling",
+      instructions: "do",
+      sourceTools: ["noop"],
+      maxRounds: 2,
+    });
+    restore();
+
+    const resumeId = spawn.childSessionId;
+    const meta = subStore.loadSessionMetadata(resumeId)!;
+    await subStore.saveSessionMetadata(resumeId, {
+      ...meta,
+      budgetResumeCount: 0,
+      questionAnswerCount: 4,
+      resumeCount: 0,
+      cumulativeRounds: 119,
+    });
+
+    let observedMaxRounds: number | undefined;
+    const originalRunTurn = ConversationLoop.prototype.runTurn;
+    restore = patchProvider(cleanSpawnProvider());
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(async (...args: Parameters<typeof originalRunTurn>) => {
+        const callbacks = args[1] as
+          | {
+              onAssistantRound?: (round: { thought?: string; text: string }) => void;
+            }
+          | undefined;
+        observedMaxRounds = (args[3] as { maxRounds?: number } | undefined)?.maxRounds;
+        callbacks?.onAssistantRound?.({ text: "last allowed round" });
+        return {
+          text: "partial at cumulative ceiling",
+          toolCalls: [],
+          stopReason: "round-cap",
+        } as Awaited<ReturnType<typeof originalRunTurn>>;
+      });
+
+    try {
+      const waiting = await runner.resume(resumeId, "continue", "near-ceiling");
+      expect(waiting.ok).toBe(true);
+      expect(waiting.turnCount).toBe(1);
+      expect(waiting.stopReason).toBe("round-cap");
+      expect(waiting.suspension).toMatchObject({ reason: "budget", resumeId });
+      expect(observedMaxRounds).toBe(1);
+
+      const atCeiling = subStore.loadSessionMetadata(resumeId)!;
+      expect(atCeiling.cumulativeRounds).toBe(120);
+      expect(atCeiling.budgetResumeCount).toBe(1);
+      expect(atCeiling.resumeCount).toBe(1);
+      expect(atCeiling.questionAnswerCount).toBe(4);
+
+      const refused = await runner.resume(resumeId, "continue again", "near-ceiling");
+      expect(refused.ok).toBe(false);
+      expect(refused.resumeExhausted).toBe(true);
+      expect(refused.turnCount).toBe(0);
+      expect(runTurnSpy).toHaveBeenCalledTimes(1);
+      expect(subStore.loadSessionMetadata(resumeId)?.cumulativeRounds).toBe(120);
+    } finally {
+      runTurnSpy.mockRestore();
+      restore();
+    }
+  });
+
+
+  it("accounts assistant rounds completed before a spawn throws", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    const originalRunTurn = ConversationLoop.prototype.runTurn;
+    const restore = patchProvider(cleanSpawnProvider());
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(async (...args: Parameters<typeof originalRunTurn>) => {
+        const callbacks = args[1] as
+          | {
+              onAssistantRound?: (round: { thought?: string; text: string }) => void;
+            }
+          | undefined;
+        callbacks?.onAssistantRound?.({ text: "completed before failure" });
+        throw new Error("partial spawn failure");
+      });
+
+    let spawn: Awaited<ReturnType<SubAgentRunner["spawn"]>>;
+    try {
+      spawn = await runner.spawn({
+        title: "partial-spawn",
+        instructions: "do",
+        sourceTools: ["noop"],
+        maxRounds: 3,
+      });
+    } finally {
+      runTurnSpy.mockRestore();
+      restore();
+    }
+
+    expect(spawn.ok).toBe(false);
+    expect(spawn.turnCount).toBe(1);
+    expect(spawn.error).toContain("partial spawn failure");
+    expect(subStore.loadSessionMetadata(spawn.childSessionId)).toMatchObject({
+      budgetResumeCount: 0,
+      questionAnswerCount: 0,
+      resumeCount: 0,
+      cumulativeRounds: 1,
+    });
+  });
+
+
+  it("accounts partial-failure rounds without merging budget and question counters", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    let restore = patchProvider(waitingSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "partial-resume",
+      instructions: "do",
+      sourceTools: ["noop"],
+      maxRounds: 2,
+    });
+    restore();
+
+    const resumeId = spawn.childSessionId;
+    const meta = subStore.loadSessionMetadata(resumeId)!;
+    await subStore.saveSessionMetadata(resumeId, {
+      ...meta,
+      budgetResumeCount: 1,
+      questionAnswerCount: 7,
+      resumeCount: 1,
+      cumulativeRounds: 10,
+      subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      subAgentSuspensionReason: "question",
+    });
+
+    const originalRunTurn = ConversationLoop.prototype.runTurn;
+    restore = patchProvider(cleanSpawnProvider());
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(async (...args: Parameters<typeof originalRunTurn>) => {
+        const callbacks = args[1] as
+          | {
+              onAssistantRound?: (round: { thought?: string; text: string }) => void;
+            }
+          | undefined;
+        callbacks?.onAssistantRound?.({ text: "completed before resume failure" });
+        throw new Error("partial resume failure");
+      });
+
+    let resumed: Awaited<ReturnType<SubAgentRunner["resume"]>>;
+    try {
+      resumed = await runner.resume(
+        resumeId,
+        "answer the child",
+        "partial-resume",
+        undefined,
+        undefined,
+        undefined,
+        "question",
+      );
+    } finally {
+      runTurnSpy.mockRestore();
+      restore();
+    }
+
+    expect(resumed.ok).toBe(false);
+    expect(resumed.turnCount).toBe(1);
+    expect(resumed.error).toContain("partial resume failure");
+    expect(subStore.loadSessionMetadata(resumeId)).toMatchObject({
+      budgetResumeCount: 1,
+      questionAnswerCount: 7,
+      resumeCount: 1,
+      cumulativeRounds: 11,
+    });
+  });
+  // ── 8) concurrent-resume lock ───────────────────────
+  it("fail-closes a second concurrent resume of the same session (one runs, one rejected, one transition sequence)", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    let restore = patchProvider(waitingSpawnProvider());
     const spawn = await runner.spawn({
       title: "concurrent",
       instructions: "do",
@@ -632,6 +1068,10 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     });
     restore();
     const resumeId = spawn.childSessionId;
+    expect(subStore.loadSessionMetadata(resumeId)).toMatchObject({
+      subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      subAgentSuspensionReason: "budget",
+    });
 
     // A resume provider that yields control (await microtask) mid-turn so the
     // two resume() calls genuinely overlap before either resolves.
@@ -656,17 +1096,384 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(oks).toHaveLength(1);
       expect(rejected).toHaveLength(1);
       expect(rejected[0].error).toMatch(/already in flight/i);
-      // Exactly ONE resume ran its turn → exactly one counter save.
-      expect(saveSpy).toHaveBeenCalledTimes(1);
+      // Exactly one authorized resume persisted WORKING and one terminal state.
+      expect(saveSpy).toHaveBeenCalledTimes(2);
+      expect(saveSpy.mock.calls[0]?.[1]).toMatchObject({
+        subAgentTaskState: "TASK_STATE_WORKING",
+        subAgentSuspensionReason: undefined,
+      });
+      expect(saveSpy.mock.calls[1]?.[1]).toMatchObject({
+        subAgentTaskState: "TASK_STATE_COMPLETED",
+        subAgentSuspensionReason: undefined,
+      });
     } finally {
       saveSpy.mockRestore();
       restore();
     }
     // The single successful resume bumped resumeCount to 1 (not 2 — the lost
     // update the lock prevents).
-    expect(subStore.loadSessionMetadata(resumeId)?.resumeCount).toBe(1);
+    expect(subStore.loadSessionMetadata(resumeId)).toMatchObject({
+      resumeCount: 1,
+      budgetResumeCount: 1,
+      subAgentTaskState: "TASK_STATE_COMPLETED",
+      subAgentSuspensionReason: undefined,
+    });
+
+    const terminalGuard = cleanSpawnProvider();
+    const onLinked = vi.fn();
+    restore = patchProvider(terminalGuard);
+    try {
+      const retry = await runner.resume(
+        resumeId,
+        "must not run",
+        "concurrent",
+        { onLinked },
+      );
+      expect(retry.ok).toBe(false);
+      expect(retry.error).toMatch(/not in INPUT_REQUIRED|already terminal/i);
+      expect(terminalGuard.turnsServed).toBe(0);
+      expect(onLinked).not.toHaveBeenCalled();
+      expect(subStore.loadSessionMetadata(resumeId)).toMatchObject({
+        subAgentTaskState: "TASK_STATE_COMPLETED",
+        subAgentSuspensionReason: undefined,
+      });
+    } finally {
+      restore();
+    }
   });
 
+  it("composes concurrent background resume handles without aliasing or duplicate parent delivery", async () => {
+    const originSessionId = "parent-background-resume";
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const deliverToParent = vi.fn(async () => ({
+      ok: true as const,
+      disposition: "mailbox" as const,
+      messageId: "winner-message",
+    }));
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+      messageBus: { deliverToParent } as never,
+    });
+
+    let restore = patchProvider(waitingSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "background-resume",
+      instructions: "wait",
+      sourceTools: ["noop"],
+      maxRounds: 2,
+      originSessionId,
+    });
+    restore();
+
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let releaseWinner!: () => void;
+    const winnerGate = new Promise<void>((resolve) => {
+      releaseWinner = resolve;
+    });
+    const blockingProvider: LLMProvider = {
+      vendor: "openai",
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        markStarted();
+        await winnerGate;
+        yield { type: "text_delta", text: "winner completed" };
+        yield { type: "message_complete", stopReason: "end_turn" };
+      },
+    };
+    restore = patchProvider(blockingProvider);
+    const events: AgentSpawnEvent[] = [];
+    const tool = createAgentSpawnTool({
+      getRunner: () => runner,
+      emit: (event) => events.push(event),
+    });
+    const toolContext = {
+      cwd: process.cwd(),
+      extraAllowedDirectories: [],
+      metadata: {
+        sessionId: originSessionId,
+        spawnDepth: 0,
+        supportsA2AParentDelivery: true,
+      },
+    };
+
+    try {
+      const winnerResult = await tool.execute(
+        {
+          title: "background-resume",
+          instructions: "continue",
+          resumeId: spawn.childSessionId,
+          background: true,
+        },
+        toolContext,
+      );
+      const winner = JSON.parse(winnerResult.output);
+      await started;
+      expect(winnerResult.isError).toBe(false);
+      expect(winner).toMatchObject({
+        childSessionId: spawn.childSessionId,
+        status: "running",
+        taskState: "TASK_STATE_WORKING",
+      });
+
+      const loserResult = await tool.execute(
+        {
+          title: "background-resume",
+          instructions: "duplicate",
+          resumeId: spawn.childSessionId,
+          background: true,
+        },
+        toolContext,
+      );
+      const loser = JSON.parse(loserResult.output);
+      expect(loserResult.isError).toBe(false);
+      expect(loser.spawnId).not.toBe(winner.spawnId);
+      expect(loser).toMatchObject({
+        status: "error",
+        taskState: "TASK_STATE_FAILED",
+      });
+      expect(loser).not.toHaveProperty("childSessionId");
+      expect(runner.getRunStatus(loser.spawnId, originSessionId)).toMatchObject({
+        status: "error",
+        taskState: "TASK_STATE_FAILED",
+        error: expect.stringContaining("already in flight"),
+      });
+      expect(runner.getRunStatus(spawn.childSessionId, originSessionId)).toMatchObject({
+        spawnId: winner.spawnId,
+        status: "running",
+        taskState: "TASK_STATE_WORKING",
+      });
+      await vi.waitFor(() =>
+        expect(events.some(
+          (event) => event.spawnId === loser.spawnId && event.type === "error",
+        )).toBe(true));
+      expect(deliverToParent).not.toHaveBeenCalled();
+
+      releaseWinner();
+      await vi.waitFor(() => expect(deliverToParent).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() =>
+        expect(events.some(
+          (event) => event.spawnId === winner.spawnId && event.type === "done",
+        )).toBe(true));
+
+      const winnerTerminal = events.filter(
+        (event) => event.spawnId === winner.spawnId
+          && (event.type === "done" || event.type === "error"),
+      );
+      const loserTerminal = events.filter(
+        (event) => event.spawnId === loser.spawnId
+          && (event.type === "done" || event.type === "error"),
+      );
+      expect(winnerTerminal).toHaveLength(1);
+      expect(winnerTerminal[0]).toMatchObject({
+        type: "done",
+        childSessionId: spawn.childSessionId,
+        taskState: "TASK_STATE_COMPLETED",
+        status: "done",
+      });
+      expect(loserTerminal).toHaveLength(1);
+      expect(loserTerminal[0]).toMatchObject({
+        type: "error",
+        taskState: "TASK_STATE_FAILED",
+        status: "error",
+      });
+      expect(loserTerminal[0]).not.toHaveProperty("childSessionId");
+      expect(deliverToParent.mock.calls[0]?.[0]).toMatchObject({
+        parentSessionId: originSessionId,
+        childSessionId: spawn.childSessionId,
+      });
+    } finally {
+      releaseWinner();
+      restore();
+    }
+  });
+  it("terminalizes a resume as FAILED when its final metadata write rejects and denies retry", async () => {
+    const originSessionId = "parent-resume-final-save";
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    let restore = patchProvider(waitingSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "resume-final-save",
+      instructions: "wait",
+      sourceTools: ["noop"],
+      maxRounds: 2,
+      originSessionId,
+    });
+    restore();
+
+    const originalSave = subStore.saveSessionMetadata.bind(subStore);
+    let saveCount = 0;
+    const savedStates: unknown[] = [];
+    const saveSpy = vi.spyOn(subStore, "saveSessionMetadata")
+      .mockImplementation(async (sessionId, next) => {
+        saveCount += 1;
+        savedStates.push(next.subAgentTaskState);
+        if (saveCount === 2) {
+          throw new Error("final metadata write failed");
+        }
+        await originalSave(sessionId, next);
+      });
+    const provider = cleanSpawnProvider();
+    restore = patchProvider(provider);
+    try {
+      const result = await runner.resume(
+        spawn.childSessionId,
+        "finish",
+        "resume-final-save",
+        undefined,
+        originSessionId,
+        "resume-final-save-attempt",
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        error: "final metadata write failed",
+      });
+      expect(savedStates).toEqual([
+        "TASK_STATE_WORKING",
+        "TASK_STATE_COMPLETED",
+        "TASK_STATE_FAILED",
+      ]);
+      expect(runner.getRunStatus(
+        "resume-final-save-attempt",
+        originSessionId,
+      )).toMatchObject({
+        status: "error",
+        taskState: "TASK_STATE_FAILED",
+        error: "final metadata write failed",
+      });
+      expect(subStore.loadSessionMetadata(spawn.childSessionId)).toMatchObject({
+        subAgentTaskState: "TASK_STATE_FAILED",
+        subAgentSuspensionReason: undefined,
+      });
+
+      const onLinked = vi.fn();
+      const retry = await runner.resume(
+        spawn.childSessionId,
+        "retry",
+        "resume-final-save",
+        { onLinked },
+        originSessionId,
+        "resume-final-save-retry",
+      );
+      expect(retry.ok).toBe(false);
+      expect(retry.error).toMatch(/not in INPUT_REQUIRED|already terminal/i);
+      expect(onLinked).not.toHaveBeenCalled();
+      expect(provider.turnsServed).toBe(1);
+      expect(saveSpy).toHaveBeenCalledTimes(3);
+    } finally {
+      saveSpy.mockRestore();
+      restore();
+    }
+  });
+
+  it("rejects a late interrupt after the resume terminal commit point", async () => {
+    const originSessionId = "parent-resume-commit";
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    let restore = patchProvider(waitingSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "resume-commit",
+      instructions: "wait",
+      sourceTools: ["noop"],
+      maxRounds: 2,
+      originSessionId,
+    });
+    restore();
+
+    const originalSave = subStore.saveSessionMetadata.bind(subStore);
+    let saveCount = 0;
+    const savedStates: unknown[] = [];
+    let signalFinalSave!: () => void;
+    let releaseFinalSave!: () => void;
+    const finalSaveEntered = new Promise<void>((resolve) => {
+      signalFinalSave = resolve;
+    });
+    const finalSaveGate = new Promise<void>((resolve) => {
+      releaseFinalSave = resolve;
+    });
+    const saveSpy = vi.spyOn(subStore, "saveSessionMetadata")
+      .mockImplementation(async (sessionId, next) => {
+        saveCount += 1;
+        savedStates.push(next.subAgentTaskState);
+        if (saveCount === 2) {
+          signalFinalSave();
+          await finalSaveGate;
+        }
+        await originalSave(sessionId, next);
+      });
+    const provider = cleanSpawnProvider();
+    restore = patchProvider(provider);
+    let pending: Promise<Awaited<ReturnType<SubAgentRunner["resume"]>>> | undefined;
+    try {
+      pending = runner.resume(
+        spawn.childSessionId,
+        "finish",
+        "resume-commit",
+        undefined,
+        originSessionId,
+        "resume-commit-cutoff",
+      );
+      await finalSaveEntered;
+
+      expect(runner.interruptRun(
+        "resume-commit-cutoff",
+        originSessionId,
+      )).toMatchObject({
+        ok: false,
+        run: {
+          status: "running",
+          taskState: "TASK_STATE_WORKING",
+        },
+      });
+      expect(subStore.loadSessionMetadata(spawn.childSessionId)).toMatchObject({
+        subAgentTaskState: "TASK_STATE_WORKING",
+        subAgentSuspensionReason: undefined,
+      });
+
+      releaseFinalSave();
+      const result = await pending;
+      expect(result).toMatchObject({ ok: true, stopReason: "end_turn" });
+      expect(savedStates).toEqual([
+        "TASK_STATE_WORKING",
+        "TASK_STATE_COMPLETED",
+      ]);
+      expect(runner.getRunStatus(
+        "resume-commit-cutoff",
+        originSessionId,
+      )).toMatchObject({
+        status: "done",
+        taskState: "TASK_STATE_COMPLETED",
+      });
+      expect(subStore.loadSessionMetadata(spawn.childSessionId)).toMatchObject({
+        subAgentTaskState: "TASK_STATE_COMPLETED",
+        subAgentSuspensionReason: undefined,
+      });
+    } finally {
+      releaseFinalSave();
+      await pending?.catch(() => undefined);
+      saveSpy.mockRestore();
+      restore();
+    }
+  });
   // ── 10) namespace isolation ─────────────────────────
   it("persists the resumed continuation ONLY to ~/.lvis/subagent/ (never the main store)", async () => {
     const toolRegistry = new ToolRegistry();
@@ -682,7 +1489,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentMemoryManager: subStore,
     });
 
-    let restore = patchProvider(cleanSpawnProvider());
+    let restore = patchProvider(waitingSpawnProvider());
     const spawn = await runner.spawn({
       title: "iso",
       instructions: "do",
@@ -737,8 +1544,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         { type: "message_complete", stopReason: "tool_use" },
       ],
       [
-        { type: "text_delta", text: "spawn done" },
-        { type: "message_complete", stopReason: "end_turn" },
+        { type: "text_delta", text: "spawn waiting" },
+        { type: "tool_call", id: "tu-counter-wait", name: "noop", input: {} },
+        { type: "message_complete", stopReason: "tool_use" },
       ],
     ]);
     let restore = patchProvider(spawnProvider);
@@ -756,7 +1564,14 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     // fix in this commit; previously left at 0 → inaccurate resume-chain ceiling).
     expect(afterSpawn.cumulativeRounds).toBe(spawn.turnCount);
     expect(afterSpawn.resumeCount).toBe(0);
+    expect(afterSpawn.budgetResumeCount).toBe(0);
+    expect(afterSpawn.questionAnswerCount).toBe(0);
     const resumeId = spawn.childSessionId;
+    // Question answers are a separate axis and must not consume MAX_RESUMES.
+    await subStore.saveSessionMetadata(resumeId, {
+      ...afterSpawn,
+      questionAnswerCount: 7,
+    });
 
     // Resume spends 1 round.
     const resumeProvider = new ScriptedProvider([
@@ -777,6 +1592,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const afterResume = subStore.loadSessionMetadata(resumeId)!;
     // +1 resume, +turnCount rounds.
     expect(afterResume.resumeCount).toBe(1);
+    expect(afterResume.budgetResumeCount).toBe(1);
+    expect(afterResume.questionAnswerCount).toBe(7);
     expect(afterResume.cumulativeRounds).toBe(afterSpawn.cumulativeRounds! + resumed.turnCount);
     // Full-overwrite spread preserved the frozen scope + profile fields — a
     // dropped spread would corrupt the scope for the NEXT resume.
@@ -859,8 +1676,12 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     await subStore.saveSessionMetadata(resumeId, {
       sessionKind: "subagent",
       sourceTools: ["noop"],
+      originSessionId: originA,
+      subAgentTitle: "owner",
       resumeCount: 0,
       cumulativeRounds: 0,
+      subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      subAgentSuspensionReason: "budget",
     });
     // Also write a minimal session JSONL so loadSession would succeed IF we got
     // past the origin check (proves the guard fires before history is loaded).
@@ -897,6 +1718,54 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     }
   });
 
+  it("rejects a tag-matching id when persisted origin metadata mismatches", async () => {
+    const { createHash, randomUUID } = await import("node:crypto");
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    const callerOrigin = "session-A";
+    const tag = createHash("sha256").update(callerOrigin).digest("hex").slice(0, 8);
+    const resumeId = "sub-" + tag + "-" + randomUUID();
+    await subStore.saveSessionMetadata(resumeId, {
+      sessionKind: "subagent",
+      sourceTools: ["noop"],
+      originSessionId: "session-collision-target",
+      budgetResumeCount: 0,
+      questionAnswerCount: 0,
+      resumeCount: 0,
+      cumulativeRounds: 0,
+    });
+    await subStore.saveSession(resumeId, []);
+
+    const guardProvider = new ScriptedProvider([
+      [
+        { type: "text_delta", text: "MUST-NOT-RUN" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const restore = patchProvider(guardProvider);
+    try {
+      const result = await runner.resume(
+        resumeId,
+        "collision attempt",
+        "attacker",
+        undefined,
+        callerOrigin,
+      );
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/origin session metadata does not match caller/i);
+      expect(guardProvider.turnsServed).toBe(0);
+    } finally {
+      restore();
+    }
+  });
+
   it("untagged sub-agent id (spawned without originSessionId) is resumable only by a no-origin caller", async () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
@@ -908,7 +1777,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     });
 
     // Spawn without originSessionId → untagged id `sub-<uuid>`.
-    let restore = patchProvider(cleanSpawnProvider());
+    let restore = patchProvider(waitingSpawnProvider());
     const spawn = await runner.spawn({
       title: "untagged",
       instructions: "do",
@@ -969,8 +1838,11 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     await subStore.saveSessionMetadata(resumeId, {
       sessionKind: "subagent",
       sourceTools: [], // deliberately empty — corruption signal
+      subAgentTitle: "tamper-test",
       resumeCount: 0,
       cumulativeRounds: 0,
+      subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      subAgentSuspensionReason: "budget",
     });
 
     const guardProvider = new ScriptedProvider([

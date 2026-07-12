@@ -16,7 +16,7 @@ import { SkillApprovalsStore } from "../../main/skill-approvals-store.js";
 import { AgentProfileStore } from "../../main/agent-profile-store.js";
 import { PersonaPromptStore } from "../../main/persona-prompt-store.js";
 import type { SubAgentRunner } from "../../engine/subagent-runner.js";
-import type { AgentSpawnEvent } from "../../tools/agent-spawn.js";
+import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
 import type { SkillLoadEvent } from "../../tools/skill-load.js";
 import {
   registerBuiltinTools,

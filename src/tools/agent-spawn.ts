@@ -9,7 +9,10 @@
  */
 import { randomUUID } from "node:crypto";
 import { createDynamicTool, type Tool } from "./base.js";
-import type { SubAgentRunner } from "../engine/subagent-runner.js";
+import type {
+  SubAgentRunner,
+  SubAgentSpawnResult,
+} from "../engine/subagent-runner.js";
 import {
   AGENT_NAME_ALLOWLIST,
   type LoadedAgentProfile,
@@ -17,56 +20,54 @@ import {
 import { t } from "../i18n/index.js";
 
 import type { ChatEntry } from "../lib/chat-stream-state.js";
+import {
+  A2A_ROLE_AGENT,
+  projectSubAgentResultState,
+  projectSubAgentRunState,
+  subAgentRunStatusFromTaskState,
+  type A2AMessage,
+} from "../shared/a2a.js";
+import type { AgentSpawnEvent as SharedAgentSpawnEvent } from "../shared/subagent-events.js";
 
-export interface AgentSpawnEvent {
-  spawnId: string;
-  /**
-   * Lifecycle phase:
-   *   - `start`    — spawn created; carries `title` + `toolUseId`.
-   *   - `activity` — the child loop produced new transcript content; carries
-   *                  the FULL {@link entries} snapshot (idempotent replace, not
-   *                  a delta) so the renderer swaps the whole child transcript.
-   *   - `done`     — clean completion; carries `summary`, `toolCallCount`, and
-   *                  the final live {@link entries} snapshot for the current
-   *                  renderer session. Persistence stays in the child JSONL.
-   *   - `error`    — failed run; carries `message` (+ any partial `entries`).
-   */
-  type: "start" | "activity" | "done" | "error";
-  title?: string;
-  /** Raw prompt sent by the parent assistant to the child agent. */
-  instructions?: string;
-  /**
-   * Full child transcript snapshot as `ChatEntry[]` — the SAME model the main
-   * chat renders. Present on `activity` / `done` (and `error` when partial
-   * output exists). DLP-masked at the source (child tool results + thoughts run
-   * through `maskSensitiveData` before entering this snapshot). Idempotent
-   * replace: the renderer overwrites the spawn's entries with each snapshot
-   * rather than appending, so a re-emitted event never double-renders.
-   */
-  entries?: ChatEntry[];
-  summary?: string;
-  toolCallCount?: number;
-  message?: string;
-  /** Terminal display state. `done` events may carry `interrupted`. */
-  status?: "running" | "done" | "error" | "interrupted";
-  /**
-   * The `tool_use` id of the `agent_spawn` invocation that triggered this
-   * spawn. Set on the `start` event so the renderer can attach the sub-agent
-   * to the originating ToolGroupCard (completion chip) instead of stacking all
-   * spawns at the top of the chat.
-   */
-  toolUseId?: string;
-  /**
-   * The addressable sub-agent session id (`SubAgentSpawnResult.childSessionId`).
-   * This is the JOIN KEY the renderer uses to unify a spawn and its resumes into
-   * a single sub-agent transcript: a resume is a SEPARATE `agent_spawn` call
-   * (own `toolUseId`) but shares the original's `childSessionId`, so the viewer
-   * groups on this field. A resume carries it on EVERY phase (it equals the
-   * `resumeId` from the tool call); a fresh spawn emits it as soon as the child
-   * session is linked, before the first child LLM round.
-   */
-  childSessionId?: string;
+
+function backgroundResultText(result: SubAgentSpawnResult): string {
+  const summary = result.error ?? result.summary;
+  if (!result.suspension) return summary;
+  const requestedInput = result.suspension.reason === "question"
+    ? result.suspension.prompt ?? "answer the sub-agent question"
+    : "send any message to continue, or treat this partial result as done";
+  return `${summary}\n\n[Input required: ${requestedInput}]`;
 }
+
+function createBackgroundResultMessage(
+  result: SubAgentSpawnResult,
+  parentSessionId: string,
+  spawnId: string,
+): A2AMessage {
+  const suspension = result.suspension;
+  return {
+    messageId: randomUUID(),
+    role: A2A_ROLE_AGENT,
+    parts: [{ text: backgroundResultText(result) }],
+    contextId: parentSessionId,
+    taskId: result.childSessionId,
+    metadata: {
+      taskState: projectSubAgentResultState(result),
+      spawnId,
+      ...(suspension
+        ? {
+            suspension: {
+              reason: suspension.reason,
+              resumeId: suspension.resumeId,
+              ...(suspension.prompt ? { prompt: suspension.prompt } : {}),
+            },
+          }
+        : {}),
+    },
+  };
+}
+
+export type AgentSpawnEvent = SharedAgentSpawnEvent<ChatEntry>;
 
 export interface AgentSpawnToolDeps {
   getRunner: () => SubAgentRunner | undefined;
@@ -126,6 +127,19 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         return {
           output: JSON.stringify({
             error: "agent_spawn cannot be invoked from a sub-agent",
+            taskState: projectSubAgentRunState("rejected"),
+          }),
+          isError: true,
+        };
+      }
+      const a = (rawInput ?? {}) as Record<string, unknown>;
+      const background = a.background === true;
+      if (background && ctx.metadata?.supportsA2AParentDelivery !== true) {
+        return {
+          output: JSON.stringify({
+            error: "background-parent-unsupported",
+            message: "Background sub-agent delivery is unavailable for this conversation surface.",
+            taskState: projectSubAgentRunState("rejected"),
           }),
           isError: true,
         };
@@ -133,16 +147,19 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
       const runner = deps.getRunner();
       if (!runner) {
         return {
-          output: JSON.stringify({ error: "agent_spawn runner not configured" }),
+          output: JSON.stringify({
+            error: "agent_spawn runner not configured",
+            taskState: projectSubAgentRunState("error"),
+          }),
           isError: true,
         };
       }
-      const a = (rawInput ?? {}) as Record<string, unknown>;
       const agentName = typeof a.agentName === "string" ? a.agentName.trim() : "";
       if (agentName && !AGENT_NAME_ALLOWLIST.test(agentName)) {
         return {
           output: JSON.stringify({
             error: `invalid agentName: must match ${AGENT_NAME_ALLOWLIST.source}`,
+            taskState: projectSubAgentRunState("rejected"),
           }),
           isError: true,
         };
@@ -152,7 +169,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         : null;
       if (agentName && !profile) {
         return {
-          output: JSON.stringify({ error: `agent profile not found: ${agentName}` }),
+          output: JSON.stringify({ error: `agent profile not found: ${agentName}`, taskState: projectSubAgentRunState("rejected") }),
           isError: true,
         };
       }
@@ -170,11 +187,12 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
       const resumeId = typeof a.resumeId === "string" && a.resumeId.trim()
         ? a.resumeId.trim()
         : undefined;
-      const background = a.background === true;
+
       if (!instructions || (!resumeId && !title)) {
         return {
           output: JSON.stringify({
             error: "instructions are required; title is required when agentName is not provided (unless resumeId is set)",
+            taskState: projectSubAgentRunState("rejected"),
           }),
           isError: true,
         };
@@ -198,13 +216,22 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
           ? (ctx.metadata.toolUseId as string)
           : undefined;
       const spawnId = randomUUID();
-      // A resume knows its join key up front (it equals `resumeId`); the original
-      // spawn learns `childSessionId` only from the run result (set on `done`).
-      const resumeChildSessionId = resumeId ? { childSessionId: resumeId } : {};
+      const initialTaskState = resumeId
+        ? projectSubAgentRunState("waiting")
+        : projectSubAgentRunState("submitted");
       const promptPayload = instructions ? { instructions } : {};
-      let linkedChildSessionId = resumeId;
+      // A known resumeId is not an authorized parent-delivery link. The runner
+      // calls onLinked only after exact origin + durable INPUT_REQUIRED checks.
+      let linkedChildSessionId: string | undefined;
       const linkedPayload = () => linkedChildSessionId ? { childSessionId: linkedChildSessionId } : {};
-      deps.emit({ spawnId, type: "start", title, toolUseId, ...promptPayload, ...resumeChildSessionId });
+      deps.emit({
+        spawnId,
+        type: "start",
+        taskState: initialTaskState,
+        title,
+        toolUseId,
+        ...promptPayload,
+      });
       try {
         const callbacks = {
           onLinked: ({ childSessionId }: { childSessionId: string }) => {
@@ -212,6 +239,9 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             deps.emit({
               spawnId,
               type: "activity" as const,
+              taskState: resumeId
+                ? projectSubAgentRunState("waiting")
+                : projectSubAgentRunState("submitted"),
               childSessionId,
               ...promptPayload,
             });
@@ -220,13 +250,15 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             deps.emit({
               spawnId,
               type: "activity" as const,
+              taskState: projectSubAgentRunState("running"),
               entries: u.entries,
               toolCallCount: u.toolCallCount,
               ...promptPayload,
               ...linkedPayload(),
             }),
-          onError: (msg: string) =>
-            deps.emit({ spawnId, type: "error" as const, message: msg, ...promptPayload, ...linkedPayload() }),
+          // `onError` is diagnostic and may precede a structurally returned
+          // INPUT_REQUIRED/REJECTED result. Only the final result below may
+          // emit a terminal renderer event for this spawnId.
         };
         // Resume RE-HYDRATES a frozen sub-agent; spawn starts a fresh one. The
         // resume path takes NO sourceTools/profile from the tool call — those are
@@ -255,34 +287,92 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
               callbacks,
             );
         if (background) {
-          const runPromise = run();
-          void runPromise
-            .then((result) => {
-              if (result.ok === false) {
-                const message = result.error ?? result.summary;
-                deps.emit({ spawnId, type: "error", message, ...promptPayload, ...linkedPayload() });
-                return;
-              }
-              linkedChildSessionId = result.childSessionId;
+          let terminalized = false;
+          const terminalize = async (result: SubAgentSpawnResult): Promise<void> => {
+            if (terminalized) return;
+            terminalized = true;
+            const authorizedChildSessionId = linkedChildSessionId;
+            const taskState = projectSubAgentResultState(result);
+            const status = subAgentRunStatusFromTaskState(taskState);
+            if (status === "error") {
+              const message = result.error ?? result.summary;
+              deps.emit({
+                spawnId,
+                type: "error",
+                taskState,
+                status,
+                message,
+                ...promptPayload,
+                ...linkedPayload(),
+              });
+            } else {
               deps.emit({
                 spawnId,
                 type: "done",
-                status: result.stopReason === "interrupted" ? "interrupted" : "done",
+                taskState,
+                status,
+                ...(result.suspension ? { suspension: result.suspension } : {}),
                 summary: result.summary,
                 toolCallCount: result.toolCallCount,
                 entries: result.entries,
                 ...promptPayload,
-                childSessionId: result.childSessionId,
+                ...linkedPayload(),
               });
-            })
-            .catch((err) => {
-              const message = (err as Error).message ?? "agent_spawn failed";
-              deps.emit({ spawnId, type: "error", message, ...promptPayload, ...linkedPayload() });
+            }
+
+            if (!authorizedChildSessionId) return;
+            const parentSessionId = originSessionId ?? "";
+            try {
+              await runner.deliverToParent({
+                parentSessionId,
+                childSessionId: authorizedChildSessionId,
+                message: createBackgroundResultMessage(
+                  result,
+                  parentSessionId,
+                  spawnId,
+                ),
+              });
+            } catch {
+              // Delivery owns its audit path. The renderer terminal state is final.
+            }
+          };
+          const terminalizeRejection = async (err: unknown): Promise<void> => {
+            const message = (err as Error).message ?? "agent_spawn failed";
+            if (!linkedChildSessionId) {
+              if (terminalized) return;
+              terminalized = true;
+              const taskState = projectSubAgentRunState("error");
+              deps.emit({
+                spawnId,
+                type: "error",
+                taskState,
+                status: subAgentRunStatusFromTaskState(taskState),
+                message,
+                ...promptPayload,
+              });
+              return;
+            }
+            await terminalize({
+              summary: message,
+              error: message,
+              toolCallCount: 0,
+              turnCount: 0,
+              childSessionId: linkedChildSessionId,
+              entries: [],
+              ok: false,
             });
+          };
+
+          void run().then(terminalize, terminalizeRejection);
+          const handleTaskState = originSessionId
+            && typeof runner.getRunStatus === "function"
+            ? runner.getRunStatus(spawnId, originSessionId)?.taskState ?? initialTaskState
+            : initialTaskState;
           return {
             output: JSON.stringify({
               spawnId,
-              status: "running",
+              status: subAgentRunStatusFromTaskState(handleTaskState),
+              taskState: handleTaskState,
               background: true,
               ...(resumeId ? { resumeId } : {}),
               ...(linkedChildSessionId ? { childSessionId: linkedChildSessionId } : {}),
@@ -293,25 +383,33 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         }
 
         const result = await run();
-        // A spawn that could not run (LLM provider unconfigured, child loop
-        // threw) returns `ok: false` with the error text as `summary` rather
-        // than throwing. Surface it as a tool error so the assistant does not
-        // treat the error string as a successful sub-agent result.
-        if (result.ok === false) {
+        const taskState = projectSubAgentResultState(result);
+        const status = subAgentRunStatusFromTaskState(taskState);
+        // FAILED and REJECTED are errors even when runTurn returned a result,
+        // for example a UserPromptSubmit stopReason of blocked.
+        if (status === "error") {
           const message = result.error ?? result.summary;
-          deps.emit({ spawnId, type: "error", message, ...promptPayload, ...linkedPayload() });
+          deps.emit({
+            spawnId,
+            type: "error",
+            taskState,
+            status,
+            message,
+            ...promptPayload,
+            childSessionId: result.childSessionId,
+          });
           return {
-            output: JSON.stringify({ error: message }),
+            output: JSON.stringify({ error: message, taskState }),
             isError: true,
           };
         }
-        // On the terminal `done` phase the join key is always available from the
-        // result (for a resume it equals `resumeId`; for the original spawn this
-        // is the first phase carrying it), so the renderer can group segments.
+        // A terminal non-error event carries the addressable child join key.
         deps.emit({
           spawnId,
           type: "done",
-          status: result.stopReason === "interrupted" ? "interrupted" : "done",
+          taskState,
+          status,
+          ...(result.suspension ? { suspension: result.suspension } : {}),
           summary: result.summary,
           toolCallCount: result.toolCallCount,
           entries: result.entries,
@@ -326,35 +424,24 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             spawnId,
             agentName: profile?.name,
             childSessionId: result.childSessionId,
+            taskState,
             ...(result.stopReason ? { stopReason: result.stopReason } : {}),
-            // Cut-off resume signal (Claude Code "the sub-agent ran out of
-            // turns and didn't finish" pattern). When the child hit its
-            // host-assigned round budget, `summary` is PARTIAL — surface that
-            // explicitly so the parent LLM does not treat the truncated text as
-            // a completed result and can decide to re-spawn / continue the task.
-            // Omitted entirely on a clean end_turn so normal completions carry
-            // no extra fields.
+            ...(result.suspension ? { suspension: result.suspension } : {}),
             ...(result.incomplete
               ? {
                   incomplete: true,
                   incompleteReason: t("be_agentSpawn.incompleteNotice"),
-                  // Same-instance resume handle (PR-C). `childSessionId` is the
-                  // addressable sub-agent session id; passing it back as
-                  // `resumeId` on a follow-up agent_spawn RE-HYDRATES this exact
-                  // sub-agent (frozen tool scope, full history) instead of
-                  // starting a fresh one. This is the ONLY surface the parent
-                  // LLM learns the id from.
                   resumeId: result.childSessionId,
                 }
               : {}),
           }),
           isError: false,
-        };
-      } catch (err) {
+        };      } catch (err) {
         const message = (err as Error).message ?? "agent_spawn failed";
-        deps.emit({ spawnId, type: "error", message, ...promptPayload, ...linkedPayload() });
+        const taskState = projectSubAgentRunState("error");
+        deps.emit({ spawnId, type: "error", taskState, message, ...promptPayload, ...linkedPayload() });
         return {
-          output: JSON.stringify({ error: message }),
+          output: JSON.stringify({ error: message, taskState }),
           isError: true,
         };
       }
