@@ -2,6 +2,7 @@ name: Cluster Detector
 
 on:
   pull_request_target:
+    branches: [main]
     # Re-run for every event that can change the current review evidence.
     types: [opened, reopened, synchronize, edited, labeled, unlabeled]
 
@@ -167,70 +168,81 @@ jobs:
           echo "::error::Sensitive area cluster (${REASON}) requires current-head cluster review"
           exit 1
 
-      - name: Revalidate live pull request snapshot
+      - name: Finalize cluster policy status
+        if: always()
         env:
           ATTESTED: ${{ steps.cluster-attestation.outputs.attested }}
           EXPECTED_DIGEST: ${{ steps.pr-snapshot.outputs.digest }}
           GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PRIOR_JOB_STATUS: ${{ job.status }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          STATUS_CONTEXT: Sensitive Area Cluster Check
           VIOLATION: ${{ steps.cluster-check.outputs.violation }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
         run: |
-          set -euo pipefail
-          FINAL_SNAPSHOT="${RUNNER_TEMP}/cluster-review-pr-final.json"
-          FINAL_OUTPUT="${RUNNER_TEMP}/cluster-review-final-output"
-          gh api "repos/${REPO}/pulls/${PR_NUMBER}" > "$FINAL_SNAPSHOT"
-          FINAL_DIGEST=$(jq -cS \
-            '{
-              number,
-              head: .head.sha,
-              base: .base.sha,
-              body: (.body // ""),
-              labels: ([.labels[].name] | sort),
-              state,
-              updated_at,
-              changed_files,
-              commits
-            }' \
-            "$FINAL_SNAPSHOT" | sha256sum | cut -d' ' -f1)
+          set -uo pipefail
+          STATUS_STATE=failure
+          STATUS_DESCRIPTION="Sensitive area cluster policy failed"
+          FINALIZER_FAILED=0
 
-          if [ "$FINAL_DIGEST" != "$EXPECTED_DIGEST" ]; then
-            echo "::error::Pull request state changed during cluster review evaluation"
-            exit 1
-          fi
-
-          if [ "$VIOLATION" = "true" ] && [ "$ATTESTED" = "true" ]; then
-            node .cluster-policy/scripts/check-cluster-review-attestation.mjs \
-              "$FINAL_SNAPSHOT" "$FINAL_OUTPUT" "$GITHUB_EVENT_PATH"
-            if ! grep -Fxq "attested=true" "$FINAL_OUTPUT"; then
-              echo "::error::Cluster review attestation changed before completion"
-              exit 1
+          if ! [[ "$HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Invalid event pull request head SHA"
+            FINALIZER_FAILED=1
+          elif [ "$PRIOR_JOB_STATUS" != "success" ]; then
+            echo "::error::Cluster policy evaluation failed before finalization"
+            FINALIZER_FAILED=1
+          else
+            FINAL_SNAPSHOT="${RUNNER_TEMP}/cluster-review-pr-final.json"
+            FINAL_OUTPUT="${RUNNER_TEMP}/cluster-review-final-output"
+            if ! gh api "repos/${REPO}/pulls/${PR_NUMBER}" > "$FINAL_SNAPSHOT"; then
+              echo "::error::Unable to refresh pull request state before final status"
+              FINALIZER_FAILED=1
+            elif ! FINAL_DIGEST=$(jq -cS \
+              '{
+                number,
+                head: .head.sha,
+                base: .base.sha,
+                body: (.body // ""),
+                labels: ([.labels[].name] | sort),
+                state,
+                updated_at,
+                changed_files,
+                commits
+              }' \
+              "$FINAL_SNAPSHOT" | sha256sum | cut -d' ' -f1); then
+              echo "::error::Unable to digest final pull request state"
+              FINALIZER_FAILED=1
+            elif [ "$FINAL_DIGEST" != "$EXPECTED_DIGEST" ]; then
+              echo "::error::Pull request state changed during cluster review evaluation"
+              FINALIZER_FAILED=1
+            elif [ "$VIOLATION" = "true" ] && [ "$ATTESTED" = "true" ]; then
+              if ! node .cluster-policy/scripts/check-cluster-review-attestation.mjs \
+                "$FINAL_SNAPSHOT" "$FINAL_OUTPUT" "$GITHUB_EVENT_PATH"; then
+                echo "::error::Unable to revalidate cluster review attestation"
+                FINALIZER_FAILED=1
+              elif ! grep -Fxq "attested=true" "$FINAL_OUTPUT"; then
+                echo "::error::Cluster review attestation changed before completion"
+                FINALIZER_FAILED=1
+              else
+                STATUS_STATE=success
+                STATUS_DESCRIPTION="Sensitive area cluster policy passed"
+              fi
+            else
+              STATUS_STATE=success
+              STATUS_DESCRIPTION="Sensitive area cluster policy passed"
             fi
           fi
 
-      - name: Publish final cluster status
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          JOB_STATUS: ${{ job.status }}
-          REPO: ${{ github.repository }}
-          STATUS_CONTEXT: Sensitive Area Cluster Check
-        run: |
-          set -euo pipefail
-          if ! [[ "$HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            echo "::error::Invalid event pull request head SHA"
-            exit 1
-          fi
-          if [ "$JOB_STATUS" = "success" ]; then
-            STATUS_STATE=success
-            STATUS_DESCRIPTION="Sensitive area cluster policy passed"
-          else
-            STATUS_STATE=failure
-            STATUS_DESCRIPTION="Sensitive area cluster policy failed"
-          fi
-          gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+          if ! gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}" \
             -f state="${STATUS_STATE}" \
             -f context="${STATUS_CONTEXT}" \
-            -f description="${STATUS_DESCRIPTION}"
+            -f description="${STATUS_DESCRIPTION}"; then
+            echo "::error::Unable to publish final cluster policy status"
+            exit 1
+          fi
+
+          if [ "$FINALIZER_FAILED" -ne 0 ] || [ "$STATUS_STATE" != "success" ]; then
+            exit 1
+          fi
