@@ -26,9 +26,18 @@
 import { createElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { McpUiPayload, McpUiResourceBundle } from "../../../mcp/types.js";
-import { Loader2, AlertCircle, PlugZap } from "lucide-react";
+import { Loader2, AlertCircle, PlugZap, ExternalLink } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { mcpAppPartitionName } from "../../../shared/mcp-app-partition.js";
+// The card-size bounds SoT. `ui/notifications/size-changed` and the payload's `height`
+// seed are UNTRUSTED numbers, and CSS cannot bound them (the card's containing block has
+// an indefinite height, so a percentage max-height resolves to `none`) — so they are
+// clamped arithmetically, at the one sink that turns them into pixels.
+import {
+  clampMcpAppCardSize,
+  mcpAppCardSeedHeight,
+  type McpAppCardSize,
+} from "../../../shared/mcp-app-card-size.js";
 import { useOptionalTheme, findBundle, bundleToPluginTokens, DEFAULT_BUNDLE_ID } from "../theme/index.js";
 // The host-side wiring lives in its own React-free module so the real-<webview> e2e
 // gate can import and exercise THE SHIPPING WIRING rather than a look-alike copy.
@@ -62,15 +71,30 @@ function tokenFromProxyUrl(proxyUrl: string): string | null {
 export function McpAppView({
   payload,
   /**
-   * The mode this MOUNT presents the card in. A transcript card is `inline` (the
-   * default); the DETACHED window is the host's `fullscreen` presentation and passes
-   * it explicitly (DetachedView). Everything else about display mode — the advertised
-   * set, the request check — is the shared SoT module.
+   * The mode this MOUNT presents the card in — and, because a mount NEVER changes it,
+   * the mode it truthfully reports for its whole life. A transcript card is `inline`
+   * (the default); the DETACHED window is the host's `fullscreen` presentation and
+   * passes it explicitly (DetachedView).
+   *
+   * A display-mode change does not mutate this: it MOVES the card to the other mount
+   * and the losing mount stops being a live app (see `applyDisplayMode`). That is what
+   * makes the host context structurally honest — there is no state a mount could set to
+   * claim a presentation it is not in.
    */
   displayMode: mountDisplayMode = MCP_APP_DEFAULT_DISPLAY_MODE,
+  /**
+   * The card's ORIGIN chat session, threaded in by a mount with no `ChatContext`
+   * ancestor — i.e. the DETACHED window, whose React root has no ChatContextProvider.
+   * The host stamped it into the detached record at detach time; without it a detached
+   * card would post `sessionId: ""`, main would drop every `ui/message` /
+   * `ui/update-model-context` on the session check, and the app (whose
+   * `ui/update-model-context` has no error channel in the spec) would never find out.
+   */
+  originSessionId,
 }: {
   payload: McpUiPayload;
   displayMode?: McpUiDisplayMode;
+  originSessionId?: string;
 }) {
   const { t, locale } = useTranslation();
   // Host theme sources for the standard `McpUiHostContext`: shell (light/dark) and
@@ -93,12 +117,14 @@ export function McpAppView({
   // whose session is no longer live must never be injected into the conversation the
   // user navigated to — it degrades to a notification (one rule, main-side).
   //
-  // Surfaces with no chat session (detached window, isolated harness) leave this empty,
-  // which is not a session id and therefore never matches — the same fail-safe branch.
+  // The DETACHED window has no ChatContextProvider in its React root, so it cannot read
+  // the session from context — it receives the host-stamped one as `originSessionId` and
+  // that takes precedence here. Surfaces with neither (an isolated harness) leave this
+  // empty, which is not a session id and therefore never matches — the fail-safe branch.
   const chatCtx = useOptionalChatContext();
   const originSessionIdRef = useRef("");
-  if (originSessionIdRef.current === "" && chatCtx?.currentSessionId) {
-    originSessionIdRef.current = chatCtx.currentSessionId;
+  if (originSessionIdRef.current === "") {
+    originSessionIdRef.current = originSessionId ?? chatCtx?.currentSessionId ?? "";
   }
 
   // ── The card's IDENTITY — the third `onupdatemodelcontext` binding ────────────
@@ -116,66 +142,102 @@ export function McpAppView({
   const [disabled, setDisabled] = useState(false);
   const bridgeRef = useRef<{ bridge: AppBridge; transport: WebviewIpcTransport; token: string | null } | null>(null);
 
-  // `payload.height` is only the INITIAL seed now (and the loading/disconnected
-  // placeholder height). The live <webview> dimensions move to state so the app's
+  // `payload.height` is only the INITIAL seed now (and the loading/placeholder height).
+  // The live <webview> dimensions move to state so the app's
   // `ui/notifications/size-changed` (via the injected `onResize` adapter) can grow the
   // card with its content. `width` stays undefined → the webview keeps its responsive
-  // `100%` default until the app declares a width.
-  const initialHeight = payload.height ?? 300;
-  const [size, setSize] = useState<{ width?: number; height: number }>({ height: initialHeight });
+  // `100%` default until the app declares a width. Both the seed (server-declared, on
+  // the tool result) and every live update (app-declared) go through the SAME bounds.
+  const seedHeight = mcpAppCardSeedHeight(payload.height);
+  const [size, setSize] = useState<McpAppCardSize>({ height: seedHeight });
 
-  // `onsizechange` adapter injected into the bridge: apply a content-driven resize,
-  // preserving whichever dimension the notification omitted. Stable identity so the
-  // ref-callback bridge lifecycle (keyed on [payload, bundle]) never re-creates the
-  // bridge for a resize.
+  // `onsizechange` adapter injected into the bridge — THE ONE SINK that turns the app's
+  // reported numbers into pixels, and therefore the one place they are bounded:
+  // `clampMcpAppCardSize` rejects non-finite / ≤ 0 values (the dimension keeps its
+  // previous value), preserves whichever dimension the notification omitted, and clamps
+  // the rest into `MCP_APP_CARD_{MIN,MAX}_{WIDTH,HEIGHT}_PX`. CSS cannot do this job: the
+  // card's containing block has an indefinite height, so `max-height: 100%` resolves to
+  // `none` and a `height: 5_000_000` card would push the transcript out of reach.
+  // Stable identity so the ref-callback bridge lifecycle (keyed on [payload, bundle])
+  // never re-creates the bridge for a resize.
   const handleResize = useCallback((next: { width?: number; height?: number }) => {
-    setSize((prev) => ({
-      width: next.width ?? prev.width,
-      height: next.height ?? prev.height,
-    }));
+    setSize((prev) => clampMcpAppCardSize(next, prev));
   }, []);
 
-  // ── `onrequestdisplaymode` — the card's APPLIED mode ──────────────────────────
-  // State drives the host context we publish; the ref is what the bridge handler reads
-  // at call time (a stale closure would answer with a mode the card has already left).
-  const [displayMode, setDisplayMode] = useState<McpUiDisplayMode>(mountDisplayMode);
-  const displayModeRef = useRef(displayMode);
-  displayModeRef.current = displayMode;
+  // ── `onrequestdisplaymode` — the card MOVES, this mount does not ──────────────
+  // This mount's mode is `mountDisplayMode` and never changes; the ref only exists so the
+  // bridge handler reads the current prop rather than a stale closure.
+  const displayModeRef = useRef(mountDisplayMode);
+  displayModeRef.current = mountDisplayMode;
   const getDisplayMode = useCallback(() => displayModeRef.current, []);
 
-  // Apply a SUPPORTED mode (the handler filters the rest against the advertised SoT)
-  // and resolve to the mode ACTUALLY applied — the previous one when the host declined.
+  // ── The detached instance this card MOVED to (inline mounts only) ─────────────
+  // Set to the host-minted viewKey when a fullscreen request succeeds. While it is set,
+  // this mount renders a quiet host-owned placeholder INSTEAD of the <webview> — which
+  // tears down its bridge + transport through the existing `attachWebview(null)` path.
+  // That is the whole point: a card has exactly ONE live bridge at a time. Cleared by the
+  // host's `detachedClosed` event (window closed by the user, by the app's `inline`
+  // request, or navigated away in the single-instance shell), which brings the card back.
+  const [detachedViewKey, setDetachedViewKey] = useState<string | null>(null);
+  const detachedViewKeyRef = useRef<string | null>(null);
+  detachedViewKeyRef.current = detachedViewKey;
+
+  // Apply a SUPPORTED mode (the handler filters the rest against the advertised SoT) and
+  // resolve to the mode the CARD is in afterwards — the mount's own mode when the host
+  // declined, since nothing moved.
   //
-  // Both arms ride the EXISTING detached-shell seam; neither builds a window path:
-  //   · fullscreen → `mcp.openDetached(payload, { maximize: true })`. The shell is
-  //     single-instance by policy, so this navigates the one detached window rather
-  //     than spawning another.
-  //   · inline     → close that shell (`window.closeAllDetached`, the same sweep work
-  //     mode uses). Under the single-instance policy it IS "close the detached shell",
-  //     and it is the exact inverse of the fullscreen arm — reachable from the inline
-  //     card and from inside the detached window alike (main closes every tracked
-  //     detached tab regardless of sender, and auth windows are never tracked).
+  // REPLACE, NEVER CLONE. Both arms move the card between the two host presentations, and
+  // in both the losing instance stops being a live app:
+  //   · fullscreen → `mcp.openDetached(payload, { maximize: true, sessionId })` mounts the
+  //     card in the detached shell, and THIS inline mount goes dormant (placeholder →
+  //     bridge + webview torn down). Two live bridges for one card — one of them lying
+  //     about its mode to a spec-conformant app inside a 300px box — is exactly what this
+  //     avoids.
+  //   · inline → close the detached window for THIS CARD'S SERVER (`mcp.closeDetached`,
+  //     scoped). Main purges the record and broadcasts `detachedClosed`, which is what
+  //     revives the dormant inline card. NOT `window.closeAllDetached`: that sweeps every
+  //     detached window the user has open, and an untrusted card must not reach it.
   const applyDisplayMode = useCallback(
     async (mode: McpUiDisplayMode): Promise<McpUiDisplayMode> => {
       const current = displayModeRef.current;
       if (mode === current) return current;
 
       if (mode === "fullscreen") {
-        const result = await window.lvis.mcp.openDetached(payload, { maximize: true });
-        // Host declined (invalid payload / window failure): the card did not move.
+        const result = await window.lvis.mcp.openDetached(payload, {
+          maximize: true,
+          // The card's origin session, so the detached instance keeps a REAL binding for
+          // `ui/message` / `ui/update-model-context`. The app never names it.
+          sessionId: originSessionIdRef.current,
+        });
+        // Host declined (invalid payload / window failure): the card did not move, and
+        // this mount stays the live one.
         if (!result?.ok) return current;
-      } else {
-        // Optional-chained like every other `api.window` call site: the surface is
-        // absent in isolated harnesses, and "there is no detached shell" is exactly
-        // the state an inline request wants anyway.
-        await getApi().window?.closeAllDetached();
+        setDetachedViewKey(result.viewKey);
+        return "fullscreen";
       }
-      displayModeRef.current = mode;
-      setDisplayMode(mode);
-      return mode;
+
+      // Optional-chained like every other preload call site: the surface is absent in
+      // isolated harnesses, and "there is no detached window" is exactly the state an
+      // inline request wants anyway.
+      const closed = await window.lvis?.mcp?.closeDetached?.(payload.serverId);
+      if (closed && !closed.ok) return current;
+      return "inline";
     },
     [payload],
   );
+
+  // The host's `detachedClosed` broadcast — the ONE signal that a detached instance is
+  // gone. It fires for a user-closed window, the `inline` arm's scoped close, and the
+  // single-instance shell navigating away, so the dormant inline card revives on all
+  // three from one subscription (a fresh <webview> + bridge; the app state lived in the
+  // window that just closed).
+  useEffect(() => {
+    const onDetachedClosed = window.lvis?.mcp?.onDetachedClosed;
+    if (typeof onDetachedClosed !== "function") return;
+    return onDetachedClosed((viewKey: string) => {
+      if (viewKey === detachedViewKeyRef.current) setDetachedViewKey(null);
+    });
+  }, []);
 
   // Host IANA time zone — stable for the app's lifetime; read once.
   const timeZone = useMemo(
@@ -205,8 +267,16 @@ export function McpAppView({
       if (family) tokens["--lvis-font-family"] = family;
     }
 
-    return buildMcpAppHostContext({ shell: resolved, tokens, locale, timeZone, displayMode });
-  }, [resolved, effectiveBundleId, locale, timeZone, displayMode]);
+    // `displayMode` is this MOUNT's mode, which never changes — a mount cannot report a
+    // presentation it is not in (a mode change moves the card to the other mount instead).
+    return buildMcpAppHostContext({
+      shell: resolved,
+      tokens,
+      locale,
+      timeZone,
+      displayMode: mountDisplayMode,
+    });
+  }, [resolved, effectiveBundleId, locale, timeZone, mountDisplayMode]);
 
   // Hold the latest builder in a ref so the ref-callback bridge lifecycle
   // (`attachWebview`, keyed only on [payload, bundle]) can seed the initial context
@@ -226,13 +296,13 @@ export function McpAppView({
     // previous serverId had disconnected; the disconnect event only disables
     // the specific card that was live when it fired.
     setDisabled(false);
-    // Re-seed the live card size from the new payload; the app will resize it again
-    // via `ui/notifications/size-changed` once it renders.
-    setSize({ height: payload.height ?? 300 });
-    // A fresh payload is a fresh card: it presents in THIS mount's mode again, whatever
-    // the previous card had talked the host into.
-    displayModeRef.current = mountDisplayMode;
-    setDisplayMode(mountDisplayMode);
+    // Re-seed the live card size from the new payload (bounded — the seed is untrusted
+    // too); the app will resize it again via `ui/notifications/size-changed` once it
+    // renders.
+    setSize({ height: mcpAppCardSeedHeight(payload.height) });
+    // A fresh payload is a fresh card: it is live in THIS mount again, whatever the
+    // previous card had talked the host into detaching.
+    setDetachedViewKey(null);
 
     window.lvis.mcp.readUiResource(payload.serverId, payload.resourceUri)
       .then((next) => {
@@ -245,7 +315,7 @@ export function McpAppView({
       });
 
     return () => { cancelled = true; };
-  }, [payload, mountDisplayMode]);
+  }, [payload]);
 
   // b3 — subscribe to the main→renderer server-disconnected broadcast. When the
   // payload's own server is torn down, disable in place (webview unmounts via
@@ -322,17 +392,16 @@ export function McpAppView({
     }
   }, [payload, bundle, handleResize, getDisplayMode, applyDisplayMode]);
 
-  // Push host-context updates to a mounted bridge when the theme shell, active
-  // bundle, or locale changes. `setHostContext` auto-diffs and only notifies the
-  // view of changed fields (no-op on the mount pass, which matches the seed).
-  // `displayMode` rides the same push: after `applyDisplayMode` commits, the app is
-  // told the mode that actually took effect — the notification half of the answer the
-  // `onrequestdisplaymode` result already carried.
+  // Push host-context updates to a mounted bridge when the theme shell, active bundle,
+  // or locale changes. `setHostContext` auto-diffs and only notifies the view of changed
+  // fields (no-op on the mount pass, which matches the seed). `displayMode` is NOT in
+  // here: this mount's mode is fixed for its lifetime, so there is no mode update to push
+  // — a mode change moves the card to the OTHER mount, whose seed carries the new mode.
   useEffect(() => {
     const current = bridgeRef.current;
     if (!current) return;
     current.bridge.setHostContext(buildHostContextRef.current());
-  }, [resolved, effectiveBundleId, locale, displayMode]);
+  }, [resolved, effectiveBundleId, locale]);
 
   return (
     <div className="mt-2 overflow-hidden rounded border bg-background">
@@ -343,7 +412,7 @@ export function McpAppView({
         </span>
       </div>
       {disabled ? (
-        <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height: initialHeight }} data-testid="mcp-app-disconnected">
+        <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height: seedHeight }} data-testid="mcp-app-disconnected">
           <PlugZap className="h-3.5 w-3.5 flex-shrink-0" />
           <span>{t("mcpAppView.serverDisconnected")}</span>
         </div>
@@ -352,8 +421,17 @@ export function McpAppView({
           <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
           <span>{error}</span>
         </div>
+      ) : detachedViewKey ? (
+        // The card LIVES IN THE DETACHED WINDOW right now. This is a host-owned
+        // placeholder, not an app: no <webview>, so no bridge, no app state, and nothing
+        // here can claim a display mode. It reverts to a live card when the host says the
+        // detached instance is gone (`onDetachedClosed`).
+        <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height: seedHeight }} data-testid="mcp-app-detached">
+          <ExternalLink className="h-3.5 w-3.5 flex-shrink-0" />
+          <span>{t("mcpAppView.openInWindow")}</span>
+        </div>
       ) : !bundle ? (
-        <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height: initialHeight }}>
+        <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height: seedHeight }}>
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           <span>{t("mcpAppView.loading")}</span>
         </div>
@@ -371,17 +449,17 @@ export function McpAppView({
           webpreferences: "contextIsolation=yes, sandbox=yes, nodeIntegration=no, javascript=yes",
           disablewebsecurity: "false",
           style: {
-            // Grow with the app's reported content size (basic-host's resize intent)
-            // but never exceed the card container. Expressed as an explicit px size +
-            // `max*: 100%` rather than `min(<content>px, 100%)`: a percentage inside
-            // `min()` resolves to `auto` when the card's parent has an indefinite
-            // height and collapses the webview, whereas a definite px size capped by
-            // `max-height`/`max-width` grows safely and no-ops when unconstrained.
+            // Grow with the app's reported content size (basic-host's resize intent).
+            // `size` is ALREADY BOUNDED — `clampMcpAppCardSize` is the real cap, applied
+            // where the numbers enter the host. There is deliberately no `maxHeight:
+            // "100%"` here: the card's containing block has an indefinite height, so a
+            // percentage max-height resolves to `none` and caps NOTHING — it would be a
+            // comment-shaped bound, not a bound. `maxWidth: "100%"` does work (the
+            // parent's width IS definite) and stays as the responsive-layout guard.
             // `width` stays a plain `100%` until the app declares one.
             width: size.width != null ? `${size.width}px` : "100%",
             maxWidth: "100%",
             height: `${size.height}px`,
-            maxHeight: "100%",
             border: 0,
             display: "flex",
             background: "transparent",

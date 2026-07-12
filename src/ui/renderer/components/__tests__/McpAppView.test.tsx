@@ -7,6 +7,7 @@ import { McpAppView } from "../McpAppView.js";
 import { ThemeProvider, useTheme } from "../../theme/index.js";
 import { DEFAULT_BUNDLE_ID } from "../../theme/index.js";
 import { mcpAppPartitionName } from "../../../../shared/mcp-app-partition.js";
+import { MCP_APP_CARD_MAX_HEIGHT_PX } from "../../../../shared/mcp-app-card-size.js";
 import type { McpUiPayload } from "../../../../mcp/types.js";
 
 // The host-context WIRING test (below) needs to observe both the args
@@ -43,6 +44,7 @@ function ThemeToggleButton({ toBundleId }: { toBundleId: string }) {
 }
 
 let disconnectHandler: ((serverId: string) => void) | null = null;
+let detachedClosedHandler: ((viewKey: string) => void) | null = null;
 // Main now returns a BUNDLE: the sandbox-proxy URL the <webview> navigates to,
 // plus the app HTML that is handed to the proxy over the bridge (never in the URL).
 const readUiResource = vi.fn(async (serverId: string) => ({
@@ -50,8 +52,19 @@ const readUiResource = vi.fn(async (serverId: string) => ({
   html: "<html><body>card</body></html>",
 }));
 const disposeUiSession = vi.fn();
-/** The EXISTING detach seam — the `onrequestdisplaymode` "fullscreen" arm reuses it. */
-const openDetached = vi.fn(async () => ({ ok: true as const, windowId: 7 }));
+/**
+ * The EXISTING detach seam — the `onrequestdisplaymode` "fullscreen" arm reuses it.
+ * Returns the host-minted `viewKey`: the identity of the detached instance the card
+ * moved into, which the inline mount keeps so it can recognize its own close event.
+ */
+const DETACHED_VIEW_KEY = "mcp-app:676974687562:card-1";
+const openDetached = vi.fn(async () => ({
+  ok: true as const,
+  windowId: 7,
+  viewKey: DETACHED_VIEW_KEY,
+}));
+/** The SCOPED close — the `onrequestdisplaymode` "inline" arm (never closeAllDetached). */
+const closeDetached = vi.fn(async () => ({ ok: true as const }));
 /** The gated save path behind `ondownloadfile`. */
 const downloadFile = vi.fn(async () => ({ ok: true as const, disposition: "saved" as const }));
 /**
@@ -67,17 +80,25 @@ const postUiModelContext = vi.fn(
 
 function stubLvis() {
   disconnectHandler = null;
+  detachedClosedHandler = null;
   vi.stubGlobal("lvis", {
     mcp: {
       readUiResource,
       disposeUiSession,
       openDetached,
+      closeDetached,
       downloadFile,
       postUiModelContext,
       onServerDisconnected: (handler: (serverId: string) => void) => {
         disconnectHandler = handler;
         return () => {
           disconnectHandler = null;
+        };
+      },
+      onDetachedClosed: (handler: (viewKey: string) => void) => {
+        detachedClosedHandler = handler;
+        return () => {
+          detachedClosedHandler = null;
         };
       },
     },
@@ -90,7 +111,9 @@ const payload = (serverId: string): McpUiPayload => ({ serverId, resourceUri: "u
 beforeEach(() => {
   readUiResource.mockClear();
   openDetached.mockClear();
-  openDetached.mockResolvedValue({ ok: true as const, windowId: 7 });
+  openDetached.mockResolvedValue({ ok: true as const, windowId: 7, viewKey: DETACHED_VIEW_KEY });
+  closeDetached.mockClear();
+  closeDetached.mockResolvedValue({ ok: true as const });
   stubLvis();
   createMcpAppBridgeMock.mockClear();
   // Default fake bridge for every test in this file: a `setHostContext` spy plus
@@ -260,6 +283,45 @@ describe("McpAppView — app-driven resize + open-link adapters (P1a)", () => {
     expect(node().style.width).toBe("100%");
   });
 
+  it("CLAMPS an absurd height — the only real bound (CSS max-height:100% caps nothing here)", async () => {
+    const { container } = renderCard(payload("github"));
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+
+    act(() => {
+      seededDeps().onResize({ height: 10_000_000 });
+    });
+
+    await waitFor(() =>
+      expect((webviewNode(container) as HTMLElement).style.height).toBe(`${MCP_APP_CARD_MAX_HEIGHT_PX}px`),
+    );
+    // And the misleading percentage cap is gone: the px value IS the bound.
+    expect((webviewNode(container) as HTMLElement).style.maxHeight).toBe("");
+  });
+
+  it("REFUSES a non-finite / non-positive size — the card keeps the height it had", async () => {
+    const { container } = renderCard(payload("github"));
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+
+    act(() => {
+      seededDeps().onResize({ height: 512 });
+    });
+    await waitFor(() => expect((webviewNode(container) as HTMLElement).style.height).toBe("512px"));
+
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, 0, -900]) {
+      act(() => {
+        seededDeps().onResize({ height: bad });
+      });
+      expect((webviewNode(container) as HTMLElement).style.height, `height=${String(bad)}`).toBe("512px");
+    }
+  });
+
+  it("bounds the SERVER-declared height seed too (the payload is untrusted as well)", async () => {
+    const { container } = renderCard({ serverId: "github", resourceUri: "ui://card/1", height: 10_000_000 });
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+
+    expect((webviewNode(container) as HTMLElement).style.height).toBe(`${MCP_APP_CARD_MAX_HEIGHT_PX}px`);
+  });
+
   it("routes onopenlink through window.lvisApi.openExternalUrl (the gated egress), returning ok", async () => {
     const openExternalUrl = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal("lvisApi", { openExternalUrl });
@@ -310,30 +372,77 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
     expect(seededDisplayDeps().getDisplayMode()).toBe("fullscreen");
   });
 
-  it("fullscreen → the existing detach seam, MAXIMIZED; the applied mode is returned and pushed to the app", async () => {
+  it("fullscreen REPLACES the card: the detach seam is called with the session binding, and THIS mount stops being a live app", async () => {
+    const { container } = renderCard(payload("github"));
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+    const transport = createMcpAppBridgeMock.mock.results[0]!.value.transport as {
+      close: ReturnType<typeof vi.fn>;
+    };
+
+    const applied = await act(() => seededDisplayDeps().applyDisplayMode("fullscreen"));
+
+    // No new window stack: the SAME `mcp.openDetached` the detach button uses, with the
+    // maximize flag that makes it the fullscreen presentation — and the card's ORIGIN
+    // SESSION, so the detached instance keeps a real binding (the app names neither).
+    expect(openDetached).toHaveBeenCalledWith(
+      expect.objectContaining({ serverId: "github" }),
+      { maximize: true, sessionId: "" },
+    );
+    expect(applied).toBe("fullscreen");
+
+    // THE FIX: replace, don't clone. The inline instance is gone — no <webview>, and its
+    // bridge/transport were torn down. Exactly one live bridge exists for this card, and
+    // it is the one in the detached window.
+    await waitFor(() => expect(screen.getByTestId("mcp-app-detached")).toBeInTheDocument());
+    expect(webviewNode(container)).toBeNull();
+    expect(transport.close).toHaveBeenCalledTimes(1);
+    // No second bridge was created in this mount.
+    expect(createMcpAppBridgeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("NEVER reports a mode it is not in: the dormant inline mount stays `inline`, never `fullscreen`", async () => {
     const { container } = renderCard(payload("github"));
     await waitFor(() => expect(webviewNode(container)).toBeTruthy());
     const bridge = createMcpAppBridgeMock.mock.results[0]!.value.bridge as {
       setHostContext: ReturnType<typeof vi.fn>;
     };
 
-    const applied = await act(() => seededDisplayDeps().applyDisplayMode("fullscreen"));
+    await act(() => seededDisplayDeps().applyDisplayMode("fullscreen"));
 
-    // No new window stack: the SAME `mcp.openDetached` the detach button uses, with
-    // the maximize flag that makes it the fullscreen presentation.
-    expect(openDetached).toHaveBeenCalledWith(
-      expect.objectContaining({ serverId: "github" }),
-      { maximize: true },
-    );
-    expect(applied).toBe("fullscreen");
-    expect(seededDisplayDeps().getDisplayMode()).toBe("fullscreen");
-    // And the app is told: the mode change rides the existing setHostContext push.
-    await waitFor(() => {
-      const calls = bridge.setHostContext.mock.calls;
-      expect((calls[calls.length - 1]?.[0] as { displayMode?: string })?.displayMode).toBe("fullscreen");
+    // The old bug: this mount set `displayMode = "fullscreen"` and pushed it into its own
+    // (still live) host context, so a spec-conformant app swapped to its fullscreen layout
+    // inside a 300px transcript box. It must never publish that.
+    expect(seededDisplayDeps().getDisplayMode()).toBe("inline");
+    for (const call of bridge.setHostContext.mock.calls) {
+      expect((call[0] as { displayMode?: string }).displayMode).not.toBe("fullscreen");
+    }
+  });
+
+  it("revives the inline card when the host says the detached instance is gone (the round trip)", async () => {
+    const { container } = renderCard(payload("github"));
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+
+    await act(() => seededDisplayDeps().applyDisplayMode("fullscreen"));
+    await waitFor(() => expect(screen.getByTestId("mcp-app-detached")).toBeInTheDocument());
+
+    // A close event for SOMEONE ELSE's detached window changes nothing.
+    act(() => {
+      detachedClosedHandler?.("mcp-app:ffff:other-card");
     });
-    // A mode change is state, not a re-mount.
-    expect(createMcpAppBridgeMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("mcp-app-detached")).toBeInTheDocument();
+    expect(webviewNode(container)).toBeNull();
+
+    // The card's OWN detached instance closing (user X, the `inline` arm, or a shell
+    // navigation — one event for all three) brings the inline card back to life: a fresh
+    // <webview> and a second bridge, which is now again the ONLY live one.
+    act(() => {
+      detachedClosedHandler?.(DETACHED_VIEW_KEY);
+    });
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+    expect(screen.queryByTestId("mcp-app-detached")).toBeNull();
+    expect(createMcpAppBridgeMock).toHaveBeenCalledTimes(2);
+    // Still truthfully inline at every step.
+    expect(seededDisplayDeps().getDisplayMode()).toBe("inline");
   });
 
   it("keeps the card where it is when the host DECLINES the detach", async () => {
@@ -345,9 +454,12 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
 
     expect(applied).toBe("inline");
     expect(seededDisplayDeps().getDisplayMode()).toBe("inline");
+    // The card never went dormant — the live bridge is still this one.
+    expect(webviewNode(container)).toBeTruthy();
+    expect(screen.queryByTestId("mcp-app-detached")).toBeNull();
   });
 
-  it("inline (from fullscreen) closes the detached shell — the exact inverse, no new IPC", async () => {
+  it("inline (from fullscreen) closes ONLY this card's server's detached window — never every detached window", async () => {
     const closeAllDetached = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal("lvisApi", { window: { closeAllDetached } });
 
@@ -358,9 +470,22 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
 
     const applied = await act(() => seededDisplayDeps().applyDisplayMode("inline"));
 
-    expect(closeAllDetached).toHaveBeenCalledTimes(1);
+    expect(closeDetached).toHaveBeenCalledWith("github");
+    // The old bug: an untrusted card could sweep shut the user's unrelated detached views.
+    expect(closeAllDetached).not.toHaveBeenCalled();
     expect(applied).toBe("inline");
-    expect(seededDisplayDeps().getDisplayMode()).toBe("inline");
+    // This mount is the DETACHED presentation and says so until its window goes away.
+    expect(seededDisplayDeps().getDisplayMode()).toBe("fullscreen");
+  });
+
+  it("leaves the detached card where it is when the scoped close fails", async () => {
+    closeDetached.mockResolvedValue({ ok: false, error: "invalid-server-id" } as never);
+    const { container } = render(<McpAppView payload={payload("github")} displayMode="fullscreen" />, {
+      wrapper: ThemeWrapper,
+    });
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+
+    await expect(act(() => seededDisplayDeps().applyDisplayMode("inline"))).resolves.toBe("fullscreen");
   });
 
   it("is a no-op when the app asks for the mode it is already in", async () => {
@@ -369,6 +494,7 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
 
     await expect(act(() => seededDisplayDeps().applyDisplayMode("inline"))).resolves.toBe("inline");
     expect(openDetached).not.toHaveBeenCalled();
+    expect(closeDetached).not.toHaveBeenCalled();
   });
 });
 
@@ -409,6 +535,30 @@ describe("McpAppView — model-context sink is BOUND to server + session + card"
     // A card id the RENDERER minted: stable, non-empty, and never named by the app.
     expect(cardId).toMatch(/^[0-9a-f-]{36}$/i);
     expect(forwarded).toEqual(params);
+  });
+
+  it("a DETACHED mount posts the host-threaded origin session, so its updates actually land", async () => {
+    postUiModelContext.mockClear();
+    // This is exactly how DetachedView mounts a card: no ChatContext anywhere in the tree
+    // (the detached window's React root has no ChatContextProvider), and the origin session
+    // threaded in from the host-owned detached record. Without the prop the card would post
+    // "" and main would drop every update on the session check — forever, silently, since
+    // `ui/update-model-context` has no error channel in the spec.
+    const { container } = render(
+      <McpAppView payload={payload("github")} displayMode="fullscreen" originSessionId="sess-abc" />,
+      { wrapper: ThemeWrapper },
+    );
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+    const deps = createMcpAppBridgeMock.mock.calls[0]![4] as {
+      updateModelContext: (params: unknown) => Promise<{ ok: boolean }>;
+      postMessage: (params: unknown) => Promise<{ ok: boolean }>;
+    };
+
+    await deps.updateModelContext({ content: [{ type: "text", text: "cart: 3 items" }] });
+
+    const [serverId, sessionId] = postUiModelContext.mock.calls[0]!;
+    expect(serverId).toBe("github");
+    expect(sessionId).toBe("sess-abc");
   });
 
   it("gives two mounted cards DIFFERENT ids, so one cannot overwrite the other's slot", async () => {

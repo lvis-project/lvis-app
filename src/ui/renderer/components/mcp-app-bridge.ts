@@ -55,8 +55,11 @@ type McpAppHostCapabilities = ConstructorParameters<typeof AppBridge>[2];
  */
 export interface McpAppBridgeDeps {
   /**
-   * `onsizechange` sink — the app reported a content-driven size; McpAppView owns
-   * the live card dimensions (React state) and clamps them.
+   * `onsizechange` sink — the app reported a content-driven size. McpAppView owns the
+   * live card dimensions (React state) and CLAMPS them there, through the shared
+   * card-size SoT (`shared/mcp-app-card-size.ts`): non-finite / ≤ 0 values are refused
+   * and the rest are bounded, because nothing in CSS can bound them (the card's
+   * containing block has an indefinite height, so a percentage max-height caps nothing).
    */
   onResize(next: { width?: number; height?: number }): void;
   /**
@@ -95,6 +98,11 @@ export interface McpAppBridgeDeps {
    * actually applied. McpAppView maps it onto the host's EXISTING window seams:
    * `inline` is the in-transcript <webview>, `fullscreen` is the maximized detached
    * shell (`CHANNELS.mcp.openDetached`). No new window stack.
+   *
+   * A mode change REPLACES the card's live instance, it does not clone it: the mount
+   * that loses the card tears down its bridge + <webview> (the inline card becomes a
+   * host-owned placeholder; the detached window closes). Exactly one bridge per card is
+   * connected at any moment, and no mount ever reports a mode it is not in.
    */
   applyDisplayMode(mode: McpUiDisplayMode): Promise<McpUiDisplayMode>;
   /**

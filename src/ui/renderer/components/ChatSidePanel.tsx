@@ -477,7 +477,12 @@ function PreviewBody({
             size="sm"
             variant="outline"
             data-testid="chat-side-panel-mcp-detach"
-            onClick={() => void window.lvis.mcp.openDetached(target.payload)}
+            // `sessionId` binds the detached card to the conversation it came from — the
+            // detached window has no ChatContext to recover it, so without it main would
+            // silently drop every `ui/message` / `ui/update-model-context` the card sends
+            // (see shared/mcp-app-detached-payload.ts). The host supplies it; the app
+            // never names a session.
+            onClick={() => void window.lvis.mcp.openDetached(target.payload, { sessionId })}
           >
             <ExternalLink className="h-3.5 w-3.5" />
             <span>{t("chatPreviewRail.detach")}</span>

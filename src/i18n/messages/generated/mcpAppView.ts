@@ -3,9 +3,11 @@ export const en = {
   "mcpAppView.sandboxBadge": "MCP · Isolated Process · Restricted Network",
   "mcpAppView.loading": "Loading MCP App...",
   "mcpAppView.serverDisconnected": "MCP server disconnected",
+  "mcpAppView.openInWindow": "Open in a separate window",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "mcpAppView.sandboxBadge": "MCP · 격리된 프로세스 · 제한된 네트워크",
   "mcpAppView.loading": "MCP App 로드 중...",
   "mcpAppView.serverDisconnected": "MCP 서버 연결이 끊겼습니다",
+  "mcpAppView.openInWindow": "별도 창에서 열려 있습니다",
 };

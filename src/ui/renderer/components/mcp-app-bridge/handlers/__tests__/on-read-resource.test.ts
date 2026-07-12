@@ -29,4 +29,30 @@ describe("createOnReadResource", () => {
       ],
     });
   });
+
+  it("REFUSES any non-ui:// uri before the IPC (fail closed)", async () => {
+    const readUiResource = vi.fn(async () => ({ html: "" }));
+    vi.stubGlobal("lvis", { mcp: { readUiResource } });
+
+    const handler = createOnReadResource({ serverId: "github" }) as (
+      p: { uri: unknown },
+    ) => Promise<unknown>;
+
+    // The uri is the ONE value the app supplies. Anything outside the card surface —
+    // another resource family on the same server, a file, an http(s) URL — is refused, and
+    // never reaches the read chokepoint (whose every call also mints a proxy-session token
+    // from a bounded LRU, so a read loop would evict other live cards' tokens).
+    for (const uri of [
+      "file:///etc/passwd",
+      "https://evil.example/x",
+      "resource://secret/1",
+      "UI://card/1",
+      "",
+      undefined,
+      42,
+    ]) {
+      await expect(handler({ uri }), `uri=${String(uri)}`).rejects.toThrow(/ui:\/\//);
+    }
+    expect(readUiResource).not.toHaveBeenCalled();
+  });
 });

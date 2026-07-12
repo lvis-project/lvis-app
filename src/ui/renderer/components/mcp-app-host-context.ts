@@ -37,8 +37,16 @@
  * to that resolution-order-dependent behavior, and keeps it free of any package
  * import so it stays trivially portable to the e2e gate. The same rationale the
  * host already applies to `McpUiResourceCsp` in `src/mcp/types.ts`.
- * `__tests__/mcp-app-host-context.test.ts` pins these twins against the upstream
- * package so a real spec change fails the suite instead of drifting silently.
+ *
+ * The drift risk that re-declaration creates is pinned, not asserted: the
+ * `anti-drift pin` block in `__tests__/mcp-app-host-context.test.ts` extracts the
+ * `McpUiStyleVariableKey` union members from the SHIPPED
+ * `node_modules/@modelcontextprotocol/ext-apps/dist/src/spec.types.d.ts` and diffs
+ * them against the members of the twin BELOW (read out of this file's own source), so
+ * an upstream spec change fails the suite instead of silently drifting. It is a text
+ * diff rather than a type-level check precisely because a value/member-level import
+ * from that package does not resolve here — the pin cannot depend on the thing that is
+ * broken.
  */
 
 // `McpUiDisplayMode` is the ONE standard type NOT re-declared below: the host's

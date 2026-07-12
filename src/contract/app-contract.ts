@@ -221,6 +221,20 @@ export const CHANNELS = {
     openDetached: "lvis:mcp:open-detached",
     detachedPayload: "lvis:mcp:detached-payload",
     serverDisconnected: "lvis:mcp:server-disconnected",
+    // The `ui/request-display-mode` "inline" arm — the exact inverse of `openDetached`:
+    // close the detached MCP-app window(s) of THIS card's server. SCOPED on purpose: the
+    // generic `window.closeAllDetached` sweep closes every detached window the user has
+    // open, which an untrusted card must never be able to trigger. Registered in
+    // window-manager.ts and gated on validateHostRendererSender (it closes a window);
+    // INTERNAL like the rest of this family.
+    closeDetached: "lvis:mcp:close-detached",
+    // main→renderer: an MCP-app detached window is GONE (closed, or navigated away from
+    // in the single-instance shell), so the card's stored payload has been purged. The
+    // inline card that moved into that window listens for this to come back to life —
+    // exactly one live bridge per card at any moment. A pure event (no ipcMain.handle,
+    // hence not an INTERNAL_HOST_CHANNELS handler entry); the renderer validates the
+    // payload shape and matches on the viewKey the host handed it at detach time.
+    detachedClosed: "lvis:mcp:detached-closed",
     // Renderer → main on card unmount: dispose the sandbox-proxy session so its token
     // is freed promptly instead of waiting for the global LRU to evict it. INTERNAL,
     // same posture as the three above. Idempotent and harmless — worst case a stale
@@ -618,6 +632,7 @@ export const INTERNAL_HOST_CHANNELS = {
     // (out-of-tree), so they are classified here for inventory completeness.
     CHANNELS.mcp.openDetached,
     CHANNELS.mcp.detachedPayload,
+    CHANNELS.mcp.closeDetached,
   ],
   autoUpdater: [
     CHANNELS.update.state,
