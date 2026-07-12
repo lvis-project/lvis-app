@@ -1,10 +1,28 @@
 import { vi } from "vitest";
+import type { IpcMainInvokeEvent } from "electron";
 
 export function makeMockWebContents() {
   return {
     send: vi.fn(),
     isDestroyed: vi.fn(() => false),
   };
+}
+
+/**
+ * A synthetic `IpcMainInvokeEvent` from the TRUSTED host renderer frame — the one
+ * `validateHostRendererSender` accepts. Shared so the gated-IPC suites don't each
+ * re-declare an identical trusted-frame builder.
+ */
+export function hostFrameEvent(): IpcMainInvokeEvent {
+  return {
+    senderFrame: { url: "file:///Applications/Lvis.app/dist/index.html" },
+    sender: {},
+  } as unknown as IpcMainInvokeEvent;
+}
+
+/** A synthetic event from ANY OTHER frame — a plugin shell, a remote page, an empty URL. */
+export function foreignFrameEvent(url: string): IpcMainInvokeEvent {
+  return { senderFrame: { url }, sender: {} } as unknown as IpcMainInvokeEvent;
 }
 
 type RegisteredHandler = (...args: unknown[]) => unknown;

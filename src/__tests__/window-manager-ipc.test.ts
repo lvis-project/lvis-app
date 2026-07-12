@@ -40,6 +40,7 @@ vi.mock("electron", () => ({
 
 import { ALLOWED_VIEW_KEYS } from "../main/window-manager.js";
 import { UNAUTHORIZED_FRAME } from "../ipc-bridge.js";
+import { hostFrameEvent } from "./test-helpers.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -52,12 +53,6 @@ function unauthorizedEvent(): IpcMainInvokeEvent {
 }
 
 /** Build an event with a trusted file:// sender frame. */
-function trustedEvent(): IpcMainInvokeEvent {
-  return {
-    senderFrame: { url: "file:///Applications/Lvis.app/dist/index.html" },
-    sender: {},
-  } as unknown as IpcMainInvokeEvent;
-}
 
 /** Minimal AuditLogger mock. */
 function makeAuditLogger() {
@@ -132,13 +127,13 @@ describe("WindowManager IPC — validateSender guard", () => {
 
     it("returns invalid-view-key for path traversal viewKey", async () => {
       const handler = handleMap.get("lvis:window:open-detached")!;
-      const result = await handler(trustedEvent(), "../etc/passwd");
+      const result = await handler(hostFrameEvent(), "../etc/passwd");
       expect(result).toEqual({ ok: false, error: "invalid-view-key" });
     });
 
     it("returns invalid-view-key for empty viewKey", async () => {
       const handler = handleMap.get("lvis:window:open-detached")!;
-      const result = await handler(trustedEvent(), "");
+      const result = await handler(hostFrameEvent(), "");
       expect(result).toEqual({ ok: false, error: "invalid-view-key" });
     });
   });
@@ -211,7 +206,7 @@ describe("WindowManager IPC — validateSender guard", () => {
       const a = injectChild(wm, 11, "routines");
       const b = injectChild(wm, 12, "plugin:meeting:meeting-control");
       const handler = handleMap.get("lvis:window:close-all-detached")!;
-      const result = await handler(trustedEvent());
+      const result = await handler(hostFrameEvent());
       expect(result).toEqual({ ok: true });
       expect(a.close).toHaveBeenCalledOnce();
       expect(b.close).toHaveBeenCalledOnce();
@@ -229,7 +224,7 @@ describe("WindowManager IPC — validateSender guard", () => {
       // skip it: the login/auth window is always a separate window.
       markAsAuthOwned(authWin.webContents as never);
       const handler = handleMap.get("lvis:window:close-all-detached")!;
-      const result = await handler(trustedEvent());
+      const result = await handler(hostFrameEvent());
       expect(result).toEqual({ ok: true });
       expect(detached.close).toHaveBeenCalledOnce();
       expect(authWin.close).not.toHaveBeenCalled();
@@ -251,7 +246,7 @@ describe("WindowManager IPC — validateSender guard", () => {
       fromId.mockReturnValueOnce(mainWindow);
 
       const handler = handleMap.get("lvis:window:load-session-in-main")!;
-      const resultPromise = Promise.resolve(handler(trustedEvent(), "sess_star-1"));
+      const resultPromise = Promise.resolve(handler(hostFrameEvent(), "sess_star-1"));
 
       expect(mainWindow.show).toHaveBeenCalledOnce();
       expect(mainWindow.focus).toHaveBeenCalledOnce();
@@ -262,7 +257,7 @@ describe("WindowManager IPC — validateSender guard", () => {
       );
       const ack = listenerMap.get("lvis:window:load-session-in-main-result");
       expect(ack).toBeDefined();
-      ack?.({ ...trustedEvent(), sender: mainWebContents } as never, {
+      ack?.({ ...hostFrameEvent(), sender: mainWebContents } as never, {
         requestId: sentPayload.requestId,
         ok: true,
       });
@@ -284,10 +279,10 @@ describe("WindowManager IPC — validateSender guard", () => {
       fromId.mockReturnValueOnce(mainWindow);
 
       const handler = handleMap.get("lvis:window:load-session-in-main")!;
-      const resultPromise = Promise.resolve(handler(trustedEvent(), "sess_star-1"));
+      const resultPromise = Promise.resolve(handler(hostFrameEvent(), "sess_star-1"));
       const sentPayload = mainWebContents.send.mock.calls[0]?.[1] as { requestId: string };
       listenerMap.get("lvis:window:load-session-in-main-result")?.(
-        { ...trustedEvent(), sender: mainWebContents } as never,
+        { ...hostFrameEvent(), sender: mainWebContents } as never,
         { requestId: sentPayload.requestId, ok: false, error: "load-session-failed" },
       );
 
@@ -296,7 +291,7 @@ describe("WindowManager IPC — validateSender guard", () => {
 
     it("rejects malformed session ids", async () => {
       const handler = handleMap.get("lvis:window:load-session-in-main")!;
-      const result = await handler(trustedEvent(), "../session");
+      const result = await handler(hostFrameEvent(), "../session");
       expect(result).toEqual({ ok: false, error: "invalid-session-id" });
     });
   });
@@ -356,7 +351,7 @@ describe("WindowManager IPC — validateSender guard", () => {
       wm.registerMainWindow(main as never);
       fromId.mockReturnValue(main);
       const handler = handleMap.get("lvis:window:resize-for-mode")!;
-      const result = await handler(trustedEvent(), "fullscreen");
+      const result = await handler(hostFrameEvent(), "fullscreen");
       expect(result).toEqual({ ok: false, error: "invalid-mode" });
       expect(main.setBounds).not.toHaveBeenCalled();
     });
@@ -364,7 +359,7 @@ describe("WindowManager IPC — validateSender guard", () => {
     it("returns main-window-not-found when no main window is registered", async () => {
       fromId.mockReturnValue(null);
       const handler = handleMap.get("lvis:window:resize-for-mode")!;
-      const result = await handler(trustedEvent(), "work");
+      const result = await handler(hostFrameEvent(), "work");
       expect(result).toEqual({ ok: false, error: "main-window-not-found" });
     });
 
@@ -373,7 +368,7 @@ describe("WindowManager IPC — validateSender guard", () => {
       wm.registerMainWindow(main as never);
       fromId.mockReturnValue(main);
       const handler = handleMap.get("lvis:window:resize-for-mode")!;
-      const result = await handler(trustedEvent(), "work");
+      const result = await handler(hostFrameEvent(), "work");
       expect(result).toEqual({ ok: true });
       // The tween emits intermediate setBounds frames; flush it to completion.
       flushTween();
@@ -387,7 +382,7 @@ describe("WindowManager IPC — validateSender guard", () => {
       wm.registerMainWindow(main as never);
       fromId.mockReturnValue(main);
       const handler = handleMap.get("lvis:window:resize-for-mode")!;
-      const result = await handler(trustedEvent(), "chat");
+      const result = await handler(hostFrameEvent(), "chat");
       expect(result).toEqual({ ok: true });
       flushTween();
       // chat mode uses computeInitialMainWindowBounds — a right-docked,
@@ -404,7 +399,7 @@ describe("WindowManager IPC — validateSender guard", () => {
       fromId.mockReturnValue(main);
       const handler = handleMap.get("lvis:window:resize-for-side-panel")!;
 
-      const openResult = await handler(trustedEvent(), true);
+      const openResult = await handler(hostFrameEvent(), true);
       expect(openResult).toEqual({ ok: true });
       flushTween();
       const expanded = lastBounds(main);
@@ -412,7 +407,7 @@ describe("WindowManager IPC — validateSender guard", () => {
       expect(expanded.height).toBe(840);
       expect(expanded.x + expanded.width).toBe(1910);
 
-      const closeResult = await handler(trustedEvent(), false);
+      const closeResult = await handler(hostFrameEvent(), false);
       expect(closeResult).toEqual({ ok: true });
       flushTween();
       const restored = lastBounds(main);
@@ -428,7 +423,7 @@ describe("WindowManager IPC — validateSender guard", () => {
       fromId.mockReturnValue(main);
       const handler = handleMap.get("lvis:window:resize-for-side-panel")!;
 
-      const result = await handler(trustedEvent(), "open");
+      const result = await handler(hostFrameEvent(), "open");
       expect(result).toEqual({ ok: false, error: "invalid-open-state" });
       expect(main.setBounds).not.toHaveBeenCalled();
     });
@@ -446,9 +441,9 @@ describe("WindowManager IPC — validateSender guard", () => {
       fromId.mockReturnValue(main);
       const handler = handleMap.get("lvis:window:resize-for-mode")!;
       // Start a work tween, advance partway, then switch to chat mid-flight.
-      await handler(trustedEvent(), "work");
+      await handler(hostFrameEvent(), "work");
       vi.advanceTimersByTime(48); // a few frames in, not yet settled
-      await handler(trustedEvent(), "chat");
+      await handler(hostFrameEvent(), "chat");
       flushTween();
       // The latest (chat) target wins: final bounds are the chat geometry,
       // never the abandoned work 1243×768.

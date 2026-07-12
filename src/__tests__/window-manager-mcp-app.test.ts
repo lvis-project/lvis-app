@@ -352,13 +352,15 @@ describe("detachedClosed broadcast", () => {
 });
 
 // ── IPC ────────────────────────────────────────────────────────────────────
-describe("lvis:mcp:open-detached IPC", () => {
-  function register() {
-    const wm = makeManager();
-    wm.registerIpc({ log: vi.fn() } as never);
-    return wm;
-  }
+/** Build a WindowManager with its MCP-app IPC handlers registered. Shared by the
+ * open-detached and close-detached suites. */
+function register() {
+  const wm = makeManager();
+  wm.registerIpc({ log: vi.fn() } as never);
+  return wm;
+}
 
+describe("lvis:mcp:open-detached IPC", () => {
   it("rejects an unauthorized sender", async () => {
     register();
     const handler = handleMap.get("lvis:mcp:open-detached")!;
@@ -415,12 +417,6 @@ describe("lvis:mcp:open-detached IPC", () => {
 });
 
 describe("lvis:mcp:close-detached IPC (the `inline` arm — SCOPED)", () => {
-  function register() {
-    const wm = makeManager();
-    wm.registerIpc({ log: vi.fn() } as never);
-    return wm;
-  }
-
   it("rejects unauthorized + plugin-ui-shell senders", async () => {
     register();
     const handler = handleMap.get("lvis:mcp:close-detached")!;
