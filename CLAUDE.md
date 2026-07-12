@@ -284,7 +284,7 @@ Packaged app 이 실행 중 Node/Electron resolver 로 직접 로드하는 unbun
 Permission policy 구현은 `docs/architecture/permission-policy-design.md` 와 `docs/architecture/architecture.md` §6.3 을 single source of truth 로 따른다.
 
 - Host app 은 plugin 코드를 직접 참조하지 않는다. Plugin 권한/도구/경로 정보는 manifest, SDK schema, HostApi self-registration 으로만 전달한다.
-- Plugin tool 의 filesystem path 판정은 tool 객체의 `_meta["xyz.lvis/pathFields"]` 선언이 유일한 SOT 이다 (유일하게 남은 LVIS 전용 manifest 키). Builtin tool 만 host 내부 default path extraction 을 가질 수 있다.
+- Plugin tool 의 filesystem path 판정은 tool 객체의 `_meta["lvisai/pathFields"]` 선언이 유일한 SOT 이다 (유일하게 남은 LVIS 전용 manifest 키). Builtin tool 만 host 내부 default path extraction 을 가질 수 있다.
 - Per-tool category 는 manifest 필드가 아니다 (#885 Phase R 에서 제거) — effective category 는 host-side `inspectHostRisk`/executor policy 가 invocation 별로 `read | write | shell | network | meta` 로 산출한다. Plugin manifest 는 category 를 스스로 선언하지 않는다.
 - Hook v1 은 deny-only + slash-based TOFU 이다. Boot 시 new/changed hook 은 실행하지 않고 `.disabled/` 로 격리한다. 신뢰 등록은 사용자가 직접 입력한 `/permission hooks accept <name>` 만 허용하며 renderer fallback prompt/modal 은 만들지 않는다.
 - Non-user-origin 입력(plugin overlay, file-content, LLM tool arg)은 slash command 로 dispatch 되면 안 된다. Leading slash 는 plain text 로 sanitize 하고, `/permission` dispatcher 는 `trustOrigin === "user-keyboard"` 만 처리한다.

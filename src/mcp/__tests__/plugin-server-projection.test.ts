@@ -25,7 +25,7 @@ const BASE_MANIFEST: PluginManifest = {
       name: "meeting_export",
       description: "Export the transcript to a path",
       inputSchema: { type: "object", properties: { path: { type: "string" } } },
-      _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
+      _meta: { ui: { visibility: ["model"] }, "lvisai/pathFields": ["path"] },
     },
     {
       // APP-ONLY — serves the plugin's CARD, hidden from the model. It IS projected
@@ -82,25 +82,48 @@ describe("plugin-server-projection — normalized Tool[] → MCP tools/list (#88
     const tools = manifestToolsToMcpTools(BASE_MANIFEST);
     const start = tools.find((t) => t.name === "meeting_start")!;
     const exp = tools.find((t) => t.name === "meeting_export")!;
-    expect((start._meta as Record<string, unknown>)["xyz.lvis/pathFields"]).toBeUndefined();
-    expect(exp._meta["xyz.lvis/pathFields"]).toEqual(["path"]);
+    expect((start._meta as Record<string, unknown>)["lvisai/pathFields"]).toBeUndefined();
+    expect(exp._meta["lvisai/pathFields"]).toEqual(["path"]);
     for (const t of tools) {
       const meta = t._meta as Record<string, unknown>;
       // removed fields never ride the wire
-      expect(meta["xyz.lvis/category"]).toBeUndefined();
-      expect(meta["xyz.lvis/version"]).toBeUndefined();
-      expect(meta["xyz.lvis/writesToOwnSandbox"]).toBeUndefined();
-      expect(meta["xyz.lvis/workerId"]).toBeUndefined();
-      expect(meta["xyz.lvis/deprecatedSince"]).toBeUndefined();
-      expect(meta["xyz.lvis/replacedBy"]).toBeUndefined();
+      expect(meta["lvisai/category"]).toBeUndefined();
+      expect(meta["lvisai/version"]).toBeUndefined();
+      expect(meta["lvisai/writesToOwnSandbox"]).toBeUndefined();
+      expect(meta["lvisai/workerId"]).toBeUndefined();
+      expect(meta["lvisai/deprecatedSince"]).toBeUndefined();
+      expect(meta["lvisai/replacedBy"]).toBeUndefined();
       // host never projects (untrusted) annotations
       expect((t as Record<string, unknown>).annotations).toBeUndefined();
-      // only `ui` + reverse-DNS xyz.lvis/* keys; never a reserved mcp second label.
+      // only `ui` + vendor-prefixed lvisai/* keys; never a reserved mcp second label.
       for (const key of Object.keys(meta)) {
-        expect(key === "ui" || key.startsWith("xyz.lvis/")).toBe(true);
+        expect(key === "ui" || key.startsWith("lvisai/")).toBe(true);
         expect(key).not.toMatch(/(^|\.)(mcp|modelcontextprotocol)\//);
       }
     }
+  });
+
+  it("transitional: reads a legacy xyz.lvis/pathFields manifest but emits ONLY the new lvisai/pathFields on the wire", () => {
+    // A published manifest that has not yet migrated still declares the reverse-DNS
+    // key; the forward projection must read it, but the WIRE carries only the new key.
+    const legacyManifest: PluginManifest = {
+      id: "com.example.legacy",
+      name: "Legacy",
+      version: "1.0.0",
+      entry: "dist/index.js",
+      description: "legacy manifest",
+      tools: [
+        {
+          name: "legacy_export",
+          description: "Export to a path",
+          inputSchema: { type: "object", properties: { path: { type: "string" } } },
+          _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
+        },
+      ],
+    };
+    const tool = manifestToolsToMcpTools(legacyManifest)[0];
+    expect(tool._meta["lvisai/pathFields"]).toEqual(["path"]);
+    expect((tool._meta as Record<string, unknown>)["xyz.lvis/pathFields"]).toBeUndefined();
   });
 
 });

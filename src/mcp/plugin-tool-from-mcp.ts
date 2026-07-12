@@ -5,13 +5,13 @@
  * `plugin-server-projection.ts` (manifest → MCP tool).
  *
  * Half of the `plugin-loopback-server` milestone (docs/architecture/mcp-alignment-design.md §5):
- * a migrated plugin's `pathFields` is read back from the tool's reverse-DNS
- * `_meta["xyz.lvis/pathFields"]`, NOT from a second direct manifest read; the
+ * a migrated plugin's `pathFields` is read back from the tool's vendor-prefixed
+ * `_meta["lvisai/pathFields"]`, NOT from a second direct manifest read; the
  * manifest is projected to MCP exactly once (forward).
  *
  * #885: per-tool `category` is REMOVED from the contract (Q3). The in-process
  * loopback forward projection emits none; an out-of-process plugin may still put
- * `_meta["xyz.lvis/category"]` on the wire, but the host does NOT trust it — this
+ * `_meta["lvisai/category"]` on the wire, but the host does NOT trust it — this
  * reverse projection ignores any wire category and registers the write-equivalent
  * default-strict baseline, with the effective category derived host-side per
  * invocation.
@@ -20,13 +20,13 @@
  * `replacedBy` fields left the Tool contract entirely (Phase-R deletions), so the
  * wire carries none and this reverse projection reads none.
  *
- * `_meta.ui.visibility` (STANDARD, not `xyz.lvis/*`) IS read back: it is the one
+ * `_meta.ui.visibility` (STANDARD, not a vendor key) IS read back: it is the one
  * declaration the host honours off this wire, and it decides only MODEL EXPOSURE
  * (`Tool.modelVisible`), never whether the tool is registered. Every discovered tool
  * — app-only ones included — becomes a registry `Tool`, because that is the only way
  * a call to it can run under the host gate.
  *
- * Trust boundary: `_meta["xyz.lvis/workerId"]` is intentionally NOT promoted to
+ * Trust boundary: `_meta["lvisai/workerId"]` is intentionally NOT promoted to
  * `Tool.workerId` here. Loopback `tools/call` executes through
  * pluginRuntime.call(), not through a host-routed ASRT worker. Treating a
  * manifest-declared worker id as execution proof would let a plugin
@@ -43,7 +43,7 @@
  * DEFAULT-STRICT (host-classifies-risk, project_permission_review_redesign):
  * #885 — the host does NOT trust a plugin's self-declared per-tool category.
  * The in-process loopback forward projection stopped emitting
- * `_meta["xyz.lvis/category"]`, and an out-of-process plugin that still puts one
+ * `_meta["lvisai/category"]`, and an out-of-process plugin that still puts one
  * on the wire is ignored too, so this reverse projection unconditionally
  * registers the write-equivalent default-strict baseline. A plugin grading its
  * own danger is not a control (MCP spec: a server can lie); the effective
@@ -58,11 +58,18 @@ import {
 } from "../plugins/runtime/tool-visibility.js";
 import { createLogger } from "../lib/logger.js";
 import type { McpUiPayload } from "./types.js";
+import { observeLegacyMetaKey } from "./legacy-meta-telemetry.js";
 
 const log = createLogger("plugin-tool-from-mcp");
 
-/** Reverse-DNS prefix for LVIS-private `_meta` keys (must mirror the forward projection). */
-const LVIS_META_PREFIX = "xyz.lvis/";
+/** Vendor prefix for LVIS-private `_meta` keys (must mirror the forward projection). */
+const LVIS_META_PREFIX = "lvisai/";
+/**
+ * transitional: accept legacy xyz.lvis/* until SDK+plugins are migrated (then remove).
+ * Out-of-process plugins and the SDK still emit the old reverse-DNS prefix on the
+ * wire; the reverse read prefers the new key and falls back to this legacy one.
+ */
+const LEGACY_LVIS_META_PREFIX = "xyz.lvis/";
 
 /**
  * The minimal shape this adapter consumes from a discovered MCP tool. Over a
@@ -83,7 +90,7 @@ export interface DiscoveredMcpTool {
  * `isError` {@link ToolResult}.
  *
  * `rawResult` is the boxed structured plugin return value carried back via
- * `_meta["xyz.lvis/rawResult"]`. It is a box (`{ value }`) rather than a bare
+ * `_meta["lvisai/rawResult"]`. It is a box (`{ value }`) rather than a bare
  * value so "present but `undefined`" (a void plugin tool) is distinguishable
  * from "absent" — preserving the legacy adapter's `metadata.rawResult` presence.
  */
@@ -92,9 +99,18 @@ export type PluginMcpInvoke = (
   args: Record<string, unknown>,
 ) => Promise<{ text: string; uiPayload?: McpUiPayload; rawResult?: { value: unknown } }>;
 
-function readPathFields(meta: Record<string, unknown>): string[] | undefined {
-  const value = meta[`${LVIS_META_PREFIX}pathFields`];
+function readPathFields(meta: Record<string, unknown>, pluginId: string): string[] | undefined {
+  // Prefer the new `lvisai/pathFields`; transitional: fall back to the legacy
+  // `xyz.lvis/pathFields` until SDK+plugins are migrated (then remove the fallback).
+  // This reads the WIRE. On the loopback arm the forward projection already
+  // normalized legacy→new, so a legacy hit here can ONLY come from a genuinely
+  // out-of-process plugin still emitting the old key — the observable gate for the
+  // out-of-process population, distinct from the on-disk-manifest gate.
+  const preferred = meta[`${LVIS_META_PREFIX}pathFields`];
+  const value =
+    preferred !== undefined ? preferred : meta[`${LEGACY_LVIS_META_PREFIX}pathFields`];
   if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
+    if (preferred === undefined) observeLegacyMetaKey(pluginId, "pathFields");
     return value as string[];
   }
   return undefined;
@@ -143,7 +159,7 @@ export function mcpToolToPluginTool(
   const meta = tool._meta ?? {};
   // #885 — the host does NOT trust a plugin's self-declared per-tool category.
   // Loopback plugins emit none; an out-of-process plugin may still put
-  // `_meta["xyz.lvis/category"]` on the wire, but it is ignored either way and
+  // `_meta["lvisai/category"]` on the wire, but it is ignored either way and
   // every plugin tool registers at the write-equivalent default-strict baseline.
   // The real per-invocation classifier is host-side `inspectHostRisk`.
   const category = "write";
@@ -154,7 +170,7 @@ export function mcpToolToPluginTool(
     source: "plugin",
     category,
     pluginId,
-    pathFields: readPathFields(meta),
+    pathFields: readPathFields(meta, pluginId),
     // MCP Apps `_meta.ui.visibility` ∌ "model" ⇒ app-only: the tool IS registered
     // (that is what puts its card's call under risk → reviewer/approval → audit) but
     // is subtracted from the model's tool list at the ONE model-exposure boundary,
