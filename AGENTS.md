@@ -74,13 +74,18 @@ state durable constraints here and put detailed designs in their owning docs.
 - Runtime dependency changes update the lockfile and run the relevant
   packaged-app smoke so missing packages cannot reach an installer.
 
-## Cross-cutting review gate
+## Cross-Cutting Review Gate
 
 - Sensitive cross-cutting work identified by `.github/workflows/cluster-detector.yml`
   or task scope requires independent architect, critic, and security reviews.
-- The PR body attestation records each role, reviewed HEAD SHA, GO/NO-GO verdict, and blocking findings.
-- Apply the exact `cluster-review-passed` label only after all reviewers return GO for the current HEAD.
-  A new commit invalidates it; a missing label or failing cluster-detector workflow blocks merge. Never bypass the gate.
+- The PR template records architect, critic, and security verdicts, reviewed
+  HEAD SHAs, and blocking findings.
+- Each machine marker contains the exact current PR HEAD SHA and a `GO`
+  verdict. `cluster-review-passed` is valid only when the workflow finds
+  exactly one current-HEAD marker per role.
+- A new commit makes any retained label insufficient until all three roles
+  review the new HEAD. A missing label, invalid marker, or failing workflow
+  blocks merge. Never bypass the gate.
 
 ## Validation: proportional during work, complete once at publish
 

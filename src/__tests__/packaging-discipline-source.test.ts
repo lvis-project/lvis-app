@@ -51,17 +51,38 @@ describe("installer smoke and packaging discipline", () => {
 
   it("locks cross-cutting review and Markdown gate contracts", () => {
     const agents = readRepoFile("AGENTS.md");
+    const claude = readRepoFile("CLAUDE.md");
     const contributing = readRepoFile("CONTRIBUTING.md");
     const pullRequestTemplate = readRepoFile(".github/pull_request_template.md");
     const clusterWorkflow = readRepoFile(".github/workflows/cluster-detector.yml");
 
-    expect(agents).toContain("## Cross-cutting review gate");
+    expect(agents).toContain("## Cross-Cutting Review Gate");
     expect(agents).toContain("architect, critic, and security");
-    expect(agents).toContain("reviewed HEAD SHA");
+    expect(agents).toContain("current PR HEAD SHA");
     expect(agents).toContain("blocking findings");
     expect(agents).toContain("`cluster-review-passed`");
-    expect(agents).toContain("failing cluster-detector workflow blocks merge");
-    expect(clusterWorkflow).toContain("cluster-review-passed");
+    expect(agents).toContain("exactly one current-HEAD marker per role");
+    expect(agents).toContain("retained label insufficient");
+
+    expect(clusterWorkflow).toContain(
+      "types: [opened, synchronize, edited, labeled, unlabeled]",
+    );
+    expect(clusterWorkflow).toContain("contents: read");
+    expect(clusterWorkflow).toContain("check-cluster-review-attestation.mjs");
+    expect(clusterWorkflow).toContain("steps.cluster-attestation.outputs.attested");
+    expect(clusterWorkflow).not.toContain("steps.exempt-check.outputs.exempt");
+    expect(clusterWorkflow).toContain("AGENTS.md#cross-cutting-review-gate");
+    expect(clusterWorkflow).not.toContain("CLAUDE.md §Cross-Cutting Review Gate");
+
+    for (const role of ["architect", "critic", "security"]) {
+      expect(pullRequestTemplate).toContain(
+        `<!-- cluster-review:${role}:<40-char-head-sha>:GO -->`,
+      );
+    }
+    expect(pullRequestTemplate).toContain("Reviewed HEAD: `<40-char-head-sha>`");
+    expect(pullRequestTemplate).toContain("Blocking findings");
+    expect(claude).toContain("[`AGENTS.md`](./AGENTS.md)");
+    expect(claude).toContain("duplicates no");
 
     for (const guidance of [agents, contributing, pullRequestTemplate]) {
       expect(guidance).toContain("review-only Markdown");
@@ -70,6 +91,14 @@ describe("installer smoke and packaging discipline", () => {
       expect(guidance).toMatch(/workflow/i);
       expect(guidance).toMatch(/sensitive/i);
     }
+
+    expect(agents).toContain("sender/frame/origin checks");
+    expect(agents).toContain("DLP handling");
+    expect(agents).toContain("fail-closed defaults");
+    expect(agents).toContain("active recipient's own permission and approval");
+    expect(agents).toContain("Do not bypass hooks");
+    expect(agents).toContain("Never push directly to `main`");
+    expect(agents).toContain("same-PR field-addition");
     expect(agents).not.toContain("Markdown-only pushes");
     expect(contributing).not.toContain("Markdown-only pushes");
   });
