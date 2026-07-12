@@ -700,7 +700,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle(CHANNELS.runtime.counts, (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.runtime.counts, e); return UNAUTHORIZED_FRAME; }
     return {
-      tools: deps.toolRegistry.size,
+      // The user-facing tool COUNT reflects the model's tools — getModelVisibleTools,
+      // not `size` (every registered tool). `size` now includes app-only tools + the
+      // auth trio (registry `Tool`s so their card call runs under the gate); counting
+      // them here would inflate "the model's tools" and softly disclose app-only names.
+      tools: deps.toolRegistry.getModelVisibleTools().length,
       plugins: pluginRuntime.listPluginIds().length,
       mcps: deps.mcpManager.listServers().filter((s) => s.status === "connected").length,
     };

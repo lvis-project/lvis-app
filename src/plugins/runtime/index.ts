@@ -435,6 +435,34 @@ export class PluginRuntime {
     return readEnabledManifestSnapshots(loadPlan, validator);
   }
 
+  /**
+   * #885 v6 — MODEL-ONLY (ratified security decision §2.4a). The `knownToolOwners`
+   * map is the pre-runtime `??` fallback in `resolveToolOwner`, feeding
+   * `assertPluginToolAccess` (plugin-to-plugin access control) and the "plugin still
+   * installing" guard (`throwIfToolOwnerNotReady`). Today's `tools[]` was model-facing
+   * only; a naive all-names `.map` would silently add the app-only auth trio to the
+   * access-control map (a widening). `isModelVisible` reproduces today's EXACT set;
+   * UI-only ownership still resolves at runtime via `methodMap` (all names), which stays
+   * authoritative.
+   *
+   * HOLDS AFTER app-only tools became registry `Tool`s. Registry membership (what may
+   * execute under the gate) and model exposure (what the LLM is shown) were split apart;
+   * THIS map is the THIRD, independent concern — who owns a name for plugin-to-plugin
+   * access control — and it does NOT follow either. It stays exactly the model-visible
+   * set.
+   *
+   * ONE method, three callers (`rememberPluginManifest`, `load`, single-plugin add), so
+   * the MODEL-ONLY `.filter(isModelVisible)` lives once. Pinned by
+   * `__tests__/known-tool-owners-model-only.test.ts` (which exercises
+   * `rememberPluginManifest`; the other two callers share this method, so the pin covers
+   * them too). A future all-names `.map` here flips that pin closed.
+   */
+  private rememberToolOwners(pluginId: string, manifest: PluginManifest): void {
+    for (const t of (manifest.tools ?? []).filter(isModelVisible)) {
+      this.knownToolOwners.set(t.name, pluginId);
+    }
+  }
+
   private rememberPluginManifest(
     pluginId: string,
     manifest: PluginManifest,
@@ -452,23 +480,7 @@ export class PluginRuntime {
     for (const [eventType, ownerId] of [...this.knownEventOwners.entries()]) {
       if (ownerId === pluginId) this.knownEventOwners.delete(eventType);
     }
-    // #885 v6 — MODEL-ONLY (ratified security decision §2.4a). This ownership map
-    // is the pre-runtime `??` fallback in resolveToolOwner, feeding
-    // assertPluginToolAccess (plugin-to-plugin access control). Today's tools[]
-    // was model-facing only; a naive all-names `.map` would silently add the
-    // app-only auth trio to the access-control map (a widening). `isModelVisible`
-    // reproduces today's EXACT set; UI-only ownership still resolves at runtime
-    // via methodMap (all names), which stays authoritative.
-    //
-    // HOLDS AFTER app-only tools became registry `Tool`s. Registry membership
-    // (what may execute under the gate) and model exposure (what the LLM is shown)
-    // were split apart; THIS map is the THIRD, independent concern — who owns a
-    // name for plugin-to-plugin access control — and it does NOT follow either. It
-    // stays exactly the model-visible set. Pinned by
-    // `__tests__/known-tool-owners-model-only.test.ts`.
-    for (const t of (manifest.tools ?? []).filter(isModelVisible)) {
-      this.knownToolOwners.set(t.name, pluginId);
-    }
+    this.rememberToolOwners(pluginId, manifest); // #885 §2.4a MODEL-ONLY (see method)
     for (const eventType of getDeclaredEmittedEvents(manifest)) {
       this.knownEventOwners.set(eventType, pluginId);
     }
@@ -508,11 +520,7 @@ export class PluginRuntime {
       this.rememberPluginInstallAlias(manifest.id, pluginId);
       this.knownPluginManifests.set(pluginId, manifest);
       this.knownPluginAccessGrants.set(pluginId, approvedPluginAccess);
-      // #885 v6 — MODEL-ONLY (§2.4a): reproduces today's model-facing tools[] set;
-      // never adds the app-only auth trio to the plugin-to-plugin access map.
-      for (const t of (manifest.tools ?? []).filter(isModelVisible)) {
-        this.knownToolOwners.set(t.name, pluginId);
-      }
+      this.rememberToolOwners(pluginId, manifest); // #885 §2.4a MODEL-ONLY (see method)
       for (const eventType of getDeclaredEmittedEvents(manifest)) {
         this.knownEventOwners.set(eventType, pluginId);
       }
@@ -1085,23 +1093,7 @@ export class PluginRuntime {
     this.rememberPluginInstallAlias(manifest.id, pluginId);
     this.knownPluginManifests.set(pluginId, manifest);
     this.knownPluginAccessGrants.set(pluginId, approvedPluginAccess);
-    // #885 v6 — MODEL-ONLY (ratified security decision §2.4a). This ownership map
-    // is the pre-runtime `??` fallback in resolveToolOwner, feeding
-    // assertPluginToolAccess (plugin-to-plugin access control). Today's tools[]
-    // was model-facing only; a naive all-names `.map` would silently add the
-    // app-only auth trio to the access-control map (a widening). `isModelVisible`
-    // reproduces today's EXACT set; UI-only ownership still resolves at runtime
-    // via methodMap (all names), which stays authoritative.
-    //
-    // HOLDS AFTER app-only tools became registry `Tool`s. Registry membership
-    // (what may execute under the gate) and model exposure (what the LLM is shown)
-    // were split apart; THIS map is the THIRD, independent concern — who owns a
-    // name for plugin-to-plugin access control — and it does NOT follow either. It
-    // stays exactly the model-visible set. Pinned by
-    // `__tests__/known-tool-owners-model-only.test.ts`.
-    for (const t of (manifest.tools ?? []).filter(isModelVisible)) {
-      this.knownToolOwners.set(t.name, pluginId);
-    }
+    this.rememberToolOwners(pluginId, manifest); // #885 §2.4a MODEL-ONLY (see method)
     for (const eventType of getDeclaredEmittedEvents(manifest)) {
       this.knownEventOwners.set(eventType, pluginId);
     }
@@ -2079,9 +2071,15 @@ export class PluginRuntime {
     return this.getApprovedPluginAccess(pluginId);
   }
 
-  listPluginCards(toolRegistry?: { getVisibleTools(): Array<{ name: string }> }): PluginCard[] {
+  listPluginCards(toolRegistry?: { getModelVisibleTools(): Array<{ name: string }> }): PluginCard[] {
+    // #885 v6 — the plugin card UI is model-facing (see buildPluginCard). Feed it the
+    // MODEL-visible set, not the executable `getVisibleTools()` superset: after app-only
+    // tools became registry `Tool`s, `getVisibleTools()` includes them (+ the auth trio),
+    // and passing that here would make `buildPluginCard`'s `.filter(isModelVisible)`
+    // pre-filter the ONLY thing keeping app-only names out of the settings/marketplace
+    // card. Using `getModelVisibleTools()` restores the pre-filter to a genuine no-op.
     const visibleNames = toolRegistry
-      ? new Set(toolRegistry.getVisibleTools().map((t) => t.name))
+      ? new Set(toolRegistry.getModelVisibleTools().map((t) => t.name))
       : null;
     const cards = new Map<string, PluginCard>();
     for (const [pluginId, manifest] of this.knownPluginManifests) {

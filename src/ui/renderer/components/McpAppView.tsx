@@ -318,6 +318,35 @@ export function McpAppView({
     });
   }, []);
 
+  // ── Reclaim a leaked AWAY entry when the HOME mount unmounts ──────────────────
+  // The home mount is a transcript child, so switching/starting a conversation
+  // UNMOUNTS it. If its card had been moved AWAY (pip or detached), the store entry
+  // would otherwise OUTLIVE this mount: the session-independent `McpAppPipPanel`
+  // (mounted in MainContent) keeps a live <webview>+bridge for a card from the
+  // conversation the user just left — still able to call tools and post
+  // `ui/update-model-context` against the now-stale `originSessionId` — and that entry
+  // is never reclaimed (a remounted home mints a FRESH `locationId`, so it can never
+  // find the orphan again). On unmount, reclaim through the SAME guarded chokepoint
+  // (`reviveCardIfAt`, no new store mutator), keyed on the card's CURRENT location so
+  // the guard always matches; deleting the entry fires the pip listener and the panel
+  // tears the bridge down.
+  //
+  // TRUE-unmount only: the cleanup is registered once and fires only when this
+  // component leaves the tree, never on a re-render — so a card moved to pip WITHIN a
+  // live conversation (where the home mount stays MOUNTED and merely goes dormant — a
+  // move does not unmount it) is left alone. HOME mount ONLY (`mountDisplayMode ===
+  // "inline"`): the pip panel's own away McpAppView shares this exact `locationId`, and
+  // if IT reclaimed here it would delete the home's entry while itself still live — the
+  // two-live-bridges hazard inverted. That away mount is `displayMode="pip"`, so this
+  // guard excludes it.
+  useEffect(() => {
+    if (mountDisplayMode !== "inline") return undefined;
+    return () => {
+      const at = getCardLocation(cardLocationIdRef.current);
+      if (at.kind !== "inline") reviveCardIfAt(cardLocationIdRef.current, at);
+    };
+  }, [mountDisplayMode]);
+
   // Host IANA time zone — stable for the app's lifetime; read once.
   const timeZone = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone,

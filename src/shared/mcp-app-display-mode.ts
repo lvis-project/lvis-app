@@ -21,18 +21,20 @@
  * atomically moves a card between them, so a `pip` presentation can coexist with the
  * detached shell without a second copy of a card ever being live at once. Advertising
  * `pip` here is what makes that third location reachable from an app; WHICH component
- * actually renders it (an in-page panel, an OS-level always-on-top window, or some
- * other future surface) is a presentation choice the location authority itself does
- * not depend on — that surface is landing separately from this SoT change, and until
- * it does, a `pip` request is honoured by the store (the card's location genuinely
- * becomes "pip") but presented by nothing yet, so the currently live mount declines it
- * and stays where it is (see McpAppView's `applyDisplayMode`) rather than orphaning a
- * card in a location no surface reads.
+ * actually renders it is a presentation choice the location authority itself does not
+ * depend on, and today that component is `McpAppPipPanel` — an in-page draggable panel
+ * (`ui/renderer/components/McpAppPipPanel.tsx`, mounted in `MainContent`) that
+ * subscribes to the store's pip slot. `applyDisplayMode` does NOT decline a `pip`
+ * request: it `moveCard`s the card into the store's `pip` slot and returns `"pip"`,
+ * the panel picks it up and mounts a live `<McpAppView>`, and the losing mount goes
+ * dormant — the same replace-not-clone move every other mode change makes.
  *
- * The mapping for the two modes with a REALIZED presentation today, both on the
- * existing detach seam (`CHANNELS.mcp.openDetached` → `WindowManager.openDetachedMcpApp`):
+ * The mapping for all three advertised modes:
  *   · `inline`     — the in-transcript <webview> card (the default every card mounts in)
- *   · `fullscreen` — the MAXIMIZED detached shell
+ *   · `fullscreen` — the MAXIMIZED detached shell, on the existing detach seam
+ *                    (`CHANNELS.mcp.openDetached` → `WindowManager.openDetachedMcpApp`)
+ *   · `pip`        — the in-page `McpAppPipPanel`, via the renderer-side location store
+ *                    (no window plumbing — it is a sibling mount in the same renderer)
  */
 
 /**
