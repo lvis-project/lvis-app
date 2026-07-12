@@ -24,6 +24,7 @@ const DECLS: PluginUiResourceDecl[] = [
   {
     uri: `ui://${PLUGIN_ID}/hello.html`,
     csp: { connectDomains: ["https://api.acme.example"] },
+    permissions: { geolocation: {} },
   },
   { uri: `ui://${PLUGIN_ID}/plain.html` },
 ];
@@ -55,6 +56,15 @@ describe("createPluginUiResourceProvider — plugin ui:// serving chokepoint", (
     const res = await providerWith({ [uri]: "<p>plain</p>" }).provider.read(uri);
     expect(res.html).toBe("<p>plain</p>");
     expect(res.csp).toBeUndefined();
+    expect(res.permissions).toBeUndefined();
+  });
+
+  it("attaches the MANIFEST's declared permissions, never the plugin hook's return", async () => {
+    // `readHtml` (plugin CODE) returns only a string — it has no channel to request a
+    // powerful feature. The permissions come from the reviewed, manifest-covered decl.
+    const uri = `ui://${PLUGIN_ID}/hello.html`;
+    const res = await providerWith({ [uri]: "<h1>hi</h1>" }).provider.read(uri);
+    expect(res.permissions).toEqual({ geolocation: {} });
   });
 
   it("rejects a uri whose authority is a DIFFERENT plugin (own-namespace-only, fail-closed)", async () => {

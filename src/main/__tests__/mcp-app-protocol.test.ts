@@ -4,6 +4,7 @@ import {
   disposeMcpAppProxySession,
   installMcpAppProtocolHandler,
   isDeclaredOriginForServer,
+  isMcpAppPermissionGranted,
   _resetMcpAppProxySessions,
   _resetMcpAppProtocolHandlers,
 } from "../mcp-app-protocol.js";
@@ -64,6 +65,20 @@ describe("mcp-app-protocol — the protocol.handle security callback", () => {
     expect(body).not.toContain("<script"); // nothing the server controls runs here
   });
 
+  it("serves the host-computed `allow` meta ONLY for a resource that declared permissions", async () => {
+    const handler = installAndCapture();
+    // A resource that declared geolocation ⇒ the proxy document carries the allow meta,
+    // computed in main from the closed feature table (never renderer/app-supplied).
+    const withPerms = createMcpAppProxySession("srv-perm", undefined, { geolocation: {} });
+    const withBody = await handler({ url: withPerms }).text();
+    expect(withBody).toContain('<meta name="lvis-mcp-app-allow" content="geolocation">');
+
+    // A resource that declared NOTHING ⇒ no allow meta at all (fail-closed default).
+    const noPerms = createMcpAppProxySession("srv-noperm");
+    const noBody = await handler({ url: noPerms }).text();
+    expect(noBody).not.toContain("lvis-mcp-app-allow");
+  });
+
   it("AUTHORITY/TOKEN MISMATCH → 403 (a proxy origin cannot serve another server's session)", () => {
     const handler = installAndCapture();
     const { token } = proxyUrlFor("srv-a");
@@ -99,6 +114,58 @@ describe("mcp-app-protocol — the protocol.handle security callback", () => {
     expect(handler({ url }).status).toBe(200);
     disposeMcpAppProxySession(token);
     expect(handler({ url }).status).toBe(404);
+  });
+});
+
+describe("mcp-app-protocol — isMcpAppPermissionGranted (the Electron permission chokepoint)", () => {
+  // The `revoked` and `mic-only` real-<webview> cards, in code form: the decision is keyed
+  // off the proxy TOKEN in the frame URL, so it fail-closes on every way the token can be
+  // wrong, grants ONLY the resource's own declaration, and honors the media-kind split.
+  it("grants ONLY what the card's resource declared", () => {
+    const url = createMcpAppProxySession("srv-geo", undefined, { geolocation: {} });
+    expect(isMcpAppPermissionGranted(url, "geolocation")).toBe(true);
+    // declared geolocation does not open the camera (Electron `media`).
+    expect(isMcpAppPermissionGranted(url, "media", ["video"])).toBe(false);
+  });
+
+  it("a card that declared nothing is denied everything (a session with no declaration grants nothing)", () => {
+    const url = createMcpAppProxySession("srv-none", undefined, undefined);
+    expect(isMcpAppPermissionGranted(url, "geolocation")).toBe(false);
+    expect(isMcpAppPermissionGranted(url, "media", ["video"])).toBe(false);
+  });
+
+  it("media-kind split: a mic-only card is granted the mic and DENIED the camera", () => {
+    const url = createMcpAppProxySession("srv-mic", undefined, { microphone: {} });
+    expect(isMcpAppPermissionGranted(url, "media", ["audio"])).toBe(true);
+    expect(isMcpAppPermissionGranted(url, "media", ["video"])).toBe(false);
+  });
+
+  it("deny-by-default on every bad token: absent url, foreign scheme, unknown token, authority mismatch", () => {
+    const url = createMcpAppProxySession("srv-geo", undefined, { geolocation: {} });
+    const token = new URL(url).searchParams.get("t")!;
+    expect(isMcpAppPermissionGranted(undefined, "geolocation")).toBe(false);
+    expect(isMcpAppPermissionGranted("https://evil.example/x", "geolocation")).toBe(false);
+    expect(
+      isMcpAppPermissionGranted(
+        `lvis-mcp-app://${encodeMcpServerId("srv-geo")}/proxy.html?t=not-a-token`,
+        "geolocation",
+      ),
+    ).toBe(false);
+    // Valid token, but the URL authority is a DIFFERENT server's hex → mismatch → deny.
+    expect(
+      isMcpAppPermissionGranted(
+        `lvis-mcp-app://${encodeMcpServerId("srv-other")}/proxy.html?t=${token}`,
+        "geolocation",
+      ),
+    ).toBe(false);
+  });
+
+  it("a disposed session is denied (the revoked-card guarantee)", () => {
+    const url = createMcpAppProxySession("srv-geo", undefined, { geolocation: {} });
+    const token = new URL(url).searchParams.get("t")!;
+    expect(isMcpAppPermissionGranted(url, "geolocation")).toBe(true);
+    disposeMcpAppProxySession(token);
+    expect(isMcpAppPermissionGranted(url, "geolocation")).toBe(false);
   });
 });
 

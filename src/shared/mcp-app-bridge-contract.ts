@@ -36,8 +36,48 @@ export const SANDBOX_PROXY_READY = "ui/notifications/sandbox-proxy-ready";
  */
 export const SANDBOX_RESOURCE_READY = "ui/notifications/sandbox-resource-ready";
 
-/** The inner iframe's sandbox attribute. No `allow-same-origin` ⇒ opaque origin. */
-export const INNER_SANDBOX_ATTR = "allow-scripts";
+/**
+ * The inner app iframe's `sandbox` attribute.
+ *
+ * `allow-scripts allow-same-origin` — the MCP Apps spec (`2026-01-26/apps.mdx:474-475`)
+ * MUSTs BOTH: the Sandbox and Host must have different origins, AND the Sandbox must
+ * carry `allow-scripts` and `allow-same-origin`. We satisfy the origin-separation MUST
+ * structurally — the renderer is `file://` and the sandbox-proxy is a per-server
+ * `lvis-mcp-app://<hex(serverId)>` custom scheme (a real, non-opaque, per-server
+ * origin). `allow-same-origin` therefore makes the inner `srcdoc` frame inherit the
+ * PROXY's per-server origin (NOT the renderer's `file://`), which is exactly what makes
+ * the spec's `permissions` (Permissions-Policy delegation + a non-opaque origin the
+ * Electron session handler can grant to) able to work at all.
+ *
+ * Why this does NOT weaken containment: the containment never rested on the opaque
+ * origin. It rests on the per-server partition + injective scheme authority
+ * (`mcp-app-partition.ts`), the isolated-world relay preload (`contextIsolation` is
+ * true, so same-origin DOM access cannot reach it) with `nodeIntegrationInSubFrames`
+ * false (no preload in the inner frame at all), the main-computed CSP response header,
+ * and the declared-origin navigation/network gates. The proxy top document the inner
+ * frame is now same-origin with is host-generated and script-free — reading it yields
+ * nothing. `allow-forms` is deliberately NOT included: the spec does not MUST it and
+ * `form-action` defaults to `'none'`, so it would be inert; add it only with evidence.
+ *
+ * Set UNCONDITIONALLY by the relay preload (`createInnerAppFrame`) — the wire never
+ * supplies a `sandbox` value.
+ */
+export const INNER_SANDBOX_ATTR = "allow-scripts allow-same-origin";
+
+/**
+ * The `<meta name>` main uses to hand the relay preload the host-computed `allow`
+ * attribute for the inner app iframe (spec `McpUiResourcePermissions`).
+ *
+ * Why a meta tag in the proxy document and NOT the bridge wire: the app HTML reaches
+ * the preload via `SANDBOX_RESOURCE_READY`, i.e. RENDERER-forwarded, and a Permissions
+ * Policy is a containment flag — the same class as `sandbox`, which the preload owns
+ * unconditionally for exactly this reason. The proxy document, by contrast, is
+ * host-generated and host-SERVED over the privileged `lvis-mcp-app://` scheme (with the
+ * token→serverId authority check), so anything main writes into it is unreachable by
+ * the renderer and by the app. Main computes the value from the closed feature table in
+ * `shared/mcp-app-permissions.ts`; the preload copies it verbatim onto the frame.
+ */
+export const MCP_APP_ALLOW_META_NAME = "lvis-mcp-app-allow";
 
 /**
  * How the host identifies itself to an App during `ui/initialize`.

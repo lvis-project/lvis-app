@@ -1536,12 +1536,14 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     });
     await withApps.client.connect();
     const advertised = await withApps.client.readResource("ui://app/p.html");
-    // The server declared `permissions` on the wire; the host does not model it
-    // (an opaque-origin sandboxed frame cannot be delegated a powerful feature), so
-    // it is DROPPED — only the csp survives into the read model.
+    // An ADVERTISED server's `_meta.ui` is surfaced faithfully into the read model —
+    // csp AND permissions. Whether a given permission is HONORED is a separate layer
+    // (`shared/mcp-app-permissions.ts`): clipboardWrite is not in the capability table,
+    // so it survives here on the wire but is never delegated or granted downstream.
     expect(advertised).toEqual({
       html: "<h1>app</h1>",
       csp: { connectDomains: ["https://api.example.com"] },
+      permissions: { clipboardWrite: {} },
     });
     await withApps.client.disconnect();
 

@@ -315,19 +315,30 @@ export interface McpUiResourceCsp {
 }
 
 /**
- * The security-relevant `_meta.ui` a UI resource carries (spec `McpUiResourceMeta`).
+ * Sandbox permissions a UI resource requests (spec `McpUiResourcePermissions`).
+ * Each maps to a Permissions-Policy feature on the inner app iframe. Absent ⇒ denied.
  *
- * The spec also defines `permissions` (camera / microphone / geolocation /
- * clipboardWrite, each a Permission-Policy feature on the inner iframe). LVIS does
- * NOT model it: the inner frame is `sandbox="allow-scripts"` with no
- * `allow-same-origin`, so it runs on an OPAQUE origin, and a powerful feature cannot
- * be delegated to one. The field was declared here, threaded through the read model,
- * and then dropped at the proxy-session mint — a knob plugin authors could set and
- * nothing would honor. Absent ⇒ denied is the whole policy; a card gets no powerful
- * features. Re-introduce it only together with the frame plumbing that proves it works.
+ * The HOST computes both the iframe `allow` attribute and the Electron session grant
+ * from this — see `shared/mcp-app-permissions.ts`, which is the single mapping table
+ * and holds the fail-closed rules. A declaration only ever SELECTS from that table:
+ * the inner frame carries `allow-same-origin` (it inherits the per-server proxy origin,
+ * not the renderer's `file://`), so a delegated feature can actually be honored. This
+ * is the full spec shape; which keys the host can DEMONSTRABLY deliver is decided by
+ * the capability table and proven by `test/e2e/ui/mcp-app-permissions.spec.ts`. A key
+ * the table does not carry is simply never granted (an external server may still send
+ * it on the wire — it is matched by nothing and denied).
  */
+export interface McpUiResourcePermissions {
+  camera?: Record<string, never>;
+  microphone?: Record<string, never>;
+  geolocation?: Record<string, never>;
+  clipboardWrite?: Record<string, never>;
+}
+
+/** The security-relevant `_meta.ui` a UI resource carries (spec `McpUiResourceMeta`). */
 export interface McpUiResourceMeta {
   csp?: McpUiResourceCsp;
+  permissions?: McpUiResourcePermissions;
 }
 
 /**
@@ -339,6 +350,7 @@ export interface McpUiResourceMeta {
 export interface McpUiResourceRead {
   html: string;
   csp?: McpUiResourceCsp;
+  permissions?: McpUiResourcePermissions;
 }
 
 /**
@@ -354,10 +366,10 @@ export interface McpUiResourceRead {
  * `resources/read` with bytes. The host never resolves or reads a
  * plugin-declared disk path — the plugin IS the MCP server, the host relays.
  *
- * Why the csp stays in the MANIFEST and is NOT returned by the hook: it is security
- * POLICY — static, schema-validated, reviewable before any plugin code runs, and
- * covered by `manifestSha256`. A runtime-supplied policy could present a narrow CSP
- * at review and widen it at serve time.
+ * Why csp/permissions stay in the MANIFEST and are NOT returned by the hook: they are
+ * security POLICY — static, schema-validated, reviewable before any plugin code runs,
+ * and covered by `manifestSha256`. A runtime-supplied policy could present a narrow CSP
+ * at review and widen it at serve time, or request the camera only once installed.
  *
  * Security invariants (enforced fail-closed at serve time — see
  * `plugin-ui-resource-provider.ts`, the single chokepoint):
@@ -368,15 +380,18 @@ export interface McpUiResourceRead {
  *    namespace.
  *  - the uri MUST be one this manifest declared (declared-only) — this is what
  *    binds served content to the csp the host computes the CSP header from.
- *  - `csp` is the resource's OWN declared policy. Main COMPUTES the sandbox-proxy
- *    CSP header from it; the plugin never supplies a policy HEADER STRING, and the
- *    renderer can never inject one.
+ *  - `csp` / `permissions` are the resource's OWN declared policy. Main COMPUTES the
+ *    sandbox-proxy CSP header and the iframe `allow` attribute from them; the plugin
+ *    never supplies a policy HEADER STRING or an allow-list, and the renderer can never
+ *    inject one.
  */
 export interface PluginUiResourceDecl {
   /** `ui://<pluginId>/<path>` — authority MUST equal the declaring plugin's id. */
   uri: string;
   /** The resource's own declared CSP (spec `McpUiResourceCsp`). @optional */
   csp?: McpUiResourceCsp;
+  /** Sandbox permissions the resource requests (spec `McpUiResourcePermissions`). @optional */
+  permissions?: McpUiResourcePermissions;
 }
 
 /**

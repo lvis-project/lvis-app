@@ -4,7 +4,7 @@
  * mcp-alignment-design.md §3.x).
  *
  * "Declared POLICY, served CONTENT": a plugin declares a card's `uri` + its
- * security policy (its `csp`) in `manifest.uiResources[]`
+ * security policy (`csp` / `permissions`) in `manifest.uiResources[]`
  * ({@link PluginUiResourceDecl}), and serves the card's BYTES itself
  * (`RuntimePlugin.readUiResource`, injected here as {@link readHtml}). The plugin
  * IS the MCP server — servers serve their own resources; the host relays. That is
@@ -104,9 +104,12 @@ export function createPluginUiResourceProvider(
       }
       // (3) the plugin serves the content; the MANIFEST supplies the policy.
       const html = await readHtml(uri);
+      // Policy comes from the MANIFEST declaration, never from `readHtml`'s return —
+      // the hook is plugin CODE and could widen at serve time what review saw.
       return {
         html,
         ...(decl.csp !== undefined ? { csp: decl.csp } : {}),
+        ...(decl.permissions !== undefined ? { permissions: decl.permissions } : {}),
       };
     },
   };
