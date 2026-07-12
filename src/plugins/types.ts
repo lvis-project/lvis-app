@@ -193,10 +193,11 @@ export interface Tool {
   /** MCP icons (2025-11-25). @optional */
   icons?: Array<{ src: string; mimeType?: string; sizes?: string }>;
   /**
-   * Surface visibility + the one LVIS-proprietary key. Exactly two keys are
-   * recognized: the standard `ui` visibility block, and the SOLE remaining
-   * LVIS-proprietary key `xyz.lvis/pathFields`. Any other key is rejected by the
-   * manifest schema. @optional
+   * Surface visibility + the one LVIS-proprietary key. Recognized keys: the
+   * standard `ui` visibility block, and the SOLE remaining LVIS-proprietary key
+   * `lvisai/pathFields`. Any other key is rejected by the manifest schema.
+   * transitional: the legacy reverse-DNS `xyz.lvis/pathFields` is still accepted
+   * until published plugin manifests + the SDK are migrated (then remove). @optional
    */
   _meta?: {
     /** SEP-1865 surface visibility. @optional */
@@ -207,6 +208,8 @@ export interface Tool {
      * fields. Untrusted routing hint: a lying declaration only ADDS host checks,
      * never bypasses one. @optional
      */
+    "lvisai/pathFields"?: string[];
+    /** transitional: legacy reverse-DNS alias of `lvisai/pathFields` (remove post-migration). @optional */
     "xyz.lvis/pathFields"?: string[];
   };
 }
