@@ -58,18 +58,11 @@ import {
 } from "../plugins/runtime/tool-visibility.js";
 import { createLogger } from "../lib/logger.js";
 import type { McpUiPayload } from "./types.js";
-import { observeLegacyMetaKey } from "./legacy-meta-telemetry.js";
 
 const log = createLogger("plugin-tool-from-mcp");
 
 /** Vendor prefix for LVIS-private `_meta` keys (must mirror the forward projection). */
 const LVIS_META_PREFIX = "lvisai/";
-/**
- * transitional: accept legacy xyz.lvis/* until SDK+plugins are migrated (then remove).
- * Out-of-process plugins and the SDK still emit the old reverse-DNS prefix on the
- * wire; the reverse read prefers the new key and falls back to this legacy one.
- */
-const LEGACY_LVIS_META_PREFIX = "xyz.lvis/";
 
 /**
  * The minimal shape this adapter consumes from a discovered MCP tool. Over a
@@ -99,18 +92,14 @@ export type PluginMcpInvoke = (
   args: Record<string, unknown>,
 ) => Promise<{ text: string; uiPayload?: McpUiPayload; rawResult?: { value: unknown } }>;
 
-function readPathFields(meta: Record<string, unknown>, pluginId: string): string[] | undefined {
-  // Prefer the new `lvisai/pathFields`; transitional: fall back to the legacy
-  // `xyz.lvis/pathFields` until SDK+plugins are migrated (then remove the fallback).
-  // This reads the WIRE. On the loopback arm the forward projection already
-  // normalized legacy→new, so a legacy hit here can ONLY come from a genuinely
-  // out-of-process plugin still emitting the old key — the observable gate for the
-  // out-of-process population, distinct from the on-disk-manifest gate.
-  const preferred = meta[`${LVIS_META_PREFIX}pathFields`];
-  const value =
-    preferred !== undefined ? preferred : meta[`${LEGACY_LVIS_META_PREFIX}pathFields`];
+function readPathFields(meta: Record<string, unknown>): string[] | undefined {
+  // Read the SOLE LVIS-proprietary wire key, `lvisai/pathFields`. The legacy
+  // reverse-DNS `xyz.lvis/pathFields` dual-read was removed: a first-party
+  // plugin's loopback forward projection only ever emits the new key, and an
+  // installed manifest carrying the legacy key is rejected fail-closed by the
+  // manifest schema before it can reach the wire (never accepted-but-ungated).
+  const value = meta[`${LVIS_META_PREFIX}pathFields`];
   if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
-    if (preferred === undefined) observeLegacyMetaKey(pluginId, "pathFields");
     return value as string[];
   }
   return undefined;
@@ -170,7 +159,7 @@ export function mcpToolToPluginTool(
     source: "plugin",
     category,
     pluginId,
-    pathFields: readPathFields(meta, pluginId),
+    pathFields: readPathFields(meta),
     // MCP Apps `_meta.ui.visibility` ∌ "model" ⇒ app-only: the tool IS registered
     // (that is what puts its card's call under risk → reviewer/approval → audit) but
     // is subtracted from the model's tool list at the ONE model-exposure boundary,
