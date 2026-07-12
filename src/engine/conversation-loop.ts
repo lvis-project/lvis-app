@@ -61,6 +61,18 @@ import type {
 } from "./turn/types.js";
 export type { TurnCallbacks, TurnResult, ConversationLoopDeps } from "./turn/types.js";
 
+export type GuidanceDropReason = "joined-limit" | "turn-ended";
+
+export interface GuidanceQueueEntry {
+  text: string;
+  /** Called only after the guidance was appended to the receiver's history. */
+  onInjected?: () => void | Promise<void>;
+  /** Called when a queued item cannot reach a round boundary. */
+  onDropped?: (reason: GuidanceDropReason) => void | Promise<void>;
+  /** DLP-masked sender provenance applied to receiver ApprovalGate reasons after injection. */
+  approvalReasonPrefix?: string;
+}
+
 
 
 // ─── Loop ───────────────────────────────────────────
@@ -179,7 +191,7 @@ export class ConversationLoop {
    * rejected at enqueue so memory + history bloat is hard-capped against
    * runaway renderer / autorepeat keyboard pressure.
    */
-  guidanceQueue: string[] = [];
+  guidanceQueue: GuidanceQueueEntry[] = [];
 
   constructor(deps: ConversationLoopDeps) {
     this.deps = deps;
@@ -243,13 +255,62 @@ export class ConversationLoop {
    *   - `"empty"` if `text` is empty after trim (no-op, returned for parity)
    */
   queueGuidance(text: string): "queued" | "no-active-turn" | "queue-full" | "too-long" | "empty" {
+    return this.enqueueGuidance(text);
+  }
+
+  /**
+   * Queue guidance whose producer needs an explicit delivery disposition.
+   *
+   * A2A parent delivery persists the Message before calling this seam. The
+   * mailbox entry is acknowledged from `onInjected`, never merely because the
+   * in-memory enqueue succeeded; a turn that ends before the next round thus
+   * leaves the durable Message available for the parent's next turn.
+   */
+  queueGuidanceWithDisposition(
+    text: string,
+    disposition: Pick<GuidanceQueueEntry, "onInjected" | "onDropped" | "approvalReasonPrefix">,
+  ): "queued" | "no-active-turn" | "queue-full" | "too-long" | "empty" {
+    return this.enqueueGuidance(text, disposition);
+  }
+
+  private enqueueGuidance(
+    text: string,
+    disposition: Pick<GuidanceQueueEntry, "onInjected" | "onDropped" | "approvalReasonPrefix"> = {},
+  ): "queued" | "no-active-turn" | "queue-full" | "too-long" | "empty" {
     const trimmed = text.trim();
     if (trimmed.length === 0) return "empty";
     if (trimmed.length > GUIDE_MAX_CHARS) return "too-long";
     if (this.currentAbortController === null) return "no-active-turn";
     if (this.guidanceQueue.length >= GUIDE_MAX_ENTRIES) return "queue-full";
-    this.guidanceQueue.push(trimmed);
+    this.guidanceQueue.push({ text: trimmed, ...disposition });
     return "queued";
+  }
+
+  /**
+   * Atomically discard guidance that can no longer reach a round boundary.
+   *
+   * The queue is detached before any producer callback runs, which makes this
+   * safe to call from overlapping cleanup paths without delivering duplicate
+   * dispositions. `runTurn` clears its active controller before calling this
+   * helper, so no new entry can join the detached batch while cleanup awaits.
+   */
+  async dropPendingGuidance(
+    reason: GuidanceDropReason,
+    callbacks?: Pick<TurnCallbacks, "onGuidanceDropped">,
+  ): Promise<void> {
+    if (this.guidanceQueue.length === 0) return;
+
+    const dropped = this.guidanceQueue;
+    this.guidanceQueue = [];
+    const droppedJoined = dropped.map((entry) => entry.text).join("\n\n");
+    await Promise.allSettled(
+      dropped.map((entry) => Promise.resolve().then(() => entry.onDropped?.(reason))),
+    );
+    try {
+      callbacks?.onGuidanceDropped?.(droppedJoined);
+    } catch {
+      // Renderer notification failure must never mask the turn's real result.
+    }
   }
 
   /** True when a turn is currently in flight. Renderer-facing visibility. */
@@ -696,6 +757,10 @@ export class ConversationLoop {
        * before it reaches the LLM-visible registry.
        */
       spawnDepth?: number;
+      /** Internal provenance label prepended to ApprovalGate reasons. */
+      approvalReasonPrefix?: string;
+      /** DLP-masked durable child messages joined to this turn after the prompt gate. */
+      initialGuidance?: string;
       inputOrigin: ChatInputOrigin;
       rolePrompt?: ActiveRolePrompt;
     },

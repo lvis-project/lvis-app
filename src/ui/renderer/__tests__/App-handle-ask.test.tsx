@@ -110,6 +110,7 @@ describe("App.handleAsk — /load command routing", () => {
       emitAgentSpawnEvent({
         spawnId: "live-old-spawn",
         type: "start",
+        taskState: "TASK_STATE_SUBMITTED",
         title: "이전 세션 live 서브에이전트",
         instructions: "old live work",
         toolUseId: "old-tool",
