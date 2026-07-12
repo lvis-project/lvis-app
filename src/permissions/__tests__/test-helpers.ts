@@ -41,6 +41,17 @@ async function windowsSandboxCanSpawn(): Promise<boolean> {
         await verifyWindowsWfpEgress({ proxyPortRange: DEFAULT_WINDOWS_PROXY_PORT_RANGE });
         return true;
       } catch {
+        // Loud, not silent: the sandbox provisioned but cannot actually spawn
+        // (CreateProcessWithLogonW access-denied) — the live-init tests are
+        // SKIPPED (not hard-failed, so the push is not blocked), but the box is
+        // NOT getting OS isolation. Anyone who wants the sandbox on can recover.
+        console.warn(
+          "[asrt-sandbox] Windows OS sandbox cannot spawn as `srt-sandbox` " +
+            "(CreateProcessWithLogonW access-denied, 0x80070005): NOT providing " +
+            "isolation on this machine — live-init tests SKIPPED (not run). " +
+            "To enable it: `Start-Service seclogon` then `gpupdate /force`, then " +
+            "re-run. See README → 'ASRT sandbox access denied' recovery.",
+        );
         return false;
       }
     })();
