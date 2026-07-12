@@ -159,7 +159,7 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
 // map) was removed here: the SDK's pure Tool[] schema collapse now rejects
 // `toolSchemas` and per-tool `category` outright (additionalProperties), and
 // the host already stopped reading them in #885 Phase R. Current authority
-// metadata is `tool._meta["xyz.lvis/pathFields"]` — covered by
+// metadata is `tool._meta["lvisai/pathFields"]` — covered by
 // normalize-manifest.test.ts. Category is never declared; the host classifies
 // risk itself (see architecture.md §6.3 / CLAUDE.md Permission Policy).
 describe("pure Tool authority metadata — no toolSchemas, category, or workerId", () => {

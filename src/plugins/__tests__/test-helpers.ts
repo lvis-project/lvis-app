@@ -46,7 +46,7 @@ export function pureTools(...names: string[]): Tool[] {
  * pure v6 `Tool[]` — the same derivation the removed pre-v6 legacy-shape reader
  * performed. Visibility: model if in `tools[]`, app if in `uiActions`;
  * description/inputSchema sourced from `toolSchemas`/`uiActions`; non-empty
- * `pathFields` moved to `_meta["xyz.lvis/pathFields"]`; removed fields dropped.
+ * `pathFields` moved to `_meta["lvisai/pathFields"]`; removed fields dropped.
  * Tests that historically declared the legacy surface use this to emit the pure
  * shape the host now reads.
  */
@@ -71,7 +71,7 @@ export function compileLegacyToolSurface(spec: {
     ];
     const meta: Tool["_meta"] = { ui: { visibility } };
     if (schema?.pathFields && schema.pathFields.length > 0) {
-      meta!["xyz.lvis/pathFields"] = schema.pathFields;
+      meta!["lvisai/pathFields"] = schema.pathFields;
     }
     const description = schema?.description ?? uiActions[name]?.description;
     return {

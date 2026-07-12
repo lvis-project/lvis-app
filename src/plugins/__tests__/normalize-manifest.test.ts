@@ -77,12 +77,12 @@ describe("parsePluginJson — manifest materialization (visibility + name defaul
     const metaNoVis = {
       name: "y",
       inputSchema: { type: "object", properties: {} },
-      _meta: { "xyz.lvis/pathFields": ["p"] },
+      _meta: { "lvisai/pathFields": ["p"] },
     };
     const out = await parse(base([noMeta, metaNoVis]));
     expect(out.tools[0]._meta?.ui?.visibility).toEqual(["model", "app"]);
     expect(out.tools[1]._meta?.ui?.visibility).toEqual(["model", "app"]);
-    expect(out.tools[1]._meta?.["xyz.lvis/pathFields"]).toEqual(["p"]); // preserved
+    expect(out.tools[1]._meta?.["lvisai/pathFields"]).toEqual(["p"]); // preserved
   });
 
   it("default is governed — never yields an app-only (bypass) tool", async () => {
@@ -98,10 +98,10 @@ describe("parsePluginJson — manifest materialization (visibility + name defaul
     const tool = {
       name: "read_file",
       inputSchema: { type: "object", properties: { path: {} } },
-      _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
+      _meta: { ui: { visibility: ["model"] }, "lvisai/pathFields": ["path"] },
     };
     const out = await parse(base([tool]));
-    expect(out.tools[0]._meta?.["xyz.lvis/pathFields"]).toEqual(["path"]);
+    expect(out.tools[0]._meta?.["lvisai/pathFields"]).toEqual(["path"]);
     expect(out.tools[0]._meta?.ui?.visibility).toEqual(["model"]);
   });
 

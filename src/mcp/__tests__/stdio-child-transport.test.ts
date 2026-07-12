@@ -30,8 +30,9 @@ describe("StdioChildTransport — out-of-process plugin over a real subprocess",
     const tool = registry.findByName("echo_say");
     expect(tool?.source).toBe("plugin");
     // Completing #885 per-tool category removal (out-of-process/stdio residual):
-    // the host IGNORES a plugin's wire-declared `_meta["xyz.lvis/category"]` — the
-    // fixture still SENDS "read" (see echo-stdio-server.mjs), but the reverse
+    // the host IGNORES a plugin's wire-declared category — the fixture still SENDS
+    // "read" under the LEGACY `_meta["xyz.lvis/category"]` prefix (an unmigrated
+    // out-of-process plugin; see echo-stdio-server.mjs), but the reverse
     // projection registers the default-strict "write" baseline just like the
     // in-process loopback path. Under `hostClassifiesRisk` (default ON, all
     // platforms) `inspectHostRisk` is the authoritative per-invocation classifier;
