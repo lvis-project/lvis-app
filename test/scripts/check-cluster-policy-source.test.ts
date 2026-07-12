@@ -21,6 +21,7 @@ describe("trusted cluster policy workflow", () => {
     expect(workflow).toContain("statuses: write");
     expect(workflow).not.toContain("contents: write");
     expect(workflow).not.toContain("pull-requests: read");
+    expect(workflow).not.toContain("issues: read");
     expect(workflow).not.toContain("issues: write");
     expect(workflow).toContain("PR-label DELETE returned 403");
     expect(workflow).toContain("cancel-in-progress: false");
