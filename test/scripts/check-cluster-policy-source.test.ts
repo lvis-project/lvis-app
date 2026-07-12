@@ -90,11 +90,25 @@ describe("trusted cluster policy transition", () => {
     expect(transition).toContain(
       "scripts/check-cluster-review-attestation.mjs",
     );
+    expect(transition).toContain(
+      "name: Enforce transition cluster review attestation",
+    );
+    expect(transition).toContain(
+      "if: steps.cluster-attestation.outputs.attested != 'true'",
+    );
+    expect(transition).not.toContain(
+      "steps.cluster-check.outputs.violation == 'true' &&",
+    );
     expect(transition).toContain("FINAL_DIGEST");
     expect(transition).toContain('if [ "$FINAL_DIGEST" != "$EXPECTED_DIGEST" ]');
     expect(transition).toContain("name: Finalize cluster policy status");
     expect(transition).toContain("if: always()");
     expect(transition).toContain("STATUS_STATE=failure");
+    expect(transition).toContain('elif [ "$ATTESTED" = "true" ]; then');
+    expect(transition).toContain(
+      "Current-head cluster review attestation is required for transition",
+    );
+    expect(transition).toContain("FINALIZER_FAILED=1");
     expect(transition).toContain('elif [ "$PRIOR_JOB_STATUS" != "success" ]');
   });
 
