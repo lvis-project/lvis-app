@@ -215,14 +215,15 @@ function invoke(channel: string, ...args: unknown[]): unknown {
   return invokeRegisteredHandler(handlers, channel, ...args);
 }
 
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
+class SessionMutationGate<T> {
+  readonly promise: Promise<T>;
+  resolve!: (value: T | PromiseLike<T>) => void;
+
+  constructor() {
+    this.promise = new Promise<T>((resolve) => {
+      this.resolve = resolve;
+    });
+  }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -839,8 +840,8 @@ describe("lvis:chat:fork", () => {
     ]);
     loop.loadSession.mockReturnValue(true);
     const deps = await setupHandlers(loop);
-    const firstSaveEntered = deferred<void>();
-    const firstSaveGate = deferred<void>();
+    const firstSaveEntered = new SessionMutationGate<void>();
+    const firstSaveGate = new SessionMutationGate<void>();
     let saveCallCount = 0;
     deps.memoryManager.saveSession.mockImplementation(async () => {
       saveCallCount += 1;
@@ -1032,8 +1033,8 @@ describe("lvis:chat:send provenance", () => {
 
   it("rejects the original input when the session changes during persona resolution", async () => {
     const loop = makeConversationLoop("session-before-persona", []);
-    const personaEntered = deferred<void>();
-    const personaGate = deferred<{
+    const personaEntered = new SessionMutationGate<void>();
+    const personaGate = new SessionMutationGate<{
       id: string;
       name: string;
       systemPromptAdd: string;
@@ -1359,10 +1360,10 @@ describe("sub-agent parent mailbox on manual turns", () => {
       route: "default",
       stopReason: "end_turn",
     });
-    const peekGate = deferred<Array<{ id: string; formattedText: string; approvalLabel: string }>>();
-    const peekEntered = deferred<void>();
-    const ackGate = deferred<number>();
-    const ackEntered = deferred<void>();
+    const peekGate = new SessionMutationGate<Array<{ id: string; formattedText: string; approvalLabel: string }>>();
+    const peekEntered = new SessionMutationGate<void>();
+    const ackGate = new SessionMutationGate<number>();
+    const ackEntered = new SessionMutationGate<void>();
     let reentrantNew: Promise<unknown> | undefined;
     const runner = {
       peekParentMailbox: vi.fn(() => {
@@ -1515,8 +1516,8 @@ describe("sub-agent autonomous parent wake", () => {
     let finishTurn!: (result: any) => void;
     loop.runTurn.mockReturnValue(new Promise((resolve) => { finishTurn = resolve; }));
     let wakeHandler: ((parentSessionId: string) => Promise<void>) | undefined;
-    const peekGate = deferred<Array<{ id: string; formattedText: string; approvalLabel: string }>>();
-    const peekEntered = deferred<void>();
+    const peekGate = new SessionMutationGate<Array<{ id: string; formattedText: string; approvalLabel: string }>>();
+    const peekEntered = new SessionMutationGate<void>();
     const acknowledgeParentMailbox = vi.fn(async () => 1);
     const runner = {
       setParentWakeHandler: vi.fn((handler: typeof wakeHandler) => { wakeHandler = handler; }),
@@ -1579,8 +1580,8 @@ describe("sub-agent autonomous parent wake", () => {
   it("waits for the current stream lease once, then wakes a late mailbox delivery", async () => {
     const loop = makeConversationLoop("parent-session", []);
     (loop as any).hasActiveTurn = vi.fn(() => false);
-    const manualTurn = deferred<any>();
-    const manualEntered = deferred<void>();
+    const manualTurn = new SessionMutationGate<any>();
+    const manualEntered = new SessionMutationGate<void>();
     loop.runTurn
       .mockImplementationOnce(() => {
         manualEntered.resolve(undefined);
@@ -1661,8 +1662,8 @@ describe("sub-agent autonomous parent wake", () => {
       acknowledgeParentMailbox: vi.fn(async () => 1),
     };
     const deps = await setupHandlers(loop, { getSubAgentRunner: () => runner });
-    const mutationGate = deferred<void>();
-    const mutationEntered = deferred<void>();
+    const mutationGate = new SessionMutationGate<void>();
+    const mutationEntered = new SessionMutationGate<void>();
     deps.memoryManager.markMainActiveFresh.mockImplementation(() => {
       mutationEntered.resolve(undefined);
       return mutationGate.promise;
@@ -1700,8 +1701,8 @@ describe("sub-agent autonomous parent wake", () => {
       acknowledgeParentMailbox: vi.fn(async () => 1),
     };
     const deps = await setupHandlers(loop, { getSubAgentRunner: () => runner });
-    const mutationGate = deferred<void>();
-    const mutationEntered = deferred<void>();
+    const mutationGate = new SessionMutationGate<void>();
+    const mutationEntered = new SessionMutationGate<void>();
     deps.memoryManager.markMainActiveFresh.mockImplementation(() => {
       mutationEntered.resolve(undefined);
       return mutationGate.promise;
