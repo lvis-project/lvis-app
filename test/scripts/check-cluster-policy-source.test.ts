@@ -94,6 +94,17 @@ describe("trusted cluster policy transition", () => {
     expect(transition).toContain("git -C .cluster-policy rev-parse HEAD");
     expect(transition).toContain("scripts/check-cluster-scope.mjs");
     expect(transition).toContain(
+      `jq -er '.sensitive | if type == "boolean" then tostring else error("invalid .sensitive") end'`,
+    );
+    expect(transition).toContain(
+      `jq -er '.violation | if type == "boolean" then tostring else error("invalid .violation") end'`,
+    );
+    expect(transition).toContain(
+      `jq -er '.reason | if type == "string" then . else error("invalid .reason") end'`,
+    );
+    expect(transition).not.toContain("jq -er '.sensitive'");
+    expect(transition).not.toContain("jq -er '.violation'");
+    expect(transition).toContain(
       "scripts/check-cluster-review-attestation.mjs",
     );
     expect(transition).toContain(
