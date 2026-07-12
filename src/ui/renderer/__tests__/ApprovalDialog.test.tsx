@@ -109,7 +109,7 @@ describe("ApprovalDialog", () => {
     );
     await waitFor(() => {
       expect(document.body.textContent).toContain("출처 미확인");
-      expect(document.body.textContent).toContain("사용자가 직접 입력한 명령이 아니라");
+      expect(document.body.textContent).toContain("사용자 직접 입력이 아니라");
     });
   });
 
