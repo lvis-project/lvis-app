@@ -23,7 +23,12 @@ import { fileURLToPath } from "node:url";
 import { RENDER_HTML_PARTITION } from "../shared/render-html-preview.js";
 import { mcpAppPartitionName } from "../shared/mcp-app-partition.js";
 import { installPluginAssetProtocolHandler, PLUGIN_ASSET_SCHEME } from "./plugin-asset-protocol.js";
-import { installMcpAppProtocolHandler, isDeclaredOriginForServer, MCP_APP_SCHEME } from "./mcp-app-protocol.js";
+import {
+  installMcpAppProtocolHandler,
+  isDeclaredOriginForServer,
+  isMcpAppPermissionGranted,
+  MCP_APP_SCHEME,
+} from "./mcp-app-protocol.js";
 
 // ESM equivalent of CommonJS `__dirname`. The original code referenced
 // `__dirname` directly, which is undefined under `"type": "module"` and
@@ -101,6 +106,55 @@ function installDeclaredOriginGate(ses: Electron.Session, serverId: string): voi
 }
 
 /**
+ * The media kind(s) a permission ask/check is about, normalized to `("video"|"audio")[]`.
+ *
+ * `setPermissionRequestHandler` details carry `mediaTypes: Array<'video'|'audio'>`;
+ * `setPermissionCheckHandler` details carry a single `mediaType: 'video'|'audio'|'unknown'`.
+ * Anything else (including `'unknown'`) is dropped, so the caller falls back to the coarse
+ * permission-string decision — the strict per-kind grant happens in the request handler.
+ */
+function extractMediaKinds(details: unknown): ("video" | "audio")[] {
+  if (!details || typeof details !== "object") return [];
+  const d = details as { mediaTypes?: unknown; mediaType?: unknown };
+  const raw = Array.isArray(d.mediaTypes)
+    ? d.mediaTypes
+    : d.mediaType !== undefined
+      ? [d.mediaType]
+      : [];
+  return raw.filter((k): k is "video" | "audio" => k === "video" || k === "audio");
+}
+
+/**
+ * Powerful-feature gate for one MCP server's partition — DENY-BY-DEFAULT, opened only by
+ * what the RENDERING RESOURCE declared in its `_meta.ui.permissions`.
+ *
+ * This is the single chokepoint where an MCP-app card can be granted a powerful feature
+ * (camera / microphone / geolocation), and it is fail-closed at every step (see
+ * `isMcpAppPermissionGranted`): a card whose declaration is absent gets nothing, and a
+ * feature that card did not declare is denied even if the frame asks for it — including a
+ * card that declared only the microphone asking for the camera (the media-kind check).
+ *
+ * The decision is keyed off the webContents' own URL — the sandbox-proxy URL, whose
+ * token main minted TOGETHER WITH the declaration. So the card cannot name its own
+ * permissions, and neither can the renderer: the only input is what the resource
+ * declared at read time.
+ *
+ * Both handlers are installed, and they must agree. `setPermissionRequestHandler` answers
+ * the ASK (`getUserMedia`, `getCurrentPosition`) and carries the requested media kinds;
+ * `setPermissionCheckHandler` answers the synchronous CHECK (`navigator.permissions.query`,
+ * and the internal check Chromium makes before some APIs even prompt). Installing only the
+ * former leaves the latter at Electron's default, which is not deny-all.
+ */
+function installDeclaredPermissionGate(ses: Electron.Session): void {
+  ses.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    callback(isMcpAppPermissionGranted(webContents?.getURL(), permission, extractMediaKinds(details)));
+  });
+  ses.setPermissionCheckHandler((webContents, permission, _requestingOrigin, details) =>
+    isMcpAppPermissionGranted(webContents?.getURL() ?? undefined, permission, extractMediaKinds(details)),
+  );
+}
+
+/**
  * #237 Option B — Plugin webview partition policy.
  *
  * Plugin webviews use `persist:plugin:<slug>` partitions.  They load from a
@@ -159,6 +213,10 @@ export function installMcpAppPartitionPolicy(
 
   const ses = sessionApi.fromPartition(partitionName);
   installDeclaredOriginGate(ses, serverId);
+
+  // Deny-by-default powerful-feature gate. Installed on the SAME per-server session as
+  // the network gate, so a card cannot reach a feature — or a host — it never declared.
+  installDeclaredPermissionGate(ses);
 
   // Serves the host-owned sandbox-proxy document (`lvis-mcp-app://…/proxy.html`)
   // with its Content-Security-Policy RESPONSE HEADER — the envelope the inner app

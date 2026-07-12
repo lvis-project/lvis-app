@@ -711,7 +711,7 @@ export class McpClient {
         blob?: string;
         uri?: string;
         mimeType?: string;
-        /** MCP Apps: the resource's own security metadata (its csp). */
+        /** MCP Apps: the resource's own security metadata (csp / permissions). */
         _meta?: { ui?: McpUiResourceMeta };
       }>;
     }
@@ -727,7 +727,7 @@ export class McpClient {
     // server cannot open its own CSP.
     const meta = this.appsUiAdvertised ? textPart._meta?.ui : undefined;
 
-    return { html: textPart.text, csp: meta?.csp };
+    return { html: textPart.text, csp: meta?.csp, permissions: meta?.permissions };
   }
 
   // ─── JSON-RPC Transport ─────────────────────────────

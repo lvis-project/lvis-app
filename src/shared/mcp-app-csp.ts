@@ -13,8 +13,8 @@
  * renderer-forwarded.
  *
  * ─── Why the header is the effective ceiling (measured, not assumed) ─────────
- * The app HTML runs in an inner `<iframe sandbox="allow-scripts" srcdoc=...>`. A
- * `srcdoc` document INHERITS the embedding document's CSP, and a `<meta>` CSP
+ * The app HTML runs in an inner `<iframe sandbox="allow-scripts allow-same-origin"
+ * srcdoc=...>`. A `srcdoc` document INHERITS the embedding document's CSP, and a `<meta>` CSP
  * inside it can only ever INTERSECT — narrow, never widen. Verified in a real
  * Electron <webview>: with the proxy header at `img-src 'none'`, an inner frame
  * whose own meta declared `img-src data:` was still blocked, citing the OUTER policy.
@@ -41,11 +41,13 @@ import type { McpUiResourceCsp } from "../mcp/types.js";
  * Restrictive floor. Every network-capable directive starts at `'none'`; only the
  * resource's own declared domains open it.
  *
- * `'unsafe-inline'` for script/style is intentional and is not the hole here: the
- * app is an opaque-origin sandboxed frame with no same-origin server, and inline
- * script is how MCP Apps are authored. `data:`/`blob:` are local, not exfiltration
- * channels. There is deliberately NO `https:` wildcard and NO hardcoded CDN
- * allowlist — either would let any app reach hosts it never declared.
+ * `'unsafe-inline'` for script/style is intentional and is not the hole here: inline
+ * script is how MCP Apps are authored, and the frame has no reachable same-origin
+ * SERVER endpoint to fetch from — the proxy origin it now shares (`allow-same-origin`)
+ * serves only the host-generated, script-free proxy document, and the network gate
+ * blocks every origin the resource did not declare. `data:`/`blob:` are local, not
+ * exfiltration channels. There is deliberately NO `https:` wildcard and NO hardcoded
+ * CDN allowlist — either would let any app reach hosts it never declared.
  */
 const DEFAULT_CSP_DIRECTIVES: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["default-src", ["'none'"]],

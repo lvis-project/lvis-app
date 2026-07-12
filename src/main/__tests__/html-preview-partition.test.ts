@@ -48,6 +48,10 @@ const mockMcpSession = {
   protocol: {
     handle: mockProtocolHandleMcp,
   },
+  // …and the deny-by-default powerful-feature gate (installDeclaredPermissionGate):
+  // both handlers are installed on the per-server session, so the mock must expose them.
+  setPermissionRequestHandler: vi.fn(),
+  setPermissionCheckHandler: vi.fn(),
 };
 const mockPluginSession = {
   webRequest: {
@@ -150,6 +154,8 @@ describe("installMcpAppPartitionPolicy (#885 b1 — lazy per-server partition po
     mockSessionApi.fromPartition.mockClear();
     mockSetPreloadsMcp.mockClear();
     mockProtocolHandleMcp.mockClear();
+    mockMcpSession.setPermissionRequestHandler.mockClear();
+    mockMcpSession.setPermissionCheckHandler.mockClear();
   });
 
   it("installs the network gate on the per-server lvis-mcp-app:<hex> partition", () => {
@@ -206,6 +212,16 @@ describe("installMcpAppPartitionPolicy (#885 b1 — lazy per-server partition po
   it("registers the lvis-mcp-app:// protocol handler that serves the sandbox proxy", () => {
     installMcpAppPartitionPolicy("github-proto", mockSessionApi);
     expect(mockProtocolHandleMcp).toHaveBeenCalledWith("lvis-mcp-app", expect.any(Function));
+  });
+
+  it("installs BOTH deny-by-default permission handlers on the per-server session", () => {
+    // The powerful-feature gate needs the request handler (answers getUserMedia /
+    // getCurrentPosition) AND the check handler (answers navigator.permissions.query and
+    // Chromium's pre-prompt check). Installing only one leaves the other at Electron's
+    // default, which is NOT deny-all.
+    installMcpAppPartitionPolicy("github-perms", mockSessionApi);
+    expect(mockMcpSession.setPermissionRequestHandler).toHaveBeenCalledOnce();
+    expect(mockMcpSession.setPermissionCheckHandler).toHaveBeenCalledOnce();
   });
 
   it("is idempotent: re-installing the same server does not re-register the gate", () => {
