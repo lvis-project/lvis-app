@@ -716,14 +716,25 @@ const DEFAULT_SETTINGS: AppSettings = {
     // category. Shadow mode reconciliation completed before this flip; users
     // can still opt out in Settings.
     hostClassifiesRisk: true,
-    // OS tool sandbox — STAGED rollout (macOS-first). Default ON on `darwin`
-    // (the live-verified-active platform) and OFF on `linux`/`win32` until the
-    // in-flight C/D-series sandbox QA is green; Linux/Windows users can still
-
-    // Linux/Windows default flips to `true` once the C/D-series QA passes —
-    // change this single expression to `true` then. (Computed from
-    // `process.platform` at default-construction; `process.platform` is stable
-    // per-process so this is a one-time, single-expression evaluation.)
+    // OS tool sandbox — STAGED rollout. Default ON on `darwin` (the
+    // live-verified-active platform) AND on `win32`. Windows joins the default
+    // because the srt-win OS-sandbox backend is now provisioned at APP-INSTALL
+    // time (NSIS `customInstall` in build/installer.nsh runs `srt-win.exe
+    // install`), so the sandbox is ready at first launch instead of gated behind
+    // a runtime "Install now" click — the CLAUDE.md convergence-plan flip for
+    // Windows, justified by install-time provisioning (issue #1608). `linux`
+    // stays OFF (opt-in) until the C/D-series sandbox QA is green.
+    //
+    // NOTE: install-time provisioning cannot be verified in CI (needs a real
+    // elevated Windows install run). If a host reaches first launch without a
+    // provisioned sandbox (provisioning was cancelled/failed, or the app was
+    // not installed via the NSIS installer), win32-not-ready does NOT hard-throw
+    // — the runtime repair panel (Settings → 권한) remains the fallback and the
+    // boot gate degrades gracefully (see below).
+    //
+    // Computed from `process.platform` at default-construction; `process.platform`
+    // is stable per-process so this is a one-time, single-expression evaluation.
+    // Linux's default flips to `true` once the C/D-series QA passes.
     //
     // Safe to stage independently of `hostClassifiesRisk` (which stays ON on all
     // platforms): on a non-sandbox (or non-filesystem-confined) platform the
@@ -733,7 +744,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     // if the platform sandbox can run, else the default/settings path DEGRADES
     // gracefully (loud warning, non-bricking); the explicit `LVIS_SANDBOX_ENABLED=1`
     // env opt-in stays fail-closed. See boot.ts + boot/steps/sandbox-gate.ts.
-    osToolSandbox: process.platform === "darwin",
+    osToolSandbox:
+      process.platform === "darwin" || process.platform === "win32",
   },
 };
 
