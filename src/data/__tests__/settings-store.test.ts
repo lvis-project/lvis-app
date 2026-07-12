@@ -608,7 +608,7 @@ describe("SettingsService role presets", () => {
     expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
   });
 
-  it("ships hostClassifiesRisk ON all-platform; osToolSandbox STAGED (darwin+win32 ON)", () => {
+  it("ships hostClassifiesRisk ON all-platform; osToolSandbox STAGED (darwin ON only)", () => {
     // hostClassifiesRisk ships ON on EVERY platform (shadow-mode reconciliation
     // completed). It is safe to ship on non-sandbox / network-only platforms
     // because the foreground read-relaxation is coupled to the active sandbox
@@ -616,20 +616,21 @@ describe("SettingsService role presets", () => {
     // falls back to the pre-exec ask.
     //
     // osToolSandbox is STAGED: default ON on darwin (the live-verified-active
-    // platform) AND win32 (srt-win is provisioned at app-install time — NSIS
-    // customInstall — so the sandbox is ready at first launch). linux stays OFF
-    // (opt-in via Settings) until the C/D-series QA is green. The default is
-    // computed from process.platform, so this assertion tracks the runner's
-    // platform deterministically.
+    // platform) ONLY. win32 stays OFF (opt-in) — default-on win32 is deferred
+    // because Windows srt-win is only partially confined (no process isolation)
+    // and the shell-containment gate refuses bash/powershell under the active
+    // partial sandbox. linux stays OFF until the C/D-series QA is green. The
+    // default is computed from process.platform, so this assertion tracks the
+    // runner's platform deterministically.
     const service = new SettingsService({ userDataPath });
     expect(service.get("features")?.hostClassifiesRisk ?? false).toBe(true);
     expect(service.get("features")?.osToolSandbox ?? false).toBe(
-      process.platform === "darwin" || process.platform === "win32",
+      process.platform === "darwin",
     );
   });
 
   // Platform-staged default TRUTH-TABLE — asserts the staged default EXPLICITLY
-  // per platform (true on darwin AND win32, false on linux), not by mirroring
+  // per platform (true on darwin only, false on win32 + linux), not by mirroring
   // the impl expression. The default is evaluated at module-load from
   // `process.platform`, so each case stubs the platform and re-imports the
   // store with `vi.resetModules()` to recompute DEFAULT_SETTINGS, then reads the
@@ -637,7 +638,7 @@ describe("SettingsService role presets", () => {
   it.each([
     ["darwin", true],
     ["linux", false],
-    ["win32", true],
+    ["win32", false],
   ] as const)(
     "osToolSandbox default on %s = %s (explicit staged truth-table)",
     async (platform, expected) => {

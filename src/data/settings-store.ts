@@ -717,35 +717,28 @@ const DEFAULT_SETTINGS: AppSettings = {
     // can still opt out in Settings.
     hostClassifiesRisk: true,
     // OS tool sandbox — STAGED rollout. Default ON on `darwin` (the
-    // live-verified-active platform) AND on `win32`. Windows joins the default
-    // because the srt-win OS-sandbox backend is now provisioned at APP-INSTALL
-    // time (NSIS `customInstall` in build/installer.nsh runs `srt-win.exe
-    // install`), so the sandbox is ready at first launch instead of gated behind
-    // a runtime "Install now" click — the CLAUDE.md convergence-plan flip for
-    // Windows, justified by install-time provisioning (issue #1608). `linux`
-    // stays OFF (opt-in) until the C/D-series sandbox QA is green.
+    // live-verified-active platform) ONLY. `win32` + `linux` stay OFF (opt-in).
     //
-    // NOTE: install-time provisioning cannot be verified in CI (needs a real
-    // elevated Windows install run). If a host reaches first launch without a
-    // provisioned sandbox (provisioning was cancelled/failed, or the app was
-    // not installed via the NSIS installer), win32-not-ready does NOT hard-throw
-    // — the runtime repair panel (Settings → 권한) remains the fallback and the
-    // boot gate degrades gracefully (see below).
+    // Windows install-time provisioning (NSIS customInstall, issue #1608) makes
+    // opt-in work out of the box, BUT default-on win32 is DEFERRED: Windows
+    // srt-win is only PARTIALLY confined (filesystem + network, no PROCESS
+    // isolation), and the shell-containment gate (`isActiveSandboxShellContained`,
+    // used by bash.ts / powershell.ts) requires full fs+process confinement — so
+    // with the sandbox ACTIVE, bash/powershell refuse to run. Flip win32 to `true`
+    // only after the shell tools handle the Windows partial case (run unsandboxed
+    // + pre-exec ask, not error). `linux` stays OFF until C/D-series QA is green.
     //
-    // Computed from `process.platform` at default-construction; `process.platform`
-    // is stable per-process so this is a one-time, single-expression evaluation.
-    // Linux's default flips to `true` once the C/D-series QA passes.
+    // Computed from `process.platform` at default-construction; stable per-process.
     //
     // Safe to stage independently of `hostClassifiesRisk` (which stays ON on all
     // platforms): on a non-sandbox (or non-filesystem-confined) platform the
     // foreground read-relaxation is coupled to the active sandbox FILESYSTEM-
     // CONTAINING the host (ToolExecutor.sandboxFsContainedProvider), so it falls
-    // back to the pre-exec ask there. When ON, boot activates ASRT
-    // if the platform sandbox can run, else the default/settings path DEGRADES
-    // gracefully (loud warning, non-bricking); the explicit `LVIS_SANDBOX_ENABLED=1`
-    // env opt-in stays fail-closed. See boot.ts + boot/steps/sandbox-gate.ts.
-    osToolSandbox:
-      process.platform === "darwin" || process.platform === "win32",
+    // back to the pre-exec ask there. When ON, boot activates ASRT if the platform
+    // sandbox can run, else the default/settings path DEGRADES gracefully (loud
+    // warning, non-bricking); the explicit `LVIS_SANDBOX_ENABLED=1` env opt-in
+    // stays fail-closed. See boot.ts + boot/steps/sandbox-gate.ts.
+    osToolSandbox: process.platform === "darwin",
   },
 };
 
