@@ -32,6 +32,8 @@ import { isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
 import { runWithCeiling } from "../../tools/executor-ceiling.js";
+import { manifestIntegrityState } from "../../permissions/manifest-integrity.js";
+import { sessionContext } from "../../engine/session-context.js";
 import { runStartWithTimeout, SessionActivationTracker } from "./lifecycle-timeout.js";
 
 import {
@@ -70,10 +72,20 @@ import {
   importPluginFactory,
 } from "./plugin-loader.js";
 import { isModelVisible } from "./tool-visibility.js";
+import type { InvocationOrigin } from "./origin-chain.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
 const log = createLogger("plugin-runtime");
 const START_FAILURE_STOP_TIMEOUT_MS = 2_000;
+
+/**
+ * Hard cap on the HTML one {@link RuntimePlugin.readUiResource} call may return
+ * (see {@link PluginRuntime.readUiResource}). An MCP App card inlines its own
+ * JS/CSS, so it is legitimately large — but it is a CARD, not a payload channel:
+ * bounding it keeps a runaway hook from ballooning the render path. Exported so
+ * the test pins the boundary rather than re-deriving it.
+ */
+export const MAX_UI_RESOURCE_HTML_BYTES = 4 * 1024 * 1024;
 
 export { runStartWithTimeout };
 export type { PluginPerfStats };
@@ -151,13 +163,19 @@ export interface PluginPreparationProgressInput {
 }
 
 export interface PluginToolInvocationContext {
-  origin: "plugin" | "ui";
+  /** SoT: {@link InvocationOrigin} (`plugins/runtime/origin-chain.ts`). */
+  origin: InvocationOrigin;
   callerPluginId?: string;
   ownerPluginId?: string;
   /**
    * True only when the renderer call was made during an active browser user
    * activation. Renderer-provided booleans are not trusted directly; preload
    * derives this from `navigator.userActivation.isActive`.
+   *
+   * Only the trusted host renderer (`origin: "ui"` — the plugin's own React
+   * panel) can produce this. An `origin: "mcp-app"` call NEVER sets it: the
+   * guest iframe's activation state is not the host frame's, and a gesture claim
+   * synthesized inside untrusted card HTML is unverifiable.
    */
   userAction?: boolean;
   /**
@@ -182,8 +200,10 @@ export interface PluginToolInvocationContext {
    * because the reviewer continues to evaluate each call. The propagation
    * only changes the `headless` lane decision, not the per-tool deny/allow
    * rules or the per-tool category × source × trust matrix.
+   *
+   * SoT: {@link InvocationOrigin}.
    */
-  parentOrigin?: "plugin" | "ui";
+  parentOrigin?: InvocationOrigin;
 }
 
 export type PluginToolInvocationDelegate = (
@@ -191,6 +211,15 @@ export type PluginToolInvocationDelegate = (
   payload: unknown,
   context: PluginToolInvocationContext,
 ) => Promise<unknown>;
+
+/**
+ * Kebab-case deny code (CLAUDE.md §IPC Error Message Language Convention) for the
+ * ONE thing an MCP App is denied that the spec's `["app"]` semantics alone would
+ * otherwise allow: the plugin's manifest-declared auth trio
+ * (`manifest.auth.{statusTool,loginTool,logoutTool}`). See {@link callFromApp} for
+ * why this is a deliberate narrowing, not a bug.
+ */
+export const MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE = "mcp-app-auth-tool-not-app-callable";
 
 export interface PluginStartPreparationContext {
   pluginId: string;
@@ -406,6 +435,34 @@ export class PluginRuntime {
     return readEnabledManifestSnapshots(loadPlan, validator);
   }
 
+  /**
+   * #885 v6 — MODEL-ONLY (ratified security decision §2.4a). The `knownToolOwners`
+   * map is the pre-runtime `??` fallback in `resolveToolOwner`, feeding
+   * `assertPluginToolAccess` (plugin-to-plugin access control) and the "plugin still
+   * installing" guard (`throwIfToolOwnerNotReady`). Today's `tools[]` was model-facing
+   * only; a naive all-names `.map` would silently add the app-only auth trio to the
+   * access-control map (a widening). `isModelVisible` reproduces today's EXACT set;
+   * UI-only ownership still resolves at runtime via `methodMap` (all names), which stays
+   * authoritative.
+   *
+   * HOLDS AFTER app-only tools became registry `Tool`s. Registry membership (what may
+   * execute under the gate) and model exposure (what the LLM is shown) were split apart;
+   * THIS map is the THIRD, independent concern — who owns a name for plugin-to-plugin
+   * access control — and it does NOT follow either. It stays exactly the model-visible
+   * set.
+   *
+   * ONE method, three callers (`rememberPluginManifest`, `load`, single-plugin add), so
+   * the MODEL-ONLY `.filter(isModelVisible)` lives once. Pinned by
+   * `__tests__/known-tool-owners-model-only.test.ts` (which exercises
+   * `rememberPluginManifest`; the other two callers share this method, so the pin covers
+   * them too). A future all-names `.map` here flips that pin closed.
+   */
+  private rememberToolOwners(pluginId: string, manifest: PluginManifest): void {
+    for (const t of (manifest.tools ?? []).filter(isModelVisible)) {
+      this.knownToolOwners.set(t.name, pluginId);
+    }
+  }
+
   private rememberPluginManifest(
     pluginId: string,
     manifest: PluginManifest,
@@ -423,16 +480,7 @@ export class PluginRuntime {
     for (const [eventType, ownerId] of [...this.knownEventOwners.entries()]) {
       if (ownerId === pluginId) this.knownEventOwners.delete(eventType);
     }
-    // #885 v6 — MODEL-ONLY (ratified security decision §2.4a). This ownership map
-    // is the pre-runtime `??` fallback in resolveToolOwner, feeding
-    // assertPluginToolAccess (plugin-to-plugin access control). Today's tools[]
-    // was model-facing only; a naive all-names `.map` would silently add the
-    // app-only auth trio to the access-control map (a widening). `isModelVisible`
-    // reproduces today's EXACT set; UI-only ownership still resolves at runtime
-    // via methodMap (all names), which stays authoritative.
-    for (const t of (manifest.tools ?? []).filter(isModelVisible)) {
-      this.knownToolOwners.set(t.name, pluginId);
-    }
+    this.rememberToolOwners(pluginId, manifest); // #885 §2.4a MODEL-ONLY (see method)
     for (const eventType of getDeclaredEmittedEvents(manifest)) {
       this.knownEventOwners.set(eventType, pluginId);
     }
@@ -472,11 +520,7 @@ export class PluginRuntime {
       this.rememberPluginInstallAlias(manifest.id, pluginId);
       this.knownPluginManifests.set(pluginId, manifest);
       this.knownPluginAccessGrants.set(pluginId, approvedPluginAccess);
-      // #885 v6 — MODEL-ONLY (§2.4a): reproduces today's model-facing tools[] set;
-      // never adds the app-only auth trio to the plugin-to-plugin access map.
-      for (const t of (manifest.tools ?? []).filter(isModelVisible)) {
-        this.knownToolOwners.set(t.name, pluginId);
-      }
+      this.rememberToolOwners(pluginId, manifest); // #885 §2.4a MODEL-ONLY (see method)
       for (const eventType of getDeclaredEmittedEvents(manifest)) {
         this.knownEventOwners.set(eventType, pluginId);
       }
@@ -1049,16 +1093,7 @@ export class PluginRuntime {
     this.rememberPluginInstallAlias(manifest.id, pluginId);
     this.knownPluginManifests.set(pluginId, manifest);
     this.knownPluginAccessGrants.set(pluginId, approvedPluginAccess);
-    // #885 v6 — MODEL-ONLY (ratified security decision §2.4a). This ownership map
-    // is the pre-runtime `??` fallback in resolveToolOwner, feeding
-    // assertPluginToolAccess (plugin-to-plugin access control). Today's tools[]
-    // was model-facing only; a naive all-names `.map` would silently add the
-    // app-only auth trio to the access-control map (a widening). `isModelVisible`
-    // reproduces today's EXACT set; UI-only ownership still resolves at runtime
-    // via methodMap (all names), which stays authoritative.
-    for (const t of (manifest.tools ?? []).filter(isModelVisible)) {
-      this.knownToolOwners.set(t.name, pluginId);
-    }
+    this.rememberToolOwners(pluginId, manifest); // #885 §2.4a MODEL-ONLY (see method)
     for (const eventType of getDeclaredEmittedEvents(manifest)) {
       this.knownEventOwners.set(eventType, pluginId);
     }
@@ -1603,6 +1638,13 @@ export class PluginRuntime {
    * Used by the boot plugin-tool executor for UI-only runtime methods that bypass
    * the reviewer surface.
    *
+   * REACHABLE ONLY FROM THE TRUSTED PANEL (`origin: "ui"`). `isAppOnlyRuntimeInvocation`
+   * routes here only on a UI-effective chain, so an MCP App (`origin: "mcp-app"`,
+   * untrusted sandboxed iframe) can never land on this ungoverned path — a card's
+   * app-only call takes the GOVERNED executor instead ({@link callFromApp}), because
+   * an app-only tool is a registry `Tool`. The panel keeps this bypass (it can supply
+   * a real user gesture); the card never sees it.
+   *
    * This bypass skips the ToolExecutor and therefore its Step-6
    * `runWithCeiling` cap, so the ceiling is enforced STRUCTURALLY here — at the
    * sole entry point of the bypass — rather than in the boot wiring that reaches
@@ -1653,8 +1695,14 @@ export class PluginRuntime {
   }
 
   /**
-   * Invoke a plugin method from the renderer, enforcing the UI invocation
-   * allowlist so only explicitly declared methods are reachable via the IPC bridge.
+   * Invoke a plugin method from the plugin's own TRUSTED first-party React panel
+   * (the host renderer), enforcing the UI invocation allowlist so only explicitly
+   * declared methods are reachable via the IPC bridge.
+   *
+   * This is the ONE origin that can carry a real user gesture, and therefore the
+   * ONE origin from which the ungoverned app-only dispatch path
+   * ({@link callDeclaredAppOnlyTool}) is reachable. An MCP App is NOT this — it
+   * uses {@link callFromApp}.
    */
   async callFromUi(
     method: string,
@@ -1681,6 +1729,173 @@ export class PluginRuntime {
       ownerPluginId: entry.pluginId,
       userAction: options?.userAction === true,
     });
+  }
+
+  /**
+   * Invoke a plugin method from an MCP APP — an untrusted `ui://` card running in
+   * a sandboxed iframe, calling a tool on its own server through the `oncalltool`
+   * bridge. The loopback arm of `mcp-ui-tool-call.ts` is the sole caller.
+   *
+   * Deliberately NOT {@link callFromUi}: an MCP App is not the plugin's trusted
+   * panel, and conflating the two is what let a hostile card reach the ungoverned
+   * app-only dispatch path. Two differences, both structural:
+   *
+   *  1. `origin: "mcp-app"` — so `isAppOnlyRuntimeInvocation` (which only ever
+   *     answers true for `"ui"`) can never route an app call into
+   *     {@link callDeclaredAppOnlyTool}. That also makes the auth `statusTool`
+   *     user-activation carve-out unreachable from a card. This is what makes the
+   *     ungoverned bypass unreachable from an app — structurally, not by a check.
+   *  2. NO `userAction` parameter. It is never true for an app, so it is not
+   *     accepted as an argument — there is nothing for a caller to get wrong.
+   *
+   * EVERY app-visible tool goes through the delegate (the governed ToolExecutor:
+   * `inspectHostRisk` → reviewer/approval → audit), APP-ONLY ONES INCLUDED, WITH ONE
+   * NAMED EXCEPTION below. They are §6.4 registry `Tool`s now — the loopback projects
+   * them to `tools/list` with their explicit visibility — so the gate has something
+   * to run, which is exactly what `["app"]` is for: a plugin ships tools that serve
+   * its CARD without putting them in the model's tool surface. (The earlier
+   * fail-closed deny existed only because an app-only tool had NO registry entry and
+   * therefore no gate; giving it one removes the reason to deny it, without giving
+   * the card the panel's ungoverned path.) The app-visibility allow-list
+   * (`assertUiActionInvokable`, the spec MUST) still bounds the surface: a
+   * MODEL-ONLY tool is not app-callable.
+   *
+   * ── DELIBERATE NARROWING below the spec's `["app"]` semantics: the auth trio ──
+   * `manifest.auth.{statusTool,loginTool,logoutTool}` is denied here BY NAME,
+   * unconditionally, even though it is app-visible and even though the executor
+   * would otherwise gate it like any other tool. Do not "fix" this by deleting it:
+   *
+   *  - The trio is not a generic spec `["app"]` tool; it is an LVIS MANIFEST CONCEPT
+   *    whose intended caller has always been the plugin's own first-party React
+   *    panel (`callFromUi`) — trusted code, a real user gesture. `["app"]` on it is
+   *    an artifact of how the manifest expresses "the panel may call this", not a
+   *    server declaring "my card may call this". Cards are a different, untrusted
+   *    surface that did not exist when that declaration was designed.
+   *  - `auth.loginTool` in particular does not merely "run a tool": it spawns a real
+   *    auth `BrowserWindow` with cookie/partition access, pointed at an identity
+   *    provider. Letting an untrusted card trigger that is a privilege escalation
+   *    EVEN BEHIND THE APPROVAL GATE — the user would see a login window they did
+   *    not ask for, summoned by a card that can also render whatever it likes around
+   *    it. Approval-gating a phishing-shaped affordance is not the same as not
+   *    having it.
+   *  - So: registry membership (governed execution, reachable from the panel) is
+   *    right, and card reachability is not. This is that one exception, named and
+   *    contained to this method — `assertUiActionInvokable`, the `"ui"` panel path,
+   *    and `isAppOnlyRuntimeInvocation` are untouched.
+   */
+  async callFromApp(method: string, payload?: unknown): Promise<unknown> {
+    const entry = this.methodMap.get(method);
+    if (!entry) {
+      this.throwIfToolOwnerNotReady(method);
+      throw new Error(`Plugin method not found: ${method}`);
+    }
+    const plugin = this.plugins.get(entry.pluginId);
+    this.throwIfPluginNotStarted(entry.pluginId);
+    assertUiActionInvokable({
+      method,
+      pluginId: entry.pluginId,
+      uiInvokable: plugin ? declaredUiInvokableMethods(plugin.manifest) : [],
+    });
+    const auth = plugin?.manifest.auth;
+    if (auth && (method === auth.statusTool || method === auth.loginTool || method === auth.logoutTool)) {
+      throw new Error(
+        `[${MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE}] Tool '${method}' is this plugin's manifest-declared ` +
+          `auth tool and is reserved for the plugin's own trusted panel: a card cannot invoke it. ` +
+          `auth.loginTool opens a credentialed auth window, and an untrusted card must never be able ` +
+          `to summon one, gated or not.`,
+      );
+    }
+    if (!this.toolInvocationDelegate) {
+      throw new Error("Plugin tool executor is not wired; MCP App plugin call denied");
+    }
+    return this.toolInvocationDelegate(method, payload, {
+      origin: "mcp-app",
+      ownerPluginId: entry.pluginId,
+      userAction: false,
+    });
+  }
+
+  /**
+   * Serve one of a plugin's manifest-declared `ui://` MCP App cards by asking the
+   * PLUGIN for the HTML ({@link RuntimePlugin.readUiResource}). The plugin is the
+   * MCP server — it serves its own resource bytes; the host relays them. The host
+   * therefore never resolves or reads a plugin-declared disk path, which is what
+   * removed the realpath-containment layer this method replaces.
+   *
+   * The caller ({@link createPluginUiResourceProvider}) has ALREADY enforced the
+   * serving policy — own-namespace authority + declared-only — so this method's
+   * job is the RUNTIME-STATE gate plus bounding the hook:
+   *
+   *  - the same fail-closed gates `pluginRuntimeToolDelegate` applies to
+   *    `tools/call` (registry-enabled OR session-activated for the calling ALS
+   *    session; not manifest-integrity-disabled), so a disabled plugin cannot
+   *    render a card any more than it can run a tool;
+   *  - a `pluginUiResourceReadMs` ceiling (SOT: TOOL_TIMEOUT_POLICY) — a plugin
+   *    hook, unlike a file read, can hang; the user is waiting on a card;
+   *  - a hard HTML size cap, so a runaway hook cannot balloon the render path.
+   *
+   * Every failure throws — the loopback server maps it to `-32002` and no body is
+   * ever served.
+   *
+   * `ceilingMs` defaults to the SOT and is a parameter solely so tests can exercise
+   * the ceiling with a small value without weakening it (same seam as
+   * {@link callDeclaredAppOnlyTool}).
+   */
+  async readUiResource(
+    pluginId: string,
+    uri: string,
+    ceilingMs: number = TOOL_TIMEOUT_POLICY.pluginUiResourceReadMs,
+  ): Promise<string> {
+    // Gate parity with pluginRuntimeToolDelegate (Gate 4): registry-enabled OR
+    // session-activated for the CALLING session (read from the ALS store;
+    // fail-closed when absent).
+    const sessionId = sessionContext.getStore()?.sessionId;
+    if (
+      !this.isPluginEnabled(pluginId) &&
+      !(sessionId !== undefined && this.isSessionActivated(sessionId, pluginId))
+    ) {
+      throw new Error(
+        `Plugin '${pluginId}' is inactive; its ui:// resources are unavailable until the plugin is re-enabled.`,
+      );
+    }
+    if (manifestIntegrityState.isDisabled(pluginId)) {
+      throw new Error(
+        `Plugin '${pluginId}' was disabled after a manifest integrity violation. Reinstall the plugin to re-enable.`,
+      );
+    }
+
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) {
+      throw new Error(`Plugin '${pluginId}' is not loaded; cannot serve '${uri}'.`);
+    }
+    const readUiResource = plugin.instance.readUiResource;
+    if (typeof readUiResource !== "function") {
+      throw new Error(
+        `Plugin '${pluginId}' declares ui:// resources but does not implement readUiResource(); cannot serve '${uri}'.`,
+      );
+    }
+
+    const outcome = await runWithCeiling(
+      async () => readUiResource.call(plugin.instance, uri),
+      ceilingMs,
+      undefined,
+      `${pluginId}.readUiResource`,
+    );
+    if (!outcome.ok) throw outcome.error;
+
+    const html = outcome.value;
+    if (typeof html !== "string") {
+      throw new Error(
+        `Plugin '${pluginId}' readUiResource('${uri}') returned ${typeof html}, expected the card HTML as a string.`,
+      );
+    }
+    const bytes = Buffer.byteLength(html, "utf-8");
+    if (bytes > MAX_UI_RESOURCE_HTML_BYTES) {
+      throw new Error(
+        `Plugin '${pluginId}' readUiResource('${uri}') returned ${bytes} bytes, over the ${MAX_UI_RESOURCE_HTML_BYTES}-byte card limit.`,
+      );
+    }
+    return html;
   }
 
   getMethodMap(): ReadonlyMap<string, { pluginId: string; handler: PluginToolHandler }> {
@@ -1856,9 +2071,15 @@ export class PluginRuntime {
     return this.getApprovedPluginAccess(pluginId);
   }
 
-  listPluginCards(toolRegistry?: { getVisibleTools(): Array<{ name: string }> }): PluginCard[] {
+  listPluginCards(toolRegistry?: { getModelVisibleTools(): Array<{ name: string }> }): PluginCard[] {
+    // #885 v6 — the plugin card UI is model-facing (see buildPluginCard). Feed it the
+    // MODEL-visible set, not the executable `getVisibleTools()` superset: after app-only
+    // tools became registry `Tool`s, `getVisibleTools()` includes them (+ the auth trio),
+    // and passing that here would make `buildPluginCard`'s `.filter(isModelVisible)`
+    // pre-filter the ONLY thing keeping app-only names out of the settings/marketplace
+    // card. Using `getModelVisibleTools()` restores the pre-filter to a genuine no-op.
     const visibleNames = toolRegistry
-      ? new Set(toolRegistry.getVisibleTools().map((t) => t.name))
+      ? new Set(toolRegistry.getModelVisibleTools().map((t) => t.name))
       : null;
     const cards = new Map<string, PluginCard>();
     for (const [pluginId, manifest] of this.knownPluginManifests) {

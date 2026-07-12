@@ -20,6 +20,25 @@
  * output rides `_meta`. Parity invariant: rawResult is present iff the call
  * succeeded (the legacy adapter sets `metadata.rawResult` only on the success
  * branch).
+ *
+ * This is also where a plugin TRIGGERS an MCP App card. A plugin's tool handler
+ * says "render this card with my result" by attaching the STANDARD MCP Apps
+ * tool-result extension to its return value —
+ *
+ *   return { ...myResult, _meta: { ui: { resourceUri: "ui://<myId>/card.html" } } };
+ *
+ * — the same `_meta.ui.*` keys an external MCP server puts on its `CallToolResult`
+ * (NOT an `xyz.lvis/*` vendor key), so both arms declare a card identically. The
+ * delegate lifts it onto the wire `_meta.ui`, from which `PluginMcpHost.invoke`
+ * builds the {@link McpUiPayload} (stamping `serverId` itself — a plugin can never
+ * point a card at another server). The declaration is stripped from the value, so
+ * the model-facing text and `metadata.rawResult` stay the plugin's own result.
+ *
+ * Fail-closed: a `resourceUri` the plugin did not declare in `manifest.uiResources[]`
+ * produces NO card. `declaredUiUris` is the SAME declared set the serving provider
+ * indexes (`PluginUiResourceProvider.list()`) — not a second registry — so a card
+ * can only ever be triggered for a uri that is actually servable under a reviewed
+ * csp. An absent set (a plugin with no `uiResources[]`) means no card is possible.
  */
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { PluginToolDelegate, PluginToolOutcome } from "./plugin-mcp-server.js";
@@ -28,12 +47,53 @@ import {
   manifestIntegrityState,
 } from "../permissions/manifest-integrity.js";
 import { sessionContext } from "../engine/session-context.js";
+import { createLogger } from "../lib/logger.js";
+import type { McpUiSlot, McpUiToolMeta } from "./types.js";
+
+const log = createLogger("plugin-runtime-delegate");
 
 /** Reserved `_meta` key carrying the plugin's raw (non-text) return value. */
 export const RAW_RESULT_META = "lvisai/rawResult";
 
 function errorOutcome(text: string): PluginToolOutcome {
   return { content: [{ type: "text", text }], isError: true };
+}
+
+/**
+ * Split a plugin tool's return value into (the plugin's own result, the MCP Apps
+ * card declaration it attached). Pure.
+ *
+ * A card is declared iff the value is a plain object carrying `_meta.ui` with a
+ * non-empty string `resourceUri` — the MCP wire shape. When it is, `_meta` is
+ * stripped from the value so the protocol envelope never leaks into the text the
+ * model reads or into `metadata.rawResult`. Any other shape (string, array, no
+ * `_meta`, malformed `ui`) passes through untouched: no card, value unchanged.
+ *
+ * `slot` is passed through with the same cast `mcp-client.ts` applies to an
+ * external server's `_meta.ui.slot`, deliberately — both arms must behave
+ * identically, and the render slot is a hint, not a security boundary.
+ */
+export function splitPluginToolUiMeta(value: unknown): { value: unknown; ui?: McpUiToolMeta } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return { value };
+  const record = value as Record<string, unknown>;
+  const meta = record._meta;
+  if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return { value };
+  const rawUi = (meta as Record<string, unknown>).ui;
+  if (typeof rawUi !== "object" || rawUi === null || Array.isArray(rawUi)) return { value };
+
+  const { resourceUri, slot, height, title } = rawUi as Record<string, unknown>;
+  if (typeof resourceUri !== "string" || resourceUri.length === 0) return { value };
+
+  const ui: McpUiToolMeta = { resourceUri };
+  if (typeof slot === "string") ui.slot = slot as McpUiSlot;
+  if (typeof height === "number" && Number.isFinite(height)) ui.height = height;
+  if (typeof title === "string") ui.title = title;
+
+  // The declaration is protocol, not payload — strip it either way (whether or not
+  // the uri survives the declared-only gate), so the result the model sees never
+  // depends on whether the card rendered.
+  const { _meta: _protocol, ...rest } = record;
+  return { value: rest, ui };
 }
 
 /**
@@ -44,6 +104,12 @@ function errorOutcome(text: string): PluginToolOutcome {
 export function pluginRuntimeToolDelegate(
   pluginRuntime: PluginRuntime,
   pluginId: string,
+  /**
+   * The `ui://` uris this plugin declared in `manifest.uiResources[]` — the same
+   * set its serving provider indexes. A card is emitted only for a uri in here.
+   * Defaults to empty: a plugin that declares no card cannot trigger one.
+   */
+  declaredUiUris: ReadonlySet<string> = new Set(),
 ): PluginToolDelegate {
   return async (toolName, args): Promise<PluginToolOutcome> => {
     // Mirror buildPluginTool: empty args → undefined payload (some plugins
@@ -84,12 +150,26 @@ export function pluginRuntimeToolDelegate(
     }
 
     try {
-      const result = await pluginRuntime.call(toolName, finalPayload);
+      const returned = await pluginRuntime.call(toolName, finalPayload);
+      // The plugin's own result, and (optionally) the card it asked the host to
+      // render with it — the standard MCP Apps `_meta.ui` tool-result extension.
+      const { value: result, ui } = splitPluginToolUiMeta(returned);
       const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-      return {
-        content: [{ type: "text", text }],
-        _meta: { [RAW_RESULT_META]: result },
-      };
+
+      const meta: Record<string, unknown> = { [RAW_RESULT_META]: result };
+      if (ui) {
+        // Declared-only, fail-closed: a card the manifest never declared is not
+        // servable under any reviewed csp, so it must not render at all.
+        if (declaredUiUris.has(ui.resourceUri)) {
+          meta.ui = ui;
+        } else {
+          log.warn(
+            `plugin '${pluginId}' tool '${toolName}' requested ui resource '${ui.resourceUri}' ` +
+              `which it did not declare in manifest.uiResources[] — no card rendered`,
+          );
+        }
+      }
+      return { content: [{ type: "text", text }], _meta: meta };
     } catch (err) {
       if (err instanceof ManifestIntegrityViolation) {
         let violationAuditError: unknown;

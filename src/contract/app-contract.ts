@@ -171,6 +171,42 @@ export const CHANNELS = {
     configSetApiKey: "lvis:mcp:config:set-api-key",
     configRemove: "lvis:mcp:config:remove",
     uiResource: "lvis:mcp:ui-resource",
+    // MCP Apps `oncalltool` — an app calls a tool on ITS OWN server (the renderer
+    // supplies the card's serverId; the app never names one). INTERNAL, same posture
+    // as the MCP-app channels below: absent from PUBLIC_CHANNELS /
+    // EXTERNAL_MUTATION_CHANNELS / CHANNEL_GESTURE, so no external origin can reach
+    // it (fail-closed isPublicChannel). Registered in ipc/domains/plugins.ts and
+    // gated on validateHostRendererSender (state-mutating: it runs a tool). The call
+    // itself is NOT authorized by the channel — it runs the same risk/consent gate as
+    // any host tool call.
+    callTool: "lvis:mcp:call-tool",
+    // MCP Apps `onmessage` (`ui/message`) — the app asks for its text to enter the
+    // conversation, or (with `_meta["lvisai/notification"]`) the notification surface.
+    // The renderer binds the card's `serverId` AND its origin session id; the app
+    // supplies neither. INTERNAL, same posture as `callTool`: absent from
+    // PUBLIC_CHANNELS / EXTERNAL_MUTATION_CHANNELS / CHANNEL_GESTURE (fail-closed
+    // isPublicChannel). Registered in ipc/domains/plugins.ts and gated on
+    // validateHostRendererSender — it mutates conversation state (queues guidance /
+    // stages a user-gated card) and fires OS notifications.
+    uiMessage: "lvis:mcp:ui-message",
+    // MCP Apps `ondownloadfile` (`ui/download-file`) — the app hands over INLINE bytes it
+    // already possessed and asks the host to save them. The host never fetches an
+    // app-supplied URI (a `resource_link` is rejected at parse time), so this channel
+    // grants no egress; the user's own save dialog is the authorization for the write.
+    // INTERNAL, same posture as `callTool` / `uiMessage`: absent from PUBLIC_CHANNELS /
+    // EXTERNAL_MUTATION_CHANNELS / CHANNEL_GESTURE (fail-closed isPublicChannel).
+    // Registered in ipc/domains/plugins.ts and gated on validateHostRendererSender —
+    // state-mutating (it writes a file the user picked).
+    uiDownloadFile: "lvis:mcp:ui-download-file",
+    // MCP Apps `onupdatemodelcontext` (`ui/update-model-context`) — the app OVERWRITES the
+    // context slot the model will see on the NEXT turn. It can never start one (the store
+    // has no reference to the conversation loop), and the body is carried as untrusted
+    // DATA. The renderer binds serverId + sessionId + cardId; the app supplies none.
+    // INTERNAL, same posture as `callTool` / `uiMessage`: absent from PUBLIC_CHANNELS /
+    // EXTERNAL_MUTATION_CHANNELS / CHANNEL_GESTURE (fail-closed isPublicChannel).
+    // Registered in ipc/domains/plugins.ts and gated on validateHostRendererSender — it
+    // mutates what the model reads next turn.
+    uiModelContext: "lvis:mcp:ui-model-context",
     catalogList: "lvis:mcp:catalog:list",
     installFromMarketplace: "lvis:mcp:install-from-marketplace",
     importClaudeDesktopPreview: "lvis:mcp:import:claude-desktop:preview",
@@ -185,6 +221,20 @@ export const CHANNELS = {
     openDetached: "lvis:mcp:open-detached",
     detachedPayload: "lvis:mcp:detached-payload",
     serverDisconnected: "lvis:mcp:server-disconnected",
+    // The `ui/request-display-mode` "inline" arm — the exact inverse of `openDetached`:
+    // close the detached MCP-app window(s) of THIS card's server. SCOPED on purpose: the
+    // generic `window.closeAllDetached` sweep closes every detached window the user has
+    // open, which an untrusted card must never be able to trigger. Registered in
+    // window-manager.ts and gated on validateHostRendererSender (it closes a window);
+    // INTERNAL like the rest of this family.
+    closeDetached: "lvis:mcp:close-detached",
+    // main→renderer: an MCP-app detached window is GONE (closed, or navigated away from
+    // in the single-instance shell), so the card's stored payload has been purged. The
+    // inline card that moved into that window listens for this to come back to life —
+    // exactly one live bridge per card at any moment. A pure event (no ipcMain.handle,
+    // hence not an INTERNAL_HOST_CHANNELS handler entry); the renderer validates the
+    // payload shape and matches on the viewKey the host handed it at detach time.
+    detachedClosed: "lvis:mcp:detached-closed",
     // Renderer → main on card unmount: dispose the sandbox-proxy session so its token
     // is freed promptly instead of waiting for the global LRU to evict it. INTERNAL,
     // same posture as the three above. Idempotent and harmless — worst case a stale
@@ -582,6 +632,7 @@ export const INTERNAL_HOST_CHANNELS = {
     // (out-of-tree), so they are classified here for inventory completeness.
     CHANNELS.mcp.openDetached,
     CHANNELS.mcp.detachedPayload,
+    CHANNELS.mcp.closeDetached,
   ],
   autoUpdater: [
     CHANNELS.update.state,

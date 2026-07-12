@@ -5,11 +5,20 @@
  *
  * #885 v6 — the manifest tool object IS the wire shape (manifest == wire, Q5),
  * so the forward projection is near-identity. Its only jobs are:
- *  - filter to MODEL-visible tools — app-only (the auth trio, UI-only methods)
- *    must NEVER enter the LLM ToolRegistry via the loopback (the #1554
- *    registry-exclusion invariant); "was in tools[]" ⇔ `model ∈ visibility`.
+ *  - project EVERY declared tool, whatever its surface. A server's `tools/list` is
+ *    the server's tools; the spec's answer to "who may call this one" is the
+ *    `_meta.ui.visibility` riding on each entry, not a hole in the list. Projecting
+ *    an app-only tool is what gives it a §6.4 registry `Tool`, and therefore the
+ *    ONLY thing that lets its card's call run under `inspectHostRisk` →
+ *    reviewer/approval → audit like any other tool. (It was previously filtered out
+ *    here, which left `["app"]` — the spec's own spelling for a card-serving tool —
+ *    with no gate to run under, so the app arm had to deny it outright.) Keeping it
+ *    OUT OF THE MODEL's tool list is a separate concern, enforced once at the model-
+ *    exposure boundary (`ToolRegistry.getModelVisibleTools`), for both arms.
  *  - emit `_meta.ui.visibility` EXPLICITLY (SoT §2.2 "the wire projection always
- *    emits visibility explicitly").
+ *    emits visibility explicitly") — the reverse projection
+ *    (`plugin-tool-from-mcp.ts`) reads it straight back off the wire to materialize
+ *    the registry `Tool`'s `modelVisible` bit.
  *  - construct `_meta` from a WHITELIST so no stray/removed proprietary key
  *    (category / version / writesToOwnSandbox / workerId / deprecation) can ride
  *    the wire — they simply have nowhere to come from.
@@ -28,7 +37,7 @@
  *    LVIS-internal and are NOT projected into MCP `ServerCapabilities`.
  */
 import type { PluginManifest, Tool as McpTool } from "../plugins/types.js";
-import { toolVisibility, isModelVisible } from "../plugins/runtime/tool-visibility.js";
+import { toolVisibility } from "../plugins/runtime/tool-visibility.js";
 import { observeLegacyMetaKey } from "./legacy-meta-telemetry.js";
 
 /** The RC protocol revision LVIS plugin-servers speak. */
@@ -109,14 +118,19 @@ function toWireTool(tool: McpTool, pluginId: string): McpToolProjection {
 }
 
 /**
- * Project the manifest's declared tools to MCP `Tool[]`. #885 v6 — filter to
- * MODEL-visible tools: app-only (auth trio, UI-only methods) must NOT enter the
- * LLM ToolRegistry via the loopback (the #1554 registry-exclusion invariant).
- * Every `Tool` has a mandatory `inputSchema`, so this reproduces the old
- * {name ∈ tools[] ∧ has schema} output set exactly — registry contents identical.
+ * Project the manifest's declared tools to MCP `Tool[]` — ALL of them, each
+ * carrying its explicit `_meta.ui.visibility`.
+ *
+ * No surface filter: `tools/list` is the server's tool list, and the host learns a
+ * tool's audience from the visibility it carries, not from its absence. The
+ * app-only entries this now emits (a card's `*_ui_*` helpers, the auth trio) become
+ * registry `Tool`s — which is precisely how they acquire a risk classifier, an
+ * approval gate and an audit row. They stay invisible to the LLM because the model-
+ * exposure boundary subtracts them there (`ToolRegistry.getModelVisibleTools`), not
+ * because they were withheld from the wire.
  */
 export function manifestToolsToMcpTools(manifest: PluginManifest): McpToolProjection[] {
-  return (manifest.tools ?? []).filter(isModelVisible).map((t) => toWireTool(t, manifest.id));
+  return (manifest.tools ?? []).map((t) => toWireTool(t, manifest.id));
 }
 
 /**
@@ -132,7 +146,10 @@ export function manifestToDiscoverResult(manifest: PluginManifest): McpDiscoverP
     capabilities.tools = { listChanged: true };
   }
   const extensions: Record<string, unknown> = {};
-  if ((manifest.ui?.length ?? 0) > 0) {
+  // Advertise the MCP Apps extension when the plugin ships EITHER a host-mounted
+  // sidebar panel (`ui[]`) OR a served `ui://` MCP App card (`uiResources[]`).
+  // The latter is what the loopback `resources/read` serving seam keys off.
+  if ((manifest.ui?.length ?? 0) > 0 || (manifest.uiResources?.length ?? 0) > 0) {
     extensions["io.modelcontextprotocol/ui"] = { mimeTypes: ["text/html;profile=mcp-app"] };
   }
   if (Object.keys(extensions).length > 0) {
