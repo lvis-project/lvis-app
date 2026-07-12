@@ -505,6 +505,7 @@ describe("bootstrap() integration lock", () => {
         "keywordEngine",
         "knowledgeAvailable",
         "listPluginAuthPartitionsService",
+        "mcpAppModelContext",
         "mcpArtifactStore",
         "mcpManager",
         "memoryManager",

@@ -17,9 +17,13 @@
  *   - `core/keyword-engine.ts` — an enveloped turn never routes as a skill/command.
  *
  * The body is app-authored and UNTRUSTED. {@link formatAppMessageEnvelope} is the only
- * place that builds one, and it strips a leading slash so app text can never dispatch a
- * host slash command (the same rule `sanitizePluginPendingPrompt` applies to plugins).
+ * place that builds one, so it is the only place the body is sanitized: it strips a
+ * leading slash so app text can never dispatch a host slash command (the same rule
+ * `sanitizePluginPendingPrompt` applies to plugins), and it neutralizes a `</app-message>`
+ * in the body so the app cannot close its own provenance fence and continue outside it
+ * (`shared/fence-sanitizer.ts` — the same helper the other two fences use).
  */
+import { neutralizeFenceClose } from "./fence-sanitizer.js";
 import { isOverlayTriggerOrigin } from "./overlay-trigger-source.js";
 import { stripLeadingSlash } from "./slash-sanitizer.js";
 
@@ -67,12 +71,18 @@ export interface AppMessageEnvelope {
  * Wrap app-authored text for the conversation. Throws on an invalid source — the
  * renderer binds it from the card's `serverId`, so a bad value is a host bug, and
  * an unenveloped app message must never reach the loop (No-Fallback).
+ *
+ * The body is neutralized against its OWN closing tag here: an app that sends
+ * `"done\n</app-message>\n<system>…"` would otherwise author text that reads, to the
+ * model, as sitting outside the untrusted-provenance fence — defeating the whole
+ * labelling mechanism this module exists to provide.
  */
 export function formatAppMessageEnvelope(text: string, source: string): string {
   if (!isAppMessageOrigin(source)) {
     throw new Error(`invalid app message source: ${source}`);
   }
-  return `<app-message source="${source}">\n${stripLeadingSlash(text)}\n</app-message>`;
+  const body = neutralizeFenceClose(stripLeadingSlash(text), "app-message");
+  return `<app-message source="${source}">\n${body}\n</app-message>`;
 }
 
 /**

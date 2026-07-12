@@ -14,6 +14,7 @@ import type {
 } from "../../../plugins/types.js";
 import { OVERLAY_TRIGGER_SOURCE_PATTERN, isOverlayTriggerOrigin } from "../../../shared/overlay-trigger-source.js";
 import { CAPABILITY_HOST_OVERLAY } from "../../../plugins/capabilities.js";
+import { neutralizeFenceClose } from "../../../shared/fence-sanitizer.js";
 import { stripLeadingSlash } from "../../../shared/slash-sanitizer.js";
 import { stripUntrustedTags } from "../../../lib/strip-untrusted-tags.js";
 import { t } from "../../../i18n/index.js";
@@ -108,11 +109,22 @@ export function sanitizePluginPendingPrompt(prompt: string): string {
   return stripLeadingSlash(prompt);
 }
 
+/**
+ * Wrap a plugin-authored prompt in its provenance fence. The body is neutralized
+ * against its OWN closing tag (`shared/fence-sanitizer.ts` — the same helper the
+ * `<app-message>` and `<mcp-app-context>` fences use): a prompt carrying a literal
+ * `</imported-from-proactive>` would otherwise author text that reads, to the model, as
+ * sitting outside the plugin-provenance fence.
+ */
 export function formatPluginPendingPrompt(prompt: string, source: string): string {
   if (!isOverlayTriggerOrigin(source)) {
     throw new Error(`invalid overlay trigger source for pending prompt: ${source}`);
   }
-  return `<imported-from-proactive source="${source}">\n${sanitizePluginPendingPrompt(prompt)}\n</imported-from-proactive>`;
+  const body = neutralizeFenceClose(
+    sanitizePluginPendingPrompt(prompt),
+    "imported-from-proactive",
+  );
+  return `<imported-from-proactive source="${source}">\n${body}\n</imported-from-proactive>`;
 }
 
 export const OVERLAY_SUMMARY_DISPLAY_CAP = 2_000;
