@@ -15,8 +15,16 @@
  * remains intact. §6.4 source/trust governance + plugin/MCP kill
  * switches ({@link unregisterByPlugin} / {@link unregisterByMcp}) are
  * carried forward from the prior interface-based registry.
+ *
+ * Registration ≠ model exposure. Registry membership answers ONE question —
+ * "what may execute under the gate" — and an MCP Apps app-only tool
+ * (`_meta.ui.visibility: ["app"]`, callable by its card, hidden from the model
+ * by spec) is registered for exactly that reason: it is the only way its call
+ * can reach `inspectHostRisk` → reviewer/approval → audit. What the LLM is SHOWN
+ * is the narrower {@link getModelVisibleTools}, through which every model-facing
+ * listing here runs.
  */
-import type { Tool } from "./base.js";
+import { isModelExposedTool, type Tool } from "./base.js";
 import type { DenyRule } from "./types.js";
 import { compareSemver } from "../shared/semver-compare.js";
 import { createLogger } from "../lib/logger.js";
@@ -251,14 +259,34 @@ export class ToolRegistry {
     return [...this.tools.values()];
   }
 
-  /** §6.3 Layer 1 — deny rules applied, returns what the LLM sees. */
+  /**
+   * §6.3 Layer 1 — deny rules applied. Every REGISTERED, non-denied tool: the
+   * executable surface, which is a superset of what the model is shown (an MCP Apps
+   * app-only tool is registered so the governed executor can run it for its card —
+   * see {@link getModelVisibleTools}).
+   */
   getVisibleTools(): Tool[] {
     return this.listAll().filter((tool) => !this.isDenied(tool.name));
   }
 
+  /**
+   * MODEL-EXPOSURE BOUNDARY — deny rules AND MCP Apps `_meta.ui.visibility`.
+   *
+   * The ONE place an app-only tool (`["app"]`, hidden from the model by spec) is
+   * subtracted, so it holds for BOTH arms at once: a first-party plugin's loopback
+   * server and a foreign MCP server both land here through an adapter that
+   * materialized {@link Tool.modelVisible}. Every model-facing listing below routes
+   * through this; nothing else does — {@link findByName} (the executor's lookup)
+   * deliberately still sees app-only tools, because being hidden from the model is
+   * not being exempt from the gate.
+   */
+  getModelVisibleTools(): Tool[] {
+    return this.getVisibleTools().filter(isModelExposedTool);
+  }
+
   /** LLM-facing schema array — consumed by SystemPromptBuilder. */
   getToolSchemas(): ToolSchemaEntry[] {
-    return this.getVisibleTools().map((tool) =>
+    return this.getModelVisibleTools().map((tool) =>
       schemaEntryForTool(tool, tool.toJsonSchema()),
     );
   }
@@ -272,7 +300,8 @@ export class ToolRegistry {
    * scope, or explicitly allowlisted by a sub-agent/routine/headless caller).
    * Everything else is deferred to {@link getToolCatalogForScope}.
    *
-   * Deny rules still apply first (§6.3 Layer 1, via {@link getVisibleTools}).
+   * Deny rules AND MCP Apps model-visibility apply first (§6.3 Layer 1 + the
+   * model-exposure boundary, via {@link getModelVisibleTools}).
    * Matches {@link getToolSchemas} shape for drop-in replacement in the
    * ConversationLoop streaming path.
    */
@@ -297,7 +326,7 @@ export class ToolRegistry {
     // and the rest live in the compact catalog.
     const deferral = scope.deferral !== false;
 
-    return this.getVisibleTools()
+    return this.getModelVisibleTools()
       .filter((tool) => {
         if (tool.source === "builtin") {
           // Builtins/meta-tools are always eager — never deferred, never
@@ -345,7 +374,9 @@ export class ToolRegistry {
    * but NOT loaded (`activeToolNames` excludes them). The LLM sees these as
    * candidates and promotes them with `tool_search({ query })`.
    *
-   * - Deny rules apply first (same as the loaded path — {@link getVisibleTools}).
+   * - Deny rules + model-visibility apply first (same as the loaded path —
+   *   {@link getModelVisibleTools}): a tool the model may not see is not a
+   *   candidate it may promote either.
    * - Loaded tools (in `activeToolNames`) are excluded so they never appear twice.
    * - Builtins/meta-tools are never catalog entries (they are always loaded).
    * - Description is trimmed to the first sentence / ~100 chars for compactness.
@@ -368,7 +399,7 @@ export class ToolRegistry {
       ? scope.activeToolNames
       : new Set(scope.activeToolNames ?? []);
 
-    return this.getVisibleTools()
+    return this.getModelVisibleTools()
       .filter((tool) => {
         if (activeNames.has(tool.name)) return false; // already loaded
         if (tool.source === "mcp") return scope.includeMcp;

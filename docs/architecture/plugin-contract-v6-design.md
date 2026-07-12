@@ -20,7 +20,7 @@
 | Q1 surface model | How the tool contract is expressed | **Single canonical `tools: Tool[]`** where each element is a **pure MCP `Tool` object** (`name, title?, description?, inputSchema, icons?, _meta?`). `toolSchemas` map and `uiActions` map are **deleted**. |
 | Q2 wire scope | Relationship to `mcp-alignment-design.md` full-wire migration | **Narrow to #885.** Adopt the MCP tool-**object** shape + isolation parity ONLY. No stateless `server/discover`/MRTR rewrite in this epic. Loopback stays (shipped). |
 | Q3 `category` | Fate of the deprecated per-tool `category` | **Removed.** `host-classifies-risk` is live; a plugin grading its own danger is not a control. |
-| **Q4 field minimization** | Fate of the remaining LVIS-proprietary tool fields | **6 → 1.** `model`+`ui` → folded into the **standard** `_meta.ui.visibility` (MCP Apps SEP-1865). `writesToOwnSandbox`, `workerId`, per-tool `version`, `deprecatedSince`/`replacedBy` → **removed from the manifest** (host-derived / host-assigned / plugin-level / YAGNI). Only `_meta["xyz.lvis/pathFields"]` remains LVIS-proprietary. |
+| **Q4 field minimization** | Fate of the remaining LVIS-proprietary tool fields | **6 → 1.** `model`+`ui` → folded into the **standard** `_meta.ui.visibility` (MCP Apps SEP-1865). `writesToOwnSandbox`, `workerId`, per-tool `version`, `deprecatedSince`/`replacedBy` → **removed from the manifest** (host-derived / host-assigned / plugin-level / YAGNI). Only `_meta["lvisai/pathFields"]` remains LVIS-proprietary. |
 | **Q5 manifest form** | Authoring shape in `plugin.json` | **Pure form** — the manifest tool object IS the MCP `Tool` (including `_meta`). Manifest shape == wire shape; no top-level `model`/`ui` sugar, no translation layer for the new shape (`normalizeManifest` handles the LEGACY shape only). |
 | **Q6 visibility default** | Interpretation when `_meta.ui.visibility` is absent | **Standard SEP-1865 default `["model","app"]`** (round 3 — LVIS hosts external MCP tools with the same semantics; a host-private reinterpretation cannot be imposed on the ecosystem). Safe by construction: the default yields only governed dual routing; the ungoverned bypass requires an explicit `["app"]`-only declaration. Resolved to an explicit array once at load. |
 | b1 partition | MCP App UI partition isolation | **Per-server, ephemeral** — `lvis-mcp-app:<serverId>` (in-memory), replacing the shared `lvis-mcp-app`. |
@@ -47,7 +47,7 @@ Real-manifest scale (per-surface, verified 2026-07-09): meeting declares 28 `too
 
 ### 2.1 Verified MCP `Tool` shape (upstream-pinned)
 
-`{ name, title?, icons?, description?, inputSchema:{type:"object", $schema?}, outputSchema?, annotations?, _meta? }`; JSON Schema dialect **2020-12**; `_meta` prefix reverse-DNS (`xyz.lvis/*`, never `*.mcp/*`). (Source: `mcp-alignment-design.md §8`, pinned verbatim against upstream `schema/draft/schema.ts`.)
+`{ name, title?, icons?, description?, inputSchema:{type:"object", $schema?}, outputSchema?, annotations?, _meta? }`; JSON Schema dialect **2020-12**; `_meta` prefix is a short vendor label (`lvisai/*`, never `*.mcp/*`). (Source: `mcp-alignment-design.md §8`, pinned verbatim against upstream `schema/draft/schema.ts`.)
 
 ### 2.2 Target shape — manifest == wire
 
@@ -67,7 +67,7 @@ Real-manifest scale (per-surface, verified 2026-07-09): meeting declares 28 `too
         "ui": { "visibility": ["model", "app"] },
         // The ONLY remaining LVIS-proprietary key: names the input-schema args that
         // are filesystem paths, fed into the HOST-side allowed-directories check.
-        "xyz.lvis/pathFields": ["attachmentPath"]
+        "lvisai/pathFields": ["attachmentPath"]
       }
     },
     {
@@ -151,12 +151,12 @@ visibility — it stays host-side, exactly as today.
 | LLM-facing? | `tools[].includes(name)` | `_meta.ui.visibility ∋ "model"` | **standard** (SEP-1865) |
 | UI-invokable? | `uiActions[name]` present | `_meta.ui.visibility ∋ "app"` | **standard** (SEP-1865); OpenAI Apps SDK production analog (`openai/widgetAccessible` → migrating to the same array) |
 | description / inputSchema / title / icons | `toolSchemas[name].*` | `tools[].*` (MCP fields) | — |
-| pathFields | `toolSchemas[name].pathFields?` | `_meta["xyz.lvis/pathFields"]` — **the only LVIS key kept** | OpenAI `_meta["openai/fileParams"]` is a structural twin; the *gate* stays host-side (a lying declaration only adds checks, never bypasses one) |
+| pathFields | `toolSchemas[name].pathFields?` | `_meta["lvisai/pathFields"]` — **the only LVIS key kept** | OpenAI `_meta["openai/fileParams"]` is a structural twin; the *gate* stays host-side (a lying declaration only adds checks, never bypasses one) |
 | category | `toolSchemas[name].category?` | **removed** (Q3) | host-classifies-risk live; MCP MUST-untrusted rule |
 | writesToOwnSandbox | `toolSchemas[name].writesToOwnSandbox?` | **removed — host-derived.** Containment of resolved path args inside the plugin sandbox root is computed host-side per invocation (the runtime verification was always the real signal; the flag was an untrusted self-claim). LVIS already has the derivation (`sandboxFsContainedProvider` / `isActiveSandboxFilesystemContainedForPluginEffects`). | MCP MUST-untrusted rule; **Codex #7635 declined the analogous self-attested sandbox field (closed not-planned)**; census: **0 declarations** across all 6 plugins |
 | workerId | `toolSchemas[name].workerId?` | **removed as manifest input — host-assigned runtime binding only.** The real proof mechanism already exists: `spawnWorker`'s wrapped-spawn path registers `(pluginId, workerId)` in `sandbox-capability.ts`; the manifest field was advisory-only by its own JSDoc ("not an execution proof"). | no external per-tool worker concept exists; census: **0 declarations** |
 | per-tool version | `toolSchemas[name].version?` | **removed — plugin-level `version` only.** | base MCP `Tool` has no version field; Claude Code / Codex version at package level only; census: **0 declarations** (every tool inherits the manifest version today) |
-| deprecatedSince / replacedBy | `toolSchemas[name].*` | **removed (YAGNI).** No producer exists — 0 manifest declarations AND no builtin tool sets them; only dormant Tool-level machinery in `tools/base.ts`/`registry.ts`. If ever needed, the FastMCP `_meta.fastmcp.version` precedent shows the re-introduction home (`_meta["xyz.lvis/*"]`). | census overrides the external-research KEEP recommendation |
+| deprecatedSince / replacedBy | `toolSchemas[name].*` | **removed (YAGNI).** No producer exists — 0 manifest declarations AND no builtin tool sets them; only dormant Tool-level machinery in `tools/base.ts`/`registry.ts`. If ever needed, the FastMCP `_meta.fastmcp.version` precedent shows the re-introduction home (`_meta["lvisai/*"]`). | census overrides the external-research KEEP recommendation |
 | auth tool refs | `auth.*` + 2 cross-surface checks | `auth.*` → tool with visibility `["app"]` (intra-object) | — |
 
 **No field is derivable from two places post-migration, and no self-declared manifest field can flip a
@@ -222,7 +222,7 @@ BOTH shapes (a `oneOf` on `tools`: legacy `string[]` vs MCP `Tool[]`).
 
 - Legacy input (`tools[0]` is a string) → build pure MCP `Tool` objects: join `toolSchemas[name]` fields,
   compile surface membership to `_meta.ui.visibility` (`tools[]`-only → `["model"]`; dual → `["model","app"]`;
-  `uiActions`-only → `["app"]`), move `pathFields` → `_meta["xyz.lvis/pathFields"]`, and **drop**
+  `uiActions`-only → `["app"]`), move `pathFields` → `_meta["lvisai/pathFields"]`, and **drop**
   `category`/`writesToOwnSandbox`/`workerId`/per-tool `version`/`deprecatedSince`/`replacedBy` (Q3/Q4 —
   logged once per plugin at load during the window so authors notice).
 - New input (`tools[0]` is an object) → pass through verbatim (**no translation — manifest IS the wire shape**).

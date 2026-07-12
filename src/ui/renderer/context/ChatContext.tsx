@@ -113,3 +113,13 @@ export function useChatContext(): ChatContextValue {
   if (!v) throw new Error("useChatContext must be used within ChatContextProvider");
   return v;
 }
+
+/**
+ * Non-throwing read, for components that also mount OUTSIDE the chat subtree
+ * (McpAppView: transcript card, preview rail, detached window, isolated test
+ * harness). `null` means "no chat session owns this surface" — a caller must treat
+ * that as an absent binding, never as the active session.
+ */
+export function useOptionalChatContext(): ChatContextValue | null {
+  return useContext(ChatContext);
+}

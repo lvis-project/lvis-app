@@ -56,7 +56,8 @@ export interface OverlayCardProps {
 
   primaryActionLabel?: string;
 
-  kind?: "routine" | "plugin";
+  /** `app` = an MCP App's `ui/message` staged for user confirmation (no turn in flight). */
+  kind?: "routine" | "plugin" | "app";
 }
 
 function relativeTime(isoString: string, t: (key: string, vars?: Record<string, string | number>) => string): string {
@@ -135,7 +136,15 @@ export function OverlayCard({
               <span className="truncate">{title}</span>
             </CardTitle>
             <CardDescription className="mt-0.5 flex items-center gap-1 text-[11px]">
-              <span>{running ? t("overlayCard.running") : kind === "plugin" ? t("overlayCard.pluginNotice") : t("overlayCard.routineDone")}</span>
+              <span>
+                {running
+                  ? t("overlayCard.running")
+                  : kind === "plugin"
+                    ? t("overlayCard.pluginNotice")
+                    : kind === "app"
+                      ? t("overlayCard.appNotice")
+                      : t("overlayCard.routineDone")}
+              </span>
               {!running && (
                 <>
                   <span>·</span>

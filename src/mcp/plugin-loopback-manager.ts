@@ -24,9 +24,15 @@
 import { ToolRegistry } from "../tools/registry.js";
 import { PluginMcpHost } from "./plugin-mcp-host.js";
 import { pluginRuntimeToolDelegate } from "./plugin-runtime-delegate.js";
+import {
+  createPluginUiResourceProvider,
+  type PluginUiResourceProvider,
+} from "./plugin-ui-resource-provider.js";
+import { createMcpServerDisconnectedSink } from "./mcp-server-disconnect-sink.js";
 import { createLogger } from "../lib/logger.js";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { PluginManifest } from "../plugins/types.js";
+import type { McpUiResourceRead } from "./types.js";
 
 const log = createLogger("plugin-loopback-manager");
 
@@ -36,6 +42,19 @@ export class PluginLoopbackManager {
   constructor(
     private readonly runtime: PluginRuntime,
     private readonly toolRegistry: ToolRegistry,
+    /**
+     * #885 b3 teardown sink — the SAME factory `McpManager` gets, so a plugin's
+     * in-process MCP server going away is indistinguishable, to a rendered card,
+     * from an external server going away (`serverDisconnected` broadcast →
+     * detached-window close → partition clear). A loopback server's id IS its
+     * pluginId, so the payload needs no translation.
+     *
+     * It DEFAULTS to the real sink rather than being injected by boot: this arm
+     * used to be silent, and a default-on sink means no future construction site
+     * can re-introduce that silence by forgetting to wire it. Tests inject a stub.
+     */
+    private readonly onServerDisconnected: (serverId: string) => void =
+      createMcpServerDisconnectedSink(),
   ) {}
 
   /**
@@ -48,10 +67,16 @@ export class PluginLoopbackManager {
    */
   async start(manifest: PluginManifest): Promise<string[]> {
     const previous = this.hosts.get(manifest.id);
+    // The provider is the SINGLE registry of this plugin's declared ui:// cards:
+    // it gates SERVING (resources/read) and its `list()` gates TRIGGERING (a tool
+    // result's `_meta.ui.resourceUri`). One declaration set, both directions.
+    const uiResources = this.buildUiResourceProvider(manifest);
+    const declaredUiUris = new Set(uiResources?.list().map((r) => r.uri) ?? []);
     const host = PluginMcpHost.loopback(
       manifest,
-      pluginRuntimeToolDelegate(this.runtime, manifest.id),
+      pluginRuntimeToolDelegate(this.runtime, manifest.id, declaredUiUris),
       this.toolRegistry,
+      uiResources,
     );
     // host.start() is registry-read-only until its final atomic swap; if it
     // throws, `previous` (and its registered tools) are untouched.
@@ -64,12 +89,59 @@ export class PluginLoopbackManager {
     return names;
   }
 
-  /** Stop a plugin's host and unregister its tools. No-op if not running. */
+  /**
+   * Serve a `ui://` resource from a running plugin's loopback host — the plugin
+   * arm of the unified UI-resource resolver (see `mcp-ui-backend-resolver.ts`).
+   * Fail-closed: an unknown plugin, an undeclared uri, or a cross-namespace uri
+   * throws (never a served body). Own-namespace enforcement lives in the host's
+   * `PluginUiResourceProvider`, so the render path (which passes `serverId ===
+   * pluginId`) can only ever reach this plugin's OWN declared resources.
+   */
+  async readUiResource(pluginId: string, uri: string): Promise<McpUiResourceRead> {
+    const host = this.hosts.get(pluginId);
+    if (!host) {
+      throw new Error(`[plugin-loopback] no running loopback host for plugin '${pluginId}'`);
+    }
+    return host.readUiResource(uri);
+  }
+
+  /**
+   * Build the per-plugin `ui://` resource provider from the manifest's
+   * `uiResources[]`. Returns `undefined` when the plugin declares no MCP App
+   * resources (the common case) so the loopback host serves none.
+   *
+   * The provider is a pure policy gate (own-namespace + declared-only); the CONTENT
+   * comes from the plugin itself via `runtime.readUiResource`, which applies the
+   * runtime-state gates and bounds the hook. The host reads no plugin file here.
+   */
+  private buildUiResourceProvider(
+    manifest: PluginManifest,
+  ): PluginUiResourceProvider | undefined {
+    const declarations = manifest.uiResources;
+    if (!declarations || declarations.length === 0) return undefined;
+    return createPluginUiResourceProvider({
+      pluginId: manifest.id,
+      declarations,
+      readHtml: (uri) => this.runtime.readUiResource(manifest.id, uri),
+    });
+  }
+
+  /**
+   * Stop a plugin's host and unregister its tools. No-op if not running.
+   *
+   * Emits the SAME `serverDisconnected` teardown the external arm emits, AFTER the
+   * server is actually down — a disabled plugin's live MCP-App cards must flip to
+   * the `mcp-app-disconnected` placeholder exactly like an external server's do,
+   * rather than staying rendered and interactive against a server that is gone.
+   * (`start()`'s atomic reload replaces the superseded host with `dispose()`, not
+   * `stop()`, so a reload deliberately does NOT emit a disconnect.)
+   */
   async stop(pluginId: string): Promise<void> {
     const host = this.hosts.get(pluginId);
     if (!host) return;
     this.hosts.delete(pluginId);
     await host.stop();
+    this.onServerDisconnected(pluginId);
     log.info(`loopback plugin '${pluginId}' stopped`);
   }
 

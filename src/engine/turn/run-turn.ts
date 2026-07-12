@@ -20,6 +20,7 @@ import { normalizeAiSdkUsageForCost } from "../llm/pricing.js";
 import { stripLeadingSlash } from "../../shared/slash-sanitizer.js";
 import { isUserKeyboardOrigin } from "../../shared/chat-origin.js";
 import { parseImportedTriggerEnvelopePayload } from "../../shared/overlay-trigger-source.js";
+import { parseAppMessageEnvelopePayload } from "../../shared/mcp-app-message-source.js";
 import { sessionContext } from "../session-context.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
@@ -262,9 +263,15 @@ export async function runTurn(
           name: options.rolePrompt.name,
         }
       : undefined;
+    // Staged (non-user-authored) input renders as an `imported_trigger` marker, not a
+    // user bubble — for a plugin overlay trigger AND for an MCP App's confirmed
+    // `ui/message`. Both read provenance from their own envelope; `source` is what the
+    // transcript shows (`overlay:…` / `app:…`).
     const importedTrigger = inputOrigin === "plugin-emitted"
       ? parseImportedTriggerEnvelopePayload(turnInput)
-      : null;
+      : inputOrigin === "app-emitted"
+        ? parseAppMessageEnvelopePayload(turnInput)
+        : null;
     if (inputOrigin === "agent-message") {
       agentMessageInputId = randomUUID();
     }

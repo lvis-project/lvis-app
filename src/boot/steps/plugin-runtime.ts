@@ -106,13 +106,12 @@ export interface LateBindingRefs {
     fn: import("../../engine/conversation-loop.js").ConversationLoop | null;
   };
   pluginToolInvokerRef: {
-    fn:
-      | ((
-          toolName: string,
-          payload: unknown,
-          context: { origin: "plugin" | "ui"; callerPluginId?: string; ownerPluginId?: string },
-        ) => Promise<unknown>)
-      | null;
+    // The gated tool-invocation delegate installed by the `plugin-tool-executor`
+    // boot step. Typed off the SoT (`PluginToolInvocationDelegate` →
+    // `PluginToolInvocationContext.origin` → `InvocationOrigin`), never an inline
+    // restatement of the origin union — a narrower structural copy here silently
+    // desynced from the runtime's own delegate type and would reject a new origin.
+    fn: import("../../plugins/runtime.js").PluginToolInvocationDelegate | null;
   };
 }
 
@@ -209,6 +208,12 @@ export interface InitPluginRuntimeOutput {
   runPluginShutdownHandlers: () => Promise<void>;
   /** SoT — shared with MarketplaceService + post-boot update detector. */
   pluginPaths: ReturnType<typeof resolvePluginPaths>;
+  /**
+   * Owns each plugin's in-process loopback MCP host. Exposed so the render IPC's
+   * unified `ui://` resolver can try the loopback host (serverId === pluginId)
+   * before the external `mcpManager.clients` registry.
+   */
+  loopbackManager: PluginLoopbackManager;
 }
 
 /**
@@ -541,6 +546,7 @@ export async function initPluginRuntime(
     pluginShutdownHandlers,
     runPluginShutdownHandlers,
     pluginPaths,
+    loopbackManager,
   };
 }
 

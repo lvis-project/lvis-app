@@ -4,11 +4,15 @@
  * The loopback delegate must reproduce buildPluginTool's execute gate exactly:
  * inactive / integrity-disabled fail closed, ManifestIntegrityViolation records
  * + fails closed, and the structured return value survives as
- * _meta["xyz.lvis/rawResult"]. A host-level test asserts that raw value reaches
+ * _meta["lvisai/rawResult"]. A host-level test asserts that raw value reaches
  * the registered Tool's metadata.rawResult (the executor.ts / boot.ts contract).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { pluginRuntimeToolDelegate, RAW_RESULT_META } from "../plugin-runtime-delegate.js";
+import {
+  pluginRuntimeToolDelegate,
+  splitPluginToolUiMeta,
+  RAW_RESULT_META,
+} from "../plugin-runtime-delegate.js";
 import { PluginMcpHost } from "../plugin-mcp-host.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import {
@@ -313,5 +317,151 @@ describe("end-to-end: raw plugin value survives manifest → server → host →
     const result = await registry.findByName("notes_read")!.execute({ q: "x" }, {} as never);
     expect(result.isError).toBe(false);
     expect(result.metadata?.rawResult).toEqual({ hits: 3 });
+  });
+});
+
+/**
+ * The MCP App TRIGGER. A plugin's tool handler declares "render this card with my
+ * result" with the STANDARD MCP Apps tool-result extension — the same
+ * `_meta.ui.resourceUri` an external MCP server puts on its CallToolResult — and the
+ * delegate lifts it onto the wire. Before this, `_meta.ui` was never populated on the
+ * plugin arm, so no first-party plugin could make a card render at all.
+ */
+const CARD_URI = `ui://${PLUGIN_ID}/note.html`;
+const DECLARED = new Set([CARD_URI]);
+
+describe("pluginRuntimeToolDelegate — MCP App card trigger (_meta.ui)", () => {
+  it("a declared resourceUri on the handler's return value reaches the wire _meta.ui", async () => {
+    const delegate = pluginRuntimeToolDelegate(
+      fakeRuntime({
+        call: vi.fn(async () => ({
+          note: "hello",
+          _meta: { ui: { resourceUri: CARD_URI, slot: "sidebar", height: 420, title: "Note" } },
+        })),
+      }),
+      PLUGIN_ID,
+      DECLARED,
+    );
+    const out = await delegate("notes_read", {});
+    expect(out._meta?.ui).toEqual({
+      resourceUri: CARD_URI,
+      slot: "sidebar",
+      height: 420,
+      title: "Note",
+    });
+  });
+
+  it("the card declaration is protocol, not payload: text + rawResult carry the plugin's OWN result", async () => {
+    const delegate = pluginRuntimeToolDelegate(
+      fakeRuntime({
+        call: vi.fn(async () => ({ note: "hello", _meta: { ui: { resourceUri: CARD_URI } } })),
+      }),
+      PLUGIN_ID,
+      DECLARED,
+    );
+    const out = await delegate("notes_read", {});
+    // The `_meta` envelope never leaks into what the model reads or into rawResult.
+    expect(out.content[0].text).toBe(JSON.stringify({ note: "hello" }, null, 2));
+    expect(out._meta?.[RAW_RESULT_META]).toEqual({ note: "hello" });
+  });
+
+  it("an UNDECLARED resourceUri produces NO card (fail-closed) — the result still returns", async () => {
+    const delegate = pluginRuntimeToolDelegate(
+      fakeRuntime({
+        call: vi.fn(async () => ({
+          note: "hello",
+          _meta: { ui: { resourceUri: `ui://${PLUGIN_ID}/undeclared.html` } },
+        })),
+      }),
+      PLUGIN_ID,
+      DECLARED,
+    );
+    const out = await delegate("notes_read", {});
+    expect(out._meta?.ui).toBeUndefined();
+    expect(out.isError).toBeUndefined();
+    expect(out._meta?.[RAW_RESULT_META]).toEqual({ note: "hello" });
+  });
+
+  it("a plugin that declared NO uiResources[] cannot trigger a card (empty-set default)", async () => {
+    const delegate = pluginRuntimeToolDelegate(
+      fakeRuntime({ call: vi.fn(async () => ({ _meta: { ui: { resourceUri: CARD_URI } } })) }),
+      PLUGIN_ID,
+      // no declared set passed — the loopback manager passes none for a plugin
+      // whose manifest declares no uiResources[]
+    );
+    const out = await delegate("notes_read", {});
+    expect(out._meta?.ui).toBeUndefined();
+  });
+
+  it("a plugin result with no _meta (the common case) is untouched — no card, value identical", async () => {
+    const value = { note: "hello" };
+    const delegate = pluginRuntimeToolDelegate(
+      fakeRuntime({ call: vi.fn(async () => value) }),
+      PLUGIN_ID,
+      DECLARED,
+    );
+    const out = await delegate("notes_read", {});
+    expect(out._meta?.ui).toBeUndefined();
+    expect(out._meta?.[RAW_RESULT_META]).toBe(value); // same reference, not a copy
+  });
+
+  it("a malformed _meta.ui (no resourceUri) yields no card and leaves the value alone", () => {
+    const value = { note: "x", _meta: { ui: { height: 300 } } };
+    expect(splitPluginToolUiMeta(value)).toEqual({ value });
+    expect(splitPluginToolUiMeta("a string")).toEqual({ value: "a string" });
+    expect(splitPluginToolUiMeta([1, 2])).toEqual({ value: [1, 2] });
+  });
+});
+
+describe("end-to-end: a plugin tool result renders a card (delegate → server → host → uiPayload)", () => {
+  const CARD_MANIFEST: PluginManifest = {
+    ...MANIFEST,
+    uiResources: [{ uri: CARD_URI, csp: { connectDomains: ["https://api.example.com"] } }],
+  };
+
+  it("registered Tool surfaces metadata.uiPayload with the HOST-stamped serverId", async () => {
+    const registry = new ToolRegistry();
+    const delegate = pluginRuntimeToolDelegate(
+      fakeRuntime({
+        call: vi.fn(async () => ({ hits: 3, _meta: { ui: { resourceUri: CARD_URI } } })),
+      }),
+      PLUGIN_ID,
+      DECLARED,
+    );
+    const host = PluginMcpHost.loopback(CARD_MANIFEST, delegate, registry);
+    await host.start();
+
+    const result = await registry.findByName("notes_read")!.execute({ q: "x" }, {} as never);
+    expect(result.isError).toBe(false);
+    // serverId is stamped by the host from the plugin's own id — a plugin can never
+    // point a card at another server's namespace.
+    expect(result.metadata?.uiPayload).toEqual({
+      serverId: PLUGIN_ID,
+      resourceUri: CARD_URI,
+      slot: "chat", // default when the plugin declares no slot
+      height: undefined,
+      title: undefined,
+    });
+    expect(result.metadata?.rawResult).toEqual({ hits: 3 });
+  });
+
+  it("an undeclared resourceUri renders NO card end-to-end", async () => {
+    const registry = new ToolRegistry();
+    const delegate = pluginRuntimeToolDelegate(
+      fakeRuntime({
+        call: vi.fn(async () => ({
+          hits: 3,
+          _meta: { ui: { resourceUri: `ui://${PLUGIN_ID}/rogue.html` } },
+        })),
+      }),
+      PLUGIN_ID,
+      DECLARED,
+    );
+    const host = PluginMcpHost.loopback(CARD_MANIFEST, delegate, registry);
+    await host.start();
+
+    const result = await registry.findByName("notes_read")!.execute({ q: "x" }, {} as never);
+    expect(result.isError).toBe(false);
+    expect(result.metadata?.uiPayload).toBeUndefined();
   });
 });
