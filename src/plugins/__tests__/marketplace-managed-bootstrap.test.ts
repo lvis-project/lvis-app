@@ -241,6 +241,66 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(result.failed).toEqual([]);
   });
 
+  it("auto-migrates a legacy-`_meta` managed plugin: catalog advertises the migrated version → update-first, no user action", async () => {
+    // The recovery ladder's tier-1 (≡ tier-2) rung for the `_meta` rename. The only
+    // plugin that ever used the legacy `xyz.lvis/pathFields` key — local-indexer — is
+    // `installPolicy:"admin"` (managed). At boot, ensureManagedInstalled sees the
+    // catalog's migrated version (0.5.24, `lvisai/pathFields`) is strictly newer than
+    // the installed pre-migration version (0.5.19, legacy key) and AUTO-UPDATES it,
+    // overwriting the on-disk manifest with the migrated one. runManagedBootstrap
+    // then restartAll()s, so the plugin reloads with the new key in the SAME boot —
+    // no broken window, no user click. The host install path is a clean artifact
+    // replace, so "update in place" and "uninstall + reinstall" are the same
+    // operation (tiers 1 and 2 collapse); the only terminal fallback is the surfaced
+    // Doctor remove-recommendation, covered by the classification test.
+    await writeFile(
+      marketplacePath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "local-indexer",
+            name: "LVIS Local Indexer",
+            description: "fixture",
+            packageSpec: "file:../lvis-plugin-local-indexer",
+            packageName: "@lvis/plugin-local-indexer",
+            tools: [],
+            installPolicy: "admin",
+            version: "0.5.24",
+          },
+        ],
+      }),
+      "utf-8",
+    );
+    const service = makeManagedService(testDir, marketplacePath);
+    vi.spyOn(
+      service as unknown as { resolveInstalledIds: (e: unknown) => Promise<Set<string>> },
+      "resolveInstalledIds",
+    ).mockResolvedValue(new Set(["local-indexer"]));
+    vi.spyOn(
+      service as unknown as { readInstalledVersionFromRegistry: (r: unknown, id: string) => Promise<string | null> },
+      "readInstalledVersionFromRegistry",
+    ).mockResolvedValue("0.5.19");
+    const installSpy = vi
+      .spyOn(
+        service as unknown as {
+          installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+        },
+        "installWithDependencies",
+      )
+      .mockResolvedValue({ pluginId: "local-indexer", installed: true });
+
+    const result = await service.ensureManagedInstalled();
+
+    expect(installSpy).toHaveBeenCalledTimes(1);
+    const [pluginId, actor] = installSpy.mock.calls[0]!;
+    expect(pluginId).toBe("local-indexer");
+    expect(actor).toBe("it-admin");
+    expect(result.updated).toEqual(["local-indexer"]);
+    expect(result.installed).toEqual([]);
+    expect(result.failed).toEqual([]);
+  });
+
   it("does NOT update a managed plugin already at the catalog version", async () => {
     await writeAdminCatalog("1.0.0");
     const service = makeManagedService(testDir, marketplacePath);
