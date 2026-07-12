@@ -29,7 +29,7 @@
  * self-claims Q4 removed (MCP "annotations untrusted", design §2.2).
  *
  * Key invariants:
- *  - `_meta` keys use the `xyz.lvis/` prefix; per §8 any prefix whose second
+ *  - `_meta` keys use the `lvisai/` prefix; per §8 any prefix whose second
  *    label is `mcp`/`modelcontextprotocol` is RESERVED for MCP.
  *  - `inputSchema` dialect moves to JSON Schema 2020-12 (a relabel — LVIS plugin
  *    tool schemas use a 2020-12 subset, no `$ref` network deref).
@@ -38,6 +38,7 @@
  */
 import type { PluginManifest, Tool as McpTool } from "../plugins/types.js";
 import { toolVisibility } from "../plugins/runtime/tool-visibility.js";
+import { observeLegacyMetaKey } from "./legacy-meta-telemetry.js";
 
 /** The RC protocol revision LVIS plugin-servers speak. */
 const MCP_PROTOCOL_VERSION = "2026-07-28";
@@ -49,7 +50,7 @@ const JSON_SCHEMA_2020_12 = "https://json-schema.org/draft/2020-12/schema";
  * An MCP `Tool` projected from one normalized `Tool`. #885 v6 — `annotations` is
  * DROPPED (the host never projects plugin-authored ones) and `_meta` is narrowed
  * to exactly the standard visibility block + the single kept LVIS-proprietary key
- * (`xyz.lvis/pathFields`).
+ * (`lvisai/pathFields`).
  */
 export interface McpToolProjection {
   name: string;
@@ -66,7 +67,7 @@ export interface McpToolProjection {
   icons?: McpTool["icons"];
   _meta: {
     ui: { visibility: Array<"model" | "app"> };
-    "xyz.lvis/pathFields"?: string[];
+    "lvisai/pathFields"?: string[];
   };
 }
 
@@ -89,10 +90,22 @@ export interface McpDiscoverProjection {
  * stray/removed proprietary key can ride the wire. `outputSchema` (standard MCP)
  * is passed through verbatim when present.
  */
-function toWireTool(tool: McpTool): McpToolProjection {
+function toWireTool(tool: McpTool, pluginId: string): McpToolProjection {
   const meta: McpToolProjection["_meta"] = { ui: { visibility: toolVisibility(tool) } };
-  const pathFields = tool._meta?.["xyz.lvis/pathFields"];
-  if (pathFields !== undefined) meta["xyz.lvis/pathFields"] = pathFields;
+  // Read the authored manifest key, preferring the new `lvisai/pathFields`;
+  // transitional: fall back to the legacy `xyz.lvis/pathFields` until published
+  // plugin manifests are migrated (then remove the fallback). The WIRE always
+  // emits ONLY the new key below. This site reads the ON-DISK manifest, so a legacy
+  // hit here is the signal that this installed plugin has not yet rolled forward —
+  // the observable removal gate for the schema's legacy property.
+  const pathFields = tool._meta?.["lvisai/pathFields"];
+  const legacyPathFields = tool._meta?.["xyz.lvis/pathFields"];
+  if (pathFields !== undefined) {
+    meta["lvisai/pathFields"] = pathFields;
+  } else if (legacyPathFields !== undefined) {
+    observeLegacyMetaKey(pluginId, "pathFields");
+    meta["lvisai/pathFields"] = legacyPathFields;
+  }
   return {
     name: tool.name,
     ...(tool.title !== undefined ? { title: tool.title } : {}),
@@ -117,7 +130,7 @@ function toWireTool(tool: McpTool): McpToolProjection {
  * because they were withheld from the wire.
  */
 export function manifestToolsToMcpTools(manifest: PluginManifest): McpToolProjection[] {
-  return (manifest.tools ?? []).map(toWireTool);
+  return (manifest.tools ?? []).map((t) => toWireTool(t, manifest.id));
 }
 
 /**

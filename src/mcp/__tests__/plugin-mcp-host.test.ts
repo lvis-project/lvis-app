@@ -34,7 +34,7 @@ const MANIFEST: PluginManifest = {
       name: "notes_read",
       description: "Read a note",
       inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
-      _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
+      _meta: { ui: { visibility: ["model"] }, "lvisai/pathFields": ["path"] },
     },
     {
       name: "notes_save",
@@ -44,7 +44,7 @@ const MANIFEST: PluginManifest = {
         properties: { path: { type: "string" }, body: { type: "string" } },
         required: ["path"],
       },
-      _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
+      _meta: { ui: { visibility: ["model"] }, "lvisai/pathFields": ["path"] },
     },
   ],
 };
@@ -106,6 +106,39 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
     expect(
       (result.metadata as { uiPayload?: Record<string, unknown> }).uiPayload,
     ).not.toHaveProperty("csp");
+  });
+
+  it("reads the LEGACY xyz.lvis/rawResult so an unmigrated out-of-process plugin keeps its structured return", async () => {
+    // The transitional dual-read's out-of-process arm: a plugin still emitting the
+    // legacy boxed-return key must keep surfacing metadata.rawResult unchanged. This
+    // is the branch that had no coverage — deleting it silently would drop a plugin's
+    // structured value to undefined, invisibly.
+    const delegate: PluginToolDelegate = vi.fn(async () => ({
+      content: [{ type: "text", text: "ok" }],
+      _meta: { "xyz.lvis/rawResult": { note: "structured" } },
+    }));
+    const registry = new ToolRegistry();
+    const host = PluginMcpHost.loopback(MANIFEST, delegate, registry);
+    await host.start();
+
+    const result = await registry.findByName("notes_read")!.execute({ path: "/a.md" }, {} as never);
+    expect((result.metadata as { rawResult?: unknown }).rawResult).toEqual({ note: "structured" });
+  });
+
+  it("prefers the new lvisai/rawResult over the legacy key when both are present", async () => {
+    const delegate: PluginToolDelegate = vi.fn(async () => ({
+      content: [{ type: "text", text: "ok" }],
+      _meta: {
+        "lvisai/rawResult": { from: "new" },
+        "xyz.lvis/rawResult": { from: "legacy" },
+      },
+    }));
+    const registry = new ToolRegistry();
+    const host = PluginMcpHost.loopback(MANIFEST, delegate, registry);
+    await host.start();
+
+    const result = await registry.findByName("notes_read")!.execute({ path: "/a.md" }, {} as never);
+    expect((result.metadata as { rawResult?: unknown }).rawResult).toEqual({ from: "new" });
   });
 
   it("keeps manifest workerId inert on the loopback path even when a worker marker exists", async () => {

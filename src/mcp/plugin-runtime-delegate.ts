@@ -14,7 +14,7 @@
  *    isError.
  *
  * The structured plugin return value is carried back as
- * `_meta["xyz.lvis/rawResult"]` (the reverse adapter re-surfaces it as
+ * `_meta["lvisai/rawResult"]` (the reverse adapter re-surfaces it as
  * `metadata.rawResult`) so the executor.ts / boot.ts consumers that read the raw
  * value keep working — MCP's content model is text-first, so non-text structured
  * output rides `_meta`. Parity invariant: rawResult is present iff the call
@@ -53,7 +53,7 @@ import type { McpUiSlot, McpUiToolMeta } from "./types.js";
 const log = createLogger("plugin-runtime-delegate");
 
 /** Reserved `_meta` key carrying the plugin's raw (non-text) return value. */
-export const RAW_RESULT_META = "xyz.lvis/rawResult";
+export const RAW_RESULT_META = "lvisai/rawResult";
 
 function errorOutcome(text: string): PluginToolOutcome {
   return { content: [{ type: "text", text }], isError: true };

@@ -51,6 +51,36 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     ).toBe(true);
   });
 
+  it("transitional: accepts a tool _meta carrying ONLY the legacy xyz.lvis/pathFields key (no lvisai/pathFields)", async () => {
+    // Locks the AJV-level compat: a published manifest that has not yet migrated
+    // to the new `lvisai/*` vendor prefix must still pass the load-time schema
+    // gate (the TS reader tests exercise mcpToolToPluginTool/toWireTool directly,
+    // which bypasses this compiled validator). Remove this test alongside the
+    // legacy schema property once the SDK + published plugins have migrated.
+    const validator = await buildManifestValidator();
+    const result = validator({
+      id: "legacy-meta-plugin",
+      name: "Legacy Meta Plugin",
+      version: "1.0.0",
+      description: "Legacy-only _meta pathFields fixture.",
+      publisher: "LVIS",
+      entry: "dist/index.js",
+      tools: [
+        {
+          name: "legacy_export",
+          description: "Export to a path.",
+          inputSchema: { type: "object", properties: { path: { type: "string" } } },
+          _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
+        },
+      ],
+    });
+    if (!result) {
+      // eslint-disable-next-line no-console
+      console.error("AJV errors:", validator.errors);
+    }
+    expect(result).toBe(true);
+  });
+
   it("accepts networkAccess.allowPrivateNetworks", async () => {
     const validator = await buildManifestValidator();
     expect(
@@ -317,7 +347,7 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
         },
         _meta: {
           ui: { visibility: ["model", "app"] },
-          "xyz.lvis/pathFields": ["path"],
+          "lvisai/pathFields": ["path"],
         },
       },
       {
@@ -409,7 +439,7 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
 
       const search = parsed.tools.find((t) => t.name === "ff_search");
       expect(search?._meta?.ui?.visibility).toEqual(["model", "app"]);
-      expect(search?._meta?.["xyz.lvis/pathFields"]).toEqual(["path"]);
+      expect(search?._meta?.["lvisai/pathFields"]).toEqual(["path"]);
 
       // Auth trio materialized as app-only (never model-visible).
       const status = parsed.tools.find((t) => t.name === "ff_status");

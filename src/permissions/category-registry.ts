@@ -15,7 +15,7 @@
  *   1. PermissionManager consults for every host-side category decision.
  *   2. #885 v6 — plugin `category` is REMOVED from the contract (Q3); the
  *      effective category is host-derived per invocation (`inspectHostRisk`).
- *      Filesystem path args are declared via `_meta["xyz.lvis/pathFields"]`.
+ *      Filesystem path args are declared via `_meta["lvisai/pathFields"]`.
  *      `meta` remains host-only.
  *   3. The reviewer classifier can score against `riskWeight`, the input
  *      to its baseline `final = max(rule, llm)` composition.
