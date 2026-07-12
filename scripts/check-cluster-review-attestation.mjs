@@ -141,14 +141,84 @@ function withoutMarkdownFencedCode(text) {
   return visibleLines.join("\n");
 }
 
+function maximalBacktickRunLength(text, index) {
+  if (text[index] !== "`") return 0;
+  let end = index + 1;
+  while (text[end] === "`") end += 1;
+  return end - index;
+}
+
+function blankPreservingNewlines(text) {
+  return text.replace(/[^\n]/g, " ");
+}
+
+function withoutMarkdownIndentedCode(text) {
+  return text
+    .split("\n")
+    .map((line) => /^(?: {4}|\t)/.test(line) ? blankPreservingNewlines(line) : line)
+    .join("\n");
+}
+
+function isBackslashEscaped(text, index) {
+  let backslashCount = 0;
+  for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor -= 1) {
+    backslashCount += 1;
+  }
+  return backslashCount % 2 === 1;
+}
+
+function withoutMarkdownCodeSpans(text) {
+  const visible = [];
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    const openingIndex = text.indexOf("`", cursor);
+    if (openingIndex < 0) {
+      visible.push(text.slice(cursor));
+      break;
+    }
+    visible.push(text.slice(cursor, openingIndex));
+
+    const openingLength = maximalBacktickRunLength(text, openingIndex);
+    let searchIndex = openingIndex + openingLength;
+    let closingIndex = -1;
+
+    while (searchIndex < text.length) {
+      const candidateIndex = text.indexOf("`", searchIndex);
+      if (candidateIndex < 0) break;
+      const candidateLength = maximalBacktickRunLength(text, candidateIndex);
+      if (candidateLength === openingLength) {
+        closingIndex = candidateIndex;
+        break;
+      }
+      searchIndex = candidateIndex + candidateLength;
+    }
+
+    if (closingIndex < 0) {
+      visible.push(text.slice(openingIndex, openingIndex + openingLength));
+      cursor = openingIndex + openingLength;
+      continue;
+    }
+
+    const spanEnd = closingIndex + openingLength;
+    visible.push(blankPreservingNewlines(text.slice(openingIndex, spanEnd)));
+    cursor = spanEnd;
+  }
+
+  return visible.join("");
+}
+
 function isInsideRawHtmlContainer(text, index) {
   const stack = [];
   const pattern = /<\/?([A-Za-z][A-Za-z0-9-]*)\b[^>]*>/g;
   const visiblePrefix = withoutMarkdownFencedCode(
     withoutHtmlComments(text.slice(0, index)),
-  ).replace(/(`+)([\s\S]*?)\1/g, "");
+  );
+  const withoutIndentedCode = withoutMarkdownIndentedCode(visiblePrefix);
+  const withoutCodeSpans = withoutMarkdownCodeSpans(withoutIndentedCode);
 
-  for (const match of visiblePrefix.matchAll(pattern)) {
+  for (const match of withoutCodeSpans.matchAll(pattern)) {
+    if (isBackslashEscaped(withoutCodeSpans, match.index)) continue;
     const name = match[1].toLowerCase();
     const closing = match[0].startsWith("</");
     const rawTextContainer = stack.at(-1);
