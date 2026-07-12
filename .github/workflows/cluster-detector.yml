@@ -1,258 +1,248 @@
 name: Cluster Detector
 
 on:
-  pull_request:
-    # `labeled` is required so applying the `cluster-review-passed`
-    # exemption label re-runs the workflow without forcing a no-op
-    # commit. `unlabeled` so removing the attestation re-enables the
-    # block.
-    types: [opened, synchronize, labeled, unlabeled]
+  pull_request_target:
+    branches: [main]
+    # Re-run for every event that can change the current review evidence.
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled]
 
 permissions:
+  contents: read
+  # PR-label DELETE returned 403 with issues:write alone in the live transition.
   pull-requests: write
   statuses: write
 
+concurrency:
+  group: cluster-detector-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 jobs:
   cluster-detector:
-    name: Sensitive Area Cluster Check
+    name: Trusted Cluster Policy Evaluation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
+      - name: Publish pending cluster status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+          STATUS_CONTEXT: Sensitive Area Cluster Check
+        run: |
+          set -euo pipefail
+          if ! [[ "$HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Invalid event pull request head SHA"
+            exit 1
+          fi
+          gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -f state=pending \
+            -f context="${STATUS_CONTEXT}" \
+            -f description="Sensitive area cluster policy evaluation started"
 
-      # ── 0. Exemption label — manual cluster review already attested ──────
-      # CLAUDE.md §Cross-Cutting Review Gate documents the resolution path:
-      # run a 3-agent cluster review (architect + critic + security-reviewer)
-      # against the merged-state set and confirm MAJOR=0. When that happens,
-      # the human attester applies the `cluster-review-passed` label to this
-      # PR and the gate clears. Without an exemption mechanism the workflow
-      # would have no way to know the manual review was performed and would
-      # block every merge in a 14-day sensitive-area window indefinitely.
-      - name: Check exemption label
-        id: exempt-check
+      - name: Invalidate retained cluster review label
+        if: >-
+          github.event.action == 'edited' ||
+          github.event.action == 'synchronize' ||
+          github.event.action == 'reopened'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          EXEMPT_LABEL=$(gh pr view "$PR_NUMBER" \
-            --repo "$REPO" \
-            --json labels \
-            --jq '.labels[]? | select(.name == "cluster-review-passed") | .name' 2>/dev/null || echo "")
-          if [ -n "$EXEMPT_LABEL" ]; then
-            echo "exempt=true" >> "$GITHUB_OUTPUT"
-            echo "Cluster review exemption label detected — gate cleared."
-          else
-            echo "exempt=false" >> "$GITHUB_OUTPUT"
+          LABEL_COUNT=$(gh api "repos/${REPO}/issues/${PR_NUMBER}" \
+            --jq '[.labels[].name | select(. == "cluster-review-passed")] | length')
+          if [ "$LABEL_COUNT" -gt 0 ]; then
+            gh api --method DELETE \
+              "repos/${REPO}/issues/${PR_NUMBER}/labels/cluster-review-passed"
+          fi
+
+      - name: Capture live pull request snapshot
+        id: pr-snapshot
+        env:
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          SNAPSHOT="${RUNNER_TEMP}/cluster-review-pr.json"
+          gh api "repos/${REPO}/pulls/${PR_NUMBER}" > "$SNAPSHOT"
+
+          LIVE_HEAD_SHA=$(jq -er '.head.sha' "$SNAPSHOT")
+          LIVE_BASE_SHA=$(jq -er '.base.sha' "$SNAPSHOT")
+          if ! [[ "$LIVE_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Invalid live pull request head SHA"
+            exit 1
+          fi
+          if ! [[ "$LIVE_BASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Invalid live pull request base SHA"
+            exit 1
+          fi
+          if [ "$LIVE_HEAD_SHA" != "$EVENT_HEAD_SHA" ]; then
+            echo "::error::Live pull request head changed after the workflow event"
+            exit 1
+          fi
+
+          SNAPSHOT_DIGEST=$(jq -cS \
+            '{
+              number,
+              head: .head.sha,
+              base: .base.sha,
+              body: (.body // ""),
+              labels: ([.labels[].name] | sort),
+              state,
+              updated_at,
+              changed_files,
+              commits
+            }' \
+            "$SNAPSHOT" | sha256sum | cut -d' ' -f1)
+
+          echo "path=${SNAPSHOT}" >> "$GITHUB_OUTPUT"
+          echo "digest=${SNAPSHOT_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${LIVE_HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "base_sha=${LIVE_BASE_SHA}" >> "$GITHUB_OUTPUT"
+
+      # Run policy only from the trusted live base commit. Pull-request content
+      # is inspected through read-only GitHub API data and is never executed.
+      - name: Checkout trusted cluster policy
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 1
+          path: .cluster-policy
+          persist-credentials: false
+          ref: ${{ steps.pr-snapshot.outputs.base_sha }}
+
+      - name: Verify trusted cluster policy checkout
+        env:
+          EXPECTED_BASE_SHA: ${{ steps.pr-snapshot.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+          CHECKED_OUT_SHA=$(git -C .cluster-policy rev-parse HEAD)
+          if [ "$CHECKED_OUT_SHA" != "$EXPECTED_BASE_SHA" ]; then
+            echo "::error::Trusted cluster policy checkout does not match the live base SHA"
+            exit 1
           fi
 
       - name: Check sensitive area changes and cluster window
         id: cluster-check
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_SNAPSHOT: ${{ steps.pr-snapshot.outputs.path }}
           REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
-
-          # ── Thresholds — keep in sync with CLAUDE.md §Cross-Cutting Review Gate ──
-          # Cluster size: number of sensitive-area PRs/commits that triggers review.
           CLUSTER_THRESHOLD=3
-          # Rolling window in days for the merged-PR count check.
           WINDOW_DAYS=14
+          SINCE_DATE=$(date -d "${WINDOW_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ)
 
-          SENSITIVE_DIRS=(
-            "src/permissions"
-            "src/audit"
-            "src/sandbox"
-            "src/ipc"
-            "src/preload"
-            "src/boot"
-            "src/core/permissions"
-          )
+          RESULT=$(node .cluster-policy/scripts/check-cluster-scope.mjs \
+            --snapshot "$PR_SNAPSHOT" \
+            --repo "$REPO" \
+            --since "$SINCE_DATE" \
+            --threshold "$CLUSTER_THRESHOLD")
 
-          # ── 1. Check if this PR touches sensitive areas ──────────────────
-          # Get changed files in this PR vs base
-          CHANGED_FILES=$(git diff --name-only "origin/${BASE_REF}...HEAD" 2>/dev/null || echo "")
-
-          SENSITIVE_HIT=false
-          for dir in "${SENSITIVE_DIRS[@]}"; do
-            # Match the directory with a trailing slash to avoid prefix over-match
-            # (e.g. src/preload/ must not match src/preloader/).
-            # src/preload is also valid as a bare .ts file (src/preload.ts),
-            # so we accept both: ^src/preload/ and ^src/preload[^/]*\.ts$
-            # Exclude __tests__/ subtrees from triggering the gate.
-            if echo "$CHANGED_FILES" | grep -qE "^${dir}/[^/]" && \
-               ! echo "$CHANGED_FILES" | grep -qE "^${dir}/__tests__/"; then
-              SENSITIVE_HIT=true
-              break
-            fi
-            # Handle the bare-file form for preload (src/preload.ts, src/preload.js, …)
-            if echo "$CHANGED_FILES" | grep -qE "^${dir}[^/]*\.(ts|tsx|js|jsx)$"; then
-              SENSITIVE_HIT=true
-              break
-            fi
-          done
-
-          # ── 2. Check single-bundle: ≥CLUSTER_THRESHOLD commits touch sensitive ─
-          BUNDLE_HIT=false
-          if [ "$SENSITIVE_HIT" = "true" ]; then
-            # Count commits in this PR that touch sensitive areas
-            SENSITIVE_COMMIT_COUNT=0
-            while IFS= read -r sha; do
-              for dir in "${SENSITIVE_DIRS[@]}"; do
-                COMMIT_FILES=$(git diff-tree --no-commit-id -r --name-only "$sha" 2>/dev/null || true)
-                if echo "$COMMIT_FILES" | grep -qE "^${dir}/[^/]" && \
-                   ! echo "$COMMIT_FILES" | grep -qE "^${dir}/__tests__/"; then
-                  SENSITIVE_COMMIT_COUNT=$((SENSITIVE_COMMIT_COUNT + 1))
-                  break
-                fi
-                if echo "$COMMIT_FILES" | grep -qE "^${dir}[^/]*\.(ts|tsx|js|jsx)$"; then
-                  SENSITIVE_COMMIT_COUNT=$((SENSITIVE_COMMIT_COUNT + 1))
-                  break
-                fi
-              done
-            done < <(git log "origin/${BASE_REF}..HEAD" --format="%H" 2>/dev/null)
-
-            if [ "$SENSITIVE_COMMIT_COUNT" -ge "$CLUSTER_THRESHOLD" ]; then
-              BUNDLE_HIT=true
-            fi
-          fi
-
-          # ── 3. Check WINDOW_DAYS rolling window: ≥CLUSTER_THRESHOLD merged PRs ─
-          WINDOW_HIT=false
-          if [ "$SENSITIVE_HIT" = "true" ]; then
-            SINCE_DATE=$(date -d "${WINDOW_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-              || date -v-${WINDOW_DAYS}d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-              || echo "")
-
-            if [ -n "$SINCE_DATE" ]; then
-              # gh --jq does not forward jq --arg/--argjson flags, so pipe to jq
-              # separately. The || echo "0" guard ensures MERGED_COUNT is always
-              # a valid integer even if gh or jq fails.
-              DIRS_JSON=$(printf '%s\n' "${SENSITIVE_DIRS[@]}" | jq -R . | jq -s .)
-              MERGED_COUNT=$(gh pr list \
-                --repo "$REPO" \
-                --state merged \
-                --search "merged:>=${SINCE_DATE}" \
-                --limit 100 \
-                --json number,mergedAt,files \
-                | jq --arg since "$SINCE_DATE" --argjson dirs "$DIRS_JSON" '
-                  [ .[]
-                    | select(.mergedAt >= $since)
-                    | select(
-                        .files
-                        | map(.path)
-                        | any(startswith($dirs[] + "/"))
-                      )
-                  ] | length
-                ' 2>/dev/null || echo "0")
-
-              if [ "${MERGED_COUNT:-0}" -ge "$CLUSTER_THRESHOLD" ]; then
-                WINDOW_HIT=true
-              fi
-            fi
-          fi
-
-          # ── 4. Determine overall violation ───────────────────────────────
-          VIOLATION=false
-          VIOLATION_REASON=""
-
-          if [ "$BUNDLE_HIT" = "true" ]; then
-            VIOLATION=true
-            VIOLATION_REASON="bundle"
-          elif [ "$WINDOW_HIT" = "true" ]; then
-            VIOLATION=true
-            VIOLATION_REASON="window"
-          fi
+          SENSITIVE_HIT=$(printf '%s' "$RESULT" | jq -er '.sensitive | if type == "boolean" then tostring else error("invalid .sensitive") end')
+          VIOLATION=$(printf '%s' "$RESULT" | jq -er '.violation | if type == "boolean" then tostring else error("invalid .violation") end')
+          VIOLATION_REASON=$(printf '%s' "$RESULT" | jq -er '.reason | if type == "string" then . else error("invalid .reason") end')
 
           echo "sensitive_hit=${SENSITIVE_HIT}" >> "$GITHUB_OUTPUT"
           echo "violation=${VIOLATION}" >> "$GITHUB_OUTPUT"
           echo "violation_reason=${VIOLATION_REASON}" >> "$GITHUB_OUTPUT"
 
-      - name: Post violation comment
-        if: steps.cluster-check.outputs.violation == 'true' && steps.exempt-check.outputs.exempt != 'true'
+      - name: Check current cluster review attestation
+        id: cluster-attestation
         env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          PR_SNAPSHOT: ${{ steps.pr-snapshot.outputs.path }}
+        run: >-
+          node .cluster-policy/scripts/check-cluster-review-attestation.mjs
+          "$PR_SNAPSHOT" "$GITHUB_OUTPUT" "$GITHUB_EVENT_PATH"
+
+      - name: Enforce cluster review gate
+        if: >-
+          steps.cluster-check.outputs.violation == 'true' &&
+          steps.cluster-attestation.outputs.attested != 'true'
+        env:
           REASON: ${{ steps.cluster-check.outputs.violation_reason }}
         run: |
-          set -euo pipefail
+          echo "::error::Sensitive area cluster (${REASON}) requires current-head cluster review"
+          exit 1
 
-          if [ "$REASON" = "bundle" ]; then
-            TRIGGER_MSG="이 PR 안에서 민감 영역을 건드리는 커밋이 **3개 이상** 포함되어 있습니다 (single-bundle cluster)."
+      - name: Finalize cluster policy status
+        if: always()
+        env:
+          ATTESTED: ${{ steps.cluster-attestation.outputs.attested }}
+          EXPECTED_DIGEST: ${{ steps.pr-snapshot.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PRIOR_JOB_STATUS: ${{ job.status }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          STATUS_CONTEXT: Sensitive Area Cluster Check
+          VIOLATION: ${{ steps.cluster-check.outputs.violation }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: |
+          set -uo pipefail
+          STATUS_STATE=failure
+          STATUS_DESCRIPTION="Sensitive area cluster policy failed"
+          FINALIZER_FAILED=0
+
+          if ! [[ "$HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Invalid event pull request head SHA"
+            FINALIZER_FAILED=1
+          elif [ "$PRIOR_JOB_STATUS" != "success" ]; then
+            echo "::error::Cluster policy evaluation failed before finalization"
+            FINALIZER_FAILED=1
           else
-            TRIGGER_MSG="최근 **14일 이내**에 민감 영역을 건드리는 PR이 **3개 이상** 머지되었습니다 (rolling-window cluster)."
+            FINAL_SNAPSHOT="${RUNNER_TEMP}/cluster-review-pr-final.json"
+            FINAL_OUTPUT="${RUNNER_TEMP}/cluster-review-final-output"
+            if ! gh api "repos/${REPO}/pulls/${PR_NUMBER}" > "$FINAL_SNAPSHOT"; then
+              echo "::error::Unable to refresh pull request state before final status"
+              FINALIZER_FAILED=1
+            elif ! FINAL_DIGEST=$(jq -cS \
+              '{
+                number,
+                head: .head.sha,
+                base: .base.sha,
+                body: (.body // ""),
+                labels: ([.labels[].name] | sort),
+                state,
+                updated_at,
+                changed_files,
+                commits
+              }' \
+              "$FINAL_SNAPSHOT" | sha256sum | cut -d' ' -f1); then
+              echo "::error::Unable to digest final pull request state"
+              FINALIZER_FAILED=1
+            elif [ "$FINAL_DIGEST" != "$EXPECTED_DIGEST" ]; then
+              echo "::error::Pull request state changed during cluster review evaluation"
+              FINALIZER_FAILED=1
+            elif [ "$VIOLATION" = "true" ] && [ "$ATTESTED" = "true" ]; then
+              if ! node .cluster-policy/scripts/check-cluster-review-attestation.mjs \
+                "$FINAL_SNAPSHOT" "$FINAL_OUTPUT" "$GITHUB_EVENT_PATH"; then
+                echo "::error::Unable to revalidate cluster review attestation"
+                FINALIZER_FAILED=1
+              elif ! grep -Fxq "attested=true" "$FINAL_OUTPUT"; then
+                echo "::error::Cluster review attestation changed before completion"
+                FINALIZER_FAILED=1
+              else
+                STATUS_STATE=success
+                STATUS_DESCRIPTION="Sensitive area cluster policy passed"
+              fi
+            else
+              STATUS_STATE=success
+              STATUS_DESCRIPTION="Sensitive area cluster policy passed"
+            fi
           fi
 
-          COMMENT_BODY="## :rotating_light: Cross-Cutting Review Gate 위반
+          if ! gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -f state="${STATUS_STATE}" \
+            -f context="${STATUS_CONTEXT}" \
+            -f description="${STATUS_DESCRIPTION}"; then
+            echo "::error::Unable to publish final cluster policy status"
+            exit 1
+          fi
 
-          이 PR은 민감 영역 클러스터 조건을 충족합니다.
-
-          **감지 사유**: ${TRIGGER_MSG}
-
-          **민감 영역** (Sensitive Areas):
-          - \`src/permissions/**\`
-          - \`src/audit/**\`
-          - \`src/sandbox/**\`
-          - \`src/ipc/**\`
-          - \`src/preload*\`
-          - \`src/boot/**\`
-          - \`src/core/permissions/**\`
-
-          **요구 사항**: 이 PR은 머지 전에 Cross-Cutting Review Gate를 통과해야 합니다.
-          자세한 기준은 [CLAUDE.md §Cross-Cutting Review Gate](../blob/main/CLAUDE.md) 를 참조하십시오.
-
-          > 이 검사는 \`.github/workflows/cluster-detector.yml\` 이 자동으로 실행합니다."
-
-          gh pr comment "$PR_NUMBER" \
-            --repo "$REPO" \
-            --body "$COMMENT_BODY"
-
-      - name: Set commit status — violation
-        if: steps.cluster-check.outputs.violation == 'true' && steps.exempt-check.outputs.exempt != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          REPO: ${{ github.repository }}
-        run: |
-          gh api \
-            --method POST \
-            "repos/${REPO}/statuses/${HEAD_SHA}" \
-            -f state=failure \
-            -f context="cluster-detector" \
-            -f description="Sensitive area cluster detected — Cross-Cutting Review Gate required" \
-            -f target_url="https://github.com/${REPO}/blob/main/CLAUDE.md"
-
-      - name: Set commit status — pass
-        if: steps.cluster-check.outputs.violation != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          REPO: ${{ github.repository }}
-        run: |
-          gh api \
-            --method POST \
-            "repos/${REPO}/statuses/${HEAD_SHA}" \
-            -f state=success \
-            -f context="cluster-detector" \
-            -f description="No sensitive area cluster detected"
-
-      - name: Set commit status — pass (cluster review exempted)
-        if: steps.cluster-check.outputs.violation == 'true' && steps.exempt-check.outputs.exempt == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          REPO: ${{ github.repository }}
-        run: |
-          gh api \
-            --method POST \
-            "repos/${REPO}/statuses/${HEAD_SHA}" \
-            -f state=success \
-            -f context="cluster-detector" \
-            -f description="Cluster review attested via cluster-review-passed label"
+          if [ "$FINALIZER_FAILED" -ne 0 ] || [ "$STATUS_STATE" != "success" ]; then
+            exit 1
+          fi

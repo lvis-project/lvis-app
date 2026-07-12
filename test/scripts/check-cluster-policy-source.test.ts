@@ -1,188 +1,139 @@
-import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const LEGACY_DETECTOR_SHA256 =
-  "c18916f06ee792b513ed85f0b90c586cf55ec8f9f0a8b8ba6450c21a205acb6a";
+const STATUS_CONTEXT = "Sensitive Area Cluster Check";
 
-describe("trusted cluster policy transition", () => {
-  it("keeps the legacy required-check workflow byte-identical", () => {
-    const legacy = readFileSync(
+describe("trusted cluster policy workflow", () => {
+  it("owns status, invalidation, and trusted-base evaluation in one run", () => {
+    const workflow = readFileSync(
       ".github/workflows/cluster-detector.yml",
       "utf8",
-    ).replace(/\r\n/g, "\n");
-
-    expect(createHash("sha256").update(legacy).digest("hex")).toBe(
-      LEGACY_DETECTOR_SHA256,
-    );
-    expect(legacy).toContain("\n  pull_request:\n");
-    expect(legacy).not.toContain("pull_request_target:");
-  });
-
-  it("keeps general invalidation while bridging only PR 1603", () => {
-    const bridge = readFileSync(
-      ".github/workflows/cluster-review-label-invalidator.yml",
-      "utf8",
     );
 
-    expect(bridge).toContain("pull_request_target:");
-    expect(bridge).not.toContain("\n  pull_request:\n");
-    expect(bridge).toContain("branches: [main]");
-    expect(bridge).toContain(
+    expect(workflow).toContain("pull_request_target:");
+    expect(workflow).toContain("branches: [main]");
+    expect(workflow).not.toContain("\n  pull_request:\n");
+    expect(workflow).toContain(
       "types: [opened, reopened, synchronize, edited, labeled, unlabeled]",
     );
-    expect(bridge).toContain("permissions: {}");
-    expect(bridge).toContain("cancel-in-progress: false");
-    expect(bridge).not.toContain("cancel-in-progress: true");
-
-    const invalidateIndex = bridge.indexOf("  invalidate:");
-    const transitionIndex = bridge.indexOf("  transition-policy:");
-    expect(invalidateIndex).toBeGreaterThan(-1);
-    expect(transitionIndex).toBeGreaterThan(invalidateIndex);
-
-    const invalidate = bridge.slice(invalidateIndex, transitionIndex);
-    expect(invalidate).toContain(
-      "github.event.pull_request.number != 1603",
-    );
-    expect(invalidate).toContain("github.event.action == 'synchronize'");
-    expect(invalidate).toContain("github.event.action == 'reopened'");
-    expect(invalidate).toContain("github.event.action == 'edited'");
-    expect(invalidate).toContain("contains(toJSON(github.event.changes)");
-    expect(invalidate).toContain("issues: write");
-    expect(invalidate).not.toContain("statuses: write");
-    expect(invalidate).not.toContain("actions/checkout");
-    expect(invalidate).not.toContain("scripts/");
-    expect(invalidate).toContain(
-      "issues/${PR_NUMBER}/labels/cluster-review-passed",
-    );
-
-    const transition = bridge.slice(transitionIndex);
-    const finalizerIndex = transition.indexOf(
-      "      - name: Finalize cluster policy status",
-    );
-    expect(finalizerIndex).toBeGreaterThan(-1);
-    const finalizer = transition.slice(finalizerIndex);
-
-    expect(transition).toContain("github.event.pull_request.number == 1603");
-    expect(transition).toContain(
-      "github.event.pull_request.base.ref == 'main'",
-    );
-    expect(transition).toContain(
-      "github.event.pull_request.head.repo.full_name == github.repository",
-    );
-    expect(transition).toContain(
-      "github.event.pull_request.head.ref == 'agent/gpt56-instruction-cleanup'",
-    );
-    expect(transition).toContain("contents: read");
-    expect(transition).toContain("pull-requests: read");
-    expect(transition).toContain("statuses: write");
-    expect(transition).toContain("issues: write");
-    expect(transition).toContain("STATUS_CONTEXT: Sensitive Area Cluster Check");
-    expect(transition).toContain("state=pending");
-    expect(transition).toContain("github.event.pull_request.head.sha");
-    expect(transition).toContain(
-      "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7",
-    );
-    expect(transition).not.toContain("actions/checkout@v7");
-    expect(transition).toContain(
-      "ref: ${{ steps.pr-snapshot.outputs.base_sha }}",
-    );
-    expect(transition).not.toContain(
-      "ref: ${{ github.event.pull_request.head.sha }}",
-    );
-    expect(transition).toContain("persist-credentials: false");
-    expect(transition).toContain("git -C .cluster-policy rev-parse HEAD");
-    expect(transition).toContain("scripts/check-cluster-scope.mjs");
-    expect(transition).toContain(
+    expect(workflow).toContain("contents: read");
+    expect(workflow).toContain("pull-requests: write");
+    expect(workflow).toContain("statuses: write");
+    expect(workflow).not.toContain("contents: write");
+    expect(workflow).not.toContain("pull-requests: read");
+    expect(workflow).not.toContain("issues: read");
+    expect(workflow).not.toContain("issues: write");
+    expect(workflow).toContain("PR-label DELETE returned 403");
+    expect(workflow).toContain(
       `jq -er '.sensitive | if type == "boolean" then tostring else error("invalid .sensitive") end'`,
     );
-    expect(transition).toContain(
+    expect(workflow).toContain(
       `jq -er '.violation | if type == "boolean" then tostring else error("invalid .violation") end'`,
     );
-    expect(transition).toContain(
+    expect(workflow).toContain(
       `jq -er '.reason | if type == "string" then . else error("invalid .reason") end'`,
     );
-    expect(transition).not.toContain("jq -er '.sensitive'");
-    expect(transition).not.toContain("jq -er '.violation'");
-    expect(transition).toContain(
-      "scripts/check-cluster-review-attestation.mjs",
-    );
-    expect(transition).toContain(
-      "name: Enforce transition cluster review attestation",
-    );
-    expect(transition).toContain(
-      "if: steps.cluster-attestation.outputs.attested != 'true'",
-    );
-    expect(transition).not.toContain(
-      "steps.cluster-check.outputs.violation == 'true' &&",
-    );
-    expect(transition).toContain("FINAL_DIGEST");
-    expect(transition).toContain('if [ "$FINAL_DIGEST" != "$EXPECTED_DIGEST" ]');
-    expect(transition).toContain("name: Finalize cluster policy status");
-    expect(transition).toContain("if: always()");
-    expect(transition).toContain("STATUS_STATE=failure");
-    expect(transition).toContain('elif [ "$ATTESTED" = "true" ]; then');
-    expect(transition).toContain(
-      "Current-head cluster review attestation is required for transition",
-    );
-    expect(transition).toContain("FINALIZER_FAILED=1");
-    expect(transition).toContain('elif [ "$PRIOR_JOB_STATUS" != "success" ]');
+    expect(workflow).not.toContain("jq -er '.sensitive'");
+    expect(workflow).not.toContain("jq -er '.violation'");
+    expect(workflow).toContain("cancel-in-progress: false");
+    expect(workflow).not.toContain("cancel-in-progress: true");
+    expect(workflow).toContain("name: Trusted Cluster Policy Evaluation");
+    expect(workflow).not.toContain("    name: Sensitive Area Cluster Check");
 
-    expect(finalizer).not.toContain("$VIOLATION");
-    expect(finalizer.match(/^\s*STATUS_STATE=success$/gm) ?? []).toHaveLength(1);
+    const stepsIndex = workflow.indexOf("    steps:");
+    const pendingIndex = workflow.indexOf("      - name: Publish pending cluster status");
+    const invalidationIndex = workflow.indexOf(
+      "      - name: Invalidate retained cluster review label",
+    );
+    const snapshotIndex = workflow.indexOf("      - name: Capture live pull request snapshot");
+    const checkoutIndex = workflow.indexOf("      - name: Checkout trusted cluster policy");
+    const verifyIndex = workflow.indexOf("      - name: Verify trusted cluster policy checkout");
+    const finalizerIndex = workflow.indexOf("      - name: Finalize cluster policy status");
+    expect(pendingIndex).toBe(workflow.indexOf("      - name:", stepsIndex));
+    expect(invalidationIndex).toBeGreaterThan(pendingIndex);
+    expect(snapshotIndex).toBeGreaterThan(invalidationIndex);
+    expect(checkoutIndex).toBeGreaterThan(snapshotIndex);
+    expect(verifyIndex).toBeGreaterThan(checkoutIndex);
+    expect(finalizerIndex).toBeGreaterThan(verifyIndex);
+    expect(workflow.match(/- name: Finalize cluster policy status/g)).toHaveLength(1);
+    expect(workflow).not.toContain("Revalidate live pull request snapshot");
+    expect(workflow).not.toContain("Publish final cluster status");
 
-    const digestIndex = finalizer.indexOf(
-      'elif [ "$FINAL_DIGEST" != "$EXPECTED_DIGEST" ]; then',
-    );
-    const attestedIndex = finalizer.indexOf(
-      'elif [ "$ATTESTED" = "true" ]; then',
-    );
-    const revalidateIndex = finalizer.indexOf(
-      "check-cluster-review-attestation.mjs",
-      attestedIndex,
-    );
-    const grepIndex = finalizer.indexOf(
-      'grep -Fxq "attested=true"',
-      revalidateIndex,
-    );
-    const successIndex = finalizer.indexOf(
-      "STATUS_STATE=success",
-      grepIndex,
-    );
-    const missingAttestationIndex = finalizer.indexOf(
-      "Current-head cluster review attestation is required for transition",
-      successIndex,
-    );
-    const statusPostIndex = finalizer.indexOf(
-      'gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}"',
-      missingAttestationIndex,
-    );
-
-    expect(attestedIndex).toBeGreaterThan(digestIndex);
-    expect(revalidateIndex).toBeGreaterThan(attestedIndex);
-    expect(grepIndex).toBeGreaterThan(revalidateIndex);
-    expect(successIndex).toBeGreaterThan(grepIndex);
-    expect(missingAttestationIndex).toBeGreaterThan(successIndex);
-    expect(statusPostIndex).toBeGreaterThan(missingAttestationIndex);
     expect(
-      finalizer.slice(missingAttestationIndex, statusPostIndex),
-    ).not.toContain("STATUS_STATE=success");
-  });
+      workflow.match(new RegExp("STATUS_CONTEXT: " + STATUS_CONTEXT, "g")),
+    ).toHaveLength(2);
+    expect(workflow).toContain("-f state=pending");
+    expect(workflow).toContain('repos/${REPO}/statuses/${HEAD_SHA}');
+    expect(workflow).toContain(
+      "issues/${PR_NUMBER}/labels/cluster-review-passed",
+    );
+    expect(workflow).toContain("github.event.action == 'edited'");
+    expect(workflow).toContain("github.event.action == 'synchronize'");
+    expect(workflow).toContain("github.event.action == 'reopened'");
+    expect(workflow).not.toContain("github.event.changes");
 
-  it("limits the temporary status-write surface to two audited workflows", () => {
-    const workflowDir = ".github/workflows";
-    const owners = readdirSync(workflowDir)
-      .filter((file) => /\.ya?ml$/.test(file))
-      .filter((file) =>
-        readFileSync(`${workflowDir}/${file}`, "utf8").includes(
-          "statuses: write",
-        ),
-      )
-      .sort();
+    expect(workflow).toContain("github.event.pull_request.head.sha");
+    expect(workflow).toContain('if ! [[ "$HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]');
+    expect(workflow).toContain('if [ "$LIVE_HEAD_SHA" != "$EVENT_HEAD_SHA" ]');
+    expect(workflow).toContain('echo "head_sha=${LIVE_HEAD_SHA}"');
+    expect(workflow).toContain('echo "base_sha=${LIVE_BASE_SHA}"');
+    expect(workflow).toContain(
+      "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7",
+    );
+    expect(workflow).not.toContain("actions/checkout@v7");
+    expect(workflow).toContain(
+      "ref: ${{ steps.pr-snapshot.outputs.base_sha }}",
+    );
+    expect(workflow).toContain("git -C .cluster-policy rev-parse HEAD");
+    expect(workflow).toContain(
+      'if [ "$CHECKED_OUT_SHA" != "$EXPECTED_BASE_SHA" ]',
+    );
+    expect(workflow).toContain("persist-credentials: false");
 
-    expect(owners).toEqual([
-      "cluster-detector.yml",
-      "cluster-review-label-invalidator.yml",
-    ]);
+    const finalizer = workflow.slice(finalizerIndex);
+    const finalSnapshotFetchIndex = finalizer.indexOf(
+      'gh api "repos/${REPO}/pulls/${PR_NUMBER}"',
+    );
+    const finalDigestIndex = finalizer.indexOf("FINAL_DIGEST=");
+    const finalAttestationIndex = finalizer.indexOf(
+      "node .cluster-policy/scripts/check-cluster-review-attestation.mjs",
+    );
+    const finalPostIndex = finalizer.indexOf(
+      'gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}"',
+    );
+    expect(finalSnapshotFetchIndex).toBeGreaterThan(-1);
+    expect(finalDigestIndex).toBeGreaterThan(finalSnapshotFetchIndex);
+    expect(finalAttestationIndex).toBeGreaterThan(finalDigestIndex);
+    expect(finalPostIndex).toBeGreaterThan(finalAttestationIndex);
+    expect(finalizer).toContain("if: always()");
+    expect(finalizer).toContain("PRIOR_JOB_STATUS: ${{ job.status }}");
+    expect(finalizer).toContain('elif [ "$PRIOR_JOB_STATUS" != "success" ]');
+    expect(finalizer).toContain(
+      'elif [ "$FINAL_DIGEST" != "$EXPECTED_DIGEST" ]',
+    );
+    expect(finalizer).toContain(
+      'elif [ "$VIOLATION" = "true" ] && [ "$ATTESTED" = "true" ]',
+    );
+    expect(finalizer).toContain("STATUS_STATE=failure");
+    expect(finalizer).toContain("STATUS_STATE=success");
+    expect(finalizer).toContain(
+      'if ! gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}"',
+    );
+    expect(finalizer).toContain('if [ "$FINALIZER_FAILED" -ne 0 ]');
+    expect(finalizer).toContain("exit 1");
+
+    expect(workflow).toContain(
+      ".cluster-policy/scripts/check-cluster-scope.mjs",
+    );
+    expect(workflow).toContain(
+      ".cluster-policy/scripts/check-cluster-review-attestation.mjs",
+    );
+    expect(workflow).not.toContain("node scripts/");
+    expect(workflow).not.toContain("ref: ${{ github.event.pull_request.head.sha }}");
+    expect(workflow).not.toContain("ref: ${{ github.event.pull_request.base.sha }}");
+    expect(workflow).not.toContain("|| true");
+    expect(
+      existsSync(".github/workflows/cluster-review-label-invalidator.yml"),
+    ).toBe(false);
   });
 });
