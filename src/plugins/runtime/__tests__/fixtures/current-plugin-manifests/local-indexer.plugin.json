@@ -1,7 +1,7 @@
 {
   "id": "local-indexer",
   "name": "LVIS Local Indexer",
-  "version": "0.5.19",
+  "version": "0.5.24",
   "icon": "Database",
   "publisher": "lvis-community",
   "installPolicy": "admin",
@@ -91,7 +91,7 @@
             "app"
           ]
         },
-        "xyz.lvis/pathFields": [
+        "lvisai/pathFields": [
           "folder",
           "paths"
         ]
@@ -142,7 +142,7 @@
             "app"
           ]
         },
-        "xyz.lvis/pathFields": [
+        "lvisai/pathFields": [
           "folder",
           "folders"
         ]
@@ -334,7 +334,7 @@
             "app"
           ]
         },
-        "xyz.lvis/pathFields": [
+        "lvisai/pathFields": [
           "folder"
         ]
       }

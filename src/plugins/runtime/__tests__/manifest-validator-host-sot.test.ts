@@ -53,12 +53,15 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     ).toBe(true);
   });
 
-  it("transitional: accepts a tool _meta carrying ONLY the legacy xyz.lvis/pathFields key (no lvisai/pathFields)", async () => {
-    // Locks the AJV-level compat: a published manifest that has not yet migrated
-    // to the new `lvisai/*` vendor prefix must still pass the load-time schema
-    // gate (the TS reader tests exercise mcpToolToPluginTool/toWireTool directly,
-    // which bypasses this compiled validator). Remove this test alongside the
-    // legacy schema property once the SDK + published plugins have migrated.
+  it("REJECTS a tool _meta carrying the legacy xyz.lvis/pathFields key (fail-closed — the dual-read was removed)", async () => {
+    // The `_meta` vendor namespace rename (`xyz.lvis/* → lvisai/*`) removed the
+    // transitional dual-read AND the schema's legacy property. Because tool `_meta`
+    // is `additionalProperties:false`, a manifest still declaring the legacy key is
+    // now REJECTED at the load-time schema gate — it is NOT silently accepted with
+    // the security-bearing pathFields ignored (that would be fail-OPEN: the
+    // permission gate would stop seeing the plugin's filesystem effects). This is
+    // the schema half of the Doctor safety net: rejection → `manifest_schema`
+    // → `manifest-validation-error` → auto-reinstall of the migrated version.
     const validator = await buildManifestValidator();
     const result = validator({
       id: "legacy-meta-plugin",
@@ -76,11 +79,17 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         },
       ],
     });
-    if (!result) {
-      // eslint-disable-next-line no-console
-      console.error("AJV errors:", validator.errors);
-    }
-    expect(result).toBe(true);
+    expect(result).toBe(false);
+    // The rejection specifically names the legacy key as the disallowed
+    // additional property (not some unrelated failure).
+    expect(validator.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          keyword: "additionalProperties",
+          params: expect.objectContaining({ additionalProperty: "xyz.lvis/pathFields" }),
+        }),
+      ]),
+    );
   });
 
   it("accepts networkAccess.allowPrivateNetworks", async () => {

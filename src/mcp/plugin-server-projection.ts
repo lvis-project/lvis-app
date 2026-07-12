@@ -38,7 +38,6 @@
  */
 import type { PluginManifest, Tool as McpTool } from "../plugins/types.js";
 import { toolVisibility } from "../plugins/runtime/tool-visibility.js";
-import { observeLegacyMetaKey } from "./legacy-meta-telemetry.js";
 
 /** The RC protocol revision LVIS plugin-servers speak. */
 const MCP_PROTOCOL_VERSION = "2026-07-28";
@@ -90,21 +89,17 @@ export interface McpDiscoverProjection {
  * stray/removed proprietary key can ride the wire. `outputSchema` (standard MCP)
  * is passed through verbatim when present.
  */
-function toWireTool(tool: McpTool, pluginId: string): McpToolProjection {
+function toWireTool(tool: McpTool): McpToolProjection {
   const meta: McpToolProjection["_meta"] = { ui: { visibility: toolVisibility(tool) } };
-  // Read the authored manifest key, preferring the new `lvisai/pathFields`;
-  // transitional: fall back to the legacy `xyz.lvis/pathFields` until published
-  // plugin manifests are migrated (then remove the fallback). The WIRE always
-  // emits ONLY the new key below. This site reads the ON-DISK manifest, so a legacy
-  // hit here is the signal that this installed plugin has not yet rolled forward —
-  // the observable removal gate for the schema's legacy property.
+  // Read the SOLE LVIS-proprietary manifest key, `lvisai/pathFields`. The legacy
+  // reverse-DNS `xyz.lvis/pathFields` dual-read was removed (the rename's
+  // transitional fallback): a manifest still carrying the legacy key is rejected
+  // fail-closed by the manifest schema (`_meta` is `additionalProperties:false`),
+  // so it never reaches this projection — it fails to load and the Plugin Doctor
+  // auto-repairs it by reinstalling the migrated marketplace version.
   const pathFields = tool._meta?.["lvisai/pathFields"];
-  const legacyPathFields = tool._meta?.["xyz.lvis/pathFields"];
   if (pathFields !== undefined) {
     meta["lvisai/pathFields"] = pathFields;
-  } else if (legacyPathFields !== undefined) {
-    observeLegacyMetaKey(pluginId, "pathFields");
-    meta["lvisai/pathFields"] = legacyPathFields;
   }
   return {
     name: tool.name,
@@ -130,7 +125,7 @@ function toWireTool(tool: McpTool, pluginId: string): McpToolProjection {
  * because they were withheld from the wire.
  */
 export function manifestToolsToMcpTools(manifest: PluginManifest): McpToolProjection[] {
-  return (manifest.tools ?? []).map((t) => toWireTool(t, manifest.id));
+  return (manifest.tools ?? []).map((t) => toWireTool(t));
 }
 
 /**
