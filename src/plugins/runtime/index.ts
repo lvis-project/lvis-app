@@ -71,7 +71,8 @@ import {
   declaredUiInvokableMethods,
   importPluginFactory,
 } from "./plugin-loader.js";
-import { isModelVisible } from "./tool-visibility.js";
+import { isModelVisible, isUiOnly } from "./tool-visibility.js";
+import type { InvocationOrigin } from "./origin-chain.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
 const log = createLogger("plugin-runtime");
@@ -162,13 +163,19 @@ export interface PluginPreparationProgressInput {
 }
 
 export interface PluginToolInvocationContext {
-  origin: "plugin" | "ui";
+  /** SoT: {@link InvocationOrigin} (`plugins/runtime/origin-chain.ts`). */
+  origin: InvocationOrigin;
   callerPluginId?: string;
   ownerPluginId?: string;
   /**
    * True only when the renderer call was made during an active browser user
    * activation. Renderer-provided booleans are not trusted directly; preload
    * derives this from `navigator.userActivation.isActive`.
+   *
+   * Only the trusted host renderer (`origin: "ui"` — the plugin's own React
+   * panel) can produce this. An `origin: "mcp-app"` call NEVER sets it: the
+   * guest iframe's activation state is not the host frame's, and a gesture claim
+   * synthesized inside untrusted card HTML is unverifiable.
    */
   userAction?: boolean;
   /**
@@ -193,8 +200,10 @@ export interface PluginToolInvocationContext {
    * because the reviewer continues to evaluate each call. The propagation
    * only changes the `headless` lane decision, not the per-tool deny/allow
    * rules or the per-tool category × source × trust matrix.
+   *
+   * SoT: {@link InvocationOrigin}.
    */
-  parentOrigin?: "plugin" | "ui";
+  parentOrigin?: InvocationOrigin;
 }
 
 export type PluginToolInvocationDelegate = (
@@ -202,6 +211,22 @@ export type PluginToolInvocationDelegate = (
   payload: unknown,
   context: PluginToolInvocationContext,
 ) => Promise<unknown>;
+
+/**
+ * Kebab-case deny code (CLAUDE.md §IPC Error Message Language Convention) for the
+ * ONE thing an MCP App can ask for that the host structurally cannot serve: an
+ * APP-ONLY-visibility plugin tool.
+ *
+ * Why it is denied rather than dispatched: an app-only tool is not projected to
+ * `tools/list` (`mcp/plugin-server-projection.ts`), so it is not a §6.4 registry
+ * `Tool` and the governed ToolExecutor cannot run it. The only path that CAN run
+ * it — `callDeclaredAppOnlyTool` — skips risk classification, the reviewer, the
+ * approval gate and the audit row, and is reserved for the plugin's own trusted
+ * panel (`origin: "ui"`), which can supply a real user gesture. An untrusted card
+ * cannot. So the app arm fails CLOSED here instead of reaching an ungoverned
+ * handler.
+ */
+export const MCP_APP_TOOL_NOT_APP_CALLABLE = "mcp-app-tool-not-app-callable";
 
 export interface PluginStartPreparationContext {
   pluginId: string;
@@ -1614,6 +1639,11 @@ export class PluginRuntime {
    * Used by the boot plugin-tool executor for UI-only runtime methods that bypass
    * the reviewer surface.
    *
+   * REACHABLE ONLY FROM THE TRUSTED PANEL (`origin: "ui"`). `isAppOnlyRuntimeInvocation`
+   * routes here only on a UI-effective chain, so an MCP App (`origin: "mcp-app"`,
+   * untrusted sandboxed iframe) can never land on this ungoverned path — its
+   * app-only calls are denied outright in {@link callFromApp}.
+   *
    * This bypass skips the ToolExecutor and therefore its Step-6
    * `runWithCeiling` cap, so the ceiling is enforced STRUCTURALLY here — at the
    * sole entry point of the bypass — rather than in the boot wiring that reaches
@@ -1664,8 +1694,14 @@ export class PluginRuntime {
   }
 
   /**
-   * Invoke a plugin method from the renderer, enforcing the UI invocation
-   * allowlist so only explicitly declared methods are reachable via the IPC bridge.
+   * Invoke a plugin method from the plugin's own TRUSTED first-party React panel
+   * (the host renderer), enforcing the UI invocation allowlist so only explicitly
+   * declared methods are reachable via the IPC bridge.
+   *
+   * This is the ONE origin that can carry a real user gesture, and therefore the
+   * ONE origin from which the ungoverned app-only dispatch path
+   * ({@link callDeclaredAppOnlyTool}) is reachable. An MCP App is NOT this — it
+   * uses {@link callFromApp}.
    */
   async callFromUi(
     method: string,
@@ -1691,6 +1727,67 @@ export class PluginRuntime {
       origin: "ui",
       ownerPluginId: entry.pluginId,
       userAction: options?.userAction === true,
+    });
+  }
+
+  /**
+   * Invoke a plugin method from an MCP APP — an untrusted `ui://` card running in
+   * a sandboxed iframe, calling a tool on its own server through the `oncalltool`
+   * bridge. The loopback arm of `mcp-ui-tool-call.ts` is the sole caller.
+   *
+   * Deliberately NOT {@link callFromUi}: an MCP App is not the plugin's trusted
+   * panel, and conflating the two is what let a hostile card reach the ungoverned
+   * app-only dispatch path. Three differences, all structural:
+   *
+   *  1. `origin: "mcp-app"` — so `isAppOnlyRuntimeInvocation` (which only ever
+   *     answers true for `"ui"`) can never route an app call into
+   *     {@link callDeclaredAppOnlyTool}. That also makes the auth `statusTool`
+   *     user-activation carve-out unreachable from a card.
+   *  2. NO `userAction` parameter. It is never true for an app, so it is not
+   *     accepted as an argument — there is nothing for a caller to get wrong.
+   *  3. An APP-ONLY tool fails CLOSED here (see {@link MCP_APP_TOOL_NOT_APP_CALLABLE}):
+   *     it is not in the §6.4 registry, so the governed executor could not run it
+   *     anyway, and the ungoverned path is panel-only. Only a MODEL-visible +
+   *     app-visible (dual) tool — the SEP-1865 default when `visibility` is
+   *     omitted — is app-callable.
+   *
+   * The app-visibility allow-list (`assertUiActionInvokable`, the spec MUST) is
+   * kept: the app surface is still gated on `_meta.ui.visibility` ∋ "app".
+   */
+  async callFromApp(method: string, payload?: unknown): Promise<unknown> {
+    const entry = this.methodMap.get(method);
+    if (!entry) {
+      this.throwIfToolOwnerNotReady(method);
+      throw new Error(`Plugin method not found: ${method}`);
+    }
+    const plugin = this.plugins.get(entry.pluginId);
+    this.throwIfPluginNotStarted(entry.pluginId);
+    assertUiActionInvokable({
+      method,
+      pluginId: entry.pluginId,
+      uiInvokable: plugin ? declaredUiInvokableMethods(plugin.manifest) : [],
+    });
+    // Fail-closed: app-visible but NOT model-visible ⇒ not a registry Tool ⇒ the
+    // governed executor cannot run it, and the ungoverned runtime dispatch belongs
+    // to the trusted panel. An unresolvable manifest tool takes the same branch
+    // (we never dispatch a tool whose declared visibility we could not read).
+    const tool = plugin?.manifest.tools.find((t) => t.name === method);
+    if (!tool || isUiOnly(tool)) {
+      throw new Error(
+        `[${MCP_APP_TOOL_NOT_APP_CALLABLE}] Tool '${method}' declares app-only visibility ` +
+          `(_meta.ui.visibility: ["app"]) and is not callable from an MCP App in this host: ` +
+          `app-only tools bypass the governed tool executor and are reserved for the plugin's ` +
+          `own trusted panel. Declare dual visibility (_meta.ui.visibility: ["model","app"]) ` +
+          `to make it app-callable.`,
+      );
+    }
+    if (!this.toolInvocationDelegate) {
+      throw new Error("Plugin tool executor is not wired; MCP App plugin call denied");
+    }
+    return this.toolInvocationDelegate(method, payload, {
+      origin: "mcp-app",
+      ownerPluginId: entry.pluginId,
+      userAction: false,
     });
   }
 
