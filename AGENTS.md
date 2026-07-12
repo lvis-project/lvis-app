@@ -67,8 +67,12 @@ state durable constraints here and put detailed designs in their owning docs.
 - A shared payload field or enum literal requires a same-PR field-addition
   sweep: update the shared SoT, validators, producers, consumers, fixtures, and
   tests; search for residual inline copies before publishing.
-- Production runtime imports loaded outside a renderer bundle belong in
-  `dependencies`, with lockfile and packaged-path validation when applicable.
+- Top-level package imports used by unbundled runtime code (main, preload, CLI,
+  or worker) belong in `dependencies`, not `devDependencies`. Renderer/UI-only
+  packages bundled into `dist` by webpack/esbuild may remain in
+  `devDependencies`.
+- Runtime dependency changes update the lockfile and run the relevant
+  packaged-app smoke so missing packages cannot reach an installer.
 
 ## Validation: proportional during work, complete once at publish
 
