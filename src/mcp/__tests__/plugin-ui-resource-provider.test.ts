@@ -5,7 +5,7 @@
  * Content-serving: the plugin supplies the card bytes (`readHtml`, wired to
  * `PluginRuntime.readUiResource`), the manifest supplies the policy. The module is
  * PURE — no fs, no path — so these tests need no disk fixtures. Proves:
- *   - serves a declared own-namespace resource (plugin html + MANIFEST csp/permissions),
+ *   - serves a declared own-namespace resource (plugin html + the MANIFEST's csp),
  *   - rejects a cross-plugin uri authority (own-namespace-only),
  *   - rejects an undeclared uri — and never asks the plugin for it,
  *   - a rejecting plugin hook fails closed (no body),
@@ -24,7 +24,6 @@ const DECLS: PluginUiResourceDecl[] = [
   {
     uri: `ui://${PLUGIN_ID}/hello.html`,
     csp: { connectDomains: ["https://api.acme.example"] },
-    permissions: { clipboardWrite: {} },
   },
   { uri: `ui://${PLUGIN_ID}/plain.html` },
 ];
@@ -40,7 +39,7 @@ function providerWith(cards: Record<string, string>, declarations = DECLS) {
 }
 
 describe("createPluginUiResourceProvider — plugin ui:// serving chokepoint", () => {
-  it("serves a declared own-namespace resource: plugin HTML + the MANIFEST's csp/permissions", async () => {
+  it("serves a declared own-namespace resource: plugin HTML + the MANIFEST's csp", async () => {
     const uri = `ui://${PLUGIN_ID}/hello.html`;
     const { provider, readHtml } = providerWith({ [uri]: "<h1>hello</h1>" });
 
@@ -48,16 +47,14 @@ describe("createPluginUiResourceProvider — plugin ui:// serving chokepoint", (
     expect(res.html).toBe("<h1>hello</h1>");
     // Policy comes from the manifest declaration, NEVER from the hook.
     expect(res.csp).toEqual({ connectDomains: ["https://api.acme.example"] });
-    expect(res.permissions).toEqual({ clipboardWrite: {} });
     expect(readHtml).toHaveBeenCalledWith(uri);
   });
 
-  it("serves a declared resource that omits csp/permissions (both undefined)", async () => {
+  it("serves a declared resource that omits the csp (undefined ⇒ the host's default policy)", async () => {
     const uri = `ui://${PLUGIN_ID}/plain.html`;
     const res = await providerWith({ [uri]: "<p>plain</p>" }).provider.read(uri);
     expect(res.html).toBe("<p>plain</p>");
     expect(res.csp).toBeUndefined();
-    expect(res.permissions).toBeUndefined();
   });
 
   it("rejects a uri whose authority is a DIFFERENT plugin (own-namespace-only, fail-closed)", async () => {

@@ -238,7 +238,7 @@ export interface PluginManifest {
    * contract for interactive HTML cards (distinct from `ui[]`, which declares
    * host-mounted React sidebar panels). Each entry declares a
    * `ui://<pluginId>/<path>` uri plus that resource's OWN `_meta.ui` security
-   * POLICY (csp / permissions). The CONTENT is served by the plugin itself
+   * POLICY (its csp). The CONTENT is served by the plugin itself
    * ({@link RuntimePlugin.readUiResource}) — "declared policy, served content".
    *
    * When a tool result carries `_meta.ui.resourceUri` matching one of these uris,
@@ -1456,9 +1456,9 @@ export interface RuntimePlugin {
    *
    * Called only for a `uri` the manifest declared in `uiResources[]` and whose
    * authority the host already verified (own-namespace-only). Returns the card
-   * HTML. `csp` / `permissions` come from the MANIFEST — never from here: they are
-   * security policy, statically reviewable and covered by `manifestSha256`, so a
-   * hook cannot present a narrow CSP at review and widen it at runtime.
+   * HTML. The `csp` comes from the MANIFEST — never from here: it is security
+   * policy, statically reviewable and covered by `manifestSha256`, so a hook cannot
+   * present a narrow CSP at review and widen it at runtime.
    *
    * Bounded by the host at the single {@link PluginRuntime.readUiResource}
    * chokepoint (timeout + HTML size cap, fail-closed). @optional

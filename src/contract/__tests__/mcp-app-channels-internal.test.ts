@@ -21,6 +21,11 @@ const mcpAppChannels = [
   CHANNELS.mcp.detachedPayload,
   CHANNELS.mcp.serverDisconnected,
   CHANNELS.mcp.disposeUiSession,
+  // The `ui/request-display-mode` "inline" arm — CLOSES a host window (scoped to the
+  // card's own server), so it is internal for the same reason `openDetached` is.
+  CHANNELS.mcp.closeDetached,
+  // main→renderer: a detached card's window is gone. Host state, never externally reachable.
+  CHANNELS.mcp.detachedClosed,
   // `oncalltool` — an app runs a tool on its own server. The most sensitive of the
   // set (it EXECUTES), so it must never be publicly reachable either.
   CHANNELS.mcp.callTool,
@@ -39,6 +44,8 @@ describe("#885 MCP-app channels are internal (fail-closed)", () => {
   it("defines the expected byte-identical channel strings", () => {
     expect(CHANNELS.mcp.openDetached).toBe("lvis:mcp:open-detached");
     expect(CHANNELS.mcp.detachedPayload).toBe("lvis:mcp:detached-payload");
+    expect(CHANNELS.mcp.closeDetached).toBe("lvis:mcp:close-detached");
+    expect(CHANNELS.mcp.detachedClosed).toBe("lvis:mcp:detached-closed");
     expect(CHANNELS.mcp.serverDisconnected).toBe("lvis:mcp:server-disconnected");
     expect(CHANNELS.mcp.disposeUiSession).toBe("lvis:mcp:dispose-ui-session");
     expect(CHANNELS.mcp.callTool).toBe("lvis:mcp:call-tool");
@@ -63,10 +70,14 @@ describe("#885 MCP-app channels are internal (fail-closed)", () => {
     }
   });
 
-  it("classifies the two window-manager-registered handlers under detachedWindow", () => {
+  it("classifies the window-manager-registered handlers under detachedWindow", () => {
     const detached = new Set<string>(INTERNAL_HOST_CHANNELS.detachedWindow);
     expect(detached.has(CHANNELS.mcp.openDetached)).toBe(true);
     expect(detached.has(CHANNELS.mcp.detachedPayload)).toBe(true);
+    expect(detached.has(CHANNELS.mcp.closeDetached)).toBe(true);
+    // `detachedClosed` is a pure main→renderer EVENT (no ipcMain.handle), like
+    // `serverDisconnected` — this map records out-of-tree HANDLERS only.
+    expect(detached.has(CHANNELS.mcp.detachedClosed)).toBe(false);
   });
 
   it("does NOT bump CONTRACT_VERSION (all three are internal)", () => {

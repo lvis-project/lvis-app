@@ -75,7 +75,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
   // the resource's security policy. The card HTML is NOT a manifest field — the
   // plugin serves its own bytes (RuntimePlugin.readUiResource), so `uri` is the
   // only required member.
-  it("accepts a uiResources[] ui:// serving declaration (csp buckets + permissions)", async () => {
+  it("accepts a uiResources[] ui:// serving declaration (csp buckets)", async () => {
     const validator = await buildManifestValidator();
     expect(
       validator({
@@ -90,11 +90,38 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
           {
             uri: "ui://ui-resource-plugin/card.html",
             csp: { connectDomains: ["https://api.example.com"], resourceDomains: [] },
-            permissions: { clipboardWrite: {} },
           },
         ],
       }),
     ).toBe(true);
+  });
+
+  it("REJECTS a uiResources[] entry declaring `permissions` — the host does not model it", async () => {
+    // The spec's `permissions` (camera/mic/geolocation/clipboardWrite) delegates a
+    // powerful feature to the card's frame. That frame is `sandbox="allow-scripts"`
+    // with no `allow-same-origin` ⇒ an OPAQUE origin, which cannot be delegated one.
+    // The field used to be declared, threaded through the read model, and then dropped
+    // at the proxy-session mint — a knob an author could set that nothing honored. It
+    // is gone from the schema, so declaring it now fails validation LOUDLY instead of
+    // silently doing nothing.
+    const validator = await buildManifestValidator();
+    expect(
+      validator({
+        id: "ui-resource-plugin",
+        name: "UI Resource Plugin",
+        version: "1.0.0",
+        description: "Plugin serving a ui:// MCP App card.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+        uiResources: [
+          {
+            uri: "ui://ui-resource-plugin/card.html",
+            permissions: { clipboardWrite: {} },
+          },
+        ],
+      }),
+    ).toBe(false);
   });
 
   it("accepts a uiResources[] entry declaring only its uri (policy is optional)", async () => {
@@ -340,7 +367,6 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       {
         uri: "ui://full-featured-plugin/card.html",
         csp: { connectDomains: ["https://api.example.com"] },
-        permissions: { clipboardWrite: {} },
       },
     ],
     configSchema: {
@@ -379,7 +405,6 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       expect(parsed.uiResources?.[0]).toEqual({
         uri: "ui://full-featured-plugin/card.html",
         csp: { connectDomains: ["https://api.example.com"] },
-        permissions: { clipboardWrite: {} },
       });
 
       const search = parsed.tools.find((t) => t.name === "ff_search");

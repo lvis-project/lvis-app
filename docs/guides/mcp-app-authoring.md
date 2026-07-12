@@ -30,8 +30,7 @@ The rule that ties them together is **declared policy, served content**: the man
         "resourceDomains": ["https://cdn.example.com"], // img/script/style/font/media
         "frameDomains": [],                              // nested iframes → frame-src
         "baseUriDomains": []                             // base-uri
-      },
-      "permissions": { "clipboardWrite": {} }            // camera | microphone | geolocation | clipboardWrite
+      }
     }
   ]
 }
@@ -39,9 +38,9 @@ The rule that ties them together is **declared policy, served content**: the man
 
 - **`uri`** — `ui://<your-plugin-id>/<path>`. The authority must be your own plugin id; the host re-checks this fail-closed at serve time. You cannot serve into another plugin's namespace.
 - **`csp`** — domain *buckets*, not CSP directive names. Main **computes** the Content-Security-Policy response header from these; you never supply a header string. Omit a bucket to allow nothing in it. **Least privilege is not advice here — it is the whole point of the field being in the manifest**: a reviewer sees exactly what your card may reach before any of your code runs.
-- **`permissions`** — each key maps to a Permission-Policy feature on the inner iframe. Absent ⇒ **denied**. Ask for nothing you do not use.
+- **No powerful features.** The spec also defines a `permissions` block (camera / microphone / geolocation / clipboard-write). LVIS does not model it, and declaring it fails manifest validation. Your card runs in a frame with `sandbox="allow-scripts"` and no `allow-same-origin`, so it lives on an *opaque origin* — a powerful feature cannot be delegated to one. Design cards that do not need them; if you need the camera, do it in a tool, not in the card.
 
-Both `csp` and `permissions` stay in the *manifest* on purpose. If they came back from your `readUiResource` hook, a plugin could present a narrow policy at review and widen it at runtime.
+The `csp` stays in the *manifest* on purpose. If it came back from your `readUiResource` hook, a plugin could present a narrow policy at review and widen it at runtime.
 
 ## 2. Serve the HTML
 
@@ -130,16 +129,17 @@ app.onhostcontextchanged = (next) => applyTheme(next);
 
 ### The visibility gate on `callServerTool` — read this before you debug it
 
-The spec says a host **MUST** reject an app's call to a tool whose `_meta.ui.visibility` does not include `"app"`. LVIS enforces it. A tool that omits `visibility` gets the spec default `["model", "app"]`, so it is app-callable — but the moment you narrow a tool to `["model"]`, your card can no longer call it, by design.
+The spec says a host **MUST** reject an app's call to a tool whose `_meta.ui.visibility` does not include `"app"`. LVIS enforces it. A tool that omits `visibility` gets the spec default `["model", "app"]`, so it is app-callable out of the box — narrow it to `["model"]` and your card can no longer call it, by design.
 
 ```jsonc
 // plugin.json → tools[]
-{ "name": "my_plugin_refresh", "_meta": { "ui": { "visibility": ["model", "app"] } } }  // both
-{ "name": "my_plugin_delete",  "_meta": { "ui": { "visibility": ["model"] } } }          // model only — card cannot call
-{ "name": "my_plugin_ui_ping", "_meta": { "ui": { "visibility": ["app"] } } }            // card only — hidden from the model
+{ "name": "my_plugin_refresh" }                                                   // dual by default — your card CAN call it
+{ "name": "my_plugin_refresh", "_meta": { "ui": { "visibility": ["model", "app"] } } }  // the same thing, spelled out
+{ "name": "my_plugin_delete",  "_meta": { "ui": { "visibility": ["model"] } } }         // model only — card cannot call
+{ "name": "my_plugin_panel_ping", "_meta": { "ui": { "visibility": ["app"] } } }        // ⚠ NOT for cards — see below
 ```
 
-Use `["app"]` for tools that exist purely to serve your card; it keeps them out of the model's tool list.
+**Do not declare `["app"]` for a tool your card calls.** In LVIS that marks a tool for the plugin's own trusted React panel — an app-only tool never enters the risk-gated tool registry, so there is no gate to run it under, and a call from a card is refused. It is the one visibility a card cannot use. Give a card-callable tool the default (or dual) visibility. Making the spec's `["app"]` work for cards means governing non-registry tools, which is tracked as a follow-up, not shipped.
 
 **A call from your card is not more trusted than a call from the model.** It goes through the same host risk classifier and the same approval gate — a `write`/`shell`/`network` tool can prompt the user, and the user can deny it. Handle rejection in your UI; do not assume a call succeeds. Your card also cannot name a *different* server: the host binds the target from the trusted payload, and a cross-server call is denied.
 
@@ -174,7 +174,7 @@ app.sendMessage({ role: "user", content: [{ type: "text", text: "Summarize the Q
 
 What happens next depends on the host's state, and **your card cannot wake the model either way**:
 
-- **A turn is in flight** → your text joins the guidance queue and reaches the model as part of that turn.
+- **A turn is in flight** → your text joins the guidance queue and reaches the model as part of that turn, **with no user confirmation**. Be deliberate about what you send on this path: it is ungated. The rest of that turn is downgraded to your app's provenance, which force-asks the user before any `write` / `shell` / `network` tool the model then reaches for.
 - **No turn in flight** → the host raises a **staging card**; the user clicks to send. This is deliberate and matches every other host (VS Code fills the chat input without auto-sending; OpenAI requires a synchronous user gesture). An app that could start a turn on its own could drive the model with no one watching.
 
 Either way the message is tagged `app-emitted` and wrapped so the model sees it came from your app, not from the user's keyboard. Text is capped at 4096 characters. The two intents are exclusive: notification meta wins, and that message never reaches the conversation.
