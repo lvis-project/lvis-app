@@ -30,40 +30,7 @@ function exactLineCount(text, expected) {
   return text.split("\n").filter((line) => line === expected).length;
 }
 
-const RAW_HTML_CONTAINERS = new Set([
-  "blockquote",
-  "details",
-  "dialog",
-  "div",
-  "iframe",
-  "noembed",
-  "noframes",
-  "object",
-  "plaintext",
-  "pre",
-  "script",
-  "section",
-  "select",
-  "span",
-  "style",
-  "table",
-  "template",
-  "textarea",
-  "title",
-  "xmp",
-]);
-
-const RAW_TEXT_HTML_CONTAINERS = new Set([
-  "iframe",
-  "noembed",
-  "noframes",
-  "plaintext",
-  "script",
-  "style",
-  "textarea",
-  "title",
-  "xmp",
-]);
+const RAW_HTML_OPENING_TAG_PATTERN = /<[A-Za-z][A-Za-z0-9-]*\b[^>]*>/;
 
 function isInsideHtmlComment(text, index) {
   return text.lastIndexOf("<!--", index) > text.lastIndexOf("-->", index);
@@ -116,165 +83,15 @@ function isInsideMarkdownFence(text, index) {
   return openFence !== undefined;
 }
 
-function withoutMarkdownFencedCode(text) {
-  const visibleLines = [];
-  let openFence;
-  for (const line of text.split("\n")) {
-    const candidate = parseFenceLine(line);
-    if (openFence) {
-      if (candidate && closesFence(candidate, openFence)) {
-        openFence = undefined;
-      }
-      visibleLines.push("");
-      continue;
-    }
-    if (candidate && isFenceOpener(candidate)) {
-      openFence = {
-        character: candidate.marker[0],
-        length: candidate.marker.length,
-      };
-      visibleLines.push("");
-      continue;
-    }
-    visibleLines.push(line);
-  }
-  return visibleLines.join("\n");
+function isEvidenceDirectlyHidden(text, index) {
+  return isInsideHtmlComment(text, index) || isInsideMarkdownFence(text, index);
 }
 
-function maximalBacktickRunLength(text, index) {
-  if (text[index] !== "`") return 0;
-  let end = index + 1;
-  while (text[end] === "`") end += 1;
-  return end - index;
-}
-
-function blankPreservingNewlines(text) {
-  return text.replace(/[^\n]/g, " ");
-}
-
-function withoutMarkdownIndentedCode(text) {
-  const visibleLines = [];
-  let inIndentedCode = false;
-  let previousWasBlank = true;
-
-  for (const line of text.split("\n")) {
-    const isBlank = /^[ \t]*$/.test(line);
-    const isIndented = /^(?: {4}|\t)/.test(line);
-    if (inIndentedCode) {
-      if (isBlank || isIndented) {
-        visibleLines.push(blankPreservingNewlines(line));
-        previousWasBlank = isBlank;
-        continue;
-      }
-      inIndentedCode = false;
-    }
-
-    if (!isBlank && isIndented && previousWasBlank) {
-      inIndentedCode = true;
-      visibleLines.push(blankPreservingNewlines(line));
-    } else {
-      visibleLines.push(line);
-    }
-    previousWasBlank = isBlank;
-  }
-
-  return visibleLines.join("\n");
-}
-
-function isBackslashEscaped(text, index) {
-  let backslashCount = 0;
-  for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor -= 1) {
-    backslashCount += 1;
-  }
-  return backslashCount % 2 === 1;
-}
-
-function withoutMarkdownCodeSpans(text) {
-  const visible = [];
-  let cursor = 0;
-
-  while (cursor < text.length) {
-    const openingIndex = text.indexOf("`", cursor);
-    if (openingIndex < 0) {
-      visible.push(text.slice(cursor));
-      break;
-    }
-    visible.push(text.slice(cursor, openingIndex));
-
-    const openingLength = maximalBacktickRunLength(text, openingIndex);
-    if (isBackslashEscaped(text, openingIndex)) {
-      visible.push(text.slice(openingIndex, openingIndex + openingLength));
-      cursor = openingIndex + openingLength;
-      continue;
-    }
-    let searchIndex = openingIndex + openingLength;
-    let closingIndex = -1;
-
-    while (searchIndex < text.length) {
-      const candidateIndex = text.indexOf("`", searchIndex);
-      if (candidateIndex < 0) break;
-      const candidateLength = maximalBacktickRunLength(text, candidateIndex);
-      if (
-        candidateLength === openingLength
-        && !isBackslashEscaped(text, candidateIndex)
-      ) {
-        closingIndex = candidateIndex;
-        break;
-      }
-      searchIndex = candidateIndex + candidateLength;
-    }
-
-    if (closingIndex < 0) {
-      visible.push(text.slice(openingIndex, openingIndex + openingLength));
-      cursor = openingIndex + openingLength;
-      continue;
-    }
-
-    const spanEnd = closingIndex + openingLength;
-    visible.push(blankPreservingNewlines(text.slice(openingIndex, spanEnd)));
-    cursor = spanEnd;
-  }
-
-  return visible.join("");
-}
-
-function isInsideRawHtmlContainer(text, index) {
-  const stack = [];
-  const pattern = /<\/?([A-Za-z][A-Za-z0-9-]*)\b[^>]*>/g;
-  const visiblePrefix = withoutMarkdownFencedCode(
-    withoutHtmlComments(text.slice(0, index)),
-  );
-  const withoutIndentedCode = withoutMarkdownIndentedCode(visiblePrefix);
-  const withoutCodeSpans = withoutMarkdownCodeSpans(withoutIndentedCode);
-
-  for (const match of withoutCodeSpans.matchAll(pattern)) {
-    if (isBackslashEscaped(withoutCodeSpans, match.index)) continue;
-    const name = match[1].toLowerCase();
-    const closing = match[0].startsWith("</");
-    const rawTextContainer = stack.at(-1);
-    if (rawTextContainer && RAW_TEXT_HTML_CONTAINERS.has(rawTextContainer)) {
-      if (closing && name === rawTextContainer) stack.pop();
-      continue;
-    }
-    if (!RAW_HTML_CONTAINERS.has(name) && !RAW_TEXT_HTML_CONTAINERS.has(name)) {
-      continue;
-    }
-    if (closing) {
-      const openIndex = stack.lastIndexOf(name);
-      if (openIndex >= 0) stack.splice(openIndex);
-    } else {
-      stack.push(name);
-    }
-  }
-  return stack.length > 0;
-}
-
-function isEvidenceHidden(text, index) {
-  return (
-    isInsideHtmlComment(text, index) ||
-    isInsideMarkdownFence(text, index) ||
-    isInsideRawHtmlContainer(text, index)
-  );
+// Intentionally conservative: any raw opening-tag-shaped token before the gate
+// rejects the attestation, even when Markdown would render it as literal text.
+// Put the review gate before raw HTML; false negatives are safer than hidden evidence.
+function hasRawHtmlOpeningTagBefore(text, index) {
+  return RAW_HTML_OPENING_TAG_PATTERN.test(text.slice(0, index));
 }
 
 export function evaluateClusterReviewAttestation(pullRequest, triggerEvent) {
@@ -348,17 +165,21 @@ export function evaluateClusterReviewAttestation(pullRequest, triggerEvent) {
   if (sectionMatches.length === 0) return rejected("missing-section");
   if (sectionMatches.length > 1) return rejected("duplicate-section");
 
+  const sectionStart = sectionMatches[0].index;
+  if (hasRawHtmlOpeningTagBefore(body, sectionStart)) {
+    return rejected("table-not-visible");
+  }
+
   if (TEMPLATE_PLACEHOLDERS.some((placeholder) => body.includes(placeholder))) {
     return rejected("template-placeholder");
   }
 
-  const sectionStart = sectionMatches[0].index;
   const nextHeadingPattern = /^## .+$/gm;
   nextHeadingPattern.lastIndex = sectionStart + SECTION_HEADING.length;
   const nextHeading = nextHeadingPattern.exec(body);
   const sectionEnd = nextHeading?.index ?? body.length;
   const section = body.slice(sectionStart, sectionEnd);
-  if (isEvidenceHidden(body, sectionStart)) return rejected("table-not-visible");
+  if (isEvidenceDirectlyHidden(body, sectionStart)) return rejected("table-not-visible");
   const outsideSection = body.slice(0, sectionStart) + body.slice(sectionEnd);
   if (
     /^Reviewed HEAD:/m.test(outsideSection) ||
@@ -382,7 +203,6 @@ export function evaluateClusterReviewAttestation(pullRequest, triggerEvent) {
 
   if (exactLineCount(section, TABLE_HEADER) !== 1) return rejected("invalid-table-header");
   if (exactLineCount(section, TABLE_SEPARATOR) !== 1) return rejected("invalid-table-separator");
-  if (/^(```|~~~)/m.test(section)) return rejected("table-not-visible");
 
   const tableBlockPattern = new RegExp(
     [
@@ -398,7 +218,12 @@ export function evaluateClusterReviewAttestation(pullRequest, triggerEvent) {
   if (tableBlocks.length !== 1) return rejected("invalid-table-block");
   const [tableBlock] = tableBlocks;
   const tableIndex = sectionStart + tableBlock.index;
-  if (isEvidenceHidden(body, tableIndex)) return rejected("table-not-visible");
+  if (
+    isEvidenceDirectlyHidden(body, tableIndex)
+    || hasRawHtmlOpeningTagBefore(body, tableIndex)
+  ) {
+    return rejected("table-not-visible");
+  }
 
   const tableRows = REVIEW_ROLES.map((role, index) => ({
     label: role.label,

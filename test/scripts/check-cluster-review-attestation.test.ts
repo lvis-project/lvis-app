@@ -261,13 +261,13 @@ describe("cluster review attestation", () => {
         pullRequest({
           body: "\\` literal\n`\n<details>\n`\n" + validBody(),
         }),
-      ),
-    ).toEqual({ attested: true, reason: "attested" });
+      ).reason,
+    ).toBe("table-not-visible");
     expect(
       evaluateClusterReviewAttestation(
         pullRequest({ body: "`\n<details>\n`\n" + validBody() }),
-      ),
-    ).toEqual({ attested: true, reason: "attested" });
+      ).reason,
+    ).toBe("table-not-visible");
     expect(
       evaluateClusterReviewAttestation(
         pullRequest({
@@ -280,8 +280,8 @@ describe("cluster review attestation", () => {
         pullRequest({
           body: "    <details>\n\n" + validBody() + "\n</details>",
         }),
-      ),
-    ).toEqual({ attested: true, reason: "attested" });
+      ).reason,
+    ).toBe("table-not-visible");
     expect(
       evaluateClusterReviewAttestation(
         pullRequest({
@@ -331,6 +331,36 @@ describe("cluster review attestation", () => {
         }),
       ).reason,
     ).toBe("table-not-visible");
+    for (const body of [
+      "<!-- <details> -->\n" + validBody(),
+      "```html\n<details>\n```\n" + validBody(),
+      "\\<details>\n" + validBody(),
+      "<details>\n\n### note\n    </details>\n\n" + validBody() + "\n</details>",
+      "<details>\n\n---\n    </details>\n\n" + validBody() + "\n</details>",
+    ]) {
+      expect(evaluateClusterReviewAttestation(pullRequest({ body })).reason).toBe(
+        "table-not-visible",
+      );
+    }
+    expect(
+      evaluateClusterReviewAttestation(
+        pullRequest({ body: "<!--\n" + validBody() + "\n-->" }),
+      ).reason,
+    ).toBe("table-not-visible");
+    const htmlWrappedTable = validBody().replace(
+      `Reviewed HEAD: \`${HEAD}\``,
+      `<details>\nReviewed HEAD: \`${HEAD}\``,
+    ) + "\n</details>";
+    expect(
+      evaluateClusterReviewAttestation(
+        pullRequest({ body: htmlWrappedTable }),
+      ).reason,
+    ).toBe("table-not-visible");
+    expect(
+      evaluateClusterReviewAttestation(
+        pullRequest({ body: "</details>\n" + validBody() }),
+      ),
+    ).toEqual({ attested: true, reason: "attested" });
   });
 
   it("rejects malformed or duplicate Reviewed HEAD candidates", () => {
