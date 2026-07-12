@@ -5,9 +5,11 @@
  * Builds the in-process HookRunner, the script-hook system, the plugin-surface
  * ToolExecutor (with the sandbox-filesystem-contained relaxation coupling), the
  * plugin-surface permission scope, and the `invokePluginTool` delegate that
- * routes plugin/UI-origin tool calls through the executor (UI-only runtime
- * invocations skip straight to the runtime). Installs the delegate on the late-
- * binding ref + the plugin runtime.
+ * routes every plugin tool call — from the model ("plugin"), the plugin's own
+ * trusted panel ("ui"), or an MCP App card ("mcp-app") — through the executor.
+ * The ONE exception is the app-only-visibility runtime dispatch, which skips
+ * straight to the runtime and is reachable from the trusted panel ORIGIN ALONE.
+ * Installs the delegate on the late-binding ref + the plugin runtime.
  */
 import { randomUUID } from "node:crypto";
 import { BrowserWindow as BrowserWindowValue } from "electron";
@@ -89,19 +91,22 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     payload: unknown,
     context: PluginToolInvocationContext,
   ): Promise<unknown> => {
-    // Issue #664 P2 — UI-origin chain propagation. Enter an
-    // AsyncLocalStorage frame so nested ctx.callTool(...) invocations from
-    // a wrapper handler inherit the outermost UI origin. `parentOrigin`
-    // is the explicit handoff (e.g. tests / future bridges that want to
-    // pin the chain start); the ambient chain (set by an outer
-    // invokePluginTool) takes precedence over a bare "plugin" current so
-    // a UI→wrapper→inner chain stays UI all the way down.
+    // Issue #664 P2 — origin-chain propagation. Enter an AsyncLocalStorage
+    // frame so nested ctx.callTool(...) invocations from a wrapper handler
+    // inherit the outermost origin. `parentOrigin` is the explicit handoff
+    // (e.g. tests / future bridges that want to pin the chain start); the
+    // ambient chain (set by an outer invokePluginTool) takes precedence over a
+    // bare "plugin" current so a UI→wrapper→inner chain stays UI all the way
+    // down. `runWithInvocationOrigin` owns that precedence (least-trusted wins:
+    // mcp-app > ui > plugin), so an MCP-App-rooted chain likewise stays
+    // "mcp-app" at every depth and can never be laundered into "ui".
     return runWithInvocationOrigin(context.origin, context.parentOrigin, async () => {
       const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
       if (isAppOnlyRuntimeInvocation(pluginRuntime, toolName, context, effectiveOrigin)) {
-        // App-only dispatch path — routes to the runtime handler directly
-        // (skipping the ToolExecutor and its Step-6 ceiling). The governed
-        // `runWithCeiling` cap is NOT re-added here: it is enforced
+        // App-only dispatch path — TRUSTED PANEL ONLY (`effectiveOrigin === "ui"`;
+        // an "mcp-app" chain never satisfies the predicate). Routes to the runtime
+        // handler directly, skipping the ToolExecutor and its Step-6 ceiling. The
+        // governed `runWithCeiling` cap is NOT re-added here: it is enforced
         // STRUCTURALLY inside `PluginRuntime.callDeclaredAppOnlyTool` (the sole
         // entry point of the bypass), so a hung app-only handler cannot block
         // the renderer caller even if this dispatch is ever reverted to a
@@ -128,9 +133,17 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
             // headless follows the *effective* chain origin (#664 P2):
             // a UI-rooted chain keeps `headless: false` even after one or
             // more `ctx.callTool` hops, so the user's outer approval is
-            // honoured and the reviewer lane is not re-engaged.
-            headless: effectiveOrigin !== "ui",
+            // honoured and the reviewer lane is not re-engaged. An MCP-App
+            // chain is foreground too — the user is looking at the card and CAN
+            // be asked — so only a plugin/LLM-emitted chain is headless. (This
+            // is exactly the lane an app call had when it dispatched as "ui";
+            // splitting the origin changed WHO may reach the ungoverned bypass,
+            // not whether a card's governed call can prompt the user.)
+            headless: effectiveOrigin === "plugin",
             trustOrigin: "plugin-emitted",
+            // The user-gesture credit is the trusted PANEL's alone: an "mcp-app"
+            // chain never carries `userAction` (callFromApp does not accept one),
+            // and the explicit origin check keeps that true even if it ever did.
             pluginPanelUserAction: effectiveOrigin === "ui" && context.userAction === true,
           }),
         },

@@ -36,13 +36,13 @@ async function setup() {
   handlers.clear();
   vi.clearAllMocks();
 
-  const callFromUi = vi.fn(async () => "plugin-result");
+  const callFromApp = vi.fn(async () => "plugin-result");
   const invokePluginTool = vi.fn(async () => "external-result");
 
   const deps = {
     pluginRuntime: {
       resolveToolOwner: vi.fn((method: string) => (method === "acme_open" ? "acme-cards" : undefined)),
-      callFromUi,
+      callFromApp,
       getPerfStats: vi.fn(() => ({})),
     },
     pluginLoopbackManager: {
@@ -75,7 +75,7 @@ async function setup() {
 
   const { registerPluginsHandlers } = await import("../plugins.js");
   registerPluginsHandlers(deps as never);
-  return { deps, callFromUi, invokePluginTool };
+  return { deps, callFromApp, invokePluginTool };
 }
 
 beforeEach(() => {
@@ -84,7 +84,7 @@ beforeEach(() => {
 
 describe("lvis:mcp:call-tool — sender gate", () => {
   it("rejects an unauthorized sender frame before touching the backend", async () => {
-    const { deps, callFromUi, invokePluginTool } = await setup();
+    const { deps, callFromApp, invokePluginTool } = await setup();
     const handler = handlers.get(CHANNEL)!;
 
     const result = await handler(
@@ -95,13 +95,13 @@ describe("lvis:mcp:call-tool — sender gate", () => {
     );
 
     expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
-    expect(callFromUi).not.toHaveBeenCalled();
+    expect(callFromApp).not.toHaveBeenCalled();
     expect(invokePluginTool).not.toHaveBeenCalled();
     expect(deps.auditLogger.log).toHaveBeenCalled(); // auditUnauthorized
   });
 
   it("rejects a plugin-ui-shell frame (mutating channel ⇒ host-renderer-only)", async () => {
-    const { callFromUi } = await setup();
+    const { callFromApp } = await setup();
     const handler = handlers.get(CHANNEL)!;
 
     const result = await handler(
@@ -112,13 +112,13 @@ describe("lvis:mcp:call-tool — sender gate", () => {
     );
 
     expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
-    expect(callFromUi).not.toHaveBeenCalled();
+    expect(callFromApp).not.toHaveBeenCalled();
   });
 });
 
 describe("lvis:mcp:call-tool — tool-owner == serverId (enforced once, here)", () => {
   it("denies a plugin card asking for a tool its plugin does not own", async () => {
-    const { deps, callFromUi } = await setup();
+    const { deps, callFromApp } = await setup();
 
     const result = await invoke(CHANNEL, "acme-cards", "other_plugin_tool", {});
 
@@ -127,7 +127,7 @@ describe("lvis:mcp:call-tool — tool-owner == serverId (enforced once, here)", 
       error: "cross-server-call-denied",
       message: "Tool 'other_plugin_tool' is not owned by MCP server 'acme-cards'",
     });
-    expect(callFromUi).not.toHaveBeenCalled();
+    expect(callFromApp).not.toHaveBeenCalled();
     expect(deps.auditLogger.log).toHaveBeenCalledWith(
       expect.objectContaining({ input: expect.stringContaining("cross-server call denied") }),
     );
@@ -170,18 +170,20 @@ describe("lvis:mcp:call-tool — tool-owner == serverId (enforced once, here)", 
 });
 
 describe("lvis:mcp:call-tool — allowed calls take the gated backend", () => {
-  it("routes a plugin card's own tool through PluginRuntime.callFromUi (userAction:false)", async () => {
-    const { callFromUi, invokePluginTool } = await setup();
+  it("routes a plugin card's own tool through PluginRuntime.callFromApp — the APP path, not the panel's callFromUi", async () => {
+    const { callFromApp, invokePluginTool } = await setup();
 
     const result = await invoke(CHANNEL, "acme-cards", "acme_open", { id: 7 });
 
     expect(result).toEqual({ ok: true, result: "plugin-result" });
-    expect(callFromUi).toHaveBeenCalledWith("acme_open", { id: 7 }, { userAction: false });
+    // Two args — the app path has no `userAction` option to pass: a gesture claim
+    // from inside an untrusted iframe is unverifiable, so it does not exist here.
+    expect(callFromApp).toHaveBeenCalledWith("acme_open", { id: 7 });
     expect(invokePluginTool).not.toHaveBeenCalled();
   });
 
-  it("routes an external card's own tool through the gated ToolExecutor delegate", async () => {
-    const { invokePluginTool, callFromUi } = await setup();
+  it("routes an external card's own tool through the gated ToolExecutor delegate (origin: mcp-app)", async () => {
+    const { invokePluginTool, callFromApp } = await setup();
 
     const result = await invoke(CHANNEL, "github", "query", { q: "x" });
 
@@ -189,20 +191,20 @@ describe("lvis:mcp:call-tool — allowed calls take the gated backend", () => {
     expect(invokePluginTool).toHaveBeenCalledWith(
       "mcp_gh_query",
       { q: "x" },
-      { origin: "ui", userAction: false },
+      { origin: "mcp-app", userAction: false },
     );
-    expect(callFromUi).not.toHaveBeenCalled();
+    expect(callFromApp).not.toHaveBeenCalled();
   });
 
   it("coerces non-object args to an empty input rather than forwarding junk", async () => {
-    const { callFromUi } = await setup();
+    const { callFromApp } = await setup();
     await invoke(CHANNEL, "acme-cards", "acme_open", "not-an-object");
-    expect(callFromUi).toHaveBeenCalledWith("acme_open", {}, { userAction: false });
+    expect(callFromApp).toHaveBeenCalledWith("acme_open", {});
   });
 
   it("turns a gate DENIAL into an outcome (never a throw across the IPC)", async () => {
-    const { deps, callFromUi } = await setup();
-    callFromUi.mockRejectedValueOnce(new Error("Tool execution denied by user"));
+    const { deps, callFromApp } = await setup();
+    callFromApp.mockRejectedValueOnce(new Error("Tool execution denied by user"));
 
     const result = await invoke(CHANNEL, "acme-cards", "acme_open", {});
 

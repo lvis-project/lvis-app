@@ -28,6 +28,7 @@ import {
   createPluginUiResourceProvider,
   type PluginUiResourceProvider,
 } from "./plugin-ui-resource-provider.js";
+import { createMcpServerDisconnectedSink } from "./mcp-server-disconnect-sink.js";
 import { createLogger } from "../lib/logger.js";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { PluginManifest } from "../plugins/types.js";
@@ -41,6 +42,19 @@ export class PluginLoopbackManager {
   constructor(
     private readonly runtime: PluginRuntime,
     private readonly toolRegistry: ToolRegistry,
+    /**
+     * #885 b3 teardown sink — the SAME factory `McpManager` gets, so a plugin's
+     * in-process MCP server going away is indistinguishable, to a rendered card,
+     * from an external server going away (`serverDisconnected` broadcast →
+     * detached-window close → partition clear). A loopback server's id IS its
+     * pluginId, so the payload needs no translation.
+     *
+     * It DEFAULTS to the real sink rather than being injected by boot: this arm
+     * used to be silent, and a default-on sink means no future construction site
+     * can re-introduce that silence by forgetting to wire it. Tests inject a stub.
+     */
+    private readonly onServerDisconnected: (serverId: string) => void =
+      createMcpServerDisconnectedSink(),
   ) {}
 
   /**
@@ -112,12 +126,22 @@ export class PluginLoopbackManager {
     });
   }
 
-  /** Stop a plugin's host and unregister its tools. No-op if not running. */
+  /**
+   * Stop a plugin's host and unregister its tools. No-op if not running.
+   *
+   * Emits the SAME `serverDisconnected` teardown the external arm emits, AFTER the
+   * server is actually down — a disabled plugin's live MCP-App cards must flip to
+   * the `mcp-app-disconnected` placeholder exactly like an external server's do,
+   * rather than staying rendered and interactive against a server that is gone.
+   * (`start()`'s atomic reload replaces the superseded host with `dispose()`, not
+   * `stop()`, so a reload deliberately does NOT emit a disconnect.)
+   */
   async stop(pluginId: string): Promise<void> {
     const host = this.hosts.get(pluginId);
     if (!host) return;
     this.hosts.delete(pluginId);
     await host.stop();
+    this.onServerDisconnected(pluginId);
     log.info(`loopback plugin '${pluginId}' stopped`);
   }
 

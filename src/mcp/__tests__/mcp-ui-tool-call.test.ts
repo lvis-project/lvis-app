@@ -97,9 +97,10 @@ describe("external tool-call source — the SPEC MUST (visibility) and the gate"
     const { source, invoker } = externalSource([externalTool("github", "query", ["model", "app"])]);
 
     await expect(source.callTool("github", "query", { q: "x" })).resolves.toBe("tool-output");
-    // The NAMESPACED registry name (the gated `Tool`), the app's args, and a
-    // foreground UI origin that is NEVER marked user-initiated.
-    expect(invoker).toHaveBeenCalledWith("mcp_gh_query", { q: "x" }, { origin: "ui", userAction: false });
+    // The NAMESPACED registry name (the gated `Tool`), the app's args, and the
+    // APP origin (never "ui" — a card is not the plugin's trusted panel) that is
+    // never marked user-initiated.
+    expect(invoker).toHaveBeenCalledWith("mcp_gh_query", { q: "x" }, { origin: "mcp-app", userAction: false });
   });
 
   it("denies the call when the executor is not wired yet", async () => {
@@ -113,11 +114,11 @@ describe("external tool-call source — the SPEC MUST (visibility) and the gate"
   });
 });
 
-describe("loopback tool-call source — plugin methods through callFromUi", () => {
+describe("loopback tool-call source — plugin methods through callFromApp", () => {
   it("resolves the owner from the runtime method map (a loopback serverId IS a pluginId)", () => {
     const runtime = {
       resolveToolOwner: vi.fn((m: string) => (m === "acme_open" ? "acme-cards" : undefined)),
-      callFromUi: vi.fn(async () => "plugin-result"),
+      callFromApp: vi.fn(async () => "plugin-result"),
     };
     const source = createLoopbackToolCallSource(runtime);
 
@@ -125,22 +126,31 @@ describe("loopback tool-call source — plugin methods through callFromUi", () =
     expect(source.resolveToolOwner("acme-cards", "other_open")).toBeUndefined();
   });
 
-  it("delegates to callFromUi (which enforces the visibility MUST + the gate) with userAction:false", async () => {
+  it("delegates to callFromApp (visibility MUST + app-only deny + the gate) — NOT callFromUi", async () => {
+    // The security-load-bearing wiring: a card is not the plugin's trusted panel,
+    // so it must not take the panel's invocation path. `callFromUi` dispatches
+    // `origin: "ui"`, the ONE origin from which the ungoverned app-only dispatch
+    // (`callDeclaredAppOnlyTool` — no risk check, no reviewer, no approval, no
+    // audit) is reachable. This source must never reach it.
+    const callFromUi = vi.fn(async () => "panel-path");
     const runtime = {
       resolveToolOwner: vi.fn(() => "acme-cards"),
-      callFromUi: vi.fn(async () => "plugin-result"),
+      callFromApp: vi.fn(async () => "plugin-result"),
+      callFromUi,
     };
     const source = createLoopbackToolCallSource(runtime);
 
     await expect(source.callTool("acme-cards", "acme_open", { id: 7 })).resolves.toBe("plugin-result");
-    expect(runtime.callFromUi).toHaveBeenCalledWith("acme_open", { id: 7 }, { userAction: false });
+    // Two args: there is no `userAction` option on the app path at all.
+    expect(runtime.callFromApp).toHaveBeenCalledWith("acme_open", { id: 7 });
+    expect(callFromUi).not.toHaveBeenCalled();
   });
 
-  it("propagates callFromUi's visibility denial (a tool without app visibility) unchanged", async () => {
+  it("propagates callFromApp's visibility denial (a tool without app visibility) unchanged", async () => {
     const runtime = {
       resolveToolOwner: vi.fn(() => "acme-cards"),
       // Exactly what `assertUiActionInvokable` throws for a non-app-visible method.
-      callFromUi: vi.fn(async () => {
+      callFromApp: vi.fn(async () => {
         throw new Error(
           "Method 'acme_secret' is not declared as a UI action for plugin 'acme-cards'.",
         );
@@ -150,6 +160,24 @@ describe("loopback tool-call source — plugin methods through callFromUi", () =
 
     await expect(source.callTool("acme-cards", "acme_secret", {})).rejects.toThrow(
       /not declared as a UI action/,
+    );
+  });
+
+  it("propagates callFromApp's app-only deny (the fail-closed card error) unchanged", async () => {
+    const runtime = {
+      resolveToolOwner: vi.fn(() => "acme-cards"),
+      callFromApp: vi.fn(async () => {
+        throw new Error(
+          "[mcp-app-tool-not-app-callable] Tool 'acme_auth_status' declares app-only visibility",
+        );
+      }),
+    };
+    const source = createLoopbackToolCallSource(runtime);
+
+    // The IPC handler turns this rejection into an `{ ok: false }` outcome, which
+    // the bridge renders as an `isError` CallToolResult — never a raw throw.
+    await expect(source.callTool("acme-cards", "acme_auth_status", {})).rejects.toThrow(
+      /mcp-app-tool-not-app-callable/,
     );
   });
 });

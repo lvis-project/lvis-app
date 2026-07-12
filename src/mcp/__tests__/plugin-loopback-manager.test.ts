@@ -185,6 +185,71 @@ describe("PluginLoopbackManager", () => {
   });
 });
 
+/**
+ * ARCH MINOR-1 — teardown parity between the two MCP server arms.
+ *
+ * A plugin's loopback host used to go down SILENTLY: only `McpManager` fed the
+ * `serverDisconnected` sink, so disabling a plugin left its live MCP-App cards
+ * rendered and interactive against a server that no longer existed, while an
+ * external server's cards correctly flipped to the `mcp-app-disconnected`
+ * placeholder. Same sink, same event shape, both arms.
+ */
+describe("PluginLoopbackManager — serverDisconnected broadcast (teardown parity)", () => {
+  it("stop() emits the disconnect for the stopped plugin (serverId === pluginId)", async () => {
+    const onDisconnected = vi.fn();
+    const mgr = new PluginLoopbackManager(fakeRuntime(), new ToolRegistry(), onDisconnected);
+    await mgr.start(manifest("com.a", ["a_one"]));
+
+    await mgr.stop("com.a");
+    expect(onDisconnected).toHaveBeenCalledTimes(1);
+    expect(onDisconnected).toHaveBeenCalledWith("com.a");
+  });
+
+  it("does not emit for an unknown plugin (stop is a no-op)", async () => {
+    const onDisconnected = vi.fn();
+    const mgr = new PluginLoopbackManager(fakeRuntime(), new ToolRegistry(), onDisconnected);
+    await mgr.stop("never-started");
+    expect(onDisconnected).not.toHaveBeenCalled();
+  });
+
+  it("emits once per host on stopAll, and once per REMOVED plugin on syncAll", async () => {
+    const onDisconnected = vi.fn();
+    const mgr = new PluginLoopbackManager(fakeRuntime(), new ToolRegistry(), onDisconnected);
+    await mgr.syncAll([
+      { pluginId: "com.a", manifest: manifest("com.a", ["a_one"]) },
+      { pluginId: "com.b", manifest: manifest("com.b", ["b_one"]) },
+    ]);
+    expect(onDisconnected).not.toHaveBeenCalled();
+
+    // Uninstall com.b: only the removed plugin's cards are disconnected.
+    await mgr.syncAll([{ pluginId: "com.a", manifest: manifest("com.a", ["a_one"]) }]);
+    expect(onDisconnected.mock.calls).toEqual([["com.b"]]);
+
+    await mgr.stopAll();
+    expect(onDisconnected.mock.calls).toEqual([["com.b"], ["com.a"]]);
+  });
+
+  it("a reload (start over a running host) does NOT emit a disconnect", async () => {
+    const onDisconnected = vi.fn();
+    const mgr = new PluginLoopbackManager(fakeRuntime(), new ToolRegistry(), onDisconnected);
+    await mgr.start(manifest("com.a", ["a_one"]));
+    // The atomic swap disposes the superseded host; the server is still there.
+    await mgr.start(manifest("com.a", ["a_two"]));
+    expect(onDisconnected).not.toHaveBeenCalled();
+  });
+
+  it("defaults to the real sink — a construction site cannot silently opt out", async () => {
+    // No sink injected: the default is the SAME factory McpManager gets. It is
+    // best-effort by contract (its own try/catch swallows a headless-Electron
+    // failure), so stop() must still complete cleanly.
+    const registry = new ToolRegistry();
+    const mgr = new PluginLoopbackManager(fakeRuntime(), registry);
+    await mgr.start(manifest("com.a", ["a_one"]));
+    await expect(mgr.stop("com.a")).resolves.toBeUndefined();
+    expect(registry.findByName("a_one")).toBeUndefined();
+  });
+});
+
 describe("PluginLoopbackManager — ui:// resource serving (readUiResource)", () => {
   /**
    * Content-serving: the PLUGIN serves the card bytes through
