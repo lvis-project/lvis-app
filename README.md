@@ -222,7 +222,7 @@ PowerShell 5.x may also require `[Console]::OutputEncoding` updates because `chc
 
 ### ASRT sandbox access denied (`CreateProcessWithLogonW`, `0x80070005`)
 
-If `src/permissions/__tests__/asrt-sandbox.test.ts` fails on Windows with `WFP egress fence could not be verified` and `CreateProcessWithLogonW(srt-sandbox): Access is denied (0x80070005)`, use the following recovery sequence:
+If `src/permissions/__tests__/asrt-sandbox.test.ts` logs a `[asrt-sandbox] Windows OS sandbox cannot spawn as \`srt-sandbox\`` warning and **skips** its live-init tests on Windows — the sandbox provisioned but `CreateProcessWithLogonW(srt-sandbox)` is `Access is denied (0x80070005)`, so it provides no OS isolation — use the following recovery sequence to enable it (the tests then run for real instead of skipping):
 
 1. Ensure Secondary Logon is running:
    - `Get-Service seclogon`
