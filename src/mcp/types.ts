@@ -311,20 +311,19 @@ export interface McpUiResourceCsp {
 }
 
 /**
- * Sandbox permissions a UI resource requests (spec `McpUiResourcePermissions`).
- * Each maps to a Permission-Policy feature on the inner iframe. Absent ⇒ denied.
+ * The security-relevant `_meta.ui` a UI resource carries (spec `McpUiResourceMeta`).
+ *
+ * The spec also defines `permissions` (camera / microphone / geolocation /
+ * clipboardWrite, each a Permission-Policy feature on the inner iframe). LVIS does
+ * NOT model it: the inner frame is `sandbox="allow-scripts"` with no
+ * `allow-same-origin`, so it runs on an OPAQUE origin, and a powerful feature cannot
+ * be delegated to one. The field was declared here, threaded through the read model,
+ * and then dropped at the proxy-session mint — a knob plugin authors could set and
+ * nothing would honor. Absent ⇒ denied is the whole policy; a card gets no powerful
+ * features. Re-introduce it only together with the frame plumbing that proves it works.
  */
-export interface McpUiResourcePermissions {
-  camera?: Record<string, never>;
-  microphone?: Record<string, never>;
-  geolocation?: Record<string, never>;
-  clipboardWrite?: Record<string, never>;
-}
-
-/** The security-relevant `_meta.ui` a UI resource carries (spec `McpUiResourceMeta`). */
 export interface McpUiResourceMeta {
   csp?: McpUiResourceCsp;
-  permissions?: McpUiResourcePermissions;
 }
 
 /**
@@ -336,7 +335,6 @@ export interface McpUiResourceMeta {
 export interface McpUiResourceRead {
   html: string;
   csp?: McpUiResourceCsp;
-  permissions?: McpUiResourcePermissions;
 }
 
 /**
@@ -344,7 +342,7 @@ export interface McpUiResourceRead {
  * plugin→host serving contract for MCP App cards. This is the plugin-side analog
  * of an external MCP server's `resources/read` for a `ui://` resource, so BOTH
  * paths converge on the SAME {@link McpUiResourceRead} model (HTML + the
- * resource's OWN declared csp/permissions).
+ * resource's OWN declared csp).
  *
  * "Declared POLICY, served CONTENT": the manifest declares the uri and the
  * resource's security policy; the CONTENT comes from the plugin itself
@@ -352,10 +350,10 @@ export interface McpUiResourceRead {
  * `resources/read` with bytes. The host never resolves or reads a
  * plugin-declared disk path — the plugin IS the MCP server, the host relays.
  *
- * Why csp/permissions stay in the MANIFEST and are NOT returned by the hook: they
- * are security POLICY — static, schema-validated, reviewable before any plugin
- * code runs, and covered by `manifestSha256`. A runtime-supplied policy could
- * present a narrow CSP at review and widen it at serve time.
+ * Why the csp stays in the MANIFEST and is NOT returned by the hook: it is security
+ * POLICY — static, schema-validated, reviewable before any plugin code runs, and
+ * covered by `manifestSha256`. A runtime-supplied policy could present a narrow CSP
+ * at review and widen it at serve time.
  *
  * Security invariants (enforced fail-closed at serve time — see
  * `plugin-ui-resource-provider.ts`, the single chokepoint):
@@ -366,17 +364,15 @@ export interface McpUiResourceRead {
  *    namespace.
  *  - the uri MUST be one this manifest declared (declared-only) — this is what
  *    binds served content to the csp the host computes the CSP header from.
- *  - `csp` / `permissions` are the resource's OWN declared policy. Main COMPUTES
- *    the sandbox-proxy CSP header from them; the plugin never supplies a policy
- *    HEADER STRING, and the renderer can never inject one.
+ *  - `csp` is the resource's OWN declared policy. Main COMPUTES the sandbox-proxy
+ *    CSP header from it; the plugin never supplies a policy HEADER STRING, and the
+ *    renderer can never inject one.
  */
 export interface PluginUiResourceDecl {
   /** `ui://<pluginId>/<path>` — authority MUST equal the declaring plugin's id. */
   uri: string;
   /** The resource's own declared CSP (spec `McpUiResourceCsp`). @optional */
   csp?: McpUiResourceCsp;
-  /** Sandbox permissions the resource requests (spec `McpUiResourcePermissions`). @optional */
-  permissions?: McpUiResourcePermissions;
 }
 
 /**
