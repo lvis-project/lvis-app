@@ -157,6 +157,7 @@ describe("installer smoke and packaging discipline", () => {
     );
     expect(finalizer).toContain("exit 1");
     expect(clusterWorkflow).not.toContain("node scripts/");
+    expect(clusterWorkflow).not.toContain("CLAUDE.md");
     expect(clusterWorkflow).not.toContain("|| true");
     expect(clusterWorkflow).toContain(
       ".cluster-policy/scripts/check-cluster-scope.mjs",
@@ -228,6 +229,27 @@ describe("installer smoke and packaging discipline", () => {
       expect(guidance).toMatch(/sensitive/i);
     }
 
+    expect(agents).toContain("openFeatureNamespace");
+    expect(agents).toContain("never hand-roll `mkdir`");
+    expect(agents).toContain("`0o700` directory / `0o600`");
+    expect(agents).toContain("src/shared/tool-timeout-policy.ts");
+    expect(agents).toContain("TOOL_TIMEOUT_POLICY");
+    expect(agents).toContain("runWithCeiling");
+    expect(agents).toContain("AbortController");
+    expect(agents).toContain("plus `Tool Governance` and `Security And Audit`");
+    expect(agents).not.toContain("architecture section 6.3");
+    expect(agents).toContain("staged default-on for `darwin`");
+    expect(agents).toContain("opt-in for `linux`/`win32`");
+    expect(agents).toContain("LVIS_SANDBOX_ENABLED=1");
+    expect(agents).toContain("relaxation/effect-boundary coupling");
+    expect(agents).toContain("No Fallback Code");
+    expect(agents).toContain("plugin manifest field updates its schema and SDK");
+    expect(agents).toContain("HostApi change bumps every plugin dependency pin");
+    expect(agents).toContain("UI edits start with `grep` before editing");
+    expect(agents).toContain("app shells `*Window`");
+    expect(agents).toContain("bodies `*Content`, and modals `*Dialog`");
+    expect(agents).toContain("marketplace API, `gh`, or local sources");
+    expect(agents).toContain("not WebSearch. After three identical failures, change approach");
     expect(agents).toContain("sender/frame/origin checks");
     expect(agents).toContain("DLP handling");
     expect(agents).toContain("fail-closed defaults");

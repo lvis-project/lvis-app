@@ -14,7 +14,8 @@ state durable constraints here and put detailed designs in their owning docs.
 - Plugin integration is defined by `src/plugins/types.ts`, manifests, schemas,
   and HostApi self-registration. Do not add plugin-specific host branches.
 - Permission behavior follows `docs/architecture/permission-policy-design.md`
-  and architecture section 6.3. Release work follows
+  plus `Tool Governance` and `Security And Audit` in
+  `docs/architecture/architecture.md`. Release work follows
   `docs/development/release-process.md`.
 - `resources/AGENTS.md` is packaged runtime guidance for the in-app assistant.
   It is not the developer or coding-agent contract and does not override this
@@ -67,6 +68,21 @@ state durable constraints here and put detailed designs in their owning docs.
 - A shared payload field or enum literal requires a same-PR field-addition
   sweep: update the shared SoT, validators, producers, consumers, fixtures, and
   tests; search for residual inline copies before publishing.
+- New persisted state under `~/.lvis/<feature>/` uses `openFeatureNamespace`;
+  never hand-roll `mkdir` or mode bits outside its `0o700` directory / `0o600`
+  file chokepoint.
+- Tool and MCP timeouts come from `src/shared/tool-timeout-policy.ts` and
+  `TOOL_TIMEOUT_POLICY`; never hardcode them. Wire `runWithCeiling` cancellation
+  through its `AbortController`.
+- ASRT is staged default-on for `darwin` and opt-in for `linux`/`win32`.
+  Explicit `LVIS_SANDBOX_ENABLED=1` setup failure aborts; default mode may
+  gracefully degrade. Preserve relaxation/effect-boundary coupling.
+- No Fallback Code: a plugin manifest field updates its schema and SDK in the
+  same PR; a HostApi change bumps every plugin dependency pin in the same PR.
+- UI edits start with `grep` before editing. Name app shells `*Window`, reusable
+  bodies `*Content`, and modals `*Dialog`.
+- Private or non-indexed assets use the marketplace API, `gh`, or local sources,
+  not WebSearch. After three identical failures, change approach.
 - Top-level package imports used by unbundled runtime code (main, preload, CLI,
   or worker) belong in `dependencies`, not `devDependencies`. Renderer/UI-only
   packages bundled into `dist` by webpack/esbuild may remain in
