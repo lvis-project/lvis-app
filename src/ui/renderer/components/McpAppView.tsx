@@ -11,14 +11,16 @@
  * script-free **sandbox-proxy document** served from the privileged
  * `lvis-mcp-app://` scheme with a real CSP response header. The host-owned relay
  * preload running in that document then mounts the app HTML into an INNER
- * `<iframe sandbox="allow-scripts" srcdoc>`.
+ * `<iframe sandbox="allow-scripts allow-same-origin" srcdoc>` — the spec's required
+ * sandbox pair, so the inner frame inherits the proxy's per-server origin.
  *
  * That indirection is the whole point. An ext-apps guest connects with the default
  * `PostMessageTransport(window.parent, window.parent)`. A <webview> guest is a
  * TOP-LEVEL document, so `window.parent === window` and the app would post to
  * ITSELF — which is exactly why the previous hand-rolled bridge here was dead. In
- * the inner frame `window.parent` is the proxy: a real, different, opaque-origin
- * frame. So postMessage genuinely crosses and the app runs COMPLETELY UNMODIFIED.
+ * the inner frame `window.parent` is the proxy: a real, different FRAME (a different
+ * frame is what postMessage needs, not a different origin). So postMessage genuinely
+ * crosses and the app runs COMPLETELY UNMODIFIED.
  *
  * Message path:
  *   AppBridge ⇄ WebviewIpcTransport ⇄ <webview> ipc ⇄ relay preload ⇄ inner App

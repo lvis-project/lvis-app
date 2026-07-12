@@ -139,7 +139,7 @@
     },
     "uiResources": {
       "type": "array",
-      "description": "MCP App ui:// resources this plugin serves (distinct from `ui[]`, which declares host-mounted React sidebar panels). DECLARED POLICY, SERVED CONTENT: each entry declares a `ui://<pluginId>/<path>` uri plus that resource's OWN _meta.ui security policy (csp); the card HTML itself is served by the plugin at read time (`RuntimePlugin.readUiResource(uri)`), exactly as an external MCP server answers resources/read with bytes — the host never reads a plugin-declared disk path. When a tool result carries `_meta.ui.resourceUri` matching one of these uris, the loopback host asks the plugin for the HTML and renders it through the same sandbox-proxy + main-computed CSP path as an external MCP server's ui:// resource. Security (enforced fail-closed at serve time): the uri authority MUST equal the plugin id (own-namespace-only), the uri MUST be declared here (declared-only — this is what binds served content to a reviewed csp), and main COMPUTES the CSP header from csp — the plugin never supplies a policy header string. The csp stays in the manifest (not on the hook's return) so it is statically reviewable and covered by manifestSha256. NOTE: the spec's `permissions` (camera/microphone/geolocation/clipboardWrite) is deliberately NOT modelled — the inner frame is sandbox=allow-scripts with no allow-same-origin, so it runs on an opaque origin and cannot be delegated a powerful feature. A card gets none.",
+      "description": "MCP App ui:// resources this plugin serves (distinct from `ui[]`, which declares host-mounted React sidebar panels). DECLARED POLICY, SERVED CONTENT: each entry declares a `ui://<pluginId>/<path>` uri plus that resource's OWN _meta.ui security policy (csp/permissions); the card HTML itself is served by the plugin at read time (`RuntimePlugin.readUiResource(uri)`), exactly as an external MCP server answers resources/read with bytes — the host never reads a plugin-declared disk path. When a tool result carries `_meta.ui.resourceUri` matching one of these uris, the loopback host asks the plugin for the HTML and renders it through the same sandbox-proxy + main-computed CSP path as an external MCP server's ui:// resource. Security (enforced fail-closed at serve time): the uri authority MUST equal the plugin id (own-namespace-only), the uri MUST be declared here (declared-only — this is what binds served content to a reviewed policy), and main COMPUTES the CSP header AND the frame's Permissions-Policy `allow` attribute from csp/permissions — the plugin never supplies a policy header string or an allow-list. csp/permissions stay in the manifest (not on the hook's return) so they are statically reviewable and covered by manifestSha256. See mcpUiResourcePermissions for the accepted permission set (host-honorable, proven end-to-end).",
       "maxItems": 64,
       "items": {
         "type": "object",
@@ -152,7 +152,8 @@
             "pattern": "^ui://[a-z0-9][a-z0-9.-]*/.+",
             "maxLength": 512
           },
-          "csp": { "$ref": "#/definitions/mcpUiResourceCsp" }
+          "csp": { "$ref": "#/definitions/mcpUiResourceCsp" },
+          "permissions": { "$ref": "#/definitions/mcpUiResourcePermissions" }
         }
       }
     },
@@ -838,6 +839,28 @@
           "type": "array",
           "description": "Allowed base URIs for the document -> base-uri.",
           "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "mcpUiResourcePermissions": {
+      "$comment": "MCP Apps spec `McpUiResourcePermissions`, restricted to what this host can DEMONSTRABLY honor. Main derives the inner iframe's Permissions-Policy `allow` attribute AND the Electron session grant from this; the plugin never supplies either. An ABSENT key is denied. The inner frame carries `allow-same-origin` (spec origin requirement, apps.mdx:474-475), so it inherits the per-server proxy origin and a delegated feature can be honored. SOT for the accepted set: src/shared/mcp-app-permissions.ts MCP_APP_PERMISSION_FEATURES, proven end-to-end in test/e2e/ui/mcp-app-permissions.spec.ts. The spec's `clipboardWrite` is deliberately NOT accepted — measured, a script-initiated clipboard write is denied even when delegated — so declaring it FAILS validation loudly rather than silently doing nothing.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "camera": {
+          "type": "object",
+          "description": "Request the camera (getUserMedia video) for this card's frame. Absent means denied.",
+          "additionalProperties": false
+        },
+        "microphone": {
+          "type": "object",
+          "description": "Request the microphone (getUserMedia audio) for this card's frame. Absent means denied.",
+          "additionalProperties": false
+        },
+        "geolocation": {
+          "type": "object",
+          "description": "Request the Geolocation API for this card's frame. Absent means denied.",
+          "additionalProperties": false
         }
       }
     }
