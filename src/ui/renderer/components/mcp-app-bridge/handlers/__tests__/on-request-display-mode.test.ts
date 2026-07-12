@@ -51,20 +51,14 @@ describe("createOnRequestDisplayMode — the result is the mode ACTUALLY applied
 });
 
 describe("createOnRequestDisplayMode — an unadvertised mode is refused, once, here", () => {
-  it("rejects `pip` (not in the host's advertised set) with the card's current mode", async () => {
-    const { handler, applyMode } = build("inline");
-
-    await expect(handler({ mode: "pip" })).resolves.toEqual({ mode: "inline" });
-    // The refusal is a NO-OP, not a failed apply: nothing touched a window.
-    expect(applyMode).not.toHaveBeenCalled();
-  });
-
-  it("refuses `pip` from the fullscreen surface too — and answers `fullscreen`", async () => {
-    const { handler, applyMode } = build("fullscreen");
-
-    await expect(handler({ mode: "pip" })).resolves.toEqual({ mode: "fullscreen" });
-    expect(applyMode).not.toHaveBeenCalled();
-  });
+  // `pip` is now IN the advertised set (a renderer-side location store makes it real —
+  // see `mcp-app-card-location-store.ts`), so a `pip` request is FORWARDED to
+  // `applyMode` like any other advertised mode; it is exercised by the "honours exactly
+  // the advertised set" test below, which is drift-safe against the SoT rather than
+  // hardcoding a specific example. This handler-level module has no opinion on WHICH
+  // mount can actually honour a `pip` request from where — that decision (e.g. a
+  // detached-window mount declining a `pip` request) lives in `applyMode` itself
+  // (McpAppView), not here.
 
   it("refuses garbage a non-conforming app could send", async () => {
     const { handler, applyMode } = build("inline");

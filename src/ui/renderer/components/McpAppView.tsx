@@ -23,7 +23,7 @@
  * Message path:
  *   AppBridge ⇄ WebviewIpcTransport ⇄ <webview> ipc ⇄ relay preload ⇄ inner App
  */
-import { createElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createElement, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { McpUiPayload, McpUiResourceBundle } from "../../../mcp/types.js";
 import { Loader2, AlertCircle, PlugZap, ExternalLink } from "lucide-react";
@@ -52,6 +52,18 @@ import {
   type McpUiDisplayMode,
 } from "../../../shared/mcp-app-display-mode.js";
 import type { BridgeWebviewElement, WebviewIpcTransport } from "./webview-ipc-transport.js";
+// The renderer-side location authority: which of a card's THREE possible mounts
+// (inline home / pip / a specific detached window) is the currently live one. See
+// `mcp-app-card-location-store.ts` for why this moved out of local mount state — pip
+// introduces a mount (the pip panel) that is a DIFFERENT component than the card's
+// home, so "where is this card" can no longer be a boolean local to whichever mount
+// happened to start the move.
+import {
+  getCardLocation,
+  moveCard,
+  reviveCardIfAt,
+  subscribeCardLocation,
+} from "../state/mcp-app-card-location-store.js";
 // `openExternalUrl` (the `onopenlink` egress path) lives on `window.lvisApi`, reached
 // through the renderer's `getApi()` — NOT `window.lvis` (a curated subset without it).
 import { getApi } from "../api-client.js";
@@ -91,10 +103,23 @@ export function McpAppView({
    * `ui/update-model-context` has no error channel in the spec) would never find out.
    */
   originSessionId,
+  /**
+   * The id this mount's display-mode transitions are filed under in the shared
+   * location store — NOT the same as `cardIdRef` below (that one is deliberately
+   * "once per mount", used only for the `ui/update-model-context` slot). A HOME
+   * mount (the transcript / preview-rail instance that owns a card for its whole
+   * lifetime) leaves this undefined and mints its own on first render. An AWAY
+   * mount that renders on a home mount's behalf — today, `McpAppPipPanel` — is
+   * handed the home's id explicitly, so a move it makes (e.g. pip → fullscreen)
+   * lands on the SAME card the home mount is dormant for, not a fresh, unrelated
+   * one.
+   */
+  locationId,
 }: {
   payload: McpUiPayload;
   displayMode?: McpUiDisplayMode;
   originSessionId?: string;
+  locationId?: string;
 }) {
   const { t, locale } = useTranslation();
   // Host theme sources for the standard `McpUiHostContext`: shell (light/dark) and
@@ -133,6 +158,28 @@ export function McpAppView({
   // app never sees it and cannot name one, so it can only ever overwrite its own slot.
   const cardIdRef = useRef("");
   if (cardIdRef.current === "") cardIdRef.current = crypto.randomUUID();
+
+  // ── The card's LOCATION identity — shared with the store, distinct from cardIdRef ──
+  // See the `locationId` prop doc above. Minted once (seeded from the prop when this is
+  // an AWAY mount rendering on a home's behalf), stable for the mount's lifetime.
+  const cardLocationIdRef = useRef("");
+  if (cardLocationIdRef.current === "") cardLocationIdRef.current = locationId ?? crypto.randomUUID();
+
+  const subscribeLocation = useCallback(
+    (listener: () => void) => subscribeCardLocation(cardLocationIdRef.current, listener),
+    [],
+  );
+  const getLocationSnapshot = useCallback(
+    () => getCardLocation(cardLocationIdRef.current),
+    [],
+  );
+  // Where this card's ONE live mount currently is. For a HOME mount this can drift
+  // away from "inline" (the card moved elsewhere) without this mount's OWN
+  // `mountDisplayMode` ever changing — that prop is this MOUNT's fixed role, `location`
+  // is the CARD's current whereabouts, and only the home mount ever needs to compare
+  // the two (see the render branch below).
+  const location = useSyncExternalStore(subscribeLocation, getLocationSnapshot);
+
   const [bundle, setBundle] = useState<McpUiResourceBundle | null>(null);
   const [error, setError] = useState<string | null>(null);
   // b3.3 — disable-in-place on server disconnect. Lives INSIDE McpAppView so
@@ -171,32 +218,41 @@ export function McpAppView({
   displayModeRef.current = mountDisplayMode;
   const getDisplayMode = useCallback(() => displayModeRef.current, []);
 
-  // ── The detached instance this card MOVED to (inline mounts only) ─────────────
-  // Set to the host-minted viewKey when a fullscreen request succeeds. While it is set,
-  // this mount renders a quiet host-owned placeholder INSTEAD of the <webview> — which
-  // tears down its bridge + transport through the existing `attachWebview(null)` path.
-  // That is the whole point: a card has exactly ONE live bridge at a time. Cleared by the
-  // host's `detachedClosed` event (window closed by the user, by the app's `inline`
-  // request, or navigated away in the single-instance shell), which brings the card back.
-  const [detachedViewKey, setDetachedViewKey] = useState<string | null>(null);
-  const detachedViewKeyRef = useRef<string | null>(null);
-  detachedViewKeyRef.current = detachedViewKey;
-
   // Apply a SUPPORTED mode (the handler filters the rest against the advertised SoT) and
   // resolve to the mode the CARD is in afterwards — the mount's own mode when the host
   // declined, since nothing moved.
   //
-  // REPLACE, NEVER CLONE. Both arms move the card between the two host presentations, and
-  // in both the losing instance stops being a live app:
-  //   · fullscreen → `mcp.openDetached(payload, { maximize: true, sessionId })` mounts the
-  //     card in the detached shell, and THIS inline mount goes dormant (placeholder →
-  //     bridge + webview torn down). Two live bridges for one card — one of them lying
-  //     about its mode to a spec-conformant app inside a 300px box — is exactly what this
-  //     avoids.
-  //   · inline → close the detached window for THIS CARD'S SERVER (`mcp.closeDetached`,
-  //     scoped). Main purges the record and broadcasts `detachedClosed`, which is what
-  //     revives the dormant inline card. NOT `window.closeAllDetached`: that sweeps every
-  //     detached window the user has open, and an untrusted card must not reach it.
+  // REPLACE, NEVER CLONE. Every arm moves the card between mounts through the shared
+  // location store, and the losing mount stops being a live app: two live bridges for
+  // one card — one of them lying about its mode to a spec-conformant app — is exactly
+  // what the store's single-location-per-card invariant avoids. This function is only
+  // ever CALLED by the card's currently live mount (a dormant mount renders no
+  // `<webview>`, so it never gets a bridge), so `current` (`displayModeRef.current`,
+  // this MOUNT's own fixed role — inline home / pip panel / detached shell) tells us
+  // unambiguously which of the branches below applies:
+  //   · → fullscreen: `mcp.openDetached(payload, { maximize: true, sessionId })` mounts
+  //     the card in the detached shell (a SEPARATE renderer process — this window's
+  //     store cannot reach into it, so it is told about the move by writing the new
+  //     location here, in THIS window).
+  //   · → pip (from inline or pip itself — the `mode === current` guard above already
+  //     handles "already there"): moves the card into the shared store's `pip` slot.
+  //     `McpAppPipPanel` (subscribed to the store) picks it up and mounts a fresh
+  //     `<McpAppView>` for it; this mount goes dormant.
+  //   · pip → fullscreen: same `moveCard` write as inline → fullscreen, just from a
+  //     DIFFERENT current mount (the pip panel's own McpAppView instance) — the store
+  //     doesn't care which mount initiated it, only that exactly one location is true.
+  //   · fullscreen → pip: DECLINED. The detached window is a separate renderer process
+  //     with no access to this window's store (its singletons live in ONE JS heap), so
+  //     there is no in-process move to make from there. Same legitimacy as any other
+  //     unavailable-from-here request — the card stays exactly where it is.
+  //   · → inline, from pip: revives the card directly through the store (both mounts
+  //     share this window's heap, no IPC needed).
+  //   · → inline, from fullscreen: close the detached window for THIS CARD'S SERVER
+  //     (`mcp.closeDetached`, scoped). Main purges the record and broadcasts
+  //     `detachedClosed`; the home mount's listener below turns that into the store
+  //     revive (guarded — see `reviveCardIfAt`). NOT `window.closeAllDetached`: that
+  //     sweeps every detached window the user has open, and an untrusted card must
+  //     never reach it.
   const applyDisplayMode = useCallback(
     async (mode: McpUiDisplayMode): Promise<McpUiDisplayMode> => {
       const current = displayModeRef.current;
@@ -212,13 +268,33 @@ export function McpAppView({
         // Host declined (invalid payload / window failure): the card did not move, and
         // this mount stays the live one.
         if (!result?.ok) return current;
-        setDetachedViewKey(result.viewKey);
+        moveCard(
+          cardLocationIdRef.current,
+          { kind: "detached", viewKey: result.viewKey },
+          { payload, originSessionId: originSessionIdRef.current },
+        );
         return "fullscreen";
       }
 
-      // Optional-chained like every other preload call site: the surface is absent in
-      // isolated harnesses, and "there is no detached window" is exactly the state an
-      // inline request wants anyway.
+      if (mode === "pip") {
+        if (current === "fullscreen") return current; // declined — see doc above
+        moveCard(
+          cardLocationIdRef.current,
+          { kind: "pip" },
+          { payload, originSessionId: originSessionIdRef.current },
+        );
+        return "pip";
+      }
+
+      // mode === "inline"
+      if (current === "pip") {
+        reviveCardIfAt(cardLocationIdRef.current, { kind: "pip" });
+        return "inline";
+      }
+
+      // current === "fullscreen". Optional-chained like every other preload call site:
+      // the surface is absent in isolated harnesses, and "there is no detached window"
+      // is exactly the state an inline request wants anyway.
       const closed = await window.lvis?.mcp?.closeDetached?.(payload.serverId);
       if (closed && !closed.ok) return current;
       return "inline";
@@ -228,14 +304,17 @@ export function McpAppView({
 
   // The host's `detachedClosed` broadcast — the ONE signal that a detached instance is
   // gone. It fires for a user-closed window, the `inline` arm's scoped close, and the
-  // single-instance shell navigating away, so the dormant inline card revives on all
+  // single-instance shell navigating away, so the dormant home mount revives on all
   // three from one subscription (a fresh <webview> + bridge; the app state lived in the
-  // window that just closed).
+  // window that just closed). `reviveCardIfAt` is the guard: this card's location must
+  // STILL be `detached(viewKey)` for this exact viewKey, or the signal is stale (e.g. it
+  // named a location this card already moved on from — the pip→fullscreen hazard the
+  // location store's module doc documents) and is correctly ignored.
   useEffect(() => {
     const onDetachedClosed = window.lvis?.mcp?.onDetachedClosed;
     if (typeof onDetachedClosed !== "function") return;
     return onDetachedClosed((viewKey: string) => {
-      if (viewKey === detachedViewKeyRef.current) setDetachedViewKey(null);
+      reviveCardIfAt(cardLocationIdRef.current, { kind: "detached", viewKey });
     });
   }, []);
 
@@ -301,8 +380,21 @@ export function McpAppView({
     // renders.
     setSize({ height: mcpAppCardSeedHeight(payload.height) });
     // A fresh payload is a fresh card: it is live in THIS mount again, whatever the
-    // previous card had talked the host into detaching.
-    setDetachedViewKey(null);
+    // previous card had talked the host into moving away (pip or detached). Read the
+    // CURRENT location synchronously and revive from exactly that — never a stale
+    // guess — so the store's own guard cannot reject this reclaim.
+    //
+    // ONLY the HOME mount (mountDisplayMode === "inline") ever does this. An AWAY
+    // mount (the pip panel's own McpAppView instance, or the detached window's) is
+    // never "home" for any card — reviving here on ITS OWN payload-driven effect would
+    // send the home mount live again while THIS mount is also still live, which is
+    // exactly the two-live-bridges failure the location store exists to prevent.
+    if (mountDisplayMode === "inline") {
+      const awayLocation = getCardLocation(cardLocationIdRef.current);
+      if (awayLocation.kind !== "inline") {
+        reviveCardIfAt(cardLocationIdRef.current, awayLocation);
+      }
+    }
 
     window.lvis.mcp.readUiResource(payload.serverId, payload.resourceUri)
       .then((next) => {
@@ -315,7 +407,7 @@ export function McpAppView({
       });
 
     return () => { cancelled = true; };
-  }, [payload]);
+  }, [payload, mountDisplayMode]);
 
   // b3 — subscribe to the main→renderer server-disconnected broadcast. When the
   // payload's own server is torn down, disable in place (webview unmounts via
@@ -421,14 +513,31 @@ export function McpAppView({
           <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
           <span>{error}</span>
         </div>
-      ) : detachedViewKey ? (
+      ) : mountDisplayMode === "inline" && location.kind === "detached" ? (
         // The card LIVES IN THE DETACHED WINDOW right now. This is a host-owned
         // placeholder, not an app: no <webview>, so no bridge, no app state, and nothing
         // here can claim a display mode. It reverts to a live card when the host says the
         // detached instance is gone (`onDetachedClosed`).
+        //
+        // Gated on `mountDisplayMode === "inline"`: ONLY the home mount ever renders an
+        // "away" placeholder for its own card. The pip panel's own McpAppView instance
+        // reads `location.kind === "pip"` for ITSELF too (that is exactly where its card
+        // is), and the detached window's instance would read "inline" (it never touches
+        // this store meaningfully — a fresh, self-minted `locationId` nobody else
+        // references). Without this gate a mount would render a placeholder pointing at
+        // its OWN live self.
         <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height: seedHeight }} data-testid="mcp-app-detached">
           <ExternalLink className="h-3.5 w-3.5 flex-shrink-0" />
           <span>{t("mcpAppView.openInWindow")}</span>
+        </div>
+      ) : mountDisplayMode === "inline" && location.kind === "pip" ? (
+        // The card LIVES IN THE PIP PANEL right now — same discipline (and the same
+        // `mountDisplayMode === "inline"` gate) as the detached placeholder above.
+        // Reverts to a live card when the pip panel's own mount sends it back (the
+        // app's own `inline` request, or the panel's close button).
+        <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height: seedHeight }} data-testid="mcp-app-pip">
+          <ExternalLink className="h-3.5 w-3.5 flex-shrink-0" />
+          <span>{t("mcpAppView.openInPip")}</span>
         </div>
       ) : !bundle ? (
         <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height: seedHeight }}>

@@ -358,7 +358,7 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
     await waitFor(() => expect(webviewNode(container)).toBeTruthy());
 
     expect(seededContext().displayMode).toBe("inline");
-    expect(seededContext().availableDisplayModes).toEqual(["inline", "fullscreen"]);
+    expect(seededContext().availableDisplayModes).toEqual(["inline", "fullscreen", "pip"]);
     expect(seededDisplayDeps().getDisplayMode()).toBe("inline");
   });
 
@@ -496,6 +496,180 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
     expect(openDetached).not.toHaveBeenCalled();
     expect(closeDetached).not.toHaveBeenCalled();
   });
+});
+
+describe("McpAppView — pip (the shared location store, not a second window stack)", () => {
+  function seededDisplayDeps() {
+    return createMcpAppBridgeMock.mock.calls[0]![4] as {
+      getDisplayMode: () => string;
+      applyDisplayMode: (mode: string) => Promise<string>;
+    };
+  }
+
+  function seededContext() {
+    return createMcpAppBridgeMock.mock.calls[0]![3] as {
+      displayMode?: string;
+      availableDisplayModes?: string[];
+    };
+  }
+
+  it("seeds a PIP mount with displayMode=pip", async () => {
+    const { container } = render(<McpAppView payload={payload("github")} displayMode="pip" />, {
+      wrapper: ThemeWrapper,
+    });
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+
+    expect(seededContext().displayMode).toBe("pip");
+    expect(seededDisplayDeps().getDisplayMode()).toBe("pip");
+  });
+
+  it("inline -> pip: REPLACES the card — no IPC, no window, this mount stops being live", async () => {
+    const { container } = renderCard(payload("github"));
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+    const transport = createMcpAppBridgeMock.mock.results[0]!.value.transport as {
+      close: ReturnType<typeof vi.fn>;
+    };
+
+    const applied = await act(() => seededDisplayDeps().applyDisplayMode("pip"));
+
+    expect(applied).toBe("pip");
+    // Purely in-process: no detach IPC at all.
+    expect(openDetached).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId("mcp-app-pip")).toBeInTheDocument());
+    expect(webviewNode(container)).toBeNull();
+    expect(transport.close).toHaveBeenCalledTimes(1);
+    expect(createMcpAppBridgeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("NEVER reports a mode it is not in: the dormant inline mount stays `inline`, never `pip`", async () => {
+    const { container } = renderCard(payload("github"));
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+    const bridge = createMcpAppBridgeMock.mock.results[0]!.value.bridge as {
+      setHostContext: ReturnType<typeof vi.fn>;
+    };
+
+    await act(() => seededDisplayDeps().applyDisplayMode("pip"));
+
+    expect(seededDisplayDeps().getDisplayMode()).toBe("inline");
+    for (const call of bridge.setHostContext.mock.calls) {
+      expect((call[0] as { displayMode?: string }).displayMode).not.toBe("pip");
+    }
+  });
+
+  it("pip -> inline: a SECOND mount (the pip surface) revives the home mount directly through the store — no IPC", async () => {
+    const locationId = "shared-loc-pip-inline";
+
+    // The HOME mount — explicit shared `locationId` so a second, independently
+    // rendered McpAppView (below) can address the SAME store entry, exactly like
+    // McpAppPipPanel does with the home's real (randomUUID) id.
+    const home = render(<McpAppView payload={payload("github")} locationId={locationId} />, {
+      wrapper: ThemeWrapper,
+    });
+    await waitFor(() => expect(webviewNode(home.container)).toBeTruthy());
+    const homeDeps = () =>
+      createMcpAppBridgeMock.mock.calls[0]![4] as { applyDisplayMode: (mode: string) => Promise<string> };
+
+    await act(() => homeDeps().applyDisplayMode("pip"));
+    await waitFor(() => expect(home.container.querySelector('[data-testid="mcp-app-pip"]')).toBeTruthy());
+    expect(webviewNode(home.container)).toBeNull();
+
+    // The PIP mount (McpAppPipPanel's own McpAppView instance) — SAME locationId, a
+    // SEPARATE React tree, coexisting with the (now dormant) home mount.
+    const pip = render(
+      <McpAppView payload={payload("github")} displayMode="pip" locationId={locationId} />,
+      { wrapper: ThemeWrapper },
+    );
+    await waitFor(() => expect(webviewNode(pip.container)).toBeTruthy());
+    expect(createMcpAppBridgeMock).toHaveBeenCalledTimes(2); // home's (torn down) + pip's live one
+    const pipDeps = () =>
+      createMcpAppBridgeMock.mock.calls[1]![4] as { applyDisplayMode: (mode: string) => Promise<string> };
+
+    // The app inside the PIP mount requests "inline".
+    const applied = await act(() => pipDeps().applyDisplayMode("inline"));
+    expect(applied).toBe("inline");
+
+    // The home mount comes back to life — a fresh, THIRD bridge for it.
+    await waitFor(() => expect(webviewNode(home.container)).toBeTruthy());
+    expect(home.container.querySelector('[data-testid="mcp-app-pip"]')).toBeNull();
+    expect(createMcpAppBridgeMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("round trip inline -> pip -> inline keeps exactly ONE live bridge at every step (coexisting home + pip mounts)", async () => {
+    const locationId = "shared-loc-round-trip";
+    const home = render(<McpAppView payload={payload("github")} locationId={locationId} />, {
+      wrapper: ThemeWrapper,
+    });
+    await waitFor(() => expect(webviewNode(home.container)).toBeTruthy());
+    const homeDeps = () =>
+      createMcpAppBridgeMock.mock.calls[0]![4] as { applyDisplayMode: (mode: string) => Promise<string> };
+
+    // inline -> pip
+    await act(() => homeDeps().applyDisplayMode("pip"));
+    expect(webviewNode(home.container)).toBeNull(); // home: dormant
+
+    const pip = render(
+      <McpAppView payload={payload("github")} displayMode="pip" locationId={locationId} />,
+      { wrapper: ThemeWrapper },
+    );
+    await waitFor(() => expect(webviewNode(pip.container)).toBeTruthy()); // pip: live
+    // Exactly one <webview> across BOTH trees at this step.
+    expect([webviewNode(home.container), webviewNode(pip.container)].filter(Boolean)).toHaveLength(1);
+    const pipDeps = () =>
+      createMcpAppBridgeMock.mock.calls[1]![4] as { applyDisplayMode: (mode: string) => Promise<string> };
+
+    // pip -> inline
+    await act(() => pipDeps().applyDisplayMode("inline"));
+    await waitFor(() => expect(webviewNode(home.container)).toBeTruthy()); // home: live again
+    // Still exactly one <webview> across both trees — the pip mount does not also
+    // stay live (production McpAppPipPanel unmounts it via the occupant-null branch;
+    // here we assert the STORE side, which is what makes that unmount correct: this
+    // card's location is no longer "pip").
+    const { getCardLocation } = await import("../../state/mcp-app-card-location-store.js");
+    expect(getCardLocation(locationId)).toEqual({ kind: "inline" });
+  });
+
+  it("pip -> fullscreen: opens the detached window and moves the STORE location to detached", async () => {
+    const locationId = "loc-shared-pip-fullscreen";
+    const { container } = render(
+      <McpAppView payload={payload("github")} displayMode="pip" locationId={locationId} />,
+      { wrapper: ThemeWrapper },
+    );
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+
+    const applied = await act(() => seededDisplayDeps().applyDisplayMode("fullscreen"));
+
+    expect(openDetached).toHaveBeenCalledWith(
+      expect.objectContaining({ serverId: "github" }),
+      { maximize: true, sessionId: "" },
+    );
+    expect(applied).toBe("fullscreen");
+    // The STORE now says this card is detached — this is what `McpAppPipPanel` (the
+    // pip mount's actual PARENT in production) reacts to by unmounting its child. An
+    // away mount does NOT self-police via its own `location` read (only the home mount
+    // does — see the `mountDisplayMode === "inline"` gate on the render branch), so THIS
+    // isolated mount keeps rendering until something ELSE unmounts it; that is exactly
+    // right, and is exercised at the panel level (McpAppPipPanel.test.tsx).
+    const { getCardLocation } = await import("../../state/mcp-app-card-location-store.js");
+    expect(getCardLocation(locationId)).toEqual({
+      kind: "detached",
+      viewKey: DETACHED_VIEW_KEY,
+    });
+  });
+
+  it("fullscreen DECLINES a pip request — cross-window pip is out of scope (separate renderer process)", async () => {
+    const { container } = render(<McpAppView payload={payload("github")} displayMode="fullscreen" />, {
+      wrapper: ThemeWrapper,
+    });
+    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+
+    const applied = await act(() => seededDisplayDeps().applyDisplayMode("pip"));
+
+    expect(applied).toBe("fullscreen");
+    // Nothing was touched: no detach-close IPC, and the detached mount is still live.
+    expect(closeDetached).not.toHaveBeenCalled();
+    expect(webviewNode(container)).toBeTruthy();
+  });
+
 });
 
 describe("McpAppView — download sink is BOUND to the card's server", () => {

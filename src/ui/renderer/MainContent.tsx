@@ -3,6 +3,10 @@ import { PluginUiHostView } from "../../plugin-ui-host.js";
 import type { getApi } from "./api-client.js";
 import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
 import { ChatView } from "./ChatView.js";
+// The pip surface for an MCP-app card in `pip` mode — a single, always-present
+// singleton (renders nothing while no card occupies the pip slot). Mounted once here
+// rather than per-transcript-card, matching the pip slot's own single-occupant design.
+import { McpAppPipPanel } from "./components/McpAppPipPanel.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import type { AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
 import type { QuickAction } from "./components/CommandPopover.js";
@@ -130,6 +134,7 @@ function MainPaneShell({
 function HomeChatPane(props: MainContentProps) {
   return (
     <ChatContextProvider value={props.chatContextValue}>
+      <McpAppPipPanel />
       <ChatView
         api={props.api}
         onAsk={props.onAsk}

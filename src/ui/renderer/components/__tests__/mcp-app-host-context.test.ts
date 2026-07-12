@@ -86,12 +86,14 @@ describe("buildMcpAppHostContext", () => {
       displayMode: "inline",
     });
 
-    // `pip` is NOT advertised (no second, always-on-top window stack exists), and the
-    // list must be exactly `MCP_APP_AVAILABLE_DISPLAY_MODES` — the same SoT
+    // The list must be exactly `MCP_APP_AVAILABLE_DISPLAY_MODES` — the same SoT
     // `onrequestdisplaymode` checks a request against. Advertising a mode the handler
     // would refuse (or refusing one we advertised) is the drift this pin exists for.
+    // `pip` IS one of them now (a renderer-side location store — see
+    // `mcp-app-card-location-store.ts` — makes it real); this assertion stays drift-safe
+    // regardless of the SoT's membership because it compares against the SoT itself.
     expect(ctx.availableDisplayModes).toEqual([...MCP_APP_AVAILABLE_DISPLAY_MODES]);
-    expect(ctx.availableDisplayModes).not.toContain("pip");
+    expect(ctx.availableDisplayModes).toContain("pip");
     expect(ctx.displayMode).toBe("inline");
   });
 
@@ -105,10 +107,12 @@ describe("buildMcpAppHostContext", () => {
     });
 
     // The context object crosses to a guest-facing surface; a mutation of it must not
-    // reach back into the module constant every other card reads.
+    // reach back into the module constant every other card reads. Pushed value is
+    // deliberately NOT a real `McpUiDisplayMode` member (so "the SoT is now polluted"
+    // could never be masked by the pushed value coincidentally already being present).
     expect(ctx.availableDisplayModes).not.toBe(MCP_APP_AVAILABLE_DISPLAY_MODES);
-    ctx.availableDisplayModes?.push("pip");
-    expect(MCP_APP_AVAILABLE_DISPLAY_MODES).not.toContain("pip");
+    (ctx.availableDisplayModes as string[] | undefined)?.push("windowed");
+    expect(MCP_APP_AVAILABLE_DISPLAY_MODES).not.toContain("windowed");
   });
 
   it("translates LVIS tokens to the standard style-variable vocabulary", () => {
