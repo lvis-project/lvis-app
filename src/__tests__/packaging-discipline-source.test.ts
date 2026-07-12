@@ -232,6 +232,7 @@ describe("installer smoke and packaging discipline", () => {
     expect(agents).toContain("openFeatureNamespace");
     expect(agents).toContain("never hand-roll `mkdir`");
     expect(agents).toContain("`0o700` directory / `0o600`");
+    expect(agents).toContain("mode bits alone are not encryption");
     expect(agents).toContain("src/shared/tool-timeout-policy.ts");
     expect(agents).toContain("TOOL_TIMEOUT_POLICY");
     expect(agents).toContain("runWithCeiling");
@@ -240,7 +241,10 @@ describe("installer smoke and packaging discipline", () => {
     expect(agents).not.toContain("architecture section 6.3");
     expect(agents).toContain("staged default-on for `darwin`");
     expect(agents).toContain("opt-in for `linux`/`win32`");
-    expect(agents).toContain("LVIS_SANDBOX_ENABLED=1");
+    expect(agents).toContain("On `darwin`/`linux`, explicit `LVIS_SANDBOX_ENABLED=1`");
+    expect(agents).toContain("default/settings mode may gracefully degrade");
+    expect(agents).toContain("Windows always");
+    expect(agents).toContain("degrades non-brickingly when unavailable");
     expect(agents).toContain("relaxation/effect-boundary coupling");
     expect(agents).toContain("No Fallback Code");
     expect(agents).toContain("plugin manifest field updates its schema and SDK");

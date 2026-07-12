@@ -71,12 +71,15 @@ state durable constraints here and put detailed designs in their owning docs.
 - New persisted state under `~/.lvis/<feature>/` uses `openFeatureNamespace`;
   never hand-roll `mkdir` or mode bits outside its `0o700` directory / `0o600`
   file chokepoint.
+  Secrets require an encrypted-at-rest store; mode bits alone are not encryption.
 - Tool and MCP timeouts come from `src/shared/tool-timeout-policy.ts` and
   `TOOL_TIMEOUT_POLICY`; never hardcode them. Wire `runWithCeiling` cancellation
   through its `AbortController`.
 - ASRT is staged default-on for `darwin` and opt-in for `linux`/`win32`.
-  Explicit `LVIS_SANDBOX_ENABLED=1` setup failure aborts; default mode may
-  gracefully degrade. Preserve relaxation/effect-boundary coupling.
+  On `darwin`/`linux`, explicit `LVIS_SANDBOX_ENABLED=1` activation failure
+  aborts; default/settings mode may gracefully degrade. Windows always
+  degrades non-brickingly when unavailable. Preserve
+  relaxation/effect-boundary coupling.
 - No Fallback Code: a plugin manifest field updates its schema and SDK in the
   same PR; a HostApi change bumps every plugin dependency pin in the same PR.
 - UI edits start with `grep` before editing. Name app shells `*Window`, reusable
