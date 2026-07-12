@@ -564,16 +564,17 @@ export class SubAgentRunner {
     }
   }
 
-  peekParentMailbox(parentSessionId: string): Promise<ParentMailboxEntry[]> {
-    return this.deps.messageBus?.peekParentMailbox(parentSessionId) ?? Promise.resolve([]);
+  async peekParentMailbox(parentSessionId: string): Promise<ParentMailboxEntry[]> {
+    const bus = this.deps.messageBus;
+    return bus ? await bus.peekParentMailbox(parentSessionId) : [];
   }
 
-  acknowledgeParentMailbox(
+  async acknowledgeParentMailbox(
     parentSessionId: string,
     ids: readonly string[],
   ): Promise<number> {
-    return this.deps.messageBus?.acknowledgeParentMailbox(parentSessionId, ids)
-      ?? Promise.resolve(0);
+    const bus = this.deps.messageBus;
+    return bus ? await bus.acknowledgeParentMailbox(parentSessionId, ids) : 0;
   }
 
   setParentWakeHandler(handler: ParentWakeHandler | null): void {

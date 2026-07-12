@@ -228,9 +228,12 @@ export function wireConversation(ctx: BootContext): void {
     mailbox: subAgentMessageMailbox,
     settingsService,
     auditLogger: bootAuditLogger,
-    resolveChildAddress: (parentSessionId, childSessionId, messageId) =>
-      subAgentRunnerRef.fn?.resolveSubAgentAddress(parentSessionId, childSessionId, messageId)
-      ?? Promise.resolve(null),
+    resolveChildAddress: async (parentSessionId, childSessionId, messageId) => {
+      const runner = subAgentRunnerRef.fn;
+      return runner
+        ? await runner.resolveSubAgentAddress(parentSessionId, childSessionId, messageId)
+        : null;
+    },
     releaseEphemeralChildAddress: (parentSessionId, childSessionId, messageId) =>
       subAgentRunnerRef.fn?.releaseEphemeralParentDelivery(
         parentSessionId,
