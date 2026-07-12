@@ -7,6 +7,7 @@ import { McpAppView } from "../McpAppView.js";
 import { McpAppPipPanel } from "../McpAppPipPanel.js";
 import { ThemeProvider, useTheme } from "../../theme/index.js";
 import { DEFAULT_BUNDLE_ID } from "../../theme/index.js";
+import { ThemeWrapper } from "./mcp-app-test-helpers.js";
 import { mcpAppPartitionName } from "../../../../shared/mcp-app-partition.js";
 import { MCP_APP_CARD_MAX_HEIGHT_PX } from "../../../../shared/mcp-app-card-size.js";
 import { __resetMcpAppCardLocationStoreForTests } from "../../state/mcp-app-card-location-store.js";
@@ -25,12 +26,6 @@ vi.mock("../mcp-app-bridge.js", () => ({
   createMcpAppBridge: createMcpAppBridgeMock,
 }));
 
-// McpAppView reads `useTheme()`, so every render is wrapped in a ThemeProvider.
-// No `api` prop → no async settings hydrate; the default bundle is already cached
-// so the shell resolves synchronously.
-function ThemeWrapper({ children }: { children: ReactNode }) {
-  return <ThemeProvider initialBundleId={DEFAULT_BUNDLE_ID}>{children}</ThemeProvider>;
-}
 
 const renderCard = (payload: McpUiPayload) =>
   render(<McpAppView payload={payload} />, { wrapper: ThemeWrapper });
@@ -109,6 +104,30 @@ function stubLvis() {
 }
 
 const payload = (serverId: string): McpUiPayload => ({ serverId, resourceUri: "ui://card/1" });
+
+/** The display-mode halves (5th arg) of the deps createMcpAppBridge was seeded with. */
+function seededDisplayDeps() {
+  return createMcpAppBridgeMock.mock.calls[0]![4] as {
+    getDisplayMode: () => string;
+    applyDisplayMode: (mode: string) => Promise<string>;
+  };
+}
+
+/** The hostContext (4th arg) of the first createMcpAppBridge call. */
+function seededContext() {
+  return createMcpAppBridgeMock.mock.calls[0]![3] as {
+    displayMode?: string;
+    availableDisplayModes?: string[];
+  };
+}
+
+/** applyDisplayMode of the FIRST (home) createMcpAppBridge call. */
+const homeDeps = () =>
+  createMcpAppBridgeMock.mock.calls[0]![4] as { applyDisplayMode: (mode: string) => Promise<string> };
+
+/** applyDisplayMode of the SECOND (pip) createMcpAppBridge call. */
+const pipDeps = () =>
+  createMcpAppBridgeMock.mock.calls[1]![4] as { applyDisplayMode: (mode: string) => Promise<string> };
 
 beforeEach(() => {
   // The pip / location-store describe blocks below write the MODULE-SINGLETON card
@@ -345,22 +364,6 @@ describe("McpAppView — app-driven resize + open-link adapters (P1a)", () => {
 });
 
 describe("McpAppView — display-mode applier (the EXISTING window seams, reused)", () => {
-  /** The display-mode halves of the `deps` arg createMcpAppBridge was seeded with. */
-  function seededDisplayDeps() {
-    return createMcpAppBridgeMock.mock.calls[0]![4] as {
-      getDisplayMode: () => string;
-      applyDisplayMode: (mode: string) => Promise<string>;
-    };
-  }
-
-  /** The hostContext (4th arg) of the Nth createMcpAppBridge call. */
-  function seededContext() {
-    return createMcpAppBridgeMock.mock.calls[0]![3] as {
-      displayMode?: string;
-      availableDisplayModes?: string[];
-    };
-  }
-
   it("seeds an inline card's host context with displayMode=inline + the advertised set", async () => {
     const { container } = renderCard(payload("github"));
     await waitFor(() => expect(webviewNode(container)).toBeTruthy());
@@ -507,20 +510,6 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
 });
 
 describe("McpAppView — pip (the shared location store, not a second window stack)", () => {
-  function seededDisplayDeps() {
-    return createMcpAppBridgeMock.mock.calls[0]![4] as {
-      getDisplayMode: () => string;
-      applyDisplayMode: (mode: string) => Promise<string>;
-    };
-  }
-
-  function seededContext() {
-    return createMcpAppBridgeMock.mock.calls[0]![3] as {
-      displayMode?: string;
-      availableDisplayModes?: string[];
-    };
-  }
-
   it("seeds a PIP mount with displayMode=pip", async () => {
     const { container } = render(<McpAppView payload={payload("github")} displayMode="pip" />, {
       wrapper: ThemeWrapper,
@@ -574,8 +563,6 @@ describe("McpAppView — pip (the shared location store, not a second window sta
       wrapper: ThemeWrapper,
     });
     await waitFor(() => expect(webviewNode(home.container)).toBeTruthy());
-    const homeDeps = () =>
-      createMcpAppBridgeMock.mock.calls[0]![4] as { applyDisplayMode: (mode: string) => Promise<string> };
 
     await act(() => homeDeps().applyDisplayMode("pip"));
     await waitFor(() => expect(home.container.querySelector('[data-testid="mcp-app-pip"]')).toBeTruthy());
@@ -589,8 +576,6 @@ describe("McpAppView — pip (the shared location store, not a second window sta
     );
     await waitFor(() => expect(webviewNode(pip.container)).toBeTruthy());
     expect(createMcpAppBridgeMock).toHaveBeenCalledTimes(2); // home's (torn down) + pip's live one
-    const pipDeps = () =>
-      createMcpAppBridgeMock.mock.calls[1]![4] as { applyDisplayMode: (mode: string) => Promise<string> };
 
     // The app inside the PIP mount requests "inline".
     const applied = await act(() => pipDeps().applyDisplayMode("inline"));
@@ -608,8 +593,6 @@ describe("McpAppView — pip (the shared location store, not a second window sta
       wrapper: ThemeWrapper,
     });
     await waitFor(() => expect(webviewNode(home.container)).toBeTruthy());
-    const homeDeps = () =>
-      createMcpAppBridgeMock.mock.calls[0]![4] as { applyDisplayMode: (mode: string) => Promise<string> };
 
     // inline -> pip
     await act(() => homeDeps().applyDisplayMode("pip"));
@@ -622,8 +605,6 @@ describe("McpAppView — pip (the shared location store, not a second window sta
     await waitFor(() => expect(webviewNode(pip.container)).toBeTruthy()); // pip: live
     // Exactly one <webview> across BOTH trees at this step.
     expect([webviewNode(home.container), webviewNode(pip.container)].filter(Boolean)).toHaveLength(1);
-    const pipDeps = () =>
-      createMcpAppBridgeMock.mock.calls[1]![4] as { applyDisplayMode: (mode: string) => Promise<string> };
 
     // pip -> inline
     await act(() => pipDeps().applyDisplayMode("inline"));

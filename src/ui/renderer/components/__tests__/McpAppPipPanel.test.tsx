@@ -1,12 +1,10 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
 import { render, waitFor, act, fireEvent } from "@testing-library/react";
-import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { McpAppPipPanel } from "../McpAppPipPanel.js";
 import { McpAppView } from "../McpAppView.js";
-import { ThemeProvider } from "../../theme/index.js";
-import { DEFAULT_BUNDLE_ID } from "../../theme/index.js";
+import { ThemeWrapper } from "./mcp-app-test-helpers.js";
 import {
   __resetMcpAppCardLocationStoreForTests,
   moveCard,
@@ -18,9 +16,6 @@ vi.mock("../mcp-app-bridge.js", () => ({
   createMcpAppBridge: createMcpAppBridgeMock,
 }));
 
-function ThemeWrapper({ children }: { children: ReactNode }) {
-  return <ThemeProvider initialBundleId={DEFAULT_BUNDLE_ID}>{children}</ThemeProvider>;
-}
 
 const readUiResource = vi.fn(async (serverId: string) => ({
   proxyUrl: `lvis-mcp-app://${Buffer.from(serverId, "utf8").toString("hex")}/proxy.html?t=tok-${serverId}`,

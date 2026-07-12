@@ -14,6 +14,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CHANNELS } from "../../contract/app-contract.js";
+import { hostFrameEvent, foreignFrameEvent } from "../../__tests__/test-helpers.js";
 
 const handleMap = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
 const showSaveDialog = vi.fn();
@@ -32,18 +33,6 @@ vi.mock("electron", () => ({
 }));
 
 /** The host renderer frame (what `validateHostRendererSender` accepts). */
-function hostEvent(): IpcMainInvokeEvent {
-  return {
-    senderFrame: { url: "file:///Applications/Lvis.app/dist/index.html" },
-    sender: {},
-  } as unknown as IpcMainInvokeEvent;
-}
-
-/** Any other frame — a plugin shell, a remote page, an empty-URL frame. */
-function foreignEvent(url: string): IpcMainInvokeEvent {
-  return { senderFrame: { url }, sender: {} } as unknown as IpcMainInvokeEvent;
-}
-
 const auditLog = vi.fn();
 
 function makeDeps() {
@@ -103,7 +92,7 @@ describe("lvis:mcp:ui-download-file", () => {
 
   it("REFUSES an unauthorized sender — the channel writes a file", async () => {
     for (const url of ["https://evil.example/index.html", "", "lvis-plugin://shell/index.html"]) {
-      const result = await invoke(foreignEvent(url), "github", csvParams);
+      const result = await invoke(foreignFrameEvent(url), "github", csvParams);
 
       expect(result).toMatchObject({ ok: false, error: "unauthorized-frame" });
     }
@@ -115,7 +104,7 @@ describe("lvis:mcp:ui-download-file", () => {
     const target = join(tempDir, "report.csv");
     showSaveDialog.mockResolvedValue({ canceled: false, filePath: target });
 
-    const result = await invoke(hostEvent(), "github", csvParams);
+    const result = await invoke(hostFrameEvent(), "github", csvParams);
 
     expect(result).toEqual({ ok: true, disposition: "saved" });
     expect(readFileSync(target, "utf8")).toBe("a,b\n1,2\n");
@@ -127,14 +116,14 @@ describe("lvis:mcp:ui-download-file", () => {
   it("a user CANCEL writes nothing and is NOT an error", async () => {
     showSaveDialog.mockResolvedValue({ canceled: true, filePath: undefined });
 
-    const result = await invoke(hostEvent(), "github", csvParams);
+    const result = await invoke(hostFrameEvent(), "github", csvParams);
 
     // `ok: true` — the bridge handler maps this to `{}`, never `{ isError: true }`.
     expect(result).toEqual({ ok: true, disposition: "cancelled" });
   });
 
   it("REJECTS a resource_link — the host never fetches an app-supplied URI", async () => {
-    const result = await invoke(hostEvent(), "github", {
+    const result = await invoke(hostFrameEvent(), "github", {
       contents: [{ type: "resource_link", uri: "https://evil.example/exfil?q=1" }],
     });
 
@@ -144,7 +133,7 @@ describe("lvis:mcp:ui-download-file", () => {
   });
 
   it("rejects an oversize payload before any dialog", async () => {
-    const result = await invoke(hostEvent(), "github", {
+    const result = await invoke(hostFrameEvent(), "github", {
       contents: [
         { type: "resource", resource: { uri: "ui://card/big.bin", blob: "A".repeat(80 * 1024 * 1024) } },
       ],
@@ -155,7 +144,7 @@ describe("lvis:mcp:ui-download-file", () => {
   });
 
   it("rejects a missing/blank serverId (the renderer binds it; a blank one is a bug)", async () => {
-    await expect(invoke(hostEvent(), "", csvParams)).resolves.toMatchObject({
+    await expect(invoke(hostFrameEvent(), "", csvParams)).resolves.toMatchObject({
       ok: false,
       error: "invalid-server-id",
     });
