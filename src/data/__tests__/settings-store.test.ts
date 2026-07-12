@@ -608,7 +608,7 @@ describe("SettingsService role presets", () => {
     expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
   });
 
-  it("ships hostClassifiesRisk ON all-platform; osToolSandbox STAGED (macOS-first)", () => {
+  it("ships hostClassifiesRisk ON all-platform; osToolSandbox STAGED (darwin ON only)", () => {
     // hostClassifiesRisk ships ON on EVERY platform (shadow-mode reconciliation
     // completed). It is safe to ship on non-sandbox / network-only platforms
     // because the foreground read-relaxation is coupled to the active sandbox
@@ -616,9 +616,12 @@ describe("SettingsService role presets", () => {
     // falls back to the pre-exec ask.
     //
     // osToolSandbox is STAGED: default ON on darwin (the live-verified-active
-    // platform) and OFF on linux/win32 until the C/D-series QA is green (opt-in
-    // via Settings until then). The default is computed from process.platform,
-    // so this assertion tracks the runner's platform deterministically.
+    // platform) ONLY. win32 stays OFF (opt-in) — default-on win32 is deferred
+    // because Windows srt-win is only partially confined (no process isolation)
+    // and the shell-containment gate refuses bash/powershell under the active
+    // partial sandbox. linux stays OFF until the C/D-series QA is green. The
+    // default is computed from process.platform, so this assertion tracks the
+    // runner's platform deterministically.
     const service = new SettingsService({ userDataPath });
     expect(service.get("features")?.hostClassifiesRisk ?? false).toBe(true);
     expect(service.get("features")?.osToolSandbox ?? false).toBe(
@@ -627,7 +630,7 @@ describe("SettingsService role presets", () => {
   });
 
   // Platform-staged default TRUTH-TABLE — asserts the staged default EXPLICITLY
-  // per platform (true on darwin, false on linux AND win32), not by mirroring
+  // per platform (true on darwin only, false on win32 + linux), not by mirroring
   // the impl expression. The default is evaluated at module-load from
   // `process.platform`, so each case stubs the platform and re-imports the
   // store with `vi.resetModules()` to recompute DEFAULT_SETTINGS, then reads the

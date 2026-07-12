@@ -133,11 +133,12 @@ export function PermissionsTab() {
   const [sandboxCapability, setSandboxCapability] = useState<SandboxCapabilityInfo | null>(null);
   const [sandboxEnabled, setSandboxEnabled] = useState(false);
   const [sandboxBusy, setSandboxBusy] = useState(false);
-  // Windows srt-win consent flow. `windowsStatus` holds the latest readiness
-  // snapshot once the user opts in on win32; the consent panel renders off it.
-  // `windowsInstallBusy` disables the "Install now" button while the UAC prompt
-  // is in flight. `windowsInstallCancelled` shows the "Install cancelled" banner
-  // after a UAC dismissal.
+  // Windows srt-win repair flow (the OS sandbox is normally provisioned at
+  // app-install time; this panel is the re-provision/repair fallback).
+  // `windowsStatus` holds the latest readiness snapshot once the user opts in on
+  // win32; the panel renders off it. `windowsInstallBusy` disables the
+  // "Re-provision" button while the UAC prompt is in flight.
+  // `windowsInstallCancelled` shows the cancelled banner after a UAC dismissal.
   const [windowsStatus, setWindowsStatus] = useState<SandboxWindowsStatusInfo | null>(null);
   const [windowsInstallBusy, setWindowsInstallBusy] = useState(false);
   const [windowsInstallCancelled, setWindowsInstallCancelled] = useState(false);
@@ -358,9 +359,10 @@ export function PermissionsTab() {
       const capability = await window.lvis.permission.sandboxCapability();
       setSandboxCapability(capability);
       // Windows: enabling the setting alone does NOT confine anything — srt-win
-      // needs a one-time admin install. When the user flips the toggle
-      // ON on win32, fetch the readiness snapshot so the consent panel can guide
-      // the (explicit, non-auto) install. Turning OFF clears the panel.
+      // must be provisioned (normally at app-install time via NSIS customInstall).
+      // When the user flips the toggle ON on win32, fetch the readiness snapshot;
+      // if provisioning did not complete, the panel guides the (explicit,
+      // non-auto) re-provision/repair. Turning OFF clears the panel.
       if (capability.platform === "win32") {
         if (next) {
           const status = await window.lvis.permission.sandboxWindowsStatus();
@@ -377,9 +379,11 @@ export function PermissionsTab() {
     }
   };
 
-  // The ONLY user-consented privilege-escalation trigger. Invoked from an
-  // explicit "Install now" click inside the win32 consent panel — never
-  // automatically. Triggers ASRT's single self-elevating UAC prompt.
+  // The ONLY user-consented privilege-escalation trigger. The OS sandbox is
+  // normally provisioned at app-install time (NSIS customInstall), so this is
+  // the manual REPAIR / re-provision path — invoked from an explicit
+  // "Re-provision" click inside the win32 panel, never automatically. Triggers
+  // ASRT's single self-elevating UAC prompt.
   const handleWindowsInstall = async () => {
     if (windowsInstallBusy) return;
     setWindowsInstallBusy(true);
@@ -776,8 +780,10 @@ export function PermissionsTab() {
                 </Button>
               </div>
             ) : (
-              // Not yet installed. EXPLICIT consent: warning card + an "Install
-              // now" button. No auto-UAC — the user must click.
+              // Sandbox not ready (install-time provisioning was cancelled/failed
+              // or the app was not installed via the NSIS installer). REPAIR
+              // fallback: warning card + a "Re-provision" button. No auto-UAC —
+              // the user must click.
               <div
                 data-testid="os-sandbox-windows-consent"
                 className="space-y-2 rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning"
