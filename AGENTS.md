@@ -105,9 +105,10 @@ state durable constraints here and put detailed designs in their owning docs.
   consistent current-HEAD row and marker per role. Only a fresh application of
   that label can pass the gated run.
 - The required check evaluates trusted-base policy through read-only repository
-  and pull-request access and never checks out or executes pull-request content.
-  The only workflow writes are the fixed `Sensitive Area Cluster Check` status
-  on the event PR head and invalidation of the fixed `cluster-review-passed` label.
+  and pull-request data access and never checks out or executes pull-request
+  content. Pull-request write is scoped only to invalidating the fixed
+  `cluster-review-passed` label; status write is scoped only to the fixed
+  `Sensitive Area Cluster Check` context on the event PR head.
 - `.github/workflows/cluster-detector.yml` is the sole workflow allowed to use
   `statuses: write` or the fixed status context. Branch protection pins the
   GitHub Actions app rather than workflow identity, so peer workflows must not

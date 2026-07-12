@@ -75,7 +75,9 @@ describe("installer smoke and packaging discipline", () => {
     expect(agents).toContain("blocking findings");
     expect(agents).toContain("`cluster-review-passed`");
     expect(agents).toContain("consistent current-HEAD row and marker per role");
-    expect(agents).toContain("fixed `Sensitive Area Cluster Check` status");
+    expect(agents).toContain("Pull-request write is scoped only");
+    expect(agents).toContain("status write is scoped only to the fixed");
+    expect(agents).toContain("`Sensitive Area Cluster Check` context");
     expect(agents).toContain("sole workflow allowed");
     expect(agents).toContain("any PR edit");
     expect(pullRequestTemplate).toContain("PR edit");
@@ -86,9 +88,12 @@ describe("installer smoke and packaging discipline", () => {
       "types: [opened, reopened, synchronize, edited, labeled, unlabeled]",
     );
     expect(clusterWorkflow).toContain("contents: read");
-    expect(clusterWorkflow).toContain("pull-requests: read");
+    expect(clusterWorkflow).toContain("pull-requests: write");
     expect(clusterWorkflow).toContain("statuses: write");
-    expect(clusterWorkflow).toContain("issues: write");
+    expect(clusterWorkflow).not.toContain("pull-requests: read");
+    expect(clusterWorkflow).not.toContain("issues: read");
+    expect(clusterWorkflow).not.toContain("issues: write");
+    expect(clusterWorkflow).toContain("PR-label DELETE returned 403");
     expect(clusterWorkflow).toContain("cancel-in-progress: false");
     expect(clusterWorkflow).not.toContain("cancel-in-progress: true");
     expect(clusterWorkflow).toContain("name: Trusted Cluster Policy Evaluation");
