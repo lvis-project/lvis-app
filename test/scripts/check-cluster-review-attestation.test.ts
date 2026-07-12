@@ -223,6 +223,22 @@ describe("cluster review attestation", () => {
     ).toBe("table-not-visible");
     expect(
       evaluateClusterReviewAttestation(
+        pullRequest({
+          body: "```markdown\n\t```\n" + validBody(),
+        }),
+      ).reason,
+    ).toBe("table-not-visible");
+    expect(
+      evaluateClusterReviewAttestation(
+        pullRequest({
+          body:
+            "```bad`info\n```\n" +
+            validBody(),
+        }),
+      ).reason,
+    ).toBe("table-not-visible");
+    expect(
+      evaluateClusterReviewAttestation(
         pullRequest({ body: "<details>\n" + validBody() + "\n</details>" }),
       ).reason,
     ).toBe("table-not-visible");
