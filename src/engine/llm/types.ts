@@ -29,6 +29,8 @@ export interface MessageMeta {
    * replayed as the user's own visible bubble.
    */
   displayText?: string;
+  /** Host-minted nonce for rollbackable injected rows across history cloning. */
+  hostInjectionId?: string;
   /** Skill routing provenance for a user turn. */
   routeSkill?: { skillId: string };
   /** Structured provenance for plugin/proactive imported trigger turns. */

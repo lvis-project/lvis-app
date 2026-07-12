@@ -31,11 +31,12 @@ import { join } from "node:path";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { LLMProvider, StreamEvent } from "../llm/types.js";
+import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
+import { MemoryManager } from "../../memory/memory-manager.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -87,6 +88,29 @@ function makeLoop(
 
 function getHistory(loop: ConversationLoop) {
   return (loop as unknown as { history: { getMessages: () => Array<{ role: string; content: unknown }> } }).history.getMessages();
+}
+
+function cloneHistoryLikeAppliedCompaction(loop: ConversationLoop): void {
+  const history = (loop as unknown as {
+    history: {
+      getMessages: () => GenericMessage[];
+      restore: (messages: GenericMessage[]) => void;
+    };
+  }).history;
+  history.restore(history.getMessages().map((message) => ({
+    ...message,
+    ...(message.meta ? { meta: { ...message.meta } } : {}),
+  })));
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 describe("ConversationLoop guidance queue + boundary inject", () => {
@@ -389,4 +413,400 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     await p;
     expect(loop.hasActiveTurn()).toBe(false);
   });
+  it("drops guidance queued during a deferred prompt denial and never leaks it into session B", async () => {
+    const provider = new FakeProvider([[
+      { type: "text_delta", text: "session B response" } as StreamEvent,
+      { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+    ]]);
+    const skillOverlay = { clear: vi.fn() };
+    const loop = makeLoop(provider, { skillOverlay });
+    const gate = deferred<{ decision: "allow" | "deny"; reason: string }>();
+    const gateEntered = deferred<void>();
+    const promptSpy = vi.spyOn(loop, "fireUserPromptSubmit").mockImplementation(() => {
+      gateEntered.resolve(undefined);
+      return gate.promise;
+    });
+    const disposition = vi.fn();
+    const rendererDropped = vi.fn();
+
+    const deniedTurn = loop.runTurn(
+      "session A",
+      { onGuidanceDropped: rendererDropped },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+    await gateEntered.promise;
+    expect(loop.queueGuidanceWithDisposition("A-only guidance", {
+      onDropped: disposition,
+    })).toBe("queued");
+    loop.turnAdditionalDirectories = ["temporary-grant"];
+    gate.resolve({ decision: "deny", reason: "policy deny" });
+
+    await expect(deniedTurn).resolves.toMatchObject({ stopReason: "blocked" });
+    expect(disposition).toHaveBeenCalledTimes(1);
+    expect(disposition).toHaveBeenCalledWith("turn-ended");
+    expect(rendererDropped).toHaveBeenCalledTimes(1);
+    expect(rendererDropped).toHaveBeenCalledWith("A-only guidance");
+    expect(loop.guidanceQueue).toEqual([]);
+    expect(loop.turnAdditionalDirectories).toEqual([]);
+    expect(loop.hasActiveTurn()).toBe(false);
+
+    promptSpy.mockResolvedValue({ decision: "allow", reason: "allowed" });
+    const injectedInB = vi.fn();
+    await loop.runTurn(
+      "session B",
+      { onGuidanceInjected: injectedInB },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(injectedInB).not.toHaveBeenCalled();
+    expect(
+      getHistory(loop).some((message) =>
+        typeof message.content === "string" && message.content.includes("A-only guidance")),
+    ).toBe(false);
+    expect(skillOverlay.clear).toHaveBeenLastCalledWith(loop.getSessionId());
+  });
+
+  it("cleans queued guidance when SessionStart throws before the prompt gate", async () => {
+    const loop = makeLoop(new FakeProvider([]));
+    const lifecycleGate = deferred<void>();
+    const lifecycleEntered = deferred<void>();
+    vi.spyOn(loop, "fireLifecycleEvent").mockImplementation(() => {
+      lifecycleEntered.resolve(undefined);
+      return lifecycleGate.promise;
+    });
+    const disposition = vi.fn();
+    const rendererDropped = vi.fn();
+
+    const turn = loop.runTurn(
+      "session start failure",
+      { onGuidanceDropped: rendererDropped },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+    await lifecycleEntered.promise;
+    expect(loop.queueGuidanceWithDisposition("queued during SessionStart", {
+      onDropped: disposition,
+    })).toBe("queued");
+    lifecycleGate.reject(new Error("SessionStart failure"));
+
+    await expect(turn).rejects.toThrow("SessionStart failure");
+    expect(disposition).toHaveBeenCalledTimes(1);
+    expect(rendererDropped).toHaveBeenCalledTimes(1);
+    expect(loop.guidanceQueue).toEqual([]);
+    expect(loop.hasActiveTurn()).toBe(false);
+  });
+
+  it("cleans queued guidance when preflight throws before queryLoop", async () => {
+    const loop = makeLoop(new FakeProvider([]));
+    const preflightGate = deferred<boolean>();
+    const preflightEntered = deferred<void>();
+    vi.spyOn(loop, "runPreflightGuard").mockImplementation(() => {
+      preflightEntered.resolve(undefined);
+      return preflightGate.promise;
+    });
+    const disposition = vi.fn();
+    const rendererDropped = vi.fn();
+
+    const turn = loop.runTurn(
+      "preflight failure",
+      { onGuidanceDropped: rendererDropped },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+    await preflightEntered.promise;
+    expect(loop.queueGuidanceWithDisposition("queued during preflight", {
+      onDropped: disposition,
+    })).toBe("queued");
+    preflightGate.reject(new Error("preflight failure"));
+
+    await expect(turn).rejects.toThrow("preflight failure");
+    expect(disposition).toHaveBeenCalledTimes(1);
+    expect(rendererDropped).toHaveBeenCalledTimes(1);
+    expect(loop.guidanceQueue).toEqual([]);
+    expect(loop.hasActiveTurn()).toBe(false);
+  });
+
+  it("drops drained guidance when its round-boundary preflight throws", async () => {
+    const provider = new FakeProvider([[
+      { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent,
+      { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
+    ]]);
+    const loop = makeLoop(provider);
+    const injectionPreflight = deferred<boolean>();
+    const injectionPreflightEntered = deferred<void>();
+    let preflightCalls = 0;
+    vi.spyOn(loop, "runPreflightGuard").mockImplementation(() => {
+      preflightCalls += 1;
+      if (preflightCalls === 1) return Promise.resolve(false);
+      injectionPreflightEntered.resolve(undefined);
+      return injectionPreflight.promise;
+    });
+    const disposition = vi.fn();
+    const rendererDropped = vi.fn();
+
+    const turn = loop.runTurn(
+      "injection preflight failure",
+      { onGuidanceDropped: rendererDropped },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+    await Promise.resolve();
+    expect(loop.queueGuidanceWithDisposition("drained before preflight", {
+      onDropped: disposition,
+    })).toBe("queued");
+    await injectionPreflightEntered.promise;
+    injectionPreflight.reject(new Error("injection preflight failure"));
+
+    await expect(turn).rejects.toThrow("injection preflight failure");
+    expect(disposition).toHaveBeenCalledTimes(1);
+    expect(disposition).toHaveBeenCalledWith("turn-ended");
+    expect(rendererDropped).toHaveBeenCalledTimes(1);
+    expect(loop.guidanceQueue).toEqual([]);
+    expect(
+      getHistory(loop).some((message) =>
+        typeof message.content === "string" && message.content.includes("drained before preflight")),
+    ).toBe(false);
+  });
+
+  it("acknowledges running guidance only after a successful provider round commit", async () => {
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent,
+        { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
+      ],
+      [
+        { type: "error", error: "synthetic provider failure" } as StreamEvent,
+      ],
+      [
+        { type: "text_delta", text: "retry base response" } as StreamEvent,
+        { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+      ],
+      [
+        { type: "text_delta", text: "retry consumed guidance" } as StreamEvent,
+        { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+      ],
+    ]);
+    const loop = makeLoop(provider);
+    const injected = vi.fn();
+    const dropped = vi.fn();
+    const rendererInjected = vi.fn();
+    const rendererDropped = vi.fn();
+
+    const failedTurn = loop.runTurn(
+      "first attempt",
+      {
+        onGuidanceInjected: rendererInjected,
+        onGuidanceDropped: rendererDropped,
+      },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+    await Promise.resolve();
+    expect(loop.queueGuidanceWithDisposition("durable child result", {
+      onInjected: injected,
+      onDropped: dropped,
+    })).toBe("queued");
+
+    await expect(failedTurn).resolves.toMatchObject({ stopReason: "stream-error" });
+    expect(injected).not.toHaveBeenCalled();
+    expect(dropped).toHaveBeenCalledTimes(1);
+    expect(dropped).toHaveBeenCalledWith("turn-ended");
+    expect(rendererInjected).not.toHaveBeenCalled();
+    expect(rendererDropped).toHaveBeenCalledTimes(1);
+    expect(
+      getHistory(loop).some((message) =>
+        typeof message.content === "string" && message.content.includes("durable child result")),
+    ).toBe(false);
+
+    const retriedTurn = loop.runTurn(
+      "second attempt",
+      { onGuidanceInjected: rendererInjected },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+    await Promise.resolve();
+    expect(loop.queueGuidanceWithDisposition("durable child result", {
+      onInjected: injected,
+      onDropped: dropped,
+    })).toBe("queued");
+    await expect(retriedTurn).resolves.toMatchObject({ stopReason: "end_turn" });
+
+    expect(injected).toHaveBeenCalledTimes(1);
+    expect(dropped).toHaveBeenCalledTimes(1);
+    expect(rendererInjected).toHaveBeenCalledTimes(1);
+    expect(rendererInjected).toHaveBeenCalledWith("durable child result");
+    expect(
+      getHistory(loop).filter((message) =>
+        typeof message.content === "string" && message.content.includes("durable child result")),
+    ).toHaveLength(1);
+  });
+
+  it("rolls back failed initialGuidance after an applied-compaction clone and retains one successful reinjection", async () => {
+    const provider = new FakeProvider([
+      [{ type: "error", error: "initial guidance provider failure" } as StreamEvent],
+      [
+        { type: "text_delta", text: "consumed" } as StreamEvent,
+        { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+      ],
+    ]);
+    const loop = makeLoop(provider);
+    vi.spyOn(loop, "runPreflightGuard").mockImplementation(async () => {
+      cloneHistoryLikeAppliedCompaction(loop);
+      return true;
+    });
+    const initialGuidance = "[Sub-Agent: Researcher]\ndurable child result";
+
+    await expect(loop.runTurn(
+      "parent request",
+      undefined,
+      undefined,
+      {
+        inputOrigin: "user-keyboard",
+        initialGuidance,
+        approvalReasonPrefix: "[Sub-Agent: Researcher]",
+      },
+    )).resolves.toMatchObject({ stopReason: "stream-error" });
+    expect(
+      getHistory(loop).filter((message) =>
+        typeof message.content === "string" && message.content.includes("durable child result")),
+    ).toHaveLength(0);
+
+    await expect(loop.runTurn(
+      "parent request",
+      undefined,
+      undefined,
+      {
+        inputOrigin: "user-keyboard",
+        initialGuidance,
+        approvalReasonPrefix: "[Sub-Agent: Researcher]",
+      },
+    )).resolves.toMatchObject({ stopReason: "end_turn" });
+
+    const guidanceHistory = getHistory(loop).filter((message) =>
+      typeof message.content === "string"
+      && message.content.includes("durable child result"));
+    // Only the successful turn retains the separate guidance-injection row.
+    expect(guidanceHistory).toHaveLength(1);
+  });
+
+  it("rolls back a failed agent-message input after an applied-compaction clone and retains one successful retry", async () => {
+    const provider = new FakeProvider([
+      [{ type: "error", error: "agent message provider failure" } as StreamEvent],
+      [
+        { type: "text_delta", text: "consumed" } as StreamEvent,
+        { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+      ],
+    ]);
+    const loop = makeLoop(provider);
+    vi.spyOn(loop, "runPreflightGuard").mockImplementation(async () => {
+      cloneHistoryLikeAppliedCompaction(loop);
+      return true;
+    });
+    const mailboxInput = "[Sub-Agent: Researcher]\ndurable autonomous wake result";
+
+    await expect(loop.runTurn(
+      mailboxInput,
+      undefined,
+      undefined,
+      {
+        inputOrigin: "agent-message",
+        approvalReasonPrefix: "[Sub-Agent: Researcher]",
+      },
+    )).resolves.toMatchObject({ stopReason: "stream-error" });
+    expect(
+      getHistory(loop).filter((message) =>
+        typeof message.content === "string"
+        && message.content.includes("durable autonomous wake result")),
+    ).toHaveLength(0);
+
+    await expect(loop.runTurn(
+      mailboxInput,
+      undefined,
+      undefined,
+      {
+        inputOrigin: "agent-message",
+        approvalReasonPrefix: "[Sub-Agent: Researcher]",
+      },
+    )).resolves.toMatchObject({ stopReason: "end_turn" });
+
+    expect(
+      getHistory(loop).filter((message) =>
+        typeof message.content === "string"
+        && message.content.includes("durable autonomous wake result")),
+    ).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      label: "initialGuidance",
+      input: "parent request",
+      injectedText: "durable post-turn guidance",
+      options: {
+        inputOrigin: "user-keyboard" as const,
+        initialGuidance: "[Sub-Agent: Researcher]\ndurable post-turn guidance",
+        approvalReasonPrefix: "[Sub-Agent: Researcher]",
+      },
+    },
+    {
+      label: "agent-message",
+      input: "[Sub-Agent: Researcher]\ndurable post-turn wake result",
+      injectedText: "durable post-turn wake result",
+      options: {
+        inputOrigin: "agent-message" as const,
+        approvalReasonPrefix: "[Sub-Agent: Researcher]",
+      },
+    },
+  ])("durably rolls back $label when post-turn fails after saving the injected row", async ({
+    input,
+    injectedText,
+    options,
+  }) => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-host-injection-rollback-"));
+    const memoryManager = new MemoryManager({ lvisDir: dir });
+    memoryManager.load();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "completed before post-turn failure" } as StreamEvent,
+        { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+      ],
+    ]);
+    let dirtySnapshotSaved = false;
+    const loop = makeLoop(provider, {
+      memoryManager,
+      postTurnHookChain: {
+        run: async ({ sessionId, messages }: {
+          sessionId: string;
+          messages: GenericMessage[];
+        }) => {
+          expect(messages.some((message) =>
+            typeof message.content === "string"
+            && message.content.includes(injectedText))).toBe(true);
+          await memoryManager.saveSession(sessionId, messages);
+          dirtySnapshotSaved = true;
+          throw new Error("synthetic post-turn failure");
+        },
+      },
+    });
+
+    try {
+      await expect(loop.runTurn(input, undefined, undefined, options))
+        .rejects.toThrow("synthetic post-turn failure");
+      expect(dirtySnapshotSaved).toBe(true);
+
+      const persisted = memoryManager.loadSession(loop.getSessionId()) ?? [];
+      expect(persisted.some((message) => {
+        if (message === null || typeof message !== "object") return false;
+        const content = (message as { content?: unknown }).content;
+        return typeof content === "string" && content.includes(injectedText);
+      })).toBe(false);
+      expect(getHistory(loop).some((message) =>
+        typeof message.content === "string"
+        && message.content.includes(injectedText))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
 });

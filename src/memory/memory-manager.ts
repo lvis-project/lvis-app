@@ -11,6 +11,11 @@ import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
 import { projectRootEquals } from "../shared/project-identity.js";
 import {
+  A2A_PROJECTED_TASK_STATE_VALUES,
+  type A2AProjectedTaskState,
+} from "../shared/a2a.js";
+import type { SubAgentSuspensionReason } from "../shared/subagent-events.js";
+import {
   buildToolResultStrippedStub,
   buildToolResultTruncatedStub,
   type ToolResultArtifactUnavailableInfo,
@@ -308,6 +313,10 @@ export interface SessionMetadata {
    * reads this so a long resume chain cannot exceed the global round budget.
    */
   cumulativeRounds?: number;
+  /** Last durable A2A projection. Only INPUT_REQUIRED is resumable. */
+  subAgentTaskState?: A2AProjectedTaskState;
+  /** Typed resume axis paired with INPUT_REQUIRED. */
+  subAgentSuspensionReason?: SubAgentSuspensionReason;
 }
 
 const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
@@ -561,6 +570,14 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
   const cumulativeRounds = typeof raw.cumulativeRounds === "number" && Number.isInteger(raw.cumulativeRounds) && raw.cumulativeRounds >= 0
     ? raw.cumulativeRounds
     : undefined;
+  const subAgentTaskState = typeof raw.subAgentTaskState === "string"
+    && (A2A_PROJECTED_TASK_STATE_VALUES as readonly string[]).includes(raw.subAgentTaskState)
+    ? raw.subAgentTaskState as A2AProjectedTaskState
+    : undefined;
+  const subAgentSuspensionReason = raw.subAgentSuspensionReason === "budget"
+    || raw.subAgentSuspensionReason === "question"
+    ? raw.subAgentSuspensionReason
+    : undefined;
   return {
     sessionKind: normalizeSessionKind(raw.sessionKind),
     routineId,
@@ -591,6 +608,8 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     questionAnswerCount,
     resumeCount,
     cumulativeRounds,
+    subAgentTaskState,
+    subAgentSuspensionReason,
   };
 }
 
@@ -1170,6 +1189,14 @@ export class MemoryManager {
     if (Array.isArray(messages)) {
       this.indexSessionForSearch(sessionId, messages);
     }
+  }
+
+  hasSessionMetadataFile(sessionId: string): boolean {
+    if (!isValidSessionId(sessionId)) {
+      throw new Error('hasSessionMetadataFile: invalid sessionId "' + sessionId + '"');
+    }
+    const path = join(this.sessionsDir, sessionId + ".meta.json");
+    return readUtf8FileIfPresent(path) !== null;
   }
 
   loadSessionMetadata(sessionId: string): SessionMetadata | null {

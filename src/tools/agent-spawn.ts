@@ -216,20 +216,21 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
           ? (ctx.metadata.toolUseId as string)
           : undefined;
       const spawnId = randomUUID();
-      // A resume knows its join key up front (it equals `resumeId`); the original
-      // spawn learns `childSessionId` only from the run result (set on `done`).
-      const resumeChildSessionId = resumeId ? { childSessionId: resumeId } : {};
+      const initialTaskState = resumeId
+        ? projectSubAgentRunState("waiting")
+        : projectSubAgentRunState("submitted");
       const promptPayload = instructions ? { instructions } : {};
-      let linkedChildSessionId = resumeId;
+      // A known resumeId is not an authorized parent-delivery link. The runner
+      // calls onLinked only after exact origin + durable INPUT_REQUIRED checks.
+      let linkedChildSessionId: string | undefined;
       const linkedPayload = () => linkedChildSessionId ? { childSessionId: linkedChildSessionId } : {};
       deps.emit({
         spawnId,
         type: "start",
-        taskState: projectSubAgentRunState("submitted"),
+        taskState: initialTaskState,
         title,
         toolUseId,
         ...promptPayload,
-        ...resumeChildSessionId,
       });
       try {
         const callbacks = {
@@ -238,7 +239,9 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             deps.emit({
               spawnId,
               type: "activity" as const,
-              taskState: projectSubAgentRunState("running"),
+              taskState: resumeId
+                ? projectSubAgentRunState("waiting")
+                : projectSubAgentRunState("submitted"),
               childSessionId,
               ...promptPayload,
             });
@@ -253,15 +256,9 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
               ...promptPayload,
               ...linkedPayload(),
             }),
-          onError: (msg: string) =>
-            deps.emit({
-              spawnId,
-              type: "error" as const,
-              taskState: projectSubAgentRunState("error"),
-              message: msg,
-              ...promptPayload,
-              ...linkedPayload(),
-            }),
+          // `onError` is diagnostic and may precede a structurally returned
+          // INPUT_REQUIRED/REJECTED result. Only the final result below may
+          // emit a terminal renderer event for this spawnId.
         };
         // Resume RE-HYDRATES a frozen sub-agent; spawn starts a fresh one. The
         // resume path takes NO sourceTools/profile from the tool call — those are
@@ -290,64 +287,92 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
               callbacks,
             );
         if (background) {
-          const runPromise = run();
-          void runPromise
-            .then(async (result) => {
-              linkedChildSessionId = result.childSessionId;
-              const taskState = projectSubAgentResultState(result);
-              const status = subAgentRunStatusFromTaskState(taskState);
-              if (status === "error") {
-                const message = result.error ?? result.summary;
-                deps.emit({
-                  spawnId,
-                  type: "error",
-                  taskState,
-                  status,
-                  message,
-                  ...promptPayload,
-                  childSessionId: result.childSessionId,
-                });
-              } else {
-                deps.emit({
-                  spawnId,
-                  type: "done",
-                  taskState,
-                  status,
-                  ...(result.suspension ? { suspension: result.suspension } : {}),
-                  summary: result.summary,
-                  toolCallCount: result.toolCallCount,
-                  entries: result.entries,
-                  ...promptPayload,
-                  childSessionId: result.childSessionId,
-                });
-              }
-              const parentSessionId = originSessionId ?? "";
+          let terminalized = false;
+          const terminalize = async (result: SubAgentSpawnResult): Promise<void> => {
+            if (terminalized) return;
+            terminalized = true;
+            const authorizedChildSessionId = linkedChildSessionId;
+            const taskState = projectSubAgentResultState(result);
+            const status = subAgentRunStatusFromTaskState(taskState);
+            if (status === "error") {
+              const message = result.error ?? result.summary;
+              deps.emit({
+                spawnId,
+                type: "error",
+                taskState,
+                status,
+                message,
+                ...promptPayload,
+                ...linkedPayload(),
+              });
+            } else {
+              deps.emit({
+                spawnId,
+                type: "done",
+                taskState,
+                status,
+                ...(result.suspension ? { suspension: result.suspension } : {}),
+                summary: result.summary,
+                toolCallCount: result.toolCallCount,
+                entries: result.entries,
+                ...promptPayload,
+                ...linkedPayload(),
+              });
+            }
+
+            if (!authorizedChildSessionId) return;
+            const parentSessionId = originSessionId ?? "";
+            try {
               await runner.deliverToParent({
                 parentSessionId,
-                childSessionId: result.childSessionId,
+                childSessionId: authorizedChildSessionId,
                 message: createBackgroundResultMessage(
                   result,
                   parentSessionId,
                   spawnId,
                 ),
               });
-            })
-            .catch((err) => {
-              const message = (err as Error).message ?? "agent_spawn failed";
+            } catch {
+              // Delivery owns its audit path. The renderer terminal state is final.
+            }
+          };
+          const terminalizeRejection = async (err: unknown): Promise<void> => {
+            const message = (err as Error).message ?? "agent_spawn failed";
+            if (!linkedChildSessionId) {
+              if (terminalized) return;
+              terminalized = true;
+              const taskState = projectSubAgentRunState("error");
               deps.emit({
                 spawnId,
                 type: "error",
-                taskState: projectSubAgentRunState("error"),
+                taskState,
+                status: subAgentRunStatusFromTaskState(taskState),
                 message,
                 ...promptPayload,
-                ...linkedPayload(),
               });
+              return;
+            }
+            await terminalize({
+              summary: message,
+              error: message,
+              toolCallCount: 0,
+              turnCount: 0,
+              childSessionId: linkedChildSessionId,
+              entries: [],
+              ok: false,
             });
+          };
+
+          void run().then(terminalize, terminalizeRejection);
+          const handleTaskState = originSessionId
+            && typeof runner.getRunStatus === "function"
+            ? runner.getRunStatus(spawnId, originSessionId)?.taskState ?? initialTaskState
+            : initialTaskState;
           return {
             output: JSON.stringify({
               spawnId,
-              status: "running",
-              taskState: projectSubAgentRunState("running"),
+              status: subAgentRunStatusFromTaskState(handleTaskState),
+              taskState: handleTaskState,
               background: true,
               ...(resumeId ? { resumeId } : {}),
               ...(linkedChildSessionId ? { childSessionId: linkedChildSessionId } : {}),

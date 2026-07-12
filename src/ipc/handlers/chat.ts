@@ -41,12 +41,7 @@ const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
 const MAX_PROJECT_ROOT_CHARS = 2_048;
 const MAX_PROJECT_NAME_CHARS = 120;
 
-const NON_ACKNOWLEDGING_STOP_REASONS = new Set([
-  "blocked",
-  "interrupted",
-  "context-error",
-  "stream-error",
-]);
+const ACKNOWLEDGING_STOP_REASON = "end_turn";
 
 export interface ParentMailboxTurn {
   parentSessionId: string;
@@ -122,7 +117,7 @@ export async function acknowledgeParentMailboxAfterTurn(
   if (
     !mailboxTurn
     || result.route === "command"
-    || NON_ACKNOWLEDGING_STOP_REASONS.has(result.stopReason ?? "")
+    || result.stopReason !== ACKNOWLEDGING_STOP_REASON
   ) return;
   if (deps.conversationLoop.getSessionId() !== mailboxTurn.parentSessionId) return;
   const runner = getParentMailboxRunner(deps);
@@ -469,8 +464,8 @@ export async function handleChatSend(
           : {}),
       },
     );
-    await markMainActiveAfterTurn(deps, effective);
     await acknowledgeParentMailboxAfterTurn(deps, mailboxTurn, result);
+    await markMainActiveAfterTurn(deps, effective);
     return result;
   });
 }

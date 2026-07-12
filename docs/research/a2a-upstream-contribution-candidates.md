@@ -1,6 +1,6 @@
 # A2A upstream contribution candidates
 
-- Checked: **2026-07-11 (Asia/Seoul)**
+- Checked: **2026-07-12 (Asia/Seoul)**
 - Sources: official A2A Protocol, A2A TCK, and A2A JavaScript SDK repositories only
 - Submission status: research draft; no upstream issue or pull request has been submitted
 
@@ -247,6 +247,7 @@ See [Push Notification objects and guarantees](https://github.com/a2aproject/A2A
 The open [push-notification semantics epic #1988](https://github.com/a2aproject/A2A/issues/1988) concerns secret redaction, token format, and initial snapshot behavior. It is not evidence of a missing private mailbox commit/ack contract.
 
 A durable in-process mailbox may choose stronger semantics, such as retaining an entry until actual injection succeeds, but persistence transactions and queue rollback are host-internal concerns. They should not be proposed as protocol requirements without failures reproduced across independent wire implementations.
+Ph1 implementation findings: a durable local record must be re-authorized against authoritative child ownership and canonical provenance at consumption time; semantic message identifiers need host-side idempotency; rejected-entry cleanup must commit before any valid guidance is exposed; and acknowledgment must wait until the receiving model has successfully consumed the guidance. Failed turns must roll back their temporary history copy without erasing durable provenance, while setup persistence and cancellation races must converge on one terminal state across status, event, and Message projections. These are host-internal security and transaction requirements, not evidence for a new A2A core issue.
 
 Acceptance evidence for “no issue”:
 
@@ -255,6 +256,29 @@ Acceptance evidence for “no issue”:
 - Documentation distinguishes “at least one attempt” from guaranteed at-least-once delivery.
 - Any future proposal begins with cross-implementation evidence rather than a private queue design.
 
+## 6. External host-agent implementation review (CLI/Desktop)
+
+This comparison is implementation evidence for the host roadmap, not a claim that non-A2A collaboration APIs are protocol-compatible. It was added as a fourth review lane alongside the local architecture, critic, and security reviews.
+
+| Host | Primary implementation evidence | Reusable lesson for this blueprint |
+| --- | --- | --- |
+| OpenAI Codex CLI/app-server | [send_input addresses a spawned thread and can optionally interrupt it](https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/handlers/multi_agents/send_input.rs); the [app-server API](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md) exposes typed collaboration items, parent/child thread relationships, turn/steer for an active turn, and thread/inject_items for explicit history injection | Keep identity, delivery, and UI projection separate. An active-turn steer is not the same transaction as a durable idle mailbox. A host-owned thread/session identifier is the routing address; display names remain metadata. |
+| Gemini CLI | The [local subagent executor](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/agents/local-executor.ts) creates isolated tool registries, derives a subagent-labelled message bus for confirmation, removes agent tools to prevent recursive spawning, and queues background completions for the next inter-turn boundary. Gemini CLI also documents [remote A2A subagents](https://geminicli.com/docs/core/remote-agents/) discovered from an Agent Card with API-key, HTTP, cloud credential, or OAuth providers | The ph1 guidance boundary, receiver-owned approval label, and D8 creation-depth stop match a shipped host pattern. Ph3 must test Agent Card discovery, supported protocol version, authentication failure, streaming result reassembly, and interrupted-task continuation rather than assuming that an A2A library alone provides host interoperability. |
+| goose CLI/Desktop | [run_subagent_task](https://github.com/aaif-goose/goose/blob/main/crates/goose/src/agents/subagent_handler.rs) creates a separate Agent/session, propagates cancellation, can return a concise final result or full conversation text, and emits structured subagent tool-request notifications. The documented [GOOSE_MAX_BACKGROUND_TASKS](https://github.com/aaif-goose/goose/blob/main/documentation/docs/guides/environment-variables.md) bounds concurrent background work | CLI and Desktop should share one execution/state pipeline. Cancellation and tool activity need structured events; summary/full-history selection is a presentation concern, not an address or lifecycle state. |
+| OpenHands CLI/GUI | OpenHands exposes a shared SDK, CLI, and Local GUI over the same agent engine, while its delegation discussion uses the typed event stream to switch control between parent and delegated agent conversations ([repository](https://github.com/All-Hands-AI/OpenHands), [delegation design discussion](https://github.com/All-Hands-AI/OpenHands/issues/10433)) | A typed event stream is a useful UI projection surface, but an internal delegation event is not A2A conformance. Interactive child-conversation UX belongs after the message/task contract is stable. |
+
+Cross-host conclusions:
+
+1. **Delivery has two distinct commit points.** Active-turn steering may be accepted immediately, while idle delivery must survive process/session changes and be acknowledged only after model-visible consumption. Ph1 therefore keeps mailbox-first delivery even when an active parent can accept guidance.
+2. **Address and display identity must remain separate.** Codex thread IDs, goose session IDs, and A2A task/context IDs all support the D7 choice: use the host-minted child session ID for routing and keep profile names display-only.
+3. **Receiver policy remains authoritative.** Gemini's derived, subagent-labelled confirmation surface supports the ph1 rule that a received message cannot inherit the sender's tool approval.
+4. **A2A interoperability begins at the binding.** Gemini CLI's remote-agent support is the most direct external host target. A future smoke test should point it at the opt-in ph3 loopback Agent Card and cover one completed Task, one INPUT_REQUIRED continuation, cancellation, and a rejected authentication attempt.
+5. **Do not import foreign creation depth.** Several hosts prohibit recursive subagents or bound background concurrency. None is evidence for relaxing this repository's depth-1 creation stop; ph2 expands only the communication graph.
+
+Potential host-project contributions discovered during this review:
+
+- **Gemini CLI documentation/version matrix:** its remote-agent examples currently show an older protocol-version value while A2A v1.0 is released. Before filing anything, reproduce the current client's supported versions and search for an existing migration issue. If the client already supports v1, propose a documentation-only update plus a v1 INPUT_REQUIRED example; otherwise file a narrowly scoped compatibility question rather than claiming a bug.
+- **No Codex, goose, or OpenHands issue yet:** their active-turn injection, subagent event, and UI patterns are useful comparative evidence, but this ph1 work did not reproduce an upstream defect in those projects.
 ## Duplicate-check checklist before any external submission
 
 - [ ] Search open and closed issues in `a2aproject/A2A`, `a2aproject/a2a-tck`, and `a2aproject/a2a-js` using the exact protocol terms and likely synonyms.

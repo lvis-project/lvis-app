@@ -28,6 +28,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
+import type { TurnStopReason } from "./turn/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { isValidSessionId, type MemoryManager } from "../memory/memory-manager.js";
 import type { ApprovalGate, ApprovalRequest, ApprovalDecision } from "../permissions/approval-gate.js";
@@ -49,6 +50,7 @@ import { SubAgentTranscriptAccumulator } from "./subagent-transcript.js";
 import type { ChatEntry } from "../lib/chat-stream-state.js";
 import { serializeHistoryMessage, type SerializedHistoryMessage } from "../shared/chat-history.js";
 import { isToolResultStubContent } from "../shared/tool-result-stub.js";
+import { maskSensitiveData } from "../shared/dlp.js";
 import type { GenericMessage } from "./llm/types.js";
 import type {
   A2ASubAgentMessageBus,
@@ -59,6 +61,10 @@ import type {
 } from "./a2a-subagent-message-bus.js";
 import type { ParentMailboxEntry } from "./subagent-message-mailbox.js";
 import {
+  A2A_ROLE_AGENT,
+  A2ATaskState,
+  canTransitionA2ATaskState,
+  isA2ATerminalTaskState,
   projectSubAgentResultState,
   projectSubAgentRunState,
   subAgentRunStatusFromTaskState,
@@ -76,6 +82,10 @@ export type {
 } from "../shared/subagent-events.js";
 
 const log = createLogger("lvis");
+
+function maskSubAgentText(text: string): string {
+  return maskSensitiveData(text).masked;
+}
 
 export interface SubAgentSpawnInput {
   title: string;
@@ -253,6 +263,14 @@ interface TrackedSubAgentRun {
   stopReason?: import("./turn/types.js").TurnStopReason;
   suspension?: SubAgentSuspension;
   abort?: () => void;
+  initialMetadataFailed?: boolean;
+  ephemeralFallbackConsumed?: boolean;
+  ephemeralParentDelivery?: {
+    parentSessionId: string;
+    childSessionId: string;
+    childTitle: string;
+    messageId: string;
+  };
 }
 
 export interface SubAgentRunnerDeps {
@@ -325,6 +343,19 @@ function createBudgetSuspension(resumeId: string): SubAgentSuspension {
     prompt: BUDGET_SUSPENSION_PROMPT,
     resumeId,
   };
+}
+
+function isSuccessfulSubAgentStopReason(stopReason: TurnStopReason | undefined): boolean {
+  return stopReason === "end_turn" || stopReason === "round-cap";
+}
+
+function subAgentStopFailureReason(
+  stopReason: TurnStopReason | undefined,
+  text: string,
+  operation: "run" | "resume",
+): string {
+  if (stopReason === "interrupted") return "sub-agent run interrupted";
+  return text.trim() || `sub-agent ${operation} stopped with ${stopReason ?? "unknown-stop"}`;
 }
 
 /**
@@ -494,20 +525,43 @@ function hideUnhydratedToolResultStub(message: GenericMessage): GenericMessage {
 export class SubAgentRunner {
   constructor(private readonly deps: SubAgentRunnerDeps) {}
 
-  deliverToParent(input: DeliverToParentInput): Promise<DeliverToParentResult> {
+  async deliverToParent(input: DeliverToParentInput): Promise<DeliverToParentResult> {
     const bus = this.deps.messageBus;
     if (!bus) {
       log.warn(
         { parentSessionId: input.parentSessionId, childSessionId: input.childSessionId },
         "a2a message dropped: message bus unavailable",
       );
-      return Promise.resolve({
+      return {
         ok: false,
         disposition: "dropped",
         reason: "message-bus-unavailable",
-      });
+      };
     }
-    return bus.deliverToParent(input);
+
+    const fallbackCreated = this.prepareEphemeralParentDelivery(input);
+    try {
+      const result = await bus.deliverToParent(input);
+      if (!result.ok && fallbackCreated) {
+        this.releaseEphemeralParentDelivery(
+          input.parentSessionId,
+          input.childSessionId,
+          input.message.messageId,
+          false,
+        );
+      }
+      return result;
+    } catch (err) {
+      if (fallbackCreated) {
+        this.releaseEphemeralParentDelivery(
+          input.parentSessionId,
+          input.childSessionId,
+          input.message.messageId,
+          false,
+        );
+      }
+      throw err;
+    }
   }
 
   peekParentMailbox(parentSessionId: string): Promise<ParentMailboxEntry[]> {
@@ -533,11 +587,40 @@ export class SubAgentRunner {
   async resolveSubAgentAddress(
     parentSessionId: string,
     childSessionId: string,
+    messageId: string,
   ): Promise<ResolvedSubAgentAddress | null> {
     if (!isValidSessionId(childSessionId)) return null;
     const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(childSessionId);
+    if (!meta) {
+      // A present-but-invalid/unreadable file is never treated as missing.
+      if (this.deps.subAgentMemoryManager.hasSessionMetadataFile(childSessionId)) {
+        return null;
+      }
+      const run = this.trackedRuns.get(childSessionId);
+      const fallback = run?.ephemeralParentDelivery;
+      if (
+        !run
+        || !run.initialMetadataFailed
+      || run.ephemeralFallbackConsumed === true
+        || run.childSessionId !== childSessionId
+        || run.originSessionId !== parentSessionId
+        || run.title.length === 0
+        || !fallback
+        || fallback.parentSessionId !== parentSessionId
+        || fallback.childSessionId !== childSessionId
+        || fallback.messageId !== messageId
+      ) {
+        return null;
+      }
+      return {
+        parentSessionId: fallback.parentSessionId,
+        childSessionId: fallback.childSessionId,
+        childTitle: fallback.childTitle,
+        ephemeralMessageId: fallback.messageId,
+      };
+    }
     if (
-      meta?.sessionKind !== "subagent"
+      meta.sessionKind !== "subagent"
       || !meta.originSessionId
       || !meta.subAgentTitle
     ) {
@@ -554,6 +637,56 @@ export class SubAgentRunner {
       childSessionId,
       childTitle: meta.subAgentTitle,
     };
+  }
+
+  releaseEphemeralParentDelivery(
+    parentSessionId: string,
+    childSessionId: string,
+    messageId: string,
+    consume = true,
+  ): void {
+    const run = this.trackedRuns.get(childSessionId);
+    const fallback = run?.ephemeralParentDelivery;
+    if (
+      !run
+      || !fallback
+      || fallback.parentSessionId !== parentSessionId
+      || fallback.childSessionId !== childSessionId
+      || fallback.messageId !== messageId
+    ) {
+      return;
+    }
+    delete run.ephemeralParentDelivery;
+    if (consume) run.ephemeralFallbackConsumed = true;
+    this.pruneTrackedRuns();
+  }
+
+  private prepareEphemeralParentDelivery(input: DeliverToParentInput): boolean {
+    const run = this.trackedRuns.get(input.childSessionId);
+    if (
+      !run
+      || !run.initialMetadataFailed
+      || run.ephemeralFallbackConsumed === true
+      || run.originSessionId !== input.parentSessionId
+      || run.childSessionId !== input.childSessionId
+      || !isA2ATerminalTaskState(run.taskState)
+      || input.message.role !== A2A_ROLE_AGENT
+      || input.message.contextId !== input.parentSessionId
+      || input.message.taskId !== input.childSessionId
+      || input.message.metadata?.taskState !== run.taskState
+    ) {
+      return false;
+    }
+    if (run.ephemeralParentDelivery) {
+      return false;
+    }
+    run.ephemeralParentDelivery = {
+      parentSessionId: input.parentSessionId,
+      childSessionId: input.childSessionId,
+      childTitle: run.title,
+      messageId: input.message.messageId,
+    };
+    return true;
   }
 
   /**
@@ -684,17 +817,18 @@ export class SubAgentRunner {
     originSessionId?: string;
     title: string;
     abort?: () => void;
+    initialTaskState?: A2AProjectedTaskState;
+    registerChildAlias?: boolean;
   }): TrackedSubAgentRun {
     const now = new Date().toISOString();
+    const taskState = args.initialTaskState ?? projectSubAgentRunState("submitted");
     const run: TrackedSubAgentRun = {
       ...(args.spawnId ? { spawnId: args.spawnId } : {}),
       childSessionId: args.childSessionId,
       ...(args.originSessionId ? { originSessionId: args.originSessionId } : {}),
       title: args.title,
-      status: "running",
-      // The host handle is immediately active, while A2A remains SUBMITTED until
-      // provider validation succeeds and the child turn can enter WORKING.
-      taskState: projectSubAgentRunState("submitted"),
+      status: subAgentRunStatusFromTaskState(taskState),
+      taskState,
       startedAt: now,
       updatedAt: now,
       toolCallCount: 0,
@@ -702,10 +836,16 @@ export class SubAgentRunner {
       entries: [],
       ...(args.abort ? { abort: args.abort } : {}),
     };
-    this.trackedRuns.set(args.childSessionId, run);
+    if (args.registerChildAlias !== false) {
+      this.trackedRuns.set(args.childSessionId, run);
+    }
     if (args.spawnId) this.trackedRuns.set(args.spawnId, run);
     this.pruneTrackedRuns();
     return run;
+  }
+
+  private attachTrackedRunChildAlias(run: TrackedSubAgentRun): void {
+    this.trackedRuns.set(run.childSessionId, run);
   }
 
   private isRunVisibleToOrigin(run: TrackedSubAgentRun, originSessionId: string): boolean {
@@ -716,13 +856,38 @@ export class SubAgentRunner {
     run: TrackedSubAgentRun,
     patch: Partial<Omit<TrackedSubAgentRun, "spawnId" | "childSessionId" | "title" | "startedAt">>,
   ): void {
-    Object.assign(run, patch, { updatedAt: new Date().toISOString() });
+    if (
+      patch.taskState !== undefined
+      && !canTransitionA2ATaskState(run.taskState, patch.taskState)
+    ) {
+      return;
+    }
+    if (patch.taskState === undefined && isA2ATerminalTaskState(run.taskState)) {
+      return;
+    }
+    const normalizedPatch = patch.taskState === undefined
+      ? patch
+      : {
+          ...patch,
+          status: subAgentRunStatusFromTaskState(patch.taskState),
+        };
+    Object.assign(run, normalizedPatch, { updatedAt: new Date().toISOString() });
   }
 
   private finalizeRun(
     run: TrackedSubAgentRun,
     result: SubAgentSpawnResult,
   ): void {
+    result.summary = maskSubAgentText(result.summary);
+    if (result.error !== undefined) {
+      result.error = maskSubAgentText(result.error);
+    }
+    if (result.suspension?.prompt !== undefined) {
+      result.suspension = {
+        ...result.suspension,
+        prompt: maskSubAgentText(result.suspension.prompt),
+      };
+    }
     const taskState = projectSubAgentResultState(result);
     const status = subAgentRunStatusFromTaskState(taskState);
     const patch: Partial<Omit<TrackedSubAgentRun, "spawnId" | "childSessionId" | "title" | "startedAt">> = {
@@ -749,7 +914,7 @@ export class SubAgentRunner {
     const unique = [...this.uniqueTrackedRuns()];
     if (unique.length <= MAX_TRACKED_RUNS) return;
     const removable = unique
-      .filter((run) => run.status !== "running")
+      .filter((run) => run.status !== "running" && !run.ephemeralParentDelivery)
       .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
     for (const run of removable.slice(0, unique.length - MAX_TRACKED_RUNS)) {
       this.trackedRuns.delete(run.childSessionId);
@@ -864,65 +1029,85 @@ export class SubAgentRunner {
     callbacks?: SubAgentSpawnCallbacks,
   ): Promise<SubAgentSpawnResult> {
     const childSessionId = buildChildSessionId(input.originSessionId);
-    callbacks?.onLinked?.({ childSessionId });
-
-    // Resolve the profile's mode → working-posture preamble + round-budget hint.
-    // Unknown / absent mode resolves to the inert `default` mode; a non-empty
-    // unmatched mode is logged so the audit trail captures the typo.
-    const modeResult = resolveAgentMode(input.profileMode);
-    if (!modeResult.matched) {
-      log.warn(
-        "sub-agent: unknown mode '%s' — using default (inert) mode",
-        modeResult.requested,
-      );
-    }
-
-    // Host-assigned round budget. Resolution: an explicit host `maxRounds`
-    // (fixed-shape callers such as WorkBoardEngine's plan/execute phases) wins;
-    // otherwise the profile mode's `maxToolRoundsHint` (explore/execute/
-    // research/plan); otherwise MAX_TURNS_DEFAULT. The LLM has no say — the
-    // `agent_spawn` tool dropped its `maxTurns` field, so a sub-agent's budget
-    // is pure host policy derived from the (coarse-grained) mode the LLM chose
-    // via agentName.
-    const requestedRounds =
-      input.maxRounds ?? modeResult.config.maxToolRoundsHint ?? MAX_TURNS_DEFAULT;
-    const cappedRounds = Math.max(1, Math.min(MAX_TURNS_CAP, requestedRounds));
-
-    // C3(b): build the sub-agent's tool surface. `sourceTools` empty/absent →
-    // null so buildChildDeps falls back to the full parent surface minus the
-    // blocklist (historical no-allowlist behavior). Resume never takes this
-    // path — it hands buildChildDeps the frozen meta.sourceTools list.
-    const frozenSourceTools = input.sourceTools && input.sourceTools.length > 0
-      ? input.sourceTools
-      : null;
-    const { childDeps, scopedTools } = this.buildChildDeps({
-      frozenSourceTools,
-      title: input.title,
-      profileModel: input.profileModel,
-    });
-
-    const child = new ConversationLoop(childDeps);
-    // Bind the child loop's session identity to the regex-valid childSessionId
-    // BEFORE any turn runs. run-turn's persistence path keys saveSession on
-    // `self.sessionId`, so this is the seam that makes the child's JSONL land
-    // under the addressable id (not the bare constructor UUID). Assigning
-    // `sessionId` directly mirrors how `newConversation` establishes identity.
-    child.sessionId = childSessionId;
-    child.sessionKind = "subagent";
-    // The tracer was created at field-init against the constructor UUID (see
-    // ConversationLoop.tracer). We just rebound `sessionId`, so re-init the
-    // tracer to key dev traces on the addressable childSessionId — otherwise a
-    // trace under the stale UUID would never correlate to the persisted
-    // session. Mirrors how `newConversation`/`loadSession` re-init the tracer
-    // after they change the session identity.
-    child.rebindTracer();
+    const cancellation = new AbortController();
+    let childForAbort: ConversationLoop | undefined;
     const trackedRun = this.trackRun({
       spawnId: input.spawnId,
       childSessionId,
       originSessionId: input.originSessionId,
       title: input.title,
-      abort: () => child.abortCurrentTurn(),
+      abort: () => {
+        cancellation.abort();
+        childForAbort?.abortCurrentTurn();
+      },
     });
+    callbacks?.onLinked?.({ childSessionId });
+
+    const setupResult = (() => {
+      try {
+        // Resolve the profile's mode → working-posture preamble + round-budget hint.
+        // Unknown / absent mode resolves to the inert `default` mode; a non-empty
+        // unmatched mode is logged so the audit trail captures the typo.
+        const modeResult = resolveAgentMode(input.profileMode);
+        if (!modeResult.matched) {
+          log.warn(
+            "sub-agent: unknown mode '%s' — using default (inert) mode",
+            modeResult.requested,
+          );
+        }
+
+        // Host-assigned round budget. Resolution: an explicit host `maxRounds`
+        // wins; otherwise use the profile hint, then the default. The LLM cannot
+        // change this policy because agent_spawn exposes no raw maxTurns field.
+        const requestedRounds =
+          input.maxRounds ?? modeResult.config.maxToolRoundsHint ?? MAX_TURNS_DEFAULT;
+        const cappedRounds = Math.max(1, Math.min(MAX_TURNS_CAP, requestedRounds));
+
+        // sourceTools empty/absent retains the historical full parent surface
+        // minus the hard blocklist. Resume uses its frozen metadata instead.
+        const frozenSourceTools = input.sourceTools && input.sourceTools.length > 0
+          ? input.sourceTools
+          : null;
+        const { childDeps, scopedTools } = this.buildChildDeps({
+          frozenSourceTools,
+          title: input.title,
+          profileModel: input.profileModel,
+        });
+
+        const child = new ConversationLoop(childDeps);
+        childForAbort = child;
+        // Bind persistence and tracing to the addressable child id before work.
+        child.sessionId = childSessionId;
+        child.sessionKind = "subagent";
+        child.rebindTracer();
+        return { ok: true as const, modeResult, cappedRounds, scopedTools, child };
+      } catch (error) {
+        return { ok: false as const, error };
+      }
+    })();
+
+    if (!setupResult.ok) {
+      trackedRun.initialMetadataFailed = true;
+      const interrupted = cancellation.signal.aborted;
+      const message = interrupted
+        ? "sub-agent run interrupted"
+        : (setupResult.error as Error).message ?? "sub-agent setup failed";
+      const result: SubAgentSpawnResult = {
+        summary: message,
+        toolCallCount: 0,
+        turnCount: 0,
+        childSessionId,
+        entries: [],
+        ok: false,
+        error: message,
+        ...(interrupted ? { stopReason: "interrupted" as const } : {}),
+      };
+      this.finalizeRun(trackedRun, result);
+      if (!interrupted) callbacks?.onError?.(maskSubAgentText(message));
+      return result;
+    }
+
+    const { modeResult, cappedRounds, scopedTools, child } = setupResult;
     // Persist resume metadata (PR-B) alongside the child JSONL before provider
     // validation and the first turn, into the SAME isolated subagent namespace (child loop's
     // MemoryManager). run-turn's saveSession writes the JSONL; this writes the
@@ -932,7 +1117,7 @@ export class SubAgentRunner {
     // exact set PR-C's resume must re-scope to — permission is frozen at spawn,
     // not re-granted on resume. `resumeCount`/`cumulativeRounds` init to 0 for
     // PR-D's loop guards. No resume logic here — this is metadata foundation.
-    await this.deps.subAgentMemoryManager.saveSessionMetadata(childSessionId, {
+    const spawnMetadata: Parameters<MemoryManager["saveSessionMetadata"]>[1] = {
       sessionKind: "subagent",
       sourceTools: scopedTools.map((tool) => tool.name),
       ...(input.profileModel !== undefined ? { profileModel: input.profileModel } : {}),
@@ -946,27 +1131,105 @@ export class SubAgentRunner {
       // Legacy alias kept in sync during the compatibility window.
       resumeCount: 0,
       cumulativeRounds: 0,
-    });
-
-    if (!child.hasProvider()) {
-      const msg = "sub-agent: LLM provider not configured";
+      subAgentTaskState: A2ATaskState.SUBMITTED,
+      subAgentSuspensionReason: undefined,
+    };
+    try {
+      await this.deps.subAgentMemoryManager.saveSessionMetadata(
+        childSessionId,
+        spawnMetadata,
+      );
+    } catch (err) {
+      trackedRun.initialMetadataFailed = true;
+      const interrupted = cancellation.signal.aborted;
+      const message = interrupted
+        ? "sub-agent run interrupted"
+        : (err as Error).message ?? "sub-agent metadata setup failed";
       const result: SubAgentSpawnResult = {
-        summary: msg,
+        summary: message,
         toolCallCount: 0,
         turnCount: 0,
         childSessionId,
         entries: [],
-        // Provider-missing is a failed spawn, not a completed run with the
-        // error text as its summary — signal it structurally so callers do
-        // not record it as success.
         ok: false,
-        error: msg,
+        error: message,
+        ...(interrupted ? { stopReason: "interrupted" as const } : {}),
       };
       this.finalizeRun(trackedRun, result);
-      callbacks?.onError?.(msg);
+      if (!interrupted) callbacks?.onError?.(maskSubAgentText(message));
       return result;
     }
 
+    const metadataForResult = (
+      terminalResult: SubAgentSpawnResult,
+    ): Parameters<MemoryManager["saveSessionMetadata"]>[1] => ({
+      ...spawnMetadata,
+      cumulativeRounds: terminalResult.turnCount,
+      subAgentTaskState: projectSubAgentResultState(terminalResult),
+      subAgentSuspensionReason: terminalResult.suspension?.reason,
+    });
+    const persistFinalResult = async (
+      terminalResult: SubAgentSpawnResult,
+    ): Promise<SubAgentSpawnResult> => {
+      // Commit point: no new interrupt is accepted while terminal metadata is
+      // persisted, so the in-memory and durable projections cannot diverge.
+      delete trackedRun.abort;
+      try {
+        await this.deps.subAgentMemoryManager.saveSessionMetadata(
+          childSessionId,
+          metadataForResult(terminalResult),
+        );
+      } catch (err) {
+        const interrupted = cancellation.signal.aborted
+          || terminalResult.stopReason === "interrupted";
+        const message = interrupted
+          ? "sub-agent run interrupted"
+          : (err as Error).message ?? "sub-agent metadata update failed";
+        const failure: SubAgentSpawnResult = {
+          summary: message,
+          toolCallCount: terminalResult.toolCallCount,
+          turnCount: terminalResult.turnCount,
+          childSessionId,
+          entries: terminalResult.entries,
+          ok: false,
+          error: message,
+          ...(interrupted ? { stopReason: "interrupted" as const } : {}),
+        };
+        this.finalizeRun(trackedRun, failure);
+        if (!interrupted) callbacks?.onError?.(maskSubAgentText(message));
+        return failure;
+      }
+      this.finalizeRun(trackedRun, terminalResult);
+      return terminalResult;
+    };
+
+    if (cancellation.signal.aborted) {
+      const message = "sub-agent run interrupted";
+      return await persistFinalResult({
+        summary: message,
+        toolCallCount: 0,
+        turnCount: 0,
+        childSessionId,
+        entries: [],
+        ok: false,
+        error: message,
+        stopReason: "interrupted",
+      });
+    }
+
+    if (!child.hasProvider()) {
+      const message = "sub-agent: LLM provider not configured";
+      callbacks?.onError?.(maskSubAgentText(message));
+      return await persistFinalResult({
+        summary: message,
+        toolCallCount: 0,
+        turnCount: 0,
+        childSessionId,
+        entries: [],
+        ok: false,
+        error: message,
+      });
+    }
     this.updateRun(trackedRun, { taskState: projectSubAgentRunState("running") });
 
     let totalToolCalls = 0;
@@ -1043,7 +1306,7 @@ export class SubAgentRunner {
             emitActivity();
           },
           onError: (e) => {
-            callbacks?.onError?.(e);
+            callbacks?.onError?.(maskSubAgentText(e));
           },
         },
         undefined,
@@ -1060,36 +1323,30 @@ export class SubAgentRunner {
       totalToolCalls = result.toolCalls.length;
       lastText = result.text;
       childStopReason = result.stopReason;
-      ok = true;
+      ok = isSuccessfulSubAgentStopReason(childStopReason);
+      if (!ok) {
+        failureReason = subAgentStopFailureReason(childStopReason, lastText, "run");
+      }
     } catch (err) {
-      const msg = (err as Error).message ?? "sub-agent run failed";
-      callbacks?.onError?.(msg);
-      lastText = msg;
-      failureReason = msg;
+      if (cancellation.signal.aborted) {
+        const message = "sub-agent run interrupted";
+        lastText = message;
+        failureReason = message;
+        childStopReason = "interrupted";
+      } else {
+        const message = (err as Error).message ?? "sub-agent run failed";
+        callbacks?.onError?.(maskSubAgentText(message));
+        lastText = message;
+        failureReason = message;
+      }
     }
 
-    // Record every assistant round the spawn actually completed. The callbacks
-    // remain observable even if a later provider/tool step throws, so a partial
-    // failure must not erase already-consumed work from the cumulative bound.
-    // Waiting without an assistant round leaves the pre-turn zero untouched.
-    if (turn > 0) {
-      await this.deps.subAgentMemoryManager.saveSessionMetadata(childSessionId, {
-        sessionKind: "subagent",
-        sourceTools: scopedTools.map((tool) => tool.name),
-        ...(input.profileModel !== undefined ? { profileModel: input.profileModel } : {}),
-        ...(input.profileMode !== undefined ? { profileMode: input.profileMode } : {}),
-        ...(input.originSessionId !== undefined ? { originSessionId: input.originSessionId } : {}),
-        ...(input.toolUseId !== undefined ? { originToolUseId: input.toolUseId } : {}),
-        ...(input.spawnId !== undefined ? { spawnId: input.spawnId } : {}),
-        subAgentTitle: input.title,
-        budgetResumeCount: 0,
-        questionAnswerCount: 0,
-        // Legacy alias kept in sync during the compatibility window.
-        resumeCount: 0,
-        cumulativeRounds: turn,
-      });
+    if (cancellation.signal.aborted) {
+      lastText = "sub-agent run interrupted";
+      failureReason = lastText;
+      childStopReason = "interrupted";
+      ok = false;
     }
-
     const result: SubAgentSpawnResult = {
       summary: lastText,
       toolCallCount: totalToolCalls,
@@ -1101,8 +1358,6 @@ export class SubAgentRunner {
       ok,
       ...(ok ? {} : { error: failureReason ?? lastText }),
       ...(childStopReason ? { stopReason: childStopReason } : {}),
-      // A clean-but-budget-capped run: the child returned real partial work
-      // (ok === true) but stopped on its round budget, so the task is unfinished.
       ...(ok && childStopReason === "round-cap"
         ? {
             suspension: createBudgetSuspension(child.sessionId),
@@ -1111,8 +1366,7 @@ export class SubAgentRunner {
           }
         : {}),
     };
-    this.finalizeRun(trackedRun, result);
-    return result;
+    return await persistFinalResult(result);
   }
 
   /**
@@ -1172,17 +1426,27 @@ export class SubAgentRunner {
     // read the same pre-increment metadata (lost-update on the counters).
     const existing = this.inFlight.get(resumeId);
     if (existing) {
-      const msg = "sub-agent resume: a resume for this session is already in flight";
-      callbacks?.onError?.(msg);
-      return {
-        summary: msg,
+      const message = "sub-agent resume: a resume for this session is already in flight";
+      const attempt = this.trackRun({
+        spawnId,
+        childSessionId: resumeId,
+        originSessionId,
+        title,
+        initialTaskState: A2ATaskState.INPUT_REQUIRED,
+        registerChildAlias: false,
+      });
+      const result: SubAgentSpawnResult = {
+        summary: message,
         toolCallCount: 0,
         turnCount: 0,
         childSessionId: resumeId,
         entries: [],
         ok: false,
-        error: msg,
+        error: message,
       };
+      this.finalizeRun(attempt, result);
+      callbacks?.onError?.(maskSubAgentText(message));
+      return result;
     }
 
     const runPromise = this.runResume(
@@ -1212,96 +1476,171 @@ export class SubAgentRunner {
     spawnId: string | undefined,
     resumeReason: SubAgentSuspensionReason,
   ): Promise<SubAgentSpawnResult> {
-    const fail = (msg: string, extra?: Partial<SubAgentSpawnResult>): SubAgentSpawnResult => {
-      callbacks?.onError?.(msg);
+    const cancellation = new AbortController();
+    let child: ConversationLoop | null = null;
+    const trackedRun = this.trackRun({
+      spawnId,
+      childSessionId: resumeId,
+      originSessionId,
+      title,
+      initialTaskState: A2ATaskState.INPUT_REQUIRED,
+      registerChildAlias: false,
+      abort: () => {
+        cancellation.abort();
+        child?.abortCurrentTurn();
+      },
+    });
+
+    const failureResult = (
+      message: string,
+      extra?: Partial<SubAgentSpawnResult>,
+    ): SubAgentSpawnResult => {
+      if (cancellation.signal.aborted) {
+        return {
+          summary: "sub-agent run interrupted",
+          toolCallCount: 0,
+          turnCount: 0,
+          childSessionId: resumeId,
+          entries: [],
+          ok: false,
+          error: "sub-agent run interrupted",
+          stopReason: "interrupted",
+        };
+      }
       return {
-        summary: msg,
+        summary: message,
         toolCallCount: 0,
         turnCount: 0,
         childSessionId: resumeId,
         entries: [],
         ok: false,
-        error: msg,
+        error: message,
         ...extra,
       };
     };
+    const finishAttemptFailure = (
+      message: string,
+      extra?: Partial<SubAgentSpawnResult>,
+    ): SubAgentSpawnResult => {
+      const result = failureResult(message, extra);
+      this.finalizeRun(trackedRun, result);
+      if (result.stopReason !== "interrupted") callbacks?.onError?.(maskSubAgentText(message));
+      return result;
+    };
 
-    // 1. Load + validate the frozen metadata. loadSessionMetadata throws on an
-    //    invalid id (not returns null), so guard the id shape first to keep the
-    //    failure fail-closed rather than an uncaught throw.
     if (!isValidSessionId(resumeId)) {
-      return fail(`sub-agent resume: invalid resumeId "${resumeId}"`);
+      return finishAttemptFailure(
+        'sub-agent resume: invalid resumeId "' + resumeId + '"',
+      );
     }
 
-    // 1b. Origin-tag early reject — the id format is
-    //     `sub-<sha256(origin)[:8]>-<uuid>`. The short tag is a stable routing
-    //     hint, not an identity proof: it is only 32 bits and a caller that
-    //     already knows a child id also knows its tag. It cheaply rejects clear
-    //     mismatches before metadata IO; the exact persisted `originSessionId`
-    //     comparison below is the authorization source of truth.
     {
-      // Distinguishing pattern: origin-tagged ids are `sub-<8hex>-<uuid>` where
-      // uuid starts with another 8-hex segment (`sub-<8hex>-<8hex>-<4hex>-...`).
-      // Untagged ids are `sub-<uuid>` = `sub-<8hex>-<4hex>-...`. The two 8-hex
-      // segments in a row are unique to the tagged form (a UUID's second segment
-      // is only 4 hex chars), so this regex only extracts a tag from a truly
-      // origin-tagged id and correctly returns undefined for untagged ids.
-      const m = /^sub-([0-9a-f]{8})-[0-9a-f]{8}-/.exec(resumeId);
-      const idTag = m?.[1] ?? "";
+      const tagged = /^sub-([0-9a-f]{8})-[0-9a-f]{8}-/.exec(resumeId);
+      const idTag = tagged?.[1] ?? "";
       const expectedTag = originSessionId
         ? createHash("sha256").update(originSessionId).digest("hex").slice(0, 8)
         : "";
       if (idTag !== expectedTag) {
-        return fail(
-          `sub-agent resume: resumeId does not belong to this session`,
+        return finishAttemptFailure(
+          "sub-agent resume: resumeId does not belong to this session",
         );
       }
     }
 
     const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(resumeId);
     if (meta === null) {
-      return fail(`sub-agent resume: no session metadata for "${resumeId}"`);
-    }
-    if (meta.sessionKind !== "subagent") {
-      // Refuse to resume anything that is not a sub-agent session (a main or
-      // routine session must never be driven through the sub-agent seam).
-      return fail(
-        `sub-agent resume: session "${resumeId}" is not a sub-agent (kind=${meta.sessionKind ?? "unknown"})`,
+      return finishAttemptFailure(
+        'sub-agent resume: no session metadata for "' + resumeId + '"',
       );
     }
-    // The short id tag is only an early-reject aid. Persisted metadata is the
-    // identity source of truth and must match exactly, including missing sides.
+    if (meta.sessionKind !== "subagent") {
+      return finishAttemptFailure(
+        'sub-agent resume: session "' + resumeId
+          + '" is not a sub-agent (kind=' + (meta.sessionKind ?? "unknown") + ")",
+      );
+    }
     if (meta.originSessionId !== originSessionId) {
-      return fail("sub-agent resume: origin session metadata does not match caller");
+      return finishAttemptFailure(
+        "sub-agent resume: origin session metadata does not match caller",
+      );
+    }
+    if (
+      meta.subAgentTaskState !== A2ATaskState.INPUT_REQUIRED
+      || !meta.subAgentSuspensionReason
+    ) {
+      return finishAttemptFailure(
+        "sub-agent resume: task is not in INPUT_REQUIRED",
+      );
+    }
+    if (meta.subAgentSuspensionReason !== resumeReason) {
+      return finishAttemptFailure(
+        "sub-agent resume: suspension reason does not match caller",
+      );
+    }
+    if (!meta.subAgentTitle) {
+      return finishAttemptFailure(
+        "sub-agent resume: missing persisted sub-agent title",
+      );
     }
 
-    // 2. Loop guards (Commit 2). Refuse BEFORE running any turn.
+    const priorTrackedRun = this.trackedRuns.get(resumeId);
+    if (priorTrackedRun && isA2ATerminalTaskState(priorTrackedRun.taskState)) {
+      return finishAttemptFailure(
+        "sub-agent resume: in-memory task is already terminal",
+      );
+    }
+
+    trackedRun.title = meta.subAgentTitle;
+    this.attachTrackedRunChildAlias(trackedRun);
+    callbacks?.onLinked?.({ childSessionId: resumeId });
+
+    const finishAuthorizedFailure = async (
+      message: string,
+      extra?: Partial<SubAgentSpawnResult>,
+    ): Promise<SubAgentSpawnResult> => {
+      const result = failureResult(message, extra);
+      // Terminal commit point: after this synchronous detach, a late interrupt
+      // is rejected and cannot race the single durable terminal write.
+      delete trackedRun.abort;
+      const taskState = projectSubAgentResultState(result);
+      try {
+        await this.deps.subAgentMemoryManager.saveSessionMetadata(resumeId, {
+          ...meta,
+          subAgentTaskState: taskState,
+          subAgentSuspensionReason: undefined,
+        });
+      } catch {
+        // The in-memory terminal latch prevents a same-process retry.
+      }
+      this.finalizeRun(trackedRun, result);
+      if (result.stopReason !== "interrupted") callbacks?.onError?.(maskSubAgentText(message));
+      return result;
+    };
+
     const legacyResumeCount = meta.resumeCount ?? 0;
-    // Only budget continuations consume MAX_RESUMES. Future question answers
-    // increment questionAnswerCount instead; cumulativeRounds still bounds all work.
     const priorBudgetResumeCount = Math.max(
       meta.budgetResumeCount ?? 0,
       legacyResumeCount,
     );
     const priorQuestionAnswerCount = meta.questionAnswerCount ?? 0;
     const priorCumulativeRounds = meta.cumulativeRounds ?? 0;
-    if (resumeReason === "budget" && priorBudgetResumeCount >= MAX_RESUMES) {
-      return fail(
-        `sub-agent resume: exhausted (budgetResumeCount=${priorBudgetResumeCount} >= ${MAX_RESUMES})`,
+    const persistedResumeReason = meta.subAgentSuspensionReason;
+
+    if (persistedResumeReason === "budget" && priorBudgetResumeCount >= MAX_RESUMES) {
+      return await finishAuthorizedFailure(
+        "sub-agent resume: exhausted (budgetResumeCount="
+          + priorBudgetResumeCount + " >= " + MAX_RESUMES + ")",
         { resumeExhausted: true },
       );
     }
     if (priorCumulativeRounds >= CUMULATIVE_ROUNDS_CEILING) {
-      return fail(
-        `sub-agent resume: cumulative-rounds ceiling reached (${priorCumulativeRounds} >= ${CUMULATIVE_ROUNDS_CEILING})`,
+      return await finishAuthorizedFailure(
+        "sub-agent resume: cumulative-rounds ceiling reached ("
+          + priorCumulativeRounds + " >= " + CUMULATIVE_ROUNDS_CEILING + ")",
         { resumeExhausted: true },
       );
     }
 
-    // 3. Re-derive the round budget from the FROZEN profile mode (same
-    //    resolution spawn used, minus the host `maxRounds` override which is a
-    //    spawn-time-only knob). The cumulative ceiling is a hard total bound,
-    //    so a near-ceiling resume receives only the remaining rounds.
     const modeResult = resolveAgentMode(meta.profileMode);
     const requestedRounds = modeResult.config.maxToolRoundsHint ?? MAX_TURNS_DEFAULT;
     const remainingRounds = CUMULATIVE_ROUNDS_CEILING - priorCumulativeRounds;
@@ -1310,63 +1649,60 @@ export class SubAgentRunner {
       Math.min(MAX_TURNS_CAP, requestedRounds, remainingRounds),
     );
 
-    // 4. Reconstruct child deps from the FROZEN scope. meta.sourceTools is the
-    //    ONLY scope source — passed as a non-null explicit list so buildChildDeps
-    //    never falls back to the parent surface (scope widening closed).
-    //
-    //    Empty scope is fail-closed: a legitimate spawn ALWAYS persists a
-    //    concrete non-empty allowlist (the resolved scoped surface after blocklist
-    //    strip). An empty `meta.sourceTools` at resume time means the metadata
-    //    was corrupted or tampered — spending an LLM round on a knowingly-broken
-    //    session wastes budget and obscures the anomaly. Refuse immediately.
     const frozenSourceTools = meta.sourceTools ?? [];
     if (frozenSourceTools.length === 0) {
-      return fail(
-        `sub-agent resume: session "${resumeId}" has an empty frozen tool scope — metadata may be corrupted or tampered`,
+      return await finishAuthorizedFailure(
+        'sub-agent resume: session "' + resumeId
+          + '" has an empty frozen tool scope; metadata may be corrupted or tampered',
       );
     }
     const { childDeps } = this.buildChildDeps({
       frozenSourceTools,
-      title,
+      title: meta.subAgentTitle,
       profileModel: meta.profileModel,
     });
 
-    const child = new ConversationLoop(childDeps);
-    // Bind identity to the resumeId BEFORE loading so persistence + tracing key
-    // on the addressable id (mirrors spawn's rebind seam).
+    child = new ConversationLoop(childDeps);
     child.sessionId = resumeId;
     child.sessionKind = "subagent";
     child.rebindTracer();
     if (!child.hasProvider()) {
-      return fail("sub-agent resume: LLM provider not configured");
+      return await finishAuthorizedFailure(
+        "sub-agent resume: LLM provider not configured",
+      );
+    }
+    if (!child.loadSession(resumeId)) {
+      return await finishAuthorizedFailure(
+        'sub-agent resume: failed to load session history for "' + resumeId + '"',
+      );
+    }
+    if (cancellation.signal.aborted) {
+      return await finishAuthorizedFailure("sub-agent run interrupted");
     }
 
-    // 5. RE-HYDRATE the full history from the isolated subagent store. loadSession
-    //    validates the id, restores + normalizes the tool-pair invariant, and
-    //    re-applies metadata. A false return (missing/unsafe) fails closed.
-    const loaded = child.loadSession(resumeId);
-    if (!loaded) {
-      return fail(`sub-agent resume: failed to load session history for "${resumeId}"`);
-    }
-    const trackedRun = this.trackRun({
-      spawnId,
-      childSessionId: resumeId,
-      originSessionId,
-      title,
-      abort: () => child.abortCurrentTurn(),
+    this.updateRun(trackedRun, {
+      taskState: A2ATaskState.WORKING,
+      status: subAgentRunStatusFromTaskState(A2ATaskState.WORKING),
     });
-    this.updateRun(trackedRun, { taskState: projectSubAgentRunState("running") });
+    try {
+      await this.deps.subAgentMemoryManager.saveSessionMetadata(resumeId, {
+        ...meta,
+        subAgentTaskState: A2ATaskState.WORKING,
+        subAgentSuspensionReason: undefined,
+      });
+    } catch (err) {
+      return await finishAuthorizedFailure(
+        (err as Error).message ?? "sub-agent resume metadata start failed",
+      );
+    }
+    if (cancellation.signal.aborted) {
+      return await finishAuthorizedFailure("sub-agent run interrupted");
+    }
 
     let totalToolCalls = 0;
     let lastText = "";
     let turn = 0;
     let assistantRounds = 0;
-    // Accumulator seed decision: keep the engine accumulator segment-local.
-    // `historyToEntries` lives in renderer code, so seeding from hydrated child
-    // history here would cross the main/renderer layer boundary. Continuity is
-    // handled downstream: each resume writes its own `agent_spawn` tool result
-    // with a distinct `toolUseId`, and the renderer groups segments by shared
-    // childSessionId into one unified transcript.
     const transcript = new SubAgentTranscriptAccumulator();
     const emitActivity = () => {
       const entries = transcript.snapshot();
@@ -1385,7 +1721,7 @@ export class SubAgentRunner {
     let childStopReason: import("./turn/types.js").TurnStopReason | undefined;
 
     try {
-      const result = await child.runTurn(
+      const turnResult = await child.runTurn(
         continuationInstructions,
         {
           onToolStart: (name, input, cbMeta) => {
@@ -1408,50 +1744,32 @@ export class SubAgentRunner {
             transcript.onAssistantRound(round.thought, round.text);
             emitActivity();
           },
-          onError: (e) => {
-            callbacks?.onError?.(e);
+          onError: (message) => {
+            callbacks?.onError?.(maskSubAgentText(message));
           },
         },
-        undefined,
+        cancellation.signal,
         {
           maxRounds: cappedRounds,
-          // Same addressable id → the continuation turn's audit + persistence
-          // stay under the resumed session.
           sessionIdOverride: resumeId,
-          // spawnDepth 1 is the byte-identical recursion defense a fresh spawn
-          // gets — a resumed child cannot agent_spawn.
           spawnDepth: 1,
           inputOrigin: "llm-tool-arg",
         },
       );
-      totalToolCalls = result.toolCalls.length;
-      lastText = result.text;
-      childStopReason = result.stopReason;
-      ok = true;
+      totalToolCalls = turnResult.toolCalls.length;
+      lastText = turnResult.text;
+      childStopReason = turnResult.stopReason;
+      ok = isSuccessfulSubAgentStopReason(childStopReason);
+      if (!ok) {
+        failureReason = subAgentStopFailureReason(childStopReason, lastText, "resume");
+      }
     } catch (err) {
-      const msg = (err as Error).message ?? "sub-agent resume run failed";
-      callbacks?.onError?.(msg);
-      lastText = msg;
-      failureReason = msg;
+      const message = (err as Error).message ?? "sub-agent resume run failed";
+      lastText = message;
+      failureReason = message;
     }
 
-    // 6. Persist counters with full-overwrite semantics. A completed resume
-    // advances only its typed counter. A failed run does not consume a resume
-    // slot, but every assistant round completed before the failure still counts
-    // toward the cumulative hard bound. A zero-round wait adds no rounds.
-    if (ok || turn > 0) {
-      await this.deps.subAgentMemoryManager.saveSessionMetadata(resumeId, {
-        ...meta,
-        sessionKind: "subagent",
-        budgetResumeCount: priorBudgetResumeCount + (ok && resumeReason === "budget" ? 1 : 0),
-        questionAnswerCount: priorQuestionAnswerCount + (ok && resumeReason === "question" ? 1 : 0),
-        // Legacy alias remains the budget-resume count during migration.
-        resumeCount: priorBudgetResumeCount + (ok && resumeReason === "budget" ? 1 : 0),
-        cumulativeRounds: priorCumulativeRounds + turn,
-      });
-    }
-
-    const result: SubAgentSpawnResult = {
+    let result: SubAgentSpawnResult = {
       summary: lastText,
       toolCallCount: totalToolCalls,
       turnCount: turn,
@@ -1462,16 +1780,100 @@ export class SubAgentRunner {
       ...(childStopReason ? { stopReason: childStopReason } : {}),
       ...(ok && childStopReason === "round-cap"
         ? {
-            suspension: createBudgetSuspension(child.sessionId),
-            // Derived compatibility alias for pre-suspension consumers.
+            suspension: createBudgetSuspension(resumeId),
             incomplete: true,
           }
         : {}),
     };
+    if (cancellation.signal.aborted) {
+      result = {
+        summary: "sub-agent run interrupted",
+        toolCallCount: totalToolCalls,
+        turnCount: turn,
+        childSessionId: resumeId,
+        entries: transcript.snapshot(),
+        ok: false,
+        error: "sub-agent run interrupted",
+        stopReason: "interrupted",
+      };
+    }
+
+    // Terminal commit point. Cancellation was sampled above; the stable result
+    // now owns the single final metadata transition.
+    delete trackedRun.abort;
+
+    const nextBudgetResumeCount = priorBudgetResumeCount
+      + (ok && persistedResumeReason === "budget" ? 1 : 0);
+    const nextQuestionAnswerCount = priorQuestionAnswerCount
+      + (ok && persistedResumeReason === "question" ? 1 : 0);
+    const metadataForResult = (terminalResult: SubAgentSpawnResult) => ({
+      ...meta,
+      sessionKind: "subagent" as const,
+      budgetResumeCount: nextBudgetResumeCount,
+      questionAnswerCount: nextQuestionAnswerCount,
+      resumeCount: nextBudgetResumeCount,
+      cumulativeRounds: priorCumulativeRounds + turn,
+      subAgentTaskState: projectSubAgentResultState(terminalResult),
+      subAgentSuspensionReason: terminalResult.suspension?.reason,
+    });
+
+    try {
+      await this.deps.subAgentMemoryManager.saveSessionMetadata(
+        resumeId,
+        metadataForResult(result),
+      );
+    } catch (err) {
+      const interrupted = cancellation.signal.aborted;
+      const message = interrupted
+        ? "sub-agent run interrupted"
+        : (err as Error).message ?? "sub-agent resume metadata update failed";
+      result = {
+        summary: message,
+        toolCallCount: totalToolCalls,
+        turnCount: turn,
+        childSessionId: resumeId,
+        entries: transcript.snapshot(),
+        ok: false,
+        error: message,
+        ...(interrupted ? { stopReason: "interrupted" as const } : {}),
+      };
+      try {
+        await this.deps.subAgentMemoryManager.saveSessionMetadata(
+          resumeId,
+          metadataForResult(result),
+        );
+      } catch {
+        // WORKING remains durable and therefore non-resumable.
+      }
+      this.finalizeRun(trackedRun, result);
+      if (result.stopReason !== "interrupted") callbacks?.onError?.(maskSubAgentText(message));
+      return result;
+    }
+
+    if (cancellation.signal.aborted && result.stopReason !== "interrupted") {
+      result = {
+        summary: "sub-agent run interrupted",
+        toolCallCount: totalToolCalls,
+        turnCount: turn,
+        childSessionId: resumeId,
+        entries: transcript.snapshot(),
+        ok: false,
+        error: "sub-agent run interrupted",
+        stopReason: "interrupted",
+      };
+      try {
+        await this.deps.subAgentMemoryManager.saveSessionMetadata(
+          resumeId,
+          metadataForResult(result),
+        );
+      } catch {
+        // The already-persisted terminal state remains non-resumable.
+      }
+    }
+
     this.finalizeRun(trackedRun, result);
     return result;
   }
-
   /**
    * C3(b): build a scoped registry covering every parent-registered tool
    * EXCEPT the entries on {@link SUB_AGENT_TOOL_BLOCKLIST}. Used when the
