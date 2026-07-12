@@ -107,6 +107,7 @@ import { ko as ko_mainToolbar } from "../generated/mainToolbar.js";
 import { ko as ko_marketplaceAnnouncementBanner } from "../generated/marketplaceAnnouncementBanner.js";
 import { ko as ko_marketplaceTab } from "../generated/marketplaceTab.js";
 import { ko as ko_marketplaceUpdateBanner } from "../generated/marketplaceUpdateBanner.js";
+import { ko as ko_mcpAppPipPanel } from "../generated/mcpAppPipPanel.js";
 import { ko as ko_mcpAppView } from "../generated/mcpAppView.js";
 import { ko as ko_mcpTab } from "../generated/mcpTab.js";
 import { ko as ko_memorySearchPanel } from "../generated/memorySearchPanel.js";
@@ -292,6 +293,7 @@ export const koMessages: Record<string, string> = {
   ...ko_marketplaceAnnouncementBanner,
   ...ko_marketplaceTab,
   ...ko_marketplaceUpdateBanner,
+  ...ko_mcpAppPipPanel,
   ...ko_mcpAppView,
   ...ko_mcpTab,
   ...ko_memorySearchPanel,

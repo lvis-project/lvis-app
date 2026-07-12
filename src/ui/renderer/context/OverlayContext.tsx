@@ -25,7 +25,12 @@ import {
 export type OverlayItemSource =
   | { kind: "routine"; routineId: string; firedAt: string }
   // Host overlay items are delivered through main-process IPC, not a plugin-specific bridge.
-  | { kind: "plugin"; pluginId: string; eventId: string };
+  | { kind: "plugin"; pluginId: string; eventId: string }
+  // MCP App `ui/message` with no turn in flight — the app may NOT wake the model on its
+  // own, so its message is staged here for an explicit user click. Same insertion shape
+  // as `plugin` (a `pendingPrompt` that becomes an `imported_trigger` on confirm), with
+  // its own provenance: the prompt is wrapped in `<app-message source="app:<serverId>">`.
+  | { kind: "app"; serverId: string; eventId: string };
 
 export interface OverlayItem {
   /** Unique id: `${source.kind}-${unique}` */

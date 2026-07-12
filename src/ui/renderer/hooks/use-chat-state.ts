@@ -589,29 +589,29 @@ export function useChatState(api: LvisApi) {
   );
 
   /**
-   * Plugin overlay confirm → main chat insert.
+   * Overlay confirm → main chat insert (plugin trigger OR MCP-app `ui/message`).
    *
-   * Inserts an imported_trigger entry (kind="imported_trigger") so the
-   * plugin-authored prompt is visible in chat history with proper overlay-trigger
-   * provenance — NOT as a plain user bubble. The user's next send turn (or
-   * an auto-fired handleAsk) will pick up from there.
+   * Inserts an imported_trigger entry (kind="imported_trigger") so the staged,
+   * NON-user-authored prompt is visible in chat history with its own provenance
+   * (`plugin:<id>` / `app:<serverId>`) — NOT as a plain user bubble. The user's next
+   * send turn (or an auto-fired handleAsk) will pick up from there.
    *
-   * Conservative default: user message inserted, auto-turn NOT started.
-   * The caller (App.tsx handlePluginPrimaryAction) decides whether to also
-   * call handleAsk with the prompt.
+   * Conservative default: entry inserted, auto-turn NOT started. The caller
+   * (use-routine-overlay's handlePluginPrimaryAction) decides whether to also call
+   * handleAsk with the prompt.
    */
   const insertImportedTriggerEntry = useCallback(
     (input: {
       sessionId: string;
-      pluginId: string;
+      /** Provenance tag — `plugin:<pluginId>` or `app:<serverId>`. */
+      source: string;
       prompt: string;
       summary: string;
-      title: string;
     }) => {
       setEntries((p) =>
         appendImportedTriggerEntry(p, {
           sessionId: input.sessionId,
-          source: `plugin:${input.pluginId}`,
+          source: input.source,
           prompt: input.prompt,
           summary: input.summary,
           toolCallCount: 0,

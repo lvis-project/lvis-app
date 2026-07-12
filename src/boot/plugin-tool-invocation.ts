@@ -2,6 +2,7 @@ import {
   type PluginRuntime,
   type PluginToolInvocationContext,
 } from "../plugins/runtime.js";
+import type { InvocationOrigin } from "../plugins/runtime/origin-chain.js";
 import { isUiOnly, isModelVisible } from "../plugins/runtime/tool-visibility.js";
 
 type RuntimeManifestView = Pick<PluginRuntime, "listPluginManifests">;
@@ -26,10 +27,18 @@ export function isAppOnlyRuntimeInvocation(
   pluginRuntime: RuntimeManifestView,
   toolName: string,
   context: PluginToolInvocationContext,
-  effectiveOrigin: "plugin" | "ui" | undefined,
+  effectiveOrigin: InvocationOrigin | undefined,
 ): boolean {
-  // #1556 — an LLM-origin ("plugin") call to ANY visibility ALWAYS takes the
-  // governed executor; the ungoverned bypass is unreachable from the model.
+  // The ungoverned app-only dispatch path is reachable from the TRUSTED PANEL
+  // ORIGIN AND NOTHING ELSE.
+  //  - #1556 — an LLM-origin ("plugin") call to ANY visibility ALWAYS takes the
+  //    governed executor; the bypass is unreachable from the model.
+  //  - An MCP App ("mcp-app" — untrusted sandboxed iframe) is likewise excluded
+  //    STRUCTURALLY, here, by origin — not by the user-activation gate below,
+  //    which has an `auth.statusTool` carve-out a card would have slipped
+  //    through. `runWithInvocationOrigin` cannot launder "mcp-app" into "ui"
+  //    (mcp-app outranks ui in the chain precedence), so an app-rooted chain
+  //    answers false at every depth.
   if (effectiveOrigin !== "ui") return false;
 
   const manifest = findOwnerManifest(pluginRuntime, context.ownerPluginId);
@@ -43,6 +52,22 @@ export function isAppOnlyRuntimeInvocation(
   return tool != null && isUiOnly(tool);
 }
 
+/**
+ * The user-activation requirement for an app-only-visibility method, with ONE
+ * carve-out: the owner manifest's `auth.statusTool` (status polling is a
+ * host-managed read, not a user-gesture action, and it must work on a
+ * plugin-origin chain).
+ *
+ * SCOPE: this is only ever consulted for a call that already reached the app-only
+ * dispatch path, which `isAppOnlyRuntimeInvocation` restricts to the TRUSTED PANEL
+ * origin. The carve-out is therefore NOT reachable from an MCP App: a card's
+ * `origin: "mcp-app"` call never selects that branch, so it never gets here — it
+ * goes to the governed executor instead (`PluginRuntime.callFromApp`), auth
+ * `statusTool` included. THE ORIGIN CHECK IS THE WHOLE CONTAINMENT, and it is why an
+ * untrusted card cannot invoke the manifest's auth-status tool with attacker-chosen
+ * arguments, with no risk check, no reviewer, no approval and no audit row: not
+ * because the call is refused, but because it can only arrive through the gate.
+ */
 export function appOnlyRuntimeInvocationRequiresUserAction(
   pluginRuntime: RuntimeManifestView,
   toolName: string,
@@ -56,9 +81,11 @@ export function appOnlyRuntimeInvocationRequiresUserAction(
 /**
  * Dispatch an app-only runtime invocation — an app-only-visibility method
  * (`_meta.ui.visibility === ["app"]`, so app-visible but NOT model-visible),
- * reached on a UI-effective chain. The caller (`plugin-tool-executor.ts`) has
+ * reached on a TRUSTED-PANEL-effective chain (`origin: "ui"`; despite the name,
+ * "app-only" describes the tool's declared VISIBILITY, not its caller — an MCP
+ * App can never reach this function). The caller (`plugin-tool-executor.ts`) has
  * already established via {@link isAppOnlyRuntimeInvocation} that `toolName` is
- * an app-only-visibility method before delegating here.
+ * an app-only-visibility method on a UI-effective chain before delegating here.
  *
  * Responsibility: enforce the user-activation requirement for non-status
  * app-only methods (and the #1556 nested plugin-origin clarity error), then
