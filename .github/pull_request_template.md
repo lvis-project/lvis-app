@@ -39,6 +39,24 @@
 
 - Screenshots / traces / viewport notes:
 
+## Cross-Cutting Review Attestation
+
+Complete only when `cluster-detector` requires independent review. All three
+reviews must cover the current PR HEAD. A new commit invalidates every marker.
+Apply `cluster-review-passed` only after replacing all placeholders below.
+
+Reviewed HEAD: `<40-char-head-sha>`
+
+| Role | Reviewed HEAD SHA | Verdict | Blocking findings |
+|---|---|---|---|
+| Architect | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |
+| Critic | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |
+| Security | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |
+
+<!-- cluster-review:architect:<40-char-head-sha>:GO -->
+<!-- cluster-review:critic:<40-char-head-sha>:GO -->
+<!-- cluster-review:security:<40-char-head-sha>:GO -->
+
 ## Risk / Rollback
 
 - Risk:
