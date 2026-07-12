@@ -224,18 +224,17 @@ PowerShell 5.x may also require `[Console]::OutputEncoding` updates because `chc
 
 If `src/permissions/__tests__/asrt-sandbox.test.ts` logs a `[asrt-sandbox] Windows OS sandbox cannot spawn as \`srt-sandbox\`` warning and **skips** its live-init tests on Windows — the sandbox provisioned but `CreateProcessWithLogonW(srt-sandbox)` is `Access is denied (0x80070005)`, so it provides no OS isolation — use the following recovery sequence to enable it (the tests then run for real instead of skipping):
 
-1. Ensure Secondary Logon is running:
-   - `Get-Service seclogon`
-   - `Start-Service seclogon` (or `Restart-Service seclogon`)
-2. Force-refresh local policy:
-   - `gpupdate /force`
-3. Verify the sandbox account and group mapping:
-   - `net user srt-sandbox`
-   - confirm `srt-sandbox` is active and remains in `sandbox-runtime-users`
-4. Re-run validation:
-   - `bunx vitest run src/permissions/__tests__/asrt-sandbox.test.ts`
+1. **Root cause — grant `srt-sandbox` read+execute on the ASRT backend.** The sandbox runs the egress probe / tool runner AS the low-privilege `srt-sandbox` user, which cannot read/execute `srt-win.exe` (or the ASRT package files) under a path whose ACL does not grant it — e.g. a per-user / workspace `node_modules`. Grant the ASRT-created `sandbox-runtime-users` group (srt-sandbox is a member) RX, recursively:
+   - `icacls node_modules\@anthropic-ai\sandbox-runtime /grant "sandbox-runtime-users:(OI)(CI)(RX)" /T /C`
+   - The packaged app does this automatically in the NSIS installer (and a perMachine Program Files install grants Users RX by default); this manual step is for a dev/workspace checkout.
+2. Prerequisites, if step 1 alone does not resolve it:
+   - `Get-Service seclogon` → `Start-Service seclogon` (Secondary Logon must be running)
+   - `net user srt-sandbox` → confirm active and still in `sandbox-runtime-users`
+   - re-provision if the account/group looks wrong: `srt-win.exe uninstall` then `srt-win.exe install`
+3. Re-run validation:
+   - `bunx vitest run src/permissions/__tests__/asrt-sandbox.test.ts` → expect `46 passed`
 
-Known-good verification for this incident: after policy refresh, the test file passed (`46 passed`).
+Known-good: granting `sandbox-runtime-users:(OI)(CI)(RX)` on the ASRT package dir made the direct probe report `OK: spawn works` and the test file pass (`46 passed`).
 
 ## Environment Variables
 

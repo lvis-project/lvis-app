@@ -359,7 +359,7 @@
     },
     "nsis": {
       "oneClick": true,
-      "perMachine": false,
+      "perMachine": true,
       "runAfterFinish": true,
       "differentialPackage": true,
       "createDesktopShortcut": "always",

@@ -41,26 +41,27 @@
 ;
 ; A bundled srt-win.exe is NOT the same as a provisioned sandbox: provisioning
 ; creates a hidden `srt-sandbox` Windows user + user-SID-keyed WFP network-filter
-; rules + filesystem ACLs, which needs a one-time admin elevation. Doing it here
-; makes the runtime Settings panel a repair-only fallback instead of the primary
-; "Install now" path.
+; rules + filesystem ACLs. This makes the runtime Settings panel a repair-only
+; fallback instead of the primary "Install now" path.
 ;
-; ⚠️ ELEVATION ASSUMPTION / VALIDATION UNKNOWN — the owner MUST confirm on a real
-; Windows install run:
-;   - srt-win.exe SELF-ELEVATES (its own single UAC). Invoked from an
-;     already-elevated installer it should detect admin and proceed WITHOUT a
-;     second UAC. BUT this app's NSIS target currently ships oneClick:true +
-;     perMachine:false (package.json build.nsis) — a PER-USER, NON-elevated
-;     installer. So srt-win WILL raise its own UAC here. Net UX: one UAC during
-;     install instead of a confusing runtime button + UAC. A truly UAC-free
-;     install-time provision would require flipping the target to
-;     perMachine:true (Program Files, all-users) — a separate installer-posture
-;     decision, deliberately NOT made here.
-;   - We do NOT pass any unverified "skip elevation" flag.
+; TWO things are required for the sandbox to actually WORK (not just provision):
+;   1. ELEVATION. This app ships oneClick:true + perMachine:true (package.json
+;      build.nsis) — an all-users Program Files install that self-elevates once.
+;      srt-win.exe self-elevates too, but invoked from the already-elevated
+;      installer it detects admin and proceeds WITHOUT a second UAC. (Confirm on
+;      a real install run; we pass no unverified skip-elevation flag.)
+;   2. FILE ACL (owner-diagnosed 2026-07-13 — the real root cause of the earlier
+;      `CreateProcessWithLogonW(srt-sandbox)` 0x80070005 access-denied). The
+;      sandbox runs the egress-probe / tool runner AS the low-privilege
+;      `srt-sandbox` user, which cannot read/execute srt-win.exe (or the ASRT
+;      package files) unless the path's ACL grants it. Program Files grants Users
+;      read+execute by default, but we ALSO grant `sandbox-runtime-users` RX
+;      explicitly (below) so it is robust regardless of the packed ACL. Without
+;      this the sandbox provisions but never initializes.
 ;
-; NON-FATAL in ALL cases — provisioning failure must NEVER Abort the app install
-; (matches the existing non-bricking sandbox posture: win32-not-ready does not
-; hard-throw; the runtime repair panel is the fallback).
+; NON-FATAL in ALL cases — provisioning/ACL failure must NEVER Abort the app
+; install (matches the non-bricking sandbox posture: win32-not-ready does not
+; hard-throw; the runtime repair panel + README recovery are the fallback).
 !macro customInstall
   Push $0
   Push $R0
@@ -96,6 +97,19 @@
     DetailPrint "LVIS: OS sandbox user provisioning failed (exit 14). Repair later from Settings → 권한."
   ${else}
     DetailPrint "LVIS: OS sandbox provisioning did not complete (exit $0). Repair later from Settings → 권한."
+  ${endif}
+
+  ; FILE-ACL grant (root-cause fix — see header). srt-sandbox must be able to
+  ; read/execute the packaged ASRT backend, or the runtime egress probe spawns
+  ; access-denied (0x80070005) and the sandbox never initializes. Grant the
+  ; ASRT-created `sandbox-runtime-users` group (srt-sandbox is a member) RX on
+  ; the packaged ASRT dir, recursively. Non-fatal; harmless if the group is
+  ; absent (provisioning failed above).
+  DetailPrint "LVIS: granting srt-sandbox read+execute on the ASRT backend (ACL)…"
+  nsExec::ExecToLog 'icacls "$INSTDIR\resources\app.asar.unpacked\node_modules\@anthropic-ai\sandbox-runtime" /grant "sandbox-runtime-users:(OI)(CI)(RX)" /T /C'
+  Pop $0
+  ${if} $0 != 0
+    DetailPrint "LVIS: ACL grant to sandbox-runtime-users returned $0 (non-fatal). If the OS sandbox reports access-denied at runtime, re-run the icacls grant — see README → 'ASRT sandbox access denied' recovery."
   ${endif}
 
   lvis_srtwin_install_done:
