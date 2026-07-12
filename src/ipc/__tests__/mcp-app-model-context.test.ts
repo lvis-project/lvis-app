@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IpcMainInvokeEvent } from "electron";
 import { tmpdir } from "node:os";
 import { CHANNELS } from "../../contract/app-contract.js";
+import { hostFrameEvent, foreignFrameEvent } from "../../__tests__/test-helpers.js";
 import { McpAppModelContextStore } from "../../mcp/mcp-app-model-context.js";
 
 const handleMap = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
@@ -29,16 +30,7 @@ vi.mock("electron", () => ({
   shell: { openPath: vi.fn() },
 }));
 
-function hostEvent(): IpcMainInvokeEvent {
-  return {
-    senderFrame: { url: "file:///Applications/Lvis.app/dist/index.html" },
-    sender: {},
-  } as unknown as IpcMainInvokeEvent;
-}
 
-function foreignEvent(url: string): IpcMainInvokeEvent {
-  return { senderFrame: { url }, sender: {} } as unknown as IpcMainInvokeEvent;
-}
 
 const ACTIVE_SESSION = "session-live";
 
@@ -86,7 +78,7 @@ describe("lvis:mcp:ui-model-context", () => {
 
   it("REFUSES an unauthorized sender", async () => {
     for (const url of ["https://evil.example/index.html", "", "lvis-plugin://shell/index.html"]) {
-      const result = await invoke(foreignEvent(url), "github", ACTIVE_SESSION, "card-1", params);
+      const result = await invoke(foreignFrameEvent(url), "github", ACTIVE_SESSION, "card-1", params);
 
       expect(result).toMatchObject({ ok: false, error: "unauthorized-frame" });
     }
@@ -94,7 +86,7 @@ describe("lvis:mcp:ui-model-context", () => {
   });
 
   it("stores the card's context — and NEVER starts a turn", async () => {
-    const result = await invoke(hostEvent(), "github", ACTIVE_SESSION, "card-1", params);
+    const result = await invoke(hostFrameEvent(), "github", ACTIVE_SESSION, "card-1", params);
 
     expect(result).toEqual({ ok: true, disposition: "stored" });
     expect(mcpAppModelContext.buildSection(ACTIVE_SESSION)).toContain("cart: 3 items");
@@ -105,8 +97,8 @@ describe("lvis:mcp:ui-model-context", () => {
   });
 
   it("OVERWRITES on the second call rather than appending", async () => {
-    await invoke(hostEvent(), "github", ACTIVE_SESSION, "card-1", params);
-    await invoke(hostEvent(), "github", ACTIVE_SESSION, "card-1", {
+    await invoke(hostFrameEvent(), "github", ACTIVE_SESSION, "card-1", params);
+    await invoke(hostFrameEvent(), "github", ACTIVE_SESSION, "card-1", {
       content: [{ type: "text", text: "cart: 5 items" }],
     });
 
@@ -117,16 +109,16 @@ describe("lvis:mcp:ui-model-context", () => {
   });
 
   it("DROPS a card whose session is no longer the live conversation", async () => {
-    const result = await invoke(hostEvent(), "github", "session-the-user-left", "card-1", params);
+    const result = await invoke(hostFrameEvent(), "github", "session-the-user-left", "card-1", params);
 
     expect(result).toMatchObject({ ok: false, error: "session-mismatch" });
     expect(mcpAppModelContext.size()).toBe(0);
   });
 
   it("refuses an over-cap body without disturbing what the card already stored", async () => {
-    await invoke(hostEvent(), "github", ACTIVE_SESSION, "card-1", params);
+    await invoke(hostFrameEvent(), "github", ACTIVE_SESSION, "card-1", params);
 
-    const result = await invoke(hostEvent(), "github", ACTIVE_SESSION, "card-1", {
+    const result = await invoke(hostFrameEvent(), "github", ACTIVE_SESSION, "card-1", {
       content: [{ type: "text", text: "x".repeat(100_000) }],
     });
 
