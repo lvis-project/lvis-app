@@ -275,6 +275,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
                 toolUseId,
                 sourceTools,
                 originSessionId,
+                projectRoot: ctx.cwd,
                 // #1112: profile's `model:` frontmatter (complexity tier or
                 // explicit model ID). SubAgentRunner resolves it against the
                 // active vendor; undefined leaves the child on the parent model.

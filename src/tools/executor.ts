@@ -49,6 +49,10 @@ import { maskSensitiveData } from "../audit/dlp-filter.js";
 import type { RiskVerdict } from "../permissions/reviewer/risk-classifier.js";
 import { emitEffectShadowLog } from "../permissions/reviewer/risk-shadow-log.js";
 import { runWithEffectLedger, type EffectLedger } from "../permissions/effect-ledger.js";
+import {
+  currentToolExecutionCwd,
+  runWithToolExecutionCwd,
+} from "./execution-context.js";
 import { runWithEffectGateContext } from "../permissions/effect-enforcement.js";
 import { CHOKEPOINT_EFFECT } from "../permissions/effect-kind.js";
 import { resolveReviewerSandboxCapability } from "../permissions/sandbox-capability.js";
@@ -670,7 +674,8 @@ export class ToolExecutor {
       executionCwd: requestedExecutionCwd,
     } = opts;
     const startTime = Date.now();
-    const executionCwd = requestedExecutionCwd ?? process.cwd();
+    const executionCwd =
+      requestedExecutionCwd ?? currentToolExecutionCwd() ?? process.cwd();
     const meta: ToolCallMeta = { groupId, toolUseId: toolUse.id, displayOrder };
     let permissionResult: PermissionCheckResult | undefined;
     let source: ToolSource = "builtin";
@@ -2100,13 +2105,15 @@ export class ToolExecutor {
         // fresh `onceGrants` set dedups N writes to one target within this call.
         // When `hostClassifiesRisk` is OFF (default) the gate is a pass-through,
         // so binding the context here is inert.
-        return runWithEffectLedger(effectLedger, () =>
-          runWithEffectGateContext(
-            {
-              headless: invocationPermissionContext.headless === true,
-              toolName: toolUse.name,
-            },
-            () => tool.execute(finalInput, ctx),
+        return runWithToolExecutionCwd(executionCwd, () =>
+          runWithEffectLedger(effectLedger, () =>
+            runWithEffectGateContext(
+              {
+                headless: invocationPermissionContext.headless === true,
+                toolName: toolUse.name,
+              },
+              () => tool.execute(finalInput, ctx),
+            ),
           ),
         );
       },
