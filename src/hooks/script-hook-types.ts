@@ -136,7 +136,7 @@ export interface ToolHookStdin {
    * Present when the tool originates from an MCP server / plugin, so a hook can
    * key its policy on the SPECIFIC origin (e.g. "deny writes from server X") and
    * match `mcp__*` / a plugin id — not just the coarse `source`. `category`
-   * already carries the authoritative `_meta["xyz.lvis/category"]` (the reverse
+   * already carries the authoritative `_meta["lvisai/category"]` (the reverse
    * projection lands it on `tool.category`).
    */
   mcpServerId?: string;

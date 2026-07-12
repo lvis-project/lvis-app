@@ -4,7 +4,7 @@
  * The loopback delegate must reproduce buildPluginTool's execute gate exactly:
  * inactive / integrity-disabled fail closed, ManifestIntegrityViolation records
  * + fails closed, and the structured return value survives as
- * _meta["xyz.lvis/rawResult"]. A host-level test asserts that raw value reaches
+ * _meta["lvisai/rawResult"]. A host-level test asserts that raw value reaches
  * the registered Tool's metadata.rawResult (the executor.ts / boot.ts contract).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
