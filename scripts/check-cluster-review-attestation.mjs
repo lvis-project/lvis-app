@@ -30,7 +30,7 @@ function exactLineCount(text, expected) {
   return text.split("\n").filter((line) => line === expected).length;
 }
 
-const RAW_HTML_OPENING_TAG_PATTERN = /<[A-Za-z][A-Za-z0-9-]*\b[^>]*>/;
+const RAW_HTML_TOKEN_PATTERN = /<[A-Za-z?!/]/;
 
 function isInsideHtmlComment(text, index) {
   return text.lastIndexOf("<!--", index) > text.lastIndexOf("-->", index);
@@ -87,11 +87,11 @@ function isEvidenceDirectlyHidden(text, index) {
   return isInsideHtmlComment(text, index) || isInsideMarkdownFence(text, index);
 }
 
-// Intentionally conservative: any raw opening-tag-shaped token before the gate
+// Intentionally conservative: any raw-HTML-shaped token before the evidence point
 // rejects the attestation, even when Markdown would render it as literal text.
 // Put the review gate before raw HTML; false negatives are safer than hidden evidence.
-function hasRawHtmlOpeningTagBefore(text, index) {
-  return RAW_HTML_OPENING_TAG_PATTERN.test(text.slice(0, index));
+function hasRawHtmlTokenBefore(text, index) {
+  return RAW_HTML_TOKEN_PATTERN.test(text.slice(0, index));
 }
 
 export function evaluateClusterReviewAttestation(pullRequest, triggerEvent) {
@@ -166,7 +166,7 @@ export function evaluateClusterReviewAttestation(pullRequest, triggerEvent) {
   if (sectionMatches.length > 1) return rejected("duplicate-section");
 
   const sectionStart = sectionMatches[0].index;
-  if (hasRawHtmlOpeningTagBefore(body, sectionStart)) {
+  if (hasRawHtmlTokenBefore(body, sectionStart)) {
     return rejected("table-not-visible");
   }
 
@@ -220,7 +220,7 @@ export function evaluateClusterReviewAttestation(pullRequest, triggerEvent) {
   const tableIndex = sectionStart + tableBlock.index;
   if (
     isEvidenceDirectlyHidden(body, tableIndex)
-    || hasRawHtmlOpeningTagBefore(body, tableIndex)
+    || hasRawHtmlTokenBefore(body, tableIndex)
   ) {
     return rejected("table-not-visible");
   }
