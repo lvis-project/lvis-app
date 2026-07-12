@@ -6,7 +6,7 @@
  * objects) and merges the English default catalog here. Non-English generated
  * catalogs are language-pack chunks under `../generated-locales/`.
  *
- * Fragments: 183
+ * Fragments: 184
  */
 import { en as en_actionPanel } from "./actionPanel.js";
 import { en as en_app } from "./app.js";
@@ -116,6 +116,7 @@ import { en as en_mainToolbar } from "./mainToolbar.js";
 import { en as en_marketplaceAnnouncementBanner } from "./marketplaceAnnouncementBanner.js";
 import { en as en_marketplaceTab } from "./marketplaceTab.js";
 import { en as en_marketplaceUpdateBanner } from "./marketplaceUpdateBanner.js";
+import { en as en_mcpAppPipPanel } from "./mcpAppPipPanel.js";
 import { en as en_mcpAppView } from "./mcpAppView.js";
 import { en as en_mcpTab } from "./mcpTab.js";
 import { en as en_memorySearchPanel } from "./memorySearchPanel.js";
@@ -301,6 +302,7 @@ export const generatedEn: Record<string, string> = {
   ...en_marketplaceAnnouncementBanner,
   ...en_marketplaceTab,
   ...en_marketplaceUpdateBanner,
+  ...en_mcpAppPipPanel,
   ...en_mcpAppView,
   ...en_mcpTab,
   ...en_memorySearchPanel,
