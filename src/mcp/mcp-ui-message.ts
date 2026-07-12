@@ -12,10 +12,12 @@
  *   2. TEXT — plain content. It belongs in the conversation, under the host's turn
  *      policy (see the IPC handler).
  *
- * Everything in here is app-authored and UNTRUSTED. This module only *classifies* and
- * *bounds* it: the sanitizing (title cap, body truncate, markdown strip, control-char
- * strip) is the NotificationService's job on one side, and the `<app-message>` envelope
- * (which strips a leading slash) on the other. No third sanitizer.
+ * Everything in here is app-authored and UNTRUSTED. This module only *classifies*,
+ * *bounds*, and *narrows* it (see {@link AppNotificationMeta} — the app does not get to
+ * carry host delivery policy on the wire). The sanitizing belongs to the sinks: title
+ * cap / body truncate / markdown strip / control-char strip in NotificationService on one
+ * side, and the `<app-message>` envelope (leading-slash strip + closing-fence
+ * neutralization) on the other. No third sanitizer.
  */
 
 /**
@@ -26,22 +28,32 @@
  */
 export const MCP_APP_MESSAGE_MAX_CHARS = 4096;
 
-/**
- * The vendor `_meta` key that routes a message to the popup surface. The repo renamed
- * its namespace `xyz.lvis/*` → `lvisai/*`; reads accept both transitionally, writes
- * (SDK / docs) use the new one.
- */
+/** The ONE vendor `_meta` key that routes a message to the popup surface. */
 export const APP_NOTIFICATION_META_KEY = "lvisai/notification";
-const APP_NOTIFICATION_META_KEY_LEGACY = "xyz.lvis/notification";
 
 export type AppNotificationSeverity = "info" | "warning" | "critical";
 
-/** The `_meta["lvisai/notification"]` shape. Every field is untrusted app text. */
+/**
+ * The `_meta["lvisai/notification"]` shape. Every field is untrusted app text.
+ *
+ * Deliberately NARROW: an app may ASK for the user's attention, it may not decide that
+ * its alert outranks the host's delivery policy. Two switches the wire format does NOT
+ * carry, and that this parser therefore cannot lift off it:
+ *
+ *   · `bypassFocusGate` — an opt-in MANIFEST signal (see `notification-service.ts` and
+ *     `boot/plugins.ts`): statically reviewable, covered by `manifestSha256`. Handing it
+ *     to a sandboxed iframe would let a card fire an OS popup while the user is looking
+ *     straight at LVIS, and burn the shared per-kind cooldown slot other plugins' real
+ *     alerts depend on.
+ *   · urgency — `severity` below is an app CLAIM, recorded in the audit row and nothing
+ *     else. It never reaches `FireOptions.urgent`, so a card cannot promote itself to a
+ *     non-silent notification.
+ */
 export interface AppNotificationMeta {
   title: string;
   body: string;
+  /** Advisory only — audited, never a behavior switch. See the caveat above. */
   severity?: AppNotificationSeverity;
-  bypassFocusGate?: boolean;
 }
 
 export type McpUiMessageIntent =
@@ -55,6 +67,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+/**
+ * Lift the notification an app is ASKING for — and only that. Anything the app puts on
+ * the wire that is not `title` / `body` / `severity` is dropped here, at the boundary, so
+ * no downstream dispatch site has to remember which app-supplied fields are safe to
+ * forward (notably: a wire `bypassFocusGate` is not a field of the result type, so it
+ * cannot be threaded on by accident).
+ */
 function parseNotificationMeta(raw: unknown): AppNotificationMeta | null {
   const meta = asRecord(raw);
   if (!meta) return null;
@@ -67,7 +86,6 @@ function parseNotificationMeta(raw: unknown): AppNotificationMeta | null {
     ...(severity === "info" || severity === "warning" || severity === "critical"
       ? { severity }
       : {}),
-    ...(meta.bypassFocusGate === true ? { bypassFocusGate: true as const } : {}),
   };
 }
 
@@ -93,9 +111,7 @@ export function parseUiMessageIntent(params: unknown): McpUiMessageIntent {
     if (!blockRecord) continue;
     const meta = asRecord(blockRecord._meta);
     if (!meta) continue;
-    const notification = parseNotificationMeta(
-      meta[APP_NOTIFICATION_META_KEY] ?? meta[APP_NOTIFICATION_META_KEY_LEGACY],
-    );
+    const notification = parseNotificationMeta(meta[APP_NOTIFICATION_META_KEY]);
     if (notification) return { kind: "notification", notification };
   }
 

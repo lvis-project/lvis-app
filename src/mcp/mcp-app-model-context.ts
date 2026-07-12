@@ -20,9 +20,10 @@
  * the host already applies to `<app-message>` bodies and to skill-catalog metadata. It is
  * fenced and labelled as data, never as instructions, and {@link serializeAppContext} is
  * the ONE place that builds a body, so the closing-fence neutralization lives there and
- * nowhere else.
+ * nowhere else — via the shared `neutralizeFenceClose` every host fence uses.
  */
 import { t } from "../i18n/index.js";
+import { neutralizeFenceClose } from "../shared/fence-sanitizer.js";
 import { appMessageSource, isAppMessageOrigin } from "../shared/mcp-app-message-source.js";
 
 /**
@@ -103,10 +104,10 @@ export function serializeAppContext(update: Pick<McpAppModelContextUpdate, "cont
     }
   }
 
-  // The ONE fence-safety site: the body is app-authored, so it must not be able to close
-  // the block that frames it as data and continue outside it. Neutralized here, at the
-  // single place a body is ever built — not re-checked downstream.
-  return parts.join("\n\n").replaceAll("</mcp-app-context>", "<\\/mcp-app-context>");
+  // The ONE fence-safety site for THIS fence: the body is app-authored, so it must not be
+  // able to close the block that frames it as data and continue outside it. Neutralized
+  // here, at the single place a body is ever built — not re-checked downstream.
+  return neutralizeFenceClose(parts.join("\n\n"), "mcp-app-context");
 }
 
 /**
