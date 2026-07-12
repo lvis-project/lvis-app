@@ -23,14 +23,11 @@ import {
   SummaryTile,
   ReviewRow,
   categoryLabel,
-  inputVolumeLabel,
   levelBadgeClass,
-  payloadLabel,
   pickSummary,
   reviewBoxClass,
   reviewTitleForCategory,
   riskLevelKoLabel,
-  scopeLabel,
   sensitivityLabel,
   type ParsedSummary,
   type PermissionDecisionCategory,
@@ -784,7 +781,7 @@ export function approvalReviewRows(
   category: PermissionDecisionCategory,
   inputSummary: string,
   originLabel: string,
-  source: string,
+  _source: string,
   sourceBadge: string,
 ): ReviewBasisRow[] {
   const parsed = parseArgs(request.args);
@@ -845,31 +842,52 @@ export function approvalReviewRows(
     });
   }
 
+  // Elaboration rows render ONLY when they carry actual per-invocation data —
+  // pickSummary's hardcoded "…not specified" fallback is dropped so the dialog
+  // shows real args, not boilerplate. The primary data row (target / command /
+  // endpoint) + the reviewer verdict always render. Always-hardcoded/redundant
+  // rows (write impact = source·category·note; read scope = source·category·…;
+  // read volume) are removed — origin + category already live in the tiles + 판단.
+  const NO_DATA = " nd ";
+  const optRow = (
+    label: string,
+    keys: string[],
+    opts: Partial<ReviewBasisRow> = {},
+  ): ReviewBasisRow | null => {
+    const v = pickSummary(parsed, keys, NO_DATA);
+    return v === NO_DATA ? null : { label, value: v, ...opts };
+  };
+  const kept = (...rs: (ReviewBasisRow | null)[]): ReviewBasisRow[] =>
+    rs.filter((r): r is ReviewBasisRow => r !== null);
+
   if (category === "read") {
     rows.push(
       { label: t("toolApprovalDialog.rowTarget"), value: request.target?.filePath ?? pickSummary(parsed, ["path", "paths", "target", "targets", "file", "directory", "resource", "query", "url", "uri"], inputSummary), monospace: true, testId: "tool-approval-input" },
-      { label: t("toolApprovalDialog.rowScope"), value: `${sourceLabel(source)} · ${categoryLabel(category)} · ${scopeLabel(parsed)}` },
       { label: t("toolApprovalDialog.rowSensitivity"), value: sensitivityLabel(parsed) },
-      { label: t("toolApprovalDialog.rowVolume"), value: inputVolumeLabel(inputSummary) },
     );
   } else if (category === "write") {
     rows.push(
       { label: t("toolApprovalDialog.rowTarget"), value: request.target?.filePath ?? pickSummary(parsed, ["path", "paths", "target", "targets", "file", "configKey", "taskId", "id"], inputSummary), monospace: true, testId: "tool-approval-input" },
-      { label: t("toolApprovalDialog.rowChange"), value: pickSummary(parsed, ["operation", "action", "mode", "patch", "content", "body", "text"], t("toolApprovalDialog.changeNotSpecified")), monospace: true },
-      { label: t("toolApprovalDialog.rowImpact"), value: `${sourceLabel(source)} · ${categoryLabel(category)} · ${t("toolApprovalDialog.impactNote")}` },
-      { label: t("toolApprovalDialog.rowRecovery"), value: pickSummary(parsed, ["diff", "backup", "rollback", "undo"], t("toolApprovalDialog.recoveryNotSpecified")) },
+      ...kept(
+        optRow(t("toolApprovalDialog.rowChange"), ["operation", "action", "mode", "patch", "content", "body", "text"], { monospace: true }),
+        optRow(t("toolApprovalDialog.rowRecovery"), ["diff", "backup", "rollback", "undo"]),
+      ),
     );
   } else if (category === "network") {
     rows.push(
       { label: t("toolApprovalDialog.rowEndpoint"), value: pickSummary(parsed, ["endpoint", "url", "uri", "host", "baseUrl"], t("toolApprovalDialog.endpointNotSpecified")), monospace: true, testId: "tool-approval-input" },
-      { label: t("toolApprovalDialog.rowMethod"), value: pickSummary(parsed, ["method", "httpMethod"], t("toolApprovalDialog.methodNotSpecified")) },
-      { label: t("toolApprovalDialog.rowPayload"), value: pickSummary(parsed, ["payload", "body", "message", "text", "input", "params", "args"], payloadLabel(inputSummary)), monospace: true },
-      { label: t("toolApprovalDialog.rowAuthScope"), value: pickSummary(parsed, ["auth", "scope", "scopes", "tenant", "account"], t("toolApprovalDialog.authScopeNotSpecified")) },
+      ...kept(
+        optRow(t("toolApprovalDialog.rowMethod"), ["method", "httpMethod"]),
+        optRow(t("toolApprovalDialog.rowPayload"), ["payload", "body", "message", "text", "input", "params", "args"], { monospace: true }),
+        optRow(t("toolApprovalDialog.rowAuthScope"), ["auth", "scope", "scopes", "tenant", "account"]),
+      ),
     );
   } else if (category === "shell") {
     rows.push(
       { label: t("toolApprovalDialog.rowCommand"), value: pickSummary(parsed, ["command", "cmd", "args", "script", "argv"], inputSummary), monospace: true, testId: "tool-approval-input" },
-      { label: t("toolApprovalDialog.rowCwdEnv"), value: pickSummary(parsed, ["cwd", "workingDirectory", "env", "environment"], t("toolApprovalDialog.cwdEnvNotSpecified")), monospace: true },
+      ...kept(
+        optRow(t("toolApprovalDialog.rowCwdEnv"), ["cwd", "workingDirectory", "env", "environment"], { monospace: true }),
+      ),
       { label: t("toolApprovalDialog.rowLimits"), value: formatEvaluationLimits(request.evaluationContext) },
     );
   } else {
@@ -885,10 +903,6 @@ export function approvalReviewRows(
     { label: t("toolApprovalDialog.rowVerdict"), value: reviewer },
   );
   return rows;
-}
-
-function sourceLabel(source: string): string {
-  return SOURCE_BADGE[source] ?? source;
 }
 
 /**
