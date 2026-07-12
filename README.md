@@ -220,6 +220,23 @@ bun run start
 
 PowerShell 5.x may also require `[Console]::OutputEncoding` updates because `chcp` alone does not refresh the cached encoding. See [docs/guides/windows-setup.md](./docs/guides/windows-setup.md).
 
+### ASRT sandbox access denied (`CreateProcessWithLogonW`, `0x80070005`)
+
+If `src/permissions/__tests__/asrt-sandbox.test.ts` fails on Windows with `WFP egress fence could not be verified` and `CreateProcessWithLogonW(srt-sandbox): Access is denied (0x80070005)`, use the following recovery sequence:
+
+1. Ensure Secondary Logon is running:
+   - `Get-Service seclogon`
+   - `Start-Service seclogon` (or `Restart-Service seclogon`)
+2. Force-refresh local policy:
+   - `gpupdate /force`
+3. Verify the sandbox account and group mapping:
+   - `net user srt-sandbox`
+   - confirm `srt-sandbox` is active and remains in `sandbox-runtime-users`
+4. Re-run validation:
+   - `bunx vitest run src/permissions/__tests__/asrt-sandbox.test.ts`
+
+Known-good verification for this incident: after policy refresh, the test file passed (`46 passed`).
+
 ## Environment Variables
 
 | Variable | Default | Purpose |
