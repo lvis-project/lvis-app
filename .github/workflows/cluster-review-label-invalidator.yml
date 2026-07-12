@@ -185,9 +185,9 @@ jobs:
             --since "$SINCE_DATE" \
             --threshold "$CLUSTER_THRESHOLD")
 
-          SENSITIVE_HIT=$(printf '%s' "$RESULT" | jq -er '.sensitive')
-          VIOLATION=$(printf '%s' "$RESULT" | jq -er '.violation')
-          VIOLATION_REASON=$(printf '%s' "$RESULT" | jq -er '.reason')
+          SENSITIVE_HIT=$(printf '%s' "$RESULT" | jq -er '.sensitive | if type == "boolean" then tostring else error("invalid .sensitive") end')
+          VIOLATION=$(printf '%s' "$RESULT" | jq -er '.violation | if type == "boolean" then tostring else error("invalid .violation") end')
+          VIOLATION_REASON=$(printf '%s' "$RESULT" | jq -er '.reason | if type == "string" then . else error("invalid .reason") end')
 
           echo "sensitive_hit=${SENSITIVE_HIT}" >> "$GITHUB_OUTPUT"
           echo "violation=${VIOLATION}" >> "$GITHUB_OUTPUT"
