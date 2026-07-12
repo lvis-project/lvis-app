@@ -265,7 +265,7 @@ export class PluginMcpHost {
   /**
    * Fetch one of THIS plugin's declared `ui://` resources over the loopback
    * transport (`resources/read`) — the plugin arm of the MCP App serving seam.
-   * Returns the HTML plus the resource's OWN `_meta.ui` (its csp),
+   * Returns the HTML plus the resource's OWN `_meta.ui` (csp / permissions),
    * from which main derives the sandbox-proxy CSP header. Mirrors
    * {@link McpClient.readResource} so the render path is transport-agnostic.
    *
@@ -283,7 +283,7 @@ export class PluginMcpHost {
       );
     }
     const ui = textPart._meta?.ui;
-    return { html: textPart.text, csp: ui?.csp };
+    return { html: textPart.text, csp: ui?.csp, permissions: ui?.permissions };
   }
 
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {

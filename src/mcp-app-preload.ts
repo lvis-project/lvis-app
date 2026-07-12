@@ -13,23 +13,33 @@
  * window.parent)`. In a <webview> the guest would be the TOP-LEVEL document, where
  * `window.parent === window` — so it would post to ITSELF and the host would never
  * see a byte (the old, dead hand-rolled bridge). We therefore run the app in an
- * INNER `<iframe sandbox="allow-scripts" srcdoc>`, whose `window.parent` is this
- * proxy frame: a genuinely different frame AND a different (opaque) origin, so
- * postMessage really crosses — with the app's code completely UNMODIFIED.
+ * INNER `<iframe sandbox="allow-scripts allow-same-origin" srcdoc>`, whose
+ * `window.parent` is this proxy frame: a genuinely different FRAME, so postMessage
+ * really crosses (a different frame is what postMessage needs — not a different origin)
+ * — with the app's code completely UNMODIFIED.
  *
  * ─── Security posture ────────────────────────────────────────────────────────
  * NOTHING is exposed to any page: no `contextBridge`, no globals. This preload
  * only forwards opaque JSON-RPC frames. The proxy document is script-free and
  * host-owned; the only code the MCP server controls runs inside the inner
- * sandboxed iframe, which has no `allow-same-origin` (⇒ opaque origin, cannot
- * reach into the proxy) and no preload of its own (`nodeIntegrationInSubFrames`
- * is false, and the top-frame guard below is belt-and-braces).
+ * sandboxed iframe.
+ *
+ * That inner frame carries `allow-same-origin`, so it inherits the PROXY's per-server
+ * origin (`lvis-mcp-app://<hex(serverId)>`) — the spec's requirement, and what lets a
+ * declared `permissions` feature actually be delegated. Same-origin does NOT let it
+ * reach this preload: `contextIsolation` is true, so this relay runs in an isolated
+ * world that same-origin DOM access cannot cross, and `nodeIntegrationInSubFrames` is
+ * false, so the inner frame has no preload of its own. The proxy top document the inner
+ * frame can now read is host-generated and script-free — there is no code there to
+ * hijack — and the `window.parent === window` guard below independently refuses to
+ * relay from anywhere but the proxy top frame.
  */
 // Named import — `import electron from "electron"` breaks in sandboxed webview
 // preload contexts (see the note in `plugin-preload.ts`).
 import { ipcRenderer } from "electron";
 import {
   INNER_SANDBOX_ATTR,
+  MCP_APP_ALLOW_META_NAME,
   MCP_APP_BRIDGE_CHANNEL,
   SANDBOX_PROXY_READY,
   SANDBOX_RESOURCE_READY,
@@ -50,21 +60,43 @@ function isSandboxProxyFrame(): boolean {
  * Build the inner app iframe. Exported and side-effect-free (creates a detached
  * element, no `window`) so the security-critical invariant below is unit-testable.
  *
- * The `sandbox` attribute is set to `INNER_SANDBOX_ATTR` UNCONDITIONALLY — the
- * preload OWNS it and never consumes a value from the wire. This is the same class
- * of trust boundary the CSP fix closed: the app HTML (and, before this fix, a
- * `sandbox` string) arrives via `sendSandboxResourceReady`, i.e. renderer-forwarded,
- * and a forged `allow-same-origin` here would collapse the opaque-origin containment
- * that keeps the untrusted app from reaching this proxy frame. So the wire cannot
- * influence it. (No live escalation exists today — the untrusted app cannot set this
- * field, and the main-derived CSP + network gate still bind the frame — but a
- * containment flag must not be renderer-governed, full stop.)
+ * BOTH containment flags are host-owned and NEVER consumed from the wire:
+ *  - `sandbox` is set to `INNER_SANDBOX_ATTR` UNCONDITIONALLY. It is a fixed constant
+ *    (`allow-scripts allow-same-origin`, the spec's required pair — see the contract),
+ *    so the app can never widen or narrow its own sandbox.
+ *  - `allow` (Permissions Policy) is the HOST-COMPUTED string, read from the proxy
+ *    document's meta tag (`readHostDeclaredAllow`) — main derived it from the resource's
+ *    declaration and served it in the host-owned proxy document, so it too is out of the
+ *    app's reach. An empty string ⇒ no `allow` attribute ⇒ no feature delegated.
+ *
+ * The trust rule is the same one the CSP fix established: the app HTML arrives via
+ * `sendSandboxResourceReady`, i.e. renderer-forwarded, so nothing taken from that
+ * channel may govern a containment flag. Both flags here come from host state instead.
  */
-export function createInnerAppFrame(doc: Document, html: string): HTMLIFrameElement {
+export function createInnerAppFrame(doc: Document, html: string, allow = ""): HTMLIFrameElement {
   const frame = doc.createElement("iframe");
   frame.setAttribute("sandbox", INNER_SANDBOX_ATTR);
+  // The Permissions Policy delegated to the app frame. Host-computed (see
+  // `readHostDeclaredAllow`) — an empty string means NO feature is delegated, which is
+  // the fail-closed default for a card that declared nothing.
+  if (allow) frame.setAttribute("allow", allow);
   frame.srcdoc = html;
   return frame;
+}
+
+/**
+ * The host-computed `allow` attribute, read from THIS (host-owned, host-served)
+ * document's meta tag — never from the bridge wire.
+ *
+ * The distinction is the whole point: app HTML arrives renderer-forwarded, so anything
+ * taken from that channel is renderer-governed and must not be a containment flag. The
+ * proxy document is generated in main and served over the privileged `lvis-mcp-app://`
+ * scheme behind the token→authority check, so its meta tags are host state. Absent meta
+ * ⇒ empty ⇒ no feature delegated.
+ */
+export function readHostDeclaredAllow(doc: Document): string {
+  const meta = doc.querySelector(`meta[name="${MCP_APP_ALLOW_META_NAME}"]`);
+  return meta?.getAttribute("content") ?? "";
 }
 
 if (isSandboxProxyFrame()) {
@@ -79,7 +111,8 @@ if (isSandboxProxyFrame()) {
   const mountApp = (params: { html?: unknown }): void => {
     if (typeof params?.html !== "string") return;
     if (inner) inner.remove();
-    inner = createInnerAppFrame(document, params.html);
+    // HTML from the wire; `allow` from the host-owned document. Never the other way round.
+    inner = createInnerAppFrame(document, params.html, readHostDeclaredAllow(document));
     document.body.appendChild(inner);
   };
 
