@@ -317,8 +317,9 @@ export function isFilesystemRootPath(foldedPath: string): boolean {
  */
 export function buildAllowedScope(
   userAdditions: readonly string[] | undefined,
+  cwd: string = process.cwd(),
 ): { directories: string[] } {
-  const defaults = computeDefaultAllowedDirectories();
+  const defaults = computeDefaultAllowedDirectories(cwd);
   const sanitized = sanitizeAllowedDirectories(userAdditions);
   const seen = new Set<string>();
   const directories: string[] = [];
@@ -337,8 +338,9 @@ export function buildAllowedScope(
  */
 export function buildRuntimeAllowedDirectories(
   userAdditions: readonly string[] | undefined,
+  cwd: string = process.cwd(),
 ): string[] {
-  const defaults = computeDefaultRuntimeAllowedDirectories();
+  const defaults = computeDefaultRuntimeAllowedDirectories(cwd);
   const sanitized = sanitizeRuntimeAllowedDirectories(userAdditions);
   const seen = new Set<string>();
   const directories: string[] = [];

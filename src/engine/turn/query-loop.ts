@@ -1141,7 +1141,7 @@ export async function queryLoop(
         toolNames: capResult.allowed.map((tu) => tu.name),
         capped: capResult.blocked.length,
       });
-      const toolResults = await self.toolExecutor.executeAll(
+      const toolResults = await self.toolExecutor.executeConversationTools(
         capResult.allowed,
         {
           callbacks: {
@@ -1174,6 +1174,7 @@ export async function queryLoop(
           // hanging until their internal timeout.
           abortSignal,
           toolResultChunkReader: (toolUseId) => self.readToolResultForChunk(toolUseId),
+          executionCwd: self.getSessionExecutionCwd(),
           permissionContext: {
             headless: self.deps.headless,
             allowedPluginIds: new Set(scope.activePluginIds),
