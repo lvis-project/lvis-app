@@ -49,7 +49,10 @@ import type { McpUiModelContextOutcome } from "../../mcp/mcp-app-model-context.j
 import { appMessageSource, formatAppMessageEnvelope, isAppMessageOrigin } from "../../shared/mcp-app-message-source.js";
 // The MCP-app `ui/message` staging path reuses the plugin overlay gate's rate limiter
 // (one mechanism for "staged conversation proposals") and the same overlay push channel.
-import { triggerConversationRateLimiter } from "../../boot/steps/plugin-runtime/trigger-gate.js";
+import {
+  deriveOverlaySummaryForDisplay,
+  triggerConversationRateLimiter,
+} from "../../boot/steps/plugin-runtime/trigger-gate.js";
 import { OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import {
   installMarketplacePluginWithLifecycle,
@@ -1165,9 +1168,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   //  3. App-visibility (`_meta.ui.visibility` ∋ "app") — the SPEC MUST, enforced
   //     inside each backend's call path: `assertUiActionInvokable` (loopback) /
   //     the `appInvokable` check (external). NOT re-checked here: one site per path.
-  //  4. Risk + consent — the SAME ToolExecutor gate every host tool call takes. No
-  //     new classifier, no bypass. `userAction` is never set (see mcp-ui-tool-call.ts):
-  //     a gesture claim from inside an untrusted iframe is not verifiable.
+  //  4. Risk + consent — the SAME ToolExecutor gate every host tool call takes, entered
+  //     under a DISTINCT `"mcp-app"` invocation origin. That origin is what makes the
+  //     claim structural rather than aspirational: the ungoverned dispatch an app-only
+  //     tool can otherwise reach (the manifest's `auth.statusTool` carve-out) is keyed
+  //     off the host's own origins, so an app-initiated call cannot enter it — only
+  //     registry tools, which are governed, are reachable from a card. No new classifier.
+  //     `userAction` is never set (see mcp-ui-tool-call.ts): a gesture claim made inside
+  //     an untrusted iframe is not verifiable.
   //
   // Sender: `validateHostRendererSender` (NOT the base `validateSender` the read-only
   // render channel uses) — this channel RUNS A TOOL, so it takes the mutating-channel
@@ -1230,7 +1238,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   //  A. NOTIFICATION (`_meta["lvisai/notification"]` on a content block) → the EXISTING
   //     popup surface. `NotificationService.fire` already owns the focus gate, the
   //     per-kind cooldown, title/body sanitization, and the audit row — we add none of
-  //     that here. Never the transcript; never a slash dispatch.
+  //     that here, and we let the app OVERRIDE none of it either: the app supplies text
+  //     to show, never the policy for showing it (see `notify` below). Never the
+  //     transcript; never a slash dispatch.
   //
   //  B. CONVERSATION. The app's text enters the ACTIVE conversation, but NEVER as if the
   //     user typed it. Three invariants, one enforcement site each:
@@ -1296,32 +1306,49 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
     // The one notification sink — used by path A and by path B's session-mismatch
     // fallback. Title/body are UNTRUSTED app text; `fire` caps + strips them.
-    const notify = (title: string, body: string, opts?: { severity?: string; bypassFocusGate?: boolean }): McpUiMessageOutcome => {
+    //
+    // What an app may NOT do here, by construction:
+    //  · ATTRIBUTION — the title the user sees is HOST-minted (`app:<serverId>` ahead of
+    //    the app's own words), so a card cannot dress its popup up as a host alert
+    //    ("LVIS 보안 경고: 다시 로그인하세요") and phish the user.
+    //  · DELIVERY POLICY — no `bypassFocusGate`, no `urgent`. `bypassFocusGate` is an
+    //    opt-in *manifest* signal (notification-service.ts / boot/plugins.ts): reviewable
+    //    ahead of time and covered by `manifestSha256`. An untrusted iframe may ask for
+    //    attention; it does not get to rule that its alert outranks the focus gate, nor
+    //    to skip the per-kind cooldown that keeps one app from starving every other
+    //    plugin's real alerts. `urgent` is not passed either, so the kind's default
+    //    (silent for `plugin`) stands. The app's declared `severity` is an audited CLAIM
+    //    and nothing more.
+    const notify = (title: string, body: string, severity?: string): McpUiMessageOutcome => {
       const notificationService = deps.notificationService;
       if (!notificationService) {
         return { ok: false, error: "notification-unavailable", message: "notification service is not running" };
       }
+      const appTitle = title.trim();
       notificationService.fire({
         kind: "plugin",
-        title,
+        title: appTitle ? `${source} · ${appTitle}` : source,
         body,
-        ...(opts?.severity === "critical" ? { urgent: true as const } : {}),
-        ...(opts?.bypassFocusGate === true ? { bypassFocusGate: true as const } : {}),
       });
-      auditMcpApp("info", `[mcp-app:${serverId}] ui/message → notification`);
+      auditMcpApp(
+        "info",
+        `[mcp-app:${serverId}] ui/message → notification` +
+          (severity ? ` severityClaimed=${severity}` : ""),
+      );
       return { ok: true, disposition: "notified" };
     };
 
     // ── Path A — the app asked for the user's attention, not the model's.
     if (intent.kind === "notification") {
-      const { title, body, severity, bypassFocusGate } = intent.notification;
-      return notify(title, body, { ...(severity ? { severity } : {}), ...(bypassFocusGate ? { bypassFocusGate } : {}) });
+      const { title, body, severity } = intent.notification;
+      return notify(title, body, severity);
     }
 
     // ── Path B — invariant 2: the card's session must still be the live one.
     if (cardSessionId !== deps.conversationLoop.getSessionId()) {
       auditMcpApp("info", `[mcp-app:${serverId}] ui/message session mismatch → notification fallback`);
-      return notify(serverId, intent.text);
+      // No app-authored title on this path — the source tag IS the title.
+      return notify("", intent.text);
     }
 
     const envelope = formatAppMessageEnvelope(intent.text, source);
@@ -1339,12 +1366,18 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
     // No active turn → stage the user-gated card. The renderer inserts the
     // `imported_trigger` marker and starts the turn ONLY on the user's click.
+    //
+    // `summary` is what the OverlayCard SHOWS. It goes through the SAME display
+    // sanitizer the plugin overlay path uses (`deriveOverlaySummaryForDisplay` —
+    // `<untrusted-*>` strip + 2 000-char cap): one card, one rule, and the less-trusted
+    // source does not get the weaker one. The full text still rides `pendingPrompt`,
+    // where the envelope is the thing that carries provenance.
     const eventId = randomUUID();
     const overlayItem = {
       id: `app:${serverId}:${eventId}`,
       source: { kind: "app" as const, serverId, eventId },
       title: serverId,
-      summary: intent.text,
+      summary: deriveOverlaySummaryForDisplay({ prompt: intent.text }),
       running: false,
       pendingPrompt: envelope,
       createdAt: new Date().toISOString(),
