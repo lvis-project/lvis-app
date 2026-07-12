@@ -6,9 +6,10 @@ on:
     # exemption label re-runs the workflow without forcing a no-op
     # commit. `unlabeled` so removing the attestation re-enables the
     # block.
-    types: [opened, synchronize, labeled, unlabeled]
+    types: [opened, synchronize, edited, labeled, unlabeled]
 
 permissions:
+  contents: read
   pull-requests: write
   statuses: write
 
@@ -21,32 +22,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      # ── 0. Exemption label — manual cluster review already attested ──────
-      # CLAUDE.md §Cross-Cutting Review Gate documents the resolution path:
-      # run a 3-agent cluster review (architect + critic + security-reviewer)
-      # against the merged-state set and confirm MAJOR=0. When that happens,
-      # the human attester applies the `cluster-review-passed` label to this
-      # PR and the gate clears. Without an exemption mechanism the workflow
-      # would have no way to know the manual review was performed and would
-      # block every merge in a 14-day sensitive-area window indefinitely.
-      - name: Check exemption label
-        id: exempt-check
+      # ── 0. Current-HEAD cluster review attestation ────────────────────────
+      # AGENTS.md §Cross-Cutting Review Gate defines the label and exact
+      # current-HEAD reviewer markers. Missing, duplicate, stale, or NO-GO
+      # markers fail closed; this workflow never removes labels automatically.
+      - name: Check cluster review attestation
+        id: cluster-attestation
         env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          EXEMPT_LABEL=$(gh pr view "$PR_NUMBER" \
-            --repo "$REPO" \
-            --json labels \
-            --jq '.labels[]? | select(.name == "cluster-review-passed") | .name' 2>/dev/null || echo "")
-          if [ -n "$EXEMPT_LABEL" ]; then
-            echo "exempt=true" >> "$GITHUB_OUTPUT"
-            echo "Cluster review exemption label detected — gate cleared."
-          else
-            echo "exempt=false" >> "$GITHUB_OUTPUT"
-          fi
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: node scripts/check-cluster-review-attestation.mjs
 
       - name: Check sensitive area changes and cluster window
         id: cluster-check
@@ -59,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # ── Thresholds — keep in sync with CLAUDE.md §Cross-Cutting Review Gate ──
+          # ── Thresholds — keep in sync with AGENTS.md §Cross-Cutting Review Gate ──
           # Cluster size: number of sensitive-area PRs/commits that triggers review.
           CLUSTER_THRESHOLD=3
           # Rolling window in days for the merged-PR count check.
@@ -175,7 +159,7 @@ jobs:
           echo "violation_reason=${VIOLATION_REASON}" >> "$GITHUB_OUTPUT"
 
       - name: Post violation comment
-        if: steps.cluster-check.outputs.violation == 'true' && steps.exempt-check.outputs.exempt != 'true'
+        if: steps.cluster-check.outputs.violation == 'true' && steps.cluster-attestation.outputs.attested != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -206,7 +190,7 @@ jobs:
           - \`src/core/permissions/**\`
 
           **요구 사항**: 이 PR은 머지 전에 Cross-Cutting Review Gate를 통과해야 합니다.
-          자세한 기준은 [CLAUDE.md §Cross-Cutting Review Gate](../blob/main/CLAUDE.md) 를 참조하십시오.
+          자세한 기준은 [AGENTS.md §Cross-Cutting Review Gate](../blob/main/AGENTS.md#cross-cutting-review-gate) 를 참조하십시오.
 
           > 이 검사는 \`.github/workflows/cluster-detector.yml\` 이 자동으로 실행합니다."
 
@@ -215,7 +199,7 @@ jobs:
             --body "$COMMENT_BODY"
 
       - name: Set commit status — violation
-        if: steps.cluster-check.outputs.violation == 'true' && steps.exempt-check.outputs.exempt != 'true'
+        if: steps.cluster-check.outputs.violation == 'true' && steps.cluster-attestation.outputs.attested != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -227,7 +211,7 @@ jobs:
             -f state=failure \
             -f context="cluster-detector" \
             -f description="Sensitive area cluster detected — Cross-Cutting Review Gate required" \
-            -f target_url="https://github.com/${REPO}/blob/main/CLAUDE.md"
+            -f target_url="https://github.com/${REPO}/blob/main/AGENTS.md#cross-cutting-review-gate"
 
       - name: Set commit status — pass
         if: steps.cluster-check.outputs.violation != 'true'
@@ -244,7 +228,7 @@ jobs:
             -f description="No sensitive area cluster detected"
 
       - name: Set commit status — pass (cluster review exempted)
-        if: steps.cluster-check.outputs.violation == 'true' && steps.exempt-check.outputs.exempt == 'true'
+        if: steps.cluster-check.outputs.violation == 'true' && steps.cluster-attestation.outputs.attested == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
