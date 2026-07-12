@@ -17,7 +17,7 @@ import type { Tool } from "../../tools/base.js";
 import type { PluginRuntime } from "../runtime.js";
 import type { PluginManifest } from "../types.js";
 
-const RAW_RESULT_META = "xyz.lvis/rawResult";
+const RAW_RESULT_META = "lvisai/rawResult";
 
 export function buildPluginToolsForTest(
   pluginRuntime: PluginRuntime,
