@@ -5,7 +5,11 @@ import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { Locale } from "../../i18n/locale.js";
 import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
-import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceBundle } from "../../mcp/types.js";
+import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
+import type { McpAppDetachedPayload } from "../../shared/mcp-app-detached-payload.js";
+import type { McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
+import type { McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
+import type { McpUiModelContextOutcome } from "../../mcp/mcp-app-model-context.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defaults.js";
@@ -1692,14 +1696,84 @@ export type LvisMcpApi = {
    * document's CSP response header.
    */
   readUiResource: (serverId: string, uri: string) => Promise<McpUiResourceBundle>;
+  /**
+   * MCP Apps `oncalltool` — run a tool on the card's OWN server through the host's
+   * risk/consent gate. `serverId` comes from the card payload the renderer holds,
+   * never from the app. Denials and tool failures come back as `{ ok: false }`.
+   */
+  callTool: (
+    serverId: string,
+    name: string,
+    args: Record<string, unknown>,
+  ) => Promise<McpUiToolCallOutcome>;
+  /**
+   * MCP Apps `onmessage` (`ui/message`). `serverId` + `sessionId` are bound by the
+   * renderer from the card (never by the app). Main decides the path: notification,
+   * round-boundary guidance, or a user-gated staging card. The outcome carries NO
+   * conversation content back.
+   */
+  postUiMessage: (
+    serverId: string,
+    sessionId: string,
+    params: unknown,
+  ) => Promise<McpUiMessageOutcome>;
+  /**
+   * MCP Apps `ondownloadfile` (`ui/download-file`). `serverId` is bound by the renderer
+   * from the card. Main decodes the app's INLINE bytes, bounds them, and puts the user's
+   * save dialog in front of the write; it never fetches an app-supplied URI (a
+   * `resource_link` is rejected). A user cancel is `{ ok: true, disposition: "cancelled" }`
+   * — not an error.
+   */
+  downloadFile: (serverId: string, params: unknown) => Promise<McpUiDownloadOutcome>;
+  /**
+   * MCP Apps `onupdatemodelcontext` (`ui/update-model-context`). `serverId` + `sessionId`
+   * + `cardId` are all bound by the renderer from the card. Main OVERWRITES that card's
+   * one slot; the content is read at the NEXT turn's prompt build and never triggers one.
+   */
+  postUiModelContext: (
+    serverId: string,
+    sessionId: string,
+    cardId: string,
+    params: unknown,
+  ) => Promise<McpUiModelContextOutcome>;
   /** Free a card's sandbox-proxy session token on unmount (fire-and-forget). */
   disposeUiSession: (token: string) => void;
-  /** #885 b2 — open an MCP-app card in a detached window (host mints cardId/viewKey). */
-  openDetached: (payload: McpUiPayload) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
-  /** #885 b2 — detached renderer fetches its stored payload on mount. */
-  getDetachedPayload: (viewKey: string) => Promise<McpUiPayload | null>;
+  /**
+   * #885 b2 — open an MCP-app card in a detached window (host mints cardId/viewKey).
+   *
+   * `maximize` is the `onrequestdisplaymode` "fullscreen" arm: the SAME detach seam,
+   * asked to land maximized. The user's detach button omits it and keeps the canvas
+   * default. No second window path exists for MCP-app cards.
+   */
+  openDetached: (
+    payload: McpUiPayload,
+    opts?: {
+      maximize?: boolean;
+      /**
+       * The card's ORIGIN chat session, bound by the TRUSTED renderer (the app names
+       * none). The detached window has no ChatContext, so this is the ONLY way a
+       * detached card keeps a real session binding for `ui/message` /
+       * `ui/update-model-context`. Main sanitizes it and re-checks it against the live
+       * conversation on every use — it binds, it never authorizes.
+       */
+      sessionId?: string;
+    },
+  ) => Promise<{ ok: true; windowId: number; viewKey: string } | { ok: false; error: string }>;
+  /**
+   * The `onrequestdisplaymode` "inline" arm — close THIS server's detached MCP-app
+   * window(s). Scoped: an untrusted card must never reach `window.closeAllDetached`.
+   */
+  closeDetached: (serverId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  /** #885 b2 — detached renderer fetches its stored record (payload + origin session) on mount. */
+  getDetachedPayload: (viewKey: string) => Promise<McpAppDetachedPayload | null>;
   /** #885 b3 — subscribe to the server-disconnected broadcast; returns an unsubscribe fn. */
   onServerDisconnected: (handler: (serverId: string) => void) => () => void;
+  /**
+   * A detached MCP-app window is gone (user close / "inline" arm / shell navigation).
+   * The inline card that moved there is dormant until this fires, so exactly one live
+   * bridge exists per card. Returns an unsubscribe fn.
+   */
+  onDetachedClosed: (handler: (viewKey: string) => void) => () => void;
 };
 
 export type ExecMode = "default" | "strict" | "auto" | "allow";

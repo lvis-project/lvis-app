@@ -41,6 +41,30 @@ window.__startHandshake = ({ proxyUrl, partition, html }) => {
     { serverId: "e2e-mcp-server" },
     html,
     webview as unknown as BridgeWebviewElement,
+    // This gate exercises the sandbox handshake, not theming: an empty standard
+    // host context matches the prior behavior (previously `{ hostContext: {} }`).
+    {},
+    // The handshake never sends `ui/open-link`, `ui/notifications/size-changed`,
+    // `tools/call`, `ui/message`, `ui/download-file`, or `ui/request-display-mode`, so
+    // these adapters are inert no-ops here — present only to satisfy the signature.
+    {
+      onResize: () => {},
+      openLink: async () => ({ ok: false }),
+      callTool: async () => ({ ok: false as const, error: "not-wired-in-e2e-harness" }),
+      postMessage: async () => ({ ok: false as const, error: "not-wired-in-e2e-harness" }),
+      getDisplayMode: () => "inline" as const,
+      applyDisplayMode: async () => "inline" as const,
+      downloadFile: async () => ({
+        ok: false as const,
+        error: "not-wired-in-e2e-harness",
+        message: "not wired in the e2e harness",
+      }),
+      updateModelContext: async () => ({
+        ok: false as const,
+        error: "not-wired-in-e2e-harness",
+        message: "not wired in the e2e harness",
+      }),
+    },
   );
 
   // Prove the sandbox handshake actually reached the (production) bridge. We observe

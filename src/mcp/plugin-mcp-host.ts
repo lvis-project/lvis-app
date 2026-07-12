@@ -18,7 +18,7 @@
  * marketplace plugins — the SAME host, a different transport. Registration runs
  * through MCP discovery (`server/discover` + `tools/list`) and the reverse
  * projection {@link mcpToolToPluginTool}, so the authoritative `category` is
- * sourced from the tool's `xyz.lvis/*` `_meta`, never a second manifest read.
+ * sourced from the tool's `lvisai/*` `_meta`, never a second manifest read.
  */
 import type {
   JsonRpcRequest,
@@ -27,13 +27,15 @@ import type {
 } from "./mcp-client.js";
 import { LoopbackTransport } from "./loopback-transport.js";
 import { PluginMcpServer, type PluginToolDelegate } from "./plugin-mcp-server.js";
+import type { PluginUiResourceProvider } from "./plugin-ui-resource-provider.js";
 import { mcpToolToPluginTool, type DiscoveredMcpTool } from "./plugin-tool-from-mcp.js";
 import { lintToolInputSchema } from "../plugins/tool-schema-lint.js";
 import { createLogger } from "../lib/logger.js";
+import { observeLegacyMetaKey } from "./legacy-meta-telemetry.js";
 import type { Tool } from "../tools/base.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { PluginManifest } from "../plugins/types.js";
-import type { McpUiPayload } from "./types.js";
+import type { McpUiPayload, McpUiResourceMeta, McpUiResourceRead } from "./types.js";
 
 const log = createLogger("plugin-mcp-host");
 
@@ -47,7 +49,12 @@ const CLIENT_INFO = { name: "lvis-app", version: "0.1.0" } as const;
 const CLIENT_CAPABILITIES = { elicitation: { form: {}, url: {} }, extensions: {} } as const;
 
 /** Reserved `_meta` key carrying the plugin's raw (non-text) return value. */
-const RAW_RESULT_META = "xyz.lvis/rawResult";
+const RAW_RESULT_META = "lvisai/rawResult";
+/**
+ * transitional: an out-of-process plugin / the SDK may still box its raw return
+ * value under the legacy reverse-DNS key until they are migrated (then remove).
+ */
+const LEGACY_RAW_RESULT_META = "xyz.lvis/rawResult";
 
 /** RC `CallToolResult` (the `complete` branch this host consumes). */
 interface RcToolCallResult {
@@ -94,8 +101,9 @@ export class PluginMcpHost {
     manifest: PluginManifest,
     delegate: PluginToolDelegate,
     toolRegistry: ToolRegistry,
+    uiResources?: PluginUiResourceProvider,
   ): PluginMcpHost {
-    const server = new PluginMcpServer(manifest, delegate);
+    const server = new PluginMcpServer(manifest, delegate, uiResources);
     return new PluginMcpHost(manifest.id, new LoopbackTransport(server), toolRegistry);
   }
 
@@ -146,7 +154,7 @@ export class PluginMcpHost {
       const tools: Tool[] = [];
       for (const tool of list.tools ?? []) {
         // Build FIRST — a structural hard failure THROWS here and aborts the
-        // whole build (rollback). A missing/invalid xyz.lvis/category no longer
+        // whole build (rollback). A missing/invalid lvisai/category no longer
         // hard-fails (host-classifies-risk: default-strict write-equivalent);
         // the remaining authority hard failure is the RC protocol mismatch
         // checked above.
@@ -239,11 +247,43 @@ export class PluginMcpHost {
     // Box the raw plugin return value iff the server included it (success path),
     // so the reverse adapter can re-surface metadata.rawResult with presence
     // preserved even when the value itself is undefined (a void plugin tool).
-    const rawResult =
-      result._meta && Object.prototype.hasOwnProperty.call(result._meta, RAW_RESULT_META)
-        ? { value: result._meta[RAW_RESULT_META] }
-        : undefined;
+    // Prefer the new `lvisai/rawResult`; transitional: fall back to the legacy
+    // `xyz.lvis/rawResult` until out-of-process plugins + the SDK are migrated.
+    const meta = result._meta;
+    let rawResult: { value: unknown } | undefined;
+    if (meta && Object.prototype.hasOwnProperty.call(meta, RAW_RESULT_META)) {
+      rawResult = { value: meta[RAW_RESULT_META] };
+    } else if (meta && Object.prototype.hasOwnProperty.call(meta, LEGACY_RAW_RESULT_META)) {
+      observeLegacyMetaKey(this.pluginId, "rawResult");
+      rawResult = { value: meta[LEGACY_RAW_RESULT_META] };
+    } else {
+      rawResult = undefined;
+    }
     return { text, uiPayload, rawResult };
+  }
+
+  /**
+   * Fetch one of THIS plugin's declared `ui://` resources over the loopback
+   * transport (`resources/read`) — the plugin arm of the MCP App serving seam.
+   * Returns the HTML plus the resource's OWN `_meta.ui` (its csp),
+   * from which main derives the sandbox-proxy CSP header. Mirrors
+   * {@link McpClient.readResource} so the render path is transport-agnostic.
+   *
+   * Fail-closed: the server rejects an undeclared / cross-namespace uri with a
+   * JSON-RPC error, which surfaces here as a rejected promise (never a body).
+   */
+  async readUiResource(uri: string): Promise<McpUiResourceRead> {
+    const result = (await this.request("resources/read", { uri })) as {
+      contents?: Array<{ text?: string; _meta?: { ui?: McpUiResourceMeta } }>;
+    };
+    const textPart = result.contents?.find((c) => typeof c.text === "string");
+    if (!textPart?.text) {
+      throw new Error(
+        `[plugin-mcp-host] resource '${uri}' on '${this.pluginId}' returned no text content`,
+      );
+    }
+    const ui = textPart._meta?.ui;
+    return { html: textPart.text, csp: ui?.csp };
   }
 
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {

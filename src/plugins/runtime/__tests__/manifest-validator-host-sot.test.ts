@@ -51,6 +51,36 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     ).toBe(true);
   });
 
+  it("transitional: accepts a tool _meta carrying ONLY the legacy xyz.lvis/pathFields key (no lvisai/pathFields)", async () => {
+    // Locks the AJV-level compat: a published manifest that has not yet migrated
+    // to the new `lvisai/*` vendor prefix must still pass the load-time schema
+    // gate (the TS reader tests exercise mcpToolToPluginTool/toWireTool directly,
+    // which bypasses this compiled validator). Remove this test alongside the
+    // legacy schema property once the SDK + published plugins have migrated.
+    const validator = await buildManifestValidator();
+    const result = validator({
+      id: "legacy-meta-plugin",
+      name: "Legacy Meta Plugin",
+      version: "1.0.0",
+      description: "Legacy-only _meta pathFields fixture.",
+      publisher: "LVIS",
+      entry: "dist/index.js",
+      tools: [
+        {
+          name: "legacy_export",
+          description: "Export to a path.",
+          inputSchema: { type: "object", properties: { path: { type: "string" } } },
+          _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
+        },
+      ],
+    });
+    if (!result) {
+      // eslint-disable-next-line no-console
+      console.error("AJV errors:", validator.errors);
+    }
+    expect(result).toBe(true);
+  });
+
   it("accepts networkAccess.allowPrivateNetworks", async () => {
     const validator = await buildManifestValidator();
     expect(
@@ -69,6 +99,112 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         },
       }),
     ).toBe(true);
+  });
+
+  // "Declared POLICY, served CONTENT": a uiResources[] entry declares the uri +
+  // the resource's security policy. The card HTML is NOT a manifest field — the
+  // plugin serves its own bytes (RuntimePlugin.readUiResource), so `uri` is the
+  // only required member.
+  it("accepts a uiResources[] ui:// serving declaration (csp buckets)", async () => {
+    const validator = await buildManifestValidator();
+    expect(
+      validator({
+        id: "ui-resource-plugin",
+        name: "UI Resource Plugin",
+        version: "1.0.0",
+        description: "Plugin serving a ui:// MCP App card.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+        uiResources: [
+          {
+            uri: "ui://ui-resource-plugin/card.html",
+            csp: { connectDomains: ["https://api.example.com"], resourceDomains: [] },
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("REJECTS a uiResources[] entry declaring `permissions` — the host does not model it", async () => {
+    // The spec's `permissions` (camera/mic/geolocation/clipboardWrite) delegates a
+    // powerful feature to the card's frame. That frame is `sandbox="allow-scripts"`
+    // with no `allow-same-origin` ⇒ an OPAQUE origin, which cannot be delegated one.
+    // The field used to be declared, threaded through the read model, and then dropped
+    // at the proxy-session mint — a knob an author could set that nothing honored. It
+    // is gone from the schema, so declaring it now fails validation LOUDLY instead of
+    // silently doing nothing.
+    const validator = await buildManifestValidator();
+    expect(
+      validator({
+        id: "ui-resource-plugin",
+        name: "UI Resource Plugin",
+        version: "1.0.0",
+        description: "Plugin serving a ui:// MCP App card.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+        uiResources: [
+          {
+            uri: "ui://ui-resource-plugin/card.html",
+            permissions: { clipboardWrite: {} },
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("accepts a uiResources[] entry declaring only its uri (policy is optional)", async () => {
+    const validator = await buildManifestValidator();
+    expect(
+      validator({
+        id: "ui-resource-bare",
+        name: "UI Resource Bare",
+        version: "1.0.0",
+        description: "uiResources entry with no declared policy.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+        uiResources: [{ uri: "ui://ui-resource-bare/card.html" }],
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects a uiResources[] entry with an unknown sub-property (additionalProperties:false)", async () => {
+    const validator = await buildManifestValidator();
+    expect(
+      validator({
+        id: "ui-resource-bad",
+        name: "UI Resource Bad",
+        version: "1.0.0",
+        description: "uiResources entry with a stray field.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+        uiResources: [
+          { uri: "ui://ui-resource-bad/card.html", cspHeader: "default-src 'none'" },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  // The removed `html` member is now an unknown sub-property: a manifest still
+  // shipping a disk path is REJECTED, not silently tolerated (the host no longer
+  // reads plugin files, so an ignored `html` would be a lie in the manifest).
+  it("rejects a uiResources[] entry still declaring the removed html path", async () => {
+    const validator = await buildManifestValidator();
+    expect(
+      validator({
+        id: "ui-resource-legacy",
+        name: "UI Resource Legacy",
+        version: "1.0.0",
+        description: "uiResources entry with the removed html path.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+        uiResources: [{ uri: "ui://ui-resource-legacy/card.html", html: "dist/cards/card.html" }],
+      }),
+    ).toBe(false);
   });
 
   it("accepts a marketplace-provider host secret grant", async () => {
@@ -211,7 +347,7 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
         },
         _meta: {
           ui: { visibility: ["model", "app"] },
-          "xyz.lvis/pathFields": ["path"],
+          "lvisai/pathFields": ["path"],
         },
       },
       {
@@ -257,6 +393,12 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
         page: "settings",
       },
     ],
+    uiResources: [
+      {
+        uri: "ui://full-featured-plugin/card.html",
+        csp: { connectDomains: ["https://api.example.com"] },
+      },
+    ],
     configSchema: {
       properties: {
         enabled: { type: "boolean", default: true, title: "Enable" },
@@ -290,10 +432,14 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       expect(parsed.auth?.logoutTool).toBe("ff_logout");
       expect(parsed.requires?.minAppVersion).toBe("1.0.0");
       expect(parsed.networkAccess?.allowedDomains).toEqual(["api.example.com"]);
+      expect(parsed.uiResources?.[0]).toEqual({
+        uri: "ui://full-featured-plugin/card.html",
+        csp: { connectDomains: ["https://api.example.com"] },
+      });
 
       const search = parsed.tools.find((t) => t.name === "ff_search");
       expect(search?._meta?.ui?.visibility).toEqual(["model", "app"]);
-      expect(search?._meta?.["xyz.lvis/pathFields"]).toEqual(["path"]);
+      expect(search?._meta?.["lvisai/pathFields"]).toEqual(["path"]);
 
       // Auth trio materialized as app-only (never model-visible).
       const status = parsed.tools.find((t) => t.name === "ff_status");

@@ -12,6 +12,7 @@ import { estimateTokens } from "../shared/token-estimate.js";
 import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
+import { isAppMessageOrigin } from "../shared/mcp-app-message-source.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import type { ProjectIdentity } from "../shared/project-identity.js";
 
@@ -134,6 +135,17 @@ export interface SystemPromptBuilderDeps {
    * file IO and the builder remains a pure assembler.
    */
   getOnboardingContext?: () => string;
+  /**
+   * MCP-app model context (`ui/update-model-context`) — returns the rendered
+   * `<mcp-app-context>` section for the ACTIVE session's cards, or "" when no card has
+   * pushed any. Decoupled through this callback exactly like `getActiveSkillsSection`:
+   * the builder stays a pure assembler and never imports the store.
+   *
+   * This callback IS the "deferred to the next turn" semantic of the spec. The app writes
+   * its slot whenever it likes; the model sees it only when the NEXT prompt is built, and
+   * a write can never start a turn because nothing pushes — the builder PULLS.
+   */
+  getAppModelContext?: (sessionId: string) => string;
 }
 
 // ─── Builder ────────────────────────────────────────
@@ -533,6 +545,32 @@ export class SystemPromptBuilder {
       },
     });
 
+    // ④-c App Message Origin Guidance (per-turn, conditional)
+    //
+    // Emitted ONLY when the turn's origin source is `app:*` — the text came from an
+    // MCP App's `ui/message` (a sandboxed, UNTRUSTED iframe), either confirmed by the
+    // user from the staging card or injected mid-turn as guidance. Distinct from the
+    // overlay block above because the trust story is different: an overlay prompt is a
+    // first-party plugin's templated suggestion, whereas this body is arbitrary text
+    // authored by a third-party app's UI. The hard gate (write/shell/network forced to
+    // ask, `isStagedTurnOrigin`) applies to both; this is the model-facing half.
+    this.sources.push({
+      id: 4.65,
+      name: "App Message Origin Guidance",
+      refresh: "per-turn",
+      build: () => {
+        const source = this.originSource;
+        if (!isAppMessageOrigin(source)) return "";
+        return [
+          "<app-message-origin-guidance priority=\"high\">",
+          t("be_systemPromptBuilder.appMessageOriginNotDirectInput", { source: source ?? "" }),
+          t("be_systemPromptBuilder.appMessageOriginUntrusted"),
+          t("be_systemPromptBuilder.appMessageOriginConfirmBeforeAction"),
+          "</app-message-origin-guidance>",
+        ].join("\n");
+      },
+    });
+
     // ④-c Available Skills Catalog (per-turn, lightweight)
     //
     // Progressive disclosure: expose only dispatch metadata so the model can
@@ -591,6 +629,31 @@ export class SystemPromptBuilder {
           const sid = this.overlaySessionId;
           if (!sid) return "";
           return getActiveSkillsSection(sid);
+        },
+      });
+    }
+
+    // ④-e MCP App Context (per-turn, only while a card in THIS session has pushed one)
+    //
+    // The `ui/update-model-context` slots of the active session's MCP-app cards. Read
+    // HERE, at prompt build — which is what makes the spec's "deferred until the next
+    // model turn" a structural fact rather than a policy: the app writes its slot through
+    // a gated IPC that holds no reference to the conversation loop, and the content
+    // surfaces only when the next turn is assembled. An app can never wake the model.
+    //
+    // The block itself is fenced and labelled by the store (mcp/mcp-app-model-context.ts)
+    // as UNTRUSTED APP DATA — the same "data, never instructions" framing the App Message
+    // Origin Guidance above and the skills catalog below already carry.
+    const { getAppModelContext } = deps;
+    if (getAppModelContext) {
+      this.sources.push({
+        id: 4.75,
+        name: "MCP App Context",
+        refresh: "per-turn",
+        build: () => {
+          const sid = this.overlaySessionId;
+          if (!sid) return "";
+          return getAppModelContext(sid);
         },
       });
     }

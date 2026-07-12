@@ -5,7 +5,7 @@
  * on the same map. Keeps boot.ts and boot/plugins.ts in sync without a
  * circular dependency.
  */
-import type { PluginRuntime } from "../plugins/runtime.js";
+import type { PluginRuntime, PluginToolInvocationDelegate } from "../plugins/runtime.js";
 import type { PluginMarketplaceService } from "../plugins/marketplace.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
@@ -13,9 +13,11 @@ import type { KeywordEngine } from "../core/keyword-engine.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
+import type { McpAppModelContextStore } from "../mcp/mcp-app-model-context.js";
 import type { ConversationLoop } from "../engine/conversation-loop.js";
 import type { RoutineEngine } from "../core/routine-engine.js";
 import type { McpManager } from "../mcp/mcp-manager.js";
+import type { PluginLoopbackManager } from "../mcp/plugin-loopback-manager.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import type { BashAstValidator } from "../main/bash-ast-validator.js";
 import type { AuditService } from "../main/audit-service.js";
@@ -73,6 +75,14 @@ export interface AppServices {
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
   systemPromptBuilder: SystemPromptBuilder;
+  /**
+   * MCP-app `ui/update-model-context` slots — ONE instance shared by its only two
+   * consumers: the gated IPC (`mcp.uiModelContext`) writes a card's slot, and the
+   * SystemPromptBuilder's "MCP App Context" source reads the active session's slots at
+   * turn build. No push path exists between them, which is precisely why an app context
+   * update can never trigger a turn.
+   */
+  mcpAppModelContext: McpAppModelContextStore;
   conversationLoop: ConversationLoop;
   /**
    * Side-chat (workspace rail) — a SECOND, independently-streaming
@@ -83,6 +93,25 @@ export interface AppServices {
   sideChatConversationLoop?: ConversationLoop;
   routineEngine?: RoutineEngine;
   mcpManager: McpManager;
+  /**
+   * Owns each first-party plugin's in-process loopback MCP host. Backs the
+   * loopback-first arm of the render IPC's unified `ui://` resolver
+   * (`resolveMcpUiBackend`): a plugin's `ui://` card is served here because its
+   * `serverId === pluginId` is NEVER in `mcpManager.clients` (external-only).
+   */
+  pluginLoopbackManager: PluginLoopbackManager;
+  /**
+   * The gated tool-invocation delegate (the plugin-surface `ToolExecutor` →
+   * `inspectHostRisk` → reviewer/approval → audit), read LAZILY: it is a late
+   * binding installed by the `plugin-tool-executor` boot step, so a consumer
+   * registered earlier (the IPC domains) must resolve it per call, not capture it.
+   *
+   * Sole consumer today: the `oncalltool` IPC's EXTERNAL arm, which runs a foreign
+   * MCP server's namespaced registry `Tool` through the same executor the model's
+   * calls take. Plugin (loopback) tools do NOT come through here — they keep going
+   * through `PluginRuntime.callFromUi`, which installs this same delegate itself.
+   */
+  getPluginToolInvoker: () => PluginToolInvocationDelegate | null;
   /**
    * §FU#259 — artifact store rooted at `userData/mcp-servers/`.
    * Constructed at boot when the marketplace fetcher supports verified

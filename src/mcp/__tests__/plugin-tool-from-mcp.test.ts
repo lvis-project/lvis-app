@@ -1,6 +1,6 @@
 /**
  * #885 v6 — the loopback reverse projection (`mcpToolToPluginTool`). The forward
- * projection now emits ONLY `_meta.ui.visibility` + `xyz.lvis/pathFields`
+ * projection now emits ONLY `_meta.ui.visibility` + `lvisai/pathFields`
  * (category / version / writesToOwnSandbox / workerId / deprecation are REMOVED
  * from the wire), so the reverse projection:
  *   - sources `pathFields` from `_meta`,
@@ -30,7 +30,7 @@ const MANIFEST: PluginManifest = {
       name: "files_read",
       description: "Read a file",
       inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
-      _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
+      _meta: { ui: { visibility: ["model"] }, "lvisai/pathFields": ["path"] },
     },
     {
       name: "files_write",
@@ -40,7 +40,7 @@ const MANIFEST: PluginManifest = {
         properties: { path: { type: "string" }, body: { type: "string" } },
         required: ["path"],
       },
-      _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
+      _meta: { ui: { visibility: ["model"] }, "lvisai/pathFields": ["path"] },
     },
     {
       name: "files_exec",
@@ -95,17 +95,57 @@ describe("mcpToolToPluginTool — v6 reverse projection from _meta", () => {
     expect(result).toEqual({ output: "disk full", isError: true });
   });
 
+  it("materializes Tool.modelVisible from the wire's _meta.ui.visibility — app-only ⇒ registered but NOT model-exposed", () => {
+    // The one standard declaration the host reads back off this wire. It decides
+    // MODEL EXPOSURE only — never whether the tool is registered. An app-only tool
+    // MUST become a registry `Tool`: that is the only way its card's `tools/call`
+    // can run under inspectHostRisk → reviewer/approval → audit.
+    const manifest: PluginManifest = {
+      ...MANIFEST,
+      tools: [
+        { name: "files_read", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model"] } } },
+        { name: "files_toggle", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } },
+        { name: "files_ui_rows", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["app"] } } },
+      ],
+    };
+    const tools = manifestToolsToMcpTools(manifest).map((t) => mcpToolToPluginTool(PLUGIN_ID, t, invoke));
+
+    // Every declared tool round-trips into a registry `Tool` — app-only included.
+    expect(tools.map((t) => t.name)).toEqual(["files_read", "files_toggle", "files_ui_rows"]);
+    expect(tools.find((t) => t.name === "files_read")!.modelVisible).toBe(true);
+    expect(tools.find((t) => t.name === "files_toggle")!.modelVisible).toBe(true);
+    expect(tools.find((t) => t.name === "files_ui_rows")!.modelVisible).toBe(false);
+    // The app-visibility MUST stays with `assertUiActionInvokable` inside
+    // PluginRuntime.callFromApp (the plugin arm's single enforcement site), so this
+    // arm deliberately leaves `appInvokable` unset.
+    for (const t of tools) expect(t.appInvokable).toBeUndefined();
+  });
+
+  it("fail-closes to the minimal governed surface when the wire carries no valid visibility", () => {
+    // The forward projection always emits visibility explicitly, so an absent /
+    // malformed declaration here means a broken producer — resolve it to ["model"]
+    // (governed, LLM-reachable) rather than silently granting the app surface.
+    for (const _meta of [{}, { ui: { visibility: "app" } }, { ui: { visibility: [] } }, { ui: 7 }]) {
+      const tool = mcpToolToPluginTool(
+        PLUGIN_ID,
+        { name: "rogue", inputSchema: { type: "object", properties: {} }, _meta },
+        invoke,
+      );
+      expect(tool.modelVisible).toBe(true);
+    }
+  });
+
   it("#885 v6 — the wire `category` is fully ignored: absent, valid, or malformed all register write-equivalent", () => {
     // #885 dropped the per-tool category reader: the host ignores any wire
-    // `_meta["xyz.lvis/category"]` (loopback sends none; an out-of-process
+    // `_meta["lvisai/category"]` (loopback sends none; an out-of-process
     // plugin's is not trusted), so the reverse projection pins every tool to the
     // write-equivalent baseline unconditionally. Security invariant preserved —
     // a wire "read" can NEVER silently downgrade a plugin tool; the host
     // `inspectHostRisk` classifier is the effective SOT.
     const wireMetas: Array<Record<string, unknown>> = [
       { ui: { visibility: ["model"] } }, // absent category
-      { "xyz.lvis/category": "read" }, // a valid-looking wire "read" is ignored
-      { "xyz.lvis/category": 42 }, // malformed
+      { "lvisai/category": "read" }, // a valid-looking wire "read" is ignored
+      { "lvisai/category": 42 }, // malformed
     ];
     for (const _meta of wireMetas) {
       const tool = mcpToolToPluginTool(
@@ -117,5 +157,37 @@ describe("mcpToolToPluginTool — v6 reverse projection from _meta", () => {
       expect(tool.category).not.toBe("read");
       expect(tool.isReadOnly({})).toBe(false);
     }
+  });
+
+  it("transitional: reads pathFields from the LEGACY xyz.lvis/pathFields wire key (compat until SDK+plugins migrate)", () => {
+    // An out-of-process plugin / SDK that has not yet migrated still emits the
+    // reverse-DNS key on the wire; the reverse projection must still surface it.
+    const legacy = mcpToolToPluginTool(
+      PLUGIN_ID,
+      {
+        name: "legacy_read",
+        inputSchema: { type: "object", properties: { path: { type: "string" } } },
+        _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
+      },
+      invoke,
+    );
+    expect(legacy.pathFields).toEqual(["path"]);
+  });
+
+  it("prefers the new lvisai/pathFields over the legacy key when both are present", () => {
+    const both = mcpToolToPluginTool(
+      PLUGIN_ID,
+      {
+        name: "both_read",
+        inputSchema: { type: "object", properties: {} },
+        _meta: {
+          ui: { visibility: ["model"] },
+          "lvisai/pathFields": ["new"],
+          "xyz.lvis/pathFields": ["old"],
+        },
+      },
+      invoke,
+    );
+    expect(both.pathFields).toEqual(["new"]);
   });
 });

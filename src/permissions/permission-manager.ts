@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } from "../tools/types.js";
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
-import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
+import { isStagedTurnOrigin } from "../shared/mcp-app-message-source.js";
 import type { UserApprovalHitPayload, UserApprovalVerdict } from "../shared/permissions-events.js";
 import { getToolCategoryDescriptor } from "./category-registry.js";
 import {
@@ -903,12 +903,15 @@ export class PermissionManager {
   /**
    * Detailed decision with an audit-log reason.
    *
-   * When `overlayTriggerOrigin` is set (for example, `"overlay:meeting-detection"`),
+   * When `overlayTriggerOrigin` is a STAGED turn origin — a plugin overlay trigger
+   * (`"overlay:meeting-detection"`) or an MCP App's `ui/message` (`"app:<serverId>"`) —
    * every write/shell/network tool is forced to `ask` regardless of user permanent
    * approval (`allow-always`), config allow rules, or auto mode.
-   * This hard gate prevents an overlay trigger from automatically running
+   * This hard gate prevents staged, non-user-authored input from automatically running
    * destructive work without user confirmation, pairing with the first-pass
    * LLM review from `<overlay-trigger-origin-guidance>`. Read tools are unaffected.
+   * The set of staged origins has ONE definition — `isStagedTurnOrigin` — so a new one
+   * can never be added while quietly skipping this gate.
    *
    * Permission policy — 5-axis category model. Layer 3 decisionFor() replaces
    * the old trust-default branch. `meta` category descriptors return `"override"`,
@@ -922,12 +925,12 @@ export class PermissionManager {
     context: PermissionCheckContext = {},
   ): PermissionCheckResult {
     const trust = this.resolveTrust(toolName, source);
-    // Strict pattern (shared with the rest of the overlay trigger flow —
-    // see shared/overlay-trigger-source.ts). Loose `startsWith` would
-    // accept malformed values like "overlay:Bad/Path" that no
-    // upstream gate emits but a future hand-injected codepath might;
-    // fail-closed on malformed input.
-    const isOverlayTrigger = isOverlayTriggerOrigin(overlayTriggerOrigin ?? null);
+    // Strict patterns (shared with the rest of the staged-origin flow — see
+    // shared/overlay-trigger-source.ts + shared/mcp-app-message-source.ts). Loose
+    // `startsWith` would accept malformed values like "overlay:Bad/Path" or "app:" that
+    // no upstream gate emits but a future hand-injected codepath might; fail-closed on
+    // malformed input.
+    const isOverlayTrigger = isStagedTurnOrigin(overlayTriggerOrigin ?? null);
     const resolvedCategory: ToolCategory = category;
     const isMutating =
       resolvedCategory === "write" ||

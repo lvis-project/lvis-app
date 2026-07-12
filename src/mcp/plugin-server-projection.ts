@@ -5,11 +5,20 @@
  *
  * #885 v6 — the manifest tool object IS the wire shape (manifest == wire, Q5),
  * so the forward projection is near-identity. Its only jobs are:
- *  - filter to MODEL-visible tools — app-only (the auth trio, UI-only methods)
- *    must NEVER enter the LLM ToolRegistry via the loopback (the #1554
- *    registry-exclusion invariant); "was in tools[]" ⇔ `model ∈ visibility`.
+ *  - project EVERY declared tool, whatever its surface. A server's `tools/list` is
+ *    the server's tools; the spec's answer to "who may call this one" is the
+ *    `_meta.ui.visibility` riding on each entry, not a hole in the list. Projecting
+ *    an app-only tool is what gives it a §6.4 registry `Tool`, and therefore the
+ *    ONLY thing that lets its card's call run under `inspectHostRisk` →
+ *    reviewer/approval → audit like any other tool. (It was previously filtered out
+ *    here, which left `["app"]` — the spec's own spelling for a card-serving tool —
+ *    with no gate to run under, so the app arm had to deny it outright.) Keeping it
+ *    OUT OF THE MODEL's tool list is a separate concern, enforced once at the model-
+ *    exposure boundary (`ToolRegistry.getModelVisibleTools`), for both arms.
  *  - emit `_meta.ui.visibility` EXPLICITLY (SoT §2.2 "the wire projection always
- *    emits visibility explicitly").
+ *    emits visibility explicitly") — the reverse projection
+ *    (`plugin-tool-from-mcp.ts`) reads it straight back off the wire to materialize
+ *    the registry `Tool`'s `modelVisible` bit.
  *  - construct `_meta` from a WHITELIST so no stray/removed proprietary key
  *    (category / version / writesToOwnSandbox / workerId / deprecation) can ride
  *    the wire — they simply have nowhere to come from.
@@ -20,7 +29,7 @@
  * self-claims Q4 removed (MCP "annotations untrusted", design §2.2).
  *
  * Key invariants:
- *  - `_meta` keys use the `xyz.lvis/` prefix; per §8 any prefix whose second
+ *  - `_meta` keys use the `lvisai/` prefix; per §8 any prefix whose second
  *    label is `mcp`/`modelcontextprotocol` is RESERVED for MCP.
  *  - `inputSchema` dialect moves to JSON Schema 2020-12 (a relabel — LVIS plugin
  *    tool schemas use a 2020-12 subset, no `$ref` network deref).
@@ -28,7 +37,8 @@
  *    LVIS-internal and are NOT projected into MCP `ServerCapabilities`.
  */
 import type { PluginManifest, Tool as McpTool } from "../plugins/types.js";
-import { toolVisibility, isModelVisible } from "../plugins/runtime/tool-visibility.js";
+import { toolVisibility } from "../plugins/runtime/tool-visibility.js";
+import { observeLegacyMetaKey } from "./legacy-meta-telemetry.js";
 
 /** The RC protocol revision LVIS plugin-servers speak. */
 const MCP_PROTOCOL_VERSION = "2026-07-28";
@@ -40,7 +50,7 @@ const JSON_SCHEMA_2020_12 = "https://json-schema.org/draft/2020-12/schema";
  * An MCP `Tool` projected from one normalized `Tool`. #885 v6 — `annotations` is
  * DROPPED (the host never projects plugin-authored ones) and `_meta` is narrowed
  * to exactly the standard visibility block + the single kept LVIS-proprietary key
- * (`xyz.lvis/pathFields`).
+ * (`lvisai/pathFields`).
  */
 export interface McpToolProjection {
   name: string;
@@ -57,7 +67,7 @@ export interface McpToolProjection {
   icons?: McpTool["icons"];
   _meta: {
     ui: { visibility: Array<"model" | "app"> };
-    "xyz.lvis/pathFields"?: string[];
+    "lvisai/pathFields"?: string[];
   };
 }
 
@@ -80,10 +90,22 @@ export interface McpDiscoverProjection {
  * stray/removed proprietary key can ride the wire. `outputSchema` (standard MCP)
  * is passed through verbatim when present.
  */
-function toWireTool(tool: McpTool): McpToolProjection {
+function toWireTool(tool: McpTool, pluginId: string): McpToolProjection {
   const meta: McpToolProjection["_meta"] = { ui: { visibility: toolVisibility(tool) } };
-  const pathFields = tool._meta?.["xyz.lvis/pathFields"];
-  if (pathFields !== undefined) meta["xyz.lvis/pathFields"] = pathFields;
+  // Read the authored manifest key, preferring the new `lvisai/pathFields`;
+  // transitional: fall back to the legacy `xyz.lvis/pathFields` until published
+  // plugin manifests are migrated (then remove the fallback). The WIRE always
+  // emits ONLY the new key below. This site reads the ON-DISK manifest, so a legacy
+  // hit here is the signal that this installed plugin has not yet rolled forward —
+  // the observable removal gate for the schema's legacy property.
+  const pathFields = tool._meta?.["lvisai/pathFields"];
+  const legacyPathFields = tool._meta?.["xyz.lvis/pathFields"];
+  if (pathFields !== undefined) {
+    meta["lvisai/pathFields"] = pathFields;
+  } else if (legacyPathFields !== undefined) {
+    observeLegacyMetaKey(pluginId, "pathFields");
+    meta["lvisai/pathFields"] = legacyPathFields;
+  }
   return {
     name: tool.name,
     ...(tool.title !== undefined ? { title: tool.title } : {}),
@@ -96,14 +118,19 @@ function toWireTool(tool: McpTool): McpToolProjection {
 }
 
 /**
- * Project the manifest's declared tools to MCP `Tool[]`. #885 v6 — filter to
- * MODEL-visible tools: app-only (auth trio, UI-only methods) must NOT enter the
- * LLM ToolRegistry via the loopback (the #1554 registry-exclusion invariant).
- * Every `Tool` has a mandatory `inputSchema`, so this reproduces the old
- * {name ∈ tools[] ∧ has schema} output set exactly — registry contents identical.
+ * Project the manifest's declared tools to MCP `Tool[]` — ALL of them, each
+ * carrying its explicit `_meta.ui.visibility`.
+ *
+ * No surface filter: `tools/list` is the server's tool list, and the host learns a
+ * tool's audience from the visibility it carries, not from its absence. The
+ * app-only entries this now emits (a card's `*_ui_*` helpers, the auth trio) become
+ * registry `Tool`s — which is precisely how they acquire a risk classifier, an
+ * approval gate and an audit row. They stay invisible to the LLM because the model-
+ * exposure boundary subtracts them there (`ToolRegistry.getModelVisibleTools`), not
+ * because they were withheld from the wire.
  */
 export function manifestToolsToMcpTools(manifest: PluginManifest): McpToolProjection[] {
-  return (manifest.tools ?? []).filter(isModelVisible).map(toWireTool);
+  return (manifest.tools ?? []).map((t) => toWireTool(t, manifest.id));
 }
 
 /**
@@ -119,7 +146,10 @@ export function manifestToDiscoverResult(manifest: PluginManifest): McpDiscoverP
     capabilities.tools = { listChanged: true };
   }
   const extensions: Record<string, unknown> = {};
-  if ((manifest.ui?.length ?? 0) > 0) {
+  // Advertise the MCP Apps extension when the plugin ships EITHER a host-mounted
+  // sidebar panel (`ui[]`) OR a served `ui://` MCP App card (`uiResources[]`).
+  // The latter is what the loopback `resources/read` serving seam keys off.
+  if ((manifest.ui?.length ?? 0) > 0 || (manifest.uiResources?.length ?? 0) > 0) {
     extensions["io.modelcontextprotocol/ui"] = { mimeTypes: ["text/html;profile=mcp-app"] };
   }
   if (Object.keys(extensions).length > 0) {

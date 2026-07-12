@@ -137,6 +137,25 @@
       },
       "description": "UI extensions. Kind-specific required fields (embedded-module: entry+exportName; embedded-page: page) are enforced at runtime with hard-fail — invalid entries fail manifest load, the plugin does NOT register."
     },
+    "uiResources": {
+      "type": "array",
+      "description": "MCP App ui:// resources this plugin serves (distinct from `ui[]`, which declares host-mounted React sidebar panels). DECLARED POLICY, SERVED CONTENT: each entry declares a `ui://<pluginId>/<path>` uri plus that resource's OWN _meta.ui security policy (csp); the card HTML itself is served by the plugin at read time (`RuntimePlugin.readUiResource(uri)`), exactly as an external MCP server answers resources/read with bytes — the host never reads a plugin-declared disk path. When a tool result carries `_meta.ui.resourceUri` matching one of these uris, the loopback host asks the plugin for the HTML and renders it through the same sandbox-proxy + main-computed CSP path as an external MCP server's ui:// resource. Security (enforced fail-closed at serve time): the uri authority MUST equal the plugin id (own-namespace-only), the uri MUST be declared here (declared-only — this is what binds served content to a reviewed csp), and main COMPUTES the CSP header from csp — the plugin never supplies a policy header string. The csp stays in the manifest (not on the hook's return) so it is statically reviewable and covered by manifestSha256. NOTE: the spec's `permissions` (camera/microphone/geolocation/clipboardWrite) is deliberately NOT modelled — the inner frame is sandbox=allow-scripts with no allow-same-origin, so it runs on an opaque origin and cannot be delegated a powerful feature. A card gets none.",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["uri"],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "description": "ui://<pluginId>/<path>. Authority MUST equal the declaring plugin's id (re-checked fail-closed at serve time).",
+            "pattern": "^ui://[a-z0-9][a-z0-9.-]*/.+",
+            "maxLength": 512
+          },
+          "csp": { "$ref": "#/definitions/mcpUiResourceCsp" }
+        }
+      }
+    },
     "keywords": {
       "type": "array",
       "items": {
@@ -772,7 +791,17 @@
                 }
               }
             },
+            "lvisai/pathFields": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+              }
+            },
             "xyz.lvis/pathFields": {
+              "$comment": "transitional: legacy reverse-DNS alias of lvisai/pathFields, still accepted until published manifests + SDK are migrated (then remove).",
               "type": "array",
               "uniqueItems": true,
               "items": {
@@ -782,6 +811,33 @@
               }
             }
           }
+        }
+      }
+    },
+    "mcpUiResourceCsp": {
+      "$comment": "MCP Apps spec `McpUiResourceCsp` — DOMAIN BUCKETS (not CSP directive names). Main derives the sandbox-proxy CSP header from these; the plugin never supplies a header string. Mirrors src/mcp/types.ts McpUiResourceCsp.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connectDomains": {
+          "type": "array",
+          "description": "Origins for network requests (fetch/XHR/WebSocket) -> connect-src.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "resourceDomains": {
+          "type": "array",
+          "description": "Origins for images, scripts, stylesheets, fonts, media.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "frameDomains": {
+          "type": "array",
+          "description": "Origins for nested iframes -> frame-src.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "baseUriDomains": {
+          "type": "array",
+          "description": "Allowed base URIs for the document -> base-uri.",
+          "items": { "type": "string", "minLength": 1 }
         }
       }
     }

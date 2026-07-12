@@ -32,7 +32,7 @@
 
 ## 1. Executive summary
 
-The **LVIS host becomes an MCP _host_** that runs **one MCP client per loaded plugin**, and **each plugin is an MCP _server_** speaking the stateless `2026-07-28` protocol. Marketplace/untrusted plugins run **out-of-process over stdio** (a normal MCP server); first-party plugins run **in-process behind a loopback transport** (today's `entry`/factory model, MCP-framed). The plugin's `plugin.json` projects to `server/discover`'s `DiscoverResult` (serverInfo + capabilities + `extensions`). `toolSchemas[*]` project to MCP `Tool`s; LVIS's `read|write|shell|network` **category stays the authoritative policy SOT** carried under reverse-DNS `_meta["xyz.lvis/category"]`, projected to (untrusted, interop-only) MCP `ToolAnnotations`. The host caches **nothing** on the connection: every host→plugin request carries `protocolVersion`+`clientInfo`+`clientCapabilities` in `_meta`, and every result is wrapped with a `resultType` discriminator. The remaining HostApi maps onto **standard MCP client-features** (sampling/elicitation), **MCP authorization**, and **MCP Apps** — **no bespoke host server**; LVIS-only platform surfaces (storage, config, triggerConversation, the domain event bus) stay host-internal. **#811 command-hooks stay 100% host-side** — MCP has no host-side tool-call veto, so hooks remain a host policy layer wrapped around the host's `tools/call` invocation, re-anchored to that boundary.
+The **LVIS host becomes an MCP _host_** that runs **one MCP client per loaded plugin**, and **each plugin is an MCP _server_** speaking the stateless `2026-07-28` protocol. Marketplace/untrusted plugins run **out-of-process over stdio** (a normal MCP server); first-party plugins run **in-process behind a loopback transport** (today's `entry`/factory model, MCP-framed). The plugin's `plugin.json` projects to `server/discover`'s `DiscoverResult` (serverInfo + capabilities + `extensions`). `toolSchemas[*]` project to MCP `Tool`s; LVIS's `read|write|shell|network` **category stays the authoritative policy SOT** carried under vendor-prefixed `_meta["lvisai/category"]`, projected to (untrusted, interop-only) MCP `ToolAnnotations`. The host caches **nothing** on the connection: every host→plugin request carries `protocolVersion`+`clientInfo`+`clientCapabilities` in `_meta`, and every result is wrapped with a `resultType` discriminator. The remaining HostApi maps onto **standard MCP client-features** (sampling/elicitation), **MCP authorization**, and **MCP Apps** — **no bespoke host server**; LVIS-only platform surfaces (storage, config, triggerConversation, the domain event bus) stay host-internal. **#811 command-hooks stay 100% host-side** — MCP has no host-side tool-call veto, so hooks remain a host policy layer wrapped around the host's `tools/call` invocation, re-anchored to that boundary.
 
 ---
 
@@ -41,7 +41,7 @@ The **LVIS host becomes an MCP _host_** that runs **one MCP client per loaded pl
 | LVIS element | MCP `2026-07-28` equivalent | Required change |
 |---|---|---|
 | `PluginManifest` (id/name/version/entry/tools[]/description) (`src/plugins/types.ts:175`) | `DiscoverResult` { supportedVersions, serverInfo:Implementation, capabilities, instructions? } | Manifest is a static file; MCP needs a live `server/discover` handler. Add manifest→`DiscoverResult` projection. `entry` becomes the server process (stdio) or loopback module. |
-| `toolSchemas[name]` (inputSchema **draft-07** + category/pathFields/writesToOwnSandbox/version/deprecatedSince/replacedBy) (`src/plugins/types.ts:268-306`) | `Tool` { name, title?, description?, inputSchema(**2020-12**, type:object), outputSchema?, annotations?, icons?, _meta? } via `tools/list`; `tools/call`→`CallToolResult{content[],structuredContent?,isError?}` | (a) dialect draft-07 → 2020-12. (b) category/pathFields/writesToOwnSandbox/version/deprecatedSince/replacedBy → `_meta["xyz.lvis/*"]` (reverse-DNS; second label MUST NOT be `mcp`/`modelcontextprotocol`). (c) project category → `ToolAnnotations` hints (interop only). |
+| `toolSchemas[name]` (inputSchema **draft-07** + category/pathFields/writesToOwnSandbox/version/deprecatedSince/replacedBy) (`src/plugins/types.ts:268-306`) | `Tool` { name, title?, description?, inputSchema(**2020-12**, type:object), outputSchema?, annotations?, icons?, _meta? } via `tools/list`; `tools/call`→`CallToolResult{content[],structuredContent?,isError?}` | (a) dialect draft-07 → 2020-12. (b) category/pathFields/writesToOwnSandbox/version/deprecatedSince/replacedBy → `_meta["lvisai/*"]` (vendor prefix; second label MUST NOT be `mcp`/`modelcontextprotocol`). (c) project category → `ToolAnnotations` hints (interop only). |
 | `PluginHostApi` (generic surface: storage/config/callLlm/resolveApiKey/agentApproval/openAuthWindow/triggerConversation/showOverlay/events/registerKeywords/getInstalledPluginIds/callTool/getSecret) (`src/plugins/types.ts:757-1105`) | **Split** (no single equivalent; **no host server** — §0) | See §3.5. callLlm→**sampling**; agentApproval/asks→**elicitation**; openAuthWindow/secrets→**authorization** (OAuth) + url-elicitation; showOverlay→**Apps**; storage/config/triggerConversation/events→**host-internal**. |
 | Plugin domain events `${id}.verb.noun` + `pluginAccess.plugins[].events` grants + `assertPluginEventAccess`/`EmitAccess` (`src/plugins/runtime/index.ts:1723-1749`) | **No MCP equivalent** (MCP notifications are server→host list-change/resource-update only; no plugin↔plugin pub/sub) | **Keep host-internal** (§0 hybrid). Surface only `tools`/`resources` list-change via MCP `notifications/*/list_changed`. |
 | Permission categories `read\|write\|shell\|network` (authoritative SOT) (`src/plugins/types.ts:18`) | `ToolAnnotations` (hints, explicitly **untrusted**) + host obtains explicit consent before any `tools/call` | Category stays the authoritative `_meta` SOT; **host policy MUST NOT trust inbound annotations** for permission decisions (matches MCP's own "annotations untrusted unless trusted server"). |
@@ -82,11 +82,11 @@ The **LVIS host becomes an MCP _host_** that runs **one MCP client per loaded pl
 > **상태 (removed in #885 Phase R):** 초기 alignment 스케치다. 최종 v6 계약(`plugin-contract-v6-design.md`)은
 > `toolSchemas` map 을 **삭제**했고(각 tool 은 pure MCP `Tool` 객체), per-tool `category` 는 manifest 에서
 > **완전히 제거**되었다(Q3: host-classifies-risk — plugin 이 자기 위험도를 스스로 매기는 것은 control 이 아님).
-> `pathFields` 만 유일한 LVIS 키로 `_meta["xyz.lvis/pathFields"]` 에 남는다. 아래 매핑은 historical 로 읽을 것.
+> `pathFields` 만 유일한 LVIS 키로 `_meta["lvisai/pathFields"]` 에 남는다. 아래 매핑은 historical 로 읽을 것.
 
 - `name` keeps the existing underscore LLM tool name. `inputSchema` migrates draft-07 → 2020-12.
-- **Category** (이 스케치는 `_meta["xyz.lvis/category"]` SOT 로 두었으나 **superseded** — removed in #885 Phase R); interop `ToolAnnotations` (`readOnlyHint`/`destructiveHint`/`openWorldHint`) 는 host 가 파생하며 host policy 는 `_meta` 만 읽고 inbound annotations 는 읽지 않는다.
-- `pathFields`/`writesToOwnSandbox`/`version`/`deprecatedSince`/`replacedBy` → `_meta["xyz.lvis/*"]`.
+- **Category** (이 스케치는 `_meta["lvisai/category"]` SOT 로 두었으나 **superseded** — removed in #885 Phase R); interop `ToolAnnotations` (`readOnlyHint`/`destructiveHint`/`openWorldHint`) 는 host 가 파생하며 host policy 는 `_meta` 만 읽고 inbound annotations 는 읽지 않는다.
+- `pathFields`/`writesToOwnSandbox`/`version`/`deprecatedSince`/`replacedBy` → `_meta["lvisai/*"]`.
 - `tools/call`→`CallToolResult{content[],structuredContent?,isError?}` wrapped `resultType:"complete"`; tool failures use `isError:true` (not JSON-RPC errors) — matches LVIS's executor result model.
 - **No-Fallback field-sweep:** `toolSchemas` entries are `additionalProperties:false` (M4 fixture contract). Adding `outputSchema`/`_meta` carriers means SDK schema + host validator + fixtures move in **one PR** (repo field-addition-sweep + No-Fallback rules).
 
@@ -127,7 +127,7 @@ Tool sets `_meta.ui.resourceUri:"ui://<plugin>/<view>"`; host `resources/read` f
 | `PreToolUse` (blocking) | fires in the host **before the client emits `tools/call`** to the plugin-server |
 | `PermissionRequest` | unchanged host gate; **distinct** from any MRTR `elicitation` the *plugin* later requests |
 | `PostToolUse` (informational) | observes the `CallToolResult` returned by the plugin-server |
-| `ScriptHookStdin.source`/`category` | `source` = plugin-via-MCP; `category` read from the tool's authoritative `_meta["xyz.lvis/category"]`; add plugin-server identity + per-request protocol version so hooks can policy on it |
+| `ScriptHookStdin.source`/`category` | `source` = plugin-via-MCP; `category` read from the tool's authoritative `_meta["lvisai/category"]`; add plugin-server identity + per-request protocol version so hooks can policy on it |
 | deny | host **declines to send `tools/call`** / aborts MRTR retry — still a host veto, never an MCP message |
 | TOFU lockfile / quarantine / `/permission hooks accept` | unchanged (pure host trust model) |
 | future generic hooks + `mcp__.*` matcher | the matcher matches the host's `tools/call` by tool name; an "MCP-handler hook" is itself a host policy MCP client — a clean fit, but a *host policy server*, not a protocol veto |
@@ -145,7 +145,7 @@ Ordered; each *change → unblocks → gate*. Because each plugin gets its own c
 3. **`plugin-loopback-server`** — define the in-process loopback transport + the stdio transport; project `PluginManifest`/`toolSchemas` → `server/discover`+`tools/list`+`tools/call`; run **one first-party plugin** as a loopback MCP server behind a per-plugin client; route `ToolRegistry` registration through MCP discovery instead of `pluginToolsForRegistration`; dialect draft-07→2020-12; category/etc. in `_meta`. *Gate:* SDK schema + validator + fixtures in **one PR** (No-Fallback); migrated plugin passes the full permission pipeline identically (category SOT from `_meta`).
 4. **`untrusted-stdio-isolation`** — out-of-process stdio runtime for marketplace plugins (+ bubblewrap/sandbox-exec), spawn/lifecycle, the spawnable-server artifact format. *Gate:* a marketplace plugin runs isolated; crash/hang containment test; artifact re-sign + installed-plugin migration path.
 5. **`governance-per-request`** — move governance from static `allowedCapabilities` whitelist to per-request capability declaration + per-request gating; keep deny-by-default, namespace, max-tools. *Gate:* **cluster review** (permissions area triggers CLAUDE.md §Cross-Cutting Review Gate — budget for it).
-6. **`hooks-on-mcp-calls`** (#811 continuation) — re-anchor `PreToolUse`/`PermissionRequest`/`PostToolUse` to the host's `tools/call`; hook stdin reads `_meta["xyz.lvis/category"]` + per-request identity; add the `mcp__.*` matcher; then continue the #811 generic-command-hooks milestone in this frame. *Gate:* deny still blocks the call; fail-closed preserved; audit HMAC chain intact.
+6. **`hooks-on-mcp-calls`** (#811 continuation) — re-anchor `PreToolUse`/`PermissionRequest`/`PostToolUse` to the host's `tools/call`; hook stdin reads `_meta["lvisai/category"]` + per-request identity; add the `mcp__.*` matcher; then continue the #811 generic-command-hooks milestone in this frame. *Gate:* deny still blocks the call; fail-closed preserved; audit HMAC chain intact.
 7. **`tasks-extension`** — adopt `io.modelcontextprotocol/tasks` for long-running plugin tools (verified: separate `experimental-ext-tasks` repo; `tasks/get`/`tasks/update`/`tasks/cancel`; `notifications/tasks` carries the full `DetailedTask`; `CreateTaskResult` sets `resultType:"task"`). *Gate:* pin the extension's draft schema at the milestone (it versions independently of the core RC); durable task store survives restart.
 8. **`apps-and-skills-extensions`** — `io.modelcontextprotocol/ui` (Apps; native-host iframe) and `io.modelcontextprotocol/skills` (skills as `skill://` Resources). *Gate:* CSP/permission enforcement per `_meta.ui`; skill digest verification; per-skill opt-in before any skill-declared code execution. Treat Apps/Skills version axes as independent of the core RC.
 9. **`legacy-removal`** — delete the now-unused HostApi surfaces replaced by MCP primitives and the `2024-11-05` client path (keep only the documented external dual-era exception). *Gate:* grep-clean of removed surfaces; all first-party plugins migrated; artifact format finalized.
@@ -171,7 +171,7 @@ not-yet (LVIS plugin servers don't elicit yet).
 
 Built + tested (one module each, all green under `vitest run src/mcp/`):
 - `plugin-server-projection.ts` — manifest/`toolSchemas` → `server/discover` +
-  `tools/list` (dialect → 2020-12; authority under `xyz.lvis/*` `_meta`).
+  `tools/list` (dialect → 2020-12; authority under `lvisai/*` `_meta`).
 - `plugin-mcp-server.ts` — the RC server methods (`server/discover`/`tools/list`/
   `tools/call`); thrown delegate → `isError` CallToolResult; `-32004` on bad version.
 - `loopback-transport.ts` — in-process `McpTransport` (client ↔ server, no socket).
@@ -184,7 +184,7 @@ Built + tested (one module each, all green under `vitest run src/mcp/`):
 - `plugin-runtime-delegate.ts` — `pluginRuntimeToolDelegate`, reproducing
   `buildPluginTool`'s fail-closed execute gates (inactive / integrity-disabled /
   `ManifestIntegrityViolation` record) at the MCP boundary, with the raw return
-  value carried via `_meta["xyz.lvis/rawResult"]`.
+  value carried via `_meta["lvisai/rawResult"]`.
 - `plugin-loopback-manager.ts` — `PluginLoopbackManager`, the boot seam owning
   host lifecycle (`start`/`stop`/`stopAll`, idempotent reload).
 
@@ -198,7 +198,7 @@ Decisions ratified during implementation:
   because the trust models differ.
 - **Structured tool output rides `_meta`.** MCP's content model is text-first, so
   the plugin's raw (non-text) return value is carried as
-  `_meta["xyz.lvis/rawResult"]` (boxed to preserve present-but-`undefined`) and
+  `_meta["lvisai/rawResult"]` (boxed to preserve present-but-`undefined`) and
   re-surfaced as `metadata.rawResult` for the `executor.ts`/`boot.ts` consumers.
 - **The provider-strict lint is a client concern** → it lives in `PluginMcpHost`
   registration, not the server projection (the server exposes its real tools; the
@@ -226,7 +226,7 @@ whitelist) + the exact deriving signals (§6 open decision).
 
 **`hooks-on-mcp-calls` (6, #811) — category-from-`_meta` already transitively
 satisfied.** The reverse projection (`mcpToolToPluginTool`) lands
-`_meta["xyz.lvis/category"]` onto `tool.category`, and the executor's hook stdin
+`_meta["lvisai/category"]` onto `tool.category`, and the executor's hook stdin
 (`ScriptHookStdin.category`) already reads `tool.category` — so a loopback plugin
 tool's hook already sees the authoritative MCP category, no extra wiring. Remaining
 #811 work: the `mcp__.*` tool-name matcher + per-request identity in hook stdin +
@@ -419,7 +419,7 @@ RequestMetaObject {
 
 **Tool:** `{ name, title?, icons?, description?, inputSchema:{type:"object", $schema?}, outputSchema?, annotations?:ToolAnnotations, _meta? }`. **JSON Schema dialect = 2020-12** (default when no `$schema`). `ToolAnnotations { title?; readOnlyHint?=false; destructiveHint?=true; idempotentHint?=false; openWorldHint?=true }`.
 
-**`_meta` namespacing:** prefix = dot-separated labels + `/`; reverse-DNS recommended; **any prefix whose second label is `mcp` or `modelcontextprotocol` is RESERVED for MCP** (so LVIS uses e.g. `xyz.lvis/…`, never `*.mcp/…`).
+**`_meta` namespacing:** prefix = dot-separated labels + `/`; a short vendor label is recommended; **any prefix whose second label is `mcp` or `modelcontextprotocol` is RESERVED for MCP** (so LVIS uses e.g. `lvisai/…`, never `*.mcp/…`).
 
 **Tasks (`experimental-ext-tasks`):** methods `tasks/get` / `tasks/update {taskId, inputResponses}` / `tasks/cancel {taskId}`; `CreateTaskResult = Result & Task` with `resultType:"task"`; `Task {taskId, status: "working"|"input_required"|"completed"|"failed"|"cancelled", createdAt, lastUpdatedAt, ttlMs|null, pollIntervalMs?}`; `notifications/tasks` carries the full `DetailedTask`; subscribe via `subscriptions/listen` + `{taskIds}`.
 

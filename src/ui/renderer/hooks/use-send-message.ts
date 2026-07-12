@@ -59,10 +59,18 @@ export interface UseSendMessageDeps {
   handleAskRef: MutableRefObject<HandleAskRefFn>;
 }
 
+/**
+ * Send modes. `trigger-import` (plugin overlay) and `app-message` (MCP App
+ * `ui/message`) are the two STAGED, non-user-authored modes: both carry a provenance
+ * envelope, both skip the user bubble, and both classify as a non-`user-keyboard`
+ * trust origin in main.
+ */
+export type SendMode = "default" | "trigger-import" | "app-message";
+
 export interface UseSendMessageResult {
   handleAsk: (
     q: string,
-    mode?: "default" | "trigger-import",
+    mode?: SendMode,
     userIntent?: UserKeyboardIntentSnapshot,
     opts?: { injectHint?: "queue" | "interrupt"; inputOrigin?: "queue-auto" },
   ) => Promise<void>;
@@ -95,7 +103,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
   const handleAsk = useCallback(
     async (
       q: string,
-      mode: "default" | "trigger-import" = "default",
+      mode: SendMode = "default",
       userIntent?: UserKeyboardIntentSnapshot,
       opts?: { injectHint?: "queue" | "interrupt"; inputOrigin?: "queue-auto" },
     ) => {
@@ -158,9 +166,11 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       const streamingRequestId = beginStreamingRequest();
       if (debugStreamEnabled) debugLog("handleAsk", "begin", { requestId, streamingRequestId });
       setQuestion("");
-      const composed = mode === "trigger-import"
-        ? composeImportedTriggerOutgoing(trimmed)
-        : composeOutgoing(trimmed);
+      // Staged modes send the enveloped text VERBATIM — composeOutgoing's composer
+      // affordances (attachment markers, persona prompt) belong to typed input only.
+      const composed = mode === "default"
+        ? composeOutgoing(trimmed)
+        : composeImportedTriggerOutgoing(trimmed);
       const outgoing = composed.text;
 
 
@@ -184,11 +194,10 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         }
         outgoingAttachments = outgoingAttachments.filter((p) => p.type !== "image");
       }
-      // trigger-import: skip only the user-bubble append. The imported_trigger
-      // marker already represents the plugin-authored overlay prompt
-      // visibly, and rendering the wrapped envelope as a user bubble
-      // would misattribute authorship.
-      if (mode !== "trigger-import") {
+      // Staged modes skip only the user-bubble append. The imported_trigger marker
+      // already represents the plugin-authored / app-authored prompt visibly, and
+      // rendering the wrapped envelope as a user bubble would misattribute authorship.
+      if (mode === "default") {
         appendUserEntry(trimmed, opts?.injectHint);
       }
       resetStreamAccumulators();
@@ -200,7 +209,9 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
             ? "queue-auto"
             : mode === "trigger-import"
               ? "plugin-emitted"
-              : "user-keyboard",
+              : mode === "app-message"
+                ? "app-emitted"
+                : "user-keyboard",
 
 
           opts?.inputOrigin === "queue-auto"
