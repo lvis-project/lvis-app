@@ -1634,6 +1634,7 @@ export const jaMessages: Record<string, string> = {
   "marketplaceUpdateBanner.updateButton": "アップデート",
   "marketplaceUpdateBanner.updating": "更新中…",
   "mcpAppView.loading": "MCP アプリを読み込み中...",
+  "mcpAppView.openInWindow": "別ウィンドウで開いています",
   "mcpAppView.sandboxBadge": "MCP · 分離されたプロセス · 制限されたネットワーク",
   "mcpAppView.serverDisconnected": "MCP サーバーの接続が切断されました",
   "mcpTab.addButton": "追加",
