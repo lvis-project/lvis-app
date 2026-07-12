@@ -96,7 +96,12 @@ export async function handleCommand(
         break;
       }
       case "tools": {
-        const tools = self.deps.toolRegistry.getVisibleTools();
+        // The /tools diagnostic reflects THE MODEL's tools — getModelVisibleTools, not
+        // the executable `getVisibleTools()` superset. After app-only tools became
+        // registry `Tool`s the superset includes them (+ the auth trio); printing those
+        // app-only names is a soft name-disclosure surface the model-exposure design
+        // avoids, and this listing is meant to be exactly what the model can see.
+        const tools = self.deps.toolRegistry.getModelVisibleTools();
         result = tools.map((tool) => `${tool.name} [${toolProvenanceLabel(tool)}]`).join("\n") || t("be_conversationLoop.cmdToolsEmpty");
         break;
       }

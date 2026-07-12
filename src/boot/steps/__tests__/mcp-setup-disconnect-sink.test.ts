@@ -1,5 +1,8 @@
 /**
- * #885 b3 — the disconnect sink wired into McpManager at boot.
+ * #885 b3 — the disconnect sink wired into McpManager at boot AND into
+ * PluginLoopbackManager (see `mcp/__tests__/plugin-loopback-manager.test.ts`).
+ * It now lives in `mcp/mcp-server-disconnect-sink.ts` so both arms can reach it;
+ * this suite still covers it from the boot step that wires the external arm.
  *
  * Asserts the MAJOR-2 clearStorageData + the strict ordering broadcast → close →
  * clear (so no live detached webContents races a wiped jar), the isDestroyed()
@@ -7,7 +10,7 @@
  * swallows a synchronous throw from over-length name derivation.
  */
 import { describe, it, expect, vi } from "vitest";
-import { createMcpServerDisconnectedSink } from "../mcp-setup.js";
+import { createMcpServerDisconnectedSink } from "../../../mcp/mcp-server-disconnect-sink.js";
 import { CHANNELS } from "../../../contract/app-contract.js";
 import { mcpAppPartitionName, MAX_SERVER_ID_LEN } from "../../../shared/mcp-app-partition.js";
 

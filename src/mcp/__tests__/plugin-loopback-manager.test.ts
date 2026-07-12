@@ -184,3 +184,139 @@ describe("PluginLoopbackManager", () => {
     expect(registry.findByName("b_one")).toBeUndefined();
   });
 });
+
+/**
+ * ARCH MINOR-1 — teardown parity between the two MCP server arms.
+ *
+ * A plugin's loopback host used to go down SILENTLY: only `McpManager` fed the
+ * `serverDisconnected` sink, so disabling a plugin left its live MCP-App cards
+ * rendered and interactive against a server that no longer existed, while an
+ * external server's cards correctly flipped to the `mcp-app-disconnected`
+ * placeholder. Same sink, same event shape, both arms.
+ */
+describe("PluginLoopbackManager — serverDisconnected broadcast (teardown parity)", () => {
+  it("stop() emits the disconnect for the stopped plugin (serverId === pluginId)", async () => {
+    const onDisconnected = vi.fn();
+    const mgr = new PluginLoopbackManager(fakeRuntime(), new ToolRegistry(), onDisconnected);
+    await mgr.start(manifest("com.a", ["a_one"]));
+
+    await mgr.stop("com.a");
+    expect(onDisconnected).toHaveBeenCalledTimes(1);
+    expect(onDisconnected).toHaveBeenCalledWith("com.a");
+  });
+
+  it("does not emit for an unknown plugin (stop is a no-op)", async () => {
+    const onDisconnected = vi.fn();
+    const mgr = new PluginLoopbackManager(fakeRuntime(), new ToolRegistry(), onDisconnected);
+    await mgr.stop("never-started");
+    expect(onDisconnected).not.toHaveBeenCalled();
+  });
+
+  it("emits once per host on stopAll, and once per REMOVED plugin on syncAll", async () => {
+    const onDisconnected = vi.fn();
+    const mgr = new PluginLoopbackManager(fakeRuntime(), new ToolRegistry(), onDisconnected);
+    await mgr.syncAll([
+      { pluginId: "com.a", manifest: manifest("com.a", ["a_one"]) },
+      { pluginId: "com.b", manifest: manifest("com.b", ["b_one"]) },
+    ]);
+    expect(onDisconnected).not.toHaveBeenCalled();
+
+    // Uninstall com.b: only the removed plugin's cards are disconnected.
+    await mgr.syncAll([{ pluginId: "com.a", manifest: manifest("com.a", ["a_one"]) }]);
+    expect(onDisconnected.mock.calls).toEqual([["com.b"]]);
+
+    await mgr.stopAll();
+    expect(onDisconnected.mock.calls).toEqual([["com.b"], ["com.a"]]);
+  });
+
+  it("a reload (start over a running host) does NOT emit a disconnect", async () => {
+    const onDisconnected = vi.fn();
+    const mgr = new PluginLoopbackManager(fakeRuntime(), new ToolRegistry(), onDisconnected);
+    await mgr.start(manifest("com.a", ["a_one"]));
+    // The atomic swap disposes the superseded host; the server is still there.
+    await mgr.start(manifest("com.a", ["a_two"]));
+    expect(onDisconnected).not.toHaveBeenCalled();
+  });
+
+  it("defaults to the real sink — a construction site cannot silently opt out", async () => {
+    // No sink injected: the default is the SAME factory McpManager gets. It is
+    // best-effort by contract (its own try/catch swallows a headless-Electron
+    // failure), so stop() must still complete cleanly.
+    const registry = new ToolRegistry();
+    const mgr = new PluginLoopbackManager(fakeRuntime(), registry);
+    await mgr.start(manifest("com.a", ["a_one"]));
+    await expect(mgr.stop("com.a")).resolves.toBeUndefined();
+    expect(registry.findByName("a_one")).toBeUndefined();
+  });
+});
+
+describe("PluginLoopbackManager — ui:// resource serving (readUiResource)", () => {
+  /**
+   * Content-serving: the PLUGIN serves the card bytes through
+   * `PluginRuntime.readUiResource` (host-gated + host-bounded there). No plugin
+   * root, no disk fixture — the host reads no plugin file on this path.
+   */
+  function cardRuntime(): PluginRuntime {
+    return {
+      isPluginEnabled: () => true,
+      call: vi.fn(async (name: string) => `ran ${name}`),
+      readUiResource: vi.fn(async (_pluginId: string, uri: string) => {
+        if (!uri.endsWith("/card.html")) throw new Error(`plugin has no card '${uri}'`);
+        return "<h1>served</h1>";
+      }),
+    } as unknown as PluginRuntime;
+  }
+
+  function uiManifest(id: string): PluginManifest {
+    return {
+      ...manifest(id, ["card_open"]),
+      uiResources: [
+        {
+          uri: `ui://${id}/card.html`,
+          csp: { connectDomains: ["https://api.example.com"] },
+        },
+      ],
+    };
+  }
+
+  it("serves a plugin's OWN declared ui:// resource (plugin html + manifest-declared csp)", async () => {
+    const runtime = cardRuntime();
+    const mgr = new PluginLoopbackManager(runtime, new ToolRegistry());
+    await mgr.start(uiManifest("com.cards"));
+
+    const res = await mgr.readUiResource("com.cards", "ui://com.cards/card.html");
+    expect(res.html).toBe("<h1>served</h1>");
+    expect(res.csp).toEqual({ connectDomains: ["https://api.example.com"] });
+    expect(runtime.readUiResource).toHaveBeenCalledWith("com.cards", "ui://com.cards/card.html");
+  });
+
+  it("rejects a cross-plugin uri authority (own-namespace-only, fail-closed)", async () => {
+    const runtime = cardRuntime();
+    const mgr = new PluginLoopbackManager(runtime, new ToolRegistry());
+    await mgr.start(uiManifest("com.cards"));
+
+    await expect(
+      mgr.readUiResource("com.cards", "ui://com.evil/card.html"),
+    ).rejects.toThrow(/own namespace/i);
+    // The plugin is never asked to serve another namespace's card.
+    expect(runtime.readUiResource).not.toHaveBeenCalled();
+  });
+
+  it("rejects an undeclared uri in the plugin's own namespace", async () => {
+    const runtime = cardRuntime();
+    const mgr = new PluginLoopbackManager(runtime, new ToolRegistry());
+    await mgr.start(uiManifest("com.cards"));
+
+    await expect(
+      mgr.readUiResource("com.cards", "ui://com.cards/nope.html"),
+    ).rejects.toThrow(/no declared ui:\/\/ resource/i);
+    expect(runtime.readUiResource).not.toHaveBeenCalled();
+  });
+
+  it("throws when no loopback host runs for the plugin", async () => {
+    const mgr = new PluginLoopbackManager(cardRuntime(), new ToolRegistry());
+    await expect(
+      mgr.readUiResource("com.absent", "ui://com.absent/card.html"),
+    ).rejects.toThrow(/no running loopback host/i);
+  });
+});

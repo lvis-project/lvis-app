@@ -31,6 +31,9 @@
  *  - Plugin `instance.start()` falls back to `pluginStartupDefaultMs` when
  *    the manifest doesn't declare `startupTimeoutMs`, and any declared value
  *    is clamped to `pluginStartupMaxMs`.
+ *  - `PluginRuntime.readUiResource` (the plugin hook that serves a declared
+ *    `ui://` MCP App card) is capped by `pluginUiResourceReadMs` — a render-path
+ *    call, not a tool execution.
  *  - `agent_spawn` carries its own sub-agent execution loop and is capped by
  *    `subAgentCeilingMs` instead of `globalCeilingMs`.
  *  - User-input gates (e.g. ApprovalGate) are exempt from the tool execution
@@ -48,6 +51,11 @@ export const TOOL_TIMEOUT_POLICY = {
   globalCeilingMs: 120_000,
   pluginStartupDefaultMs: 10_000,
   pluginStartupMaxMs: 60_000,
+  // Ceiling for `RuntimePlugin.readUiResource` — the plugin hook that serves one
+  // of its manifest-declared `ui://` MCP App cards. It sits on the RENDER path
+  // (the user is waiting on a card, not on work a tool was asked to do), so it is
+  // bounded far tighter than `globalCeilingMs`. Fail-closed on expiry: no card.
+  pluginUiResourceReadMs: 10_000,
   subAgentCeilingMs: 600_000,
   mcpRequestDefaultMs: 60_000,
   mcpRequestMaxMs: 120_000,

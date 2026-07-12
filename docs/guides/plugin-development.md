@@ -53,6 +53,12 @@ render within the provided root and use the bridge for host interaction.
 If the entry cannot load, the shell shows English fallback errors. A blank plugin
 surface is considered a regression.
 
+This is the host-mounted **sidebar panel** surface (`ui[]` in the manifest). It is
+not the only one: a plugin can also ship an **MCP App** — an interactive `ui://`
+card the host renders next to a tool result, built on the standard
+`@modelcontextprotocol/ext-apps` library rather than a LVIS bridge. See
+[Authoring an MCP App](./mcp-app-authoring.md).
+
 ## Tool Plugins
 
 Plugin tools are normalized into the host tool registry. A tool definition must

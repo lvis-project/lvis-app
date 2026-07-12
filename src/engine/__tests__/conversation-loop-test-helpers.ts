@@ -82,7 +82,11 @@ export function makeConversationLoopDeps(
       listAll: () => [],
       getToolCatalogForScope: () => [],
       getToolSchemasForScope: () => [],
+      // The executable surface (`getVisibleTools`) and the MODEL-facing one
+      // (`getModelVisibleTools`, which subtracts MCP Apps app-only tools) are
+      // distinct registry listings; the turn's tool scope reads the latter.
       getVisibleTools: () => [],
+      getModelVisibleTools: () => [],
     } as unknown as ConversationLoopDeps["toolRegistry"],
     memoryManager: makeConversationLoopMemoryManager(),
     ...overrides,

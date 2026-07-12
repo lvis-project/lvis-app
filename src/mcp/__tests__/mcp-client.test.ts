@@ -1536,10 +1536,12 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     });
     await withApps.client.connect();
     const advertised = await withApps.client.readResource("ui://app/p.html");
+    // The server declared `permissions` on the wire; the host does not model it
+    // (an opaque-origin sandboxed frame cannot be delegated a powerful feature), so
+    // it is DROPPED — only the csp survives into the read model.
     expect(advertised).toEqual({
       html: "<h1>app</h1>",
       csp: { connectDomains: ["https://api.example.com"] },
-      permissions: { clipboardWrite: {} },
     });
     await withApps.client.disconnect();
 

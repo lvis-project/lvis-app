@@ -27,6 +27,7 @@ import type {
 } from "./mcp-client.js";
 import { LoopbackTransport } from "./loopback-transport.js";
 import { PluginMcpServer, type PluginToolDelegate } from "./plugin-mcp-server.js";
+import type { PluginUiResourceProvider } from "./plugin-ui-resource-provider.js";
 import { mcpToolToPluginTool, type DiscoveredMcpTool } from "./plugin-tool-from-mcp.js";
 import { lintToolInputSchema } from "../plugins/tool-schema-lint.js";
 import { createLogger } from "../lib/logger.js";
@@ -34,7 +35,7 @@ import { observeLegacyMetaKey } from "./legacy-meta-telemetry.js";
 import type { Tool } from "../tools/base.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { PluginManifest } from "../plugins/types.js";
-import type { McpUiPayload } from "./types.js";
+import type { McpUiPayload, McpUiResourceMeta, McpUiResourceRead } from "./types.js";
 
 const log = createLogger("plugin-mcp-host");
 
@@ -100,8 +101,9 @@ export class PluginMcpHost {
     manifest: PluginManifest,
     delegate: PluginToolDelegate,
     toolRegistry: ToolRegistry,
+    uiResources?: PluginUiResourceProvider,
   ): PluginMcpHost {
-    const server = new PluginMcpServer(manifest, delegate);
+    const server = new PluginMcpServer(manifest, delegate, uiResources);
     return new PluginMcpHost(manifest.id, new LoopbackTransport(server), toolRegistry);
   }
 
@@ -258,6 +260,30 @@ export class PluginMcpHost {
       rawResult = undefined;
     }
     return { text, uiPayload, rawResult };
+  }
+
+  /**
+   * Fetch one of THIS plugin's declared `ui://` resources over the loopback
+   * transport (`resources/read`) — the plugin arm of the MCP App serving seam.
+   * Returns the HTML plus the resource's OWN `_meta.ui` (its csp),
+   * from which main derives the sandbox-proxy CSP header. Mirrors
+   * {@link McpClient.readResource} so the render path is transport-agnostic.
+   *
+   * Fail-closed: the server rejects an undeclared / cross-namespace uri with a
+   * JSON-RPC error, which surfaces here as a rejected promise (never a body).
+   */
+  async readUiResource(uri: string): Promise<McpUiResourceRead> {
+    const result = (await this.request("resources/read", { uri })) as {
+      contents?: Array<{ text?: string; _meta?: { ui?: McpUiResourceMeta } }>;
+    };
+    const textPart = result.contents?.find((c) => typeof c.text === "string");
+    if (!textPart?.text) {
+      throw new Error(
+        `[plugin-mcp-host] resource '${uri}' on '${this.pluginId}' returned no text content`,
+      );
+    }
+    const ui = textPart._meta?.ui;
+    return { html: textPart.text, csp: ui?.csp };
   }
 
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {

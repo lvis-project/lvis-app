@@ -60,7 +60,8 @@ export type ToolDecisionOverride = "always-allow-with-audit" | "ask";
  * chat input origin. The conversation loop must derive this at the concrete
  * model/tool boundary: a typed user prompt that causes a model-generated bash
  * input is `llm-tool-arg`, while later tool calls influenced by read_file
- * output are `file-content`.
+ * output are `file-content`. A turn seeded (or, mid-turn, joined) by an MCP App's
+ * `ui/message` is `app-emitted` — never `user-keyboard`, whatever the app claims.
  */
 export type ToolTrustOrigin = ChatInputOrigin;
 
