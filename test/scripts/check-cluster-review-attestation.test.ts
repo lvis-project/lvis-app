@@ -252,6 +252,26 @@ describe("cluster review attestation", () => {
         }),
       ).reason,
     ).toBe("table-not-visible");
+    expect(
+      evaluateClusterReviewAttestation(
+        pullRequest({
+          body:
+            "<details>\n```html\n</details>\n```\n" +
+            validBody() +
+            "\n</details>",
+        }),
+      ).reason,
+    ).toBe("table-not-visible");
+    expect(
+      evaluateClusterReviewAttestation(
+        pullRequest({
+          body:
+            "<details>\n<script>\n</details>\n</script>\n" +
+            validBody() +
+            "\n</details>",
+        }),
+      ).reason,
+    ).toBe("table-not-visible");
   });
 
   it("rejects malformed or duplicate Reviewed HEAD candidates", () => {

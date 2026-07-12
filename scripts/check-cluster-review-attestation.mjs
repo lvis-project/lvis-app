@@ -35,53 +35,134 @@ const RAW_HTML_CONTAINERS = new Set([
   "details",
   "dialog",
   "div",
+  "iframe",
+  "noembed",
+  "noframes",
+  "object",
+  "plaintext",
   "pre",
   "script",
   "section",
+  "select",
   "span",
   "style",
   "table",
   "template",
+  "textarea",
+  "title",
+  "xmp",
+]);
+
+const RAW_TEXT_HTML_CONTAINERS = new Set([
+  "iframe",
+  "noembed",
+  "noframes",
+  "plaintext",
+  "script",
+  "style",
+  "textarea",
+  "title",
+  "xmp",
 ]);
 
 function isInsideHtmlComment(text, index) {
   return text.lastIndexOf("<!--", index) > text.lastIndexOf("-->", index);
 }
 
+function withoutHtmlComments(text) {
+  const preserveLines = (value) => value.replace(/[^\n]/g, " ");
+  return text
+    .replace(/<!--[\s\S]*?-->/g, preserveLines)
+    .replace(/<!--[\s\S]*$/, preserveLines);
+}
+
+function parseFenceLine(line) {
+  const match = line.match(/^ {0,3}((?:`{3,})|(?:~{3,}))(.*)$/);
+  if (!match) return undefined;
+  return { marker: match[1], suffix: match[2] };
+}
+
+function isFenceOpener(candidate) {
+  return !(
+    candidate.marker[0] === "`" &&
+    candidate.suffix.includes("`")
+  );
+}
+
+function closesFence(candidate, openFence) {
+  return (
+    candidate.marker[0] === openFence.character &&
+    candidate.marker.length >= openFence.length &&
+    /^[ \t]*$/.test(candidate.suffix)
+  );
+}
+
 function isInsideMarkdownFence(text, index) {
   let openFence;
-  for (const line of text.slice(0, index).split("\n")) {
-    const match = line.match(/^ {0,3}((?:`{3,})|(?:~{3,}))(.*)$/);
-    if (!match) continue;
-    const marker = match[1];
+  const prefix = withoutHtmlComments(text.slice(0, index));
+  for (const line of prefix.split("\n")) {
+    const candidate = parseFenceLine(line);
+    if (!candidate) continue;
     if (!openFence) {
-      if (marker[0] === "`" && match[2].includes("`")) continue;
-      openFence = { character: marker[0], length: marker.length };
-    } else if (
-      marker[0] === openFence.character &&
-      marker.length >= openFence.length &&
-      /^[ \t]*$/.test(match[2])
-    ) {
+      if (!isFenceOpener(candidate)) continue;
+      openFence = {
+        character: candidate.marker[0],
+        length: candidate.marker.length,
+      };
+    } else if (closesFence(candidate, openFence)) {
       openFence = undefined;
     }
   }
   return openFence !== undefined;
 }
 
+function withoutMarkdownFencedCode(text) {
+  const visibleLines = [];
+  let openFence;
+  for (const line of text.split("\n")) {
+    const candidate = parseFenceLine(line);
+    if (openFence) {
+      if (candidate && closesFence(candidate, openFence)) {
+        openFence = undefined;
+      }
+      visibleLines.push("");
+      continue;
+    }
+    if (candidate && isFenceOpener(candidate)) {
+      openFence = {
+        character: candidate.marker[0],
+        length: candidate.marker.length,
+      };
+      visibleLines.push("");
+      continue;
+    }
+    visibleLines.push(line);
+  }
+  return visibleLines.join("\n");
+}
+
 function isInsideRawHtmlContainer(text, index) {
   const stack = [];
   const pattern = /<\/?([A-Za-z][A-Za-z0-9-]*)\b[^>]*>/g;
-  const visiblePrefix = text
-    .slice(0, index)
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<!--[\s\S]*$/, "");
+  const visiblePrefix = withoutMarkdownFencedCode(
+    withoutHtmlComments(text.slice(0, index)),
+  ).replace(/(`+)([\s\S]*?)\1/g, "");
+
   for (const match of visiblePrefix.matchAll(pattern)) {
     const name = match[1].toLowerCase();
-    if (!RAW_HTML_CONTAINERS.has(name)) continue;
-    if (match[0].startsWith("</")) {
+    const closing = match[0].startsWith("</");
+    const rawTextContainer = stack.at(-1);
+    if (rawTextContainer && RAW_TEXT_HTML_CONTAINERS.has(rawTextContainer)) {
+      if (closing && name === rawTextContainer) stack.pop();
+      continue;
+    }
+    if (!RAW_HTML_CONTAINERS.has(name) && !RAW_TEXT_HTML_CONTAINERS.has(name)) {
+      continue;
+    }
+    if (closing) {
       const openIndex = stack.lastIndexOf(name);
-      if (openIndex >= 0) stack.splice(openIndex, 1);
-    } else if (!match[0].endsWith("/>")) {
+      if (openIndex >= 0) stack.splice(openIndex);
+    } else {
       stack.push(name);
     }
   }
