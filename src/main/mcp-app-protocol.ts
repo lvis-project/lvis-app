@@ -28,9 +28,14 @@
  */
 import type { Session } from "electron";
 import { randomUUID } from "node:crypto";
-import type { McpUiResourceCsp } from "../mcp/types.js";
+import type { McpUiResourceCsp, McpUiResourcePermissions } from "../mcp/types.js";
+import { MCP_APP_ALLOW_META_NAME } from "../shared/mcp-app-bridge-contract.js";
 import { buildMcpCspHeader, declaredOrigins } from "../shared/mcp-app-csp.js";
 import { encodeMcpServerId, MCP_APP_SCHEME } from "../shared/mcp-app-partition.js";
+import {
+  buildMcpAppAllowAttr,
+  isElectronPermissionGranted,
+} from "../shared/mcp-app-permissions.js";
 
 export { MCP_APP_SCHEME };
 
@@ -55,6 +60,18 @@ type ProxySession = {
   serverId: string;
   /** Effective CSP header string. Computed in main; never supplied by the renderer. */
   csp: string;
+  /**
+   * The RESOURCE's declared permissions. Kept in its structured form (not just the
+   * serialized allow string) because the Electron session handlers need to answer
+   * per-permission — including telling `camera` from `microphone`, which Electron
+   * collapses into one `media` permission.
+   */
+  permissions?: McpUiResourcePermissions;
+  /**
+   * The `allow` attribute for the inner app frame. Computed in main from the closed
+   * feature table; never supplied by the renderer or the app.
+   */
+  allow: string;
 };
 
 const proxySessions = new Map<string, ProxySession>();
@@ -80,21 +97,50 @@ export function isDeclaredOriginForServer(serverId: string, origin: string): boo
 }
 
 /**
- * A session is consumed within milliseconds — the webview navigates to the proxy
- * URL immediately after minting — so the live set is tiny. This bound keeps the
- * registry from growing without limit across a long chat (Map preserves insertion
- * order, so the oldest entry is the first key).
+ * Session lifetime = CARD MOUNT lifetime. A proxy session is NOT consumed in
+ * milliseconds: since per-resource `permissions` landed, its token is a long-lived
+ * permission AUTHORITY that {@link isMcpAppPermissionGranted} consults on EVERY
+ * `getUserMedia` / `getCurrentPosition` for the card's whole life. The authoritative
+ * reclaim is therefore explicit: {@link disposeMcpAppProxySession}, called by
+ * `McpAppView` when the card's webview unmounts (#1600). In normal operation the live
+ * set equals the number of currently-mounted cards, and it is kept small by that
+ * dispose — NOT by the cap below.
+ *
+ * The cap is ONLY a leak backstop: it bounds worst-case memory if a dispose is ever
+ * missed (e.g. a renderer crash that skips the unmount path). It is deliberately set far
+ * above any plausible count of simultaneously-mounted MCP-app cards (each is a live
+ * <webview>; a transcript with thousands of live webviews would exhaust renderer
+ * resources long before this), so FIFO eviction never fires on a live card in practice —
+ * fixing the earlier bug where a tight 64 cap, sized under the now-false "consumed in
+ * milliseconds" assumption, could silently revoke a still-mounted card's grant after 64
+ * newer mints. Each entry is a few small strings + a tiny permissions object, so the
+ * worst-case leaked footprint is a few MB. Map preserves insertion order, so the oldest
+ * entry is the first key.
  */
-const MAX_PROXY_SESSIONS = 64;
+const MAX_PROXY_SESSIONS = 4096;
 
 /**
  * Mint a proxy session for one card render and return the URL the `<webview>`
- * should load. The token selects the CSP the proxy document is served with.
+ * should load. The token selects the CSP the proxy document is served with, AND the
+ * permissions that card was granted.
+ *
+ * `permissions` is the RESOURCE's own declaration — from the plugin MANIFEST, or from an
+ * external server's `resources/read` `_meta.ui`. It is policy INPUT, not policy: main
+ * derives the frame's `allow` attribute and the Electron grant set from it here.
  */
-export function createMcpAppProxySession(serverId: string, csp?: McpUiResourceCsp): string {
+export function createMcpAppProxySession(
+  serverId: string,
+  csp?: McpUiResourceCsp,
+  permissions?: McpUiResourcePermissions,
+): string {
   const authority = encodeMcpServerId(serverId); // fail-closed on empty/over-length
   const token = randomUUID();
-  proxySessions.set(token, { serverId, csp: buildMcpCspHeader(csp) });
+  proxySessions.set(token, {
+    serverId,
+    csp: buildMcpCspHeader(csp),
+    permissions,
+    allow: buildMcpAppAllowAttr(permissions),
+  });
 
   // Keep the network gate in lockstep with the CSP: whatever this resource declared
   // (and only that) becomes reachable at the webRequest layer too.
@@ -102,6 +148,8 @@ export function createMcpAppProxySession(serverId: string, csp?: McpUiResourceCs
   for (const origin of declaredOrigins(csp)) origins.add(origin);
   declaredOriginsByServer.set(serverId, origins);
 
+  // Leak backstop only — see MAX_PROXY_SESSIONS. Reaching this bound means many disposes
+  // were missed; the authoritative reclaim is disposeMcpAppProxySession on card unmount.
   while (proxySessions.size > MAX_PROXY_SESSIONS) {
     const oldest = proxySessions.keys().next().value;
     if (oldest === undefined) break;
@@ -110,7 +158,12 @@ export function createMcpAppProxySession(serverId: string, csp?: McpUiResourceCs
   return `${MCP_APP_SCHEME}://${authority}/proxy.html?t=${token}`;
 }
 
-/** Drop a card's proxy session (webview unmounted). */
+/**
+ * Drop a card's proxy session — the AUTHORITATIVE reclaim, called by `McpAppView` when
+ * the card's webview unmounts (#1600). This, not the leak-backstop cap, is what keeps the
+ * live set equal to the mounted-card set, so a long-lived camera/mic/geolocation grant is
+ * never FIFO-evicted while its card is still on screen. Idempotent.
+ */
 export function disposeMcpAppProxySession(token: string): void {
   proxySessions.delete(token);
 }
@@ -122,15 +175,76 @@ export function _resetMcpAppProxySessions(): void {
 }
 
 /**
+ * The token in a proxy URL — the only thing that identifies WHICH card (and therefore
+ * which declaration) a webContents is running. Returns undefined for any URL that is
+ * not one of ours, so a caller cannot accidentally key a decision off a foreign page.
+ */
+function proxySessionForUrl(url: string | undefined): ProxySession | undefined {
+  if (!url) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== `${MCP_APP_SCHEME}:`) return undefined;
+  const token = parsed.searchParams.get("t");
+  if (!token) return undefined;
+  const session = proxySessions.get(token);
+  if (!session) return undefined;
+  // Same fail-closed authority check the protocol handler makes: a URL whose authority
+  // is not its token's serverId is not a session we minted.
+  if (parsed.hostname !== encodeMcpServerId(session.serverId)) return undefined;
+  return session;
+}
+
+/**
+ * The Electron permission decision for one MCP-app card — the SINGLE chokepoint, wired
+ * to the per-server session by `installMcpAppPartitionPolicy`.
+ *
+ * `frameUrl` is the webContents' top-level URL, i.e. the sandbox-proxy URL carrying the
+ * card's token. The token is what binds the running frame back to the DECLARATION the
+ * host minted it with — the app cannot change it, and the renderer never supplies it.
+ *
+ * DENY-BY-DEFAULT, at every step: an unknown URL, a missing/expired token, an authority
+ * that does not match the token, a card that declared nothing, and any feature that card
+ * did not declare are ALL denied. A session with no declaration grants nothing.
+ *
+ * `mediaKinds` (from Electron's `details.mediaTypes`/`mediaType`) disambiguates the
+ * camera/microphone collision — see `isElectronPermissionGranted`.
+ */
+export function isMcpAppPermissionGranted(
+  frameUrl: string | undefined,
+  permission: string,
+  mediaKinds?: readonly ("video" | "audio")[],
+): boolean {
+  const session = proxySessionForUrl(frameUrl);
+  if (!session) return false;
+  return isElectronPermissionGranted(session.permissions, permission, mediaKinds);
+}
+
+/** Escape a host-computed attribute value. The input is a closed enum, so this is belt-and-braces. */
+function escapeAttr(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+/**
  * The sandbox-proxy document. Deliberately script-free: ALL relay logic lives in
  * the host-owned preload (`mcp-app-preload.ts`), which runs in an isolated world
  * and is therefore not subject to this document's CSP. Nothing the MCP server
  * controls ever executes in this frame — only inside the inner sandboxed iframe.
+ *
+ * The `allow` meta is how main hands the preload the host-computed Permissions Policy
+ * for the inner frame. It rides in THIS document — host-generated, host-served — and not
+ * over the renderer-forwarded bridge, so the app can never influence its own allow-list.
  */
-function proxyDocument(): string {
+function proxyDocument(allow: string): string {
+  const allowMeta = allow
+    ? `<meta name="${MCP_APP_ALLOW_META_NAME}" content="${escapeAttr(allow)}">`
+    : "";
   return `<!doctype html>
 <html>
-  <head><meta charset="utf-8"><title>MCP App</title>
+  <head><meta charset="utf-8"><title>MCP App</title>${allowMeta}
     <style>
       html, body { margin: 0; padding: 0; height: 100%; background: transparent; }
       iframe { display: block; border: 0; width: 100%; height: 100%; background: transparent; }
@@ -164,7 +278,7 @@ export function installMcpAppProtocolHandler(partitionName: string, ses: Session
       return new Response("mcp app session/authority mismatch", { status: 403 });
     }
 
-    return new Response(proxyDocument(), {
+    return new Response(proxyDocument(session.allow), {
       status: 200,
       headers: {
         "Content-Type": "text/html;charset=utf-8",

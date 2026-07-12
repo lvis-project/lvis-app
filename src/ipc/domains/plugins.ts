@@ -1150,8 +1150,13 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // forge a permissive policy and widen the envelope that contains the untrusted
     // app HTML. Per-resource, so one card's declared domains never leak to another.
     // Plugin-served HTML rides the SAME sandbox-proxy + main-computed CSP path.
+    //
+    // Same for `_meta.ui.permissions`: the RESOURCE declares which powerful features it
+    // wants, and main derives BOTH the inner frame's `allow` attribute and the Electron
+    // session grant from it. The renderer never supplies either — a compromised one must
+    // not be able to hand a card the camera.
     const resource = await backend.readUiResource(uri);
-    const proxyUrl = createMcpAppProxySession(serverId, resource.csp);
+    const proxyUrl = createMcpAppProxySession(serverId, resource.csp, resource.permissions);
     return { proxyUrl, html: resource.html } satisfies McpUiResourceBundle;
   });
 
