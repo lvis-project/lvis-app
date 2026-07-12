@@ -4,7 +4,7 @@
 
 ## Title Check
 
-- Expected format: `<type>(<scope>): <summary>` (for example, `feat(marketplace): add user package install flow`).
+- Expected format: `{type}({scope}): {summary}` (for example, `feat(marketplace): add user package install flow`).
 
 ## Scope
 
@@ -41,12 +41,14 @@
 
 ## Cross-Cutting Review Gate
 
+Keep this section before any raw HTML opening tag; place raw HTML later in the PR body.
 Complete only when `cluster-detector` requires independent review. All three
 reviews must cover the current PR HEAD. A new commit, body edit, base change,
 or reopen invalidates a retained label. Each visible row and hidden marker must
 use the same current HEAD SHA and verdict; a `GO` row requires blocking findings to be
-exactly `None`. Reapply `cluster-review-passed` only after replacing all
-placeholders below.
+exactly `None`. The required check accepts attestation only on a fresh
+application of `cluster-review-passed`; any later PR metadata event requires
+removing and reapplying the label. Replace all placeholders below first.
 
 Reviewed HEAD: `<40-char-head-sha>`
 
