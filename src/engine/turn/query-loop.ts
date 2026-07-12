@@ -310,6 +310,47 @@ export async function queryLoop(
         ? Math.min(MAX_TOOL_ROUNDS, Math.floor(requestedMaxRounds))
         : MAX_TOOL_ROUNDS;
 
+    type PendingGuidanceDelivery = {
+      entries: Array<(typeof self.guidanceQueue)[number]>;
+      joined: string;
+      historyMessage: ReturnType<typeof self.history.append> | null;
+      round: number;
+    };
+    let pendingGuidanceDelivery: PendingGuidanceDelivery | null = null;
+
+    const rollbackPendingGuidance = (): void => {
+      const delivery = pendingGuidanceDelivery;
+      if (!delivery) return;
+      pendingGuidanceDelivery = null;
+      if (delivery.historyMessage) {
+        self.history.removeExact(delivery.historyMessage);
+      }
+      // Return the drained entries to the turn queue. runTurn's outer finally
+      // clears the active controller first, then atomically drops this queue via
+      // dropPendingGuidance so producer and renderer dispositions fire once.
+      self.guidanceQueue = [...delivery.entries, ...self.guidanceQueue];
+    };
+
+    const commitPendingGuidance = async (): Promise<void> => {
+      const delivery = pendingGuidanceDelivery;
+      if (!delivery) return;
+      pendingGuidanceDelivery = null;
+      await Promise.allSettled(
+        delivery.entries.map((entry) =>
+          Promise.resolve().then(() => entry.onInjected?.())),
+      );
+      try {
+        callbacks?.onGuidanceInjected?.(delivery.joined);
+      } catch {
+        // Renderer notification failure must not invalidate a committed round.
+      }
+      self.tracer.step("GUIDANCE_INJECTED", {
+        round: delivery.round,
+        len: delivery.joined.length,
+      });
+    };
+
+    try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       // C3(a): hard guard between rounds — if we have already executed
       // `effectiveMaxRounds` assistant turns, stop cleanly and return the
@@ -363,7 +404,12 @@ export async function queryLoop(
       // Do not interrupt an in-flight length-continuation with queued guidance:
       // it would push a user message after the assistant prefill and break the
       // continue_final_message "last message is assistant" precondition.
-      if (round > 0 && self.guidanceQueue.length > 0 && continuationPrefillText === undefined) {
+      if (
+        round > 0
+        && pendingGuidanceDelivery === null
+        && self.guidanceQueue.length > 0
+        && continuationPrefillText === undefined
+      ) {
         // Truncate from the head — preserve the user's MOST RECENT guides
         // since older queued items may have been superseded. Worst case
         // (16 × 8000 chars = 128KB joined) is capped at
@@ -390,10 +436,18 @@ export async function queryLoop(
         self.guidanceQueue = [];
         if (dropped.length > 0) {
           await Promise.allSettled(
-            dropped.map((entry) => entry.onDropped?.("joined-limit")),
+            dropped.map((entry) =>
+              Promise.resolve().then(() => entry.onDropped?.("joined-limit"))),
           );
         }
         const injectedContent = t("be_conversationLoop.guidanceInjectionHeader", { joined });
+        const delivery: PendingGuidanceDelivery = {
+          entries: kept,
+          joined,
+          historyMessage: null,
+          round,
+        };
+        pendingGuidanceDelivery = delivery;
         // Critic round 2 M1: run preflight BEFORE appending the guide so
         // compaction targets the older history and never accidentally
         // summarizes-away the just-injected guide marker. `joined` is
@@ -428,13 +482,11 @@ export async function queryLoop(
             );
           }
         }
-        self.history.append({
+        const historyMessage = self.history.append({
           role: "user",
           content: injectedContent,
         });
-        await Promise.allSettled(kept.map((entry) => entry.onInjected?.()));
-        callbacks?.onGuidanceInjected?.(joined);
-        self.tracer.step("GUIDANCE_INJECTED", { round, len: joined.length });
+        delivery.historyMessage = historyMessage;
       }
 
       const repaired = self.history.repairToolPairInvariant();
@@ -848,6 +900,7 @@ export async function queryLoop(
         textLen: mergedText.length,
         toolCallCount: pendingToolCalls.length,
       });
+      await commitPendingGuidance();
       roundIndex += 1;
       // C3(a): a "round" for cap purposes is any assistant message we
       // committed to history — `end_turn` and `tool_use` both count.
@@ -1211,4 +1264,7 @@ export async function queryLoop(
     // early-exit above: a budget-hit, not a natural end_turn — flag it so the
     // sub-agent runner marks the result incomplete.
     return withServingIdentity({ text: t("be_conversationLoop.toolRoundLimitExceeded"), toolCalls: allToolCalls, usage: turnUsage, stopReason: "round-cap" });
+    } finally {
+      rollbackPendingGuidance();
+    }
   }

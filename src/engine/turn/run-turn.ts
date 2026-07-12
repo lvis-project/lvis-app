@@ -6,6 +6,7 @@
  * token-projection fields it reads/writes live on the ConversationLoop
  * instance (via `self`), so turn_summary.tokensIn is computed exactly as before.
  */
+import { randomUUID } from "node:crypto";
 import type { LoopContext } from "./loop-context.js";
 import type { TurnCallbacks, TurnResult } from "./types.js";
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
@@ -105,6 +106,28 @@ export async function runTurn(
       );
     }
     const turnSignal = ac.signal;
+    let initialGuidanceId: string | null = null;
+    let agentMessageInputId: string | null = null;
+    let retainHostInjectedMessages = false;
+    let turnStateFinalized = false;
+
+    // Cleanup covers every path after the controller becomes observable:
+    // lifecycle hooks, prompt refusal, preflight, queryLoop, and post-turn
+    // processing. Detaching the queue before callbacks makes it idempotent.
+    const finalizeTurnState = async () => {
+      if (turnStateFinalized) return;
+      turnStateFinalized = true;
+      self.currentAbortController = null;
+      self.turnAdditionalDirectories = [];
+      try {
+        self.deps.skillOverlay?.clear(effectiveSessionId);
+      } catch {
+        // Overlay cleanup failure must not strand queued guidance.
+      }
+      await self.dropPendingGuidance("turn-ended", callbacks);
+    };
+
+    try {
 
 
 
@@ -242,7 +265,11 @@ export async function runTurn(
     const importedTrigger = inputOrigin === "plugin-emitted"
       ? parseImportedTriggerEnvelopePayload(turnInput)
       : null;
+    if (inputOrigin === "agent-message") {
+      agentMessageInputId = randomUUID();
+    }
     const userMeta: MessageMeta = {
+      ...(agentMessageInputId ? { hostInjectionId: agentMessageInputId } : {}),
       ...(personaPromptMeta ? { activePersonaPrompt: personaPromptMeta } : {}),
       ...(routeResult.route === "skill"
         ? { displayText: turnInput, routeSkill: { skillId: routeResult.skillId } }
@@ -268,11 +295,13 @@ export async function runTurn(
       ...(Object.keys(userMeta).length > 0 ? { meta: userMeta } : {}),
     });
     if (options?.initialGuidance) {
+      initialGuidanceId = randomUUID();
       self.history.append({
         role: "user",
         content: t("be_conversationLoop.guidanceInjectionHeader", {
           joined: options.initialGuidance,
         }),
+        meta: { hostInjectionId: initialGuidanceId },
       });
     }
     // §4.5.2 step 5 — HISTORY_APPEND
@@ -312,8 +341,7 @@ export async function runTurn(
     // §4.5.2 step 6 — PROMPT_ASSEMBLE
     self.tracer.step("PROMPT_ASSEMBLE", { promptLen: systemPrompt.length, activePlugins: scope.activePluginIds.size });
     let result: Awaited<ReturnType<typeof queryLoop>>;
-    try {
-      // Establish per-session ALS context so Gate 4 (plugin-runtime-delegate)
+    // Establish per-session ALS context so Gate 4 (plugin-runtime-delegate)
       // can consult the CALLING session's on-demand activation set. The context
       // uses effectiveSessionId (respects sessionIdOverride for sub-agents) and
       // propagates through all await chains inside queryLoop, including the
@@ -340,40 +368,14 @@ export async function runTurn(
           },
         ),
       );
-    } finally {
-      // Always clear the controller, even when `queryLoop` throws (provider
-      // error / abort / tool error). Otherwise the loop looks "mid-turn"
-      // forever to anyone consulting `currentAbortController` (e.g.
-      // TriggerExecutor's chat-busy guard), and a single failed chat turn
-      // would permanently block trigger imports.
-      self.currentAbortController = null;
-      // "이번 1회만" out-of-allowed-dir grants live only for the duration
-      // of one user message. Clearing here (queryLoop terminal regardless
-      // of success/error/abort) ensures the next turn re-prompts for the
-      // same path — the user's "1회" intent.
-      self.turnAdditionalDirectories = [];
-      self.deps.skillOverlay?.clear(effectiveSessionId);
-      // Drain any guidance that never reached a round boundary (single-
-      // round turn, or guidance queued after the last round closed). It
-      // cannot be applied to a future turn safely — the next turn's user
-      // intent should not be silently prefixed with stale mid-stream
-      // guidance — so drop and surface to the renderer via
-      // `onGuidanceDropped` (critic MAJOR #3) so the user knows their
-      // direction-adjustment was NOT applied. A `log.warn` alone made the
-      // drop invisible to end users and worse-UX than the old abort-and-
-      // restart flow.
-      if (self.guidanceQueue.length > 0) {
-        const dropped = self.guidanceQueue;
-        const droppedJoined = dropped.map((entry) => entry.text).join("\n\n");
-        log.warn(
-          `runTurn: ${self.guidanceQueue.length} guide utterance(s) queued but never reached a round boundary — dropping`,
-        );
-        self.guidanceQueue = [];
-        await Promise.allSettled(
-          dropped.map((entry) => entry.onDropped?.("turn-ended")),
-        );
-        callbacks?.onGuidanceDropped?.(droppedJoined);
-      }
+    await finalizeTurnState();
+    if (result.stopReason !== "end_turn" && initialGuidanceId) {
+      self.history.removeByHostInjectionId(initialGuidanceId);
+      initialGuidanceId = null;
+    }
+    if (result.stopReason !== "end_turn" && agentMessageInputId) {
+      self.history.removeByHostInjectionId(agentMessageInputId);
+      agentMessageInputId = null;
     }
     // lastTurnScope must reflect any Option C request_plugin expansions so
     // the next turn's keyword-miss fallback keeps those plugins visible.
@@ -677,5 +679,23 @@ export async function runTurn(
       }
     }
 
+    retainHostInjectedMessages = result.stopReason === "end_turn";
     return { ...result, route: routeResult.route };
+    } finally {
+      let removedHostInjectionRows = 0;
+      if (!retainHostInjectedMessages && initialGuidanceId) {
+        removedHostInjectionRows += self.history.removeByHostInjectionId(initialGuidanceId);
+      }
+      if (!retainHostInjectedMessages && agentMessageInputId) {
+        removedHostInjectionRows += self.history.removeByHostInjectionId(agentMessageInputId);
+      }
+      if (removedHostInjectionRows > 0 && !self.deps.disableSessionPersistence) {
+        try {
+          await self.deps.memoryManager.saveSession(self.sessionId, self.history.getMessages());
+        } catch (err) {
+          log.warn("host-injection rollback save failed: %s", err);
+        }
+      }
+      await finalizeTurnState();
+    }
   }

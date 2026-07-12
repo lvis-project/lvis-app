@@ -10,6 +10,12 @@ export interface SubAgentSuspension {
 
 export type SubAgentRunStatus = "running" | "waiting" | "done" | "error" | "interrupted";
 
+/**
+ * Canonical agent_spawn lifecycle payload shared by main, preload, renderer,
+ * and test fixtures. `taskState` is the required A2A projection for every
+ * phase; boundary fixtures must stay typed to this interface so field additions
+ * cannot be silently dropped by `unknown` or record-shaped adapters.
+ */
 export interface AgentSpawnEvent<TEntry = unknown> {
   spawnId: string;
   taskState: A2AProjectedTaskState;

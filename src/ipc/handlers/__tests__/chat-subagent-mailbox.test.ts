@@ -92,7 +92,16 @@ describe("parent sub-agent mailbox turns", () => {
     expect(fixture.acknowledgeParentMailbox).toHaveBeenCalledWith("parent-1", ["message-1"]);
   });
 
-  it.each(["blocked", "interrupted", "context-error", "stream-error"] as const)(
+  it.each([
+    "blocked",
+    "interrupted",
+    "context-error",
+    "stream-error",
+    "max_tokens",
+    "round-cap",
+    "tool_use",
+    undefined,
+  ] as const)(
     "does not acknowledge after a %s turn",
     async (stopReason) => {
       const fixture = makeDeps([mailboxEntry("message-1", "first", "[Sub-Agent: One]")]);

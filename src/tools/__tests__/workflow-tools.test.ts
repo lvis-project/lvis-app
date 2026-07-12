@@ -25,8 +25,8 @@ import {
   createAgentInterruptTool,
   createAgentSpawnTool,
   createAgentStatusTool,
-  type AgentSpawnEvent,
 } from "../agent-spawn.js";
+import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
 import { createSkillLoadTool } from "../skill-load.js";
 import { createSkillListTool } from "../skill-list.js";
 import { createAgentListTool } from "../agent-list.js";
@@ -637,6 +637,98 @@ describe("agent_spawn tool", () => {
     });
     expect(deliverToParent).not.toHaveBeenCalled();
   });
+  it("emits only INPUT_REQUIRED when a foreground diagnostic precedes a budget suspension", async () => {
+    const events: AgentSpawnEvent[] = [];
+    const suspension = {
+      reason: "budget" as const,
+      resumeId: "child-diagnostic-waiting",
+    };
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        spawn: async (_input, callbacks) => {
+          callbacks?.onLinked?.({ childSessionId: suspension.resumeId });
+          callbacks?.onError?.("round cap reached");
+          return {
+            summary: "partial work",
+            toolCallCount: 1,
+            turnCount: 2,
+            childSessionId: suspension.resumeId,
+            entries: [],
+            ok: true,
+            stopReason: "round-cap" as const,
+            suspension,
+            incomplete: true,
+          };
+        },
+      }) as never,
+      emit: (event) => events.push(event),
+    });
+
+    const result = await tool.execute(
+      { title: "diagnostic-waiting", instructions: "work" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(false);
+    const terminalEvents = events.filter(
+      (event) => event.type === "done" || event.type === "error",
+    );
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]).toMatchObject({
+      type: "done",
+      taskState: "TASK_STATE_INPUT_REQUIRED",
+      status: "waiting",
+      suspension,
+    });
+  });
+
+  it("emits only REJECTED when a foreground diagnostic precedes resume exhaustion", async () => {
+    const events: AgentSpawnEvent[] = [];
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        resume: async (_id, _instructions, _title, callbacks) => {
+          callbacks?.onLinked?.({ childSessionId: "child-resume-exhausted" });
+          callbacks?.onError?.("resume exhausted");
+          return {
+            summary: "resume exhausted",
+            error: "resume exhausted",
+            toolCallCount: 0,
+            turnCount: 0,
+            childSessionId: "child-resume-exhausted",
+            entries: [],
+            ok: false,
+            resumeExhausted: true,
+          };
+        },
+      }) as never,
+      emit: (event) => events.push(event),
+    });
+
+    const result = await tool.execute(
+      {
+        title: "resume-exhausted",
+        instructions: "continue",
+        resumeId: "child-resume-exhausted",
+      },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.output)).toMatchObject({
+      error: "resume exhausted",
+      taskState: "TASK_STATE_REJECTED",
+    });
+    const terminalEvents = events.filter(
+      (event) => event.type === "done" || event.type === "error",
+    );
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]).toMatchObject({
+      type: "error",
+      taskState: "TASK_STATE_REJECTED",
+      status: "error",
+      message: "resume exhausted",
+    });
+  });
   it("background mode returns a handle immediately and emits terminal event later", async () => {
     let resolveSpawn!: (value: {
       summary: string;
@@ -656,7 +748,7 @@ describe("agent_spawn tool", () => {
     }>((resolve) => {
       resolveSpawn = resolve;
     });
-    const events: Array<{ type: string; spawnId: string; childSessionId?: string }> = [];
+    const events: AgentSpawnEvent[] = [];
     const deliverToParent = vi.fn(async () => ({
       ok: true as const,
       disposition: "mailbox" as const,
@@ -667,17 +759,12 @@ describe("agent_spawn tool", () => {
         spawn: async (input, callbacks) => {
           expect(input.spawnId).toBeTruthy();
           callbacks?.onLinked?.({ childSessionId: "child-bg" });
+          callbacks?.onActivity?.({ entries: [], toolCallCount: 0 });
           return await spawnPromise;
         },
         deliverToParent,
       }) as never,
-      emit: (event) => {
-        events.push({
-          type: event.type,
-          spawnId: event.spawnId,
-          ...(event.childSessionId ? { childSessionId: event.childSessionId } : {}),
-        });
-      },
+      emit: (event) => events.push(event),
     });
 
     const r = await tool.execute(
@@ -689,9 +776,14 @@ describe("agent_spawn tool", () => {
     const parsed = JSON.parse(r.output);
     expect(parsed.background).toBe(true);
     expect(parsed.status).toBe("running");
+    expect(parsed.taskState).toBe("TASK_STATE_SUBMITTED");
     expect(parsed.spawnId).toBeTruthy();
     expect(parsed.childSessionId).toBe("child-bg");
-    expect(events.map((event) => event.type)).toEqual(["start", "activity"]);
+    expect(events.map((event) => [event.type, event.taskState])).toEqual([
+      ["start", "TASK_STATE_SUBMITTED"],
+      ["activity", "TASK_STATE_SUBMITTED"],
+      ["activity", "TASK_STATE_WORKING"],
+    ]);
 
     resolveSpawn({
       summary: "done later",
@@ -707,6 +799,8 @@ describe("agent_spawn tool", () => {
     }
     expect(events.at(-1)).toMatchObject({
       type: "done",
+      taskState: "TASK_STATE_COMPLETED",
+      status: "done",
       spawnId: parsed.spawnId,
       childSessionId: "child-bg",
     });
@@ -725,6 +819,103 @@ describe("agent_spawn tool", () => {
         }),
       }),
     }));
+  });
+
+  it("terminalizes a linked background rejection as FAILED and delivers it exactly once", async () => {
+    const events: AgentSpawnEvent[] = [];
+    const deliverToParent = vi.fn(async () => ({
+      ok: true as const,
+      disposition: "mailbox" as const,
+      messageId: "failed-message",
+    }));
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        spawn: async (_input, callbacks) => {
+          callbacks?.onLinked?.({ childSessionId: "child-rejected-promise" });
+          callbacks?.onError?.("metadata setup failed");
+          throw new Error("metadata setup failed");
+        },
+        deliverToParent,
+      }) as never,
+      emit: (event) => events.push(event),
+    });
+
+    const handle = await tool.execute(
+      { title: "reject", instructions: "fail during setup", background: true },
+      ctx(),
+    );
+    expect(handle.isError).toBe(false);
+
+    const deadline = Date.now() + 1000;
+    while (deliverToParent.mock.calls.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const terminalEvents = events.filter((event) => event.type === "done" || event.type === "error");
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]).toMatchObject({
+      type: "error",
+      taskState: "TASK_STATE_FAILED",
+      status: "error",
+      message: "metadata setup failed",
+      childSessionId: "child-rejected-promise",
+    });
+    expect(deliverToParent).toHaveBeenCalledTimes(1);
+    expect(deliverToParent).toHaveBeenCalledWith(expect.objectContaining({
+      parentSessionId: "session-x",
+      childSessionId: "child-rejected-promise",
+      message: expect.objectContaining({
+        contextId: "session-x",
+        taskId: "child-rejected-promise",
+        metadata: expect.objectContaining({ taskState: "TASK_STATE_FAILED" }),
+      }),
+    }));
+  });
+
+  it("keeps a successful terminal event final when parent delivery rejects", async () => {
+    const events: AgentSpawnEvent[] = [];
+    const deliverToParent = vi.fn(async () => {
+      throw new Error("delivery unavailable");
+    });
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        spawn: async (_input, callbacks) => {
+          callbacks?.onLinked?.({ childSessionId: "child-delivery-reject" });
+          return {
+            summary: "completed before delivery",
+            toolCallCount: 0,
+            turnCount: 1,
+            childSessionId: "child-delivery-reject",
+            entries: [],
+            ok: true as const,
+          };
+        },
+        deliverToParent,
+      }) as never,
+      emit: (event) => events.push(event),
+    });
+
+    const handle = await tool.execute(
+      { title: "delivery", instructions: "complete", background: true },
+      ctx(),
+    );
+    expect(handle.isError).toBe(false);
+
+    const deadline = Date.now() + 1000;
+    while (deliverToParent.mock.calls.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await Promise.resolve();
+
+    expect(deliverToParent).toHaveBeenCalledTimes(1);
+    const terminalEvents = events.filter((event) => event.type === "done" || event.type === "error");
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]).toMatchObject({
+      type: "done",
+      taskState: "TASK_STATE_COMPLETED",
+      status: "done",
+      childSessionId: "child-delivery-reject",
+    });
   });
 
   it.each([
@@ -782,7 +973,10 @@ describe("agent_spawn tool", () => {
     }));
     const tool = createAgentSpawnTool({
       getRunner: () => ({
-        spawn: async () => spawnResult,
+        spawn: async (_input, callbacks) => {
+          callbacks?.onLinked?.({ childSessionId: spawnResult.childSessionId });
+          return spawnResult;
+        },
         deliverToParent,
       }) as never,
       emit: vi.fn(),
@@ -800,24 +994,20 @@ describe("agent_spawn tool", () => {
     }
     expect(deliverToParent).toHaveBeenCalledTimes(1);
     const delivery = deliverToParent.mock.calls[0]![0];
-    expect(delivery).toMatchObject({
-      parentSessionId: "session-x",
-      childSessionId: "child-state",
-      message: {
-        contextId: "session-x",
-        taskId: "child-state",
-        role: "ROLE_AGENT",
-        metadata: expect.objectContaining({ taskState: expectedState }),
-      },
-    });
+    expect(delivery.parentSessionId).toBe("session-x");
+    expect(delivery.childSessionId).toBe("child-state");
+    expect(delivery.message.contextId).toBe("session-x");
+    expect(delivery.message.taskId).toBe("child-state");
+    expect(delivery.message.role).toBe("ROLE_AGENT");
     if (expectedState === "TASK_STATE_INPUT_REQUIRED") {
-      expect(delivery.message).toMatchObject({
-        metadata: expect.objectContaining({
-          suspension: { reason: "budget", resumeId: "child-state" },
-        }),
-      });
       expect(delivery.message.parts[0]?.text).toContain("Input required");
     }
+    expect(delivery.message.metadata).toMatchObject({
+      taskState: expectedState,
+      ...(expectedState === "TASK_STATE_INPUT_REQUIRED"
+        ? { suspension: { reason: "budget", resumeId: "child-state" } }
+        : {}),
+    });
   });
   it("emits blocked background runs as rejected errors and still pushes the Message", async () => {
     const events: AgentSpawnEvent[] = [];
@@ -828,15 +1018,18 @@ describe("agent_spawn tool", () => {
     }));
     const tool = createAgentSpawnTool({
       getRunner: () => ({
-        spawn: async () => ({
-          summary: "prompt refused",
-          toolCallCount: 0,
-          turnCount: 0,
-          childSessionId: "child-blocked-bg",
-          entries: [],
-          ok: true,
-          stopReason: "blocked" as const,
-        }),
+        spawn: async (_input, callbacks) => {
+          callbacks?.onLinked?.({ childSessionId: "child-blocked-bg" });
+          return {
+            summary: "prompt refused",
+            toolCallCount: 0,
+            turnCount: 0,
+            childSessionId: "child-blocked-bg",
+            entries: [],
+            ok: true,
+            stopReason: "blocked" as const,
+          };
+        },
         deliverToParent,
       }) as never,
       emit: (event) => events.push(event),

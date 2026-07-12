@@ -286,6 +286,33 @@ export class ConversationLoop {
     return "queued";
   }
 
+  /**
+   * Atomically discard guidance that can no longer reach a round boundary.
+   *
+   * The queue is detached before any producer callback runs, which makes this
+   * safe to call from overlapping cleanup paths without delivering duplicate
+   * dispositions. `runTurn` clears its active controller before calling this
+   * helper, so no new entry can join the detached batch while cleanup awaits.
+   */
+  async dropPendingGuidance(
+    reason: GuidanceDropReason,
+    callbacks?: Pick<TurnCallbacks, "onGuidanceDropped">,
+  ): Promise<void> {
+    if (this.guidanceQueue.length === 0) return;
+
+    const dropped = this.guidanceQueue;
+    this.guidanceQueue = [];
+    const droppedJoined = dropped.map((entry) => entry.text).join("\n\n");
+    await Promise.allSettled(
+      dropped.map((entry) => Promise.resolve().then(() => entry.onDropped?.(reason))),
+    );
+    try {
+      callbacks?.onGuidanceDropped?.(droppedJoined);
+    } catch {
+      // Renderer notification failure must never mask the turn's real result.
+    }
+  }
+
   /** True when a turn is currently in flight. Renderer-facing visibility. */
   hasActiveTurn(): boolean {
     return this.currentAbortController !== null;

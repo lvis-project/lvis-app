@@ -429,10 +429,26 @@ export function registerChatHandlers(deps: IpcDeps): void {
   const wakeAwareRunner = deps.getSubAgentRunner?.() as WakeAwareRunner | undefined;
   if (typeof wakeAwareRunner?.setParentWakeHandler === "function") {
     wakeAwareRunner.setParentWakeHandler(async (parentSessionId) => {
+      // A child result can arrive after the last round boundary but before the
+      // stream or session lease releases. Capture that one lease and await it
+      // once. The bus invokes this handler from a detached side promise, so a
+      // synchronous onDropped callback never waits on its own active turn.
+      // There is deliberately no timer, polling, or parking loop.
+      const leaseAtRequest = activeStreamTurn ?? activeSessionMutation;
+      if (leaseAtRequest !== null) {
+        try {
+          await leaseAtRequest;
+        } catch {
+          // Failed/interrupted work still releases its lease. The durable
+          // mailbox remains eligible for the same one-time revalidation.
+        }
+      }
+
       if (
         conversationLoop.getSessionKind() !== "main"
         || conversationLoop.getSessionId() !== parentSessionId
         || activeStreamTurn !== null
+        || activeSessionMutation !== null
         || conversationLoop.hasActiveTurn()
       ) {
         return;
@@ -466,8 +482,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
           },
         );
         if (conversationLoop.getSessionId() !== parentSessionId) return result;
-        await markMainActiveAfterTurn(deps, mailboxTurn.initialGuidance);
         await acknowledgeParentMailboxAfterTurn(deps, mailboxTurn, result);
+        await markMainActiveAfterTurn(deps, mailboxTurn.initialGuidance);
         return result;
       });
     });

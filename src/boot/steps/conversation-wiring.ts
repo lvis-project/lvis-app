@@ -228,9 +228,15 @@ export function wireConversation(ctx: BootContext): void {
     mailbox: subAgentMessageMailbox,
     settingsService,
     auditLogger: bootAuditLogger,
-    resolveChildAddress: (parentSessionId, childSessionId) =>
-      subAgentRunnerRef.fn?.resolveSubAgentAddress(parentSessionId, childSessionId)
+    resolveChildAddress: (parentSessionId, childSessionId, messageId) =>
+      subAgentRunnerRef.fn?.resolveSubAgentAddress(parentSessionId, childSessionId, messageId)
       ?? Promise.resolve(null),
+    releaseEphemeralChildAddress: (parentSessionId, childSessionId, messageId) =>
+      subAgentRunnerRef.fn?.releaseEphemeralParentDelivery(
+        parentSessionId,
+        childSessionId,
+        messageId,
+      ),
   });
 
   // Workflow system tools — late bindings now that ConversationLoop exists.

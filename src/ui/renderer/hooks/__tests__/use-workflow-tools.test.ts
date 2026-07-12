@@ -22,11 +22,13 @@ describe("useWorkflowTools", () => {
       onSpawn?.({
         spawnId: "spawn-waiting",
         type: "start",
+        taskState: "TASK_STATE_SUBMITTED",
         title: "Budgeted agent",
       });
       onSpawn?.({
         spawnId: "spawn-waiting",
         type: "done",
+        taskState: "TASK_STATE_INPUT_REQUIRED",
         status: "waiting",
         summary: "partial work",
         suspension: { reason: "budget", resumeId: "child-waiting" },
