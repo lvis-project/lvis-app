@@ -159,9 +159,10 @@ describe("mcpToolToPluginTool — v6 reverse projection from _meta", () => {
     }
   });
 
-  it("transitional: reads pathFields from the LEGACY xyz.lvis/pathFields wire key (compat until SDK+plugins migrate)", () => {
-    // An out-of-process plugin / SDK that has not yet migrated still emits the
-    // reverse-DNS key on the wire; the reverse projection must still surface it.
+  it("IGNORES the legacy xyz.lvis/pathFields wire key — the dual-read was removed (fail-closed)", () => {
+    // The `_meta` namespace rename removed the transitional legacy read. A wire
+    // carrying ONLY the legacy key yields NO pathFields — the security-bearing
+    // extraction is not silently sourced from the old key (that would be fail-open).
     const legacy = mcpToolToPluginTool(
       PLUGIN_ID,
       {
@@ -171,11 +172,11 @@ describe("mcpToolToPluginTool — v6 reverse projection from _meta", () => {
       },
       invoke,
     );
-    expect(legacy.pathFields).toEqual(["path"]);
+    expect(legacy.pathFields).toBeUndefined();
   });
 
-  it("prefers the new lvisai/pathFields over the legacy key when both are present", () => {
-    const both = mcpToolToPluginTool(
+  it("reads pathFields from the new lvisai/pathFields wire key (and ignores a stray legacy key)", () => {
+    const tool = mcpToolToPluginTool(
       PLUGIN_ID,
       {
         name: "both_read",
@@ -188,6 +189,6 @@ describe("mcpToolToPluginTool — v6 reverse projection from _meta", () => {
       },
       invoke,
     );
-    expect(both.pathFields).toEqual(["new"]);
+    expect(tool.pathFields).toEqual(["new"]);
   });
 });

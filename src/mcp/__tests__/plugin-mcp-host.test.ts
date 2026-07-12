@@ -108,11 +108,10 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
     ).not.toHaveProperty("csp");
   });
 
-  it("reads the LEGACY xyz.lvis/rawResult so an unmigrated out-of-process plugin keeps its structured return", async () => {
-    // The transitional dual-read's out-of-process arm: a plugin still emitting the
-    // legacy boxed-return key must keep surfacing metadata.rawResult unchanged. This
-    // is the branch that had no coverage — deleting it silently would drop a plugin's
-    // structured value to undefined, invisibly.
+  it("IGNORES the legacy xyz.lvis/rawResult — the dual-read was removed alongside the _meta rename", async () => {
+    // rawResult is a DATA channel (not a security field), but the legacy read was
+    // removed in the same sweep for consistency: a plugin emitting ONLY the legacy
+    // key now surfaces NO metadata.rawResult (it must emit the new `lvisai/rawResult`).
     const delegate: PluginToolDelegate = vi.fn(async () => ({
       content: [{ type: "text", text: "ok" }],
       _meta: { "xyz.lvis/rawResult": { note: "structured" } },
@@ -122,10 +121,10 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
     await host.start();
 
     const result = await registry.findByName("notes_read")!.execute({ path: "/a.md" }, {} as never);
-    expect((result.metadata as { rawResult?: unknown }).rawResult).toEqual({ note: "structured" });
+    expect(result.metadata).toBeUndefined();
   });
 
-  it("prefers the new lvisai/rawResult over the legacy key when both are present", async () => {
+  it("reads the new lvisai/rawResult (and ignores a stray legacy key)", async () => {
     const delegate: PluginToolDelegate = vi.fn(async () => ({
       content: [{ type: "text", text: "ok" }],
       _meta: {

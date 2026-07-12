@@ -195,9 +195,8 @@ export interface Tool {
   /**
    * Surface visibility + the one LVIS-proprietary key. Recognized keys: the
    * standard `ui` visibility block, and the SOLE remaining LVIS-proprietary key
-   * `lvisai/pathFields`. Any other key is rejected by the manifest schema.
-   * transitional: the legacy reverse-DNS `xyz.lvis/pathFields` is still accepted
-   * until published plugin manifests + the SDK are migrated (then remove). @optional
+   * `lvisai/pathFields`. Any other key — including the removed legacy reverse-DNS
+   * `xyz.lvis/pathFields` — is rejected by the manifest schema (fail-closed). @optional
    */
   _meta?: {
     /** SEP-1865 surface visibility. @optional */
@@ -209,8 +208,6 @@ export interface Tool {
      * never bypasses one. @optional
      */
     "lvisai/pathFields"?: string[];
-    /** transitional: legacy reverse-DNS alias of `lvisai/pathFields` (remove post-migration). @optional */
-    "xyz.lvis/pathFields"?: string[];
   };
 }
 

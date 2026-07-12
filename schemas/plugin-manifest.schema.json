@@ -800,16 +800,6 @@
                 "minLength": 1,
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
               }
-            },
-            "xyz.lvis/pathFields": {
-              "$comment": "transitional: legacy reverse-DNS alias of lvisai/pathFields, still accepted until published manifests + SDK are migrated (then remove).",
-              "type": "array",
-              "uniqueItems": true,
-              "items": {
-                "type": "string",
-                "minLength": 1,
-                "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
-              }
             }
           }
         }

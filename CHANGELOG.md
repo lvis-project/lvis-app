@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Plugin contract — the transitional `xyz.lvis/*` `_meta` legacy read is removed (fail-closed + Doctor-repaired)
+
+- **Removed the legacy dual-read AND the schema property (fail-closed, never fail-open).** The `_meta` vendor-namespace rename (`xyz.lvis/* → lvisai/*`, #1601) shipped a transitional dual-read + `observeLegacyMetaKey` telemetry so the removal could be timed by evidence. Both are now deleted: the three read fallbacks (`plugin-server-projection.ts` forward `xyz.lvis/pathFields`, `plugin-tool-from-mcp.ts` reverse `xyz.lvis/pathFields`, `plugin-mcp-host.ts` `xyz.lvis/rawResult`), the `legacy-meta-telemetry.ts` module, and the schema's `xyz.lvis/pathFields` property. Because tool `_meta` is `additionalProperties:false`, dropping the property makes an installed pre-rename manifest **fail schema validation** — it is rejected loudly, NOT silently accepted with its security-bearing `pathFields` ignored (that would be fail-open: the permission gate would stop seeing the plugin's filesystem effects). `xyz.lvis/pathFields` drives host-side filesystem-path extraction for the permission gate, so the terminal state must be broken-until-repaired, never silently-ungated.
+- **Recovery is update-first via the existing Plugin Doctor / managed bootstrap.** A legacy-manifest rejection classifies as the reinstall-fixable `manifest-validation-error` kind. The only plugin that ever used the legacy key — `local-indexer` — is `installPolicy:"admin"` (managed), so the boot-time managed bootstrap (`ensureManagedInstalled` → `restartAll`) proactively auto-updates it to the migrated marketplace version (v0.5.24, `lvisai/pathFields`) within the same boot, with no user click and no broken window. The host install path is a clean artifact replace, so "update in place" and "uninstall + reinstall" are the same operation; the sole terminal fallback (when a plugin cannot be auto-migrated) is the surfaced Doctor remove-recommendation on the failed plugin card.
+- **`local-indexer` was republished as v0.5.24 first** (with `lvisai/pathFields`), verified published to the marketplace, so the Doctor/managed-bootstrap reinstall target exists before this removal ships.
+- **Companion PRs required** (orchestrator): the `@lvis/plugin-sdk` mirror + the marketplace schema still carry the legacy alias and must drop it separately.
+
 ## v0.5.2 — 2026-07-12
 
 Completes the MCP Apps program and renames the vendor `_meta` namespace. A patch release — the wire contract is unchanged and the rename is transitionally dual-read, so installed plugins keep working. It also republishes the host so plugins pinned at `requires.minAppVersion` `0.5.2` (ms-graph / ep / git) become installable again.
