@@ -8,9 +8,9 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+  # PR-label DELETE returned 403 with issues:write alone in the live transition.
+  pull-requests: write
   statuses: write
-  issues: write
 
 concurrency:
   group: cluster-detector-${{ github.repository }}-${{ github.event.pull_request.number }}
