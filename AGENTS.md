@@ -19,7 +19,6 @@ state durable constraints here and put detailed designs in their owning docs.
 - `resources/AGENTS.md` is packaged runtime guidance for the in-app assistant.
   It is not the developer or coding-agent contract and does not override this
   file.
-- `docs/development/claude-directives-legacy.md` is historical reference only.
 
 ## Autonomy and communication
 
