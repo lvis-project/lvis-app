@@ -35,14 +35,15 @@ export function evaluateClusterReviewAttestation(pullRequest) {
   if (reviewedHead.toLowerCase() !== headSha.toLowerCase()) return rejected("stale-reviewed-head");
 
   const markerPattern = new RegExp(
-    `<!-- cluster-review:(architect|critic|security):(${HEAD_PATTERN}):(GO|NO-GO) -->`,
-    "g",
+    `^<!-- cluster-review:(architect|critic|security):(${HEAD_PATTERN}):(GO|NO-GO) -->$`,
   );
-  const markers = [...body.matchAll(markerPattern)].map((match) => ({
-    role: match[1],
-    sha: match[2],
-    verdict: match[3],
-  }));
+  const markerLines = body.split("\n").filter((line) => line.includes("cluster-review:"));
+  const markers = [];
+  for (const line of markerLines) {
+    const match = line.match(markerPattern);
+    if (!match) return rejected("invalid-marker");
+    markers.push({ role: match[1], sha: match[2], verdict: match[3] });
+  }
 
   for (const role of REVIEW_ROLES) {
     const roleMarkers = markers.filter((marker) => marker.role === role);
