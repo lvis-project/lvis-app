@@ -29,10 +29,10 @@
 
 ## Validation
 
-- [ ] `bun run typecheck`
-- [ ] `bun run test`
-- [ ] `bun run build`
-- [ ] Targeted UI/E2E checks:
+- [ ] Targeted checks run while iterating (commands/results below):
+- [ ] Code-bearing change: pre-push full gate passed once; Markdown-only change: policy/static pre-push passed:
+- [ ] Targeted changed-flow Playwright check, when UI behavior changed:
+- [ ] Full E2E is delegated to CI/release unless explicitly required locally:
 - [ ] Installer or packaged-app smoke, when packaging behavior changed:
 
 ## UI Evidence
