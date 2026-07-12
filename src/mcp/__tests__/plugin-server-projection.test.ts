@@ -103,9 +103,14 @@ describe("plugin-server-projection — normalized Tool[] → MCP tools/list (#88
     }
   });
 
-  it("transitional: reads a legacy xyz.lvis/pathFields manifest but emits ONLY the new lvisai/pathFields on the wire", () => {
-    // A published manifest that has not yet migrated still declares the reverse-DNS
-    // key; the forward projection must read it, but the WIRE carries only the new key.
+  it("no longer reads a legacy xyz.lvis/pathFields manifest — the dual-read is removed (fail-closed)", () => {
+    // The `_meta` namespace rename removed the transitional legacy read. A tool that
+    // (illegally, post-rename) carries ONLY the legacy key contributes NO
+    // pathFields to the wire — the forward projection reads only `lvisai/pathFields`.
+    // In production such a manifest never reaches this projection: the schema
+    // (`_meta` additionalProperties:false) rejects it at load, so it fails-closed and
+    // the Doctor auto-repairs it — it is never silently accepted with pathFields
+    // dropped (that would be fail-open).
     const legacyManifest: PluginManifest = {
       id: "com.example.legacy",
       name: "Legacy",
@@ -117,12 +122,14 @@ describe("plugin-server-projection — normalized Tool[] → MCP tools/list (#88
           name: "legacy_export",
           description: "Export to a path",
           inputSchema: { type: "object", properties: { path: { type: "string" } } },
-          _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
+          // Cast: the legacy key is no longer part of the `_meta` type; this
+          // fixture forces it on to prove the reader ignores it.
+          _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] } as never,
         },
       ],
     };
     const tool = manifestToolsToMcpTools(legacyManifest)[0];
-    expect(tool._meta["lvisai/pathFields"]).toEqual(["path"]);
+    expect(tool._meta["lvisai/pathFields"]).toBeUndefined();
     expect((tool._meta as Record<string, unknown>)["xyz.lvis/pathFields"]).toBeUndefined();
   });
 
