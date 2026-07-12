@@ -21,9 +21,11 @@ export class ConversationHistory {
     this.maxMessages = normalizeMaxMessages(options?.maxMessages);
   }
 
-  append(message: GenericMessage): void {
-    this.messages.push(stampCreatedAt(applyToolResultCap(message)));
+  append(message: GenericMessage): GenericMessage {
+    const stored = stampCreatedAt(applyToolResultCap(message));
+    this.messages.push(stored);
     this.trim();
+    return stored;
   }
 
   /**
@@ -64,6 +66,32 @@ export class ConversationHistory {
    */
   getMessages(): GenericMessage[] {
     return [...this.messages];
+  }
+
+  /**
+   * Remove the exact object returned by append().
+   *
+   * Used for rollbackable host-injected messages: subsequent assistant or
+   * system notices remain intact, while an unconsumed injection is removed
+   * without truncating unrelated history.
+   */
+  removeExact(message: GenericMessage): boolean {
+    const index = this.messages.indexOf(message);
+    if (index < 0) return false;
+    this.messages.splice(index, 1);
+    return true;
+  }
+
+  /**
+   * Remove every surviving clone of one host-injected row. Auto-compaction may
+   * replace message object identities, so rollback cannot rely on removeExact.
+   */
+  removeByHostInjectionId(hostInjectionId: string): number {
+    const before = this.messages.length;
+    this.messages = this.messages.filter(
+      (message) => message.meta?.hostInjectionId !== hostInjectionId,
+    );
+    return before - this.messages.length;
   }
 
   repairToolPairInvariant(): { removedMessages: number; removedToolCalls: number } {

@@ -33,16 +33,21 @@ import {
   SubAgentRunner,
   resolveSubAgentModel,
   buildModePreamble,
+  type SubAgentSpawnResult,
 } from "../subagent-runner.js";
 import { MODEL_COMPLEXITY_MAP } from "../../shared/model-complexity-map.js";
 import { LLM_VENDOR_MODEL_OPTIONS } from "../../shared/llm-vendor-defaults.js";
 import { AGENT_MODE_MAP } from "../../shared/agent-mode-map.js";
 import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import { createAgentSpawnTool } from "../../tools/agent-spawn.js";
+import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { buildPluginToolsForTest } from "../../plugins/__tests__/plugin-tool-test-fixture.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 import type { PluginManifest } from "../../plugins/types.js";
+import { A2A_ROLE_AGENT, A2ATaskState, type A2AMessage } from "../../shared/a2a.js";
+import { A2ASubAgentMessageBus } from "../a2a-subagent-message-bus.js";
+import { SubAgentMessageMailbox } from "../subagent-message-mailbox.js";
 
 // ─── Test scaffolding ─────────────────────────────────
 
@@ -80,6 +85,29 @@ function fakeSubAgentMemoryManager() {
     listSessions: () => [],
     load: () => undefined,
   } as unknown as ConstructorParameters<typeof SubAgentRunner>[0]["subAgentMemoryManager"];
+}
+
+function createInMemoryMailboxNamespace() {
+  let stored: unknown;
+  let rejectNextWrite = false;
+  return {
+    handle: {
+      dir: "memory",
+      readJson: async (_name: string, fallback: unknown) =>
+        structuredClone(stored === undefined ? fallback : stored),
+      writeJson: async (_name: string, value: unknown) => {
+        if (rejectNextWrite) {
+          rejectNextWrite = false;
+          throw new Error("mailbox-write-failed");
+        }
+        stored = structuredClone(value);
+      },
+      childDir: async (name: string) => name,
+    } as never,
+    rejectNextWrite: () => {
+      rejectNextWrite = true;
+    },
+  };
 }
 
 function buildLoopDeps(toolRegistry: ToolRegistry) {
@@ -248,13 +276,97 @@ describe("SubAgentRunner — maxRounds bound", () => {
 
 // ─── 2) sourceTools allowlist ─────────────────────────
 
-describe("SubAgentRunner — projected terminal status", () => {
-  it("projects a structurally returned blocked turn as rejected/error", async () => {
+describe("SubAgentRunner — cross-agent DLP boundary", () => {
+  it("masks a child success across returned, tracked, and activity callback surfaces", async () => {
+    const secret = "ghp_" + "s".repeat(24);
+    const provider = new ScriptedProvider([[
+      { type: "text_delta", text: "completed with " + secret },
+      { type: "message_complete", stopReason: "end_turn" },
+    ]]);
     const toolRegistry = new ToolRegistry();
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
       toolRegistry,
       subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+    const hasProviderSpy = vi.spyOn(
+      ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+      "hasProvider",
+    ).mockReturnValue(true);
+    const refreshProviderSpy = vi.spyOn(
+      ConversationLoop.prototype as unknown as { refreshProvider: () => void },
+      "refreshProvider",
+    ).mockImplementation(function (this: ConversationLoop) {
+      (this as { provider: LLMProvider | null }).provider = provider;
+    });
+    const onActivity = vi.fn();
+
+    try {
+      const result = await runner.spawn({
+        title: "dlp-success",
+        instructions: "finish",
+        originSessionId: "parent-session",
+      }, { onActivity });
+      const snapshot = runner.getRunStatus(result.childSessionId, "parent-session");
+
+      for (const surface of [result, snapshot, onActivity.mock.calls]) {
+        const serialized = JSON.stringify(surface);
+        expect(serialized).not.toContain(secret);
+        expect(serialized).toContain("[REDACTED:TOKEN]");
+      }
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+    }
+  });
+
+  it("masks a child failure across returned, tracked, and error callback surfaces", async () => {
+    const secret = "ghp_" + "e".repeat(24);
+    const toolRegistry = new ToolRegistry();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+    const hasProviderSpy = vi.spyOn(
+      ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+      "hasProvider",
+    ).mockReturnValue(true);
+    const runTurnSpy = vi.spyOn(ConversationLoop.prototype, "runTurn")
+      .mockRejectedValue(new Error("provider exposed " + secret));
+    const onError = vi.fn();
+
+    try {
+      const result = await runner.spawn({
+        title: "dlp-error",
+        instructions: "fail",
+        originSessionId: "parent-session",
+      }, { onError });
+      const snapshot = runner.getRunStatus(result.childSessionId, "parent-session");
+
+      expect(result.ok).toBe(false);
+      for (const surface of [result, snapshot, onError.mock.calls]) {
+        const serialized = JSON.stringify(surface);
+        expect(serialized).not.toContain(secret);
+        expect(serialized).toContain("[REDACTED:TOKEN]");
+      }
+    } finally {
+      hasProviderSpy.mockRestore();
+      runTurnSpy.mockRestore();
+    }
+  });
+});
+describe("SubAgentRunner — projected terminal status", () => {
+  it("projects a structurally returned blocked turn as rejected/error", async () => {
+    const toolRegistry = new ToolRegistry();
+    const saveSessionMetadata = vi.fn(async () => undefined);
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: {
+        ...fakeSubAgentMemoryManager(),
+        saveSessionMetadata,
+      },
     });
     const hasProviderSpy = vi
       .spyOn(
@@ -285,7 +397,8 @@ describe("SubAgentRunner — projected terminal status", () => {
       });
 
       expect(result).toMatchObject({
-        ok: true,
+        ok: false,
+        error: "prompt refused",
         stopReason: "blocked",
         summary: "prompt refused",
       });
@@ -294,10 +407,398 @@ describe("SubAgentRunner — projected terminal status", () => {
         taskState: "TASK_STATE_REJECTED",
         error: "prompt refused",
       });
+      expect(saveSessionMetadata).toHaveBeenCalledTimes(2);
+      expect(saveSessionMetadata.mock.calls[1]?.[1]).toMatchObject({
+        cumulativeRounds: 0,
+        subAgentTaskState: "TASK_STATE_REJECTED",
+        subAgentSuspensionReason: undefined,
+      });
     } finally {
       hasProviderSpy.mockRestore();
       refreshProviderSpy.mockRestore();
       runTurnSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    "stream-error",
+    "context-error",
+    "max_tokens",
+    "tool_use",
+  ] as const)(
+    "projects a non-completing %s turn as failed/error and commits zero-round metadata",
+    async (stopReason) => {
+      const toolRegistry = new ToolRegistry();
+      const saveSessionMetadata = vi.fn(async () => undefined);
+      const runner = new SubAgentRunner({
+        parentDeps: buildLoopDeps(toolRegistry),
+        toolRegistry,
+        subAgentMemoryManager: {
+          ...fakeSubAgentMemoryManager(),
+          saveSessionMetadata,
+        },
+      });
+      const hasProviderSpy = vi
+        .spyOn(
+          ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+          "hasProvider",
+        )
+        .mockReturnValue(true);
+      const refreshProviderSpy = vi
+        .spyOn(
+          ConversationLoop.prototype as unknown as { refreshProvider: () => void },
+          "refreshProvider",
+        )
+        .mockImplementation(() => undefined);
+      const runTurnSpy = vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue({
+        text: "",
+        toolCalls: [],
+        route: "default",
+        stopReason,
+      });
+
+      try {
+        const result = await runner.spawn({
+          title: `non-completing-${stopReason}`,
+          instructions: "attempt work",
+          originSessionId: "parent-session",
+        });
+
+        expect(result).toMatchObject({
+          ok: false,
+          error: `sub-agent run stopped with ${stopReason}`,
+          stopReason,
+          turnCount: 0,
+        });
+        expect(runner.getRunStatus(result.childSessionId, "parent-session")).toMatchObject({
+          status: "error",
+          taskState: "TASK_STATE_FAILED",
+          error: `sub-agent run stopped with ${stopReason}`,
+        });
+        expect(saveSessionMetadata).toHaveBeenCalledTimes(2);
+        expect(saveSessionMetadata.mock.calls[1]?.[1]).toMatchObject({
+          cumulativeRounds: 0,
+          subAgentTaskState: "TASK_STATE_FAILED",
+          subAgentSuspensionReason: undefined,
+        });
+      } finally {
+        hasProviderSpy.mockRestore();
+        refreshProviderSpy.mockRestore();
+        runTurnSpy.mockRestore();
+      }
+    },
+  );
+  it("keeps cancellation terminal when the pending initial metadata save rejects", async () => {
+    let rejectMetadata!: (error: Error) => void;
+    const saveSessionMetadata = vi.fn(
+      () => new Promise<void>((_resolve, reject) => {
+        rejectMetadata = reject;
+      }),
+    );
+    const deliverToParent = vi.fn(async () => ({
+      ok: true as const,
+      disposition: "mailbox" as const,
+      messageId: "canceled-message",
+    }));
+    const toolRegistry = new ToolRegistry();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: {
+        ...fakeSubAgentMemoryManager(),
+        saveSessionMetadata,
+      },
+      messageBus: { deliverToParent } as never,
+    });
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(true);
+    const runTurnSpy = vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue({
+      text: "must not run",
+      toolCalls: [],
+      route: "default",
+      stopReason: "end_turn",
+    });
+    let capturedResult: SubAgentSpawnResult | undefined;
+    const originalSpawn = runner.spawn.bind(runner);
+    const spawnSpy = vi.spyOn(runner, "spawn").mockImplementation(async (input, callbacks) => {
+      capturedResult = await originalSpawn(input, callbacks);
+      return capturedResult;
+    });
+    const events: AgentSpawnEvent[] = [];
+    const tool = createAgentSpawnTool({
+      getRunner: () => runner,
+      emit: (event) => events.push(event),
+    });
+
+    try {
+      const handleResult = await tool.execute(
+        { title: "cancel-before-working", instructions: "do not start", background: true },
+        {
+          cwd: process.cwd(),
+          extraAllowedDirectories: [],
+          metadata: {
+            sessionId: "parent-session",
+            spawnDepth: 0,
+            supportsA2AParentDelivery: true,
+          },
+        },
+      );
+      const handle = JSON.parse(handleResult.output);
+      expect(handle.childSessionId).toBeTruthy();
+      expect(runner.getRunStatus(handle.spawnId, "parent-session")).toMatchObject({
+        taskState: "TASK_STATE_SUBMITTED",
+        status: "running",
+      });
+
+      expect(runner.interruptRun(handle.spawnId, "parent-session")).toMatchObject({
+        ok: true,
+        run: { taskState: "TASK_STATE_CANCELED", status: "interrupted" },
+      });
+      rejectMetadata(new Error("initial metadata write failed"));
+
+      const deadline = Date.now() + 1000;
+      while (deliverToParent.mock.calls.length === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+
+      expect(capturedResult).toMatchObject({
+        childSessionId: handle.childSessionId,
+        ok: false,
+        stopReason: "interrupted",
+        error: "sub-agent run interrupted",
+      });
+      expect(runTurnSpy).not.toHaveBeenCalled();
+      const terminalEvents = events.filter((event) => event.type === "done" || event.type === "error");
+      expect(terminalEvents).toHaveLength(1);
+      expect(terminalEvents[0]).toMatchObject({
+        type: "done",
+        taskState: "TASK_STATE_CANCELED",
+        status: "interrupted",
+        childSessionId: handle.childSessionId,
+      });
+      expect(events.some((event) => event.type === "error")).toBe(false);
+      expect(deliverToParent).toHaveBeenCalledTimes(1);
+      expect(deliverToParent.mock.calls[0]![0]).toMatchObject({
+        parentSessionId: "parent-session",
+        childSessionId: handle.childSessionId,
+        message: expect.objectContaining({
+          taskId: handle.childSessionId,
+          metadata: expect.objectContaining({ taskState: "TASK_STATE_CANCELED" }),
+        }),
+      });
+      expect(runner.getRunStatus(handle.spawnId, "parent-session")).toMatchObject({
+        taskState: "TASK_STATE_CANCELED",
+        status: "interrupted",
+        stopReason: "interrupted",
+      });
+      expect(runner.interruptRun(handle.spawnId, "parent-session")).toMatchObject({
+        ok: false,
+        run: { taskState: "TASK_STATE_CANCELED", status: "interrupted" },
+      });
+    } finally {
+      hasProviderSpy.mockRestore();
+      runTurnSpy.mockRestore();
+      spawnSpy.mockRestore();
+    }
+  });
+
+  it("terminalizes a successful turn as FAILED when its final metadata save rejects", async () => {
+    let saveCount = 0;
+    let rejectFinalMetadata!: (error: Error) => void;
+    const saveSessionMetadata = vi.fn(() => {
+      saveCount += 1;
+      if (saveCount === 1) return Promise.resolve();
+      return new Promise<void>((_resolve, reject) => {
+        rejectFinalMetadata = reject;
+      });
+    });
+    const deliverToParent = vi.fn(async () => ({
+      ok: true as const,
+      disposition: "mailbox" as const,
+      messageId: "failed-final-save-message",
+    }));
+    const toolRegistry = new ToolRegistry();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: {
+        ...fakeSubAgentMemoryManager(),
+        saveSessionMetadata,
+      },
+      messageBus: { deliverToParent } as never,
+    });
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(true);
+    const runTurnSpy = vi.spyOn(ConversationLoop.prototype, "runTurn").mockImplementation(
+      async (_prompt, callbacks) => {
+        callbacks?.onAssistantRound?.({ thought: "", text: "completed but not durable" });
+        return {
+          text: "completed but not durable",
+          toolCalls: [],
+          route: "default",
+          stopReason: "end_turn",
+        };
+      },
+    );
+    let capturedResult: SubAgentSpawnResult | undefined;
+    const originalSpawn = runner.spawn.bind(runner);
+    const spawnSpy = vi.spyOn(runner, "spawn").mockImplementation(async (input, callbacks) => {
+      capturedResult = await originalSpawn(input, callbacks);
+      return capturedResult;
+    });
+    const events: AgentSpawnEvent[] = [];
+    const tool = createAgentSpawnTool({
+      getRunner: () => runner,
+      emit: (event) => events.push(event),
+    });
+
+    try {
+      const handleResult = await tool.execute(
+        { title: "final-save", instructions: "complete", background: true },
+        {
+          cwd: process.cwd(),
+          extraAllowedDirectories: [],
+          metadata: {
+            sessionId: "parent-session",
+            spawnDepth: 0,
+            supportsA2AParentDelivery: true,
+          },
+        },
+      );
+      const handle = JSON.parse(handleResult.output);
+      const saveDeadline = Date.now() + 1000;
+      while (saveSessionMetadata.mock.calls.length < 2 && Date.now() < saveDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(saveSessionMetadata).toHaveBeenCalledTimes(2);
+      expect(runner.getRunStatus(handle.spawnId, "parent-session")).toMatchObject({
+        taskState: "TASK_STATE_WORKING",
+        status: "running",
+      });
+      expect(runner.interruptRun(handle.spawnId, "parent-session")).toMatchObject({
+        ok: false,
+        run: { taskState: "TASK_STATE_WORKING", status: "running" },
+      });
+
+      rejectFinalMetadata(new Error("final metadata write failed"));
+      const deliveryDeadline = Date.now() + 1000;
+      while (deliverToParent.mock.calls.length === 0 && Date.now() < deliveryDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+
+      expect(capturedResult).toMatchObject({
+        childSessionId: handle.childSessionId,
+        ok: false,
+        error: "final metadata write failed",
+      });
+      const terminalEvents = events.filter((event) => event.type === "done" || event.type === "error");
+      expect(terminalEvents).toHaveLength(1);
+      expect(terminalEvents[0]).toMatchObject({
+        type: "error",
+        taskState: "TASK_STATE_FAILED",
+        status: "error",
+        message: "final metadata write failed",
+        childSessionId: handle.childSessionId,
+      });
+      expect(deliverToParent).toHaveBeenCalledTimes(1);
+      expect(deliverToParent.mock.calls[0]![0]).toMatchObject({
+        parentSessionId: "parent-session",
+        childSessionId: handle.childSessionId,
+        message: expect.objectContaining({
+          taskId: handle.childSessionId,
+          metadata: expect.objectContaining({ taskState: "TASK_STATE_FAILED" }),
+        }),
+      });
+      expect(runner.getRunStatus(handle.spawnId, "parent-session")).toMatchObject({
+        taskState: "TASK_STATE_FAILED",
+        status: "error",
+        error: "final metadata write failed",
+      });
+      expect(runner.interruptRun(handle.spawnId, "parent-session")).toMatchObject({
+        ok: false,
+        run: { taskState: "TASK_STATE_FAILED", status: "error" },
+      });
+    } finally {
+      hasProviderSpy.mockRestore();
+      runTurnSpy.mockRestore();
+      spawnSpy.mockRestore();
+    }
+  });
+  it("keeps a pre-loop setup failure pollable and delivers one linked background failure", async () => {
+    const toolRegistry = new ToolRegistry();
+    const deliverToParent = vi.fn(async () => ({
+      ok: true as const,
+      disposition: "mailbox" as const,
+      messageId: "setup-failure-message",
+    }));
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+      messageBus: { deliverToParent } as never,
+    });
+    const setupSpy = vi.spyOn(toolRegistry, "createScopedView").mockImplementation(() => {
+      throw new Error("child setup failed");
+    });
+    const events: AgentSpawnEvent[] = [];
+    const tool = createAgentSpawnTool({
+      getRunner: () => runner,
+      emit: (event) => events.push(event),
+    });
+
+    try {
+      const handleResult = await tool.execute(
+        { title: "setup-failure", instructions: "start", background: true },
+        {
+          cwd: process.cwd(),
+          extraAllowedDirectories: [],
+          metadata: {
+            sessionId: "parent-session",
+            spawnDepth: 0,
+            supportsA2AParentDelivery: true,
+          },
+        },
+      );
+      const handle = JSON.parse(handleResult.output);
+      expect(handleResult.isError).toBe(false);
+      expect(handle.childSessionId).toBeTruthy();
+      expect(handle).toMatchObject({ status: "error", taskState: "TASK_STATE_FAILED" });
+      expect(runner.getRunStatus(handle.spawnId, "parent-session")).toMatchObject({
+        childSessionId: handle.childSessionId,
+        status: "error",
+        taskState: "TASK_STATE_FAILED",
+        error: "child setup failed",
+      });
+
+      await vi.waitFor(() => expect(deliverToParent).toHaveBeenCalledTimes(1));
+      const terminalEvents = events.filter(
+        (event) => event.type === "done" || event.type === "error",
+      );
+      expect(terminalEvents).toHaveLength(1);
+      expect(terminalEvents[0]).toMatchObject({
+        type: "error",
+        taskState: "TASK_STATE_FAILED",
+        childSessionId: handle.childSessionId,
+        message: "child setup failed",
+      });
+      expect(deliverToParent.mock.calls[0]?.[0]).toMatchObject({
+        parentSessionId: "parent-session",
+        childSessionId: handle.childSessionId,
+        message: expect.objectContaining({
+          taskId: handle.childSessionId,
+          metadata: expect.objectContaining({ taskState: "TASK_STATE_FAILED" }),
+        }),
+      });
+    } finally {
+      setupSpy.mockRestore();
     }
   });
 });
@@ -955,6 +1456,8 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
         budgetResumeCount: 0,
         questionAnswerCount: 0,
         cumulativeRounds: 0,
+        subAgentTaskState: "TASK_STATE_FAILED",
+        subAgentSuspensionReason: undefined,
       });
       await expect(
         runner.resolveSubAgentAddress("origin-missing", result.childSessionId),
@@ -1136,5 +1639,146 @@ describe("SubAgentRunner A2A bus facade", () => {
       runner.acknowledgeParentMailbox("parent-session", ["message-1"]),
     ).resolves.toBe(0);
     expect(() => runner.setParentWakeHandler(null)).not.toThrow();
+  });
+
+  it("one-shots an initial-metadata failure through the real bus and durable mailbox", async () => {
+    const parentSessionId = "parent-session";
+    const namespace = createInMemoryMailboxNamespace();
+    const mailbox = new SubAgentMessageMailbox(namespace.handle);
+    const audit = vi.fn();
+    const toolRegistry = new ToolRegistry();
+    const subAgentMemoryManager = {
+      ...fakeSubAgentMemoryManager(),
+      saveSessionMetadata: vi.fn(async () => {
+        throw new Error("initial metadata write failed");
+      }),
+      loadSessionMetadata: vi.fn(() => null),
+      hasSessionMetadataFile: vi.fn(() => false),
+    } as unknown as ConstructorParameters<typeof SubAgentRunner>[0]["subAgentMemoryManager"];
+    let runner!: SubAgentRunner;
+    const bus = new A2ASubAgentMessageBus({
+      parentLoop: {
+        getSessionId: () => "different-active-session",
+        hasActiveTurn: () => false,
+      } as unknown as ConversationLoop,
+      mailbox,
+      settingsService: {
+        get: () => ({ subAgentAutonomousWake: false }),
+      } as never,
+      auditLogger: { log: audit } as never,
+      resolveChildAddress: (parentId, childId, messageId) =>
+        runner.resolveSubAgentAddress(parentId, childId, messageId),
+      releaseEphemeralChildAddress: (parentId, childId, messageId) =>
+        runner.releaseEphemeralParentDelivery(parentId, childId, messageId),
+    });
+    runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager,
+      messageBus: bus,
+    });
+    const events: AgentSpawnEvent[] = [];
+    const tool = createAgentSpawnTool({
+      getRunner: () => runner,
+      emit: (event) => events.push(event),
+    });
+
+    const handleResult = await tool.execute(
+      { title: "metadata-failure", instructions: "start", background: true },
+      {
+        cwd: process.cwd(),
+        extraAllowedDirectories: [],
+        metadata: {
+          sessionId: parentSessionId,
+          spawnDepth: 0,
+          supportsA2AParentDelivery: true,
+        },
+      },
+    );
+    const handle = JSON.parse(handleResult.output) as {
+      spawnId: string;
+      childSessionId: string;
+    };
+    expect(handleResult.isError).toBe(false);
+    expect(handle.childSessionId).toBeTruthy();
+
+    let persisted = await runner.peekParentMailbox(parentSessionId);
+    const deadline = Date.now() + 2_000;
+    while (persisted.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      persisted = await runner.peekParentMailbox(parentSessionId);
+    }
+    expect(persisted).toHaveLength(1);
+    const entry = persisted[0]!;
+    expect(entry).toMatchObject({
+      parentSessionId,
+      childSessionId: handle.childSessionId,
+      childTitle: "metadata-failure",
+      message: {
+        contextId: parentSessionId,
+        taskId: handle.childSessionId,
+        metadata: { taskState: A2ATaskState.FAILED },
+      },
+    });
+    expect(events.filter((event) => event.type === "done" || event.type === "error"))
+      .toHaveLength(1);
+    expect(events.find((event) => event.type === "error")).toMatchObject({
+      taskState: A2ATaskState.FAILED,
+      childSessionId: handle.childSessionId,
+    });
+
+    await expect(runner.resolveSubAgentAddress(
+      parentSessionId,
+      handle.childSessionId,
+      entry.message.messageId,
+    )).resolves.toEqual({
+      parentSessionId,
+      childSessionId: handle.childSessionId,
+      childTitle: "metadata-failure",
+      ephemeralMessageId: entry.message.messageId,
+    });
+
+    const makeReplay = (contextId: string, messageId: string): A2AMessage => ({
+      messageId,
+      contextId,
+      taskId: handle.childSessionId,
+      role: A2A_ROLE_AGENT,
+      parts: [{ text: "forged terminal replay" }],
+      metadata: { taskState: A2ATaskState.FAILED },
+    });
+    await expect(runner.deliverToParent({
+      parentSessionId: "other-parent",
+      childSessionId: handle.childSessionId,
+      message: makeReplay("other-parent", "wrong-parent-message"),
+    })).resolves.toMatchObject({ ok: false, reason: "unknown-child" });
+    await expect(runner.deliverToParent({
+      parentSessionId,
+      childSessionId: handle.childSessionId,
+      message: makeReplay(parentSessionId, "wrong-message-id"),
+    })).resolves.toMatchObject({ ok: false, reason: "unknown-child" });
+
+    namespace.rejectNextWrite();
+    await expect(runner.acknowledgeParentMailbox(parentSessionId, [entry.id]))
+      .rejects.toThrow("mailbox-write-failed");
+    await expect(runner.resolveSubAgentAddress(
+      parentSessionId,
+      handle.childSessionId,
+      entry.message.messageId,
+    )).resolves.toMatchObject({ ephemeralMessageId: entry.message.messageId });
+    await expect(runner.peekParentMailbox(parentSessionId)).resolves.toHaveLength(1);
+
+    await expect(runner.acknowledgeParentMailbox(parentSessionId, [entry.id]))
+      .resolves.toBe(1);
+    await expect(runner.resolveSubAgentAddress(
+      parentSessionId,
+      handle.childSessionId,
+      entry.message.messageId,
+    )).resolves.toBeNull();
+    await expect(runner.deliverToParent({
+      parentSessionId,
+      childSessionId: handle.childSessionId,
+      message: makeReplay(parentSessionId, "post-ack-message-id"),
+    })).resolves.toMatchObject({ ok: false, reason: "unknown-child" });
+    await expect(runner.peekParentMailbox(parentSessionId)).resolves.toEqual([]);
   });
 });
