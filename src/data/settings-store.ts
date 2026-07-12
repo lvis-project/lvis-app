@@ -716,23 +716,28 @@ const DEFAULT_SETTINGS: AppSettings = {
     // category. Shadow mode reconciliation completed before this flip; users
     // can still opt out in Settings.
     hostClassifiesRisk: true,
-    // OS tool sandbox — STAGED rollout (macOS-first). Default ON on `darwin`
-    // (the live-verified-active platform) and OFF on `linux`/`win32` until the
-    // in-flight C/D-series sandbox QA is green; Linux/Windows users can still
-
-    // Linux/Windows default flips to `true` once the C/D-series QA passes —
-    // change this single expression to `true` then. (Computed from
-    // `process.platform` at default-construction; `process.platform` is stable
-    // per-process so this is a one-time, single-expression evaluation.)
+    // OS tool sandbox — STAGED rollout. Default ON on `darwin` (the
+    // live-verified-active platform) ONLY. `win32` + `linux` stay OFF (opt-in).
+    //
+    // Windows install-time provisioning (NSIS customInstall, issue #1608) makes
+    // opt-in work out of the box, BUT default-on win32 is DEFERRED: Windows
+    // srt-win is only PARTIALLY confined (filesystem + network, no PROCESS
+    // isolation), and the shell-containment gate (`isActiveSandboxShellContained`,
+    // used by bash.ts / powershell.ts) requires full fs+process confinement — so
+    // with the sandbox ACTIVE, bash/powershell refuse to run. Flip win32 to `true`
+    // only after the shell tools handle the Windows partial case (run unsandboxed
+    // + pre-exec ask, not error). `linux` stays OFF until C/D-series QA is green.
+    //
+    // Computed from `process.platform` at default-construction; stable per-process.
     //
     // Safe to stage independently of `hostClassifiesRisk` (which stays ON on all
     // platforms): on a non-sandbox (or non-filesystem-confined) platform the
     // foreground read-relaxation is coupled to the active sandbox FILESYSTEM-
     // CONTAINING the host (ToolExecutor.sandboxFsContainedProvider), so it falls
-    // back to the pre-exec ask there. When ON, boot activates ASRT
-    // if the platform sandbox can run, else the default/settings path DEGRADES
-    // gracefully (loud warning, non-bricking); the explicit `LVIS_SANDBOX_ENABLED=1`
-    // env opt-in stays fail-closed. See boot.ts + boot/steps/sandbox-gate.ts.
+    // back to the pre-exec ask there. When ON, boot activates ASRT if the platform
+    // sandbox can run, else the default/settings path DEGRADES gracefully (loud
+    // warning, non-bricking); the explicit `LVIS_SANDBOX_ENABLED=1` env opt-in
+    // stays fail-closed. See boot.ts + boot/steps/sandbox-gate.ts.
     osToolSandbox: process.platform === "darwin",
   },
 };
