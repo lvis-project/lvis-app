@@ -912,9 +912,9 @@ describe("PermissionsTab — handleWindowsInstall error-shape robustness", () =>
     const installBtn = screen.getByTestId("os-sandbox-windows-consent");
     expect(installBtn).toBeTruthy();
 
-    // Click "Install now" (i18n key osSandboxWindowsInstallButton → "지금 설치") — triggers the error-shape branch.
+    // Click "Re-provision" (i18n key osSandboxWindowsInstallButton → "재설정") — triggers the error-shape branch.
     await act(async () => {
-      fireEvent.click(screen.getByText("지금 설치"));
+      fireEvent.click(screen.getByText("재설정"));
     });
 
     // osToolSandbox must not be reverted to false; the user opted in and the
@@ -939,7 +939,7 @@ describe("PermissionsTab — handleWindowsInstall error-shape robustness", () =>
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByText("지금 설치"));
+      fireEvent.click(screen.getByText("재설정"));
     });
 
     expect(updateSettings).not.toHaveBeenCalledWith({ features: { osToolSandbox: false } });

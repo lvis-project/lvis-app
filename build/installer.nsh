@@ -16,9 +16,98 @@
 ;     디렉토리 하위 .lvis 가 잔여로 남음 — 완전 제거되도록 수정". 즉 *default 완전
 ;     제거* 가 원래 의도. 단 *되돌리기 불가* 손실이라 [아니오] 선택 시 보존 path 도 제공.
 
+; ─────────────────────────────────────────────────────────────────────────────
+; Resolve the packaged srt-win.exe (ASRT Windows OS-sandbox backend) under
+; $INSTDIR into the caller-supplied register. Empty string when neither arch is
+; present. electron-after-pack (scripts/electron-after-pack.cjs) keeps at least
+; the packed arch's vendor dir, so try x64 then arm64 and use whichever exists —
+; this works regardless of which arch was packed. Relative jumps (+2/+3) count
+; NSIS instructions and mirror the IfFileExists/StrCpy pattern already used in
+; customRemoveFiles below.
+!macro resolveSrtWinPath _out
+  StrCpy ${_out} ""
+  IfFileExists "$INSTDIR\resources\app.asar.unpacked\node_modules\@anthropic-ai\sandbox-runtime\vendor\srt-win\x64\srt-win.exe" 0 +2
+    StrCpy ${_out} "$INSTDIR\resources\app.asar.unpacked\node_modules\@anthropic-ai\sandbox-runtime\vendor\srt-win\x64\srt-win.exe"
+  StrCmp ${_out} "" 0 +3
+  IfFileExists "$INSTDIR\resources\app.asar.unpacked\node_modules\@anthropic-ai\sandbox-runtime\vendor\srt-win\arm64\srt-win.exe" 0 +2
+    StrCpy ${_out} "$INSTDIR\resources\app.asar.unpacked\node_modules\@anthropic-ai\sandbox-runtime\vendor\srt-win\arm64\srt-win.exe"
+!macroend
+
+; ─────────────────────────────────────────────────────────────────────────────
+; ASRT (OS execution sandbox) — provision the Windows srt-win backend at
+; install time so the sandbox is ready at first launch (issue #1608). Runs after
+; installApplicationFiles (electron-builder installSection.nsh inserts
+; customInstall last), so srt-win.exe is present.
+;
+; A bundled srt-win.exe is NOT the same as a provisioned sandbox: provisioning
+; creates a hidden `srt-sandbox` Windows user + user-SID-keyed WFP network-filter
+; rules + filesystem ACLs, which needs a one-time admin elevation. Doing it here
+; makes the runtime Settings panel a repair-only fallback instead of the primary
+; "Install now" path.
+;
+; ⚠️ ELEVATION ASSUMPTION / VALIDATION UNKNOWN — the owner MUST confirm on a real
+; Windows install run:
+;   - srt-win.exe SELF-ELEVATES (its own single UAC). Invoked from an
+;     already-elevated installer it should detect admin and proceed WITHOUT a
+;     second UAC. BUT this app's NSIS target currently ships oneClick:true +
+;     perMachine:false (package.json build.nsis) — a PER-USER, NON-elevated
+;     installer. So srt-win WILL raise its own UAC here. Net UX: one UAC during
+;     install instead of a confusing runtime button + UAC. A truly UAC-free
+;     install-time provision would require flipping the target to
+;     perMachine:true (Program Files, all-users) — a separate installer-posture
+;     decision, deliberately NOT made here.
+;   - We do NOT pass any unverified "skip elevation" flag.
+;
+; NON-FATAL in ALL cases — provisioning failure must NEVER Abort the app install
+; (matches the existing non-bricking sandbox posture: win32-not-ready does not
+; hard-throw; the runtime repair panel is the fallback).
+!macro customInstall
+  Push $0
+  Push $R0
+
+  !insertmacro resolveSrtWinPath $R0
+  ${if} $R0 == ""
+    DetailPrint "LVIS: srt-win.exe not found under $INSTDIR — skipping OS sandbox provisioning (runtime repair panel remains available)."
+    Goto lvis_srtwin_install_done
+  ${endif}
+
+  DetailPrint "LVIS: provisioning the Windows OS sandbox (srt-win install)…"
+  ; --proxy-port-range MUST equal ASRT's DEFAULT_WINDOWS_PROXY_PORT_RANGE
+  ; ([60080, 60089]): the WFP rule stamped here must cover exactly the range the
+  ; srt-win egress proxy binds at runtime, or all egress hard-fails. A vitest
+  ; drift guard (src/permissions/__tests__/installer-nsh-proxy-port-drift.test.ts)
+  ; pins this literal against ASRT's real export so an upstream range change
+  ; fails CI instead of silently desyncing the two paths.
+  nsExec::ExecToLog '"$R0" install --proxy-port-range 60080-60089'
+  Pop $0
+
+  ${if} $0 == 0
+    DetailPrint "LVIS: OS sandbox provisioned (srt-sandbox user + WFP rules + FS ACLs)."
+  ${elseif} $0 == 13
+    ; Already provisioned with a DIFFERENT config. Do NOT auto-pass --force — a
+    ; differing port range / sandbox-user is the owner's call. Treat as
+    ; already-provisioned (success-ish) and just log for the audit trail.
+    DetailPrint "LVIS: OS sandbox already provisioned with a different config (exit 13) — left as-is (no --force). Re-provision from Settings → 권한 if needed."
+  ${elseif} $0 == 10
+    DetailPrint "LVIS: OS sandbox provisioning cancelled at the UAC prompt (exit 10). Provision later from Settings → 권한."
+  ${elseif} $0 == 12
+    DetailPrint "LVIS: OS sandbox WFP filter install failed (exit 12). Repair later from Settings → 권한."
+  ${elseif} $0 == 14
+    DetailPrint "LVIS: OS sandbox user provisioning failed (exit 14). Repair later from Settings → 권한."
+  ${else}
+    DetailPrint "LVIS: OS sandbox provisioning did not complete (exit $0). Repair later from Settings → 권한."
+  ${endif}
+
+  lvis_srtwin_install_done:
+  Pop $R0
+  Pop $0
+!macroend
+
 !macro customUnInstall
   Push $R0
   Push $R1
+  Push $R2
+  Push $R3
 
   ; electron-builder invokes the old uninstaller with /KEEP_APP_DATA and
   ; --updated during upgrades. Preserve user state on that path; manual
@@ -40,6 +129,27 @@
     Goto lvis_skip_userdata
   ${endif}
 
+  ; ── ASRT OS sandbox teardown (genuine uninstall only) ──
+  ; Remove the machine-level srt-sandbox user + user-SID-keyed WFP rules that
+  ; customInstall provisioned. Placed AFTER the upgrade guards above so an
+  ; upgrade (isUpdated / KEEP_APP_DATA / --updated) does NOT tear the sandbox
+  ; down, and BEFORE customRemoveFiles deletes $INSTDIR (electron-builder
+  ; uninstaller.nsh inserts customUnInstall first) so srt-win.exe is still
+  ; present. Deliberately BEFORE the user-data MessageBox: removing the
+  ; system-level provisioning is orthogonal to whether the user keeps their chat
+  ; data. Non-fatal + idempotent ({cancelled:true} on UAC dismiss).
+  !insertmacro resolveSrtWinPath $R2
+  ${if} $R2 != ""
+    DetailPrint "LVIS: removing the Windows OS sandbox (srt-win uninstall)…"
+    nsExec::ExecToLog '"$R2" uninstall'
+    Pop $R3
+    ${if} $R3 == 0
+      DetailPrint "LVIS: OS sandbox removed (srt-sandbox user + WFP rules)."
+    ${else}
+      DetailPrint "LVIS: OS sandbox removal returned exit $R3 (non-fatal; srt-win uninstall is idempotent)."
+    ${endif}
+  ${endif}
+
   MessageBox MB_YESNO|MB_ICONQUESTION \
     "LVIS 사용자 데이터를 함께 삭제하시겠습니까?$\n$\n[예]: 모든 채팅 기록, 설정, 메모리, plugin 데이터, 데모 활성 상태가 영구 삭제됩니다.$\n[아니오]: 사용자 데이터는 보존됩니다 — 같은 사용자가 LVIS 를 재설치하면 이어서 사용할 수 있습니다." \
     /SD IDYES IDNO lvis_skip_userdata
@@ -53,6 +163,8 @@
   RMDir /r "$LOCALAPPDATA\LVIS"
 
   lvis_skip_userdata:
+  Pop $R3
+  Pop $R2
   Pop $R1
   Pop $R0
 !macroend
