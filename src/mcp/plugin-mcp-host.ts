@@ -30,6 +30,7 @@ import { PluginMcpServer, type PluginToolDelegate } from "./plugin-mcp-server.js
 import { mcpToolToPluginTool, type DiscoveredMcpTool } from "./plugin-tool-from-mcp.js";
 import { lintToolInputSchema } from "../plugins/tool-schema-lint.js";
 import { createLogger } from "../lib/logger.js";
+import { observeLegacyMetaKey } from "./legacy-meta-telemetry.js";
 import type { Tool } from "../tools/base.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { PluginManifest } from "../plugins/types.js";
@@ -251,6 +252,7 @@ export class PluginMcpHost {
     if (meta && Object.prototype.hasOwnProperty.call(meta, RAW_RESULT_META)) {
       rawResult = { value: meta[RAW_RESULT_META] };
     } else if (meta && Object.prototype.hasOwnProperty.call(meta, LEGACY_RAW_RESULT_META)) {
+      observeLegacyMetaKey(this.pluginId, "rawResult");
       rawResult = { value: meta[LEGACY_RAW_RESULT_META] };
     } else {
       rawResult = undefined;
