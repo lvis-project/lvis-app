@@ -1,28 +1,41 @@
-name: Cluster Review Label Invalidator
+name: Cluster Review Transition Bridge
 
 on:
   pull_request_target:
-    types: [synchronize, edited, reopened]
+    branches: [main]
+    # Keep normal invalidation active while PR #1603 crosses the trusted
+    # pull_request -> pull_request_target policy boundary.
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled]
 
-permissions:
-  contents: read
-  pull-requests: read
-  issues: write
+permissions: {}
 
 concurrency:
-  group: cluster-review-label-invalidator-${{ github.repository }}-${{ github.event.pull_request.number }}
+  group: cluster-review-transition-${{ github.repository }}-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
   invalidate:
     name: Invalidate Retained Cluster Review Label
     if: >-
-      github.event.action != 'edited' ||
-      contains(toJSON(github.event.changes), '"body":') ||
-      contains(toJSON(github.event.changes), '"base":')
+      github.event.pull_request.number != 1603 &&
+      (
+        github.event.action == 'synchronize' ||
+        github.event.action == 'reopened' ||
+        (
+          github.event.action == 'edited' &&
+          (
+            contains(toJSON(github.event.changes), '"body":') ||
+            contains(toJSON(github.event.changes), '"base":')
+          )
+        )
+      )
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
     runs-on: ubuntu-latest
     steps:
-      # Security boundary: this trusted-base workflow never checks out or runs
+      # Security boundary: this trusted-base job never checks out or runs
       # pull-request content. It mutates only the fixed review label.
       - name: Remove retained label
         env:
@@ -36,4 +49,239 @@ jobs:
           if [ "$LABEL_COUNT" -gt 0 ]; then
             gh api --method DELETE \
               "repos/${REPO}/issues/${PR_NUMBER}/labels/cluster-review-passed"
+          fi
+
+  transition-policy:
+    name: Trusted Cluster Policy Transition
+    if: >-
+      github.event.pull_request.number == 1603 &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/gpt56-instruction-cleanup'
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+      issues: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish pending cluster status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+          STATUS_CONTEXT: Sensitive Area Cluster Check
+        run: |
+          set -euo pipefail
+          if ! [[ "$HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Invalid event pull request head SHA"
+            exit 1
+          fi
+          gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -f state=pending \
+            -f context="${STATUS_CONTEXT}" \
+            -f description="Sensitive area cluster policy evaluation started"
+
+      - name: Invalidate retained cluster review label
+        if: >-
+          github.event.action == 'edited' ||
+          github.event.action == 'synchronize' ||
+          github.event.action == 'reopened'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          LABEL_COUNT=$(gh api "repos/${REPO}/issues/${PR_NUMBER}" \
+            --jq '[.labels[].name | select(. == "cluster-review-passed")] | length')
+          if [ "$LABEL_COUNT" -gt 0 ]; then
+            gh api --method DELETE \
+              "repos/${REPO}/issues/${PR_NUMBER}/labels/cluster-review-passed"
+          fi
+
+      - name: Capture live pull request snapshot
+        id: pr-snapshot
+        env:
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          SNAPSHOT="${RUNNER_TEMP}/cluster-review-pr.json"
+          gh api "repos/${REPO}/pulls/${PR_NUMBER}" > "$SNAPSHOT"
+
+          LIVE_HEAD_SHA=$(jq -er '.head.sha' "$SNAPSHOT")
+          LIVE_BASE_SHA=$(jq -er '.base.sha' "$SNAPSHOT")
+          if ! [[ "$LIVE_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Invalid live pull request head SHA"
+            exit 1
+          fi
+          if ! [[ "$LIVE_BASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Invalid live pull request base SHA"
+            exit 1
+          fi
+          if [ "$LIVE_HEAD_SHA" != "$EVENT_HEAD_SHA" ]; then
+            echo "::error::Live pull request head changed after the workflow event"
+            exit 1
+          fi
+
+          SNAPSHOT_DIGEST=$(jq -cS \
+            '{
+              number,
+              head: .head.sha,
+              base: .base.sha,
+              body: (.body // ""),
+              labels: ([.labels[].name] | sort),
+              state,
+              updated_at,
+              changed_files,
+              commits
+            }' \
+            "$SNAPSHOT" | sha256sum | cut -d' ' -f1)
+
+          echo "path=${SNAPSHOT}" >> "$GITHUB_OUTPUT"
+          echo "digest=${SNAPSHOT_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${LIVE_HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "base_sha=${LIVE_BASE_SHA}" >> "$GITHUB_OUTPUT"
+
+      # Run policy only from the trusted live base commit. Pull-request content
+      # is inspected through read-only GitHub API data and is never executed.
+      - name: Checkout trusted cluster policy
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 1
+          path: .cluster-policy
+          persist-credentials: false
+          ref: ${{ steps.pr-snapshot.outputs.base_sha }}
+
+      - name: Verify trusted cluster policy checkout
+        env:
+          EXPECTED_BASE_SHA: ${{ steps.pr-snapshot.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+          CHECKED_OUT_SHA=$(git -C .cluster-policy rev-parse HEAD)
+          if [ "$CHECKED_OUT_SHA" != "$EXPECTED_BASE_SHA" ]; then
+            echo "::error::Trusted cluster policy checkout does not match the live base SHA"
+            exit 1
+          fi
+
+      - name: Check sensitive area changes and cluster window
+        id: cluster-check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_SNAPSHOT: ${{ steps.pr-snapshot.outputs.path }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          CLUSTER_THRESHOLD=3
+          WINDOW_DAYS=14
+          SINCE_DATE=$(date -d "${WINDOW_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ)
+
+          RESULT=$(node .cluster-policy/scripts/check-cluster-scope.mjs \
+            --snapshot "$PR_SNAPSHOT" \
+            --repo "$REPO" \
+            --since "$SINCE_DATE" \
+            --threshold "$CLUSTER_THRESHOLD")
+
+          SENSITIVE_HIT=$(printf '%s' "$RESULT" | jq -er '.sensitive')
+          VIOLATION=$(printf '%s' "$RESULT" | jq -er '.violation')
+          VIOLATION_REASON=$(printf '%s' "$RESULT" | jq -er '.reason')
+
+          echo "sensitive_hit=${SENSITIVE_HIT}" >> "$GITHUB_OUTPUT"
+          echo "violation=${VIOLATION}" >> "$GITHUB_OUTPUT"
+          echo "violation_reason=${VIOLATION_REASON}" >> "$GITHUB_OUTPUT"
+
+      - name: Check current cluster review attestation
+        id: cluster-attestation
+        env:
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          PR_SNAPSHOT: ${{ steps.pr-snapshot.outputs.path }}
+        run: >-
+          node .cluster-policy/scripts/check-cluster-review-attestation.mjs
+          "$PR_SNAPSHOT" "$GITHUB_OUTPUT" "$GITHUB_EVENT_PATH"
+
+      - name: Enforce transition cluster review attestation
+        if: steps.cluster-attestation.outputs.attested != 'true'
+        run: |
+          echo "::error::Cluster policy transition requires current-head cluster review"
+          exit 1
+
+      - name: Finalize cluster policy status
+        if: always()
+        env:
+          ATTESTED: ${{ steps.cluster-attestation.outputs.attested }}
+          EXPECTED_DIGEST: ${{ steps.pr-snapshot.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PRIOR_JOB_STATUS: ${{ job.status }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          STATUS_CONTEXT: Sensitive Area Cluster Check
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: |
+          set -uo pipefail
+          STATUS_STATE=failure
+          STATUS_DESCRIPTION="Sensitive area cluster policy failed"
+          FINALIZER_FAILED=0
+
+          if ! [[ "$HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Invalid event pull request head SHA"
+            FINALIZER_FAILED=1
+          elif [ "$PRIOR_JOB_STATUS" != "success" ]; then
+            echo "::error::Cluster policy evaluation failed before finalization"
+            FINALIZER_FAILED=1
+          else
+            FINAL_SNAPSHOT="${RUNNER_TEMP}/cluster-review-pr-final.json"
+            FINAL_OUTPUT="${RUNNER_TEMP}/cluster-review-final-output"
+            if ! gh api "repos/${REPO}/pulls/${PR_NUMBER}" > "$FINAL_SNAPSHOT"; then
+              echo "::error::Unable to refresh pull request state before final status"
+              FINALIZER_FAILED=1
+            elif ! FINAL_DIGEST=$(jq -cS \
+              '{
+                number,
+                head: .head.sha,
+                base: .base.sha,
+                body: (.body // ""),
+                labels: ([.labels[].name] | sort),
+                state,
+                updated_at,
+                changed_files,
+                commits
+              }' \
+              "$FINAL_SNAPSHOT" | sha256sum | cut -d' ' -f1); then
+              echo "::error::Unable to digest final pull request state"
+              FINALIZER_FAILED=1
+            elif [ "$FINAL_DIGEST" != "$EXPECTED_DIGEST" ]; then
+              echo "::error::Pull request state changed during cluster review evaluation"
+              FINALIZER_FAILED=1
+            elif [ "$ATTESTED" = "true" ]; then
+              if ! node .cluster-policy/scripts/check-cluster-review-attestation.mjs \
+                "$FINAL_SNAPSHOT" "$FINAL_OUTPUT" "$GITHUB_EVENT_PATH"; then
+                echo "::error::Unable to revalidate cluster review attestation"
+                FINALIZER_FAILED=1
+              elif ! grep -Fxq "attested=true" "$FINAL_OUTPUT"; then
+                echo "::error::Cluster review attestation changed before completion"
+                FINALIZER_FAILED=1
+              else
+                STATUS_STATE=success
+                STATUS_DESCRIPTION="Sensitive area cluster policy passed"
+              fi
+            else
+              echo "::error::Current-head cluster review attestation is required for transition"
+              FINALIZER_FAILED=1
+            fi
+          fi
+
+          if ! gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -f state="${STATUS_STATE}" \
+            -f context="${STATUS_CONTEXT}" \
+            -f description="${STATUS_DESCRIPTION}"; then
+            echo "::error::Unable to publish final cluster policy status"
+            exit 1
+          fi
+
+          if [ "$FINALIZER_FAILED" -ne 0 ] || [ "$STATUS_STATE" != "success" ]; then
+            exit 1
           fi
