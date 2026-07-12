@@ -115,13 +115,16 @@ export function buildMcpAppAllowAttr(permissions?: McpUiResourcePermissions): st
  *
  * `mediaKinds` disambiguates the camera/microphone collision. Electron reports both as a
  * single `media` permission and names the actual kind(s) only in `details.mediaTypes`
- * (request) / `details.mediaType` (check). When kinds are given for a kind-collapsed
- * permission, EVERY requested kind must map to a declared feature — so a card that
- * declared only the microphone cannot open the camera. (Measured necessity: for a
- * same-origin inner frame the `allow` attribute does NOT enforce this, so it must be
- * enforced here.) When no kind is given, the decision falls back to the coarse
- * permission-string match; the strict per-kind check runs in the request handler, which
- * is the authoritative grant path for `getUserMedia`.
+ * (request) / `details.mediaType` (check). For the kind-collapsed `media` permission the
+ * decision is FAIL-CLOSED on the kind: a request/check whose kind is indeterminate
+ * (no resolvable `video`/`audio` — e.g. `mediaTypes` arrived empty or a check reported
+ * `'unknown'`) is DENIED. It does NOT fall back to a coarse permission-string match,
+ * because that fallback was fail-OPEN: a card that declared only the microphone could be
+ * granted `media` for a CAMERA request that carried no kind. When kinds ARE given, EVERY
+ * requested kind must map to a declared feature — so a mic-only card cannot open the
+ * camera. (Measured necessity: for a same-origin inner frame the `allow` attribute does
+ * NOT enforce this, so it must be enforced here.) A feature Electron already names
+ * uniquely and that has NO kind (geolocation) is unaffected: a declared match is the grant.
  *
  * @param permissions the RESOURCE's declaration. `undefined` ⇒ deny everything.
  * @param permission Electron's permission string.
@@ -137,8 +140,12 @@ export function isElectronPermissionGranted(
   );
   if (matching.length === 0) return false;
   const kindAware = matching.some((feature) => feature.electronMediaKind !== undefined);
-  if (kindAware && mediaKinds && mediaKinds.length > 0) {
-    // Fail-closed: grant only if EVERY requested kind was declared.
+  if (kindAware) {
+    // Fail-closed for the kind-collapsed `media` permission. An indeterminate kind (none
+    // resolvable) is DENIED — never a coarse-match grant, which would let a mic-only card
+    // answer a kindless camera request. When kinds are present, grant only if EVERY
+    // requested kind was declared.
+    if (!mediaKinds || mediaKinds.length === 0) return false;
     return mediaKinds.every((kind) =>
       matching.some((feature) => feature.electronMediaKind === kind),
     );

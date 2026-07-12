@@ -169,6 +169,37 @@ describe("mcp-app-protocol — isMcpAppPermissionGranted (the Electron permissio
   });
 });
 
+describe("mcp-app-protocol — session lifetime = card mount lifetime (LRU cannot revoke a live card)", () => {
+  // Regression guard: the proxy session is now a long-lived permission AUTHORITY consulted
+  // for the card's whole life, so a tight FIFO cap could FIFO-evict a still-mounted card's
+  // grant after enough newer mints — the exact mechanism the `revoked` e2e uses on purpose.
+  // The authoritative reclaim is dispose-on-unmount; the cap is only a leak backstop set far
+  // above any plausible live-card count, so eviction never fires on a live card in practice.
+  it("a live (undisposed) session survives well beyond the old 64 cap of subsequent mints", () => {
+    // A long-lived camera card, minted first.
+    const liveUrl = createMcpAppProxySession("srv-live", undefined, { camera: {} });
+    expect(isMcpAppPermissionGranted(liveUrl, "media", ["video"])).toBe(true);
+
+    // A busy chat mints many more cards AFTER it — far more than the old 64 bound.
+    for (let i = 0; i < 200; i++) {
+      createMcpAppProxySession(`srv-churn-${i}`, undefined, { microphone: {} });
+    }
+
+    // The live card's grant is intact — it was NOT FIFO-evicted despite being the oldest.
+    expect(isMcpAppPermissionGranted(liveUrl, "media", ["video"])).toBe(true);
+  });
+
+  it("dispose-on-unmount frees a session promptly (the real reclaim keeps the live set small)", () => {
+    const url = createMcpAppProxySession("srv-mount", undefined, { camera: {} });
+    const token = new URL(url).searchParams.get("t")!;
+    expect(isMcpAppPermissionGranted(url, "media", ["video"])).toBe(true);
+    // Card unmounts → McpAppView calls disposeUiSession → this. The grant is gone at once,
+    // without waiting for any cap-driven eviction.
+    disposeMcpAppProxySession(token);
+    expect(isMcpAppPermissionGranted(url, "media", ["video"])).toBe(false);
+  });
+});
+
 describe("mcp-app-protocol — declared-origin tracking (CSP ↔ network gate lockstep)", () => {
   it("records exactly the origins a server's resources declared, per server", () => {
     createMcpAppProxySession("srv-a", { connectDomains: ["https://api.example.com"] });

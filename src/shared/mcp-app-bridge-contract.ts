@@ -61,6 +61,16 @@ export const SANDBOX_RESOURCE_READY = "ui/notifications/sandbox-resource-ready";
  *
  * Set UNCONDITIONALLY by the relay preload (`createInnerAppFrame`) — the wire never
  * supplies a `sandbox` value.
+ *
+ * ─── REVERT COUPLING (do not split) ──────────────────────────────────────────
+ * This origin flip (`allow-same-origin`, making the inner frame NON-opaque) and the
+ * `permissions` plumbing it enables — the manifest/schema `mcpUiResourcePermissions`, the
+ * host-computed `allow` attribute (`mcp-app-permissions.ts`), and the Electron session
+ * grant — are ONE change and MUST be reverted together. Reverting only this sandbox attr
+ * back to the opaque origin while leaving the permissions plumbing in place re-creates the
+ * #1600 "unhonored knob": a plugin's `permissions` would be accepted by the schema and
+ * pass review, but an opaque origin cannot have camera/microphone/geolocation delegated to
+ * it, so the declared feature would silently do nothing.
  */
 export const INNER_SANDBOX_ATTR = "allow-scripts allow-same-origin";
 

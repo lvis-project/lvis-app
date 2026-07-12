@@ -97,12 +97,27 @@ export function isDeclaredOriginForServer(serverId: string, origin: string): boo
 }
 
 /**
- * A session is consumed within milliseconds — the webview navigates to the proxy
- * URL immediately after minting — so the live set is tiny. This bound keeps the
- * registry from growing without limit across a long chat (Map preserves insertion
- * order, so the oldest entry is the first key).
+ * Session lifetime = CARD MOUNT lifetime. A proxy session is NOT consumed in
+ * milliseconds: since per-resource `permissions` landed, its token is a long-lived
+ * permission AUTHORITY that {@link isMcpAppPermissionGranted} consults on EVERY
+ * `getUserMedia` / `getCurrentPosition` for the card's whole life. The authoritative
+ * reclaim is therefore explicit: {@link disposeMcpAppProxySession}, called by
+ * `McpAppView` when the card's webview unmounts (#1600). In normal operation the live
+ * set equals the number of currently-mounted cards, and it is kept small by that
+ * dispose — NOT by the cap below.
+ *
+ * The cap is ONLY a leak backstop: it bounds worst-case memory if a dispose is ever
+ * missed (e.g. a renderer crash that skips the unmount path). It is deliberately set far
+ * above any plausible count of simultaneously-mounted MCP-app cards (each is a live
+ * <webview>; a transcript with thousands of live webviews would exhaust renderer
+ * resources long before this), so FIFO eviction never fires on a live card in practice —
+ * fixing the earlier bug where a tight 64 cap, sized under the now-false "consumed in
+ * milliseconds" assumption, could silently revoke a still-mounted card's grant after 64
+ * newer mints. Each entry is a few small strings + a tiny permissions object, so the
+ * worst-case leaked footprint is a few MB. Map preserves insertion order, so the oldest
+ * entry is the first key.
  */
-const MAX_PROXY_SESSIONS = 64;
+const MAX_PROXY_SESSIONS = 4096;
 
 /**
  * Mint a proxy session for one card render and return the URL the `<webview>`
@@ -133,6 +148,8 @@ export function createMcpAppProxySession(
   for (const origin of declaredOrigins(csp)) origins.add(origin);
   declaredOriginsByServer.set(serverId, origins);
 
+  // Leak backstop only — see MAX_PROXY_SESSIONS. Reaching this bound means many disposes
+  // were missed; the authoritative reclaim is disposeMcpAppProxySession on card unmount.
   while (proxySessions.size > MAX_PROXY_SESSIONS) {
     const oldest = proxySessions.keys().next().value;
     if (oldest === undefined) break;
@@ -141,7 +158,12 @@ export function createMcpAppProxySession(
   return `${MCP_APP_SCHEME}://${authority}/proxy.html?t=${token}`;
 }
 
-/** Drop a card's proxy session (webview unmounted). */
+/**
+ * Drop a card's proxy session — the AUTHORITATIVE reclaim, called by `McpAppView` when
+ * the card's webview unmounts (#1600). This, not the leak-backstop cap, is what keeps the
+ * live set equal to the mounted-card set, so a long-lived camera/mic/geolocation grant is
+ * never FIFO-evicted while its card is still on screen. Idempotent.
+ */
 export function disposeMcpAppProxySession(token: string): void {
   proxySessions.delete(token);
 }
