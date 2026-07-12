@@ -55,28 +55,107 @@ describe("installer smoke and packaging discipline", () => {
     const contributing = readRepoFile("CONTRIBUTING.md");
     const pullRequestTemplate = readRepoFile(".github/pull_request_template.md");
     const clusterWorkflow = readRepoFile(".github/workflows/cluster-detector.yml");
+    const clusterInvalidator = readRepoFile(
+      ".github/workflows/cluster-review-label-invalidator.yml",
+    );
+    const clusterScope = readRepoFile("scripts/check-cluster-scope.mjs");
+    const clusterAttestation = readRepoFile(
+      "scripts/check-cluster-review-attestation.mjs",
+    );
+    const sensitivePathHelper = readRepoFile("scripts/check-cluster-sensitive-paths.mjs");
 
     expect(agents).toContain("## Cross-Cutting Review Gate");
     expect(agents).toContain("architect, critic, and security");
     expect(agents).toContain("current PR HEAD SHA");
     expect(agents).toContain("blocking findings");
     expect(agents).toContain("`cluster-review-passed`");
-    expect(agents).toContain("exactly one current-HEAD marker per role");
-    expect(agents).toContain("retained label insufficient");
+    expect(agents).toContain("consistent current-HEAD row and marker per role");
+    expect(agents).toContain("or reopen makes any retained label");
 
     expect(clusterWorkflow).toContain(
-      "types: [opened, synchronize, edited, labeled, unlabeled]",
+      "types: [opened, reopened, synchronize, edited, labeled, unlabeled]",
     );
     expect(clusterWorkflow).toContain("contents: read");
-    expect(clusterWorkflow).toContain("check-cluster-review-attestation.mjs");
+    expect(clusterWorkflow).toContain("pull-requests: read");
+    expect(clusterWorkflow).not.toContain("issues: write");
+    expect(clusterWorkflow).not.toContain("statuses: write");
+    expect(clusterWorkflow).not.toContain("/statuses/");
+    expect(clusterWorkflow).toContain("cancel-in-progress: true");
+    expect(clusterWorkflow).toContain("Checkout trusted cluster policy");
+    expect(clusterWorkflow).toContain("path: .cluster-policy");
+    expect(clusterWorkflow).toContain("persist-credentials: false");
+    expect(clusterWorkflow).toContain(
+      "ref: ${{ github.event.pull_request.base.sha }}",
+    );
+    expect(clusterWorkflow).not.toContain("github.event.pull_request.head.sha");
+    expect(clusterWorkflow).not.toContain("node scripts/");
+    expect(clusterWorkflow).not.toContain("git diff");
+    expect(clusterWorkflow).toContain("Capture live pull request snapshot");
+    expect(clusterWorkflow).toContain('gh api "repos/${REPO}/pulls/${PR_NUMBER}"');
+    expect(clusterWorkflow).toContain("state,");
+    expect(clusterWorkflow).toContain("updated_at");
+    expect(clusterWorkflow).toContain("sha256sum");
+    expect(clusterWorkflow).toContain(
+      ".cluster-policy/scripts/check-cluster-scope.mjs",
+    );
+    expect(clusterWorkflow).toContain(
+      ".cluster-policy/scripts/check-cluster-review-attestation.mjs",
+    );
+    expect(clusterWorkflow).toContain("Revalidate accepted cluster review");
     expect(clusterWorkflow).toContain("steps.cluster-attestation.outputs.attested");
+    expect(clusterWorkflow).toContain("Enforce cluster review gate");
     expect(clusterWorkflow).not.toContain("steps.exempt-check.outputs.exempt");
-    expect(clusterWorkflow).toContain("AGENTS.md#cross-cutting-review-gate");
-    expect(clusterWorkflow).not.toContain("CLAUDE.md §Cross-Cutting Review Gate");
+    expect(clusterWorkflow).not.toContain("Set commit status");
+    expect(clusterWorkflow).not.toContain("Post violation comment");
     expect(clusterWorkflow).not.toContain('2>/dev/null || echo ""');
     expect(clusterWorkflow).not.toContain('2>/dev/null || echo "0"');
     expect(clusterWorkflow).not.toContain("|| true");
     expect(clusterWorkflow).toContain("exit 1");
+
+    expect(clusterInvalidator).toContain("pull_request_target:");
+    expect(clusterInvalidator).toContain("types: [synchronize, edited, reopened]");
+    expect(clusterInvalidator).toContain("issues: write");
+    expect(clusterInvalidator).toContain("cancel-in-progress: false");
+    expect(clusterInvalidator).not.toContain("cancel-in-progress: true");
+    expect(clusterInvalidator).toContain("contains(toJSON(github.event.changes)");
+    expect(clusterInvalidator).toContain("body");
+    expect(clusterInvalidator).toContain("base");
+    expect(clusterInvalidator).toContain(
+      "issues/${PR_NUMBER}/labels/cluster-review-passed",
+    );
+    expect(clusterInvalidator).not.toContain("actions/checkout");
+    expect(clusterInvalidator).not.toContain("scripts/");
+    expect(clusterInvalidator).not.toContain("pull_request.head");
+    expect(clusterInvalidator).not.toContain("pull_request.body");
+
+    expect(clusterScope).toContain(
+      'import { hasSensitiveClusterPath } from "./check-cluster-sensitive-paths.mjs"',
+    );
+    expect(clusterScope).toContain("previous_filename");
+    expect(clusterScope).toContain("github-previous-filename-required");
+    expect(clusterScope).toContain("pull-request-page-duplicate");
+    expect(clusterScope).toContain("pull-request-window-changed");
+    expect(clusterScope).toContain("pull-request-files-incomplete");
+    expect(clusterScope).toContain("pull-request-files-saturated");
+    expect(clusterScope).toContain("pull-request-commits-saturated");
+    expect(clusterScope).toContain("pull-request-pages-saturated");
+    expect(clusterScope).toContain('state: "closed"');
+    expect(clusterScope).not.toContain("--limit 100");
+    expect(clusterAttestation).toContain("fresh-review-label-required");
+    expect(clusterAttestation).toContain("isInsideMarkdownFence");
+    expect(clusterAttestation).toContain("RAW_HTML_TOKEN_PATTERN");
+    expect(clusterAttestation).toContain("hasRawHtmlTokenBefore");
+    expect(clusterAttestation).toContain('candidate.suffix.includes("`")');
+    expect(clusterAttestation).toContain(
+      "hasRawHtmlTokenBefore(body, sectionStart)",
+    );
+    expect(clusterAttestation).toContain(
+      "hasRawHtmlTokenBefore(body, tableIndex)",
+    );
+    expect(sensitivePathHelper).toContain("parseNulDelimitedGitPaths");
+    expect(sensitivePathHelper).toContain(
+      'return !path.startsWith(`${dir}/__tests__/`)',
+    );
 
     for (const role of ["architect", "critic", "security"]) {
       expect(pullRequestTemplate).toContain(
@@ -85,6 +164,19 @@ describe("installer smoke and packaging discipline", () => {
     }
     expect(pullRequestTemplate).toContain("## Cross-Cutting Review Gate");
     expect(pullRequestTemplate).toContain("Reviewed HEAD: `<40-char-head-sha>`");
+    expect(pullRequestTemplate).toContain(
+      "| Architect | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |",
+    );
+    expect(pullRequestTemplate).toContain(
+      "| Critic | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |",
+    );
+    expect(pullRequestTemplate).toContain(
+      "| Security | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |",
+    );
+    expect(pullRequestTemplate).toContain("same current HEAD SHA and verdict");
+    expect(pullRequestTemplate).toContain("exactly `None`");
+    expect(pullRequestTemplate).toContain("only on a fresh");
+    expect(pullRequestTemplate).toContain("removing and reapplying the label");
     expect(pullRequestTemplate).toContain("Blocking findings");
     expect(claude).toContain("[`AGENTS.md`](./AGENTS.md)");
     expect(claude).toContain("duplicates no");
@@ -101,6 +193,10 @@ describe("installer smoke and packaging discipline", () => {
     expect(agents).toContain("DLP handling");
     expect(agents).toContain("fail-closed defaults");
     expect(agents).toContain("active recipient's own permission and approval");
+    expect(agents).toContain("visible role row and hidden marker");
+    expect(agents).toContain("findings exactly `None`");
+    expect(agents).toContain("Only a fresh application");
+    expect(agents).toContain("removing and reapplying it");
     expect(agents).toContain("Do not bypass hooks");
     expect(agents).toContain("Never push directly to `main`");
     expect(agents).toContain("same-PR field-addition");
