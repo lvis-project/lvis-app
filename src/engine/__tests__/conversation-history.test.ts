@@ -53,6 +53,22 @@ describe("ConversationHistory.getCapacityRemaining", () => {
   });
 });
 
+
+describe("ConversationHistory.removeExact", () => {
+  it("removes only the append-returned message and preserves later notices", () => {
+    const h = new ConversationHistory();
+    const injected = h.append({ role: "user", content: "transient guidance" });
+    h.append({ role: "assistant", content: "provider error" });
+
+    expect(h.removeExact({ role: "user", content: "transient guidance" })).toBe(false);
+    expect(h.removeExact(injected)).toBe(true);
+    expect(h.removeExact(injected)).toBe(false);
+    expect(withoutRuntimeMeta(h.getMessages())).toEqual([
+      { role: "assistant", content: "provider error" },
+    ]);
+  });
+});
+
 describe("ConversationHistory tool-call invariant", () => {
   it("drops orphan tool_result messages after capacity trim", () => {
     const h = new ConversationHistory({ maxMessages: 3 });

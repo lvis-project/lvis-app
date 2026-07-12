@@ -200,6 +200,12 @@ export interface FeatureFlags {
    * configured LLM to refresh user-preferences.md. Default false: manual only.
    */
   idlePreferenceRefresh?: boolean;
+  /**
+   * When true, a queued background sub-agent Message may start a new parent
+   * turn while that exact parent session is loaded and idle. Default false:
+   * the durable mailbox joins the user's next turn instead.
+   */
+  subAgentAutonomousWake?: boolean;
 
 
 
@@ -693,6 +699,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   features: {
     // Idle preference refresh runs by default; users can opt out in Settings.
     idlePreferenceRefresh: true,
+    // A2A child Message delivery is manual-by-default. Opt-in wake still uses
+    // the normal parent runTurn path and its fail-closed UserPromptSubmit gate.
+    subAgentAutonomousWake: false,
 
     // Fresh installs MUST start the Z onboarding chain. Persisting an
     // explicit `false` (instead of relying on `undefined`) keeps the
@@ -2403,6 +2412,9 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   const result: FeatureFlags = {};
   if (typeof obj.idlePreferenceRefresh === "boolean") {
     result.idlePreferenceRefresh = obj.idlePreferenceRefresh;
+  }
+  if (typeof obj.subAgentAutonomousWake === "boolean") {
+    result.subAgentAutonomousWake = obj.subAgentAutonomousWake;
   }
   if (typeof obj.onboardingCompleted === "boolean") {
     result.onboardingCompleted = obj.onboardingCompleted;

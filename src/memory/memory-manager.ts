@@ -11,6 +11,11 @@ import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
 import { projectRootEquals } from "../shared/project-identity.js";
 import {
+  A2A_PROJECTED_TASK_STATE_VALUES,
+  type A2AProjectedTaskState,
+} from "../shared/a2a.js";
+import type { SubAgentSuspensionReason } from "../shared/subagent-events.js";
+import {
   buildToolResultStrippedStub,
   buildToolResultTruncatedStub,
   type ToolResultArtifactUnavailableInfo,
@@ -290,9 +295,15 @@ export interface SessionMetadata {
   /** User-visible sub-agent title. Stored separately from `title`, which is capped for session lists. */
   subAgentTitle?: string;
   /**
-   * Number of times this sub-agent session has been resumed. Initialized to 0
-   * on spawn. PR-D's MAX_RESUMES loop guard reads this to refuse a fork-bomb
-   * via the resume axis.
+   * Number of budget continuations consumed by this sub-agent session.
+   * MAX_RESUMES applies only to this counter.
+   */
+  budgetResumeCount?: number;
+  /** Number of question answers accepted; independent from MAX_RESUMES. */
+  questionAnswerCount?: number;
+  /**
+   * Legacy compatibility alias for budgetResumeCount. Old metadata may contain
+   * only this field; the runner fail-closes on the greater compatible value.
    */
   resumeCount?: number;
   /**
@@ -302,6 +313,10 @@ export interface SessionMetadata {
    * reads this so a long resume chain cannot exceed the global round budget.
    */
   cumulativeRounds?: number;
+  /** Last durable A2A projection. Only INPUT_REQUIRED is resumable. */
+  subAgentTaskState?: A2AProjectedTaskState;
+  /** Typed resume axis paired with INPUT_REQUIRED. */
+  subAgentSuspensionReason?: SubAgentSuspensionReason;
 }
 
 const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
@@ -546,8 +561,22 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
   const resumeCount = typeof raw.resumeCount === "number" && Number.isInteger(raw.resumeCount) && raw.resumeCount >= 0
     ? raw.resumeCount
     : undefined;
+  const budgetResumeCount = typeof raw.budgetResumeCount === "number" && Number.isInteger(raw.budgetResumeCount) && raw.budgetResumeCount >= 0
+    ? raw.budgetResumeCount
+    : undefined;
+  const questionAnswerCount = typeof raw.questionAnswerCount === "number" && Number.isInteger(raw.questionAnswerCount) && raw.questionAnswerCount >= 0
+    ? raw.questionAnswerCount
+    : undefined;
   const cumulativeRounds = typeof raw.cumulativeRounds === "number" && Number.isInteger(raw.cumulativeRounds) && raw.cumulativeRounds >= 0
     ? raw.cumulativeRounds
+    : undefined;
+  const subAgentTaskState = typeof raw.subAgentTaskState === "string"
+    && (A2A_PROJECTED_TASK_STATE_VALUES as readonly string[]).includes(raw.subAgentTaskState)
+    ? raw.subAgentTaskState as A2AProjectedTaskState
+    : undefined;
+  const subAgentSuspensionReason = raw.subAgentSuspensionReason === "budget"
+    || raw.subAgentSuspensionReason === "question"
+    ? raw.subAgentSuspensionReason
     : undefined;
   return {
     sessionKind: normalizeSessionKind(raw.sessionKind),
@@ -575,8 +604,12 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     originToolUseId,
     spawnId,
     subAgentTitle,
+    budgetResumeCount,
+    questionAnswerCount,
     resumeCount,
     cumulativeRounds,
+    subAgentTaskState,
+    subAgentSuspensionReason,
   };
 }
 
@@ -1156,6 +1189,14 @@ export class MemoryManager {
     if (Array.isArray(messages)) {
       this.indexSessionForSearch(sessionId, messages);
     }
+  }
+
+  hasSessionMetadataFile(sessionId: string): boolean {
+    if (!isValidSessionId(sessionId)) {
+      throw new Error('hasSessionMetadataFile: invalid sessionId "' + sessionId + '"');
+    }
+    const path = join(this.sessionsDir, sessionId + ".meta.json");
+    return readUtf8FileIfPresent(path) !== null;
   }
 
   loadSessionMetadata(sessionId: string): SessionMetadata | null {

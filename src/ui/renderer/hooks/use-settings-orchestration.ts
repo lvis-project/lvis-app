@@ -81,6 +81,8 @@ export interface SettingsOrchestrationState {
   // Experimental feature flags
   idlePreferenceRefresh: boolean;
   setIdlePreferenceRefresh: (v: boolean) => void;
+  subAgentAutonomousWake: boolean;
+  setSubAgentAutonomousWake: (v: boolean) => void;
   // Marketplace
   marketplaceBaseUrl: string;
   setMarketplaceBaseUrl: (v: string) => void;
@@ -160,6 +162,7 @@ export function useSettingsOrchestration(
   const [hasWebKey, setHasWebKey] = useState(false);
   const [piiRedactEnabled, setPiiRedactEnabled] = useState(false);
   const [idlePreferenceRefresh, setIdlePreferenceRefresh] = useState(true);
+  const [subAgentAutonomousWake, setSubAgentAutonomousWake] = useState(false);
   const [marketplaceBaseUrl, setMarketplaceBaseUrl] = useState("");
   const [marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork] = useState(true);
   const [hasMarketplaceApiKey, setHasMarketplaceApiKey] = useState(false);
@@ -236,6 +239,7 @@ export function useSettingsOrchestration(
       setHasWebKey(webApiKeySet);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
       setIdlePreferenceRefresh(s.features?.idlePreferenceRefresh ?? true);
+      setSubAgentAutonomousWake(s.features?.subAgentAutonomousWake ?? false);
       setMarketplaceBaseUrl(s.marketplace?.cloudBaseUrl ?? "");
       setMarketplaceAllowPrivateNetwork(s.marketplace?.cloudAllowPrivateNetwork ?? false);
       setHasMarketplaceApiKey(marketplaceKeySet);
@@ -254,6 +258,7 @@ export function useSettingsOrchestration(
     return api.onSettingsUpdated((next) => {
       setSettingsSnapshot(next);
       setIdlePreferenceRefresh(next.features?.idlePreferenceRefresh ?? true);
+      setSubAgentAutonomousWake(next.features?.subAgentAutonomousWake ?? false);
       const nextProvider = isLLMVendor(next.llm.provider)
         ? next.llm.provider
         : DEFAULT_LLM_VENDOR;
@@ -535,6 +540,21 @@ export function useSettingsOrchestration(
       });
   }, [api, idlePreferenceRefresh, onSaved, settingsLoaded]);
 
+  const setSubAgentAutonomousWakeLive = useCallback((next: boolean) => {
+    const previous = subAgentAutonomousWake;
+    setSubAgentAutonomousWake(next);
+    if (!settingsLoaded) return;
+    void api
+      .updateSettings({ features: { subAgentAutonomousWake: next } })
+      .then((updated) => {
+        if (isIpcErrorResult(updated)) throw new Error(updated.message ?? updated.error);
+        setSettingsSnapshot(updated);
+        onSaved();
+      })
+      .catch(() => {
+        setSubAgentAutonomousWake(previous);
+      });
+  }, [api, onSaved, settingsLoaded, subAgentAutonomousWake]);
   return {
     lastSaveError,
     clearLastSaveError,
@@ -561,6 +581,7 @@ export function useSettingsOrchestration(
     hasWebKey, setHasWebKey,
     piiRedactEnabled, setPiiRedactEnabled,
     idlePreferenceRefresh, setIdlePreferenceRefresh: setIdlePreferenceRefreshLive,
+    subAgentAutonomousWake, setSubAgentAutonomousWake: setSubAgentAutonomousWakeLive,
     marketplaceBaseUrl, setMarketplaceBaseUrl,
     marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork,
     hasMarketplaceApiKey, setHasMarketplaceApiKey,
