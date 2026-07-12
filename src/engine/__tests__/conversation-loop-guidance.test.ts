@@ -103,14 +103,17 @@ function cloneHistoryLikeAppliedCompaction(loop: ConversationLoop): void {
   })));
 }
 
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
+class DeferredGate<T> {
+  readonly promise: Promise<T>;
+  resolve!: (value: T | PromiseLike<T>) => void;
+  reject!: (reason?: unknown) => void;
+
+  constructor() {
+    this.promise = new Promise<T>((resolve, reject) => {
+      this.resolve = resolve;
+      this.reject = reject;
+    });
+  }
 }
 
 describe("ConversationLoop guidance queue + boundary inject", () => {
@@ -420,8 +423,8 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     ]]);
     const skillOverlay = { clear: vi.fn() };
     const loop = makeLoop(provider, { skillOverlay });
-    const gate = deferred<{ decision: "allow" | "deny"; reason: string }>();
-    const gateEntered = deferred<void>();
+    const gate = new DeferredGate<{ decision: "allow" | "deny"; reason: string }>();
+    const gateEntered = new DeferredGate<void>();
     const promptSpy = vi.spyOn(loop, "fireUserPromptSubmit").mockImplementation(() => {
       gateEntered.resolve(undefined);
       return gate.promise;
@@ -470,8 +473,8 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
 
   it("cleans queued guidance when SessionStart throws before the prompt gate", async () => {
     const loop = makeLoop(new FakeProvider([]));
-    const lifecycleGate = deferred<void>();
-    const lifecycleEntered = deferred<void>();
+    const lifecycleGate = new DeferredGate<void>();
+    const lifecycleEntered = new DeferredGate<void>();
     vi.spyOn(loop, "fireLifecycleEvent").mockImplementation(() => {
       lifecycleEntered.resolve(undefined);
       return lifecycleGate.promise;
@@ -500,8 +503,8 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
 
   it("cleans queued guidance when preflight throws before queryLoop", async () => {
     const loop = makeLoop(new FakeProvider([]));
-    const preflightGate = deferred<boolean>();
-    const preflightEntered = deferred<void>();
+    const preflightGate = new DeferredGate<boolean>();
+    const preflightEntered = new DeferredGate<void>();
     vi.spyOn(loop, "runPreflightGuard").mockImplementation(() => {
       preflightEntered.resolve(undefined);
       return preflightGate.promise;
@@ -534,8 +537,8 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
       { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
     ]]);
     const loop = makeLoop(provider);
-    const injectionPreflight = deferred<boolean>();
-    const injectionPreflightEntered = deferred<void>();
+    const injectionPreflight = new DeferredGate<boolean>();
+    const injectionPreflightEntered = new DeferredGate<void>();
     let preflightCalls = 0;
     vi.spyOn(loop, "runPreflightGuard").mockImplementation(() => {
       preflightCalls += 1;
