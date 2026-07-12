@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -55,6 +55,14 @@ describe("installer smoke and packaging discipline", () => {
     const contributing = readRepoFile("CONTRIBUTING.md");
     const pullRequestTemplate = readRepoFile(".github/pull_request_template.md");
     const clusterWorkflow = readRepoFile(".github/workflows/cluster-detector.yml");
+    const clusterStatusOwners = readdirSync(resolve(root, ".github/workflows"))
+      .filter((name) => /\.ya?ml$/.test(name))
+      .filter((name) => {
+        const source = readRepoFile(`.github/workflows/${name}`);
+        return source.includes("statuses: write")
+          || source.includes("STATUS_CONTEXT: Sensitive Area Cluster Check");
+      })
+      .sort();
     const clusterScope = readRepoFile("scripts/check-cluster-scope.mjs");
     const clusterAttestation = readRepoFile(
       "scripts/check-cluster-review-attestation.mjs",
@@ -68,10 +76,12 @@ describe("installer smoke and packaging discipline", () => {
     expect(agents).toContain("`cluster-review-passed`");
     expect(agents).toContain("consistent current-HEAD row and marker per role");
     expect(agents).toContain("fixed `Sensitive Area Cluster Check` status");
+    expect(agents).toContain("sole workflow allowed");
     expect(agents).toContain("any PR edit");
     expect(pullRequestTemplate).toContain("PR edit");
 
     expect(clusterWorkflow).toContain("pull_request_target:");
+    expect(clusterWorkflow).toContain("branches: [main]");
     expect(clusterWorkflow).toContain(
       "types: [opened, reopened, synchronize, edited, labeled, unlabeled]",
     );
@@ -83,6 +93,7 @@ describe("installer smoke and packaging discipline", () => {
     expect(clusterWorkflow).not.toContain("cancel-in-progress: true");
     expect(clusterWorkflow).toContain("name: Trusted Cluster Policy Evaluation");
     expect(clusterWorkflow).not.toContain("    name: Sensitive Area Cluster Check");
+    expect(clusterStatusOwners).toEqual(["cluster-detector.yml"]);
     expect(clusterWorkflow).toContain("STATUS_CONTEXT: Sensitive Area Cluster Check");
     expect(clusterWorkflow).toContain("-f state=pending");
     expect(clusterWorkflow).toContain(
@@ -97,15 +108,14 @@ describe("installer smoke and packaging discipline", () => {
     );
     const snapshotIndex = clusterWorkflow.indexOf("Capture live pull request snapshot");
     const checkoutIndex = clusterWorkflow.indexOf("Checkout trusted cluster policy");
-    const revalidateIndex = clusterWorkflow.indexOf(
-      "Revalidate live pull request snapshot",
-    );
-    const finalStatusIndex = clusterWorkflow.indexOf("Publish final cluster status");
+    const finalizerIndex = clusterWorkflow.indexOf("Finalize cluster policy status");
     expect(invalidationIndex).toBeGreaterThan(pendingIndex);
     expect(snapshotIndex).toBeGreaterThan(invalidationIndex);
     expect(checkoutIndex).toBeGreaterThan(snapshotIndex);
-    expect(revalidateIndex).toBeGreaterThan(checkoutIndex);
-    expect(finalStatusIndex).toBeGreaterThan(revalidateIndex);
+    expect(finalizerIndex).toBeGreaterThan(checkoutIndex);
+    expect(clusterWorkflow.match(/Finalize cluster policy status/g)).toHaveLength(1);
+    expect(clusterWorkflow).not.toContain("Revalidate live pull request snapshot");
+    expect(clusterWorkflow).not.toContain("Publish final cluster status");
 
     expect(clusterWorkflow).toContain(
       "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7",
@@ -123,14 +133,29 @@ describe("installer smoke and packaging discipline", () => {
     expect(clusterWorkflow).toContain(
       'if [ "$LIVE_HEAD_SHA" != "$EVENT_HEAD_SHA" ]',
     );
-    expect(clusterWorkflow).toContain("FINAL_DIGEST=");
-    expect(clusterWorkflow).toContain(
-      'if [ "$VIOLATION" = "true" ] && [ "$ATTESTED" = "true" ]',
+
+    const finalizer = clusterWorkflow.slice(finalizerIndex);
+    const finalSnapshotFetchIndex = finalizer.indexOf(
+      'gh api "repos/${REPO}/pulls/${PR_NUMBER}"',
     );
-    expect(clusterWorkflow).toContain("if: always()");
-    expect(clusterWorkflow).toContain("JOB_STATUS: ${{ job.status }}");
-    expect(clusterWorkflow).toContain("STATUS_STATE=success");
-    expect(clusterWorkflow).toContain("STATUS_STATE=failure");
+    const finalDigestIndex = finalizer.indexOf("FINAL_DIGEST=");
+    const finalAttestationIndex = finalizer.indexOf(
+      "node .cluster-policy/scripts/check-cluster-review-attestation.mjs",
+    );
+    const finalPostIndex = finalizer.indexOf(
+      'gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}"',
+    );
+    expect(finalDigestIndex).toBeGreaterThan(finalSnapshotFetchIndex);
+    expect(finalAttestationIndex).toBeGreaterThan(finalDigestIndex);
+    expect(finalPostIndex).toBeGreaterThan(finalAttestationIndex);
+    expect(finalizer).toContain("if: always()");
+    expect(finalizer).toContain("PRIOR_JOB_STATUS: ${{ job.status }}");
+    expect(finalizer).toContain("STATUS_STATE=failure");
+    expect(finalizer).toContain("STATUS_STATE=success");
+    expect(finalizer).toContain(
+      'if ! gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}"',
+    );
+    expect(finalizer).toContain("exit 1");
     expect(clusterWorkflow).not.toContain("node scripts/");
     expect(clusterWorkflow).not.toContain("|| true");
     expect(clusterWorkflow).toContain(
