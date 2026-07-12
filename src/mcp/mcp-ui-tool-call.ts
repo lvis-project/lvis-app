@@ -27,10 +27,16 @@
  * whole fix: the activation check has a carve-out (the manifest's
  * `auth.statusTool`), and a card that could reach the path would slip through it.
  *
- * Consequence, intended: from an MCP App only tools that are ALSO model-visible
- * (dual — the spec default when `_meta.ui.visibility` is omitted) are callable,
- * because only those exist as §6.4 registry `Tool`s the governed executor can run.
- * An APP-ONLY tool fails closed with `mcp-app-tool-not-app-callable`.
+ * ── What an app may call: `_meta.ui.visibility` ∋ "app". Nothing else. ────────────
+ * Including an APP-ONLY tool (`["app"]`) — the spec's spelling for a tool that
+ * serves the CARD and is hidden from the model. Both arms register such a tool as a
+ * §6.4 `Tool` (loopback: `plugin-server-projection` → `plugin-tool-from-mcp`;
+ * external: `mcp-tool-adapter`), which is what gives the governed executor something
+ * to run, and both keep it out of the model's tool list at the registry's one
+ * model-exposure boundary. So the SAME declaration means the SAME thing whichever
+ * server backs the card — governed, callable, model-invisible. What an app-only tool
+ * does NOT get from either arm is the panel's ungoverned dispatch: it is reached
+ * through the gate, or not at all.
  */
 import type { Tool } from "../tools/base.js";
 import type { PluginToolInvocationDelegate } from "../plugins/runtime/index.js";
@@ -42,9 +48,9 @@ export interface PluginToolCallRuntime {
   /**
    * The gated MCP-App→plugin invocation path (`origin: "mcp-app"`). Enforces
    * `assertUiActionInvokable` (the tool's `_meta.ui.visibility` MUST include
-   * `"app"` — the SPEC MUST for this backend, enforced there and nowhere else),
-   * fails closed on an app-only tool, and delegates to the ToolExecutor. It takes
-   * no `userAction` argument: an app never has one.
+   * `"app"` — the SPEC MUST for this backend, enforced there and nowhere else) and
+   * delegates to the ToolExecutor — for every app-visible tool, app-only ones
+   * included. It takes no `userAction` argument: an app never has one.
    */
   callFromApp(method: string, payload?: unknown): Promise<unknown>;
 }
@@ -62,8 +68,7 @@ export interface ExternalToolCallDeps {
 /**
  * Loopback source — the card's server is a first-party plugin's in-process MCP
  * host, so its tools are plugin methods. Ownership comes from the runtime's method
- * map; the visibility MUST, the app-only deny, and the gate all live inside
- * `callFromApp`.
+ * map; the visibility MUST and the gate both live inside `callFromApp`.
  */
 export function createLoopbackToolCallSource(runtime: PluginToolCallRuntime): {
   resolveToolOwner(serverId: string, toolName: string): string | undefined;

@@ -71,7 +71,7 @@ import {
   declaredUiInvokableMethods,
   importPluginFactory,
 } from "./plugin-loader.js";
-import { isModelVisible, isUiOnly } from "./tool-visibility.js";
+import { isModelVisible } from "./tool-visibility.js";
 import type { InvocationOrigin } from "./origin-chain.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
@@ -214,19 +214,12 @@ export type PluginToolInvocationDelegate = (
 
 /**
  * Kebab-case deny code (CLAUDE.md §IPC Error Message Language Convention) for the
- * ONE thing an MCP App can ask for that the host structurally cannot serve: an
- * APP-ONLY-visibility plugin tool.
- *
- * Why it is denied rather than dispatched: an app-only tool is not projected to
- * `tools/list` (`mcp/plugin-server-projection.ts`), so it is not a §6.4 registry
- * `Tool` and the governed ToolExecutor cannot run it. The only path that CAN run
- * it — `callDeclaredAppOnlyTool` — skips risk classification, the reviewer, the
- * approval gate and the audit row, and is reserved for the plugin's own trusted
- * panel (`origin: "ui"`), which can supply a real user gesture. An untrusted card
- * cannot. So the app arm fails CLOSED here instead of reaching an ungoverned
- * handler.
+ * ONE thing an MCP App is denied that the spec's `["app"]` semantics alone would
+ * otherwise allow: the plugin's manifest-declared auth trio
+ * (`manifest.auth.{statusTool,loginTool,logoutTool}`). See {@link callFromApp} for
+ * why this is a deliberate narrowing, not a bug.
  */
-export const MCP_APP_TOOL_NOT_APP_CALLABLE = "mcp-app-tool-not-app-callable";
+export const MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE = "mcp-app-auth-tool-not-app-callable";
 
 export interface PluginStartPreparationContext {
   pluginId: string;
@@ -466,6 +459,13 @@ export class PluginRuntime {
     // app-only auth trio to the access-control map (a widening). `isModelVisible`
     // reproduces today's EXACT set; UI-only ownership still resolves at runtime
     // via methodMap (all names), which stays authoritative.
+    //
+    // HOLDS AFTER app-only tools became registry `Tool`s. Registry membership
+    // (what may execute under the gate) and model exposure (what the LLM is shown)
+    // were split apart; THIS map is the THIRD, independent concern — who owns a
+    // name for plugin-to-plugin access control — and it does NOT follow either. It
+    // stays exactly the model-visible set. Pinned by
+    // `__tests__/known-tool-owners-model-only.test.ts`.
     for (const t of (manifest.tools ?? []).filter(isModelVisible)) {
       this.knownToolOwners.set(t.name, pluginId);
     }
@@ -1092,6 +1092,13 @@ export class PluginRuntime {
     // app-only auth trio to the access-control map (a widening). `isModelVisible`
     // reproduces today's EXACT set; UI-only ownership still resolves at runtime
     // via methodMap (all names), which stays authoritative.
+    //
+    // HOLDS AFTER app-only tools became registry `Tool`s. Registry membership
+    // (what may execute under the gate) and model exposure (what the LLM is shown)
+    // were split apart; THIS map is the THIRD, independent concern — who owns a
+    // name for plugin-to-plugin access control — and it does NOT follow either. It
+    // stays exactly the model-visible set. Pinned by
+    // `__tests__/known-tool-owners-model-only.test.ts`.
     for (const t of (manifest.tools ?? []).filter(isModelVisible)) {
       this.knownToolOwners.set(t.name, pluginId);
     }
@@ -1641,8 +1648,10 @@ export class PluginRuntime {
    *
    * REACHABLE ONLY FROM THE TRUSTED PANEL (`origin: "ui"`). `isAppOnlyRuntimeInvocation`
    * routes here only on a UI-effective chain, so an MCP App (`origin: "mcp-app"`,
-   * untrusted sandboxed iframe) can never land on this ungoverned path — its
-   * app-only calls are denied outright in {@link callFromApp}.
+   * untrusted sandboxed iframe) can never land on this ungoverned path — a card's
+   * app-only call takes the GOVERNED executor instead ({@link callFromApp}), because
+   * an app-only tool is a registry `Tool`. The panel keeps this bypass (it can supply
+   * a real user gesture); the card never sees it.
    *
    * This bypass skips the ToolExecutor and therefore its Step-6
    * `runWithCeiling` cap, so the ceiling is enforced STRUCTURALLY here — at the
@@ -1737,22 +1746,50 @@ export class PluginRuntime {
    *
    * Deliberately NOT {@link callFromUi}: an MCP App is not the plugin's trusted
    * panel, and conflating the two is what let a hostile card reach the ungoverned
-   * app-only dispatch path. Three differences, all structural:
+   * app-only dispatch path. Two differences, both structural:
    *
    *  1. `origin: "mcp-app"` — so `isAppOnlyRuntimeInvocation` (which only ever
    *     answers true for `"ui"`) can never route an app call into
    *     {@link callDeclaredAppOnlyTool}. That also makes the auth `statusTool`
-   *     user-activation carve-out unreachable from a card.
+   *     user-activation carve-out unreachable from a card. This is what makes the
+   *     ungoverned bypass unreachable from an app — structurally, not by a check.
    *  2. NO `userAction` parameter. It is never true for an app, so it is not
    *     accepted as an argument — there is nothing for a caller to get wrong.
-   *  3. An APP-ONLY tool fails CLOSED here (see {@link MCP_APP_TOOL_NOT_APP_CALLABLE}):
-   *     it is not in the §6.4 registry, so the governed executor could not run it
-   *     anyway, and the ungoverned path is panel-only. Only a MODEL-visible +
-   *     app-visible (dual) tool — the SEP-1865 default when `visibility` is
-   *     omitted — is app-callable.
    *
-   * The app-visibility allow-list (`assertUiActionInvokable`, the spec MUST) is
-   * kept: the app surface is still gated on `_meta.ui.visibility` ∋ "app".
+   * EVERY app-visible tool goes through the delegate (the governed ToolExecutor:
+   * `inspectHostRisk` → reviewer/approval → audit), APP-ONLY ONES INCLUDED, WITH ONE
+   * NAMED EXCEPTION below. They are §6.4 registry `Tool`s now — the loopback projects
+   * them to `tools/list` with their explicit visibility — so the gate has something
+   * to run, which is exactly what `["app"]` is for: a plugin ships tools that serve
+   * its CARD without putting them in the model's tool surface. (The earlier
+   * fail-closed deny existed only because an app-only tool had NO registry entry and
+   * therefore no gate; giving it one removes the reason to deny it, without giving
+   * the card the panel's ungoverned path.) The app-visibility allow-list
+   * (`assertUiActionInvokable`, the spec MUST) still bounds the surface: a
+   * MODEL-ONLY tool is not app-callable.
+   *
+   * ── DELIBERATE NARROWING below the spec's `["app"]` semantics: the auth trio ──
+   * `manifest.auth.{statusTool,loginTool,logoutTool}` is denied here BY NAME,
+   * unconditionally, even though it is app-visible and even though the executor
+   * would otherwise gate it like any other tool. Do not "fix" this by deleting it:
+   *
+   *  - The trio is not a generic spec `["app"]` tool; it is an LVIS MANIFEST CONCEPT
+   *    whose intended caller has always been the plugin's own first-party React
+   *    panel (`callFromUi`) — trusted code, a real user gesture. `["app"]` on it is
+   *    an artifact of how the manifest expresses "the panel may call this", not a
+   *    server declaring "my card may call this". Cards are a different, untrusted
+   *    surface that did not exist when that declaration was designed.
+   *  - `auth.loginTool` in particular does not merely "run a tool": it spawns a real
+   *    auth `BrowserWindow` with cookie/partition access, pointed at an identity
+   *    provider. Letting an untrusted card trigger that is a privilege escalation
+   *    EVEN BEHIND THE APPROVAL GATE — the user would see a login window they did
+   *    not ask for, summoned by a card that can also render whatever it likes around
+   *    it. Approval-gating a phishing-shaped affordance is not the same as not
+   *    having it.
+   *  - So: registry membership (governed execution, reachable from the panel) is
+   *    right, and card reachability is not. This is that one exception, named and
+   *    contained to this method — `assertUiActionInvokable`, the `"ui"` panel path,
+   *    and `isAppOnlyRuntimeInvocation` are untouched.
    */
   async callFromApp(method: string, payload?: unknown): Promise<unknown> {
     const entry = this.methodMap.get(method);
@@ -1767,18 +1804,13 @@ export class PluginRuntime {
       pluginId: entry.pluginId,
       uiInvokable: plugin ? declaredUiInvokableMethods(plugin.manifest) : [],
     });
-    // Fail-closed: app-visible but NOT model-visible ⇒ not a registry Tool ⇒ the
-    // governed executor cannot run it, and the ungoverned runtime dispatch belongs
-    // to the trusted panel. An unresolvable manifest tool takes the same branch
-    // (we never dispatch a tool whose declared visibility we could not read).
-    const tool = plugin?.manifest.tools.find((t) => t.name === method);
-    if (!tool || isUiOnly(tool)) {
+    const auth = plugin?.manifest.auth;
+    if (auth && (method === auth.statusTool || method === auth.loginTool || method === auth.logoutTool)) {
       throw new Error(
-        `[${MCP_APP_TOOL_NOT_APP_CALLABLE}] Tool '${method}' declares app-only visibility ` +
-          `(_meta.ui.visibility: ["app"]) and is not callable from an MCP App in this host: ` +
-          `app-only tools bypass the governed tool executor and are reserved for the plugin's ` +
-          `own trusted panel. Declare dual visibility (_meta.ui.visibility: ["model","app"]) ` +
-          `to make it app-callable.`,
+        `[${MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE}] Tool '${method}' is this plugin's manifest-declared ` +
+          `auth tool and is reserved for the plugin's own trusted panel: a card cannot invoke it. ` +
+          `auth.loginTool opens a credentialed auth window, and an untrusted card must never be able ` +
+          `to summon one, gated or not.`,
       );
     }
     if (!this.toolInvocationDelegate) {
