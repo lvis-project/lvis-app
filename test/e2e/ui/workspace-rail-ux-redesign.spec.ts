@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electron";
+import type { AgentSpawnEvent } from "../../../src/shared/subagent-events.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -203,7 +204,7 @@ test.describe("workspace rail UX redesign", () => {
     await page.getByTestId("chat-side-panel-launcher-subagent").click();
     await expect(page.getByTestId("chat-side-panel-tab-subagent")).toBeVisible();
 
-    const sendSpawn = async (event: Record<string, unknown>): Promise<void> => {
+    const sendSpawn = async (event: AgentSpawnEvent): Promise<void> => {
       await app.evaluate(({ BrowserWindow }, ev) => {
         const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
         if (!win) return;
@@ -214,13 +215,16 @@ test.describe("workspace rail UX redesign", () => {
     const CHILD = "e2e-child-session";
     // 1) original spawn runs to an INCOMPLETE finish (learns its childSessionId
     //    on `done`, the first phase to carry the join key).
-    await sendSpawn({ spawnId: "e2e-orig", type: "start", title: "E2E research", instructions: "E2E prompt", toolUseId: "tu-orig" });
+    await sendSpawn({ spawnId: "e2e-orig", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "E2E research", instructions: "E2E prompt", toolUseId: "tu-orig" });
     await sendSpawn({
       spawnId: "e2e-orig",
       type: "done",
+      taskState: "TASK_STATE_INPUT_REQUIRED",
+      status: "waiting",
       summary: "partial",
       toolCallCount: 2,
       childSessionId: CHILD,
+      suspension: { reason: "budget", resumeId: CHILD },
       entries: [{ kind: "assistant", text: "ORIGINAL_SEGMENT", streaming: false }],
     });
 
@@ -233,10 +237,11 @@ test.describe("workspace rail UX redesign", () => {
     // 2) a resume (separate spawnId, SAME childSessionId) starts and streams a
     //    growing tail. The unified transcript's prefix (the original segment)
     //    must stay stable while the tail grows — no flicker / re-mount.
-    await sendSpawn({ spawnId: "e2e-resume", type: "start", title: "(sub-agent)", instructions: "resume prompt", toolUseId: "tu-resume", childSessionId: CHILD });
+    await sendSpawn({ spawnId: "e2e-resume", type: "start", taskState: "TASK_STATE_INPUT_REQUIRED", title: "(sub-agent)", instructions: "resume prompt", toolUseId: "tu-resume", childSessionId: CHILD });
     await sendSpawn({
       spawnId: "e2e-resume",
       type: "activity",
+      taskState: "TASK_STATE_WORKING",
       toolCallCount: 1,
       childSessionId: CHILD,
       entries: [{ kind: "assistant", text: "RESUME_TAIL_A", streaming: false }],
@@ -250,6 +255,8 @@ test.describe("workspace rail UX redesign", () => {
     await sendSpawn({
       spawnId: "e2e-resume",
       type: "done",
+      taskState: "TASK_STATE_COMPLETED",
+      status: "done",
       summary: "done",
       toolCallCount: 2,
       childSessionId: CHILD,

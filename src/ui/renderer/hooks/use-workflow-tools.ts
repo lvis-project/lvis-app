@@ -76,6 +76,7 @@ export function useWorkflowTools(api: LvisApi) {
             errorMessage: event.message,
             toolUseId: event.toolUseId,
             childSessionId: event.childSessionId,
+            suspension: event.suspension,
           };
           return [...prev, synthetic];
         }
@@ -111,6 +112,7 @@ export function useWorkflowTools(api: LvisApi) {
             toolCallCount: event.toolCallCount ?? existing.toolCallCount,
             ...instructionsPatch,
             ...childSessionIdPatch,
+            ...(event.suspension ? { suspension: event.suspension } : {}),
           };
         } else if (event.type === "error") {
           next[existingIdx] = {

@@ -17,8 +17,8 @@ import {
   createAgentInterruptTool,
   createAgentSpawnTool,
   createAgentStatusTool,
-  type AgentSpawnEvent,
 } from "../tools/agent-spawn.js";
+import type { AgentSpawnEvent } from "../shared/subagent-events.js";
 import { createSkillLoadTool, type SkillLoadEvent } from "../tools/skill-load.js";
 import { createSkillListTool } from "../tools/skill-list.js";
 import { createAgentListTool } from "../tools/agent-list.js";

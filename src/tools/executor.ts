@@ -255,6 +255,10 @@ export interface ExecuteOptions {
    * SubAgentRunner registry strip).
    */
   spawnDepth?: number;
+  /** Host-owned capability for background child-to-parent delivery. */
+  supportsA2AParentDelivery?: boolean;
+  /** Internal, DLP-masked source label for receiver-side approval prompts. */
+  approvalReasonPrefix?: string;
   abortSignal?: AbortSignal;
   toolResultChunkReader?: ToolResultChunkReader;
   permissionContext?: ToolPermissionContext;
@@ -641,6 +645,8 @@ export class ToolExecutor {
       sessionId,
       overlayTriggerOrigin,
       spawnDepth,
+      supportsA2AParentDelivery,
+      approvalReasonPrefix,
       abortSignal,
       toolResultChunkReader,
       permissionContext,
@@ -883,7 +889,9 @@ export class ToolExecutor {
           toolName: toolUse.name,
           toolCategory: invocationCategory,
           args: finalInput,
-          reason: dirLayerResult.reason,
+          reason: approvalReasonPrefix
+            ? `${approvalReasonPrefix} ${dirLayerResult.reason}`
+            : dirLayerResult.reason,
           source: source as "builtin" | "plugin" | "mcp",
           createdAt: Date.now(),
           target: { filePath: outOfAllowedTarget.filePath },
@@ -1329,7 +1337,9 @@ export class ToolExecutor {
       ? tool.decisionOverride
       : undefined;
     const isAlwaysAllowMeta = metaOverride === "always-allow-with-audit";
-    if (this.permissionManager && !isAlwaysAllowMeta) {
+    // Cross-agent provenance re-elevates even host-owned always-allow meta tools:
+    // the receiver must authorize every tool use caused by an A2A Message.
+    if (this.permissionManager && (!isAlwaysAllowMeta || approvalReasonPrefix !== undefined)) {
       // Permission policy V1 SOT — the meta `decisionOverride="ask"` re-elevation
       // (agent_spawn: elevate the registry's override-`allow` to a per-invocation
       // `forceModal` ask, except under allow-all mode) now lives inside
@@ -1762,6 +1772,16 @@ export class ToolExecutor {
       // confirmation lanes, layer 6). Gating on the layer is the precise,
       // route-agnostic test: overlay/strict/MCP-strict carry no reviewer route
       // but are uniformly layer <= 2.
+      // A cross-agent Message is untrusted input. Preserve any prior deny,
+      // but force every otherwise-allowed tool through the receiver's own
+      // ApprovalGate with the DLP-masked Sub-Agent provenance label.
+      if (approvalReasonPrefix && permissionResult.decision !== "deny") {
+        permissionResult = {
+          ...permissionResult,
+          decision: "ask",
+          forceModal: true,
+        };
+      }
       if (
         permissionResult.decision === "ask" &&
         permissionResult.layer >= 3 &&
@@ -1803,11 +1823,13 @@ export class ToolExecutor {
             reviewerVerdict: permissionResult.reviewer?.verdict,
             ...(approvalPurpose ? { approvalPurpose } : {}),
             args: finalInput,
-            reason: permissionResult.reason,
+            reason: approvalReasonPrefix
+              ? `${approvalReasonPrefix} ${permissionResult.reason}`
+              : permissionResult.reason,
             source: source as "builtin" | "plugin" | "mcp",
             createdAt: Date.now(),
             ...(targetFilePath ? { target: { filePath: targetFilePath } } : {}),
-            isReadOnly: invocationCategory === "read",
+            isReadOnly: approvalReasonPrefix ? false : invocationCategory === "read",
             mode: this.currentApprovalMode(),
             sensitivePathPattern,
             trustOrigin: invocationPermissionContext.trustOrigin,
@@ -2018,6 +2040,7 @@ export class ToolExecutor {
         // C3(b): spawn depth visible to tools — `agent_spawn` reads this
         // and refuses when >= 1 (a sub-agent cannot itself spawn).
         spawnDepth: spawnDepth ?? 0,
+        supportsA2AParentDelivery: supportsA2AParentDelivery === true,
         // Tool 자기 호출의 stable id — 렌더러가 inline UI 카드 (sub-agent 등)
         // 를 ToolGroupCard 옆에 join 할 때 키로 사용. agent_spawn 이 emit 하는
         // 라이프사이클 이벤트에 함께 실어 보냄.
