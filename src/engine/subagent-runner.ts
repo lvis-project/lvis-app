@@ -108,6 +108,10 @@ export interface SubAgentSpawnInput {
   maxRounds?: number;
   /** Origin session id — propagated for audit attribution only. */
   originSessionId?: string;
+  /** Authorized project root inherited from the spawning conversation/work item. */
+  projectRoot?: string;
+  /** Human-readable project name paired with the project root. */
+  projectName?: string;
   /**
    * Agent profile's `model:` frontmatter. May be a complexity tier
    * ("low" / "mid" / "high"), an explicit vendor-specific model ID, or
@@ -1076,6 +1080,15 @@ export class SubAgentRunner {
         });
 
         const child = new ConversationLoop(childDeps);
+        child.newConversation(
+          "subagent",
+          input.projectRoot
+            ? {
+                projectRoot: input.projectRoot,
+                ...(input.projectName ? { projectName: input.projectName } : {}),
+              }
+            : childDeps.getDefaultProject?.(),
+        );
         childForAbort = child;
         // Bind persistence and tracing to the addressable child id before work.
         child.sessionId = childSessionId;
@@ -1120,6 +1133,7 @@ export class SubAgentRunner {
     // PR-D's loop guards. No resume logic here — this is metadata foundation.
     const spawnMetadata: Parameters<MemoryManager["saveSessionMetadata"]>[1] = {
       sessionKind: "subagent",
+      ...(!child.getSessionProjectIsDefault() ? child.getSessionProjectContext() : {}),
       sourceTools: scopedTools.map((tool) => tool.name),
       ...(input.profileModel !== undefined ? { profileModel: input.profileModel } : {}),
       ...(input.profileMode !== undefined ? { profileMode: input.profileMode } : {}),

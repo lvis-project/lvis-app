@@ -522,9 +522,11 @@ describe("agent_spawn tool", () => {
   });
   it("forwards to runner and emits start/done events", async () => {
     const events: Array<{ type: string; spawnId: string }> = [];
+    let forwardedProjectRoot: string | undefined;
     const tool = createAgentSpawnTool({
       getRunner: () => ({
         spawn: async (input, callbacks) => {
+          forwardedProjectRoot = input.projectRoot;
           callbacks?.onActivity?.({
             entries: [{ kind: "assistant", text: "hello", streaming: false }],
             toolCallCount: 0,
@@ -543,9 +545,10 @@ describe("agent_spawn tool", () => {
         events.push({ type: e.type, spawnId: e.spawnId });
       },
     });
+    const executionCwd = resolvePath("test-fixtures", "agent-connector");
     const r = await tool.execute(
       { title: "search", instructions: "find X" },
-      ctx(),
+      { ...ctx(), cwd: executionCwd },
     );
     expect(r.isError).toBe(false);
     const parsed = JSON.parse(r.output);
@@ -553,6 +556,7 @@ describe("agent_spawn tool", () => {
     expect(parsed.toolCallCount).toBe(0);
     expect(parsed.childSessionId).toBe("child-1");
     expect(parsed.entries).toBeUndefined();
+    expect(forwardedProjectRoot).toBe(executionCwd);
     const types = events.map((e) => e.type);
     expect(types).toContain("start");
     // PR3: activity events carry the live ChatEntry[] snapshot.
