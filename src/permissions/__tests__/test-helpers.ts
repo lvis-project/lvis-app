@@ -48,9 +48,11 @@ async function windowsSandboxCanSpawn(): Promise<boolean> {
         console.warn(
           "[asrt-sandbox] Windows OS sandbox cannot spawn as `srt-sandbox` " +
             "(CreateProcessWithLogonW access-denied, 0x80070005): NOT providing " +
-            "isolation on this machine — live-init tests SKIPPED (not run). " +
-            "To enable it: `Start-Service seclogon` then `gpupdate /force`, then " +
-            "re-run. See README → 'ASRT sandbox access denied' recovery.",
+            "isolation on this machine — live-init tests SKIPPED (not run). Fix: " +
+            "grant srt-sandbox read+execute on the ASRT backend — `icacls " +
+            "node_modules\\@anthropic-ai\\sandbox-runtime /grant " +
+            '"sandbox-runtime-users:(OI)(CI)(RX)" /T /C`. See README → ' +
+            "'ASRT sandbox access denied' recovery.",
         );
         return false;
       }
