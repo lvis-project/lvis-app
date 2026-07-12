@@ -23,6 +23,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool, type Tool } from "../base.js";
+import { ToolExecutor } from "../executor.js";
+import { PermissionManager } from "../../permissions/permission-manager.js";
+import { runWithInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
 import { mcpToolToTool } from "../../mcp/mcp-tool-adapter.js";
 import { mcpToolToPluginTool } from "../../mcp/plugin-tool-from-mcp.js";
 import { manifestToolsToMcpTools } from "../../mcp/plugin-server-projection.js";
@@ -189,19 +192,26 @@ describe("registry — an app-only tool is NOT exposed to the model (both arms, 
     expect(names).toContain("meeting_start"); // the promoted model-visible one loads
   });
 
-  it("THE AUTH TRIO stays model-invisible and model-uncallable (it is app-only by manifest law)", () => {
+  it("THE AUTH TRIO stays model-invisible and IS registered under the gate (app-only by manifest law)", () => {
     const registry = loadedRegistry();
     for (const name of AUTH_TRIO) {
       // Not shown to the model, in any listing…
       expect(registry.getModelVisibleTools().map((t) => t.name)).not.toContain(name);
       expect(registry.getToolSchemas().map((s) => s.name)).not.toContain(name);
       expect(registry.getToolSchemasForScope(FULL_SCOPE).map((s) => s.name)).not.toContain(name);
-      // …and the model cannot name what it cannot see. (It IS registered, so that a
-      // card's auth call runs under the gate — the exact call the old ungoverned
-      // bypass handed to an untrusted iframe with no risk check and no audit row.)
+      // …yet IS registered, so that a CARD's auth call runs under the gate — the exact
+      // call the old ungoverned bypass handed to an untrusted iframe with no risk check
+      // and no audit row. `findByName` resolving it is DELIBERATE, not a leak: model
+      // exposure (what the LLM is shown) is subtracted at the listings above, while
+      // registration (what may execute under the gate) is retained here.
       expect(registry.findByName(name)).toBeDefined();
       expect(registry.findByName(name)!.modelVisible).toBe(false);
     }
+    // The "model can't RUN it" half of the invariant is NOT a registry property — the
+    // registry resolves the name on purpose — it is an EXECUTOR property, proved in the
+    // "executor refuses a model-origin call" block below. Asserting it here would be the
+    // lie this block used to carry (title once said "…AND model-uncallable" while only
+    // showing findByName resolves).
   });
 
   it("leaves builtins alone — a tool that declares no MCP visibility is model-visible", () => {
@@ -213,5 +223,83 @@ describe("registry — an app-only tool is NOT exposed to the model (both arms, 
     expect(registry.getModelVisibleTools().map((t) => t.name)).toContain("bash");
     // Same for an external server that declares nothing: SEP-1865 default is dual.
     expect(registry.findByName("mcp_gh_legacy")!.modelVisible).toBe(true);
+  });
+});
+
+/**
+ * THE OTHER HALF — registration is NOT executability-by-the-model. `findByName`
+ * resolving an app-only tool (proved above) is exactly why the EXECUTOR needs its own
+ * guard: a model `tool_use` naming `meeting_auth_login` (whose handler spawns a
+ * credentialed auth window) or an ordinary app-only card tool (`meeting_ui_list_rows`)
+ * must be REFUSED, while the SAME tool invoked on a governed card origin ("mcp-app",
+ * the arm that legitimately reaches app-only tools) still runs. The discriminator is
+ * the effective invocation origin: the model's main-loop executor runs in no
+ * `runWithInvocationOrigin` frame (undefined), the card arm runs inside one ("mcp-app").
+ */
+describe("executor refuses a model-origin call to an app-only tool (the model-uncallable half)", () => {
+  const APP_ONLY = ["meeting_ui_list_rows", "meeting_auth_login"];
+
+  function loadedWithSpy(): { registry: ToolRegistry; invoke: ReturnType<typeof vi.fn> } {
+    const invoke = vi.fn(async (name: string) => ({ text: `ran ${name}` }));
+    const registry = new ToolRegistry();
+    registry.registerBatch([
+      builtinTool("bash"),
+      ...manifestToolsToMcpTools(MANIFEST).map((schema) => mcpToolToPluginTool(PLUGIN_ID, schema, invoke)),
+    ]);
+    return { registry, invoke };
+  }
+
+  /**
+   * Auto-allow permission manager: the MAJOR-1 deny fires right after `findByName`,
+   * BEFORE any permission check, so the model-origin case never consults this — it only
+   * lets the app-origin (governed) case reach the tool's handler so the contrast is real.
+   */
+  function executorFor(registry: ToolRegistry): ToolExecutor {
+    const permMgr = new PermissionManager("/tmp/nonexistent-model-exposure.json");
+    permMgr.checkDetailed = () => ({ decision: "allow", reason: "test auto-allow", layer: 3 });
+    return new ToolExecutor(registry, undefined, permMgr);
+  }
+
+  it("MODEL origin (no invocation-origin frame) is DENIED — is_error, and the app-only handler NEVER runs", async () => {
+    for (const name of APP_ONLY) {
+      const { registry, invoke } = loadedWithSpy();
+      const [result] = await executorFor(registry).executeAll(
+        [{ id: `tu-${name}`, name, input: {} }],
+        {
+          sessionId: "s",
+          permissionContext: { trustOrigin: "llm-tool-arg", allowedPluginIds: new Set([PLUGIN_ID]) },
+        },
+      );
+      expect(result.is_error, name).toBe(true);
+      expect(invoke, `${name} handler must not run`).not.toHaveBeenCalled();
+    }
+  });
+
+  it("APP origin (runWithInvocationOrigin 'mcp-app') reaches the SAME app-only tool's handler — the contrast", async () => {
+    const { registry, invoke } = loadedWithSpy();
+    const [result] = await runWithInvocationOrigin("mcp-app", undefined, () =>
+      executorFor(registry).executeAll(
+        [{ id: "tu-card", name: "meeting_ui_list_rows", input: {} }],
+        {
+          sessionId: "s",
+          permissionContext: { trustOrigin: "plugin-emitted", allowedPluginIds: new Set([PLUGIN_ID]) },
+        },
+      ),
+    );
+    expect(result.is_error).toBeFalsy();
+    expect(invoke).toHaveBeenCalledWith("meeting_ui_list_rows", {});
+  });
+
+  it("a MODEL-VISIBLE plugin tool is unaffected — the guard keys on modelVisible, not on being a plugin tool", async () => {
+    const { registry, invoke } = loadedWithSpy();
+    const [result] = await executorFor(registry).executeAll(
+      [{ id: "tu-model", name: "meeting_start", input: {} }],
+      {
+        sessionId: "s",
+        permissionContext: { trustOrigin: "llm-tool-arg", allowedPluginIds: new Set([PLUGIN_ID]) },
+      },
+    );
+    expect(result.is_error).toBeFalsy();
+    expect(invoke).toHaveBeenCalledWith("meeting_start", {});
   });
 });

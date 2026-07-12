@@ -4,10 +4,12 @@ import { render, screen, waitFor, act, fireEvent } from "@testing-library/react"
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { McpAppView } from "../McpAppView.js";
+import { McpAppPipPanel } from "../McpAppPipPanel.js";
 import { ThemeProvider, useTheme } from "../../theme/index.js";
 import { DEFAULT_BUNDLE_ID } from "../../theme/index.js";
 import { mcpAppPartitionName } from "../../../../shared/mcp-app-partition.js";
 import { MCP_APP_CARD_MAX_HEIGHT_PX } from "../../../../shared/mcp-app-card-size.js";
+import { __resetMcpAppCardLocationStoreForTests } from "../../state/mcp-app-card-location-store.js";
 import type { McpUiPayload } from "../../../../mcp/types.js";
 
 // The host-context WIRING test (below) needs to observe both the args
@@ -109,6 +111,11 @@ function stubLvis() {
 const payload = (serverId: string): McpUiPayload => ({ serverId, resourceUri: "ui://card/1" });
 
 beforeEach(() => {
+  // The pip / location-store describe blocks below write the MODULE-SINGLETON card
+  // location store (moveCard / reviveCardIfAt via applyDisplayMode). Reset it per test
+  // so order-coupled shared state never leaks between cases (the store test and
+  // McpAppPipPanel.test.tsx already do this).
+  __resetMcpAppCardLocationStoreForTests();
   readUiResource.mockClear();
   openDetached.mockClear();
   openDetached.mockResolvedValue({ ok: true as const, windowId: 7, viewKey: DETACHED_VIEW_KEY });
@@ -129,6 +136,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  __resetMcpAppCardLocationStoreForTests();
 });
 
 /** Query the MOUNTED <webview> node (asserts the node attribute, not a setter). */
@@ -670,6 +678,64 @@ describe("McpAppView — pip (the shared location store, not a second window sta
     expect(webviewNode(container)).toBeTruthy();
   });
 
+});
+
+describe("McpAppView — home-mount unmount reclaims a leaked away entry (MAJOR-2)", () => {
+  function homeDeps() {
+    return createMcpAppBridgeMock.mock.calls[0]![4] as {
+      applyDisplayMode: (mode: string) => Promise<string>;
+    };
+  }
+
+  it("home-mount unmount while the card is in pip reclaims the entry and tears the bridge down", async () => {
+    const { getCardLocation, getPipOccupant } = await import("../../state/mcp-app-card-location-store.js");
+    const locationId = "loc-unmount-reclaim";
+
+    // Production topology: a transcript HOME mount + the session-independent pip panel.
+    const home = render(<McpAppView payload={payload("github")} locationId={locationId} />, {
+      wrapper: ThemeWrapper,
+    });
+    await waitFor(() => expect(webviewNode(home.container)).toBeTruthy());
+    const pip = render(<McpAppPipPanel />, { wrapper: ThemeWrapper });
+
+    // The app moves the card to pip: the home goes dormant, the panel mounts a live away card.
+    await act(() => homeDeps().applyDisplayMode("pip"));
+    await waitFor(() => expect(pip.container.querySelector("webview")).toBeTruthy());
+    expect(getCardLocation(locationId)).toEqual({ kind: "pip" });
+    expect(webviewNode(home.container)).toBeNull(); // home dormant
+
+    // The user leaves the conversation → the transcript child (the HOME mount) unmounts.
+    home.unmount();
+
+    // The leaked entry is reclaimed and the pip bridge torn down: store back to inline,
+    // nobody occupies pip, and the panel renders nothing (its away McpAppView unmounted).
+    await waitFor(() => expect(getPipOccupant()).toBeNull());
+    expect(getCardLocation(locationId)).toEqual({ kind: "inline" });
+    expect(pip.container.querySelector('[data-testid="mcp-app-pip-panel"]')).toBeNull();
+  });
+
+  it("a card in pip within a live conversation is NOT killed by an unrelated home re-render", async () => {
+    const { getCardLocation, getPipOccupant } = await import("../../state/mcp-app-card-location-store.js");
+    const locationId = "loc-rerender-safe";
+    // Stable payload identity so a re-render does NOT re-run the payload effect (which
+    // has its own fresh-card reclaim) — this isolates the unmount effect under test.
+    const p = payload("github");
+
+    const home = render(<McpAppView payload={p} locationId={locationId} />, { wrapper: ThemeWrapper });
+    await waitFor(() => expect(webviewNode(home.container)).toBeTruthy());
+
+    await act(() => homeDeps().applyDisplayMode("pip"));
+    expect(getCardLocation(locationId)).toEqual({ kind: "pip" });
+
+    // A benign re-render of the still-MOUNTED home (e.g. a parent state change) — no
+    // unmount. The unmount cleanup must not fire, so the pip card survives.
+    home.rerender(<McpAppView payload={p} locationId={locationId} />);
+
+    expect(getCardLocation(locationId)).toEqual({ kind: "pip" });
+    expect(getPipOccupant()?.cardId).toBe(locationId);
+    // The home stayed mounted throughout, showing its own dormant pip placeholder.
+    expect(home.container.querySelector('[data-testid="mcp-app-pip"]')).toBeTruthy();
+  });
 });
 
 describe("McpAppView — download sink is BOUND to the card's server", () => {
