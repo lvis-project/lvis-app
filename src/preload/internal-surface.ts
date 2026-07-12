@@ -54,6 +54,7 @@ import type {
 } from "../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../shared/session-todo.js";
 import type { StreamEvent, ChatEntry } from "../lib/chat-stream-state.js";
+import type { AgentSpawnEvent } from "../shared/subagent-events.js";
 import type { SerializedHistoryMessage } from "../shared/chat-history.js";
 import type { TurnResult } from "../engine/conversation-loop.js";
 
@@ -1626,20 +1627,7 @@ export function buildInternalApiSurface() {
 
   // agent_spawn — sub-agent lifecycle event stream
   onAgentSpawnEvent: (
-    handler: (event: {
-      spawnId: string;
-      type: "start" | "activity" | "done" | "error";
-      status?: "running" | "done" | "error" | "interrupted";
-      title?: string;
-      instructions?: string;
-      entries?: ChatEntry[];
-      summary?: string;
-      toolCallCount?: number;
-      message?: string;
-      toolUseId?: string;
-      // JOIN KEY for the unified resume transcript (mirrors `AgentSpawnEvent`).
-      childSessionId?: string;
-    }) => void,
+    handler: (event: AgentSpawnEvent<ChatEntry>) => void,
   ) => {
     const listener = (_e: unknown, ev: Parameters<typeof handler>[0]) => handler(ev);
     ipcRenderer.on(CHANNELS.agentSpawn.event, listener);

@@ -12,6 +12,7 @@ export type ChatInputOrigin =
    */
   | "app-emitted"
   | "llm-tool-arg"
+  | "agent-message"
   | "file-content"
 
 
