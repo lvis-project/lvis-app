@@ -36,10 +36,12 @@ bunx vitest run path/to/affected.test.ts  # targeted tests while iterating
 bunx playwright test path/to/flow.spec.ts # changed UI flow only
 ```
 
-Use the smallest affected checks while iterating. For code-bearing changes, the
-pre-push hook is the sole local full gate: it runs `bun run typecheck`, the full
-`bun run test`, and `bun run build` once. Markdown-only pushes run policy and
-static text checks without code gates. Do not duplicate the full trio around a
+Use the smallest affected checks while iterating. For code-bearing changes and
+runtime, instruction, workflow, or sensitive-contract Markdown, the pre-push
+hook is the sole local full gate: it runs `bun run typecheck`, the full
+`bun run test`, and `bun run build` once. Only Markdown accepted by the
+hook's explicit review-only Markdown allowlist may skip those expensive gates; a `.md`
+suffix alone does not qualify. Do not duplicate the full trio around a
 successful push. If a check fails, fix it and rerun only the failed or
 invalidated checks before pushing again. Full Playwright E2E runs in CI/release
 validation; UI changes require the targeted local flow check above. Never

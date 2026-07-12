@@ -74,12 +74,22 @@ state durable constraints here and put detailed designs in their owning docs.
 - Runtime dependency changes update the lockfile and run the relevant
   packaged-app smoke so missing packages cannot reach an installer.
 
+## Cross-cutting review gate
+
+- Sensitive cross-cutting work identified by `.github/workflows/cluster-detector.yml`
+  or task scope requires independent architect, critic, and security reviews.
+- The PR body attestation records each role, reviewed HEAD SHA, GO/NO-GO verdict, and blocking findings.
+- Apply the exact `cluster-review-passed` label only after all reviewers return GO for the current HEAD.
+  A new commit invalidates it; a missing label or failing cluster-detector workflow blocks merge. Never bypass the gate.
+
 ## Validation: proportional during work, complete once at publish
 
 Use the smallest check that can disprove the current change while iterating:
 
-- Docs-only: `git diff --check`, path/link sanity, and policy scans relevant to
-  the edited text. Do not run typecheck, unit tests, build, or E2E.
+- Review-only Markdown: only the pre-push hook's explicit allowlist may skip
+  expensive gates; still run diff/path/policy checks. A `.md` suffix alone does
+  not qualify; runtime/instruction/workflow/sensitive-contract Markdown and
+  mixed changes get relevant targeted checks plus the full pre-push gate.
 - Types or isolated logic: affected unit test file(s) and the narrowest useful
   typecheck. Do not run overlapping broad suites after every small edit.
 - Cross-module or shared contract: targeted tests for each changed boundary,
@@ -90,14 +100,12 @@ Use the smallest check that can disprove the current change while iterating:
 - Packaging, permissions, IPC, sandbox, or release paths: add the focused
   security or packaged-app check required by the owning design.
 
-For code-bearing changes, publishing has one local full gate: the pre-push hook
-runs `bun run typecheck`, the full `bun run test`, and `bun run build` once.
-Markdown-only pushes run policy and static text checks but skip code gates. Do
-not manually run the same full trio immediately before or after a successful
-pre-push. If a check fails, fix the cause and rerun only the failed check plus
-checks invalidated by that fix; let the next push perform the required complete
-gate. Full Playwright E2E belongs to CI/release validation; locally run only the
-targeted changed-flow specs unless the task or release checklist requires more.
+For code-bearing and runtime/instruction/workflow/sensitive-contract Markdown,
+pre-push runs `bun run typecheck`, full `bun run test`, and `bun run build`
+once. Only allowlisted review-only Markdown takes the static-policy path. Do not
+manually duplicate the full trio. After failure, rerun only failed or invalidated
+checks; the next push performs the complete gate. Full Playwright E2E belongs to
+CI/release; locally run only changed-flow specs unless the task requires more.
 
 ## Change and PR discipline
 
