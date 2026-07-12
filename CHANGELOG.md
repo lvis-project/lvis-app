@@ -1,8 +1,17 @@
 # Changelog
 
-## Unreleased
+## v0.5.2 — 2026-07-12
 
-### Plugin contract — `_meta` vendor namespace rename
+Completes the MCP Apps program and renames the vendor `_meta` namespace. A patch release — the wire contract is unchanged and the rename is transitionally dual-read, so installed plugins keep working. It also republishes the host so plugins pinned at `requires.minAppVersion` `0.5.2` (ms-graph / ep / git) become installable again.
+
+### MCP Apps — plugin `ui://` cards, the full app→host surface (#1600)
+
+- **A plugin can now ship an interactive `ui://` card.** #1593 delivered the host render path for external MCP servers; the plugin arm did not exist (`readUiResource` resolved only against external servers, and the loopback delegate never lifted a handler's `_meta.ui` onto the wire). Both are built: a plugin declares a card in `plugin.json`'s `uiResources[]` ("declared policy, served content" — the manifest declares the `ui://` uri + its CSP, the plugin serves the bytes from `RuntimePlugin.readUiResource`), and returns `_meta.ui.resourceUri` from a tool to trigger it. Author guide: `docs/guides/mcp-app-authoring.md`.
+- **The full app→host handler surface is wired** from one handlers-table SoT (`mcp-app-bridge.ts`): `oncalltool`, `onmessage`, `onopenlink`, `onsizechange`, `onrequestdisplaymode` (`inline` / `fullscreen` / in-page `pip`), `ondownloadfile`, `onupdatemodelcontext`, plus the sandbox/read-resource handshake. A capability cannot be advertised without its handler.
+- **A card is not privileged.** An app-initiated tool call takes the same `inspectHostRisk` → reviewer → approval → audit path a model call takes; the app can never name a different server; a card cannot wake the model (a `ui/message` with no active turn raises a user-gated staging card, matching VS Code). `_meta.ui.visibility: ["app"]` tools are registered so their card call runs governed, and are hidden from the model at one exposure boundary — including from the model's own execution path. A card cannot invoke the plugin's manifest auth trio (`loginTool` spawns a credentialed window).
+- **`HostContext`** carries theme / locale / timeZone / displayMode to the card as the standard `McpUiStyleVariableKey` vocabulary — no `--lvis-*` key leaks.
+
+### Plugin contract — `_meta` vendor namespace rename (#1601)
 
 - **`_meta` key prefix `xyz.lvis/*` → `lvisai/*`** — the reverse-DNS prefix didn't match the real domain (lvisai.xyz); the sole LVIS-proprietary `_meta` key is now `_meta["lvisai/pathFields"]`, a plain vendor prefix (same style as OpenAI's `openai/*` `_meta` keys). The host's forward (write) projection emits only the new key. The reverse (read) path is transitionally dual-read: it prefers `lvisai/*` and falls back to the legacy `xyz.lvis/*` so already-published out-of-process plugins and the SDK keep working unmigrated.
 - **Follow-up required, and its removal gate is observable, not a date** — `@lvis/plugin-sdk` and published plugin manifests still emit `xyz.lvis/*` and need a separate migration. The removal gate is NOT "the rename is done": an installed plugin's manifest is a file on the user's disk that keeps saying `xyz.lvis/*` until *that* user updates *that* plugin, and the host cannot observe roll-forward directly. So each legacy read is instrumented (`observeLegacyMetaKey`, once per plugin+key per process): the forward-projection hit reports an **installed manifest** that has not rolled forward (the gate for the schema's legacy property), and the two wire-read hits report an **out-of-process plugin** still emitting the old key (a population that does not exist in production yet). Ship one instrumented release; delete the fallback — and the schema property — only when that warning has gone quiet across the installed base, not on a schedule.
