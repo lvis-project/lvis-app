@@ -51,7 +51,7 @@ export function SuggestedRepliesChipRow({
       data-testid="suggested-replies-chip-row"
       role="toolbar"
       aria-label={t("suggestedRepliesChipRow.toolbarAriaLabel")}
-      className="mx-3 mt-3 mb-1 flex gap-2 overflow-x-auto transition-opacity duration-150 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1"
+      className="mx-3 mt-3 mb-1 flex gap-2 overflow-x-auto transition-[opacity,transform] duration-(--motion-fast) ease-(--motion-ease-out) motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-reduce:transition-none"
     >
       {alternates.map((text, idx) => {
         const isFocused = focusedIdx === idx;
@@ -70,8 +70,8 @@ export function SuggestedRepliesChipRow({
             // distinct (hover = bg-accent, focus = ring + bg-accent) so users
             // can tell where input is going.
             className={
-              "shrink-0 rounded-full bg-muted px-3 py-1 text-xs transition-all duration-150 hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" +
-              (isFocused ? " bg-accent ring-2 ring-ring" : "")
+              "shrink-0 rounded-full bg-input-bar-subtle px-3 py-1 text-caption text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) focus:outline-none focus-visible:ring-2 focus-visible:ring-input-bar-focus motion-reduce:transition-none" +
+              (isFocused ? " bg-input-bar-action/(--opacity-subtle) ring-2 ring-input-bar-focus" : "")
             }
             onClick={() => onAccept(text)}
             onFocus={() => onFocusChange(idx)}

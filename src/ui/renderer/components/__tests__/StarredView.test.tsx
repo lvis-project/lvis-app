@@ -30,7 +30,7 @@ describe("StarredView", () => {
       getUsageDailySummary: vi.fn(async () => ({ ok: true, summary: "오늘은 프로젝트 흐름을 정리했습니다.", generatedAt: now })),
     } as unknown as Parameters<typeof StarredView>[0]["api"];
 
-    const { findByText } = render(
+    const { findAllByText, findByText } = render(
       <StarredView
         api={api}
         starred={[{
@@ -57,7 +57,7 @@ describe("StarredView", () => {
 
     expect(await findByText("오늘은 프로젝트 흐름을 정리했습니다.")).toBeTruthy();
     expect(await findByText("토큰 히트맵")).toBeTruthy();
-    expect(await findByText("프로젝트별 대화")).toBeTruthy();
+    expect(await findAllByText("대화")).not.toHaveLength(0);
     expect(await findByText("workspace")).toBeTruthy();
     await waitFor(() => {
       expect(document.body.querySelector(`[aria-label="${selectedKey}: 토큰 120개"]`)).toBeTruthy();
@@ -71,6 +71,140 @@ describe("StarredView", () => {
         }),
       );
     });
+  });
+
+  it("labels the heatmap and links audit usage to its conversation without recent session metadata", async () => {
+    const now = new Date().toISOString();
+    const selectedKey = koreaDateKey(new Date(now));
+    const api = {
+      starredRemove: vi.fn(async () => ({ ok: true })),
+      getUsageRange: vi.fn(async (range: { dateFrom: string; dateTo: string }) => ({
+        today: {
+          inputTokens: 900,
+          outputTokens: 100,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 1_000,
+          cost: 0.01,
+        },
+        trend: [{
+          date: selectedKey,
+          inputTokens: 900,
+          outputTokens: 100,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 1_000,
+          cost: 0.01,
+        }],
+        topConversations: range.dateFrom === range.dateTo
+          ? [{
+              sessionId: "audit-only-session",
+              turns: 2,
+              firstInput: "감사 로그에서 찾은 대화",
+              inputTokens: 900,
+              outputTokens: 100,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              totalTokens: 1_000,
+              cost: 0.01,
+            }]
+          : [],
+      })),
+      getUsageDailySummary: vi.fn(async () => ({ ok: false, error: "unavailable" })),
+    } as unknown as Parameters<typeof StarredView>[0]["api"];
+    const onJumpToSession = vi.fn(async () => true);
+
+    const { findByText, getByTestId } = render(
+      <StarredView
+        api={api}
+        starred={[]}
+        sessions={[]}
+        currentSessionId=""
+        refreshStarred={vi.fn()}
+        onJumpToSession={onJumpToSession}
+        onActivateHome={vi.fn()}
+      />,
+    );
+
+    const row = await findByText("감사 로그에서 찾은 대화");
+    expect(getByTestId("heatmap-weekday-labels").textContent).toContain("일");
+    expect(getByTestId("heatmap-weekday-labels").textContent).toContain("토");
+    expect(getByTestId("heatmap-month-labels").children).toHaveLength(12);
+    expect(row.closest("button")?.textContent).toContain("1,000");
+    fireEvent.click(row);
+    await waitFor(() => expect(onJumpToSession).toHaveBeenCalledWith("audit-only-session"));
+  });
+
+  it("keeps scrollable insights sections in normal flow with stable list height", () => {
+    const api = {
+      starredRemove: vi.fn(async () => ({ ok: true })),
+    } as unknown as Parameters<typeof StarredView>[0]["api"];
+    const { getByTestId } = render(
+      <StarredView
+        api={api}
+        starred={[]}
+        sessions={[]}
+        currentSessionId=""
+        refreshStarred={vi.fn()}
+        onJumpToSession={vi.fn()}
+        onActivateHome={vi.fn()}
+      />,
+    );
+
+    expect(getByTestId("insights-scroll-root").className).toContain("overflow-y-auto");
+    expect(getByTestId("insights-overview-grid").className).toContain("shrink-0");
+    expect(getByTestId("insights-heatmap").className).toContain("shrink-0");
+    expect(getByTestId("insights-lists-grid").className).toContain("lg:min-h-[22rem]");
+    expect(getByTestId("insights-conversations-panel").className).toContain("h-[22rem]");
+  });
+
+  it("disables calendar dates that have no activity signal", async () => {
+    const now = new Date();
+    const inactive = new Date(now);
+    inactive.setDate(inactive.getDate() - 1);
+    const activeKey = koreaDateKey(now);
+    const inactiveKey = koreaDateKey(inactive);
+    const api = {
+      starredRemove: vi.fn(async () => ({ ok: true })),
+    } as unknown as Parameters<typeof StarredView>[0]["api"];
+    const { container } = render(
+      <StarredView
+        api={api}
+        starred={[{
+          id: "active-day-star",
+          sessionId: "active-day-session",
+          messageIndex: 0,
+          role: "assistant",
+          text: "activity",
+          starredAt: now.toISOString(),
+        }]}
+        sessions={[]}
+        currentSessionId="active-day-session"
+        refreshStarred={vi.fn()}
+        onJumpToSession={vi.fn()}
+        onActivateHome={vi.fn()}
+      />,
+    );
+
+    const dayButton = (dateKey: string) => container.querySelector<HTMLButtonElement>(
+      `button[data-day="${dateKey}"], [data-day="${dateKey}"] button`,
+    );
+    await waitFor(() => {
+      expect(dayButton(activeKey)).toBeTruthy();
+    }, { timeout: 5_000 });
+    const activeButton = dayButton(activeKey);
+    const inactiveButton = dayButton(inactiveKey);
+    const activeCell = activeButton?.closest("[data-day]");
+    const inactiveCell = inactiveButton?.closest("[data-day]");
+    expect(activeButton?.disabled).toBe(false);
+    expect(inactiveButton?.disabled).toBe(true);
+    expect(activeCell?.getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.click(inactiveButton!);
+
+    expect(activeCell?.getAttribute("aria-selected")).toBe("true");
+    expect(inactiveCell?.getAttribute("aria-selected")).not.toBe("true");
+    expect(container.querySelector<HTMLButtonElement>(`button[aria-label^="${inactiveKey}:"]`)?.disabled).toBe(true);
   });
 
   it("removes a starred item and refreshes the list", async () => {
