@@ -50,6 +50,7 @@
     "plugins:disable": "tsx scripts/plugins-cli.ts disable",
     "cli": "tsx scripts/lvis-cli.ts",
     "test": "vitest run",
+    "test:a2a-tck": "bun scripts/run-a2a-tck.ts",
     "check:i18n-catalog": "node --import tsx scripts/i18n-validate-catalog.ts",
     "check:sunset-inventory": "node scripts/check-sunset-inventory.mjs",
     "check:no-inline-channels": "node scripts/check-no-inline-channels.mjs",
