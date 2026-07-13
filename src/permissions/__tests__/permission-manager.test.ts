@@ -389,6 +389,23 @@ describe("PermissionManager — overlay-trigger origin override", () => {
     expect(r.decision).toBe("ask");
   });
 
+  it("forces ASK on ask-meta through the same overlay authority gate", () => {
+    pm.setMode("auto");
+    pm.setInteractiveAutoApprove("medium");
+    const r = pm.checkDetailed(
+      "authority_probe",
+      "builtin",
+      "meta",
+      "overlay:meeting-detection",
+      { decisionOverride: "ask" },
+    );
+
+    expect(r.decision).toBe("ask");
+    expect(r.layer).toBe(2);
+    expect(r.reviewer).toBeUndefined();
+    expect(r.forceModal).toBeUndefined();
+  });
+
   it("does NOT force ASK on read tools", async () => {
     await pm.addAlwaysAllowedPersist("email_read");
     const r = pm.checkDetailed(

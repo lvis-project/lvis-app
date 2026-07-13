@@ -64,7 +64,7 @@ function makeDeps(options: {
   auditAppendError?: Error;
   queue?: Record<string, unknown> | null;
   mode?: string;
-  interactiveAutoApprove?: "off" | "low";
+  interactiveAutoApprove?: "off" | "low" | "medium";
   hasReviewer?: boolean;
 } = {}) {
   const appWindows = [
