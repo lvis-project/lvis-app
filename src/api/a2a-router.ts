@@ -33,17 +33,11 @@ const PUSH_METHODS = new Set<string>(A2A_PUSH_JSONRPC_METHODS);
 
 export class A2AHandlerError extends Error {
   readonly definition: A2AErrorDefinition | StandardErrorDefinition;
-  readonly metadata?: Record<string, string>;
 
-  constructor(
-    definition: A2AErrorDefinition | StandardErrorDefinition,
-    message = definition.message,
-    metadata?: Record<string, string>,
-  ) {
-    super(message);
+  constructor(definition: A2AErrorDefinition | StandardErrorDefinition) {
+    super(definition.message);
     this.name = "A2AHandlerError";
     this.definition = definition;
-    this.metadata = metadata;
   }
 }
 
@@ -137,7 +131,6 @@ function sendFailure(
   res: ServerResponse,
   id: A2AJsonRpcId,
   definition: A2AErrorDefinition | StandardErrorDefinition,
-  message: string = definition.message,
   metadata?: Record<string, string>,
 ): void {
   const reason = "reason" in definition ? definition.reason : undefined;
@@ -156,7 +149,7 @@ function sendFailure(
     id,
     error: {
       code: definition.code,
-      message,
+      message: definition.message,
       ...(data ? { data } : {}),
     },
   });
@@ -313,7 +306,6 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
           res,
           request.id,
           A2AJsonRpcErrorDefinition.VERSION_NOT_SUPPORTED,
-          undefined,
           { supportedVersions: A2A_PROTOCOL_VERSION },
         );
         return true;
@@ -352,7 +344,7 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
         sendSuccess(res, request.id, result);
       } catch (error) {
         if (error instanceof A2AHandlerError) {
-          sendFailure(res, request.id, error.definition, error.message, error.metadata);
+          sendFailure(res, request.id, error.definition);
           return true;
         }
         options.audit?.({
