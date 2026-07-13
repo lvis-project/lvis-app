@@ -594,6 +594,63 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     ).rejects.toThrow(/networkAccess does not match the catalog-approved grant/i);
   });
 
+  it("accepts marketplace artifacts whose hostFetch capability matches the top-level catalog grant", async () => {
+    const pluginDir = join(testDir, "plugins", "installed", "network-capability-positive");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "network-capability-positive",
+        name: "Network Capability Positive",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: [],
+        description: "Test fixture.",
+        capabilities: ["external-auth-consumer"],
+        networkAccess: {
+          allowedDomains: ["api.example.com"],
+          reasoning: "Catalog-approved grant.",
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = makeManagedService(testDir, marketplacePath);
+    await expect(
+      (service as unknown as {
+        assertInstalledManifestMatchesCatalog: (
+          plugin: {
+            id: string;
+            installPolicy: "user";
+            capabilities?: string[];
+            networkAccess?: {
+              allowedDomains: string[];
+              reasoning?: string;
+              allowPrivateNetworks?: boolean;
+            };
+          },
+          version: string,
+          manifestFile: string,
+          pluginDir: string,
+        ) => Promise<void>;
+      }).assertInstalledManifestMatchesCatalog(
+        {
+          id: "network-capability-positive",
+          installPolicy: "user",
+          capabilities: ["external-auth-consumer"],
+          networkAccess: {
+            allowedDomains: ["api.example.com"],
+            reasoning: "Catalog-approved grant.",
+          },
+        },
+        "1.0.0",
+        manifestPath,
+        pluginDir,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it("rejects marketplace artifacts whose hostFetch capability exceeds the catalog-approved grant", async () => {
     const pluginDir = join(testDir, "plugins", "installed", "network-capability-plugin");
     await mkdir(pluginDir, { recursive: true });
@@ -624,6 +681,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             id: string;
             installPolicy: "user";
             capabilities?: string[];
+            requires?: { capabilities: string[] };
             networkAccess?: {
               allowedDomains: string[];
               reasoning?: string;
@@ -639,6 +697,9 @@ describe("PluginMarketplaceService managed bootstrap", () => {
           id: "network-capability-plugin",
           installPolicy: "user",
           capabilities: [],
+          // Dependency requirements are not catalog approval for capabilities
+          // declared by the artifact itself.
+          requires: { capabilities: ["external-auth-consumer"] },
           networkAccess: {
             allowedDomains: ["api.example.com"],
             reasoning: "Catalog-approved grant.",
