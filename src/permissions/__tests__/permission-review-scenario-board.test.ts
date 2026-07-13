@@ -399,7 +399,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
     },
   );
 
-  it("default mode + medium threshold uses the same foreground reviewer route", async () => {
+  it("default mode ignores the medium threshold and uses the normal approval path", async () => {
     const classifier = fixedClassifier({
       level: "medium",
       reason: "default-mode medium verdict",
@@ -419,15 +419,18 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         input: { path: resolve(process.cwd(), "tmp-default-medium.txt") },
       });
 
-      expect(result[0].is_error).toBeUndefined();
-      expect(execute).toHaveBeenCalledOnce();
-      expect(classifier.classify).toHaveBeenCalledOnce();
-      expect(gate.requestAndWait).not.toHaveBeenCalled();
+      expect(result[0].is_error).toBe(true);
+      expect(execute).not.toHaveBeenCalled();
+      expect(classifier.classify).not.toHaveBeenCalled();
+      expect(gate.requestAndWait).toHaveBeenCalledOnce();
+      const request = gate.requestAndWait.mock.calls[0]?.[0] as {
+        reviewerVerdict?: unknown;
+      };
+      expect(request.reviewerVerdict).toBeUndefined();
     } finally {
       cleanup();
     }
   });
-
   it("overlay ask-meta bypasses MEDIUM auto-review and opens the common modal", async () => {
     const classifier = fixedClassifier({
       level: "medium",

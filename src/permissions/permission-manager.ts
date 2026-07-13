@@ -116,9 +116,9 @@ export interface PermissionCheckResult {
   /**
    * Per-invocation hard-ask marker. When `true`, this `ask` decision MUST be
    * confirmed by the user on every invocation and is NEVER auto-skipped by the
-   * explicit-approval memory store (Store B). Set when a tool author declared
-   * `decisionOverride: "ask"` ("always confirm me"); honouring it preserves the
-   * author's per-invocation intent against a prior session/persistent grant.
+   * explicit-approval memory store (Store B). Policy sets it only after choosing
+   * a hard user-approval lane; `decisionOverride: "ask"` may instead use the
+   * common foreground reviewer route when that route is eligible.
    */
   forceModal?: boolean;
   /**
@@ -316,7 +316,7 @@ export class PermissionManager {
    */
   private reviewerDegradedToRule = false;
   /**
-   * Issue #690 — interactive auto-approve setting. "low"/"medium" are global
+   * Issue #690 — interactive auto-approve setting. "low"/"medium" are auto-mode
    * foreground reviewer thresholds that skip the approval modal for LOW /
    * LOW+MEDIUM respectively. Read by {@link categoryBasedDecision} to
    * decide whether to set `reviewer.route='foreground-auto'`.
@@ -909,11 +909,12 @@ export class PermissionManager {
    *
    * When `overlayTriggerOrigin` is a STAGED turn origin — a plugin overlay trigger
    * (`"overlay:meeting-detection"`) or an MCP App's `ui/message` (`"app:<serverId>"`) —
-   * every write/shell/network tool is forced to `ask` regardless of user permanent
+   * every foreground-authority call (write/shell/network plus meta with
+   * `decisionOverride: "ask"`) is forced to `ask` regardless of user permanent
    * approval (`allow-always`), config allow rules, or auto mode.
    * This hard gate prevents staged, non-user-authored input from automatically running
-   * destructive work without user confirmation, pairing with the first-pass
-   * LLM review from `<overlay-trigger-origin-guidance>`. Read tools are unaffected.
+   * authority-bearing work without user confirmation, pairing with the first-pass
+   * LLM review from `<overlay-trigger-origin-guidance>`. Other calls are unaffected.
    * The set of staged origins has ONE definition — `isStagedTurnOrigin` — so a new one
    * can never be added while quietly skipping this gate.
    *
@@ -1388,6 +1389,7 @@ export class PermissionManager {
     context: PermissionCheckContext,
   ): boolean {
     return (
+      this.mode === "auto" &&
       context.headless !== true &&
       this.isForegroundAuthorityReviewEligible(category, context) &&
       this.interactiveAutoApprove !== "off"
@@ -1409,7 +1411,7 @@ export class PermissionManager {
    * acts as a BACKGROUND adjudicator, not a modal text-filler:
    *   - headless lane: "reviewer" routes to dispatchReviewer (defer policy
    *     queues HIGH verdicts);
-   *   - foreground lane: an enabled inclusive threshold stamps eligible
+   *   - foreground lane: in `mode="auto"`, an enabled inclusive threshold stamps eligible
    *     write/shell/network and decisionOverride:"ask" meta calls with
    *     `reviewer.route = "foreground-auto"`. The executor auto-allows
    *     verdicts through the configured threshold with audit; higher verdicts

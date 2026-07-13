@@ -962,7 +962,7 @@ export const zhMessages: Record<string, string> = {
   "composerPlaceholder.streamingHint": "将被添加到消息队列（用⌘⏎立即中断）",
   "constants.execModeAllowDesc": "自动允许硬块外的工具；访问允许的目录之外需要单独批准",
   "constants.execModeAllowLabel": "允许全部",
-  "constants.execModeAutoDesc": "低风险操作通过审计跟踪进行处理；自动（无头）执行和交互式聊天均由权限审核者验证",
+  "constants.execModeAutoDesc": "交互式低风险和中风险判定会在记录审计日志的同时自动批准；高风险仍需批准，无头执行使用独立的故障关闭式审核队列",
   "constants.execModeAutoLabel": "自动验证",
   "constants.execModeDefaultDesc": "允许读取；写入、shell 和网络操作需要批准",
   "constants.execModeDefaultLabel": "确认写入",

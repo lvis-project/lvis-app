@@ -190,7 +190,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.getByTestId("exec-mode-strict")).toHaveTextContent("전체 확인");
     expect(screen.getByText(/읽기까지 포함해 모든 도구/)).toBeTruthy();
     expect(screen.getByTestId("exec-mode-auto")).toHaveTextContent("자동 검증");
-    expect(screen.getByText(/권한 리뷰어가 검증/)).toBeTruthy();
+    expect(screen.getByText(/대화형 저위험·중위험 판정/)).toBeTruthy();
     expect(screen.getByTestId("exec-mode-allow")).toHaveTextContent("모두 허용");
   });
 

@@ -128,7 +128,7 @@ const DEFAULT_REVIEWER: ReviewerSettingsBlock = {
   //
   // `interactive.autoApprove: "medium"` lets LOW and MEDIUM verdicts in the
   // foreground chat flow silently allow without a modal. HIGH still returns to
-  // the main LLM as a blocked tool result. This is a global reviewer threshold;
+  // the main LLM as a blocked tool result. This threshold applies in auto mode;
   // the headless lane remains unaffected.
   //
   // Why not "rule" as the default: rule is the *degraded* posture, not the
