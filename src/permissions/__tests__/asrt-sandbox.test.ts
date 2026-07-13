@@ -14,6 +14,7 @@
  * Real ASRT semantics, no ASRT mocks — mirrors the no-mock style of the
  * bash/powershell tests. Windows resolves host-sensitive paths from an isolated
  * test home while leaving USERPROFILE unchanged for CreateProcessWithLogonW.
+ * LVIS_HOME is pinned there too so prior test files cannot leak a host path.
  */
 import {
   describe,
@@ -67,14 +68,17 @@ import { matchesDomainPattern } from "@anthropic-ai/sandbox-runtime/dist/sandbox
 import { resolveParentProxy } from "@anthropic-ai/sandbox-runtime/dist/sandbox/parent-proxy.js";
 
 let originalAsrtTestHome: string | undefined;
+let originalLvisHome: string | undefined;
 let isolatedWindowsHome: string | undefined;
 
 beforeAll(() => {
   if (process.platform !== "win32") return;
 
   originalAsrtTestHome = process.env.LVIS_ASRT_TEST_HOME;
+  originalLvisHome = process.env.LVIS_HOME;
   isolatedWindowsHome = mkdtempSync(join(tmpdir(), "lvis-asrt-test-home-"));
   process.env.LVIS_ASRT_TEST_HOME = isolatedWindowsHome;
+  process.env.LVIS_HOME = join(isolatedWindowsHome, ".lvis");
 });
 
 afterAll(() => {
@@ -84,6 +88,11 @@ afterAll(() => {
     delete process.env.LVIS_ASRT_TEST_HOME;
   } else {
     process.env.LVIS_ASRT_TEST_HOME = originalAsrtTestHome;
+  }
+  if (originalLvisHome === undefined) {
+    delete process.env.LVIS_HOME;
+  } else {
+    process.env.LVIS_HOME = originalLvisHome;
   }
   rmSync(isolatedWindowsHome, { recursive: true, force: true });
 });
