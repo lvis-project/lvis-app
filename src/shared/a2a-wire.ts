@@ -194,10 +194,9 @@ export interface A2AAgentCard {
 
 export type A2AAgentCardTemplate = Omit<A2AAgentCard, "supportedInterfaces">;
 
-export interface A2ASendMessageResult {
-  task?: A2ATask;
-  message?: A2AMessage;
-}
+export type A2ASendMessageResult =
+  | { task: A2ATask; message?: never }
+  | { message: A2AMessage; task?: never };
 
 export interface A2AListTasksResult {
   tasks: A2ATask[];
