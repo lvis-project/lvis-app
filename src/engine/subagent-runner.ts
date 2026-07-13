@@ -280,6 +280,25 @@ export interface A2AWireResumeBinding {
   handlerId: string;
 }
 
+export interface A2AWireRunSnapshot {
+  childSessionId: string;
+  title: string;
+  taskState: A2AProjectedTaskState;
+  updatedAt?: string;
+  summary?: string;
+  error?: string;
+  stopReason?: TurnStopReason;
+  suspension?: SubAgentSuspension;
+}
+
+export type A2AWireCancelResult =
+  | { ok: true; run: A2AWireRunSnapshot }
+  | {
+      ok: false;
+      reason: "task-not-found" | "task-not-cancelable" | "storage-failed";
+      run?: A2AWireRunSnapshot;
+    };
+
 const A2A_WIRE_APPROVAL_REASON_PREFIX = "[A2A Wire]" as const;
 const A2A_WIRE_ID_MAX_CHARS = 256;
 const A2A_WIRE_CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
@@ -455,6 +474,7 @@ interface TrackedSubAgentRun {
   stopReason?: import("./turn/types.js").TurnStopReason;
   suspension?: SubAgentSuspension;
   abort?: () => void;
+  terminalCommitClaimed?: boolean;
   initialMetadataFailed?: boolean;
   ephemeralFallbackConsumed?: boolean;
   ephemeralParentDelivery?: {
@@ -464,6 +484,26 @@ interface TrackedSubAgentRun {
     messageId: string;
   };
 }
+
+interface InFlightResumeAttempt {
+  promise?: Promise<SubAgentSpawnResult>;
+  run?: TrackedSubAgentRun;
+}
+
+type SubAgentSessionMetadata = NonNullable<
+  ReturnType<MemoryManager["loadSessionMetadata"]>
+>;
+type A2AWireBoundMetadata = SubAgentSessionMetadata & Required<
+  Pick<
+    SubAgentSessionMetadata,
+    | "subAgentTitle"
+    | "projectRoot"
+    | "sourceTools"
+    | "originSessionId"
+    | "a2aWireHandlerId"
+    | "a2aWireInternalOrigin"
+  >
+>;
 
 export type ReserveQuestionWaitResult =
   | { ok: true; token: symbol }
@@ -953,7 +993,7 @@ export class SubAgentRunner {
    * second concurrent resume of the same id. Single main-process, so a Map
    * keyed on the session id is sufficient — no cross-process contention.
    */
-  private readonly inFlight = new Map<string, Promise<SubAgentSpawnResult>>();
+  private readonly inFlight = new Map<string, InFlightResumeAttempt>();
   private readonly trackedRuns = new Map<string, TrackedSubAgentRun>();
 
   private readonly activeChildren = new Map<string, ActiveSubAgentChild>();
@@ -1897,13 +1937,14 @@ export class SubAgentRunner {
     const persistFinalResult = async (
       terminalResult: SubAgentSpawnResult,
     ): Promise<SubAgentSpawnResult> => {
+      // Claim the terminal transition before the first async preparation yield.
+      // Cancellation and final persistence therefore have a single winner.
+      trackedRun.terminalCommitClaimed = true;
+      delete trackedRun.abort;
       let stableResult = await this.prepareQuestionStageForPersistence(
         completedQuestionWait,
         terminalResult,
       );
-      // Commit point: no new interrupt is accepted while terminal metadata is
-      // persisted, so the in-memory and durable projections cannot diverge.
-      delete trackedRun.abort;
       let durableTaskState: A2AProjectedTaskState | undefined;
       let durableResult: SubAgentSpawnResult | undefined;
       const saveResult = async (next: SubAgentSpawnResult): Promise<void> => {
@@ -2216,6 +2257,207 @@ export class SubAgentRunner {
     );
   }
 
+  private resolveA2AWireBindingMetadata(
+    childSessionId: string,
+    handlerId: string,
+  ): A2AWireBoundMetadata | null {
+    if (!isValidA2AWireId(childSessionId) || !isValidA2AWireId(handlerId)) return null;
+    const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(childSessionId);
+    if (
+      !meta
+      || meta.sessionKind !== "subagent"
+      || !meta.subAgentTitle
+      || !meta.projectRoot
+      || meta.sourceTools === undefined
+      || meta.a2aWireHandlerId !== handlerId
+      || !meta.a2aWireInternalOrigin
+      || meta.a2aWireInternalOrigin !== meta.originSessionId
+    ) {
+      return null;
+    }
+    if (
+      !meta.subAgentTaskState
+      || (
+        meta.subAgentTaskState === A2ATaskState.INPUT_REQUIRED
+          ? (
+              !meta.subAgentSuspensionReason
+              || !meta.subAgentSuspensionPrompt?.trim()
+            )
+          : (
+              meta.subAgentSuspensionReason !== undefined
+              || meta.subAgentSuspensionPrompt !== undefined
+            )
+      )
+    ) {
+      return null;
+    }
+    return meta as A2AWireBoundMetadata;
+  }
+
+  private snapshotA2AWireRun(
+    childSessionId: string,
+    meta: A2AWireBoundMetadata,
+  ): A2AWireRunSnapshot {
+    const inFlightRun = this.inFlight.get(childSessionId)?.run;
+    const trackedRun = inFlightRun ?? this.trackedRuns.get(childSessionId);
+    if (
+      trackedRun
+      && trackedRun.childSessionId === childSessionId
+      && trackedRun.originSessionId === meta.a2aWireInternalOrigin
+    ) {
+      return {
+        childSessionId,
+        title: trackedRun.title,
+        taskState: trackedRun.taskState,
+        updatedAt: trackedRun.updatedAt,
+        ...(trackedRun.summary !== undefined ? { summary: trackedRun.summary } : {}),
+        ...(trackedRun.error !== undefined ? { error: trackedRun.error } : {}),
+        ...(trackedRun.stopReason !== undefined ? { stopReason: trackedRun.stopReason } : {}),
+        ...(trackedRun.suspension !== undefined
+          ? { suspension: trackedRun.suspension }
+          : {}),
+      };
+    }
+
+    const taskState = meta.subAgentTaskState ?? A2ATaskState.SUBMITTED;
+    const suspension = taskState === A2ATaskState.INPUT_REQUIRED
+      && meta.subAgentSuspensionReason
+      ? {
+          reason: meta.subAgentSuspensionReason,
+          ...(meta.subAgentSuspensionPrompt
+            ? { prompt: meta.subAgentSuspensionPrompt }
+            : {}),
+          resumeId: childSessionId,
+        }
+      : undefined;
+    return {
+      childSessionId,
+      title: maskSubAgentText(meta.subAgentTitle),
+      taskState,
+      ...(suspension ? { suspension } : {}),
+    };
+  }
+
+  getA2AWireRunSnapshot(
+    childSessionId: string,
+    binding: A2AWireResumeBinding,
+  ): A2AWireRunSnapshot | null {
+    const meta = this.resolveA2AWireBindingMetadata(
+      childSessionId,
+      binding?.handlerId,
+    );
+    return meta ? this.snapshotA2AWireRun(childSessionId, meta) : null;
+  }
+
+  async cancelA2AWireRun(
+    childSessionId: string,
+    binding: A2AWireResumeBinding,
+  ): Promise<A2AWireCancelResult> {
+    const meta = this.resolveA2AWireBindingMetadata(
+      childSessionId,
+      binding?.handlerId,
+    );
+    if (!meta) return { ok: false, reason: "task-not-found" };
+
+    const durableState = meta.subAgentTaskState ?? A2ATaskState.SUBMITTED;
+    if (isA2ATerminalTaskState(durableState)) {
+      return {
+        ok: false,
+        reason: "task-not-cancelable",
+        run: this.snapshotA2AWireRun(childSessionId, meta),
+      };
+    }
+
+    const trackedRun = this.inFlight.get(childSessionId)?.run
+      ?? this.trackedRuns.get(childSessionId);
+    if (
+      trackedRun
+      && trackedRun.originSessionId !== meta.a2aWireInternalOrigin
+    ) {
+      return { ok: false, reason: "task-not-found" };
+    }
+    if (trackedRun && isA2ATerminalTaskState(trackedRun.taskState)) {
+      return {
+        ok: false,
+        reason: "task-not-cancelable",
+        run: this.snapshotA2AWireRun(childSessionId, meta),
+      };
+    }
+    if (trackedRun?.terminalCommitClaimed) {
+      return {
+        ok: false,
+        reason: "task-not-cancelable",
+        run: this.snapshotA2AWireRun(childSessionId, meta),
+      };
+    }
+    const canceledMeta: A2AWireBoundMetadata = {
+      ...meta,
+      subAgentTaskState: A2ATaskState.CANCELED,
+      subAgentSuspensionReason: undefined,
+      subAgentSuspensionPrompt: undefined,
+    };
+    if (trackedRun?.abort) {
+      trackedRun.abort();
+      delete trackedRun.abort;
+      this.updateRun(trackedRun, {
+        taskState: A2ATaskState.CANCELED,
+        stopReason: "interrupted",
+        suspension: undefined,
+      });
+      try {
+        await this.deps.subAgentMemoryManager.saveSessionMetadata(
+          childSessionId,
+          canceledMeta,
+        );
+      } catch {
+        return {
+          ok: false,
+          reason: "storage-failed",
+          run: this.snapshotA2AWireRun(childSessionId, meta),
+        };
+      }
+      return {
+        ok: true,
+        run: this.snapshotA2AWireRun(childSessionId, canceledMeta),
+      };
+    }
+    if (trackedRun && trackedRun.taskState !== A2ATaskState.INPUT_REQUIRED) {
+      return {
+        ok: false,
+        reason: "task-not-cancelable",
+        run: this.snapshotA2AWireRun(childSessionId, meta),
+      };
+    }
+
+    try {
+      await this.deps.subAgentMemoryManager.saveSessionMetadata(
+        childSessionId,
+        canceledMeta,
+      );
+    } catch {
+      return {
+        ok: false,
+        reason: "storage-failed",
+        run: this.snapshotA2AWireRun(childSessionId, meta),
+      };
+    }
+    if (trackedRun) {
+      delete trackedRun.abort;
+      this.updateRun(trackedRun, {
+        taskState: A2ATaskState.CANCELED,
+        stopReason: "interrupted",
+        suspension: undefined,
+      });
+    }
+    return {
+      ok: true,
+      run: this.snapshotA2AWireRun(
+        childSessionId,
+        canceledMeta,
+      ),
+    };
+  }
+
   /** Continue a wire-bound task without accepting remote provenance choices. */
   async resumeFromA2AWire(
     request: A2AWireResumeRequest,
@@ -2227,20 +2469,13 @@ export class SubAgentRunner {
     const resumeId = isValidA2AWireId(rawResumeId)
       ? rawResumeId
       : "invalid-a2a-wire-resume";
-    const meta = resumeId !== "invalid-a2a-wire-resume"
-      ? this.deps.subAgentMemoryManager.loadSessionMetadata(resumeId)
-      : null;
+    const meta = this.resolveA2AWireBindingMetadata(
+      resumeId,
+      binding?.handlerId,
+    );
     if (
       !messageText
-      || !isValidA2AWireId(binding?.handlerId)
       || !meta
-      || meta.sessionKind !== "subagent"
-      || !meta.subAgentTitle
-      || !meta.projectRoot
-      || meta.sourceTools === undefined
-      || meta.a2aWireHandlerId !== binding.handlerId
-      || !meta.a2aWireInternalOrigin
-      || meta.a2aWireInternalOrigin !== meta.originSessionId
     ) {
       return this.failA2AWireRun(
         resumeId,
@@ -2307,6 +2542,7 @@ export class SubAgentRunner {
       return result;
     }
 
+    const attempt: InFlightResumeAttempt = {};
     const runPromise = this.runResume(
       resumeId,
       continuationInstructions,
@@ -2316,8 +2552,10 @@ export class SubAgentRunner {
       spawnId,
       background,
       executionPolicy,
+      attempt,
     );
-    this.inFlight.set(resumeId, runPromise);
+    attempt.promise = runPromise;
+    this.inFlight.set(resumeId, attempt);
     try {
       return await runPromise;
     } finally {
@@ -2335,6 +2573,7 @@ export class SubAgentRunner {
     spawnId: string | undefined,
     background: boolean,
     executionPolicy: SubAgentExecutionPolicy | undefined,
+    attempt: InFlightResumeAttempt,
   ): Promise<SubAgentSpawnResult> {
     const cancellation = new AbortController();
     let child: ConversationLoop | null = null;
@@ -2350,6 +2589,7 @@ export class SubAgentRunner {
         child?.abortCurrentTurn();
       },
     });
+    attempt.run = trackedRun;
 
     const failureResult = (
       message: string,
@@ -2490,6 +2730,7 @@ export class SubAgentRunner {
       const result = failureResult(message, extra);
       // Terminal commit point: after this synchronous detach, a late interrupt
       // is rejected and cannot race the single durable terminal write.
+      trackedRun.terminalCommitClaimed = true;
       delete trackedRun.abort;
       const taskState = projectSubAgentResultState(result);
       let persisted = false;
@@ -2785,13 +3026,14 @@ export class SubAgentRunner {
       };
     }
 
-    // Terminal commit point. Cancellation was sampled above; the stable result
-    // now owns the single final metadata transition.
+    // Claim the terminal transition before the first async preparation yield.
+    // Cancellation and final persistence therefore have a single winner.
+    trackedRun.terminalCommitClaimed = true;
+    delete trackedRun.abort;
     result = await this.prepareQuestionStageForPersistence(
       completedQuestionWait,
       result,
     );
-    delete trackedRun.abort;
 
     const nextBudgetResumeCount = priorBudgetResumeCount
       + (result.ok && persistedResumeReason === "budget" ? 1 : 0);

@@ -11,7 +11,11 @@ import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { ConversationLoop } from "../conversation-loop.js";
-import { SubAgentRunner, type A2AWireHostBinding } from "../subagent-runner.js";
+import {
+  SubAgentRunner,
+  type A2AWireHostBinding,
+  type SubAgentSpawnResult,
+} from "../subagent-runner.js";
 import type { TurnResult } from "../turn/types.js";
 
 const COMPLETED_TURN: TurnResult = {
@@ -114,6 +118,36 @@ describe("SubAgentRunner A2A wire security contract", () => {
     });
   }
 
+  function pauseQuestionStagePreparation(runner: SubAgentRunner): {
+    entered: Promise<void>;
+    release: () => void;
+  } {
+    type PreparationTarget = {
+      prepareQuestionStageForPersistence: (
+        questionWait: unknown,
+        result: SubAgentSpawnResult,
+      ) => Promise<SubAgentSpawnResult>;
+    };
+    const target = runner as unknown as PreparationTarget;
+    const original = target.prepareQuestionStageForPersistence.bind(runner);
+    let signalEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      signalEntered = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(target, "prepareQuestionStageForPersistence").mockImplementation(
+      async (questionWait, result) => {
+        signalEntered();
+        await gate;
+        return await original(questionWait, result);
+      },
+    );
+    return { entered, release };
+  }
+
   function makeBinding(
     sourceTools: readonly string[] = ["noop"],
     handlerId = "wire-handler-a",
@@ -149,6 +183,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
       cumulativeRounds: 0,
       subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
       subAgentSuspensionReason: "budget",
+      subAgentSuspensionPrompt: "Continue the task.",
       ...extra,
     } as SessionMetadata);
   }
@@ -176,6 +211,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
         cumulativeRounds: 0,
         subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
         subAgentSuspensionReason: "budget",
+        subAgentSuspensionPrompt: "Continue the task.",
         ...extra,
       }, null, 2),
       "utf8",
@@ -618,6 +654,269 @@ describe("SubAgentRunner A2A wire security contract", () => {
       turnCount: 0,
     });
     expect(runTurn).not.toHaveBeenCalled();
+  });
+
+  it("projects and cancels a persisted wire wait only for its bound handler", async () => {
+    const originSessionId = "wire-origin-handler-a";
+    const resumeId = makeResumeId(originSessionId);
+    await saveWaitingMetadata(resumeId, originSessionId, {
+      a2aWireHandlerId: "wire-handler-a",
+      a2aWireInternalOrigin: originSessionId,
+      subAgentSuspensionPrompt: "Continue the task.",
+    });
+    const runner = makeRunner();
+
+    expect(runner.getA2AWireRunSnapshot(
+      resumeId,
+      { handlerId: "wire-handler-b" },
+    )).toBeNull();
+    expect(runner.getA2AWireRunSnapshot(
+      resumeId,
+      { handlerId: "wire-handler-a" },
+    )).toMatchObject({
+      childSessionId: resumeId,
+      taskState: "TASK_STATE_INPUT_REQUIRED",
+      suspension: {
+        reason: "budget",
+        prompt: "Continue the task.",
+        resumeId,
+      },
+    });
+
+    await expect(runner.cancelA2AWireRun(
+      resumeId,
+      { handlerId: "wire-handler-b" },
+    )).resolves.toEqual({ ok: false, reason: "task-not-found" });
+    await expect(runner.cancelA2AWireRun(
+      resumeId,
+      { handlerId: "wire-handler-a" },
+    )).resolves.toMatchObject({
+      ok: true,
+      run: { taskState: "TASK_STATE_CANCELED" },
+    });
+    expect(store.loadSessionMetadata(resumeId)).toMatchObject({
+      subAgentTaskState: "TASK_STATE_CANCELED",
+    });
+    await expect(runner.cancelA2AWireRun(
+      resumeId,
+      { handlerId: "wire-handler-a" },
+    )).resolves.toMatchObject({
+      ok: false,
+      reason: "task-not-cancelable",
+    });
+  });
+
+  it("rejects an INPUT_REQUIRED wire binding without its typed prompt", async () => {
+    const originSessionId = "wire-origin-handler-a";
+    const resumeId = makeResumeId(originSessionId);
+    writeRawWaitingMetadata(resumeId, originSessionId, {
+      a2aWireHandlerId: "wire-handler-a",
+      a2aWireInternalOrigin: originSessionId,
+      subAgentSuspensionPrompt: undefined,
+    });
+    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+      .mockResolvedValue(COMPLETED_TURN);
+    const runner = makeRunner();
+
+    expect(runner.getA2AWireRunSnapshot(
+      resumeId,
+      { handlerId: "wire-handler-a" },
+    )).toBeNull();
+    await expect(runner.resumeFromA2AWire(
+      { resumeId, messageText: "continue" },
+      { handlerId: "wire-handler-a" },
+    )).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/wire resume binding is invalid/i),
+    });
+    expect(runTurn).not.toHaveBeenCalled();
+  });
+
+  it("cancels an active wire spawn without allowing a terminal regression", async () => {
+    let enterTurn!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enterTurn = resolve;
+    });
+    let finishTurn!: (result: TurnResult) => void;
+    const turn = new Promise<TurnResult>((resolve) => {
+      finishTurn = resolve;
+    });
+    vi.spyOn(ConversationLoop.prototype, "runTurn").mockImplementation(async () => {
+      enterTurn();
+      return await turn;
+    });
+    const runner = makeRunner();
+    const binding = makeBinding();
+    let childSessionId = "";
+    const running = runner.spawnFromA2AWire(
+      { messageText: "Start the work." },
+      binding,
+      {
+        onDurablyLinked: async (link) => {
+          childSessionId = link.childSessionId;
+        },
+      },
+    );
+    await entered;
+
+    expect(runner.getA2AWireRunSnapshot(
+      childSessionId,
+      { handlerId: binding.handlerId },
+    )).toMatchObject({ taskState: "TASK_STATE_WORKING" });
+    await expect(runner.cancelA2AWireRun(
+      childSessionId,
+      { handlerId: binding.handlerId },
+    )).resolves.toMatchObject({
+      ok: true,
+      run: { taskState: "TASK_STATE_CANCELED" },
+    });
+    expect(store.loadSessionMetadata(childSessionId)).toMatchObject({
+      subAgentTaskState: "TASK_STATE_CANCELED",
+    });
+
+    finishTurn(COMPLETED_TURN);
+    await expect(running).resolves.toMatchObject({
+      ok: false,
+      stopReason: "interrupted",
+    });
+    expect(runner.getA2AWireRunSnapshot(
+      childSessionId,
+      { handlerId: binding.handlerId },
+    )).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
+  });
+
+  it("routes cancellation to the in-flight wire resume attempt", async () => {
+    const originSessionId = "wire-origin-handler-a";
+    const resumeId = makeResumeId(originSessionId);
+    const binding = makeBinding();
+    await saveWaitingMetadata(resumeId, originSessionId, {
+      a2aWireHandlerId: binding.handlerId,
+      a2aWireInternalOrigin: originSessionId,
+    });
+    vi.spyOn(ConversationLoop.prototype, "getSessionProjectRoot")
+      .mockReturnValue(binding.project.root);
+    let enterTurn!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enterTurn = resolve;
+    });
+    let finishTurn!: (result: TurnResult) => void;
+    const turn = new Promise<TurnResult>((resolve) => {
+      finishTurn = resolve;
+    });
+    vi.spyOn(ConversationLoop.prototype, "runTurn").mockImplementation(async () => {
+      enterTurn();
+      return await turn;
+    });
+    const runner = makeRunner();
+    const running = runner.resumeFromA2AWire(
+      { resumeId, messageText: "continue" },
+      { handlerId: binding.handlerId },
+    );
+    await entered;
+
+    await expect(runner.cancelA2AWireRun(
+      resumeId,
+      { handlerId: binding.handlerId },
+    )).resolves.toMatchObject({
+      ok: true,
+      run: { taskState: "TASK_STATE_CANCELED" },
+    });
+    expect(store.loadSessionMetadata(resumeId)).toMatchObject({
+      subAgentTaskState: "TASK_STATE_CANCELED",
+    });
+    finishTurn(COMPLETED_TURN);
+    await expect(running).resolves.toMatchObject({
+      ok: false,
+      stopReason: "interrupted",
+    });
+    expect(runner.getA2AWireRunSnapshot(
+      resumeId,
+      { handlerId: binding.handlerId },
+    )).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
+  });
+
+  it("rejects spawn cancellation after terminal persistence ownership is claimed", async () => {
+    vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue(COMPLETED_TURN);
+    const runner = makeRunner();
+    const binding = makeBinding();
+    const preparation = pauseQuestionStagePreparation(runner);
+    let childSessionId = "";
+    const running = runner.spawnFromA2AWire(
+      { messageText: "Start the work." },
+      binding,
+      {
+        onDurablyLinked: async (link) => {
+          childSessionId = link.childSessionId;
+        },
+      },
+    );
+    await preparation.entered;
+
+    const canceled = await runner.cancelA2AWireRun(
+      childSessionId,
+      { handlerId: binding.handlerId },
+    );
+    preparation.release();
+    const result = await running;
+
+    expect(canceled).toMatchObject({
+      ok: false,
+      reason: "task-not-cancelable",
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      stopReason: "end_turn",
+    });
+    expect(store.loadSessionMetadata(childSessionId)).toMatchObject({
+      subAgentTaskState: "TASK_STATE_COMPLETED",
+    });
+    expect(runner.getA2AWireRunSnapshot(
+      childSessionId,
+      { handlerId: binding.handlerId },
+    )).toMatchObject({ taskState: "TASK_STATE_COMPLETED" });
+  });
+
+  it("rejects resume cancellation after terminal persistence ownership is claimed", async () => {
+    const originSessionId = "wire-origin-handler-a";
+    const resumeId = makeResumeId(originSessionId);
+    const binding = makeBinding();
+    await saveWaitingMetadata(resumeId, originSessionId, {
+      a2aWireHandlerId: binding.handlerId,
+      a2aWireInternalOrigin: originSessionId,
+    });
+    vi.spyOn(ConversationLoop.prototype, "getSessionProjectRoot")
+      .mockReturnValue(binding.project.root);
+    vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue(COMPLETED_TURN);
+    const runner = makeRunner();
+    const preparation = pauseQuestionStagePreparation(runner);
+    const running = runner.resumeFromA2AWire(
+      { resumeId, messageText: "continue" },
+      { handlerId: binding.handlerId },
+    );
+    await preparation.entered;
+
+    const canceled = await runner.cancelA2AWireRun(
+      resumeId,
+      { handlerId: binding.handlerId },
+    );
+    preparation.release();
+    const result = await running;
+
+    expect(canceled).toMatchObject({
+      ok: false,
+      reason: "task-not-cancelable",
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      stopReason: "end_turn",
+    });
+    expect(store.loadSessionMetadata(resumeId)).toMatchObject({
+      subAgentTaskState: "TASK_STATE_COMPLETED",
+    });
+    expect(runner.getA2AWireRunSnapshot(
+      resumeId,
+      { handlerId: binding.handlerId },
+    )).toMatchObject({ taskState: "TASK_STATE_COMPLETED" });
   });
 
 });
