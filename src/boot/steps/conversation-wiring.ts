@@ -260,13 +260,13 @@ export function wireConversation(ctx: BootContext): void {
       scriptHookManager,
       auditLogger: bootAuditLogger,
       getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
-      ...(conversationLoop.deps.isDefaultProjectRoot
+      ...(conversationLoop.deps?.isDefaultProjectRoot
         ? { isDefaultProjectRoot: conversationLoop.deps.isDefaultProjectRoot }
         : {}),
-      ...(conversationLoop.deps.getDefaultProject
+      ...(conversationLoop.deps?.getDefaultProject
         ? { getDefaultProject: conversationLoop.deps.getDefaultProject }
         : {}),
-      ...(conversationLoop.deps.authorizeProject
+      ...(conversationLoop.deps?.authorizeProject
         ? { authorizeProject: conversationLoop.deps.authorizeProject }
         : {}),
       rewireReviewerAgent,
