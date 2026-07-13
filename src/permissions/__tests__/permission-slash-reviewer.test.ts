@@ -83,6 +83,13 @@ describe("parsePermissionReviewerCommand", () => {
     });
   });
 
+  it("parses 'interactive medium'", () => {
+    expect(parsePermissionReviewerCommand("interactive medium")).toEqual({
+      verb: "interactive",
+      value: "medium",
+    });
+  });
+
   it("rejects empty input", () => {
     const r = parsePermissionReviewerCommand("");
     expect(r).toEqual({ ok: false, error: expect.stringMatching(/missing subcommand/) });
@@ -113,13 +120,13 @@ describe("dispatchPermissionReviewerCommand — persistence", () => {
       // Default reviewer is "llm" (strongest classifier). Boot wiring degrades
       // to rule at runtime when no LLM provider is configured (fresh install),
       // but the persisted/default mode is "llm" so intent stays visible.
-      // interactive.autoApprove defaults to "low" so LOW foreground calls are
-      // silently allowed; MEDIUM/HIGH still surface.
+      // interactive.autoApprove defaults to "medium" so LOW/MEDIUM foreground
+      // calls are silently allowed; HIGH still surfaces.
       expect(r.settings.mode).toBe("llm");
       expect(r.settings.provider).toBe("openai");
       expect(r.settings.model).toBe("gpt-4o-mini");
       expect(r.settings.fallbackOnError).toBe("deny");
-      expect(r.settings.interactive.autoApprove).toBe("low");
+      expect(r.settings.interactive.autoApprove).toBe("medium");
     }
   });
 
@@ -172,7 +179,7 @@ describe("dispatchPermissionReviewerCommand — persistence", () => {
     expect(settings.permissions.reviewer.interactive.autoApprove).toBe("low");
   });
 
-  it("interactive off persists and is the safe default", async () => {
+  it("interactive off persists as an explicit fail-closed choice", async () => {
     const path = tmpSettingsPath();
     // First flip to low, then back to off — confirms the toggle is bidirectional.
     await dispatchPermissionReviewerCommand({ verb: "interactive", value: "low" }, path);
@@ -181,14 +188,15 @@ describe("dispatchPermissionReviewerCommand — persistence", () => {
     expect(settings.permissions.reviewer.interactive.autoApprove).toBe("off");
   });
 
-  it("invalid interactive value returns ok:false (MED auto-approve is not in scope)", async () => {
+  it("interactive medium persists as the LOW+MEDIUM foreground threshold", async () => {
     const path = tmpSettingsPath();
     const r = await dispatchPermissionReviewerCommand(
       { verb: "interactive", value: "medium" },
       path,
     );
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/invalid interactive/);
+    expect(r.ok).toBe(true);
+    const settings = readPermissionSettings(path);
+    expect(settings.permissions.reviewer.interactive.autoApprove).toBe("medium");
   });
 
   it("invalid mode returns ok:false", async () => {
@@ -266,13 +274,13 @@ describe("normalizePermissionSettings — reviewer block", () => {
     const settings = normalizePermissionSettings({});
     expect(settings.permissions.reviewer).toEqual({
       // Default reviewer mode is "llm" (strongest classifier; degrades to rule
-      // at boot when no provider is configured). interactive.autoApprove "low"
-      // silently allows LOW foreground calls.
+      // at boot when no provider is configured). interactive.autoApprove "medium"
+      // silently allows LOW/MEDIUM foreground calls.
       mode: "llm",
       provider: "openai",
       model: "gpt-4o-mini",
       fallbackOnError: "deny",
-      interactive: { autoApprove: "low" },
+      interactive: { autoApprove: "medium" },
     });
   });
 
@@ -295,7 +303,7 @@ describe("normalizePermissionSettings — reviewer block", () => {
     expect(settings.permissions.reviewer.model).toBe("gpt-4o-mini");
   });
 
-  it("valid reviewer block round-trips (absent interactive → default low)", () => {
+  it("valid reviewer block round-trips (absent interactive → default medium)", () => {
     const settings = normalizePermissionSettings({
       permissions: {
         reviewer: {
@@ -312,7 +320,7 @@ describe("normalizePermissionSettings — reviewer block", () => {
       model: "claude-haiku-4-5",
       fallbackOnError: "deny",
       // Only absent fields take the new default; explicit fields above are kept.
-      interactive: { autoApprove: "low" },
+      interactive: { autoApprove: "medium" },
     });
   });
 

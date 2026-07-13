@@ -65,17 +65,16 @@ export type ReviewerFallbackOnError = "deny" | "rule";
  * Interactive auto-approve policy — issue #690.
  *
  *   - "off"  : reviewer never auto-approves in interactive (foreground)
- *              flow. Every ask hits the modal. Default — safest.
+ *              flow. Every ask hits the modal.
  *   - "low"  : reviewer's LOW verdict in interactive flow silently
- *              allows the call without showing the modal. MEDIUM/HIGH
- *              return as blocked tool results for the main LLM to handle.
+ *              allows the call without showing the modal. MEDIUM/HIGH ask.
+ *   - "medium": reviewer LOW and MEDIUM verdicts in interactive flow silently
+ *              allow the call without showing the modal. HIGH still asks.
  *
- * MED/HIGH is intentionally NOT auto-approvable — MEDIUM means
- * "writes to user data dir / idempotent network", which still warrants
- * human confirmation. Adding "low-medium" later would be a follow-up,
- * not a hidden enum value here.
+ * This inclusive threshold applies only to the foreground reviewer route.
+ * Headless review remains fail-closed for MEDIUM and HIGH.
  */
-export type ReviewerInteractiveAutoApprove = "off" | "low";
+export type ReviewerInteractiveAutoApprove = "off" | "low" | "medium";
 
 export interface ReviewerInteractiveBlock {
   autoApprove: ReviewerInteractiveAutoApprove;
@@ -86,7 +85,7 @@ export interface ReviewerInteractiveBlock {
  * persisted for legacy command compatibility; runtime LLM reviewer wiring now
  * follows the active chat LLM provider/model when available.
  * Defaults: provider="openai", model="gpt-4o-mini",
- * fallbackOnError="deny", interactive.autoApprove="off".
+ * fallbackOnError="deny", interactive.autoApprove="medium".
  */
 export interface ReviewerSettingsBlock {
   mode: ReviewerMode;
@@ -127,10 +126,10 @@ const DEFAULT_REVIEWER: ReviewerSettingsBlock = {
   // self-healing: as soon as a provider/key is configured, the auth + settings
   // rewire path re-fires wiring and the reviewer returns to "llm".
   //
-  // `interactive.autoApprove: "low"` lets a LOW verdict in the foreground chat
-  // flow silently allow without a modal — the everyday flow is unblocked while
-  // MEDIUM/HIGH still return to the main LLM as blocked tool results. The
-  // headless lane is unaffected.
+  // `interactive.autoApprove: "medium"` lets LOW and MEDIUM verdicts in the
+  // foreground chat flow silently allow without a modal. HIGH still returns to
+  // the main LLM as a blocked tool result. This is a global reviewer threshold;
+  // the headless lane remains unaffected.
   //
   // Why not "rule" as the default: rule is the *degraded* posture, not the
   // intended one. Encoding "llm" as the default keeps the intent visible and
@@ -145,11 +144,11 @@ const DEFAULT_REVIEWER: ReviewerSettingsBlock = {
   provider: "openai",
   model: "gpt-4o-mini",
   fallbackOnError: "deny",
-  interactive: { autoApprove: "low" },
+  interactive: { autoApprove: "medium" },
 };
 
 const REVIEWER_INTERACTIVE_AUTO_APPROVES: ReadonlySet<ReviewerInteractiveAutoApprove> =
-  new Set(["off", "low"]);
+  new Set(["off", "low", "medium"]);
 
 const DEFAULT_FILE: PermissionSettingsFile = {
   permissions: {

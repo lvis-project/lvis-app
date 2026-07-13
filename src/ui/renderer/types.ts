@@ -1443,7 +1443,7 @@ export type PermissionReviewerMode = "disabled" | "rule" | "llm" | "strict";
 export type PermissionReviewerProvider = "openai" | "anthropic" | "google" | "foundry" | "gcp-playground";
 export type PermissionReviewerFallbackOnError = "deny" | "rule";
 /** Issue #690 — interactive reviewer auto-approve scope. */
-export type PermissionReviewerInteractiveAutoApprove = "off" | "low";
+export type PermissionReviewerInteractiveAutoApprove = "off" | "low" | "medium";
 
 export interface PermissionReviewerSettings {
   mode: PermissionReviewerMode;
