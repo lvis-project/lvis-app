@@ -962,7 +962,7 @@ export const esMessages: Record<string, string> = {
   "composerPlaceholder.streamingHint": "Se agregará a la cola de mensajes (interrumpa inmediatamente con ⌘⏎)",
   "constants.execModeAllowDesc": "Las herramientas fuera de los bloques duros están permitidas automáticamente; el acceso fuera de los directorios permitidos requiere una aprobación por separado",
   "constants.execModeAllowLabel": "Permitir todo",
-  "constants.execModeAutoDesc": "Las operaciones de bajo riesgo se procesan con un registro de auditoría; El revisor de permisos verifica la ejecución automatizada (sin cabeza) y el chat interactivo.",
+  "constants.execModeAutoDesc": "Las decisiones interactivas de riesgo bajo y medio se aprueban automáticamente con un registro de auditoría; el riesgo alto requiere aprobación y la ejecución sin interfaz usa su cola de revisión cerrada ante fallos",
   "constants.execModeAutoLabel": "Verificar automáticamente",
   "constants.execModeDefaultDesc": "Lecturas permitidas; Se requiere aprobación para operaciones de escritura, shell y red.",
   "constants.execModeDefaultLabel": "Confirmar escrituras",

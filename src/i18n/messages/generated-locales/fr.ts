@@ -962,7 +962,7 @@ export const frMessages: Record<string, string> = {
   "composerPlaceholder.streamingHint": "Sera ajouté à la file d'attente des messages (interrompre immédiatement avec ⌘⏎)",
   "constants.execModeAllowDesc": "Les outils en dehors des blocs durs sont automatiquement autorisés; l'accès en dehors des répertoires autorisés nécessite une approbation distincte",
   "constants.execModeAllowLabel": "Autoriser tout",
-  "constants.execModeAutoDesc": "Les opérations à faible risque sont traitées avec une piste d'audit; l'exécution automatisée (sans tête) et le chat interactif sont tous deux vérifiés par le réviseur d'autorisations",
+  "constants.execModeAutoDesc": "Les décisions interactives à risque faible ou moyen sont automatiquement autorisées avec journalisation ; le risque élevé exige une approbation et exécution sans interface utilise sa file de contrôle à sécurité fermée",
   "constants.execModeAutoLabel": "Vérification automatique",
   "constants.execModeDefaultDesc": "Lectures autorisées; approbation requise pour les opérations d'écriture, de shell et de réseau",
   "constants.execModeDefaultLabel": "Confirmer les écritures",
