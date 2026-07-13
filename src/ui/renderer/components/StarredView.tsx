@@ -39,6 +39,13 @@ interface UsageTotals {
   cost?: number;
 }
 
+interface DailyUsageResult {
+  source: Partial<LvisApi>["getUsageRange"];
+  dateKey: string;
+  usage: UsageTotals | null;
+  conversations: UsageConversation[];
+}
+
 interface HeatmapCell {
   key: string;
   dateKey?: string;
@@ -51,6 +58,8 @@ interface UsageConversation extends UsageTotals {
   turns: number;
   firstInput?: string;
 }
+
+const EMPTY_USAGE_CONVERSATIONS: UsageConversation[] = [];
 
 interface InsightConversation {
   sessionId: string;
@@ -178,8 +187,7 @@ export function StarredView({
   const [visibleYear, setVisibleYear] = useState<number>(
     () => Number(koreaDateKey(new Date()).slice(0, 4)),
   );
-  const [dailyUsage, setDailyUsage] = useState<UsageTotals | null>(null);
-  const [dailyUsageConversations, setDailyUsageConversations] = useState<UsageConversation[]>([]);
+  const [dailyUsageResult, setDailyUsageResult] = useState<DailyUsageResult | null>(null);
   const [discoveredSessions, setDiscoveredSessions] = useState<SessionSummary[]>([]);
   const [yearlyUsageByDate, setYearlyUsageByDate] = useState<Map<string, number>>(() => new Map());
   const [llmSummary, setLlmSummary] = useState<string | null>(null);
@@ -187,6 +195,14 @@ export function StarredView({
   const selectedKey = koreaDateKey(selectedDate);
   const todayKey = koreaDateKey(new Date());
   const currentYear = Number(todayKey.slice(0, 4));
+  const getUsageRange = (api as Partial<LvisApi>).getUsageRange;
+  const currentDailyUsageResult = (
+    dailyUsageResult?.source === getUsageRange && dailyUsageResult?.dateKey === selectedKey
+  ) ? dailyUsageResult : null;
+  const dailyUsageReady = !getUsageRange || currentDailyUsageResult !== null;
+  const dailyUsage = currentDailyUsageResult?.usage ?? null;
+  const dailyUsageConversations = currentDailyUsageResult?.conversations
+    ?? EMPTY_USAGE_CONVERSATIONS;
 
   const allSessions = useMemo(() => {
     const byId = new Map(discoveredSessions.map((session) => [session.id, session]));
@@ -268,26 +284,31 @@ export function StarredView({
 
   useEffect(() => {
     let cancelled = false;
-    const getUsageRange = (api as Partial<LvisApi>).getUsageRange;
     if (!getUsageRange) {
-      setDailyUsage(null);
-      setDailyUsageConversations([]);
       return;
     }
     void getUsageRange({ dateFrom: selectedKey, dateTo: selectedKey }).then((summary) => {
       if (cancelled) return;
-      setDailyUsage(usageForDate(summary, selectedKey));
-      setDailyUsageConversations(usageConversations(summary));
+      setDailyUsageResult({
+        source: getUsageRange,
+        dateKey: selectedKey,
+        usage: usageForDate(summary, selectedKey),
+        conversations: usageConversations(summary),
+      });
     }).catch(() => {
       if (!cancelled) {
-        setDailyUsage(null);
-        setDailyUsageConversations([]);
+        setDailyUsageResult({
+          source: getUsageRange,
+          dateKey: selectedKey,
+          usage: null,
+          conversations: [],
+        });
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [api, selectedKey]);
+  }, [getUsageRange, selectedKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -336,7 +357,7 @@ export function StarredView({
   useEffect(() => {
     let cancelled = false;
     const getUsageDailySummary = (api as Partial<LvisApi>).getUsageDailySummary;
-    if (!getUsageDailySummary || !hasDailySignal) {
+    if (!getUsageDailySummary || !hasDailySignal || !dailyUsageReady) {
       setLlmSummary(null);
       setLlmSummaryState("idle");
       return;
@@ -357,7 +378,7 @@ export function StarredView({
     return () => {
       cancelled = true;
     };
-  }, [api, hasDailySignal, summaryPayload]);
+  }, [api, dailyUsageReady, hasDailySignal, summaryPayload]);
 
   const summaryText = llmSummary ?? localSummaryText;
 

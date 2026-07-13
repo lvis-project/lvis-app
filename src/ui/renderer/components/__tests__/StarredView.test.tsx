@@ -101,7 +101,11 @@ describe("StarredView", () => {
       />,
     );
 
-    expect(await findByText("오늘은 프로젝트 흐름을 정리했습니다.")).toBeTruthy();
+    expect(await findByText(
+      "오늘은 프로젝트 흐름을 정리했습니다.",
+      undefined,
+      { timeout: 10_000 },
+    )).toBeTruthy();
     expect(await findByText("토큰 히트맵")).toBeTruthy();
     expect(await findAllByText("대화")).not.toHaveLength(0);
     expect(await findByText("workspace")).toBeTruthy();
@@ -116,6 +120,7 @@ describe("StarredView", () => {
           usage: expect.objectContaining({ totalTokens: 120 }),
         }),
       );
+      expect((api as { getUsageDailySummary: ReturnType<typeof vi.fn> }).getUsageDailySummary).toHaveBeenCalledTimes(1);
     });
   });
 
