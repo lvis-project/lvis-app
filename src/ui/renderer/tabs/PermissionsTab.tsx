@@ -21,6 +21,7 @@ import type {
   ExecMode,
   HookTrustRow,
   PermissionReviewerMode,
+  PermissionReviewerInteractiveAutoApprove,
   PermissionReviewerSettings,
   PermissionRule,
 } from "../types.js";
@@ -268,7 +269,7 @@ export function PermissionsTab() {
     m === "auto" ? "llm" : "disabled";
   const interactiveAutoApproveForExecMode = (
     m: ExecMode,
-  ): "off" | "low" => (m === "auto" ? "low" : "off");
+  ): PermissionReviewerInteractiveAutoApprove => (m === "auto" ? "medium" : "off");
 
   const handleModeChange = async (m: ExecMode) => {
     const targetReviewerMode = reviewerModeForExecMode(m);
@@ -318,6 +319,28 @@ export function PermissionsTab() {
       }
     } catch (e) {
       showBanner("error", t("permissionsTab.errorModeChangeError", { message: (e as Error).message }));
+    } finally {
+      setModeBusy(false);
+    }
+  };
+
+  const handleInteractiveAutoApproveChange = async (
+    value: PermissionReviewerInteractiveAutoApprove,
+  ) => {
+    if (modeBusy || reviewer.interactive.autoApprove === value) return;
+    setModeBusy(true);
+    try {
+      const result = await window.lvis.permission.reviewerDispatch(`interactive ${value}`);
+      if (result.ok) {
+        setReviewer(result.settings);
+      } else {
+        showBanner("error", formatReviewerDispatchError(result.error));
+      }
+    } catch (error) {
+      showBanner(
+        "error",
+        t("permissionsTab.errorModeChangeError", { message: (error as Error).message }),
+      );
     } finally {
       setModeBusy(false);
     }
@@ -646,21 +669,64 @@ export function PermissionsTab() {
                   <span className="font-medium">{opt.label}</span>
                   <span className="ml-1.5 text-[11px] text-muted-foreground">{opt.description}</span>
                   {opt.value === "auto" && mode === "auto" && (
-                    <details
-                      className="mt-2 rounded-md border bg-muted/(--opacity-light)"
-                      data-testid="reviewer-prompt-panel"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <summary className="cursor-pointer px-3 py-2 text-[11px] font-semibold text-muted-foreground">
-                        {t("permissionsTab.frameworkSystemPromptTitle")}
-                      </summary>
-                      <pre
-                        className="max-h-44 overflow-auto border-t px-3 py-3 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
-                        data-testid="reviewer-system-prompt"
+                    <>
+                      <span
+                        className="mt-2 flex items-center gap-3 rounded-md border bg-background/(--opacity-stronger) px-3 py-2"
+                        data-testid="interactive-auto-approve-control"
+                        onClick={(event) => event.stopPropagation()}
                       >
-                        {PERMISSION_REVIEWER_FRAMEWORK.systemPrompt}
-                      </pre>
-                    </details>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[11px] font-semibold">
+                            {t("permissionsTab.interactiveAutoApproveLabel")}
+                          </span>
+                          <span className="block text-[10px] text-muted-foreground">
+                            {reviewer.interactive.autoApprove === "medium"
+                              ? t("permissionsTab.interactiveMediumDescription")
+                              : reviewer.interactive.autoApprove === "low"
+                                ? t("permissionsTab.interactiveLowDescription")
+                                : t("permissionsTab.interactiveOffDescription")}
+                          </span>
+                        </span>
+                        <Select
+                          value={reviewer.interactive.autoApprove}
+                          disabled={modeBusy}
+                          onValueChange={(value) =>
+                            void handleInteractiveAutoApproveChange(
+                              value as PermissionReviewerInteractiveAutoApprove,
+                            )
+                          }
+                        >
+                          <SelectTrigger
+                            className="h-8 w-44 text-[11px]"
+                            data-testid="interactive-auto-approve-select"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="off">{t("permissionsTab.interactiveOffLabel")}</SelectItem>
+                            <SelectItem value="low">{t("permissionsTab.interactiveLowLabel")}</SelectItem>
+                            <SelectItem value="medium">
+                              {t("permissionsTab.interactiveMediumLabel")}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </span>
+                      <details
+                        className="mt-2 rounded-md border bg-muted/(--opacity-light)"
+                        data-testid="reviewer-prompt-panel"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <summary className="cursor-pointer px-3 py-2 text-[11px] font-semibold text-muted-foreground">
+                          {t("permissionsTab.frameworkSystemPromptTitle")}
+                        </summary>
+                        <pre
+                          className="max-h-44 overflow-auto border-t px-3 py-3 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
+                          data-testid="reviewer-system-prompt"
+                        >
+                          {PERMISSION_REVIEWER_FRAMEWORK.systemPrompt}
+                        </pre>
+                      </details>
+                    </>
                   )}
                 </span>
               </Label>

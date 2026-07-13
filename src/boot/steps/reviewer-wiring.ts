@@ -358,37 +358,8 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
   // lane without re-reading settings on every tool call.
   deps.permissionManager.setInteractiveAutoApprove(settings.interactive.autoApprove);
 
-  // Migration breadcrumb for users upgrading from a pre-PR install where
-  // `mode="auto"` was the standalone trigger for foreground auto-approve.
-  // Post-PR the SOT moved to `permissions.reviewer.interactive.autoApprove`;
-  // if a user's existing `mode="auto"` lands without the new field, every
-  // mutating tool now hits a modal. Log a one-line warning so the user
-  // can flip the setting (`/permission reviewer interactive low`) and
-  // see the breadcrumb in the log instead of silently wondering.
-  if (
-    deps.permissionManager.getMode() === "auto" &&
-    settings.interactive.autoApprove === "off"
-  ) {
-    log.warn(
-      "legacy exec mode=auto + reviewer.interactive.autoApprove=off — " +
-      "foreground auto-approve disabled. Use `/permission reviewer interactive low` " +
-      "to re-enable LOW-verdict silent allow.",
-    );
-  }
-  // Symmetric inverted case: `mode=strict` promises "ask about everything"
-  // but `interactive.autoApprove=low` silently bypasses LOW mutating tools.
-  // These directly contradict. Warn at boot so the user notices.
-  if (
-    deps.permissionManager.getMode() === "strict" &&
-    settings.interactive.autoApprove === "low"
-  ) {
-    log.warn(
-      "exec mode=strict + reviewer.interactive.autoApprove=low — " +
-      "strict mode promises a modal for every tool call but interactive " +
-      "auto-approve silently allows LOW mutating calls. Flip one of the " +
-      "two to resolve the contradiction.",
-    );
-  }
+  // Strict mode returns at layer 2 before foreground reviewer routing, so an
+  // enabled interactive threshold cannot bypass or contradict strict mode.
   // `mode="allow"` bypasses the reviewer entirely, so the
   // `interactive.autoApprove` setting is dead config. A user reading
   // PermissionsTab might assume `interactive=off` protects them — but
