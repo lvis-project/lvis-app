@@ -48,6 +48,7 @@ describe("ConversationLoop project identity", () => {
     // the ambient default rather than an explicit selection — 2026-07
     // "remove Current Project labeling".
     expect(loop.getSessionProjectIsDefault()).toBe(true);
+    expect(loop.getSessionExecutionCwd()).toBe(defaultRoot);
   });
 
   it("does not include legacy unscoped memory for explicit non-default projects", () => {
@@ -68,6 +69,30 @@ describe("ConversationLoop project identity", () => {
       projectName: "alpha",
     });
     expect(loop.getSessionProjectIsDefault()).toBe(false);
+    expect(loop.getSessionExecutionCwd()).toBe("C:\\workspace\\alpha");
+  });
+
+  it("rebinds a resumed session without project metadata to the default workspace", () => {
+    const defaultRoot = "C:\\Users\\ikcha\\.lvis\\workspace";
+    const memoryManager = makeConversationLoopMemoryManager([
+      { role: "user", content: "hello" },
+    ], "unscoped-session");
+    vi.mocked(memoryManager.loadSessionMetadata).mockReturnValue({
+      sessionKind: "main",
+    } as ReturnType<typeof memoryManager.loadSessionMetadata>);
+    const loop = new ConversationLoop(makeConversationLoopDeps({
+      memoryManager,
+      getDefaultProject: () => ({
+        projectRoot: defaultRoot,
+        projectName: "workspace",
+        isDefault: true,
+      }),
+      isDefaultProjectRoot: (projectRoot) => projectRoot === defaultRoot,
+    }));
+
+    expect(loop.loadSession("unscoped-session")).toBe(true);
+    expect(loop.getSessionExecutionCwd()).toBe(defaultRoot);
+    expect(loop.getTurnAdditionalDirectories()).toContain(defaultRoot);
   });
 
   it("re-authorizes stored project roots on session resume before granting tool directories", () => {
