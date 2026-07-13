@@ -12,28 +12,35 @@ const ownsReportsDir = !process.env.LVIS_COVERAGE_REPORTS_DIR;
 const bunCommand = process.platform === "win32" ? "bun.exe" : "bun";
 
 try {
-  const coverage = spawnSync(
-    bunCommand,
-    [
-      "run",
-      "vitest",
-      "run",
-      "--coverage",
-      "--silent",
-      `--coverage.reportsDirectory=${reportsDir}`,
-    ],
-    { stdio: "inherit" },
-  );
-  if (coverage.status !== 0) {
-    process.exitCode = coverage.status ?? 1;
+  const prepare = spawnSync(bunCommand, ["run", "test:prepare"], {
+    stdio: "inherit",
+  });
+  if (prepare.status !== 0) {
+    process.exitCode = prepare.status ?? 1;
   } else {
-    const summary = join(reportsDir, "coverage-summary.json");
-    const gate = spawnSync(
-      process.execPath,
-      ["scripts/check-test-coverage.mjs", summary],
+    const coverage = spawnSync(
+      bunCommand,
+      [
+        "run",
+        "vitest",
+        "run",
+        "--coverage",
+        "--silent",
+        `--coverage.reportsDirectory=${reportsDir}`,
+      ],
       { stdio: "inherit" },
     );
-    process.exitCode = gate.status ?? 1;
+    if (coverage.status !== 0) {
+      process.exitCode = coverage.status ?? 1;
+    } else {
+      const summary = join(reportsDir, "coverage-summary.json");
+      const gate = spawnSync(
+        process.execPath,
+        ["scripts/check-test-coverage.mjs", summary],
+        { stdio: "inherit" },
+      );
+      process.exitCode = gate.status ?? 1;
+    }
   }
 } finally {
   if (ownsReportsDir && !keepCoverage) {
