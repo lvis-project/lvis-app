@@ -60,7 +60,7 @@
     "test:coverage": "bun run test:prepare && vitest run --coverage",
     "check:test-coverage": "node scripts/run-test-coverage-gate.mjs",
     "check:test-quality": "bun run check:test-duplicates -- --fail-on-duplicates && bun run check:test-coverage",
-    "test:watch": "vitest",
+    "test:watch": "bun run test:prepare && vitest",
     "test:ui-e2e": "playwright test",
     "test:electron-smoke": "node scripts/run-electron.mjs --version",
     "test:packaged-smoke": "node scripts/smoke-packaged-app.mjs --target current",
