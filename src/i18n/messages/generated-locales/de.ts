@@ -962,7 +962,7 @@ export const deMessages: Record<string, string> = {
   "composerPlaceholder.streamingHint": "Wird zur Nachrichtenwarteschlange hinzugefügt (sofort mit ⌘⏎ unterbrechen)",
   "constants.execModeAllowDesc": "Werkzeuge außerhalb harter Blöcke werden automatisch zugelassen; Der Zugriff außerhalb erlaubter Verzeichnisse bedarf einer gesonderten Genehmigung",
   "constants.execModeAllowLabel": "Alles zulassen",
-  "constants.execModeAutoDesc": "Vorgänge mit geringem Risiko werden mit einem Prüfpfad verarbeitet; Sowohl die automatisierte (kopflose) Ausführung als auch der interaktive Chat werden vom Berechtigungsprüfer überprüft",
+  "constants.execModeAutoDesc": "Interaktive Entscheidungen mit niedrigem und mittlerem Risiko werden mit Prüfprotokoll automatisch genehmigt; hohes Risiko erfordert eine Genehmigung, und die Headless-Ausführung nutzt ihre separate Fail-Closed-Prüfwarteschlange",
   "constants.execModeAutoLabel": "Automatische Überprüfung",
   "constants.execModeDefaultDesc": "Lesevorgänge erlaubt; Für Schreib-, Shell- und Netzwerkvorgänge ist eine Genehmigung erforderlich",
   "constants.execModeDefaultLabel": "Schreibvorgänge bestätigen",

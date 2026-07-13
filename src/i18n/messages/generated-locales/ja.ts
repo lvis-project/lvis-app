@@ -962,7 +962,7 @@ export const jaMessages: Record<string, string> = {
   "composerPlaceholder.streamingHint": "メッセージキューに追加されます (⌘⏎ですぐに中断)",
   "constants.execModeAllowDesc": "ハード ブロックの外側にあるツールは自動的に許可されます。許可されたディレクトリ外へのアクセスには別途承認が必要",
   "constants.execModeAllowLabel": "すべてを許可する",
-  "constants.execModeAutoDesc": "リスクの低い操作は監査証跡を使用して処理されます。自動 (ヘッドレス) 実行と対話型チャットは両方とも権限レビュー担当者によって検証されます",
+  "constants.execModeAutoDesc": "対話型の低・中リスク判定は監査記録付きで自動承認され、高リスクは承認が必要です。ヘッドレス実行は別のフェイルクローズ型レビューキューを使用します",
   "constants.execModeAutoLabel": "自動検証",
   "constants.execModeDefaultDesc": "読み取りは許可されます。書き込み、シェル、およびネットワーク操作には承認が必要です",
   "constants.execModeDefaultLabel": "書き込みの確認",

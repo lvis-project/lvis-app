@@ -534,7 +534,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     expect(pm.getInteractiveAutoApprove()).toBe("low");
   });
 
-  it("logs boot warning when mode=auto + interactive.autoApprove=off (round-5 test-engineer MAJOR)", () => {
+  it("does not warn when mode=auto + interactive.autoApprove=off", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     pm.setMode("auto");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -551,18 +551,10 @@ describe("Permission policy P4 reviewer-wiring", () => {
         verdictCachePath: join(tmpDir, "cache-warn-auto-off.jsonl"),
         deferredQueuePath: join(tmpDir, "queue-warn-auto-off.jsonl"),
       });
-      // The logger calls into pino which may stream via console or a
-      // dedicated transport. We use a permissive assertion that fires
-      // when *any* warn-level emission contains the canonical phrase.
-      // Round-6 test-engineer CRITICAL — strict assertion. The earlier
-      // `fired || calls.length===0` form was a tautology that passed
-      // even when the warn never fired. The logger's vitest path
-      // routes through `console.warn` directly (lib/logger.ts), so
-      // `warnSpy.mock.calls` is the SOT.
       const fired = warnSpy.mock.calls.some((args) =>
         args.some((a) => typeof a === "string" && a.includes("legacy exec mode=auto")),
       );
-      expect(fired).toBe(true);
+      expect(fired).toBe(false);
     } finally {
       warnSpy.mockRestore();
     }
