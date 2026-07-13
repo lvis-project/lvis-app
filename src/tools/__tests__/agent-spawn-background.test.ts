@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  createInMemoryFeatureNamespace as createInMemoryNamespace,
+} from "../../__tests__/test-helpers.js";
 import { A2ATaskState } from "../../shared/a2a.js";
 import { A2AAgentMessageBus } from "../../engine/a2a-agent-message-bus.js";
 import { A2A_PARENT_RECIPIENT } from "../../engine/a2a-agent-message-envelope.js";
@@ -29,21 +32,6 @@ function childContext() {
   };
 }
 
-function createInMemoryNamespace() {
-  let stored: unknown;
-  return {
-    handle: {
-      dir: "memory",
-      readJson: async (_name: string, fallback: unknown) =>
-        structuredClone(stored === undefined ? fallback : stored),
-      writeJson: async (_name: string, value: unknown) => {
-        stored = structuredClone(value);
-      },
-      childDir: async (name: string) => name,
-    } as never,
-    getStored: () => structuredClone(stored),
-  };
-}
 
 describe("agent_spawn background routing", () => {
   it("passes the host background mode to both fresh spawn and resume", async () => {
