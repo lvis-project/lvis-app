@@ -10,6 +10,7 @@ import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
 import { projectRootEquals } from "../shared/project-identity.js";
+import { maskSensitiveData } from "../shared/dlp.js";
 import {
   A2A_PROJECTED_TASK_STATE_VALUES,
   type A2AProjectedTaskState,
@@ -286,8 +287,12 @@ export interface SessionMetadata {
   profileModel?: string;
   /** Agent profile's `mode:` frontmatter the child was spawned with (resume reuses it). */
   profileMode?: string;
-  /** Parent chat session that created this sub-agent. Used only for transcript lookup/join. */
+  /** Parent chat session or host-minted internal A2A origin bound to this child. */
   originSessionId?: string;
+  /** Host-only A2A profile handler id. Never populated from remote context ids. */
+  a2aWireHandlerId?: string;
+  /** Host-minted A2A origin; must match originSessionId for wire-bound tasks. */
+  a2aWireInternalOrigin?: string;
   /** Parent `agent_spawn` tool_use id that created this sub-agent. */
   originToolUseId?: string;
   /** Host-visible spawn id emitted on the live agent-spawn event stream. */
@@ -342,6 +347,7 @@ const MAX_SESSION_FILE_BYTES = 5_000_000;
 const MAX_SUMMARY_PREAMBLE_CHARS = 8_000;
 const MAX_PROJECT_ROOT_CHARS = 2_048;
 const MAX_PROJECT_NAME_CHARS = 120;
+const MAX_A2A_WIRE_ID_CHARS = 256;
 const ACTIVE_SESSION_STATE_FILE = ".active-session.json";
 
 /**
@@ -359,6 +365,11 @@ const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
  */
 export function isValidSessionId(id: unknown): id is string {
   return typeof id === "string" && SESSION_ID_REGEX.test(id);
+}
+function isValidA2AWireMetadataId(id: unknown): id is string {
+  return isValidSessionId(id)
+    && id.length <= MAX_A2A_WIRE_ID_CHARS
+    && maskSensitiveData(id).detections.length === 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -557,6 +568,27 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
   const profileModel = typeof raw.profileModel === "string" ? raw.profileModel : undefined;
   const profileMode = typeof raw.profileMode === "string" ? raw.profileMode : undefined;
   const originSessionId = isValidSessionId(raw.originSessionId) ? raw.originSessionId : undefined;
+  const hasA2AWireHandlerId = Object.prototype.hasOwnProperty.call(raw, "a2aWireHandlerId");
+  const hasA2AWireInternalOrigin = Object.prototype.hasOwnProperty.call(raw, "a2aWireInternalOrigin");
+  let a2aWireHandlerId: string | undefined;
+  let a2aWireInternalOrigin: string | undefined;
+  if (hasA2AWireHandlerId || hasA2AWireInternalOrigin) {
+    if (
+      !hasA2AWireHandlerId
+      || !hasA2AWireInternalOrigin
+      || !isValidA2AWireMetadataId(raw.a2aWireHandlerId)
+      || !isValidA2AWireMetadataId(raw.a2aWireInternalOrigin)
+      || raw.a2aWireInternalOrigin !== originSessionId
+      || projectRoot === undefined
+      || !Array.isArray(raw.sourceTools)
+      || !raw.sourceTools.every((tool) =>
+        typeof tool === "string" && tool.length > 0 && tool.length <= 256)
+    ) {
+      throw new Error("invalid A2A wire binding metadata (a2a-wire-binding-invalid)");
+    }
+    a2aWireHandlerId = raw.a2aWireHandlerId;
+    a2aWireInternalOrigin = raw.a2aWireInternalOrigin;
+  }
   const originToolUseId = normalizeMetadataString(raw.originToolUseId, 256);
   const spawnId = normalizeMetadataString(raw.spawnId, 128);
   const subAgentTitle = normalizeMetadataString(raw.subAgentTitle, MAX_PROJECT_NAME_CHARS);
@@ -603,10 +635,16 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     branchedFromCompactNum: rawBranchedFromCompactNum,
     branchedAt: rawBranchedAt,
     // Sub-agent resume metadata (PR-B).
-    sourceTools: sourceTools && sourceTools.length > 0 ? sourceTools : undefined,
+    sourceTools: a2aWireHandlerId !== undefined
+      ? sourceTools
+      : sourceTools && sourceTools.length > 0
+        ? sourceTools
+        : undefined,
     profileModel,
     profileMode,
     originSessionId,
+    a2aWireHandlerId,
+    a2aWireInternalOrigin,
     originToolUseId,
     spawnId,
     subAgentTitle,
@@ -1184,12 +1222,30 @@ export class MemoryManager {
         MAX_SUMMARY_PREAMBLE_CHARS,
       ),
     };
+    const hasA2AWireHandlerId = safe.a2aWireHandlerId !== undefined;
+    const hasA2AWireInternalOrigin = safe.a2aWireInternalOrigin !== undefined;
+    if (hasA2AWireHandlerId || hasA2AWireInternalOrigin) {
+      if (
+        !isValidA2AWireMetadataId(safe.a2aWireHandlerId)
+        || !isValidA2AWireMetadataId(safe.a2aWireInternalOrigin)
+        || safe.a2aWireInternalOrigin !== safe.originSessionId
+        || safe.projectRoot === undefined
+        || !Array.isArray(safe.sourceTools)
+        || !safe.sourceTools.every((tool) =>
+          typeof tool === "string" && tool.length > 0 && tool.length <= 256)
+      ) {
+        throw new Error(
+          "saveSessionMetadata: invalid A2A wire binding metadata (a2a-wire-binding-invalid)",
+        );
+      }
+    }
     // Cap stored title to 20 chars.
     if (safe.title !== undefined && safe.title.length > 20) {
       safe = { ...safe, title: safe.title.slice(0, 20) };
     }
+    const serialized = JSON.stringify(safe, null, 2);
     await withFileLock(targetPath, async () => {
-      writeFileSync(targetPath, JSON.stringify(safe, null, 2), "utf-8");
+      writeFileSync(targetPath, serialized, "utf-8");
     });
     // Metadata (sessionKind/routineId/projectRoot/title) is denormalized into
     // the FTS row (#1500 / E3) — re-index whenever it changes, not just on
