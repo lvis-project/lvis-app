@@ -37,7 +37,14 @@ import { SubAgentRunner } from "../subagent-runner.js";
 import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { createAgentSpawnTool } from "../../tools/agent-spawn.js";
+import { createAgentSendTool } from "../../tools/agent-send.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
+import { A2AAgentMessageBus } from "../a2a-agent-message-bus.js";
+import {
+  A2AAgentMessageMailbox,
+  type A2AAgentMailboxEntry,
+} from "../a2a-agent-message-mailbox.js";
+import { A2A_AGENT_MAX_TRACKED_TREES } from "../a2a-agent-message-envelope.js";
 
 // ─── Test scaffolding ─────────────────────────────────
 
@@ -45,11 +52,13 @@ class ScriptedProvider implements LLMProvider {
   readonly vendor = "openai" as const;
   public turnsServed = 0;
   public observedToolNames: string[][] = [];
+  public observedMessages: unknown[] = [];
 
   constructor(private readonly turns: StreamEvent[][]) {}
 
   async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
     this.observedToolNames.push((params.tools ?? []).map((tool) => tool.name));
+    this.observedMessages.push(structuredClone(params.messages));
     const idx = this.turnsServed++;
     yield* this.turns[idx] ?? this.turns[this.turns.length - 1] ?? [
       { type: "text_delta", text: "(out-of-script)" },
@@ -137,6 +146,12 @@ function noopTool(name: string) {
 
 const SESSION_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
 
+function makeTestSubStore(): MemoryManager {
+  const store = new MemoryManager({ lvisDir: openFeatureNamespace("subagent").dir });
+  store.load();
+  return store;
+}
+
 describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   let tmpHome: string;
   let prevLvisHome: string | undefined;
@@ -179,6 +194,34 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         { type: "message_complete", stopReason: "tool_use" },
       ]),
     );
+  }
+  function makeAgentMailboxEntry(
+    recipientChildSessionId: string,
+    messageId = "message-idle-resume",
+  ): A2AAgentMailboxEntry {
+    return {
+      id: "entry-" + messageId,
+      createdAt: "2026-07-13T00:00:00.000Z",
+      envelope: {
+        version: 1,
+        originSessionId: "parent-session-mailbox",
+        senderChildSessionId: "sub-sender-mailbox",
+        recipientChildSessionId,
+        hopCount: 3,
+        treeSequence: 1,
+      },
+      senderTitle: "sender-worker",
+      recipientTitle: "recipient-worker",
+      message: {
+        messageId,
+        contextId: "parent-session-mailbox",
+        taskId: "sub-sender-mailbox",
+        role: "ROLE_AGENT",
+        parts: [{ text: "idle sibling guidance" }],
+      },
+      formattedText: "[Sub-Agent message from sender-worker]\nidle sibling guidance",
+      approvalLabel: "[Sub-Agent: sender-worker]",
+    };
   }
 
   it("persists parent agent_spawn linkage and reloads the child transcript by explicit childSessionId", async () => {
@@ -475,6 +518,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   it("scopes the resumed child to exactly meta.sourceTools (write tool absent)", async () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("read_only"));
+    toolRegistry.register({ ...noopTool("agent_send"), modelVisible: false });
+    expect(toolRegistry.getToolSchemas().map((schema) => schema.name))
+      .not.toContain("agent_send");
     toolRegistry.register(
       createDynamicTool({
         name: "bash",
@@ -501,7 +547,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     });
     restore();
     const resumeId = spawn.childSessionId;
-    expect(subStore.loadSessionMetadata(resumeId)?.sourceTools).toEqual(["read_only"]);
+    expect(subStore.loadSessionMetadata(resumeId)?.sourceTools).toEqual(["read_only", "agent_send"]);
 
     const resumeProvider = new ScriptedProvider([
       [
@@ -516,7 +562,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       restore();
     }
     // The resumed child's LLM schema saw exactly ["read_only"] — never "bash".
-    expect(resumeProvider.observedToolNames[0]).toEqual(["read_only"]);
+    expect(resumeProvider.observedToolNames[0]).toEqual(["read_only", "agent_send"]);
     expect(resumeProvider.observedToolNames[0]).not.toContain("bash");
   });
 
@@ -670,6 +716,578 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     }
   });
 
+
+  it("fails closed when an INPUT_REQUIRED question was not staged by agent_send", async () => {
+    const originSessionId = "parent-question";
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+    const originalRunTurn = ConversationLoop.prototype.runTurn;
+    const restore = patchProvider(cleanSpawnProvider());
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(async (...args: Parameters<typeof originalRunTurn>) => {
+        const callbacks = args[1] as
+          | { onAssistantRound?: (round: { thought?: string; text: string }) => void }
+          | undefined;
+        callbacks?.onAssistantRound?.({ text: "waiting for the parent" });
+        return {
+          text: "I need the parent to choose.",
+          toolCalls: [],
+          route: "default",
+          stopReason: "input-required",
+          inputRequired: { reason: "question", prompt: "Which path?" },
+        };
+      });
+
+    try {
+      const result = await runner.spawn({
+        title: "question-wait",
+        instructions: "ask when blocked",
+        sourceTools: ["noop"],
+        originSessionId,
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("question delivery was not staged"),
+      });
+      expect(subStore.loadSessionMetadata(result.childSessionId)).toMatchObject({
+        subAgentTaskState: "TASK_STATE_FAILED",
+        subAgentSuspensionReason: undefined,
+      });
+    } finally {
+      runTurnSpy.mockRestore();
+      restore();
+    }
+  });
+
+  it("resolves same-origin peers and atomically reserves one question wait per active sender", async () => {
+    const toolRegistry = new ToolRegistry();
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+    const originSessionId = "parent-peer";
+    const senderChildSessionId = "sub-sender";
+    const recipientChildSessionId = "sub-recipient";
+    await subStore.saveSessionMetadata(senderChildSessionId, {
+      sessionKind: "subagent",
+      originSessionId,
+      subAgentTitle: "sender",
+      sourceTools: ["noop"],
+      subAgentTaskState: "TASK_STATE_WORKING",
+    });
+    await subStore.saveSessionMetadata(recipientChildSessionId, {
+      sessionKind: "subagent",
+      originSessionId,
+      subAgentTitle: "recipient",
+      sourceTools: ["noop"],
+      subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      subAgentSuspensionReason: "budget",
+    });
+
+    const senderLoop = { hasActiveTurn: () => true } as unknown as ConversationLoop;
+    const recipientLoop = { hasActiveTurn: () => true } as unknown as ConversationLoop;
+    const activeChildren = (runner as unknown as {
+      activeChildren: Map<string, {
+        lease: symbol;
+        childSessionId: string;
+        originSessionId?: string;
+        title: string;
+        loop: ConversationLoop;
+        background: boolean;
+        questionWait?: { token: symbol; prompt: string };
+      }>;
+    }).activeChildren;
+    activeChildren.set(senderChildSessionId, {
+      lease: Symbol("sender"),
+      childSessionId: senderChildSessionId,
+      originSessionId,
+      title: "sender",
+      loop: senderLoop,
+      background: true,
+    });
+    activeChildren.set(recipientChildSessionId, {
+      lease: Symbol("recipient"),
+      childSessionId: recipientChildSessionId,
+      originSessionId,
+      title: "recipient",
+      loop: recipientLoop,
+      background: false,
+    });
+
+    const route = await runner.resolveSubAgentPeer(
+      senderChildSessionId,
+      recipientChildSessionId,
+    );
+    expect(route).toMatchObject({
+      ok: true,
+      originSessionId,
+      sender: { childSessionId: senderChildSessionId },
+      recipient: {
+        childSessionId: recipientChildSessionId,
+        activeLoop: recipientLoop,
+      },
+    });
+    await expect(runner.resolveSubAgentSender(senderChildSessionId)).resolves.toMatchObject({
+      childSessionId: senderChildSessionId,
+      originSessionId,
+      background: true,
+      taskState: "TASK_STATE_WORKING",
+    });
+    expect(runner.isSubAgentOriginActive(originSessionId)).toBe(true);
+    expect(runner.isSubAgentOriginActive("other-origin")).toBe(false);
+
+
+    const secret = "ghp_" + "b".repeat(24);
+    const first = runner.reserveQuestionWait(
+      senderChildSessionId,
+      `Need input ${secret} ${"q".repeat(9_000)}`,
+    );
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw new Error("question reservation unexpectedly failed");
+    const reservedPrompt = activeChildren.get(senderChildSessionId)?.questionWait?.prompt;
+    expect(reservedPrompt).toHaveLength(8_000);
+    expect(reservedPrompt).not.toContain(secret);
+    expect(first).not.toHaveProperty("prompt");
+    expect(runner.reserveQuestionWait(senderChildSessionId, "second")).toEqual({
+      ok: false,
+      reason: "question-already-outstanding",
+    });
+    await expect(runner.cancelQuestionWait(senderChildSessionId, Symbol("wrong")))
+      .resolves.toBe(false);
+    await expect(runner.cancelQuestionWait(senderChildSessionId, first.token))
+      .resolves.toBe(true);
+    expect(runner.reserveQuestionWait(senderChildSessionId, "second").ok).toBe(true);
+
+    await subStore.saveSessionMetadata(recipientChildSessionId, {
+      ...subStore.loadSessionMetadata(recipientChildSessionId)!,
+      originSessionId: "other-parent",
+    });
+    await expect(runner.resolveSubAgentPeer(
+      senderChildSessionId,
+      recipientChildSessionId,
+    )).resolves.toEqual({ ok: false, reason: "cross-origin" });
+    await expect(runner.resolveSubAgentPeer(
+      senderChildSessionId,
+      "sub-unknown",
+    )).resolves.toEqual({ ok: false, reason: "unknown-recipient" });
+  });
+  it("preserves a persisted INPUT_REQUIRED tree across restart pressure and evicts terminal ownership", async () => {
+    const activeOrigin = "parent-restart-active";
+    const terminalOrigin = "parent-restart-terminal";
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const activeChild = "sub-persisted-input-required";
+    const terminalChild = "sub-persisted-completed";
+
+    await subStore.saveSession(activeChild, []);
+    await subStore.saveSessionMetadata(activeChild, {
+      sessionKind: "subagent",
+      originSessionId: activeOrigin,
+      subAgentTitle: "persisted active",
+      sourceTools: ["noop"],
+      resumeCount: 0,
+      cumulativeRounds: 0,
+      subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      subAgentSuspensionReason: "budget",
+    });
+    await subStore.saveSession(terminalChild, []);
+    await subStore.saveSessionMetadata(terminalChild, {
+      sessionKind: "subagent",
+      originSessionId: terminalOrigin,
+      subAgentTitle: "persisted terminal",
+      sourceTools: ["noop"],
+      resumeCount: 0,
+      cumulativeRounds: 1,
+      subAgentTaskState: "TASK_STATE_COMPLETED",
+    });
+
+    const restartedRunner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+    expect(restartedRunner.isSubAgentOriginActive(activeOrigin)).toBe(true);
+    expect(restartedRunner.isSubAgentOriginActive(terminalOrigin)).toBe(false);
+
+    let stored: unknown;
+    const mailbox = new A2AAgentMessageMailbox({
+      dir: "memory",
+      readJson: async (_name: string, fallback: unknown) =>
+        structuredClone(stored === undefined ? fallback : stored),
+      writeJson: async (_name: string, value: unknown) => {
+        stored = structuredClone(value);
+      },
+      childDir: async (name: string) => name,
+    } as never);
+    const allocate = (originSessionId: string) => mailbox.allocateEnvelope({
+      version: 1,
+      originSessionId,
+      senderChildSessionId: "sub-persisted-sender",
+      recipientChildSessionId: "parent",
+      hopCount: 1,
+    }, (candidateOriginSessionId) =>
+      restartedRunner.isSubAgentOriginActive(candidateOriginSessionId));
+
+    for (let sequence = 1; sequence <= 5; sequence += 1) {
+      await expect(allocate(activeOrigin)).resolves.toMatchObject({
+        ok: true,
+        envelope: { treeSequence: sequence },
+      });
+    }
+    for (let index = 0; index < A2A_AGENT_MAX_TRACKED_TREES - 1; index += 1) {
+      await allocate(index === 0 ? terminalOrigin : "parent-aged-" + index);
+    }
+    await expect(allocate("parent-after-restart")).resolves.toMatchObject({
+      ok: true,
+      envelope: { treeSequence: 1 },
+    });
+    await expect(allocate(activeOrigin)).resolves.toMatchObject({
+      ok: true,
+      envelope: { treeSequence: 6 },
+    });
+  });
+  it("joins an idle sibling mailbox into resume and acknowledges only after end-turn commit", async () => {
+    const originSessionId = "parent-session-mailbox";
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    let mailboxEntry: A2AAgentMailboxEntry | undefined;
+    const peekRecipientMailbox = vi.fn(async (recipientChildSessionId: string) => {
+      expect(subStore.loadSessionMetadata(recipientChildSessionId)?.subAgentTaskState)
+        .toBe("TASK_STATE_INPUT_REQUIRED");
+      return mailboxEntry ? [mailboxEntry] : [];
+    });
+    const acknowledgeRecipientMailbox = vi.fn(async (
+      recipientChildSessionId: string,
+      entries: readonly A2AAgentMailboxEntry[],
+    ) => {
+      expect(subStore.loadSessionMetadata(recipientChildSessionId)?.subAgentTaskState)
+        .toBe("TASK_STATE_COMPLETED");
+      return entries.length;
+    });
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+      agentMessageBus: {
+        peekRecipientMailbox,
+        acknowledgeRecipientMailbox,
+      } as never,
+    });
+
+    let restore = patchProvider(waitingSpawnProvider());
+    const spawned = await runner.spawn({
+      title: "mailbox-recipient",
+      instructions: "wait",
+      sourceTools: ["noop"],
+      maxRounds: 1,
+      originSessionId,
+    });
+    restore();
+    mailboxEntry = makeAgentMailboxEntry(spawned.childSessionId);
+    const waitingMeta = subStore.loadSessionMetadata(spawned.childSessionId)!;
+    await subStore.saveSessionMetadata(spawned.childSessionId, {
+      ...waitingMeta,
+      subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      subAgentSuspensionReason: "question",
+      subAgentSuspensionPrompt: "Which option?",
+    });
+
+    let observedOptions: {
+      initialGuidance?: string;
+      approvalReasonPrefix?: string;
+      a2aCausalContext?: unknown;
+    } | undefined;
+    restore = patchProvider(cleanSpawnProvider());
+    const originalRunTurn = ConversationLoop.prototype.runTurn;
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(function (
+        this: ConversationLoop,
+        ...args: Parameters<typeof originalRunTurn>
+      ) {
+        observedOptions = args[3];
+        expect(acknowledgeRecipientMailbox).not.toHaveBeenCalled();
+        return originalRunTurn.apply(this, args);
+      });
+    let resumed;
+    try {
+      resumed = await runner.resume(
+        spawned.childSessionId,
+        "continue",
+        "mailbox-recipient",
+        undefined,
+        originSessionId,
+        undefined,
+        true,
+      );
+    } finally {
+      runTurnSpy.mockRestore();
+      restore();
+    }
+
+    expect(resumed.stopReason).toBe("end_turn");
+    expect(observedOptions).toMatchObject({
+      initialGuidance: mailboxEntry.formattedText,
+      approvalReasonPrefix: "[Sub-Agent: multiple sources]",
+      a2aCausalContext: {
+        kind: "a2a-causal-hop",
+        version: 1,
+        originSessionId,
+        recipientChildSessionId: spawned.childSessionId,
+        hopCount: 3,
+      },
+    });
+    expect(peekRecipientMailbox).toHaveBeenCalledWith(spawned.childSessionId);
+    expect(acknowledgeRecipientMailbox).toHaveBeenCalledWith(
+      spawned.childSessionId,
+      [mailboxEntry],
+    );
+    expect(JSON.stringify(subStore.loadSession(spawned.childSessionId)))
+      .toContain("idle sibling guidance");
+  });
+
+  it.each(["round-cap", "interrupted", "stream-error"] as const)(
+    "retains idle sibling mailbox delivery when resume stops with %s",
+    async (stopReason) => {
+      const originSessionId = "parent-session-mailbox";
+      const toolRegistry = new ToolRegistry();
+      toolRegistry.register(noopTool("noop"));
+      const subStore = makeSubStore();
+      let mailboxEntry: A2AAgentMailboxEntry | undefined;
+      const acknowledgeRecipientMailbox = vi.fn(async () => 1);
+      const runner = new SubAgentRunner({
+        parentDeps: buildLoopDeps(toolRegistry),
+        toolRegistry,
+        subAgentMemoryManager: subStore,
+        agentMessageBus: {
+          peekRecipientMailbox: vi.fn(async () =>
+            mailboxEntry ? [mailboxEntry] : []),
+          acknowledgeRecipientMailbox,
+        } as never,
+      });
+
+      let restore = patchProvider(waitingSpawnProvider());
+      const spawned = await runner.spawn({
+        title: "mailbox-retain",
+        instructions: "wait",
+        sourceTools: ["noop"],
+        maxRounds: 1,
+        originSessionId,
+      });
+      restore();
+      mailboxEntry = makeAgentMailboxEntry(
+        spawned.childSessionId,
+        "message-retain-" + stopReason,
+      );
+
+      restore = patchProvider(cleanSpawnProvider());
+      const runTurnSpy = vi
+        .spyOn(ConversationLoop.prototype, "runTurn")
+        .mockResolvedValue({
+          text: "resume stopped",
+          toolCalls: [],
+          stopReason,
+        } as never);
+      try {
+        await runner.resume(
+          spawned.childSessionId,
+          "continue",
+          "mailbox-retain",
+          undefined,
+          originSessionId,
+          undefined,
+          true,
+        );
+      } finally {
+        runTurnSpy.mockRestore();
+        restore();
+      }
+
+      expect(acknowledgeRecipientMailbox).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects invalid question answers without consuming the wait, then accepts a valid answer", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    let restore = patchProvider(waitingSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "question-validation",
+      instructions: "wait",
+      sourceTools: ["noop"],
+      maxRounds: 1,
+    });
+    restore();
+    const meta = subStore.loadSessionMetadata(spawn.childSessionId)!;
+    await subStore.saveSessionMetadata(spawn.childSessionId, {
+      ...meta,
+      subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      subAgentSuspensionReason: "question",
+      subAgentSuspensionPrompt: "Which option?",
+    });
+    const waiting = subStore.loadSessionMetadata(spawn.childSessionId)!;
+
+    const guard = new ScriptedProvider([[
+      { type: "text_delta", text: "MUST-NOT-RUN" },
+      { type: "message_complete", stopReason: "end_turn" },
+    ]]);
+    restore = patchProvider(guard);
+    try {
+      for (const invalidAnswer of ["", "x".repeat(9_000)]) {
+        const rejected = await runner.resume(
+          spawn.childSessionId,
+          invalidAnswer,
+          "question-validation",
+        );
+        expect(rejected).toMatchObject({
+          ok: false,
+          turnCount: 0,
+          error: expect.stringContaining("question answer must be non-empty"),
+        });
+        expect(subStore.loadSessionMetadata(spawn.childSessionId)).toMatchObject({
+          subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+          subAgentSuspensionReason: "question",
+          subAgentSuspensionPrompt: "Which option?",
+          budgetResumeCount: waiting.budgetResumeCount,
+          questionAnswerCount: waiting.questionAnswerCount,
+          cumulativeRounds: waiting.cumulativeRounds,
+        });
+      }
+      expect(guard.turnsServed).toBe(0);
+    } finally {
+      restore();
+    }
+
+    const answerProvider = cleanSpawnProvider();
+    restore = patchProvider(answerProvider);
+    try {
+      const accepted = await runner.resume(
+        spawn.childSessionId,
+        "Use option A",
+        "question-validation",
+      );
+      expect(accepted.ok).toBe(true);
+      expect(answerProvider.turnsServed).toBe(1);
+    } finally {
+      restore();
+    }
+  });
+
+  it("masks a question answer and gates an always-allow tool under parent provenance", async () => {
+    const originSessionId = "parent-question-answer-security";
+    const execute = vi.fn(async () => ({ output: "ran", isError: false }));
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(createDynamicTool({
+      name: "question_probe",
+      description: "question answer security probe",
+      source: "builtin",
+      category: "read",
+      modelVisible: true,
+      decisionOverride: "always-allow-with-audit",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute,
+    }));
+    const requestAndWait = vi.fn(async (req: { id: string }) => ({
+      requestId: req.id,
+      choice: "deny-once" as const,
+    }));
+    const parentDeps = {
+      ...buildLoopDeps(toolRegistry),
+      approvalGate: { requestAndWait } as never,
+    };
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps,
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    let restore = patchProvider(new ScriptedProvider([[
+      { type: "tool_call", id: "spawn-probe", name: "question_probe", input: {} },
+      { type: "message_complete", stopReason: "tool_use" },
+    ]]));
+    const spawn = await runner.spawn({
+      title: "question-security",
+      instructions: "wait",
+      sourceTools: ["question_probe"],
+      maxRounds: 1,
+      originSessionId,
+    });
+    restore();
+    const meta = subStore.loadSessionMetadata(spawn.childSessionId)!;
+    await subStore.saveSessionMetadata(spawn.childSessionId, {
+      ...meta,
+      subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      subAgentSuspensionReason: "question",
+      subAgentSuspensionPrompt: "Provide the value",
+    });
+    execute.mockClear();
+    requestAndWait.mockClear();
+
+    const resumeProvider = new ScriptedProvider([
+      [
+        { type: "tool_call", id: "resume-probe", name: "question_probe", input: {} },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "denial observed" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const secret = "ghp_" + "a".repeat(24);
+    restore = patchProvider(resumeProvider);
+    try {
+      const resumed = await runner.resume(
+        spawn.childSessionId,
+        "Use " + secret,
+        "question-security",
+        undefined,
+        originSessionId,
+      );
+      expect(resumed.ok).toBe(true);
+    } finally {
+      restore();
+    }
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+      reason: expect.stringContaining("[Sub-Agent: parent]"),
+      trustOrigin: "agent-message",
+    }));
+    const providerInput = JSON.stringify(resumeProvider.observedMessages);
+    expect(providerInput).toContain("[REDACTED:TOKEN]");
+    expect(providerInput).not.toContain(secret);
+    const transcript = runner.getPersistedTranscript({
+      originSessionId,
+      childSessionId: spawn.childSessionId,
+    });
+    expect(transcript.ok).toBe(true);
+    if (transcript.ok) {
+      const persisted = JSON.stringify(transcript.messages);
+      expect(persisted).toContain("[REDACTED:TOKEN]");
+      expect(persisted).not.toContain(secret);
+    }
+  });
+
   it("counts question answers separately from the budget-resume ceiling", async () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
@@ -703,40 +1321,15 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     restore = patchProvider(resumeProvider);
     try {
       const onLinked = vi.fn();
-      const saveSpy = vi.spyOn(subStore, "saveSessionMetadata");
-      try {
-        const mismatch = await runner.resume(
-          spawn.childSessionId,
-          "wrong reason",
-          "question-counter",
-          { onLinked },
-          undefined,
-          "question-mismatch-attempt",
-          "budget",
-        );
-        expect(mismatch.ok).toBe(false);
-        expect(mismatch.error).toContain("suspension reason does not match caller");
-        expect(resumeProvider.turnsServed).toBe(0);
-        expect(onLinked).not.toHaveBeenCalled();
-        expect(saveSpy).not.toHaveBeenCalled();
-        expect(subStore.loadSessionMetadata(spawn.childSessionId)).toMatchObject({
-          subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
-          subAgentSuspensionReason: "question",
-        });
-      } finally {
-        saveSpy.mockRestore();
-      }
-
       const resumed = await runner.resume(
         spawn.childSessionId,
         "the answer",
         "question-counter",
-        undefined,
-        undefined,
-        undefined,
-        "question",
+        { onLinked },
       );
       expect(resumed.ok).toBe(true);
+      expect(resumeProvider.turnsServed).toBe(1);
+      expect(onLinked).toHaveBeenCalledWith({ childSessionId: spawn.childSessionId });
     } finally {
       restore();
     }
@@ -1024,15 +1617,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
 
     let resumed: Awaited<ReturnType<SubAgentRunner["resume"]>>;
     try {
-      resumed = await runner.resume(
-        resumeId,
-        "answer the child",
-        "partial-resume",
-        undefined,
-        undefined,
-        undefined,
-        "question",
-      );
+      resumed = await runner.resume(resumeId, "answer the child", "partial-resume");
     } finally {
       runTurnSpy.mockRestore();
       restore();
@@ -1861,6 +2446,222 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       restore();
     }
   });
+  it("runs terminal mailbox cleanup after durable commit and skips INPUT_REQUIRED", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeTestSubStore();
+    const cleanupTerminalRecipientMailbox = vi.fn(async (childSessionId: string) => {
+      expect(subStore.loadSessionMetadata(childSessionId)).toMatchObject({
+        subAgentTaskState: "TASK_STATE_COMPLETED",
+      });
+      return { ok: true as const, removed: 1, retained: 0 };
+    });
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+      agentMessageBus: { cleanupTerminalRecipientMailbox } as never,
+    });
+
+    let restore = patchProvider(cleanSpawnProvider());
+    try {
+      const completed = await runner.spawn({
+        title: "terminal cleanup",
+        instructions: "finish",
+      });
+      expect(completed.ok).toBe(true);
+      expect(cleanupTerminalRecipientMailbox)
+        .toHaveBeenCalledWith(completed.childSessionId);
+    } finally {
+      restore();
+    }
+
+    cleanupTerminalRecipientMailbox.mockClear();
+    restore = patchProvider(waitingSpawnProvider());
+    try {
+      const waiting = await runner.spawn({
+        title: "waiting retain",
+        instructions: "pause",
+        sourceTools: ["noop"],
+        maxRounds: 1,
+      });
+      expect(waiting).toMatchObject({
+        ok: true,
+        stopReason: "round-cap",
+        suspension: { reason: "budget" },
+      });
+      expect(cleanupTerminalRecipientMailbox).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("commits a staged background question only after durable INPUT_REQUIRED metadata", async () => {
+    const originSessionId = "parent-question-order";
+    const toolRegistry = new ToolRegistry();
+    let runner!: SubAgentRunner;
+    toolRegistry.register(createAgentSendTool({ getRuntime: () => runner }));
+    const subStore = makeTestSubStore();
+    const namespace = openFeatureNamespace("subagent-messaging");
+    const mailbox = new A2AAgentMessageMailbox(namespace);
+    const audit = vi.fn();
+    const parentDeliver = vi.fn(async (input: {
+      childSessionId: string;
+      message: { metadata?: unknown; messageId: string; parts: unknown[] };
+    }) => {
+      expect(subStore.loadSessionMetadata(input.childSessionId)).toMatchObject({
+        subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+        subAgentSuspensionReason: "question",
+        subAgentSuspensionPrompt: "Which option?",
+      });
+      expect(input.message).toMatchObject({
+        parts: [{ text: "Which option?" }],
+        metadata: {
+          taskState: "TASK_STATE_INPUT_REQUIRED",
+          suspension: {
+            reason: "question",
+            prompt: "Which option?",
+            resumeId: input.childSessionId,
+          },
+        },
+      });
+      return {
+        ok: true as const,
+        disposition: "mailbox" as const,
+        messageId: input.message.messageId,
+      };
+    });
+    const bus = new A2AAgentMessageBus({
+      parentBus: { deliverToParent: parentDeliver } as never,
+      mailbox,
+      auditLogger: { log: audit } as never,
+      resolveSender: (childSessionId) => runner.resolveSubAgentSender(childSessionId),
+      resolvePeer: (sender, recipient) => runner.resolveSubAgentPeer(sender, recipient),
+      isOriginActive: (origin) => runner.isSubAgentOriginActive(origin),
+    });
+    runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+      agentMessageBus: bus,
+    });
+    const provider = new ScriptedProvider([[
+      {
+        type: "tool_call",
+        id: "question-send",
+        name: "agent_send",
+        input: {
+          to: "parent",
+          parts: [{ text: "Which option?" }],
+          waitForReply: true,
+        },
+      },
+      { type: "message_complete", stopReason: "tool_use" },
+    ]]);
+    const restore = patchProvider(provider);
+    try {
+      const result = await runner.spawn({
+        title: "question child",
+        instructions: "ask parent",
+        originSessionId,
+        background: true,
+      });
+      expect(result).toMatchObject({
+        ok: true,
+        stopReason: "input-required",
+        suspension: { reason: "question", prompt: "Which option?" },
+      });
+      expect(parentDeliver).toHaveBeenCalledTimes(1);
+      expect(provider.turnsServed).toBe(1);
+      const stored = await namespace.readJson<{
+        trees: Array<{ originSessionId: string; messageCount: number }>;
+      }>("agent-mailbox.json", { trees: [] });
+      expect(stored.trees).toEqual([{ originSessionId, messageCount: 1 }]);
+      expect(audit.mock.calls.filter(([entry]) =>
+        String(entry.input).includes("delivered:parent"))).toHaveLength(1);
+    } finally {
+      restore();
+    }
+  });
+
+  it("restores the durable waiting projection when commit and FAILED overwrite both fail", async () => {
+    const originSessionId = "parent-question-fallback";
+    const toolRegistry = new ToolRegistry();
+    let runner!: SubAgentRunner;
+    toolRegistry.register(createAgentSendTool({ getRuntime: () => runner }));
+    const subStore = makeTestSubStore();
+    const namespace = openFeatureNamespace("subagent-messaging");
+    const mailbox = new A2AAgentMessageMailbox(namespace);
+    const parentDeliver = vi.fn(async () => ({
+      ok: false as const,
+      reason: "storage-failed" as const,
+    }));
+    const bus = new A2AAgentMessageBus({
+      parentBus: { deliverToParent: parentDeliver } as never,
+      mailbox,
+      auditLogger: { log: vi.fn() } as never,
+      resolveSender: (childSessionId) => runner.resolveSubAgentSender(childSessionId),
+      resolvePeer: (sender, recipient) => runner.resolveSubAgentPeer(sender, recipient),
+      isOriginActive: (origin) => runner.isSubAgentOriginActive(origin),
+    });
+    runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+      agentMessageBus: bus,
+    });
+    const originalSave = subStore.saveSessionMetadata.bind(subStore);
+    vi.spyOn(subStore, "saveSessionMetadata").mockImplementation(async (id, meta) => {
+      if (meta.subAgentTaskState === "TASK_STATE_FAILED") {
+        throw new Error("terminal overwrite failed");
+      }
+      await originalSave(id, meta);
+    });
+    const provider = new ScriptedProvider([[
+      {
+        type: "tool_call",
+        id: "question-send-fallback",
+        name: "agent_send",
+        input: {
+          to: "parent",
+          parts: [{ text: "Which option?" }],
+          waitForReply: true,
+        },
+      },
+      { type: "message_complete", stopReason: "tool_use" },
+    ]]);
+    const restore = patchProvider(provider);
+    try {
+      const result = await runner.spawn({
+        title: "question fallback",
+        instructions: "ask parent",
+        originSessionId,
+        background: true,
+      });
+      expect(result).toMatchObject({
+        ok: true,
+        stopReason: "input-required",
+        suspension: { reason: "question", prompt: "Which option?" },
+      });
+      expect(subStore.loadSessionMetadata(result.childSessionId)).toMatchObject({
+        subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+        subAgentSuspensionReason: "question",
+      });
+      expect(runner.getRunStatus(result.childSessionId, originSessionId)).toMatchObject({
+        taskState: "TASK_STATE_INPUT_REQUIRED",
+        status: "waiting",
+      });
+      expect(parentDeliver).toHaveBeenCalledTimes(1);
+      const stored = await namespace.readJson<{ trees?: unknown[] }>(
+        "agent-mailbox.json",
+        {},
+      );
+      expect(stored.trees ?? []).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
 });
 
 // ─── 9) agent_spawn tool — resumeId surface + routing ─────────────────────────
@@ -1993,4 +2794,5 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
     expect(JSON.parse(r.output).error).toContain("cannot be invoked from a sub-agent");
     expect(resumeSpy).not.toHaveBeenCalled();
   });
+
 });

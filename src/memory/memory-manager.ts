@@ -317,6 +317,8 @@ export interface SessionMetadata {
   subAgentTaskState?: A2AProjectedTaskState;
   /** Typed resume axis paired with INPUT_REQUIRED. */
   subAgentSuspensionReason?: SubAgentSuspensionReason;
+  /** DLP-masked, bounded prompt paired with an INPUT_REQUIRED suspension. */
+  subAgentSuspensionPrompt?: string;
 }
 
 const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
@@ -578,6 +580,10 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     || raw.subAgentSuspensionReason === "question"
     ? raw.subAgentSuspensionReason
     : undefined;
+  const subAgentSuspensionPrompt = normalizeMetadataString(
+    raw.subAgentSuspensionPrompt,
+    MAX_SUMMARY_PREAMBLE_CHARS,
+  );
   return {
     sessionKind: normalizeSessionKind(raw.sessionKind),
     routineId,
@@ -610,6 +616,7 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     cumulativeRounds,
     subAgentTaskState,
     subAgentSuspensionReason,
+    subAgentSuspensionPrompt,
   };
 }
 
@@ -1172,6 +1179,10 @@ export class MemoryManager {
       sessionKind: normalizeSessionKind(safe.sessionKind),
       projectRoot: normalizeMetadataString(safe.projectRoot, MAX_PROJECT_ROOT_CHARS),
       projectName: normalizeMetadataString(safe.projectName, MAX_PROJECT_NAME_CHARS),
+      subAgentSuspensionPrompt: normalizeMetadataString(
+        safe.subAgentSuspensionPrompt,
+        MAX_SUMMARY_PREAMBLE_CHARS,
+      ),
     };
     // Cap stored title to 20 chars.
     if (safe.title !== undefined && safe.title.length > 20) {
