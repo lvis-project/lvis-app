@@ -44,6 +44,8 @@ import {
   resetAndResume,
   branchFromCheckpoint,
   startRoutineConversation,
+  revokeWorkspaceRoot,
+  type WorkspaceRootRevocationResult,
   type SessionProjectContext,
 } from "./turn/session.js";
 import { manualCompact, runPreflightGuard, applyBoundaryToSession } from "./turn/compaction.js";
@@ -59,6 +61,7 @@ import type {
   ToolScope,
   ToolExposureMetrics,
   ProviderRequestDiagnostics,
+  WorkspaceRootRevocationOptions,
 } from "./turn/types.js";
 export type { TurnCallbacks, TurnResult, ConversationLoopDeps } from "./turn/types.js";
 
@@ -219,6 +222,9 @@ export class ConversationLoop {
       // Tool.workerId calls that the host spawned and currently tracks as
       // ASRT-wrapped (mac/linux UDS or Windows holder-PID ACL grant).
       isActiveSandboxFilesystemContainedForPluginEffects,
+      // Workspace handlers wire this after loop construction; resolve lazily
+      // so persistent directory approvals never capture an empty snapshot.
+      () => deps.workspaceRootLifecycle,
     );
     this.auditLogger = deps.auditLogger ?? new AuditLogger();
     this.refreshProvider();
@@ -237,8 +243,8 @@ export class ConversationLoop {
   }
 
   /** B4: Abort the current streaming turn. No-op if no turn in flight. */
-  abortCurrentTurn(): void {
-    this.currentAbortController?.abort(new Error("user cancelled turn"));
+  abortCurrentTurn(reason: Error = new Error("user cancelled turn")): void {
+    this.currentAbortController?.abort(reason);
   }
 
   /**
@@ -446,6 +452,13 @@ export class ConversationLoop {
 
   newConversation(kind: SessionKind = "main", project?: SessionProjectContext): void {
     newConversation(this, kind, project ?? (kind === "main" ? this.deps.getDefaultProject?.() : undefined));
+  }
+
+  revokeWorkspaceRoot(
+    root: string,
+    options?: WorkspaceRootRevocationOptions,
+  ): WorkspaceRootRevocationResult {
+    return revokeWorkspaceRoot(this, root, options);
   }
 
   addSessionAdditionalDirectory(path: string): void {

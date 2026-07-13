@@ -28,7 +28,12 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
-import type { TurnInputRequired, TurnStopReason } from "./turn/types.js";
+import { canonicalizePathForMatch } from "../permissions/sensitive-paths.js";
+import type {
+  TurnInputRequired,
+  TurnStopReason,
+  WorkspaceRootRevocationOptions,
+} from "./turn/types.js";
 import {
   GUIDE_JOINED_MAX_CHARS,
   GUIDE_MAX_CHARS,
@@ -610,6 +615,61 @@ function hideUnhydratedToolResultStub(message: GenericMessage): GenericMessage {
 export class SubAgentRunner {
   constructor(private readonly deps: SubAgentRunnerDeps) {}
 
+  /** Allow newly-created child sessions to bind to a root registered again. */
+  allowProjectRoot(root: string): void {
+    this.deps.subAgentMemoryManager.allowProjectRoot(root);
+  }
+
+  /**
+   * Detach the removed project from the isolated sub-agent session store while
+   * preserving transcripts. Kept separate from live-scope revocation because
+   * metadata cleanup is asynchronous and must be awaited by the workspace
+   * lifecycle coordinator.
+   */
+  async detachSessionsFromProject(root: string): Promise<number> {
+    return await this.deps.subAgentMemoryManager.detachSessionsFromProject(root);
+  }
+
+  /**
+   * Remove a workspace root from every child loop that is live right now.
+   * Iterate a snapshot and isolate failures so one child cannot prevent the
+   * remaining scopes from shrinking.
+   */
+  revokeWorkspaceRoot(
+    root: string,
+    options?: WorkspaceRootRevocationOptions,
+  ): {
+    activeChildrenVisited: number;
+    liveScopesRevoked: number;
+  } {
+    let canonicalRoot: string;
+    try {
+      canonicalRoot = canonicalizePathForMatch(root);
+    } catch {
+      return { activeChildrenVisited: 0, liveScopesRevoked: 0 };
+    }
+
+    let activeChildrenVisited = 0;
+    let liveScopesRevoked = 0;
+    for (const child of [...this.activeChildren.values()]) {
+      activeChildrenVisited += 1;
+      try {
+        const result = child.loop.revokeWorkspaceRoot(canonicalRoot, options);
+        liveScopesRevoked += result.sessionDirectoriesRemoved + result.turnDirectoriesRemoved;
+      } catch (error: unknown) {
+        log.warn(
+          {
+            childSessionId: child.childSessionId,
+            errorName: error instanceof Error ? error.name : "UnknownError",
+          },
+          "sub-agent workspace scope revocation failed",
+        );
+      }
+    }
+    return { activeChildrenVisited, liveScopesRevoked };
+  }
+
+
   async deliverToParent(input: DeliverToParentInput): Promise<DeliverToParentResult> {
     const bus = this.deps.messageBus;
     if (!bus) {
@@ -953,7 +1013,11 @@ export class SubAgentRunner {
     }
 
     const active = this.activeChildren.get(recipientChildSessionId);
-    const recipientIsActive = active?.originSessionId === sender.originSessionId;
+    // A freshly-created child is registered before metadata persistence so
+    // workspace revocation can see it, but it is not message-routable until
+    // runTurn owns an active turn (the pre-run routing invariant).
+    const recipientIsActive = active?.originSessionId === sender.originSessionId
+      && active.loop.hasActiveTurn();
     return {
       ok: true,
       originSessionId: sender.originSessionId,
@@ -1567,12 +1631,32 @@ export class SubAgentRunner {
       subAgentSuspensionReason: undefined,
       subAgentSuspensionPrompt: undefined,
     };
+    // Register the addressable child before the first asynchronous boundary.
+    // Workspace removal snapshots `activeChildren`; registering only after the
+    // initial metadata write left a window where a fully-constructed child kept
+    // stale project directories but was invisible to live-scope revocation.
+    const activeLease = this.registerActiveChild({
+      childSessionId,
+      originSessionId: input.originSessionId,
+      title: input.title,
+      loop: child,
+      background: input.background === true,
+    });
+    let completedQuestionWait: ActiveSubAgentChild["questionWait"];
+    const unregisterSpawnChild = (): void => {
+      const active = this.activeChildren.get(childSessionId);
+      if (active?.lease === activeLease) {
+        completedQuestionWait = active.questionWait;
+      }
+      this.unregisterActiveChild(childSessionId, activeLease);
+    };
     try {
       await this.deps.subAgentMemoryManager.saveSessionMetadata(
         childSessionId,
         spawnMetadata,
       );
     } catch (err) {
+      unregisterSpawnChild();
       trackedRun.initialMetadataFailed = true;
       const interrupted = cancellation.signal.aborted;
       const message = interrupted
@@ -1593,8 +1677,6 @@ export class SubAgentRunner {
       return result;
     }
 
-    let completedQuestionWait: ActiveSubAgentChild["questionWait"];
-
     const metadataForResult = (
       terminalResult: SubAgentSpawnResult,
     ): Parameters<MemoryManager["saveSessionMetadata"]>[1] => ({
@@ -1607,6 +1689,10 @@ export class SubAgentRunner {
     const persistFinalResult = async (
       terminalResult: SubAgentSpawnResult,
     ): Promise<SubAgentSpawnResult> => {
+      // Pre-loop terminal paths (cancellation/provider setup failure) do not
+      // enter runTurn's finally block. Release the same lease here; the helper
+      // is idempotent and also preserves any staged question owned by it.
+      unregisterSpawnChild();
       let stableResult = await this.prepareQuestionStageForPersistence(
         completedQuestionWait,
         terminalResult,
@@ -1746,13 +1832,6 @@ export class SubAgentRunner {
       : input.instructions;
     let assistantRounds = 0;
 
-    const activeLease = this.registerActiveChild({
-      childSessionId,
-      originSessionId: input.originSessionId,
-      title: input.title,
-      loop: child,
-      background: input.background === true,
-    });
     try {
       // C3(a): pass `maxRounds` so queryLoop terminates cleanly between
       // rounds — the previous abortCurrentTurn() approach only halted the
@@ -1824,11 +1903,7 @@ export class SubAgentRunner {
         failureReason = message;
       }
     } finally {
-      const active = this.activeChildren.get(childSessionId);
-      if (active?.lease === activeLease) {
-        completedQuestionWait = active.questionWait;
-      }
-      this.unregisterActiveChild(childSessionId, activeLease);
+      unregisterSpawnChild();
     }
 
     if (cancellation.signal.aborted) {
@@ -1981,6 +2056,18 @@ export class SubAgentRunner {
         child?.abortCurrentTurn();
       },
     });
+    let activeLease: symbol | undefined;
+    let completedQuestionWait: ActiveSubAgentChild["questionWait"];
+    const unregisterResumeChild = (): void => {
+      const lease = activeLease;
+      if (!lease) return;
+      const active = this.activeChildren.get(resumeId);
+      if (active?.lease === lease) {
+        completedQuestionWait = active.questionWait;
+      }
+      this.unregisterActiveChild(resumeId, lease);
+      activeLease = undefined;
+    };
 
     const failureResult = (
       message: string,
@@ -2099,6 +2186,7 @@ export class SubAgentRunner {
       message: string,
       extra?: Partial<SubAgentSpawnResult>,
     ): Promise<SubAgentSpawnResult> => {
+      unregisterResumeChild();
       const result = failureResult(message, extra);
       // Terminal commit point: after this synchronous detach, a late interrupt
       // is rejected and cannot race the single durable terminal write.
@@ -2185,6 +2273,17 @@ export class SubAgentRunner {
     if (cancellation.signal.aborted) {
       return await finishAuthorizedFailure("sub-agent run interrupted");
     }
+    // A resumed child is live as soon as its loop and project scope exist.
+    // Register it before mailbox or metadata I/O so workspace removal cannot
+    // snapshot activeChildren in the construction-to-run gap and leave stale
+    // directories on the child loop.
+    activeLease = this.registerActiveChild({
+      childSessionId: resumeId,
+      originSessionId: meta.originSessionId,
+      title: meta.subAgentTitle,
+      loop: child,
+      background,
+    });
     let agentMailboxEntries: A2AAgentMailboxEntry[] = [];
     let agentMailboxGuidance: string | undefined;
     let agentMailboxApprovalPrefix = persistedResumeReason === "question"
@@ -2279,15 +2378,7 @@ export class SubAgentRunner {
     let failureReason: string | undefined;
     let childInputRequired: TurnInputRequired | undefined;
     let childStopReason: import("./turn/types.js").TurnStopReason | undefined;
-    let completedQuestionWait: ActiveSubAgentChild["questionWait"];
 
-    const activeLease = this.registerActiveChild({
-      childSessionId: resumeId,
-      originSessionId: meta.originSessionId,
-      title: meta.subAgentTitle,
-      loop: child,
-      background,
-    });
     try {
       const turnResult = await child.runTurn(
         canonicalContinuationInstructions,
@@ -2348,11 +2439,7 @@ export class SubAgentRunner {
       lastText = message;
       failureReason = message;
     } finally {
-      const active = this.activeChildren.get(resumeId);
-      if (active?.lease === activeLease) {
-        completedQuestionWait = active.questionWait;
-      }
-      this.unregisterActiveChild(resumeId, activeLease);
+      unregisterResumeChild();
     }
     let result: SubAgentSpawnResult = {
       summary: lastText,

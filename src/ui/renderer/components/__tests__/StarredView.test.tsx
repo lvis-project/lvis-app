@@ -18,6 +18,52 @@ function koreaDateKey(date: Date): string {
 }
 
 describe("StarredView", () => {
+  it("renders the current disambiguated project label and leaves general chats unlabelled", async () => {
+    const now = new Date().toISOString();
+    const api = {
+      starredRemove: vi.fn(async () => ({ ok: true })),
+    } as unknown as Parameters<typeof StarredView>[0]["api"];
+
+    const { findByText, queryByText } = render(
+      <StarredView
+        api={api}
+        starred={[]}
+        sessions={[
+          {
+            id: "scoped",
+            modifiedAt: now,
+            title: "범위 지정 대화",
+            sessionKind: "main",
+            projectRoot: "c:/work/team-a/shared/",
+            projectName: "shared",
+          },
+          {
+            id: "general",
+            modifiedAt: now,
+            title: "일반 대화",
+            sessionKind: "main",
+            projectName: "stale-general",
+          },
+        ]}
+        workspaceProjects={[
+          { projectRoot: "C:\\workspace", projectName: "workspace", isDefault: true },
+          { projectRoot: "C:\\work\\team-a\\shared", projectName: "shared — team-a" },
+          { projectRoot: "C:\\work\\team-b\\shared", projectName: "shared — team-b" },
+        ]}
+        currentSessionId=""
+        refreshStarred={vi.fn()}
+        onJumpToSession={vi.fn()}
+        onActivateHome={vi.fn()}
+      />,
+    );
+
+    expect(await findByText("범위 지정 대화")).toBeTruthy();
+    expect(await findByText("shared — team-a")).toBeTruthy();
+    expect(await findByText("일반 대화")).toBeTruthy();
+    expect(queryByText("shared")).toBeNull();
+    expect(queryByText("stale-general")).toBeNull();
+  });
+
   it("renders an LLM-generated daily summary when the usage summary API is available", async () => {
     const now = new Date().toISOString();
     const selectedKey = koreaDateKey(new Date(now));

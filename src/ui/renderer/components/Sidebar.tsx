@@ -37,7 +37,7 @@ import { isSidebarTab } from "../../../shared/sidebar-tab.js";
 import type { PluginCardSummary, PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
-import { projectBasename, projectRootEquals, workspaceRootsToProjects } from "../../../shared/project-identity.js";
+import { projectRootEquals, workspaceRootsToProjects } from "../../../shared/project-identity.js";
 import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
@@ -108,6 +108,8 @@ export interface SidebarProps {
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
   /** Re-fetch the workspace project list (after a context-menu mutation e.g. remove). */
   onRefreshProjects?: () => void | Promise<void>;
+  /** Surface a project-removal IPC failure without hiding the row. */
+  onProjectRemoveError?: (error?: string, message?: string) => void;
   /** Active sidebar tab ("chats" = ungrouped conversation list, "projects" = named-project groups). Persisted (SystemSettings). */
   activeSidebarTab?: SidebarTab;
   /** Switch the active sidebar tab — persists immediately. */
@@ -457,11 +459,12 @@ function projectTestId(root: string, fallback: string): string {
   return safe || "default";
 }
 
-function useWorkspaceProjects(): ProjectIdentity[] {
+function useWorkspaceProjects(enabled: boolean): ProjectIdentity[] {
   const { t } = useTranslation();
   const [projects, setProjects] = useState<ProjectIdentity[]>([]);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     void window.lvis?.workspace?.listRoots?.().then((result) => {
       if (cancelled || !result?.ok) return;
@@ -477,7 +480,7 @@ function useWorkspaceProjects(): ProjectIdentity[] {
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, [enabled, t]);
 
   return projects;
 }
@@ -576,6 +579,7 @@ function ProjectSessionList({
   onLoadSession,
   onNewChatForProject,
   onRefreshProjects,
+  onProjectRemoveError,
   projects: projectsProp,
   activeTab,
   onActiveTabChange,
@@ -591,6 +595,7 @@ function ProjectSessionList({
   onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
   onRefreshProjects?: () => void | Promise<void>;
+  onProjectRemoveError?: (error?: string, message?: string) => void;
   projects?: ProjectIdentity[];
   activeTab: SidebarTab;
   onActiveTabChange: (tab: SidebarTab) => void;
@@ -610,16 +615,21 @@ function ProjectSessionList({
   // Remove a picked (non-default) project from the workspace root list (real
   // capability: workspace.removeRoot). Refresh the sidebar list on success so
   // the removed project disappears immediately.
-  const removeProject = (project: ProjectIdentity) => {
+  const removeProject = async (project: ProjectIdentity): Promise<void> => {
     if (!project.projectRoot || project.isDefault) return;
-    void Promise.resolve(window.lvis?.workspace?.removeRoot?.(project.projectRoot))
-      .then(() => onRefreshProjects?.())
-      .catch(() => {
-        // Non-fatal: the list simply keeps the project until the next refresh.
-      });
+    try {
+      const result = await window.lvis?.workspace?.removeRoot?.(project.projectRoot);
+      if (!result?.ok) {
+        onProjectRemoveError?.(result?.error, result?.message);
+        return;
+      }
+      await onRefreshProjects?.();
+    } catch (error) {
+      onProjectRemoveError?.("remove-failed", error instanceof Error ? error.message : undefined);
+    }
   };
   const isSessionPinned = (sessionId: string) => Boolean(isSessionStarred?.(sessionId));
-  const fallbackProjects = useWorkspaceProjects();
+  const fallbackProjects = useWorkspaceProjects(projectsProp === undefined);
   const workspaceProjects = projectsProp ?? fallbackProjects;
   const mainSessions = useMemo(
     () => sessions.filter((session) => session.sessionKind === "main"),
@@ -635,32 +645,9 @@ function ProjectSessionList({
   // projects sort to the top (stable — order among unpinned/pinned groups is
   // otherwise unchanged).
   const namedProjects = useMemo(() => {
-    const known = workspaceProjects.filter((project) => !project.isDefault);
-    // The default/base-directory root itself — sessions tagged with it must
-    // fold into the ungrouped list below, never synthesize a phantom named
-    // group here. Defense-in-depth alongside the read-path scrub in
-    // handleChatSessions (src/ipc/handlers/chat.ts): that chokepoint strips
-    // project metadata from legacy default-tagged sessions before they ever
-    // reach the renderer, but this guard keeps the "unknown project"
-    // fallback below correct on its own terms too, independent of what any
-    // particular caller supplies in `sessions`.
-    const defaultProjectRoot = workspaceProjects.find((project) => project.isDefault)?.projectRoot;
-    const unknown = new Map<string, ProjectIdentity>();
-    for (const session of mainSessions) {
-      if (
-        !session.projectRoot
-        || known.some((project) => projectRootEquals(project.projectRoot, session.projectRoot))
-        || (defaultProjectRoot && projectRootEquals(defaultProjectRoot, session.projectRoot))
-      ) continue;
-      unknown.set(session.projectRoot, {
-        projectRoot: session.projectRoot,
-        projectName: session.projectName || projectBasename(session.projectRoot),
-        isDefault: false,
-      });
-    }
-    const combined = [...known, ...unknown.values()];
-    return sortWithPinnedFirst(combined, (project) => Boolean(isProjectPinned?.(project.projectRoot)));
-  }, [isProjectPinned, mainSessions, workspaceProjects]);
+    const configured = workspaceProjects.filter((project) => !project.isDefault);
+    return sortWithPinnedFirst(configured, (project) => Boolean(isProjectPinned?.(project.projectRoot)));
+  }, [isProjectPinned, workspaceProjects]);
   const sessionsByProject = useMemo(
     () => namedProjects.map((project) => {
       const projectSessions = sortWithPinnedFirst(
@@ -786,7 +773,7 @@ function ProjectSessionList({
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 streaming ? "cursor-not-allowed opacity-50" : "hover:bg-muted",
               ].join(" ")}
-              title={t("sidebar.newProjectChat", { project: project.projectName })}
+              title={project.projectRoot ?? t("sidebar.newProjectChat", { project: project.projectName })}
               data-testid={`sidebar-project-${projectTestId(project.projectRoot, project.projectName)}`}
               onClick={() => void onNewChatForProject?.({
                 ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
@@ -811,7 +798,7 @@ function ProjectSessionList({
                   ? { "project.reveal": () => revealProject(project.projectRoot!) }
                   : {}),
                 ...(project.projectRoot && !project.isDefault
-                  ? { "project.remove": () => removeProject(project) }
+                  ? { "project.remove": () => void removeProject(project) }
                   : {}),
               } as NativeContextMenuHandlers)}
             >
@@ -1037,6 +1024,7 @@ export function Sidebar({
   currentSessionId,
   onLoadSession,
   onRefreshProjects,
+  onProjectRemoveError,
   activeSidebarTab = "chats",
   onActiveSidebarTabChange,
   isSessionStarred,
@@ -1305,6 +1293,7 @@ export function Sidebar({
                     onLoadSession={onLoadSession}
                     onNewChatForProject={onNewChatForProject}
                     onRefreshProjects={onRefreshProjects}
+                    onProjectRemoveError={onProjectRemoveError}
                     activeTab={activeSidebarTab}
                     onActiveTabChange={onActiveSidebarTabChange ?? (() => {})}
                     isSessionStarred={isSessionStarred}

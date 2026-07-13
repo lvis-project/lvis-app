@@ -26,6 +26,7 @@ import { dirname, resolve as pathResolve } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { canonicalizePathForMatch, caseFoldForMatch } from "./sensitive-paths.js";
 
 const log = createLogger("permission-settings");
 
@@ -439,6 +440,77 @@ export async function setReviewerSettingsPersist(
 }
 
 /**
+ * Resolve an existing directory to the identity that is persisted in the
+ * permission SOT. Keeping the real path (instead of a symlink alias) freezes the
+ * authorized target even if that alias is later removed or retargeted.
+ *
+ * Legacy/non-existent values are kept verbatim so hand-edited settings and the
+ * slash-command parser retain their existing behaviour; workspace IPC validates
+ * existence before calling this helper.
+ */
+function persistedAllowedDirectory(dir: string): string {
+  if (dir.trim().length === 0) return dir;
+  const resolved = pathResolve(dir);
+  return existsSync(resolved) ? canonicalizePathForMatch(resolved) : dir;
+}
+
+function allowedDirectoryKey(dir: string): string | null {
+  if (dir.trim().length === 0) return null;
+  try {
+    return caseFoldForMatch(canonicalizePathForMatch(pathResolve(dir)));
+  } catch {
+    return null;
+  }
+}
+
+async function mutateAllowedDirectoriesPersist(
+  mutation: (current: string[]) => string[],
+  pathOverride?: string,
+): Promise<string[]> {
+  const filePath = pathOverride ?? defaultPath();
+  let result: string[] = [];
+  await withFileLock(filePath, async () => {
+    let existing: Record<string, unknown> = {};
+    if (existsSync(filePath)) {
+      try {
+        existing = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+      } catch {
+        existing = {};
+      }
+    }
+    const existingPerm = { ...((existing.permissions ?? {}) as Record<string, unknown>) };
+    const current = Array.isArray(existingPerm.additionalDirectories)
+      ? existingPerm.additionalDirectories.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [];
+    const next = mutation(current);
+    result = [...next];
+    if (
+      next.length === current.length &&
+      next.every((value, index) => value === current[index])
+    ) {
+      return;
+    }
+    delete existingPerm.allowedDirectories;
+    const merged = {
+      ...existing,
+      permissions: {
+        ...existingPerm,
+        additionalDirectories: next,
+        reviewer: normalizeReviewerBlock(existingPerm.reviewer),
+      },
+    };
+    mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
+    writeFileSync(filePath, JSON.stringify(merged, null, 2), {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
+  });
+  return result;
+}
+
+/**
  * Append a directory to `permissions.additionalDirectories`. Persists
  * via {@link writePermissionSettings}. De-duplicates by exact string.
  *
@@ -448,12 +520,18 @@ export async function addAllowedDirectoryPersist(
   dir: string,
   pathOverride?: string,
 ): Promise<string[]> {
-  const current = readPermissionSettings(pathOverride);
-  const list = current.permissions.additionalDirectories;
-  if (list.includes(dir)) return list;
-  const next = [...list, dir];
-  await writePermissionSettings({ additionalDirectories: next }, pathOverride);
-  return next;
+  const stored = persistedAllowedDirectory(dir);
+  return mutateAllowedDirectoriesPersist((list) => {
+    const targetKey = allowedDirectoryKey(stored);
+    if (
+      list.some((entry) =>
+        targetKey === null ? entry === stored : allowedDirectoryKey(entry) === targetKey,
+      )
+    ) {
+      return list;
+    }
+    return [...list, stored];
+  }, pathOverride);
 }
 
 /**
@@ -464,10 +542,10 @@ export async function removeAllowedDirectoryPersist(
   dir: string,
   pathOverride?: string,
 ): Promise<string[]> {
-  const current = readPermissionSettings(pathOverride);
-  const list = current.permissions.additionalDirectories;
-  const next = list.filter((d) => d !== dir);
-  if (next.length === list.length) return list;
-  await writePermissionSettings({ additionalDirectories: next }, pathOverride);
-  return next;
+  return mutateAllowedDirectoriesPersist((list) => {
+    const targetKey = allowedDirectoryKey(dir);
+    return list.filter((entry) =>
+      targetKey === null ? entry !== dir : allowedDirectoryKey(entry) !== targetKey,
+    );
+  }, pathOverride);
 }

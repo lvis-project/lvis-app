@@ -52,6 +52,17 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
   const showNativeContextMenu = vi.fn(async (_payload: NativeContextMenuPayload) => ({
     ok: true as const,
   }));
+  const removeRoot = vi.fn(async (root: string) => ({
+    ok: true as const, removed: root, roots: [],
+  }));
+  const listRoots = vi.fn(async () => ({
+    ok: true as const,
+    defaultRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app",
+    roots: [
+      { path: "C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app", isDefault: true },
+      { path: "C:\\Users\\ikcha\\workspace\\lvis-project\\other-app", isDefault: false },
+    ],
+  }));
   const sessions: SessionSummary[] = overrides.sessions ?? [
     {
       id: "sess-1",
@@ -91,6 +102,17 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     onToggleCurrentSessionStar: vi.fn(),
     onExport: vi.fn(),
     sessions,
+    projects: overrides.projects ?? [
+      {
+        projectRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app",
+        projectName: "lvis-app",
+        isDefault: true,
+      },
+      {
+        projectRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\other-app",
+        projectName: "other-app",
+      },
+    ],
     currentSessionId: "sess-1",
     onLoadSession,
     onNewChatForProject,
@@ -110,14 +132,8 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
       },
     },
     workspace: {
-      listRoots: vi.fn(async () => ({
-        ok: true,
-        defaultRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app",
-        roots: [
-          { path: "C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app", isDefault: true },
-          { path: "C:\\Users\\ikcha\\workspace\\lvis-project\\other-app", isDefault: false },
-        ],
-      })),
+      removeRoot,
+      listRoots,
     },
   };
 
@@ -132,6 +148,8 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     onLoadSession,
     onNewChatForProject,
     showNativeContextMenu,
+    removeRoot,
+    listRoots,
     emitNativeContextCommand: (command: NativeContextMenuAction["command"]) => {
       const payload = showNativeContextMenu.mock.calls.at(-1)?.[0];
       if (!payload) throw new Error("native context menu was not requested");
@@ -148,6 +166,16 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
 }
 
 describe("Sidebar project sessions", () => {
+  it("does not fetch workspace roots when the parent supplies projects", async () => {
+    const { listRoots, restore } = renderSidebar();
+    try {
+      await Promise.resolve();
+      expect(listRoots).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
   it("renders no-project conversations as a plain ungrouped list on the Chats tab, and real projects as groups on the Projects tab", async () => {
     const { getByTestId, getByText, queryByTestId, restore } = renderSidebar();
     try {
@@ -173,6 +201,35 @@ describe("Sidebar project sessions", () => {
     }
   });
 
+
+  it("keeps a stale project conversation as a general chat without resurrecting its project", async () => {
+    const staleRoot = "C:\\Users\\ikcha\\workspace\\deleted-project";
+    const { getByTestId, queryByTestId, restore } = renderSidebar({
+      projects: [{
+        projectRoot: "C:\\Users\\ikcha\\workspace\\default",
+        projectName: "default",
+        isDefault: true,
+      }],
+      sessions: [{
+        id: "stale-session",
+        title: "보존된 일반 대화",
+        modifiedAt: new Date().toISOString(),
+        sessionKind: "main",
+        projectRoot: staleRoot,
+        projectName: "deleted-project",
+      }],
+    });
+    try {
+      expect(getByTestId("sidebar-unassigned-sessions").textContent).toContain("보존된 일반 대화");
+
+      activateTab(getByTestId("sidebar-tab-projects"));
+      await waitFor(() => {
+        expect(queryByTestId("sidebar-project-C-Users-ikcha-workspace-deleted-project")).toBeNull();
+      });
+    } finally {
+      restore();
+    }
+  });
   it("loads a selected project conversation through the existing session loader", async () => {
     const { getByTestId, onLoadSession, restore } = renderSidebar();
     try {
@@ -428,6 +485,75 @@ describe("Sidebar project pinning", () => {
     }
   });
 
+
+  it("refreshes projects only after the native remove action succeeds", async () => {
+    const onRefreshProjects = vi.fn();
+    const {
+      getByTestId,
+      removeRoot,
+      emitNativeContextCommand,
+      restore,
+    } = renderSidebar({
+      sessions: [],
+      projects,
+      activeSidebarTab: "projects",
+      onRefreshProjects,
+    });
+    try {
+      const projectRow = await waitFor(() =>
+        getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-alpha"));
+      fireEvent.contextMenu(projectRow);
+      emitNativeContextCommand("project.remove");
+
+      await waitFor(() => {
+        expect(removeRoot).toHaveBeenCalledWith(
+          "C:\\Users\\ikcha\\workspace\\lvis-project\\alpha",
+        );
+        expect(onRefreshProjects).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps the project and surfaces the IPC error when native remove fails", async () => {
+    const onRefreshProjects = vi.fn();
+    const onProjectRemoveError = vi.fn();
+    const {
+      getByTestId,
+      removeRoot,
+      emitNativeContextCommand,
+      restore,
+    } = renderSidebar({
+      sessions: [],
+      projects,
+      activeSidebarTab: "projects",
+      onRefreshProjects,
+      onProjectRemoveError,
+    });
+    removeRoot.mockResolvedValueOnce({
+      ok: false,
+      error: "not-an-additional-root",
+      message: "not registered",
+    } as never);
+    try {
+      const projectRow = await waitFor(() =>
+        getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-alpha"));
+      fireEvent.contextMenu(projectRow);
+      emitNativeContextCommand("project.remove");
+
+      await waitFor(() => {
+        expect(onProjectRemoveError).toHaveBeenCalledWith(
+          "not-an-additional-root",
+          "not registered",
+        );
+      });
+      expect(onRefreshProjects).not.toHaveBeenCalled();
+      expect(getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-alpha")).toBeTruthy();
+    } finally {
+      restore();
+    }
+  });
   it("sorts a pinned project to the top of the Projects tab", async () => {
     const { getByTestId, restore } = renderSidebar({
       sessions: [],

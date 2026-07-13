@@ -100,13 +100,17 @@ describe("parsePermissionDirCommand", () => {
 describe("dispatchPermissionDirCommand — allow", () => {
   it("persists a valid directory to settings.json", async () => {
     const path = tmpSettingsPath();
+    const validation = validateDirectoryAddition("/Users/ken/work");
+    expect(validation.ok).toBe(true);
     const r = await dispatchPermissionDirCommand(
       { verb: "allow", path: "/Users/ken/work", session: false, acknowledgeWarnings: false },
       path,
     );
     expect(r).toMatchObject({ ok: true, verb: "allow", sessionOnly: false });
     const onDisk = readPermissionSettings(path);
-    expect(onDisk.permissions.additionalDirectories).toContain("/Users/ken/work");
+    expect(onDisk.permissions.additionalDirectories).toContain(
+      validation.ok ? validation.canonicalPath : "",
+    );
   });
 
   it("rejects sensitive path", async () => {
@@ -151,13 +155,17 @@ describe("dispatchPermissionDirCommand — allow", () => {
 
   it("persists adjacency-warning paths only after acknowledgement", async () => {
     const path = tmpSettingsPath();
+    const validation = validateDirectoryAddition("/Users/ken/work/proj/.git");
+    expect(validation.ok).toBe(true);
     const r = await dispatchPermissionDirCommand(
       { verb: "allow", path: "/Users/ken/work/proj/.git", session: false, acknowledgeWarnings: true },
       path,
     );
     expect(r).toMatchObject({ ok: true, verb: "allow" });
     const onDisk = readPermissionSettings(path);
-    expect(onDisk.permissions.additionalDirectories).toContain("/Users/ken/work/proj/.git");
+    expect(onDisk.permissions.additionalDirectories).toContain(
+      validation.ok ? validation.canonicalPath : "",
+    );
   });
 });
 
@@ -178,6 +186,114 @@ describe("dispatchPermissionDirCommand — deny", () => {
   });
 });
 
+
+describe("dispatchPermissionDirCommand — injected workspace lifecycle", () => {
+  it("delegates allow with the permission-slash source and returns lifecycle persistence", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lvis-perm-lifecycle-allow-"));
+    const validation = validateDirectoryAddition(directory);
+    expect(validation.ok).toBe(true);
+    const persisted = [directory, join(directory, "other")];
+    const allowDirectory = vi.fn(async () => persisted);
+    const denyDirectory = vi.fn(async () => [] as string[]);
+
+    const result = await dispatchPermissionDirCommand(
+      { verb: "allow", path: directory, session: false, acknowledgeWarnings: false },
+      undefined,
+      { allowDirectory, denyDirectory },
+    );
+
+    expect(allowDirectory).toHaveBeenCalledWith(
+      validation.ok ? validation.canonicalPath : directory,
+      "permission-slash",
+    );
+    expect(result).toEqual({
+      ok: true,
+      verb: "allow",
+      persisted,
+      sessionOnly: false,
+      warnings: [],
+    });
+  });
+
+  it("delegates deny with the permission-slash source and returns lifecycle persistence", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lvis-perm-lifecycle-deny-"));
+    const persisted = [join(directory, "remaining")];
+    const allowDirectory = vi.fn(async () => [] as string[]);
+    const denyDirectory = vi.fn(async () => persisted);
+
+    const result = await dispatchPermissionDirCommand(
+      { verb: "deny", path: directory, session: false, acknowledgeWarnings: false },
+      undefined,
+      { allowDirectory, denyDirectory },
+    );
+
+    expect(denyDirectory).toHaveBeenCalledWith(directory, "permission-slash");
+    expect(result).toEqual({ ok: true, verb: "deny", persisted });
+  });
+
+  it("returns a stable structured error when lifecycle allow rejects", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lvis-perm-lifecycle-allow-fail-"));
+    const allowDirectory = vi.fn(async () => {
+      throw new Error("private allow failure");
+    });
+    const denyDirectory = vi.fn(async () => [] as string[]);
+
+    const result = await dispatchPermissionDirCommand(
+      { verb: "allow", path: directory, session: false, acknowledgeWarnings: false },
+      undefined,
+      { allowDirectory, denyDirectory },
+    );
+
+    expect(allowDirectory).toHaveBeenCalledWith(
+      expect.any(String),
+      "permission-slash",
+    );
+    expect(result).toEqual({ ok: false, error: "workspace lifecycle update failed" });
+  });
+
+  it("returns a stable structured error when lifecycle deny rejects", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lvis-perm-lifecycle-deny-fail-"));
+    const allowDirectory = vi.fn(async () => [] as string[]);
+    const denyDirectory = vi.fn(async () => {
+      throw new Error("private deny failure");
+    });
+
+    const result = await dispatchPermissionDirCommand(
+      { verb: "deny", path: directory, session: false, acknowledgeWarnings: false },
+      undefined,
+      { allowDirectory, denyDirectory },
+    );
+
+    expect(denyDirectory).toHaveBeenCalledWith(directory, "permission-slash");
+    expect(result).toEqual({ ok: false, error: "workspace lifecycle update failed" });
+  });
+
+  it("fails closed for persistent mutations when the host lifecycle is unavailable", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lvis-perm-lifecycle-missing-"));
+
+    const allowResult = await dispatchPermissionDirCommand({
+      verb: "allow",
+      path: directory,
+      session: false,
+      acknowledgeWarnings: false,
+    });
+    const denyResult = await dispatchPermissionDirCommand({
+      verb: "deny",
+      path: directory,
+      session: false,
+      acknowledgeWarnings: false,
+    });
+
+    expect(allowResult).toEqual({
+      ok: false,
+      error: "workspace lifecycle update failed",
+    });
+    expect(denyResult).toEqual({
+      ok: false,
+      error: "workspace lifecycle update failed",
+    });
+  });
+});
 describe("dispatchPermissionDirCommand — list", () => {
   it("returns defaults + user additions + effective scope", async () => {
     const path = tmpSettingsPath();

@@ -1,6 +1,7 @@
 import { readPermissionSettings } from "../permissions/permission-settings-store.js";
 import { sanitizeRuntimeAllowedDirectories } from "../permissions/allowed-directories.js";
 import {
+  disambiguateProjectNames,
   projectBasename,
   projectRootEquals,
   type ProjectIdentity,
@@ -42,7 +43,7 @@ export function listAuthorizedWorkspaceProjects(defaultWorkspaceRoot = getDefaul
       projectName: projectBasename(root) || defaultProject.projectName,
     });
   }
-  return projects;
+  return disambiguateProjectNames(projects);
 }
 
 export function isAuthorizedWorkspaceProjectRoot(projectRoot: string): boolean {
@@ -52,7 +53,7 @@ export function isAuthorizedWorkspaceProjectRoot(projectRoot: string): boolean {
 
 export function resolveAuthorizedWorkspaceProject(
   requestedRoot: string | undefined,
-  requestedName?: string,
+  _requestedName?: string,
 ): AuthorizedProjectResolution {
   if (!requestedRoot) {
     return { project: defaultWorkspaceProject(), authorized: true };
@@ -64,11 +65,7 @@ export function resolveAuthorizedWorkspaceProject(
     return { project: null, authorized: false };
   }
   return {
-    project: {
-      projectRoot: authorized.projectRoot,
-      projectName: requestedName?.trim() || authorized.projectName,
-      ...(authorized.isDefault ? { isDefault: true } : {}),
-    },
+    project: authorized,
     authorized: true,
   };
 }
