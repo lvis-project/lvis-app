@@ -368,6 +368,56 @@ describe("PluginConfigTab", () => {
     });
   });
 
+  it("reports a non-reinstallable diagnosis as repaired only after the refreshed runtime is loaded", async () => {
+    const broken = {
+      id: "meeting",
+      name: "Meeting",
+      description:
+        'Marketplace install failed: plugin "meeting" artifact manifest external-auth-consumer capability does not match the catalog-approved grant',
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      installAliases: ["lvis-plugin-meeting"],
+      installFailureKind: "catalog-grant-mismatch" as const,
+      loadStatus: "failed" as const,
+    };
+    const repaired = {
+      ...broken,
+      installFailureKind: undefined,
+      loadStatus: "loaded" as const,
+      runtimeLoaded: true,
+    };
+    const cards = vi.fn()
+      .mockResolvedValueOnce([broken])
+      .mockResolvedValueOnce([repaired]);
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:meeting")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("plugin-config:doctor:meeting"));
+
+    await waitFor(() => {
+      expect(mockInstall).not.toHaveBeenCalled();
+      expect(cards).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("Meeting 복구 완료")).toBeInTheDocument();
+      expect(screen.getByTestId("plugin-config:banner")).toHaveClass("text-success");
+    });
+    expect(
+      screen.queryByText("Meeting: 진단 완료 — 로컬 복구 불가, 아직 실행할 수 없습니다."),
+    ).toBeNull();
+  });
+
   it("shows an unresolved warning without reinstalling when the app is too old", async () => {
     const broken = {
       id: "meeting",

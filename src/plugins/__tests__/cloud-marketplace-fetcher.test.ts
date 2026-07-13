@@ -124,6 +124,29 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     expect(headers["authorization"]).toBeUndefined();
   });
 
+  it("maps malformed top-level capabilities to an empty approval set", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: "malformed-capabilities",
+          name: "Malformed Capabilities",
+          description: "Test fixture",
+          packageName: "@acme/malformed-capabilities",
+          packageSpec: "@acme/malformed-capabilities@1.0.0",
+          capabilities: "external-auth-consumer",
+        },
+      ]),
+    );
+
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    const plugins = await fetcher.listPlugins();
+
+    expect(plugins).toHaveLength(1);
+    expect(plugins[0]?.capabilities).toEqual([]);
+  });
+
   it("listPlugins() accepts {plugins: [...]} wrapper shape (actual server shape)", async () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse({

@@ -594,7 +594,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     ).rejects.toThrow(/networkAccess does not match the catalog-approved grant/i);
   });
 
-  it("accepts marketplace artifacts whose hostFetch capability matches the top-level catalog grant", async () => {
+  it("accepts matching external-auth-consumer capabilities without a networkAccess grant", async () => {
     const pluginDir = join(testDir, "plugins", "installed", "network-capability-positive");
     await mkdir(pluginDir, { recursive: true });
     const manifestPath = join(pluginDir, "plugin.json");
@@ -608,10 +608,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         tools: [],
         description: "Test fixture.",
         capabilities: ["external-auth-consumer"],
-        networkAccess: {
-          allowedDomains: ["api.example.com"],
-          reasoning: "Catalog-approved grant.",
-        },
       }),
       "utf-8",
     );
@@ -624,11 +620,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             id: string;
             installPolicy: "user";
             capabilities?: string[];
-            networkAccess?: {
-              allowedDomains: string[];
-              reasoning?: string;
-              allowPrivateNetworks?: boolean;
-            };
           },
           version: string,
           manifestFile: string,
@@ -639,10 +630,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
           id: "network-capability-positive",
           installPolicy: "user",
           capabilities: ["external-auth-consumer"],
-          networkAccess: {
-            allowedDomains: ["api.example.com"],
-            reasoning: "Catalog-approved grant.",
-          },
         },
         "1.0.0",
         manifestPath,
@@ -651,7 +638,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("rejects marketplace artifacts whose hostFetch capability exceeds the catalog-approved grant", async () => {
+  it("rejects unapproved external-auth-consumer capability even without a networkAccess grant", async () => {
     const pluginDir = join(testDir, "plugins", "installed", "network-capability-plugin");
     await mkdir(pluginDir, { recursive: true });
     const manifestPath = join(pluginDir, "plugin.json");
@@ -665,10 +652,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         tools: [],
         description: "Test fixture.",
         capabilities: ["external-auth-consumer"],
-        networkAccess: {
-          allowedDomains: ["api.example.com"],
-          reasoning: "Artifact-completed grant.",
-        },
       }),
       "utf-8",
     );
@@ -682,11 +665,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             installPolicy: "user";
             capabilities?: string[];
             requires?: { capabilities: string[] };
-            networkAccess?: {
-              allowedDomains: string[];
-              reasoning?: string;
-              allowPrivateNetworks?: boolean;
-            };
           },
           version: string,
           manifestFile: string,
@@ -700,10 +678,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
           // Dependency requirements are not catalog approval for capabilities
           // declared by the artifact itself.
           requires: { capabilities: ["external-auth-consumer"] },
-          networkAccess: {
-            allowedDomains: ["api.example.com"],
-            reasoning: "Catalog-approved grant.",
-          },
         },
         "1.0.0",
         manifestPath,

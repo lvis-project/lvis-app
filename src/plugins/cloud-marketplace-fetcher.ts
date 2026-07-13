@@ -529,10 +529,12 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     // The catalog's top-level capabilities are the trusted expected side of
     // the artifact integrity check. Keep this separate from
     // requires.capabilities, which describes dependencies the plugin needs.
-    if (Array.isArray(row.capabilities)) {
-      item.capabilities = row.capabilities.filter(
-        (capability): capability is string => typeof capability === "string",
-      );
+    if (row.capabilities !== undefined) {
+      item.capabilities = Array.isArray(row.capabilities)
+        ? row.capabilities.filter(
+            (capability): capability is string => typeof capability === "string",
+          )
+        : [];
     }
 
     // S14: map requires.capabilities[] (+ min_app_version) from the catalog row

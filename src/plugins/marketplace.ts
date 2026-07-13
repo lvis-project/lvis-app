@@ -1619,12 +1619,9 @@ export class PluginMarketplaceService {
             `plugin "${plugin.id}" artifact manifest networkAccess does not match the catalog-approved grant`,
           );
         }
-        const expectedHostFetchCapability = hasExternalAuthConsumerCapability(plugin);
-        const actualHostFetchCapability = hasExternalAuthConsumerCapability(manifest);
-        if (
-          (plugin.networkAccess || manifest.networkAccess) &&
-          actualHostFetchCapability !== expectedHostFetchCapability
-        ) {
+        const expectedExternalAuthConsumerCapability = hasExternalAuthConsumerCapability(plugin);
+        const actualExternalAuthConsumerCapability = hasExternalAuthConsumerCapability(manifest);
+        if (actualExternalAuthConsumerCapability !== expectedExternalAuthConsumerCapability) {
           throw new Error(
             `plugin "${plugin.id}" artifact manifest external-auth-consumer capability does not match the catalog-approved grant`,
           );
