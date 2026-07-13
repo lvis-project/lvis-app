@@ -180,7 +180,10 @@ describe("check-test-coverage", () => {
     const vitestVersion = packageJson.devDependencies.vitest.replace(/^[^\d]*/, "");
     const coverageVersion = packageJson.devDependencies["@vitest/coverage-v8"].replace(/^[^\d]*/, "");
 
-    expect(packageJson.scripts["test:coverage"]).toBe("vitest run --coverage");
+    expect(packageJson.scripts["test:prepare"]).toBe("bun run build:icons");
+    expect(packageJson.scripts["test:coverage"]).toBe(
+      "bun run test:prepare && vitest run --coverage",
+    );
     expect(packageJson.scripts["check:test-coverage"]).toContain("scripts/run-test-coverage-gate.mjs");
     expect(packageJson.scripts["check:test-quality"]).toContain("check:test-duplicates");
     expect(coverageVersion).toBe(vitestVersion);
