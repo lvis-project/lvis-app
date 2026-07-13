@@ -84,6 +84,8 @@ interface ServerCatalogRow {
   latestStableVersion?: string;
   latest_artifact_sha256?: string | null;
   channel?: string;
+  /** Catalog-approved capabilities declared by this plugin (not dependency requirements). */
+  capabilities?: unknown;
   /** S14: requires.capabilities[] (+ optional min_app_version) exposed by the server catalog. */
   requires?: { capabilities?: unknown[]; min_app_version?: unknown } | null;
   /** lvis-marketplace#52: "plugin" (default) | "mcp". */
@@ -523,6 +525,15 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     }
     if (row.channel === "canary") item.channel = "canary";
     else if (version) item.channel = "stable";
+
+    // The catalog's top-level capabilities are the trusted expected side of
+    // the artifact integrity check. Keep this separate from
+    // requires.capabilities, which describes dependencies the plugin needs.
+    if (Array.isArray(row.capabilities)) {
+      item.capabilities = row.capabilities.filter(
+        (capability): capability is string => typeof capability === "string",
+      );
+    }
 
     // S14: map requires.capabilities[] (+ min_app_version) from the catalog row
     if (row.requires && typeof row.requires === "object") {

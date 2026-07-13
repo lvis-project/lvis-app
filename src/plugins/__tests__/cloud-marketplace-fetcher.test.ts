@@ -79,6 +79,10 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
           installPolicy: "user",
           dependencies: ["calendar"],
           publisher: "Acme",
+          capabilities: ["external-auth-consumer", 7, null],
+          requires: {
+            capabilities: ["calendar-provider", false],
+          },
           network_access: {
             allowed_domains: ["api.acme.example", "login.acme.example"],
             reasoning: "Syncs notes with the Acme workspace API.",
@@ -101,6 +105,10 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
       installPolicy: "user",
       dependencies: ["calendar"],
       publisher: "Acme",
+      capabilities: ["external-auth-consumer"],
+      requires: {
+        capabilities: ["calendar-provider"],
+      },
       networkAccess: {
         allowedDomains: ["api.acme.example", "login.acme.example"],
         reasoning: "Syncs notes with the Acme workspace API.",
