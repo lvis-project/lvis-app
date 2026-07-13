@@ -23,7 +23,7 @@
  *      the full-overwrite spread preserves sourceTools/profile*.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConversationLoop } from "../conversation-loop.js";
@@ -223,6 +223,138 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       approvalLabel: "[Sub-Agent: sender-worker]",
     };
   }
+
+  it("persists and re-authorizes an explicit project cwd for fresh and resumed children", async () => {
+    const explicitRoot = join(tmpHome, "agent-connector");
+    const defaultRoot = join(tmpHome, "workspace");
+    mkdirSync(explicitRoot, { recursive: true });
+    mkdirSync(defaultRoot, { recursive: true });
+
+    const observedCwds: string[] = [];
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(createDynamicTool({
+      name: "cwd_probe",
+      description: "capture the child cwd",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async (_input, ctx) => {
+        observedCwds.push(ctx.cwd);
+        return { output: "cwd-ok", isError: false };
+      },
+    }));
+    const authorizeProject = vi.fn((projectRoot: string) =>
+      projectRoot === explicitRoot
+        ? { projectRoot: explicitRoot, projectName: "agent-connector", isDefault: false }
+        : null,
+    );
+    const parentDeps = {
+      ...buildLoopDeps(toolRegistry),
+      getDefaultProject: () => ({
+        projectRoot: defaultRoot,
+        projectName: "workspace",
+        isDefault: true,
+      }),
+      isDefaultProjectRoot: (projectRoot: string) => projectRoot === defaultRoot,
+      authorizeProject,
+    };
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps,
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    let restore = patchProvider(new ScriptedProvider([[
+      { type: "tool_call", id: "spawn-cwd", name: "cwd_probe", input: {} },
+      { type: "message_complete", stopReason: "tool_use" },
+    ]]));
+    let spawned: Awaited<ReturnType<SubAgentRunner["spawn"]>>;
+    try {
+      spawned = await runner.spawn({
+        title: "project child",
+        instructions: "inspect the project",
+        sourceTools: ["cwd_probe"],
+        maxRounds: 1,
+        projectRoot: explicitRoot,
+        projectName: "agent-connector",
+      });
+    } finally {
+      restore();
+    }
+
+    expect(spawned.incomplete).toBe(true);
+    expect(subStore.loadSessionMetadata(spawned.childSessionId)).toMatchObject({
+      sessionKind: "subagent",
+      projectRoot: explicitRoot,
+      projectName: "agent-connector",
+    });
+
+    restore = patchProvider(new ScriptedProvider([
+      [
+        { type: "tool_call", id: "resume-cwd", name: "cwd_probe", input: {} },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "resumed" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]));
+    try {
+      const resumed = await runner.resume(
+        spawned.childSessionId,
+        "continue",
+        "project child",
+      );
+      expect(resumed.ok).toBe(true);
+    } finally {
+      restore();
+    }
+
+    expect(observedCwds).toEqual([explicitRoot, explicitRoot]);
+    expect(authorizeProject).toHaveBeenCalledWith(explicitRoot, "agent-connector");
+    expect(authorizeProject.mock.calls.filter(([root]) => root === explicitRoot)).toHaveLength(2);
+  });
+
+  it("binds an unscoped child to the default workspace without persisting it as explicit", async () => {
+    const defaultRoot = join(tmpHome, "workspace");
+    mkdirSync(defaultRoot, { recursive: true });
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const runner = new SubAgentRunner({
+      parentDeps: {
+        ...buildLoopDeps(toolRegistry),
+        getDefaultProject: () => ({
+          projectRoot: defaultRoot,
+          projectName: "workspace",
+          isDefault: true,
+        }),
+        isDefaultProjectRoot: (projectRoot: string) => projectRoot === defaultRoot,
+        authorizeProject: (projectRoot: string) =>
+          projectRoot === defaultRoot
+            ? { projectRoot: defaultRoot, projectName: "workspace", isDefault: true }
+            : null,
+      },
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+    const restore = patchProvider(cleanSpawnProvider());
+    try {
+      const spawned = await runner.spawn({
+        title: "default child",
+        instructions: "work in the default workspace",
+        sourceTools: ["noop"],
+      });
+      const metadata = subStore.loadSessionMetadata(spawned.childSessionId);
+      expect(metadata?.sessionKind).toBe("subagent");
+      expect(metadata?.projectRoot).toBeUndefined();
+      expect(metadata?.projectName).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
 
   it("persists parent agent_spawn linkage and reloads the child transcript by explicit childSessionId", async () => {
     const toolRegistry = new ToolRegistry();
