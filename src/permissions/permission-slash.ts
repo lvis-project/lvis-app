@@ -22,6 +22,7 @@ import {
   readPermissionSettings,
   setReviewerSettingsPersist,
   type ReviewerFallbackOnError,
+  type ReviewerInteractiveAutoApprove,
   type ReviewerMode,
   type ReviewerSettingsBlock,
 } from "./permission-settings-store.js";
@@ -247,9 +248,10 @@ const VALID_REVIEWER_FALLBACKS: ReadonlySet<ReviewerFallbackOnError> = new Set([
   "deny",
   "rule",
 ]);
-const VALID_REVIEWER_INTERACTIVE_AUTO_APPROVES: ReadonlySet<"off" | "low"> = new Set([
+const VALID_REVIEWER_INTERACTIVE_AUTO_APPROVES: ReadonlySet<ReviewerInteractiveAutoApprove> = new Set([
   "off",
   "low",
+  "medium",
 ]);
 
 /**
@@ -361,7 +363,7 @@ export async function dispatchPermissionReviewerCommand(
     }
   }
   if (cmd.verb === "interactive") {
-    if (!VALID_REVIEWER_INTERACTIVE_AUTO_APPROVES.has(cmd.value as "off" | "low")) {
+    if (!VALID_REVIEWER_INTERACTIVE_AUTO_APPROVES.has(cmd.value as ReviewerInteractiveAutoApprove)) {
       return {
         ok: false,
         error: `invalid interactive auto-approve '${cmd.value}' — expected ${[...VALID_REVIEWER_INTERACTIVE_AUTO_APPROVES].join("|")}`,
@@ -369,7 +371,7 @@ export async function dispatchPermissionReviewerCommand(
     }
     try {
       const settings = await setReviewerSettingsPersist(
-        { interactive: { autoApprove: cmd.value as "off" | "low" } },
+        { interactive: { autoApprove: cmd.value as ReviewerInteractiveAutoApprove } },
         pathOverride,
       );
       return { ok: true, verb: "interactive", settings };

@@ -38,7 +38,7 @@ function makeStub(opts: {
   verdict: RiskVerdict;
   deferredId?: string;
   mode?: string;
-  interactiveAutoApprove?: "off" | "low";
+  interactiveAutoApprove?: "off" | "low" | "medium";
 }): {
   pm: PermissionManager;
   resolveSpy: ReturnType<typeof vi.fn>;

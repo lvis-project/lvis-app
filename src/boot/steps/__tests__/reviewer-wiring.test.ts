@@ -568,7 +568,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     }
   });
 
-  it("logs boot warning when mode=strict + interactive.autoApprove=low (round-5 test-engineer MAJOR)", () => {
+  it.each(["low", "medium"] as const)("does not warn for mode=strict + interactive.autoApprove=%s", (autoApprove) => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     pm.setMode("strict");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -580,7 +580,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
           provider: "openai",
           model: "gpt-4o-mini",
           fallbackOnError: "deny",
-          interactive: { autoApprove: "low" },
+          interactive: { autoApprove },
         }),
         verdictCachePath: join(tmpDir, "cache-warn-strict.jsonl"),
         deferredQueuePath: join(tmpDir, "queue-warn-strict.jsonl"),
@@ -588,8 +588,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
       const fired = warnSpy.mock.calls.some((args) =>
         args.some((a) => typeof a === "string" && a.includes("exec mode=strict")),
       );
-      // Round-6 test-engineer CRITICAL — strict, no-tautology assertion.
-      expect(fired).toBe(true);
+      expect(fired).toBe(false);
     } finally {
       warnSpy.mockRestore();
     }

@@ -67,6 +67,7 @@ function makeTool(args: {
   pathFields?: readonly string[];
   pluginId?: string;
   mcpServerId?: string;
+  decisionOverride?: Tool["decisionOverride"];
 }): { tool: Tool; execute: ReturnType<typeof vi.fn> } {
   const execute = vi.fn(async () => ({ output: `${args.name} ok`, isError: false }));
   const tool = createDynamicTool({
@@ -76,6 +77,7 @@ function makeTool(args: {
     category: args.category,
     pluginId: args.pluginId,
     mcpServerId: args.mcpServerId,
+    decisionOverride: args.decisionOverride,
     pathFields: args.pathFields,
     jsonSchema: {
       type: "object",
@@ -109,6 +111,8 @@ async function runProbe(args: {
   gate?: ReturnType<typeof makeGate>;
   headless?: boolean;
   trustOrigin?: "user-keyboard" | "llm-tool-arg" | "plugin-emitted";
+  auditLogger?: ConstructorParameters<typeof ToolExecutor>[6];
+  overlayTriggerOrigin?: string;
 }) {
   const registry = new ToolRegistry();
   registry.register(args.tool);
@@ -118,11 +122,14 @@ async function runProbe(args: {
     args.pm,
     undefined,
     args.gate as never,
+    undefined,
+    args.auditLogger,
   );
   return executor.executeAll(
     [{ id: `tu-${args.tool.name}`, name: args.tool.name, input: args.input }],
     {
       sessionId: `sess-${args.tool.name}`,
+      ...(args.overlayTriggerOrigin ? { overlayTriggerOrigin: args.overlayTriggerOrigin } : {}),
       permissionContext: {
         trustOrigin: args.trustOrigin ?? "user-keyboard",
         ...(args.headless ? { headless: true } : {}),
@@ -314,6 +321,179 @@ describe("permission-review-scenario-board-v2.html contract", () => {
     expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
       reason: expect.stringContaining("reviewer unavailable"),
     }));
+  });
+
+  it.each([
+    {
+      category: "write",
+      name: "write_file",
+      input: { path: resolve(process.cwd(), "tmp-medium.txt") },
+    },
+    { category: "shell", name: "bash", input: { command: "git status" } },
+    {
+      category: "network",
+      name: "http_probe",
+      input: { endpoint: "https://example.com" },
+    },
+    {
+      category: "meta",
+      name: "agent_spawn",
+      input: { instructions: "inspect tests" },
+    },
+  ] as const)(
+    "auto-review medium threshold auto-approves the common $category reviewer route",
+    async ({ category, name, input }) => {
+      const classifier = fixedClassifier({
+        level: "medium",
+        reason: "medium reviewer verdict",
+      });
+      const { pm, cleanup } = makeManager("auto", classifier);
+      pm.setInteractiveAutoApprove("medium");
+      try {
+        const { tool, execute } = makeTool({
+          name,
+          category,
+          ...(category === "meta" ? { decisionOverride: "ask" as const } : {}),
+        });
+        const gate = makeGate("deny-once");
+        const appendPermissionAuditEntry = vi.fn(
+          async (entry: Record<string, unknown>) => ({
+            ...entry,
+            prevHash: "h",
+          }),
+        );
+        const auditLogger = {
+          log: vi.fn(),
+          isPermissionAuditChainReady: vi.fn(() => true),
+          assertPermissionAuditWritable: vi.fn(),
+          appendPermissionAuditEntry,
+          isShadowChannelWritable: vi.fn(() => true),
+        };
+        const result = await runProbe({
+          tool,
+          pm,
+          gate,
+          input,
+          auditLogger: auditLogger as never,
+        });
+        expect(result[0].is_error).toBeUndefined();
+        expect(execute).toHaveBeenCalledOnce();
+        expect(gate.requestAndWait).not.toHaveBeenCalled();
+        expect(appendPermissionAuditEntry).toHaveBeenCalledOnce();
+        expect(appendPermissionAuditEntry).toHaveBeenCalledWith(
+          expect.objectContaining({
+            decision: "allow",
+            tool: name,
+            source: "builtin",
+            category,
+            layer: 5,
+            reviewer: expect.objectContaining({
+              level: "medium",
+              reason: "medium reviewer verdict",
+            }),
+          }),
+        );
+      } finally {
+        cleanup();
+      }
+    },
+  );
+
+  it("default mode + medium threshold uses the same foreground reviewer route", async () => {
+    const classifier = fixedClassifier({
+      level: "medium",
+      reason: "default-mode medium verdict",
+    });
+    const { pm, cleanup } = makeManager("default", classifier);
+    pm.setInteractiveAutoApprove("medium");
+    try {
+      const { tool, execute } = makeTool({
+        name: "default_write",
+        category: "write",
+      });
+      const gate = makeGate("deny-once");
+      const result = await runProbe({
+        tool,
+        pm,
+        gate,
+        input: { path: resolve(process.cwd(), "tmp-default-medium.txt") },
+      });
+
+      expect(result[0].is_error).toBeUndefined();
+      expect(execute).toHaveBeenCalledOnce();
+      expect(classifier.classify).toHaveBeenCalledOnce();
+      expect(gate.requestAndWait).not.toHaveBeenCalled();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("overlay ask-meta bypasses MEDIUM auto-review and opens the common modal", async () => {
+    const classifier = fixedClassifier({
+      level: "medium",
+      reason: "must not run for overlay hard gate",
+    });
+    const { pm, cleanup } = makeManager("auto", classifier);
+    pm.setInteractiveAutoApprove("medium");
+    try {
+      const { tool, execute } = makeTool({
+        name: "authority_probe",
+        category: "meta",
+        decisionOverride: "ask",
+      });
+      const gate = makeGate("deny-once");
+      const result = await runProbe({
+        tool,
+        pm,
+        gate,
+        overlayTriggerOrigin: "overlay:meeting-detection",
+        input: { instructions: "delegate from staged overlay" },
+      });
+
+      expect(result[0].is_error).toBe(true);
+      expect(execute).not.toHaveBeenCalled();
+      expect(classifier.classify).not.toHaveBeenCalled();
+      expect(gate.requestAndWait).toHaveBeenCalledOnce();
+      const request = gate.requestAndWait.mock.calls[0]?.[0] as {
+        reviewerVerdict?: unknown;
+      };
+      expect(request.reviewerVerdict).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("auto-review HIGH agent_spawn uses the common approval path", async () => {
+    const classifier = fixedClassifier({
+      level: "high",
+      reason: "unsafe delegated authority",
+    });
+    const { pm, cleanup } = makeManager("auto", classifier);
+    pm.setInteractiveAutoApprove("medium");
+    try {
+      const { tool, execute } = makeTool({
+        name: "agent_spawn",
+        category: "meta",
+        decisionOverride: "ask",
+      });
+      const gate = makeGate("deny-once");
+      const result = await runProbe({
+        tool,
+        pm,
+        gate,
+        input: { instructions: "perform a high-risk operation" },
+      });
+      expect(result[0].is_error).toBe(true);
+      expect(execute).not.toHaveBeenCalled();
+      expect(classifier.classify).toHaveBeenCalledOnce();
+      expect(gate.requestAndWait).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reviewerVerdict: expect.objectContaining({ level: "high" }),
+        }),
+      );
+    } finally {
+      cleanup();
+    }
   });
 
   it("S9 reviewer timeout/error fails closed to HIGH and routes to the approval modal; deny-once blocks", async () => {

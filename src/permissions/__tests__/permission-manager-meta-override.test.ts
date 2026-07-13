@@ -23,7 +23,8 @@
  * not by an early return.
  *
  * Truth-table axes:
- *   - decisionOverride="ask" × default/auto                → ask + forceModal (post-guard fires)
+ *   - decisionOverride="ask" × default                     → ask + forceModal (post-guard fires)
+ *   - decisionOverride="ask" × auto + enabled threshold    → common foreground reviewer route
  *   - decisionOverride="ask" × allow (any layer)           → allow, NO prompt (post-guard skips)
  *   - decisionOverride="ask" × strict                      → ask layer 2, no forceModal
  *                                                            (layer-2 return before layer 3/5/6)
@@ -63,13 +64,15 @@ describe("PermissionManager — meta decisionOverride re-elevation (V1 SOT)", ()
     expect(result.layer).toBe(6);
   });
 
-  it("auto mode + decisionOverride='ask' → forceModal ask (layer 6)", () => {
+  it("auto mode + medium threshold + decisionOverride='ask' → common foreground reviewer route", () => {
     pm.setMode("auto");
+    pm.setInteractiveAutoApprove("medium");
     const result = pm.checkDetailed("agent_spawn", "builtin", "meta", null, {
       decisionOverride: "ask",
     });
     expect(result.decision).toBe("ask");
-    expect(result.forceModal).toBe(true);
+    expect(result.forceModal).toBeUndefined();
+    expect(result.reviewer).toEqual({ route: "foreground-auto" });
     expect(result.layer).toBe(6);
   });
 
