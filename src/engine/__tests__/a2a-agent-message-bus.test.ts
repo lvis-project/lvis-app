@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createInMemoryFeatureNamespace as createInMemoryNamespace,
+} from "../../__tests__/test-helpers.js";
+import {
   A2ATaskState,
   type A2AProjectedTaskState,
 } from "../../shared/a2a.js";
@@ -35,21 +38,6 @@ type CapturedGuidance = {
   };
 };
 
-function createInMemoryNamespace() {
-  let stored: unknown;
-  return {
-    handle: {
-      dir: "memory",
-      readJson: async (_name: string, fallback: unknown) =>
-        structuredClone(stored === undefined ? fallback : stored),
-      writeJson: async (_name: string, value: unknown) => {
-        stored = structuredClone(value);
-      },
-      childDir: async (name: string) => name,
-    } as never,
-    getStored: () => structuredClone(stored),
-  };
-}
 
 function routeFor(
   taskState: A2AProjectedTaskState,

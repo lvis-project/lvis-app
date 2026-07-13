@@ -146,12 +146,6 @@ function noopTool(name: string) {
 
 const SESSION_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
 
-function makeTestSubStore(): MemoryManager {
-  const store = new MemoryManager({ lvisDir: openFeatureNamespace("subagent").dir });
-  store.load();
-  return store;
-}
-
 describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   let tmpHome: string;
   let prevLvisHome: string | undefined;
@@ -2581,7 +2575,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   it("runs terminal mailbox cleanup after durable commit and skips INPUT_REQUIRED", async () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
-    const subStore = makeTestSubStore();
+    const subStore = makeSubStore();
     const cleanupTerminalRecipientMailbox = vi.fn(async (childSessionId: string) => {
       expect(subStore.loadSessionMetadata(childSessionId)).toMatchObject({
         subAgentTaskState: "TASK_STATE_COMPLETED",
@@ -2633,7 +2627,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const toolRegistry = new ToolRegistry();
     let runner!: SubAgentRunner;
     toolRegistry.register(createAgentSendTool({ getRuntime: () => runner }));
-    const subStore = makeTestSubStore();
+    const subStore = makeSubStore();
     const namespace = openFeatureNamespace("subagent-messaging");
     const mailbox = new A2AAgentMessageMailbox(namespace);
     const audit = vi.fn();
@@ -2721,7 +2715,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const toolRegistry = new ToolRegistry();
     let runner!: SubAgentRunner;
     toolRegistry.register(createAgentSendTool({ getRuntime: () => runner }));
-    const subStore = makeTestSubStore();
+    const subStore = makeSubStore();
     const namespace = openFeatureNamespace("subagent-messaging");
     const mailbox = new A2AAgentMessageMailbox(namespace);
     const parentDeliver = vi.fn(async () => ({
