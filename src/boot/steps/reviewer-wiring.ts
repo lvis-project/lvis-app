@@ -375,20 +375,8 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
       "to re-enable LOW-verdict silent allow.",
     );
   }
-  // Symmetric inverted case: `mode=strict` promises "ask about everything"
-  // but `interactive.autoApprove=low` silently bypasses LOW mutating tools.
-  // These directly contradict. Warn at boot so the user notices.
-  if (
-    deps.permissionManager.getMode() === "strict" &&
-    settings.interactive.autoApprove === "low"
-  ) {
-    log.warn(
-      "exec mode=strict + reviewer.interactive.autoApprove=low — " +
-      "strict mode promises a modal for every tool call but interactive " +
-      "auto-approve silently allows LOW mutating calls. Flip one of the " +
-      "two to resolve the contradiction.",
-    );
-  }
+  // Strict mode returns at layer 2 before foreground reviewer routing, so an
+  // enabled interactive threshold cannot bypass or contradict strict mode.
   // `mode="allow"` bypasses the reviewer entirely, so the
   // `interactive.autoApprove` setting is dead config. A user reading
   // PermissionsTab might assume `interactive=off` protects them — but

@@ -174,19 +174,10 @@ export async function dispatchReviewerForInteractiveAuto(
   abortSignal?: AbortSignal,
 ): Promise<PermissionCheckResult | null> {
   if (context.headless === true) return null;
-  // Issue #690 — the gate is EITHER legacy `auto` exec mode OR the
-  // interactive auto-approve setting. PermissionManager.categoryBasedDecision
-  // only sets `reviewer.route='foreground-auto'` when one of those is
-  // true, so reaching here implies opt-in, but check explicitly to
-  // stay robust against future producers that set the route directly.
+  // PermissionManager's resolved route marker is the sole eligibility SOT.
+  // Reaching this dispatcher means foreground review was explicitly selected.
   const mgr = permissionManager;
   if (!mgr) return null;
-  if (mgr.getMode() !== "auto" && mgr.getInteractiveAutoApprove() === "off") {
-    return null;
-  }
-  if (category !== "write" && category !== "shell" && category !== "network") {
-    return null;
-  }
   if (!mgr.hasReviewer()) {
     return {
       decision: "ask",
@@ -250,17 +241,8 @@ export async function dispatchReviewerForInteractiveAuto(
   }
 
   // V3 SOT — PermissionManager owns the verdict→decision mapping.
-  //
-  // LOW → allow; foreground non-LOW verdict → `ask` (route to the user
-  // approval modal) rather than silently hard-denying. The user is the
-  // authority: the ToolApprovalDialog renders the reviewer verdict (HIGH
-  // forces a session-only grant requiring NL justification), so a HIGH-risk
-  // action ASKS and only executes on an explicit user allow. Pre-fix the
-  // non-LOW branch returned "deny" with a "no approval popup was opened"
-  // reason, which — with plugin tool categories removed (host-classifies-risk
-  // incomplete) — silently blocked every plugin tool that defaulted to
-  // category "write". deny-by-default is preserved: a deny-once at the modal
-  // yields a blocked tool result; only allow lets the effect run.
+  // Verdicts through the configured inclusive threshold allow; higher verdicts
+  // ask the user. HIGH still requires explicit approval with justification.
   const decision = mgr.resolveReviewerDecision(reviewer.verdict, "foreground-auto");
   // Review-status telemetry derived from the resolved decision so the
   // auto-approve disclosure and the audit decision share one source.
