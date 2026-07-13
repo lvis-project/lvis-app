@@ -82,3 +82,19 @@ export function makeMockApprovalGate() {
 export function withPlatformForTest(platform: NodeJS.Platform): void {
   Object.defineProperty(process, "platform", { value: platform, configurable: true });
 }
+
+export function createInMemoryFeatureNamespace() {
+  let stored: unknown;
+  return {
+    handle: {
+      dir: "memory",
+      readJson: async (_name: string, fallback: unknown) =>
+        structuredClone(stored === undefined ? fallback : stored),
+      writeJson: async (_name: string, value: unknown) => {
+        stored = structuredClone(value);
+      },
+      childDir: async (name: string) => name,
+    } as never,
+    getStored: () => structuredClone(stored),
+  };
+}

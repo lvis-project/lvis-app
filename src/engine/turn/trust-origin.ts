@@ -21,6 +21,9 @@ export function initialToolTrustOrigin(inputOrigin: ChatInputOrigin, turnInput: 
   if (inputOrigin === "file-content" || INLINE_PASTED_TEXT_RE.test(turnInput)) {
     return "file-content";
   }
+  if (inputOrigin === "agent-message") {
+    return "agent-message";
+  }
   if (inputOrigin === "plugin-emitted") {
     return "plugin-emitted";
   }
@@ -55,7 +58,7 @@ export function nextToolTrustOrigin(
   toolUses: readonly ToolUseBlock[],
   toolResults: readonly ToolResult[],
 ): ToolTrustOrigin {
-  if (current === "file-content") return current;
+  if (current === "file-content" || current === "agent-message") return current;
   const successful = new Set(
     toolResults
       .filter((result) => !result.is_error)

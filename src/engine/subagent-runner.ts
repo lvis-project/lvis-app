@@ -28,7 +28,11 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
-import type { TurnStopReason } from "./turn/types.js";
+import type { TurnInputRequired, TurnStopReason } from "./turn/types.js";
+import {
+  GUIDE_JOINED_MAX_CHARS,
+  GUIDE_MAX_CHARS,
+} from "./turn/guidance-limits.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { isValidSessionId, type MemoryManager } from "../memory/memory-manager.js";
 import type { ApprovalGate, ApprovalRequest, ApprovalDecision } from "../permissions/approval-gate.js";
@@ -60,6 +64,22 @@ import type {
   ResolvedSubAgentAddress,
 } from "./a2a-subagent-message-bus.js";
 import type { ParentMailboxEntry } from "./subagent-message-mailbox.js";
+import type {
+  A2AAgentMessageBus,
+  A2AStagedQuestionDelivery,
+} from "./a2a-agent-message-bus.js";
+import type { A2AAgentMailboxEntry } from "./a2a-agent-message-mailbox.js";
+import {
+  causalContextForEnvelopes,
+  type A2AAgentCausalContext,
+} from "./a2a-agent-message-envelope.js";
+import type {
+  A2AAgentSendAuditInput,
+  A2AAgentSendRequest,
+  A2AAgentSendResult,
+  ResolveSubAgentPeerResult,
+  ResolvedA2ASender,
+} from "./a2a-agent-message-envelope.js";
 import {
   A2A_ROLE_AGENT,
   A2ATaskState,
@@ -73,7 +93,6 @@ import {
 import type {
   SubAgentRunStatus,
   SubAgentSuspension,
-  SubAgentSuspensionReason,
 } from "../shared/subagent-events.js";
 export type {
   SubAgentRunStatus,
@@ -127,6 +146,8 @@ export interface SubAgentSpawnInput {
    * Unknown / absent → the `default` mode (inert), logged for audit.
    */
   profileMode?: string;
+  /** Trusted host execution mode; never accepted from the child model. */
+  background?: boolean;
 }
 
 export interface SubAgentActivityUpdate {
@@ -277,6 +298,24 @@ interface TrackedSubAgentRun {
   };
 }
 
+export type ReserveQuestionWaitResult =
+  | { ok: true; token: symbol }
+  | { ok: false; reason: "question-already-outstanding" };
+
+interface ActiveSubAgentChild {
+  lease: symbol;
+  childSessionId: string;
+  originSessionId?: string;
+  title: string;
+  loop: ConversationLoop;
+  questionWait?: {
+    token: symbol;
+    prompt: string;
+    stage?: A2AStagedQuestionDelivery;
+  };
+  background: boolean;
+}
+
 export interface SubAgentRunnerDeps {
   /** Parent's ConversationLoopDeps. We clone but swap toolRegistry to a scoped view. */
   parentDeps: ConversationLoopDeps;
@@ -293,6 +332,8 @@ export interface SubAgentRunnerDeps {
   subAgentMemoryManager: MemoryManager;
   /** Optional until boot wiring is constructed; all absent-bus delivery fails closed. */
   messageBus?: A2ASubAgentMessageBus;
+  /** Child-to-parent and sibling A2A message bus. */
+  agentMessageBus?: A2AAgentMessageBus;
 }
 
 // Sub-agent round budget. The child runs on the same ConversationLoop whose
@@ -338,6 +379,8 @@ const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>([
 const MAX_RESUMES = 3;
 const CUMULATIVE_ROUNDS_CEILING = 4 * MAX_TURNS_CAP;
 const MAX_TRACKED_RUNS = 100;
+const QUESTION_SUSPENSION_PROMPT_FALLBACK =
+  "Answer the sub-agent question to continue.";
 const BUDGET_SUSPENSION_PROMPT =
   "Send any message to continue, or treat the partial result as done.";
 
@@ -349,8 +392,46 @@ function createBudgetSuspension(resumeId: string): SubAgentSuspension {
   };
 }
 
-function isSuccessfulSubAgentStopReason(stopReason: TurnStopReason | undefined): boolean {
-  return stopReason === "end_turn" || stopReason === "round-cap";
+function normalizeSuspensionPrompt(prompt: string | undefined, fallback: string): string {
+  const masked = maskSubAgentText(prompt ?? "").trim();
+  return (masked || fallback).slice(0, GUIDE_MAX_CHARS);
+}
+
+function createQuestionSuspension(
+  resumeId: string,
+  inputRequired: TurnInputRequired,
+): SubAgentSuspension {
+  return {
+    reason: "question",
+    prompt: normalizeSuspensionPrompt(
+      inputRequired.prompt,
+      QUESTION_SUSPENSION_PROMPT_FALLBACK,
+    ),
+    resumeId,
+  };
+}
+
+function normalizeResultSuspension(result: SubAgentSpawnResult): void {
+  const suspension = result.suspension;
+  if (!suspension) return;
+  result.suspension = {
+    ...suspension,
+    prompt: normalizeSuspensionPrompt(
+      suspension.prompt,
+      suspension.reason === "question"
+        ? QUESTION_SUSPENSION_PROMPT_FALLBACK
+        : BUDGET_SUSPENSION_PROMPT,
+    ),
+  };
+}
+
+function isSuccessfulSubAgentStopReason(
+  stopReason: TurnStopReason | undefined,
+  inputRequired: TurnInputRequired | undefined,
+): boolean {
+  return stopReason === "end_turn"
+    || stopReason === "round-cap"
+    || (stopReason === "input-required" && inputRequired?.reason === "question");
 }
 
 function subAgentStopFailureReason(
@@ -708,6 +789,331 @@ export class SubAgentRunner {
   private readonly inFlight = new Map<string, Promise<SubAgentSpawnResult>>();
   private readonly trackedRuns = new Map<string, TrackedSubAgentRun>();
 
+  private readonly activeChildren = new Map<string, ActiveSubAgentChild>();
+
+  isSubAgentOriginActive(originSessionId: string): boolean {
+    if (!originSessionId) return false;
+    if ([...this.activeChildren.values()].some((child) =>
+      child.originSessionId === originSessionId)) {
+      return true;
+    }
+    if ([...this.uniqueTrackedRuns()].some((run) =>
+      run.originSessionId === originSessionId
+      && !isA2ATerminalTaskState(run.taskState))) {
+      return true;
+    }
+    const persisted = this.deps.subAgentMemoryManager.listSessions({
+      kind: "subagent",
+      limit: MAX_TRACKED_RUNS,
+    });
+    return persisted.some((session) => {
+      const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(session.id);
+      return meta?.sessionKind === "subagent"
+        && meta.originSessionId === originSessionId
+        && !isA2ATerminalTaskState(
+          meta.subAgentTaskState ?? A2ATaskState.SUBMITTED,
+        );
+    });
+  }
+  async resolveSubAgentSender(childSessionId: string): Promise<ResolvedA2ASender | null> {
+    if (!isValidSessionId(childSessionId)) return null;
+    const active = this.activeChildren.get(childSessionId);
+    if (!active?.originSessionId || !active.loop.hasActiveTurn()) return null;
+    const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(childSessionId);
+    if (
+      meta?.sessionKind !== "subagent"
+      || meta.originSessionId !== active.originSessionId
+      || !meta.subAgentTitle
+    ) {
+      return null;
+    }
+    return {
+      childSessionId,
+      originSessionId: active.originSessionId,
+      title: maskSubAgentText(meta.subAgentTitle).slice(0, 120),
+      background: active.background,
+      taskState: A2ATaskState.WORKING,
+    };
+  }
+
+  async sendAgentMessage(input: A2AAgentSendRequest): Promise<A2AAgentSendResult> {
+    const bus = this.deps.agentMessageBus;
+    if (!bus) {
+      log.warn(
+        { senderChildSessionId: input.senderChildSessionId, recipient: input.recipient },
+        "a2a agent message dropped: message bus unavailable",
+      );
+      return {
+        ok: false,
+        disposition: "dropped",
+        reason: "message-bus-unavailable",
+      };
+    }
+    if (input.waitForReply !== true) return bus.send(input);
+
+    const active = this.activeChildren.get(input.senderChildSessionId);
+    const questionWait = active?.questionWait;
+    if (!active || !questionWait || questionWait.stage) {
+      await bus.auditToolDrop({
+        senderChildSessionId: input.senderChildSessionId,
+        recipient: input.recipient,
+        messageId: input.messageId,
+        reason: "question-already-outstanding",
+      });
+      return {
+        ok: false,
+        disposition: "dropped",
+        reason: "question-already-outstanding",
+      };
+    }
+
+    const staged = await bus.stageQuestion(input);
+    if (!staged.ok) return staged.result;
+    const current = this.activeChildren.get(input.senderChildSessionId);
+    const part = staged.result.canonicalMessage.parts[0];
+    const canonicalPrompt = part && "text" in part && typeof part.text === "string"
+      ? part.text.trim()
+      : "";
+    if (
+      current !== active
+      || current.questionWait !== questionWait
+      || canonicalPrompt !== questionWait.prompt
+    ) {
+      const rolledBack = await bus.rollbackStagedQuestion(staged.stage);
+      const reason = rolledBack ? "aborted" : "storage-failed";
+      await bus.auditToolDrop({
+        senderChildSessionId: input.senderChildSessionId,
+        recipient: input.recipient,
+        messageId: input.messageId,
+        reason,
+      });
+      return { ok: false, disposition: "dropped", reason };
+    }
+    questionWait.stage = staged.stage;
+    return staged.result;
+  }
+
+  async auditAgentSendDrop(input: A2AAgentSendAuditInput): Promise<void> {
+    const bus = this.deps.agentMessageBus;
+    if (bus) {
+      await bus.auditToolDrop(input);
+      return;
+    }
+    log.warn(
+      {
+        senderChildSessionId: input.senderChildSessionId,
+        recipient: input.recipient,
+        reason: input.reason,
+      },
+      "a2a agent message drop audit: message bus unavailable",
+    );
+  }
+
+  async resolveSubAgentPeer(
+    senderChildSessionId: string,
+    recipientChildSessionId: string,
+  ): Promise<ResolveSubAgentPeerResult> {
+    if (!isValidSessionId(senderChildSessionId)) {
+      return { ok: false, reason: "unknown-sender" };
+    }
+    if (!isValidSessionId(recipientChildSessionId)) {
+      return { ok: false, reason: "unknown-recipient" };
+    }
+
+    const loadEndpoint = (
+      childSessionId: string,
+    ): {
+      childSessionId: string;
+      originSessionId: string;
+      title: string;
+      taskState: A2AProjectedTaskState;
+    } | null => {
+      const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(childSessionId);
+      if (
+        meta?.sessionKind !== "subagent"
+        || !meta.originSessionId
+        || !meta.subAgentTitle
+      ) {
+        return null;
+      }
+      return {
+        childSessionId,
+        originSessionId: meta.originSessionId,
+        title: maskSubAgentText(meta.subAgentTitle).slice(0, 120),
+        taskState: meta.subAgentTaskState ?? A2ATaskState.SUBMITTED,
+      };
+    };
+
+    const sender = loadEndpoint(senderChildSessionId);
+    if (!sender) return { ok: false, reason: "unknown-sender" };
+    const recipient = loadEndpoint(recipientChildSessionId);
+    if (!recipient) return { ok: false, reason: "unknown-recipient" };
+    if (sender.originSessionId !== recipient.originSessionId) {
+      return { ok: false, reason: "cross-origin" };
+    }
+
+    const active = this.activeChildren.get(recipientChildSessionId);
+    const recipientIsActive = active?.originSessionId === sender.originSessionId;
+    return {
+      ok: true,
+      originSessionId: sender.originSessionId,
+      sender: {
+        childSessionId: sender.childSessionId,
+        title: sender.title,
+      },
+      recipient: {
+        childSessionId: recipient.childSessionId,
+        title: recipient.title,
+        taskState: recipientIsActive ? A2ATaskState.WORKING : recipient.taskState,
+        ...(recipientIsActive
+          ? { activeLoop: active.loop }
+          : {}),
+      },
+    };
+  }
+
+  reserveQuestionWait(
+    senderChildSessionId: string,
+    prompt: string,
+  ): ReserveQuestionWaitResult {
+    const active = this.activeChildren.get(senderChildSessionId);
+    if (
+      !active
+      || !active.loop.hasActiveTurn()
+      || active.questionWait
+      || !prompt.trim()
+    ) {
+      return { ok: false, reason: "question-already-outstanding" };
+    }
+
+    const token = Symbol(senderChildSessionId);
+    active.questionWait = {
+      token,
+      prompt: normalizeSuspensionPrompt(
+        prompt,
+        QUESTION_SUSPENSION_PROMPT_FALLBACK,
+      ),
+    };
+    return { ok: true, token };
+  }
+
+  async cancelQuestionWait(
+    senderChildSessionId: string,
+    token: unknown,
+  ): Promise<boolean> {
+    const active = this.activeChildren.get(senderChildSessionId);
+    if (!active?.questionWait || active.questionWait.token !== token) return false;
+    const { stage } = active.questionWait;
+    delete active.questionWait;
+    if (!stage) return true;
+    return await this.deps.agentMessageBus?.rollbackStagedQuestion(stage) ?? false;
+  }
+
+  private questionDeliveryFailure(
+    result: SubAgentSpawnResult,
+    message: string,
+  ): SubAgentSpawnResult {
+    const masked = maskSubAgentText(message);
+    return {
+      summary: masked,
+      toolCallCount: result.toolCallCount,
+      turnCount: result.turnCount,
+      childSessionId: result.childSessionId,
+      entries: result.entries,
+      ok: false,
+      error: masked,
+      ...(result.stopReason === "interrupted" || message === "sub-agent run interrupted"
+        ? { stopReason: "interrupted" as const }
+        : {}),
+    };
+  }
+
+  private async prepareQuestionStageForPersistence(
+    questionWait: ActiveSubAgentChild["questionWait"] | undefined,
+    result: SubAgentSpawnResult,
+  ): Promise<SubAgentSpawnResult> {
+    normalizeResultSuspension(result);
+    const expectsQuestion = result.suspension?.reason === "question";
+    const stage = questionWait?.stage;
+    const stageMatches = Boolean(
+      stage
+      && questionWait
+      && result.suspension?.prompt === questionWait.prompt,
+    );
+    if (expectsQuestion && stageMatches) return result;
+
+    if (stage) {
+      const rolledBack = await this.deps.agentMessageBus?.rollbackStagedQuestion(stage)
+        ?? false;
+      if (!rolledBack) {
+        return this.questionDeliveryFailure(
+          result,
+          "sub-agent question staging rollback failed",
+        );
+      }
+    }
+    return expectsQuestion
+      ? this.questionDeliveryFailure(
+          result,
+          "sub-agent question delivery was not staged",
+        )
+      : result;
+  }
+
+  private async commitQuestionStageAfterPersistence(
+    questionWait: ActiveSubAgentChild["questionWait"] | undefined,
+    result: SubAgentSpawnResult,
+  ): Promise<SubAgentSpawnResult> {
+    if (result.suspension?.reason !== "question") return result;
+    const stage = questionWait?.stage;
+    const bus = this.deps.agentMessageBus;
+    if (!stage || !bus) {
+      return this.questionDeliveryFailure(
+        result,
+        "sub-agent question delivery commit is unavailable",
+      );
+    }
+    const committed = await bus.commitStagedQuestion(stage);
+    return committed.ok
+      ? result
+      : this.questionDeliveryFailure(
+          result,
+          "sub-agent question delivery commit failed: " + committed.reason,
+        );
+  }
+
+  private async cleanupTerminalRecipientMailbox(
+    childSessionId: string,
+    taskState: A2AProjectedTaskState,
+  ): Promise<void> {
+    if (!isA2ATerminalTaskState(taskState)) return;
+    const cleaned = await this.deps.agentMessageBus
+      ?.cleanupTerminalRecipientMailbox?.(childSessionId);
+    if (cleaned && !cleaned.ok) {
+      log.warn(
+        "sub-agent terminal agent mailbox cleanup failed for %s",
+        childSessionId,
+      );
+    }
+  }
+
+  private registerActiveChild(args: {
+    childSessionId: string;
+    originSessionId?: string;
+    title: string;
+    loop: ConversationLoop;
+    background: boolean;
+  }): symbol {
+    const lease = Symbol(args.childSessionId);
+    this.activeChildren.set(args.childSessionId, { ...args, lease });
+    return lease;
+  }
+
+  private unregisterActiveChild(childSessionId: string, lease: symbol): void {
+    const active = this.activeChildren.get(childSessionId);
+    if (active?.lease === lease) this.activeChildren.delete(childSessionId);
+  }
+
   listRunStatuses(originSessionId: string): SubAgentRunSnapshot[] {
     return [...this.uniqueTrackedRuns()]
       .filter((run) => this.isRunVisibleToOrigin(run, originSessionId))
@@ -887,12 +1293,7 @@ export class SubAgentRunner {
     if (result.error !== undefined) {
       result.error = maskSubAgentText(result.error);
     }
-    if (result.suspension?.prompt !== undefined) {
-      result.suspension = {
-        ...result.suspension,
-        prompt: maskSubAgentText(result.suspension.prompt),
-      };
-    }
+    normalizeResultSuspension(result);
     const taskState = projectSubAgentResultState(result);
     const status = subAgentRunStatusFromTaskState(taskState);
     const patch: Partial<Omit<TrackedSubAgentRun, "spawnId" | "childSessionId" | "title" | "startedAt">> = {
@@ -952,6 +1353,7 @@ export class SubAgentRunner {
      * ALWAYS passes a non-null array (meta.sourceTools) so it never widens.
      */
     frozenSourceTools: string[] | null;
+    includeAgentSend?: boolean;
     title: string;
     profileModel: string | undefined;
   }): {
@@ -963,12 +1365,26 @@ export class SubAgentRunner {
     // null (spawn's no-allowlist path) we still want the agent_spawn block to
     // apply, so we start from the full tool list and intersect with the
     // blocklist. resume never takes the null branch — it hands a frozen list.
-    const filteredSourceTools = args.frozenSourceTools
-      ? args.frozenSourceTools.filter((name) => !SUB_AGENT_TOOL_BLOCKLIST.has(name))
+    const exposeAgentSend = args.includeAgentSend === true
+      || args.frozenSourceTools?.includes("agent_send") === true;
+    const frozenSourceTools = args.frozenSourceTools && args.includeAgentSend
+      ? [...new Set([...args.frozenSourceTools, "agent_send"])]
+      : args.frozenSourceTools;
+    const filteredSourceTools = frozenSourceTools
+      ? frozenSourceTools.filter((name) => !SUB_AGENT_TOOL_BLOCKLIST.has(name))
       : null;
-    const scopedRegistry = filteredSourceTools
-      ? this.deps.toolRegistry.createScopedView(filteredSourceTools)
-      : this.parentRegistryWithoutBlocklist();
+    const baseToolNames = filteredSourceTools
+      ? filteredSourceTools.filter((name) => name !== "agent_send")
+      : this.deps.toolRegistry
+          .listAll()
+          .map((tool) => tool.name)
+          .filter((name) =>
+            !SUB_AGENT_TOOL_BLOCKLIST.has(name) && name !== "agent_send");
+    const scopedRegistry = this.deps.toolRegistry.createScopedView(baseToolNames);
+    if (exposeAgentSend) {
+      const agentSend = this.deps.toolRegistry.findByName("agent_send");
+      if (agentSend) scopedRegistry.register({ ...agentSend, modelVisible: true });
+    }
     const scopedTools = scopedRegistry.listAll();
     const forcedActivePluginIds = new Set(
       filteredSourceTools
@@ -1077,6 +1493,7 @@ export class SubAgentRunner {
           frozenSourceTools,
           title: input.title,
           profileModel: input.profileModel,
+          includeAgentSend: true,
         });
 
         const child = new ConversationLoop(childDeps);
@@ -1148,6 +1565,7 @@ export class SubAgentRunner {
       cumulativeRounds: 0,
       subAgentTaskState: A2ATaskState.SUBMITTED,
       subAgentSuspensionReason: undefined,
+      subAgentSuspensionPrompt: undefined,
     };
     try {
       await this.deps.subAgentMemoryManager.saveSessionMetadata(
@@ -1175,6 +1593,8 @@ export class SubAgentRunner {
       return result;
     }
 
+    let completedQuestionWait: ActiveSubAgentChild["questionWait"];
+
     const metadataForResult = (
       terminalResult: SubAgentSpawnResult,
     ): Parameters<MemoryManager["saveSessionMetadata"]>[1] => ({
@@ -1182,40 +1602,80 @@ export class SubAgentRunner {
       cumulativeRounds: terminalResult.turnCount,
       subAgentTaskState: projectSubAgentResultState(terminalResult),
       subAgentSuspensionReason: terminalResult.suspension?.reason,
+      subAgentSuspensionPrompt: terminalResult.suspension?.prompt,
     });
     const persistFinalResult = async (
       terminalResult: SubAgentSpawnResult,
     ): Promise<SubAgentSpawnResult> => {
+      let stableResult = await this.prepareQuestionStageForPersistence(
+        completedQuestionWait,
+        terminalResult,
+      );
       // Commit point: no new interrupt is accepted while terminal metadata is
       // persisted, so the in-memory and durable projections cannot diverge.
       delete trackedRun.abort;
-      try {
+      let durableTaskState: A2AProjectedTaskState | undefined;
+      let durableResult: SubAgentSpawnResult | undefined;
+      const saveResult = async (next: SubAgentSpawnResult): Promise<void> => {
         await this.deps.subAgentMemoryManager.saveSessionMetadata(
           childSessionId,
-          metadataForResult(terminalResult),
+          metadataForResult(next),
         );
+        durableTaskState = projectSubAgentResultState(next);
+        durableResult = next;
+      };
+      try {
+        await saveResult(stableResult);
       } catch (err) {
         const interrupted = cancellation.signal.aborted
-          || terminalResult.stopReason === "interrupted";
+          || stableResult.stopReason === "interrupted";
         const message = interrupted
           ? "sub-agent run interrupted"
           : (err as Error).message ?? "sub-agent metadata update failed";
-        const failure: SubAgentSpawnResult = {
-          summary: message,
-          toolCallCount: terminalResult.toolCallCount,
-          turnCount: terminalResult.turnCount,
-          childSessionId,
-          entries: terminalResult.entries,
-          ok: false,
-          error: message,
-          ...(interrupted ? { stopReason: "interrupted" as const } : {}),
-        };
-        this.finalizeRun(trackedRun, failure);
+        stableResult = await this.prepareQuestionStageForPersistence(
+          completedQuestionWait,
+          this.questionDeliveryFailure(stableResult, message),
+        );
+        this.finalizeRun(trackedRun, stableResult);
         if (!interrupted) callbacks?.onError?.(maskSubAgentText(message));
-        return failure;
+        return stableResult;
       }
-      this.finalizeRun(trackedRun, terminalResult);
-      return terminalResult;
+
+      if (cancellation.signal.aborted && stableResult.suspension?.reason === "question") {
+        stableResult = await this.prepareQuestionStageForPersistence(
+          completedQuestionWait,
+          this.questionDeliveryFailure(stableResult, "sub-agent run interrupted"),
+        );
+        try {
+          await saveResult(stableResult);
+        } catch {
+          stableResult = durableResult ?? stableResult;
+          // INPUT_REQUIRED remains durable, but no parent delivery was exposed.
+        }
+      } else {
+        const committed = await this.commitQuestionStageAfterPersistence(
+          completedQuestionWait,
+          stableResult,
+        );
+        if (committed !== stableResult) {
+          stableResult = committed;
+          try {
+            await saveResult(stableResult);
+          } catch {
+            stableResult = durableResult ?? stableResult;
+            // The parent delivery failed and the staged envelope was rolled back.
+          }
+        }
+      }
+
+      if (durableTaskState) {
+        await this.cleanupTerminalRecipientMailbox(childSessionId, durableTaskState);
+      }
+      this.finalizeRun(trackedRun, stableResult);
+      if (!stableResult.ok && stableResult.error?.includes("question delivery")) {
+        callbacks?.onError?.(stableResult.error);
+      }
+      return stableResult;
     };
 
     if (cancellation.signal.aborted) {
@@ -1275,6 +1735,7 @@ export class SubAgentRunner {
     let ok = false;
     let failureReason: string | undefined;
     let childStopReason: import("./turn/types.js").TurnStopReason | undefined;
+    let childInputRequired: TurnInputRequired | undefined;
 
     // Prepend the mode preamble (posture + auto-skill recommendation) to the
     // instructions. The preamble is empty for the default mode, leaving the
@@ -1285,6 +1746,13 @@ export class SubAgentRunner {
       : input.instructions;
     let assistantRounds = 0;
 
+    const activeLease = this.registerActiveChild({
+      childSessionId,
+      originSessionId: input.originSessionId,
+      title: input.title,
+      loop: child,
+      background: input.background === true,
+    });
     try {
       // C3(a): pass `maxRounds` so queryLoop terminates cleanly between
       // rounds — the previous abortCurrentTurn() approach only halted the
@@ -1338,7 +1806,8 @@ export class SubAgentRunner {
       totalToolCalls = result.toolCalls.length;
       lastText = result.text;
       childStopReason = result.stopReason;
-      ok = isSuccessfulSubAgentStopReason(childStopReason);
+      childInputRequired = result.inputRequired;
+      ok = isSuccessfulSubAgentStopReason(childStopReason, childInputRequired);
       if (!ok) {
         failureReason = subAgentStopFailureReason(childStopReason, lastText, "run");
       }
@@ -1354,6 +1823,12 @@ export class SubAgentRunner {
         lastText = message;
         failureReason = message;
       }
+    } finally {
+      const active = this.activeChildren.get(childSessionId);
+      if (active?.lease === activeLease) {
+        completedQuestionWait = active.questionWait;
+      }
+      this.unregisterActiveChild(childSessionId, activeLease);
     }
 
     if (cancellation.signal.aborted) {
@@ -1379,6 +1854,9 @@ export class SubAgentRunner {
             // Derived compatibility alias for pre-suspension consumers.
             incomplete: true,
           }
+        : {}),
+      ...(ok && childStopReason === "input-required" && childInputRequired
+        ? { suspension: createQuestionSuspension(child.sessionId, childInputRequired) }
         : {}),
     };
     return await persistFinalResult(result);
@@ -1424,8 +1902,6 @@ export class SubAgentRunner {
    * @param originSessionId  The calling session's id (ctx.metadata.sessionId
    *                  in agent-spawn.ts). Matched against the tag embedded in
    *                  `resumeId` to refuse cross-session hijack attempts.
-   * @param resumeReason Internal accounting axis. ph1 callers use the default
-   *                  budget reason; ph2 question answers use question.
    */
   async resume(
     resumeId: string,
@@ -1434,7 +1910,7 @@ export class SubAgentRunner {
     callbacks?: SubAgentSpawnCallbacks,
     originSessionId?: string,
     spawnId?: string,
-    resumeReason: SubAgentSuspensionReason = "budget",
+    background = false,
   ): Promise<SubAgentSpawnResult> {
     // In-flight lock: fail-closed if a resume for THIS session is already
     // running. Checked before any load so two concurrent resumes cannot both
@@ -1471,7 +1947,7 @@ export class SubAgentRunner {
       callbacks,
       originSessionId,
       spawnId,
-      resumeReason,
+      background,
     );
     this.inFlight.set(resumeId, runPromise);
     try {
@@ -1489,7 +1965,7 @@ export class SubAgentRunner {
     callbacks: SubAgentSpawnCallbacks | undefined,
     originSessionId: string | undefined,
     spawnId: string | undefined,
-    resumeReason: SubAgentSuspensionReason,
+    background: boolean,
   ): Promise<SubAgentSpawnResult> {
     const cancellation = new AbortController();
     let child: ConversationLoop | null = null;
@@ -1587,14 +2063,24 @@ export class SubAgentRunner {
         "sub-agent resume: task is not in INPUT_REQUIRED",
       );
     }
-    if (meta.subAgentSuspensionReason !== resumeReason) {
-      return finishAttemptFailure(
-        "sub-agent resume: suspension reason does not match caller",
-      );
-    }
     if (!meta.subAgentTitle) {
       return finishAttemptFailure(
         "sub-agent resume: missing persisted sub-agent title",
+      );
+    }
+    const persistedResumeReason = meta.subAgentSuspensionReason;
+    const canonicalContinuationInstructions = persistedResumeReason === "question"
+      ? maskSensitiveData(continuationInstructions).masked.trim()
+      : continuationInstructions;
+    if (
+      persistedResumeReason === "question"
+      && (
+        canonicalContinuationInstructions.length === 0
+        || canonicalContinuationInstructions.length > GUIDE_MAX_CHARS
+      )
+    ) {
+      return finishAttemptFailure(
+        "sub-agent resume: question answer must be non-empty and within the message limit",
       );
     }
 
@@ -1618,14 +2104,20 @@ export class SubAgentRunner {
       // is rejected and cannot race the single durable terminal write.
       delete trackedRun.abort;
       const taskState = projectSubAgentResultState(result);
+      let persisted = false;
       try {
         await this.deps.subAgentMemoryManager.saveSessionMetadata(resumeId, {
           ...meta,
           subAgentTaskState: taskState,
+          subAgentSuspensionPrompt: undefined,
           subAgentSuspensionReason: undefined,
         });
+        persisted = true;
       } catch {
         // The in-memory terminal latch prevents a same-process retry.
+      }
+      if (persisted) {
+        await this.cleanupTerminalRecipientMailbox(resumeId, taskState);
       }
       this.finalizeRun(trackedRun, result);
       if (result.stopReason !== "interrupted") callbacks?.onError?.(maskSubAgentText(message));
@@ -1639,7 +2131,6 @@ export class SubAgentRunner {
     );
     const priorQuestionAnswerCount = meta.questionAnswerCount ?? 0;
     const priorCumulativeRounds = meta.cumulativeRounds ?? 0;
-    const persistedResumeReason = meta.subAgentSuspensionReason;
 
     if (persistedResumeReason === "budget" && priorBudgetResumeCount >= MAX_RESUMES) {
       return await finishAuthorizedFailure(
@@ -1694,6 +2185,58 @@ export class SubAgentRunner {
     if (cancellation.signal.aborted) {
       return await finishAuthorizedFailure("sub-agent run interrupted");
     }
+    let agentMailboxEntries: A2AAgentMailboxEntry[] = [];
+    let agentMailboxGuidance: string | undefined;
+    let agentMailboxApprovalPrefix = persistedResumeReason === "question"
+      ? "[Sub-Agent: parent]"
+      : undefined;
+    let agentMailboxCausalContext: A2AAgentCausalContext | undefined;
+    const agentMessageBus = this.deps.agentMessageBus;
+    if (agentMessageBus) {
+      try {
+        agentMailboxEntries = await agentMessageBus.peekRecipientMailbox(resumeId);
+      } catch {
+        return await finishAuthorizedFailure(
+          "sub-agent resume: agent mailbox read failed",
+        );
+      }
+      if (agentMailboxEntries.length > 0) {
+        if (agentMailboxEntries.some((entry) =>
+          entry.envelope.originSessionId !== meta.originSessionId
+          || entry.envelope.recipientChildSessionId !== resumeId)) {
+          return await finishAuthorizedFailure(
+            "sub-agent resume: agent mailbox origin validation failed",
+          );
+        }
+        const joined = agentMailboxEntries
+          .map((entry) => entry.formattedText)
+          .join("\n\n");
+        if (joined.length > GUIDE_JOINED_MAX_CHARS) {
+          return await finishAuthorizedFailure(
+            "sub-agent resume: agent mailbox guidance exceeds host limit",
+          );
+        }
+        const causalContext = causalContextForEnvelopes(
+          resumeId,
+          agentMailboxEntries.map((entry) => entry.envelope),
+        );
+        if (!causalContext) {
+          return await finishAuthorizedFailure(
+            "sub-agent resume: agent mailbox causal context is invalid",
+          );
+        }
+        const approvalLabels = new Set([
+          ...(agentMailboxApprovalPrefix ? [agentMailboxApprovalPrefix] : []),
+          ...agentMailboxEntries.map((entry) => entry.approvalLabel),
+        ],
+        );
+        agentMailboxGuidance = joined;
+        agentMailboxApprovalPrefix = approvalLabels.size === 1
+          ? approvalLabels.values().next().value
+          : "[Sub-Agent: multiple sources]";
+        agentMailboxCausalContext = causalContext;
+      }
+    }
 
     this.updateRun(trackedRun, {
       taskState: A2ATaskState.WORKING,
@@ -1703,6 +2246,7 @@ export class SubAgentRunner {
       await this.deps.subAgentMemoryManager.saveSessionMetadata(resumeId, {
         ...meta,
         subAgentTaskState: A2ATaskState.WORKING,
+        subAgentSuspensionPrompt: undefined,
         subAgentSuspensionReason: undefined,
       });
     } catch (err) {
@@ -1733,11 +2277,20 @@ export class SubAgentRunner {
     };
     let ok = false;
     let failureReason: string | undefined;
+    let childInputRequired: TurnInputRequired | undefined;
     let childStopReason: import("./turn/types.js").TurnStopReason | undefined;
+    let completedQuestionWait: ActiveSubAgentChild["questionWait"];
 
+    const activeLease = this.registerActiveChild({
+      childSessionId: resumeId,
+      originSessionId: meta.originSessionId,
+      title: meta.subAgentTitle,
+      loop: child,
+      background,
+    });
     try {
       const turnResult = await child.runTurn(
-        continuationInstructions,
+        canonicalContinuationInstructions,
         {
           onToolStart: (name, input, cbMeta) => {
             transcript.onToolStart(name, input, cbMeta);
@@ -1768,13 +2321,25 @@ export class SubAgentRunner {
           maxRounds: cappedRounds,
           sessionIdOverride: resumeId,
           spawnDepth: 1,
-          inputOrigin: "llm-tool-arg",
+          ...(agentMailboxEntries.length > 0
+            ? {
+                initialGuidance: agentMailboxGuidance!,
+                a2aCausalContext: agentMailboxCausalContext!,
+              }
+            : {}),
+          ...(agentMailboxApprovalPrefix
+            ? { approvalReasonPrefix: agentMailboxApprovalPrefix }
+            : {}),
+          inputOrigin: persistedResumeReason === "question" || agentMailboxEntries.length > 0
+            ? "agent-message"
+            : "llm-tool-arg",
         },
       );
       totalToolCalls = turnResult.toolCalls.length;
       lastText = turnResult.text;
+      childInputRequired = turnResult.inputRequired;
       childStopReason = turnResult.stopReason;
-      ok = isSuccessfulSubAgentStopReason(childStopReason);
+      ok = isSuccessfulSubAgentStopReason(childStopReason, childInputRequired);
       if (!ok) {
         failureReason = subAgentStopFailureReason(childStopReason, lastText, "resume");
       }
@@ -1782,8 +2347,13 @@ export class SubAgentRunner {
       const message = (err as Error).message ?? "sub-agent resume run failed";
       lastText = message;
       failureReason = message;
+    } finally {
+      const active = this.activeChildren.get(resumeId);
+      if (active?.lease === activeLease) {
+        completedQuestionWait = active.questionWait;
+      }
+      this.unregisterActiveChild(resumeId, activeLease);
     }
-
     let result: SubAgentSpawnResult = {
       summary: lastText,
       toolCallCount: totalToolCalls,
@@ -1798,6 +2368,9 @@ export class SubAgentRunner {
             suspension: createBudgetSuspension(resumeId),
             incomplete: true,
           }
+        : {}),
+      ...(ok && childStopReason === "input-required" && childInputRequired
+        ? { suspension: createQuestionSuspension(resumeId, childInputRequired) }
         : {}),
     };
     if (cancellation.signal.aborted) {
@@ -1815,12 +2388,16 @@ export class SubAgentRunner {
 
     // Terminal commit point. Cancellation was sampled above; the stable result
     // now owns the single final metadata transition.
+    result = await this.prepareQuestionStageForPersistence(
+      completedQuestionWait,
+      result,
+    );
     delete trackedRun.abort;
 
     const nextBudgetResumeCount = priorBudgetResumeCount
-      + (ok && persistedResumeReason === "budget" ? 1 : 0);
+      + (result.ok && persistedResumeReason === "budget" ? 1 : 0);
     const nextQuestionAnswerCount = priorQuestionAnswerCount
-      + (ok && persistedResumeReason === "question" ? 1 : 0);
+      + (result.ok && persistedResumeReason === "question" ? 1 : 0);
     const metadataForResult = (terminalResult: SubAgentSpawnResult) => ({
       ...meta,
       sessionKind: "subagent" as const,
@@ -1830,35 +2407,37 @@ export class SubAgentRunner {
       cumulativeRounds: priorCumulativeRounds + turn,
       subAgentTaskState: projectSubAgentResultState(terminalResult),
       subAgentSuspensionReason: terminalResult.suspension?.reason,
+      subAgentSuspensionPrompt: terminalResult.suspension?.prompt,
     });
-
-    try {
+    let durableTaskState: A2AProjectedTaskState | undefined;
+    let durableResult: SubAgentSpawnResult | undefined;
+    const saveResult = async (next: SubAgentSpawnResult): Promise<void> => {
       await this.deps.subAgentMemoryManager.saveSessionMetadata(
         resumeId,
-        metadataForResult(result),
+        metadataForResult(next),
       );
+      durableTaskState = projectSubAgentResultState(next);
+      durableResult = next;
+    };
+
+    try {
+      await saveResult(result);
     } catch (err) {
       const interrupted = cancellation.signal.aborted;
       const message = interrupted
         ? "sub-agent run interrupted"
         : (err as Error).message ?? "sub-agent resume metadata update failed";
-      result = {
-        summary: message,
-        toolCallCount: totalToolCalls,
-        turnCount: turn,
-        childSessionId: resumeId,
-        entries: transcript.snapshot(),
-        ok: false,
-        error: message,
-        ...(interrupted ? { stopReason: "interrupted" as const } : {}),
-      };
+      result = await this.prepareQuestionStageForPersistence(
+        completedQuestionWait,
+        this.questionDeliveryFailure(result, message),
+      );
       try {
-        await this.deps.subAgentMemoryManager.saveSessionMetadata(
-          resumeId,
-          metadataForResult(result),
-        );
+        await saveResult(result);
       } catch {
         // WORKING remains durable and therefore non-resumable.
+      }
+      if (durableTaskState) {
+        await this.cleanupTerminalRecipientMailbox(resumeId, durableTaskState);
       }
       this.finalizeRun(trackedRun, result);
       if (result.stopReason !== "interrupted") callbacks?.onError?.(maskSubAgentText(message));
@@ -1866,26 +2445,56 @@ export class SubAgentRunner {
     }
 
     if (cancellation.signal.aborted && result.stopReason !== "interrupted") {
-      result = {
-        summary: "sub-agent run interrupted",
-        toolCallCount: totalToolCalls,
-        turnCount: turn,
-        childSessionId: resumeId,
-        entries: transcript.snapshot(),
-        ok: false,
-        error: "sub-agent run interrupted",
-        stopReason: "interrupted",
-      };
+      result = await this.prepareQuestionStageForPersistence(
+        completedQuestionWait,
+        this.questionDeliveryFailure(result, "sub-agent run interrupted"),
+      );
       try {
-        await this.deps.subAgentMemoryManager.saveSessionMetadata(
-          resumeId,
-          metadataForResult(result),
-        );
+        await saveResult(result);
       } catch {
-        // The already-persisted terminal state remains non-resumable.
+        result = durableResult ?? result;
+        // The already-persisted state remains authoritative and no stage commits.
+      }
+    } else {
+      const committed = await this.commitQuestionStageAfterPersistence(
+        completedQuestionWait,
+        result,
+      );
+      if (committed !== result) {
+        result = committed;
+        try {
+          await saveResult(result);
+        } catch {
+          result = durableResult ?? result;
+          // The staged envelope was rolled back before this terminal projection.
+        }
       }
     }
 
+    if (
+      agentMessageBus
+      && agentMailboxEntries.length > 0
+      && result.ok
+      && (result.stopReason === "end_turn" || result.stopReason === "input-required")
+    ) {
+      try {
+        const removed = await agentMessageBus.acknowledgeRecipientMailbox(
+          resumeId,
+          agentMailboxEntries,
+        );
+        if (removed !== agentMailboxEntries.length) {
+          log.warn(
+            "sub-agent resume: agent mailbox acknowledgement mismatch for %s",
+            resumeId,
+          );
+        }
+      } catch {
+        log.warn("sub-agent resume: agent mailbox acknowledgement failed for %s", resumeId);
+      }
+    }
+    if (durableTaskState) {
+      await this.cleanupTerminalRecipientMailbox(resumeId, durableTaskState);
+    }
     this.finalizeRun(trackedRun, result);
     return result;
   }
@@ -1895,11 +2504,4 @@ export class SubAgentRunner {
    * spawn caller did not provide an explicit `sourceTools` allowlist —
    * we still need to enforce the blocklist defense.
    */
-  private parentRegistryWithoutBlocklist(): ToolRegistry {
-    const allNames = this.deps.toolRegistry
-      .listAll()
-      .map((t) => t.name)
-      .filter((n) => !SUB_AGENT_TOOL_BLOCKLIST.has(n));
-    return this.deps.toolRegistry.createScopedView(allNames);
-  }
 }

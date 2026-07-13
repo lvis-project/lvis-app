@@ -24,6 +24,11 @@ import type {
 } from "./types.js";
 import { trustFromSource } from "./types.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+import {
+  A2A_CAUSAL_CONTEXT_METADATA_KEY,
+  isA2AAgentCausalContext,
+  type A2AAgentCausalContext,
+} from "../engine/a2a-agent-message-envelope.js";
 import { runWithCeiling } from "./executor-ceiling.js";
 import { PermissionManager, requiredTier, type PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
@@ -263,6 +268,8 @@ export interface ExecuteOptions {
   supportsA2AParentDelivery?: boolean;
   /** Internal, DLP-masked source label for receiver-side approval prompts. */
   approvalReasonPrefix?: string;
+  /** Host-only causal hop, exposed solely to the builtin agent_send handler. */
+  a2aCausalContext?: A2AAgentCausalContext;
   abortSignal?: AbortSignal;
   toolResultChunkReader?: ToolResultChunkReader;
   permissionContext?: ToolPermissionContext;
@@ -669,6 +676,7 @@ export class ToolExecutor {
       supportsA2AParentDelivery,
       approvalReasonPrefix,
       abortSignal,
+      a2aCausalContext,
       toolResultChunkReader,
       permissionContext,
       executionCwd: requestedExecutionCwd,
@@ -1365,7 +1373,10 @@ export class ToolExecutor {
     const isAlwaysAllowMeta = metaOverride === "always-allow-with-audit";
     // Cross-agent provenance re-elevates even host-owned always-allow meta tools:
     // the receiver must authorize every tool use caused by an A2A Message.
-    if (this.permissionManager && (!isAlwaysAllowMeta || approvalReasonPrefix !== undefined)) {
+    if (
+      (this.permissionManager && !isAlwaysAllowMeta)
+      || approvalReasonPrefix !== undefined
+    ) {
       // Permission policy V1 SOT — the meta `decisionOverride="ask"` re-elevation
       // (agent_spawn: elevate the registry's override-`allow` to a per-invocation
       // `forceModal` ask, except under allow-all mode) now lives inside
@@ -1373,13 +1384,20 @@ export class ToolExecutor {
       // override into the check context; it never rewrites the verdict or
       // re-consults getMode(). The allow-all invariant (mode==="allow" → no
       // prompt, meta included) is single-sourced in PermissionManager.
-      permissionResult = this.permissionManager.checkDetailed(
-        toolUse.name,
-        source,
-        invocationCategory,
-        overlayTriggerOrigin,
-        { ...invocationPermissionContext, decisionOverride: metaOverride },
-      );
+      permissionResult = this.permissionManager
+        ? this.permissionManager.checkDetailed(
+            toolUse.name,
+            source,
+            invocationCategory,
+            overlayTriggerOrigin,
+            { ...invocationPermissionContext, decisionOverride: metaOverride },
+          )
+        : {
+            decision: "ask",
+            reason: "cross-agent message requires receiver approval",
+            layer: 3,
+            forceModal: true,
+          };
       // ── Plugin-read auto-allow ↔ sandbox-fs-containment coupling ──────────
       //
       // The merged read-relaxation coupling (the block immediately below) only
@@ -2074,6 +2092,13 @@ export class ToolExecutor {
         trustOrigin: invocationPermissionContext.trustOrigin,
         ...(toolResultChunkReader
           ? { [TOOL_RESULT_CHUNK_READER_METADATA_KEY]: toolResultChunkReader }
+          : {}),
+        ...(toolUse.name === "agent_send"
+          && tool.source === "builtin"
+          && spawnDepth === 1
+          && sessionId === a2aCausalContext?.recipientChildSessionId
+          && isA2AAgentCausalContext(a2aCausalContext)
+          ? { [A2A_CAUSAL_CONTEXT_METADATA_KEY]: a2aCausalContext }
           : {}),
       },
       abortSignal,
