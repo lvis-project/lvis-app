@@ -2124,7 +2124,7 @@ export const deMessages: Record<string, string> = {
   "pluginConfigTab.doctorFailureDetailLabel": "Fehlerdetail",
   "pluginConfigTab.errorDoctor": "Plugin Doctor fehlgeschlagen",
   "pluginConfigTab.successDoctor": "{displayName} repariert",
-  "pluginConfigTab.successDoctorDiagnostic": "Diagnose für {displayName} abgeschlossen",
+  "pluginConfigTab.doctorDiagnosticUnresolved": "{displayName}: Diagnose abgeschlossen — keine lokale Reparatur möglich; weiterhin nicht ausführbar",
   "pluginConfigTab.errorSave": "Speichern fehlgeschlagen",
   "pluginConfigTab.errorSaveSecret": "Der geheime Wert konnte nicht gespeichert werden",
   "pluginConfigTab.errorToggleEnabled": "Der aktive Status des Plugins konnte nicht geändert werden",

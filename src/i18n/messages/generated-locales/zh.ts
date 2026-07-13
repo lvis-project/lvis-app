@@ -2124,7 +2124,7 @@ export const zhMessages: Record<string, string> = {
   "pluginConfigTab.doctorFailureDetailLabel": "错误详情",
   "pluginConfigTab.errorDoctor": "插件 Doctor 失败",
   "pluginConfigTab.successDoctor": "{displayName} 已修复",
-  "pluginConfigTab.successDoctorDiagnostic": "{displayName} 诊断完成",
+  "pluginConfigTab.doctorDiagnosticUnresolved": "{displayName}：诊断完成 — 无法在本地修复，仍不可运行",
   "pluginConfigTab.errorSave": "保存失败",
   "pluginConfigTab.errorSaveSecret": "保存秘密值失败",
   "pluginConfigTab.errorToggleEnabled": "无法更改插件活动状态",
