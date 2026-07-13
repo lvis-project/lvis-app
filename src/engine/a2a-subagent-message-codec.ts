@@ -1,11 +1,16 @@
 import { maskSensitiveData } from "../shared/dlp.js";
 import {
   A2A_ROLE_AGENT,
+  A2A_ROLE_USER,
   type A2AJsonObject,
   type A2AJsonValue,
   type A2AMessage,
   type A2APart,
 } from "../shared/a2a.js";
+import {
+  GUIDE_MAX_CHARS,
+  GUIDE_MAX_ENTRIES,
+} from "./turn/guidance-limits.js";
 
 const MESSAGE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/;
 const MESSAGE_KEYS = new Set([
@@ -42,7 +47,7 @@ function hasOwn(value: object, key: PropertyKey): boolean {
 }
 
 function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
+  return Array.isArray(value) && [...value].every((item) => typeof item === "string");
 }
 
 export function isSafeA2AMessageId(value: unknown): value is string {
@@ -332,6 +337,108 @@ export function canonicalizeAgentMessage(
       formattedText: formatted.text,
       approvalLabel: formatted.approvalLabel,
       childTitle: formatted.childTitle,
+    };
+  } catch {
+    return { ok: false, reason: "invalid-message" };
+  }
+}
+
+export type InboundA2ASubAgentMessageFailureReason =
+  | "invalid-message"
+  | "unsupported-role"
+  | "unsupported-part"
+  | "message-too-long";
+
+export type CanonicalInboundA2ASubAgentMessageResult =
+  | {
+      ok: true;
+      /** DLP-canonical value safe to persist as untrusted wire history. */
+      message: A2AMessage;
+      /** Parts-only runner input. Wire metadata never becomes a host control. */
+      prompt: string;
+      detectionCount: number;
+    }
+  | { ok: false; reason: InboundA2ASubAgentMessageFailureReason };
+
+function validateInboundA2ASubAgentMessage(
+  message: unknown,
+): InboundA2ASubAgentMessageFailureReason | null {
+  if (!isRecord(message) || !hasOnlyKeys(message, MESSAGE_KEYS)) return "invalid-message";
+  if (!isSafeA2AMessageId(message.messageId)) return "invalid-message";
+  if (typeof message.role !== "string") return "invalid-message";
+  if (message.role !== A2A_ROLE_USER) return "unsupported-role";
+  if (hasOwn(message, "contextId") && !isSafeStructuralId(message.contextId)) {
+    return "invalid-message";
+  }
+  if (hasOwn(message, "taskId") && !isSafeStructuralId(message.taskId)) {
+    return "invalid-message";
+  }
+  if (
+    !Array.isArray(message.parts)
+    || message.parts.length === 0
+    || message.parts.length > GUIDE_MAX_ENTRIES
+  ) {
+    return "invalid-message";
+  }
+  if (hasOwn(message, "metadata") && !isRecord(message.metadata)) {
+    return "invalid-message";
+  }
+  if (
+    hasOwn(message, "extensions")
+    && (!isStringArray(message.extensions) || message.extensions.length > GUIDE_MAX_ENTRIES)
+  ) {
+    return "invalid-message";
+  }
+  if (
+    hasOwn(message, "referenceTaskIds")
+    && (!isStringArray(message.referenceTaskIds)
+      || message.referenceTaskIds.length > GUIDE_MAX_ENTRIES)
+  ) {
+    return "invalid-message";
+  }
+  for (const part of message.parts) {
+    const reason = validatePart(part);
+    if (reason) return reason;
+  }
+  return null;
+}
+
+/**
+ * Decode one loopback A2A user Message into the only values the runner needs.
+ *
+ * Caller-supplied metadata remains inert protocol history: it is recursively
+ * DLP-masked but is never rendered into the prompt or projected into origin,
+ * title, cwd, project, tool-scope, or ApprovalGate options. Those controls are
+ * host-owned at the runner boundary.
+ */
+export function canonicalizeInboundA2ASubAgentMessage(
+  message: unknown,
+): CanonicalInboundA2ASubAgentMessageResult {
+  try {
+    const invalidReason = validateInboundA2ASubAgentMessage(message);
+    if (invalidReason) return { ok: false, reason: invalidReason };
+
+    const masked = maskA2AMessage(message as A2AMessage);
+    const prompt = masked.message.parts
+      .map(renderPart)
+      .filter((part) => part.trim().length > 0)
+      .join("\n\n")
+      .trim();
+    if (prompt.length === 0) return { ok: false, reason: "invalid-message" };
+
+    const serializedMessage = JSON.stringify(masked.message);
+    if (
+      prompt.length > GUIDE_MAX_CHARS
+      || serializedMessage.length > GUIDE_MAX_CHARS
+    ) {
+      return { ok: false, reason: "message-too-long" };
+    }
+
+    return {
+      ok: true,
+      message: masked.message,
+      prompt,
+      detectionCount: masked.detectionCount,
     };
   } catch {
     return { ok: false, reason: "invalid-message" };
