@@ -310,6 +310,13 @@ export function SettingsContent({
     "text-muted-foreground hover:bg-accent/(--opacity-strong) hover:text-foreground " +
     "data-[state=active]:bg-accent data-[state=active]:text-accent-foreground " +
     "data-[state=active]:shadow-none";
+  // The active panel must grow with ordinary overflowing content. Keeping it
+  // as a fixed `flex-1 min-h-0` item lets descendants overflow beyond the
+  // panel's layout box, so the outer scroll pane's bottom padding is consumed
+  // and the last control lands flush against the window edge. Active panels
+  // are flex columns so split-pane children can still use `flex-1 min-h-0`.
+  const tabContentCls =
+    "min-h-full shrink-0 outline-none data-[state=active]:flex data-[state=active]:flex-col";
   // Common icon class so the 12 nav entries render at a uniform 16px.
   const navIconCls = "size-4 shrink-0";
 
@@ -490,11 +497,11 @@ export function SettingsContent({
           </div>
         )}
 
-          <TabsContent value="about" className="flex-1 min-h-0 outline-none">
+          <TabsContent value="about" className={tabContentCls}>
             <AboutTab api={api} />
           </TabsContent>
 
-          <TabsContent value="llm" className="flex-1 min-h-0 outline-none">
+          <TabsContent value="llm" className={tabContentCls}>
             <LlmTab
               api={api}
               vendor={s.vendor}
@@ -542,11 +549,11 @@ export function SettingsContent({
             />
           </TabsContent>
 
-          <TabsContent value="appearance" className="flex-1 min-h-0 outline-none">
+          <TabsContent value="appearance" className={tabContentCls}>
             <AppearanceTab onOpenMarketplace={openMarketplaceTab} />
           </TabsContent>
 
-          <TabsContent value="chat" className="flex-1 min-h-0 outline-none">
+          <TabsContent value="chat" className={tabContentCls}>
             <ChatTab
               autoCompact={s.autoCompact}
               setAutoCompact={s.setAutoCompact}
@@ -567,7 +574,7 @@ export function SettingsContent({
             {/* ChatTab is fully immediate-apply — no deferred-save bar needed. */}
           </TabsContent>
 
-          <TabsContent value="web" className="flex-1 min-h-0 outline-none">
+          <TabsContent value="web" className={tabContentCls}>
             <WebTab
               api={api}
               webProvider={s.webProvider}
@@ -589,19 +596,19 @@ export function SettingsContent({
             />
           </TabsContent>
 
-          <TabsContent value="startup" className="flex-1 min-h-0 outline-none"><StartupTab /></TabsContent>
-          <TabsContent value="permissions" className="flex-1 min-h-0 outline-none"><PermissionsTab /></TabsContent>
-          <TabsContent value="roles" className="flex-1 min-h-0 outline-none"><RolesTab api={api} /></TabsContent>
-          <TabsContent value="usage" className="flex-1 min-h-0 outline-none">
+          <TabsContent value="startup" className={tabContentCls}><StartupTab /></TabsContent>
+          <TabsContent value="permissions" className={tabContentCls}><PermissionsTab /></TabsContent>
+          <TabsContent value="roles" className={tabContentCls}><RolesTab api={api} /></TabsContent>
+          <TabsContent value="usage" className={tabContentCls}>
             <UsageDashboard
               api={api}
               onNavigate={(nextTab) => setTab(normalizeSettingsTab(nextTab))}
             />
           </TabsContent>
-          <TabsContent value="audit" className="flex-1 min-h-0 outline-none"><AuditTab /></TabsContent>
-          <TabsContent value="mcp" className="flex-1 min-h-0 outline-none"><McpTab /></TabsContent>
-          <TabsContent value="plugin-config" className="flex-1 min-h-0 outline-none"><PluginConfigTab api={api} /></TabsContent>
-          <TabsContent value="marketplace" className="flex-1 min-h-0 outline-none">
+          <TabsContent value="audit" className={tabContentCls}><AuditTab /></TabsContent>
+          <TabsContent value="mcp" className={tabContentCls}><McpTab /></TabsContent>
+          <TabsContent value="plugin-config" className={tabContentCls}><PluginConfigTab api={api} /></TabsContent>
+          <TabsContent value="marketplace" className={tabContentCls}>
             <MarketplaceTab
               api={api}
               baseUrl={s.marketplaceBaseUrl}
