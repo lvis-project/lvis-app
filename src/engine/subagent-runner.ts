@@ -35,6 +35,7 @@ import {
 } from "./turn/guidance-limits.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { isValidSessionId, type MemoryManager } from "../memory/memory-manager.js";
+import { projectRootEquals } from "../shared/project-identity.js";
 import type { ApprovalGate, ApprovalRequest, ApprovalDecision } from "../permissions/approval-gate.js";
 import {
   isModelComplexityLevel,
@@ -55,6 +56,7 @@ import type { ChatEntry } from "../lib/chat-stream-state.js";
 import { serializeHistoryMessage, type SerializedHistoryMessage } from "../shared/chat-history.js";
 import { isToolResultStubContent } from "../shared/tool-result-stub.js";
 import { maskSensitiveData } from "../shared/dlp.js";
+import { renderAgentProfilePrompt } from "./agent-profile-prompt.js";
 import type { GenericMessage } from "./llm/types.js";
 import type {
   A2ASubAgentMessageBus,
@@ -71,6 +73,7 @@ import type {
 import type { A2AAgentMailboxEntry } from "./a2a-agent-message-mailbox.js";
 import {
   causalContextForEnvelopes,
+  isSafeA2AStructuralId,
   type A2AAgentCausalContext,
 } from "./a2a-agent-message-envelope.js";
 import type {
@@ -236,6 +239,170 @@ export interface SubAgentSpawnCallbacks {
    */
   onActivity?: (update: SubAgentActivityUpdate) => void;
   onError?: (message: string) => void;
+}
+
+export interface A2AWireSpawnCallbacks extends SubAgentSpawnCallbacks {
+  /**
+   * Required wire-only barrier. The runner awaits this after child metadata is
+   * durable and before exposing the link or touching the provider.
+   */
+  onDurablyLinked: (link: { childSessionId: string }) => void | Promise<void>;
+}
+/** Remote-controlled portion of a new A2A wire task. */
+export interface A2AWireSpawnRequest {
+  messageText: unknown;
+}
+
+/** Remote-controlled portion of an A2A wire continuation. */
+export interface A2AWireResumeRequest {
+  resumeId: unknown;
+  messageText: unknown;
+}
+
+/** Host-resolved profile/project binding. No wire field can populate this. */
+export interface A2AWireHostBinding {
+  handlerId: string;
+  profile: {
+    name: string;
+    body: string;
+    sourceTools: readonly string[];
+    model?: string;
+    mode?: string;
+  };
+  project: {
+    root: string;
+    name?: string;
+  };
+}
+
+/** Host-only handler binding used to authorize a wire continuation. */
+export interface A2AWireResumeBinding {
+  handlerId: string;
+}
+
+const A2A_WIRE_APPROVAL_REASON_PREFIX = "[A2A Wire]" as const;
+const A2A_WIRE_ID_MAX_CHARS = 256;
+const A2A_WIRE_CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
+const A2A_WIRE_LABEL_FORBIDDEN = /[\u0000-\u001f\u007f\[\]]/;
+
+interface SubAgentExecutionPolicy {
+  inputOrigin: "agent-message";
+  approvalReasonPrefix: typeof A2A_WIRE_APPROVAL_REASON_PREFIX;
+  forceExplicitToolScope: true;
+  wireBinding: {
+    handlerId: string;
+    internalOriginSessionId: string;
+  };
+}
+
+function buildA2AWireInternalOrigin(handlerId: string): string {
+  const handlerTag = createHash("sha256").update(handlerId).digest("hex").slice(0, 8);
+  return `a2a-wire-${handlerTag}-${randomUUID()}`;
+}
+
+function canonicalizeA2AWireMessage(messageText: unknown): string | null {
+  if (typeof messageText !== "string") return null;
+  const masked = maskSubAgentText(messageText).trim();
+  return masked.length > 0 && masked.length <= GUIDE_MAX_CHARS ? masked : null;
+}
+
+function isValidA2AWireId(value: unknown): value is string {
+  return isSafeA2AStructuralId(value)
+    && value.length <= A2A_WIRE_ID_MAX_CHARS
+    && isValidSessionId(value);
+}
+
+function isValidOptionalA2AWireText(
+  value: unknown,
+  maxChars: number,
+  displayLabel = false,
+): boolean {
+  return value === undefined
+    || (
+      typeof value === "string"
+      && value.trim().length > 0
+      && value.length <= maxChars
+      && !A2A_WIRE_CONTROL_CHAR.test(value)
+      && (!displayLabel || !A2A_WIRE_LABEL_FORBIDDEN.test(value))
+      && maskSensitiveData(value).detections.length === 0
+    );
+}
+
+function notifyA2AWireObserver<T>(
+  callback: ((value: T) => unknown) | undefined,
+  value: T,
+  observer: string,
+): void {
+  if (!callback) return;
+  try {
+    const result = callback(value);
+    if (
+      result !== null
+      && typeof result === "object"
+      && "then" in result
+      && typeof (result as PromiseLike<unknown>).then === "function"
+    ) {
+      void Promise.resolve(result).catch(() => {
+        log.warn("sub-agent A2A wire observer failed: %s", observer);
+      });
+    }
+  } catch {
+    log.warn("sub-agent A2A wire observer failed: %s", observer);
+  }
+}
+
+function normalizeA2AWireSpawnCallbacks(value: unknown): A2AWireSpawnCallbacks | null {
+  if (value === null || typeof value !== "object") return null;
+  try {
+    const candidate = value as Partial<A2AWireSpawnCallbacks>;
+    const onDurablyLinked = candidate.onDurablyLinked;
+    const onLinked = candidate.onLinked;
+    const onActivity = candidate.onActivity;
+    const onError = candidate.onError;
+    if (
+      typeof onDurablyLinked !== "function"
+      || (onLinked !== undefined && typeof onLinked !== "function")
+      || (onActivity !== undefined && typeof onActivity !== "function")
+      || (onError !== undefined && typeof onError !== "function")
+    ) {
+      return null;
+    }
+    return {
+      onDurablyLinked,
+      ...(onLinked
+        ? { onLinked: (link) => notifyA2AWireObserver(onLinked, link, "on-linked") }
+        : {}),
+      ...(onActivity
+        ? { onActivity: (update) => notifyA2AWireObserver(onActivity, update, "on-activity") }
+        : {}),
+      ...(onError
+        ? { onError: (message) => notifyA2AWireObserver(onError, message, "on-error") }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+function isValidA2AWireHostBinding(binding: A2AWireHostBinding): boolean {
+  const profileName = binding?.profile?.name;
+  const projectRoot = binding?.project?.root;
+  return isValidA2AWireId(binding?.handlerId)
+    && typeof profileName === "string"
+    && profileName.trim().length > 0
+    && profileName.length <= 120
+    && !A2A_WIRE_LABEL_FORBIDDEN.test(profileName)
+    && maskSensitiveData(profileName).detections.length === 0
+    && typeof binding.profile.body === "string"
+    && Array.isArray(binding.profile.sourceTools)
+    && binding.profile.sourceTools.every((tool) =>
+      typeof tool === "string" && tool.length > 0 && tool.length <= 256)
+    && isValidOptionalA2AWireText(binding.profile.model, 256)
+    && isValidOptionalA2AWireText(binding.profile.mode, 256)
+    && typeof projectRoot === "string"
+    && projectRoot.trim().length > 0
+    && projectRoot.length <= 2_048
+    && !A2A_WIRE_CONTROL_CHAR.test(projectRoot)
+    && isValidOptionalA2AWireText(binding.project.name, 120, true);
 }
 
 export interface SubAgentRunSnapshot {
@@ -1449,7 +1616,92 @@ export class SubAgentRunner {
     input: SubAgentSpawnInput,
     callbacks?: SubAgentSpawnCallbacks,
   ): Promise<SubAgentSpawnResult> {
+    return await this.runSpawn(input, callbacks);
+  }
+
+  /**
+   * Host-only A2A ingress. The remote-controlled request is intentionally
+   * limited to message text; profile, tools, project, handler, origin, and
+   * execution provenance all come from the host binding or are minted here.
+   */
+  async spawnFromA2AWire(
+    request: A2AWireSpawnRequest,
+    binding: A2AWireHostBinding,
+    callbacks: A2AWireSpawnCallbacks,
+  ): Promise<SubAgentSpawnResult> {
+    const handlerSeed = typeof binding?.handlerId === "string"
+      ? binding.handlerId
+      : "invalid-handler";
+    const internalOriginSessionId = buildA2AWireInternalOrigin(handlerSeed);
+    const rejectedChildSessionId = buildChildSessionId(internalOriginSessionId);
+    const messageText = canonicalizeA2AWireMessage(request?.messageText);
+    const safeCallbacks = normalizeA2AWireSpawnCallbacks(callbacks);
+    const durableLinkBarrier = safeCallbacks?.onDurablyLinked ?? null;
+    if (!durableLinkBarrier || !messageText || !isValidA2AWireHostBinding(binding)) {
+      return this.failA2AWireRun(
+        rejectedChildSessionId,
+        "sub-agent A2A wire binding is invalid",
+        safeCallbacks ?? undefined,
+      );
+    }
+
+    return await this.runSpawn(
+      {
+        title: binding.profile.name.trim(),
+        instructions: renderAgentProfilePrompt(binding.profile, messageText),
+        sourceTools: [...binding.profile.sourceTools],
+        originSessionId: internalOriginSessionId,
+        projectRoot: binding.project.root,
+        ...(binding.project.name ? { projectName: binding.project.name } : {}),
+        ...(binding.profile.model ? { profileModel: binding.profile.model } : {}),
+        ...(binding.profile.mode ? { profileMode: binding.profile.mode } : {}),
+        background: true,
+      },
+      safeCallbacks ?? undefined,
+      {
+        inputOrigin: "agent-message",
+        approvalReasonPrefix: A2A_WIRE_APPROVAL_REASON_PREFIX,
+        forceExplicitToolScope: true,
+        wireBinding: {
+          handlerId: binding.handlerId,
+          internalOriginSessionId,
+        },
+      },
+      durableLinkBarrier,
+    );
+  }
+
+  private failA2AWireRun(
+    childSessionId: string,
+    message: string,
+    callbacks?: SubAgentSpawnCallbacks,
+  ): SubAgentSpawnResult {
+    callbacks?.onError?.(message);
+    return {
+      summary: message,
+      toolCallCount: 0,
+      turnCount: 0,
+      childSessionId,
+      entries: [],
+      ok: false,
+      error: message,
+    };
+  }
+
+  private async runSpawn(
+    input: SubAgentSpawnInput,
+    callbacks?: SubAgentSpawnCallbacks,
+    executionPolicy?: SubAgentExecutionPolicy,
+    durableLinkBarrier?: A2AWireSpawnCallbacks["onDurablyLinked"],
+  ): Promise<SubAgentSpawnResult> {
     const childSessionId = buildChildSessionId(input.originSessionId);
+    if (executionPolicy && typeof durableLinkBarrier !== "function") {
+      return this.failA2AWireRun(
+        childSessionId,
+        "sub-agent A2A durable link barrier is required",
+        callbacks,
+      );
+    }
     const cancellation = new AbortController();
     let childForAbort: ConversationLoop | undefined;
     const trackedRun = this.trackRun({
@@ -1462,7 +1714,7 @@ export class SubAgentRunner {
         childForAbort?.abortCurrentTurn();
       },
     });
-    callbacks?.onLinked?.({ childSessionId });
+    if (!executionPolicy) callbacks?.onLinked?.({ childSessionId });
 
     const setupResult = (() => {
       try {
@@ -1486,9 +1738,11 @@ export class SubAgentRunner {
 
         // sourceTools empty/absent retains the historical full parent surface
         // minus the hard blocklist. Resume uses its frozen metadata instead.
-        const frozenSourceTools = input.sourceTools && input.sourceTools.length > 0
-          ? input.sourceTools
-          : null;
+        const frozenSourceTools = executionPolicy?.forceExplicitToolScope
+          ? (input.sourceTools ?? [])
+          : input.sourceTools && input.sourceTools.length > 0
+            ? input.sourceTools
+            : null;
         const { childDeps, scopedTools } = this.buildChildDeps({
           frozenSourceTools,
           title: input.title,
@@ -1506,6 +1760,14 @@ export class SubAgentRunner {
               }
             : childDeps.getDefaultProject?.(),
         );
+        if (
+          executionPolicy
+          && !projectRootEquals(child.getSessionProjectRoot(), input.projectRoot)
+        ) {
+          throw new Error(
+            "sub-agent A2A project binding rejected (a2a-project-binding-rejected)",
+          );
+        }
         childForAbort = child;
         // Bind persistence and tracing to the addressable child id before work.
         child.sessionId = childSessionId;
@@ -1550,11 +1812,21 @@ export class SubAgentRunner {
     // PR-D's loop guards. No resume logic here — this is metadata foundation.
     const spawnMetadata: Parameters<MemoryManager["saveSessionMetadata"]>[1] = {
       sessionKind: "subagent",
-      ...(!child.getSessionProjectIsDefault() ? child.getSessionProjectContext() : {}),
+      ...(executionPolicy
+        ? child.getSessionProjectContext()
+        : !child.getSessionProjectIsDefault()
+          ? child.getSessionProjectContext()
+          : {}),
       sourceTools: scopedTools.map((tool) => tool.name),
       ...(input.profileModel !== undefined ? { profileModel: input.profileModel } : {}),
       ...(input.profileMode !== undefined ? { profileMode: input.profileMode } : {}),
       ...(input.originSessionId !== undefined ? { originSessionId: input.originSessionId } : {}),
+      ...(executionPolicy
+        ? {
+            a2aWireHandlerId: executionPolicy.wireBinding.handlerId,
+            a2aWireInternalOrigin: executionPolicy.wireBinding.internalOriginSessionId,
+          }
+        : {}),
       ...(input.toolUseId !== undefined ? { originToolUseId: input.toolUseId } : {}),
       ...(input.spawnId !== undefined ? { spawnId: input.spawnId } : {}),
       subAgentTitle: input.title,
@@ -1567,17 +1839,25 @@ export class SubAgentRunner {
       subAgentSuspensionReason: undefined,
       subAgentSuspensionPrompt: undefined,
     };
+    let initialMetadataPersisted = false;
     try {
       await this.deps.subAgentMemoryManager.saveSessionMetadata(
         childSessionId,
         spawnMetadata,
       );
+      initialMetadataPersisted = true;
+      if (executionPolicy) {
+        await durableLinkBarrier!({ childSessionId });
+        callbacks?.onLinked?.({ childSessionId });
+      }
     } catch (err) {
-      trackedRun.initialMetadataFailed = true;
+      if (!initialMetadataPersisted) trackedRun.initialMetadataFailed = true;
       const interrupted = cancellation.signal.aborted;
       const message = interrupted
         ? "sub-agent run interrupted"
-        : (err as Error).message ?? "sub-agent metadata setup failed";
+        : initialMetadataPersisted
+          ? "sub-agent durable binding failed"
+          : (err as Error).message ?? "sub-agent metadata setup failed";
       const result: SubAgentSpawnResult = {
         summary: message,
         toolCallCount: 0,
@@ -1588,6 +1868,16 @@ export class SubAgentRunner {
         error: message,
         ...(interrupted ? { stopReason: "interrupted" as const } : {}),
       };
+      if (initialMetadataPersisted) {
+        try {
+          await this.deps.subAgentMemoryManager.saveSessionMetadata(childSessionId, {
+            ...spawnMetadata,
+            subAgentTaskState: projectSubAgentResultState(result),
+          });
+        } catch {
+          // The provider is still blocked; the wire/task owner must reconcile the failed bind.
+        }
+      }
       this.finalizeRun(trackedRun, result);
       if (!interrupted) callbacks?.onError?.(maskSubAgentText(message));
       return result;
@@ -1797,7 +2087,10 @@ export class SubAgentRunner {
           maxRounds: cappedRounds,
           sessionIdOverride: childSessionId,
           spawnDepth: 1,
-          inputOrigin: "llm-tool-arg",
+          ...(executionPolicy
+            ? { approvalReasonPrefix: executionPolicy.approvalReasonPrefix }
+            : {}),
+          inputOrigin: executionPolicy?.inputOrigin ?? "llm-tool-arg",
         },
       );
       // `result.toolCalls.length` is the authoritative final count (the
@@ -1912,6 +2205,80 @@ export class SubAgentRunner {
     spawnId?: string,
     background = false,
   ): Promise<SubAgentSpawnResult> {
+    return await this.resumeWithPolicy(
+      resumeId,
+      continuationInstructions,
+      title,
+      callbacks,
+      originSessionId,
+      spawnId,
+      background,
+    );
+  }
+
+  /** Continue a wire-bound task without accepting remote provenance choices. */
+  async resumeFromA2AWire(
+    request: A2AWireResumeRequest,
+    binding: A2AWireResumeBinding,
+    callbacks?: SubAgentSpawnCallbacks,
+  ): Promise<SubAgentSpawnResult> {
+    const messageText = canonicalizeA2AWireMessage(request?.messageText);
+    const rawResumeId = request?.resumeId;
+    const resumeId = isValidA2AWireId(rawResumeId)
+      ? rawResumeId
+      : "invalid-a2a-wire-resume";
+    const meta = resumeId !== "invalid-a2a-wire-resume"
+      ? this.deps.subAgentMemoryManager.loadSessionMetadata(resumeId)
+      : null;
+    if (
+      !messageText
+      || !isValidA2AWireId(binding?.handlerId)
+      || !meta
+      || meta.sessionKind !== "subagent"
+      || !meta.subAgentTitle
+      || !meta.projectRoot
+      || meta.sourceTools === undefined
+      || meta.a2aWireHandlerId !== binding.handlerId
+      || !meta.a2aWireInternalOrigin
+      || meta.a2aWireInternalOrigin !== meta.originSessionId
+    ) {
+      return this.failA2AWireRun(
+        resumeId,
+        "sub-agent A2A wire resume binding is invalid",
+        callbacks,
+      );
+    }
+
+    return await this.resumeWithPolicy(
+      resumeId,
+      messageText,
+      meta.subAgentTitle,
+      callbacks,
+      meta.a2aWireInternalOrigin,
+      undefined,
+      true,
+      {
+        inputOrigin: "agent-message",
+        approvalReasonPrefix: A2A_WIRE_APPROVAL_REASON_PREFIX,
+        forceExplicitToolScope: true,
+        wireBinding: {
+          handlerId: binding.handlerId,
+          internalOriginSessionId: meta.a2aWireInternalOrigin,
+        },
+      },
+    );
+  }
+
+  private async resumeWithPolicy(
+    resumeId: string,
+    continuationInstructions: string,
+    title: string,
+    callbacks?: SubAgentSpawnCallbacks,
+    originSessionId?: string,
+    spawnId?: string,
+    background = false,
+    executionPolicy?: SubAgentExecutionPolicy,
+  ): Promise<SubAgentSpawnResult> {
     // In-flight lock: fail-closed if a resume for THIS session is already
     // running. Checked before any load so two concurrent resumes cannot both
     // read the same pre-increment metadata (lost-update on the counters).
@@ -1948,6 +2315,7 @@ export class SubAgentRunner {
       originSessionId,
       spawnId,
       background,
+      executionPolicy,
     );
     this.inFlight.set(resumeId, runPromise);
     try {
@@ -1966,6 +2334,7 @@ export class SubAgentRunner {
     originSessionId: string | undefined,
     spawnId: string | undefined,
     background: boolean,
+    executionPolicy: SubAgentExecutionPolicy | undefined,
   ): Promise<SubAgentSpawnResult> {
     const cancellation = new AbortController();
     let child: ConversationLoop | null = null;
@@ -2053,6 +2422,25 @@ export class SubAgentRunner {
     if (meta.originSessionId !== originSessionId) {
       return finishAttemptFailure(
         "sub-agent resume: origin session metadata does not match caller",
+      );
+    }
+    const hasWireBinding = meta.a2aWireHandlerId !== undefined
+      || meta.a2aWireInternalOrigin !== undefined;
+    if (executionPolicy) {
+      if (
+        meta.a2aWireHandlerId !== executionPolicy.wireBinding.handlerId
+        || meta.a2aWireInternalOrigin !== executionPolicy.wireBinding.internalOriginSessionId
+        || meta.a2aWireInternalOrigin !== meta.originSessionId
+        || !meta.projectRoot
+        || meta.sourceTools === undefined
+      ) {
+        return finishAttemptFailure(
+          "sub-agent resume: A2A wire binding metadata does not match caller",
+        );
+      }
+    } else if (hasWireBinding) {
+      return finishAttemptFailure(
+        "sub-agent resume: wire-bound task requires the A2A wire entry point",
       );
     }
     if (
@@ -2155,11 +2543,11 @@ export class SubAgentRunner {
       Math.min(MAX_TURNS_CAP, requestedRounds, remainingRounds),
     );
 
-    const frozenSourceTools = meta.sourceTools ?? [];
-    if (frozenSourceTools.length === 0) {
+    const frozenSourceTools = meta.sourceTools;
+    if (!frozenSourceTools || (!executionPolicy && frozenSourceTools.length === 0)) {
       return await finishAuthorizedFailure(
         'sub-agent resume: session "' + resumeId
-          + '" has an empty frozen tool scope; metadata may be corrupted or tampered',
+          + '" has a missing or empty frozen tool scope; metadata may be corrupted or tampered',
       );
     }
     const { childDeps } = this.buildChildDeps({
@@ -2180,6 +2568,14 @@ export class SubAgentRunner {
     if (!child.loadSession(resumeId)) {
       return await finishAuthorizedFailure(
         'sub-agent resume: failed to load session history for "' + resumeId + '"',
+      );
+    }
+    if (
+      executionPolicy
+      && !projectRootEquals(child.getSessionProjectRoot(), meta.projectRoot)
+    ) {
+      return await finishAuthorizedFailure(
+        "sub-agent resume: A2A project binding rejected (a2a-project-binding-rejected)",
       );
     }
     if (cancellation.signal.aborted) {
@@ -2327,12 +2723,15 @@ export class SubAgentRunner {
                 a2aCausalContext: agentMailboxCausalContext!,
               }
             : {}),
-          ...(agentMailboxApprovalPrefix
-            ? { approvalReasonPrefix: agentMailboxApprovalPrefix }
-            : {}),
-          inputOrigin: persistedResumeReason === "question" || agentMailboxEntries.length > 0
-            ? "agent-message"
-            : "llm-tool-arg",
+          ...(executionPolicy
+            ? { approvalReasonPrefix: executionPolicy.approvalReasonPrefix }
+            : agentMailboxApprovalPrefix
+              ? { approvalReasonPrefix: agentMailboxApprovalPrefix }
+              : {}),
+          inputOrigin: executionPolicy?.inputOrigin
+            ?? (persistedResumeReason === "question" || agentMailboxEntries.length > 0
+              ? "agent-message"
+              : "llm-tool-arg"),
         },
       );
       totalToolCalls = turnResult.toolCalls.length;
