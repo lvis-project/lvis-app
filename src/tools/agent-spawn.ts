@@ -17,6 +17,7 @@ import {
   AGENT_NAME_ALLOWLIST,
   type LoadedAgentProfile,
 } from "../main/agent-profile-store.js";
+import { renderAgentProfilePrompt } from "../engine/agent-profile-prompt.js";
 import { t } from "../i18n/index.js";
 
 import type { ChatEntry } from "../lib/chat-stream-state.js";
@@ -569,33 +570,4 @@ export function createAgentInterruptTool(deps: Pick<AgentSpawnToolDeps, "getRunn
       };
     },
   });
-}
-
-function renderAgentProfilePrompt(
-  profile: LoadedAgentProfile,
-  taskInstructions: string,
-): string {
-  return [
-    `<lvis-agent-profile name="${escapeAttr(profile.name)}">`,
-    neutralizeAgentProfileFence(profile.body),
-    "</lvis-agent-profile>",
-    "",
-    "<lvis-agent-task>",
-    neutralizeAgentProfileFence(taskInstructions),
-    "</lvis-agent-task>",
-  ].join("\n");
-}
-
-function escapeAttr(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-const AGENT_PROFILE_FENCE_PATTERN = /<(\s*\/?\s*lvis-agent-(?:profile|task)[^>]*)>/gi;
-const ZWSP = "​";
-function neutralizeAgentProfileFence(body: string): string {
-  return body.replace(AGENT_PROFILE_FENCE_PATTERN, `<${ZWSP}$1>`);
 }
