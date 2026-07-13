@@ -332,7 +332,7 @@ export interface SubAgentRunnerDeps {
   subAgentMemoryManager: MemoryManager;
   /** Optional until boot wiring is constructed; all absent-bus delivery fails closed. */
   messageBus?: A2ASubAgentMessageBus;
-  /** Phase-2 child-to-parent/sibling A2A bus. */
+  /** Child-to-parent and sibling A2A message bus. */
   agentMessageBus?: A2AAgentMessageBus;
 }
 
