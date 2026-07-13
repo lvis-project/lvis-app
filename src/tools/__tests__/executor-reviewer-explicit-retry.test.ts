@@ -34,6 +34,15 @@ function makeReviewedNetworkProbe(name: string, executeSpy: ReturnType<typeof vi
   return registry;
 }
 
+function makeAutoPermissionManager(
+  dir: string,
+  classifySpy: ReturnType<typeof vi.fn>,
+) {
+  const permMgr = makePermissionManager(dir, classifySpy);
+  permMgr.setMode("auto");
+  return permMgr;
+}
+
 describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
   it("does not record or consume explicit reviewer authorization without a session id", async () => {
     const executeSpy = vi.fn(async () => "sent");
@@ -47,7 +56,7 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
       const executor = new ToolExecutor(
         makeReviewedNetworkProbe(toolName, executeSpy),
         undefined,
-        makePermissionManager(dir, classifySpy),
+        makeAutoPermissionManager(dir, classifySpy),
       );
       const input = { payload: "send release notice" };
 
@@ -98,7 +107,7 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
       const executor = new ToolExecutor(
         makeReviewedNetworkProbe(toolName, executeSpy),
         undefined,
-        makePermissionManager(dir, classifySpy),
+        makeAutoPermissionManager(dir, classifySpy),
       );
       const input = { payload: "send release notice" };
 
@@ -144,7 +153,7 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
       const executor = new ToolExecutor(
         makeReviewedNetworkProbe(toolName, executeSpy),
         undefined,
-        makePermissionManager(dir, classifySpy),
+        makeAutoPermissionManager(dir, classifySpy),
       );
       const input = { payload: "send release notice" };
 
@@ -192,7 +201,7 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
       const executor = new ToolExecutor(
         makeReviewedNetworkProbe(toolName, executeSpy),
         undefined,
-        makePermissionManager(dir, classifySpy),
+        makeAutoPermissionManager(dir, classifySpy),
       );
       const input = { payload: "send release notice" };
 
