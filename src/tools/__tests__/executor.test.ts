@@ -758,12 +758,9 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     expect(allowEntry).not.toHaveProperty("directoryAllowed");
   });
 
-  it("interactive auto-approve LOW in default mode silently allows mutating tool calls (issue #690)", async () => {
-    // P3 SOT change: previously, foreground reviewer auto-approve was
-    // gated to `exec mode === "auto"`. Issue #690 moves that gate to the
-    // `permissions.reviewer.interactive.autoApprove` setting so users
-    // can opt into "LOW silently allows" without flipping the entire
-    // exec mode. The test asserts:
+  it("interactive auto-approve LOW in auto mode silently allows mutating tool calls", async () => {
+    // Foreground reviewer auto-approval requires BOTH explicit auto mode and
+    // the configured interactive threshold. The test asserts:
     //   1. With setInteractiveAutoApprove("low") + reviewer LOW verdict,
     //      the tool executes without an approval modal (no `is_error`).
     //   2. The audit entry records `decision: "allow"` with the reviewer
@@ -788,9 +785,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     const dir = mkdtempSync(join(tmpdir(), "lvis-executor-interactive-p3-"));
     try {
       const permMgr = new PermissionManager(join(dir, "permissions.json"));
-      // Critically: exec mode is the safe DEFAULT, not "auto" — only the
-      // new interactive setting is the SOT for the foreground reviewer.
-      permMgr.setMode("default");
+      permMgr.setMode("auto");
       permMgr.setInteractiveAutoApprove("low");
       permMgr.setReviewer({
         classifier: {
@@ -864,12 +859,9 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     }
   });
 
-  it("interactive=off in default mode falls back to the user-approval modal even when reviewer would say LOW", async () => {
-    // Negative companion to the test above: with interactive=off, the
-    // foreground-auto reviewer lane MUST NOT trigger. The tool must
-    // surface to the approval gate (we simulate gate=null so the call
-    // hits the no-approval-gate fail-closed branch — proving the route
-    // never short-circuited via the reviewer).
+  it("interactive threshold in default mode falls back to the user-approval modal without reviewer classification", async () => {
+    // Negative companion to the test above: a configured interactive
+    // threshold does not activate the foreground reviewer outside auto mode.
     const executeSpy = vi.fn(async () => "should-not-run");
     const registry = new ToolRegistry();
     registry.register(createDynamicTool({
@@ -891,7 +883,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     try {
       const permMgr = new PermissionManager(join(dir, "permissions.json"));
       permMgr.setMode("default");
-      permMgr.setInteractiveAutoApprove("off");
+      permMgr.setInteractiveAutoApprove("low");
       const classifySpy = vi.fn(() => ({ level: "low" as const, reason: "reviewer says safe" }));
       permMgr.setReviewer({
         classifier: { classify: classifySpy },
@@ -904,12 +896,18 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         assertPermissionAuditWritable: vi.fn(),
         appendPermissionAuditEntry: vi.fn(async (entry: Record<string, unknown>) => ({ ...entry, prevHash: "h" })),
       };
+      const gate = {
+        requestAndWait: vi.fn(async (req: { id: string }) => ({
+          requestId: req.id,
+          choice: "deny-once" as const,
+        })),
+      };
       const executor = new ToolExecutor(
         registry,
         undefined,
         permMgr,
         undefined,
-        undefined,
+        gate as never,
         undefined,
         auditLogger as never,
       );
@@ -917,13 +915,15 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         [{ id: "tu-p3-off", name: "reviewed_write_probe_p3_off", input: { payload: "ok" } }],
         { sessionId: "sess-p3-off", permissionContext: userPermissionContext() },
       );
-      // Tool MUST NOT have run: no approval gate is wired in this executor,
-      // and the reviewer is gated off, so the call should error/deny.
+      // The normal approval gate handles the request and denies execution.
       expect(executeSpy).not.toHaveBeenCalled();
       expect(result[0].is_error).toBe(true);
-      // Reviewer MUST NOT have been consulted via the foreground-auto lane,
-      // since the gate now requires interactive!="off" or exec="auto".
       expect(classifySpy).not.toHaveBeenCalled();
+      expect(gate.requestAndWait).toHaveBeenCalledOnce();
+      expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        mode: "default",
+        reviewerVerdict: undefined,
+      }));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -950,7 +950,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     const dir = mkdtempSync(join(tmpdir(), "lvis-executor-interactive-medium-"));
     try {
       const permMgr = new PermissionManager(join(dir, "permissions.json"));
-      permMgr.setMode("default");
+      permMgr.setMode("auto");
       permMgr.setInteractiveAutoApprove("low");
       const classifySpy = vi.fn((ctx: import("../../permissions/reviewer/risk-classifier.js").ToolInvocationContext) => ({
         level: "medium" as const,
@@ -1044,7 +1044,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     const dir = mkdtempSync(join(tmpdir(), "lvis-executor-interactive-retry-"));
     try {
       const permMgr = new PermissionManager(join(dir, "permissions.json"));
-      permMgr.setMode("default");
+      permMgr.setMode("auto");
       permMgr.setInteractiveAutoApprove("low");
       const classifySpy = vi.fn(() => ({
         level: "medium" as const,
@@ -1199,7 +1199,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     const dir = mkdtempSync(join(tmpdir(), "lvis-executor-interactive-retry-changed-"));
     try {
       const permMgr = new PermissionManager(join(dir, "permissions.json"));
-      permMgr.setMode("default");
+      permMgr.setMode("auto");
       permMgr.setInteractiveAutoApprove("low");
       const classifySpy = vi.fn(() => ({
         level: "medium" as const,
