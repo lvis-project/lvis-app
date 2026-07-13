@@ -6,7 +6,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { LoopContext } from "./loop-context.js";
-import type { TurnCallbacks, TurnStopReason, ToolScope } from "./types.js";
+import type { TurnCallbacks, TurnInputRequired, TurnStopReason, ToolScope } from "./types.js";
 import type { LLMVendor, TokenUsage, TokenUsageByModel, ToolSchema } from "../llm/types.js";
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import type { ToolTrustOrigin } from "../../tools/types.js";
@@ -29,6 +29,13 @@ import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
 import { MAX_TOOL_CALLS_PER_ROUND } from "../../shared/subagent-policy.js";
 import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
+import { isA2AQuestionInputRequiredControl } from "../../tools/agent-send.js";
+import {
+  isA2AAgentCausalContext,
+  mergeA2AAgentCausalContexts,
+  type A2AAgentCausalContext,
+} from "../a2a-agent-message-envelope.js";
+
 
 const log = createLogger("lvis");
 
@@ -186,6 +193,7 @@ export async function queryLoop(
       sessionIdOverride?: string;
       spawnDepth?: number;
       approvalReasonPrefix?: string;
+      a2aCausalContext?: A2AAgentCausalContext;
       inputOrigin: ChatInputOrigin;
       toolTrustOrigin: ToolTrustOrigin;
       permissionUserIntent?: string;
@@ -197,6 +205,7 @@ export async function queryLoop(
     toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>;
     usage?: TokenUsage;
     stopReason?: TurnStopReason;
+    inputRequired?: TurnInputRequired;
     usageByModel: TokenUsageByModel[];
     vendorProvider: LLMVendor;
     vendorModel: string;
@@ -244,6 +253,7 @@ export async function queryLoop(
         toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>;
         usage?: TokenUsage;
         stopReason?: TurnStopReason;
+        inputRequired?: TurnInputRequired;
       },
     ) => ({
       ...result,
@@ -297,6 +307,13 @@ export async function queryLoop(
     // the activated tool. Today these coincide, but keying on one source removes
     // the future-coincidence dependency.
     const effectiveSessionId = bounds.sessionIdOverride ?? self.sessionId;
+    let activeA2ACausalContext =
+      isA2AAgentCausalContext(bounds.a2aCausalContext)
+      && bounds.a2aCausalContext.recipientChildSessionId === effectiveSessionId
+        ? bounds.a2aCausalContext
+        : undefined;
+    if (activeA2ACausalContext) toolTrustOrigin = "agent-message";
+
     // C3(a): assistant-round counter — used by the maxRounds break below.
     let assistantRoundsRun = 0;
     // finish_reason=length CONTINUATION carry. While a logical answer is being
@@ -455,6 +472,23 @@ export async function queryLoop(
           kept.map((entry) => entry.approvalReasonPrefix),
         );
         self.guidanceQueue = [];
+        const queuedCausalContexts = kept
+          .map((entry) => entry.a2aCausalContext)
+          .filter((context): context is A2AAgentCausalContext => context !== undefined);
+        if (queuedCausalContexts.length > 0) {
+          const mergedCausalContext = mergeA2AAgentCausalContexts(
+            effectiveSessionId,
+            [
+              ...(activeA2ACausalContext ? [activeA2ACausalContext] : []),
+              ...queuedCausalContexts,
+            ],
+          );
+          if (mergedCausalContext) {
+            activeA2ACausalContext = mergedCausalContext;
+            toolTrustOrigin = "agent-message";
+          }
+        }
+
         if (dropped.length > 0) {
           await Promise.allSettled(
             dropped.map((entry) =>
@@ -1171,6 +1205,7 @@ export async function queryLoop(
           approvalReasonPrefix: activeApprovalReasonPrefix,
           // Threading the turn's abort signal lets long-blocking tools
           // (`ask_user_question`) honor the user's 중단 button instead of
+          a2aCausalContext: activeA2ACausalContext,
           // hanging until their internal timeout.
           abortSignal,
           toolResultChunkReader: (toolUseId) => self.readToolResultForChunk(toolUseId),
@@ -1244,6 +1279,37 @@ export async function queryLoop(
       }
       // Intra-turn micro-compact — mark older tool_results stale before the
       // next round assembles its request (`messagesForRound`), so the next
+      const inputRequiredControls = toolResults.flatMap((toolResult) => {
+        const toolUse = capResult.allowed.find((candidate) =>
+          candidate.id === toolResult.tool_use_id);
+        const meta = toolMetaByUseId.get(toolResult.tool_use_id);
+        return !toolResult.is_error
+          && toolUse?.name === "agent_send"
+          && meta?.source === "builtin"
+          && isA2AQuestionInputRequiredControl(toolResult.rawResult)
+          ? [toolResult.rawResult]
+          : [];
+      });
+      if (inputRequiredControls.length === 1) {
+        const control = inputRequiredControls[0]!;
+        return withServingIdentity({
+          text: mergedText,
+          toolCalls: allToolCalls,
+          usage: turnUsage,
+          stopReason: "input-required",
+          inputRequired: { reason: "question", prompt: control.prompt },
+        });
+      }
+      if (inputRequiredControls.length > 1) {
+        log.error("queryLoop: multiple a2a-input-required controls in one round");
+        return withServingIdentity({
+          text: mergedText,
+          toolCalls: allToolCalls,
+          usage: turnUsage,
+          stopReason: "stream-error",
+        });
+      }
+
       // provider send stubs them on the wire. Mirrors the sub-agent fallback
       // mark (clear()/restore() atomic swap). Gated on the already-computed
       // per-round projection to skip short turns; the threshold SOT is

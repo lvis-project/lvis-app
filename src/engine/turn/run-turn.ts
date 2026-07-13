@@ -8,7 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { LoopContext } from "./loop-context.js";
-import type { TurnCallbacks, TurnResult } from "./types.js";
+import type { TurnCallbacks, TurnResult, TurnStopReason } from "./types.js";
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { MessageMeta } from "../llm/types.js";
@@ -24,8 +24,13 @@ import { parseAppMessageEnvelopePayload } from "../../shared/mcp-app-message-sou
 import { sessionContext } from "../session-context.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
+import type { A2AAgentCausalContext } from "../a2a-agent-message-envelope.js";
 
 const log = createLogger("lvis");
+
+function commitsHostInjectedMessages(stopReason: TurnStopReason | undefined): boolean {
+  return stopReason === "end_turn" || stopReason === "input-required";
+}
 
 export async function runTurn(
   self: LoopContext,
@@ -65,6 +70,8 @@ export async function runTurn(
       approvalReasonPrefix?: string;
       /** DLP-masked durable child messages joined to this turn after the prompt gate. */
       initialGuidance?: string;
+      /** Host-owned causal hop inherited from durable A2A guidance. */
+      a2aCausalContext?: A2AAgentCausalContext;
       inputOrigin: ChatInputOrigin;
       rolePrompt?: ActiveRolePrompt;
     },
@@ -368,6 +375,7 @@ export async function runTurn(
             spawnDepth: options?.spawnDepth,
             approvalReasonPrefix: options?.approvalReasonPrefix,
             inputOrigin,
+            a2aCausalContext: options?.a2aCausalContext,
             toolTrustOrigin,
             permissionUserIntent,
             permissionExplicitAuthorizationIntent,
@@ -376,11 +384,11 @@ export async function runTurn(
         ),
       );
     await finalizeTurnState();
-    if (result.stopReason !== "end_turn" && initialGuidanceId) {
+    if (!commitsHostInjectedMessages(result.stopReason) && initialGuidanceId) {
       self.history.removeByHostInjectionId(initialGuidanceId);
       initialGuidanceId = null;
     }
-    if (result.stopReason !== "end_turn" && agentMessageInputId) {
+    if (!commitsHostInjectedMessages(result.stopReason) && agentMessageInputId) {
       self.history.removeByHostInjectionId(agentMessageInputId);
       agentMessageInputId = null;
     }
@@ -686,7 +694,7 @@ export async function runTurn(
       }
     }
 
-    retainHostInjectedMessages = result.stopReason === "end_turn";
+    retainHostInjectedMessages = commitsHostInjectedMessages(result.stopReason);
     return { ...result, route: routeResult.route };
     } finally {
       let removedHostInjectionRows = 0;
