@@ -154,6 +154,12 @@ async function main(): Promise<void> {
     actualHead === PINNED_TCK_HEAD,
     "A2A TCK HEAD mismatch: expected " + PINNED_TCK_HEAD + ", got " + actualHead,
   );
+  const dirtyTck = execFileSync(
+    "git",
+    ["-C", tckPath, "status", "--porcelain", "--untracked-files=all"],
+    { encoding: "utf8" },
+  ).trim();
+  assert(dirtyTck.length === 0, "A2A TCK checkout must be clean");
 
   const secret = randomBytes(32).toString("hex");
   const handler = new A2ATckFixtureHandler();
@@ -188,11 +194,23 @@ async function main(): Promise<void> {
     assert(exitCode === 0, "A2A TCK exited " + String(exitCode));
     verifyReport(tckPath);
   } finally {
-    console.log("Closing A2A TCK proxy");
-    await proxy?.close();
-    console.log("Closing A2A TCK backend");
-    await backend.close();
+    const cleanup = await Promise.allSettled([
+      (async () => {
+        console.log("Closing A2A TCK proxy");
+        await proxy?.close();
+      })(),
+      (async () => {
+        console.log("Closing A2A TCK backend");
+        await backend.close();
+      })(),
+    ]);
     console.log("A2A TCK resources closed");
+    const failures = cleanup.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "A2A TCK cleanup failed");
+    }
   }
 }
 
