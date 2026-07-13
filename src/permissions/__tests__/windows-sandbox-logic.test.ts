@@ -11,6 +11,7 @@
  * Added to the CI `windows-permission-tests` job (ci.yml, windows-latest) AND
  * runs on darwin/linux too — the platform is faked, so the logic is the same.
  */
+import { win32 as win32Path } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -161,16 +162,28 @@ describe("windows sandbox — PR1 sandboxRelaxesCategory now LIVE for win32", ()
 
 describe("windows sandbox — binShell threading (the double-shell fix)", () => {
   it("ASRT parseWindowsBinShell accepts 'powershell' (Windows PowerShell)", () => {
-    expect(parseWindowsBinShell("powershell")).toEqual({ kind: "powershell" });
+    expect(parseWindowsBinShell("powershell")).toEqual({
+      exe: win32Path.join(
+        process.env.SystemRoot ?? "C:\\Windows",
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      ),
+      args: ["-NoProfile", "-Command"],
+    });
   });
 
   it("ASRT parseWindowsBinShell accepts 'pwsh' (PowerShell Core)", () => {
-    expect(parseWindowsBinShell("pwsh")).toEqual({ kind: "pwsh" });
+    expect(parseWindowsBinShell("pwsh")).toEqual({
+      exe: "pwsh.exe",
+      args: ["-NoProfile", "-Command"],
+    });
   });
 
   it("ASRT parseWindowsBinShell accepts an absolute Git Bash path", () => {
     const gitBash = "C:\\Program Files\\Git\\bin\\bash.exe";
-    expect(parseWindowsBinShell(gitBash)).toEqual({ kind: "bash", path: gitBash });
+    expect(parseWindowsBinShell(gitBash)).toEqual({ exe: gitBash, args: ["-c"] });
   });
 
   it("ASRT parseWindowsBinShell REJECTS a relative bash name (no silent cmd fallback)", () => {
@@ -182,7 +195,10 @@ describe("windows sandbox — binShell threading (the double-shell fix)", () => 
     // The bug this fixes: powershell.ts pre-rendered `powershell.exe -Command …`
     // AND passed binShell=undefined → ASRT defaulted to cmd → cmd /c "powershell
     // …". Now powershell.ts passes 'powershell' + the bare command instead.
-    expect(parseWindowsBinShell(undefined)).toEqual({ kind: "cmd" });
+    expect(parseWindowsBinShell(undefined)).toEqual({
+      exe: win32Path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe"),
+      args: ["/d", "/s", "/c"],
+    });
   });
 });
 
