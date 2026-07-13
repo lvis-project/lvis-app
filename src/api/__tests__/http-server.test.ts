@@ -415,7 +415,7 @@ describe("http-server — GET /v1/events (SSE)", () => {
     expect(await poll(() => broadcaster.subscriberCount() === 0)).toBe(true);
   });
 
-  it("server.close() with a live SSE client resolves and drops the subscription", async () => {
+  it("server.close() is idempotent and drops a live SSE subscription", async () => {
     const { server, broadcaster } = await startWithBroadcaster(stubApi(() => ({ ok: true, data: {} })));
     const controller = new AbortController();
     const res = await fetch(url(server, "/v1/events"), {
@@ -426,9 +426,10 @@ describe("http-server — GET /v1/events (SSE)", () => {
     await readUntil(reader, (b) => b.includes(": connected"));
     expect(await poll(() => broadcaster.subscriberCount() === 1)).toBe(true);
 
-    // close() must resolve (no hang) even with a live event-stream socket.
+    // Both the first close and an idempotent lifecycle cleanup must resolve.
     await server.close();
-    // Drop from the tracking list so afterEach does not double-close.
+    await server.close();
+    // Drop from the tracking list because this test already closed it.
     servers = servers.filter((s) => s !== server);
     expect(broadcaster.subscriberCount()).toBe(0);
     controller.abort();
