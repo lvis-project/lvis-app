@@ -173,6 +173,96 @@ describe("PluginConfigTab", () => {
     });
   });
 
+  it.each(["failed", "missing"] as const)(
+    "does not report repair success when the refreshed card is %s",
+    async (refreshedState) => {
+      const broken = {
+        id: "agent-hub",
+        name: "Agent Hub",
+        description: "Agent orchestration",
+        publisher: "Test fixture",
+        sampleTools: [],
+        capabilities: [],
+        tools: [],
+        installAliases: ["lvis-plugin-agent-hub"],
+        loadStatus: "failed" as const,
+      };
+      const cards = vi.fn()
+        .mockResolvedValueOnce([broken])
+        .mockResolvedValueOnce(refreshedState === "failed" ? [broken] : []);
+      mockInstall.mockResolvedValue({ ok: true as const, pluginId: "agent-hub" });
+      Object.defineProperty(window, "lvis", {
+        value: {
+          plugins: { cards },
+          pluginConfig: { get: mockGet, set: mockSet },
+        },
+        writable: true,
+        configurable: true,
+      });
+
+      render(<PluginConfigTab />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("plugin-config:doctor-panel:agent-hub")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId("plugin-config:doctor:agent-hub"));
+
+      await waitFor(() => {
+        expect(mockInstall).toHaveBeenCalledWith("lvis-plugin-agent-hub");
+        expect(cards).toHaveBeenCalledTimes(2);
+        expect(
+          screen.getByText("Agent Hub: 진단 완료 — 로컬 복구 불가, 아직 실행할 수 없습니다."),
+        ).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Agent Hub 복구 완료")).toBeNull();
+      expect(screen.getByTestId("plugin-config:banner")).toHaveClass("text-warning");
+    },
+  );
+
+  it("keeps a card refresh failure instead of overwriting it with repair success", async () => {
+    const broken = {
+      id: "agent-hub",
+      name: "Agent Hub",
+      description: "Agent orchestration",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      installAliases: ["lvis-plugin-agent-hub"],
+      loadStatus: "failed" as const,
+    };
+    const cards = vi.fn()
+      .mockResolvedValueOnce([broken])
+      .mockRejectedValueOnce(new Error("card refresh failed"));
+    mockInstall.mockResolvedValue({ ok: true as const, pluginId: "agent-hub" });
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:agent-hub")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("plugin-config:doctor:agent-hub"));
+
+    await waitFor(() => {
+      expect(mockInstall).toHaveBeenCalledWith("lvis-plugin-agent-hub");
+      expect(cards).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("card refresh failed")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Agent Hub 복구 완료")).toBeNull();
+    expect(
+      screen.queryByText("Agent Hub: 진단 완료 — 로컬 복구 불가, 아직 실행할 수 없습니다."),
+    ).toBeNull();
+    expect(screen.getByTestId("plugin-config:banner")).toHaveClass("text-destructive");
+  });
+
   it("passes networkAccess acknowledgement when Doctor reinstalls a network-enabled failed plugin", async () => {
     const broken = {
       id: "meeting",
@@ -235,7 +325,7 @@ describe("PluginConfigTab", () => {
     });
   });
 
-  it("completes Doctor diagnostics without reinstalling when grants do not match", async () => {
+  it("shows an unresolved warning without reinstalling when grants do not match", async () => {
     const broken = {
       id: "meeting",
       name: "Meeting",
@@ -271,11 +361,14 @@ describe("PluginConfigTab", () => {
     await waitFor(() => {
       expect(mockInstall).not.toHaveBeenCalled();
       expect(cards).toHaveBeenCalledTimes(2);
-      expect(screen.getByText("Meeting 진단 완료")).toBeInTheDocument();
+      expect(
+        screen.getByText("Meeting: 진단 완료 — 로컬 복구 불가, 아직 실행할 수 없습니다."),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("plugin-config:banner")).toHaveClass("text-warning");
     });
   });
 
-  it("completes Doctor diagnostics without reinstalling when the app is too old", async () => {
+  it("shows an unresolved warning without reinstalling when the app is too old", async () => {
     const broken = {
       id: "meeting",
       name: "Meeting",
@@ -312,7 +405,10 @@ describe("PluginConfigTab", () => {
       // NOT reinstall-fixable → no reinstall attempt, diagnostic only.
       expect(mockInstall).not.toHaveBeenCalled();
       expect(cards).toHaveBeenCalledTimes(2);
-      expect(screen.getByText("Meeting 진단 완료")).toBeInTheDocument();
+      expect(
+        screen.getByText("Meeting: 진단 완료 — 로컬 복구 불가, 아직 실행할 수 없습니다."),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("plugin-config:banner")).toHaveClass("text-warning");
     });
   });
 
