@@ -11,15 +11,35 @@
  *     OS sandbox and resolves its vendor binaries — same proof as the runtime
  *     smoke, exercised through the host adapter here).
  *
- * Real ASRT, no mocks — mirrors the no-mock style of the bash/powershell tests.
- * The wrap/spawn assertions are guarded to supported platforms (darwin/linux);
- * the flag + trust-boundary assertions run everywhere.
+ * Real ASRT semantics, no ASRT mocks — mirrors the no-mock style of the
+ * bash/powershell tests. Windows resolves host-sensitive paths from an isolated
+ * test home while leaving USERPROFILE unchanged for CreateProcessWithLogonW.
  */
-import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  vi,
+} from "vitest";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+
+vi.mock("node:os", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:os")>();
+  return {
+    ...original,
+    homedir: () => {
+      const isolated = process.env.LVIS_ASRT_TEST_HOME;
+      return process.platform === "win32" && isolated ? isolated : original.homedir();
+    },
+  };
+});
 
 import {
   isAsrtSandboxActive,
@@ -46,6 +66,28 @@ import { asrtCanInitialize } from "./test-helpers.js";
 import { matchesDomainPattern } from "@anthropic-ai/sandbox-runtime/dist/sandbox/domain-pattern.js";
 import { resolveParentProxy } from "@anthropic-ai/sandbox-runtime/dist/sandbox/parent-proxy.js";
 
+let originalAsrtTestHome: string | undefined;
+let isolatedWindowsHome: string | undefined;
+
+beforeAll(() => {
+  if (process.platform !== "win32") return;
+
+  originalAsrtTestHome = process.env.LVIS_ASRT_TEST_HOME;
+  isolatedWindowsHome = mkdtempSync(join(tmpdir(), "lvis-asrt-test-home-"));
+  process.env.LVIS_ASRT_TEST_HOME = isolatedWindowsHome;
+});
+
+afterAll(() => {
+  if (process.platform !== "win32" || isolatedWindowsHome === undefined) return;
+
+  if (originalAsrtTestHome === undefined) {
+    delete process.env.LVIS_ASRT_TEST_HOME;
+  } else {
+    process.env.LVIS_ASRT_TEST_HOME = originalAsrtTestHome;
+  }
+  rmSync(isolatedWindowsHome, { recursive: true, force: true });
+});
+
 afterEach(async () => {
   // Always return to the gated-OFF baseline so cross-test state never leaks.
   if (isAsrtSandboxActive()) {
@@ -56,6 +98,7 @@ afterEach(async () => {
 function runArgv(
   argv: string[],
   env: NodeJS.ProcessEnv,
+  cwd?: string,
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const [cmd, ...args] = argv;
@@ -63,6 +106,7 @@ function runArgv(
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
       env,
+      cwd,
     });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
@@ -109,17 +153,21 @@ describe("asrt-sandbox — gate ON wraps a real command under the OS sandbox", (
     try {
       await initializeAsrtSandbox({ allowedDomains: [], allowWrite: [writeDir] });
 
-      const { argv, env } = await wrapToolCommand("echo asrt-ok", {
-        filesystem: { allowWrite: [writeDir], allowRead: [writeDir] },
-      });
+      const { argv, env } = await wrapToolCommand(
+        "echo asrt-ok",
+        process.platform === "win32"
+          ? {}
+          : { filesystem: { allowWrite: [writeDir], allowRead: [writeDir] } },
+      );
 
-      // mac/linux wrap shape: [<shell>, "-c", <wrapped>]
+      // mac/linux: [<shell>, "-c", <wrapped>]; Windows: [srt-win, "exec", ...]
       expect(argv.length).toBeGreaterThanOrEqual(3);
-      expect(argv[1]).toBe("-c");
+      expect(argv[1]).toBe(process.platform === "win32" ? "exec" : "-c");
 
-      const res = await runArgv(argv, env);
+      const res = await runArgv(argv, env, writeDir);
       cleanupAsrtSandboxAfterCommand();
 
+      expect(res.code, res.stderr).toBe(0);
       expect(res.stdout).toContain("asrt-ok");
       // vendor-resolved: no module/vendor resolution failure in the wrapper.
       const combined = `${res.stdout}\n${res.stderr}`;
@@ -180,7 +228,7 @@ describe("asrt-sandbox — worker wrap carries only the filesystem jail", () => 
       filesystem: { allowWrite: [], allowRead: [] },
     });
     expect(argv.length).toBeGreaterThanOrEqual(3);
-    expect(argv[1]).toBe("-c");
+    expect(argv[1]).toBe(process.platform === "win32" ? "exec" : "-c");
   });
 });
 
