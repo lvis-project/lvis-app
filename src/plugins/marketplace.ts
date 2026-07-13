@@ -22,7 +22,7 @@ import { installReceiptPath, listFilesRecursive, verifyInstallReceipt } from "./
 import { canonicalJSON } from "./whitelist/canonical-json.js";
 import type { PluginInstallReceipt } from "./plugin-install-receipt.js";
 import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
-import { CAPABILITY_EXTERNAL_AUTH_CONSUMER } from "./capabilities.js";
+import { KNOWN_CAPABILITY_IDS } from "./capabilities.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 import type { PluginInstallFailureKind } from "../shared/plugin-install-failure.js";
 import { createLogger } from "../lib/logger.js";
@@ -100,10 +100,15 @@ function shaOfCatalogItem(item: PluginMarketplaceItem): string {
   return createHash("sha256").update(canonicalJSON(item)).digest("hex");
 }
 
-function hasExternalAuthConsumerCapability(source: {
-  capabilities?: readonly string[];
-}): boolean {
-  return source.capabilities?.includes(CAPABILITY_EXTERNAL_AUTH_CONSUMER) === true;
+function findRuntimeCapabilityMismatches(
+  expected: { capabilities?: readonly string[] },
+  actual: { capabilities?: readonly string[] },
+): string[] {
+  const expectedCapabilities = new Set(expected.capabilities ?? []);
+  const actualCapabilities = new Set(actual.capabilities ?? []);
+  return KNOWN_CAPABILITY_IDS.filter(
+    (capability) => expectedCapabilities.has(capability) !== actualCapabilities.has(capability),
+  );
 }
 
 function classifyInstallFailure(message: string): PluginInstallFailureKind | undefined {
@@ -1619,14 +1624,10 @@ export class PluginMarketplaceService {
             `plugin "${plugin.id}" artifact manifest networkAccess does not match the catalog-approved grant`,
           );
         }
-        const expectedHostFetchCapability = hasExternalAuthConsumerCapability(plugin);
-        const actualHostFetchCapability = hasExternalAuthConsumerCapability(manifest);
-        if (
-          (plugin.networkAccess || manifest.networkAccess) &&
-          actualHostFetchCapability !== expectedHostFetchCapability
-        ) {
+        const runtimeCapabilityMismatches = findRuntimeCapabilityMismatches(plugin, manifest);
+        if (runtimeCapabilityMismatches.length > 0) {
           throw new Error(
-            `plugin "${plugin.id}" artifact manifest external-auth-consumer capability does not match the catalog-approved grant`,
+            `plugin "${plugin.id}" artifact manifest ${runtimeCapabilityMismatches.join(", ")} capability does not match the catalog-approved grant`,
           );
         }
 

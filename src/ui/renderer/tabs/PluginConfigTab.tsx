@@ -26,6 +26,7 @@ import { buildNetworkAccessAcknowledgement } from "../../../shared/network-acces
 import { isReinstallFixableFailureKind } from "../../../shared/plugin-install-failure.js";
 
 type KV = { key: string; value: string };
+type BannerType = "error" | "success" | "warning";
 
 const INSTALL_PHASE_I18N_KEY: Record<InstallPhase, string> = {
   installing: "pluginConfigTab.phaseInstalling",
@@ -62,6 +63,21 @@ function formatBytes(bytes: number): string {
 
 function isRuntimeCallablePlugin(plugin: PluginCardSummary): boolean {
   return plugin.runtimeLoaded ?? (plugin.loadStatus === "loaded");
+}
+
+function findRefreshedDoctorPlugin(
+  cards: readonly PluginCardSummary[],
+  plugin: PluginCardSummary,
+  additionalKeys: readonly string[] = [],
+): PluginCardSummary | undefined {
+  const lookupKeys = [plugin.id, ...(plugin.installAliases ?? []), ...additionalKeys];
+  return cards.find((card) =>
+    lookupKeys.some((key) => isPluginInstallKey(card.id, key, card.installAliases)),
+  );
+}
+
+function isDoctorRepairLoaded(plugin: PluginCardSummary | undefined): boolean {
+  return plugin?.loadStatus === "loaded" && isRuntimeCallablePlugin(plugin);
 }
 
 function getPluginDoctorInstallKey(plugin: PluginCardSummary): string {
@@ -222,9 +238,9 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [doctoringId, setDoctoringId] = useState<string | null>(null);
-  const [banner, setBanner] = useState<{ type: "error" | "success"; msg: string } | null>(null);
+  const [banner, setBanner] = useState<{ type: BannerType; msg: string } | null>(null);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showBanner = useCallback((type: "error" | "success", msg: string) => {
+  const showBanner = useCallback((type: BannerType, msg: string) => {
     if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
     setBanner({ type, msg });
     bannerTimerRef.current = setTimeout(() => setBanner(null), DEFAULT_TOAST_TTL_MS);
@@ -241,7 +257,9 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
   // would still display the pre-install plugin set after a `lvis://install`
   // deep-link landed (other plugin surfaces refresh via the same event but
   // the settings tab's local `plugins` state was a one-shot mount-time snapshot).
-  const refreshPlugins = useCallback(async (options?: { preferInstallKey?: string }) => {
+  const refreshPlugins = useCallback(async (
+    options?: { preferInstallKey?: string },
+  ): Promise<PluginCardSummary[] | null> => {
     try {
       const cards = await window.lvis.plugins.cards();
       setPlugins(cards);
@@ -258,8 +276,10 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
         if (failed) return failed.id;
         return cards.length > 0 ? cards[0].id : null;
       });
+      return cards;
     } catch (e) {
       showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorLoadPlugins"));
+      return null;
     } finally {
       setLoading(false);
     }
@@ -515,21 +535,29 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
   }, [showBanner, refreshPlugins, t]);
 
   const handleDoctorPlugin = useCallback(async (plugin: PluginCardSummary) => {
-    // Cause-aware Doctor. NOT-locally-fixable failures (catalog↔grant mismatch,
-    // app-version incompatibility) cannot be repaired by reinstalling — a
-    // reinstall re-fetches the same broken/too-new package and re-fails. Show
-    // the diagnosis and leave Remove as the user-initiated exit.
-    if (!isReinstallFixableFailureKind(plugin.installFailureKind)) {
-      showBanner("success", t("pluginConfigTab.successDoctorDiagnostic", { displayName: plugin.name }));
-      await refreshPlugins();
-      return;
-    }
-    // Reinstall-fixable failure (stale/pre-v6 on-disk manifest, missing/corrupt
-    // files, generic load error) → automatically attempt reinstalling the latest
-    // marketplace version. One attempt, no loop: on failure we surface the cause
-    // and the Remove button in the Doctor panel stays available as the fallback.
     setDoctoringId(plugin.id);
     try {
+      // Cause-aware Doctor. NOT-locally-fixable failures (catalog↔grant mismatch,
+      // app-version incompatibility) cannot be repaired by reinstalling — a
+      // reinstall re-fetches the same broken/too-new package and re-fails. Refresh
+      // the source of truth, but keep the outcome explicitly unresolved unless the
+      // runtime now reports a loaded card.
+      if (!isReinstallFixableFailureKind(plugin.installFailureKind)) {
+        const refreshedCards = await refreshPlugins();
+        if (!refreshedCards) return;
+        const refreshedPlugin = findRefreshedDoctorPlugin(refreshedCards, plugin);
+        if (isDoctorRepairLoaded(refreshedPlugin)) {
+          showBanner("success", t("pluginConfigTab.successDoctor", { displayName: plugin.name }));
+        } else {
+          showBanner("warning", t("pluginConfigTab.doctorDiagnosticUnresolved", { displayName: plugin.name }));
+        }
+        return;
+      }
+
+      // Reinstall-fixable failure (stale/pre-v6 on-disk manifest, missing/corrupt
+      // files, generic load error) → automatically attempt reinstalling the latest
+      // marketplace version. One attempt, no loop: on failure we surface the cause
+      // and the Remove button in the Doctor panel stays available as the fallback.
       const installKey = await resolvePluginDoctorInstallKey(plugin);
       const networkAccessAcknowledgement = buildNetworkAccessAcknowledgement(plugin.networkAccess);
       const result = networkAccessAcknowledgement
@@ -544,7 +572,19 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
         showBanner("error", result.message ?? result.error ?? t("pluginConfigTab.errorDoctor"));
         return;
       }
-      await refreshPlugins({ preferInstallKey: result.pluginId || installKey });
+
+      const preferredInstallKey = result.pluginId || installKey;
+      const refreshedCards = await refreshPlugins({ preferInstallKey: preferredInstallKey });
+      if (!refreshedCards) return;
+      const refreshedPlugin = findRefreshedDoctorPlugin(
+        refreshedCards,
+        plugin,
+        [preferredInstallKey, installKey],
+      );
+      if (!isDoctorRepairLoaded(refreshedPlugin)) {
+        showBanner("warning", t("pluginConfigTab.doctorDiagnosticUnresolved", { displayName: plugin.name }));
+        return;
+      }
       showBanner("success", t("pluginConfigTab.successDoctor", { displayName: plugin.name }));
     } catch (e) {
       showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorDoctor"));
@@ -597,8 +637,13 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
       />
       {banner && (
         <div
+          data-testid="plugin-config:banner"
           className={`rounded-md px-3 py-2 text-sm ${
-            banner.type === "error" ? "bg-destructive/(--opacity-soft) text-destructive" : "bg-success/(--opacity-soft) text-success"
+            banner.type === "error"
+              ? "bg-destructive/(--opacity-soft) text-destructive"
+              : banner.type === "warning"
+                ? "bg-warning/(--opacity-soft) text-warning"
+                : "bg-success/(--opacity-soft) text-success"
           }`}
         >
           {banner.msg}
