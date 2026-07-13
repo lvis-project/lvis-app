@@ -9,7 +9,7 @@
  *
  * Rules:
  *   headless        : low → allow(layer 5) ; medium/high → deny(layer 5)
- *   foreground-auto : low → allow(layer 5) ; medium/high → ask(layer 5)
+ *   foreground-auto : configured threshold (low or medium) → allow(layer 5) ; above it → ask
  * Every result carries `reviewer: { route, verdict }`.
  */
 import { describe, it, expect } from "vitest";
@@ -67,7 +67,8 @@ describe("PermissionManager.resolveReviewerDecision", () => {
       });
     });
 
-    it("medium → ask(layer 5) with route+verdict", () => {
+    it("low threshold: medium → ask(layer 5) with route+verdict", () => {
+      pm.setInteractiveAutoApprove("low");
       const v = verdict("medium");
       expect(pm.resolveReviewerDecision(v, "foreground-auto")).toEqual({
         decision: "ask",
@@ -77,7 +78,19 @@ describe("PermissionManager.resolveReviewerDecision", () => {
       });
     });
 
+    it("medium threshold: medium → allow(layer 5) with route+verdict", () => {
+      pm.setInteractiveAutoApprove("medium");
+      const v = verdict("medium");
+      expect(pm.resolveReviewerDecision(v, "foreground-auto")).toEqual({
+        decision: "allow",
+        reason: "reviewer medium: medium reason",
+        layer: 5,
+        reviewer: { route: "foreground-auto", verdict: v },
+      });
+    });
+
     it("high → ask(layer 5) with route+verdict", () => {
+      pm.setInteractiveAutoApprove("medium");
       const v = verdict("high");
       expect(pm.resolveReviewerDecision(v, "foreground-auto")).toEqual({
         decision: "ask",

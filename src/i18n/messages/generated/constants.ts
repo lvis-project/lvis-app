@@ -21,7 +21,7 @@ export const en = {
   "constants.execModeStrictLabel": "Confirm all",
   "constants.execModeStrictDesc": "Approval required for all tools including reads",
   "constants.execModeAutoLabel": "Auto-verify",
-  "constants.execModeAutoDesc": "Low-risk operations are processed with an audit trail; automated (headless) execution and interactive chat are both verified by the permission reviewer",
+  "constants.execModeAutoDesc": "Interactive LOW and MEDIUM verdicts are auto-approved with an audit trail; HIGH asks, and headless execution uses its separate fail-closed reviewer queue",
   "constants.execModeAllowLabel": "Allow all",
   "constants.execModeAllowDesc": "Tools outside hard blocks are auto-allowed; access outside allowed directories requires separate approval",
 
@@ -53,7 +53,7 @@ export const ko: Record<keyof typeof en, string> = {
   "constants.execModeStrictLabel": "전체 확인",
   "constants.execModeStrictDesc": "읽기까지 포함해 모든 도구 실행 전 승인 요청",
   "constants.execModeAutoLabel": "자동 검증",
-  "constants.execModeAutoDesc": "저위험 작업은 감사 기록으로 처리하고 자동(헤드리스) 실행과 대화형 채팅 모두를 권한 리뷰어가 검증",
+  "constants.execModeAutoDesc": "대화형 저위험·중위험 판정은 감사 기록과 함께 자동 허용하고, 고위험은 승인을 요청하며 헤드리스 실행은 별도의 실패 폐쇄형 리뷰 대기열을 사용",
   "constants.execModeAllowLabel": "모두 허용",
   "constants.execModeAllowDesc": "하드 차단 밖 도구는 자동 허용하고 허용 디렉터리 밖 접근은 별도 승인",
 
