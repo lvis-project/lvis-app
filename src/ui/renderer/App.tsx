@@ -924,6 +924,7 @@ export function App() {
         onDeferredQueueOpenChange={setDeferredQueueOpen}
         approvalQueue={approvalQueue}
         onApprovalDecide={handleApprovalDecide}
+        onboardingDialogsSuspended={activeView === "settings"}
         chainStage={chainStage}
         dispatchChain={dispatchChain}
         selectedScenarioId={selectedScenarioId}

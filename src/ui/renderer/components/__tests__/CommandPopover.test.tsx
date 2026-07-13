@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
-import { render, act, screen, waitFor } from "@testing-library/react";
+import { render, act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { CommandPopover, type QuickAction } from "../CommandPopover.js";
+import type { NativeContextMenuAction } from "../../../../shared/native-context-menu.js";
 
 const DEFAULT_ACTIONS: QuickAction[] = [
   { id: "home",     label: "홈으로 이동",   run: vi.fn() },
@@ -117,6 +118,49 @@ describe("CommandPopover", () => {
     await act(async () => { await user.click(screen.getByText("홈으로 이동")); });
     expect(run).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("routes quick-action right-click through the native command menu", async () => {
+    const previousLvis = window.lvis;
+    let actionHandler: ((action: NativeContextMenuAction) => void) | null = null;
+    const showNativeContextMenu = vi.fn(async () => ({ ok: true as const }));
+    Object.defineProperty(window, "lvis", {
+      configurable: true,
+      value: {
+        ...previousLvis,
+        ui: {
+          ...previousLvis?.ui,
+          showNativeContextMenu,
+          onNativeContextMenuAction: (handler: (action: NativeContextMenuAction) => void) => {
+            actionHandler = handler;
+            return () => { actionHandler = null; };
+          },
+        },
+      },
+    });
+
+    const run = vi.fn();
+    renderPopover({
+      open: true,
+      actions: [{ id: "home", label: "홈으로 이동", run }],
+    });
+    await waitFor(() => expect(screen.getByText("홈으로 이동")).toBeTruthy());
+    const row = screen.getByText("홈으로 이동").closest<HTMLElement>("[cmdk-item]");
+    expect(row).toBeTruthy();
+    fireEvent.contextMenu(row!);
+
+    await waitFor(() => expect(showNativeContextMenu).toHaveBeenCalledOnce());
+    const payload = showNativeContextMenu.mock.calls[0]![0];
+    expect(payload).toMatchObject({
+      kind: "command-item",
+      commands: ["command.activate", "command.copy"],
+    });
+    act(() => {
+      actionHandler?.({ requestId: payload.requestId, command: "command.activate" });
+    });
+    expect(run).toHaveBeenCalledOnce();
+
+    Object.defineProperty(window, "lvis", { configurable: true, value: previousLvis });
   });
 
   it("hides empty groups when query filters out all items", async () => {

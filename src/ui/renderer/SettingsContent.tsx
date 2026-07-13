@@ -469,7 +469,7 @@ export function SettingsContent({
           </button>
         </div>
       )}
-      <div ref={rightPaneRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto [scrollbar-gutter:stable] px-8 pt-2 pb-8 lvis-settings-scroll">
+      <div ref={rightPaneRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto [scrollbar-gutter:stable] px-8 pt-2 pb-12 scroll-pb-12 lvis-settings-scroll">
         {s.lastSaveError && (
           <div
             role="alert"
