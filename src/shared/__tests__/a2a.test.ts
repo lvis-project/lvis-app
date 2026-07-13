@@ -24,6 +24,7 @@ import {
   type A2ATaskStatus,
   type A2ATaskStatusUpdateEvent,
 } from "../a2a.js";
+import type { A2ASendMessageResult } from "../a2a-wire.js";
 
 describe("A2A v1.0 vendored core model", () => {
   it("pins canonical ProtoJSON TaskState values in proto numeric order", () => {
@@ -265,5 +266,18 @@ describe("sub-agent to A2A projection", () => {
       );
       expect(isA2AProjectedTaskState(projected)).toBe(true);
     }
+  });
+});
+describe("A2A v1.0 wire result types", () => {
+  it("requires exactly one SendMessage payload", () => {
+    type TaskOnly = { task: A2ATask } extends A2ASendMessageResult ? true : false;
+    type MessageOnly = { message: A2AMessage } extends A2ASendMessageResult ? true : false;
+    type Empty = Record<never, never> extends A2ASendMessageResult ? true : false;
+    type Both = { task: A2ATask; message: A2AMessage } extends A2ASendMessageResult
+      ? true
+      : false;
+
+    const assignability: [TaskOnly, MessageOnly, Empty, Both] = [true, true, false, false];
+    expect(assignability).toEqual([true, true, false, false]);
   });
 });
