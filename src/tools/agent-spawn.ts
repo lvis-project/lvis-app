@@ -264,7 +264,15 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         // resume path takes NO sourceTools/profile from the tool call — those are
         // read from the persisted metadata so a resume cannot re-scope the child.
         const run = async () => resumeId
-          ? await runner.resume(resumeId, instructions, title, callbacks, originSessionId, spawnId)
+          ? await runner.resume(
+              resumeId,
+              instructions,
+              title,
+              callbacks,
+              originSessionId,
+              spawnId,
+              background,
+            )
           : await runner.spawn(
               {
                 title,
@@ -275,6 +283,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
                 toolUseId,
                 sourceTools,
                 originSessionId,
+                background,
                 projectRoot: ctx.cwd,
                 // #1112: profile's `model:` frontmatter (complexity tier or
                 // explicit model ID). SubAgentRunner resolves it against the
@@ -321,7 +330,12 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
               });
             }
 
-            if (!authorizedChildSessionId) return;
+            if (
+              !authorizedChildSessionId
+              || result.suspension?.reason === "question"
+            ) {
+              return;
+            }
             const parentSessionId = originSessionId ?? "";
             try {
               await runner.deliverToParent({
