@@ -32,6 +32,8 @@ import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFro
 import { PreferenceRefreshService } from "../../memory/preference-refresh-service.js";
 import { SubAgentRunner } from "../../engine/subagent-runner.js";
 import { A2ASubAgentMessageBus } from "../../engine/a2a-subagent-message-bus.js";
+import { A2AAgentMessageBus } from "../../engine/a2a-agent-message-bus.js";
+import { A2AAgentMessageMailbox } from "../../engine/a2a-agent-message-mailbox.js";
 import { SubAgentMessageMailbox } from "../../engine/subagent-message-mailbox.js";
 import { createWorkBoardEngine, type WorkBoardEngine } from "../../core/work-board-engine.js";
 import { createWorkBoardReporter, type WorkBoardReporter } from "../../work-board/work-report.js";
@@ -220,8 +222,9 @@ export function wireConversation(ctx: BootContext): void {
   });
   subAgentMemoryManager.load();
 
+  const subAgentMessagingNamespace = openFeatureNamespace("subagent-messaging");
   const subAgentMessageMailbox = new SubAgentMessageMailbox(
-    openFeatureNamespace("subagent-messaging"),
+    subAgentMessagingNamespace,
   );
   const subAgentMessageBus = new A2ASubAgentMessageBus({
     parentLoop: conversationLoop,
@@ -240,6 +243,32 @@ export function wireConversation(ctx: BootContext): void {
         childSessionId,
         messageId,
       ),
+  });
+  const agentMessageMailbox = new A2AAgentMessageMailbox(
+    subAgentMessagingNamespace,
+  );
+  const agentMessageBus = new A2AAgentMessageBus({
+    parentBus: subAgentMessageBus,
+    mailbox: agentMessageMailbox,
+    auditLogger: bootAuditLogger,
+    isOriginActive: (originSessionId) =>
+      subAgentRunnerRef.fn?.isSubAgentOriginActive(originSessionId) ?? true,
+    resolveSender: async (senderChildSessionId) => {
+      const runner = subAgentRunnerRef.fn;
+      return runner ? await runner.resolveSubAgentSender(senderChildSessionId) : null;
+    },
+    resolvePeer: async (
+      senderChildSessionId,
+      recipientChildSessionId,
+    ) => {
+      const runner = subAgentRunnerRef.fn;
+      return runner
+        ? await runner.resolveSubAgentPeer(
+            senderChildSessionId,
+            recipientChildSessionId,
+          )
+        : { ok: false, reason: "unknown-sender" };
+    },
   });
 
   // Workflow system tools — late bindings now that ConversationLoop exists.
@@ -275,6 +304,7 @@ export function wireConversation(ctx: BootContext): void {
     toolRegistry,
     subAgentMemoryManager,
     messageBus: subAgentMessageBus,
+    agentMessageBus,
   });
   // skill_load no longer mutates conversation history. The body is registered
   // into SkillOverlay for the current user-turn window and read by

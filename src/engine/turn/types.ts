@@ -196,9 +196,18 @@ export type TurnStopReason =
   // resumes on the next user message). turn_summary / notification gates treat
   // it like a completed turn (real partial output + usage), NOT like an error.
   | "round-cap"
+  // A sub-agent deliberately ended the current round to wait for an answer.
+  // The loop is fully terminated; continuation re-hydrates the persisted
+  // session through SubAgentRunner.resume() rather than parking a coroutine.
+  | "input-required"
   // #811 m2 — a trusted UserPromptSubmit hook (or its fail-closed dispatch)
   // REFUSED the prompt before queryLoop ran. The turn never reached the LLM.
   | "blocked";
+
+export interface TurnInputRequired {
+  reason: "question";
+  prompt: string;
+}
 
 export interface TurnResult {
   text: string;
@@ -207,6 +216,8 @@ export interface TurnResult {
   usage?: TokenUsage;
   usageByModel?: TokenUsageByModel[];
   stopReason?: TurnStopReason;
+  /** Structured terminate-and-resume request emitted with input-required. */
+  inputRequired?: TurnInputRequired;
 }
 
 export interface ConversationLoopDeps {

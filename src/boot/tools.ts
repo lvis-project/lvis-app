@@ -22,6 +22,7 @@ import type { AgentSpawnEvent } from "../shared/subagent-events.js";
 import { createSkillLoadTool, type SkillLoadEvent } from "../tools/skill-load.js";
 import { createSkillListTool } from "../tools/skill-list.js";
 import { createAgentListTool } from "../tools/agent-list.js";
+import { createAgentSendTool, type AgentSendRuntime } from "../tools/agent-send.js";
 import type { AskUserQuestionGate } from "../main/ask-user-question-gate.js";
 import type { RoutinesStore } from "../main/routines-store.js";
 import type { SessionTodoStore } from "../main/session-todo-store.js";
@@ -440,6 +441,8 @@ export interface WorkflowToolDeps {
   sessionTodoStore?: SessionTodoStore;
   /** Lazy-resolved sub-agent runner — populated after ConversationLoop wiring. */
   getSubAgentRunner?: () => SubAgentRunner | undefined;
+  /** Host-only A2A runtime; agent_send still rejects every non-child context. */
+  getAgentSendRuntime?: () => AgentSendRuntime | undefined;
   skillStore?: SkillStore;
   agentProfileStore?: AgentProfileStore;
   /** C2(c): per-session skill overlay registry. */
@@ -651,6 +654,11 @@ export function registerBuiltinTools(
   }
   if (workflowDeps?.agentProfileStore) {
     builtins.push(createAgentListTool(workflowDeps.agentProfileStore));
+  }
+  if (workflowDeps?.getAgentSendRuntime) {
+    builtins.push(createAgentSendTool({
+      getRuntime: workflowDeps.getAgentSendRuntime,
+    }));
   }
   if (
     workflowDeps?.skillStore &&

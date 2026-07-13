@@ -49,6 +49,7 @@ import {
 import { manualCompact, runPreflightGuard, applyBoundaryToSession } from "./turn/compaction.js";
 import { GUIDE_MAX_ENTRIES, GUIDE_MAX_CHARS } from "./turn/guidance-limits.js";
 import { runTurn } from "./turn/run-turn.js";
+import type { A2AAgentCausalContext } from "./a2a-agent-message-envelope.js";
 import type {
   TurnCallbacks,
   TurnResult,
@@ -71,7 +72,14 @@ export interface GuidanceQueueEntry {
   onDropped?: (reason: GuidanceDropReason) => void | Promise<void>;
   /** DLP-masked sender provenance applied to receiver ApprovalGate reasons after injection. */
   approvalReasonPrefix?: string;
+  /** Host-owned hop context for a message-triggered receiver turn. */
+  a2aCausalContext?: A2AAgentCausalContext;
 }
+type GuidanceDisposition = Pick<
+  GuidanceQueueEntry,
+  "onInjected" | "onDropped" | "approvalReasonPrefix" | "a2aCausalContext"
+>;
+
 
 
 
@@ -268,14 +276,14 @@ export class ConversationLoop {
    */
   queueGuidanceWithDisposition(
     text: string,
-    disposition: Pick<GuidanceQueueEntry, "onInjected" | "onDropped" | "approvalReasonPrefix">,
+    disposition: GuidanceDisposition,
   ): "queued" | "no-active-turn" | "queue-full" | "too-long" | "empty" {
     return this.enqueueGuidance(text, disposition);
   }
 
   private enqueueGuidance(
     text: string,
-    disposition: Pick<GuidanceQueueEntry, "onInjected" | "onDropped" | "approvalReasonPrefix"> = {},
+    disposition: GuidanceDisposition = {},
   ): "queued" | "no-active-turn" | "queue-full" | "too-long" | "empty" {
     const trimmed = text.trim();
     if (trimmed.length === 0) return "empty";
@@ -768,6 +776,8 @@ export class ConversationLoop {
       approvalReasonPrefix?: string;
       /** DLP-masked durable child messages joined to this turn after the prompt gate. */
       initialGuidance?: string;
+      /** Host-owned causal hop inherited from durable A2A guidance. */
+      a2aCausalContext?: A2AAgentCausalContext;
       inputOrigin: ChatInputOrigin;
       rolePrompt?: ActiveRolePrompt;
     },

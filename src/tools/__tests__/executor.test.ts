@@ -1572,12 +1572,20 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         choice: "allow-once" as const,
       })),
     };
+    const auditLogger = {
+      log: vi.fn(),
+      isPermissionAuditChainReady: () => true,
+      assertPermissionAuditWritable: () => undefined,
+      appendPermissionAuditEntry: vi.fn(async () => undefined),
+    };
     const executor = new ToolExecutor(
       registry,
       undefined,
       permMgr,
       undefined,
       approvalGate as never,
+      undefined,
+      auditLogger as never,
     );
 
     const results = await executor.executeAll(
@@ -1585,7 +1593,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       {
         sessionId: "sess-a2a-receiver",
         approvalReasonPrefix: "[Sub-Agent: researcher]",
-        permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }),
+        permissionContext: userPermissionContext({ trustOrigin: "agent-message" }),
       },
     );
 
@@ -1594,7 +1602,11 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     expect(approvalGate.requestAndWait).toHaveBeenCalledWith(
       expect.objectContaining({
         reason: "[Sub-Agent: researcher] would otherwise allow",
+        trustOrigin: "agent-message",
       }),
+    );
+    expect(auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ trustOrigin: "agent-message" }),
     );
   });
 
@@ -1695,6 +1707,78 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
   });
 
+  it("forces receiver ApprovalGate when A2A provenance exists without PermissionManager", async () => {
+    const executeSpy = vi.fn(async () => "approved");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "a2a_no_manager_probe",
+      description: "A2A no-manager receiver gate probe",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: await executeSpy(), isError: false }),
+    }));
+    const approvalGate = {
+      requestAndWait: vi.fn(async (request: { id: string }) => ({
+        requestId: request.id,
+        choice: "allow-once" as const,
+      })),
+    };
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      undefined,
+      undefined,
+      approvalGate as never,
+    );
+
+    const results = await executor.executeAll(
+      [{ id: "tu-a2a-no-manager", name: "a2a_no_manager_probe", input: {} }],
+      {
+        sessionId: "sess-a2a-no-manager",
+        approvalReasonPrefix: "[Sub-Agent: researcher]",
+        permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }),
+      },
+    );
+
+    expect(results[0].is_error).toBeUndefined();
+    expect(executeSpy).toHaveBeenCalledOnce();
+    expect(approvalGate.requestAndWait).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: "a2a_no_manager_probe",
+        isReadOnly: false,
+        reason: "[Sub-Agent: researcher] cross-agent message requires receiver approval",
+      }),
+    );
+  });
+
+  it("fails closed when A2A provenance has neither PermissionManager nor ApprovalGate", async () => {
+    const executeSpy = vi.fn(async () => "must-not-run");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "a2a_no_gate_probe",
+      description: "A2A missing receiver gate probe",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: await executeSpy(), isError: false }),
+    }));
+    const executor = new ToolExecutor(registry);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-a2a-no-gate", name: "a2a_no_gate_probe", input: {} }],
+      {
+        sessionId: "sess-a2a-no-gate",
+        approvalReasonPrefix: "[Sub-Agent: researcher]",
+        permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }),
+      },
+    );
+
+    expect(results[0].is_error).toBe(true);
+    expect(executeSpy).not.toHaveBeenCalled();
+  });
 });
 
 // ─── D4 §4.5.3 — ordered tool approval/execution ─────────────
