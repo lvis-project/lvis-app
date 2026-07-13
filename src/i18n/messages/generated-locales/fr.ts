@@ -2124,7 +2124,7 @@ export const frMessages: Record<string, string> = {
   "pluginConfigTab.doctorFailureDetailLabel": "Détail de l'erreur",
   "pluginConfigTab.errorDoctor": "Échec de Doctor pour le plugin",
   "pluginConfigTab.successDoctor": "{displayName} réparé",
-  "pluginConfigTab.successDoctorDiagnostic": "Diagnostic de {displayName} terminé",
+  "pluginConfigTab.doctorDiagnosticUnresolved": "{displayName} : diagnostic terminé — aucune réparation locale possible, toujours inexécutable",
   "pluginConfigTab.errorSave": "Échec de l'enregistrement",
   "pluginConfigTab.errorSaveSecret": "Échec de l'enregistrement de la valeur secrète",
   "pluginConfigTab.errorToggleEnabled": "Échec de la modification de l'état actif du plugin",
