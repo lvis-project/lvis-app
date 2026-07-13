@@ -6,6 +6,8 @@ import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import type { LvisApi } from "../types.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
+import type { ProjectIdentity } from "../../../shared/project-identity.js";
+import { projectLabelForSession } from "../utils/insights-project-groups.js";
 import { CalendarFallback, LazyCalendar } from "./LazyCalendar.js";
 
 export interface StarredItem {
@@ -21,6 +23,7 @@ export interface StarredViewProps {
   api: LvisApi;
   starred: StarredItem[];
   sessions?: SessionSummary[];
+  workspaceProjects?: readonly ProjectIdentity[];
   currentSessionId: string;
   refreshStarred: () => void | Promise<void>;
   onJumpToSession: (sessionId: string) => boolean | void | Promise<boolean | void>;
@@ -163,6 +166,7 @@ export function StarredView({
   api,
   starred,
   sessions = [],
+  workspaceProjects,
   currentSessionId,
   refreshStarred,
   onJumpToSession,
@@ -214,10 +218,11 @@ export function StarredView({
     const byId = new Map<string, InsightConversation>();
     for (const usage of dailyUsageConversations) {
       const session = sessionById.get(usage.sessionId);
+      const projectName = session ? projectLabelForSession(session, workspaceProjects) : undefined;
       byId.set(usage.sessionId, {
         sessionId: usage.sessionId,
         title: session?.title?.trim() || usage.firstInput?.trim() || t("starredView.untitledSession"),
-        ...(session?.projectName ? { projectName: session.projectName } : {}),
+        ...(projectName ? { projectName } : {}),
         ...(session?.modifiedAt ? { modifiedAt: session.modifiedAt } : {}),
         totalTokens: usage.totalTokens,
         turns: usage.turns,
@@ -225,10 +230,11 @@ export function StarredView({
     }
     for (const session of sessionsForDay) {
       if (byId.has(session.id)) continue;
+      const projectName = projectLabelForSession(session, workspaceProjects);
       byId.set(session.id, {
         sessionId: session.id,
         title: session.title?.trim() || t("starredView.untitledSession"),
-        ...(session.projectName ? { projectName: session.projectName } : {}),
+        ...(projectName ? { projectName } : {}),
         modifiedAt: session.modifiedAt,
       });
     }
@@ -237,7 +243,7 @@ export function StarredView({
         (b.totalTokens ?? -1) - (a.totalTokens ?? -1) ||
         (b.modifiedAt ?? "").localeCompare(a.modifiedAt ?? ""),
     );
-  }, [allSessions, dailyUsageConversations, sessionsForDay, t]);
+  }, [allSessions, dailyUsageConversations, sessionsForDay, t, workspaceProjects]);
 
   const heatmapCells = useMemo(() => buildYearHeatmap(visibleYear, yearlyUsageByDate), [visibleYear, yearlyUsageByDate]);
   const heatmapMonthLabels = useMemo(

@@ -70,6 +70,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-path": "formatIpcError.invalidPath",
   "cannot-remove-default": "formatIpcError.cannotRemoveDefaultRoot",
   "not-an-additional-root": "formatIpcError.notAnAdditionalRoot",
+  "lifecycle-failed": "formatIpcError.persistFailed",
 
   // ── Args / canonicalization ──
   "args-not-object": "formatIpcError.argsNotObject",
