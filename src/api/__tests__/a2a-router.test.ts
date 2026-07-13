@@ -49,6 +49,14 @@ function testHandler(): {
         if (params.id === "missing") {
           throw new A2AHandlerError(A2AJsonRpcErrorDefinition.TASK_NOT_FOUND);
         }
+        if (params.id === "typed-secret") {
+          const error = new A2AHandlerError(A2AJsonRpcErrorDefinition.TASK_NOT_FOUND);
+          error.message = "sensitive-typed-handler-detail";
+          (error as A2AHandlerError & { metadata?: Record<string, string> }).metadata = {
+            leaked: "sensitive-typed-handler-metadata",
+          };
+          throw error;
+        }
         if (params.id === "explode") {
           throw new Error("sensitive-handler-detail");
         }
@@ -419,6 +427,25 @@ describe("A2A v1 loopback router", () => {
     expect(JSON.stringify(body)).not.toContain("sensitive-handler-detail");
     expect(log).toHaveBeenCalledWith("A2A handler tck failed");
     expect(JSON.stringify(log.mock.calls)).not.toContain("sensitive-handler-detail");
+  });
+
+  it("exposes only definition-owned handler errors", async () => {
+    const { server } = await start();
+    const response = await fetch(url(server), {
+      method: "POST",
+      headers: headers(),
+      body: rpc(A2AJsonRpcMethod.GET_TASK, { id: "typed-secret" }),
+    });
+    const body = (await response.json()) as any;
+
+    expect(body.error.code).toBe(-32001);
+    expect(body.error.message).toBe("Task not found");
+    expect(body.error.data[0]).toEqual({
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      reason: "TASK_NOT_FOUND",
+      domain: "a2a-protocol.org",
+    });
+    expect(JSON.stringify(body)).not.toContain("sensitive-typed-handler");
   });
 
   it("fails closed and audits an unknown handler without exposing registered cards", async () => {
