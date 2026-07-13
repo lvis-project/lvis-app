@@ -18,6 +18,7 @@ import { PersonaPromptStore } from "../../main/persona-prompt-store.js";
 import type { SubAgentRunner } from "../../engine/subagent-runner.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
 import type { SkillLoadEvent } from "../../tools/skill-load.js";
+import type { AgentSendRuntime } from "../../tools/agent-send.js";
 import {
   registerBuiltinTools,
   registerRequestPluginMetaTool,
@@ -83,6 +84,16 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
     getAskUserQuestionGate: () => askUserQuestionGate,
     getApprovalGate: () => approvalGateRef.fn,
     getSubAgentRunner: () => subAgentRunnerRef.fn,
+    getAgentSendRuntime: () => {
+      const runtime = subAgentRunnerRef.fn as unknown as Partial<AgentSendRuntime> | undefined;
+      return runtime
+        && typeof runtime.sendAgentMessage === "function"
+        && typeof runtime.auditAgentSendDrop === "function"
+        && typeof runtime.reserveQuestionWait === "function"
+        && typeof runtime.cancelQuestionWait === "function"
+        ? runtime as AgentSendRuntime
+        : undefined;
+    },
     emitAgentSpawn: (event: AgentSpawnEvent) => {
       try {
         getMainWindow()?.webContents.send("lvis:agent-spawn:event", event);
