@@ -532,6 +532,13 @@ export class ConversationLoop {
     return this.sessionProjectRoot;
   }
 
+  /** Working directory owned by this conversation session. */
+  getSessionExecutionCwd(): string {
+    return this.sessionProjectRoot
+      ?? this.deps.getDefaultProject?.().projectRoot
+      ?? process.cwd();
+  }
+
   getSessionProjectName(): string | null {
     return this.sessionProjectName;
   }
