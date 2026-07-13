@@ -639,11 +639,11 @@ export interface PluginMarketplaceItem {
   /**
    * Catalog-declared capabilities, kept as the trusted "expected" side of the
    * install-time integrity cross-check in `assertInstalledManifestMatchesCatalog`
-   * (the `external-auth-consumer` TOCTOU guard). This maps only the catalog's
+   * (the runtime-enforced capability TOCTOU guard). This maps only the catalog's
    * top-level `capabilities`; `requires.capabilities` is a distinct dependency
    * contract and must never grant artifact capabilities. An omitted or malformed
    * catalog field therefore remains the conservative empty set — a tampered zip
-   * cannot silently gain `external-auth-consumer` beyond what the catalog advertises.
+   * cannot silently gain a runtime-enforced capability beyond what the catalog advertises.
    */
   capabilities?: string[];
   auth?: PluginAuthSpec;

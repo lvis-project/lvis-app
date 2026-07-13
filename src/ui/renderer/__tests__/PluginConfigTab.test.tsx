@@ -339,7 +339,15 @@ describe("PluginConfigTab", () => {
       installFailureKind: "catalog-grant-mismatch" as const,
       loadStatus: "failed" as const,
     };
-    const cards = vi.fn().mockResolvedValue([broken]);
+    const refreshedButNotRunnable = {
+      ...broken,
+      installFailureKind: undefined,
+      loadStatus: "loaded" as const,
+      runtimeLoaded: false,
+    };
+    const cards = vi.fn()
+      .mockResolvedValueOnce([broken])
+      .mockResolvedValueOnce([refreshedButNotRunnable]);
     Object.defineProperty(window, "lvis", {
       value: {
         plugins: { cards },

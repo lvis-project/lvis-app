@@ -594,7 +594,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     ).rejects.toThrow(/networkAccess does not match the catalog-approved grant/i);
   });
 
-  it("accepts matching external-auth-consumer capabilities without a networkAccess grant", async () => {
+  it("accepts matching runtime-enforced capabilities without a networkAccess grant", async () => {
     const pluginDir = join(testDir, "plugins", "installed", "network-capability-positive");
     await mkdir(pluginDir, { recursive: true });
     const manifestPath = join(pluginDir, "plugin.json");
@@ -607,7 +607,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         entry: "dist/index.js",
         tools: [],
         description: "Test fixture.",
-        capabilities: ["external-auth-consumer"],
+        capabilities: ["external-auth-consumer", "host:overlay"],
       }),
       "utf-8",
     );
@@ -629,7 +629,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         {
           id: "network-capability-positive",
           installPolicy: "user",
-          capabilities: ["external-auth-consumer"],
+          capabilities: ["external-auth-consumer", "host:overlay"],
         },
         "1.0.0",
         manifestPath,
@@ -684,6 +684,50 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         pluginDir,
       ),
     ).rejects.toThrow(/external-auth-consumer capability does not match the catalog-approved grant/i);
+  });
+
+  it("rejects an unapproved host:overlay capability", async () => {
+    const pluginDir = join(testDir, "plugins", "installed", "overlay-capability-plugin");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "overlay-capability-plugin",
+        name: "Overlay Capability Plugin",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: [],
+        description: "Test fixture.",
+        capabilities: ["host:overlay"],
+      }),
+      "utf-8",
+    );
+
+    const service = makeManagedService(testDir, marketplacePath);
+    await expect(
+      (service as unknown as {
+        assertInstalledManifestMatchesCatalog: (
+          plugin: {
+            id: string;
+            installPolicy: "user";
+            capabilities?: string[];
+          },
+          version: string,
+          manifestFile: string,
+          pluginDir: string,
+        ) => Promise<void>;
+      }).assertInstalledManifestMatchesCatalog(
+        {
+          id: "overlay-capability-plugin",
+          installPolicy: "user",
+          capabilities: [],
+        },
+        "1.0.0",
+        manifestPath,
+        pluginDir,
+      ),
+    ).rejects.toThrow(/host:overlay capability does not match the catalog-approved grant/i);
   });
 
   it("restores registry state during dependency rollback cleanup", async () => {
