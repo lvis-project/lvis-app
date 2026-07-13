@@ -2124,7 +2124,7 @@ export const jaMessages: Record<string, string> = {
   "pluginConfigTab.doctorFailureDetailLabel": "エラー詳細",
   "pluginConfigTab.errorDoctor": "プラグイン Doctor に失敗しました",
   "pluginConfigTab.successDoctor": "{displayName} を修復しました",
-  "pluginConfigTab.successDoctorDiagnostic": "{displayName} の診断が完了しました",
+  "pluginConfigTab.doctorDiagnosticUnresolved": "{displayName}: 診断完了 — ローカルで修復できないため、引き続き実行できません",
   "pluginConfigTab.errorSave": "保存に失敗しました",
   "pluginConfigTab.errorSaveSecret": "シークレット値の保存に失敗しました",
   "pluginConfigTab.errorToggleEnabled": "プラグインのアクティブ状態を変更できませんでした",
