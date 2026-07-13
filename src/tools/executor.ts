@@ -49,6 +49,10 @@ import { maskSensitiveData } from "../audit/dlp-filter.js";
 import type { RiskVerdict } from "../permissions/reviewer/risk-classifier.js";
 import { emitEffectShadowLog } from "../permissions/reviewer/risk-shadow-log.js";
 import { runWithEffectLedger, type EffectLedger } from "../permissions/effect-ledger.js";
+import {
+  currentToolExecutionCwd,
+  runWithToolExecutionCwd,
+} from "./execution-context.js";
 import { runWithEffectGateContext } from "../permissions/effect-enforcement.js";
 import { CHOKEPOINT_EFFECT } from "../permissions/effect-kind.js";
 import { resolveReviewerSandboxCapability } from "../permissions/sandbox-capability.js";
@@ -262,6 +266,16 @@ export interface ExecuteOptions {
   abortSignal?: AbortSignal;
   toolResultChunkReader?: ToolResultChunkReader;
   permissionContext?: ToolPermissionContext;
+  /**
+   * Invocation working directory. Conversation callers must provide this via
+   * executeConversationTools; non-conversation/plugin callers retain the
+   * process cwd fallback.
+   */
+  executionCwd?: string;
+}
+
+export interface ConversationExecuteOptions extends ExecuteOptions {
+  executionCwd: string;
 }
 
 // ─── Executor ──────────────────────────────────────
@@ -628,6 +642,13 @@ export class ToolExecutor {
     return results;
   }
 
+  async executeConversationTools(
+    toolUses: ToolUseBlock[],
+    opts: ConversationExecuteOptions,
+  ): Promise<ToolResult[]> {
+    return this.executeAll(toolUses, opts);
+  }
+
   private isParallelSafeToolUse(toolUse: ToolUseBlock): boolean {
     const tool = this.toolRegistry.findByName(toolUse.name);
     return tool?.parallelSafe === true;
@@ -650,9 +671,11 @@ export class ToolExecutor {
       abortSignal,
       toolResultChunkReader,
       permissionContext,
+      executionCwd: requestedExecutionCwd,
     } = opts;
     const startTime = Date.now();
-    const executionCwd = process.cwd();
+    const executionCwd =
+      requestedExecutionCwd ?? currentToolExecutionCwd() ?? process.cwd();
     const meta: ToolCallMeta = { groupId, toolUseId: toolUse.id, displayOrder };
     let permissionResult: PermissionCheckResult | undefined;
     let source: ToolSource = "builtin";
@@ -802,7 +825,7 @@ export class ToolExecutor {
     // LOCALS here (not context fields): applyApprovedDirectory reassigns them and
     // the sandbox-relaxation blocks below read them inline — boxing them would
     // force edits inside those byte-identical trust-boundary blocks.
-    const initialState = createInvocationContext(invocationPermissionContext);
+    const initialState = createInvocationContext(invocationPermissionContext, executionCwd);
     const baseAdditionalDirectories = initialState.baseAdditionalDirectories;
     let invocationAllowedScope = initialState.allowedScope;
     let invocationRuntimeAllowedDirectories = initialState.runtimeAllowedDirectories;
@@ -1069,8 +1092,11 @@ export class ToolExecutor {
       const fresh: readonly string[] =
         invocationPermissionContext.getAdditionalDirectories?.()
         ?? baseAdditionalDirectories;
-      invocationAllowedScope = buildAllowedScope([...fresh, approvedDirectory]);
-      invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories([...fresh, approvedDirectory]);
+      invocationAllowedScope = buildAllowedScope([...fresh, approvedDirectory], executionCwd);
+      invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories(
+        [...fresh, approvedDirectory],
+        executionCwd,
+      );
     };
 
     // Propagate the user's grant lifetime choice up to the conversation
@@ -2079,13 +2105,15 @@ export class ToolExecutor {
         // fresh `onceGrants` set dedups N writes to one target within this call.
         // When `hostClassifiesRisk` is OFF (default) the gate is a pass-through,
         // so binding the context here is inert.
-        return runWithEffectLedger(effectLedger, () =>
-          runWithEffectGateContext(
-            {
-              headless: invocationPermissionContext.headless === true,
-              toolName: toolUse.name,
-            },
-            () => tool.execute(finalInput, ctx),
+        return runWithToolExecutionCwd(executionCwd, () =>
+          runWithEffectLedger(effectLedger, () =>
+            runWithEffectGateContext(
+              {
+                headless: invocationPermissionContext.headless === true,
+                toolName: toolUse.name,
+              },
+              () => tool.execute(finalInput, ctx),
+            ),
           ),
         );
       },

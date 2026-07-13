@@ -125,6 +125,7 @@ export type InitialInvocationState = Pick<
  */
 export function createInvocationContext(
   permissionContext: ToolPermissionContext,
+  executionCwd: string,
 ): InitialInvocationState {
   // Within-round freshness: when the caller provided a getter we read the
   // *current* additional-directories view at the top of this executeOne (rather
@@ -135,8 +136,11 @@ export function createInvocationContext(
     permissionContext.getAdditionalDirectories?.()
     ?? permissionContext.additionalDirectories
     ?? [];
-  const allowedScope = buildAllowedScope(baseAdditionalDirectories);
-  const runtimeAllowedDirectories = buildRuntimeAllowedDirectories(baseAdditionalDirectories);
+  const allowedScope = buildAllowedScope(baseAdditionalDirectories, executionCwd);
+  const runtimeAllowedDirectories = buildRuntimeAllowedDirectories(
+    baseAdditionalDirectories,
+    executionCwd,
+  );
   // Capture any AMBIENT (parent) ledger BEFORE opening this invocation's own
   // ledger. For a top-level tool this is undefined; for a re-entrant
   // `callTool(M)` it is the OUTER wrapper's ledger, so a MUTATING inner tool

@@ -155,10 +155,12 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
     self.sessionRoutineId = sessionMeta?.routineId ?? null;
     self.sessionRoutineTitle = sessionMeta?.routineTitle ?? null;
     self.sessionAdditionalDirectories = [];
-    applyProjectContext(self, {
-      ...(sessionMeta?.projectRoot ? { projectRoot: sessionMeta.projectRoot } : {}),
-      ...(sessionMeta?.projectName ? { projectName: sessionMeta.projectName } : {}),
-    });
+    applyProjectContext(self, sessionMeta?.projectRoot
+      ? {
+          projectRoot: sessionMeta.projectRoot,
+          ...(sessionMeta.projectName ? { projectName: sessionMeta.projectName } : {}),
+        }
+      : self.deps.getDefaultProject?.());
     self.history.clear();
     self.history.restore(normalized.messages);
     self.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };

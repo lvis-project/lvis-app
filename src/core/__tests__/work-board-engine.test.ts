@@ -39,6 +39,7 @@ interface SpawnCall {
   sourceTools?: string[];
   profileMode?: string;
   originSessionId?: string;
+  projectRoot?: string;
 }
 
 /** Fake runner that records each spawn and returns a phase-specific summary. */
@@ -50,12 +51,14 @@ function fakeRunner(): { runner: SubAgentRunner; calls: SpawnCall[] } {
       sourceTools?: string[];
       profileMode?: string;
       originSessionId?: string;
+      projectRoot?: string;
     }) {
       calls.push({
         title: input.title,
         sourceTools: input.sourceTools,
         profileMode: input.profileMode,
         originSessionId: input.originSessionId,
+        projectRoot: input.projectRoot,
       });
       const isPlan = input.profileMode === "plan";
       return {
@@ -90,7 +93,8 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
   it("runs the full sequence on approval and persists plan + output", async () => {
     const { store, cleanup } = tempBoard();
     try {
-      const created = await store.create({ title: "ship feature" });
+      const projectRoot = join(tmpdir(), "agent-connector");
+      const created = await store.create({ title: "ship feature", projectRoot });
       if (created.status !== "created") throw new Error("setup failed");
       const id = created.itemId;
 
@@ -120,6 +124,8 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
       // Execute omits sourceTools → full parent registry.
       expect(calls[1].sourceTools).toBeUndefined();
       expect(calls[0].originSessionId).toBe(`work-board:${id}`);
+      expect(calls[0].projectRoot).toBe(projectRoot);
+      expect(calls[1].projectRoot).toBe(projectRoot);
 
       // Exactly one approval request, carrying the plan + meta category.
       expect(requests).toHaveLength(1);
