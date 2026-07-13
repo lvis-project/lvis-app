@@ -3,6 +3,7 @@ import type { ToolInvocationContext } from "../reviewer/risk-classifier.js";
 import {
   checkAsrtDependencies,
   isAsrtSandboxSupported,
+  DEFAULT_WINDOWS_PROXY_PORT_RANGE,
 } from "../asrt-sandbox.js";
 import { detectSandboxCapability } from "../sandbox-capability.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
@@ -22,15 +23,59 @@ export function makeTestPolicy(overrides: Partial<PolicyFile> = {}): PolicyFile 
 }
 
 /**
+ * Windows: `checkAsrtDependencies` only proves the srt-win binary + a provisioned
+ * `srt-sandbox` user exist — it does NOT prove the box can actually SPAWN a
+ * process as that user. `CreateProcessWithLogonW` is denied on managed Windows
+ * where a GPO or EDR blocks secondary-logon-as-another-user, so the account + WFP
+ * can be fully provisioned yet every wrapped spawn fails access-denied. Probe the
+ * real egress fence once (the same call `SandboxManager.initialize` makes); a
+ * throw means the sandbox cannot initialize on THIS machine. Memoized — the
+ * capability is machine-level and never changes within a run.
+ */
+let _winSpawnProbe: Promise<boolean> | undefined;
+async function windowsSandboxCanSpawn(): Promise<boolean> {
+  if (_winSpawnProbe === undefined) {
+    _winSpawnProbe = (async () => {
+      try {
+        const { verifyWindowsWfpEgress } = await import("@anthropic-ai/sandbox-runtime");
+        await verifyWindowsWfpEgress({ proxyPortRange: DEFAULT_WINDOWS_PROXY_PORT_RANGE });
+        return true;
+      } catch {
+        // Loud, not silent: the sandbox provisioned but cannot actually spawn
+        // (CreateProcessWithLogonW access-denied) — the live-init tests are
+        // SKIPPED (not hard-failed, so the push is not blocked), but the box is
+        // NOT getting OS isolation. Anyone who wants the sandbox on can recover.
+        console.warn(
+          "[asrt-sandbox] Windows OS sandbox cannot spawn as `srt-sandbox` " +
+            "(CreateProcessWithLogonW access-denied, 0x80070005): NOT providing " +
+            "isolation on this machine — live-init tests SKIPPED (not run). Fix: " +
+            "grant srt-sandbox read+execute on the ASRT backend — `icacls " +
+            "node_modules\\@anthropic-ai\\sandbox-runtime /grant " +
+            '"sandbox-runtime-users:(OI)(CI)(RX)" /T /C`. See README → ' +
+            "'ASRT sandbox access denied' recovery.",
+        );
+        return false;
+      }
+    })();
+  }
+  return _winSpawnProbe;
+}
+
+/**
  * Whether the real ASRT sandbox can actually initialize on this host —
- * supported platform AND no dependency errors (Linux: bwrap + socat + ripgrep).
- * Shared by the asrt-sandbox + worker-spawn UDS live tests so each can
- * early-return as a skip on a host that lacks the binaries.
+ * supported platform AND no dependency errors (Linux: bwrap + socat + ripgrep),
+ * AND (Windows only) the srt-sandbox spawn actually works. Shared by the
+ * asrt-sandbox + worker-spawn UDS live tests so each can early-return as a skip
+ * on a host that lacks the binaries or is policy-blocked from the sandbox logon.
+ * The real boot degrades gracefully to unsandboxed on such a box, and CI covers
+ * these live-init paths on Linux/mac + the Windows-logic suite covers win32 logic.
  */
 export async function asrtCanInitialize(): Promise<boolean> {
   if (!(await isAsrtSandboxSupported())) return false;
   const deps = await checkAsrtDependencies();
-  return deps.errors.length === 0;
+  if (deps.errors.length > 0) return false;
+  if (process.platform === "win32" && !(await windowsSandboxCanSpawn())) return false;
+  return true;
 }
 
 export function makeRiskClassifierContext(
