@@ -45,13 +45,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../../components/ui/dropdown-menu.js";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "../../../components/ui/context-menu.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { wrapRenderHtmlInlineFrameDocument } from "../../../shared/render-html-preview.js";
@@ -71,6 +64,7 @@ import { SideChatView } from "./SideChatView.js";
 import { VerticalSplitLayout } from "./VerticalSplitLayout.js";
 import { useVerticalSplit } from "../hooks/use-vertical-split.js";
 import { useAddProjectFolder } from "../hooks/use-add-project-folder.js";
+import { useNativeContextMenu } from "../hooks/use-native-context-menu.js";
 import type { SubAgentSpawn } from "../subagents/types.js";
 import { groupSubAgentSessions } from "../subagents/group-subagent-sessions.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
@@ -690,10 +684,6 @@ function toRelativePath(root: string | null, full: string): string {
   return full.slice(root.length).replace(/^[/\\]+/, "") || full;
 }
 
-/** Platform hint for the reveal label (Finder on macOS, Explorer elsewhere). */
-const IS_MAC_LIKE =
-  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
-
 /**
  * Extension → row icon. `File` is the legitimate domain default for an unknown
  * extension (not a papering-over fallback).
@@ -760,6 +750,7 @@ function ProjectRootsBrowser({
   selectedPath: string | null;
 }) {
   const { t } = useTranslation();
+  const openNativeContextMenu = useNativeContextMenu();
   const [roots, setRoots] = useState<Array<{ path: string; isDefault: boolean }>>([]);
   const [activeRoot, setActiveRoot] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -1218,8 +1209,6 @@ function ProjectRootsBrowser({
         const isActiveItem = entry.path === activeItemPath;
         return (
           <div key={entry.path}>
-            <ContextMenu>
-              <ContextMenuTrigger asChild>
                 <div
                   ref={(el) => {
                     if (el) itemRefs.current.set(entry.path, el);
@@ -1247,6 +1236,18 @@ function ProjectRootsBrowser({
                     if (isDir) toggleFolder(entry.path);
                     else onOpenFile(entry.path);
                   }}
+                  onContextMenu={(event) => openNativeContextMenu(event, "workspace-entry", {
+                    "workspace.open": () => (
+                      isDir ? toggleFolder(entry.path) : onOpenFile(entry.path)
+                    ),
+                    "workspace.reveal": () => void revealEntry(entry.path),
+                    "workspace.copy-path": () =>
+                      void navigator.clipboard?.writeText(entry.path),
+                    "workspace.copy-relative-path": () =>
+                      void navigator.clipboard?.writeText(
+                        toRelativePath(activeRoot, entry.path),
+                      ),
+                  })}
                 >
                   {isDir ? (
                     isOpen ? (
@@ -1261,39 +1262,6 @@ function ProjectRootsBrowser({
                   )}
                   <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                 </div>
-              </ContextMenuTrigger>
-              <ContextMenuContent className="min-w-[11rem]" data-testid="chat-side-panel-fs-context-menu">
-                <ContextMenuItem
-                  data-testid="chat-side-panel-fs-ctx-open"
-                  onSelect={() => (isDir ? toggleFolder(entry.path) : onOpenFile(entry.path))}
-                >
-                  {isDir ? <Folder className="h-3.5 w-3.5" /> : <File className="h-3.5 w-3.5" />}
-                  {t("chatPreviewRail.ctxOpen")}
-                </ContextMenuItem>
-                <ContextMenuItem
-                  data-testid="chat-side-panel-fs-ctx-reveal"
-                  onSelect={() => void revealEntry(entry.path)}
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  {t(IS_MAC_LIKE ? "chatPreviewRail.revealInFinder" : "chatPreviewRail.revealInExplorer")}
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem
-                  data-testid="chat-side-panel-fs-ctx-copy-path"
-                  onSelect={() => void navigator.clipboard?.writeText(entry.path)}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  {t("chatPreviewRail.copyPath")}
-                </ContextMenuItem>
-                <ContextMenuItem
-                  data-testid="chat-side-panel-fs-ctx-copy-rel"
-                  onSelect={() => void navigator.clipboard?.writeText(toRelativePath(activeRoot, entry.path))}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  {t("chatPreviewRail.copyRelativePath")}
-                </ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenu>
             {isDir && isOpen ? <div role="group">{renderEntries(entry.path, depth + 1)}</div> : null}
           </div>
         );

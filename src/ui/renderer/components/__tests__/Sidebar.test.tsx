@@ -8,6 +8,10 @@ import { Sidebar } from "../Sidebar.js";
 import type { SessionSummary } from "../../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../../shared/project-identity.js";
 import type { SidebarTab } from "../../hooks/use-sidebar-tab.js";
+import type {
+  NativeContextMenuAction,
+  NativeContextMenuPayload,
+} from "../../../../shared/native-context-menu.js";
 
 /**
  * Wraps <Sidebar> with local tab state so a click on a TabsTrigger actually
@@ -44,6 +48,10 @@ function Harness(props: Parameters<typeof Sidebar>[0]) {
 function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
   const onLoadSession = vi.fn();
   const onNewChatForProject = vi.fn();
+  let nativeContextActionHandler: ((action: NativeContextMenuAction) => void) | null = null;
+  const showNativeContextMenu = vi.fn(async (_payload: NativeContextMenuPayload) => ({
+    ok: true as const,
+  }));
   const sessions: SessionSummary[] = overrides.sessions ?? [
     {
       id: "sess-1",
@@ -92,6 +100,15 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
   const previous = (window as unknown as { lvis?: unknown }).lvis;
   (window as unknown as { lvis?: unknown }).lvis = {
     ...(previous && typeof previous === "object" ? previous : {}),
+    ui: {
+      showNativeContextMenu,
+      onNativeContextMenuAction: (handler: (action: NativeContextMenuAction) => void) => {
+        nativeContextActionHandler = handler;
+        return () => {
+          if (nativeContextActionHandler === handler) nativeContextActionHandler = null;
+        };
+      },
+    },
     workspace: {
       listRoots: vi.fn(async () => ({
         ok: true,
@@ -114,6 +131,12 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     ...result,
     onLoadSession,
     onNewChatForProject,
+    showNativeContextMenu,
+    emitNativeContextCommand: (command: NativeContextMenuAction["command"]) => {
+      const payload = showNativeContextMenu.mock.calls.at(-1)?.[0];
+      if (!payload) throw new Error("native context menu was not requested");
+      nativeContextActionHandler?.({ requestId: payload.requestId, command });
+    },
     restore: () => {
       if (previous === undefined) {
         delete (window as unknown as { lvis?: unknown }).lvis;
@@ -374,7 +397,12 @@ describe("Sidebar project pinning", () => {
 
   it("shows a pin/unpin context menu item and calls onToggleProjectPin with the project root", async () => {
     const onToggleProjectPin = vi.fn();
-    const { getByTestId, restore } = renderSidebar({
+    const {
+      getByTestId,
+      showNativeContextMenu,
+      emitNativeContextCommand,
+      restore,
+    } = renderSidebar({
       sessions: [],
       projects,
       activeSidebarTab: "projects",
@@ -384,8 +412,16 @@ describe("Sidebar project pinning", () => {
     try {
       const projectRow = await waitFor(() => getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-alpha"));
       fireEvent.contextMenu(projectRow);
-      const pinItem = await screen.findByTestId("sidebar-project-menu-pin");
-      fireEvent.click(pinItem);
+      expect(showNativeContextMenu).toHaveBeenCalledWith(expect.objectContaining({
+        kind: "project",
+        commands: expect.arrayContaining([
+          "project.pin",
+          "project.new-chat",
+          "project.reveal",
+          "project.remove",
+        ]),
+      }));
+      emitNativeContextCommand("project.pin");
       expect(onToggleProjectPin).toHaveBeenCalledWith("C:\\Users\\ikcha\\workspace\\lvis-project\\alpha");
     } finally {
       restore();
@@ -411,6 +447,74 @@ describe("Sidebar project pinning", () => {
         "sidebar-project-C-Users-ikcha-workspace-lvis-project-beta",
         "sidebar-project-C-Users-ikcha-workspace-lvis-project-alpha",
       ]);
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("Sidebar conversation context menu", () => {
+  it("opens and pins an unpinned conversation through the native menu", async () => {
+    const onToggleSessionStar = vi.fn();
+    const { getByTestId, onLoadSession, showNativeContextMenu, emitNativeContextCommand, restore } = renderSidebar({
+      onToggleSessionStar,
+      isSessionStarred: () => null,
+    });
+    try {
+      const row = await waitFor(() => getByTestId("sidebar-session-sess-1"));
+      fireEvent.contextMenu(row);
+      expect(showNativeContextMenu).toHaveBeenCalledWith(expect.objectContaining({
+        kind: "conversation",
+        commands: ["conversation.open", "conversation.pin"],
+      }));
+
+      emitNativeContextCommand("conversation.open");
+      expect(onLoadSession).toHaveBeenCalledWith("sess-1");
+
+      fireEvent.contextMenu(row);
+      emitNativeContextCommand("conversation.pin");
+      expect(onToggleSessionStar).toHaveBeenCalledWith("sess-1", "전체 동기화로 상태 파악");
+    } finally {
+      restore();
+    }
+  });
+
+  it("offers unpin for a pinned conversation", async () => {
+    const onToggleSessionStar = vi.fn();
+    const { getByTestId, showNativeContextMenu, emitNativeContextCommand, restore } = renderSidebar({
+      onToggleSessionStar,
+      isSessionStarred: (sessionId) => sessionId === "sess-1" ? "star-1" : null,
+    });
+    try {
+      const row = await waitFor(() => getByTestId("sidebar-session-sess-1"));
+      fireEvent.contextMenu(row);
+      expect(showNativeContextMenu).toHaveBeenCalledWith(expect.objectContaining({
+        kind: "conversation",
+        commands: ["conversation.open", "conversation.unpin"],
+      }));
+
+      emitNativeContextCommand("conversation.unpin");
+      expect(onToggleSessionStar).toHaveBeenCalledWith("sess-1", "전체 동기화로 상태 파악");
+    } finally {
+      restore();
+    }
+  });
+
+  it("does not expose session switching for an inactive conversation while streaming", async () => {
+    const onToggleSessionStar = vi.fn();
+    const { getByTestId, showNativeContextMenu, restore } = renderSidebar({
+      streaming: true,
+      onToggleSessionStar,
+      isSessionStarred: () => null,
+    });
+    try {
+      const inactiveRow = await waitFor(() => getByTestId("sidebar-session-sess-2"));
+      expect(inactiveRow).toBeDisabled();
+      fireEvent.contextMenu(inactiveRow);
+      expect(showNativeContextMenu).toHaveBeenCalledWith(expect.objectContaining({
+        kind: "conversation",
+        commands: ["conversation.pin"],
+      }));
     } finally {
       restore();
     }

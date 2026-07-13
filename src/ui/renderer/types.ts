@@ -30,6 +30,10 @@ import type {
   AssistantContextMenuAction,
   AssistantContextMenuPayload,
 } from "../../shared/assistant-context-menu.js";
+import type {
+  NativeContextMenuAction,
+  NativeContextMenuPayload,
+} from "../../shared/native-context-menu.js";
 import type { AiProviderPingIpcResult } from "../../shared/ai-provider-ping.js";
 import type {
   OpenHtmlPreviewWindowPayload,
@@ -1939,6 +1943,12 @@ export interface LvisUiApi {
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
   onAssistantContextAction: (
     cb: (action: AssistantContextMenuAction) => void,
+  ) => () => void;
+  showNativeContextMenu: (
+    payload: NativeContextMenuPayload,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  onNativeContextMenuAction: (
+    cb: (action: NativeContextMenuAction) => void,
   ) => () => void;
 }
 

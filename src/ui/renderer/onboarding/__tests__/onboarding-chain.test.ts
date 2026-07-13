@@ -4,7 +4,7 @@
  * Verifies every legal transition + that out-of-order events stay
  * no-op. 2026-05-20 redesign — the `welcome` stage was removed; the
  * new chain order is:
- *   showcase → login → memory → personalized_welcome → tour → plugins → done
+ *   showcase → login → memory → personalized_welcome → tour → done
  * Memory now precedes the welcome card so the welcome can reference
  * the 호칭/자기소개 the user just typed.
  *
@@ -65,7 +65,6 @@ describe("nextOnboardingStage", () => {
       { type: "memory-finish" },
       { type: "personalized-welcome-accept" },
       { type: "tour-finish" },
-      { type: "plugins-close" },
     ]);
     expect(result).toBe("done");
   });
@@ -79,7 +78,7 @@ describe("nextOnboardingStage", () => {
     expect(result).toBe("memory");
   });
 
-  it("tour-skip still advances to plugins", () => {
+  it("tour-skip completes onboarding without an extra plugin popup", () => {
     const result = transitionStage("idle", [
       { type: "probe-start" },
       { type: "showcase-start" },
@@ -88,7 +87,7 @@ describe("nextOnboardingStage", () => {
       { type: "personalized-welcome-accept" },
       { type: "tour-skip" },
     ]);
-    expect(result).toBe("plugins");
+    expect(result).toBe("done");
   });
 
   it("out-of-order events stay no-op", () => {
@@ -101,7 +100,7 @@ describe("nextOnboardingStage", () => {
     expect(
       nextOnboardingStage("memory", { type: "personalized-welcome-accept" }),
     ).toBe("memory");
-    expect(nextOnboardingStage("tour", { type: "plugins-close" })).toBe(
+    expect(nextOnboardingStage("tour", { type: "login-success" })).toBe(
       "tour",
     );
   });
@@ -126,7 +125,6 @@ describe("nextOnboardingStage", () => {
       "memory",
       "personalized_welcome",
       "tour",
-      "plugins",
       "done",
     ];
     for (const stage of stages) {
@@ -143,7 +141,6 @@ describe("nextOnboardingStage", () => {
       { type: "memory-finish" },
       { type: "personalized-welcome-accept" },
       { type: "tour-finish" },
-      { type: "plugins-close" },
     ]);
     expect(result).toBe("done");
   });
@@ -241,13 +238,12 @@ describe("onboardingChainReducer (state record)", () => {
       { type: "memory-finish", nickname: "Ken", introduction: "PM" },
       { type: "personalized-welcome-accept" },
       { type: "tour-finish" },
-      { type: "plugins-close" },
     ]);
     expect(result).toEqual({
       stage: "done",
       selectedScenarioId: "meeting",
       memorySeed: { nickname: "Ken", introduction: "PM" },
-      // Full funnel ending in `plugins-close` records the "chain" reason
+      // Finishing the tour records the "chain" reason
       // so the post-tour first-task proposal is allowed to fire.
       completionReason: "chain",
     });
@@ -284,13 +280,13 @@ describe("onboardingChainReducer — completionReason (post-tour-first-task gate
     expect(next.completionReason).toBe("probe-skip");
   });
 
-  it("plugins-close → done records completionReason 'chain' (full funnel incl. tour)", () => {
-    const atPlugins: OnboardingChainState = {
-      stage: "plugins",
+  it("tour-finish → done records completionReason 'chain' without opening the plugin showcase", () => {
+    const atTour: OnboardingChainState = {
+      stage: "tour",
       selectedScenarioId: null,
       memorySeed: { nickname: "", introduction: "" },
     };
-    const next = onboardingChainReducer(atPlugins, { type: "plugins-close" });
+    const next = onboardingChainReducer(atTour, { type: "tour-finish" });
     expect(next.stage).toBe("done");
     expect(next.completionReason).toBe("chain");
   });
@@ -311,11 +307,11 @@ describe("onboardingChainReducer — completionReason (post-tour-first-task gate
     // post-tour UI for a user who actually finished the tour).
     const doneViaChain = onboardingChainReducer(
       {
-        stage: "plugins",
+        stage: "tour",
         selectedScenarioId: null,
         memorySeed: { nickname: "", introduction: "" },
       },
-      { type: "plugins-close" },
+      { type: "tour-finish" },
     );
     expect(doneViaChain.completionReason).toBe("chain");
     const afterLateProbe = onboardingChainReducer(doneViaChain, {
@@ -328,11 +324,11 @@ describe("onboardingChainReducer — completionReason (post-tour-first-task gate
   it("logout-reset clears a prior completionReason", () => {
     const doneViaChain = onboardingChainReducer(
       {
-        stage: "plugins",
+        stage: "tour",
         selectedScenarioId: null,
         memorySeed: { nickname: "", introduction: "" },
       },
-      { type: "plugins-close" },
+      { type: "tour-finish" },
     );
     expect(doneViaChain.completionReason).toBe("chain");
     const reset = onboardingChainReducer(doneViaChain, { type: "logout-reset" });

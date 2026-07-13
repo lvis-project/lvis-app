@@ -17,6 +17,10 @@ import type { RefObject } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { CATEGORY_ICON, catLabel } from "./slash-picker-data.js";
 import type { InlineSlashItem } from "../hooks/use-inline-slash-menu.js";
+import {
+  useNativeContextMenu,
+  type NativeContextMenuHandlers,
+} from "../hooks/use-native-context-menu.js";
 
 interface InlineSlashMenuProps {
   open: boolean;
@@ -24,7 +28,7 @@ interface InlineSlashMenuProps {
   activeIndex: number;
   anchorRef: RefObject<HTMLTextAreaElement | null>;
   onHover: (index: number) => void;
-  onSelect: () => void;
+  onSelect: (index?: number) => void;
 }
 
 interface Anchor {
@@ -44,6 +48,7 @@ export function InlineSlashMenu({
   const { t } = useTranslation();
   const [anchor, setAnchor] = useState<Anchor | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const openNativeContextMenu = useNativeContextMenu();
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -85,6 +90,10 @@ export function InlineSlashMenu({
             data-active={active}
             data-testid={`inline-slash-item-${index}`}
             onMouseEnter={() => onHover(index)}
+            onContextMenu={(event) => openNativeContextMenu(event, "command-item", {
+              "command.activate": () => onSelect(index),
+              "command.copy": () => navigator.clipboard.writeText(item.label),
+            } as NativeContextMenuHandlers)}
             onMouseDown={(e) => {
               // Keep textarea focus — select without stealing the caret.
               e.preventDefault();
