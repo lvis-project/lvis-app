@@ -9,7 +9,7 @@ import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
-import { projectRootEquals } from "../shared/project-identity.js";
+import { projectRootEquals, projectRootKey } from "../shared/project-identity.js";
 import {
   A2A_PROJECTED_TASK_STATE_VALUES,
   type A2AProjectedTaskState,
@@ -627,6 +627,20 @@ export class MemoryManager {
   /** FTS5 cross-session search index (#1500) — one per MemoryManager instance,
    *  keyed by this.lvisDir (never a global singleton; mirrors sessionsDir). */
   private readonly searchIndex: SessionSearchIndex;
+  /**
+   * Roots explicitly detached from persisted sessions. The guard prevents a
+   * late metadata writer holding a pre-detach snapshot from resurrecting a
+   * removed project binding while that root is absent. Re-adding the same root
+   * clears this root-wide guard so NEW sessions can bind to it again.
+   */
+  private readonly detachedProjectRoots = new Set<string>();
+  /**
+   * Session-scoped tombstones survive a root re-add for the lifetime of this
+   * manager. They distinguish a detached, pre-removal session from a genuinely
+   * new session created after re-add, so a late writer cannot partially restore
+   * old project groupings.
+   */
+  private readonly detachedProjectRootsBySession = new Map<string, Set<string>>();
   private persistentContextWatchers: FSWatcher[] = [];
   private persistentContextReloadTimer: ReturnType<typeof setTimeout> | undefined;
   private persistentContextPollTimer: ReturnType<typeof setInterval> | undefined;
@@ -974,6 +988,15 @@ export class MemoryManager {
       this.searchIndex.close();
     }
   }
+  private deleteSessionFromSearchIndex(sessionId: string): void {
+    if (!this.searchIndex.open()) return;
+    try {
+      this.searchIndex.deleteSession(sessionId);
+    } finally {
+      this.searchIndex.close();
+    }
+  }
+
 
   /**
    * Boot-time integrity check → rebuild-from-JSONL recovery path (#1500 /
@@ -1189,6 +1212,28 @@ export class MemoryManager {
       safe = { ...safe, title: safe.title.slice(0, 20) };
     }
     await withFileLock(targetPath, async () => {
+      const guardedProjectKey = projectRootKey(safe.projectRoot);
+      const sessionTombstones = this.detachedProjectRootsBySession.get(sessionId);
+      const rootIsDetached = Boolean(
+        guardedProjectKey && this.detachedProjectRoots.has(guardedProjectKey),
+      );
+      const sessionWasDetached = Boolean(
+        guardedProjectKey && sessionTombstones?.has(guardedProjectKey),
+      );
+      if (guardedProjectKey && (rootIsDetached || sessionWasDetached)) {
+        // A write that first arrives while the root-wide guard is active must
+        // also remain detached after re-add. This covers an active session that
+        // had not produced a metadata file when removal began.
+        if (rootIsDetached && !sessionWasDetached) {
+          const nextTombstones = sessionTombstones ?? new Set<string>();
+          nextTombstones.add(guardedProjectKey);
+          this.detachedProjectRootsBySession.set(sessionId, nextTombstones);
+        }
+        const detached = { ...safe };
+        delete detached.projectRoot;
+        delete detached.projectName;
+        safe = detached;
+      }
       writeFileSync(targetPath, JSON.stringify(safe, null, 2), "utf-8");
     });
     // Metadata (sessionKind/routineId/projectRoot/title) is denormalized into
@@ -1199,7 +1244,82 @@ export class MemoryManager {
     const messages = this.loadSession(sessionId);
     if (Array.isArray(messages)) {
       this.indexSessionForSearch(sessionId, messages);
+    } else {
+      this.deleteSessionFromSearchIndex(sessionId);
     }
+  }
+
+  /**
+   * Allow newly-created sessions to bind to a root that the user registered
+   * again. Existing per-session tombstones intentionally remain: re-adding a
+   * folder is not an implicit reassignment of previously detached chats.
+   */
+  allowProjectRoot(projectRoot: string): void {
+    const key = projectRootKey(projectRoot);
+    if (key) this.detachedProjectRoots.delete(key);
+  }
+
+  /**
+   * Preserve conversation JSONL while detaching project metadata from sessions
+   * that belonged to a removed workspace root. Each metadata file is re-read
+   * inside its file lock so concurrent detach calls are idempotent, and only the
+   * two project fields are removed so future metadata keys remain intact.
+   */
+  async detachSessionsFromProject(projectRoot: string): Promise<number> {
+    const key = projectRootKey(projectRoot);
+    if (!key) return 0;
+    this.detachedProjectRoots.add(key);
+
+    let detachedCount = 0;
+    let invalidMetadataDetected = false;
+    const metadataFiles = readdirIfPresent(this.sessionsDir).filter((file) => file.endsWith(".meta.json"));
+    for (const file of metadataFiles) {
+      const sessionId = file.slice(0, -".meta.json".length);
+      if (!isValidSessionId(sessionId)) continue;
+      const targetPath = join(this.sessionsDir, file);
+      let changed = false;
+
+      await withFileLock(targetPath, async () => {
+        const raw = readUtf8FileIfPresent(targetPath);
+        if (raw === null) return;
+        try {
+          const parsed = JSON.parse(raw) as Record<string, unknown>;
+          if (!parsed || typeof parsed !== "object") return;
+          const storedRoot = typeof parsed.projectRoot === "string" ? parsed.projectRoot : undefined;
+          if (!storedRoot || !projectRootEquals(storedRoot, projectRoot)) return;
+
+          const sessionTombstones = this.detachedProjectRootsBySession.get(sessionId) ?? new Set<string>();
+          sessionTombstones.add(key);
+          this.detachedProjectRootsBySession.set(sessionId, sessionTombstones);
+          const next = { ...parsed };
+          delete next.projectRoot;
+          delete next.projectName;
+          writeFileSync(targetPath, JSON.stringify(next, null, 2), "utf-8");
+          changed = true;
+        } catch (error) {
+          // JSON parser diagnostics can echo source fragments. Metadata may
+          // contain private conversation context, so log only a stable class.
+          const errorName = error instanceof Error ? error.name : "UnknownError";
+          log.warn("detachSessionsFromProject: invalid metadata for %s (%s)", sessionId, errorName);
+          invalidMetadataDetected = true;
+        }
+      });
+
+      if (!changed) continue;
+      detachedCount += 1;
+      const messages = this.loadSession(sessionId);
+      if (Array.isArray(messages)) {
+        this.indexSessionForSearch(sessionId, messages);
+      } else {
+        this.deleteSessionFromSearchIndex(sessionId);
+      }
+    }
+    if (invalidMetadataDetected) {
+      throw Object.assign(new Error("workspace session metadata detach incomplete"), {
+        code: "SESSION_METADATA_INVALID",
+      });
+    }
+    return detachedCount;
   }
 
   hasSessionMetadataFile(sessionId: string): boolean {
@@ -1450,6 +1570,7 @@ export class MemoryManager {
       log.warn({ sessionId }, "unsafe caller-provided sessionId rejected in deleteSession");
       return;
     }
+    this.detachedProjectRootsBySession.delete(sessionId);
     const jsonlPath = join(this.sessionsDir, `${sessionId}.jsonl`);
     unlinkIfPresent(jsonlPath);
     const metaPath = join(this.sessionsDir, `${sessionId}.meta.json`);

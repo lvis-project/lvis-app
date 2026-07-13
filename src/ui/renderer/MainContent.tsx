@@ -210,6 +210,7 @@ export function MainContent(props: MainContentProps): ReactNode {
           api={api}
           starred={props.starred}
           sessions={props.sessions}
+          workspaceProjects={props.workspaceProjects}
           currentSessionId={props.currentSessionId}
           refreshStarred={props.refreshStarred}
           onJumpToSession={props.onJumpToSession}

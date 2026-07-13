@@ -2599,6 +2599,118 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     expect(results[0].is_error).toBeUndefined();
   });
 
+  it("allow-always resolves the central workspace lifecycle lazily and persists through it", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const allowDirectory = vi.fn(async (root: string) => [root]);
+    let lifecycle:
+      | import("../../permissions/permission-slash.js").PermissionDirectoryLifecycle
+      | undefined;
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      undefined,
+      undefined,
+      gate,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => lifecycle,
+    );
+
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-l1-allow-always-lifecycle",
+        name: "read_file",
+        input: { path: "/var/tmp/persisted-scope/notes.md" },
+      }],
+      {
+        sessionId: "sess-l1-allow-always-lifecycle",
+        permissionContext: userPermissionContext(),
+      },
+    );
+
+    const sent = await waitForApprovalPayload<{
+      id: string;
+      nonce: string;
+      hmac: string;
+      outOfAllowedDir?: { suggestedParent?: string };
+    }>(wc);
+    lifecycle = {
+      allowDirectory,
+      denyDirectory: vi.fn(async () => []),
+    };
+    gate.resolve(sent.id, {
+      requestId: sent.id,
+      choice: "allow-always",
+      rememberPattern: sent.outOfAllowedDir?.suggestedParent,
+      nonce: sent.nonce,
+      hmac: sent.hmac,
+    });
+
+    const results = await callPromise;
+    expect(results[0].is_error).toBeUndefined();
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+    expect(allowDirectory).toHaveBeenCalledTimes(1);
+    expect(allowDirectory).toHaveBeenCalledWith(
+      expect.any(String),
+      "permission-slash",
+    );
+  });
+
+  it("allow-always fails closed when a standalone executor has no workspace lifecycle", async () => {
+    const previousHome = process.env.LVIS_HOME;
+    const isolatedHome = mkdtempSync(join(tmpdir(), "lvis-executor-no-lifecycle-"));
+    process.env.LVIS_HOME = isolatedHome;
+    try {
+      const executeSpy = vi.fn(async () => "ok");
+      const registry = new ToolRegistry();
+      registry.register(makeReadFileTool(executeSpy));
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+      const callPromise = executor.executeAll(
+        [{
+          id: "tu-l1-allow-always-no-lifecycle",
+          name: "read_file",
+          input: { path: "/var/tmp/unwired-persisted-scope/notes.md" },
+        }],
+        {
+          sessionId: "sess-l1-allow-always-no-lifecycle",
+          permissionContext: userPermissionContext(),
+        },
+      );
+
+      const sent = await waitForApprovalPayload<{
+        id: string;
+        nonce: string;
+        hmac: string;
+        outOfAllowedDir?: { suggestedParent?: string };
+      }>(wc);
+      gate.resolve(sent.id, {
+        requestId: sent.id,
+        choice: "allow-always",
+        rememberPattern: sent.outOfAllowedDir?.suggestedParent,
+        nonce: sent.nonce,
+        hmac: sent.hmac,
+      });
+
+      const results = await callPromise;
+      expect(results[0].is_error).toBe(true);
+      expect(results[0].content).toContain("workspace lifecycle unavailable");
+      expect(executeSpy).not.toHaveBeenCalled();
+    } finally {
+      if (previousHome === undefined) delete process.env.LVIS_HOME;
+      else process.env.LVIS_HOME = previousHome;
+      rmSync(isolatedHome, { recursive: true, force: true });
+    }
+  });
+
   it("allow-once → invokes onTurnDirectoryGrant with the request path (turn-scope grant propagation)", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();

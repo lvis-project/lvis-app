@@ -1082,6 +1082,114 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       envelope: { treeSequence: 6 },
     });
   });
+
+  it("registers a resumed child before mailbox I/O can race workspace removal", async () => {
+    const removedRoot = join(tmpHome, "resume-removed-root");
+    const fallbackRoot = join(tmpHome, "resume-fallback-root");
+    mkdirSync(removedRoot, { recursive: true });
+    mkdirSync(fallbackRoot, { recursive: true });
+
+    let rootRegistered = true;
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    let releaseMailbox!: () => void;
+    const mailboxPending = new Promise<void>((resolve) => {
+      releaseMailbox = resolve;
+    });
+    const peekRecipientMailbox = vi.fn(async () => {
+      await mailboxPending;
+      return [] as A2AAgentMailboxEntry[];
+    });
+    const parentDeps = {
+      ...buildLoopDeps(toolRegistry),
+      getAdditionalDirectories: () => rootRegistered ? [removedRoot] : [],
+      getDefaultProject: () => ({
+        projectRoot: fallbackRoot,
+        projectName: "fallback",
+        isDefault: true,
+      }),
+      isDefaultProjectRoot: (projectRoot: string) => projectRoot === fallbackRoot,
+      authorizeProject: (projectRoot: string, projectName?: string) =>
+        rootRegistered && projectRoot === removedRoot
+          ? { projectRoot: removedRoot, projectName: projectName ?? "removed", isDefault: false }
+          : null,
+    };
+    const runner = new SubAgentRunner({
+      parentDeps,
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+      agentMessageBus: { peekRecipientMailbox } as never,
+    });
+
+    let restore = patchProvider(waitingSpawnProvider());
+    let spawned: Awaited<ReturnType<SubAgentRunner["spawn"]>>;
+    try {
+      spawned = await runner.spawn({
+        title: "resume removal race",
+        instructions: "wait",
+        sourceTools: ["noop"],
+        maxRounds: 1,
+        projectRoot: removedRoot,
+        projectName: "removed",
+      });
+    } finally {
+      restore();
+    }
+    expect(spawned.incomplete).toBe(true);
+
+    let directoriesAtRun: readonly string[] = [];
+    const runTurnSpy = vi.spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(async function (this: ConversationLoop) {
+        directoriesAtRun = this.getTurnAdditionalDirectories();
+        return {
+          text: "safe",
+          toolCalls: [],
+          route: "default",
+          stopReason: "end_turn",
+        };
+      });
+    restore = patchProvider(cleanSpawnProvider());
+    let resumePromise: Promise<Awaited<ReturnType<SubAgentRunner["resume"]>>> | undefined;
+
+    try {
+      resumePromise = runner.resume(
+        spawned.childSessionId,
+        "continue",
+        "resume removal race",
+      );
+      await vi.waitFor(() => expect(peekRecipientMailbox).toHaveBeenCalledTimes(1));
+      expect(runTurnSpy).not.toHaveBeenCalled();
+
+      await expect(runner.detachSessionsFromProject(removedRoot)).resolves.toBe(1);
+      rootRegistered = false;
+      expect(runner.revokeWorkspaceRoot(removedRoot, {
+        globalScopeWasAuthorized: true,
+      })).toMatchObject({
+        activeChildrenVisited: 1,
+      });
+
+      releaseMailbox();
+      const resumed = await resumePromise;
+      resumePromise = undefined;
+
+      expect(resumed.ok).toBe(true);
+      expect(runTurnSpy).toHaveBeenCalledTimes(1);
+      expect(directoriesAtRun).toContain(fallbackRoot);
+      expect(directoriesAtRun).not.toContain(removedRoot);
+      expect(subStore.loadSessionMetadata(spawned.childSessionId)).not.toMatchObject({
+        projectRoot: removedRoot,
+      });
+      expect((runner as unknown as { activeChildren: Map<string, unknown> }).activeChildren.size)
+        .toBe(0);
+    } finally {
+      releaseMailbox();
+      await resumePromise?.catch(() => undefined);
+      runTurnSpy.mockRestore();
+      restore();
+    }
+  });
+
   it("joins an idle sibling mailbox into resume and acknowledges only after end-turn commit", async () => {
     const originSessionId = "parent-session-mailbox";
     const toolRegistry = new ToolRegistry();

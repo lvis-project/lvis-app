@@ -1782,3 +1782,160 @@ describe("SubAgentRunner A2A bus facade", () => {
     await expect(runner.peekParentMailbox(parentSessionId)).resolves.toEqual([]);
   });
 });
+
+describe("SubAgentRunner workspace lifecycle", () => {
+  it("revokes every active child and isolates a child failure", () => {
+    const first = vi.fn(() => ({
+      sessionDirectoriesRemoved: 2,
+      turnDirectoriesRemoved: 1,
+      projectRebound: false,
+    }));
+    const failing = vi.fn(() => {
+      throw new Error("isolated child failure");
+    });
+    const last = vi.fn(() => ({
+      sessionDirectoriesRemoved: 0,
+      turnDirectoriesRemoved: 4,
+      projectRebound: true,
+    }));
+    const runner = new SubAgentRunner({} as never);
+    const activeChildren = (runner as unknown as {
+      activeChildren: Map<string, unknown>;
+    }).activeChildren;
+    const child = (childSessionId: string, revokeWorkspaceRoot: ReturnType<typeof vi.fn>) => ({
+      lease: Symbol(childSessionId),
+      childSessionId,
+      title: childSessionId,
+      background: true,
+      loop: { revokeWorkspaceRoot },
+    });
+    activeChildren.set("child-one", child("child-one", first));
+    activeChildren.set("child-failing", child("child-failing", failing));
+    activeChildren.set("child-last", child("child-last", last));
+
+    const options = {
+      globalScopeWasAuthorized: true,
+      preserveRoots: [join(tmpdir(), "removed-workspace", "child")],
+    };
+    const result = runner.revokeWorkspaceRoot(join(tmpdir(), "removed-workspace"), options);
+
+    expect(result).toEqual({
+      activeChildrenVisited: 3,
+      liveScopesRevoked: 7,
+    });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(failing).toHaveBeenCalledTimes(1);
+    expect(last).toHaveBeenCalledTimes(1);
+    expect(first.mock.calls[0]?.[0]).toBe(last.mock.calls[0]?.[0]);
+    expect(first.mock.calls[0]?.[1]).toEqual(options);
+    expect(failing.mock.calls[0]?.[1]).toEqual(options);
+    expect(last.mock.calls[0]?.[1]).toEqual(options);
+  });
+
+  it("registers a fresh child before initial metadata persistence can race workspace removal", async () => {
+    const removedRoot = join(tmpdir(), "subagent-pending-metadata-root");
+    const fallbackRoot = join(tmpdir(), "subagent-safe-default-root");
+    let rootRegistered = true;
+    let releaseInitialMetadata!: () => void;
+    const initialMetadataPending = new Promise<void>((resolve) => {
+      releaseInitialMetadata = resolve;
+    });
+    let metadataSaveCount = 0;
+    const saveSessionMetadata = vi.fn(() => {
+      metadataSaveCount += 1;
+      return metadataSaveCount === 1 ? initialMetadataPending : Promise.resolve();
+    });
+    const toolRegistry = new ToolRegistry();
+    const parentDeps = buildLoopDeps(toolRegistry);
+    Object.assign(parentDeps, {
+      getAdditionalDirectories: () => rootRegistered ? [removedRoot] : [],
+      getDefaultProject: () => ({
+        projectRoot: fallbackRoot,
+        projectName: "safe-default",
+        isDefault: true,
+      }),
+      authorizeProject: (projectRoot: string, projectName?: string) =>
+        rootRegistered && projectRoot === removedRoot
+          ? { projectRoot, projectName, isDefault: false }
+          : null,
+    });
+    const runner = new SubAgentRunner({
+      parentDeps,
+      toolRegistry,
+      subAgentMemoryManager: {
+        ...fakeSubAgentMemoryManager(),
+        saveSessionMetadata,
+      },
+    });
+    const hasProviderSpy = vi.spyOn(
+      ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+      "hasProvider",
+    ).mockReturnValue(true);
+    let directoriesAtRun: readonly string[] = [];
+    const runTurnSpy = vi.spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(async function (this: ConversationLoop) {
+        directoriesAtRun = this.getTurnAdditionalDirectories();
+        return {
+          text: "safe",
+          toolCalls: [],
+          route: "default",
+          stopReason: "end_turn",
+        };
+      });
+    let spawnPromise: Promise<SubAgentSpawnResult> | undefined;
+
+    try {
+      spawnPromise = runner.spawn({
+        title: "pending metadata child",
+        instructions: "run only after metadata persists",
+        projectRoot: removedRoot,
+        projectName: "removed-project",
+        originSessionId: "parent-session",
+      });
+      expect(saveSessionMetadata).toHaveBeenCalledTimes(1);
+      expect(runTurnSpy).not.toHaveBeenCalled();
+
+      rootRegistered = false;
+      expect(runner.revokeWorkspaceRoot(removedRoot, {
+        globalScopeWasAuthorized: true,
+      })).toMatchObject({
+        activeChildrenVisited: 1,
+        liveScopesRevoked: 1,
+      });
+
+      releaseInitialMetadata();
+      const result = await spawnPromise;
+      spawnPromise = undefined;
+
+      expect(result.ok).toBe(true);
+      expect(runTurnSpy).toHaveBeenCalledTimes(1);
+      expect(directoriesAtRun).toContain(fallbackRoot);
+      expect(directoriesAtRun).not.toContain(removedRoot);
+      expect((runner as unknown as { activeChildren: Map<string, unknown> }).activeChildren.size)
+        .toBe(0);
+    } finally {
+      releaseInitialMetadata();
+      await spawnPromise?.catch(() => undefined);
+      hasProviderSpy.mockRestore();
+      runTurnSpy.mockRestore();
+    }
+  });
+
+  it("delegates project detach and re-add to the isolated metadata store", async () => {
+    const allowProjectRoot = vi.fn();
+    const detachSessionsFromProject = vi.fn(async () => 2);
+    const runner = new SubAgentRunner({
+      subAgentMemoryManager: {
+        allowProjectRoot,
+        detachSessionsFromProject,
+      },
+    } as never);
+    const root = join(tmpdir(), "removed-subagent-workspace");
+
+    await expect(runner.detachSessionsFromProject(root)).resolves.toBe(2);
+    runner.allowProjectRoot(root);
+
+    expect(detachSessionsFromProject).toHaveBeenCalledWith(root);
+    expect(allowProjectRoot).toHaveBeenCalledWith(root);
+  });
+});

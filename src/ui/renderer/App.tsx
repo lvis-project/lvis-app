@@ -55,9 +55,10 @@ import type { ProjectIdentity } from "../../shared/project-identity.js";
 import {
   defaultProjectFromProjects,
   projectIdentityFromPayload,
-  projectRootEquals,
+  reconcileActiveProject,
   workspaceRootsToProjects,
 } from "../../shared/project-identity.js";
+import { formatIpcError } from "./format-ipc-error.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -297,11 +298,19 @@ export function App() {
       // exact string value is never shown.
       const projects = workspaceRootsToProjects(result.defaultRoot, roots, t("sidebar.projectsLabel"));
       setWorkspaceProjects(projects);
-      setActiveProject((current) => current ?? defaultProjectFromProjects(projects));
+      setActiveProject((current) => reconcileActiveProject(current, projects));
     } catch {
       // The backend still defaults chat creation to the anchored workspace root.
     }
   }, [t]);
+
+  const handleProjectRemoveError = useCallback((error?: string, message?: string) => {
+    statusPushToast({
+      severity: "error",
+      message: formatIpcError(error, message, { fallbackContext: t("sidebar.projectMenuRemove") }),
+      ttlMs: 10_000,
+    });
+  }, [statusPushToast, t]);
 
   useEffect(() => {
     void refreshWorkspaceProjects();
@@ -309,13 +318,13 @@ export function App() {
 
   const resolveKnownProject = useCallback((project: ProjectIdentity | undefined): ProjectIdentity | undefined => {
     if (!project) return undefined;
-    return workspaceProjects.find((candidate) => projectRootEquals(candidate.projectRoot, project.projectRoot)) ?? project;
+    return reconcileActiveProject(project, workspaceProjects);
   }, [workspaceProjects]);
 
   useEffect(() => {
     const sessionProject = projectIdentityFromPayload(currentSessionProject);
-    if (sessionProject) setActiveProject(resolveKnownProject(sessionProject));
-  }, [currentSessionProject, resolveKnownProject]);
+    setActiveProject(reconcileActiveProject(sessionProject, workspaceProjects));
+  }, [currentSessionProject, workspaceProjects]);
 
   const defaultWorkspaceProject = useMemo(
     () => defaultProjectFromProjects(workspaceProjects),
@@ -782,6 +791,7 @@ export function App() {
         onNewChat={onNewChat}
         onNewChatForProject={onNewChatForProject}
         onRefreshProjects={refreshWorkspaceProjects}
+        onProjectRemoveError={handleProjectRemoveError}
         workspaceProjects={workspaceProjects}
         activeProject={activeProject ?? defaultWorkspaceProject}
         onOpenMarketplace={onOpenMarketplace}

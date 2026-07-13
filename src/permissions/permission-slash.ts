@@ -61,6 +61,17 @@ export type PermissionDirResult =
   | { ok: true; verb: "list"; defaults: string[]; userAdditions: string[]; effective: string[] }
   | { ok: false; error: string; warnings?: string[]; requiresAcknowledgement?: boolean };
 
+export interface PermissionDirectoryLifecycle {
+  allowDirectory(
+    root: string,
+    source: "permission-slash",
+  ): Promise<string[]>;
+  denyDirectory(
+    root: string,
+    source: "permission-slash",
+  ): Promise<string[]>;
+}
+
 /**
  * Parse a `/permission dir ...` invocation. Accepts the full subcommand
  * string AFTER `/permission dir` (so the dispatcher can hand off the
@@ -167,6 +178,7 @@ function tokenizePermissionArgs(rawArgs: string): { ok: true; tokens: string[] }
 export async function dispatchPermissionDirCommand(
   cmd: PermissionDirCommand,
   pathOverride?: string,
+  lifecycle?: PermissionDirectoryLifecycle,
 ): Promise<PermissionDirResult> {
   if (cmd.verb === "list") {
     const current = readPermissionSettings(pathOverride);
@@ -202,7 +214,17 @@ export async function dispatchPermissionDirCommand(
         sessionDirectory: validation.canonicalPath,
       };
     }
-    const next = await addAllowedDirectoryPersist(cmd.path, pathOverride);
+    if (!pathOverride && !lifecycle) {
+      return { ok: false, error: "workspace lifecycle update failed" };
+    }
+    let next: string[];
+    try {
+      next = lifecycle && !pathOverride
+        ? await lifecycle.allowDirectory(validation.canonicalPath, "permission-slash")
+        : await addAllowedDirectoryPersist(validation.canonicalPath, pathOverride);
+    } catch {
+      return { ok: false, error: "workspace lifecycle update failed" };
+    }
     return {
       ok: true,
       verb: "allow",
@@ -212,7 +234,17 @@ export async function dispatchPermissionDirCommand(
     };
   }
   // deny
-  const next = await removeAllowedDirectoryPersist(cmd.path, pathOverride);
+  if (!pathOverride && !lifecycle) {
+    return { ok: false, error: "workspace lifecycle update failed" };
+  }
+  let next: string[];
+  try {
+    next = lifecycle && !pathOverride
+      ? await lifecycle.denyDirectory(cmd.path, "permission-slash")
+      : await removeAllowedDirectoryPersist(cmd.path, pathOverride);
+  } catch {
+    return { ok: false, error: "workspace lifecycle update failed" };
+  }
   return { ok: true, verb: "deny", persisted: next };
 }
 

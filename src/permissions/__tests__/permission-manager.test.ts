@@ -824,6 +824,40 @@ describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
     // In-memory alwaysAllowed entry also cleared → the grant no longer allows.
     expect(pm.checkDetailed(`write_file:path:${under}`, "builtin", "write").decision).toBe("ask");
   });
+  it("preserves grants at or below a separately registered descendant root", async () => {
+    const preservedChild = join(root, "child");
+    const parentOnly = join(root, "parent-only.md");
+    const childExact = preservedChild;
+    const childDeep = join(preservedChild, "src", "app.ts");
+    const childPrefixSibling = join(root, "child-old", "stale.ts");
+    for (const target of [parentOnly, childExact, childDeep, childPrefixSibling]) {
+      await pm.addAlwaysAllowedPersist(`write_file:path:${target}`, "write");
+    }
+
+    const pruned = await pm.prunePathGrantsUnderRoot(root, {
+      preserveRoots: [preservedChild],
+    });
+
+    expect(pruned.map((grant) => grant.path)).toEqual([
+      parentOnly,
+      childPrefixSibling,
+    ]);
+    expect(mockStore.rules.map((rule) => rule.pattern)).toEqual([
+      `write_file:path:${childExact}`,
+      `write_file:path:${childDeep}`,
+    ]);
+    expect(pm.checkDetailed(
+      `write_file:path:${childDeep}`,
+      "builtin",
+      "write",
+    ).decision).toBe("allow");
+    expect(pm.checkDetailed(
+      `write_file:path:${parentOnly}`,
+      "builtin",
+      "write",
+    ).decision).toBe("ask");
+  });
+
 
   // #1494 item-2 — the ORIGINAL #1493 bug was grant revival: a path-scoped tier
   // grant under a removed root would silently re-authorize writes if the SAME
@@ -853,11 +887,13 @@ describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
     expect(mockStore.rules.some((r) => r.pattern === grantPattern)).toBe(false);
   });
 
-  it("keeps a grant on the root directory entry itself (strict descendant only)", async () => {
+  it("prunes a grant on the removed root directory entry itself", async () => {
     await pm.addAlwaysAllowedPersist(`read_file:path:${root}`, "read");
     const pruned = await pm.prunePathGrantsUnderRoot(root);
-    expect(pruned).toHaveLength(0);
-    expect(mockStore.rules).toHaveLength(1);
+    expect(pruned).toEqual([
+      expect.objectContaining({ pattern: `read_file:path:${root}`, path: root }),
+    ]);
+    expect(mockStore.rules).toHaveLength(0);
   });
 
   it("keeps a grant under a sibling root (no false path-prefix match)", async () => {

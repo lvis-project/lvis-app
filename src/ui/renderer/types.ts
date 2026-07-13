@@ -1900,7 +1900,7 @@ export interface LvisWorkspaceApi {
      * the removal toast so the user knows saved grants were revoked too.
      */
     prunedGrants?: number;
-    error?: "unauthorized" | "invalid-path" | "not-an-additional-root" | "cannot-remove-default";
+    error?: "unauthorized" | "invalid-path" | "not-an-additional-root" | "cannot-remove-default" | "lifecycle-failed";
     message?: string;
   }>;
   /** Reveal a scope-revalidated file/folder in the OS file manager (location only, never opens it). */
