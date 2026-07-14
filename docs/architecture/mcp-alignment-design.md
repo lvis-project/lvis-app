@@ -179,7 +179,7 @@ sampling → host LLM — host surfaces, wired at the live-resolver step). No re
 ⇒ fail closed (No-Fallback). The plugin host's `input_required` stays a typed
 not-yet (LVIS plugin servers don't elicit yet).
 
-Built + tested (one module each, all green under `vitest run src/mcp/`):
+Built + tested (one module each, all green under `bun run test:vitest -- run src/mcp/`):
 - `plugin-server-projection.ts` — manifest/`toolSchemas` → `server/discover` +
   `tools/list` (dialect → 2020-12; authority under `lvisai/*` `_meta`).
 - `plugin-mcp-server.ts` — the RC server methods (`server/discover`/`tools/list`/
