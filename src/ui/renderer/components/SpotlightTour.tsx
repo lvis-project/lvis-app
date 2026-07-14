@@ -367,8 +367,8 @@ export function SpotlightTour({
         });
       }
       setActiveScenarioId(null);
-      // Z onboarding chain — notify the host so the chain reducer
-      // can still advance to PluginShowcase even when the user
+      // Z onboarding chain — notify the host so dismissing the tour
+      // can still complete the first-run flow.
 
       try {
         onDismiss?.(id);

@@ -56,6 +56,7 @@ export function AppShell({
   onNewChat,
   onNewChatForProject,
   onRefreshProjects,
+  onProjectRemoveError,
   workspaceProjects,
   activeProject,
   onOpenMarketplace,
@@ -136,6 +137,7 @@ export function AppShell({
   onNewChat: () => void;
   onNewChatForProject: SidebarProps["onNewChatForProject"];
   onRefreshProjects: SidebarProps["onRefreshProjects"];
+  onProjectRemoveError: SidebarProps["onProjectRemoveError"];
   workspaceProjects?: SidebarProps["projects"];
   activeProject?: USPProps["project"];
   onOpenMarketplace: () => void;
@@ -233,6 +235,7 @@ export function AppShell({
         onNewChat={onNewChat}
         onNewChatForProject={onNewChatForProject}
         onRefreshProjects={onRefreshProjects}
+        onProjectRemoveError={onProjectRemoveError}
         projects={workspaceProjects}
         streaming={streaming}
         onOpenMarketplace={onOpenMarketplace}
