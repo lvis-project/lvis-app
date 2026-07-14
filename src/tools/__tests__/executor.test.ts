@@ -1178,7 +1178,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     }
   });
 
-  it("does not reuse explicit reviewer authorization for changed tool input", async () => {
+  it("never treats free-form retry text as authority for changed tool input", async () => {
     const executeSpy = vi.fn(async () => "sent");
     const registry = new ToolRegistry();
     registry.register(createDynamicTool({
@@ -1237,7 +1237,6 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
           sessionId: "sess-reviewer-retry-changed",
           permissionContext: userPermissionContext({
             userIntent: "진행해",
-            explicitAuthorizationIntent: "진행해",
           }),
         },
       );

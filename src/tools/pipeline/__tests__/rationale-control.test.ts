@@ -9,7 +9,6 @@ import {
   isRationaleEligible,
   parseRationaleResponse,
   toRationaleProviderEnvelope,
-  transitionRationaleState,
   type ActionIdentity,
   type RationaleEligibilityProvenance,
 } from "../rationale-control.js";
@@ -103,8 +102,15 @@ describe("foreground rationale contract", () => {
     expect(FOREGROUND_RATIONALE_PRODUCTION_ENABLED).toBe(false);
     expect(RATIONALE_ACTIVATION_PREREQUISITES).toEqual([
       "persistent-ticket-store",
+      "anchor-round-budget-store",
       "server-enforced-allowed-choices",
       "one-shot-resolution-cas",
+      "rationale-only-provider-round",
+      "same-batch-sibling-cancellation",
+      "reviewer-reevaluation-cache-isolation",
+      "current-action-identity-revalidation",
+      "ordered-security-suffix-resume",
+      "invocation-lifecycle-audit",
       "bounded-modal-ui",
     ]);
   });
@@ -140,6 +146,7 @@ describe("foreground rationale contract", () => {
 
   it("binds invocation trust and the separate monotonic rationale provenance", () => {
     const anchor = createAnchor();
+    expect(anchor.rationaleRoundBudget).toBe(1);
     const baseline = createAction(anchor.anchorId);
     const trustChanged = createAction(anchor.anchorId, {
       invocationTrustOrigin: "file-content",
@@ -222,6 +229,12 @@ describe("foreground rationale contract", () => {
       "malformed",
       "sandbox-state-changed",
     ] satisfies ReviewerDispatchOutcome[]) {
+    // The user starts the turn, but the first model tool call is llm-tool-arg.
+    expect(check("fresh", { invocationTrustOrigin: "user-keyboard" })).toBe(false);
+    expect(check("fresh", {
+      rationaleProvenance: { startedFromUserKeyboard: false, taint: "none" },
+    })).toBe(false);
+    // Monotonic taint wins even though the turn originally started at the keyboard.
       expect(check(outcome)).toBe(false);
     }
     expect(check("fresh", {
@@ -244,6 +257,7 @@ describe("foreground rationale contract", () => {
     expect(serialized).not.toContain("finalInput");
     expect(serialized).not.toContain("sandboxExecutionPlan");
     expect(wire.actionDigest).toBe(control.action.actionDigest);
+    expect(wire.canonicalTargets).toEqual(control.action.canonicalTargets);
   });
 
   it("strictly parses the one bounded response for the sealed action", () => {
@@ -255,30 +269,14 @@ describe("foreground rationale contract", () => {
       actionDigest: control.action.actionDigest,
       round: 1,
       suggestion: "빌드 폴더만 삭제하려는 작업입니다.",
-      scopeAlignment: "aligned",
-      scopeReasons: ["요청한 정리 범위와 일치합니다."],
     };
 
     expect(parseRationaleResponse(valid, control)).toMatchObject(valid);
     expect(parseRationaleResponse({ ...valid, ticketId: "other" }, control)).toBeNull();
     expect(parseRationaleResponse({ ...valid, suggestion: "" }, control)).toBeNull();
     expect(parseRationaleResponse({ ...valid, suggestion: "x".repeat(501) }, control)).toBeNull();
-    expect(parseRationaleResponse({ ...valid, scopeReasons: [""] }, control)).toBeNull();
-    expect(parseRationaleResponse({
-      ...valid,
-      scopeReasons: Array.from({ length: 9 }, () => "reason"),
-    }, control)).toBeNull();
+    expect(parseRationaleResponse({ ...valid, scopeAlignment: "aligned" }, control)).toBeNull();
     expect(Object.isFrozen(parseRationaleResponse(valid, control))).toBe(true);
   });
 
-  it("allows only the declared state-machine transitions and never reviewer-to-allow", () => {
-    expect(transitionRationaleState("review_required", "request-rationale")).toBe("rationale_requested");
-    expect(transitionRationaleState("rationale_requested", "rationale-ready")).toBe("rationale_ready");
-    expect(transitionRationaleState("rationale_ready", "prompt-user")).toBe("user_pending");
-    expect(transitionRationaleState("user_pending", "allow-once")).toBe("allowed_once");
-    expect(() => transitionRationaleState("rationale_requested", "allow-once")).toThrow(
-      /invalid rationale state transition/,
-    );
-    expect(transitionRationaleState("rationale_requested", "expire")).toBe("expired");
-  });
 });

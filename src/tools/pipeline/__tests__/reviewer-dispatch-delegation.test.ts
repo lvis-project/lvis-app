@@ -190,6 +190,36 @@ describe("reviewer-dispatch delegates verdict→decision to PermissionManager (V
     },
   );
 
+
+  it.each([
+    "fresh", "cache", "approval-memory", "unavailable",
+    "error", "timeout", "malformed", "sandbox-state-changed",
+  ] satisfies ReviewerDispatchOutcome[])(
+    "%s has an explicit foreground and headless dispatcher decision",
+    async (outcome) => {
+      const successful = ["fresh", "cache", "approval-memory"].includes(outcome);
+      const verdict: RiskVerdict = { level: "low", reason: "matrix" };
+
+      const foregroundStub = makeStub({ verdict, outcome });
+      const foreground = await dispatch(
+        foregroundStub.pm, "foreground-auto",
+      ) as PermissionCheckResult;
+      expect(foregroundStub.resolveSpy).toHaveBeenCalledTimes(successful ? 1 : 0);
+      expect(foreground.decision).toBe(successful ? "allow" : "ask");
+      expect(foreground.reviewer?.outcome).toBe(outcome);
+      expect(foreground.forceModal === true).toBe(!successful);
+
+      const headlessStub = makeStub({ verdict, outcome });
+      const headless = await dispatch(headlessStub.pm, "headless") as {
+        allowed: boolean;
+        permissionResult: PermissionCheckResult;
+      };
+      expect(headlessStub.resolveSpy).toHaveBeenCalledTimes(successful ? 1 : 0);
+      expect(headless.allowed).toBe(successful);
+      expect(headless.permissionResult.decision).toBe(successful ? "allow" : "deny");
+      expect(headless.permissionResult.reviewer?.outcome).toBe(outcome);
+    },
+  );
   it("treats caller abort after a valid fresh result as terminal and non-recordable", async () => {
     const abortController = new AbortController();
     const statuses: string[] = [];
