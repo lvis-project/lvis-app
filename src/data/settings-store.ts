@@ -206,6 +206,12 @@ export interface FeatureFlags {
    * the durable mailbox joins the user's next turn instead.
    */
   subAgentAutonomousWake?: boolean;
+  /**
+   * Enables the A2A loopback route family on the shared 127.0.0.1 listener.
+   * Default false. The boot lifecycle snapshots this value once; a settings
+   * change takes effect only after restart.
+   */
+  a2aLoopbackServer?: boolean;
 
 
 
@@ -702,6 +708,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     // A2A child Message delivery is manual-by-default. Opt-in wake still uses
     // the normal parent runTurn path and its fail-closed UserPromptSubmit gate.
     subAgentAutonomousWake: false,
+    // External A2A wire routes are independently opt-in and default OFF.
+    a2aLoopbackServer: false,
 
     // Fresh installs MUST start the Z onboarding chain. Persisting an
     // explicit `false` (instead of relying on `undefined`) keeps the
@@ -2420,6 +2428,9 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   }
   if (typeof obj.subAgentAutonomousWake === "boolean") {
     result.subAgentAutonomousWake = obj.subAgentAutonomousWake;
+  }
+  if (typeof obj.a2aLoopbackServer === "boolean") {
+    result.a2aLoopbackServer = obj.a2aLoopbackServer;
   }
   if (typeof obj.onboardingCompleted === "boolean") {
     result.onboardingCompleted = obj.onboardingCompleted;
