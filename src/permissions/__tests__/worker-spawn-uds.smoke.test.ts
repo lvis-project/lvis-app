@@ -153,10 +153,13 @@ describe("worker-spawn UDS smoke (macOS, real ASRT)", () => {
 
     // Spawn the worker WRAPPED. allowWritePaths includes the temp worker dir so
     // the node worker can read its own script + the host injects the UDS path.
+    // RunAsNode makes process.execPath the Electron binary; the wrapper retains
+    // its host Node path so this smoke still exercises a standalone Node worker.
+    const nodeCommand = process.env.LVIS_TEST_NODE_EXEC_PATH ?? process.execPath;
     worker = await spawnWorker({
       pluginId: "uds-smoke-plugin",
       workerId: "uds-smoke-worker",
-      command: process.execPath, // node
+      command: nodeCommand,
       args: [workerFile],
       allowWritePaths: [tmpRoot],
       udsArgName: "--uds",

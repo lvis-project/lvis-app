@@ -260,7 +260,7 @@ grep -rn "toolSchemas\|uiActions\|PluginUiActionSpec\|declaredUiInvokableMethods
   src/ ../lvis-plugin-sdk/src ../lvis-plugin-*/plugin.json ../lvis-plugin-template ../lvis-marketplace \
   | grep -v "__tests__\|CHANGELOG"
 ```
-Plus `bunx tsc --noEmit` rc=0 (ground-truth over LSP ghosts) + `bunx vitest run` + `bun run build`.
+Plus `bunx tsc --noEmit` rc=0 (ground-truth over LSP ghosts) + `bun run test:vitest -- run` + `bun run build`.
 Deleting the `tools` union type statically proves no fallback branch survives.
 
 ## 4. Axis (b) — MCP isolation parity
