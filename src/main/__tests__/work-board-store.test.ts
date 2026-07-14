@@ -254,12 +254,26 @@ describe("WorkBoardStore — project scope", () => {
 
 describe("WorkBoardStore — MAX_ITEMS cap", () => {
   it("rejects create once the board holds MAX_ITEMS items", async () => {
-    const { store, cleanup } = tempBoard();
+    const { store, path, cleanup } = tempBoard();
     try {
-      for (let i = 0; i < MAX_ITEMS; i++) {
-        const r = await store.create({ title: `item-${i}` });
-        expect(r.status).toBe("created");
-      }
+      const timestamp = new Date(FIXED_NOW).toISOString();
+      writeFileSync(
+        path,
+        JSON.stringify({
+          version: 1,
+          nextId: MAX_ITEMS + 1,
+          items: Array.from({ length: MAX_ITEMS }, (_, index) => ({
+            id: index + 1,
+            title: `item-${index}`,
+            status: "planned",
+            priority: "medium",
+            created_at: timestamp,
+            updated_at: timestamp,
+          })),
+        }),
+        "utf-8",
+      );
+
       const overflow = await store.create({ title: "one too many" });
       expect(overflow.status).toBe("invalid");
       if (overflow.status !== "invalid") throw new Error("unreachable");

@@ -481,6 +481,7 @@ interface TrackedSubAgentRun {
   suspension?: SubAgentSuspension;
   abort?: () => void;
   terminalCommitClaimed?: boolean;
+  cancellationPersistencePending?: boolean;
   initialMetadataFailed?: boolean;
   ephemeralFallbackConsumed?: boolean;
   ephemeralParentDelivery?: {
@@ -1425,9 +1426,15 @@ export class SubAgentRunner {
     taskState: A2AProjectedTaskState,
   ): Promise<void> {
     if (!isA2ATerminalTaskState(taskState)) return;
-    const cleaned = await this.deps.agentMessageBus
-      ?.cleanupTerminalRecipientMailbox?.(childSessionId);
-    if (cleaned && !cleaned.ok) {
+    try {
+      const cleaned = await this.deps.agentMessageBus
+        ?.cleanupTerminalRecipientMailbox?.(childSessionId);
+      if (!cleaned || cleaned.ok) return;
+      log.warn(
+        "sub-agent terminal agent mailbox cleanup failed for %s",
+        childSessionId,
+      );
+    } catch {
       log.warn(
         "sub-agent terminal agent mailbox cleanup failed for %s",
         childSessionId,
@@ -1653,6 +1660,7 @@ export class SubAgentRunner {
     }
     delete run.abort;
     this.updateRun(run, patch);
+    run.terminalCommitClaimed = isA2ATerminalTaskState(run.taskState);
   }
 
   private pruneTrackedRuns(): void {
@@ -2499,6 +2507,7 @@ export class SubAgentRunner {
     if (
       !isDetachedTerminalTask
       && trackedRun
+      && !trackedRun.cancellationPersistencePending
       && trackedRun.childSessionId === childSessionId
       && trackedRun.originSessionId === meta.a2aWireInternalOrigin
     ) {
@@ -2573,11 +2582,32 @@ export class SubAgentRunner {
     ) {
       return { ok: false, reason: "task-not-found" };
     }
-    if (trackedRun && isA2ATerminalTaskState(trackedRun.taskState)) {
+    const canceledMeta: A2AWireBoundMetadata = {
+      ...meta,
+      subAgentTaskState: A2ATaskState.CANCELED,
+      subAgentSuspensionReason: undefined,
+      subAgentSuspensionPrompt: undefined,
+    };
+    if (trackedRun?.cancellationPersistencePending) {
+      try {
+        await this.deps.subAgentMemoryManager.saveSessionMetadata(
+          childSessionId,
+          canceledMeta,
+        );
+      } catch {
+        return {
+          ok: false,
+          reason: "storage-failed",
+        };
+      }
+      trackedRun.cancellationPersistencePending = false;
+      await this.cleanupTerminalRecipientMailbox(
+        childSessionId,
+        A2ATaskState.CANCELED,
+      );
       return {
-        ok: false,
-        reason: "task-not-cancelable",
-        run: this.snapshotA2AWireRun(childSessionId, meta),
+        ok: true,
+        run: this.snapshotA2AWireRun(childSessionId, canceledMeta),
       };
     }
     if (trackedRun?.terminalCommitClaimed) {
@@ -2587,13 +2617,15 @@ export class SubAgentRunner {
         run: this.snapshotA2AWireRun(childSessionId, meta),
       };
     }
-    const canceledMeta: A2AWireBoundMetadata = {
-      ...meta,
-      subAgentTaskState: A2ATaskState.CANCELED,
-      subAgentSuspensionReason: undefined,
-      subAgentSuspensionPrompt: undefined,
-    };
+    if (trackedRun && isA2ATerminalTaskState(trackedRun.taskState)) {
+      return {
+        ok: false,
+        reason: "task-not-cancelable",
+        run: this.snapshotA2AWireRun(childSessionId, meta),
+      };
+    }
     if (trackedRun?.abort) {
+      trackedRun.cancellationPersistencePending = true;
       trackedRun.abort();
       delete trackedRun.abort;
       this.updateRun(trackedRun, {
@@ -2610,9 +2642,13 @@ export class SubAgentRunner {
         return {
           ok: false,
           reason: "storage-failed",
-          run: this.snapshotA2AWireRun(childSessionId, meta),
         };
       }
+      trackedRun.cancellationPersistencePending = false;
+      await this.cleanupTerminalRecipientMailbox(
+        childSessionId,
+        A2ATaskState.CANCELED,
+      );
       return {
         ok: true,
         run: this.snapshotA2AWireRun(childSessionId, canceledMeta),
@@ -2635,7 +2671,6 @@ export class SubAgentRunner {
       return {
         ok: false,
         reason: "storage-failed",
-        run: this.snapshotA2AWireRun(childSessionId, meta),
       };
     }
     if (trackedRun) {
@@ -2646,6 +2681,10 @@ export class SubAgentRunner {
         suspension: undefined,
       });
     }
+    await this.cleanupTerminalRecipientMailbox(
+      childSessionId,
+      A2ATaskState.CANCELED,
+    );
     return {
       ok: true,
       run: this.snapshotA2AWireRun(

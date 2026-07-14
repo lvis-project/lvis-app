@@ -1088,6 +1088,124 @@ describe("SubAgentRunner A2A wire security contract", () => {
     )).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
   });
 
+  it("keeps a durably waiting run cancelable and cleans its terminal mailbox", async () => {
+    vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue(INPUT_REQUIRED_TURN);
+    const cleanupTerminalRecipientMailbox = vi.fn(async () => ({ ok: true as const }));
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: store,
+      agentMessageBus: { cleanupTerminalRecipientMailbox } as never,
+    });
+    const binding = makeBinding();
+    const waiting = await runner.spawnFromA2AWire(
+      { messageText: "Start the work." },
+      binding,
+      { onDurablyLinked: async () => undefined },
+    );
+    expect(waiting).toMatchObject({
+      ok: true,
+      suspension: { reason: "budget" },
+    });
+
+    await expect(runner.cancelA2AWireRun(
+      waiting.childSessionId,
+      { handlerId: binding.handlerId },
+    )).resolves.toMatchObject({
+      ok: true,
+      run: { taskState: "TASK_STATE_CANCELED" },
+    });
+    expect(store.loadSessionMetadata(waiting.childSessionId)).toMatchObject({
+      subAgentTaskState: "TASK_STATE_CANCELED",
+    });
+    expect(cleanupTerminalRecipientMailbox).toHaveBeenCalledOnce();
+  });
+
+  it("retries owned cancellation persistence after provider finalization wins the latch", async () => {
+    let enterTurn!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enterTurn = resolve;
+    });
+    let finishTurn!: (result: TurnResult) => void;
+    const turn = new Promise<TurnResult>((resolve) => {
+      finishTurn = resolve;
+    });
+    vi.spyOn(ConversationLoop.prototype, "runTurn").mockImplementation(async () => {
+      enterTurn();
+      return await turn;
+    });
+    const originalSave = store.saveSessionMetadata.bind(store);
+    let canceledSaveAttempts = 0;
+    vi.spyOn(store, "saveSessionMetadata").mockImplementation(async (...args) => {
+      if (args[1].subAgentTaskState === "TASK_STATE_CANCELED") {
+        canceledSaveAttempts += 1;
+        if (canceledSaveAttempts <= 2) throw new Error("simulated canceled metadata failure");
+      }
+      await originalSave(...args);
+    });
+    const cleanupTerminalRecipientMailbox = vi.fn(async () => ({ ok: true as const }));
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: store,
+      agentMessageBus: { cleanupTerminalRecipientMailbox } as never,
+    });
+    const binding = makeBinding();
+    let childSessionId = "";
+    const running = runner.spawnFromA2AWire(
+      { messageText: "Start the work." },
+      binding,
+      {
+        onDurablyLinked: async (link) => {
+          childSessionId = link.childSessionId;
+        },
+      },
+    );
+    await entered;
+
+    await expect(runner.cancelA2AWireRun(
+      childSessionId,
+      { handlerId: binding.handlerId },
+    )).resolves.toEqual({ ok: false, reason: "storage-failed" });
+    expect(store.loadSessionMetadata(childSessionId)).toMatchObject({
+      subAgentTaskState: "TASK_STATE_SUBMITTED",
+    });
+    expect(runner.getA2AWireRunSnapshot(
+      childSessionId,
+      { handlerId: binding.handlerId },
+    )).toMatchObject({ taskState: "TASK_STATE_SUBMITTED" });
+
+    finishTurn(COMPLETED_TURN);
+    await expect(running).resolves.toMatchObject({
+      ok: false,
+      stopReason: "interrupted",
+    });
+    expect(store.loadSessionMetadata(childSessionId)).toMatchObject({
+      subAgentTaskState: "TASK_STATE_SUBMITTED",
+    });
+    expect(runner.getA2AWireRunSnapshot(
+      childSessionId,
+      { handlerId: binding.handlerId },
+    )).toMatchObject({ taskState: "TASK_STATE_SUBMITTED" });
+
+    await expect(runner.cancelA2AWireRun(
+      childSessionId,
+      { handlerId: binding.handlerId },
+    )).resolves.toMatchObject({
+      ok: true,
+      run: { taskState: "TASK_STATE_CANCELED" },
+    });
+    expect(canceledSaveAttempts).toBe(3);
+    expect(store.loadSessionMetadata(childSessionId)).toMatchObject({
+      subAgentTaskState: "TASK_STATE_CANCELED",
+    });
+    expect(runner.getA2AWireRunSnapshot(
+      childSessionId,
+      { handlerId: binding.handlerId },
+    )).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
+    expect(cleanupTerminalRecipientMailbox).toHaveBeenCalledOnce();
+  });
+
   it("routes cancellation to the in-flight wire resume attempt", async () => {
     const originSessionId = "wire-origin-handler-a";
     const resumeId = makeResumeId(originSessionId);
