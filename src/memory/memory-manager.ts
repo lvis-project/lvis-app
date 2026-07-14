@@ -1575,7 +1575,7 @@ export class MemoryManager {
 
     await withAllMetadataLocks(0, async () => {
       const plans: DetachPlan[] = [];
-      // Phase 1: validate every metadata file while every candidate lock is
+      // Validate every metadata file while every candidate lock is
       // held. No file is rewritten until the complete preflight succeeds.
       for (const { sessionId, targetPath } of metadataTargets) {
         try {
@@ -1607,7 +1607,7 @@ export class MemoryManager {
         }
       }
 
-      // Phase 2: atomic per-file replacement. An I/O failure may leave earlier
+      // Replace each metadata file atomically. An I/O failure may leave earlier
       // files detached, but the root intent remains active and a retry repairs
       // both metadata and the complete search index.
       for (const { sessionId, targetPath, normalized, next } of plans) {
