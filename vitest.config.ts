@@ -1,6 +1,7 @@
 import { defineConfig } from "vitest/config";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import "./scripts/assert-electron-node-vitest.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const rootPath = (p: string) => path.resolve(ROOT, p);
