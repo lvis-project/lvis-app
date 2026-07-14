@@ -114,7 +114,7 @@ const PERMISSION_TEXT_COLOR: Record<PermissionModeVariant, string> = {
   strict: "text-destructive",
   auto: "text-warning",
   allow: "text-success",
-  unknown: "text-muted-foreground",
+  unknown: "text-input-bar-placeholder",
 };
 
 export function InputActionBar({
@@ -208,7 +208,7 @@ export function InputActionBar({
           <Button
             variant="outline"
             size="sm"
-            className="relative h-[26px] w-[26px] shrink-0 bg-input-bar p-0"
+            className="relative h-[26px] w-[26px] shrink-0 border-input-bar-border bg-input-bar-subtle p-0 text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) hover:text-input-bar-action focus-visible:ring-input-bar-focus motion-reduce:transition-none"
             title={assistantTitle}
             aria-label={assistantTitle}
             data-testid="iab-assistant-context-button"
@@ -230,7 +230,7 @@ export function InputActionBar({
             onClick={() => void onAttach()}
             disabled={attachDisabled}
             data-testid="iab-attach-button"
-            className="h-[26px] w-[26px] shrink-0 bg-input-bar p-0"
+            className="h-[26px] w-[26px] shrink-0 border-input-bar-border bg-input-bar-subtle p-0 text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) hover:text-input-bar-action focus-visible:ring-input-bar-focus motion-reduce:transition-none"
             title={attachButtonLabel(attachDisabled, attachDisabledReason)}
             aria-label={attachButtonLabel(attachDisabled, attachDisabledReason)}
           >
@@ -250,7 +250,7 @@ export function InputActionBar({
               type="button"
               onClick={onCancel}
               data-testid="composer-cancel-button"
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-80"
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-input-bar-border bg-input-bar-subtle text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) focus:outline-none focus-visible:ring-2 focus-visible:ring-input-bar-focus motion-reduce:transition-none"
               title={t("bottomActionRow.cancelButton")}
               aria-label={t("bottomActionRow.cancelButton")}
             >
@@ -262,7 +262,7 @@ export function InputActionBar({
             onClick={onSend}
             disabled={isSendDisabled}
             data-testid="composer-send-button"
-            className="inline-flex h-[26px] shrink-0 items-center gap-1.5 px-3 text-xs font-semibold"
+            className="inline-flex h-[26px] shrink-0 items-center gap-1.5 px-3 text-caption font-semibold focus-visible:ring-input-bar-focus"
           >
             <span>{t("bottomActionRow.sendButton")}</span>
             <KbdInverse>⏎</KbdInverse>
@@ -323,7 +323,7 @@ function StatusSubRow({
   return (
     <div
       data-testid="iab-status-row"
-      className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 pb-1.5 text-[11px] text-muted-foreground"
+      className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 pb-1.5 text-caption text-input-bar-placeholder"
     >
       {/* Status sub-row order (user): ring on the LEFT; then a right-aligned
           cluster — [대기 승인 N] · permission(mode only) · model ·
@@ -343,7 +343,7 @@ function StatusSubRow({
                 type="button"
                 onClick={onOpenApprovalQueue}
                 data-testid="iab-status-pending"
-                className="shrink-0 rounded-full border border-warning px-1.5 tabular-nums text-warning hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="shrink-0 rounded-full border border-warning px-1.5 tabular-nums text-warning transition-opacity duration-(--motion-fast) ease-(--motion-ease-standard) hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none"
                 title={t("permissionModeBadge.queueButtonLabel", {
                   pendingText: t("permissionModeBadge.pendingTextCount", { count: pendingApprovals }),
                 })}
@@ -373,7 +373,7 @@ function StatusSubRow({
             onClick={onOpenPermissions}
             data-testid="iab-status-permission"
             data-mode={permissionMode}
-            className={`shrink-0 truncate hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring ${PERMISSION_TEXT_COLOR[permissionMode]}`}
+            className={`shrink-0 truncate transition-opacity duration-(--motion-fast) ease-(--motion-ease-standard) hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${PERMISSION_TEXT_COLOR[permissionMode]}`}
             title={permissionLabel}
           >
             {permissionLabel}
@@ -397,10 +397,10 @@ function StatusSubRow({
             type="button"
             onClick={onOpenModelSettings}
             data-testid="iab-status-model"
-            className="inline-flex min-w-0 shrink items-center gap-1 text-left hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="inline-flex min-w-0 shrink items-center gap-1 text-left transition-opacity duration-(--motion-fast) ease-(--motion-ease-standard) hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none"
             title={vendorModel}
           >
-            <Brain className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <Brain className="h-3 w-3 shrink-0 text-input-bar-placeholder" aria-hidden="true" />
             <span className="min-w-0 truncate">{displayModel}</span>
           </button>
         ) : (
@@ -409,7 +409,7 @@ function StatusSubRow({
             className="inline-flex min-w-0 shrink items-center gap-1"
             title={vendorModel}
           >
-            <Brain className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <Brain className="h-3 w-3 shrink-0 text-input-bar-placeholder" aria-hidden="true" />
             <span className="min-w-0 truncate">{displayModel}</span>
           </span>
         )}
@@ -424,7 +424,7 @@ function StatusSubRow({
         {/* Active-state dot — trailing (far right). */}
         <span
           data-testid="iab-status-active-dot"
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? "bg-success" : "bg-muted-foreground/(--opacity-muted)"}`}
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? "bg-success" : "bg-input-bar-placeholder/(--opacity-muted)"}`}
           aria-label={active ? t("inputActionBar.statusActive") : t("inputActionBar.statusInactive")}
         />
       </div>
@@ -477,7 +477,7 @@ function ShortcutsButton() {
               size="icon"
               data-testid="composer-shortcuts-button"
               aria-label={label}
-              className="h-[26px] w-[26px] shrink-0 text-muted-foreground"
+              className="h-[26px] w-[26px] shrink-0 text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-subtle hover:text-input-bar-action focus-visible:ring-input-bar-focus motion-reduce:transition-none"
             >
               <HelpCircle className="h-3.5 w-3.5" />
             </Button>
@@ -487,7 +487,7 @@ function ShortcutsButton() {
       </Tooltip>
 
       <PopoverContent align="end" className="w-56 p-2" data-testid="composer-shortcuts-popover">
-        <div className="px-1 pb-1.5 text-[11px] font-medium text-muted-foreground">{label}</div>
+        <div className="px-1 pb-1.5 text-caption font-medium text-muted-foreground">{label}</div>
         <div className="flex flex-col gap-0.5">
           <ShortcutRow keys={["⏎"]} label={t("bottomActionRow.shortcutSend")} />
           <ShortcutRow keys={["⇧⏎"]} label={t("bottomActionRow.shortcutNewline")} />
@@ -502,7 +502,7 @@ function ShortcutsButton() {
 
 function ShortcutRow({ keys, label }: { keys: string[]; label: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded px-1 py-0.5 text-[11px]">
+    <div className="flex items-center justify-between gap-3 rounded px-1 py-0.5 text-caption">
       <span className="text-foreground">{label}</span>
       <span className="inline-flex items-center gap-1">
         {keys.map((k) => (
@@ -515,7 +515,7 @@ function ShortcutRow({ keys, label }: { keys: string[]; label: string }) {
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="inline-flex h-4 min-w-[16px] items-center justify-center rounded border border-border border-b-2 bg-muted px-1 font-mono text-[10px] text-muted-foreground">
+    <kbd className="inline-flex h-4 min-w-[16px] items-center justify-center rounded border border-border border-b-2 bg-muted px-1 font-mono text-micro text-muted-foreground">
       {children}
     </kbd>
   );
@@ -524,7 +524,7 @@ function Kbd({ children }: { children: ReactNode }) {
 function KbdInverse({ children }: { children: ReactNode }) {
   // theme tokens 만 사용 (theme-snapshot.test.tsx 가 black/white 직접 참조 금지).
   return (
-    <kbd className="inline-flex h-4 min-w-[16px] items-center justify-center rounded border border-primary-foreground/(--opacity-muted) border-b-2 bg-primary-foreground/(--opacity-soft) px-1 font-mono text-[10px] text-primary-foreground">
+    <kbd className="inline-flex h-4 min-w-[16px] items-center justify-center rounded border border-primary-foreground/(--opacity-muted) border-b-2 bg-primary-foreground/(--opacity-soft) px-1 font-mono text-micro text-primary-foreground">
       {children}
     </kbd>
   );

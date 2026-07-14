@@ -1,12 +1,15 @@
 import type { SessionSummary } from "../hooks/use-sessions.js";
+import type { ProjectIdentity } from "../../../shared/project-identity.js";
+import { findWorkspaceProject } from "../../../shared/project-identity.js";
 
 /**
  * Pure aggregation for the Insights "프로젝트별 대화" (conversations-by-project)
  * panel. Extracted from StarredView so the group-by join can be unit-tested
  * without rendering the view.
  *
- * A session is grouped by its project label — `projectName` when present, else
- * the basename of `projectRoot`. Sessions that carry neither fall through to the
+ * A session is grouped by its current registry label when available; legacy
+ * callers without a registry fall back to `projectName` or the root basename.
+ * Sessions that carry no current named-project identity fall through to the
  * caller-supplied `fallbackLabel` (e.g. "프로젝트 없음"). The regression this
  * guards (2026-07): new main sessions under the default/base-directory project
  * were not persisting their project identity, so every conversation collapsed
@@ -26,11 +29,19 @@ export function pathBasename(value: string | undefined): string | undefined {
 }
 
 /**
- * Resolve the project label for a single session. `projectName` wins; a bare
- * `projectRoot` falls back to its basename. Returns `undefined` only when the
- * session has neither — the caller substitutes its localized fallback.
+ * Resolve the current project label for a single session. When the project
+ * registry is available, its canonical root match is authoritative so stale
+ * persisted names cannot bypass duplicate-basename disambiguation. A missing,
+ * default, or removed root remains a general conversation.
  */
-export function projectLabelForSession(session: SessionSummary): string | undefined {
+export function projectLabelForSession(
+  session: SessionSummary,
+  workspaceProjects?: readonly ProjectIdentity[],
+): string | undefined {
+  if (workspaceProjects) {
+    const currentProject = findWorkspaceProject(workspaceProjects, session.projectRoot);
+    return currentProject && !currentProject.isDefault ? currentProject.projectName : undefined;
+  }
   return session.projectName?.trim() || pathBasename(session.projectRoot);
 }
 
@@ -44,11 +55,12 @@ export function projectLabelForSession(session: SessionSummary): string | undefi
 export function groupSessionsByProject(
   sessions: readonly SessionSummary[],
   fallbackLabel: string,
+  workspaceProjects?: readonly ProjectIdentity[],
 ): ProjectSessionGroup[] {
   const groups = new Map<string, SessionSummary[]>();
   const sorted = [...sessions].sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
   for (const session of sorted) {
-    const label = projectLabelForSession(session) ?? fallbackLabel;
+    const label = projectLabelForSession(session, workspaceProjects) ?? fallbackLabel;
     const list = groups.get(label) ?? [];
     list.push(session);
     groups.set(label, list);

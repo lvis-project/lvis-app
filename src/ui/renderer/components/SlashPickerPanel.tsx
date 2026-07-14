@@ -23,6 +23,10 @@ import { PopoverContent } from "../../../components/ui/popover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
 import { useSlashPickerRuntime } from "../hooks/use-slash-picker-runtime.js";
+import {
+  useNativeContextMenu,
+  type NativeContextMenuHandlers,
+} from "../hooks/use-native-context-menu.js";
 import type { QuickAction } from "./command-actions.js";
 import type { PluginEntry } from "./PluginGridButton.js";
 import {
@@ -95,6 +99,7 @@ export function SlashPickerPanel({
   const [step, setStep] = useState<Category | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
+  const openNativeContextMenu = useNativeContextMenu();
   // Live MCP-server tools + registered skills (real host IPC, fetched while
   // the panel is mounted/open).
   const { mcpTools, skills } = useSlashPickerRuntime(true);
@@ -186,6 +191,10 @@ export function SlashPickerPanel({
       className={PICKER_ROW_CLASS}
       value={`${c.cmd} ${t(c.labelKey)}`}
       onSelect={() => runSlash(c.cmd)}
+      onContextMenu={(event) => openNativeContextMenu(event, "command-item", {
+        "command.activate": () => runSlash(c.cmd),
+        "command.copy": () => navigator.clipboard.writeText(c.cmd),
+      } as NativeContextMenuHandlers)}
     >
       <PickerIconSlot>
         <CATEGORY_ICON.command className={PICKER_ICON_CLASS} />
@@ -195,7 +204,16 @@ export function SlashPickerPanel({
   );
 
   const renderActionRow = (a: QuickAction) => (
-    <CommandItem key={a.id} className={PICKER_ROW_CLASS} value={a.label} onSelect={() => runAction(a)}>
+    <CommandItem
+      key={a.id}
+      className={PICKER_ROW_CLASS}
+      value={a.label}
+      onSelect={() => runAction(a)}
+      onContextMenu={(event) => openNativeContextMenu(event, "command-item", {
+        "command.activate": () => runAction(a),
+        "command.copy": () => navigator.clipboard.writeText(a.label),
+      } as NativeContextMenuHandlers)}
+    >
       <PickerIconSlot>
         <CATEGORY_ICON.shortcut className={PICKER_ICON_CLASS} />
       </PickerIconSlot>
@@ -207,7 +225,16 @@ export function SlashPickerPanel({
     const Icon = pluginIconFor({ icon: p.icon, iconText: p.iconText });
     const needsDoctor = p.doctorRequired || p.loadStatus === "failed";
     return (
-      <CommandItem key={p.viewKey} className={PICKER_ROW_CLASS} value={p.label} onSelect={() => runPlugin(p)}>
+      <CommandItem
+        key={p.viewKey}
+        className={PICKER_ROW_CLASS}
+        value={p.label}
+        onSelect={() => runPlugin(p)}
+        onContextMenu={(event) => openNativeContextMenu(event, "command-item", {
+          "command.activate": () => runPlugin(p),
+          "command.copy": () => navigator.clipboard.writeText(p.label),
+        } as NativeContextMenuHandlers)}
+      >
         <PickerIconSlot>
           <Suspense fallback={<span className={PICKER_ICON_CLASS} />}>
             <Icon
@@ -232,6 +259,10 @@ export function SlashPickerPanel({
       className={PICKER_ROW_CLASS}
       value={`${m.name} ${m.serverId}`}
       onSelect={() => runText(m.name)}
+      onContextMenu={(event) => openNativeContextMenu(event, "command-item", {
+        "command.activate": () => runText(m.name),
+        "command.copy": () => navigator.clipboard.writeText(m.name),
+      } as NativeContextMenuHandlers)}
     >
       <PickerIconSlot>
         <McpIcon className={PICKER_ICON_CLASS} />
@@ -247,6 +278,10 @@ export function SlashPickerPanel({
       className={PICKER_ROW_CLASS}
       value={`${s.name} ${s.description}`}
       onSelect={() => runText(s.name)}
+      onContextMenu={(event) => openNativeContextMenu(event, "command-item", {
+        "command.activate": () => runText(s.name),
+        "command.copy": () => navigator.clipboard.writeText(s.name),
+      } as NativeContextMenuHandlers)}
     >
       <PickerIconSlot>
         <SkillIcon className={PICKER_ICON_CLASS} />
@@ -299,6 +334,10 @@ export function SlashPickerPanel({
                     className={PICKER_ROW_CLASS}
                     value={catLabel(c)}
                     onSelect={() => setStep(c)}
+                    onContextMenu={(event) => openNativeContextMenu(event, "command-item", {
+                      "command.activate": () => setStep(c),
+                      "command.copy": () => navigator.clipboard.writeText(catLabel(c)),
+                    } as NativeContextMenuHandlers)}
                     data-testid={`slash-picker-cat-${c}`}
                   >
                     <PickerIconSlot>
@@ -321,6 +360,9 @@ export function SlashPickerPanel({
             <CommandItem
               value="__back__"
               onSelect={() => setStep(null)}
+              onContextMenu={(event) => openNativeContextMenu(event, "command-item", {
+                "command.activate": () => setStep(null),
+              } as NativeContextMenuHandlers)}
               className={PICKER_BACK_ROW_CLASS}
               data-testid="slash-picker-back"
             >

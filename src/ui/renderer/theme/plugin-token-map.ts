@@ -21,6 +21,12 @@ function tripleToHsl(triple: string): string {
   return `hsla(${m[1]}, ${m[2]}%, ${m[3]}%, ${m[4]})`;
 }
 
+function tripleToHslWithAlpha(triple: string, alpha: number): string {
+  const m = _HSL_RE.exec(triple.trim());
+  if (!m) return tripleToHsl(triple);
+  return `hsla(${m[1]}, ${m[2]}%, ${m[3]}%, ${alpha})`;
+}
+
 // Theme-invariant tokens — same across all bundles.
 //
 // These values reach plugin webviews via the primed token payload that
@@ -35,6 +41,18 @@ const _INVARIANT: Partial<Record<LvisTokenName, string>> = {
   "--lvis-text-sm":         "0.875rem",
   "--lvis-text-base":       "1rem",
   "--lvis-text-lg":         "1.125rem",
+  "--lvis-text-micro":      "0.75rem",
+  "--lvis-text-caption":    "0.75rem",
+  "--lvis-text-body-sm":    "0.875rem",
+  "--lvis-text-body":       "1rem",
+  "--lvis-leading-micro":   "1rem",
+  "--lvis-leading-caption": "1.125rem",
+  "--lvis-leading-body-sm": "1.25rem",
+  "--lvis-leading-body":    "1.5rem",
+  "--lvis-tracking-micro":  "0.015em",
+  "--lvis-tracking-caption":"0em",
+  "--lvis-tracking-body-sm":"0em",
+  "--lvis-tracking-body":   "0em",
   "--lvis-weight-normal":   "400",
   "--lvis-weight-medium":   "500",
   "--lvis-weight-semibold": "600",
@@ -44,6 +62,11 @@ const _INVARIANT: Partial<Record<LvisTokenName, string>> = {
   "--lvis-space-4":         "1rem",
   "--lvis-motion-fast":     "120ms",
   "--lvis-motion-normal":   "180ms",
+  "--lvis-motion-slow":     "240ms",
+  "--lvis-motion-layout":   "300ms",
+  "--lvis-motion-ease-standard": "cubic-bezier(0.2, 0, 0, 1)",
+  "--lvis-motion-ease-out":      "cubic-bezier(0.22, 1, 0.36, 1)",
+  "--lvis-motion-ease-in-out":   "cubic-bezier(0.4, 0, 0.2, 1)",
 };
 
 /**
@@ -76,6 +99,12 @@ export function bundleToPluginTokens(bundle: ThemeBundle): Record<LvisTokenName,
   const secondary = tripleToHsl(t.secondary);
   const fg        = tripleToHsl(t.foreground);
   const ring      = tripleToHsl(t.ring);
+  const userBg    = tripleToHsl(t["message-user-bg"]);
+  const userFg    = tripleToHsl(t["message-user-fg"]);
+  const inputBg   = tripleToHsl(t["input-bar-bg"]);
+  const inputPlaceholder = tripleToHslWithAlpha(t.foreground, 0.82);
+  const inputBorder = tripleToHsl(t["ui-line"]);
+  const inputSubtle = tripleToHsl(t.muted);
 
   // Mix percentages scale by shell mode and high-contrast requirement.
   // AA contrast on dark surfaces; HC bundle bumps mix to 24/40 for elevated contrast over body background.
@@ -103,6 +132,19 @@ export function bundleToPluginTokens(bundle: ThemeBundle): Record<LvisTokenName,
     "--lvis-success-fg":      tripleToHsl(t["success-foreground"]),
     "--lvis-border":          tripleToHsl(t.border),
     "--lvis-ring":            ring,
+    "--lvis-message-user-bg":       userBg,
+    "--lvis-message-user-fg":       userFg,
+    "--lvis-message-user-border":   userFg,
+    "--lvis-message-user-muted":    userFg,
+    "--lvis-message-user-action":   userFg,
+    "--lvis-message-user-emphasis": userFg,
+    "--lvis-input-bar-bg":          inputBg,
+    "--lvis-input-bar-fg":          fg,
+    "--lvis-input-bar-placeholder": inputPlaceholder,
+    "--lvis-input-bar-border":      inputBorder,
+    "--lvis-input-bar-focus":       ring,
+    "--lvis-input-bar-subtle":      inputSubtle,
+    "--lvis-input-bar-action":      fg,
     "--lvis-radius":          "0.6rem",
     "--lvis-radius-sm":       "0.25rem",
     // ── Derived tinted-surface tokens ────────────────────────────────────────

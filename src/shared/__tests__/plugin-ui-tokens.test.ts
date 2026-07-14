@@ -11,9 +11,57 @@ const DERIVED_TOKENS = [
   "--lvis-focus-shadow",
 ] as const;
 
-describe("LVIS_TOKEN_NAMES — derived tinted-surface tokens", () => {
+const CHAT_SEMANTIC_TOKENS = [
+  "--lvis-message-user-bg",
+  "--lvis-message-user-fg",
+  "--lvis-message-user-border",
+  "--lvis-message-user-muted",
+  "--lvis-message-user-action",
+  "--lvis-message-user-emphasis",
+  "--lvis-input-bar-bg",
+  "--lvis-input-bar-fg",
+  "--lvis-input-bar-placeholder",
+  "--lvis-input-bar-border",
+  "--lvis-input-bar-focus",
+  "--lvis-input-bar-subtle",
+  "--lvis-input-bar-action",
+] as const;
+
+const TYPOGRAPHY_AND_MOTION_TOKENS = [
+  "--lvis-text-micro",
+  "--lvis-text-caption",
+  "--lvis-text-body-sm",
+  "--lvis-text-body",
+  "--lvis-leading-micro",
+  "--lvis-leading-caption",
+  "--lvis-leading-body-sm",
+  "--lvis-leading-body",
+  "--lvis-tracking-micro",
+  "--lvis-tracking-caption",
+  "--lvis-tracking-body-sm",
+  "--lvis-tracking-body",
+  "--lvis-motion-slow",
+  "--lvis-motion-layout",
+  "--lvis-motion-ease-standard",
+  "--lvis-motion-ease-out",
+  "--lvis-motion-ease-in-out",
+] as const;
+
+describe("LVIS_TOKEN_NAMES — complete public token contract", () => {
   it("includes all 7 new derived tokens", () => {
     for (const token of DERIVED_TOKENS) {
+      expect(LVIS_TOKEN_NAMES).toContain(token);
+    }
+  });
+
+  it("includes chat semantic aliases", () => {
+    for (const token of CHAT_SEMANTIC_TOKENS) {
+      expect(LVIS_TOKEN_NAMES).toContain(token);
+    }
+  });
+
+  it("includes semantic typography and complete motion roles", () => {
+    for (const token of TYPOGRAPHY_AND_MOTION_TOKENS) {
       expect(LVIS_TOKEN_NAMES).toContain(token);
     }
   });

@@ -2636,6 +2636,56 @@ SDK 에는 fallback artifact (JSON / CSS / TS const) 가 없으며, plugin 은
 - **검증**: real-Electron drop e2e(`test/e2e/ui/workspace-drag-drop.spec.ts`) — CDP `Input.dispatchDragEvent` 는 File 을 OS-back 하지 못해 `getPathForFile` 이 ""(electron#44600)를 반환하므로, (A) 실제 드롭 wiring+bridge 가 안전한 no-op 임과 (B) 실제 preload IPC+main 핸들러 신뢰 파이프라인(valid→ack→persist / sensitive→deny / file→not-a-dir)을 각각 검증. jsdom `{path}` fake 금지.
 - **앵커**: `src/preload/webutils-bridge.ts`, `src/preload.ts`(`lvisDrop` world), `src/ipc/domains/workspace.ts`(`dropPrepare` handler + `PickGesture`), `src/contract/app-contract.ts`(`workspace.dropPrepare`, INTERNAL), `src/ui/renderer/components/ChatSidePanel.tsx`(드롭존 핸들러 + `handleFolderDrop`).
 
+### 6.10.12 호스트 에이전트 레퍼런스와 워크스페이스 루트 수명주기
+
+호스트 에이전트 동작을 조사할 때는 공식 문서와 현재 배포 동작을 기준으로
+Codex CLI/Desktop, Claude Code/Desktop, Hermes Agent Desktop, goose Desktop,
+GitHub Copilot, Google Antigravity를 1차 비교 대상으로 삼는다. IDE 및
+워크스페이스 제품은 편집기·파일시스템·멀티 루트의 일반 관례를 확인하는
+2차 자료이며, 에이전트 수명주기·프로젝트 처리·상호작용·데스크톱 UX에 대한
+1차 호스트 에이전트 근거를 대체하지 않는다. 문서화된 계약이 아니라 추론한
+결론은 그 사실을 명시한다.
+
+프로젝트의 식별자는 정규화된 절대 경로다. basename은 표시 문자열일 뿐
+병합·제거·권한 부여·복구의 키로 사용하지 않는다. 정규 경로가 같은 항목만
+중복 제거하고, basename이 같아도 경로가 다르면 서로 다른 프로젝트로
+유지한다. 같은 이름은 구분에 필요한 만큼 부모 경로를 붙여 표시하며, 경로가
+없거나 오래된 경우 이름만 같은 다른 폴더로 대체하지 않는다.
+
+워크스페이스 루트는 다음의 단일 호스트 소유 수명주기를 따른다.
+
+1. 저장된 루트는 앱 시작 시와 런타임 사용 전에 다시 검증한다. `ENOENT`,
+   `ENOTDIR`, 또는 실제 파일처럼 디렉터리가 아님이 확정되면 설정에서
+   제거한다. 일시적인 접근 거부, 장치·네트워크·I/O 오류는 삭제로 간주하지
+   않고 유지하며 감사 로그에 남겨 이후 검증에서 다시 시도한다.
+2. 추가 및 재추가는 main process가 기존 디렉터리임을 확인하고 권한 저장소가
+   정규 경로를 수락한 뒤에만 완료한다. basename 중복은 허용하지만 동일한
+   정규 경로를 두 번 등록하지 않는다.
+3. 워크스페이스 루트의 추가·제거·재조정은 겹치는 상위·하위 경로를 포함해
+   전역 직렬화하므로 서로 다른 영속 스냅샷을 교차해 처리하지 않는다. 제거는
+   영속 범위와 현재 런타임 범위를 함께 축소한다. 설정 항목을 지우기 전에 해당
+   루트 아래의 루틴 디렉터리와 path-scoped 권한을 영속 저장소에서 정리하고,
+   모든 호스트 소유 대화 namespace에서 프로젝트 metadata를 분리한다. 별도로
+   등록된 하위 루트는 제외 경계이므로 그 하위 루트의 권한과 루틴 범위는
+   보존한다. 필수 정리기가 없거나 어느 영속 단계든 실패하면 설정 항목을
+   유지한다(fail closed). 설정 축소 후에는 live scope를 회수하고, 제거 전
+   전역 allow-list에서 해당 루트를 스냅샷한 활성 턴을 중단하여 이미 구성된
+   tool batch가 계속 실행되지 못하게 한다.
+4. 필수 제거 전 metadata 분리 과정에서도 대화 transcript는 삭제하지 않는다.
+   metadata lock 안에서 일치하는 세션의 `projectRoot`와 `projectName`만 제거하고
+   다른 metadata와 JSONL을 보존한 뒤 세션 검색 FTS 행을 재인덱싱한다. 제거
+   전의 오래된 metadata write가 이후 루트를 다시 연결해서는 안 된다.
+5. 프로젝트 목록은 현재 검증된 루트 레지스트리에서만 만든다. 세션 metadata가
+   제거된 프로젝트 행을 다시 만들 수 없다. 분리되었거나 의도적으로 프로젝트가
+   없는 세션은 그룹 없는 `대화` 목록에 남고, 저장된 식별자를 basename으로
+   재할당하거나 기본 루트로 조용히 다시 쓰지 않는다. 현재는 프로젝트 metadata를
+   지우므로 연결이 끊긴 세션과 처음부터 프로젝트가 없던 세션을 저장 모델에서
+   구분할 수 없다. 이는 LVIS의 현재 구현 선택이지 참고 제품의 공통 관행이 아니다.
+   Codex, Claude, Copilot, Hermes, goose, Antigravity의 근거가 공통으로 지지하는
+   것은 transcript 보존이며, 일반 대화로의 자동 재분류는 아니다. 프로젝트가
+   없는 대화를 실행할 때는 호스트가 그 턴의 실행 컨텍스트를 기본 워크스페이스에
+   연결한다.
+
 ---
 
 ## 7. Overlay Trigger Surface

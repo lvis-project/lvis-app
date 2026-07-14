@@ -21,11 +21,14 @@
  * `buildAllowedScope(...)` which adds the host defaults.
  *
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname, resolve as pathResolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { resolve as pathResolve } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
+import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { canonicalizePathForMatch, caseFoldForMatch } from "./sensitive-paths.js";
 
 const log = createLogger("permission-settings");
 
@@ -109,7 +112,17 @@ export interface ReviewerSettingsBlock {
 
 export interface PermissionSettingsBlock {
   additionalDirectories: string[];
+  pendingWorkspaceRootRemovals: PendingWorkspaceRootRemoval[];
   reviewer: ReviewerSettingsBlock;
+}
+
+/** Durable forward-only cleanup journal for a removed workspace root. */
+export interface PendingWorkspaceRootRemoval {
+  operationId: string;
+  storedPath: string;
+  runtimePath: string;
+  requestedAt: string;
+  source: string;
 }
 
 export interface PermissionSettingsFile {
@@ -153,6 +166,7 @@ const REVIEWER_INTERACTIVE_AUTO_APPROVES: ReadonlySet<ReviewerInteractiveAutoApp
 const DEFAULT_FILE: PermissionSettingsFile = {
   permissions: {
     additionalDirectories: [],
+    pendingWorkspaceRootRemovals: [],
     reviewer: { ...DEFAULT_REVIEWER },
   },
 };
@@ -199,11 +213,7 @@ export function readPermissionSettings(pathOverride?: string): PermissionSetting
       // or the disk is read-only, we still return the migrated in-memory
       // result so the user's runtime behaviour is fail-closed (strict).
       try {
-        mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
-        writeFileSync(filePath, JSON.stringify(parsed, null, 2), {
-          encoding: "utf-8",
-          mode: 0o600,
-        });
+        writeUtf8FileAtomicSync(filePath, JSON.stringify(parsed, null, 2), 0o600);
       } catch (persistErr) {
         log.warn(
           "issue-664 migration: failed to persist migrated settings to %s — runtime still strict (%s)",
@@ -272,17 +282,73 @@ export function normalizePermissionSettings(
   parsed: Record<string, unknown>,
 ): PermissionSettingsFile {
   const perm = (parsed.permissions ?? {}) as Record<string, unknown>;
+  const pendingWorkspaceRootRemovals = normalizePendingWorkspaceRootRemovals(
+    perm.pendingWorkspaceRootRemovals,
+  );
+  const pendingKeys = new Set(
+    pendingWorkspaceRootRemovals.flatMap((intent) => {
+      const key = allowedDirectoryKey(intent.runtimePath);
+      return key === null ? [] : [key];
+    }),
+  );
   const additional = perm.additionalDirectories;
   let dirs: string[] = [];
   if (Array.isArray(additional)) {
-    dirs = additional.filter((s): s is string => typeof s === "string" && s.length > 0);
+    dirs = additional.filter((s): s is string => {
+      if (typeof s !== "string" || s.length === 0) return false;
+      const key = allowedDirectoryKey(s);
+      // Pending wins over a conflicting hand edit or interrupted legacy write.
+      return key === null || !pendingKeys.has(key);
+    });
   }
   return {
     permissions: {
       additionalDirectories: dirs,
+      pendingWorkspaceRootRemovals,
       reviewer: normalizeReviewerBlock(perm.reviewer),
     },
   };
+}
+
+function normalizePendingWorkspaceRootRemovals(
+  parsed: unknown,
+): PendingWorkspaceRootRemoval[] {
+  if (parsed === undefined) return [];
+  if (!Array.isArray(parsed)) {
+    throw new Error("permissions.pendingWorkspaceRootRemovals must be an array");
+  }
+  const seenOperations = new Set<string>();
+  const result: PendingWorkspaceRootRemoval[] = [];
+  for (const candidate of parsed) {
+    if (!candidate || typeof candidate !== "object") {
+      throw new Error("permissions.pendingWorkspaceRootRemovals contains an invalid intent");
+    }
+    const value = candidate as Record<string, unknown>;
+    if (
+      typeof value.operationId !== "string"
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.operationId)
+      || typeof value.storedPath !== "string"
+      || value.storedPath.length === 0
+      || typeof value.runtimePath !== "string"
+      || value.runtimePath.length === 0
+      || typeof value.requestedAt !== "string"
+      || value.requestedAt.length === 0
+      || typeof value.source !== "string"
+      || value.source.length === 0
+      || seenOperations.has(value.operationId)
+    ) {
+      throw new Error("permissions.pendingWorkspaceRootRemovals contains an invalid intent");
+    }
+    seenOperations.add(value.operationId);
+    result.push({
+      operationId: value.operationId,
+      storedPath: value.storedPath,
+      runtimePath: value.runtimePath,
+      requestedAt: value.requestedAt,
+      source: value.source,
+    });
+  }
+  return result;
 }
 
 /**
@@ -380,11 +446,7 @@ export async function writePermissionSettings(
         reviewer: nextReviewer,
       },
     };
-    mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
-    writeFileSync(filePath, JSON.stringify(merged, null, 2), {
-      encoding: "utf-8",
-      mode: 0o600,
-    });
+    writeUtf8FileAtomicSync(filePath, JSON.stringify(merged, null, 2), 0o600);
   });
 }
 
@@ -438,6 +500,79 @@ export async function setReviewerSettingsPersist(
 }
 
 /**
+ * Resolve an existing directory to the identity that is persisted in the
+ * permission SOT. Keeping the real path (instead of a symlink alias) freezes the
+ * authorized target even if that alias is later removed or retargeted.
+ *
+ * Legacy/non-existent values are kept verbatim so hand-edited settings and the
+ * slash-command parser retain their existing behaviour; workspace IPC validates
+ * existence before calling this helper.
+ */
+function persistedAllowedDirectory(dir: string): string {
+  if (dir.trim().length === 0) return dir;
+  const resolved = pathResolve(dir);
+  return existsSync(resolved) ? canonicalizePathForMatch(resolved) : dir;
+}
+
+function allowedDirectoryKey(dir: string): string | null {
+  if (dir.trim().length === 0) return null;
+  try {
+    return caseFoldForMatch(canonicalizePathForMatch(pathResolve(dir)));
+  } catch {
+    return null;
+  }
+}
+
+async function mutateAllowedDirectoriesPersist(
+  mutation: (
+    current: string[],
+    pending: readonly PendingWorkspaceRootRemoval[],
+  ) => string[],
+  pathOverride?: string,
+): Promise<string[]> {
+  const filePath = pathOverride ?? defaultPath();
+  let result: string[] = [];
+  await withFileLock(filePath, async () => {
+    let existing: Record<string, unknown> = {};
+    if (existsSync(filePath)) {
+      try {
+        existing = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+      } catch {
+        existing = {};
+      }
+    }
+    const existingPerm = { ...((existing.permissions ?? {}) as Record<string, unknown>) };
+    const current = Array.isArray(existingPerm.additionalDirectories)
+      ? existingPerm.additionalDirectories.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [];
+    const pending = normalizePendingWorkspaceRootRemovals(
+      existingPerm.pendingWorkspaceRootRemovals,
+    );
+    const next = mutation(current, pending);
+    result = [...next];
+    if (
+      next.length === current.length &&
+      next.every((value, index) => value === current[index])
+    ) {
+      return;
+    }
+    delete existingPerm.allowedDirectories;
+    const merged = {
+      ...existing,
+      permissions: {
+        ...existingPerm,
+        additionalDirectories: next,
+        reviewer: normalizeReviewerBlock(existingPerm.reviewer),
+      },
+    };
+    writeUtf8FileAtomicSync(filePath, JSON.stringify(merged, null, 2), 0o600);
+  });
+  return result;
+}
+
+/**
  * Append a directory to `permissions.additionalDirectories`. Persists
  * via {@link writePermissionSettings}. De-duplicates by exact string.
  *
@@ -447,12 +582,26 @@ export async function addAllowedDirectoryPersist(
   dir: string,
   pathOverride?: string,
 ): Promise<string[]> {
-  const current = readPermissionSettings(pathOverride);
-  const list = current.permissions.additionalDirectories;
-  if (list.includes(dir)) return list;
-  const next = [...list, dir];
-  await writePermissionSettings({ additionalDirectories: next }, pathOverride);
-  return next;
+  const stored = persistedAllowedDirectory(dir);
+  return mutateAllowedDirectoriesPersist((list, pending) => {
+    const targetKey = allowedDirectoryKey(stored);
+    if (
+      targetKey !== null
+      && pending.some((intent) => allowedDirectoryKey(intent.runtimePath) === targetKey)
+    ) {
+      throw Object.assign(new Error("workspace-root-removal-pending"), {
+        code: "WORKSPACE_ROOT_REMOVAL_PENDING",
+      });
+    }
+    if (
+      list.some((entry) =>
+        targetKey === null ? entry === stored : allowedDirectoryKey(entry) === targetKey,
+      )
+    ) {
+      return list;
+    }
+    return [...list, stored];
+  }, pathOverride);
 }
 
 /**
@@ -463,10 +612,175 @@ export async function removeAllowedDirectoryPersist(
   dir: string,
   pathOverride?: string,
 ): Promise<string[]> {
-  const current = readPermissionSettings(pathOverride);
-  const list = current.permissions.additionalDirectories;
-  const next = list.filter((d) => d !== dir);
-  if (next.length === list.length) return list;
-  await writePermissionSettings({ additionalDirectories: next }, pathOverride);
-  return next;
+  return mutateAllowedDirectoriesPersist((list) => {
+    const targetKey = allowedDirectoryKey(dir);
+    return list.filter((entry) =>
+      targetKey === null ? entry !== dir : allowedDirectoryKey(entry) !== targetKey,
+    );
+  }, pathOverride);
+}
+
+function isCommittedAtomicWriteError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "committed" in error
+    && (error as { committed?: unknown }).committed === true,
+  );
+}
+
+export interface BeginWorkspaceRootRemovalResult {
+  intent: PendingWorkspaceRootRemoval;
+  activeDirectories: string[];
+  created: boolean;
+}
+
+/**
+ * Atomically cut a registered root out of the active allow-list and append a
+ * durable cleanup intent. A matching pending operation is returned on retry.
+ */
+export async function beginWorkspaceRootRemovalPersist(
+  root: string,
+  source: string,
+  pathOverride?: string,
+): Promise<BeginWorkspaceRootRemovalResult | null> {
+  const filePath = pathOverride ?? defaultPath();
+  let result: BeginWorkspaceRootRemovalResult | null = null;
+  await withFileLock(filePath, async () => {
+    let existing: Record<string, unknown> = {};
+    if (existsSync(filePath)) {
+      try {
+        existing = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+      } catch {
+        existing = {};
+      }
+    }
+    const existingPerm = { ...((existing.permissions ?? {}) as Record<string, unknown>) };
+    const current = Array.isArray(existingPerm.additionalDirectories)
+      ? existingPerm.additionalDirectories.filter(
+          (value): value is string => typeof value === "string" && value.length > 0,
+        )
+      : [];
+    const pending = normalizePendingWorkspaceRootRemovals(
+      existingPerm.pendingWorkspaceRootRemovals,
+    );
+    const targetKey = allowedDirectoryKey(root);
+    const existingIntent = pending.find((intent) =>
+      targetKey === null
+        ? intent.runtimePath === root || intent.storedPath === root
+        : allowedDirectoryKey(intent.runtimePath) === targetKey,
+    );
+    const storedPath = current.find((candidate) =>
+      targetKey === null ? candidate === root : allowedDirectoryKey(candidate) === targetKey,
+    );
+    if (!storedPath) {
+      if (existingIntent) {
+        result = { intent: existingIntent, activeDirectories: [...current], created: false };
+      }
+      return;
+    }
+
+    const runtimePath = canonicalizePathForMatch(pathResolve(storedPath));
+    const runtimeKey = allowedDirectoryKey(runtimePath);
+    const intent = existingIntent ?? {
+      operationId: randomUUID(),
+      storedPath,
+      runtimePath,
+      requestedAt: new Date().toISOString(),
+      source,
+    };
+    const activeDirectories = current.filter((candidate) =>
+      runtimeKey === null
+        ? candidate !== storedPath
+        : allowedDirectoryKey(candidate) !== runtimeKey,
+    );
+    const nextPending = existingIntent ? pending : [...pending, intent];
+    delete existingPerm.allowedDirectories;
+    const merged = {
+      ...existing,
+      permissions: {
+        ...existingPerm,
+        additionalDirectories: activeDirectories,
+        pendingWorkspaceRootRemovals: nextPending,
+        reviewer: normalizeReviewerBlock(existingPerm.reviewer),
+      },
+    };
+    try {
+      writeUtf8FileAtomicSync(filePath, JSON.stringify(merged, null, 2), 0o600);
+    } catch (error: unknown) {
+      if (!isCommittedAtomicWriteError(error)) throw error;
+      const verified = readPermissionSettings(filePath).permissions;
+      const intentCommitted = verified.pendingWorkspaceRootRemovals.some(
+        (candidate) => candidate.operationId === intent.operationId,
+      );
+      const rootInactive = !verified.additionalDirectories.some(
+        (candidate) => runtimeKey !== null && allowedDirectoryKey(candidate) === runtimeKey,
+      );
+      if (!intentCommitted || !rootInactive) throw error;
+    }
+    result = { intent, activeDirectories, created: !existingIntent };
+  });
+  return result;
+}
+
+/** Complete one exact operation; stale operation IDs are ABA-safe no-ops. */
+export async function completeWorkspaceRootRemovalPersist(
+  operationId: string,
+  pathOverride?: string,
+): Promise<boolean> {
+  const filePath = pathOverride ?? defaultPath();
+  let completed = false;
+  await withFileLock(filePath, async () => {
+    let existing: Record<string, unknown> = {};
+    if (existsSync(filePath)) {
+      try {
+        existing = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+      } catch {
+        existing = {};
+      }
+    }
+    const existingPerm = { ...((existing.permissions ?? {}) as Record<string, unknown>) };
+    const pending = normalizePendingWorkspaceRootRemovals(
+      existingPerm.pendingWorkspaceRootRemovals,
+    );
+    const intent = pending.find((candidate) => candidate.operationId === operationId);
+    if (!intent) return;
+    const intentKey = allowedDirectoryKey(intent.runtimePath);
+    const current = Array.isArray(existingPerm.additionalDirectories)
+      ? existingPerm.additionalDirectories.filter(
+          (value): value is string => typeof value === "string" && value.length > 0,
+        )
+      : [];
+    const activeDirectories = current.filter((candidate) =>
+      intentKey === null
+        ? candidate !== intent.storedPath
+        : allowedDirectoryKey(candidate) !== intentKey,
+    );
+    const merged = {
+      ...existing,
+      permissions: {
+        ...existingPerm,
+        additionalDirectories: activeDirectories,
+        pendingWorkspaceRootRemovals: pending.filter(
+          (candidate) => candidate.operationId !== operationId,
+        ),
+        reviewer: normalizeReviewerBlock(existingPerm.reviewer),
+      },
+    };
+    try {
+      writeUtf8FileAtomicSync(filePath, JSON.stringify(merged, null, 2), 0o600);
+    } catch (error: unknown) {
+      if (!isCommittedAtomicWriteError(error)) throw error;
+      const verified = readPermissionSettings(filePath).permissions;
+      const intentGone = !verified.pendingWorkspaceRootRemovals.some(
+        (candidate) => candidate.operationId === operationId,
+      );
+      const rootInactive = !verified.additionalDirectories.some(
+        (candidate) => intentKey !== null && allowedDirectoryKey(candidate) === intentKey,
+      );
+      if (!intentGone || !rootInactive) throw error;
+    }
+    completed = true;
+  });
+  return completed;
 }

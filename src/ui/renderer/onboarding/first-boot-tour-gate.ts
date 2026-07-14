@@ -5,11 +5,11 @@
  * Why this exists (the bug it fixes):
  *   The boot probe in App.tsx skipped the chain only when
  *   `settings.features.onboardingCompleted === true` or an LLM vendor key
- *   was present. That flag flips true only at the chain's `done` stage —
- *   which is reached AFTER PluginShowcase closes, two stages past the tour.
- *   A user who finished the SpotlightTour but quit before closing
- *   PluginShowcase left the flag `false`, so the tour re-appeared on EVERY
- *   launch. Tour completion is recorded separately in the tour-state store
+ *   was present. Older builds reached the chain's `done` stage only after
+ *   a separate PluginShowcase popup. A user who finished the SpotlightTour
+ *   but quit before closing that popup left the flag `false`, so the tour
+ *   re-appeared on every launch. Tour completion is recorded separately in
+ *   the tour-state store
  *   (`completedScenarios`), which the boot probe never consulted.
  *
  *   This helper closes that gap: if the tour-state store says the user

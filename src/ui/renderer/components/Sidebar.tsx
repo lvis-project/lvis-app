@@ -1,10 +1,9 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { EdgeResizeBar } from "./EdgeResizeBar.js";
 import {
   CalendarDays,
   Download,
   Folder,
-  FolderOpen,
   Home,
   KanbanSquare,
   KeyRound,
@@ -12,17 +11,14 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Pin,
-  PinOff,
   Plus,
   Repeat2,
   Search,
   ShoppingBag,
-  Trash2,
   Upload,
   Wrench,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../../components/ui/dropdown-menu.js";
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "../../../components/ui/context-menu.js";
 import { Button } from "../../../components/ui/button.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs.js";
@@ -33,11 +29,15 @@ import { toPluginDoctorViewKey } from "../utils/plugin-doctor-view.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
 import { sortWithPinnedFirst } from "../utils/pinned-sort.js";
 import type { SidebarTab } from "../hooks/use-sidebar-tab.js";
+import {
+  useNativeContextMenu,
+  type NativeContextMenuHandlers,
+} from "../hooks/use-native-context-menu.js";
 import { isSidebarTab } from "../../../shared/sidebar-tab.js";
 import type { PluginCardSummary, PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
-import { projectBasename, projectRootEquals, workspaceRootsToProjects } from "../../../shared/project-identity.js";
+import { projectRootEquals, workspaceRootsToProjects } from "../../../shared/project-identity.js";
 import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
@@ -108,6 +108,8 @@ export interface SidebarProps {
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
   /** Re-fetch the workspace project list (after a context-menu mutation e.g. remove). */
   onRefreshProjects?: () => void | Promise<void>;
+  /** Surface a project-removal IPC failure without hiding the row. */
+  onProjectRemoveError?: (error?: string, message?: string) => void;
   /** Active sidebar tab ("chats" = ungrouped conversation list, "projects" = named-project groups). Persisted (SystemSettings). */
   activeSidebarTab?: SidebarTab;
   /** Switch the active sidebar tab — persists immediately. */
@@ -457,11 +459,12 @@ function projectTestId(root: string, fallback: string): string {
   return safe || "default";
 }
 
-function useWorkspaceProjects(): ProjectIdentity[] {
+function useWorkspaceProjects(enabled: boolean): ProjectIdentity[] {
   const { t } = useTranslation();
   const [projects, setProjects] = useState<ProjectIdentity[]>([]);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     void window.lvis?.workspace?.listRoots?.().then((result) => {
       if (cancelled || !result?.ok) return;
@@ -477,7 +480,7 @@ function useWorkspaceProjects(): ProjectIdentity[] {
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, [enabled, t]);
 
   return projects;
 }
@@ -501,6 +504,7 @@ function SessionRow({
   onLoadSession,
   isPinned,
   onTogglePin,
+  onContextMenu,
   t,
 }: {
   session: SessionSummary;
@@ -511,12 +515,15 @@ function SessionRow({
   isPinned?: boolean;
   /** Toggle this conversation's pin — omitted entirely hides the pin affordance. */
   onTogglePin?: () => void | Promise<void>;
+  /** Open the native conversation actions menu for this row. */
+  onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
   t: ReturnType<typeof useTranslation>["t"];
 }) {
   const time = formatRelativeSessionTime(session.modifiedAt, t);
   const rowDisabled = streaming && !active;
   return (
     <div
+      onContextMenu={onContextMenu}
       className={[
         "group relative flex w-full min-w-0 items-center rounded-md transition-colors",
         active
@@ -572,6 +579,7 @@ function ProjectSessionList({
   onLoadSession,
   onNewChatForProject,
   onRefreshProjects,
+  onProjectRemoveError,
   projects: projectsProp,
   activeTab,
   onActiveTabChange,
@@ -587,6 +595,7 @@ function ProjectSessionList({
   onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
   onRefreshProjects?: () => void | Promise<void>;
+  onProjectRemoveError?: (error?: string, message?: string) => void;
   projects?: ProjectIdentity[];
   activeTab: SidebarTab;
   onActiveTabChange: (tab: SidebarTab) => void;
@@ -596,6 +605,7 @@ function ProjectSessionList({
   onToggleProjectPin?: (projectRoot: string) => void;
 }) {
   const { t } = useTranslation();
+  const openNativeContextMenu = useNativeContextMenu();
   // Reveal the project folder in the OS file manager (real capability:
   // workspace.reveal).
   const revealProject = (projectRoot: string) => {
@@ -605,16 +615,21 @@ function ProjectSessionList({
   // Remove a picked (non-default) project from the workspace root list (real
   // capability: workspace.removeRoot). Refresh the sidebar list on success so
   // the removed project disappears immediately.
-  const removeProject = (project: ProjectIdentity) => {
+  const removeProject = async (project: ProjectIdentity): Promise<void> => {
     if (!project.projectRoot || project.isDefault) return;
-    void Promise.resolve(window.lvis?.workspace?.removeRoot?.(project.projectRoot))
-      .then(() => onRefreshProjects?.())
-      .catch(() => {
-        // Non-fatal: the list simply keeps the project until the next refresh.
-      });
+    try {
+      const result = await window.lvis?.workspace?.removeRoot?.(project.projectRoot);
+      if (!result?.ok) {
+        onProjectRemoveError?.(result?.error, result?.message);
+        return;
+      }
+      await onRefreshProjects?.();
+    } catch (error) {
+      onProjectRemoveError?.("remove-failed", error instanceof Error ? error.message : undefined);
+    }
   };
   const isSessionPinned = (sessionId: string) => Boolean(isSessionStarred?.(sessionId));
-  const fallbackProjects = useWorkspaceProjects();
+  const fallbackProjects = useWorkspaceProjects(projectsProp === undefined);
   const workspaceProjects = projectsProp ?? fallbackProjects;
   const mainSessions = useMemo(
     () => sessions.filter((session) => session.sessionKind === "main"),
@@ -630,32 +645,9 @@ function ProjectSessionList({
   // projects sort to the top (stable — order among unpinned/pinned groups is
   // otherwise unchanged).
   const namedProjects = useMemo(() => {
-    const known = workspaceProjects.filter((project) => !project.isDefault);
-    // The default/base-directory root itself — sessions tagged with it must
-    // fold into the ungrouped list below, never synthesize a phantom named
-    // group here. Defense-in-depth alongside the read-path scrub in
-    // handleChatSessions (src/ipc/handlers/chat.ts): that chokepoint strips
-    // project metadata from legacy default-tagged sessions before they ever
-    // reach the renderer, but this guard keeps the "unknown project"
-    // fallback below correct on its own terms too, independent of what any
-    // particular caller supplies in `sessions`.
-    const defaultProjectRoot = workspaceProjects.find((project) => project.isDefault)?.projectRoot;
-    const unknown = new Map<string, ProjectIdentity>();
-    for (const session of mainSessions) {
-      if (
-        !session.projectRoot
-        || known.some((project) => projectRootEquals(project.projectRoot, session.projectRoot))
-        || (defaultProjectRoot && projectRootEquals(defaultProjectRoot, session.projectRoot))
-      ) continue;
-      unknown.set(session.projectRoot, {
-        projectRoot: session.projectRoot,
-        projectName: session.projectName || projectBasename(session.projectRoot),
-        isDefault: false,
-      });
-    }
-    const combined = [...known, ...unknown.values()];
-    return sortWithPinnedFirst(combined, (project) => Boolean(isProjectPinned?.(project.projectRoot)));
-  }, [isProjectPinned, mainSessions, workspaceProjects]);
+    const configured = workspaceProjects.filter((project) => !project.isDefault);
+    return sortWithPinnedFirst(configured, (project) => Boolean(isProjectPinned?.(project.projectRoot)));
+  }, [isProjectPinned, workspaceProjects]);
   const sessionsByProject = useMemo(
     () => namedProjects.map((project) => {
       const projectSessions = sortWithPinnedFirst(
@@ -719,6 +711,17 @@ function ProjectSessionList({
       onLoadSession={onLoadSession}
       isPinned={isSessionPinned(session.id)}
       onTogglePin={onToggleSessionStar ? () => onToggleSessionStar(session.id, session.title) : undefined}
+      onContextMenu={(event) => openNativeContextMenu(event, "conversation", {
+        ...(!streaming || session.id === currentSessionId
+          ? { "conversation.open": () => void onLoadSession?.(session.id) }
+          : {}),
+        ...(onToggleSessionStar
+          ? {
+              [isSessionPinned(session.id) ? "conversation.unpin" : "conversation.pin"]: () =>
+                void onToggleSessionStar(session.id, session.title),
+            }
+          : {}),
+      } as NativeContextMenuHandlers)}
       t={t}
     />
   );
@@ -762,8 +765,6 @@ function ProjectSessionList({
           <div key={project.projectRoot} className="space-y-1">
             {/* Right-click a project row → context menu of REAL project actions
                 (new chat here, reveal folder, pin/unpin, remove project). */}
-            <ContextMenu>
-              <ContextMenuTrigger asChild>
             <button
               type="button"
               disabled={streaming}
@@ -772,57 +773,40 @@ function ProjectSessionList({
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 streaming ? "cursor-not-allowed opacity-50" : "hover:bg-muted",
               ].join(" ")}
-              title={t("sidebar.newProjectChat", { project: project.projectName })}
+              title={project.projectRoot ?? t("sidebar.newProjectChat", { project: project.projectName })}
               data-testid={`sidebar-project-${projectTestId(project.projectRoot, project.projectName)}`}
               onClick={() => void onNewChatForProject?.({
                 ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
                 projectName: project.projectName,
               })}
+              onContextMenu={(event) => openNativeContextMenu(event, "project", {
+                ...(!streaming
+                  ? {
+                      "project.new-chat": () => void onNewChatForProject?.({
+                        ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
+                        projectName: project.projectName,
+                      }),
+                    }
+                  : {}),
+                ...(onToggleProjectPin && project.projectRoot
+                  ? {
+                      [pinned ? "project.unpin" : "project.pin"]: () =>
+                        onToggleProjectPin(project.projectRoot!),
+                    }
+                  : {}),
+                ...(project.projectRoot
+                  ? { "project.reveal": () => revealProject(project.projectRoot!) }
+                  : {}),
+                ...(project.projectRoot && !project.isDefault
+                  ? { "project.remove": () => void removeProject(project) }
+                  : {}),
+              } as NativeContextMenuHandlers)}
             >
               <Folder className="h-4 w-4 shrink-0 text-primary" />
               {pinned ? <Pin className="h-3 w-3 shrink-0 fill-current text-primary" /> : null}
               <span className="min-w-0 flex-1 truncate">{project.projectName}</span>
               <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             </button>
-              </ContextMenuTrigger>
-              <ContextMenuContent className="min-w-[11rem]" data-testid="sidebar-project-context-menu">
-                <ContextMenuItem
-                  data-testid="sidebar-project-menu-new-chat"
-                  onSelect={() => void onNewChatForProject?.({
-                    ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
-                    projectName: project.projectName,
-                  })}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  {t("sidebar.projectMenuNewChat")}
-                </ContextMenuItem>
-                {onToggleProjectPin ? (
-                  <ContextMenuItem
-                    data-testid="sidebar-project-menu-pin"
-                    onSelect={() => onToggleProjectPin(project.projectRoot)}
-                  >
-                    {pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-                    {pinned ? t("sidebar.unpinProject") : t("sidebar.pinProject")}
-                  </ContextMenuItem>
-                ) : null}
-                <ContextMenuItem
-                  data-testid="sidebar-project-menu-reveal"
-                  onSelect={() => revealProject(project.projectRoot)}
-                >
-                  <FolderOpen className="h-3.5 w-3.5" />
-                  {t("sidebar.projectMenuReveal")}
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem
-                  data-testid="sidebar-project-menu-remove"
-                  className="text-destructive focus:text-destructive"
-                  onSelect={() => removeProject(project)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  {t("sidebar.projectMenuRemove")}
-                </ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenu>
             <div className="ml-4 border-l border-border/(--opacity-half) pl-2">
               {recent.length > 0 ? recent.map(renderSessionRow) : (
                 <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
@@ -1040,6 +1024,7 @@ export function Sidebar({
   currentSessionId,
   onLoadSession,
   onRefreshProjects,
+  onProjectRemoveError,
   activeSidebarTab = "chats",
   onActiveSidebarTabChange,
   isSessionStarred,
@@ -1308,6 +1293,7 @@ export function Sidebar({
                     onLoadSession={onLoadSession}
                     onNewChatForProject={onNewChatForProject}
                     onRefreshProjects={onRefreshProjects}
+                    onProjectRemoveError={onProjectRemoveError}
                     activeTab={activeSidebarTab}
                     onActiveTabChange={onActiveSidebarTabChange ?? (() => {})}
                     isSessionStarred={isSessionStarred}
