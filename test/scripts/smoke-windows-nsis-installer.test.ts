@@ -3,7 +3,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { parseExecutableFromCommand } from "../../scripts/smoke-windows-nsis-installer.mjs";
+import {
+  ACL_QUERY_SCRIPT,
+  buildPowerShellScript,
+  parseExecutableFromCommand,
+  REGISTRY_QUERY_SCRIPT,
+} from "../../scripts/smoke-windows-nsis-installer.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -21,6 +26,30 @@ describe("Windows NSIS installer smoke contracts", () => {
     expect(
       parseExecutableFromCommand('C:\\Program Files\\LVIS\\LVIS.exe "%1"'),
     ).toBe("C:\\Program Files\\LVIS\\LVIS.exe");
+  });
+
+  it("preserves PowerShell block boundaries with newlines instead of semicolon joins", () => {
+    const blockScript = buildPowerShellScript([
+      "switch ($value) {",
+      "  'ok' { return $true }",
+      "}",
+    ]);
+
+    for (const script of [
+      blockScript,
+      REGISTRY_QUERY_SCRIPT,
+      ACL_QUERY_SCRIPT,
+    ]) {
+      expect(script).toContain("\n");
+      expect(script).not.toMatch(/\{\s*;/);
+      expect(script).not.toMatch(/;\s*\}/);
+    }
+    expect(REGISTRY_QUERY_SCRIPT).toContain(
+      "$hive = switch ($env:LVIS_REGISTRY_HIVE) {\n",
+    );
+    expect(REGISTRY_QUERY_SCRIPT).toContain("\ntry {\n");
+    expect(ACL_QUERY_SCRIPT).toContain("ForEach-Object {\n");
+    expect(() => buildPowerShellScript([])).toThrow(/non-empty string array/);
   });
 
   it("uses fail-closed .NET registry views and cross-checks machine uninstall commands", () => {
