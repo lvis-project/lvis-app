@@ -105,7 +105,7 @@ src/
 │   ├── executor.ts           #   STAYS as ToolExecutor facade + 7 public exports (executeAll/executeOne orchestrator stays)
 │   ├── executor-ceiling.ts   #   UNCHANGED — owns runWithCeiling/ToolCeilingOutcome/ToolCeilingTerminationReason
 │   └── pipeline/             #   NEW — per-responsibility §4.5.6 pipeline units (path-extraction/approval-purpose/
-│                             #     audit-entries/display-mask/rate-limiter/reviewer-authorization-store/reviewer-dispatch/
+│                             #     audit-entries/display-mask/rate-limiter/reviewer-dispatch/
 │                             #     approval-memory-skip/risk-classification/audit-writer/invocation-context)
 │
 ├── plugins/runtime/          # FINISH split (index/manifest-validation/origin-chain/sandbox/snapshots/types exist)

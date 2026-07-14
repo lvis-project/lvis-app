@@ -29,32 +29,19 @@ export const RATIONALE_RESPONSE_TOOL = "permission_rationale";
 export const FOREGROUND_RATIONALE_PRODUCTION_ENABLED = false as const;
 export const RATIONALE_ACTIVATION_PREREQUISITES = [
   "persistent-ticket-store",
+  "anchor-round-budget-store",
   "server-enforced-allowed-choices",
   "one-shot-resolution-cas",
+  "rationale-only-provider-round",
+  "same-batch-sibling-cancellation",
+  "reviewer-reevaluation-cache-isolation",
+  "current-action-identity-revalidation",
+  "ordered-security-suffix-resume",
+  "invocation-lifecycle-audit",
   "bounded-modal-ui",
 ] as const;
 
-export type RationaleControlState =
-  | "review_required"
-  | "rationale_requested"
-  | "rationale_ready"
-  | "rationale_failed"
-  | "user_pending"
-  | "allowed_once"
-  | "denied"
-  | "cancelled"
-  | "expired";
-
-export type RationaleControlEvent =
-  | "request-rationale"
-  | "rationale-ready"
-  | "rationale-failed"
-  | "prompt-user"
-  | "allow-once"
-  | "deny"
-  | "cancel"
-  | "expire";
-
+export const RATIONALE_UNKNOWN_SCOPE_SENTINEL = "[unknown]" as const;
 export interface RequestAnchor {
   contractVersion: typeof RATIONALE_CONTROL_CONTRACT_VERSION;
   anchorId: string;
@@ -63,6 +50,7 @@ export interface RequestAnchor {
   inputMessageId: string;
   inputOrigin: "user-keyboard";
   sanitizedIntent: string;
+  rationaleRoundBudget: 1;
   intentDigest: string;
   createdAt: number;
   expiresAt: number;
@@ -121,6 +109,11 @@ export interface ActionIdentity {
   sandboxExecutionPlan: DeepReadonly<Record<string, unknown>>;
 }
 
+/**
+ * `toolUseId` is the host invocation identity. It intentionally is not part of
+ * the reusable ActionIdentity/actionDigest, but the full sealed action is bound
+ * by invocationDigest and execution also requires a host-consumed CAS receipt.
+ */
 export interface SealedRationaleAction {
   toolUseId: string;
   toolName: string;
@@ -154,6 +147,7 @@ export interface RationaleProviderEnvelope {
   toolName: string;
   source: ToolSource;
   category: ToolCategory;
+  canonicalTargets: readonly string[];
   requestedEffects: readonly string[];
   affectedResources: readonly string[];
   requiredAuthority: string;
@@ -169,14 +163,6 @@ export interface RationaleResponse {
   actionDigest: string;
   round: 1;
   suggestion: string;
-  scopeAlignment: "aligned" | "unclear" | "outside";
-  scopeReasons: readonly string[];
-}
-
-export interface RationaleResumeRequest {
-  control: RationaleRequiredControl;
-  response: RationaleResponse | null;
-  rationaleStatus: "ready" | "failed";
 }
 
 export const RATIONALE_RESPONSE_SCHEMA: ToolSchema = {
@@ -193,12 +179,6 @@ export const RATIONALE_RESPONSE_SCHEMA: ToolSchema = {
       actionDigest: { type: "string" },
       round: { type: "integer", const: 1 },
       suggestion: { type: "string", maxLength: 500 },
-      scopeAlignment: { type: "string", enum: ["aligned", "unclear", "outside"] },
-      scopeReasons: {
-        type: "array",
-        maxItems: 8,
-        items: { type: "string", maxLength: 160 },
-      },
     },
     required: [
       "contractVersion",
@@ -207,8 +187,6 @@ export const RATIONALE_RESPONSE_SCHEMA: ToolSchema = {
       "actionDigest",
       "round",
       "suggestion",
-      "scopeAlignment",
-      "scopeReasons",
     ],
   },
 };
@@ -301,6 +279,9 @@ function assertCanonicalJson(value: unknown, label: string): void {
       ) {
         throw new TypeError(path + " must be a dense JSON array without extra properties");
       }
+      if (Object.getPrototypeOf(current) !== Array.prototype) {
+        throw new TypeError(path + " must use the intrinsic Array prototype");
+      }
       for (let index = 0; index < length; index += 1) {
         const descriptor = descriptors[String(index)];
         if (!descriptor?.enumerable || !("value" in descriptor)) {
@@ -346,17 +327,33 @@ function cloneBoundedStringList(
   maxItems: number,
   maxLength: number,
 ): readonly string[] {
-  if (
-    !Array.isArray(value) ||
-    value.length > maxItems ||
-    !value.every(
-      (item) =>
-        typeof item === "string" &&
-        item.trim().length > 0 &&
-        item.length <= maxLength,
-    )
-  ) {
+  if (!Array.isArray(value)) {
     throw new TypeError(label + " exceeds its bounded string-list contract");
+  }
+  // Validate descriptors and prototypes before any inherited iterator helper
+  // can observe attacker-controlled Array subclasses or accessors.
+  assertCanonicalJson(value, label);
+  const descriptors = Object.getOwnPropertyDescriptors(value) as Record<string, PropertyDescriptor>;
+  const lengthDescriptor = descriptors.length;
+  if (!lengthDescriptor || !("value" in lengthDescriptor)) {
+    throw new TypeError(label + " has an invalid length descriptor");
+  }
+  const length = lengthDescriptor.value as number;
+  if (length < 1 || length > maxItems) {
+    throw new TypeError(label + " exceeds its bounded string-list contract");
+  }
+  const values: string[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = descriptors[String(index)];
+    const item = descriptor && "value" in descriptor ? descriptor.value : undefined;
+    if (typeof item !== "string" || item.trim().length === 0 || item.length > maxLength) {
+      throw new TypeError(label + " exceeds its bounded string-list contract");
+    }
+    values.push(item);
+  }
+  if (values.includes(RATIONALE_UNKNOWN_SCOPE_SENTINEL) &&
+      !(values.length === 1 && values[0] === RATIONALE_UNKNOWN_SCOPE_SENTINEL)) {
+    throw new TypeError(label + " unknown sentinel must be the sole value");
   }
   return cloneCanonicalJson(value, label) as readonly string[];
 }
@@ -409,6 +406,24 @@ function assertExactOwnKeys(value: object, expected: readonly string[], label: s
   if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
     throw new TypeError(label + " contains unexpected or missing fields");
   }
+}
+
+export function assertRationaleCanonicalJson(value: unknown, label: string): void {
+  assertCanonicalJson(value, label);
+}
+
+export function cloneRationaleCanonicalJson<T>(
+  value: T,
+  label: string,
+): DeepReadonly<T> {
+  return cloneCanonicalJson(value, label);
+}
+
+export function normalizeRationaleRiskVerdict(
+  value: RiskVerdict,
+  label: string,
+): RiskVerdict {
+  return normalizeAndSealRiskVerdict(value, label);
 }
 
 function assertRationaleProvenance(value: RationaleEligibilityProvenance): void {
@@ -468,8 +483,13 @@ function assertHostEligibilityContext(
 function computeRationaleInvocationDigest(input: {
   ticketId: string;
   nonce: string;
-  toolUseId: string;
+  anchor: RequestAnchor;
+  // SHA-256 is only a deterministic consistency key. It is not an
+  // authenticity primitive: resume/execution must compare it with the
+  // immutable digest stored by the host ticket CAS, never with a digest
+  // supplied or recomputed by an untrusted caller.
   actionDigest: string;
+  sealedAction: SealedRationaleAction;
   eligibilityContext: HostRationaleEligibilityContext;
   reviewerOutcome: "fresh" | "cache";
   initialVerdict: RiskVerdict;
@@ -477,8 +497,9 @@ function computeRationaleInvocationDigest(input: {
   return digest({
     ticketId: input.ticketId,
     nonce: input.nonce,
-    toolUseId: input.toolUseId,
+    anchor: input.anchor,
     actionDigest: input.actionDigest,
+    sealedAction: input.sealedAction,
     eligibilityContext: input.eligibilityContext,
     reviewerOutcome: input.reviewerOutcome,
     initialVerdict: input.initialVerdict,
@@ -555,6 +576,7 @@ export function createRequestAnchor(input: {
     intentDigest: digest({ inputOrigin: input.inputOrigin, normalizedIntent }),
     createdAt: now,
     expiresAt: now + ttlMs,
+    rationaleRoundBudget: 1,
   }) as RequestAnchor;
 }
 
@@ -564,7 +586,7 @@ function isValidRequestAnchor(anchor: RequestAnchor, now: number): boolean {
     assertCanonicalJson(anchor, "RequestAnchor");
     assertExactOwnKeys(anchor, [
       "contractVersion", "anchorId", "sessionId", "turnId", "inputMessageId",
-      "inputOrigin", "sanitizedIntent", "intentDigest", "createdAt", "expiresAt",
+      "inputOrigin", "sanitizedIntent", "intentDigest", "createdAt", "expiresAt", "rationaleRoundBudget",
     ], "RequestAnchor");
     for (const [label, value, maxLength] of [
       ["anchorId", anchor.anchorId, 256], ["sessionId", anchor.sessionId, 256],
@@ -580,6 +602,7 @@ function isValidRequestAnchor(anchor: RequestAnchor, now: number): boolean {
       /^[0-9a-f-]{36}$/i.test(anchor.anchorId) &&
       /^[0-9a-f]{64}$/.test(anchor.intentDigest) &&
       Number.isFinite(now) && Number.isFinite(anchor.createdAt) &&
+      anchor.rationaleRoundBudget === 1 &&
       Number.isFinite(anchor.expiresAt) && anchor.expiresAt > anchor.createdAt &&
       anchor.createdAt <= now && anchor.expiresAt > now
     );
@@ -864,8 +887,9 @@ export function createRationaleRequiredControl(input: {
   const invocationDigest = computeRationaleInvocationDigest({
     ticketId,
     nonce,
-    toolUseId: sealedAction.toolUseId,
+    anchor,
     actionDigest: action.actionDigest,
+    sealedAction,
     eligibilityContext,
     reviewerOutcome,
     initialVerdict,
@@ -980,8 +1004,9 @@ export function verifyRationaleRequiredControl(
     const expectedInvocationDigest = computeRationaleInvocationDigest({
       ticketId: control.ticketId,
       nonce: control.nonce,
-      toolUseId: sealedAction.toolUseId,
+      anchor: control.anchor,
       actionDigest: control.action.actionDigest,
+      sealedAction,
       eligibilityContext: control.eligibilityContext,
       reviewerOutcome: control.reviewerOutcome,
       initialVerdict,
@@ -1013,11 +1038,16 @@ export function toRationaleProviderEnvelope(
   if (!verifyRationaleRequiredControl(control)) {
     throw new Error("invalid or expired rationale control");
   }
-  const projectBounded = (values: readonly string[], label: string) => {
-    if (values.length > 8) {
+  const projectBounded = (
+    values: readonly string[],
+    label: string,
+    maxItems = 8,
+    maxLength = 160,
+  ) => {
+    if (values.length > maxItems) {
       throw new Error(label + " exceeds the provider contract");
     }
-    const projected = values.map((value) => sanitizeDisplayText(value, 160));
+    const projected = values.map((value) => sanitizeDisplayText(value, maxLength));
     if (projected.some((value) => !value)) {
       throw new Error(label + " contains an empty provider projection");
     }
@@ -1031,6 +1061,12 @@ export function toRationaleProviderEnvelope(
     anchorId: control.anchor.anchorId,
     ticketId: control.ticketId,
     actionDigest: control.action.actionDigest,
+    canonicalTargets: projectBounded(
+      control.action.canonicalTargets,
+      "canonicalTargets",
+      32,
+      1_024,
+    ),
     round: 1,
     sanitizedIntent: control.anchor.sanitizedIntent,
     toolName: control.action.toolName,
@@ -1053,28 +1089,6 @@ export function toRationaleProviderEnvelope(
   }) as RationaleProviderEnvelope;
 }
 
-export function transitionRationaleState(
-  state: RationaleControlState,
-  event: RationaleControlEvent,
-): RationaleControlState {
-  if (event === "expire" && !["allowed_once", "denied", "cancelled", "expired"].includes(state)) {
-    return "expired";
-  }
-  const key = state + ":" + event;
-  const transitions: Record<string, RationaleControlState> = {
-    "review_required:request-rationale": "rationale_requested",
-    "rationale_requested:rationale-ready": "rationale_ready",
-    "rationale_requested:rationale-failed": "rationale_failed",
-    "rationale_ready:prompt-user": "user_pending",
-    "rationale_failed:prompt-user": "user_pending",
-    "user_pending:allow-once": "allowed_once",
-    "user_pending:deny": "denied",
-    "user_pending:cancel": "cancelled",
-  };
-  const next = transitions[key];
-  if (!next) throw new Error("invalid rationale state transition: " + key);
-  return next;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -1091,7 +1105,7 @@ export function parseRationaleResponse(
     if (!isRecord(input)) return null;
     assertExactOwnKeys(input, [
       "contractVersion", "anchorId", "ticketId", "actionDigest", "round",
-      "suggestion", "scopeAlignment", "scopeReasons",
+      "suggestion",
     ], "RationaleResponse");
     if (
       input.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
@@ -1101,25 +1115,12 @@ export function parseRationaleResponse(
       input.round !== 1 ||
       typeof input.suggestion !== "string" ||
       input.suggestion.length === 0 ||
-      input.suggestion.length > 500 ||
-      typeof input.scopeAlignment !== "string" ||
-      !["aligned", "unclear", "outside"].includes(input.scopeAlignment) ||
-      !Array.isArray(input.scopeReasons) ||
-      input.scopeReasons.length > 8 ||
-      !input.scopeReasons.every(
-        (reason) =>
-          typeof reason === "string" &&
-          reason.length > 0 &&
-          reason.length <= 160,
-      )
+      input.suggestion.length > 500
     ) {
       return null;
     }
     const suggestion = sanitizeDisplayText(input.suggestion, 500);
-    const scopeReasons = input.scopeReasons.map((reason) =>
-      sanitizeDisplayText(reason, 160)
-    );
-    if (!suggestion || scopeReasons.some((reason) => !reason)) return null;
+    if (!suggestion) return null;
 
     return deepFreeze({
       contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
@@ -1128,81 +1129,8 @@ export function parseRationaleResponse(
       actionDigest: control.action.actionDigest,
       round: 1,
       suggestion,
-      scopeAlignment: input.scopeAlignment as RationaleResponse["scopeAlignment"],
-      scopeReasons,
     }) as RationaleResponse;
   } catch {
     return null;
-  }
-}
-
-export function createRationaleResumeRequest(input: {
-  control: RationaleRequiredControl;
-  response: unknown | null;
-  rationaleStatus: "ready" | "failed";
-  currentEligibilityContext: HostRationaleEligibilityContext;
-  now?: number;
-}): RationaleResumeRequest {
-  const now = input.now ?? Date.now();
-  const control = cloneCanonicalJson(
-    input.control,
-    "RationaleRequiredControl",
-  ) as RationaleRequiredControl;
-  if (!verifyRationaleRequiredControl(control, {
-    now,
-    currentEligibilityContext: input.currentEligibilityContext,
-  })) {
-    throw new Error("invalid, expired, or stale rationale control");
-  }
-  if (input.rationaleStatus === "ready") {
-    const response = parseRationaleResponse(input.response, control, now);
-    if (!response) throw new Error("invalid rationale response");
-    return deepFreeze({
-      control,
-      response,
-      rationaleStatus: "ready",
-    }) as RationaleResumeRequest;
-  }
-  if (input.rationaleStatus === "failed" && input.response === null) {
-    return deepFreeze({
-      control,
-      response: null,
-      rationaleStatus: "failed",
-    }) as RationaleResumeRequest;
-  }
-  throw new Error("failed rationale handoff must not carry a response");
-}
-
-export function validateRationaleResumeRequest(
-  request: unknown,
-  currentEligibilityContext: HostRationaleEligibilityContext,
-  now = Date.now(),
-): request is RationaleResumeRequest {
-  try {
-    assertCanonicalJson(request, "RationaleResumeRequest");
-    if (!isRecord(request)) return false;
-    assertExactOwnKeys(
-      request,
-      ["control", "response", "rationaleStatus"],
-      "RationaleResumeRequest",
-    );
-    const control = request.control as RationaleRequiredControl;
-    if (!verifyRationaleRequiredControl(control, {
-      now,
-      currentEligibilityContext,
-    })) {
-      return false;
-    }
-    if (request.rationaleStatus === "failed") {
-      return request.response === null;
-    }
-    if (request.rationaleStatus !== "ready") return false;
-    const parsed = parseRationaleResponse(request.response, control, now);
-    return (
-      parsed !== null &&
-      canonicalStringify(parsed) === canonicalStringify(request.response)
-    );
-  } catch {
-    return false;
   }
 }

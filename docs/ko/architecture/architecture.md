@@ -1221,7 +1221,7 @@ lvis-app/src/
 │   ├── executor.ts              # ToolExecutor facade + executeAll/executeOne orchestrator
 │   ├── executor-ceiling.ts      # runWithCeiling AbortController helper (SOT)
 │   ├── pipeline/ # §4.5.6 pipeline units (C7/C8): path-extraction, approval-purpose,
-│   │            #  audit-entries, display-mask, rate-limiter, reviewer-authorization-store,
+│   │            #  audit-entries, display-mask, rate-limiter,
 │   │            #  reviewer-dispatch, approval-memory-skip, risk-classification,
 │   │            #  audit-writer, invocation-context
 │   ├── knowledge-search.ts, bash.ts
