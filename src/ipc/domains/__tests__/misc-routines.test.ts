@@ -43,7 +43,7 @@ function makeDeps(
     conversationLoop: { getSessionId: vi.fn(() => "main-session") },
     memoryManager: {
       listSessionsByRoutine: vi.fn(() => sessions),
-      deleteSession: vi.fn(),
+      deleteSession: vi.fn(async () => undefined),
     },
     auditLogger: { log: vi.fn() },
     getMainWindow: vi.fn(() => null),
@@ -136,6 +136,38 @@ describe("routine pending results", () => {
         title: "뉴스 요약",
         preview: "뉴스 요약 완료",
       },
+    ]);
+  });
+
+  it("waits for every routine session deletion before reporting removal", async () => {
+    const deps = await setup([
+      { id: "routine-session-1", preview: "first" },
+      { id: "routine-session-2", preview: "second" },
+    ]);
+    deps.routinesStore.remove.mockResolvedValue(true);
+    let releaseDelete!: () => void;
+    const deleteGate = new Promise<void>((resolve) => {
+      releaseDelete = resolve;
+    });
+    deps.memoryManager.deleteSession.mockImplementation(async () => {
+      await deleteGate;
+    });
+    let settled = false;
+    const removing = invoke(ROUTINES_V2.remove, "routine-a").then((result) => {
+      settled = true;
+      return result;
+    });
+    await vi.waitFor(() => {
+      expect(deps.memoryManager.deleteSession).toHaveBeenCalledTimes(1);
+    });
+    expect(settled).toBe(false);
+
+    releaseDelete();
+
+    await expect(removing).resolves.toEqual({ ok: true });
+    expect(deps.memoryManager.deleteSession.mock.calls).toEqual([
+      ["routine-session-1"],
+      ["routine-session-2"],
     ]);
   });
 });

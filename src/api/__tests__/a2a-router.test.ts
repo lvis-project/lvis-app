@@ -5,7 +5,7 @@ import {
   type LocalApiHttpServer,
 } from "../http-server.js";
 import { createStreamBroadcaster } from "../stream-broadcaster.js";
-import type { LocalApi } from "../local-api.js";
+import { makeStubLocalApi } from "./a2a-test-helpers.js";
 import {
   A2AHostJsonRpcErrorDefinition,
   A2AJsonRpcErrorDefinition,
@@ -18,10 +18,6 @@ import { A2ARole, A2ATaskState, type A2ATask } from "../../shared/a2a.js";
 
 const SECRET = "a2a-test-secret-0123456789abcdef";
 const HANDLER_PATH = "/a2a/tck";
-
-function stubApi(): LocalApi {
-  return { dispatch: vi.fn(async () => ({ ok: true, data: {} })) };
-}
 
 function task(state = A2ATaskState.COMPLETED): A2ATask {
   return {
@@ -130,7 +126,7 @@ async function start(): Promise<{
   const audit = vi.fn();
   const log = vi.fn();
   const server = await startLocalApiHttpServer({
-    api: stubApi(),
+    api: makeStubLocalApi(),
     secret: SECRET,
     broadcaster: createStreamBroadcaster(),
     a2aRouter: createA2AHttpRouter({ handlers: [handler], audit, log }),
@@ -508,6 +504,16 @@ describe("A2A v1 loopback router", () => {
 });
 
 describe("A2A handler registration", () => {
+  it("exposes a sorted immutable handler-id snapshot for local discovery", () => {
+    const { handler } = testHandler();
+    const router = createA2AHttpRouter({
+      handlers: [{ ...handler, id: "zeta" }, { ...handler, id: "alpha" }],
+    });
+
+    expect(router.handlerIds).toEqual(["alpha", "zeta"]);
+    expect(Object.isFrozen(router.handlerIds)).toBe(true);
+  });
+
   it("rejects unsafe ids, duplicates, and capabilities the router cannot serve", () => {
     const { handler } = testHandler();
     expect(() =>

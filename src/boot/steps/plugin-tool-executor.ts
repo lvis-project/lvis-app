@@ -63,6 +63,9 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
   const hookSystem = await wireHookSystem({ auditLogger: bootAuditLogger });
   const scriptHookManager = hookSystem.manager;
 
+  // This executor is created before ConversationLoop and workspace IPC. Resolve
+  // the lifecycle through the existing late-binding ref at approval time; an
+  // unexpectedly early plugin invocation sees undefined and fails closed.
   const pluginSurfaceExecutor = new ToolExecutor(
     toolRegistry,
     hookRunner,
@@ -79,6 +82,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     // tools, degraded hosts, and sandbox-off hosts return false so the pre-exec
     // ask stands (see ToolExecutor.sandboxFsContainedProvider).
     isActiveSandboxFilesystemContainedForPluginEffects,
+    () => lateBinding.conversationLoopRef.fn?.deps.workspaceRootLifecycle,
   );
   const pluginSurfacePermissionScope = createPluginSurfacePermissionScope({
     readPersistedDirectories: () => readPermissionSettings().permissions.additionalDirectories,

@@ -139,6 +139,119 @@ describe("ui IPC handlers", () => {
     });
   });
 
+  it("builds generic native commands in canonical order and emits typed click actions", () => {
+    const event = makeEvent();
+
+    const result = invoke(UI.nativeContextMenu, event, {
+      requestId: "native-1",
+      x: 10.4,
+      y: 20.6,
+      kind: "project",
+      commands: [
+        "project.remove",
+        "project.reveal",
+        "project.new-chat",
+        "project.pin",
+      ],
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(popupMock).toHaveBeenCalledWith({
+      window: expect.objectContaining({ isDestroyed: expect.any(Function) }),
+      x: 10,
+      y: 21,
+    });
+
+    const template = firstTemplate();
+    expect(template.map((item) => item.type ?? "command")).toEqual([
+      "command",
+      "separator",
+      "command",
+      "command",
+      "separator",
+      "command",
+    ]);
+    for (const item of template) item.click?.();
+
+    expect(sendMock.mock.calls.map(([, action]) => action)).toEqual([
+      { requestId: "native-1", command: "project.new-chat" },
+      { requestId: "native-1", command: "project.pin" },
+      { requestId: "native-1", command: "project.reveal" },
+      { requestId: "native-1", command: "project.remove" },
+    ]);
+    expect(sendMock.mock.calls.every(([channel]) => channel === UI.nativeContextAction)).toBe(true);
+  });
+
+  it("builds conversation commands in canonical order and emits typed click actions", () => {
+    const event = makeEvent();
+
+    const result = invoke(UI.nativeContextMenu, event, {
+      requestId: "conversation-1",
+      x: 4,
+      y: 8,
+      kind: "conversation",
+      commands: ["conversation.unpin", "conversation.open"],
+    });
+
+    expect(result).toEqual({ ok: true });
+    const template = firstTemplate();
+    expect(template.map((item) => item.type ?? "command")).toEqual([
+      "command",
+      "separator",
+      "command",
+    ]);
+    for (const item of template) item.click?.();
+
+    expect(sendMock.mock.calls.map(([, action]) => action)).toEqual([
+      { requestId: "conversation-1", command: "conversation.open" },
+      { requestId: "conversation-1", command: "conversation.unpin" },
+    ]);
+  });
+
+  it("builds command item actions in canonical order", () => {
+    const event = makeEvent();
+
+    const result = invoke(UI.nativeContextMenu, event, {
+      requestId: "command-1",
+      x: 4,
+      y: 8,
+      kind: "command-item",
+      commands: ["command.copy", "command.activate"],
+    });
+
+    expect(result).toEqual({ ok: true });
+    const template = firstTemplate();
+    expect(template.map((item) => item.type ?? "command")).toEqual([
+      "command",
+      "separator",
+      "command",
+    ]);
+    for (const item of template) item.click?.();
+
+    expect(sendMock.mock.calls.map(([, action]) => action)).toEqual([
+      { requestId: "command-1", command: "command.activate" },
+      { requestId: "command-1", command: "command.copy" },
+    ]);
+  });
+
+  it.each([
+    ["cross-kind command", ["project.pin"]],
+    ["unknown command", ["message.unknown"]],
+    ["empty commands", []],
+  ])("rejects native context payloads with %s", (_caseName, commands) => {
+    const result = invoke(UI.nativeContextMenu, makeEvent(), {
+      requestId: "native-invalid",
+      x: 1,
+      y: 2,
+      kind: "message",
+      commands,
+    });
+
+    expect(result).toEqual({ ok: false, error: "invalid-native-context-menu" });
+    expect(popupMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed payloads without opening a menu", () => {
     const result = invoke(UI.assistantContextMenu, makeEvent(), {
       requestId: "req-3",

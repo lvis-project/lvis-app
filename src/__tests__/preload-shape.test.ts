@@ -185,7 +185,9 @@ describe("preload contextBridge world shape lock", () => {
           ],
           "ui": [
             "onAssistantContextAction",
+            "onNativeContextMenuAction",
             "showAssistantContextMenu",
+            "showNativeContextMenu",
           ],
           "userApproval": [
             "list",

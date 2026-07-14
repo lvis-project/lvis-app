@@ -454,7 +454,8 @@ describe("ticket/action-bound lifecycle truth table", () => {
 
 describe("invocation audit and sealed resume", () => {
   it("maps versioned security phases to the executor source in strict order", () => {
-    const source = readFileSync(new URL("../../executor.ts", import.meta.url), "utf8");
+    const source = readFileSync(new URL("../../executor.ts", import.meta.url), "utf8")
+      .replace(/\r\n/g, "\n");
     expect(FOREGROUND_RATIONALE_PRODUCTION_ENABLED).toBe(false);
     expect(RATIONALE_SECURITY_SUFFIX_VERSION).toBe(2);
     expect(RATIONALE_SECURITY_SUFFIX).toEqual([

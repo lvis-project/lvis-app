@@ -739,3 +739,125 @@ describe("RoutinesStore v2 — source marker", () => {
     }
   });
 });
+
+describe("RoutinesStore workspace scope revocation", () => {
+  it("atomically removes a canonical root and descendants and persists the shrink", async () => {
+    const { store, dir, cleanup } = tempStore();
+    try {
+      const removedRoot = join(dir, "workspace");
+      const segmentSibling = join(dir, "workspace-sibling");
+      const unrelated = join(dir, "unrelated");
+      await store.add({
+        trigger: "schedule",
+        execution: "notification-only",
+        schedule: { at: futureIso() },
+        notificationTitle: "first",
+        scope: {
+          pluginIds: { mode: "deny-all" },
+          forcedPluginIds: [],
+          directories: [
+            removedRoot,
+            join(removedRoot, "child"),
+            segmentSibling,
+          ],
+        },
+      });
+      await store.add({
+        trigger: "schedule",
+        execution: "notification-only",
+        schedule: { at: futureIso() },
+        notificationTitle: "second",
+        scope: {
+          pluginIds: { mode: "deny-all" },
+          forcedPluginIds: [],
+          directories: [join(removedRoot, "nested", "child"), unrelated],
+        },
+      });
+
+      await expect(store.revokeWorkspaceRoot(join(removedRoot, "."))).resolves.toEqual({
+        routinesUpdated: 2,
+        directoriesRemoved: 3,
+      });
+
+      const reloaded = new RoutinesStore(join(dir, "routines.json"));
+      await reloaded.load();
+      const byTitle = new Map(
+        reloaded.list().map((routine) => [routine.notificationTitle, routine]),
+      );
+      expect(byTitle.get("first")?.scope?.directories).toEqual([segmentSibling]);
+      expect(byTitle.get("second")?.scope?.directories).toEqual([unrelated]);
+    } finally {
+      cleanup();
+    }
+  });
+  it("preserves routine directories owned by a separately registered child root", async () => {
+    const { store, dir, cleanup } = tempStore();
+    try {
+      const parentRoot = join(dir, "workspace");
+      const preservedChild = join(parentRoot, "child");
+      const parentOnly = join(parentRoot, "parent-only");
+      const childDeep = join(preservedChild, "src");
+      const childPrefixSibling = join(parentRoot, "child-old");
+      const unrelated = join(dir, "unrelated");
+      await store.add({
+        trigger: "schedule",
+        execution: "notification-only",
+        schedule: { at: futureIso() },
+        notificationTitle: "nested",
+        scope: {
+          pluginIds: { mode: "deny-all" },
+          forcedPluginIds: [],
+          directories: [
+            parentRoot,
+            parentOnly,
+            preservedChild,
+            childDeep,
+            childPrefixSibling,
+            unrelated,
+          ],
+        },
+      });
+
+      await expect(store.revokeWorkspaceRoot(parentRoot, {
+        preserveRoots: [preservedChild],
+      })).resolves.toEqual({
+        routinesUpdated: 1,
+        directoriesRemoved: 3,
+      });
+
+      const reloaded = new RoutinesStore(join(dir, "routines.json"));
+      await reloaded.load();
+      expect(reloaded.list()[0]?.scope?.directories).toEqual([
+        preservedChild,
+        childDeep,
+        unrelated,
+      ]);
+    } finally {
+      cleanup();
+    }
+  });
+
+
+  it("is a no-op when no routine scope is covered", async () => {
+    const { store, dir, cleanup } = tempStore();
+    try {
+      await store.add({
+        trigger: "schedule",
+        execution: "notification-only",
+        schedule: { at: futureIso() },
+        notificationTitle: "unrelated",
+        scope: {
+          pluginIds: { mode: "deny-all" },
+          forcedPluginIds: [],
+          directories: [join(dir, "workspace-sibling")],
+        },
+      });
+      await expect(store.revokeWorkspaceRoot(join(dir, "workspace"))).resolves.toEqual({
+        routinesUpdated: 0,
+        directoriesRemoved: 0,
+      });
+    } finally {
+      cleanup();
+    }
+  });
+});

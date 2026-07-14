@@ -305,14 +305,18 @@ function hasExactInitialStoredMessage(record: A2ATaskRecord, message: A2AMessage
 
 export interface A2ATaskStoreAuditEvent {
   type: "a2a-task-store-drop";
-  reason: "invalid-record" | "duplicate-record";
+  reason: "invalid-record" | "duplicate-record" | "inactive-handler";
   count: number;
 }
 
 export interface CreateA2ATaskStoreOptions {
   namespace: Pick<FeatureNamespaceHandle, "readJson" | "writeJson">;
   maxTasks: number;
+  /** Optional fair-share ceiling used when multiple handlers share one store. */
+  maxTasksPerHandler?: number;
   maxHistoryMessages: number;
+  /** Optional immutable boot snapshot; persisted records for removed handlers are ignored. */
+  activeHandlerIds?: ReadonlySet<string>;
   fileName?: string;
   now?: () => string;
   audit?: (event: A2ATaskStoreAuditEvent) => void;
@@ -403,6 +407,12 @@ export class A2ATaskStore {
     if (!Number.isInteger(options.maxTasks) || options.maxTasks < 1) {
       throw new Error("A2A task store maxTasks must be a positive integer");
     }
+    if (
+      options.maxTasksPerHandler !== undefined
+      && (!Number.isInteger(options.maxTasksPerHandler) || options.maxTasksPerHandler < 1)
+    ) {
+      throw new Error("A2A task store maxTasksPerHandler must be a positive integer");
+    }
     if (!Number.isInteger(options.maxHistoryMessages) || options.maxHistoryMessages < 1) {
       throw new Error("A2A task store maxHistoryMessages must be a positive integer");
     }
@@ -430,15 +440,27 @@ export class A2ATaskStore {
       && Array.isArray(raw.records)
       ? raw.records
       : [];
-    const candidates = values
+    const normalized = values
       .map((value) => normalizeRecord(value, this.options.maxHistoryMessages))
       .filter((value): value is A2ATaskRecord => value !== null);
-    const invalidCount = values.length - candidates.length;
+    const invalidCount = values.length - normalized.length;
     if (invalidCount > 0) {
       this.options.audit?.({
         type: "a2a-task-store-drop",
         reason: "invalid-record",
         count: invalidCount,
+      });
+    }
+
+    const candidates = this.options.activeHandlerIds
+      ? normalized.filter((record) => this.options.activeHandlerIds!.has(record.handlerId))
+      : normalized;
+    const inactiveCount = normalized.length - candidates.length;
+    if (inactiveCount > 0) {
+      this.options.audit?.({
+        type: "a2a-task-store-drop",
+        reason: "inactive-handler",
+        count: inactiveCount,
       });
     }
 
@@ -489,6 +511,14 @@ export class A2ATaskStore {
   private findMessageRecord(handlerId: string, messageId: string): A2ATaskRecord | undefined {
     return this.records.find((record) =>
       record.handlerId === handlerId && recordMessageIds(record).includes(messageId));
+  }
+
+  private removalCountForAdmission(handlerId: string): number {
+    const totalOverflow = this.records.length - this.options.maxTasks + 1;
+    const perHandlerLimit = this.options.maxTasksPerHandler ?? this.options.maxTasks;
+    const handlerCount = this.records.filter((record) => record.handlerId === handlerId).length;
+    const handlerOverflow = handlerCount - perHandlerLimit + 1;
+    return Math.max(0, totalOverflow, handlerOverflow);
   }
 
   private inspectContinuationUnlocked(input: {
@@ -634,7 +664,7 @@ export class A2ATaskStore {
         return { ok: false, reason: "admission-busy" };
       }
 
-      const removeCount = this.records.length - this.options.maxTasks + 1;
+      const removeCount = this.removalCountForAdmission(input.handlerId);
       if (removeCount > 0) {
         const terminalCount = this.records.filter((record) =>
           record.handlerId === input.handlerId
@@ -740,7 +770,7 @@ export class A2ATaskStore {
         return { ok: true, created: false, record: cloneRecord(existing) };
       }
 
-      const removeCount = this.records.length - this.options.maxTasks + 1;
+      const removeCount = this.removalCountForAdmission(input.handlerId);
       let removable = new Set<string>();
       if (removeCount > 0) {
         const terminal = this.records

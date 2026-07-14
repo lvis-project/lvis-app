@@ -24,6 +24,10 @@ import { PermissionReviewStatusCard } from "./PermissionReviewStatusCard.js";
 import { TurnActionBar } from "./TurnActionBar.js";
 import { ImportedTriggerCard } from "./ImportedTriggerCard.js";
 import { AskUserAnswerBubble } from "./AskUserAnswerBubble.js";
+import {
+  useNativeContextMenu,
+  type NativeContextMenuHandlers,
+} from "../hooks/use-native-context-menu.js";
 
 /**
  * Per-turn provider-reported usage summary, keyed by turn-start entry index.
@@ -145,6 +149,7 @@ export function TranscriptRenderer({
   workGroupsForceOpen = false,
 }: SharedTranscriptProps): React.ReactElement {
   const { t } = useTranslation();
+  const openNativeContextMenu = useNativeContextMenu();
 
   // Cluster fields with explicit inert defaults. These defaults ARE the
   // no-regression contract: forgetting one produces wrong runtime output
@@ -237,44 +242,73 @@ export function TranscriptRenderer({
         const showHoverActions =
           !viewMode && (!!setEditingEntryIdx || !!onFork || !!onToggleStar);
         rendered.push(
-          <div key={idx} data-chat-entry-index={idx} className={`group relative ml-auto w-fit min-w-0 max-w-[75%] overflow-hidden rounded-lg bg-message-user px-3.5 py-2.5 text-sm text-message-user-foreground shadow-sm ${userGapCls} ${ringCls}`}>
-            {/* "나" label removed — sender is implicit. Star + hover
-                actions float top-right via absolute positioning so
-                the bubble has no header chrome. */}
-            {entry.injectHint === "queue" ? (
-              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/(--opacity-subtle) px-1.5 py-0.5 text-[10px] text-message-user-foreground/(--opacity-stronger)" title={t("chatView.queueInjectTitle")}>
-                {t("chatView.queueInjectLabel")}
-              </div>
-            ) : entry.injectHint === "interrupt" ? (
-              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/(--opacity-subtle) px-1.5 py-0.5 text-[10px] text-message-user-foreground/(--opacity-stronger)" title={t("chatView.interruptTitle")}>
-                {t("chatView.interruptLabel")}
-              </div>
-            ) : null}
-            {starActive ? (
-              <Pin key="active" className="absolute right-2 top-2 h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" />
-            ) : null}
-            {/* Hide mutating actions in view-mode (read-only slice) and for
-                sources that omit the edit / action callbacks. */}
+          <div
+            key={idx}
+            data-chat-entry-index={idx}
+            className={`group relative ml-auto w-fit min-w-0 max-w-[75%] ${userGapCls}`}
+            onContextMenu={(event) =>
+              openNativeContextMenu(event, "message", {
+                "message.copy": () => void navigator.clipboard?.writeText(entry.text),
+                ...(!viewMode && setEditingEntryIdx
+                  ? { "message.edit": () => setEditingEntryIdx(idx) }
+                  : {}),
+                ...(!viewMode && onFork
+                  ? { "message.fork": () => void onFork(idx) }
+                  : {}),
+                ...(!viewMode && onToggleStar
+                  ? {
+                      [starActive ? "message.unpin" : "message.pin"]: () =>
+                        void onToggleStar(idx),
+                    }
+                  : {}),
+              } as NativeContextMenuHandlers)
+            }
+          >
+            <div
+              data-testid="user-message-bubble"
+              className={`min-w-0 overflow-hidden rounded-lg border border-message-user-border bg-message-user px-3.5 py-2.5 text-body-sm text-message-user-foreground shadow-sm ${ringCls}`}
+            >
+              {/* Sender is implicit. Metadata stays above the selectable body. */}
+              {entry.injectHint === "queue" ? (
+                <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-muted/(--opacity-subtle) px-1.5 py-0.5 text-micro text-message-user-muted" title={t("chatView.queueInjectTitle")}>
+                  {t("chatView.queueInjectLabel")}
+                </div>
+              ) : entry.injectHint === "interrupt" ? (
+                <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-muted/(--opacity-subtle) px-1.5 py-0.5 text-micro text-message-user-muted" title={t("chatView.interruptTitle")}>
+                  {t("chatView.interruptLabel")}
+                </div>
+              ) : null}
+              {starActive ? (
+                <div className="mb-1 flex justify-end">
+                  <Pin data-testid="user-message-pin-indicator" key="active" className="h-3 w-3 fill-message-user-emphasis text-message-user-emphasis lvis-anim-star" />
+                </div>
+              ) : null}
+              <div className="cursor-text select-text whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
+            </div>
+            {/* Keep a fixed action slot outside the bubble. Revealing controls
+                changes only opacity/transform, never message or transcript height. */}
             {showHoverActions && (
-              <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/(--opacity-solid) rounded">
+              <div
+                data-testid="user-message-actions"
+                className="mt-1 flex h-7 translate-y-1 justify-end gap-1 opacity-0 pointer-events-none transition-[opacity,transform] duration-[var(--motion-fast)] ease-[var(--motion-ease-out)] group-hover:translate-y-0 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100 group-focus-within:pointer-events-auto motion-reduce:transition-none motion-reduce:transform-none"
+              >
                 {setEditingEntryIdx ? (
-                  <Button type="button" variant="ghost" size="icon-xs" title={t("chatView.editButtonTitle")} onClick={() => setEditingEntryIdx(idx)}>
+                  <Button type="button" variant="ghost" size="icon-xs" className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring" title={t("chatView.editButtonTitle")} onClick={() => setEditingEntryIdx(idx)}>
                     <Pencil className="h-3 w-3" />
                   </Button>
                 ) : null}
                 {onFork ? (
-                  <Button type="button" variant="ghost" size="icon-xs" title={t("chatView.forkButtonTitle")} onClick={() => void onFork(idx)}>
+                  <Button type="button" variant="ghost" size="icon-xs" className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring" title={t("chatView.forkButtonTitle")} onClick={() => void onFork(idx)}>
                     <GitBranch className="h-3 w-3" />
                   </Button>
                 ) : null}
                 {onToggleStar ? (
-                  <Button type="button" variant="ghost" size="icon-xs" title={t("chatView.starButtonTitle")} onClick={() => void onToggleStar(idx)}>
+                  <Button type="button" variant="ghost" size="icon-xs" className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring" title={t("chatView.starButtonTitle")} onClick={() => void onToggleStar(idx)}>
                     <Pin key={starActive ? "on" : "off"} className={`h-3 w-3 ${starActive ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
                   </Button>
                 ) : null}
               </div>
             )}
-            <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
           </div>
         );
       }
@@ -606,6 +640,7 @@ export function TranscriptRenderer({
     onFork,
     onRetryEffort,
     onToggleStar,
+    openNativeContextMenu,
     searchHighlight,
     searchIdx,
     searchMatchSet,

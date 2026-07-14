@@ -9,12 +9,14 @@
 import type { ConversationLoop } from "../conversation-loop.js";
 import type { SessionKind } from "../../memory/memory-manager.js";
 import type { GenericMessage } from "../llm/types.js";
+import type { WorkspaceRootRevocationOptions } from "./types.js";
 import { normalizeToolPairInvariant } from "../conversation-history.js";
 import { createTracer } from "../../observability/conversation-trace.js";
 import { latestPersistedContextTokens } from "./context-carrier.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
 import { createLogger } from "../../lib/logger.js";
-import { projectBasename } from "../../shared/project-identity.js";
+import { projectBasename, projectRootEquals } from "../../shared/project-identity.js";
+import { canonicalizePathForMatch, caseFoldForMatch } from "../../permissions/sensitive-paths.js";
 
 const log = createLogger("lvis");
 
@@ -73,6 +75,99 @@ function currentProjectContext(self: ConversationLoop): SessionProjectContext {
     ...(self.sessionProjectRoot ? { projectRoot: self.sessionProjectRoot } : {}),
     ...(self.sessionProjectName ? { projectName: self.sessionProjectName } : {}),
   };
+}
+
+export interface WorkspaceRootRevocationResult {
+  sessionDirectoriesRemoved: number;
+  turnDirectoriesRemoved: number;
+  projectRebound: boolean;
+}
+
+function isPathAtOrBelow(root: string, candidate: string): boolean {
+  try {
+    const canonicalRoot = caseFoldForMatch(canonicalizePathForMatch(root));
+    const canonicalCandidate = caseFoldForMatch(canonicalizePathForMatch(candidate));
+    if (!canonicalRoot || !canonicalCandidate) return false;
+    return canonicalCandidate === canonicalRoot || canonicalCandidate.startsWith(`${canonicalRoot}/`);
+  } catch {
+    return projectRootEquals(root, candidate);
+  }
+}
+
+/**
+ * Revoke every live session/turn directory covered by a removed workspace
+ * root. When the active project depended on that root, re-authorize it against
+ * the already-shrunk settings; independently registered child roots survive,
+ * while unauthorized bindings fall back to the default workspace.
+ */
+export function revokeWorkspaceRoot(
+  self: ConversationLoop,
+  removedRoot: string,
+  options: WorkspaceRootRevocationOptions = {},
+): WorkspaceRootRevocationResult {
+  const normalizedRoot = normalizeProjectString(removedRoot);
+  if (!normalizedRoot) {
+    return { sessionDirectoriesRemoved: 0, turnDirectoriesRemoved: 0, projectRebound: false };
+  }
+  const previousSessionDirectories = [...self.sessionAdditionalDirectories];
+  const previousTurnDirectories = [...self.turnAdditionalDirectories];
+  const previousProjectRoot = self.sessionProjectRoot;
+  const previousProjectName = self.sessionProjectName;
+  const previousProjectWasDefault = self.sessionProjectIsDefault;
+  const staticDirectories = self.deps.additionalDirectories ?? [];
+  const preserveRoots = (options.preserveRoots ?? []).filter(
+    (preserveRoot) =>
+      !projectRootEquals(normalizedRoot, preserveRoot)
+      && isPathAtOrBelow(normalizedRoot, preserveRoot),
+  );
+  const isPreserved = (directory: string): boolean =>
+    preserveRoots.some((preserveRoot) => isPathAtOrBelow(preserveRoot, directory));
+  const isRevoked = (directory: string): boolean =>
+    isPathAtOrBelow(normalizedRoot, directory) && !isPreserved(directory);
+  const affectsActiveTurn = Boolean(
+    options.globalScopeWasAuthorized === true
+      || (previousProjectRoot && isRevoked(previousProjectRoot))
+      || previousSessionDirectories.some(isRevoked)
+      || previousTurnDirectories.some(isRevoked)
+      || staticDirectories.some(isRevoked),
+  );
+  if (affectsActiveTurn) {
+    // Tool batches snapshot their execution cwd. Abort only loops that actually
+    // reference the removed root; unrelated project work must keep running.
+    self.abortCurrentTurn(new Error("workspace-removal"));
+  }
+
+  const retainedSessionDirectories = previousSessionDirectories.filter(
+    (directory) => !isRevoked(directory),
+  );
+  self.turnAdditionalDirectories = previousTurnDirectories.filter(
+    (directory) => !isRevoked(directory),
+  );
+  const projectNeedsReauthorization = Boolean(
+    previousProjectRoot && isRevoked(previousProjectRoot),
+  );
+
+  self.sessionAdditionalDirectories = retainedSessionDirectories;
+  if (projectNeedsReauthorization) {
+    applyProjectContext(self, currentProjectContext(self));
+    for (const directory of retainedSessionDirectories) {
+      if (!self.sessionAdditionalDirectories.some((current) => projectRootEquals(current, directory))) {
+        self.sessionAdditionalDirectories.push(directory);
+      }
+    }
+  }
+
+  const projectRebound = projectNeedsReauthorization && (
+    !projectRootEquals(previousProjectRoot ?? "", self.sessionProjectRoot ?? "")
+    || previousProjectName !== self.sessionProjectName
+    || previousProjectWasDefault !== self.sessionProjectIsDefault
+  );
+  const sessionDirectoriesRemoved = previousSessionDirectories.length - retainedSessionDirectories.length;
+  const turnDirectoriesRemoved = previousTurnDirectories.length - self.turnAdditionalDirectories.length;
+  if (projectNeedsReauthorization || sessionDirectoriesRemoved > 0 || turnDirectoriesRemoved > 0) {
+    self.deps.broadcastPermissionConfigChanged?.();
+  }
+  return { sessionDirectoriesRemoved, turnDirectoriesRemoved, projectRebound };
 }
 
 export function newConversation(
