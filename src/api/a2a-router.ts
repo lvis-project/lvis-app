@@ -58,6 +58,8 @@ export interface A2AHttpRouterAuditEvent {
 }
 
 export interface A2AHttpRouter {
+  /** Stable, sorted handler ids exposed by this immutable boot snapshot. */
+  readonly handlerIds: readonly string[];
   isPublicAgentCardRequest(path: string, method: string): boolean;
   tryHandle(
     req: IncomingMessage,
@@ -256,7 +258,10 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
     handlers.set(handler.id, handler);
   }
 
-  return {
+  const handlerIds = Object.freeze([...handlers.keys()].sort());
+
+  const router: A2AHttpRouter = {
+    handlerIds,
     isPublicAgentCardRequest(path, method) {
       return method === "GET" && A2A_CARD_PATTERN.test(path);
     },
@@ -364,4 +369,5 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
       return true;
     },
   };
+  return Object.freeze(router);
 }
