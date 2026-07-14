@@ -65,6 +65,12 @@ const FETCH_FORBIDDEN_PORTS = new Set<number>([
   2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6697, 10080,
 ]);
 
+/** Route families exposed by one immutable loopback listener snapshot. */
+export interface LoopbackRouteFamilies {
+  localApi: boolean;
+  a2a: boolean;
+}
+
 /** Configuration for {@link startLocalApiHttpServer}. */
 export interface LocalApiHttpServerOptions {
   /** Injected external-surface dispatcher (the security seam). */
@@ -75,6 +81,8 @@ export interface LocalApiHttpServerOptions {
   broadcaster: StreamBroadcaster;
   /** Optional A2A v1 path multiplexer. Omitted unless its opt-in wire feature is enabled. */
   a2aRouter?: A2AHttpRouter;
+  /** Enabled route families. Defaults preserve the pre-snapshot listener behavior. */
+  routeFamilies?: Readonly<LoopbackRouteFamilies>;
   /** Bind host. Defaults to 127.0.0.1; MUST never default to 0.0.0.0. */
   host?: string;
   /** Bind port. Defaults to 0 (ephemeral); actual port read from address(). */
@@ -116,6 +124,11 @@ function isAuthorized(header: string | undefined, secret: string): boolean {
   const expected = Buffer.from(secret, "utf8");
   if (presented.length !== expected.length) return false;
   return timingSafeEqual(presented, expected);
+}
+
+/** Match a family root without treating lookalikes such as `/v10` as `/v1`. */
+function isRouteFamilyPath(path: string, root: "/v1" | "/a2a"): boolean {
+  return path === root || path.startsWith(`${root}/`);
 }
 
 /** Read the request body with a hard 1 MiB cap; resolves null when over-cap. */
@@ -314,6 +327,21 @@ export function startLocalApiHttpServer(
 ): Promise<LocalApiHttpServer> {
   const { api, secret, broadcaster, a2aRouter, host = DEFAULT_HOST, port = DEFAULT_PORT, log } =
     opts;
+  const requestedRouteFamilies = opts.routeFamilies ?? {
+    localApi: true,
+    a2a: Boolean(a2aRouter),
+  };
+  const routeFamilies: Readonly<LoopbackRouteFamilies> = Object.freeze({
+    localApi: requestedRouteFamilies.localApi,
+    a2a: requestedRouteFamilies.a2a,
+  });
+  if (!routeFamilies.localApi && !routeFamilies.a2a) {
+    return Promise.reject(new Error("loopback http server requires an enabled route family"));
+  }
+  if (routeFamilies.a2a && !a2aRouter) {
+    return Promise.reject(new Error("loopback http server A2A route family requires a router"));
+  }
+  const enabledA2ARouter = routeFamilies.a2a ? a2aRouter : undefined;
   if (port !== DEFAULT_PORT && isFetchForbiddenPort(port)) {
     return Promise.reject(
       new Error(`local-api http server port ${port} is blocked by Fetch clients`),
@@ -327,14 +355,21 @@ export function startLocalApiHttpServer(
   const server: Server = createServer((req, res) => {
     const path = (req.url ?? "").split("?")[0].split("#")[0];
     const method = req.method ?? "GET";
+    if (
+      (!routeFamilies.localApi && isRouteFamilyPath(path, "/v1"))
+      || (!routeFamilies.a2a && isRouteFamilyPath(path, "/a2a"))
+    ) {
+      sendJson(res, 404, { ok: false, error: "not-found" });
+      return;
+    }
     // Agent Card discovery is the only public route. Every operation and every
     // pre-existing local API route still authenticates before processing.
-    const isPublicAgentCard = a2aRouter?.isPublicAgentCardRequest(path, method) === true;
+    const isPublicAgentCard = enabledA2ARouter?.isPublicAgentCardRequest(path, method) === true;
     if (!isPublicAgentCard && !isAuthorized(req.headers.authorization, secret)) {
       sendJson(res, 401, { ok: false, error: "unauthorized" });
       return;
     }
-    void route(req, res, api, broadcaster, liveStreams, a2aRouter, log).catch((err) => {
+    void route(req, res, api, broadcaster, liveStreams, enabledA2ARouter, log).catch((err) => {
       // Defensive: an unexpected error in the routing layer itself.
       log?.(`request routing error: ${err instanceof Error ? err.message : String(err)}`);
       if (!res.headersSent) {

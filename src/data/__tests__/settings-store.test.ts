@@ -608,6 +608,20 @@ describe("SettingsService role presets", () => {
     expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
   });
 
+  it("keeps the A2A loopback server off by default and accepts booleans only", async () => {
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("features")?.a2aLoopbackServer).toBe(false);
+
+    await service.patch({ features: { a2aLoopbackServer: true } });
+    expect(service.get("features")?.a2aLoopbackServer).toBe(true);
+
+    await service.patch({ features: { a2aLoopbackServer: "yes" } as never });
+    expect(service.get("features")?.a2aLoopbackServer).toBe(true);
+
+    const reloaded = new SettingsService({ userDataPath });
+    expect(reloaded.get("features")?.a2aLoopbackServer).toBe(true);
+  });
+
   it("ships hostClassifiesRisk ON all-platform; osToolSandbox STAGED (darwin ON only)", () => {
     // hostClassifiesRisk ships ON on EVERY platform (shadow-mode reconciliation
     // completed). It is safe to ship on non-sandbox / network-only platforms
