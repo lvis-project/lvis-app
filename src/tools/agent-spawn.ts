@@ -7,7 +7,6 @@
  * sub-agent viewer (start → turn → done|error) so the user sees what the
  * sub-agent is doing.
  */
-import { randomUUID } from "node:crypto";
 import { createDynamicTool, type Tool } from "./base.js";
 import type {
   SubAgentRunner,
@@ -29,6 +28,7 @@ import {
   type A2AMessage,
 } from "../shared/a2a.js";
 import type { AgentSpawnEvent as SharedAgentSpawnEvent } from "../shared/subagent-events.js";
+import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 
 
 function backgroundResultText(result: SubAgentSpawnResult): string {
@@ -47,7 +47,7 @@ function createBackgroundResultMessage(
 ): A2AMessage {
   const suspension = result.suspension;
   return {
-    messageId: randomUUID(),
+    messageId: createDlpSafeUuid(),
     role: A2A_ROLE_AGENT,
     parts: [{ text: backgroundResultText(result) }],
     contextId: parentSessionId,
@@ -216,7 +216,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         typeof ctx.metadata?.toolUseId === "string"
           ? (ctx.metadata.toolUseId as string)
           : undefined;
-      const spawnId = randomUUID();
+      const spawnId = createDlpSafeUuid();
       const initialTaskState = resumeId
         ? projectSubAgentRunState("waiting")
         : projectSubAgentRunState("submitted");
