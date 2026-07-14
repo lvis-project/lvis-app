@@ -258,7 +258,20 @@ export function parseExecutableFromCommand(command) {
   return expanded.match(/^(.+?\.exe)(?:\s|$)/i)?.[1] ?? null;
 }
 
-const REGISTRY_QUERY_SCRIPT = [
+export function buildPowerShellScript(lines) {
+  if (
+    !Array.isArray(lines) ||
+    lines.length === 0 ||
+    !lines.every((line) => typeof line === "string")
+  ) {
+    throw new TypeError(
+      "PowerShell script lines must be a non-empty string array",
+    );
+  }
+  return lines.join("\n");
+}
+
+export const REGISTRY_QUERY_SCRIPT = buildPowerShellScript([
   "$ErrorActionPreference = 'Stop'",
   "$hive = switch ($env:LVIS_REGISTRY_HIVE) {",
   "  'HKLM' { [Microsoft.Win32.RegistryHive]::LocalMachine; break }",
@@ -308,7 +321,7 @@ const REGISTRY_QUERY_SCRIPT = [
   "  if ($null -ne $key) { $key.Dispose() }",
   "  $baseKey.Dispose()",
   "}",
-].join("; ");
+]);
 
 async function registryQuery(hive, path, view, mode) {
   const result = await runPowerShellJson(REGISTRY_QUERY_SCRIPT, {
@@ -463,10 +476,10 @@ async function runPowerShellJson(script, env) {
 async function shortcutTarget(shortcutPath) {
   if (!existsSync(shortcutPath)) return null;
   const result = await runPowerShellJson(
-    [
+    buildPowerShellScript([
       "$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LVIS_SHORTCUT_PATH)",
       "[PSCustomObject]@{ target = $shortcut.TargetPath } | ConvertTo-Json -Compress",
-    ].join("; "),
+    ]),
     { LVIS_SHORTCUT_PATH: shortcutPath },
   );
   return typeof result.target === "string" ? result.target : null;
@@ -919,7 +932,7 @@ function assertUserDataTargetsRemoved() {
     );
   }
 }
-const ACL_QUERY_SCRIPT = [
+export const ACL_QUERY_SCRIPT = buildPowerShellScript([
   "$ErrorActionPreference = 'Stop'",
   "$entries = @((Get-Acl -LiteralPath $env:LVIS_ACL_TARGET).Access | ForEach-Object {",
   "  try { $sid = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }",
@@ -927,7 +940,7 @@ const ACL_QUERY_SCRIPT = [
   "  [PSCustomObject]@{ sid = $sid; rights = [int64]$_.FileSystemRights; type = $_.AccessControlType.ToString(); inheritance = $_.InheritanceFlags.ToString(); propagation = $_.PropagationFlags.ToString(); inherited = $_.IsInherited }",
   "})",
   "ConvertTo-Json -InputObject $entries -Compress",
-].join("; ");
+]);
 
 function resolveSrtWinFromVendor(vendorRoot, label) {
   const candidates = [
