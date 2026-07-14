@@ -64,7 +64,7 @@ export interface UseInlineSlashMenuResult {
   activeIndex: number;
   setActiveIndex: (i: number) => void;
   move: (delta: number) => void;
-  accept: () => void;
+  accept: (index?: number) => void;
   close: () => void;
 }
 
@@ -208,9 +208,9 @@ export function useInlineSlashMenu({
     [items.length],
   );
 
-  const accept = useCallback(() => {
+  const accept = useCallback((index?: number) => {
     if (!trigger) return;
-    const item = items[activeIndex];
+    const item = items[index ?? activeIndex];
     if (!item) return;
     item.apply({ start: trigger.start, end: trigger.end });
   }, [trigger, items, activeIndex]);

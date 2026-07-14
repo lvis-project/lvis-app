@@ -30,6 +30,10 @@ import type {
   AssistantContextMenuAction,
   AssistantContextMenuPayload,
 } from "../../shared/assistant-context-menu.js";
+import type {
+  NativeContextMenuAction,
+  NativeContextMenuPayload,
+} from "../../shared/native-context-menu.js";
 import type { AiProviderPingIpcResult } from "../../shared/ai-provider-ping.js";
 import type {
   OpenHtmlPreviewWindowPayload,
@@ -1896,7 +1900,7 @@ export interface LvisWorkspaceApi {
      * the removal toast so the user knows saved grants were revoked too.
      */
     prunedGrants?: number;
-    error?: "unauthorized" | "invalid-path" | "not-an-additional-root" | "cannot-remove-default";
+    error?: "unauthorized" | "invalid-path" | "not-an-additional-root" | "cannot-remove-default" | "lifecycle-failed";
     message?: string;
   }>;
   /** Reveal a scope-revalidated file/folder in the OS file manager (location only, never opens it). */
@@ -1939,6 +1943,12 @@ export interface LvisUiApi {
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
   onAssistantContextAction: (
     cb: (action: AssistantContextMenuAction) => void,
+  ) => () => void;
+  showNativeContextMenu: (
+    payload: NativeContextMenuPayload,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  onNativeContextMenuAction: (
+    cb: (action: NativeContextMenuAction) => void,
   ) => () => void;
 }
 
