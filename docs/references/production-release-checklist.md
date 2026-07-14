@@ -136,7 +136,7 @@ release and requires a SID/profile handoff fix before the full gate is rerun.
       candidate and complete first launch as that original user. Record both
       SIDs, candidate SHA, Windows build, resolved paths, and evidence URL; prove
       the launched process owner and every recreated app/userData path belong to
-      the original user while the distinct administrator profile remains absent
+      the original user while the distinct administrator profile's LVIS paths remain absent
       or byte-for-byte unchanged.
 
 Do not add an online web bootstrapper to the NSIS path unless the product
