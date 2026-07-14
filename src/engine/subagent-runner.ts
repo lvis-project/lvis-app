@@ -402,7 +402,7 @@ function normalizeA2AWireSpawnCallbacks(value: unknown): A2AWireSpawnCallbacks |
     return null;
   }
 }
-function isValidA2AWireHostBinding(binding: A2AWireHostBinding): boolean {
+export function isValidA2AWireHostBinding(binding: A2AWireHostBinding): boolean {
   const profileName = binding?.profile?.name;
   const projectRoot = binding?.project?.root;
   return isValidA2AWireId(binding?.handlerId)
