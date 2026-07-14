@@ -1,6 +1,7 @@
 import { defineConfig } from "vitest/config";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import "./scripts/assert-electron-node-vitest.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const rootPath = (p: string) => path.resolve(ROOT, p);
@@ -61,11 +62,9 @@ export default defineConfig({
     // every worker fork restores the pre-v25 behaviour where jsdom owns
     // the `localStorage` global, and is a no-op on Node versions where
     // webstorage is not on by default (e.g. v22 on Windows CI).
-    // `--no-experimental-webstorage` is a Node v25+ flag. Older Node
-    // versions (e.g. Node 20 on the M4 e2e self-hosted runner) reject it
-    // as "bad option" causing every worker fork to crash before vitest
-    // can pick up any test file ("Test Files: no tests"). Apply only when
-    // the host Node is v25 or newer.
+    // `--no-experimental-webstorage` is a Node v25+ flag. Older runtimes,
+    // including Electron's current embedded Node, reject it as "bad option"
+    // before Vitest can collect a test file. Gate on the active test runtime.
     execArgv: (() => {
       const major = parseInt(process.versions.node.split(".")[0], 10);
       return major >= 25 ? ["--no-experimental-webstorage"] : [];
