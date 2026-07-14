@@ -84,24 +84,12 @@ test.describe("memory seed onboarding wizard", () => {
     const loginModal = page.getByTestId("login-modal");
     await expect(loginModal).toBeVisible({ timeout: 10_000 });
 
-    const settingsWindowPromise = app.waitForEvent("window", { timeout: 10_000 });
     await page.getByTestId("login-modal:chip-byok").click();
-    const settingsWindow = await settingsWindowPromise;
-    await settingsWindow.waitForLoadState("domcontentloaded");
-    await expect(
-      settingsWindow.getByRole("heading", { name: t("settingsContent.sidebarHeading") }),
-    ).toBeVisible({
-      timeout: 10_000,
-    });
+    const settingsHeading = page.getByTestId("settings-sidebar-heading");
+    await expect(settingsHeading).toBeVisible({ timeout: 10_000 });
 
-    const settingsClosed = settingsWindow.waitForEvent("close");
-    await app.evaluate(({ BrowserWindow }, settingsWindowTitle) => {
-      const target = BrowserWindow.getAllWindows().find(
-        (w) => !w.isDestroyed() && w.getTitle() === settingsWindowTitle,
-      );
-      target?.close();
-    }, t("be_main.settingsWindowTitle"));
-    await settingsClosed;
+    await page.getByTestId("settings-inline-back").click();
+    await expect(settingsHeading).toBeHidden({ timeout: 10_000 });
 
     const dialog = page.getByTestId("memory-seed-dialog");
     await expect(dialog).toBeVisible({ timeout: 15_000 });
@@ -140,10 +128,9 @@ test.describe("memory seed onboarding wizard", () => {
     }
     await expect(tourCard).toBeHidden({ timeout: 10_000 });
 
-    const pluginShowcase = page.getByTestId("plugin-showcase");
-    await expect(pluginShowcase).toBeVisible({ timeout: 10_000 });
-    await page.getByTestId("plugin-showcase:close").click();
-    await expect(pluginShowcase).toBeHidden({ timeout: 10_000 });
+    // Plugin discovery stays in Marketplace/Settings instead of blocking the
+    // end of the first-run flow with another modal.
+    await expect(page.getByTestId("plugin-showcase")).toHaveCount(0);
     await expect
       .poll(
         async () =>

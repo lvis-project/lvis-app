@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import { isValidCronExpression } from "../routines/cron-evaluator.js";
 import { writeFileAtomicAtPath } from "./storage/feature-namespace.js";
 import { createLogger } from "../lib/logger.js";
+import { canonicalizePathForMatch, caseFoldForMatch } from "../permissions/sensitive-paths.js";
 const log = createLogger("lvis");
 
 // Re-export from shared so callers that import from routines-store continue
@@ -134,6 +135,27 @@ async function withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<
   const next = prev.then(() => fn());
   fileLocks.set(key, next.then(() => undefined, () => undefined));
   return next;
+}
+
+function workspaceRootKey(root: string): string | null {
+  try {
+    const key = caseFoldForMatch(canonicalizePathForMatch(root)).replace(/\/+$/g, "");
+    return key || "/";
+  } catch {
+    return null;
+  }
+}
+
+function isWorkspaceKeyAtOrBelow(rootKey: string, candidate: string): boolean {
+  return candidate === rootKey || (rootKey === "/"
+    ? candidate.startsWith("/")
+    : candidate.startsWith(`${rootKey}/`));
+}
+
+function isDirectoryAtOrBelow(rootKey: string, directory: string): boolean {
+  const candidate = workspaceRootKey(directory);
+  if (!candidate) return false;
+  return isWorkspaceKeyAtOrBelow(rootKey, candidate);
 }
 
 async function readFileOrEmpty(filePath: string): Promise<RoutinesFile> {
@@ -406,6 +428,56 @@ export class RoutinesStore {
       await writeFileAtomic(this.filePath, file);
       this.cache = file.routines;
       return removed;
+    });
+  }
+
+  /**
+   * Permanently remove a deleted workspace root from every persisted routine
+   * scope. The whole read/mutate/write transaction shares the store file lock,
+   * so a concurrent routine mutation cannot resurrect a stale directory.
+   */
+  async revokeWorkspaceRoot(
+    root: string,
+    options?: { preserveRoots?: readonly string[] },
+  ): Promise<{
+    routinesUpdated: number;
+    directoriesRemoved: number;
+  }> {
+    if (!this.loaded) await this.load();
+    const rootKey = workspaceRootKey(root);
+    if (!rootKey) return { routinesUpdated: 0, directoriesRemoved: 0 };
+    const preservedRootKeys = (options?.preserveRoots ?? [])
+      .map(workspaceRootKey)
+      .filter((key): key is string =>
+        key !== null
+        && key !== rootKey
+        && isWorkspaceKeyAtOrBelow(rootKey, key),
+      );
+    return withFileLock(this.filePath, async () => {
+      const file = await readFileOrEmpty(this.filePath);
+      let routinesUpdated = 0;
+      let directoriesRemoved = 0;
+      for (const routine of file.routines) {
+        if (!routine.scope) continue;
+        const retained = routine.scope.directories.filter(
+          (directory) => {
+            if (!isDirectoryAtOrBelow(rootKey, directory)) return true;
+            return preservedRootKeys.some(
+              (preservedRootKey) => isDirectoryAtOrBelow(preservedRootKey, directory),
+            );
+          },
+        );
+        const removed = routine.scope.directories.length - retained.length;
+        if (removed === 0) continue;
+        routine.scope.directories = retained;
+        routinesUpdated += 1;
+        directoriesRemoved += removed;
+      }
+      if (directoriesRemoved > 0) {
+        await writeFileAtomic(this.filePath, file);
+      }
+      this.cache = file.routines;
+      return { routinesUpdated, directoriesRemoved };
     });
   }
 

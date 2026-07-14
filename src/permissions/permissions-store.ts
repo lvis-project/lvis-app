@@ -2,10 +2,11 @@
 
 
 
-import { mkdir, open, readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { PermissionRule, ExecutionMode } from "./permission-manager.js";
 import { withFileLock } from "../lib/with-file-lock.js";
+import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 
 
 
@@ -65,14 +66,7 @@ export async function updatePermissionsFile(
       };
       await mutator(file);
       file.updatedAt = new Date().toISOString();
-      await mkdir(dirname(filePath), { recursive: true });
-
-      const fd = await open(filePath, "w", 0o600);
-      try {
-        await fd.writeFile(`${JSON.stringify(file, null, 2)}\n`, "utf-8");
-      } finally {
-        await fd.close();
-      }
+      writeUtf8FileAtomicSync(filePath, `${JSON.stringify(file, null, 2)}\n`, 0o600);
     });
   });
 }
