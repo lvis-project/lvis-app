@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
   A2ARole,
@@ -48,6 +48,7 @@ import {
 const TEXT_MODE = "text/plain";
 const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
 const CHILD_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
+const DLP_SAFE_ID_ALPHABET = "abcdefghjkmnpqrs";
 const SEND_KEYS = new Set(["tenant", "message", "configuration", "metadata"]);
 const SEND_CONFIGURATION_KEYS = new Set([
   "acceptedOutputModes",
@@ -98,6 +99,17 @@ function isSafeChildSessionId(value: unknown): value is string {
   return typeof value === "string"
     && CHILD_SESSION_ID_PATTERN.test(value)
     && maskSensitiveData(value).detections.length === 0;
+}
+
+/** 128-bit opaque context ID encoded without digits that can trip Luhn DLP rules. */
+export function createA2AContextId(): string {
+  const encoded = [...randomBytes(16)]
+    .flatMap((byte) => [
+      DLP_SAFE_ID_ALPHABET[byte >>> 4],
+      DLP_SAFE_ID_ALPHABET[byte & 0x0f],
+    ])
+    .join("");
+  return `context-${encoded}`;
 }
 
 function isValidHistoryLength(value: unknown): value is number {
@@ -436,7 +448,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
     }
     this.id = options.id;
     this.card = options.card;
-    this.makeId = options.makeId ?? randomUUID;
+    this.makeId = options.makeId ?? createA2AContextId;
   }
 
   private async withTaskLock<T>(taskId: string, operation: () => Promise<T>): Promise<T> {
