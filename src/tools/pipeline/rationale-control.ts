@@ -185,6 +185,7 @@ export const RATIONALE_RESPONSE_SCHEMA: ToolSchema = {
     "Return a user-facing explanation for the single sealed action. This tool cannot change the action or grant permission.",
   inputSchema: {
     type: "object",
+    additionalProperties: false,
     properties: {
       contractVersion: { type: "integer", const: RATIONALE_CONTROL_CONTRACT_VERSION },
       anchorId: { type: "string" },
@@ -274,14 +275,39 @@ function assertCanonicalJson(value: unknown, label: string): void {
     seen.add(current);
 
     if (Array.isArray(current)) {
-      const keys = Object.keys(current);
+      const descriptors = Object.getOwnPropertyDescriptors(current) as Record<
+        string, PropertyDescriptor
+      >;
+      const lengthDescriptor = descriptors.length;
       if (
-        keys.length !== current.length ||
-        keys.some((key, index) => key !== String(index))
+        !lengthDescriptor ||
+        !("value" in lengthDescriptor) ||
+        typeof lengthDescriptor.value !== "number" ||
+        !Number.isSafeInteger(lengthDescriptor.value) ||
+        (lengthDescriptor.value as number) < 0
+      ) {
+        throw new TypeError(path + " has an invalid array length descriptor");
+      }
+      const length = lengthDescriptor.value as number;
+      const expectedKeys = new Set<string>(["length"]);
+      for (let index = 0; index < length; index += 1) {
+        expectedKeys.add(String(index));
+      }
+      const ownKeys = Reflect.ownKeys(current);
+      if (
+        ownKeys.some((key) => typeof key === "symbol") ||
+        ownKeys.some((key) => typeof key === "string" && !expectedKeys.has(key)) ||
+        ownKeys.length !== expectedKeys.size
       ) {
         throw new TypeError(path + " must be a dense JSON array without extra properties");
       }
-      current.forEach((child, index) => visit(child, depth + 1, path + "[" + index + "]"));
+      for (let index = 0; index < length; index += 1) {
+        const descriptor = descriptors[String(index)];
+        if (!descriptor?.enumerable || !("value" in descriptor)) {
+          throw new TypeError(path + "[" + index + "] must be an enumerable data property");
+        }
+        visit(descriptor.value, depth + 1, path + "[" + index + "]");
+      }
       return;
     }
 
@@ -341,6 +367,32 @@ function assertBoundedText(value: string, label: string, maxLength: number): voi
   }
 }
 
+
+
+function normalizeAndSealRiskVerdict(
+  value: RiskVerdict,
+  label: string,
+): RiskVerdict {
+  assertCanonicalJson(value, label);
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(label + " must be a RiskVerdict object");
+  }
+  assertExactOwnKeys(value, ["level", "reason"], label);
+  if (
+    !["low", "medium", "high"].includes(value.level) ||
+    typeof value.reason !== "string"
+  ) {
+    throw new TypeError(label + " has an invalid RiskVerdict value");
+  }
+  const reason = value.reason
+    .normalize("NFC")
+    .replace(/\r\n?/g, "\n")
+    .trim();
+  if (!reason || reason.length > 1_000) {
+    throw new TypeError(label + ".reason exceeds its bounded text contract");
+  }
+  return deepFreeze({ level: value.level, reason }) as RiskVerdict;
+}
 
 const TOOL_TRUST_ORIGINS: readonly string[] = [
   "user-keyboard", "plugin-emitted", "app-emitted", "llm-tool-arg",
@@ -412,27 +464,36 @@ function assertHostEligibilityContext(
   );
 }
 
+
+function computeRationaleInvocationDigest(input: {
+  ticketId: string;
+  nonce: string;
+  toolUseId: string;
+  actionDigest: string;
+  eligibilityContext: HostRationaleEligibilityContext;
+  reviewerOutcome: "fresh" | "cache";
+  initialVerdict: RiskVerdict;
+}): string {
+  return digest({
+    ticketId: input.ticketId,
+    nonce: input.nonce,
+    toolUseId: input.toolUseId,
+    actionDigest: input.actionDigest,
+    eligibilityContext: input.eligibilityContext,
+    reviewerOutcome: input.reviewerOutcome,
+    initialVerdict: input.initialVerdict,
+  });
+}
+
 export function isRationaleEligibilityContextCurrent(
   control: RationaleRequiredControl,
   current: HostRationaleEligibilityContext,
+  now = Date.now(),
 ): boolean {
-  try {
-    assertHostEligibilityContext(control.eligibilityContext);
-    assertHostEligibilityContext(current);
-    const expectedInvocationDigest = digest({
-      ticketId: control.ticketId,
-      nonce: control.nonce,
-      toolUseId: control.sealedAction.toolUseId,
-      actionDigest: control.action.actionDigest,
-      eligibilityContext: control.eligibilityContext,
-    });
-    return (
-      expectedInvocationDigest === control.invocationDigest &&
-      canonicalStringify(current) === canonicalStringify(control.eligibilityContext)
-    );
-  } catch {
-    return false;
-  }
+  return verifyRationaleRequiredControl(control, {
+    now,
+    currentEligibilityContext: current,
+  });
 }
 
 function assertSourceIdentity(
@@ -782,6 +843,12 @@ export function createRationaleRequiredControl(input: {
     "HostRationaleEligibilityContext",
   ) as HostRationaleEligibilityContext;
   assertHostEligibilityContext(eligibilityContext);
+  const reviewerOutcome = input.permission.reviewer.outcome;
+  const initialVerdict = normalizeAndSealRiskVerdict(
+    input.permission.reviewer.verdict,
+    "initialVerdict",
+  );
+
   if (
     !verifyActionIdentity(action) ||
     !isValidRequestAnchor(anchor, now) ||
@@ -794,12 +861,14 @@ export function createRationaleRequiredControl(input: {
 
   const ticketId = randomUUID();
   const nonce = randomUUID();
-  const invocationDigest = digest({
+  const invocationDigest = computeRationaleInvocationDigest({
     ticketId,
     nonce,
     toolUseId: sealedAction.toolUseId,
     actionDigest: action.actionDigest,
     eligibilityContext,
+    reviewerOutcome,
+    initialVerdict,
   });
   return deepFreeze({
     kind: "rationale-required",
@@ -813,18 +882,137 @@ export function createRationaleRequiredControl(input: {
     action,
     sealedAction,
     eligibilityContext,
-    reviewerOutcome: input.permission.reviewer.outcome,
-    initialVerdict: cloneCanonicalJson(
-      input.permission.reviewer.verdict,
-      "initialVerdict",
-    ),
+    reviewerOutcome,
+    initialVerdict,
     reasonCode: "foreground-reviewer-threshold",
   }) as RationaleRequiredControl;
+}
+
+export function verifyRationaleRequiredControl(
+  control: RationaleRequiredControl,
+  options: {
+    now?: number;
+    currentEligibilityContext?: HostRationaleEligibilityContext;
+  } = {},
+): boolean {
+  try {
+    const now = options.now ?? Date.now();
+    if (!Number.isFinite(now)) return false;
+    assertCanonicalJson(control, "RationaleRequiredControl");
+    assertExactOwnKeys(control, [
+      "kind", "contractVersion", "state", "ticketId", "nonce",
+      "invocationDigest", "round", "anchor", "action", "sealedAction",
+      "eligibilityContext", "reviewerOutcome", "initialVerdict", "reasonCode",
+    ], "RationaleRequiredControl");
+    if (
+      control.kind !== "rationale-required" ||
+      control.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
+      control.state !== "rationale_requested" ||
+      control.round !== 1 ||
+      control.reasonCode !== "foreground-reviewer-threshold"
+    ) {
+      return false;
+    }
+    assertBoundedText(control.ticketId, "ticketId", 256);
+    assertBoundedText(control.nonce, "nonce", 256);
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        control.ticketId,
+      ) ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        control.nonce,
+      ) ||
+      !/^[0-9a-f]{64}$/.test(control.invocationDigest)
+    ) {
+      return false;
+    }
+    if (
+      !isValidRequestAnchor(control.anchor, now) ||
+      !verifyActionIdentity(control.action) ||
+      control.anchor.anchorId !== control.action.anchorId
+    ) {
+      return false;
+    }
+
+    const sealedAction = control.sealedAction;
+    if (
+      !sealedAction ||
+      typeof sealedAction !== "object" ||
+      Array.isArray(sealedAction)
+    ) {
+      return false;
+    }
+    assertExactOwnKeys(
+      sealedAction,
+      ["toolUseId", "toolName", "originalInput", "finalInput"],
+      "SealedRationaleAction",
+    );
+    assertBoundedText(sealedAction.toolUseId, "sealedAction.toolUseId", 256);
+    assertBoundedText(sealedAction.toolName, "sealedAction.toolName", 256);
+    assertCanonicalJson(sealedAction.originalInput, "sealedAction.originalInput");
+    assertCanonicalJson(sealedAction.finalInput, "sealedAction.finalInput");
+    if (
+      !isRecord(sealedAction.originalInput) ||
+      !isRecord(sealedAction.finalInput) ||
+      sealedAction.toolName !== control.action.toolName ||
+      digest(sealedAction.finalInput) !== control.action.finalInputDigest
+    ) {
+      return false;
+    }
+
+    assertHostEligibilityContext(control.eligibilityContext);
+    if (
+      control.reviewerOutcome !== "fresh" &&
+      control.reviewerOutcome !== "cache"
+    ) {
+      return false;
+    }
+    const initialVerdict = normalizeAndSealRiskVerdict(
+      control.initialVerdict,
+      "initialVerdict",
+    );
+    if (
+      canonicalStringify(initialVerdict) !==
+      canonicalStringify(control.initialVerdict)
+    ) {
+      return false;
+    }
+    const expectedInvocationDigest = computeRationaleInvocationDigest({
+      ticketId: control.ticketId,
+      nonce: control.nonce,
+      toolUseId: sealedAction.toolUseId,
+      actionDigest: control.action.actionDigest,
+      eligibilityContext: control.eligibilityContext,
+      reviewerOutcome: control.reviewerOutcome,
+      initialVerdict,
+    });
+    if (expectedInvocationDigest !== control.invocationDigest) return false;
+
+    if (options.currentEligibilityContext !== undefined) {
+      assertCanonicalJson(
+        options.currentEligibilityContext,
+        "currentEligibilityContext",
+      );
+      assertHostEligibilityContext(options.currentEligibilityContext);
+      if (
+        canonicalStringify(options.currentEligibilityContext) !==
+        canonicalStringify(control.eligibilityContext)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function toRationaleProviderEnvelope(
   control: RationaleRequiredControl,
 ): RationaleProviderEnvelope {
+  if (!verifyRationaleRequiredControl(control)) {
+    throw new Error("invalid or expired rationale control");
+  }
   const projectBounded = (values: readonly string[], label: string) => {
     if (values.length > 8) {
       throw new Error(label + " exceeds the provider contract");
@@ -895,41 +1083,126 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function parseRationaleResponse(
   input: unknown,
   control: RationaleRequiredControl,
+  now = Date.now(),
 ): RationaleResponse | null {
-  if (!isRecord(input)) return null;
-  if (
-    input.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
-    input.anchorId !== control.anchor.anchorId ||
-    input.ticketId !== control.ticketId ||
-    input.actionDigest !== control.action.actionDigest ||
-    input.round !== 1 ||
-    typeof input.suggestion !== "string" ||
-    input.suggestion.length === 0 ||
-    input.suggestion.length > 500 ||
-    !["aligned", "unclear", "outside"].includes(String(input.scopeAlignment)) ||
-    !Array.isArray(input.scopeReasons) ||
-    input.scopeReasons.length > 8 ||
-    !input.scopeReasons.every(
-      (reason) =>
-        typeof reason === "string" &&
-        reason.length > 0 &&
-        reason.length <= 160,
-    )
-  ) {
+  if (!verifyRationaleRequiredControl(control, { now })) return null;
+  try {
+    assertCanonicalJson(input, "RationaleResponse");
+    if (!isRecord(input)) return null;
+    assertExactOwnKeys(input, [
+      "contractVersion", "anchorId", "ticketId", "actionDigest", "round",
+      "suggestion", "scopeAlignment", "scopeReasons",
+    ], "RationaleResponse");
+    if (
+      input.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
+      input.anchorId !== control.anchor.anchorId ||
+      input.ticketId !== control.ticketId ||
+      input.actionDigest !== control.action.actionDigest ||
+      input.round !== 1 ||
+      typeof input.suggestion !== "string" ||
+      input.suggestion.length === 0 ||
+      input.suggestion.length > 500 ||
+      typeof input.scopeAlignment !== "string" ||
+      !["aligned", "unclear", "outside"].includes(input.scopeAlignment) ||
+      !Array.isArray(input.scopeReasons) ||
+      input.scopeReasons.length > 8 ||
+      !input.scopeReasons.every(
+        (reason) =>
+          typeof reason === "string" &&
+          reason.length > 0 &&
+          reason.length <= 160,
+      )
+    ) {
+      return null;
+    }
+    const suggestion = sanitizeDisplayText(input.suggestion, 500);
+    const scopeReasons = input.scopeReasons.map((reason) =>
+      sanitizeDisplayText(reason, 160)
+    );
+    if (!suggestion || scopeReasons.some((reason) => !reason)) return null;
+
+    return deepFreeze({
+      contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
+      anchorId: control.anchor.anchorId,
+      ticketId: control.ticketId,
+      actionDigest: control.action.actionDigest,
+      round: 1,
+      suggestion,
+      scopeAlignment: input.scopeAlignment as RationaleResponse["scopeAlignment"],
+      scopeReasons,
+    }) as RationaleResponse;
+  } catch {
     return null;
   }
-  const suggestion = sanitizeDisplayText(input.suggestion, 500);
-  const scopeReasons = input.scopeReasons.map((reason) => sanitizeDisplayText(reason, 160));
-  if (!suggestion || scopeReasons.some((reason) => !reason)) return null;
+}
 
-  return deepFreeze({
-    contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
-    anchorId: control.anchor.anchorId,
-    ticketId: control.ticketId,
-    actionDigest: control.action.actionDigest,
-    round: 1,
-    suggestion,
-    scopeAlignment: input.scopeAlignment as RationaleResponse["scopeAlignment"],
-    scopeReasons,
-  }) as RationaleResponse;
+export function createRationaleResumeRequest(input: {
+  control: RationaleRequiredControl;
+  response: unknown | null;
+  rationaleStatus: "ready" | "failed";
+  currentEligibilityContext: HostRationaleEligibilityContext;
+  now?: number;
+}): RationaleResumeRequest {
+  const now = input.now ?? Date.now();
+  const control = cloneCanonicalJson(
+    input.control,
+    "RationaleRequiredControl",
+  ) as RationaleRequiredControl;
+  if (!verifyRationaleRequiredControl(control, {
+    now,
+    currentEligibilityContext: input.currentEligibilityContext,
+  })) {
+    throw new Error("invalid, expired, or stale rationale control");
+  }
+  if (input.rationaleStatus === "ready") {
+    const response = parseRationaleResponse(input.response, control, now);
+    if (!response) throw new Error("invalid rationale response");
+    return deepFreeze({
+      control,
+      response,
+      rationaleStatus: "ready",
+    }) as RationaleResumeRequest;
+  }
+  if (input.rationaleStatus === "failed" && input.response === null) {
+    return deepFreeze({
+      control,
+      response: null,
+      rationaleStatus: "failed",
+    }) as RationaleResumeRequest;
+  }
+  throw new Error("failed rationale handoff must not carry a response");
+}
+
+export function validateRationaleResumeRequest(
+  request: unknown,
+  currentEligibilityContext: HostRationaleEligibilityContext,
+  now = Date.now(),
+): request is RationaleResumeRequest {
+  try {
+    assertCanonicalJson(request, "RationaleResumeRequest");
+    if (!isRecord(request)) return false;
+    assertExactOwnKeys(
+      request,
+      ["control", "response", "rationaleStatus"],
+      "RationaleResumeRequest",
+    );
+    const control = request.control as RationaleRequiredControl;
+    if (!verifyRationaleRequiredControl(control, {
+      now,
+      currentEligibilityContext,
+    })) {
+      return false;
+    }
+    if (request.rationaleStatus === "failed") {
+      return request.response === null;
+    }
+    if (request.rationaleStatus !== "ready") return false;
+    const parsed = parseRationaleResponse(request.response, control, now);
+    return (
+      parsed !== null &&
+      canonicalStringify(parsed) === canonicalStringify(request.response)
+    );
+  } catch {
+    return false;
+  }
 }

@@ -110,6 +110,35 @@ export type ReviewerDispatchOutcome =
   | "malformed"
   | "sandbox-state-changed";
 
+export type ReviewerAutoDecisionOutcome = Extract<
+  ReviewerDispatchOutcome,
+  "fresh" | "cache" | "approval-memory"
+>;
+
+/** Exhaustive fail-closed SOT for reviewer outcomes that may auto-decide. */
+export function isReviewerAutoDecisionOutcome(
+  outcome: ReviewerDispatchOutcome | undefined,
+): outcome is ReviewerAutoDecisionOutcome {
+  if (outcome === undefined) return false;
+  switch (outcome) {
+    case "fresh":
+    case "cache":
+    case "approval-memory":
+      return true;
+    case "unavailable":
+    case "error":
+    case "timeout":
+    case "malformed":
+    case "sandbox-state-changed":
+      return false;
+    default: {
+      const exhaustive: never = outcome;
+      void exhaustive;
+      return false;
+    }
+  }
+}
+
 export interface PermissionCheckResult {
   decision: PermissionDecision;
   reason: string;
@@ -1294,7 +1323,11 @@ export class PermissionManager {
           llmVerdictForAudit = null;
         }
         const postReviewSandboxState = readSandboxCacheState();
-        if (!sameReviewerSandboxCacheState(sandboxCacheState, postReviewSandboxState)) {
+        if (options?.abortSignal?.aborted === true) {
+          // Dispatcher/executor own the terminal abort result. Internally mark
+          // this non-success so an aborted fresh verdict cannot seed the cache.
+          outcome = "error";
+        } else if (!sameReviewerSandboxCacheState(sandboxCacheState, postReviewSandboxState)) {
           sandboxStateForAudit = postReviewSandboxState;
           const freshRuleVerdict = new RuleBasedRiskClassifier().classify(
             buildReviewerContext(postReviewSandboxState),
@@ -1369,11 +1402,14 @@ export class PermissionManager {
 
     const deferPolicy = options?.defer ?? "high";
     const shouldDefer =
-      deferPolicy === "medium-high"
-        ? verdict.level !== "low"
-        : deferPolicy === "high"
-          ? verdict.level === "high"
-          : false;
+      options?.abortSignal?.aborted !== true &&
+      (
+        deferPolicy === "medium-high"
+          ? verdict.level !== "low"
+          : deferPolicy === "high"
+            ? verdict.level === "high"
+            : false
+      );
 
     if (shouldDefer) {
       const deferredId = await queue.append({
