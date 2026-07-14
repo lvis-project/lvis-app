@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PermissionCheckResult } from "../../../permissions/permission-manager.js";
 import {
+  InMemoryHostAnchorRoundCasStore,
   createActionIdentity,
   createRationaleRequiredControl,
   parseRationaleResponse,
   createRequestAnchor,
+  createTriggeringBatchDisposition,
   isRationaleEligible,
   isRationaleEligibilityContextCurrent,
   toRationaleProviderEnvelope,
@@ -76,6 +78,26 @@ const sealedAction = {
   finalInput: { command: "Remove-Item -Recurse build" },
 };
 
+function anchorRoundFor(
+  anchor: ReturnType<typeof anchorAt>,
+  action: ActionIdentity,
+  toolUseId = "tool-use-1",
+  now = Date.now(),
+) {
+  const triggeringBatchDisposition = createTriggeringBatchDisposition({
+    batchId: "provider-batch-1",
+    originalToolUseIds: ["tool-use-completed", toolUseId, "tool-use-cancelled"],
+    triggeringToolUseId: toolUseId,
+    completedToolUseIds: ["tool-use-completed"],
+  });
+  const hostAnchorRoundCas = new InMemoryHostAnchorRoundCasStore();
+  const anchorRoundReservation = hostAnchorRoundCas.tryReserve({
+    anchor, action, triggeringBatchDisposition, round: 1, now,
+  });
+  if (!anchorRoundReservation) throw new Error("expected anchor reservation");
+  return { triggeringBatchDisposition, anchorRoundReservation, hostAnchorRoundCas };
+}
+
 describe("foreground rationale hostile input rejection", () => {
   it("rejects non-canonical final input and sandbox-plan values", () => {
     const anchor = anchorAt();
@@ -143,6 +165,7 @@ describe("foreground rationale hostile input rejection", () => {
     expect(() => createRationaleRequiredControl({
       anchor: otherAnchor,
       action,
+      ...anchorRoundFor(anchor, action),
       eligibilityContext,
       sealedAction,
       permission,
@@ -150,6 +173,7 @@ describe("foreground rationale hostile input rejection", () => {
     expect(() => createRationaleRequiredControl({
       anchor,
       action,
+      ...anchorRoundFor(anchor, action),
       eligibilityContext,
       sealedAction: { ...sealedAction, toolUseId: "" },
       permission,
@@ -157,6 +181,7 @@ describe("foreground rationale hostile input rejection", () => {
     expect(() => createRationaleRequiredControl({
       anchor,
       action,
+      ...anchorRoundFor(anchor, action),
       eligibilityContext,
       sealedAction: { ...sealedAction, toolName: "other-tool" },
       permission,
@@ -167,6 +192,7 @@ describe("foreground rationale hostile input rejection", () => {
     expect(() => createRationaleRequiredControl({
       anchor: expiringAnchor,
       action: expiringAction,
+      ...anchorRoundFor(expiringAnchor, expiringAction, "tool-use-1", 100),
       eligibilityContext,
       sealedAction,
       permission,
@@ -206,6 +232,7 @@ describe("foreground rationale hostile input rejection", () => {
     const control = createRationaleRequiredControl({
       anchor,
       action,
+      ...anchorRoundFor(anchor, action),
       eligibilityContext,
       sealedAction,
       permission: secretPermission,
@@ -266,6 +293,7 @@ describe("foreground rationale identity and eligibility binding", () => {
     const first = createRationaleRequiredControl({
       anchor,
       action,
+      ...anchorRoundFor(anchor, action),
       eligibilityContext,
       sealedAction,
       permission,
@@ -273,6 +301,7 @@ describe("foreground rationale identity and eligibility binding", () => {
     const second = createRationaleRequiredControl({
       anchor,
       action,
+      ...anchorRoundFor(anchor, action, "tool-use-2"),
       eligibilityContext,
       sealedAction: { ...sealedAction, toolUseId: "tool-use-2" },
       permission,
@@ -299,6 +328,7 @@ it("requires and revalidates the host eligibility snapshot for every control", (
     expect(() => createRationaleRequiredControl({
       anchor,
       action,
+      ...anchorRoundFor(anchor, action),
       sealedAction,
       eligibilityContext: blockedContext,
       permission,
@@ -308,6 +338,7 @@ it("requires and revalidates the host eligibility snapshot for every control", (
   const control = createRationaleRequiredControl({
     anchor,
     action,
+    ...anchorRoundFor(anchor, action),
     sealedAction,
     eligibilityContext,
     permission,
@@ -331,6 +362,7 @@ it("binds reviewer outcome and a normalized exact verdict outside actionDigest",
   const control = createRationaleRequiredControl({
     anchor,
     action,
+    ...anchorRoundFor(anchor, action),
     sealedAction,
     eligibilityContext,
     permission,
@@ -338,6 +370,7 @@ it("binds reviewer outcome and a normalized exact verdict outside actionDigest",
   const cacheControl = createRationaleRequiredControl({
     anchor,
     action,
+    ...anchorRoundFor(anchor, action),
     sealedAction,
     eligibilityContext,
     permission: {
@@ -375,6 +408,7 @@ it("binds reviewer outcome and a normalized exact verdict outside actionDigest",
   expect(() => createRationaleRequiredControl({
     anchor,
     action,
+    ...anchorRoundFor(anchor, action),
     sealedAction,
     eligibilityContext,
     permission: {
@@ -392,6 +426,7 @@ it("binds reviewer outcome and a normalized exact verdict outside actionDigest",
   expect(() => createRationaleRequiredControl({
     anchor,
     action,
+    ...anchorRoundFor(anchor, action),
     sealedAction,
     eligibilityContext,
     permission: {
@@ -411,6 +446,7 @@ it("rejects extra authority, coercion, hostile arrays, and stale controls", () =
   const control = createRationaleRequiredControl({
     anchor,
     action,
+    ...anchorRoundFor(anchor, action),
     sealedAction,
     eligibilityContext,
     permission,
@@ -491,9 +527,11 @@ it("rejects extra authority, coercion, hostile arrays, and stale controls", () =
   );
 
   const expiringAnchor = anchorAt(100, 100);
+  const expiringAction = actionFor(expiringAnchor.anchorId);
   const expiringControl = createRationaleRequiredControl({
     anchor: expiringAnchor,
-    action: actionFor(expiringAnchor.anchorId),
+    action: expiringAction,
+    ...anchorRoundFor(expiringAnchor, expiringAction, "tool-use-1", 100),
     sealedAction,
     eligibilityContext,
     permission,
@@ -512,11 +550,13 @@ it("rejects extra authority, coercion, hostile arrays, and stale controls", () =
 });
 
 
-it("binds every RequestAnchor field and every sealedAction field into invocationDigest", () => {
+it("binds every anchor, triggering-batch, reservation, and sealed-action field", () => {
   const now = Date.now();
   const anchor = anchorAt(now);
+  const action = actionFor(anchor.anchorId);
   const control = createRationaleRequiredControl({
-    anchor, action: actionFor(anchor.anchorId), sealedAction, eligibilityContext, permission, now,
+    anchor, action, ...anchorRoundFor(anchor, action, "tool-use-1", now),
+    sealedAction, eligibilityContext, permission, now,
   });
   const mutations: Array<Partial<typeof anchor>> = [
     { contractVersion: 2 as never },
@@ -547,6 +587,26 @@ it("binds every RequestAnchor field and every sealedAction field into invocation
       sealedAction: { ...control.sealedAction, ...mutation },
     })).toBe(false);
   }
+  const alternateBatch = createTriggeringBatchDisposition({
+    batchId: "provider-batch-2",
+    originalToolUseIds: control.triggeringBatchDisposition.originalToolUseIds,
+    triggeringToolUseId: control.triggeringBatchDisposition.triggeringToolUseId,
+    completedToolUseIds: control.triggeringBatchDisposition.completedToolUseIds,
+  });
+  expect(verifyRationaleRequiredControl({
+    ...control,
+    triggeringBatchDisposition: alternateBatch,
+    anchorRoundReservation: {
+      ...control.anchorRoundReservation, batchDigest: alternateBatch.batchDigest,
+    },
+  })).toBe(false);
+  expect(verifyRationaleRequiredControl({
+    ...control,
+    anchorRoundReservation: {
+      ...control.anchorRoundReservation,
+      reservationId: "11111111-1111-4111-8111-111111111111",
+    },
+  })).toBe(false);
 });
 
 it("rejects Array subclasses and custom prototypes before inherited helpers or getters run", () => {

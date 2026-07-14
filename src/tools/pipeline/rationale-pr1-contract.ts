@@ -12,6 +12,8 @@ import {
   verifyRationaleRequiredControl,
   type RationaleRequiredControl,
   type RationaleResponse,
+  type HostAnchorRoundReservationReceipt,
+  type TriggeringBatchDisposition,
 } from "./rationale-control.js";
 
 /** Frozen PR(1) contracts only. This module grants no execution authority. */
@@ -20,9 +22,15 @@ export type ReviewerReevaluationOutcome = Exclude<
   "cache" | "approval-memory"
 >;
 
-const FAILURE_OUTCOMES: readonly ReviewerReevaluationOutcome[] = [
+export type ReviewerReevaluationFailureOutcome = Exclude<
+  ReviewerReevaluationOutcome,
+  "fresh"
+>;
+
+export const REVIEWER_REEVALUATION_FAILURE_OUTCOMES:
+readonly ReviewerReevaluationFailureOutcome[] = Object.freeze([
   "unavailable", "error", "timeout", "malformed", "sandbox-state-changed",
-];
+]);
 const SCOPE_ALIGNMENTS: readonly Exclude<ReviewerScopeAlignment, "unknown">[] = [
   "aligned", "unclear", "outside",
 ];
@@ -82,6 +90,8 @@ export interface RationaleExecutorControlOutcome {
   channel: "executor-control";
   outcome: "rationale-required";
   control: RationaleRequiredControl;
+  triggeringBatchDisposition: TriggeringBatchDisposition;
+  anchorRoundReservation: HostAnchorRoundReservationReceipt;
   transcriptVisibility: "hidden";
   ordinaryToolResult: null;
   executionAuthorized: false;
@@ -95,6 +105,12 @@ export function createRationaleExecutorControlOutcome(
   }
   return seal({ contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
     channel: "executor-control", outcome: "rationale-required", control,
+    triggeringBatchDisposition: seal(
+      control.triggeringBatchDisposition, "triggeringBatchDisposition",
+    ),
+    anchorRoundReservation: seal(
+      control.anchorRoundReservation, "anchorRoundReservation",
+    ),
     transcriptVisibility: "hidden", ordinaryToolResult: null,
     executionAuthorized: false }, "RationaleExecutorControlOutcome");
 }
@@ -105,7 +121,8 @@ export interface RationaleOnlyRoundContract {
   schemas: readonly [typeof RATIONALE_RESPONSE_SCHEMA];
   requiredToolName: typeof RATIONALE_RESPONSE_TOOL;
   ordinaryToolSchemas: "forbidden";
-  sameBatchSiblingPolicy: "cancel-unexecuted";
+  rationaleOnlyBatchSiblingPolicy: "cancel-unexecuted";
+  triggeringBatchDisposition: "completed-before-rationale-only-round";
   transcriptPolicy: "ephemeral-rationale-only";
   executionAuthority: "none";
 }
@@ -120,7 +137,8 @@ export function createRationaleOnlyRoundContract(
     ticketId: control.ticketId, actionDigest: control.action.actionDigest, round: 1,
     anchorRoundBudget: control.anchor.rationaleRoundBudget,
     schemas: [RATIONALE_RESPONSE_SCHEMA], requiredToolName: RATIONALE_RESPONSE_TOOL,
-    ordinaryToolSchemas: "forbidden", sameBatchSiblingPolicy: "cancel-unexecuted",
+    ordinaryToolSchemas: "forbidden", rationaleOnlyBatchSiblingPolicy: "cancel-unexecuted",
+    triggeringBatchDisposition: "completed-before-rationale-only-round",
     transcriptPolicy: "ephemeral-rationale-only", executionAuthority: "none",
   }, "RationaleOnlyRoundContract") as RationaleOnlyRoundContract;
 }
@@ -129,10 +147,11 @@ export interface RationaleRoundCall { id: string; name: string; input: unknown; 
 
 export interface RationaleOnlyBatchDecision {
   contractVersion: typeof RATIONALE_CONTROL_CONTRACT_VERSION;
+  batchKind: "rationale-only-followup";
   ticketId: string; actionDigest: string; accepted: boolean;
   response: RationaleResponse | null;
   rejectedCallIds: readonly string[];
-  cancelledSiblingCallIds: readonly string[];
+  cancelledRationaleOnlySiblingCallIds: readonly string[];
   reason: "accepted-rationale" | "missing-rationale-call" |
     "ordinary-tool-call-rejected" | "multiple-calls-rejected" | "malformed-rationale";
   ticketCreationAllowed: boolean; sideEffectsAllowed: false;
@@ -140,9 +159,11 @@ export interface RationaleOnlyBatchDecision {
 
 function batchResult(
   control: RationaleRequiredControl,
-  value: Omit<RationaleOnlyBatchDecision, "contractVersion" | "ticketId" | "actionDigest">,
+  value: Omit<RationaleOnlyBatchDecision,
+    "contractVersion" | "batchKind" | "ticketId" | "actionDigest">,
 ): RationaleOnlyBatchDecision {
   return seal({ contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
+    batchKind: "rationale-only-followup",
     ticketId: control.ticketId, actionDigest: control.action.actionDigest, ...value },
     "RationaleOnlyBatchDecision");
 }
@@ -167,20 +188,20 @@ export function evaluateRationaleOnlyBatch(
     const response = parseRationaleResponse(normalized[0]!.input, control, now);
     return response
       ? batchResult(control, { accepted: true, response, rejectedCallIds: [],
-          cancelledSiblingCallIds: [], reason: "accepted-rationale",
+          cancelledRationaleOnlySiblingCallIds: [], reason: "accepted-rationale",
           ticketCreationAllowed: true, sideEffectsAllowed: false })
       : batchResult(control, { accepted: false, response: null,
-          rejectedCallIds: [normalized[0]!.id], cancelledSiblingCallIds: [],
+          rejectedCallIds: [normalized[0]!.id], cancelledRationaleOnlySiblingCallIds: [],
           reason: "malformed-rationale", ticketCreationAllowed: false,
           sideEffectsAllowed: false });
   }
   const ordinary = normalized.findIndex((call) => call.name !== RATIONALE_RESPONSE_TOOL);
   const rejected = ordinary >= 0 ? ordinary : 0;
   const rejectedCallIds = normalized.length ? [normalized[rejected]!.id] : [];
-  const cancelledSiblingCallIds = normalized
+  const cancelledRationaleOnlySiblingCallIds = normalized
     .filter((_, index) => index !== rejected).map((call) => call.id);
   return batchResult(control, { accepted: false, response: null, rejectedCallIds,
-    cancelledSiblingCallIds, reason: normalized.length === 0
+    cancelledRationaleOnlySiblingCallIds, reason: normalized.length === 0
       ? "missing-rationale-call"
       : ordinary >= 0 ? "ordinary-tool-call-rejected" : "multiple-calls-rejected",
     ticketCreationAllowed: false, sideEffectsAllowed: false });
@@ -215,7 +236,7 @@ export function createReviewerScopeReevaluation(input: {
     throw new Error("invalid or expired rationale control");
   }
   const initial = normalizeRationaleRiskVerdict(input.control.initialVerdict, "initialVerdict");
-  const failed = FAILURE_OUTCOMES.includes(input.outcome);
+  const failed = REVIEWER_REEVALUATION_FAILURE_OUTCOMES.includes(input.outcome as never);
   if (input.outcome !== "fresh" && !failed) {
     throw new TypeError("cache and approval-memory are forbidden for ticket reevaluation");
   }
@@ -265,7 +286,8 @@ export function validateReviewerScopeReevaluation(
       value.ticketNamespace !== "rationale-ticket/" + control.ticketId ||
       value.cachePolicy !== "bypass-base-cache" || value.baseCacheWrite !== "forbidden") return false;
     const outcome = value.outcome as ReviewerReevaluationOutcome;
-    if (outcome !== "fresh" && !FAILURE_OUTCOMES.includes(outcome)) return false;
+    if (outcome !== "fresh" &&
+      !REVIEWER_REEVALUATION_FAILURE_OUTCOMES.includes(outcome as never)) return false;
     if (!equal(boundedStrings(value.scopeReasons, "scopeReasons"), value.scopeReasons)) return false;
     const reevaluated = normalizeRationaleRiskVerdict(
       value.reevaluatedVerdict as RiskVerdict, "reevaluatedVerdict",
