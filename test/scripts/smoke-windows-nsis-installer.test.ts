@@ -163,6 +163,161 @@ describe("Windows NSIS installer smoke contracts", () => {
     ).toThrow(/invalid process output contract/);
   });
 
+  it("enforces registry query state semantics by mode", () => {
+    const treeContext = {
+      hive: "HKLM",
+      path: WINDOWS_UNINSTALL_REGISTRY_PATH,
+      view: "64",
+      mode: "tree",
+    };
+    const defaultContext = {
+      ...treeContext,
+      path: "SOFTWARE\\Classes\\lvis\\shell\\open\\command",
+      mode: "default",
+    };
+    const validEntry = {
+      key: `HKEY_LOCAL_MACHINE\\${WINDOWS_UNINSTALL_REGISTRY_PATH}\\LVIS`,
+      view: "64",
+      values: { DisplayName: "LVIS" },
+    };
+    const validTree = {
+      keyExists: true,
+      valueExists: false,
+      value: null,
+      entries: [validEntry],
+    };
+    const missingKey = {
+      keyExists: false,
+      valueExists: false,
+      value: null,
+      entries: [],
+    };
+
+    const validCases = [
+      {
+        name: "missing tree key",
+        context: treeContext,
+        result: missingKey,
+      },
+      {
+        name: "missing default key",
+        context: defaultContext,
+        result: missingKey,
+      },
+      { name: "tree result", context: treeContext, result: validTree },
+      {
+        name: "default value absent",
+        context: defaultContext,
+        result: {
+          keyExists: true,
+          valueExists: false,
+          value: null,
+          entries: [],
+        },
+      },
+      {
+        name: "default value present",
+        context: defaultContext,
+        result: {
+          keyExists: true,
+          valueExists: true,
+          value: '"C:\\Program Files\\LVIS\\LVIS.exe" "%1"',
+          entries: [],
+        },
+      },
+      {
+        name: "default empty string present",
+        context: defaultContext,
+        result: {
+          keyExists: true,
+          valueExists: true,
+          value: "",
+          entries: [],
+        },
+      },
+    ];
+    for (const testCase of validCases) {
+      expect(
+        validateRegistryQueryResult(testCase.result, testCase.context),
+        testCase.name,
+      ).toBe(testCase.result);
+    }
+
+    const invalidCases = [
+      {
+        name: "unknown mode",
+        context: { ...treeContext, mode: "values" },
+        result: validTree,
+        error: /unsupported registry query validation mode/,
+      },
+      {
+        name: "missing key with an entry",
+        context: treeContext,
+        result: { ...missingKey, entries: [validEntry] },
+        error: /invalid missing-key state/,
+      },
+      {
+        name: "missing key with valueExists and a value",
+        context: defaultContext,
+        result: { ...missingKey, valueExists: true, value: "command" },
+        error: /invalid missing-key state/,
+      },
+      {
+        name: "missing key with a non-null value",
+        context: defaultContext,
+        result: { ...missingKey, value: "command" },
+        error: /invalid missing-key state/,
+      },
+      {
+        name: "tree with valueExists",
+        context: treeContext,
+        result: { ...validTree, valueExists: true, value: "command" },
+        error: /tree query returned an invalid state/,
+      },
+      {
+        name: "tree with a non-null value",
+        context: treeContext,
+        result: { ...validTree, value: "command" },
+        error: /tree query returned an invalid state/,
+      },
+      {
+        name: "default with entries",
+        context: defaultContext,
+        result: { ...missingKey, keyExists: true, entries: [validEntry] },
+        error: /default query returned an invalid state/,
+      },
+      {
+        name: "default absent value with non-null payload",
+        context: defaultContext,
+        result: { ...missingKey, keyExists: true, value: "command" },
+        error: /default query returned an invalid state/,
+      },
+      {
+        name: "default present value with non-string payload",
+        context: defaultContext,
+        result: {
+          ...missingKey,
+          keyExists: true,
+          valueExists: true,
+          value: 7,
+        },
+        error: /default query returned an invalid state/,
+      },
+      {
+        name: "non-array entries contract",
+        context: treeContext,
+        result: { ...validTree, entries: "not-an-array" },
+        error: /invalid contract/,
+      },
+    ];
+    for (const testCase of invalidCases) {
+      expect(
+        () => validateRegistryQueryResult(testCase.result, testCase.context),
+        testCase.name,
+      ).toThrow(testCase.error);
+    }
+  });
+
   it("rejects malformed registry tree entry shapes before absence checks", () => {
     const context = {
       hive: "HKLM",
@@ -181,7 +336,6 @@ describe("Windows NSIS installer smoke contracts", () => {
       value: null,
       entries: [validEntry],
     };
-    expect(validateRegistryQueryResult(validResult, context)).toBe(validResult);
 
     for (const malformedEntry of [
       null,
@@ -199,12 +353,6 @@ describe("Windows NSIS installer smoke contracts", () => {
         ),
       ).toThrow(/malformed entry/);
     }
-    expect(() =>
-      validateRegistryQueryResult(
-        { ...validResult, entries: "not-an-array" },
-        context,
-      ),
-    ).toThrow(/invalid contract/);
   });
 
   it.runIf(process.platform === "win32")(
