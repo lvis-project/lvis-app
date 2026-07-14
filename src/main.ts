@@ -43,6 +43,8 @@ import { readStartupLaunchState } from "./main/startup-launch.js";
 import { reconcileOsIntegrationOnBoot } from "./main/reconcile-os-integration.js";
 import { registerSettingsWindowHandlers } from "./main/settings-window.js";
 import { maybeStartLocalApiServer } from "./main/local-api-server.js";
+import { createA2ALoopbackRuntime } from "./main/a2a-loopback-runtime.js";
+import { getLvisAppVersion } from "./shared/app-version.js";
 import { handleLvisUri, lvisDevLog } from "./main/lvis-deep-link.js";
 import {
   getMainWindow,
@@ -161,6 +163,18 @@ async function main() {
       services,
       getMainWindow: () => getMainWindow(),
       getAppWindows,
+      createA2ARouter: ({ approveAgentAction }) => {
+        const project = services.conversationLoop.getSessionProjectContext();
+        return createA2ALoopbackRuntime({
+          services,
+          project: {
+            root: project.projectRoot ?? services.conversationLoop.getSessionExecutionCwd(),
+            ...(project.projectName ? { name: project.projectName } : {}),
+          },
+          appVersion: getLvisAppVersion(),
+          approveAgentAction,
+        });
+      },
       log: (m) => log.info(m),
     });
     if (localApi) log.info(`local API server listening on 127.0.0.1:${localApi.port}`);

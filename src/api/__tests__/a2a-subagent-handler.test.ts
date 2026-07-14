@@ -14,6 +14,7 @@ import type {
   A2AWireHostBinding,
   SubAgentSpawnResult,
 } from "../../engine/subagent-runner.js";
+import { GUIDE_MAX_CHARS } from "../../engine/turn/guidance-limits.js";
 import {
   A2ASubAgentHandler,
   type A2AMutationAuthorizer,
@@ -392,6 +393,40 @@ describe("A2ASubAgentHandler", () => {
       { resumeId: TASK_ID, messageText: "continue" },
       { handlerId: HANDLER_ID },
     );
+  });
+
+  it("masks and bounds a suspension prompt without copying it into metadata", async () => {
+    const { handler, runner } = makeHarness();
+    const rawToken = "sk-abcdefgh12345678";
+    const rawPrompt = `Continue ${rawToken} ${"\u0000".repeat(GUIDE_MAX_CHARS)}`;
+    runner.spawnFromA2AWire.mockImplementation(async (_request, _binding, callbacks) => {
+      await callbacks.onDurablyLinked({ childSessionId: TASK_ID });
+      const result = waitingResult();
+      result.suspension = { ...result.suspension!, prompt: rawPrompt };
+      return result;
+    });
+
+    const first = taskFrom(await handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
+      message: userMessage("wire-sensitive-suspension"),
+    }));
+    const statusMessage = first.status.message!;
+    const text = (statusMessage.parts[0] as { text: string }).text;
+    const suspension = (statusMessage.metadata as {
+      suspension: { reason: string; resumeId: string; prompt?: string };
+    }).suspension;
+
+    expect(text).not.toContain(rawToken);
+    expect(text).toContain("[REDACTED:TOKEN]");
+    expect(JSON.stringify(statusMessage).length).toBeLessThanOrEqual(GUIDE_MAX_CHARS);
+    expect(suspension).toEqual({ reason: "budget", resumeId: TASK_ID });
+    expect(JSON.stringify(first)).not.toContain(rawToken);
+
+    const replay = await handler.handle(
+      A2AJsonRpcMethod.GET_TASK,
+      { id: TASK_ID },
+    ) as A2ATask;
+    expect(replay.status.message).toEqual(statusMessage);
+    expect(JSON.stringify(replay)).not.toContain(rawToken);
   });
 
   it("preflights a continuation before consent and leaves it waiting when denied", async () => {
