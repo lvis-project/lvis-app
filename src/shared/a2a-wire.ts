@@ -7,6 +7,7 @@ export const A2A_JSONRPC_VERSION = "2.0" as const;
 export const A2A_VERSION_HEADER = "a2a-version" as const;
 export const A2A_ERROR_INFO_TYPE = "type.googleapis.com/google.rpc.ErrorInfo" as const;
 export const A2A_ERROR_INFO_DOMAIN = "a2a-protocol.org" as const;
+export const A2A_HOST_ERROR_INFO_DOMAIN = "lvis-project.github.io" as const;
 
 export const A2AJsonRpcMethod = {
   SEND_MESSAGE: "SendMessage",
@@ -124,6 +125,27 @@ export const A2AJsonRpcErrorDefinition = {
 export type A2AErrorDefinition =
   (typeof A2AJsonRpcErrorDefinition)[keyof typeof A2AJsonRpcErrorDefinition];
 export type A2AErrorReason = A2AErrorDefinition["reason"];
+
+/**
+ * Host policy errors outside the vendored A2A v1.0 error registry.
+ *
+ * These remain JSON-RPC server errors, but must not be presented as protocol
+ * definitions supplied by the A2A specification.
+ */
+export const A2AHostJsonRpcErrorDefinition = {
+  OPERATION_REJECTED: {
+    code: -32010,
+    message: "Operation rejected",
+    reason: "OPERATION_REJECTED",
+  },
+} as const;
+
+export type A2AHostErrorDefinition =
+  (typeof A2AHostJsonRpcErrorDefinition)[keyof typeof A2AHostJsonRpcErrorDefinition];
+export type A2AHostErrorReason = A2AHostErrorDefinition["reason"];
+
+/** Error definitions the host router may safely project onto the A2A wire. */
+export type A2ARouterErrorDefinition = A2AErrorDefinition | A2AHostErrorDefinition;
 
 export const StandardJsonRpcErrorDefinition = {
   PARSE_ERROR: { code: -32700, message: "Parse error" },

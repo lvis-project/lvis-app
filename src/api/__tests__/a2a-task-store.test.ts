@@ -151,6 +151,37 @@ describe("A2ATaskStore", () => {
 
     await expect(store.get("profile-a", "sub-live-owner")).resolves.not.toBeNull();
     await expect(store.get("profile-b", "sub-live-owner")).resolves.toBeNull();
+    await expect(store.lookupTask("profile-a", "sub-live-owner")).resolves.toMatchObject({
+      ok: true,
+      record: { handlerId: "profile-a" },
+    });
+    await expect(store.lookupTask("profile-b", "sub-live-owner")).resolves.toEqual({
+      ok: false,
+      reason: "cross-origin",
+    });
+    await expect(store.lookupTask("profile-b", "sub-unknown")).resolves.toEqual({
+      ok: false,
+      reason: "unknown-task",
+    });
+    await expect(store.preflightContinuation({
+      handlerId: "profile-b",
+      taskId: "sub-live-owner",
+      contextId: "context-owner",
+      message: userMessage("message-cross-origin-answer"),
+    })).resolves.toEqual({
+      ok: false,
+      reason: "task-not-found",
+      availability: "cross-origin",
+    });
+    await expect(store.preflightContinuation({
+      handlerId: "profile-b",
+      taskId: "sub-unknown",
+      message: userMessage("message-unknown-answer"),
+    })).resolves.toEqual({
+      ok: false,
+      reason: "task-not-found",
+      availability: "unknown-task",
+    });
     expect((storage.snapshot() as { records: unknown[] }).records).toHaveLength(1);
   });
 
@@ -241,6 +272,113 @@ describe("A2ATaskStore", () => {
     })).resolves.toMatchObject({ ok: true, created: true });
     await expect(store.get("profile-a", "sub-profile-a-old")).resolves.toBeNull();
     await expect(store.get("profile-b", "sub-profile-b-active")).resolves.not.toBeNull();
+  });
+
+  it("reserves initial admission before consent and releases the single slot", async () => {
+    const storage = memoryNamespace();
+    const store = makeStore(storage, { maxTasks: 1 });
+    await store.create({
+      handlerId: "profile-a",
+      childSessionId: "sub-admission-existing",
+      contextId: "context-admission-existing",
+      message: userMessage("message-admission-existing"),
+    });
+    await store.transition({
+      handlerId: "profile-a",
+      taskId: "sub-admission-existing",
+      state: A2ATaskState.WORKING,
+    });
+
+    await expect(store.reserveInitialTaskAdmission({
+      handlerId: "profile-a",
+      message: userMessage("message-admission-full"),
+    })).resolves.toEqual({ ok: false, reason: "capacity-exceeded" });
+
+    await store.transition({
+      handlerId: "profile-a",
+      taskId: "sub-admission-existing",
+      state: A2ATaskState.COMPLETED,
+    });
+    const reserved = await store.reserveInitialTaskAdmission({
+      handlerId: "profile-a",
+      message: userMessage("message-admission-first"),
+    });
+    expect(reserved).toMatchObject({ ok: true, reserved: true });
+    if (!reserved.ok || !reserved.reserved) return;
+    await expect(store.reserveInitialTaskAdmission({
+      handlerId: "profile-a",
+      message: userMessage("message-admission-distinct"),
+    })).resolves.toEqual({ ok: false, reason: "admission-busy" });
+
+    await store.releaseInitialTaskAdmission(reserved.admissionId);
+    const reacquired = await store.reserveInitialTaskAdmission({
+      handlerId: "profile-a",
+      message: userMessage("message-admission-distinct"),
+    });
+    expect(reacquired).toMatchObject({ ok: true, reserved: true });
+    if (!reacquired.ok || !reacquired.reserved) return;
+    expect(reacquired.admissionId).not.toBe(reserved.admissionId);
+
+    await store.releaseInitialTaskAdmission(reserved.admissionId);
+    await expect(store.reserveInitialTaskAdmission({
+      handlerId: "profile-a",
+      message: userMessage("message-admission-after-stale-release"),
+    })).resolves.toEqual({ ok: false, reason: "admission-busy" });
+  });
+
+  it("preflights continuation validity without mutating state or history", async () => {
+    const storage = memoryNamespace();
+    const store = makeStore(storage);
+    await store.create({
+      handlerId: "profile-a",
+      childSessionId: "sub-preflight",
+      contextId: "context-preflight",
+      message: userMessage("message-preflight-start"),
+    });
+    await store.transition({
+      handlerId: "profile-a",
+      taskId: "sub-preflight",
+      state: A2ATaskState.INPUT_REQUIRED,
+      message: agentMessage("status-preflight-waiting", "continue"),
+    });
+    const input = {
+      handlerId: "profile-a",
+      taskId: "sub-preflight",
+      contextId: "context-preflight",
+      message: userMessage("message-preflight-answer"),
+    };
+    const before = storage.snapshot();
+
+    await expect(store.preflightContinuation(input)).resolves.toMatchObject({
+      ok: true,
+      duplicate: false,
+      record: { task: { status: { state: A2ATaskState.INPUT_REQUIRED } } },
+    });
+    expect(storage.snapshot()).toEqual(before);
+    await expect(store.get("profile-a", "sub-preflight")).resolves.toMatchObject({
+      task: {
+        status: { state: A2ATaskState.INPUT_REQUIRED },
+        history: expect.not.arrayContaining([
+          expect.objectContaining({ messageId: "message-preflight-answer" }),
+        ]),
+      },
+    });
+
+    await expect(store.beginContinuation(input)).resolves.toMatchObject({
+      ok: true,
+      duplicate: false,
+      record: { task: { status: { state: A2ATaskState.WORKING } } },
+    });
+    const afterCommit = storage.snapshot();
+    await expect(store.preflightContinuation(input)).resolves.toMatchObject({
+      ok: true,
+      duplicate: true,
+    });
+    await expect(store.preflightContinuation({
+      ...input,
+      message: userMessage("message-preflight-answer", "different answer"),
+    })).resolves.toEqual({ ok: false, reason: "duplicate-message" });
+    expect(storage.snapshot()).toEqual(afterCommit);
   });
 
   it("rolls back in-memory continuation state when the durable write fails", async () => {
