@@ -99,6 +99,7 @@ export class AgentProfileStore {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw err;
     }
+    entries.sort((left, right) => left.name.localeCompare(right.name, "en"));
 
     let realDir: string;
     try {

@@ -508,6 +508,16 @@ describe("A2A v1 loopback router", () => {
 });
 
 describe("A2A handler registration", () => {
+  it("exposes a sorted immutable handler-id snapshot for local discovery", () => {
+    const { handler } = testHandler();
+    const router = createA2AHttpRouter({
+      handlers: [{ ...handler, id: "zeta" }, { ...handler, id: "alpha" }],
+    });
+
+    expect(router.handlerIds).toEqual(["alpha", "zeta"]);
+    expect(Object.isFrozen(router.handlerIds)).toBe(true);
+  });
+
   it("rejects unsafe ids, duplicates, and capabilities the router cannot serve", () => {
     const { handler } = testHandler();
     expect(() =>
