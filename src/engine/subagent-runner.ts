@@ -26,7 +26,7 @@
  * shared state (`sessionId`, `history`, `cumulativeUsage`), and lets each
  * spawn audit-log under a child sessionId tagged with the origin session id.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
 import { canonicalizePathForMatch } from "../permissions/sensitive-paths.js";
 import type {
@@ -61,6 +61,7 @@ import type { ChatEntry } from "../lib/chat-stream-state.js";
 import { serializeHistoryMessage, type SerializedHistoryMessage } from "../shared/chat-history.js";
 import { isToolResultStubContent } from "../shared/tool-result-stub.js";
 import { maskSensitiveData } from "../shared/dlp.js";
+import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 import { renderAgentProfilePrompt } from "./agent-profile-prompt.js";
 import type { GenericMessage } from "./llm/types.js";
 import type {
@@ -321,7 +322,7 @@ interface SubAgentExecutionPolicy {
 
 function buildA2AWireInternalOrigin(handlerId: string): string {
   const handlerTag = createHash("sha256").update(handlerId).digest("hex").slice(0, 8);
-  return `a2a-wire-${handlerTag}-${randomUUID()}`;
+  return createDlpSafeUuid(`a2a-wire-${handlerTag}`);
 }
 
 function canonicalizeA2AWireMessage(messageText: unknown): string | null {
@@ -677,9 +678,7 @@ function subAgentStopFailureReason(
 function buildChildSessionId(originSessionId?: string): string {
   const origin = originSessionId ?? "";
   const originTag = origin ? originSessionTag(origin) : "";
-  return originTag
-    ? `sub-${originTag}-${randomUUID()}`
-    : `sub-${randomUUID()}`;
+  return createDlpSafeUuid(originTag ? `sub-${originTag}` : "sub");
 }
 
 function originSessionTag(originSessionId: string): string {

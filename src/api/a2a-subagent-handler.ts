@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
   A2ARole,
@@ -36,6 +35,7 @@ import {
 } from "../engine/subagent-runner.js";
 import { GUIDE_MAX_CHARS } from "../engine/turn/guidance-limits.js";
 import { maskSensitiveData } from "../shared/dlp.js";
+import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 import { A2AHandlerError, type A2ARequestHandler } from "./a2a-router.js";
 import {
   A2ATaskStore,
@@ -48,7 +48,6 @@ import {
 const TEXT_MODE = "text/plain";
 const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
 const CHILD_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
-const DLP_SAFE_ID_ALPHABET = "abcdefghjkmnpqrs";
 const SEND_KEYS = new Set(["tenant", "message", "configuration", "metadata"]);
 const SEND_CONFIGURATION_KEYS = new Set([
   "acceptedOutputModes",
@@ -101,15 +100,9 @@ function isSafeChildSessionId(value: unknown): value is string {
     && maskSensitiveData(value).detections.length === 0;
 }
 
-/** 128-bit opaque context ID encoded without digits that can trip Luhn DLP rules. */
+/** UUID-compatible context ID whose complete value passes the DLP scanner. */
 export function createA2AContextId(): string {
-  const encoded = [...randomBytes(16)]
-    .flatMap((byte) => [
-      DLP_SAFE_ID_ALPHABET[byte >>> 4],
-      DLP_SAFE_ID_ALPHABET[byte & 0x0f],
-    ])
-    .join("");
-  return `context-${encoded}`;
+  return createDlpSafeUuid();
 }
 
 function isValidHistoryLength(value: unknown): value is number {

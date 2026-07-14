@@ -3,6 +3,7 @@ import {
   createInMemoryFeatureNamespace as createInMemoryNamespace,
 } from "../../__tests__/test-helpers.js";
 import { A2ATaskState } from "../../shared/a2a.js";
+import { maskSensitiveData } from "../../shared/dlp.js";
 import { A2AAgentMessageBus } from "../../engine/a2a-agent-message-bus.js";
 import { A2A_PARENT_RECIPIENT } from "../../engine/a2a-agent-message-envelope.js";
 import { A2AAgentMessageMailbox } from "../../engine/a2a-agent-message-mailbox.js";
@@ -116,6 +117,56 @@ describe("agent_spawn background routing", () => {
       suspension: expect.objectContaining({ reason: "question" }),
     }));
     expect(deliverToParent).not.toHaveBeenCalled();
+  });
+  it("keeps background delivery ids DLP-clean and correlated with renderer events", async () => {
+    const deliverToParent = vi.fn(async (input: {
+      message: { messageId: string; metadata?: unknown };
+    }) => ({
+      ok: true as const,
+      disposition: "mailbox" as const,
+      messageId: input.message.messageId,
+    }));
+    const emit = vi.fn();
+    const spawn = vi.fn(async (
+      _input: unknown,
+      callbacks: { onLinked?: (input: { childSessionId: string }) => void },
+    ) => {
+      callbacks.onLinked?.({ childSessionId: "sub-completed" });
+      return {
+        summary: "Finished",
+        toolCallCount: 1,
+        turnCount: 1,
+        childSessionId: "sub-completed",
+        entries: [],
+        ok: true,
+        stopReason: "end_turn" as const,
+      };
+    });
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({ spawn, deliverToParent }) as never,
+      emit,
+    });
+
+    await expect(tool.execute({
+      title: "completed child",
+      instructions: "finish",
+      background: true,
+    }, parentContext())).resolves.toMatchObject({ isError: false });
+    for (let attempt = 0; attempt < 20 && deliverToParent.mock.calls.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(deliverToParent).toHaveBeenCalledTimes(1);
+    const delivered = deliverToParent.mock.calls[0]?.[0].message;
+    const metadata = delivered?.metadata as { spawnId?: string } | undefined;
+    const spawnId = metadata?.spawnId ?? "";
+    expect(delivered?.messageId)
+      .toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(maskSensitiveData(delivered?.messageId ?? "").detections).toEqual([]);
+    expect(maskSensitiveData(spawnId).detections).toEqual([]);
+    const events = emit.mock.calls.map(([event]) => event as { type: string; spawnId: string });
+    expect(events.find((event) => event.type === "start")?.spawnId).toBe(spawnId);
+    expect(events.find((event) => event.type === "done")?.spawnId).toBe(spawnId);
   });
   it("delivers a background question once across agent_send and result projection", async () => {
     const namespace = createInMemoryNamespace();
