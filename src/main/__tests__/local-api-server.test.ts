@@ -20,7 +20,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   isLocalApiEnabled,
+  isA2ALoopbackEnabled,
   maybeStartLocalApiServer,
+  resetLocalApiServerForTests,
+  resolveLoopbackRouteFamilies,
   stopLocalApiServer,
   buildExternalMutationApprover,
   LOCAL_API_INFO_FILE,
@@ -29,12 +32,16 @@ import {
 import { makeDeepProxy } from "../../testing/deep-proxy.js";
 import type { AppServices } from "../../boot.js";
 import type { SettingsService } from "../../data/settings-store.js";
-import type { SystemSettings } from "../../data/settings-store.js";
+import type { FeatureFlags, SystemSettings } from "../../data/settings-store.js";
 import type { ApprovalGate } from "../../permissions/approval-gate.js";
+import type { A2AHttpRouter } from "../../api/a2a-router.js";
 import { PERMISSIONS, EXTERNAL_MUTATION_DENIED } from "../../contract/app-contract.js";
 
-/** Minimal SettingsService stub — only `get("system")` is consulted by the gate. */
-function stubSettings(system: Partial<SystemSettings>): SettingsService {
+/** Minimal SettingsService stub for the independently snapshotted route gates. */
+function stubSettings(
+  system: Partial<SystemSettings>,
+  features: Partial<FeatureFlags> = {},
+): SettingsService {
   const resolved: SystemSettings = {
     closeBehavior: "hide-to-tray",
     appMode: "work",
@@ -42,7 +49,11 @@ function stubSettings(system: Partial<SystemSettings>): SettingsService {
     ...system,
   };
   return {
-    get: (key: string) => (key === "system" ? { ...resolved } : undefined),
+    get: (key: string) => {
+      if (key === "system") return { ...resolved };
+      if (key === "features") return { ...features };
+      return undefined;
+    },
   } as unknown as SettingsService;
 }
 
@@ -64,11 +75,13 @@ function makeServices(
   system: Partial<SystemSettings>,
   getMode = "plan",
   approvalGate?: Pick<ApprovalGate, "requestAndWait">,
+  features: Partial<FeatureFlags> = {},
+  auditLog?: (entry: unknown) => void,
 ): AppServices {
   const base = makeDeepProxy(SERVICE_KEYS) as Record<string, unknown>;
   return new Proxy(base, {
     get(target, prop) {
-      if (prop === "settingsService") return stubSettings(system);
+      if (prop === "settingsService") return stubSettings(system, features);
       if (prop === "conversationLoop") {
         return {
           getSessionId: () => "test-session-id",
@@ -79,6 +92,7 @@ function makeServices(
       // external-mutation approver drives it. Otherwise fall through to the
       // deep-proxy (the approver still builds, but no mutation test exercises it).
       if (prop === "approvalGate" && approvalGate) return approvalGate;
+      if (prop === "auditLogger" && auditLog) return { log: auditLog };
       return Reflect.get(target, prop);
     },
     ownKeys() {
@@ -96,6 +110,21 @@ const START_ARGS = {
   log: () => {},
 };
 
+const TEST_AGENT_CARD_PATH = "/a2a/test/.well-known/agent-card.json";
+
+function stubA2ARouter(): A2AHttpRouter {
+  return {
+    isPublicAgentCardRequest: (path, method) =>
+      path === TEST_AGENT_CARD_PATH && method === "GET",
+    tryHandle: async (_req, res, path, method) => {
+      if (path !== TEST_AGENT_CARD_PATH || method !== "GET") return false;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ name: "Test A2A handler" }));
+      return true;
+    },
+  };
+}
+
 function readInfo(home: string): LocalApiServerInfoFile {
   const path = join(home, "local-api", LOCAL_API_INFO_FILE);
   return JSON.parse(readFileSync(path, "utf-8")) as LocalApiServerInfoFile;
@@ -104,12 +133,15 @@ function readInfo(home: string): LocalApiServerInfoFile {
 describe("local-api-server", () => {
   let prevLvisHome: string | undefined;
   let prevEnvFlag: string | undefined;
+  let prevA2AEnvFlag: string | undefined;
   let home: string;
 
   beforeEach(() => {
     prevLvisHome = process.env.LVIS_HOME;
     prevEnvFlag = process.env.LVIS_LOCAL_API;
+    prevA2AEnvFlag = process.env.LVIS_A2A;
     delete process.env.LVIS_LOCAL_API;
+    delete process.env.LVIS_A2A;
     home = mkdtempSync(join(tmpdir(), "lvis-local-api-"));
     process.env.LVIS_HOME = home;
   });
@@ -117,10 +149,13 @@ describe("local-api-server", () => {
   afterEach(async () => {
     // Always stop so a started server never leaks past a test.
     await stopLocalApiServer();
+    resetLocalApiServerForTests();
     if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
     else process.env.LVIS_HOME = prevLvisHome;
     if (prevEnvFlag === undefined) delete process.env.LVIS_LOCAL_API;
     else process.env.LVIS_LOCAL_API = prevEnvFlag;
+    if (prevA2AEnvFlag === undefined) delete process.env.LVIS_A2A;
+    else process.env.LVIS_A2A = prevA2AEnvFlag;
     rmSync(home, { recursive: true, force: true });
   });
 
@@ -137,11 +172,181 @@ describe("local-api-server", () => {
       expect(isLocalApiEnabled(stubSettings({}), { LVIS_LOCAL_API: "1" })).toBe(true);
     });
 
+    it("keeps A2A independently off unless its setting or exact env opt-in is enabled", () => {
+      expect(isA2ALoopbackEnabled(stubSettings({}, {}), {})).toBe(false);
+      expect(isA2ALoopbackEnabled(stubSettings({}, { a2aLoopbackServer: true }), {})).toBe(true);
+      expect(isA2ALoopbackEnabled(stubSettings({}, {}), { LVIS_A2A: "1" })).toBe(true);
+      expect(isA2ALoopbackEnabled(stubSettings({}, {}), { LVIS_A2A: "true" })).toBe(false);
+    });
+
+    it("resolves the two route-family gates independently", () => {
+      expect(resolveLoopbackRouteFamilies(stubSettings({ localApiServer: true }, {}), {}))
+        .toEqual({ localApi: true, a2a: false });
+      expect(resolveLoopbackRouteFamilies(stubSettings({}, { a2aLoopbackServer: true }), {}))
+        .toEqual({ localApi: false, a2a: true });
+      expect(resolveLoopbackRouteFamilies(stubSettings({}, {}), {
+        LVIS_LOCAL_API: "1",
+        LVIS_A2A: "1",
+      })).toEqual({ localApi: true, a2a: true });
+    });
+
     it("default-off: maybeStart returns null and writes NO discovery file", async () => {
       const result = await maybeStartLocalApiServer({ services: makeServices({}), ...START_ARGS });
       expect(result).toBeNull();
       expect(existsSync(join(home, "local-api", LOCAL_API_INFO_FILE))).toBe(false);
       expect(existsSync(join(home, "local-api"))).toBe(false);
+    });
+
+    it("treats listener stop as terminal for the current process boot", async () => {
+      const factory = vi.fn(() => stubA2ARouter());
+      await expect(maybeStartLocalApiServer({
+        services: makeServices({}),
+        createA2ARouter: factory,
+        ...START_ARGS,
+      })).resolves.toBeNull();
+
+      await stopLocalApiServer();
+
+      process.env.LVIS_A2A = "1";
+      await expect(maybeStartLocalApiServer({
+        services: makeServices({}),
+        createA2ARouter: factory,
+        ...START_ARGS,
+      })).resolves.toBeNull();
+      expect(factory).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("independent route-family lifecycle", () => {
+    it("single-flights concurrent starts onto exactly one listener", async () => {
+      process.env.LVIS_A2A = "1";
+      const factory = vi.fn(() => stubA2ARouter());
+      const input = {
+        services: makeServices({}),
+        createA2ARouter: factory,
+        ...START_ARGS,
+      };
+
+      const [first, second] = await Promise.all([
+        maybeStartLocalApiServer(input),
+        maybeStartLocalApiServer(input),
+      ]);
+
+      expect(first).not.toBeNull();
+      expect(second).toEqual(first);
+      expect(factory).toHaveBeenCalledOnce();
+      expect(readInfo(home).port).toBe(first!.port);
+    });
+
+    it("invalidates a pending start during shutdown without resurrecting a listener", async () => {
+      process.env.LVIS_A2A = "1";
+      let resolveRouter: ((router: A2AHttpRouter) => void) | undefined;
+      const factory = vi.fn(() => new Promise<A2AHttpRouter>((resolve) => {
+        resolveRouter = resolve;
+      }));
+      const start = maybeStartLocalApiServer({
+        services: makeServices({}),
+        createA2ARouter: factory,
+        ...START_ARGS,
+      });
+      expect(factory).toHaveBeenCalledOnce();
+
+      const stopping = stopLocalApiServer();
+      await expect(stopping).resolves.toBeUndefined();
+      await expect(start).resolves.toBeNull();
+      expect(existsSync(join(home, "local-api"))).toBe(false);
+
+      // Release the detached factory after shutdown; its stale generation must
+      // not continue into bind/discovery work.
+      resolveRouter!(stubA2ARouter());
+      await Promise.resolve();
+    });
+
+    it("starts A2A-only on the shared listener and hides /v1 before auth", async () => {
+      process.env.LVIS_A2A = "1";
+      const result = await maybeStartLocalApiServer({
+        services: makeServices({}),
+        createA2ARouter: () => stubA2ARouter(),
+        ...START_ARGS,
+      });
+      expect(result).not.toBeNull();
+
+      const localResponse = await fetch(`http://127.0.0.1:${result!.port}/v1/health`);
+      expect(localResponse.status).toBe(404);
+      expect(await localResponse.json()).toEqual({ ok: false, error: "not-found" });
+
+      const cardResponse = await fetch(
+        `http://127.0.0.1:${result!.port}${TEST_AGENT_CARD_PATH}`,
+      );
+      expect(cardResponse.status).toBe(200);
+      expect(await cardResponse.json()).toEqual({ name: "Test A2A handler" });
+    });
+
+    it("starts both route families on one port", async () => {
+      process.env.LVIS_LOCAL_API = "1";
+      process.env.LVIS_A2A = "1";
+      const result = await maybeStartLocalApiServer({
+        services: makeServices({}),
+        createA2ARouter: () => stubA2ARouter(),
+        ...START_ARGS,
+      });
+      const info = readInfo(home);
+
+      const health = await fetch(`http://127.0.0.1:${result!.port}/v1/health`, {
+        headers: { authorization: `Bearer ${info.secret}` },
+      });
+      const card = await fetch(`http://127.0.0.1:${result!.port}${TEST_AGENT_CARD_PATH}`);
+      expect(health.status).toBe(200);
+      expect(card.status).toBe(200);
+      expect(info.port).toBe(result!.port);
+    });
+
+    it("isolates A2A initialization failure while keeping /v1 available", async () => {
+      process.env.LVIS_LOCAL_API = "1";
+      process.env.LVIS_A2A = "1";
+      const emitted = vi.fn();
+      const audit = vi.fn();
+      const result = await maybeStartLocalApiServer({
+        services: makeServices({}, "plan", undefined, {}, audit),
+        createA2ARouter: () => {
+          throw new Error("secret-shaped provider detail");
+        },
+        ...START_ARGS,
+        log: emitted,
+      });
+      expect(result).not.toBeNull();
+      const info = readInfo(home);
+      const health = await fetch(`http://127.0.0.1:${result!.port}/v1/health`, {
+        headers: { authorization: `Bearer ${info.secret}` },
+      });
+      expect(health.status).toBe(200);
+      expect(emitted).toHaveBeenCalledWith(
+        "[a2a] initialization failed; route family disabled for this boot",
+      );
+      expect(JSON.stringify(emitted.mock.calls)).not.toContain("provider detail");
+      expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+        type: "warn",
+        input: "a2a:loopback:initialization-failed",
+      }));
+    });
+
+    it("retains no empty listener and does not retry when A2A has no handler", async () => {
+      process.env.LVIS_A2A = "1";
+      const audit = vi.fn();
+      const factory = vi.fn(() => null);
+      const input = {
+        services: makeServices({}, "plan", undefined, {}, audit),
+        createA2ARouter: factory,
+        ...START_ARGS,
+      };
+      await expect(maybeStartLocalApiServer(input)).resolves.toBeNull();
+      await expect(maybeStartLocalApiServer(input)).resolves.toBeNull();
+      expect(factory).toHaveBeenCalledOnce();
+      expect(existsSync(join(home, "local-api"))).toBe(false);
+      expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+        type: "warn",
+        input: "a2a:loopback:no-routable-handler",
+      }));
     });
   });
 
