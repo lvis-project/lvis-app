@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
@@ -18,6 +19,20 @@ class FakeChild extends EventEmitter {
 }
 
 describe("Electron Node-mode Vitest runner", () => {
+  it("locks both test entrypoints to the runtime guard", () => {
+    const vitestConfig = readFileSync(
+      new URL("../../vitest.config.ts", import.meta.url),
+      "utf8",
+    );
+    const bunfig = readFileSync(new URL("../../bunfig.toml", import.meta.url), "utf8");
+    expect(vitestConfig).toMatch(
+      /^import "\.\/scripts\/assert-electron-node-vitest\.mjs";$/m,
+    );
+    expect(bunfig).toMatch(
+      /^preload = \["\.\/scripts\/assert-electron-node-vitest\.mjs"\]$/m,
+    );
+  });
+
   it("fails fast for direct Node or Bun test runners", () => {
     expect(() =>
       assertElectronNodeVitestRuntime({
