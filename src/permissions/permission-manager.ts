@@ -100,6 +100,16 @@ export interface PermissionRule {
  */
 export type ReviewerLane = "foreground-auto" | "headless";
 
+export type ReviewerDispatchOutcome =
+  | "fresh"
+  | "cache"
+  | "approval-memory"
+  | "unavailable"
+  | "error"
+  | "timeout"
+  | "malformed"
+  | "sandbox-state-changed";
+
 export interface PermissionCheckResult {
   decision: PermissionDecision;
   reason: string;
@@ -112,6 +122,7 @@ export interface PermissionCheckResult {
   reviewer?: {
     route: ReviewerLane;
     verdict?: RiskVerdict;
+    outcome?: ReviewerDispatchOutcome;
   };
   /**
    * Per-invocation hard-ask marker. When `true`, this `ask` decision MUST be
@@ -244,6 +255,7 @@ export interface ReviewerDispatchInput {
  */
 export interface ReviewerDispatchResult {
   verdict: RiskVerdict;
+  outcome: ReviewerDispatchOutcome;
   /**
    * "hit" / "miss-stale" / "miss-expired" / "miss-not-found" — surfaces
    * the audit-trail "from cache" hint (m1 architect MAJOR-5 cache
@@ -1091,6 +1103,7 @@ export class PermissionManager {
       return {
         verdict: { level: "high", reason: "reviewer not wired — fail-safe defer" },
         cacheReason: "miss-not-found",
+        outcome: "unavailable",
       };
     }
     const classifier = this.reviewerClassifier!;
@@ -1146,6 +1159,7 @@ export class PermissionManager {
         scope: {
           ...(routineScope ?? {}),
           reviewer: this.reviewerCacheScope,
+          reviewerOutcomeContractVersion: 1,
           sandboxKind: sandboxScope.kind,
           sandboxConfidence: sandboxScope.confidence,
         },
@@ -1169,6 +1183,7 @@ export class PermissionManager {
       nlJustification: string | null;
       verdictAtApproval: UserApprovalVerdict | null;
     } | null = null;
+    let outcome: ReviewerDispatchOutcome = "fresh";
     let sandboxStateForAudit = sandboxCacheState;
     const buildReviewerContext = (
       reviewerSandboxState: ReviewerSandboxCacheState = sandboxCacheState,
@@ -1238,6 +1253,7 @@ export class PermissionManager {
         nlJustification: userApproval.nlJustification,
         verdictAtApproval: userApproval.verdictAtApproval,
       };
+      outcome = "approval-memory";
       // CRITICAL 4.1: disclose memory-hit auto-approve to renderer + log
       console.info(`[permission] memory-hit auto-approve: ${toolName} (scope=${userApproval.scope}, verdict=${userApproval.verdictAtApproval})`);
       try {
@@ -1257,6 +1273,7 @@ export class PermissionManager {
       const ruleClassifier = new RuleBasedRiskClassifier();
       ruleVerdictForAudit = ruleClassifier.classify(buildReviewerContext()).level;
       verdict = cacheResult.verdict;
+      outcome = "cache";
     } else {
       const ctx = buildReviewerContext();
       try {
@@ -1267,6 +1284,7 @@ export class PermissionManager {
         if (classifier instanceof LlmRiskClassifier) {
           const trace = await classifier.classifyWithTrace(ctx, { abortSignal: options?.abortSignal });
           verdict = trace.finalVerdict;
+          outcome = trace.outcome;
           ruleVerdictForAudit = trace.ruleVerdict.level;
           llmVerdictForAudit = trace.llmVerdict?.level ?? null;
         } else {
@@ -1286,15 +1304,20 @@ export class PermissionManager {
             level: "high",
             reason: "reviewer sandbox state changed during classification — fail-safe re-review required",
           };
+          outcome = "sandbox-state-changed";
         } else {
-          // Persist for next time (HIGH cached too — re-deny is fast). The
-          // verdict is stored only if the live wrap state still matches the
-          // reviewer context that produced it.
-          await cache.store(lookupKey, cacheCtx, verdict);
+          // Only a successful fresh classification may become a base-cache
+          // entry. malformed/error/timeout fallback verdicts remain fail-safe
+          // for this invocation and can never reappear as an eligible "cache"
+          // rationale outcome on the next call.
+          if (outcome === "fresh") {
+            await cache.store(lookupKey, cacheCtx, verdict);
+          }
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         verdict = { level: "high", reason: `reviewer error — ${message}` };
+        outcome = "error";
         ruleVerdictForAudit = new RuleBasedRiskClassifier().classify(ctx).level;
         llmVerdictForAudit = classifier instanceof LlmRiskClassifier ? "high" : null;
       }
@@ -1361,9 +1384,9 @@ export class PermissionManager {
         ...(input.evaluationContext ? { evaluationContext: input.evaluationContext } : {}),
         verdict,
       });
-      return { verdict, cacheReason: cacheResult.reason, deferredId };
+      return { verdict, outcome, cacheReason: cacheResult.reason, deferredId };
     }
-    return { verdict, cacheReason: cacheResult.reason };
+    return { verdict, outcome, cacheReason: cacheResult.reason };
   }
 
   // ─── Private ─────────────────────────────────────
