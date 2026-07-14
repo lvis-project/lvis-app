@@ -26,14 +26,12 @@ import { promises as fs } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { randomBytes } from "node:crypto";
 import { validateSender, auditUnauthorized } from "../gated.js";
-import { redactFsPath } from "../../audit/dlp-filter.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { assertReadableFilePath } from "../../tools/file-read-core.js";
 import {
   readPermissionSettings,
   addAllowedDirectoryPersist,
-  removeAllowedDirectoryPersist,
 } from "../../permissions/permission-settings-store.js";
 import {
   buildRuntimeAllowedDirectories,
@@ -46,6 +44,14 @@ import {
   isSensitivePath,
 } from "../../permissions/sensitive-paths.js";
 import { getDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
+import {
+  reconcileWorkspaceRoots,
+  removeWorkspaceRootWithIntent,
+  retainedDescendantWorkspaceRoots,
+  opaqueWorkspaceRootAuditRef,
+} from "../../permissions/workspace-root-reconciler.js";
+import { withWorkspaceRootLifecycleLock } from "../../permissions/workspace-root-lifecycle-lock.js";
+import { detachWorkspaceRootSessions } from "../../memory/workspace-root-session-lifecycle.js";
 
 /** Max directory entries returned per lazy listing (bounds huge dirs). */
 const MAX_DIR_ENTRIES = 1_000;
@@ -109,6 +115,7 @@ export interface WorkspaceListRootsResult {
   ok: boolean;
   defaultRoot?: string;
   roots?: WorkspaceRoot[];
+  cleanupPending?: number;
   error?: string;
 }
 
@@ -195,7 +202,9 @@ export interface WorkspaceRemoveRootResult {
    * a non-zero count in its removal toast (Korean via i18n).
    */
   prunedGrants?: number;
-  error?: "unauthorized" | "invalid-path" | "not-an-additional-root" | "cannot-remove-default";
+  /** Durable cleanup remains journaled, while the root is already inactive. */
+  cleanupPending?: boolean;
+  error?: "unauthorized" | "invalid-path" | "not-an-additional-root" | "cannot-remove-default" | "lifecycle-failed";
   message?: string;
 }
 
@@ -227,6 +236,411 @@ function computeRoots(): WorkspaceRoot[] {
 
 export function registerWorkspaceHandlers(deps: IpcDeps): void {
   const { auditLogger, getMainWindow } = deps;
+  type WorkspaceMemoryLifecycle = {
+    allowProjectRoot?: (root: string) => unknown;
+    detachSessionsFromProject?: (root: string) => unknown;
+  };
+  type WorkspaceRootRevocationOptions = {
+    globalScopeWasAuthorized?: boolean;
+    preserveRoots?: readonly string[];
+  };
+  type WorkspaceLoopLifecycle = {
+    revokeWorkspaceRoot?: (root: string, options?: WorkspaceRootRevocationOptions) => unknown;
+  };
+
+  const stableErrorCode = (error: unknown): string => {
+    const candidate =
+      error && typeof error === "object" && "code" in error
+        ? (error as { code?: unknown }).code
+        : error instanceof Error
+          ? error.name
+          : undefined;
+    const code = String(candidate ?? "UNKNOWN").toUpperCase();
+    return /^[A-Z0-9_-]{1,64}$/.test(code) ? code : "UNKNOWN";
+  };
+  const isLifecycleCount = (value: unknown): value is number =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+  const auditLifecycleWarning = (
+    source: string,
+    root: string,
+    phase:
+      | "allow"
+      | "revoke-live-scopes"
+      | "prune-path-grants"
+      | "prune-routine-scopes"
+      | "detach-sessions",
+    error: unknown,
+  ): void => {
+    try {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "workspace-root-lifecycle",
+        type: "warn",
+        input: JSON.stringify({
+          channel: source,
+          path: opaqueWorkspaceRootAuditRef(root),
+          lifecyclePhase: phase,
+          errorCode: stableErrorCode(error),
+        }),
+      });
+    } catch {
+      // An audit sink failure must not mask the lifecycle decision itself.
+    }
+  };
+
+  const sessionMemoryManagers = (
+    source: string = CHANNELS.workspace.listRoots,
+    root: string = getDefaultWorkspaceRoot(),
+    failClosed = false,
+  ): WorkspaceMemoryLifecycle[] => {
+    const managers: WorkspaceMemoryLifecycle[] = [];
+    const add = (candidate: unknown): void => {
+      if (
+        candidate &&
+        (typeof candidate === "object" || typeof candidate === "function") &&
+        !managers.includes(candidate as WorkspaceMemoryLifecycle)
+      ) {
+        managers.push(candidate as WorkspaceMemoryLifecycle);
+      }
+    };
+    const primary = deps.memoryManager as unknown as WorkspaceMemoryLifecycle | undefined;
+    if (failClosed && typeof primary?.detachSessionsFromProject !== "function") {
+      const error = Object.assign(new Error("workspace memory manager unavailable"), {
+        code: "MEMORY_MANAGER_UNAVAILABLE",
+      });
+      auditLifecycleWarning(source, root, "detach-sessions", error);
+      throw error;
+    }
+    add(primary);
+    try {
+      const sideLoop = deps.sideChatConversationLoop as
+        | { deps?: { memoryManager?: unknown } }
+        | undefined;
+      add(sideLoop?.deps?.memoryManager);
+    } catch (error: unknown) {
+      auditLifecycleWarning(source, root, "detach-sessions", error);
+      if (failClosed) throw error;
+    }
+    try {
+      add(deps.getSubAgentRunner?.());
+    } catch (error: unknown) {
+      auditLifecycleWarning(source, root, "detach-sessions", error);
+      if (failClosed) throw error;
+    }
+    return managers;
+  };
+
+  async function detachWorkspaceRootSessionsBeforeRemoval(
+    root: string,
+    source: string,
+  ): Promise<number> {
+    try {
+      return await detachWorkspaceRootSessions(
+        root,
+        sessionMemoryManagers(source, root, true),
+      );
+    } catch (error: unknown) {
+      auditLifecycleWarning(source, root, "detach-sessions", error);
+      throw Object.assign(new Error("workspace-root-session-detach-failed"), {
+        code: stableErrorCode(error),
+      });
+    }
+  }
+  const allowWorkspaceRoot = (root: string, source: string, allowRoutine = true): void => {
+    for (const manager of sessionMemoryManagers(source, root)) {
+      if (typeof manager.allowProjectRoot !== "function") continue;
+      try {
+        manager.allowProjectRoot(root);
+      } catch (error: unknown) {
+        auditLifecycleWarning(source, root, "allow", error);
+      }
+    }
+    if (allowRoutine && typeof deps.routineEngine?.allowWorkspaceRoot === "function") {
+      try {
+        deps.routineEngine.allowWorkspaceRoot(root);
+      } catch (error: unknown) {
+        auditLifecycleWarning(source, root, "allow", error);
+      }
+    }
+  };
+
+  async function finalizeRemovedWorkspaceRoot(
+    root: string,
+    source: string,
+    options: WorkspaceRootRevocationOptions,
+  ): Promise<{ liveScopesRevoked: number }> {
+    let liveScopesRevoked = 0;
+    const errors: unknown[] = [];
+    const liveScopeOwners: unknown[] = [
+      deps.conversationLoop,
+      deps.sideChatConversationLoop,
+      deps.routineEngine,
+    ];
+    try {
+      liveScopeOwners.push(deps.getSubAgentRunner?.());
+    } catch (error: unknown) {
+      errors.push(error);
+      auditLifecycleWarning(source, root, "revoke-live-scopes", error);
+    }
+    for (const candidate of liveScopeOwners) {
+      const loop = candidate as WorkspaceLoopLifecycle | undefined;
+      if (typeof loop?.revokeWorkspaceRoot !== "function") continue;
+      try {
+        const result = await Promise.resolve(loop.revokeWorkspaceRoot(root, options)) as
+          | {
+              sessionDirectoriesRemoved?: unknown;
+              turnDirectoriesRemoved?: unknown;
+              liveScopesRevoked?: unknown;
+            }
+          | null
+          | undefined;
+        const hasDirectResult = Boolean(
+          result && typeof result === "object" && "liveScopesRevoked" in result,
+        );
+        let removed: number | null = null;
+        if (hasDirectResult) {
+          if (isLifecycleCount(result?.liveScopesRevoked)) {
+            removed = result.liveScopesRevoked;
+          }
+        } else if (
+          isLifecycleCount(result?.sessionDirectoriesRemoved) &&
+          isLifecycleCount(result?.turnDirectoriesRemoved)
+        ) {
+          const combined = result.sessionDirectoriesRemoved + result.turnDirectoriesRemoved;
+          if (Number.isSafeInteger(combined)) removed = combined;
+        }
+        if (removed === null) {
+          const invalidResult = Object.assign(
+            new Error("workspace-root-live-scope-revoke-invalid-result"),
+            { code: "WORKSPACE_ROOT_LIVE_SCOPE_REVOKE_INVALID_RESULT" },
+          );
+          errors.push(invalidResult);
+          auditLifecycleWarning(source, root, "revoke-live-scopes", invalidResult);
+          continue;
+        }
+        liveScopesRevoked += removed;
+      } catch (error: unknown) {
+        errors.push(error);
+        auditLifecycleWarning(source, root, "revoke-live-scopes", error);
+      }
+    }
+
+    if (errors.length > 0) {
+      throw Object.assign(
+        new AggregateError(errors, "workspace-root-live-scope-revoke-failed"),
+        { code: "WORKSPACE_ROOT_LIVE_SCOPE_REVOKE_FAILED" },
+      );
+    }
+
+    return { liveScopesRevoked };
+  }
+  async function pruneWorkspaceRootGrants(
+    root: string,
+    source: string,
+    preserveRoots: readonly string[] = [],
+  ): Promise<{
+    count: number;
+    audit: Array<{ tool: string; tier: string; path: string }>;
+  }> {
+    const permissionManager = deps.conversationLoop?.permissionManager;
+    if (!permissionManager) {
+      const error = Object.assign(new Error("workspace permission manager unavailable"), {
+        code: "PERMISSION_MANAGER_UNAVAILABLE",
+      });
+      auditLifecycleWarning(source, root, "prune-path-grants", error);
+      throw error;
+    }
+    try {
+      const pruned = await permissionManager.prunePathGrantsUnderRoot(root, { preserveRoots });
+      return {
+        count: pruned.length,
+        audit: pruned.map((grant) => ({
+          tool: grant.toolName,
+          tier: grant.tier,
+          path: opaqueWorkspaceRootAuditRef(grant.path),
+        })),
+      };
+    } catch (error: unknown) {
+      auditLifecycleWarning(source, root, "prune-path-grants", error);
+      const lifecycleError = new Error("workspace-root-grant-prune-failed");
+      (lifecycleError as Error & { code: string }).code = stableErrorCode(error);
+      throw lifecycleError;
+    }
+  }
+
+  async function pruneWorkspaceRootRoutineScopes(
+    root: string,
+    source: string,
+    preserveRoots: readonly string[],
+  ): Promise<void> {
+    const routinesStore = deps.routinesStore;
+    if (typeof routinesStore?.revokeWorkspaceRoot !== "function") {
+      const error = Object.assign(new Error("workspace routines store unavailable"), {
+        code: "ROUTINES_STORE_UNAVAILABLE",
+      });
+      auditLifecycleWarning(source, root, "prune-routine-scopes", error);
+      throw error;
+    }
+    try {
+      await routinesStore.revokeWorkspaceRoot(root, { preserveRoots });
+    } catch (error: unknown) {
+      auditLifecycleWarning(source, root, "prune-routine-scopes", error);
+      const lifecycleError = new Error("workspace-root-routine-prune-failed");
+      (lifecycleError as Error & { code: string }).code = stableErrorCode(error);
+      throw lifecycleError;
+    }
+  }
+
+  async function pruneWorkspaceRootDurableScopes(
+    root: string,
+    source: string,
+    preserveRoots: readonly string[],
+  ): Promise<Awaited<ReturnType<typeof pruneWorkspaceRootGrants>>> {
+    const errors: unknown[] = [];
+    let grants: Awaited<ReturnType<typeof pruneWorkspaceRootGrants>> = {
+      count: 0,
+      audit: [],
+    };
+    try {
+      await pruneWorkspaceRootRoutineScopes(root, source, preserveRoots);
+    } catch (error: unknown) {
+      errors.push(error);
+    }
+    try {
+      grants = await pruneWorkspaceRootGrants(root, source, preserveRoots);
+    } catch (error: unknown) {
+      errors.push(error);
+    }
+    if (errors.length > 0) {
+      throw Object.assign(
+        new AggregateError(errors, "workspace-root-durable-scope-cleanup-failed"),
+        { code: "WORKSPACE_ROOT_DURABLE_SCOPE_CLEANUP_FAILED" },
+      );
+    }
+    return grants;
+  }
+
+  type WorkspaceRootRemoval = {
+    storedPath: string;
+    runtimePath: string;
+    persisted: string[];
+    prunedGrants: number;
+    prunedAudit: Array<{ tool: string; tier: string; path: string }>;
+    detachedSessions: number;
+    liveScopesRevoked: number;
+    cleanupPending: boolean;
+    operationId: string;
+  };
+
+  async function allowPersistedWorkspaceRoot(root: string, source: string): Promise<string[]> {
+    const runtimeRoot = canonicalizePathForMatch(resolvePath(root));
+    return withWorkspaceRootLifecycleLock(runtimeRoot, async () => {
+      // Every persistent add path (picker, slash command, and Settings) reaches
+      // this choke point. Validate inside the same-root lifecycle lock so a
+      // non-existent path or regular file can never enter the durable registry,
+      // even when the caller did not originate from the native picker.
+      const stat = await fs.stat(runtimeRoot).catch(() => null);
+      if (!stat) {
+        throw new Error("workspace-root-not-found");
+      }
+      if (!stat.isDirectory()) {
+        throw new Error("workspace-root-not-directory");
+      }
+      const current = readPermissionSettings().permissions.additionalDirectories;
+      const runtimeKey = caseFoldForMatch(runtimeRoot);
+      const alreadyRegistered = current.some(
+        (candidate) =>
+          caseFoldForMatch(canonicalizePathForMatch(candidate)) === runtimeKey,
+      );
+      if (alreadyRegistered) return current;
+      const preserveRoots = retainedDescendantWorkspaceRoots(runtimeRoot, current);
+      await pruneWorkspaceRootGrants(runtimeRoot, source, preserveRoots);
+      try {
+        // Re-add must not persist until stale durable routine scopes are gone.
+        // Otherwise a restart could lose an in-memory deny and revive them.
+        await pruneWorkspaceRootRoutineScopes(runtimeRoot, source, preserveRoots);
+      } catch (error: unknown) {
+        try {
+          deps.routineEngine?.revokeWorkspaceRoot(runtimeRoot, { preserveRoots });
+        } catch (revokeError: unknown) {
+          auditLifecycleWarning(source, runtimeRoot, "revoke-live-scopes", revokeError);
+        }
+        throw error;
+      }
+      const persisted = await addAllowedDirectoryPersist(runtimeRoot);
+      allowWorkspaceRoot(runtimeRoot, source);
+      return persisted;
+    });
+  }
+
+  async function removePersistedWorkspaceRoot(
+    root: string,
+    source: string,
+  ): Promise<WorkspaceRootRemoval | null> {
+    const target = canonicalizePathForMatch(resolvePath(root));
+    let grantResult: Awaited<ReturnType<typeof pruneWorkspaceRootGrants>> = {
+      count: 0,
+      audit: [],
+    };
+    let detachedSessions = 0;
+    let liveScopesRevoked = 0;
+    const execution = await removeWorkspaceRootWithIntent(target, {
+      source,
+      auditLogger,
+      beforeRemove: async (runtimePath, context) => {
+        grantResult = await pruneWorkspaceRootDurableScopes(
+          runtimePath,
+          source,
+          context.preserveRoots,
+        );
+        return grantResult.count;
+      },
+      beforeComplete: async (runtimePath) => {
+        detachedSessions = await detachWorkspaceRootSessionsBeforeRemoval(
+          runtimePath,
+          source,
+        );
+      },
+      onInactive: async (intent, context) => {
+        const finalized = await finalizeRemovedWorkspaceRoot(
+          intent.runtimePath,
+          source,
+          context,
+        );
+        liveScopesRevoked = finalized.liveScopesRevoked;
+      },
+    });
+    if (!execution) return null;
+    return {
+      storedPath: execution.intent.storedPath,
+      runtimePath: execution.intent.runtimePath,
+      persisted: readPermissionSettings().permissions.additionalDirectories,
+      prunedGrants: execution.prunedGrants,
+      prunedAudit: grantResult.audit,
+      detachedSessions,
+      liveScopesRevoked,
+      cleanupPending: !execution.completed,
+      operationId: execution.intent.operationId,
+    };
+  }
+
+  const permissionDirectoryLifecycle = {
+    allowDirectory: (root: string, source: "permission-slash") =>
+      allowPersistedWorkspaceRoot(root, source),
+    denyDirectory: async (root: string, source: "permission-slash") =>
+      (await removePersistedWorkspaceRoot(root, source))?.persisted ??
+        readPermissionSettings().permissions.additionalDirectories,
+  };
+  deps.workspaceRootLifecycle = permissionDirectoryLifecycle;
+  if (deps.conversationLoop?.deps) {
+    deps.conversationLoop.deps.workspaceRootLifecycle = permissionDirectoryLifecycle;
+  }
+  if (deps.sideChatConversationLoop) {
+    deps.sideChatConversationLoop.deps.workspaceRootLifecycle = permissionDirectoryLifecycle;
+  }
+
+
 
   /**
    * Persist a MAIN-OWNED directory path into `permissions.additionalDirectories`
@@ -251,7 +665,8 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
     picked: string,
     gesture: PickGesture,
   ): Promise<WorkspacePickRootResult> {
-    const verdict = validateDirectoryAddition(picked);
+    const canonicalPicked = canonicalizePathForMatch(picked);
+    const verdict = validateDirectoryAddition(canonicalPicked);
     if (!verdict.ok) {
       return { ok: false, error: directoryDenyCode(verdict.reason), warnings: verdict.adjacencyWarnings };
     }
@@ -260,16 +675,19 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
     // swap-to-symlink race before the ack lands; a non-directory must never enter
     // the Layer-1 read allow-list.
     try {
-      const stat = await fs.stat(picked);
+      const stat = await fs.stat(canonicalPicked);
       if (!stat.isDirectory()) {
         return { ok: false, error: "not-a-dir", warnings: verdict.adjacencyWarnings };
       }
     } catch {
       return { ok: false, error: "not-found", warnings: verdict.adjacencyWarnings };
     }
-    // Persist the picked absolute path (settings SOT stores the raw path;
-    // sanitize/canonicalize happens at read time). Dedup handled by the store.
-    await addAllowedDirectoryPersist(picked);
+    // Persist the identity that passed validation, freezing symlink aliases.
+    try {
+      await allowPersistedWorkspaceRoot(canonicalPicked, CHANNELS.workspace.pickRoot);
+    } catch {
+      return { ok: false, error: "persist-failed", warnings: verdict.adjacencyWarnings };
+    }
     // Audit the allow-list widening: the permission SOT just grew the executor's
     // Layer-1 read scope. Mirrors the preview-read audit (redacted path via the
     // shared DLP filter) so a read-scope WRITE is recorded, not only READS. The
@@ -281,13 +699,13 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
       type: "info",
       input: JSON.stringify({
         channel: CHANNELS.workspace.pickRoot,
-        path: redactFsPath(picked),
+        path: opaqueWorkspaceRootAuditRef(picked),
         gesture,
       }),
     });
     return {
       ok: true,
-      added: picked,
+      added: canonicalPicked,
       roots: computeRoots(),
       warnings: verdict.adjacencyWarnings,
     };
@@ -298,7 +716,40 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
       auditUnauthorized(auditLogger, CHANNELS.workspace.listRoots, e);
       return { ok: false, error: "unauthorized" };
     }
-    return { ok: true, defaultRoot: getDefaultWorkspaceRoot(), roots: computeRoots() };
+    const reconciliation = await reconcileWorkspaceRoots({
+      source: "list-roots",
+      auditLogger,
+      permissionManager: deps.conversationLoop?.permissionManager,
+      beforeRemove: async (runtimeRoot, context) => {
+        const grants = await pruneWorkspaceRootDurableScopes(
+          runtimeRoot,
+          CHANNELS.workspace.listRoots,
+          context.preserveRoots,
+        );
+        return grants.count;
+      },
+      beforeComplete: async (runtimeRoot) => {
+        await detachWorkspaceRootSessionsBeforeRemoval(
+          runtimeRoot,
+          CHANNELS.workspace.listRoots,
+        );
+      },
+      onInactive: async (intent, context) => {
+        await finalizeRemovedWorkspaceRoot(
+          intent.runtimePath,
+          CHANNELS.workspace.listRoots,
+          context,
+        );
+      },
+    });
+    return {
+      ok: true,
+      defaultRoot: getDefaultWorkspaceRoot(),
+      roots: computeRoots(),
+      ...(reconciliation.pending?.length
+        ? { cleanupPending: reconciliation.pending.length }
+        : {}),
+    };
   });
 
   ipcMain.handle(
@@ -454,24 +905,26 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
       if (targetCanon === defaultCanon) {
         return { ok: false, error: "cannot-remove-default", message: "default root cannot be removed" };
       }
-      const additional = readPermissionSettings().permissions.additionalDirectories;
-      const match = additional.find(
-        (d) => caseFoldForMatch(canonicalizePathForMatch(d)) === targetCanon,
-      );
-      if (!match) {
+      let removal: WorkspaceRootRemoval | null;
+      try {
+        removal = await removePersistedWorkspaceRoot(rawPath, CHANNELS.workspace.removeRoot);
+      } catch {
+        return {
+          ok: false,
+          error: "lifecycle-failed",
+          message: "workspace lifecycle update failed",
+        };
+      }
+      if (!removal) {
         return { ok: false, error: "not-an-additional-root", message: "path is not a removable project root" };
       }
-      await removeAllowedDirectoryPersist(match);
       // #1493 — the read allow-list just shrank, but path-scoped #1481 tier
       // grants (`rules[].tier` patterns of the form `<tool>:path:<absPath>`) for
       // files UNDER the removed root are a SEPARATE grant surface: without this
-      // they stay orphaned and silently revive if the same root is re-added,
-      // re-authorizing writes the user thought they revoked. Prune them via the
-      // permission manager (the SOT that owns the rule list + persistence). The
-      // manager may not be wired yet (boot race / headless) — treat the prune as
-      // best-effort so removeRoot still succeeds; the read-list shrink is the
-      // primary, always-applied action.
-      let prunedGrants = 0;
+      // they stay orphaned and silently revive if the same root is re-added.
+      // The active→pending cutover already made the root inaccessible; cleanup
+      // failures remain journaled and do not re-add it to the UI/runtime.
+      const prunedGrants = removal.prunedGrants;
       // #1494 item-4 — redacted per-pattern provenance for the success audit.
       // prunePathGrantsUnderRoot returns the pruned grant tuples; we keep the
       // count derivable (`.length`) for the IPC response + renderer toast, but
@@ -479,45 +932,31 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
       // so forensics can see exactly what a root removal disowned. The pattern
       // list is audit-only — the IPC response still carries a bare number, so the
       // renderer is unchanged (No-Fallback: no renderer-side type widening).
-      let prunedAudit: Array<{ tool: string; tier: string; path: string }> = [];
-      const pm = deps.conversationLoop?.permissionManager;
-      if (pm) {
-        try {
-          const prunedList = await pm.prunePathGrantsUnderRoot(match);
-          prunedGrants = prunedList.length;
-          prunedAudit = prunedList.map((g) => ({
-            tool: g.toolName,
-            tier: g.tier,
-            path: redactFsPath(g.path),
-          }));
-        } catch (err) {
-          // A prune failure must not fail the removal — log and continue.
-          auditLogger.log({
-            timestamp: new Date().toISOString(),
-            sessionId: "workspace-remove-root",
-            type: "warn",
-            input: JSON.stringify({
-              channel: CHANNELS.workspace.removeRoot,
-              path: redactFsPath(match),
-              pruneError: err instanceof Error ? err.message : String(err),
-            }),
-          });
-        }
-      }
+      const prunedAudit = removal.prunedAudit;
       auditLogger.log({
         timestamp: new Date().toISOString(),
         sessionId: "workspace-remove-root",
         type: "info",
         input: JSON.stringify({
           channel: CHANNELS.workspace.removeRoot,
-          path: redactFsPath(match),
+          path: opaqueWorkspaceRootAuditRef(removal.runtimePath),
+          operationId: removal.operationId,
+          cleanupPending: removal.cleanupPending,
           prunedGrants,
+          detachedSessions: removal.detachedSessions,
+          liveScopesRevoked: removal.liveScopesRevoked,
           // Redacted per-pattern tuples (empty when nothing pruned). Audit-only;
           // never returned to the renderer.
           ...(prunedAudit.length > 0 ? { prunedPatterns: prunedAudit } : {}),
         }),
       });
-      return { ok: true, removed: match, roots: computeRoots(), prunedGrants };
+      return {
+        ok: true,
+        removed: removal.storedPath,
+        roots: computeRoots(),
+        prunedGrants,
+        ...(removal.cleanupPending ? { cleanupPending: true } : {}),
+      };
     },
   );
 

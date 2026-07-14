@@ -123,6 +123,8 @@ export interface ChatViewProps {
   onRefreshProjects?: () => void | Promise<void>;
 }
 
+const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
+
 export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
@@ -233,6 +235,71 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   // docked/drawer branch) so switching branches does not move the signal.
   const chatViewRootRef = useRef<HTMLDivElement | null>(null);
   const { isNarrow } = useContainerNarrow(chatViewRootRef);
+  const dockedPanelShouldOpen = previewRailVisible && !isNarrow;
+  const [dockedPanelPresent, setDockedPanelPresent] = useState(dockedPanelShouldOpen);
+  // Always start collapsed so an initially-open persisted panel never paints
+  // expanded before the opening transition lifecycle begins.
+  const [dockedPanelExpanded, setDockedPanelExpanded] = useState(false);
+  const [sidePanelResizing, setSidePanelResizing] = useState(false);
+
+  // Resizing only disables the CSS transition. It must not retrigger this
+  // mount/expand lifecycle, otherwise the first drag frame collapses the
+  // panel to 0px before expanding it again.
+  useEffect(() => {
+    const reduceMotion =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (dockedPanelShouldOpen) {
+      setDockedPanelPresent(true);
+      if (reduceMotion) {
+        setDockedPanelExpanded(true);
+        return;
+      }
+      setDockedPanelExpanded(false);
+      // Two frames guarantee the collapsed 0px state is painted before the
+      // expanded state is committed. A single RAF can be coalesced with the
+      // mount on fast machines, making the panel appear to pop in.
+      let expansionFrame = 0;
+      const mountFrame = window.requestAnimationFrame(() => {
+        expansionFrame = window.requestAnimationFrame(() => {
+          setDockedPanelExpanded(true);
+        });
+      });
+      return () => {
+        window.cancelAnimationFrame(mountFrame);
+        if (expansionFrame) window.cancelAnimationFrame(expansionFrame);
+      };
+    }
+
+    setDockedPanelExpanded(false);
+    setSidePanelResizing(false);
+    if (reduceMotion || isNarrow) {
+      setDockedPanelPresent(false);
+      return;
+    }
+    const timer = window.setTimeout(
+      () => setDockedPanelPresent(false),
+      SIDE_PANEL_LAYOUT_TRANSITION_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [dockedPanelShouldOpen, isNarrow]);
+
+  const handleSidePanelWidthChange = useCallback(
+    (px: number) => {
+      setSidePanelResizing(true);
+      setSidePanelWidth(px);
+    },
+    [setSidePanelWidth],
+  );
+  const handleSidePanelWidthCommit = useCallback(
+    (px: number) => {
+      setSidePanelResizing(false);
+      setSidePanelWidth(px);
+      commitSidePanelWidth(px);
+    },
+    [commitSidePanelWidth, setSidePanelWidth],
+  );
 
   // Tool Activity (ActionPanel) — co-located here (§6.10.7) so its open-actions
   // reach the workspace store / preview model / side-panel toggle that also
@@ -733,28 +800,57 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         onProjectSelectorOpenChange={setProjectSelectorOpen}
       />
       </div>
-      {previewRailVisible && !isNarrow ? (
-        <ChatSidePanel
-          api={api}
-          sessionId={currentSessionId}
-          targets={previewModel.targets}
-          files={previewModel.files}
-          selectedId={selectedPreviewId}
-          onSelect={setSelectedPreviewId}
-          workspaceTabs={workspaceTabs}
-          subAgentSpawns={subAgentSpawns}
-          width={sidePanelWidth}
-          onWidthChange={setSidePanelWidth}
-          onWidthCommit={commitSidePanelWidth}
-          onClose={() => {
-            onSidePanelOpenChange?.(false);
+      {dockedPanelPresent ? (
+        <div
+          id="chat-side-panel"
+          data-testid="chat-side-panel-motion"
+          aria-hidden={!dockedPanelExpanded}
+          inert={!dockedPanelExpanded}
+          style={{ width: dockedPanelExpanded ? `${sidePanelWidth}px` : "0px" }}
+          className={[
+            "relative z-40 flex min-w-0 max-w-[calc(100vw-12rem)] shrink-0 origin-right justify-end self-stretch will-change-[width,opacity,transform]",
+            sidePanelResizing
+              ? "transition-none"
+              : "transition-[width,opacity,transform] duration-[var(--motion-layout)] ease-[var(--motion-ease-out)] motion-reduce:transition-none",
+            dockedPanelExpanded
+              ? "pointer-events-auto translate-x-0 overflow-visible opacity-100"
+              : "pointer-events-none translate-x-2 overflow-hidden opacity-0",
+          ].join(" ")}
+          onTransitionEnd={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              event.propertyName === "width" &&
+              !dockedPanelShouldOpen
+            ) {
+              setDockedPanelPresent(false);
+            }
           }}
-          className="relative z-40 flex max-w-[calc(100vw-12rem)] shrink-0 self-stretch"
-        />
+          onTransitionCancel={() => {
+            if (!dockedPanelShouldOpen) setDockedPanelPresent(false);
+          }}
+        >
+          <ChatSidePanel
+            api={api}
+            sessionId={currentSessionId}
+            targets={previewModel.targets}
+            files={previewModel.files}
+            selectedId={selectedPreviewId}
+            onSelect={setSelectedPreviewId}
+            workspaceTabs={workspaceTabs}
+            subAgentSpawns={subAgentSpawns}
+            width={sidePanelWidth}
+            onWidthChange={handleSidePanelWidthChange}
+            onWidthCommit={handleSidePanelWidthCommit}
+            onClose={() => {
+              onSidePanelOpenChange?.(false);
+            }}
+            className="relative flex max-w-[calc(100vw-12rem)] shrink-0 self-stretch"
+          />
+        </div>
       ) : null}
-      {previewRailVisible && isNarrow ? (
+      {isNarrow ? (
         <WorkspaceRailDrawer
-          open
+          open={previewRailVisible}
           onOpenChange={(open) => {
             if (!open) onSidePanelOpenChange?.(false);
           }}

@@ -601,7 +601,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
 
 
-          className="min-w-0 flex-1 resize-none min-h-[40px] max-h-[144px] overflow-y-auto border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none text-xs placeholder:text-xs px-4 py-2"
+          className="min-w-0 flex-1 resize-none min-h-[40px] max-h-[144px] overflow-y-auto border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none px-4 py-2 text-body-sm text-input-bar-foreground caret-input-bar-action placeholder:text-body-sm placeholder:text-input-bar-placeholder"
         />
 
 
@@ -616,7 +616,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       {isFull ? (
         <div
           data-testid="composer-limit-warning"
-          className="mt-1 text-[11px] text-destructive"
+          className="mt-1 text-caption text-destructive"
         >
           {t("composer.attachLimitWarning", { max: ATTACH_MAX_COUNT })}
         </div>

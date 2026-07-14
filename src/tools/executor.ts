@@ -44,7 +44,10 @@ import {
   pickClosestParent,
   validateDirectoryAddition,
 } from "../permissions/allowed-directories.js";
-import { dispatchPermissionDirCommand } from "../permissions/permission-slash.js";
+import {
+  dispatchPermissionDirCommand,
+  type PermissionDirectoryLifecycle,
+} from "../permissions/permission-slash.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import type { ScriptHookManager, HookDispatchResult } from "../hooks/script-hook-manager.js";
 import type { HookTrustOrigin } from "../hooks/script-hook-types.js";
@@ -316,6 +319,13 @@ export class ToolExecutor {
    * known-safe pre-exec ask.
    */
   private readonly sandboxFsContainedProvider: (tool: Tool) => boolean;
+  /**
+   * Lazy because workspace IPC wires the central lifecycle after conversation
+   * loops (and their ToolExecutors) are constructed. Executors without this
+   * host capability may still grant once/session scope, but persistent
+   * directory approval fails closed instead of mutating settings alone.
+   */
+  private readonly workspaceRootLifecycleProvider: () => PermissionDirectoryLifecycle | undefined;
   private readonly reviewerAuthorizations = new ReviewerAuthorizationStore();
   private readonly auditWriter: AuditWriter;
 
@@ -329,6 +339,7 @@ export class ToolExecutor {
     auditLogger?: AuditLogger,
     hostClassifiesRiskProvider?: () => boolean,
     sandboxFsContainedProvider?: (tool: Tool) => boolean,
+    workspaceRootLifecycleProvider?: () => PermissionDirectoryLifecycle | undefined,
   ) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
@@ -339,6 +350,7 @@ export class ToolExecutor {
     this.scriptHookManager = scriptHookManager;
     this.hostClassifiesRiskProvider = hostClassifiesRiskProvider ?? (() => false);
     this.sandboxFsContainedProvider = sandboxFsContainedProvider ?? (() => false);
+    this.workspaceRootLifecycleProvider = workspaceRootLifecycleProvider ?? (() => undefined);
     this.requirePermissionAuditChain = auditLogger?.isPermissionAuditChainReady() === true;
     this.auditWriter = new AuditWriter(
       this.auditLogger,
@@ -996,12 +1008,20 @@ export class ToolExecutor {
               : suggestedParent ?? outOfAllowedTarget.filePath)
           : outOfAllowedTarget.filePath;
         if (decision.choice === "allow-always") {
-          const dirResult = await dispatchPermissionDirCommand({
-            verb: "allow",
-            path: approvedDirectory,
-            session: false,
-            acknowledgeWarnings: true,
-          });
+          let lifecycle: PermissionDirectoryLifecycle | undefined;
+          try {
+            lifecycle = this.workspaceRootLifecycleProvider();
+          } catch {
+            lifecycle = undefined;
+          }
+          const dirResult = lifecycle
+            ? await dispatchPermissionDirCommand({
+                verb: "allow",
+                path: approvedDirectory,
+                session: false,
+                acknowledgeWarnings: true,
+              }, undefined, lifecycle)
+            : { ok: false as const, error: "workspace lifecycle unavailable" };
           if (!dirResult.ok || dirResult.verb !== "allow") {
             const msg = t("be_executor.dirPolicySaveFailed", { name: toolUse.name, error: dirResult.ok ? "unexpected result" : dirResult.error });
             const durationMs = Date.now() - startTime;

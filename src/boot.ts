@@ -68,6 +68,7 @@ import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { wireWhitelistRegistry } from "./boot/steps/whitelist-bootstrap.js";
 import { wireAnnouncementCheck, wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { migrateCanonicalization } from "./permissions/user-approval-store.js";
+import { reconcileWorkspaceRoots } from "./permissions/workspace-root-reconciler.js";
 import { createLogger } from "./lib/logger.js";
 import { lvisHome } from "./shared/lvis-home.js";
 import {
@@ -85,7 +86,11 @@ import { setupWorkflowStores } from "./boot/steps/workflow-stores.js";
 import { setupMarketplace } from "./boot/steps/marketplace-setup.js";
 import { wireReviewerAndPermissions } from "./boot/steps/reviewer-permission-wiring.js";
 import { setupPluginToolExecutor } from "./boot/steps/plugin-tool-executor.js";
-import { wireConversation } from "./boot/steps/conversation-wiring.js";
+import {
+  createIsolatedConversationMemoryManagers,
+  wireConversation,
+} from "./boot/steps/conversation-wiring.js";
+import { detachWorkspaceRootSessions } from "./memory/workspace-root-session-lifecycle.js";
 import { wireRoutinesScheduler } from "./boot/steps/routines-wiring.js";
 import { setupMcp } from "./boot/steps/mcp-setup.js";
 import { initSandboxGate } from "./boot/steps/sandbox-init.js";
@@ -253,16 +258,63 @@ export async function bootstrap(
   // mainWindow getter and the registered plugins).
   const permissionManager = await createPermissionManager();
   ctx.permissionManager = permissionManager;
-
-  // Routines SOT — constructed BEFORE initPluginRuntime because the per-plugin
-  // HostApi factory (built inside initPluginRuntime's startAll) wires
-  // `hostApi.hasRoutineBySource` against this store. The RoutinesScheduler is
-  // still created below with the rest of the workflow services.
+  // Routines SOT must exist before project reconciliation so durable routine
+  // scope pruning can succeed before the permission registry is narrowed.
   const routinesStore = new RoutinesStore();
   await routinesStore.load().catch((err) => {
     log.warn("boot: routines load failed (non-fatal): %s", (err as Error).message);
   });
   ctx.routinesStore = routinesStore;
+  // Open every durable conversation namespace before reconciliation. The same
+  // instances are wired into the live loops below, preserving root tombstones
+  // against late writes in this process.
+  const isolatedConversationMemoryManagers = createIsolatedConversationMemoryManagers();
+  const workspaceSessionStores = [
+    memoryManager,
+    isolatedConversationMemoryManagers.sideChatMemoryManager,
+    isolatedConversationMemoryManagers.subAgentMemoryManager,
+  ];
+  // Project roots are persisted permissions, so reconcile them before any
+  // plugin receives a HostApi. Confirmed missing/non-directory roots are
+  // removed and their path grants pruned; transient filesystem failures retain
+  // the user's setting. Conversation JSONL is preserved while stale project
+  // metadata is detached and reindexed before the interactive loop is created.
+  const rootReconciliation = await reconcileWorkspaceRoots({
+    source: "boot",
+    auditLogger: ctx.bootAuditLogger,
+    permissionManager,
+    beforeRemove: async (runtimeRoot, context) => {
+      const pruneOptions = { preserveRoots: context.preserveRoots };
+      const errors: unknown[] = [];
+      let prunedGrants = 0;
+      try {
+        await routinesStore.revokeWorkspaceRoot(runtimeRoot, pruneOptions);
+      } catch (error: unknown) {
+        errors.push(error);
+      }
+      try {
+        const pruned = await permissionManager.prunePathGrantsUnderRoot(
+          runtimeRoot,
+          pruneOptions,
+        );
+        prunedGrants = pruned.length;
+      } catch (error: unknown) {
+        errors.push(error);
+      }
+      if (errors.length > 0) {
+        throw Object.assign(
+          new AggregateError(errors, "workspace-root-durable-scope-cleanup-failed"),
+          { code: "WORKSPACE_ROOT_DURABLE_SCOPE_CLEANUP_FAILED" },
+        );
+      }
+      return prunedGrants;
+    },
+    beforeComplete: async (runtimeRoot) => {
+      await detachWorkspaceRootSessions(runtimeRoot, workspaceSessionStores);
+    },
+  });
+
+
 
   const {
     pluginRuntime,
@@ -344,7 +396,14 @@ export async function bootstrap(
 
   // §4.5 + §7: routine engine, ConversationLoop, late bindings, SubAgentRunner,
   // WorkBoardEngine/reporter, and manifest-driven plugin IPC bridges.
-  wireConversation(ctx);
+  await wireConversation(
+    ctx,
+    [...new Set([
+      ...rootReconciliation.removed.map((removed) => removed.runtimePath),
+      ...(rootReconciliation.inactiveRoots ?? []),
+    ])],
+    isolatedConversationMemoryManagers,
+  );
 
   // §7: RoutinesScheduler v2 execution-branch wiring.
   wireRoutinesScheduler(ctx);

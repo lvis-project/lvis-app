@@ -35,20 +35,30 @@ import { relativeLuminance } from '../../contrast-helpers.js';
  *  WCAG contrast helpers (run inside page context)
  * ─────────────────────────────────────────────────────────────────────── */
 
-/** Parse "rgb(r, g, b)" / "rgba(r, g, b, a)" into [r,g,b] in 0..1. */
-function rgbToTuple(input: string): [number, number, number] {
-  const m = input.match(/rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)/);
+/** Parse "rgb(r, g, b)" / "rgba(r, g, b, a)" into RGBA in 0..1. */
+function rgbToTuple(input: string): [number, number, number, number] {
+  const m = input.match(
+    /rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)(?:\s*,\s*(\d+(?:\.\d+)?))?/,
+  );
   if (!m) throw new Error(`unparseable color string: ${input}`);
   const r = parseFloat(m[1]!) / 255;
   const g = parseFloat(m[2]!) / 255;
   const b = parseFloat(m[3]!) / 255;
-  return [r, g, b];
+  const a = m[4] === undefined ? 1 : parseFloat(m[4]!);
+  return [r, g, b, a];
 }
 
 
 function contrastRatio(fg: string, bg: string): number {
-  const fl = relativeLuminance(rgbToTuple(fg));
-  const bl = relativeLuminance(rgbToTuple(bg));
+  const [fr, fgChannel, fb, fa] = rgbToTuple(fg);
+  const [br, bgChannel, bb] = rgbToTuple(bg);
+  const paintedFg: [number, number, number] = [
+    fr * fa + br * (1 - fa),
+    fgChannel * fa + bgChannel * (1 - fa),
+    fb * fa + bb * (1 - fa),
+  ];
+  const fl = relativeLuminance(paintedFg);
+  const bl = relativeLuminance([br, bgChannel, bb]);
   const [hi, lo] = fl > bl ? [fl, bl] : [bl, fl];
   return (hi + 0.05) / (lo + 0.05);
 }
@@ -57,7 +67,7 @@ function contrastRatio(fg: string, bg: string): number {
  *  Spec
  * ─────────────────────────────────────────────────────────────────────── */
 
-test.describe('Chat surface contrast — WCAG AA across all 6 theme bundles', () => {
+test.describe('Chat surface contrast — WCAG AA across all shipped theme bundles', () => {
   test('every bundle passes contrast >= 4.5:1 for body text and inline code', async ({
     mainWindow,
   }) => {
@@ -210,6 +220,171 @@ test.describe('Chat surface contrast — WCAG AA across all 6 theme bundles', ()
     }
 
     expect(failures, 'all bundles must clear WCAG AA body-text contrast').toHaveLength(0);
+    expect(rows).toHaveLength(BUNDLE_IDS.length);
+  });
+
+  test('user bubble and composer semantic classes resolve and keep text contrast >= 4.5:1', async ({
+    mainWindow,
+  }) => {
+    const REQUIRED_SEMANTIC_TOKENS = [
+      '--message-user-bg',
+      '--message-user-fg',
+      '--message-user-border',
+      '--message-user-muted',
+      '--message-user-action',
+      '--input-bar-bg',
+      '--input-bar-fg',
+      '--input-bar-placeholder',
+      '--input-bar-border',
+      '--input-bar-focus',
+      '--input-bar-subtle',
+      '--input-bar-action',
+    ] as const;
+
+    type SemanticRow = {
+      bundle: BundleId;
+      missingTokens: string[];
+      userColor: string;
+      userBg: string;
+      userRatio: number;
+      composerColor: string;
+      composerBg: string;
+      composerRatio: number;
+      placeholderColor: string;
+      placeholderBg: string;
+      placeholderRatio: number;
+    };
+
+    const rows: SemanticRow[] = [];
+    const failures: SemanticRow[] = [];
+
+    for (const bundle of BUNDLE_IDS) {
+      await mainWindow.evaluate(
+        ({ bundleId }: { bundleId: string }) => {
+          document.documentElement.setAttribute('data-theme-bundle', bundleId);
+        },
+        { bundleId: bundle },
+      );
+
+      // These are the production class chains from TranscriptRenderer and
+      // ChatComposerDock/Composer. Keeping the probe on the compiled utilities
+      // catches a token that exists in source but is missing from the runtime CSS.
+      await mainWindow.evaluate(() => {
+        const PROBE_HOST_ID = '__lvis_semantic_contrast_probe__';
+        document.getElementById(PROBE_HOST_ID)?.remove();
+
+        const host = document.createElement('div');
+        host.id = PROBE_HOST_ID;
+        host.style.cssText = 'position:fixed;left:-9999px;top:0;width:480px;z-index:-1';
+
+        const userBubble = document.createElement('div');
+        userBubble.id = '__lvis_semantic_user_bubble__';
+        userBubble.className =
+          'rounded-lg border border-message-user-border bg-message-user px-3.5 py-2.5 text-body-sm text-message-user-foreground';
+        userBubble.textContent = '사용자 질문 대비 검증';
+
+        const composerSurface = document.createElement('div');
+        composerSurface.id = '__lvis_semantic_composer_surface__';
+        composerSurface.className =
+          'rounded-xl border border-input-bar-border bg-input-bar text-input-bar-foreground';
+
+        const composerInput = document.createElement('textarea');
+        composerInput.id = '__lvis_semantic_composer_input__';
+        composerInput.className =
+          'bg-transparent text-body-sm text-input-bar-foreground placeholder:text-body-sm placeholder:text-input-bar-placeholder';
+        composerInput.value = '입력된 대화 대비 검증';
+        composerInput.placeholder = '메시지를 입력하세요';
+        composerSurface.appendChild(composerInput);
+
+        host.append(userBubble, composerSurface);
+        document.body.appendChild(host);
+      });
+
+      const probe = await mainWindow.evaluate(
+        ({ tokenNames }: { tokenNames: string[] }) => {
+          const userBubble = document.getElementById('__lvis_semantic_user_bubble__');
+          const composerSurface = document.getElementById('__lvis_semantic_composer_surface__');
+          const composerInput = document.getElementById('__lvis_semantic_composer_input__');
+          if (!userBubble || !composerSurface || !composerInput) {
+            throw new Error('semantic contrast probe missing after injection');
+          }
+
+          function paintedBg(el: Element): string {
+            let cur: Element | null = el;
+            while (cur) {
+              const bg = getComputedStyle(cur).backgroundColor;
+              if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return bg;
+              cur = cur.parentElement;
+            }
+            return getComputedStyle(document.documentElement).backgroundColor || 'rgb(255, 255, 255)';
+          }
+
+          const rootStyle = getComputedStyle(document.documentElement);
+          const tokenValues = Object.fromEntries(
+            tokenNames.map((name) => [name, rootStyle.getPropertyValue(name).trim()]),
+          );
+          const userStyle = getComputedStyle(userBubble);
+          const composerStyle = getComputedStyle(composerInput);
+          const placeholderStyle = getComputedStyle(composerInput, '::placeholder');
+
+          return {
+            tokenValues,
+            userColor: userStyle.color,
+            userBg: paintedBg(userBubble),
+            composerColor: composerStyle.color,
+            composerBg: paintedBg(composerInput),
+            placeholderColor: placeholderStyle.color,
+            placeholderBg: paintedBg(composerInput),
+          };
+        },
+        { tokenNames: [...REQUIRED_SEMANTIC_TOKENS] },
+      );
+
+      const row: SemanticRow = {
+        bundle,
+        missingTokens: REQUIRED_SEMANTIC_TOKENS.filter((name) => !probe.tokenValues[name]),
+        userColor: probe.userColor,
+        userBg: probe.userBg,
+        userRatio: contrastRatio(probe.userColor, probe.userBg),
+        composerColor: probe.composerColor,
+        composerBg: probe.composerBg,
+        composerRatio: contrastRatio(probe.composerColor, probe.composerBg),
+        placeholderColor: probe.placeholderColor,
+        placeholderBg: probe.placeholderBg,
+        placeholderRatio: contrastRatio(probe.placeholderColor, probe.placeholderBg),
+      };
+      rows.push(row);
+
+      if (
+        row.missingTokens.length > 0 ||
+        row.userRatio < 4.5 ||
+        row.composerRatio < 4.5 ||
+        row.placeholderRatio < 4.5
+      ) {
+        failures.push(row);
+      }
+    }
+
+    await mainWindow.evaluate(() => {
+      document.getElementById('__lvis_semantic_contrast_probe__')?.remove();
+    });
+
+    if (failures.length > 0) {
+      const lines = failures.map(
+        (failure) =>
+          `  bundle=${failure.bundle}: ` +
+          `missing=[${failure.missingTokens.join(', ')}] ` +
+          `user=${failure.userRatio.toFixed(2)} (color=${failure.userColor} bg=${failure.userBg}) ` +
+          `composer=${failure.composerRatio.toFixed(2)} (color=${failure.composerColor} bg=${failure.composerBg}) ` +
+          `placeholder=${failure.placeholderRatio.toFixed(2)} ` +
+          `(color=${failure.placeholderColor} bg=${failure.placeholderBg})`,
+      );
+      throw new Error(
+        `Semantic chat contrast regression — ${failures.length}/${rows.length} bundles failed:\n${lines.join('\n')}`,
+      );
+    }
+
+    expect(failures, 'semantic chat text must clear WCAG AA and all required tokens must resolve').toHaveLength(0);
     expect(rows).toHaveLength(BUNDLE_IDS.length);
   });
 });

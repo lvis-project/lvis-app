@@ -161,14 +161,18 @@ export function MainToolbar({
               type="button"
               variant="ghost"
               size="icon-xs"
-              className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="h-7 w-7 rounded-lg text-muted-foreground transition-[color,background-color,transform] duration-[var(--motion-fast)] ease-[var(--motion-ease-standard)] hover:bg-accent hover:text-foreground active:scale-[0.96] motion-reduce:transition-none motion-reduce:transform-none"
               title={sidePanelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open")}
               aria-label={sidePanelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open")}
               aria-pressed={sidePanelOpen}
+              aria-expanded={sidePanelOpen}
+              aria-controls="chat-side-panel"
               onClick={onToggleSidePanel}
               data-testid="chat-side-panel-toggle"
             >
-              {sidePanelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+              <span key={sidePanelOpen ? "close" : "open"} className="lvis-anim-fade-in motion-reduce:animate-none">
+                {sidePanelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+              </span>
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">{sidePanelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open")}</TooltipContent>

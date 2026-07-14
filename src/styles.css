@@ -51,7 +51,29 @@
   --color-action-compact: hsl(var(--action-compact));
   --color-message-user: hsl(var(--message-user-bg));
   --color-message-user-foreground: hsl(var(--message-user-fg));
+  --color-message-user-border: hsl(var(--message-user-border));
+  --color-message-user-muted: hsl(var(--message-user-muted));
+  --color-message-user-action: hsl(var(--message-user-action));
+  --color-message-user-emphasis: hsl(var(--message-user-emphasis));
   --color-input-bar: hsl(var(--input-bar-bg));
+  --color-input-bar-foreground: hsl(var(--input-bar-fg));
+  --color-input-bar-placeholder: var(--input-bar-placeholder);
+  --color-input-bar-border: hsl(var(--input-bar-border));
+  --color-input-bar-focus: hsl(var(--input-bar-focus));
+  --color-input-bar-subtle: hsl(var(--input-bar-subtle));
+  --color-input-bar-action: hsl(var(--input-bar-action));
+  --text-micro: var(--type-size-12);
+  --text-micro--line-height: var(--type-leading-16);
+  --text-micro--letter-spacing: var(--type-tracking-wide);
+  --text-caption: var(--type-size-12);
+  --text-caption--line-height: var(--type-leading-18);
+  --text-caption--letter-spacing: var(--type-tracking-normal);
+  --text-body-sm: var(--type-size-14);
+  --text-body-sm--line-height: var(--type-leading-20);
+  --text-body-sm--letter-spacing: var(--type-tracking-normal);
+  --text-body: var(--type-size-16);
+  --text-body--line-height: var(--type-leading-24);
+  --text-body--letter-spacing: var(--type-tracking-normal);
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
@@ -518,11 +540,33 @@
     /* Motion — product-wide interaction timing. Reference systems converge on
      * short, purposeful micro-motion; these variables keep durations/easing
      * consistent without creating another component API. */
+    --type-size-12: 0.75rem;
+    --type-size-14: 0.875rem;
+    --type-size-16: 1rem;
+    --type-leading-16: 1rem;
+    --type-leading-18: 1.125rem;
+    --type-leading-20: 1.25rem;
+    --type-leading-24: 1.5rem;
+    --type-tracking-normal: 0em;
+    --type-tracking-wide: 0.015em;
+    --message-user-border: var(--message-user-fg);
+    --message-user-muted: var(--message-user-fg);
+    --message-user-action: var(--message-user-fg);
+    --message-user-emphasis: var(--message-user-fg);
+    --input-bar-fg: var(--foreground);
+    --input-bar-placeholder: hsl(var(--input-bar-fg) / 82%);
+    --input-bar-border: var(--ui-line);
+    --input-bar-focus: var(--ring);
+    --input-bar-subtle: var(--muted);
+    --input-bar-action: var(--foreground);
     --motion-fast: 120ms;
-    --motion-base: 180ms;
-    --motion-slow: 220ms;
+    --motion-normal: 180ms;
+    --motion-base: var(--motion-normal);
+    --motion-slow: 240ms;
+    --motion-layout: 300ms;
     --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
     --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   /* ── Tier B-derived: composite tokens ─────────────────────────────────
@@ -1751,6 +1795,14 @@
   @media (prefers-reduced-motion: reduce) {
     :root {
       transition: none;
+      --motion-fast: 1ms;
+      --motion-normal: 1ms;
+      --motion-base: 1ms;
+      --motion-slow: 1ms;
+      --motion-layout: 1ms;
+      --motion-ease-out: linear;
+      --motion-ease-standard: linear;
+      --motion-ease-in-out: linear;
     }
   }
 
