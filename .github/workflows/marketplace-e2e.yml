@@ -191,7 +191,7 @@ jobs:
           echo "M4_E2E=$M4_E2E"
           echo "MARKETPLACE_URL=$MARKETPLACE_URL"
           echo "=== vitest collection (dry-run via --reporter=verbose, single file) ==="
-          M4_E2E=1 bunx vitest run --reporter=verbose test/e2e/marketplace-e2e.test.ts
+          M4_E2E=1 bun run test:vitest -- run --reporter=verbose test/e2e/marketplace-e2e.test.ts
 
       - name: Dump marketplace server log (always)
         if: always()

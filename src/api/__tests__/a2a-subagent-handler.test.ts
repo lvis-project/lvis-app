@@ -15,9 +15,11 @@ import type {
   SubAgentSpawnResult,
 } from "../../engine/subagent-runner.js";
 import { GUIDE_MAX_CHARS } from "../../engine/turn/guidance-limits.js";
+import { maskSensitiveData } from "../../shared/dlp.js";
 import { createInMemoryFeatureNamespace } from "../../__tests__/test-helpers.js";
 import {
   A2ASubAgentHandler,
+  createA2AContextId,
   type A2AMutationAuthorizer,
   type A2ASubAgentLifecycleRunner,
 } from "../a2a-subagent-handler.js";
@@ -25,6 +27,8 @@ import { A2ATaskStore } from "../a2a-task-store.js";
 
 const HANDLER_ID = "profile-a";
 const TASK_ID = "sub-wire-task-1";
+const UUID_V4_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function clock() {
   let tick = 0;
@@ -222,6 +226,31 @@ async function seedInputRequiredTask(
 }
 
 describe("A2ASubAgentHandler", () => {
+  it("generates unique DLP-safe UUID-compatible default context and status ids", async () => {
+    const ids = Array.from({ length: 64 }, () => createA2AContextId());
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of ids) {
+      expect(id).toMatch(UUID_V4_PATTERN);
+      expect(maskSensitiveData(id).detections).toEqual([]);
+    }
+
+    const { store, runner, audit, authorizeMutation } = makeHarness();
+    const handler = new A2ASubAgentHandler({
+      id: HANDLER_ID,
+      card: card(),
+      binding: binding(HANDLER_ID),
+      runner: runner as unknown as A2ASubAgentLifecycleRunner,
+      store,
+      authorizeMutation,
+      audit,
+    });
+    const task = taskFrom(await handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
+      message: userMessage("default-generated-status"),
+    }));
+    expect(task.status.message?.messageId).toMatch(UUID_V4_PATTERN);
+    expect(maskSensitiveData(task.status.message?.messageId ?? "").detections).toEqual([]);
+  });
+
   it("fails closed before the initial runner/store mutation when consent is denied", async () => {
     const authorizeMutation = vi.fn(async () => false);
     const { handler, runner, store, audit } = makeHarness(HANDLER_ID, {
