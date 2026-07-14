@@ -587,16 +587,18 @@ async function assertInstalledSurface(machineInstall) {
 async function assertUninstalledSurface(machineInstall) {
   const { installDir, entry, registryPath } = machineInstall;
   await waitForPathRemoved(installDir, 30_000);
-  const exactEntry = await registryQuery(
-    "HKLM",
-    registryPath,
-    entry.view,
-    "default",
-  );
-  if (exactEntry.keyExists) {
-    throw new Error(
-      `uninstall left exact HKLM ${entry.view}-bit key: ${entry.key}`,
+  for (const view of REGISTRY_VIEWS) {
+    const exactEntry = await registryQuery(
+      "HKLM",
+      registryPath,
+      view,
+      "default",
     );
+    if (exactEntry.keyExists) {
+      throw new Error(
+        `uninstall left exact HKLM ${view}-bit key (discovered in ${entry.view}-bit view): ${entry.key}`,
+      );
+    }
   }
   const machineEntries = await productUninstallEntries("HKLM");
   const userEntries = await productUninstallEntries("HKCU");

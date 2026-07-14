@@ -110,16 +110,24 @@ Do not treat a missing/non-readable ASRT precondition as a successful skip.
 Move that candidate to a documented manual release gate instead. Hosted CI
 cannot prove interactive UAC and cross-account desktop boundaries.
 
-Manual Windows evidence gates:
+The following manual Windows gates are release-blocking. Any failure blocks the
+release and requires a SID/profile handoff fix before the full gate is rerun.
 
-- [ ] On a clean VM, install the signed candidate from a standard-user session
-      using a distinct administrator credential. Attach the candidate SHA, Windows
-      build, recording, and installer/ASRT logs proving exactly one installer UAC
-      consent and zero nested `srt-win` UAC prompts.
-- [ ] Record the initiating user's `whoami /user`, then prove the launched LVIS
-      process and all app/userData paths belong to that original user after the
-      alternate administrator approves elevation. Attach the resolved paths and
-      evidence that the administrator profile contains no LVIS user data.
+- [ ] On a clean VM, record the signed candidate SHA, Windows build, evidence
+      URL, and `whoami /user` SID for both the initiating standard user and the
+      distinct administrator. Attach a recording and installer/ASRT logs proving
+      exactly one installer UAC consent and zero nested `srt-win` UAC prompts.
+- [ ] Genuine KEEP: seed fixed-content sentinels in the initiating user's
+      resolved `%USERPROFILE%\.lvis`, Roaming `LVIS`/`lvis-app`, and Local
+      `LVIS`/`lvis-app` paths; approve with the distinct administrator and run
+      genuine `/KEEP_APP_DATA` uninstall. Record the resolved paths and prove
+      every original-user sentinel/profile is unchanged while the administrator
+      profile's LVIS paths remain absent or byte-for-byte unchanged.
+- [ ] Genuine DELETE: reinstall and seed the same original-user sentinels, then
+      approve with the distinct administrator and run genuine DELETE uninstall.
+      Prove all original-user LVIS sentinel/profile paths are removed while the
+      administrator profile's LVIS paths remain absent or byte-for-byte
+      unchanged.
 
 Do not add an online web bootstrapper to the NSIS path unless the product
 explicitly changes distribution strategy. Runtime assets such as the compressed
