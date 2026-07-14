@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,9 +12,11 @@ const lockControl = vi.hoisted(() => {
   const control = {
     calls: 0,
     events: [] as string[],
+    targets: [] as string[],
     reset(): void {
       control.calls = 0;
       control.events.length = 0;
+      control.targets.length = 0;
       firstLockGate = new Promise<void>((resolve) => {
         releaseFirstLock = resolve;
       });
@@ -41,8 +43,9 @@ const lockControl = vi.hoisted(() => {
 });
 
 vi.mock("../../lib/with-file-lock.js", () => ({
-  withFileLock: vi.fn(async <T>(_targetPath: string, callback: () => Promise<T>): Promise<T> => {
+  withFileLock: vi.fn(async <T>(targetPath: string, callback: () => Promise<T>): Promise<T> => {
     const callNumber = ++lockControl.calls;
+    lockControl.targets.push(targetPath);
     if (callNumber === 1) {
       lockControl.events.push("stale-save-lock-requested");
       lockControl.signalFirstLockBlocked();
@@ -80,6 +83,34 @@ afterEach(() => {
 });
 
 describe("MemoryManager workspace project detach ABA ordering", () => {
+  it("serializes deletion against a detach that already snapshotted metadata", async () => {
+    const sessionsDir = join(dir, "sessions");
+    const metadataPath = join(sessionsDir, SESSION_ID + ".meta.json");
+    const jsonlPath = join(sessionsDir, SESSION_ID + ".jsonl");
+    writeFileSync(jsonlPath, JSON.stringify({ role: "user", content: "delete race" }) + "\n");
+    writeFileSync(metadataPath, JSON.stringify({
+      sessionKind: "main",
+      projectRoot: ROOT,
+      projectName: "Alpha",
+    }));
+
+    const detaching = memory.detachSessionsFromProject(ROOT);
+    await lockControl.firstLockBlocked;
+    const deleting = memory.deleteSession(SESSION_ID);
+    await deleting;
+
+    expect(lockControl.targets).toHaveLength(2);
+    expect(lockControl.targets[0]).toBe(lockControl.targets[1]);
+    expect(lockControl.targets[0]).toContain(".metadata-locks");
+    expect(existsSync(metadataPath)).toBe(false);
+    expect(existsSync(jsonlPath)).toBe(false);
+
+    lockControl.releaseFirstLock();
+    await expect(detaching).resolves.toBe(0);
+    expect(existsSync(metadataPath)).toBe(false);
+    expect(existsSync(jsonlPath)).toBe(false);
+  });
+
   it("cancels a wire save whose captured generation predates detach and allow", async () => {
     const metadataPath = join(dir, "sessions", SESSION_ID + ".meta.json");
     const wireMetadata = {

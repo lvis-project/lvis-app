@@ -1784,7 +1784,7 @@ describe("SubAgentRunner A2A bus facade", () => {
 });
 
 describe("SubAgentRunner workspace lifecycle", () => {
-  it("revokes every active child and isolates a child failure", () => {
+  it("revokes every active child and surfaces an aggregate child failure", () => {
     const first = vi.fn(() => ({
       sessionDirectoriesRemoved: 2,
       turnDirectoriesRemoved: 1,
@@ -1817,12 +1817,16 @@ describe("SubAgentRunner workspace lifecycle", () => {
       globalScopeWasAuthorized: true,
       preserveRoots: [join(tmpdir(), "removed-workspace", "child")],
     };
-    const result = runner.revokeWorkspaceRoot(join(tmpdir(), "removed-workspace"), options);
+    let thrown: unknown;
+    try {
+      runner.revokeWorkspaceRoot(join(tmpdir(), "removed-workspace"), options);
+    } catch (error: unknown) {
+      thrown = error;
+    }
 
-    expect(result).toEqual({
-      activeChildrenVisited: 3,
-      liveScopesRevoked: 7,
-    });
+    expect(thrown).toBeInstanceOf(AggregateError);
+    expect(thrown).toMatchObject({ code: "SUBAGENT_WORKSPACE_ROOT_REVOKE_FAILED" });
+    expect((thrown as AggregateError).errors).toHaveLength(1);
     expect(first).toHaveBeenCalledTimes(1);
     expect(failing).toHaveBeenCalledTimes(1);
     expect(last).toHaveBeenCalledTimes(1);

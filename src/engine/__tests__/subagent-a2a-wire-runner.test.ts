@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
-import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import { MemoryManager, type SessionMetadata } from "../../memory/memory-manager.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { createDynamicTool } from "../../tools/base.js";
@@ -17,6 +16,13 @@ import {
   type SubAgentSpawnResult,
 } from "../subagent-runner.js";
 import type { TurnResult } from "../turn/types.js";
+
+vi.mock("../../observability/conversation-trace.js", () => ({
+  createTracer: () => ({
+    enabled: false,
+    step: () => undefined,
+  }),
+}));
 
 const COMPLETED_TURN: TurnResult = {
   text: "done",
@@ -80,16 +86,13 @@ function makeResumeId(originSessionId: string): string {
 
 describe("SubAgentRunner A2A wire security contract", () => {
   let tmpHome: string;
-  let previousLvisHome: string | undefined;
   let store: MemoryManager;
   let toolRegistry: ToolRegistry;
   let loadSessionSpy: { mockRestore(): void };
 
   beforeEach(() => {
-    previousLvisHome = process.env.LVIS_HOME;
     tmpHome = mkdtempSync(join(tmpdir(), "lvis-a2a-wire-runner-"));
-    process.env.LVIS_HOME = tmpHome;
-    store = new MemoryManager({ lvisDir: openFeatureNamespace("subagent").dir });
+    store = new MemoryManager({ lvisDir: join(tmpHome, "subagent") });
     store.load();
     toolRegistry = new ToolRegistry();
     registerNoop(toolRegistry);
@@ -105,8 +108,6 @@ describe("SubAgentRunner A2A wire security contract", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    if (previousLvisHome === undefined) delete process.env.LVIS_HOME;
-    else process.env.LVIS_HOME = previousLvisHome;
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
@@ -195,7 +196,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
   ): void {
     writeFileSync(
       join(
-        openFeatureNamespace("subagent").dir,
+        join(tmpHome, "subagent"),
         "sessions",
         resumeId + ".meta.json",
       ),

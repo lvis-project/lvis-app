@@ -839,15 +839,16 @@ export class PermissionManager {
         return true;
       });
     });
-    if (pruned.length === 0) return [];
-
-    // Reconcile in-memory caches with the persisted shrink (a boot-hydrated rule
-    // or a same-session Map entry for the pruned pattern must also drop).
-    const prunedPatterns = new Set(pruned.map((p) => p.pattern));
+    // Reconcile by scope on every retry, not only by patterns removed in this
+    // disk pass. A prior attempt may have committed the file shrink and then
+    // thrown while broadcasting/revoking bearers; the retry must still remove
+    // stale live cache entries and re-run the revoke signal.
     this.rules = this.rules.filter(
-      (r) => !(r.action === "allow" && !r.source && prunedPatterns.has(r.pattern)),
+      (r) => !(r.action === "allow" && !r.source && isUnderRoot(r.pattern)),
     );
-    for (const pattern of prunedPatterns) this.alwaysAllowed.delete(pattern);
+    for (const pattern of [...this.alwaysAllowed.keys()]) {
+      if (isUnderRoot(pattern)) this.alwaysAllowed.delete(pattern);
+    }
 
     this.broadcastConfigChanged?.();
     // A revoke narrows policy — outstanding bearers must re-resolve under it.
