@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startLocalApiHttpServer, type LocalApiHttpServer } from "../../api/http-server.js";
 import { createStreamBroadcaster } from "../../api/stream-broadcaster.js";
-import type { A2ASubAgentLifecycleRunner } from "../../api/a2a-subagent-handler.js";
+import {
+  A2ASubAgentHandler,
+  type A2ASubAgentLifecycleRunner,
+} from "../../api/a2a-subagent-handler.js";
 import { createInMemoryFeatureNamespace } from "../../__tests__/test-helpers.js";
 import { makeStubLocalApi } from "../../api/__tests__/a2a-test-helpers.js";
 import { A2AJsonRpcMethod } from "../../shared/a2a-wire.js";
@@ -210,5 +213,42 @@ describe("A2A production loopback runtime", () => {
       error: { code: -32010, message: "Operation rejected" },
     });
     expect(runner.spawnFromA2AWire).not.toHaveBeenCalled();
+  });
+
+  it("starts and disposes one expiry lifecycle per immutable handler", async () => {
+    const start = vi.spyOn(
+      A2ASubAgentHandler.prototype,
+      "startInputRequiredExpiry",
+    ).mockResolvedValue(undefined);
+    let releaseDispose!: () => void;
+    const disposeGate = new Promise<void>((resolve) => {
+      releaseDispose = resolve;
+    });
+    const dispose = vi.spyOn(
+      A2ASubAgentHandler.prototype,
+      "dispose",
+    ).mockImplementation(async () => await disposeGate);
+    try {
+      const runtime = await createA2ALoopbackRuntime(makeOptions([
+        profile("alpha", "C:/profiles/alpha.md"),
+        profile("zeta", "C:/profiles/zeta.md"),
+      ]));
+      expect(start).toHaveBeenCalledTimes(2);
+
+      let secondSettled = false;
+      const first = runtime!.dispose();
+      const second = runtime!.dispose().then(() => {
+        secondSettled = true;
+      });
+      await Promise.resolve();
+      expect(dispose).toHaveBeenCalledTimes(2);
+      expect(secondSettled).toBe(false);
+      releaseDispose();
+      await Promise.all([first, second]);
+      expect(secondSettled).toBe(true);
+    } finally {
+      start.mockRestore();
+      dispose.mockRestore();
+    }
   });
 });
