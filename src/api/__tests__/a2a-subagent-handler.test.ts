@@ -15,9 +15,11 @@ import type {
   SubAgentSpawnResult,
 } from "../../engine/subagent-runner.js";
 import { GUIDE_MAX_CHARS } from "../../engine/turn/guidance-limits.js";
+import { maskSensitiveData } from "../../shared/dlp.js";
 import { createInMemoryFeatureNamespace } from "../../__tests__/test-helpers.js";
 import {
   A2ASubAgentHandler,
+  createA2AContextId,
   type A2AMutationAuthorizer,
   type A2ASubAgentLifecycleRunner,
 } from "../a2a-subagent-handler.js";
@@ -222,6 +224,15 @@ async function seedInputRequiredTask(
 }
 
 describe("A2ASubAgentHandler", () => {
+  it("generates unique DLP-safe opaque default context ids", () => {
+    const ids = Array.from({ length: 64 }, () => createA2AContextId());
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of ids) {
+      expect(id).toMatch(/^context-[abcdefghjkmnpqrs]{32}$/);
+      expect(maskSensitiveData(id).detections).toEqual([]);
+    }
+  });
+
   it("fails closed before the initial runner/store mutation when consent is denied", async () => {
     const authorizeMutation = vi.fn(async () => false);
     const { handler, runner, store, audit } = makeHarness(HANDLER_ID, {
