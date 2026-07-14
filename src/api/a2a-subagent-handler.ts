@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
   A2ARole,
   A2ATaskState,
@@ -12,6 +13,7 @@ import {
   type A2ATask,
 } from "../shared/a2a.js";
 import {
+  A2AHostJsonRpcErrorDefinition,
   A2AJsonRpcErrorDefinition,
   A2AJsonRpcMethod,
   StandardJsonRpcErrorDefinition,
@@ -39,6 +41,7 @@ import {
   A2ATaskStore,
   isA2ARfc3339Timestamp,
   type A2ATaskCreateResult,
+  type A2ATaskContinuationResult,
   type A2ATaskRecord,
 } from "./a2a-task-store.js";
 
@@ -266,6 +269,23 @@ function projectTask(
   return projected;
 }
 
+function isExactTaskMessageReplay(task: A2ATask, message: A2AMessage): boolean {
+  const assigned = {
+    ...structuredClone(message),
+    contextId: task.contextId,
+    taskId: task.id,
+  };
+  const candidates = message.taskId
+    ? [
+        ...(task.history ?? []),
+        ...(task.status.message ? [task.status.message] : []),
+      ]
+    : (task.history ?? []).slice(0, 1);
+  return candidates.some((candidate) =>
+    candidate.messageId === assigned.messageId
+    && isDeepStrictEqual(candidate, assigned));
+}
+
 interface Cursor {
   version: 1;
   handlerId: string;
@@ -332,6 +352,7 @@ export interface A2ATaskLifecycleAuditEvent {
   outcome: "masked" | "dropped";
   reason:
     | "dlp-masked"
+    | "consent-denied"
     | "cross-origin"
     | "invalid-message"
     | "unknown-task"
@@ -344,7 +365,22 @@ export interface A2ATaskLifecycleAuditEvent {
   taskId?: string;
   messageId?: string;
   detectionCount?: number;
+  operation?: A2AMutationOperation;
 }
+
+export type A2AMutationOperation = "send-message" | "cancel-task";
+
+/** Host-owned, redacted description of a requested wire mutation. */
+export interface A2AMutationAuthorizationDescriptor {
+  operation: A2AMutationOperation;
+  handlerId: string;
+  taskId?: string;
+  messageId?: string;
+}
+
+export type A2AMutationAuthorizer = (
+  descriptor: Readonly<A2AMutationAuthorizationDescriptor>,
+) => boolean | Promise<boolean>;
 
 export interface CreateA2ASubAgentHandlerOptions {
   id: string;
@@ -352,15 +388,46 @@ export interface CreateA2ASubAgentHandlerOptions {
   binding: A2AWireHostBinding;
   runner: A2ASubAgentLifecycleRunner;
   store: A2ATaskStore;
+  authorizeMutation: A2AMutationAuthorizer;
   makeId?: () => string;
   audit?: (event: A2ATaskLifecycleAuditEvent) => void;
 }
+
+interface PendingTaskMutation {
+  fingerprint: "cancel-task" | A2AMessage;
+  promise: Promise<unknown>;
+}
+
+interface PendingInitialMutation {
+  fingerprint: A2AMessage;
+  promise: Promise<A2AInitialAdmissionStart>;
+}
+
+interface A2AInitialStart {
+  execution: Promise<A2ATaskRecord>;
+  linked: Promise<void>;
+  getLinkedTaskId: () => string | undefined;
+  observeDetachedFailure: () => void;
+}
+
+type A2AInitialAdmissionStart =
+  | { duplicate: true; record: A2ATaskRecord }
+  | { duplicate: false; started: A2AInitialStart };
+
+type A2AContinuationStart =
+  | { duplicate: true; record: A2ATaskRecord }
+  | {
+      duplicate: false;
+      record: A2ATaskRecord;
+      execution: Promise<A2ATaskRecord>;
+    };
 
 export class A2ASubAgentHandler implements A2ARequestHandler {
   readonly id: string;
   readonly card: A2AAgentCardTemplate;
   private readonly makeId: () => string;
-  private readonly initialInFlight = new Map<string, Promise<A2ATask>>();
+  private readonly initialInFlight = new Map<string, PendingInitialMutation>();
+  private readonly pendingTaskMutations = new Map<string, PendingTaskMutation>();
   private readonly taskQueues = new Map<string, Promise<void>>();
 
   constructor(private readonly options: CreateA2ASubAgentHandlerOptions) {
@@ -384,6 +451,34 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
     }
   }
 
+  private reserveTaskMutation<T>(
+    taskId: string,
+    fingerprint: PendingTaskMutation["fingerprint"],
+    descriptor: Omit<A2AMutationAuthorizationDescriptor, "handlerId">,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const existing = this.pendingTaskMutations.get(taskId);
+    if (existing) {
+      if (isDeepStrictEqual(existing.fingerprint, fingerprint)) {
+        return existing.promise as Promise<T>;
+      }
+      this.rejectConcurrentMutation(descriptor);
+    }
+
+    // Defer the operation by one microtask so the reservation is visible before
+    // preflight or the per-task FIFO can yield to another request.
+    const promise = Promise.resolve().then(operation);
+    const reservation: PendingTaskMutation = { fingerprint, promise };
+    this.pendingTaskMutations.set(taskId, reservation);
+    const clear = (): void => {
+      if (this.pendingTaskMutations.get(taskId) === reservation) {
+        this.pendingTaskMutations.delete(taskId);
+      }
+    };
+    void promise.then(clear, clear);
+    return promise;
+  }
+
   private audit(
     reason: A2ATaskLifecycleAuditEvent["reason"],
     outcome: A2ATaskLifecycleAuditEvent["outcome"],
@@ -391,15 +486,88 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
       taskId?: string;
       messageId?: string;
       detectionCount?: number;
+      operation?: A2AMutationOperation;
     } = {},
   ): void {
-    this.options.audit?.({
-      type: "a2a-task-lifecycle",
-      outcome,
-      reason,
-      handlerId: this.id,
-      ...identifiers,
+    try {
+      this.options.audit?.({
+        type: "a2a-task-lifecycle",
+        outcome,
+        reason,
+        handlerId: this.id,
+        ...identifiers,
+      });
+    } catch {
+      // Audit sink failures must not change the fail-closed wire decision.
+    }
+  }
+
+  private rejectConcurrentMutation(
+    descriptor: Omit<A2AMutationAuthorizationDescriptor, "handlerId">,
+  ): never {
+    this.audit("consent-denied", "dropped", {
+      operation: descriptor.operation,
+      ...(descriptor.taskId ? { taskId: descriptor.taskId } : {}),
+      ...(descriptor.messageId ? { messageId: descriptor.messageId } : {}),
     });
+    throw new A2AHandlerError(A2AHostJsonRpcErrorDefinition.OPERATION_REJECTED);
+  }
+
+  private async authorizeMutation(
+    descriptor: Omit<A2AMutationAuthorizationDescriptor, "handlerId">,
+  ): Promise<void> {
+    const request = Object.freeze({
+      operation: descriptor.operation,
+      handlerId: this.id,
+      ...(descriptor.taskId ? { taskId: descriptor.taskId } : {}),
+      ...(descriptor.messageId ? { messageId: descriptor.messageId } : {}),
+    });
+    const authorize = this.options.authorizeMutation as A2AMutationAuthorizer | undefined;
+    let allowed = false;
+    try {
+      allowed = typeof authorize === "function" && (await authorize(request)) === true;
+    } catch {
+      allowed = false;
+    }
+    if (allowed) return;
+    this.audit("consent-denied", "dropped", {
+      operation: request.operation,
+      ...(request.taskId ? { taskId: request.taskId } : {}),
+      ...(request.messageId ? { messageId: request.messageId } : {}),
+    });
+    throw new A2AHandlerError(A2AHostJsonRpcErrorDefinition.OPERATION_REJECTED);
+  }
+
+  private auditUnavailableTask(
+    reason: "cross-origin" | "unknown-task",
+    taskId: string,
+    messageId?: string,
+  ): void {
+    this.audit(reason, "dropped", {
+      taskId,
+      ...(messageId ? { messageId } : {}),
+    });
+  }
+
+  private async rejectContinuation(
+    failure: Extract<A2ATaskContinuationResult, { ok: false }>,
+    taskId: string,
+    messageId: string,
+  ): Promise<never> {
+    if (failure.reason === "task-not-found") {
+      this.auditUnavailableTask(failure.availability, taskId, messageId);
+      throw new A2AHandlerError(A2AJsonRpcErrorDefinition.TASK_NOT_FOUND);
+    }
+    this.audit(
+      failure.reason === "history-capacity-exceeded"
+        ? "task-budget-exceeded"
+        : failure.reason === "duplicate-message"
+          ? "invalid-message"
+          : "task-not-resumable",
+      "dropped",
+      { taskId, messageId },
+    );
+    throw new A2AHandlerError(StandardJsonRpcErrorDefinition.INVALID_PARAMS);
   }
 
   private auditCreateFailure(
@@ -557,7 +725,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
     return failed.record;
   }
 
-  private async createInitialTask(parsed: ParsedSend): Promise<A2ATask> {
+  private startInitialTask(parsed: ParsedSend, admissionId: string): A2AInitialStart {
     const contextId = parsed.message.contextId ?? this.newId();
     let linkedTaskId: string | undefined;
     let resolveLinked!: () => void;
@@ -580,6 +748,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
                 childSessionId,
                 contextId,
                 message: parsed.message,
+                admissionId,
               });
               if (!created.ok) {
                 this.auditCreateFailure(
@@ -606,6 +775,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
             childSessionId: linkedTaskId,
             contextId,
             message: parsed.message,
+            admissionId,
           });
           if (!created.ok) {
             this.auditCreateFailure(
@@ -633,21 +803,45 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
           throw error;
         }
       }
-    })();
+    })().finally(async () => {
+      await this.options.store.releaseInitialTaskAdmission(admissionId);
+    });
 
+    let detachedFailureObserved = false;
+    return {
+      execution,
+      linked,
+      getLinkedTaskId: () => linkedTaskId,
+      observeDetachedFailure: () => {
+        if (detachedFailureObserved) return;
+        detachedFailureObserved = true;
+        void execution.catch(() => {
+          this.audit("storage-failed", "dropped", { taskId: linkedTaskId });
+        });
+      },
+    };
+  }
+
+  private async projectInitialTask(
+    admission: A2AInitialAdmissionStart,
+    parsed: ParsedSend,
+  ): Promise<A2ATask> {
+    if (admission.duplicate) {
+      return projectTask((await this.reconcile(admission.record)).task, parsed.historyLength);
+    }
+    const started = admission.started;
     if (!parsed.returnImmediately) {
-      return projectTask((await execution).task, parsed.historyLength);
+      return projectTask((await started.execution).task, parsed.historyLength);
     }
     const winner = await Promise.race([
-      linked.then(() => "linked" as const),
-      execution.then(() => "finished" as const),
+      started.linked.then(() => "linked" as const),
+      started.execution.then(() => "finished" as const),
     ]);
     if (winner === "finished") {
-      return projectTask((await execution).task, parsed.historyLength);
+      return projectTask((await started.execution).task, parsed.historyLength);
     }
-    void execution.catch(() => {
-      this.audit("storage-failed", "dropped", { taskId: linkedTaskId });
-    });
+    started.observeDetachedFailure();
+    const linkedTaskId = started.getLinkedTaskId();
     const record = linkedTaskId
       ? await this.options.store.get(this.id, linkedTaskId)
       : null;
@@ -674,6 +868,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
           parsed.message.contextId
           && parsed.message.contextId !== duplicate.task.contextId
         )
+        || !isExactTaskMessageReplay(duplicate.task, parsed.message)
       ) {
         this.audit("invalid-message", "dropped", {
           messageId: parsed.message.messageId,
@@ -685,82 +880,155 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
 
     if (!parsed.message.taskId) {
       const key = this.id + "\u0000" + parsed.message.messageId;
+      const fingerprint = structuredClone(parsed.message);
       const existing = this.initialInFlight.get(key);
-      if (existing) return await existing;
-      const pending = this.createInitialTask(parsed);
-      this.initialInFlight.set(key, pending);
-      try {
-        return await pending;
-      } finally {
-        this.initialInFlight.delete(key);
+      if (existing) {
+        if (!isDeepStrictEqual(existing.fingerprint, fingerprint)) {
+          this.rejectConcurrentMutation({
+            operation: "send-message",
+            messageId: parsed.message.messageId,
+          });
+        }
+        return await this.projectInitialTask(await existing.promise, parsed);
       }
-    }
-
-    const begun = await this.withTaskLock(
-      parsed.message.taskId,
-      () => this.options.store.beginContinuation({
-        handlerId: this.id,
-        taskId: parsed.message.taskId!,
-        contextId: parsed.message.contextId,
-        message: parsed.message,
-      }),
-    );
-    if (!begun.ok) {
-      const reason = begun.reason === "task-not-found"
-        ? "unknown-task"
-        : begun.reason === "history-capacity-exceeded"
-          ? "task-budget-exceeded"
-          : "task-not-resumable";
-      this.audit(reason, "dropped", {
-        taskId: parsed.message.taskId,
-        messageId: parsed.message.messageId,
-      });
-      throw new A2AHandlerError(
-        begun.reason === "task-not-found"
-          ? A2AJsonRpcErrorDefinition.TASK_NOT_FOUND
-          : StandardJsonRpcErrorDefinition.INVALID_PARAMS,
-      );
-    }
-    if (begun.duplicate) return projectTask(begun.record.task, parsed.historyLength);
-
-    const execution = (async () => {
-      try {
-        const result = await this.options.runner.resumeFromA2AWire(
-          { resumeId: begun.record.childSessionId, messageText: parsed.prompt },
-          { handlerId: this.id },
-        );
-        return await this.withTaskLock(
-          begun.record.childSessionId,
-          () => this.finalize(begun.record.childSessionId, result),
-        );
-      } catch (error) {
+      const pending = (async () => {
+        const descriptor = {
+          operation: "send-message" as const,
+          messageId: parsed.message.messageId,
+        };
+        const admission = await this.options.store.reserveInitialTaskAdmission({
+          handlerId: this.id,
+          message: parsed.message,
+        });
+        if (!admission.ok) {
+          if (admission.reason === "admission-busy") {
+            this.rejectConcurrentMutation(descriptor);
+          }
+          if (admission.reason === "invalid-message") invalidParams();
+          if (admission.reason === "duplicate-message") {
+            this.audit("invalid-message", "dropped", {
+              messageId: parsed.message.messageId,
+            });
+            invalidParams();
+          }
+          this.audit("task-budget-exceeded", "dropped", {
+            messageId: parsed.message.messageId,
+          });
+          throw new A2AHandlerError(A2AHostJsonRpcErrorDefinition.OPERATION_REJECTED);
+        }
+        if (!admission.reserved) {
+          return { duplicate: true as const, record: admission.record };
+        }
         try {
-          return await this.withTaskLock(
-            begun.record.childSessionId,
-            () => this.markRunnerFailure(begun.record.childSessionId),
-          );
-        } catch {
+          await this.authorizeMutation(descriptor);
+          return {
+            duplicate: false as const,
+            started: this.startInitialTask(parsed, admission.admissionId),
+          };
+        } catch (error) {
+          await this.options.store.releaseInitialTaskAdmission(admission.admissionId);
           throw error;
         }
-      }
-    })();
-    if (parsed.returnImmediately) {
-      void execution.catch(() => {
-        this.audit("runner-failed", "dropped", { taskId: begun.record.task.id });
-      });
-      return projectTask(begun.record.task, parsed.historyLength);
+      })();
+      const reservation: PendingInitialMutation = { fingerprint, promise: pending };
+      this.initialInFlight.set(key, reservation);
+      const clear = (): void => {
+        if (this.initialInFlight.get(key) === reservation) this.initialInFlight.delete(key);
+      };
+      void pending.then(
+        (admitted) => {
+          if (admitted.duplicate) {
+            clear();
+            return;
+          }
+          const started = admitted.started;
+          void Promise.race([
+            started.linked,
+            started.execution.then(() => undefined, () => undefined),
+          ]).then(clear, clear);
+        },
+        clear,
+      );
+      return await this.projectInitialTask(await pending, parsed);
     }
-    return projectTask((await execution).task, parsed.historyLength);
+
+    const taskId = parsed.message.taskId;
+    const descriptor = {
+      operation: "send-message" as const,
+      taskId,
+      messageId: parsed.message.messageId,
+    };
+    const started = await this.reserveTaskMutation<A2AContinuationStart>(
+      taskId,
+      parsed.message,
+      descriptor,
+      () => this.withTaskLock(taskId, async () => {
+        const input = {
+          handlerId: this.id,
+          taskId,
+          contextId: parsed.message.contextId,
+          message: parsed.message,
+        };
+        const preflight = await this.options.store.preflightContinuation(input);
+        if (!preflight.ok) return await this.rejectContinuation(
+          preflight,
+          taskId,
+          parsed.message.messageId,
+        );
+        if (preflight.duplicate) return { duplicate: true, record: preflight.record };
+        await this.authorizeMutation(descriptor);
+        const committed = await this.options.store.beginContinuation(input);
+        if (!committed.ok) return await this.rejectContinuation(
+          committed,
+          taskId,
+          parsed.message.messageId,
+        );
+        if (committed.duplicate) return { duplicate: true, record: committed.record };
+
+        // Invoke resume before releasing the task lock. Provider completion is
+        // deliberately not awaited here, so cancel can run after resume starts.
+        const execution = (async (): Promise<A2ATaskRecord> => {
+          try {
+            const result = await this.options.runner.resumeFromA2AWire(
+              { resumeId: committed.record.childSessionId, messageText: parsed.prompt },
+              { handlerId: this.id },
+            );
+            return await this.withTaskLock(
+              committed.record.childSessionId,
+              () => this.finalize(committed.record.childSessionId, result),
+            );
+          } catch (error) {
+            try {
+              return await this.withTaskLock(
+                committed.record.childSessionId,
+                () => this.markRunnerFailure(committed.record.childSessionId),
+              );
+            } catch {
+              throw error;
+            }
+          }
+        })();
+        void execution.catch(() => {
+          this.audit("runner-failed", "dropped", { taskId: committed.record.task.id });
+        });
+        return { duplicate: false, record: committed.record, execution };
+      }),
+    );
+    if (started.duplicate) return projectTask(started.record.task, parsed.historyLength);
+    if (parsed.returnImmediately) {
+      return projectTask(started.record.task, parsed.historyLength);
+    }
+    return projectTask((await started.execution).task, parsed.historyLength);
   }
 
   private async getTask(params: A2AJsonObject): Promise<A2ATask> {
     const parsed = parseGet(params);
-    const record = await this.options.store.get(this.id, parsed.id);
-    if (!record) {
-      this.audit("unknown-task", "dropped", { taskId: parsed.id });
+    const lookup = await this.options.store.lookupTask(this.id, parsed.id);
+    if (!lookup.ok) {
+      this.auditUnavailableTask(lookup.reason, parsed.id);
       throw new A2AHandlerError(A2AJsonRpcErrorDefinition.TASK_NOT_FOUND);
     }
-    return projectTask((await this.reconcile(record)).task, parsed.historyLength);
+    return projectTask((await this.reconcile(lookup.record)).task, parsed.historyLength);
   }
 
   private async listTasks(params: A2AJsonObject): Promise<A2ADirectJsonRpcResult> {
@@ -795,16 +1063,36 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
 
   private async cancelTask(params: A2AJsonObject): Promise<A2ATask> {
     const taskId = parseCancel(params);
-    return await this.withTaskLock(taskId, () => this.cancelTaskLocked(taskId));
+    return await this.reserveTaskMutation(
+      taskId,
+      "cancel-task",
+      { operation: "cancel-task", taskId },
+      () => this.withTaskLock(taskId, () => this.cancelTaskLocked(taskId)),
+    );
   }
 
   private async cancelTaskLocked(taskId: string): Promise<A2ATask> {
-    const record = await this.options.store.get(this.id, taskId);
-    if (!record) {
-      this.audit("unknown-task", "dropped", { taskId });
+    const lookup = await this.options.store.lookupTask(this.id, taskId);
+    if (!lookup.ok) {
+      this.auditUnavailableTask(lookup.reason, taskId);
       throw new A2AHandlerError(A2AJsonRpcErrorDefinition.TASK_NOT_FOUND);
     }
-    const state = record.task.status.state;
+    let record = lookup.record;
+    let state = record.task.status.state;
+    if (state === A2ATaskState.CANCELED) return record.task;
+    if (isA2ATerminalTaskState(state)) {
+      this.audit("task-not-cancelable", "dropped", { taskId });
+      throw new A2AHandlerError(A2AJsonRpcErrorDefinition.TASK_NOT_CANCELABLE);
+    }
+    await this.authorizeMutation({ operation: "cancel-task", taskId });
+
+    const revalidated = await this.options.store.lookupTask(this.id, taskId);
+    if (!revalidated.ok) {
+      this.auditUnavailableTask(revalidated.reason, taskId);
+      throw new A2AHandlerError(A2AJsonRpcErrorDefinition.TASK_NOT_FOUND);
+    }
+    record = revalidated.record;
+    state = record.task.status.state;
     if (state === A2ATaskState.CANCELED) return record.task;
     if (isA2ATerminalTaskState(state)) {
       this.audit("task-not-cancelable", "dropped", { taskId });

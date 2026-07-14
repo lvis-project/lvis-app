@@ -3,22 +3,24 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   A2A_DIRECT_JSONRPC_METHODS,
   A2A_ERROR_INFO_DOMAIN,
+  A2A_HOST_ERROR_INFO_DOMAIN,
   A2A_ERROR_INFO_TYPE,
   A2A_JSONRPC_VERSION,
   A2A_PROTOCOL_VERSION,
   A2A_PUSH_JSONRPC_METHODS,
   A2AJsonRpcErrorDefinition,
+  A2AHostJsonRpcErrorDefinition,
   A2AJsonRpcMethod,
   StandardJsonRpcErrorDefinition,
   type A2AAgentCard,
   type A2AAgentCardTemplate,
   type A2ADirectJsonRpcMethod,
   type A2ADirectJsonRpcResult,
-  type A2AErrorDefinition,
   type A2AJsonObject,
   type A2AJsonRpcId,
   type A2AJsonRpcRequest,
   type A2AJsonValue,
+  type A2ARouterErrorDefinition,
   type StandardJsonRpcErrorDefinition as StandardErrorDefinition,
 } from "../shared/a2a-wire.js";
 
@@ -32,9 +34,9 @@ const DIRECT_METHODS = new Set<string>(A2A_DIRECT_JSONRPC_METHODS);
 const PUSH_METHODS = new Set<string>(A2A_PUSH_JSONRPC_METHODS);
 
 export class A2AHandlerError extends Error {
-  readonly definition: A2AErrorDefinition | StandardErrorDefinition;
+  readonly definition: A2ARouterErrorDefinition | StandardErrorDefinition;
 
-  constructor(definition: A2AErrorDefinition | StandardErrorDefinition) {
+  constructor(definition: A2ARouterErrorDefinition | StandardErrorDefinition) {
     super(definition.message);
     this.name = "A2AHandlerError";
     this.definition = definition;
@@ -130,16 +132,19 @@ function sendSuccess(
 function sendFailure(
   res: ServerResponse,
   id: A2AJsonRpcId,
-  definition: A2AErrorDefinition | StandardErrorDefinition,
+  definition: A2ARouterErrorDefinition | StandardErrorDefinition,
   metadata?: Record<string, string>,
 ): void {
   const reason = "reason" in definition ? definition.reason : undefined;
+  const domain = reason === A2AHostJsonRpcErrorDefinition.OPERATION_REJECTED.reason
+    ? A2A_HOST_ERROR_INFO_DOMAIN
+    : A2A_ERROR_INFO_DOMAIN;
   const data: A2AJsonValue | undefined = reason
     ? [
         {
           "@type": A2A_ERROR_INFO_TYPE,
           reason,
-          domain: A2A_ERROR_INFO_DOMAIN,
+          domain,
           ...(metadata ? { metadata } : {}),
         },
       ]
