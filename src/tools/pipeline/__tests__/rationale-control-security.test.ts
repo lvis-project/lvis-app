@@ -3,14 +3,12 @@ import type { PermissionCheckResult } from "../../../permissions/permission-mana
 import {
   createActionIdentity,
   createRationaleRequiredControl,
-  createRationaleResumeRequest,
   parseRationaleResponse,
   createRequestAnchor,
   isRationaleEligible,
   isRationaleEligibilityContextCurrent,
   toRationaleProviderEnvelope,
   type ActionIdentity,
-  validateRationaleResumeRequest,
   verifyRationaleRequiredControl,
   RATIONALE_RESPONSE_SCHEMA,
 } from "../rationale-control.js";
@@ -185,11 +183,13 @@ describe("foreground rationale hostile input rejection", () => {
 
   it("projects every bounded item and DLP-masks reviewer text without leaking raw secrets", () => {
     const anchor = anchorAt();
+    const targets = Array.from({ length: 32 }, (_, index) => "target-" + index);
     const effects = Array.from({ length: 8 }, (_, index) =>
       index === 0 ? "notify alice@example.com" : "effect-" + index
     );
     const resources = Array.from({ length: 8 }, (_, index) => "resource-" + index);
     const action = actionFor(anchor.anchorId, {
+      canonicalTargets: targets,
       requestedEffects: effects,
       affectedResources: resources,
     });
@@ -215,6 +215,7 @@ describe("foreground rationale hostile input rejection", () => {
 
     expect(envelope.requestedEffects).toHaveLength(8);
     expect(envelope.affectedResources).toHaveLength(8);
+    expect(envelope.canonicalTargets).toEqual(targets);
     expect(serialized).not.toContain("alice@example.com");
     expect(serialized).not.toContain("sk-secret-token-value");
     expect(envelope.initialVerdict.reason.length).toBeLessThanOrEqual(500);
@@ -421,8 +422,6 @@ it("rejects extra authority, coercion, hostile arrays, and stale controls", () =
     actionDigest: control.action.actionDigest,
     round: 1,
     suggestion: "빌드 폴더만 삭제합니다.",
-    scopeAlignment: "aligned",
-    scopeReasons: ["요청 범위와 일치합니다."],
   };
 
   expect(parseRationaleResponse({
@@ -512,60 +511,80 @@ it("rejects extra authority, coercion, hostile arrays, and stale controls", () =
   );
 });
 
-it("validates a default-off resume handoff without carrying grant authority", () => {
-  const anchor = anchorAt();
+
+it("binds every RequestAnchor field and every sealedAction field into invocationDigest", () => {
+  const now = Date.now();
+  const anchor = anchorAt(now);
   const control = createRationaleRequiredControl({
-    anchor,
-    action: actionFor(anchor.anchorId),
-    sealedAction,
-    eligibilityContext,
-    permission,
+    anchor, action: actionFor(anchor.anchorId), sealedAction, eligibilityContext, permission, now,
   });
-  const response = {
-    contractVersion: 1,
-    anchorId: control.anchor.anchorId,
-    ticketId: control.ticketId,
-    actionDigest: control.action.actionDigest,
-    round: 1,
-    suggestion: "빌드 폴더만 삭제합니다.",
-    scopeAlignment: "aligned",
-    scopeReasons: ["요청 범위와 일치합니다."],
-  };
-  const ready = createRationaleResumeRequest({
-    control,
-    response,
-    rationaleStatus: "ready",
-    currentEligibilityContext: eligibilityContext,
-  });
-  expect(Object.keys(ready).sort()).toEqual([
-    "control", "rationaleStatus", "response",
-  ]);
-  expect(JSON.stringify(ready)).not.toContain("allowedChoices");
-  expect(validateRationaleResumeRequest(ready, eligibilityContext)).toBe(true);
-  expect(validateRationaleResumeRequest({
-    ...ready,
-    control: {
-      ...ready.control,
-      nonce: "00000000-0000-4000-8000-000000000000",
-    },
-  }, eligibilityContext)).toBe(false);
-  expect(() => createRationaleResumeRequest({
-    control,
-    response,
-    rationaleStatus: "ready",
-    currentEligibilityContext: { ...eligibilityContext, forceModal: true },
-  })).toThrow(/stale rationale control/);
-  expect(() => createRationaleResumeRequest({
-    control,
-    response,
-    rationaleStatus: "failed",
-    currentEligibilityContext: eligibilityContext,
-  })).toThrow(/must not carry a response/);
-  const failed = createRationaleResumeRequest({
-    control,
-    response: null,
-    rationaleStatus: "failed",
-    currentEligibilityContext: eligibilityContext,
-  });
-  expect(validateRationaleResumeRequest(failed, eligibilityContext)).toBe(true);
+  const mutations: Array<Partial<typeof anchor>> = [
+    { contractVersion: 2 as never },
+    { anchorId: "00000000-0000-4000-8000-000000000000" },
+    { sessionId: "session-2" },
+    { turnId: "turn-2" },
+    { inputMessageId: "message-2" },
+    { inputOrigin: "file-content" as never },
+    { sanitizedIntent: "다른 의도" },
+    { intentDigest: "0".repeat(64) },
+    { createdAt: anchor.createdAt - 1 },
+    { expiresAt: anchor.expiresAt + 1 },
+    { rationaleRoundBudget: 0 as never },
+  ];
+  for (const mutation of mutations) {
+    expect(verifyRationaleRequiredControl({
+      ...control, anchor: { ...control.anchor, ...mutation },
+    })).toBe(false);
+  }
+  for (const mutation of [
+    { toolUseId: "tool-use-2" },
+    { toolName: "other-tool" },
+    { originalInput: { command: "Get-ChildItem build" } },
+    { finalInput: { command: "Get-ChildItem build" } },
+  ] as const) {
+    expect(verifyRationaleRequiredControl({
+      ...control,
+      sealedAction: { ...control.sealedAction, ...mutation },
+    })).toBe(false);
+  }
+});
+
+it("rejects Array subclasses and custom prototypes before inherited helpers or getters run", () => {
+  const anchor = anchorAt();
+  const every = vi.fn(() => true);
+  const map = vi.fn(() => ["delete-files"]);
+  class HostileArray extends Array<string> {}
+  Object.defineProperty(HostileArray.prototype, "every", { value: every });
+  Object.defineProperty(HostileArray.prototype, "map", { value: map });
+  const hostile = new HostileArray("delete-files");
+  expect(() => actionFor(anchor.anchorId, { requestedEffects: hostile })).toThrow(
+    /intrinsic Array prototype/,
+  );
+  expect(every).not.toHaveBeenCalled();
+  expect(map).not.toHaveBeenCalled();
+
+  const customPrototype = ["delete-files"];
+  Object.setPrototypeOf(customPrototype, Object.create(Array.prototype));
+  expect(() => actionFor(anchor.anchorId, { requestedEffects: customPrototype })).toThrow(
+    /intrinsic Array prototype/,
+  );
+
+  const getter = vi.fn(() => "delete-files");
+  const accessor: string[] = [];
+  Object.defineProperty(accessor, "0", { enumerable: true, get: getter });
+  expect(() => actionFor(anchor.anchorId, { requestedEffects: accessor })).toThrow();
+  expect(getter).not.toHaveBeenCalled();
+});
+
+it("requires explicit non-empty scope lists or the sealed unknown sentinel", () => {
+  const anchor = anchorAt();
+  for (const field of ["canonicalTargets", "requestedEffects", "affectedResources"] as const) {
+    expect(() => actionFor(anchor.anchorId, { [field]: [] })).toThrow(
+      /bounded string-list contract/,
+    );
+    expect(() => actionFor(anchor.anchorId, {
+      [field]: ["[unknown]", "extra"],
+    })).toThrow(/unknown sentinel/);
+    expect(() => actionFor(anchor.anchorId, { [field]: ["[unknown]"] })).not.toThrow();
+  }
 });

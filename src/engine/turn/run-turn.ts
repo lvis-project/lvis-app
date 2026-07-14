@@ -84,9 +84,6 @@ export async function runTurn(
     const turnInput = isUserKeyboardOrigin(inputOrigin) ? input : stripLeadingSlash(input);
     const toolTrustOrigin = initialToolTrustOrigin(inputOrigin, turnInput);
     const permissionUserIntent = summarizePermissionUserIntent(inputOrigin, turnInput);
-    const permissionExplicitAuthorizationIntent = isUserKeyboardOrigin(inputOrigin)
-      ? permissionUserIntent
-      : undefined;
     // Deterministic completed-plan clear: execute any clear the post-turn hook
     // marked for this session. Unconditional (no input-origin gate) so
     // routine/headless turns clear too; unfinished plans were never marked.
@@ -378,7 +375,6 @@ export async function runTurn(
             a2aCausalContext: options?.a2aCausalContext,
             toolTrustOrigin,
             permissionUserIntent,
-            permissionExplicitAuthorizationIntent,
             rolePrompt: options?.rolePrompt,
           },
         ),
