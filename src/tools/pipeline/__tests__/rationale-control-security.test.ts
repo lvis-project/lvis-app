@@ -1,13 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { PermissionCheckResult } from "../../../permissions/permission-manager.js";
 import {
   createActionIdentity,
   createRationaleRequiredControl,
+  createRationaleResumeRequest,
+  parseRationaleResponse,
   createRequestAnchor,
   isRationaleEligible,
   isRationaleEligibilityContextCurrent,
   toRationaleProviderEnvelope,
   type ActionIdentity,
+  validateRationaleResumeRequest,
+  verifyRationaleRequiredControl,
+  RATIONALE_RESPONSE_SCHEMA,
 } from "../rationale-control.js";
 
 const permission = {
@@ -317,4 +322,250 @@ it("requires and revalidates the host eligibility snapshot for every control", (
   })).toBe(false);
 });
 
+});
+
+it("binds reviewer outcome and a normalized exact verdict outside actionDigest", () => {
+  const anchor = anchorAt();
+  const action = actionFor(anchor.anchorId);
+  const control = createRationaleRequiredControl({
+    anchor,
+    action,
+    sealedAction,
+    eligibilityContext,
+    permission,
+  });
+  const cacheControl = createRationaleRequiredControl({
+    anchor,
+    action,
+    sealedAction,
+    eligibilityContext,
+    permission: {
+      ...permission,
+      reviewer: {
+        ...permission.reviewer,
+        outcome: "cache",
+        verdict: { level: "low", reason: "cached bounded action" },
+      },
+    },
+  });
+  expect(cacheControl.action.actionDigest).toBe(control.action.actionDigest);
+  expect(verifyRationaleRequiredControl(cacheControl)).toBe(true);
+  expect(verifyRationaleRequiredControl(control)).toBe(true);
+  expect(verifyRationaleRequiredControl({
+    ...control,
+    reviewerOutcome: "cache",
+  })).toBe(false);
+  expect(verifyRationaleRequiredControl({
+    ...control,
+    initialVerdict: {
+      ...control.initialVerdict,
+      reason: "modified after review",
+    },
+  })).toBe(false);
+  expect(verifyRationaleRequiredControl({
+    ...control,
+    sealedAction: {
+      ...control.sealedAction,
+      toolUseId: "different-tool-use",
+    },
+  })).toBe(false);
+  expect(action.actionDigest).toBe(control.action.actionDigest);
+
+  expect(() => createRationaleRequiredControl({
+    anchor,
+    action,
+    sealedAction,
+    eligibilityContext,
+    permission: {
+      ...permission,
+      reviewer: {
+        ...permission.reviewer,
+        verdict: {
+          level: "medium",
+          reason: "valid",
+          allow: true,
+        } as never,
+      },
+    },
+  })).toThrow(/unexpected or missing fields/);
+  expect(() => createRationaleRequiredControl({
+    anchor,
+    action,
+    sealedAction,
+    eligibilityContext,
+    permission: {
+      ...permission,
+      reviewer: {
+        ...permission.reviewer,
+        verdict: { level: "critical", reason: "invalid" } as never,
+      },
+    },
+  })).toThrow(/invalid RiskVerdict/);
+});
+
+it("rejects extra authority, coercion, hostile arrays, and stale controls", () => {
+  expect(RATIONALE_RESPONSE_SCHEMA.inputSchema.additionalProperties).toBe(false);
+  const anchor = anchorAt();
+  const action = actionFor(anchor.anchorId);
+  const control = createRationaleRequiredControl({
+    anchor,
+    action,
+    sealedAction,
+    eligibilityContext,
+    permission,
+  });
+  const valid = {
+    contractVersion: 1,
+    anchorId: control.anchor.anchorId,
+    ticketId: control.ticketId,
+    actionDigest: control.action.actionDigest,
+    round: 1,
+    suggestion: "빌드 폴더만 삭제합니다.",
+    scopeAlignment: "aligned",
+    scopeReasons: ["요청 범위와 일치합니다."],
+  };
+
+  expect(parseRationaleResponse({
+    ...valid,
+    allowedChoices: ["allow-always"],
+  }, control)).toBeNull();
+  expect(parseRationaleResponse({
+    ...valid,
+    nonce: control.nonce,
+  }, control)).toBeNull();
+  expect(parseRationaleResponse({
+    ...valid,
+    scopeAlignment: ["aligned"],
+  }, control)).toBeNull();
+  expect(parseRationaleResponse({
+    ...valid,
+    scopeAlignment: { toString: () => "aligned" },
+  }, control)).toBeNull();
+
+  const sparseReasons = Array<string>(2);
+  sparseReasons[1] = "reason";
+  expect(parseRationaleResponse({
+    ...valid,
+    scopeReasons: sparseReasons,
+  }, control)).toBeNull();
+
+  const getter = vi.fn(() => "must not run");
+  const accessorReasons: string[] = [];
+  Object.defineProperty(accessorReasons, "0", {
+    configurable: true,
+    enumerable: true,
+    get: getter,
+  });
+  expect(parseRationaleResponse({
+    ...valid,
+    scopeReasons: accessorReasons,
+  }, control)).toBeNull();
+  expect(getter).not.toHaveBeenCalled();
+
+  const symbolReasons = ["reason"];
+  Object.defineProperty(symbolReasons, Symbol("authority"), {
+    value: "allow",
+    enumerable: true,
+  });
+  expect(parseRationaleResponse({
+    ...valid,
+    scopeReasons: symbolReasons,
+  }, control)).toBeNull();
+
+  const extraReasons = ["reason"];
+  Object.defineProperty(extraReasons, "authority", {
+    value: "allow",
+    enumerable: false,
+  });
+  expect(parseRationaleResponse({
+    ...valid,
+    scopeReasons: extraReasons,
+  }, control)).toBeNull();
+
+  const modifiedControl = {
+    ...control,
+    invocationDigest: "0".repeat(64),
+  };
+  expect(parseRationaleResponse(valid, modifiedControl)).toBeNull();
+  expect(() => toRationaleProviderEnvelope(modifiedControl)).toThrow(
+    /invalid or expired rationale control/,
+  );
+
+  const expiringAnchor = anchorAt(100, 100);
+  const expiringControl = createRationaleRequiredControl({
+    anchor: expiringAnchor,
+    action: actionFor(expiringAnchor.anchorId),
+    sealedAction,
+    eligibilityContext,
+    permission,
+    now: 110,
+  });
+  const expiringResponse = {
+    ...valid,
+    anchorId: expiringControl.anchor.anchorId,
+    ticketId: expiringControl.ticketId,
+    actionDigest: expiringControl.action.actionDigest,
+  };
+  expect(parseRationaleResponse(expiringResponse, expiringControl, 200)).toBeNull();
+  expect(() => toRationaleProviderEnvelope(expiringControl)).toThrow(
+    /invalid or expired rationale control/,
+  );
+});
+
+it("validates a default-off resume handoff without carrying grant authority", () => {
+  const anchor = anchorAt();
+  const control = createRationaleRequiredControl({
+    anchor,
+    action: actionFor(anchor.anchorId),
+    sealedAction,
+    eligibilityContext,
+    permission,
+  });
+  const response = {
+    contractVersion: 1,
+    anchorId: control.anchor.anchorId,
+    ticketId: control.ticketId,
+    actionDigest: control.action.actionDigest,
+    round: 1,
+    suggestion: "빌드 폴더만 삭제합니다.",
+    scopeAlignment: "aligned",
+    scopeReasons: ["요청 범위와 일치합니다."],
+  };
+  const ready = createRationaleResumeRequest({
+    control,
+    response,
+    rationaleStatus: "ready",
+    currentEligibilityContext: eligibilityContext,
+  });
+  expect(Object.keys(ready).sort()).toEqual([
+    "control", "rationaleStatus", "response",
+  ]);
+  expect(JSON.stringify(ready)).not.toContain("allowedChoices");
+  expect(validateRationaleResumeRequest(ready, eligibilityContext)).toBe(true);
+  expect(validateRationaleResumeRequest({
+    ...ready,
+    control: {
+      ...ready.control,
+      nonce: "00000000-0000-4000-8000-000000000000",
+    },
+  }, eligibilityContext)).toBe(false);
+  expect(() => createRationaleResumeRequest({
+    control,
+    response,
+    rationaleStatus: "ready",
+    currentEligibilityContext: { ...eligibilityContext, forceModal: true },
+  })).toThrow(/stale rationale control/);
+  expect(() => createRationaleResumeRequest({
+    control,
+    response,
+    rationaleStatus: "failed",
+    currentEligibilityContext: eligibilityContext,
+  })).toThrow(/must not carry a response/);
+  const failed = createRationaleResumeRequest({
+    control,
+    response: null,
+    rationaleStatus: "failed",
+    currentEligibilityContext: eligibilityContext,
+  });
+  expect(validateRationaleResumeRequest(failed, eligibilityContext)).toBe(true);
 });

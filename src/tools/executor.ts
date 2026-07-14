@@ -1715,6 +1715,9 @@ export class ToolExecutor {
           approvalPurpose,
           abortSignal,
         );
+        if (abortSignal?.aborted) {
+          return returnUserAbort(abortDeps(finalInput));
+        }
         if (reviewerResult) {
           permissionResult = reviewerResult;
         }
@@ -1782,6 +1785,9 @@ export class ToolExecutor {
             approvalPurpose,
             abortSignal,
           );
+          if (abortSignal?.aborted) {
+            return returnUserAbort(abortDeps(finalInput));
+          }
           if (reviewerResult.allowed) {
             permissionResult = reviewerResult.permissionResult;
           } else {
@@ -1930,6 +1936,9 @@ export class ToolExecutor {
               invocationPermissionContext,
               targetFilePath,
             );
+            if (abortSignal?.aborted) {
+              return returnUserAbort(abortDeps(finalInput));
+            }
             decision = await this.approvalGate.requestAndWait(approvalRequest);
           } catch (approvalErr) {
             const msg = t("be_executor.approvalGateError", { name: toolUse.name, error: approvalErr instanceof Error ? approvalErr.message : String(approvalErr) });
