@@ -1,8 +1,8 @@
 /**
  * local-api-server.ts — #1436 lifecycle wiring for the loopback local API.
  *
- * This module owns the MAIN-PROCESS lifecycle of the #1409 external surface:
- * it decides whether to start the loopback HTTP+SSE server (opt-in gate),
+ * This module owns the MAIN-PROCESS lifecycle of the shared loopback surface:
+ * it snapshots the independently opt-in local API and A2A route families,
  * generates a fresh per-boot bearer secret, builds the same `IpcDeps` the IPC
  * registrars receive plus a server-owned {@link ChatSendContext}, starts the
  * transport (`src/api/http-server.ts`), and persists a small discovery file so
@@ -10,11 +10,10 @@
  * app shutdown.
  *
  * SECURITY / GATE:
- *   - The server is OFF by default. It starts ONLY when the user enabled it in
- *     Settings (`system.localApiServer === true`) OR the environment sets
- *     `LVIS_LOCAL_API=1`. When the gate is off, {@link maybeStartLocalApiServer}
- *     returns null immediately — no listener socket is opened and nothing is
- *     written to disk.
+ *   - The server is OFF when both route families are disabled. The local API is
+ *     enabled by `system.localApiServer` or `LVIS_LOCAL_API=1`; A2A is enabled
+ *     by `features.a2aLoopbackServer` or `LVIS_A2A=1` and also requires a
+ *     routable handler factory. No active family means no socket or disk write.
  *   - The secret is `randomBytes(32).toString("hex")` (64 hex chars), fresh per
  *     boot. It is NEVER logged. The bearer check + constant-time compare live in
  *     the transport (`http-server.ts`).
@@ -37,7 +36,12 @@ import type { IpcDeps } from "../ipc/types.js";
 import type { ChatSendContext } from "../ipc/handlers/chat.js";
 import type { TurnResult } from "../engine/conversation-loop.js";
 import { createLocalApi, type ExternalMutationApprover } from "../api/local-api.js";
-import { startLocalApiHttpServer, type LocalApiHttpServer } from "../api/http-server.js";
+import type { A2AHttpRouter } from "../api/a2a-router.js";
+import {
+  startLocalApiHttpServer,
+  type LocalApiHttpServer,
+  type LoopbackRouteFamilies,
+} from "../api/http-server.js";
 import { createStreamBroadcaster } from "../api/stream-broadcaster.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import { openFeatureNamespace } from "./storage/feature-namespace.js";
@@ -76,6 +80,29 @@ const LOCAL_API_TOMBSTONE: LocalApiServerInfoFile = { port: 0, secret: "", pid: 
 
 /** Module-level handle to the running server (C17 shared-handle pattern). */
 let runningServer: LocalApiHttpServer | null = null;
+let bootRouteFamilies: Readonly<LoopbackRouteFamilies> | undefined;
+let bootA2ARouter: Promise<A2AHttpRouter | null> | undefined;
+let bootStartPromise: Promise<{ port: number } | null> | undefined;
+let cancelBootStart: (() => void) | undefined;
+let stopPromise: Promise<void> | undefined;
+let lifecycleGeneration = 0;
+let stopped = false;
+
+const START_CANCELLED: unique symbol = Symbol("start-cancelled");
+
+export type A2ARouterFactory = () => A2AHttpRouter | null | Promise<A2AHttpRouter | null>;
+
+export function resolveLoopbackRouteFamilies(
+  settingsService: SettingsService,
+  env: NodeJS.ProcessEnv = process.env,
+): Readonly<LoopbackRouteFamilies> {
+  return Object.freeze({
+    localApi:
+      settingsService.get("system").localApiServer === true || env.LVIS_LOCAL_API === "1",
+    a2a:
+      settingsService.get("features")?.a2aLoopbackServer === true || env.LVIS_A2A === "1",
+  });
+}
 
 /**
  * Is the opt-in local API server enabled? True when the user turned it on in
@@ -86,9 +113,57 @@ export function isLocalApiEnabled(
   settingsService: SettingsService,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  const settingEnabled = settingsService.get("system").localApiServer === true;
-  const envEnabled = env.LVIS_LOCAL_API === "1";
-  return settingEnabled || envEnabled;
+  return resolveLoopbackRouteFamilies(settingsService, env).localApi;
+}
+
+/** Is the independently opt-in A2A loopback family enabled for this boot? */
+export function isA2ALoopbackEnabled(
+  settingsService: SettingsService,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return resolveLoopbackRouteFamilies(settingsService, env).a2a;
+}
+
+function auditA2ARouteDisabled(
+  services: AppServices,
+  reason: "initialization-failed" | "no-routable-handler",
+): void {
+  try {
+    services.auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "a2a-loopback",
+      type: "warn",
+      input: "a2a:loopback:" + reason,
+    });
+  } catch {
+    // Audit persistence must not brick the independently enabled local API.
+  }
+}
+
+async function initializeA2ARouter(
+  factory: A2ARouterFactory | undefined,
+  services: AppServices,
+  emit: (message: string) => void,
+): Promise<A2AHttpRouter | null> {
+  bootA2ARouter ??= (async () => {
+    if (!factory) {
+      auditA2ARouteDisabled(services, "no-routable-handler");
+      emit("[a2a] no routable handlers; route family disabled for this boot");
+      return null;
+    }
+    try {
+      const router = await factory();
+      if (router) return router;
+      auditA2ARouteDisabled(services, "no-routable-handler");
+      emit("[a2a] no routable handlers; route family disabled for this boot");
+      return null;
+    } catch {
+      auditA2ARouteDisabled(services, "initialization-failed");
+      emit("[a2a] initialization failed; route family disabled for this boot");
+      return null;
+    }
+  })();
+  return await bootA2ARouter;
 }
 
 /**
@@ -201,20 +276,40 @@ export function buildExternalMutationApprover(
  * Idempotent-ish: if a server is already running it is returned as-is rather
  * than double-started (defensive — main.ts calls this exactly once).
  */
-export async function maybeStartLocalApiServer(input: {
+interface LocalApiStartInput {
   services: AppServices;
   getMainWindow: () => BrowserWindow | null;
   getAppWindows: () => Array<BrowserWindow | null | undefined>;
+  createA2ARouter?: A2ARouterFactory;
   log?: (message: string) => void;
-}): Promise<{ port: number } | null> {
+}
+
+async function startLocalApiServerForBoot(
+  input: LocalApiStartInput,
+  generation: number,
+  cancellation: Promise<void>,
+): Promise<{ port: number } | null> {
   const { services, getMainWindow, getAppWindows } = input;
   const emit = input.log ?? ((m: string) => log.info(m));
 
-  if (!isLocalApiEnabled(services.settingsService)) {
+  bootRouteFamilies ??= resolveLoopbackRouteFamilies(services.settingsService);
+  if (!bootRouteFamilies.localApi && !bootRouteFamilies.a2a) {
     return null;
   }
-  if (runningServer) {
-    return { port: runningServer.port };
+  const a2aRouter = bootRouteFamilies.a2a
+    ? await Promise.race([
+      initializeA2ARouter(input.createA2ARouter, services, emit),
+      cancellation.then((): typeof START_CANCELLED => START_CANCELLED),
+    ])
+    : null;
+  if (a2aRouter === START_CANCELLED) return null;
+  if (generation !== lifecycleGeneration) return null;
+  const activeRouteFamilies = Object.freeze({
+    localApi: bootRouteFamilies.localApi,
+    a2a: a2aRouter !== null,
+  });
+  if (!activeRouteFamilies.localApi && !activeRouteFamilies.a2a) {
+    return null;
   }
 
   // Same DI bag the IPC registrars receive (see registerIpcHandlers).
@@ -239,21 +334,88 @@ export async function maybeStartLocalApiServer(input: {
     api,
     secret,
     broadcaster,
+    a2aRouter: a2aRouter ?? undefined,
+    routeFamilies: activeRouteFamilies,
     // Do NOT forward the secret into the transport log — startLocalApiHttpServer
     // is documented to never receive it, and this callback only sees benign
     // dispatch/routing diagnostics.
     log: (message: string) => emit(`[local-api] ${message}`),
   });
+  if (generation !== lifecycleGeneration) {
+    await server.close();
+    return null;
+  }
   runningServer = server;
 
   // Persist discovery info AFTER listen succeeds so the file never points at a
   // dead port for this boot. 0o600 file mode (via openFeatureNamespace) is the
   // protection model for this capability token — same as an SSH key.
   const info: LocalApiServerInfoFile = { port: server.port, secret, pid: process.pid };
-  await openFeatureNamespace(LOCAL_API_FEATURE).writeJson(LOCAL_API_INFO_FILE, info);
+  try {
+    await openFeatureNamespace(LOCAL_API_FEATURE).writeJson(LOCAL_API_INFO_FILE, info);
+  } catch (err) {
+    if (runningServer === server) runningServer = null;
+    await server.close();
+    await tombstoneDiscoveryFile();
+    throw err;
+  }
+
+  if (generation !== lifecycleGeneration) {
+    if (runningServer === server) {
+      runningServer = null;
+      await server.close();
+    }
+    await tombstoneDiscoveryFile();
+    return null;
+  }
 
   emit(`[local-api] listening on 127.0.0.1:${server.port}`);
   return { port: server.port };
+}
+
+export async function maybeStartLocalApiServer(
+  input: LocalApiStartInput,
+): Promise<{ port: number } | null> {
+  if (stopped) return null;
+  if (stopPromise) {
+    await stopPromise;
+    return null;
+  }
+  if (bootStartPromise) return await bootStartPromise;
+  if (runningServer) return { port: runningServer.port };
+
+  let cancel!: () => void;
+  const cancellation = new Promise<void>((resolve) => {
+    cancel = resolve;
+  });
+  const pending = startLocalApiServerForBoot(input, lifecycleGeneration, cancellation);
+  bootStartPromise = pending;
+  cancelBootStart = cancel;
+  try {
+    return await pending;
+  } finally {
+    if (bootStartPromise === pending) bootStartPromise = undefined;
+    if (cancelBootStart === cancel) cancelBootStart = undefined;
+  }
+}
+
+async function tombstoneDiscoveryFile(): Promise<void> {
+  try {
+    await openFeatureNamespace(LOCAL_API_FEATURE).writeJson(
+      LOCAL_API_INFO_FILE,
+      LOCAL_API_TOMBSTONE,
+    );
+  } catch (err) {
+    log.warn(
+      "failed to blank local-api discovery file: %s",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+async function closeAndTombstone(server: LocalApiHttpServer): Promise<void> {
+  await server.close();
+  await tombstoneDiscoveryFile();
 }
 
 /**
@@ -262,18 +424,46 @@ export async function maybeStartLocalApiServer(input: {
  * shutdown). Fast: the transport's close() destroys idle sockets and ends live
  * SSE streams so it never hangs.
  */
-export async function stopLocalApiServer(): Promise<void> {
+async function stopLocalApiServerForShutdown(): Promise<void> {
+  stopped = true;
+  lifecycleGeneration += 1;
+  const pending = bootStartPromise;
+  cancelBootStart?.();
   const server = runningServer;
   runningServer = null;
   if (server) {
-    await server.close();
-    // Overwrite the discovery file with a tombstone so a stale secret + port
-    // never lingers on disk after the server is gone. Best-effort — a failed
-    // blank must not throw out of the shutdown sequence.
-    try {
-      await openFeatureNamespace(LOCAL_API_FEATURE).writeJson(LOCAL_API_INFO_FILE, LOCAL_API_TOMBSTONE);
-    } catch (err) {
-      log.warn("failed to blank local-api discovery file: %s", err instanceof Error ? err.message : String(err));
-    }
+    await closeAndTombstone(server);
   }
+  if (pending) {
+    await pending.catch(() => undefined);
+  }
+  const lateServer = runningServer;
+  if (lateServer) {
+    runningServer = null;
+    await closeAndTombstone(lateServer);
+  }
+}
+
+export function stopLocalApiServer(): Promise<void> {
+  if (stopPromise) return stopPromise;
+  const operation = stopLocalApiServerForShutdown();
+  const tracked = operation.finally(() => {
+    if (stopPromise === tracked) stopPromise = undefined;
+  });
+  stopPromise = tracked;
+  return tracked;
+}
+
+/** @internal Test-only module-state reset; production boot snapshots never reset. */
+export function resetLocalApiServerForTests(): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("local-api-server-test-reset-outside-test");
+  }
+  if (runningServer || bootStartPromise || stopPromise) {
+    throw new Error("local-api-server-test-reset-while-active");
+  }
+  bootRouteFamilies = undefined;
+  bootA2ARouter = undefined;
+  lifecycleGeneration += 1;
+  stopped = false;
 }
