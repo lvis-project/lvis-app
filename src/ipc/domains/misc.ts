@@ -45,7 +45,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
     const ok = await routinesStore.remove(id);
     if (ok) {
       for (const session of memoryManager.listSessionsByRoutine(id)) {
-        memoryManager.deleteSession(session.id);
+        await memoryManager.deleteSession(session.id);
       }
     }
     return { ok };

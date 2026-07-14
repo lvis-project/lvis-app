@@ -28,6 +28,7 @@ import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import { registerPluginNotifications } from "../plugins.js";
 import { registerPluginEventBridge } from "./ipc-bridge.js";
 import { readPermissionSettings } from "../../permissions/permission-settings-store.js";
+import { retainedDescendantWorkspaceRoots } from "../../permissions/workspace-root-reconciler.js";
 import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "../../ipc/domains/permissions.js";
 import { PreferenceRefreshService } from "../../memory/preference-refresh-service.js";
 import { SubAgentRunner } from "../../engine/subagent-runner.js";
@@ -46,7 +47,28 @@ import type { BootContext } from "../context.js";
 
 const log = createLogger("lvis");
 
-export function wireConversation(ctx: BootContext): void {
+export interface IsolatedConversationMemoryManagers {
+  sideChatMemoryManager: MemoryManager;
+  subAgentMemoryManager: MemoryManager;
+}
+
+export function createIsolatedConversationMemoryManagers(): IsolatedConversationMemoryManagers {
+  const sideChatMemoryManager = new MemoryManager({
+    lvisDir: openFeatureNamespace("side-chat").dir,
+  });
+  sideChatMemoryManager.load();
+  const subAgentMemoryManager = new MemoryManager({
+    lvisDir: openFeatureNamespace("subagent").dir,
+  });
+  subAgentMemoryManager.load();
+  return { sideChatMemoryManager, subAgentMemoryManager };
+}
+
+export async function wireConversation(
+  ctx: BootContext,
+  removedWorkspaceRoots: readonly string[],
+  isolatedMemoryManagers: IsolatedConversationMemoryManagers,
+): Promise<void> {
   const {
     settingsService,
     systemPromptBuilder,
@@ -76,6 +98,7 @@ export function wireConversation(ctx: BootContext): void {
     mainWindow,
   } = ctx;
 
+  const { sideChatMemoryManager, subAgentMemoryManager } = isolatedMemoryManagers;
 
 
   const routineLoopDeps = {
@@ -104,6 +127,14 @@ export function wireConversation(ctx: BootContext): void {
     // to a concrete allow-list at fire time (never at loop-construction).
     getActivePluginIds: () => pluginRuntime.listPluginIds(),
   });
+  // Durable routine-scope pruning is best-effort during boot. Keep the newly
+  // constructed engine fail-closed even when that persistence cleanup failed.
+  const retainedWorkspaceRoots = readPermissionSettings().permissions.additionalDirectories;
+  for (const root of removedWorkspaceRoots) {
+    routineEngine.revokeWorkspaceRoot(root, {
+      preserveRoots: retainedDescendantWorkspaceRoots(root, retainedWorkspaceRoots),
+    });
+  }
 
   // §4.2 Step 7: manifest-driven IPC bridges. Plugin notifications route
   // through `notificationService` (#841) so they inherit the same focus
@@ -174,10 +205,6 @@ export function wireConversation(ctx: BootContext): void {
   // inheritance) as the main chat but never mixes sessions with it — the
   // isolated store guarantees `chat.sessions` (main) never lists a side-chat
   // session. Its own history/sessionId keep the two streams fully independent.
-  const sideChatMemoryManager = new MemoryManager({
-    lvisDir: openFeatureNamespace("side-chat").dir,
-  });
-  sideChatMemoryManager.load();
   const sideChatConversationLoop = createSideChatConversationLoop({
     settingsService,
     keywordEngine,
@@ -217,11 +244,6 @@ export function wireConversation(ctx: BootContext): void {
   // the main `~/.lvis/sessions/` list; a dedicated store keeps sub-agent
   // transcripts out of `chat.sessions` and gives same-instance resume its own
   // addressable namespace. Mirrors the sideChatMemoryManager wiring above.
-  const subAgentMemoryManager = new MemoryManager({
-    lvisDir: openFeatureNamespace("subagent").dir,
-  });
-  subAgentMemoryManager.load();
-
   const subAgentMessagingNamespace = openFeatureNamespace("subagent-messaging");
   const subAgentMessageMailbox = new SubAgentMessageMailbox(
     subAgentMessagingNamespace,

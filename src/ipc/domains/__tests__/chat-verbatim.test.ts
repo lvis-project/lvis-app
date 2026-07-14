@@ -655,7 +655,7 @@ describe("lvis:chat active main state", () => {
     const loop = makeConversationLoop("session-active", []);
     const deps = await setupHandlers(loop);
 
-    await invoke("lvis:chat:new", { projectRoot: explicitProjectRoot, projectName: "explicit-project" });
+    await invoke("lvis:chat:new", { projectRoot: explicitProjectRoot, projectName: "spoofed-project-name" });
 
     expect(deps.memoryManager.saveSessionMetadata).toHaveBeenCalledTimes(1);
     const [savedId, savedMeta] = (deps.memoryManager.saveSessionMetadata as any).mock.calls[0];
@@ -664,7 +664,9 @@ describe("lvis:chat active main state", () => {
     // slash/case form — compare case/separator-insensitively rather than
     // asserting the exact literal input string.
     expect(savedMeta.sessionKind).toBe("main");
-    expect(savedMeta.projectName).toBe("explicit-project");
+    // The root is the durable identity. Ignore the renderer-provided label and
+    // persist the display name resolved from the authorized project registry.
+    expect(savedMeta.projectName).toBe(path.basename(explicitProjectRoot));
     expect((savedMeta.projectRoot as string).toLowerCase().replace(/\\/g, "/")).toBe(
       explicitProjectRoot.toLowerCase().replace(/\\/g, "/"),
     );

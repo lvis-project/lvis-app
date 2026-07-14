@@ -116,4 +116,21 @@ describe("TranscriptRenderer — action suppression keys off callback presence",
     );
     expect(queryByTitle(RETRY_TITLE)).not.toBeNull();
   });
+
+  it("keeps the pinned user-message indicator visible when hover actions are wired", () => {
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[user("pinned question"), assistant("answer")]}
+        streaming={false}
+        currentSessionId="s1"
+        actions={{
+          isEntryStarred: (idx) => idx === 0 ? "star-1" : null,
+          onToggleStar: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(getByTestId("user-message-actions")).toBeTruthy();
+    expect(getByTestId("user-message-pin-indicator")).toBeTruthy();
+  });
 });

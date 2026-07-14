@@ -177,13 +177,25 @@ describe("App smoke (Phase 1 infra)", () => {
       fireEvent.click(container.querySelector('[data-testid="chat-side-panel-toggle"]')!);
     });
     await waitFor(() => expect(windowApi.resizeForSidePanel).toHaveBeenLastCalledWith(true));
+    await waitFor(() =>
+      expect(
+        container.querySelector('[data-testid="chat-side-panel-motion"]')?.getAttribute("aria-hidden"),
+      ).toBe("false"),
+    );
     expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeTruthy();
 
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="chat-side-panel-toggle"]')!);
     });
+    const closingMotion = container.querySelector('[data-testid="chat-side-panel-motion"]');
+    expect(closingMotion).toBeTruthy();
+    expect(closingMotion?.getAttribute("aria-hidden")).toBe("true");
+    expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeTruthy();
     await waitFor(() => expect(windowApi.resizeForSidePanel).toHaveBeenLastCalledWith(false));
-    expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeFalsy();
+    await waitFor(
+      () => expect(container.querySelector('[data-testid="chat-side-panel-motion"]')).toBeFalsy(),
+      { timeout: 1_000 },
+    );
   });
 
   it("opens the chat side panel from non-home inline views instead of latching invisible state", async () => {
