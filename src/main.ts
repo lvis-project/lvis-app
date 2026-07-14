@@ -43,6 +43,7 @@ import { readStartupLaunchState } from "./main/startup-launch.js";
 import { reconcileOsIntegrationOnBoot } from "./main/reconcile-os-integration.js";
 import { registerSettingsWindowHandlers } from "./main/settings-window.js";
 import { maybeStartLocalApiServer } from "./main/local-api-server.js";
+import { installNativeEditContextMenu } from "./main/native-edit-context-menu.js";
 import { handleLvisUri, lvisDevLog } from "./main/lvis-deep-link.js";
 import {
   getMainWindow,
@@ -314,7 +315,10 @@ if (!gotSingleInstanceLock) {
 // new document). Deny every non-data navigation and new-window attempt on
 // any webview webContents as soon as it's created.
 app.on("web-contents-created", (_event, contents) => {
-  if (contents.getType() !== "webview") return;
+  if (contents.getType() !== "webview") {
+    installNativeEditContextMenu(contents);
+    return;
+  }
 
   // Eagerly install the partition network policy at attach time —
   // BEFORE the first navigation lands. The previous `did-navigate`

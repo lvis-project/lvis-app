@@ -442,7 +442,7 @@ describe("MemoryManager.searchSessions — index maintenance", () => {
     await mm.saveSession(id, [{ role: "user", content: "ephemeral keyword body" }]);
     expect(mm.searchSessions("ephemeral").map((r) => r.sessionId)).toEqual([id]);
 
-    mm.deleteSession(id);
+    await mm.deleteSession(id);
     expect(mm.searchSessions("ephemeral")).toEqual([]);
   });
 
@@ -556,7 +556,7 @@ describe("MemoryManager.listSessionEntries", () => {
     mkdirSync(diffCacheDir, { recursive: true });
     writeFileSync(join(diffCacheDir, "tool-call.json"), "diff", "utf-8");
 
-    mm.deleteSession(sessionId);
+    await mm.deleteSession(sessionId);
 
     expect(existsSync(join(sessionsDir, `${sessionId}.jsonl`))).toBe(false);
     expect(existsSync(join(sessionsDir, `${sessionId}.meta.json`))).toBe(false);

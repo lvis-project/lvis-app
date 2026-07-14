@@ -15,11 +15,9 @@ import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "../../../components/ui/context-menu.js";
+  useNativeContextMenu,
+  type NativeContextMenuHandlers,
+} from "../hooks/use-native-context-menu.js";
 
 export interface ActionPanelActivityItem {
   id: string;
@@ -101,6 +99,7 @@ function ActivitySection({
   web?: boolean;
 }) {
   const { t } = useTranslation();
+  const openNativeContextMenu = useNativeContextMenu();
   const visibleItems = items.slice(0, ACTIVITY_PREVIEW_LIMIT);
   if (visibleItems.length === 0) return null;
 
@@ -148,40 +147,27 @@ function ActivitySection({
           return (
             <li key={item.id}>
               {item.target && onOpenItem ? (
-                <ContextMenu>
-                  <ContextMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className="flex w-full min-w-0 items-start gap-2 rounded-md bg-muted/(--opacity-faint) px-2 py-1.5 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      data-testid={`action-panel-activity-${item.id}`}
-                      title={titleText}
-                      onClick={() => onOpenItem(item.target!, web)}
-                      onDoubleClick={() => (onOpenItemPinned ?? onOpenItem)(item.target!, web)}
-                    >
-                      {rowContent}
-                    </button>
-                  </ContextMenuTrigger>
-                  {canOpenInSystemApp || canCopy ? (
-                    <ContextMenuContent className="min-w-[10rem]" data-testid="action-panel-context-menu">
-                      {canOpenInSystemApp ? (
-                        <ContextMenuItem
-                          data-testid="action-panel-open-in-system-app"
-                          onSelect={() => onOpenItemInSystemApp?.(item.target!, web)}
-                        >
-                          {t("actionPanel.openInSystemApp")}
-                        </ContextMenuItem>
-                      ) : null}
-                      {canCopy ? (
-                        <ContextMenuItem
-                          data-testid="action-panel-copy-target"
-                          onSelect={() => void navigator.clipboard?.writeText(item.target!)}
-                        >
-                          {t(web ? "actionPanel.copyUrl" : "actionPanel.copyPath")}
-                        </ContextMenuItem>
-                      ) : null}
-                    </ContextMenuContent>
-                  ) : null}
-                </ContextMenu>
+                <button
+                  type="button"
+                  className="flex w-full min-w-0 items-start gap-2 rounded-md bg-muted/(--opacity-faint) px-2 py-1.5 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  data-testid={"action-panel-activity-" + item.id}
+                  title={titleText}
+                  onClick={() => onOpenItem(item.target!, web)}
+                  onDoubleClick={() => (onOpenItemPinned ?? onOpenItem)(item.target!, web)}
+                  onContextMenu={(event) => openNativeContextMenu(event, "action-item", {
+                    ...(canOpenInSystemApp
+                      ? { "action.open-system": () => onOpenItemInSystemApp?.(item.target!, web) }
+                      : {}),
+                    ...(canCopy
+                      ? {
+                          [web ? "action.copy-url" : "action.copy-path"]: () =>
+                            void navigator.clipboard?.writeText(item.target!),
+                        }
+                      : {}),
+                  } as NativeContextMenuHandlers)}
+                >
+                  {rowContent}
+                </button>
               ) : (
                 <div
                   className="flex min-w-0 items-start gap-2 rounded-md bg-muted/(--opacity-faint) px-2 py-1.5 text-xs"

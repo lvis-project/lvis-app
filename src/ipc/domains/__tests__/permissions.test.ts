@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PERMISSIONS } from "../../../shared/ipc-channels.js";
@@ -66,6 +66,7 @@ function makeDeps(options: {
   mode?: string;
   interactiveAutoApprove?: "off" | "low" | "medium";
   hasReviewer?: boolean;
+  workspaceLifecycleAvailable?: boolean;
 } = {}) {
   const appWindows = [
     {
@@ -96,6 +97,10 @@ function makeDeps(options: {
     getVisibilityDenyRules: vi.fn(() => []),
     getDeferredQueue: vi.fn(() => options.queue ?? null),
     isReviewerDegradedToRule: vi.fn(() => false),
+  };
+  const workspaceRootLifecycle = {
+    allowDirectory: vi.fn(async (root: string) => [root]),
+    denyDirectory: vi.fn(async () => [] as string[]),
   };
   const deps = {
     conversationLoop: {
@@ -139,17 +144,18 @@ function makeDeps(options: {
     },
     rewireReviewerAgent: vi.fn(),
     getAppWindows: vi.fn(() => appWindows),
+    ...(options.workspaceLifecycleAvailable === false ? {} : { workspaceRootLifecycle }),
   };
-  return { deps, permissionManager, appWindows };
+  return { deps, permissionManager, appWindows, workspaceRootLifecycle };
 }
 
 async function setup(options: Parameters<typeof makeDeps>[0] = {}) {
   handlers.clear();
   vi.clearAllMocks();
-  const { deps, permissionManager, appWindows } = makeDeps(options);
+  const { deps, permissionManager, appWindows, workspaceRootLifecycle } = makeDeps(options);
   const { registerPermissionsHandlers } = await import("../permissions.js");
   registerPermissionsHandlers(deps as never);
-  return { deps, permissionManager, appWindows };
+  return { deps, permissionManager, appWindows, workspaceRootLifecycle };
 }
 
 beforeEach(() => {
@@ -347,6 +353,60 @@ describe("permissions IPC handlers", () => {
     expect(deps.conversationLoop.addSessionAdditionalDirectory).toHaveBeenCalledWith(
       (result as { sessionDirectory: string }).sessionDirectory,
     );
+  });
+
+  it("dirDispatch routes persistent Settings allow and deny through the workspace lifecycle", async () => {
+    const { workspaceRootLifecycle } = await setup();
+    const dir = mkdtempSync(join(tmpdir(), "lvis-persisted-dir-"));
+
+    try {
+      const allowed = await invoke(PERMISSIONS.dirDispatch, {
+        rawArgs: `allow ${dir}`,
+        intent: USER_INTENT,
+      });
+
+      expect(allowed).toMatchObject({
+        ok: true,
+        verb: "allow",
+        sessionOnly: false,
+      });
+      expect(workspaceRootLifecycle.allowDirectory).toHaveBeenCalledWith(
+        (allowed as { persisted: string[] }).persisted[0],
+        "permission-slash",
+      );
+
+      const denied = await invoke(PERMISSIONS.dirDispatch, {
+        rawArgs: `deny ${dir}`,
+        intent: USER_INTENT,
+      });
+
+      expect(denied).toMatchObject({ ok: true, verb: "deny" });
+      expect(workspaceRootLifecycle.denyDirectory).toHaveBeenCalledWith(
+        dir,
+        "permission-slash",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("dirDispatch fails closed when the persistent workspace lifecycle is unavailable", async () => {
+    await setup({ workspaceLifecycleAvailable: false });
+    const dir = mkdtempSync(join(tmpdir(), "lvis-missing-lifecycle-"));
+
+    try {
+      const result = await invoke(PERMISSIONS.dirDispatch, {
+        rawArgs: `allow ${dir}`,
+        intent: USER_INTENT,
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        error: "workspace lifecycle unavailable",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("permission mutations reject missing user-keyboard intent", async () => {
