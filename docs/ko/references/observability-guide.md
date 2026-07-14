@@ -152,7 +152,7 @@ See `docs/references/production-release-checklist.md`. Observability items to ve
 1. Open Settings → 개인정보 탭 → check `topPatterns`
 2. Identify pattern causing false positives
 3. Adjust regex in `src/audit/dlp-filter.ts` pattern list
-4. Re-run `bunx vitest run src/audit` to confirm no regressions
+4. Re-run `bun run test:vitest -- run src/audit` to confirm no regressions
 
 ### Diagnosing Plugin Slowness
 

@@ -1,9 +1,11 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeywordEngine } from "../../core/keyword-engine.js";
+import { maskSensitiveData } from "../../shared/dlp.js";
+import { createDlpSafeUuid } from "../../shared/dlp-safe-id.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { MemoryManager, type SessionMetadata } from "../../memory/memory-manager.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
@@ -81,7 +83,7 @@ function registerNoop(toolRegistry: ToolRegistry): void {
 
 function makeResumeId(originSessionId: string): string {
   const tag = createHash("sha256").update(originSessionId).digest("hex").slice(0, 8);
-  return "sub-" + tag + "-" + randomUUID();
+  return createDlpSafeUuid(`sub-${tag}`);
 }
 
 describe("SubAgentRunner A2A wire security contract", () => {
@@ -278,6 +280,10 @@ describe("SubAgentRunner A2A wire security contract", () => {
     );
 
     expect(result.ok).toBe(true);
+    expect(maskSensitiveData(result.childSessionId).detections).toEqual([]);
+    const metadata = store.loadSessionMetadata(result.childSessionId);
+    expect(metadata?.a2aWireInternalOrigin).toMatch(/^a2a-wire-[0-9a-f]{8}-/);
+    expect(maskSensitiveData(metadata?.a2aWireInternalOrigin ?? "").detections).toEqual([]);
     expect(events.slice(0, 4)).toEqual(["metadata", "barrier", "linked", "provider"]);
   });
 
