@@ -11,23 +11,25 @@ describe("detachWorkspaceRootSessions", () => {
     expect(second.detachSessionsFromProject).toHaveBeenCalledTimes(1);
   });
 
-  it("fails closed and releases root-wide guards when any namespace cannot detach", async () => {
+  it("starts every namespace and keeps root guards when one detach fails", async () => {
     const allowFirst = vi.fn();
     const allowSecond = vi.fn();
     const first = {
       allowProjectRoot: allowFirst,
-      detachSessionsFromProject: vi.fn(async () => 1),
-    };
-    const second = {
-      allowProjectRoot: allowSecond,
       detachSessionsFromProject: vi.fn(async () => {
         throw Object.assign(new Error("private"), { code: "EIO" });
       }),
     };
+    const second = {
+      allowProjectRoot: allowSecond,
+      detachSessionsFromProject: vi.fn(async () => 1),
+    };
     await expect(detachWorkspaceRootSessions("C:\\work\\alpha", [first, second]))
       .rejects.toMatchObject({ code: "EIO" });
-    expect(allowFirst).toHaveBeenCalledWith("C:\\work\\alpha");
-    expect(allowSecond).toHaveBeenCalledWith("C:\\work\\alpha");
+    expect(first.detachSessionsFromProject).toHaveBeenCalledWith("C:\\work\\alpha");
+    expect(second.detachSessionsFromProject).toHaveBeenCalledWith("C:\\work\\alpha");
+    expect(allowFirst).not.toHaveBeenCalled();
+    expect(allowSecond).not.toHaveBeenCalled();
   });
 
   it.each([

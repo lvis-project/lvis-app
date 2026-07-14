@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MemoryManager, type SessionMetadata } from "../memory-manager.js";
 
@@ -57,6 +57,9 @@ describe("MemoryManager workspace project detachment", () => {
     expect(memory.loadSessionMetadata(SESSION_A)?.projectRoot).toBeUndefined();
     expect(memory.loadSessionMetadata(SESSION_A)?.projectName).toBeUndefined();
     expect(memory.loadSessionMetadata(SESSION_OTHER)?.projectRoot).toBe("C:\\Work\\Beta");
+    expect(memory.searchSessions(`message-${SESSION_OTHER}`, {
+      projectRoot: "C:\\Work\\Beta",
+    })).toHaveLength(1);
 
     const raw = JSON.parse(
       readFileSync(join(dir, "sessions", `${SESSION_A}.meta.json`), "utf-8"),
@@ -267,7 +270,7 @@ describe("MemoryManager workspace project detachment", () => {
     });
     await memory.detachSessionsFromProject(ROOT);
     memory.allowProjectRoot(ROOT);
-    memory.deleteSession(SESSION_A);
+    await memory.deleteSession(SESSION_A);
 
     await memory.saveSessionMetadata(SESSION_A, {
       sessionKind: "main",
@@ -301,6 +304,78 @@ describe("MemoryManager workspace project detachment", () => {
     await expect(memory.detachSessionsFromProject(ROOT)).rejects.toMatchObject({
       code: "SESSION_METADATA_INVALID",
     });
+  });
+
+  it("preflights every metadata file before rewriting any matching session", async () => {
+    await seed(SESSION_A, ROOT, "valid-first");
+    await seed(SESSION_B, ROOT, "malformed-second");
+    writeFileSync(
+      join(dir, "sessions", `${SESSION_B}.meta.json`),
+      `{"projectRoot":${JSON.stringify(ROOT)},`,
+      "utf8",
+    );
+
+    await expect(memory.detachSessionsFromProject(ROOT)).rejects.toMatchObject({
+      code: "SESSION_METADATA_INVALID",
+    });
+
+    expect(memory.loadSessionMetadata(SESSION_A)?.projectRoot).toBe(ROOT);
+    expect(memory.searchSessions(`message-${SESSION_A}`, { projectRoot: ROOT }))
+      .toHaveLength(1);
+  });
+
+  it("repairs every FTS row on a zero-change detach retry", async () => {
+    await seed(SESSION_A, ROOT, "stale-index");
+    await expect(memory.detachSessionsFromProject(ROOT)).resolves.toBe(1);
+    const searchIndex = (memory as unknown as {
+      searchIndex: {
+        open(): boolean;
+        close(): void;
+        upsertSession(input: {
+          sessionId: string;
+          content: string;
+          timestamp: string;
+          sessionKind: "main";
+          projectRoot: string;
+          title: string;
+        }): void;
+      };
+    }).searchIndex;
+    expect(searchIndex.open()).toBe(true);
+    searchIndex.upsertSession({
+      sessionId: SESSION_A,
+      content: `message-${SESSION_A}`,
+      timestamp: new Date().toISOString(),
+      sessionKind: "main",
+      projectRoot: ROOT,
+      title: "stale-index",
+    });
+    searchIndex.close();
+    expect(memory.searchSessions(`message-${SESSION_A}`, { projectRoot: ROOT }))
+      .toHaveLength(1);
+
+    await expect(memory.detachSessionsFromProject(ROOT)).resolves.toBe(0);
+
+    expect(memory.searchSessions(`message-${SESSION_A}`, { projectRoot: ROOT }))
+      .toHaveLength(0);
+    expect(memory.searchSessions(`message-${SESSION_A}`)).toHaveLength(1);
+  });
+
+  it("preserves a retryable error when full FTS repair cannot open", async () => {
+    await seed(SESSION_A, ROOT, "repair-retry");
+    const searchIndex = (memory as unknown as {
+      searchIndex: { open(): boolean };
+    }).searchIndex;
+    const openSpy = vi.spyOn(searchIndex, "open").mockReturnValueOnce(false);
+
+    await expect(memory.detachSessionsFromProject(ROOT)).rejects.toMatchObject({
+      code: "SESSION_SEARCH_INDEX_REPAIR_FAILED",
+    });
+    expect(memory.loadSessionMetadata(SESSION_A)?.projectRoot).toBeUndefined();
+
+    openSpy.mockRestore();
+    await expect(memory.detachSessionsFromProject(ROOT)).resolves.toBe(0);
+    expect(memory.searchSessions(`message-${SESSION_A}`)).toHaveLength(1);
   });
 
   it("removes an orphaned FTS row when project metadata exists without JSONL", async () => {

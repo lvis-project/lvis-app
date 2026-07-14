@@ -285,13 +285,32 @@ export async function bootstrap(
     permissionManager,
     beforeRemove: async (runtimeRoot, context) => {
       const pruneOptions = { preserveRoots: context.preserveRoots };
-      await routinesStore.revokeWorkspaceRoot(runtimeRoot, pruneOptions);
-      const pruned = await permissionManager.prunePathGrantsUnderRoot(
-        runtimeRoot,
-        pruneOptions,
-      );
+      const errors: unknown[] = [];
+      let prunedGrants = 0;
+      try {
+        await routinesStore.revokeWorkspaceRoot(runtimeRoot, pruneOptions);
+      } catch (error: unknown) {
+        errors.push(error);
+      }
+      try {
+        const pruned = await permissionManager.prunePathGrantsUnderRoot(
+          runtimeRoot,
+          pruneOptions,
+        );
+        prunedGrants = pruned.length;
+      } catch (error: unknown) {
+        errors.push(error);
+      }
+      if (errors.length > 0) {
+        throw Object.assign(
+          new AggregateError(errors, "workspace-root-durable-scope-cleanup-failed"),
+          { code: "WORKSPACE_ROOT_DURABLE_SCOPE_CLEANUP_FAILED" },
+        );
+      }
+      return prunedGrants;
+    },
+    beforeComplete: async (runtimeRoot) => {
       await detachWorkspaceRootSessions(runtimeRoot, workspaceSessionStores);
-      return pruned.length;
     },
   });
 
@@ -379,7 +398,10 @@ export async function bootstrap(
   // WorkBoardEngine/reporter, and manifest-driven plugin IPC bridges.
   await wireConversation(
     ctx,
-    rootReconciliation.removed.map((removed) => removed.runtimePath),
+    [...new Set([
+      ...rootReconciliation.removed.map((removed) => removed.runtimePath),
+      ...(rootReconciliation.inactiveRoots ?? []),
+    ])],
     isolatedConversationMemoryManagers,
   );
 

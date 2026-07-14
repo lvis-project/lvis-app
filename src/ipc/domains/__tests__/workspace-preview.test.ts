@@ -9,7 +9,10 @@ const {
   showItemInFolderMock,
   addAllowedDirectoryPersistMock,
   removeAllowedDirectoryPersistMock,
+  beginWorkspaceRootRemovalPersistMock,
+  completeWorkspaceRootRemovalPersistMock,
   additionalDirectories,
+  pendingWorkspaceRootRemovals,
 } = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   showOpenDialogMock: vi.fn(),
@@ -19,7 +22,16 @@ const {
     additionalDirectories.value = additionalDirectories.value.filter((d) => d !== dir);
     return additionalDirectories.value;
   }),
+  beginWorkspaceRootRemovalPersistMock: vi.fn(),
+  completeWorkspaceRootRemovalPersistMock: vi.fn(),
   additionalDirectories: { value: [] as string[] },
+  pendingWorkspaceRootRemovals: { value: [] as Array<{
+    operationId: string;
+    storedPath: string;
+    runtimePath: string;
+    requestedAt: string;
+    source: string;
+  }> },
 }));
 
 vi.mock("electron", () => ({
@@ -34,10 +46,15 @@ vi.mock("electron", () => ({
 
 vi.mock("../../../permissions/permission-settings-store.js", () => ({
   readPermissionSettings: () => ({
-    permissions: { additionalDirectories: additionalDirectories.value },
+    permissions: {
+      additionalDirectories: additionalDirectories.value,
+      pendingWorkspaceRootRemovals: pendingWorkspaceRootRemovals.value,
+    },
   }),
   addAllowedDirectoryPersist: addAllowedDirectoryPersistMock,
   removeAllowedDirectoryPersist: removeAllowedDirectoryPersistMock,
+  beginWorkspaceRootRemovalPersist: beginWorkspaceRootRemovalPersistMock,
+  completeWorkspaceRootRemovalPersist: completeWorkspaceRootRemovalPersistMock,
 }));
 
 import { registerPreviewHandlers } from "../preview.js";
@@ -93,7 +110,48 @@ beforeEach(() => {
   showItemInFolderMock.mockReset();
   addAllowedDirectoryPersistMock.mockClear();
   removeAllowedDirectoryPersistMock.mockClear();
+  beginWorkspaceRootRemovalPersistMock.mockReset();
+  completeWorkspaceRootRemovalPersistMock.mockReset();
   additionalDirectories.value = [root];
+  pendingWorkspaceRootRemovals.value = [];
+  let operationSequence = 0;
+  const key = (value: string) => value.replace(/\\/g, "/").toLowerCase();
+  beginWorkspaceRootRemovalPersistMock.mockImplementation(async (
+    target: string,
+    source: string,
+  ) => {
+    const existing = pendingWorkspaceRootRemovals.value.find(
+      (intent) => key(intent.runtimePath) === key(target),
+    );
+    const storedPath = additionalDirectories.value.find(
+      (candidate) => key(candidate) === key(target),
+    );
+    if (!storedPath) {
+      return existing
+        ? { intent: existing, activeDirectories: additionalDirectories.value, created: false }
+        : null;
+    }
+    operationSequence += 1;
+    const intent = existing ?? {
+      operationId: `00000000-0000-4000-8000-${String(operationSequence).padStart(12, "0")}`,
+      storedPath,
+      runtimePath: target,
+      requestedAt: new Date(0).toISOString(),
+      source,
+    };
+    additionalDirectories.value = additionalDirectories.value.filter(
+      (candidate) => key(candidate) !== key(target),
+    );
+    if (!existing) pendingWorkspaceRootRemovals.value.push(intent);
+    return { intent, activeDirectories: additionalDirectories.value, created: !existing };
+  });
+  completeWorkspaceRootRemovalPersistMock.mockImplementation(async (operationId: string) => {
+    const before = pendingWorkspaceRootRemovals.value.length;
+    pendingWorkspaceRootRemovals.value = pendingWorkspaceRootRemovals.value.filter(
+      (intent) => intent.operationId !== operationId,
+    );
+    return pendingWorkspaceRootRemovals.value.length !== before;
+  });
 });
 
 describe("preview:read-file handler", () => {
@@ -230,11 +288,16 @@ describe("workspace handlers", () => {
     };
 
     expect(res.ok).toBe(true);
-    expect(removeAllowedDirectoryPersistMock).toHaveBeenCalledWith(missingRoot, undefined);
+    expect(beginWorkspaceRootRemovalPersistMock).toHaveBeenCalledWith(
+      missingRoot,
+      "list-roots",
+      undefined,
+    );
+    expect(completeWorkspaceRootRemovalPersistMock).toHaveBeenCalledTimes(1);
     expect(res.roots?.some((entry) => entry.path === missingRoot)).toBe(false);
   });
 
-  it("listRoots retains a missing root setting when path-grant cleanup cannot persist", async () => {
+  it("listRoots keeps a missing root inactive and pending when grant cleanup fails", async () => {
     const missingRoot = join(
       tmpdir(),
       `lvis-missing-root-fail-closed-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -242,7 +305,11 @@ describe("workspace handlers", () => {
     rmSync(missingRoot, { recursive: true, force: true });
     additionalDirectories.value = [missingRoot];
     const log = vi.fn();
-    const revokeWorkspaceRoot = vi.fn();
+    const revokeWorkspaceRoot = vi.fn(() => ({
+      sessionDirectoriesRemoved: 0,
+      turnDirectoriesRemoved: 0,
+      projectRebound: false,
+    }));
     const detachSessionsFromProject = vi.fn(async () => 0);
     const lifecycleDeps = {
       auditLogger: { log },
@@ -269,19 +336,23 @@ describe("workspace handlers", () => {
       const res = (await invoke(CHANNELS.workspace.listRoots, OK_FRAME)) as {
         ok: boolean;
         roots?: Array<{ path: string; isDefault: boolean }>;
+        cleanupPending?: number;
       };
       expect(res.ok).toBe(true);
+      expect(res.cleanupPending).toBe(1);
       expect(res.roots?.some((entry) => entry.path === missingRoot)).toBe(false);
       expect(removeAllowedDirectoryPersistMock).not.toHaveBeenCalled();
-      expect(additionalDirectories.value).toEqual([missingRoot]);
-      expect(revokeWorkspaceRoot).not.toHaveBeenCalled();
-      expect(detachSessionsFromProject).not.toHaveBeenCalled();
+      expect(additionalDirectories.value).toEqual([]);
+      expect(pendingWorkspaceRootRemovals.value).toHaveLength(1);
+      expect(revokeWorkspaceRoot).toHaveBeenCalled();
+      expect(detachSessionsFromProject).toHaveBeenCalledTimes(1);
       const warningPayloads = log.mock.calls
         .map(([entry]) => entry as { type?: string; input?: string; output?: string })
         .filter((entry) => entry.type === "warn")
         .map((entry) => `${entry.input ?? ""}\n${entry.output ?? ""}`);
-      expect(warningPayloads.some((payload) => payload.includes("lifecycle-prepare-failed"))).toBe(true);
+      expect(warningPayloads.some((payload) => payload.includes("cleanup-pending"))).toBe(true);
       expect(warningPayloads.join("\n")).not.toContain("must-not-leak-list-path");
+      expect(warningPayloads.join("\n")).not.toContain(missingRoot);
     } finally {
       registerWorkspaceHandlers(deps);
     }
@@ -612,7 +683,12 @@ describe("workspace handlers", () => {
       roots?: Array<{ path: string; isDefault: boolean }>;
     };
     expect(res).toMatchObject({ ok: true, removed: root });
-    expect(removeAllowedDirectoryPersistMock).toHaveBeenCalledWith(root);
+    expect(beginWorkspaceRootRemovalPersistMock).toHaveBeenCalledWith(
+      canonicalizePathForMatch(root),
+      CHANNELS.workspace.removeRoot,
+      undefined,
+    );
+    expect(completeWorkspaceRootRemovalPersistMock).toHaveBeenCalledTimes(1);
     expect(res.roots?.some((r) => r.path === root)).toBe(false);
     expect(log).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -682,7 +758,7 @@ describe("workspace handlers", () => {
   });
 
 
-  it("detaches durable session metadata before shrinking settings, then revokes live scope", async () => {
+  it("cuts over, revokes live scope, prunes durable scope, detaches sessions, then completes", async () => {
     const revokeWorkspaceRoot = vi.fn(() => ({
       sessionDirectoriesRemoved: 1,
       turnDirectoriesRemoved: 1,
@@ -739,18 +815,192 @@ describe("workspace handlers", () => {
       });
       expect(pruneRoutineScopes).toHaveBeenCalledTimes(1);
       expect(detachSessionsFromProject).toHaveBeenCalledWith(canonicalizePathForMatch(root));
+      expect(beginWorkspaceRootRemovalPersistMock.mock.invocationCallOrder[0]).toBeLessThan(
+        revokeWorkspaceRoot.mock.invocationCallOrder[0]!,
+      );
+      expect(revokeWorkspaceRoot.mock.invocationCallOrder[0]).toBeLessThan(
+        pruneRoutineScopes.mock.invocationCallOrder[0]!,
+      );
       expect(pruneRoutineScopes.mock.invocationCallOrder[0]).toBeLessThan(
         detachSessionsFromProject.mock.invocationCallOrder[0]!,
       );
-      expect(detachSessionsFromProject.mock.invocationCallOrder[0]).toBeLessThan(
-        subAgentDetachSessionsFromProject.mock.invocationCallOrder[0]!,
-      );
       expect(subAgentDetachSessionsFromProject.mock.invocationCallOrder[0]).toBeLessThan(
-        removeAllowedDirectoryPersistMock.mock.invocationCallOrder[0]!,
+        completeWorkspaceRootRemovalPersistMock.mock.invocationCallOrder[0]!,
       );
-      expect(removeAllowedDirectoryPersistMock.mock.invocationCallOrder[0]).toBeLessThan(
-        revokeWorkspaceRoot.mock.invocationCallOrder[0]!,
+      expect(detachSessionsFromProject.mock.invocationCallOrder[0]).toBeLessThan(
+        completeWorkspaceRootRemovalPersistMock.mock.invocationCallOrder[0]!,
       );
+    } finally {
+      registerWorkspaceHandlers(deps);
+    }
+  });
+
+  it("attempts every live owner, keeps revoke failures pending, and completes on retry", async () => {
+    const mainRevoke = vi.fn()
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error("main owner revoke failed"), { code: "EIO" });
+      })
+      .mockReturnValue({
+        sessionDirectoriesRemoved: 1,
+        turnDirectoriesRemoved: 0,
+        projectRebound: false,
+      });
+    const sideRevoke = vi.fn(() => ({
+      sessionDirectoriesRemoved: 0,
+      turnDirectoriesRemoved: 1,
+      projectRebound: false,
+    }));
+    const routineRevoke = vi.fn(() => ({
+      activeLoopsVisited: 1,
+      liveScopesRevoked: 1,
+    }));
+    const subAgentRevoke = vi.fn(() => ({
+      activeChildrenVisited: 1,
+      liveScopesRevoked: 1,
+    }));
+    const primaryDetach = vi.fn(async () => 1);
+    const sideDetach = vi.fn(async () => 1);
+    const subAgentDetach = vi.fn(async () => 1);
+    const pruneRoutineScopes = vi.fn(async () => ({
+      routinesUpdated: 0,
+      directoriesRemoved: 0,
+    }));
+    const prunePathGrants = vi.fn(async () => []);
+    const subAgentRunner = {
+      detachSessionsFromProject: subAgentDetach,
+      revokeWorkspaceRoot: subAgentRevoke,
+    };
+    const lifecycleDeps = {
+      auditLogger: { log: vi.fn() },
+      getMainWindow: () => null,
+      memoryManager: { detachSessionsFromProject: primaryDetach },
+      conversationLoop: {
+        deps: {},
+        permissionManager: { prunePathGrantsUnderRoot: prunePathGrants },
+        revokeWorkspaceRoot: mainRevoke,
+      },
+      sideChatConversationLoop: {
+        deps: { memoryManager: { detachSessionsFromProject: sideDetach } },
+        revokeWorkspaceRoot: sideRevoke,
+      },
+      routineEngine: { revokeWorkspaceRoot: routineRevoke },
+      getSubAgentRunner: () => subAgentRunner,
+      routinesStore: { revokeWorkspaceRoot: pruneRoutineScopes },
+    } as never;
+    registerWorkspaceHandlers(lifecycleDeps);
+
+    try {
+      const first = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, root)) as {
+        ok: boolean;
+        cleanupPending?: boolean;
+      };
+
+      expect(first).toMatchObject({ ok: true, cleanupPending: true });
+      expect(mainRevoke).toHaveBeenCalledTimes(1);
+      expect(sideRevoke).toHaveBeenCalledTimes(1);
+      expect(routineRevoke).toHaveBeenCalledTimes(1);
+      expect(subAgentRevoke).toHaveBeenCalledTimes(1);
+      expect(pruneRoutineScopes).toHaveBeenCalledTimes(1);
+      expect(prunePathGrants).toHaveBeenCalledTimes(1);
+      expect(primaryDetach).toHaveBeenCalledTimes(1);
+      expect(sideDetach).toHaveBeenCalledTimes(1);
+      expect(subAgentDetach).toHaveBeenCalledTimes(1);
+      expect(pendingWorkspaceRootRemovals.value).toHaveLength(1);
+      expect(completeWorkspaceRootRemovalPersistMock).not.toHaveBeenCalled();
+
+      const second = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, root)) as {
+        ok: boolean;
+        cleanupPending?: boolean;
+      };
+
+      expect(second).toMatchObject({ ok: true });
+      expect(second.cleanupPending).toBeUndefined();
+      expect(mainRevoke).toHaveBeenCalledTimes(2);
+      expect(sideRevoke).toHaveBeenCalledTimes(2);
+      expect(routineRevoke).toHaveBeenCalledTimes(2);
+      expect(subAgentRevoke).toHaveBeenCalledTimes(2);
+      expect(pruneRoutineScopes).toHaveBeenCalledTimes(2);
+      expect(prunePathGrants).toHaveBeenCalledTimes(2);
+      expect(primaryDetach).toHaveBeenCalledTimes(2);
+      expect(sideDetach).toHaveBeenCalledTimes(2);
+      expect(subAgentDetach).toHaveBeenCalledTimes(2);
+      expect(completeWorkspaceRootRemovalPersistMock).toHaveBeenCalledTimes(1);
+      expect(pendingWorkspaceRootRemovals.value).toEqual([]);
+    } finally {
+      registerWorkspaceHandlers(deps);
+    }
+  });
+
+  it.each([
+    ["undefined", undefined],
+    ["NaN direct count", { liveScopesRevoked: Number.NaN }],
+    ["incomplete directory counts", { sessionDirectoriesRemoved: 1 }],
+  ])("keeps malformed %s live revoke results pending after attempting every phase", async (_label, result) => {
+    const log = vi.fn();
+    const mainRevoke = vi.fn(() => result);
+    const sideRevoke = vi.fn(() => ({
+      sessionDirectoriesRemoved: 0,
+      turnDirectoriesRemoved: 0,
+      projectRebound: false,
+    }));
+    const routineRevoke = vi.fn(() => ({
+      activeLoopsVisited: 0,
+      liveScopesRevoked: 0,
+    }));
+    const subAgentRevoke = vi.fn(() => ({
+      activeChildrenVisited: 0,
+      liveScopesRevoked: 0,
+    }));
+    const pruneRoutineScopes = vi.fn(async () => ({
+      routinesUpdated: 0,
+      directoriesRemoved: 0,
+    }));
+    const prunePathGrants = vi.fn(async () => []);
+    const detachSessionsFromProject = vi.fn(async () => 0);
+    registerWorkspaceHandlers({
+      auditLogger: { log },
+      getMainWindow: () => null,
+      memoryManager: { detachSessionsFromProject },
+      conversationLoop: {
+        deps: {},
+        permissionManager: { prunePathGrantsUnderRoot: prunePathGrants },
+        revokeWorkspaceRoot: mainRevoke,
+      },
+      sideChatConversationLoop: {
+        deps: {},
+        revokeWorkspaceRoot: sideRevoke,
+      },
+      routineEngine: { revokeWorkspaceRoot: routineRevoke },
+      getSubAgentRunner: () => ({
+        detachSessionsFromProject: vi.fn(async () => 0),
+        revokeWorkspaceRoot: subAgentRevoke,
+      }),
+      routinesStore: { revokeWorkspaceRoot: pruneRoutineScopes },
+    } as never);
+
+    try {
+      const response = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, root)) as {
+        ok: boolean;
+        cleanupPending?: boolean;
+      };
+
+      expect(response).toMatchObject({ ok: true, cleanupPending: true });
+      expect(mainRevoke).toHaveBeenCalledTimes(1);
+      expect(sideRevoke).toHaveBeenCalledTimes(1);
+      expect(routineRevoke).toHaveBeenCalledTimes(1);
+      expect(subAgentRevoke).toHaveBeenCalledTimes(1);
+      expect(pruneRoutineScopes).toHaveBeenCalledTimes(1);
+      expect(prunePathGrants).toHaveBeenCalledTimes(1);
+      expect(detachSessionsFromProject).toHaveBeenCalledTimes(1);
+      expect(completeWorkspaceRootRemovalPersistMock).not.toHaveBeenCalled();
+      expect(pendingWorkspaceRootRemovals.value).toHaveLength(1);
+      const warning = log.mock.calls
+        .map(([entry]) => entry as { type?: string; input?: string })
+        .find((entry) =>
+          entry.type === "warn" &&
+          entry.input?.includes("WORKSPACE_ROOT_LIVE_SCOPE_REVOKE_INVALID_RESULT")
+        );
+      expect(warning).toBeDefined();
     } finally {
       registerWorkspaceHandlers(deps);
     }
@@ -810,9 +1060,10 @@ describe("workspace handlers", () => {
 
       expect(removed).toMatchObject({ ok: true, removed: root });
       expect(picked).toMatchObject({ ok: true, added: canonicalizePathForMatch(root) });
-      expect(removeAllowedDirectoryPersistMock).toHaveBeenCalledWith(root);
+      expect(beginWorkspaceRootRemovalPersistMock).toHaveBeenCalled();
+      expect(completeWorkspaceRootRemovalPersistMock).toHaveBeenCalled();
       expect(addAllowedDirectoryPersistMock).toHaveBeenCalledWith(canonicalizePathForMatch(root));
-      expect(removeAllowedDirectoryPersistMock.mock.invocationCallOrder[0]).toBeLessThan(
+      expect(completeWorkspaceRootRemovalPersistMock.mock.invocationCallOrder[0]).toBeLessThan(
         addAllowedDirectoryPersistMock.mock.invocationCallOrder[0]!,
       );
     } finally {
@@ -821,14 +1072,20 @@ describe("workspace handlers", () => {
     }
   });
 
-  it("fails closed with a stable error when durable routine scope prune fails", async () => {
+  it("keeps removal inactive and pending when durable routine scope prune fails", async () => {
     const log = vi.fn();
     const pruneError = Object.assign(new Error("must-not-leak-path"), { code: "EACCES" });
+    const prunePathGrants = vi.fn(async () => []);
+    const detachSessionsFromProject = vi.fn(async () => 0);
+    const pruneRoutineScopes = vi.fn(async () => {
+      throw pruneError;
+    });
     const lifecycleDeps = {
       auditLogger: { log },
       getMainWindow: () => null,
+      memoryManager: { detachSessionsFromProject },
       conversationLoop: {
-        permissionManager: undefined,
+        permissionManager: { prunePathGrantsUnderRoot: prunePathGrants },
         revokeWorkspaceRoot: vi.fn(() => ({
           sessionDirectoriesRemoved: 0,
           turnDirectoriesRemoved: 0,
@@ -836,25 +1093,26 @@ describe("workspace handlers", () => {
         })),
       },
       routinesStore: {
-        revokeWorkspaceRoot: vi.fn(async () => {
-          throw pruneError;
-        }),
+        revokeWorkspaceRoot: pruneRoutineScopes,
       },
     } as never;
     registerWorkspaceHandlers(lifecycleDeps);
     try {
       const res = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, root)) as {
         ok: boolean;
-        error?: string;
-        message?: string;
+        cleanupPending?: boolean;
       };
       expect(res).toMatchObject({
-        ok: false,
-        error: "lifecycle-failed",
-        message: "workspace lifecycle update failed",
+        ok: true,
+        cleanupPending: true,
       });
       expect(removeAllowedDirectoryPersistMock).not.toHaveBeenCalled();
-      expect(additionalDirectories.value).toEqual([root]);
+      expect(additionalDirectories.value).toEqual([]);
+      expect(pendingWorkspaceRootRemovals.value).toHaveLength(1);
+      expect(completeWorkspaceRootRemovalPersistMock).not.toHaveBeenCalled();
+      expect(pruneRoutineScopes).toHaveBeenCalledTimes(1);
+      expect(prunePathGrants).toHaveBeenCalledTimes(1);
+      expect(detachSessionsFromProject).toHaveBeenCalledTimes(1);
       const warning = log.mock.calls
         .map(([entry]) => entry as { type?: string; input?: string })
         .find((entry) => entry.type === "warn" && entry.input?.includes("prune-routine-scopes"));
@@ -869,9 +1127,13 @@ describe("workspace handlers", () => {
       registerWorkspaceHandlers(deps);
     }
   });
-  it("retains the project and suppresses live detach when path-grant pruning fails", async () => {
+  it("revokes live scope and leaves cleanup pending when path-grant pruning fails", async () => {
     const log = vi.fn();
-    const revokeWorkspaceRoot = vi.fn();
+    const revokeWorkspaceRoot = vi.fn(() => ({
+      sessionDirectoriesRemoved: 0,
+      turnDirectoriesRemoved: 0,
+      projectRebound: false,
+    }));
     const detachSessionsFromProject = vi.fn(async () => 0);
     const pruneError = Object.assign(new Error("must-not-leak-grant-path"), {
       code: "EIO",
@@ -900,18 +1162,17 @@ describe("workspace handlers", () => {
     try {
       const res = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, root)) as {
         ok: boolean;
-        error?: string;
-        message?: string;
+        cleanupPending?: boolean;
       };
       expect(res).toMatchObject({
-        ok: false,
-        error: "lifecycle-failed",
-        message: "workspace lifecycle update failed",
+        ok: true,
+        cleanupPending: true,
       });
       expect(removeAllowedDirectoryPersistMock).not.toHaveBeenCalled();
-      expect(additionalDirectories.value).toEqual([root]);
-      expect(revokeWorkspaceRoot).not.toHaveBeenCalled();
-      expect(detachSessionsFromProject).not.toHaveBeenCalled();
+      expect(additionalDirectories.value).toEqual([]);
+      expect(pendingWorkspaceRootRemovals.value).toHaveLength(1);
+      expect(revokeWorkspaceRoot).toHaveBeenCalled();
+      expect(detachSessionsFromProject).toHaveBeenCalledTimes(1);
       const warning = log.mock.calls
         .map(([entry]) => entry as { type?: string; input?: string })
         .find((entry) => entry.type === "warn" && entry.input?.includes("prune-path-grants"));
@@ -927,12 +1188,16 @@ describe("workspace handlers", () => {
     }
   });
 
-  it("fails closed before settings shrink when session metadata detach fails", async () => {
+  it("keeps guards and pending intent when session metadata detach fails", async () => {
     const allowProjectRoot = vi.fn();
     const detachSessionsFromProject = vi.fn(async () => {
       throw Object.assign(new Error("must-not-leak-metadata-path"), { code: "EIO" });
     });
-    const revokeWorkspaceRoot = vi.fn();
+    const revokeWorkspaceRoot = vi.fn(() => ({
+      sessionDirectoriesRemoved: 0,
+      turnDirectoriesRemoved: 0,
+      projectRebound: false,
+    }));
     const log = vi.fn();
     registerWorkspaceHandlers({
       auditLogger: { log },
@@ -952,13 +1217,14 @@ describe("workspace handlers", () => {
     try {
       const res = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, root)) as {
         ok: boolean;
-        error?: string;
+        cleanupPending?: boolean;
       };
-      expect(res).toMatchObject({ ok: false, error: "lifecycle-failed" });
+      expect(res).toMatchObject({ ok: true, cleanupPending: true });
       expect(removeAllowedDirectoryPersistMock).not.toHaveBeenCalled();
-      expect(additionalDirectories.value).toEqual([root]);
-      expect(revokeWorkspaceRoot).not.toHaveBeenCalled();
-      expect(allowProjectRoot).toHaveBeenCalledWith(canonicalizePathForMatch(root));
+      expect(additionalDirectories.value).toEqual([]);
+      expect(pendingWorkspaceRootRemovals.value).toHaveLength(1);
+      expect(revokeWorkspaceRoot).toHaveBeenCalled();
+      expect(allowProjectRoot).not.toHaveBeenCalled();
       expect(JSON.stringify(res)).not.toContain("must-not-leak-metadata-path");
       expect(JSON.stringify(log.mock.calls)).not.toContain("must-not-leak-metadata-path");
     } finally {
@@ -1047,7 +1313,7 @@ describe("workspace handlers", () => {
     }
   });
 
-  it("fails closed when the permission manager is unavailable", async () => {
+  it("keeps removal pending when the permission manager is unavailable", async () => {
     registerWorkspaceHandlers({
       auditLogger: { log: vi.fn() },
       getMainWindow: () => null,
@@ -1058,17 +1324,17 @@ describe("workspace handlers", () => {
     try {
       const res = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, root)) as {
         ok: boolean;
-        error?: string;
+        cleanupPending?: boolean;
       };
-      expect(res).toMatchObject({ ok: false, error: "lifecycle-failed" });
+      expect(res).toMatchObject({ ok: true, cleanupPending: true });
       expect(removeAllowedDirectoryPersistMock).not.toHaveBeenCalled();
-      expect(additionalDirectories.value).toEqual([root]);
+      expect(additionalDirectories.value).toEqual([]);
     } finally {
       registerWorkspaceHandlers(deps);
     }
   });
 
-  it("fails closed when the routines store is unavailable", async () => {
+  it("keeps removal pending when the routines store is unavailable", async () => {
     registerWorkspaceHandlers({
       auditLogger: { log: vi.fn() },
       getMainWindow: () => null,
@@ -1079,11 +1345,11 @@ describe("workspace handlers", () => {
     try {
       const res = (await invoke(CHANNELS.workspace.removeRoot, OK_FRAME, root)) as {
         ok: boolean;
-        error?: string;
+        cleanupPending?: boolean;
       };
-      expect(res).toMatchObject({ ok: false, error: "lifecycle-failed" });
+      expect(res).toMatchObject({ ok: true, cleanupPending: true });
       expect(removeAllowedDirectoryPersistMock).not.toHaveBeenCalled();
-      expect(additionalDirectories.value).toEqual([root]);
+      expect(additionalDirectories.value).toEqual([]);
     } finally {
       registerWorkspaceHandlers(deps);
     }

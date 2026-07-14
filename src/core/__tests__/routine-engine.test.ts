@@ -224,4 +224,41 @@ describe("RoutineEngine workspace lifecycle", () => {
     });
     expect(revokeWorkspaceRoot).toHaveBeenCalledTimes(1);
   });
+
+  it("attempts every active loop before surfacing aggregate revoke failures", () => {
+    const first = vi.fn(() => ({
+      sessionDirectoriesRemoved: 1,
+      turnDirectoriesRemoved: 0,
+      projectRebound: false,
+    }));
+    const failing = vi.fn(() => {
+      throw new Error("routine child revoke failed");
+    });
+    const last = vi.fn(() => ({
+      sessionDirectoriesRemoved: 0,
+      turnDirectoriesRemoved: 1,
+      projectRebound: false,
+    }));
+    const engine = new RoutineEngine({} as never);
+    const activeLoops = (engine as unknown as {
+      activeLoops: Set<{ revokeWorkspaceRoot: ReturnType<typeof vi.fn> }>;
+    }).activeLoops;
+    activeLoops.add({ revokeWorkspaceRoot: first });
+    activeLoops.add({ revokeWorkspaceRoot: failing });
+    activeLoops.add({ revokeWorkspaceRoot: last });
+
+    let thrown: unknown;
+    try {
+      engine.revokeWorkspaceRoot(resolve("routine-failing-root"));
+    } catch (error: unknown) {
+      thrown = error;
+    }
+
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(failing).toHaveBeenCalledTimes(1);
+    expect(last).toHaveBeenCalledTimes(1);
+    expect(thrown).toBeInstanceOf(AggregateError);
+    expect(thrown).toMatchObject({ code: "ROUTINE_WORKSPACE_ROOT_REVOKE_FAILED" });
+    expect((thrown as AggregateError).errors).toHaveLength(1);
+  });
 });

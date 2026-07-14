@@ -6,6 +6,7 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, re
 import { createHash } from "node:crypto";
 import { join, resolve, basename } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
+import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
@@ -790,6 +791,19 @@ export class MemoryManager {
     return this.projectRootGenerations.get(key) ?? 0;
   }
 
+  /**
+   * Stable coordination target for metadata save/detach/delete.
+   *
+   * Locking the metadata file itself is unsafe because withFileLock must touch
+   * a missing target before acquisition. A delete between detach's directory
+   * snapshot and lock acquisition could therefore recreate the deleted path.
+   * This sidecar survives session deletion and gives all three operations one
+   * inode-independent serialization point.
+   */
+  private sessionMetadataLockPath(sessionId: string): string {
+    return join(this.sessionsDir, ".metadata-locks", `${sessionId}.target`);
+  }
+
   private bumpProjectRootGeneration(key: string): void {
     this.projectRootGenerations.set(key, this.projectRootGeneration(key) + 1);
   }
@@ -1161,6 +1175,61 @@ export class MemoryManager {
     }
   }
 
+  /**
+   * Rebuild every current session search row from the JSONL source of truth.
+   *
+   * Project detach is retryable: metadata may already be detached when a
+   * process crashes before its denormalized FTS row is updated. Replacing the
+   * whole index on every detach invocation repairs that state even when the
+   * retry has zero metadata files left to change. Unlike ordinary best-effort
+   * incremental indexing, this lifecycle path throws on reset/open/count
+   * failure so workspace removal retains its durable intent for a later retry.
+   */
+  private repairAllSessionSearchRowsForProjectDetach(): void {
+    const dbPath = this.searchIndex.getDbPath();
+    this.searchIndex.close();
+    try {
+      for (const suffix of ["", "-wal", "-shm"]) {
+        try {
+          unlinkSync(`${dbPath}${suffix}`);
+        } catch (error) {
+          if (!isMissingPathError(error)) throw error;
+        }
+      }
+      if (!this.searchIndex.open()) {
+        throw new Error("search index could not be opened after reset");
+      }
+
+      let expectedRows = 0;
+      const sessionFiles = readdirIfPresent(this.sessionsDir)
+        .filter((file) => file.endsWith(".jsonl"))
+        .sort();
+      for (const file of sessionFiles) {
+        const sessionId = file.slice(0, -".jsonl".length);
+        if (!isValidSessionId(sessionId)) continue;
+        const messages = this.loadSession(sessionId);
+        if (!Array.isArray(messages)) continue;
+        const input = this.buildIndexInput(sessionId, messages);
+        if (!input) continue;
+        this.searchIndex.upsertSession(input);
+        expectedRows += 1;
+      }
+      const actualRows = this.searchIndex.rowCount();
+      if (actualRows !== expectedRows) {
+        throw new Error(
+          `search index row count mismatch (expected ${expectedRows}, got ${actualRows})`,
+        );
+      }
+    } catch (cause) {
+      throw Object.assign(
+        new Error("workspace session search index repair failed"),
+        { code: "SESSION_SEARCH_INDEX_REPAIR_FAILED", cause },
+      );
+    } finally {
+      this.searchIndex.close();
+    }
+  }
+
 
   /**
    * Boot-time integrity check → rebuild-from-JSONL recovery path (#1500 /
@@ -1403,7 +1472,7 @@ export class MemoryManager {
     const capturedRootGeneration = guardedProjectKey
       ? this.projectRootGeneration(guardedProjectKey)
       : undefined;
-    await withFileLock(targetPath, async () => {
+    await withFileLock(this.sessionMetadataLockPath(sessionId), async () => {
       const sessionTombstones = this.detachedProjectRootsBySession.get(sessionId);
       const rootIsDetached = Boolean(
         guardedProjectKey && this.detachedProjectRoots.has(guardedProjectKey),
@@ -1436,7 +1505,7 @@ export class MemoryManager {
         safe = detachProjectBinding(safe);
         this.rememberDetachedWireTerminal(sessionId, safe);
       }
-      writeFileSync(targetPath, JSON.stringify(safe, null, 2), "utf-8");
+      writeUtf8FileAtomicSync(targetPath, JSON.stringify(safe, null, 2));
     });
     // Metadata (sessionKind/routineId/projectRoot/title) is denormalized into
     // the FTS row (#1500 / E3) — re-index whenever it changes, not just on
@@ -1476,63 +1545,88 @@ export class MemoryManager {
     this.bumpProjectRootGeneration(key);
     this.detachedProjectRoots.add(key);
 
+    type DetachPlan = {
+      sessionId: string;
+      targetPath: string;
+      normalized: SessionMetadata;
+      next: Record<string, unknown>;
+    };
+    const metadataTargets = readdirIfPresent(this.sessionsDir)
+      .filter((file) => file.endsWith(".meta.json"))
+      .map((file) => ({
+        sessionId: file.slice(0, -".meta.json".length),
+        targetPath: join(this.sessionsDir, file),
+      }))
+      .filter(({ sessionId }) => isValidSessionId(sessionId))
+      .sort((a, b) => a.targetPath.localeCompare(b.targetPath));
+
     let detachedCount = 0;
-    let invalidMetadataDetected = false;
-    const metadataFiles = readdirIfPresent(this.sessionsDir).filter((file) => file.endsWith(".meta.json"));
-    for (const file of metadataFiles) {
-      const sessionId = file.slice(0, -".meta.json".length);
-      if (!isValidSessionId(sessionId)) continue;
-      const targetPath = join(this.sessionsDir, file);
-      let changed = false;
+    const withAllMetadataLocks = async <T>(
+      index: number,
+      action: () => Promise<T>,
+    ): Promise<T> => {
+      const target = metadataTargets[index];
+      if (!target) return await action();
+      return await withFileLock(
+        this.sessionMetadataLockPath(target.sessionId),
+        async () => await withAllMetadataLocks(index + 1, action),
+      );
+    };
 
-      await withFileLock(targetPath, async () => {
-        const raw = readUtf8FileIfPresent(targetPath);
-        if (raw === null) return;
+    await withAllMetadataLocks(0, async () => {
+      const plans: DetachPlan[] = [];
+      // Phase 1: validate every metadata file while every candidate lock is
+      // held. No file is rewritten until the complete preflight succeeds.
+      for (const { sessionId, targetPath } of metadataTargets) {
         try {
+          const raw = readUtf8FileIfPresent(targetPath);
+          if (raw === null) continue;
           const parsed = JSON.parse(raw) as Record<string, unknown>;
-          if (!parsed || typeof parsed !== "object") return;
-          const storedRoot = typeof parsed.projectRoot === "string" ? parsed.projectRoot : undefined;
-          if (!storedRoot || !projectRootEquals(storedRoot, projectRoot)) return;
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new TypeError("session metadata must be an object");
+          }
+          const storedRoot = typeof parsed.projectRoot === "string"
+            ? parsed.projectRoot
+            : undefined;
+          if (!storedRoot || !projectRootEquals(storedRoot, projectRoot)) continue;
           const normalized = normalizeSessionMetadata(parsed);
-
-          const sessionTombstones = this.detachedProjectRootsBySession.get(sessionId) ?? new Set<string>();
-          sessionTombstones.add(key);
-          this.detachedProjectRootsBySession.set(sessionId, sessionTombstones);
           const terminalTombstone = this.detachedWireTerminalTombstones.get(sessionId);
           const next = terminalTombstone
             ? applyDetachedWireTerminalTombstone(parsed, terminalTombstone)
             : detachProjectBinding(parsed);
-          if (!terminalTombstone) {
-            this.rememberDetachedWireTerminal(sessionId, {
-              ...normalized,
-              subAgentTaskState: (next as Partial<SessionMetadata>).subAgentTaskState,
-            });
-          }
-          writeFileSync(targetPath, JSON.stringify(next, null, 2), "utf-8");
-          changed = true;
+          plans.push({ sessionId, targetPath, normalized, next });
         } catch (error) {
-          // JSON parser diagnostics can echo source fragments. Metadata may
-          // contain private conversation context, so log only a stable class.
+          // Parser diagnostics can echo private metadata fragments. Preserve a
+          // stable retryable error without exposing source text.
           const errorName = error instanceof Error ? error.name : "UnknownError";
           log.warn("detachSessionsFromProject: invalid metadata for %s (%s)", sessionId, errorName);
-          invalidMetadataDetected = true;
+          throw Object.assign(new Error("workspace session metadata detach incomplete"), {
+            code: "SESSION_METADATA_INVALID",
+            cause: error,
+          });
         }
-      });
-
-      if (!changed) continue;
-      detachedCount += 1;
-      const messages = this.loadSession(sessionId);
-      if (Array.isArray(messages)) {
-        this.indexSessionForSearch(sessionId, messages);
-      } else {
-        this.deleteSessionFromSearchIndex(sessionId);
       }
-    }
-    if (invalidMetadataDetected) {
-      throw Object.assign(new Error("workspace session metadata detach incomplete"), {
-        code: "SESSION_METADATA_INVALID",
-      });
-    }
+
+      // Phase 2: atomic per-file replacement. An I/O failure may leave earlier
+      // files detached, but the root intent remains active and a retry repairs
+      // both metadata and the complete search index.
+      for (const { sessionId, targetPath, normalized, next } of plans) {
+        writeUtf8FileAtomicSync(targetPath, JSON.stringify(next, null, 2));
+        const sessionTombstones = this.detachedProjectRootsBySession.get(sessionId)
+          ?? new Set<string>();
+        sessionTombstones.add(key);
+        this.detachedProjectRootsBySession.set(sessionId, sessionTombstones);
+        if (!this.detachedWireTerminalTombstones.has(sessionId)) {
+          this.rememberDetachedWireTerminal(sessionId, {
+            ...normalized,
+            subAgentTaskState: (next as Partial<SessionMetadata>).subAgentTaskState,
+          });
+        }
+        detachedCount += 1;
+      }
+    });
+
+    this.repairAllSessionSearchRowsForProjectDetach();
     return detachedCount;
   }
 
@@ -1774,50 +1868,54 @@ export class MemoryManager {
   /**
    * Delete a session: JSONL, metadata, and sibling compact archives,
    * snapshots, sidecars, and diff-cache state.
+   * The stable metadata lock target intentionally remains so operations that
+   * were already waiting on that session keep the same serialization point.
    *
    * The compact pipeline stores oversized message fragments under
    * `sessions/<sessionId>/truncated/` and `sessions/.checkpoints/<sessionId>/`.
    * Remove those with the transcript so no orphaned fragments remain.
    */
-  deleteSession(sessionId: string): void {
+  async deleteSession(sessionId: string): Promise<void> {
     if (!isValidSessionId(sessionId)) {
       log.warn({ sessionId }, "unsafe caller-provided sessionId rejected in deleteSession");
       return;
     }
-    this.detachedProjectRootsBySession.delete(sessionId);
-    this.detachedWireTerminalTombstones.delete(sessionId);
-    const jsonlPath = join(this.sessionsDir, `${sessionId}.jsonl`);
-    unlinkIfPresent(jsonlPath);
-    const metaPath = join(this.sessionsDir, `${sessionId}.meta.json`);
-    unlinkIfPresent(metaPath);
-    const sessionDir = join(this.sessionsDir, sessionId);
-    try {
-      rmSync(sessionDir, { recursive: true, force: true });
-    } catch (err) {
-      log.warn(`deleteSession: failed to remove session dir ${sessionDir}: ${(err as Error).message}`);
-    }
-    const checkpointSnapshotDir = join(this.checkpointsDir, sessionId);
-    try {
-      rmSync(checkpointSnapshotDir, { recursive: true, force: true });
-    } catch (err) {
-      log.warn(`deleteSession: failed to remove checkpoint snapshot dir ${checkpointSnapshotDir}: ${(err as Error).message}`);
-    }
-    const diffCacheDir = join(this.lvisDir, "diff-cache", sessionId);
-    try {
-      rmSync(diffCacheDir, { recursive: true, force: true });
-    } catch (err) {
-      log.warn(`deleteSession: failed to remove diff cache dir ${diffCacheDir}: ${(err as Error).message}`);
-    }
-    // Drop the session's FTS row too (#1500 / E3) — otherwise a deleted
-    // session lingers as an orphaned, still-searchable hit. Per-op
-    // open→delete→close (no persistent handle; mirrors indexSessionForSearch).
-    if (this.searchIndex.open()) {
+    await withFileLock(this.sessionMetadataLockPath(sessionId), async () => {
+      this.detachedProjectRootsBySession.delete(sessionId);
+      this.detachedWireTerminalTombstones.delete(sessionId);
+      const jsonlPath = join(this.sessionsDir, `${sessionId}.jsonl`);
+      unlinkIfPresent(jsonlPath);
+      const metaPath = join(this.sessionsDir, `${sessionId}.meta.json`);
+      unlinkIfPresent(metaPath);
+      const sessionDir = join(this.sessionsDir, sessionId);
       try {
-        this.searchIndex.deleteSession(sessionId);
-      } finally {
-        this.searchIndex.close();
+        rmSync(sessionDir, { recursive: true, force: true });
+      } catch (err) {
+        log.warn(`deleteSession: failed to remove session dir ${sessionDir}: ${(err as Error).message}`);
       }
-    }
+      const checkpointSnapshotDir = join(this.checkpointsDir, sessionId);
+      try {
+        rmSync(checkpointSnapshotDir, { recursive: true, force: true });
+      } catch (err) {
+        log.warn(`deleteSession: failed to remove checkpoint snapshot dir ${checkpointSnapshotDir}: ${(err as Error).message}`);
+      }
+      const diffCacheDir = join(this.lvisDir, "diff-cache", sessionId);
+      try {
+        rmSync(diffCacheDir, { recursive: true, force: true });
+      } catch (err) {
+        log.warn(`deleteSession: failed to remove diff cache dir ${diffCacheDir}: ${(err as Error).message}`);
+      }
+      // Drop the session's FTS row too (#1500 / E3) — otherwise a deleted
+      // session lingers as an orphaned, still-searchable hit. Per-op
+      // open→delete→close (no persistent handle; mirrors indexSessionForSearch).
+      if (this.searchIndex.open()) {
+        try {
+          this.searchIndex.deleteSession(sessionId);
+        } finally {
+          this.searchIndex.close();
+        }
+      }
+    });
   }
 
   private toolResultArtifactsDir(sessionId: string): string {

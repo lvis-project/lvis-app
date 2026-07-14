@@ -127,6 +127,7 @@ describe("reconcileWorkspaceRoots", () => {
       expect(serializedAudit).toContain(code);
       expect(serializedAudit).not.toContain("sensitive filesystem detail");
       expect(serializedAudit).not.toContain(dir);
+      if (process.platform !== "win32") expect(serializedAudit).not.toContain("/tmp");
     },
   );
 
@@ -213,7 +214,7 @@ describe("reconcileWorkspaceRoots", () => {
   });
 
 
-  it("retains a confirmed missing root when durable pre-removal cleanup fails", async () => {
+  it("keeps a confirmed missing root inactive and journaled when cleanup fails", async () => {
     const { dir, path } = tempSettings();
     await seed(path, [dir]);
     const runtimePath = sanitizeRuntimeAllowedDirectories([dir])[0]!;
@@ -241,17 +242,18 @@ describe("reconcileWorkspaceRoots", () => {
       preserveRoots: [],
     });
     expect(result.removed).toEqual([]);
-    expect(result.retained).toEqual([{
+    expect(result.retained).toEqual([]);
+    expect(result.pending).toEqual([expect.objectContaining({
       storedPath: dir,
       runtimePath,
-      reason: "persist-error",
       code: "EACCES",
-    }]);
-    expect(readPermissionSettings(path).permissions.additionalDirectories).toEqual([dir]);
+    })]);
+    expect(readPermissionSettings(path).permissions.additionalDirectories).toEqual([]);
+    expect(readPermissionSettings(path).permissions.pendingWorkspaceRootRemovals).toHaveLength(1);
     expect(prunePathGrantsUnderRoot).not.toHaveBeenCalled();
     expect(onRemoved).not.toHaveBeenCalled();
     const serializedAudit = JSON.stringify(auditLog.mock.calls);
-    expect(serializedAudit).toContain("lifecycle-prepare-failed");
+    expect(serializedAudit).toContain("cleanup-pending");
     expect(serializedAudit).toContain("EACCES");
     expect(serializedAudit).not.toContain("private lifecycle failure");
     expect(serializedAudit).not.toContain(dir);
@@ -294,7 +296,76 @@ describe("reconcileWorkspaceRoots", () => {
     expect(readPermissionSettings(path).permissions.additionalDirectories).toEqual([childRoot]);
   });
 
-  it("keeps removal durable when best-effort grant pruning fails without leaking the error", async () => {
+  it("attempts every cleanup phase and leaves completion pending when earlier phases fail", async () => {
+    const { dir, path } = tempSettings();
+    await seed(path, [dir]);
+    const events: string[] = [];
+    const result = await reconcileWorkspaceRoots({
+      source: "boot",
+      settingsPath: path,
+      statFn: vi.fn(async () => {
+        throw codedError("ENOENT");
+      }),
+      onInactive: vi.fn(async () => {
+        events.push("inactive");
+        throw codedError("EIO");
+      }),
+      beforeRemove: vi.fn(async () => {
+        events.push("durable");
+        throw codedError("EACCES");
+      }),
+      beforeComplete: vi.fn(async () => {
+        events.push("sessions");
+        throw codedError("EBUSY");
+      }),
+    });
+
+    expect(events).toEqual(["inactive", "durable", "sessions"]);
+    expect(result.removed).toEqual([]);
+    expect(result.pending).toEqual([
+      expect.objectContaining({ storedPath: dir, code: "EIO" }),
+    ]);
+    expect(readPermissionSettings(path).permissions.additionalDirectories).toEqual([]);
+    expect(readPermissionSettings(path).permissions.pendingWorkspaceRootRemovals).toHaveLength(1);
+  });
+
+  it("resumes a pending intent in live→routines/grants→sessions→complete order", async () => {
+    const { dir, path } = tempSettings();
+    await seed(path, [dir]);
+    const events: string[] = [];
+    let failSessionDetach = true;
+    const options = {
+      source: "boot" as const,
+      settingsPath: path,
+      statFn: vi.fn(async () => {
+        throw codedError("ENOENT");
+      }),
+      onInactive: vi.fn(async () => { events.push("inactive"); }),
+      beforeRemove: vi.fn(async () => {
+        events.push("durable");
+        return 2;
+      }),
+      beforeComplete: vi.fn(async () => {
+        events.push("sessions");
+        if (failSessionDetach) throw codedError("EIO");
+      }),
+    };
+
+    const first = await reconcileWorkspaceRoots(options);
+    expect(events).toEqual(["inactive", "durable", "sessions"]);
+    expect(first.pending).toHaveLength(1);
+    expect(readPermissionSettings(path).permissions.additionalDirectories).toEqual([]);
+
+    events.length = 0;
+    failSessionDetach = false;
+    const second = await reconcileWorkspaceRoots(options);
+    expect(events).toEqual(["inactive", "durable", "sessions"]);
+    expect(second.pending).toBeUndefined();
+    expect(second.inactiveRoots).toContain(sanitizeRuntimeAllowedDirectories([dir])[0]);
+    expect(readPermissionSettings(path).permissions.pendingWorkspaceRootRemovals).toEqual([]);
+  });
+
+  it("keeps removal pending when grant pruning fails without leaking the error", async () => {
     const { dir, path } = tempSettings();
     await seed(path, [dir]);
     const auditLog = vi.fn();
@@ -312,10 +383,12 @@ describe("reconcileWorkspaceRoots", () => {
       auditLogger: { log: auditLog },
     });
 
-    expect(result.removed[0]).toMatchObject({ storedPath: dir, prunedGrants: 0 });
+    expect(result.removed).toEqual([]);
+    expect(result.pending?.[0]).toMatchObject({ storedPath: dir, prunedGrants: 0, code: "EIO" });
     expect(readPermissionSettings(path).permissions.additionalDirectories).toEqual([]);
+    expect(readPermissionSettings(path).permissions.pendingWorkspaceRootRemovals).toHaveLength(1);
     const serializedAudit = JSON.stringify(auditLog.mock.calls);
-    expect(serializedAudit).toContain("grant-prune-failed");
+    expect(serializedAudit).toContain("cleanup-pending");
     expect(serializedAudit).toContain("EIO");
     expect(serializedAudit).not.toContain("private grant-store failure");
   });
