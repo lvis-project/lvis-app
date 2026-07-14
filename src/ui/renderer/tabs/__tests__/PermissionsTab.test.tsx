@@ -93,7 +93,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
             },
           };
         }
-        if (rawArgs === "interactive low") {
+        if (rawArgs === "interactive low" || rawArgs === "interactive medium") {
           return {
             ok: true as const,
             verb: "interactive" as const,
@@ -102,7 +102,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
               provider: "openai" as const,
               model: "gpt-4o-mini",
               fallbackOnError: "deny" as const,
-              interactive: { autoApprove: "low" as const },
+              interactive: { autoApprove: rawArgs === "interactive medium" ? "medium" as const : "low" as const },
             },
           };
         }
@@ -190,7 +190,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.getByTestId("exec-mode-strict")).toHaveTextContent("전체 확인");
     expect(screen.getByText(/읽기까지 포함해 모든 도구/)).toBeTruthy();
     expect(screen.getByTestId("exec-mode-auto")).toHaveTextContent("자동 검증");
-    expect(screen.getByText(/권한 리뷰어가 검증/)).toBeTruthy();
+    expect(screen.getByText(/대화형 저위험·중위험 판정/)).toBeTruthy();
     expect(screen.getByTestId("exec-mode-allow")).toHaveTextContent("모두 허용");
   });
 
@@ -235,9 +235,9 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
     expect(api.permission.setMode).toHaveBeenCalledWith("auto");
     // Round-2 test-engineer MAJOR — exec-mode-auto must ALSO fire the
-    // `interactive low` dispatch so the new SOT (issue #690 P3) stays
+    // `interactive medium` dispatch so the global LOW+MEDIUM threshold stays
     // coupled to the legacy `auto` UX.
-    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
+    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive medium");
     expect(api.permission.setMode.mock.invocationCallOrder[0]).toBeLessThan(
       api.permission.reviewerDispatch.mock.invocationCallOrder.at(-1)!,
     );
@@ -374,7 +374,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
-    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
+    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive medium");
     expect(screen.queryByTestId("reviewer-active-llm-source")).toBeNull();
     expect(screen.queryByTestId("reviewer-provider-select")).toBeNull();
     expect(screen.queryByTestId("reviewer-fallback-select")).toBeNull();
@@ -448,7 +448,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     );
   });
 
-  it("does not render reviewer interactive controls even when the stored mode is auto", async () => {
+  it("renders the off/low/medium threshold control when the stored mode is auto", async () => {
     const api = installApi([[]]);
     api.permission.getMode.mockResolvedValueOnce({ mode: "auto" });
     api.permission.reviewerDispatch.mockImplementation(async (rawArgs: string) => {
@@ -471,8 +471,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     await act(async () => {
       render(<PermissionsTab />);
     });
-    expect(screen.queryByTestId("reviewer-interactive-off")).toBeNull();
-    expect(screen.queryByTestId("reviewer-interactive-low")).toBeNull();
+    expect(screen.getByTestId("interactive-auto-approve-select")).toBeTruthy();
     expect(screen.queryByTestId("permissions-legacy-auto-mode-banner")).toBeNull();
     expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
     expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));

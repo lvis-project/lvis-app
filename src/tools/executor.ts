@@ -1378,9 +1378,9 @@ export class ToolExecutor {
     //
     //   `ask` (e.g. agent_spawn)
     //     Category is `meta` (control-flow primitive, not a write), but
-    //     the action is sensitive enough to warrant an approval modal.
-    //     We fall through to the standard ask path below — the override
-    //     just signals "skip automatic approval lanes".
+    //     the action still requires policy review. PermissionManager routes it
+    //     through the same enabled foreground reviewer threshold as mutating
+    //     categories; verdicts above the threshold still ask the user.
     //
     // Trust boundary: only honor decisionOverride for builtin tools. A
     // plugin or MCP tool that happens to declare `meta` does not get
@@ -1397,13 +1397,13 @@ export class ToolExecutor {
       (this.permissionManager && !isAlwaysAllowMeta)
       || approvalReasonPrefix !== undefined
     ) {
-      // Permission policy V1 SOT — the meta `decisionOverride="ask"` re-elevation
-      // (agent_spawn: elevate the registry's override-`allow` to a per-invocation
-      // `forceModal` ask, except under allow-all mode) now lives inside
-      // categoryBasedDecision's "override" branch. The executor only CARRIES the
-      // override into the check context; it never rewrites the verdict or
-      // re-consults getMode(). The allow-all invariant (mode==="allow" → no
-      // prompt, meta included) is single-sourced in PermissionManager.
+      // Permission policy V1 SOT — PermissionManager re-elevates
+      // `decisionOverride="ask"` and selects either the common foreground
+      // reviewer route or a force-modal ask when that route is disabled.
+      // The executor only CARRIES the override into the check context; it never
+      // rewrites the verdict or re-consults getMode(). The allow-all invariant
+      // (mode==="allow" → no prompt, meta included) remains single-sourced in
+      // PermissionManager.
       permissionResult = this.permissionManager
         ? this.permissionManager.checkDetailed(
             toolUse.name,
@@ -1849,8 +1849,8 @@ export class ToolExecutor {
       if (
         permissionResult.decision === "ask" &&
         permissionResult.layer >= 3 &&
-        // A meta tool whose author declared decisionOverride="ask" is a
-        // per-invocation hard gate — never satisfied by a stored approval.
+        // Only an explicit forceModal marker is a per-invocation hard gate;
+        // reviewer-routed ask-meta calls use the normal stored-approval lane.
         permissionResult.forceModal !== true &&
         invocationPermissionContext.headless !== true &&
         foregroundMemorySkipChecked !== true

@@ -534,7 +534,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     expect(pm.getInteractiveAutoApprove()).toBe("low");
   });
 
-  it("logs boot warning when mode=auto + interactive.autoApprove=off (round-5 test-engineer MAJOR)", () => {
+  it("does not warn when mode=auto + interactive.autoApprove=off", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     pm.setMode("auto");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -551,24 +551,16 @@ describe("Permission policy P4 reviewer-wiring", () => {
         verdictCachePath: join(tmpDir, "cache-warn-auto-off.jsonl"),
         deferredQueuePath: join(tmpDir, "queue-warn-auto-off.jsonl"),
       });
-      // The logger calls into pino which may stream via console or a
-      // dedicated transport. We use a permissive assertion that fires
-      // when *any* warn-level emission contains the canonical phrase.
-      // Round-6 test-engineer CRITICAL — strict assertion. The earlier
-      // `fired || calls.length===0` form was a tautology that passed
-      // even when the warn never fired. The logger's vitest path
-      // routes through `console.warn` directly (lib/logger.ts), so
-      // `warnSpy.mock.calls` is the SOT.
       const fired = warnSpy.mock.calls.some((args) =>
         args.some((a) => typeof a === "string" && a.includes("legacy exec mode=auto")),
       );
-      expect(fired).toBe(true);
+      expect(fired).toBe(false);
     } finally {
       warnSpy.mockRestore();
     }
   });
 
-  it("logs boot warning when mode=strict + interactive.autoApprove=low (round-5 test-engineer MAJOR)", () => {
+  it.each(["low", "medium"] as const)("does not warn for mode=strict + interactive.autoApprove=%s", (autoApprove) => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     pm.setMode("strict");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -580,7 +572,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
           provider: "openai",
           model: "gpt-4o-mini",
           fallbackOnError: "deny",
-          interactive: { autoApprove: "low" },
+          interactive: { autoApprove },
         }),
         verdictCachePath: join(tmpDir, "cache-warn-strict.jsonl"),
         deferredQueuePath: join(tmpDir, "queue-warn-strict.jsonl"),
@@ -588,8 +580,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
       const fired = warnSpy.mock.calls.some((args) =>
         args.some((a) => typeof a === "string" && a.includes("exec mode=strict")),
       );
-      // Round-6 test-engineer CRITICAL — strict, no-tautology assertion.
-      expect(fired).toBe(true);
+      expect(fired).toBe(false);
     } finally {
       warnSpy.mockRestore();
     }

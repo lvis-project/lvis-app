@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } from "../tools/types.js";
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
+import type { ReviewerInteractiveAutoApprove } from "./permission-settings-store.js";
 import { isStagedTurnOrigin } from "../shared/mcp-app-message-source.js";
 import type { UserApprovalHitPayload, UserApprovalVerdict } from "../shared/permissions-events.js";
 import { getToolCategoryDescriptor } from "./category-registry.js";
@@ -92,7 +93,8 @@ export interface PermissionRule {
  * Layer 5 reviewer routing lane. Distinguishes the two automatic-approval
  * lanes that {@link PermissionManager.resolveReviewerDecision} translates a
  * verdict for: `headless` (background/routine turns — non-low denies) and
- * `foreground-auto` (interactive auto-review opt-in — non-low asks). Shared by
+ * `foreground-auto` (interactive auto-review opt-in — verdicts through the
+ * configured inclusive threshold allow, higher verdicts ask). Shared by
  * the `reviewer.route` marker and the reviewer-dispatch callsites so the lane
  * union has a single source of truth.
  */
@@ -114,9 +116,9 @@ export interface PermissionCheckResult {
   /**
    * Per-invocation hard-ask marker. When `true`, this `ask` decision MUST be
    * confirmed by the user on every invocation and is NEVER auto-skipped by the
-   * explicit-approval memory store (Store B). Set when a tool author declared
-   * `decisionOverride: "ask"` ("always confirm me"); honouring it preserves the
-   * author's per-invocation intent against a prior session/persistent grant.
+   * explicit-approval memory store (Store B). Policy sets it only after choosing
+   * a hard user-approval lane; `decisionOverride: "ask"` may instead use the
+   * common foreground reviewer route when that route is eligible.
    */
   forceModal?: boolean;
   /**
@@ -161,13 +163,12 @@ export interface PermissionCheckContext {
   approvalCacheKey?: string;
   /**
    * Tool-author `decisionOverride` for `meta`-category builtin tools, carried
-   * from the executor so the "override" branch of {@link categoryBasedDecision}
-   * owns the re-elevation decision (V1 SOT). `"ask"` (e.g. agent_spawn) elevates
-   * the override-`allow` to a per-invocation `forceModal` ask in every mode
-   * except `allow` (the allow-all opt-in); `"always-allow-with-audit"` is
-   * short-circuited before checkDetailed runs and never reaches here. Non-meta
-   * callers pass `undefined` (current behaviour — the override branch keeps its
-   * `allow`).
+   * from the executor so the post-computation guard owns re-elevation (V1 SOT).
+   * A foreground `"ask"` meta invocation uses the same reviewer route as
+   * write/shell/network when interactive auto-review is enabled; otherwise it
+   * remains a per-invocation `forceModal` ask. `"always-allow-with-audit"` is
+   * short-circuited before checkDetailed runs. Non-meta callers pass
+   * `undefined`.
    */
   decisionOverride?: "ask" | "always-allow-with-audit";
 }
@@ -315,12 +316,12 @@ export class PermissionManager {
    */
   private reviewerDegradedToRule = false;
   /**
-   * Issue #690 — interactive auto-approve setting. "off" by default;
-   * "low" means the reviewer's LOW verdict in the foreground flow
-   * skips the approval modal. Read by {@link categoryBasedDecision} to
+   * Issue #690 — interactive auto-approve setting. "low"/"medium" are auto-mode
+   * foreground reviewer thresholds that skip the approval modal for LOW /
+   * LOW+MEDIUM respectively. Read by {@link categoryBasedDecision} to
    * decide whether to set `reviewer.route='foreground-auto'`.
    */
-  private interactiveAutoApprove: "off" | "low" = "off";
+  private interactiveAutoApprove: ReviewerInteractiveAutoApprove = "off";
   /** CRITICAL 4.1: optional broadcast for memory-hit auto-approve disclosure */
   private broadcastUserApprovalHit: ((payload: UserApprovalHitPayload) => void) | null = null;
   /**
@@ -406,7 +407,7 @@ export class PermissionManager {
    *
    * Rules (behavior-neutral move from `reviewer-dispatch.ts`):
    *  - headless lane: `low` → allow(layer 5); non-low (medium/high) → deny(layer 5).
-   *  - foreground-auto lane: `low` → allow(layer 5); non-low → ask(layer 5).
+   *  - foreground-auto lane: verdicts up to the configured threshold allow; the rest ask.
    *
    * The returned result carries the reviewer route + verdict marker. The
    * pipeline still owns the human-facing `message`, deferred-queue append,
@@ -417,6 +418,9 @@ export class PermissionManager {
     lane: ReviewerLane,
   ): PermissionCheckResult {
     const isLow = verdict.level === "low";
+    const isForegroundAutoApproved =
+      isLow ||
+      (verdict.level === "medium" && this.interactiveAutoApprove === "medium");
     if (lane === "headless") {
       if (isLow) {
         return {
@@ -434,10 +438,10 @@ export class PermissionManager {
       };
     }
     // foreground-auto lane
-    if (isLow) {
+    if (isForegroundAutoApproved) {
       return {
         decision: "allow",
-        reason: `reviewer low: ${verdict.reason}`,
+        reason: `reviewer ${verdict.level}: ${verdict.reason}`,
         layer: 5,
         reviewer: { route: "foreground-auto", verdict },
       };
@@ -511,11 +515,11 @@ export class PermissionManager {
    * pushes it here so the gate inside {@link categoryBasedDecision}
    * does not have to re-read the file on every tool call.
    */
-  setInteractiveAutoApprove(autoApprove: "off" | "low"): void {
+  setInteractiveAutoApprove(autoApprove: ReviewerInteractiveAutoApprove): void {
     this.interactiveAutoApprove = autoApprove;
   }
 
-  getInteractiveAutoApprove(): "off" | "low" {
+  getInteractiveAutoApprove(): ReviewerInteractiveAutoApprove {
     return this.interactiveAutoApprove;
   }
 
@@ -936,11 +940,12 @@ export class PermissionManager {
    *
    * When `overlayTriggerOrigin` is a STAGED turn origin — a plugin overlay trigger
    * (`"overlay:meeting-detection"`) or an MCP App's `ui/message` (`"app:<serverId>"`) —
-   * every write/shell/network tool is forced to `ask` regardless of user permanent
+   * every foreground-authority call (write/shell/network plus meta with
+   * `decisionOverride: "ask"`) is forced to `ask` regardless of user permanent
    * approval (`allow-always`), config allow rules, or auto mode.
    * This hard gate prevents staged, non-user-authored input from automatically running
-   * destructive work without user confirmation, pairing with the first-pass
-   * LLM review from `<overlay-trigger-origin-guidance>`. Read tools are unaffected.
+   * authority-bearing work without user confirmation, pairing with the first-pass
+   * LLM review from `<overlay-trigger-origin-guidance>`. Other calls are unaffected.
    * The set of staged origins has ONE definition — `isStagedTurnOrigin` — so a new one
    * can never be added while quietly skipping this gate.
    *
@@ -967,6 +972,8 @@ export class PermissionManager {
       resolvedCategory === "write" ||
       resolvedCategory === "shell" ||
       resolvedCategory === "network";
+    const isForegroundAuthorityReviewEligible =
+      this.isForegroundAuthorityReviewEligible(resolvedCategory, context);
 
     const approvalCacheKey = normalizeApprovalCacheKey(context.approvalCacheKey);
     const denyTargets = approvalCacheKey ? [toolName, approvalCacheKey] : [toolName];
@@ -986,10 +993,10 @@ export class PermissionManager {
       return { decision: "ask", reason: t("be_permissionManager.mcpServerStrictMode"), layer: 2 };
     }
 
-    // Overlay-trigger origin override — write/shell/network tools bypass cached
-    // allow rules, always-allowed, and auto mode, then always ask the user.
+    // Overlay-trigger origin override — every foreground authority-review tool
+    // bypasses cached allows and reviewer auto-approval, then asks the user.
     // Read tools may still run automatically.
-    if (isOverlayTrigger && isMutating) {
+    if (isOverlayTrigger && isForegroundAuthorityReviewEligible) {
       return {
         decision: "ask",
         reason: t("be_permissionManager.overlayTriggerMutatingReason", { origin: overlayTriggerOrigin ?? "" }),
@@ -1053,24 +1060,18 @@ export class PermissionManager {
 
     // Permission policy V1 SOT — per-invocation `decisionOverride="ask"` gate.
     //
-    // A `meta`-category builtin tool that declares `decisionOverride: "ask"`
-    // (e.g. agent_spawn) must show an approval modal on EVERY invocation,
-    // regardless of which layer produced the current `allow` verdict:
+    // A meta builtin that declares `decisionOverride: "ask"` must never inherit
+    // an unconditional allow from layers 3/5/6. The layer-agnostic post-guard
+    // routes foreground calls through the same reviewer lane used by
+    // write/shell/network when interactive auto-review is enabled. Otherwise it
+    // retains the per-invocation force-modal contract.
     //
     //   layer 3 (allow rule)    — user added agent_spawn to their allow-list
     //   layer 5 (alwaysAllowed) — user clicked "Allow always" on the modal
     //   layer 6 (override case) — the normal first-invocation path
     //
-    // The post-guard is layer-agnostic: layers 3/5/6 all fall through to it.
-    // The previous override-branch-only approach silently bypassed layer-3/5
-    // hits because those paths returned early before categoryBasedDecision ran.
-    //
-    // Allow-all invariant: `mode !== "allow"` is NOT dead code here — unlike
-    // inside the override branch (where strict/allow early-returns narrow the
-    // mode), at this point in checkDetailed the mode is not narrowed. Allow
-    // mode can reach here via the layer-3 allow-rule loop. The guard must stay
-    // so that an explicit allow-all opt-in still auto-allows agent_spawn with
-    // no prompt, matching the allow-all invariant.
+    // Allow-all remains the sole exception: it is the user's explicit global
+    // opt-in and still covers every non-hard-blocked tool.
     //
     // Strict mode: already returned ask at layer 2 before this point, so
     // `result.decision` is never `allow` under strict and the guard never fires.
@@ -1079,11 +1080,17 @@ export class PermissionManager {
       context.decisionOverride === "ask" &&
       this.mode !== "allow"
     ) {
+      const foregroundReviewer = this.shouldRouteForegroundReviewer(
+        resolvedCategory,
+        context,
+      );
       return {
         decision: "ask",
         reason: t("be_executor.metaToolAskOverrideReason"),
         layer: 6,
-        forceModal: true,
+        ...(foregroundReviewer
+          ? { reviewer: { route: "foreground-auto" as const } }
+          : { forceModal: true }),
       };
     }
 
@@ -1396,6 +1403,30 @@ export class PermissionManager {
     return trustFromSource(source ?? "builtin");
   }
 
+  private isForegroundAuthorityReviewEligible(
+    category: ToolCategory,
+    context: PermissionCheckContext,
+  ): boolean {
+    return (
+      category === "write" ||
+      category === "shell" ||
+      category === "network" ||
+      (category === "meta" && context.decisionOverride === "ask")
+    );
+  }
+
+  private shouldRouteForegroundReviewer(
+    category: ToolCategory,
+    context: PermissionCheckContext,
+  ): boolean {
+    return (
+      this.mode === "auto" &&
+      context.headless !== true &&
+      this.isForegroundAuthorityReviewEligible(category, context) &&
+      this.interactiveAutoApprove !== "off"
+    );
+  }
+
   /**
    * Permission policy Layer 3 — Category × Source × Mode via registry descriptor.
    *
@@ -1411,13 +1442,11 @@ export class PermissionManager {
    * acts as a BACKGROUND adjudicator, not a modal text-filler:
    *   - headless lane: "reviewer" routes to dispatchReviewer (defer policy
    *     queues HIGH verdicts);
-   *   - foreground lane: when `interactive.autoApprove === "low"` (the
-   *     default), mutating tools are stamped `reviewer.route =
-   *     "foreground-auto"` and the executor's
-   *     dispatchReviewerForInteractiveAuto auto-allows LOW verdicts with
-   *     audit only — MEDIUM/HIGH return a blocked tool result containing
-   *     the reviewer verdict, so the main LLM can ask the user and retry
-   *     only when the user explicitly authorizes that exact action.
+   *   - foreground lane: in `mode="auto"`, an enabled inclusive threshold stamps eligible
+   *     write/shell/network and decisionOverride:"ask" meta calls with
+   *     `reviewer.route = "foreground-auto"`. The executor auto-allows
+   *     verdicts through the configured threshold with audit; higher verdicts
+   *     ask the user. The default persisted threshold is MEDIUM.
    * When the reviewer is unavailable, "reviewer" maps to "ask" so the user
    * is prompted instead of silently permitting a headless write — fail-safe
    * per design §1 principles.
@@ -1530,10 +1559,10 @@ export class PermissionManager {
         // {@link ToolExecutor.dispatchReviewerForInteractiveAuto}
         // returns a clear "reviewer unavailable" ask, preserving the
         // pre-PR fail-safe behaviour.
-        const mutating = category === "write" || category === "shell" || category === "network";
-        const interactiveOptIn = this.interactiveAutoApprove !== "off";
-        const enableForegroundAutoReviewer =
-          context.headless !== true && mutating && interactiveOptIn;
+        const enableForegroundAutoReviewer = this.shouldRouteForegroundReviewer(
+          category,
+          context,
+        );
         return {
           decision: "ask",
           reason: t("be_permissionManager.userConfirmRequired", { category, trust }),
