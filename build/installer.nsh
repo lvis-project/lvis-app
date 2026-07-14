@@ -1,11 +1,12 @@
 ; LVIS NSIS installer hook — user-data cleanup on uninstall.
 ;
-; electron-builder의 `nsis.include` 로 wiring. `deleteAppDataOnUninstall: true`
-; 가 `%APPDATA%\LVIS\` (Electron userData = Roaming\LVIS\) 자동 제거를 처리하므로,
-; 이 hook 은 *그 범위 밖* 의 사용자 데이터 정리만 책임진다:
+; electron-builder의 `nsis.include` 로 wiring. `/KEEP_APP_DATA`가 모든 userData를
+; 실제로 보존할 수 있도록 `deleteAppDataOnUninstall: false`를 사용하고, 이 hook이
+; Roaming/Local/홈 데이터 삭제를 한 분기에서 책임진다:
 ;
 ;   - `%USERPROFILE%\.lvis\`   — LVIS_HOME (sessions, memories, secrets, plugins data)
-;   - `%LOCALAPPDATA%\LVIS\`   — Local AppData (Chromium GPU cache 등 Electron 잔여)
+;   - `%APPDATA%\${APP_*}\`    — Electron userData/cache의 현재/과거 이름
+;   - `%LOCALAPPDATA%\${APP_*}\` — Chromium GPU cache 등 Electron 잔여
 ;
 ; 사용자 confirmation:
 ;   - GUI 설치 제거 → MessageBox 로 "Yes/No" 묻기. Default 는 Yes.
@@ -113,6 +114,10 @@
   ${endif}
 
   lvis_srtwin_install_done:
+  ; electron-builder writes InstallLocation only to its private install key.
+  ; Mirror it into Apps & Features so smoke/enterprise inventory can discover
+  ; and cross-check the machine install without guessing a Program Files path.
+  WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "InstallLocation" "$INSTDIR"
   Pop $R0
   Pop $0
 !macroend
@@ -123,60 +128,94 @@
   Push $R2
   Push $R3
 
-  ; electron-builder invokes the old uninstaller with /KEEP_APP_DATA and
-  ; --updated during upgrades. Preserve user state on that path; manual
-  ; uninstall still asks below.
-  ${if} ${isUpdated}
-    Goto lvis_skip_userdata
-  ${endif}
-
   ClearErrors
   ${GetParameters} $R0
-  ${GetOptions} $R0 "/KEEP_APP_DATA" $R1
-  ${ifNot} ${Errors}
-    Goto lvis_skip_userdata
+
+  ; Only electron-builder's updater uninstall may preserve machine-level ASRT.
+  ; /KEEP_APP_DATA is a genuine uninstall choice and controls userData only.
+  ${if} ${isUpdated}
+    Goto lvis_skip_genuine_uninstall
   ${endif}
 
   ClearErrors
-  ${GetOptions} $R0 "--updated" $R1
+  ${GetOptions} $R0 "--updated" $R2
   ${ifNot} ${Errors}
-    Goto lvis_skip_userdata
+    Goto lvis_skip_genuine_uninstall
   ${endif}
 
-  ; ── ASRT OS sandbox teardown (genuine uninstall only) ──
-  ; Remove the machine-level srt-sandbox user + user-SID-keyed WFP rules that
-  ; customInstall provisioned. Placed AFTER the upgrade guards above so an
-  ; upgrade (isUpdated / KEEP_APP_DATA / --updated) does NOT tear the sandbox
-  ; down, and BEFORE customRemoveFiles deletes $INSTDIR (electron-builder
-  ; uninstaller.nsh inserts customUnInstall first) so srt-win.exe is still
-  ; present. Deliberately BEFORE the user-data MessageBox: removing the
-  ; system-level provisioning is orthogonal to whether the user keeps their chat
-  ; data. Non-fatal + idempotent ({cancelled:true} on UAC dismiss).
+  StrCpy $R1 "0"
+  ClearErrors
+  ${GetOptions} $R0 "/KEEP_APP_DATA" $R2
+  ${ifNot} ${Errors}
+    StrCpy $R1 "1"
+  ${endif}
+
+  ; ── ASRT OS sandbox teardown (every genuine uninstall) ──
+  ; Recover dead holder-PID grants before deleting the sandbox principal, then
+  ; remove the WFP filters, sandbox user/group, credential and setup marker.
+  ; Both operations are fail-closed here: silently deleting app files while
+  ; leaving machine security state behind would make a green smoke misleading.
   !insertmacro resolveSrtWinPath $R2
   ${if} $R2 != ""
+    DetailPrint "LVIS: recovering stranded ASRT holder ACLs…"
+    nsExec::ExecToLog '"$R2" acl recover --force'
+    Pop $R3
+    ${if} $R3 != 0
+      SetErrorLevel 1
+      Abort "LVIS uninstall failed: ASRT holder ACL recovery returned exit $R3"
+    ${endif}
+
     DetailPrint "LVIS: removing the Windows OS sandbox (srt-win uninstall)…"
     nsExec::ExecToLog '"$R2" uninstall'
     Pop $R3
-    ${if} $R3 == 0
-      DetailPrint "LVIS: OS sandbox removed (srt-sandbox user + WFP rules)."
-    ${else}
-      DetailPrint "LVIS: OS sandbox removal returned exit $R3 (non-fatal; srt-win uninstall is idempotent)."
+    ${if} $R3 != 0
+      SetErrorLevel 1
+      Abort "LVIS uninstall failed: ASRT teardown returned exit $R3"
     ${endif}
+    DetailPrint "LVIS: OS sandbox removed (holder ACLs + srt-sandbox user/group + credential + WFP rules)."
+  ${else}
+    SetErrorLevel 1
+    Abort "LVIS uninstall failed: packaged srt-win.exe is missing; ASRT teardown cannot be verified"
+  ${endif}
+
+  ; KEEP_APP_DATA is evaluated only after ASRT teardown.
+  ${if} $R1 == "1"
+    Goto lvis_skip_userdata
   ${endif}
 
   MessageBox MB_YESNO|MB_ICONQUESTION \
     "LVIS 사용자 데이터를 함께 삭제하시겠습니까?$\n$\n[예]: 모든 채팅 기록, 설정, 메모리, plugin 데이터, 데모 활성 상태가 영구 삭제됩니다.$\n[아니오]: 사용자 데이터는 보존됩니다 — 같은 사용자가 LVIS 를 재설치하면 이어서 사용할 수 있습니다." \
     /SD IDYES IDNO lvis_skip_userdata
 
+  ; A perMachine uninstaller normally has all-users shell context. User data
+  ; belongs to the original interactive user, matching electron-builder's own
+  ; deletion template, so switch only inside the DELETE branch and restore it.
+  ${if} $installMode == "all"
+    SetShellVarContext current
+  ${endif}
+
   ; LVIS_HOME — sessions / memories / secrets / plugins / audit / .env.demo
   RMDir /r "$PROFILE\.lvis"
 
-  ; Local AppData 잔여 (Chromium GPU cache, partition cache 등). Roaming\LVIS\ 는
-  ; electron-builder 의 `deleteAppDataOnUninstall: true` 가 별도 처리하므로 여기서
-  ; 다시 손대지 않는다.
-  RMDir /r "$LOCALAPPDATA\LVIS"
+  ; Keep electron-builder's current/legacy APPDATA candidates together with
+  ; their Local AppData counterparts. KEEP_APP_DATA skips this whole block.
+  RMDir /r "$APPDATA\${APP_FILENAME}"
+  RMDir /r "$LOCALAPPDATA\${APP_FILENAME}"
+  !ifdef APP_PRODUCT_FILENAME
+    RMDir /r "$APPDATA\${APP_PRODUCT_FILENAME}"
+    RMDir /r "$LOCALAPPDATA\${APP_PRODUCT_FILENAME}"
+  !endif
+  !ifdef APP_PACKAGE_NAME
+    RMDir /r "$APPDATA\${APP_PACKAGE_NAME}"
+    RMDir /r "$LOCALAPPDATA\${APP_PACKAGE_NAME}"
+  !endif
+
+  ${if} $installMode == "all"
+    SetShellVarContext all
+  ${endif}
 
   lvis_skip_userdata:
+  lvis_skip_genuine_uninstall:
   Pop $R3
   Pop $R2
   Pop $R1
