@@ -352,6 +352,11 @@ export function validateRegistryQueryResult(
   result,
   { hive, path, view, mode },
 ) {
+  if (mode !== "tree" && mode !== "default") {
+    throw new Error(
+      `unsupported registry query validation mode: ${String(mode)}`,
+    );
+  }
   if (
     !result ||
     typeof result !== "object" ||
@@ -364,7 +369,20 @@ export function validateRegistryQueryResult(
       `registry query returned an invalid contract for ${hive} ${view}-bit ${path}: ${JSON.stringify(result)}`,
     );
   }
+  if (
+    !result.keyExists &&
+    (result.valueExists || result.value !== null || result.entries.length !== 0)
+  ) {
+    throw new Error(
+      `registry query returned an invalid missing-key state for ${hive} ${view}-bit ${path}: ${JSON.stringify(result)}`,
+    );
+  }
   if (mode === "tree") {
+    if (result.valueExists || result.value !== null) {
+      throw new Error(
+        `registry tree query returned an invalid state for ${hive} ${view}-bit ${path}: ${JSON.stringify(result)}`,
+      );
+    }
     for (const entry of result.entries) {
       if (
         !entry ||
@@ -383,6 +401,15 @@ export function validateRegistryQueryResult(
         );
       }
     }
+  } else if (
+    result.entries.length !== 0 ||
+    (result.valueExists
+      ? typeof result.value !== "string"
+      : result.value !== null)
+  ) {
+    throw new Error(
+      `registry default query returned an invalid state for ${hive} ${view}-bit ${path}: ${JSON.stringify(result)}`,
+    );
   }
   return result;
 }
