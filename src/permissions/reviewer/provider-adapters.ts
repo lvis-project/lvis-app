@@ -45,7 +45,10 @@
  * provider errors.
  */
 import type { LlmCompletionResult, LlmReviewerProvider } from "./risk-classifier.js";
-import { TRUSTED_NETWORK_HOST_SUFFIXES } from "./risk-classifier.js";
+import {
+  ReviewerDispatchError,
+  TRUSTED_NETWORK_HOST_SUFFIXES,
+} from "./risk-classifier.js";
 // REVIEWER_VENDOR_MAP lives in reviewer-vendor-map.ts (single SOT).
 // Imported here for internal use and re-exported for backward compat.
 import { REVIEWER_VENDOR_MAP } from "./reviewer-vendor-map.js";
@@ -137,7 +140,10 @@ export class FoundryReviewerProvider implements LlmReviewerProvider {
 
     const ac = new AbortController();
     const timeoutId = setTimeout(
-      () => ac.abort(new Error(`Foundry reviewer timeout ${REVIEWER_HTTP_TIMEOUT_MS / 1000}s`)),
+      () => ac.abort(new ReviewerDispatchError(
+        "timeout",
+        `Foundry reviewer timeout ${REVIEWER_HTTP_TIMEOUT_MS / 1000}s`,
+      )),
       REVIEWER_HTTP_TIMEOUT_MS,
     );
     const signal = params.abortSignal
@@ -322,7 +328,10 @@ export class GcpPlaygroundReviewerProvider implements LlmReviewerProvider {
 
     const ac = new AbortController();
     const timeoutId = setTimeout(
-      () => ac.abort(new Error(`GCP reviewer timeout ${REVIEWER_HTTP_TIMEOUT_MS / 1000}s`)),
+      () => ac.abort(new ReviewerDispatchError(
+        "timeout",
+        `GCP reviewer timeout ${REVIEWER_HTTP_TIMEOUT_MS / 1000}s`,
+      )),
       REVIEWER_HTTP_TIMEOUT_MS,
     );
     const signal = params.abortSignal

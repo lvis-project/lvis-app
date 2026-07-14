@@ -124,7 +124,11 @@ export async function dispatchReviewerForHeadless(
   // only wires the human-facing message + deferred-queue metadata around it.
   // The review-status telemetry is derived from the resolved decision so the
   // auto-approve disclosure and the audit decision share one source.
-  const decision = permissionManager.resolveReviewerDecision(reviewer.verdict, "headless");
+  const resolved = permissionManager.resolveReviewerDecision(reviewer.verdict, "headless");
+  const decision: PermissionCheckResult = {
+    ...resolved,
+    reviewer: { route: "headless", verdict: reviewer.verdict, outcome: reviewer.outcome },
+  };
   emitPermissionReview(callbacks, {
     status: decision.decision === "allow" ? "auto_approved" : "needs_approval",
     toolName,
@@ -239,11 +243,28 @@ export async function dispatchReviewerForInteractiveAuto(
     });
     throw err;
   }
+  if (abortSignal?.aborted) {
+    return {
+      decision: "deny",
+      reason: "foreground reviewer cancelled by caller",
+      layer: 5,
+      reviewer: {
+        route: "foreground-auto",
+        verdict: reviewer.verdict,
+        outcome: reviewer.outcome,
+      },
+    };
+  }
+
 
   // V3 SOT — PermissionManager owns the verdict→decision mapping.
   // Verdicts through the configured inclusive threshold allow; higher verdicts
   // ask the user. HIGH still requires explicit approval with justification.
-  const decision = mgr.resolveReviewerDecision(reviewer.verdict, "foreground-auto");
+  const resolved = mgr.resolveReviewerDecision(reviewer.verdict, "foreground-auto");
+  const decision: PermissionCheckResult = {
+    ...resolved,
+    reviewer: { route: "foreground-auto", verdict: reviewer.verdict, outcome: reviewer.outcome },
+  };
   // Review-status telemetry derived from the resolved decision so the
   // auto-approve disclosure and the audit decision share one source.
   emitPermissionReview(callbacks, {
