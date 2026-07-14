@@ -622,12 +622,12 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
       : state === A2ATaskState.INPUT_REQUIRED
         ? input.suspension?.prompt?.trim() || fallback
         : fallback;
-    const text = maskSensitiveData(rawText).masked.slice(0, GUIDE_MAX_CHARS);
+    const maskedText = maskSensitiveData(rawText).masked;
     const messageId = this.newId();
     if (!isSafeA2AMessageId(messageId)) {
       throw new Error("A2A id generator returned an invalid message id");
     }
-    return {
+    const buildMessage = (text: string): A2AMessage => ({
       messageId,
       contextId: record.task.contextId,
       taskId: record.task.id,
@@ -639,13 +639,22 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
           ? {
               suspension: {
                 reason: input.suspension.reason,
-                ...(input.suspension.prompt ? { prompt: input.suspension.prompt } : {}),
                 resumeId: input.suspension.resumeId,
               },
             }
           : {}),
       },
-    };
+    });
+    const envelopeLength = JSON.stringify(buildMessage("")).length;
+    let remaining = Math.max(0, GUIDE_MAX_CHARS - envelopeLength);
+    const textParts: string[] = [];
+    for (const character of maskedText) {
+      const serializedLength = JSON.stringify(character).length - 2;
+      if (serializedLength > remaining) break;
+      textParts.push(character);
+      remaining -= serializedLength;
+    }
+    return buildMessage(textParts.join(""));
   }
 
   private async transitionFromSnapshot(
