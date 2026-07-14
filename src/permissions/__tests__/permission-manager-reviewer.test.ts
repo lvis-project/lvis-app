@@ -5,7 +5,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PermissionManager } from "../permission-manager.js";
+import {
+  isReviewerAutoDecisionOutcome,
+  PermissionManager,
+} from "../permission-manager.js";
 import { VerdictCache } from "../reviewer/verdict-cache.js";
 import { DeferredQueue } from "../reviewer/deferred-queue.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
@@ -745,6 +748,26 @@ describe("reviewer outcome provenance and base-cache safety", () => {
     return { pm, complete: provider.complete };
   }
 
+  it("auto-decides only the three explicitly successful outcomes", () => {
+    for (const outcome of [
+      "fresh",
+      "cache",
+      "approval-memory",
+    ] as const) {
+      expect(isReviewerAutoDecisionOutcome(outcome)).toBe(true);
+    }
+    for (const outcome of [
+      "unavailable",
+      "error",
+      "timeout",
+      "malformed",
+      "sandbox-state-changed",
+    ] as const) {
+      expect(isReviewerAutoDecisionOutcome(outcome)).toBe(false);
+    }
+    expect(isReviewerAutoDecisionOutcome(undefined)).toBe(false);
+  });
+
   it("stores only a typed fresh success and reports the subsequent hit as cache", async () => {
     const { pm, complete } = makeLlmManager(async () => ({
       text: '{"level":"medium","reason":"bounded shell action"}',
@@ -805,5 +828,38 @@ describe("reviewer outcome provenance and base-cache safety", () => {
     expect(first.cacheReason).toBe("miss-not-found");
     expect(second.cacheReason).toBe("miss-not-found");
     expect(complete).toHaveBeenCalledTimes(6);
+  });
+
+  it("does not cache a valid fresh verdict when the caller aborts before return", async () => {
+    const abortController = new AbortController();
+    const classify = vi.fn(async () => {
+      abortController.abort();
+      return { level: "medium" as const, reason: "valid fresh result" };
+    });
+    const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
+    const pm = new PermissionManager(tmpFile("permissions.json"));
+    pm.setReviewer({
+      classifier: { classify },
+      cache: new VerdictCache(tmpFile("reviewer-cache.jsonl")),
+      deferredQueue: queue,
+    });
+
+    const aborted = await pm.dispatchReviewer(
+      "bash",
+      input,
+      undefined,
+      { defer: "medium-high", abortSignal: abortController.signal },
+    );
+    const next = await pm.dispatchReviewer(
+      "bash",
+      input,
+      undefined,
+      { defer: "none" },
+    );
+
+    expect(aborted.outcome).toBe("error");
+    expect(next.outcome).toBe("fresh");
+    expect(classify).toHaveBeenCalledTimes(2);
+    expect(queue.listPending()).toHaveLength(0);
   });
 });

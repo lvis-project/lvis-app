@@ -235,4 +235,75 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("makes reviewer abort terminal before auth recording, execution, or modal open", async () => {
+    const executeSpy = vi.fn(async () => "sent");
+    const abortControllers = [new AbortController(), new AbortController()];
+    let classifyIndex = 0;
+    const classifySpy = vi.fn(async () => {
+      const controller = abortControllers[classifyIndex];
+      classifyIndex += 1;
+      controller?.abort();
+      await Promise.resolve();
+      return {
+        level: "medium" as const,
+        reason: "valid fresh result immediately before caller abort",
+      };
+    });
+    const requestAndWait = vi.fn(async () => ({
+      requestId: "must-not-open",
+      choice: "allow-once" as const,
+    }));
+    const statuses: string[] = [];
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-reviewer-abort-"));
+    try {
+      const toolName = "reviewed_network_abort_terminal";
+      const executor = new ToolExecutor(
+        makeReviewedNetworkProbe(toolName, executeSpy),
+        undefined,
+        makeAutoPermissionManager(dir, classifySpy),
+        undefined,
+        { requestAndWait } as never,
+      );
+      const input = { payload: "send release notice" };
+      const callbacks = {
+        onPermissionReview: (event: { status: string }) =>
+          statuses.push(event.status),
+      };
+
+      const first = await executor.executeAll(
+        [{ id: "tu-abort-first", name: toolName, input }],
+        {
+          sessionId: "sess-reviewer-abort",
+          abortSignal: abortControllers[0]!.signal,
+          callbacks,
+          permissionContext: userPermissionContext({
+            userIntent: "릴리즈 안내를 전송해줘",
+          }),
+        },
+      );
+      expect(first[0].is_error).toBe(true);
+
+      const second = await executor.executeAll(
+        [{ id: "tu-abort-retry", name: toolName, input }],
+        {
+          sessionId: "sess-reviewer-abort",
+          abortSignal: abortControllers[1]!.signal,
+          callbacks,
+          permissionContext: userPermissionContext({
+            userIntent: "진행해",
+            explicitAuthorizationIntent: "진행해",
+          }),
+        },
+      );
+
+      expect(second[0].is_error).toBe(true);
+      expect(classifySpy).toHaveBeenCalledTimes(2);
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(requestAndWait).not.toHaveBeenCalled();
+      expect(statuses.filter((status) => status === "failed")).toHaveLength(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
