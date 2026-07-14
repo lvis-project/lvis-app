@@ -47,6 +47,10 @@ import type {
   AssistantContextMenuAction,
   AssistantContextMenuPayload,
 } from "../shared/assistant-context-menu.js";
+import type {
+  NativeContextMenuAction,
+  NativeContextMenuPayload,
+} from "../shared/native-context-menu.js";
 import type { AiProviderPingIpcResult } from "../shared/ai-provider-ping.js";
 import type {
   OpenHtmlPreviewWindowPayload,
@@ -1883,6 +1887,13 @@ export function buildLvisNamespaceExtras() {
       const listener = (_event: unknown, action: AssistantContextMenuAction) => cb(action);
       ipcRenderer.on(UI.assistantContextAction, listener);
       return () => ipcRenderer.removeListener(UI.assistantContextAction, listener);
+    },
+    showNativeContextMenu: (payload: NativeContextMenuPayload) =>
+      ipcRenderer.invoke(UI.nativeContextMenu, payload),
+    onNativeContextMenuAction: (cb: (action: NativeContextMenuAction) => void) => {
+      const listener = (_event: unknown, action: NativeContextMenuAction) => cb(action);
+      ipcRenderer.on(UI.nativeContextAction, listener);
+      return () => ipcRenderer.removeListener(UI.nativeContextAction, listener);
     },
   },
   pluginConfig: {

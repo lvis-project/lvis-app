@@ -21,6 +21,17 @@ Korean source history is preserved at
 - Keep UI extension points powerful but bounded by host-owned APIs.
 - Preserve deterministic fallbacks for provider, network, or plugin failures.
 
+## Reference Product Hierarchy
+
+Research for host-agent behavior starts with official documentation and current
+shipped behavior from Codex CLI/Desktop, Claude Code/Desktop, Hermes Agent
+Desktop, goose Desktop, GitHub Copilot, and Google Antigravity. These are the
+primary comparison set for agent lifecycle, project handling, interaction, and
+desktop UX. IDE and workspace products are secondary references: they may inform
+generic editor, filesystem, and multi-root conventions, but they do not override
+host-agent evidence. Record when a conclusion is an inference rather than a
+documented primary-product contract.
+
 ## Layer Map
 
 | Layer | Scope | Primary Responsibilities |
@@ -50,7 +61,7 @@ requirements as other tools.
 ## Project Identity
 
 Project identity is not inferred from `process.cwd()`. LVIS is a desktop app,
-so project scope comes from app state:
+so project scope comes from host-owned app state:
 
 - selected project in the sidebar or project header;
 - default workspace project when no explicit project is selected;
@@ -58,9 +69,49 @@ so project scope comes from app state:
   conversations and insights;
 - per-project memory, work-board reports, and token usage aggregation.
 
-There should not be a durable "no project" session in the normal app path. If
-legacy metadata is missing a project, list and UI surfaces should normalize it
-to the default workspace project where possible.
+The canonical, normalized absolute path is the project identity. A basename is
+display text only and must never be used to merge, remove, authorize, or recover
+a root. Canonically equal paths deduplicate; different paths with the same
+basename remain different projects. Their labels are disambiguated with parent
+path context, expanding only as far as necessary to make each label clear. There
+is no same-name fallback when a path is absent or stale.
+
+Workspace roots follow one host-owned lifecycle:
+
+1. Validate persisted roots at startup and again before runtime use. A confirmed
+   missing path, `ENOTDIR`, or an existing non-directory is pruned. A transient
+   access, device, network, or I/O failure is retained and audited for a later
+   retry; uncertainty is not treated as deletion.
+2. Add or re-add a root only after main-process validation confirms an existing
+   directory and the permission store accepts its canonical path. A duplicate
+   basename is allowed; a duplicate canonical path is not added twice.
+3. Workspace-root lifecycle operations are serialized globally, including
+   overlapping parent and descendant roots, so add, remove, and reconciliation
+   cannot cross persisted snapshots. Removal shrinks both persistent and live
+   scope. Before the settings entry is removed, durably prune routine
+   directories and path-scoped grants under that root, then detach project
+   metadata from every host-owned conversation namespace. A separately
+   registered descendant root is an exclusion boundary and retains its own
+   grants and routine scope. Missing cleanup services or any persistence failure
+   retain the settings entry (fail closed). After settings persistence, revoke
+   live scope and abort active turns that captured the removed root through the
+   pre-removal global allow-list so a snapshot tool batch cannot continue.
+4. Preserve conversation transcripts during the mandatory pre-removal metadata
+   detachment. Under a metadata lock, clear only `projectRoot` and `projectName`
+   from matching sessions, retain every other metadata field and the JSONL
+   transcript, then reindex the session search row. A stale metadata write must
+   not reattach a root after removal.
+5. Project lists are derived only from the current validated root registry.
+   Session metadata cannot synthesize a removed project row. Detached and
+   intentionally unscoped sessions remain in the ungrouped Chats list; their
+   stored identity is never reassigned by basename or silently rewritten to the
+   default root. Clearing project metadata currently makes a detached session
+   indistinguishable from a conversation that was unscoped from creation. This
+   is an LVIS implementation choice, not a shared reference-product convention;
+   Codex, Claude, Copilot, Hermes, goose, and Antigravity evidence supports
+   transcript preservation but not automatic reclassification as a general
+   conversation. When an unscoped conversation executes, the host binds that
+   turn to the default workspace execution context.
 
 ## Conversation Loop
 
@@ -71,7 +122,8 @@ and commits turn artifacts back to the session store.
 
 Important rules:
 
-- Project metadata must be attached before a new session is persisted.
+- Explicit project metadata must be attached before a project-scoped new
+  session is persisted; a general conversation remains unscoped.
 - Tool calls must not execute until the permission manager has resolved the
   decision path.
 - Long histories are compacted through the structured compact path rather than

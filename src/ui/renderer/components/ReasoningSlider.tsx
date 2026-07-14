@@ -111,13 +111,13 @@ export function ReasoningSlider({ enabled, onToggle }: ReasoningSliderProps) {
           data-level={level}
           aria-label={`${reasoningLabel}: ${levelLabels[level]}`}
           title={`${reasoningLabel}: ${levelLabels[level]}`}
-          className="flex shrink-0 items-center gap-0.5 cursor-pointer hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="flex shrink-0 cursor-pointer items-center gap-0.5 text-input-bar-placeholder transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-input-bar-action focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none"
         >
           <Lightbulb
-            className={`h-3 w-3 shrink-0 ${level > 0 ? "text-primary" : "text-muted-foreground"}`}
+            className={`h-3 w-3 shrink-0 ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}
             aria-hidden="true"
           />
-          <span className={`shrink-0 tabular-nums ${level > 0 ? "text-primary" : ""}`}>
+          <span className={`shrink-0 tabular-nums ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}>
             {levelLabels[level]}
           </span>
           <ChevronDown className="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />
@@ -130,7 +130,7 @@ export function ReasoningSlider({ enabled, onToggle }: ReasoningSliderProps) {
         className="w-52 p-3"
         data-testid="reasoning-popover"
       >
-        <div className="mb-2 text-[11px] font-medium text-muted-foreground">{reasoningLabel}</div>
+        <div className="mb-2 text-caption font-medium text-muted-foreground">{reasoningLabel}</div>
         <input
           type="range"
           min={0}
@@ -141,13 +141,13 @@ export function ReasoningSlider({ enabled, onToggle }: ReasoningSliderProps) {
           aria-label={`${reasoningLabel}: ${levelLabels[level]}`}
           className="lvis-reasoning-range h-1 w-full cursor-pointer accent-primary"
         />
-        <div className="mt-1.5 flex justify-between text-[10px] text-muted-foreground">
+        <div className="mt-1.5 flex justify-between text-micro text-muted-foreground">
           {levelLabels.map((label, idx) => (
             <button
               key={label}
               type="button"
               onClick={() => apply(idx)}
-              className={`shrink-0 cursor-pointer hover:text-foreground ${
+              className={`shrink-0 cursor-pointer transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-foreground motion-reduce:transition-none ${
                 idx === level ? "font-medium text-primary" : ""
               }`}
             >

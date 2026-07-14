@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import { Composer, type ComposerHandle } from "../Composer.js";
 import type { Attachment } from "../../types/attachments.js";
 import type { QuickAction } from "../command-actions.js";
+import type { NativeContextMenuAction } from "../../../../shared/native-context-menu.js";
 
 const mockSave = vi.fn(async () => ({ ok: true }));
 
@@ -103,5 +104,45 @@ describe("inline / autocomplete in the composer", () => {
     });
     expect(run).toHaveBeenCalledTimes(1);
     expect(ta.value).toBe("");
+  });
+
+  it("routes a right-clicked row through the native menu and activates that exact row", async () => {
+    const previousLvis = window.lvis;
+    let actionHandler: ((action: NativeContextMenuAction) => void) | null = null;
+    const showNativeContextMenu = vi.fn(async () => ({ ok: true as const }));
+    Object.defineProperty(window, "lvis", {
+      configurable: true,
+      value: {
+        ...previousLvis,
+        ui: {
+          ...previousLvis?.ui,
+          showNativeContextMenu,
+          onNativeContextMenuAction: (handler: (action: NativeContextMenuAction) => void) => {
+            actionHandler = handler;
+            return () => { actionHandler = null; };
+          },
+        },
+      },
+    });
+
+    const { getByTestId } = render(<Harness />);
+    const ta = getByTestId("composer-textarea") as HTMLTextAreaElement;
+    act(() => typeInto(ta, "/"));
+    const row = getByTestId("inline-slash-item-1");
+    expect(row.textContent).toContain("/sessions");
+    fireEvent.contextMenu(row);
+
+    expect(showNativeContextMenu).toHaveBeenCalledOnce();
+    const payload = showNativeContextMenu.mock.calls[0]![0];
+    expect(payload).toMatchObject({
+      kind: "command-item",
+      commands: ["command.activate", "command.copy"],
+    });
+    act(() => {
+      actionHandler?.({ requestId: payload.requestId, command: "command.activate" });
+    });
+    expect(ta.value).toBe("/sessions ");
+
+    Object.defineProperty(window, "lvis", { configurable: true, value: previousLvis });
   });
 });
