@@ -503,7 +503,7 @@ describe("local-api-server", () => {
 
     it("a thrown gate → false (fail-closed) and logs one line", async () => {
       const requestAndWait = vi.fn(async () => {
-        throw new Error("gate exploded");
+        throw new Error("secret-from-gate-must-not-be-logged");
       });
       const logs: string[] = [];
       const approver = buildExternalMutationApprover(
@@ -516,9 +516,12 @@ describe("local-api-server", () => {
         origin: "local-api",
       });
       expect(approved).toBe(false);
-      expect(logs.some((l) => l.includes("external-mutation approval errored"))).toBe(true);
+      expect(logs).toEqual([
+        `[local-api] external-mutation approval errored channel=${PERMISSIONS.setMode} origin=local-api → denied`,
+      ]);
       // No secret is ever logged — only channel + origin diagnostics.
       expect(logs.join("\n")).not.toContain("Bearer");
+      expect(logs.join("\n")).not.toContain("secret-from-gate-must-not-be-logged");
     });
 
     // ── security MINOR-1 (#1441 cluster review): attention-DoS in-flight cap ──
