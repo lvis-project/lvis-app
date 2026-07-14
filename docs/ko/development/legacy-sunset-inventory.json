@@ -31,7 +31,7 @@
         "src/boot/steps/__tests__/work-board-migration.test.ts"
       ],
       "validation": [
-        "bun test src/boot/steps/__tests__/work-board-migration.test.ts"
+        "bun run test:vitest -- run src/boot/steps/__tests__/work-board-migration.test.ts"
       ],
       "sunsetNotBefore": "2026-09-14",
       "sunsetCriteria": [
@@ -56,7 +56,7 @@
         "src/permissions/__tests__/permission-settings-store-664-migration.test.ts"
       ],
       "validation": [
-        "bun test src/permissions/__tests__/permission-settings-store-664-migration.test.ts"
+        "bun run test:vitest -- run src/permissions/__tests__/permission-settings-store-664-migration.test.ts"
       ],
       "sunsetNotBefore": "2026-08-15",
       "sunsetCriteria": [
@@ -80,7 +80,7 @@
         "src/permissions/__tests__/permission-slash.test.ts"
       ],
       "validation": [
-        "bun test src/permissions/__tests__/permission-slash.test.ts"
+        "bun run test:vitest -- run src/permissions/__tests__/permission-slash.test.ts"
       ],
       "sunsetNotBefore": "2026-08-15",
       "sunsetCriteria": [
@@ -102,7 +102,7 @@
       ],
       "dataPreservationTests": [],
       "validation": [
-        "bun test src/mcp/__tests__/stdio-server-loop.test.ts src/mcp/__tests__/stdio-child-transport.test.ts"
+        "bun run test:vitest -- run src/mcp/__tests__/stdio-server-loop.test.ts src/mcp/__tests__/stdio-child-transport.test.ts"
       ],
       "reviewAfter": "2026-08-05",
       "deleteOrPromoteAfter": "2026-10-04",
