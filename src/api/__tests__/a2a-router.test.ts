@@ -7,6 +7,7 @@ import {
 import { createStreamBroadcaster } from "../stream-broadcaster.js";
 import type { LocalApi } from "../local-api.js";
 import {
+  A2AHostJsonRpcErrorDefinition,
   A2AJsonRpcErrorDefinition,
   A2AJsonRpcMethod,
   StandardJsonRpcErrorDefinition,
@@ -42,6 +43,16 @@ function testHandler(): {
       if (method === A2AJsonRpcMethod.SEND_MESSAGE) {
         if (typeof params.message !== "object" || params.message === null) {
           throw new A2AHandlerError(StandardJsonRpcErrorDefinition.INVALID_PARAMS);
+        }
+        if ((params.message as A2AJsonObject).messageId === "consent-denied") {
+          const error = new A2AHandlerError(
+            A2AHostJsonRpcErrorDefinition.OPERATION_REJECTED,
+          );
+          error.message = "sensitive-consent-handler-detail";
+          (error as A2AHandlerError & { metadata?: Record<string, string> }).metadata = {
+            leaked: "sensitive-consent-handler-metadata",
+          };
+          throw error;
         }
         return { task: task() };
       }
@@ -446,6 +457,35 @@ describe("A2A v1 loopback router", () => {
       domain: "a2a-protocol.org",
     });
     expect(JSON.stringify(body)).not.toContain("sensitive-typed-handler");
+  });
+
+  it("uses the host ErrorInfo domain for an exact consent rejection", async () => {
+    const { server } = await start();
+    const response = await fetch(url(server), {
+      method: "POST",
+      headers: headers(),
+      body: rpc(
+        A2AJsonRpcMethod.SEND_MESSAGE,
+        { message: { messageId: "consent-denied" } },
+        "consent-id",
+      ),
+    });
+
+    const body = await response.json();
+    expect(body).toEqual({
+      jsonrpc: "2.0",
+      id: "consent-id",
+      error: {
+        code: -32010,
+        message: "Operation rejected",
+        data: [{
+          "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+          reason: "OPERATION_REJECTED",
+          domain: "lvis-project.github.io",
+        }],
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("sensitive-consent-handler");
   });
 
   it("fails closed and audits an unknown handler without exposing registered cards", async () => {

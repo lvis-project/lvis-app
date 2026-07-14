@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
   A2ARole,
   A2ATaskState,
@@ -285,6 +287,22 @@ function recordMessageIds(record: A2ATaskRecord): string[] {
   return [...new Set(ids)];
 }
 
+function hasExactStoredMessage(record: A2ATaskRecord, message: A2AMessage): boolean {
+  const candidates = [
+    ...(record.task.history ?? []),
+    ...(record.task.status.message ? [record.task.status.message] : []),
+  ];
+  return candidates.some((candidate) =>
+    candidate.messageId === message.messageId
+    && isDeepStrictEqual(candidate, message));
+}
+
+function hasExactInitialStoredMessage(record: A2ATaskRecord, message: A2AMessage): boolean {
+  const initial = record.task.history?.[0];
+  return initial?.messageId === message.messageId
+    && isDeepStrictEqual(initial, message);
+}
+
 export interface A2ATaskStoreAuditEvent {
   type: "a2a-task-store-drop";
   reason: "invalid-record" | "duplicate-record";
@@ -311,18 +329,52 @@ export type A2ATaskCreateResult =
         | "invalid-task";
     };
 
+export type A2AInitialTaskAdmissionResult =
+  | { ok: true; reserved: true; admissionId: string }
+  | { ok: true; reserved: false; record: A2ATaskRecord }
+  | {
+      ok: false;
+      reason:
+        | "admission-busy"
+        | "capacity-exceeded"
+        | "duplicate-message"
+        | "invalid-message";
+    };
+
 export type A2ATaskContinuationResult =
   | { ok: true; duplicate: boolean; record: A2ATaskRecord }
   | {
       ok: false;
+      reason: "task-not-found";
+      availability: "cross-origin" | "unknown-task";
+    }
+  | {
+      ok: false;
       reason:
-        | "task-not-found"
         | "task-not-resumable"
         | "context-mismatch"
         | "duplicate-message"
         | "history-capacity-exceeded"
         | "invalid-message";
     };
+
+export type A2ATaskLookupResult =
+  | { ok: true; record: A2ATaskRecord }
+  | { ok: false; reason: "cross-origin" | "unknown-task" };
+
+type A2ATaskContinuationInspection =
+  | {
+      ok: true;
+      duplicate: true;
+      record: A2ATaskRecord;
+    }
+  | {
+      ok: true;
+      duplicate: false;
+      record: A2ATaskRecord;
+      message: A2AMessage;
+    }
+  | Extract<A2ATaskContinuationResult, { ok: false }>;
 
 export type A2ATaskTransitionResult =
   | { ok: true; changed: boolean; record: A2ATaskRecord }
@@ -343,6 +395,9 @@ export class A2ATaskStore {
   private records: A2ATaskRecord[] = [];
   private loaded = false;
   private queue: Promise<void> = Promise.resolve();
+  private initialAdmission:
+    | { id: string; handlerId: string; message: A2AMessage }
+    | undefined;
 
   constructor(private readonly options: CreateA2ATaskStoreOptions) {
     if (!Number.isInteger(options.maxTasks) || options.maxTasks < 1) {
@@ -436,10 +491,88 @@ export class A2ATaskStore {
       record.handlerId === handlerId && recordMessageIds(record).includes(messageId));
   }
 
+  private inspectContinuationUnlocked(input: {
+    handlerId: string;
+    taskId: string;
+    contextId?: string;
+    message: A2AMessage;
+  }): A2ATaskContinuationInspection {
+    if (
+      this.initialAdmission?.handlerId === input.handlerId
+      && this.initialAdmission.message.messageId === input.message.messageId
+    ) {
+      return { ok: false, reason: "duplicate-message" };
+    }
+    const duplicate = this.findMessageRecord(input.handlerId, input.message.messageId);
+    if (duplicate) {
+      if (duplicate.task.id !== input.taskId) {
+        return { ok: false, reason: "duplicate-message" };
+      }
+      if (input.contextId && input.contextId !== duplicate.task.contextId) {
+        return { ok: false, reason: "context-mismatch" };
+      }
+      const assignedMessage = normalizeStoredMessage({
+        ...structuredClone(input.message),
+        contextId: duplicate.task.contextId,
+        taskId: duplicate.task.id,
+      });
+      if (!assignedMessage || !hasExactStoredMessage(duplicate, assignedMessage)) {
+        return { ok: false, reason: "duplicate-message" };
+      }
+      return { ok: true, duplicate: true, record: duplicate };
+    }
+    const index = this.findIndex(input.handlerId, input.taskId);
+    if (index < 0) {
+      return {
+        ok: false,
+        reason: "task-not-found",
+        availability: this.records.some((record) => record.task.id === input.taskId)
+          ? "cross-origin"
+          : "unknown-task",
+      };
+    }
+    const record = this.records[index]!;
+    if (input.contextId && input.contextId !== record.task.contextId) {
+      return { ok: false, reason: "context-mismatch" };
+    }
+    if (record.task.status.state !== A2ATaskState.INPUT_REQUIRED) {
+      return { ok: false, reason: "task-not-resumable" };
+    }
+    const assignedMessage = normalizeStoredMessage({
+      ...structuredClone(input.message),
+      contextId: record.task.contextId,
+      taskId: record.task.id,
+    });
+    if (!assignedMessage) return { ok: false, reason: "invalid-message" };
+    if ((record.task.history?.length ?? 0) >= this.options.maxHistoryMessages) {
+      return { ok: false, reason: "history-capacity-exceeded" };
+    }
+    return {
+      ok: true,
+      duplicate: false,
+      record,
+      message: assignedMessage,
+    };
+  }
+
   async get(handlerId: string, taskId: string): Promise<A2ATaskRecord | null> {
     return await this.withLock(() => {
       const index = this.findIndex(handlerId, taskId);
       return index < 0 ? null : cloneRecord(this.records[index]!);
+    });
+  }
+
+  /** Atomically return an owned task or its redacted unavailability classification. */
+  async lookupTask(handlerId: string, taskId: string): Promise<A2ATaskLookupResult> {
+    return await this.withLock(() => {
+      const index = this.findIndex(handlerId, taskId);
+      if (index >= 0) return { ok: true, record: cloneRecord(this.records[index]!) };
+      return {
+        ok: false,
+        reason: this.records.some((record) => record.task.id === taskId)
+          ? "cross-origin"
+          : "unknown-task",
+      };
     });
   }
 
@@ -462,11 +595,79 @@ export class A2ATaskStore {
       .map(cloneRecord));
   }
 
+  /**
+   * Reserve the single in-process admission slot before prompting or starting a
+   * child. The reservation is intentionally not persisted and is released when
+   * the durable Task link commits or the attempted spawn fails.
+   */
+  async reserveInitialTaskAdmission(input: {
+    handlerId: string;
+    message: A2AMessage;
+  }): Promise<A2AInitialTaskAdmissionResult> {
+    return await this.withLock(() => {
+      if (
+        !HANDLER_ID_PATTERN.test(input.handlerId)
+        || maskSensitiveData(input.handlerId).detections.length > 0
+        || !isSafeA2AMessageId(input.message.messageId)
+        || input.message.taskId !== undefined
+      ) {
+        return { ok: false, reason: "invalid-message" };
+      }
+      const duplicate = this.findMessageRecord(input.handlerId, input.message.messageId);
+      if (duplicate) {
+        if (
+          input.message.contextId
+          && input.message.contextId !== duplicate.task.contextId
+        ) {
+          return { ok: false, reason: "duplicate-message" };
+        }
+        const assignedMessage = normalizeStoredMessage({
+          ...structuredClone(input.message),
+          contextId: duplicate.task.contextId,
+          taskId: duplicate.task.id,
+        });
+        return assignedMessage && hasExactInitialStoredMessage(duplicate, assignedMessage)
+          ? { ok: true, reserved: false, record: cloneRecord(duplicate) }
+          : { ok: false, reason: "duplicate-message" };
+      }
+      if (this.initialAdmission) {
+        return { ok: false, reason: "admission-busy" };
+      }
+
+      const removeCount = this.records.length - this.options.maxTasks + 1;
+      if (removeCount > 0) {
+        const terminalCount = this.records.filter((record) =>
+          record.handlerId === input.handlerId
+          && isA2ATerminalTaskState(record.task.status.state)).length;
+        if (terminalCount < removeCount) {
+          return { ok: false, reason: "capacity-exceeded" };
+        }
+      }
+      this.initialAdmission = {
+        id: randomUUID(),
+        handlerId: input.handlerId,
+        message: structuredClone(input.message),
+      };
+      return {
+        ok: true,
+        reserved: true,
+        admissionId: this.initialAdmission.id,
+      };
+    });
+  }
+
+  async releaseInitialTaskAdmission(admissionId: string): Promise<void> {
+    await this.withLock(() => {
+      if (this.initialAdmission?.id === admissionId) this.initialAdmission = undefined;
+    });
+  }
+
   async create(input: {
     handlerId: string;
     childSessionId: string;
     contextId: string;
     message: A2AMessage;
+    admissionId?: string;
   }): Promise<A2ATaskCreateResult> {
     return await this.withLock(async () => {
       if (
@@ -484,6 +685,32 @@ export class A2ATaskStore {
         taskId: input.childSessionId,
       });
       if (!assignedMessage) return { ok: false, reason: "invalid-task" };
+      const admission = input.admissionId ? this.initialAdmission : undefined;
+      if (
+        input.admissionId
+        && (
+          !admission
+          || admission.id !== input.admissionId
+          || admission.handlerId !== input.handlerId
+          || admission.message.messageId !== assignedMessage.messageId
+          || !isDeepStrictEqual(
+            {
+              ...structuredClone(admission.message),
+              contextId: input.contextId,
+              taskId: input.childSessionId,
+            },
+            assignedMessage,
+          )
+        )
+      ) {
+        return { ok: false, reason: "invalid-task" };
+      }
+      if (this.initialAdmission && admission !== this.initialAdmission) {
+        return { ok: false, reason: "capacity-exceeded" };
+      }
+      const consumeAdmission = (): void => {
+        if (admission && this.initialAdmission === admission) this.initialAdmission = undefined;
+      };
 
       const childOwner = this.records.find(
         (record) => record.childSessionId === input.childSessionId,
@@ -494,16 +721,23 @@ export class A2ATaskStore {
 
       const duplicateMessage = this.findMessageRecord(input.handlerId, assignedMessage.messageId);
       if (duplicateMessage) {
-        return duplicateMessage.childSessionId === input.childSessionId
-          ? { ok: true, created: false, record: cloneRecord(duplicateMessage) }
-          : { ok: false, reason: "duplicate-message" };
+        if (
+          duplicateMessage.childSessionId !== input.childSessionId
+          || !hasExactInitialStoredMessage(duplicateMessage, assignedMessage)
+        ) {
+          return { ok: false, reason: "duplicate-message" };
+        }
+        consumeAdmission();
+        return { ok: true, created: false, record: cloneRecord(duplicateMessage) };
       }
       const existingIndex = this.findIndex(input.handlerId, input.childSessionId);
       if (existingIndex >= 0) {
         const existing = this.records[existingIndex]!;
-        return recordMessageIds(existing).includes(assignedMessage.messageId)
-          ? { ok: true, created: false, record: cloneRecord(existing) }
-          : { ok: false, reason: "duplicate-message" };
+        if (!hasExactInitialStoredMessage(existing, assignedMessage)) {
+          return { ok: false, reason: "duplicate-message" };
+        }
+        consumeAdmission();
+        return { ok: true, created: false, record: cloneRecord(existing) };
       }
 
       const removeCount = this.records.length - this.options.maxTasks + 1;
@@ -544,6 +778,7 @@ export class A2ATaskStore {
         this.records = previous;
         throw error;
       }
+      consumeAdmission();
       return { ok: true, created: true, record: cloneRecord(record) };
     });
   }
@@ -555,33 +790,15 @@ export class A2ATaskStore {
     message: A2AMessage;
   }): Promise<A2ATaskContinuationResult> {
     return await this.withLock(async () => {
-      const duplicate = this.findMessageRecord(input.handlerId, input.message.messageId);
-      if (duplicate) {
-        return duplicate.task.id === input.taskId
-          ? { ok: true, duplicate: true, record: cloneRecord(duplicate) }
-          : { ok: false, reason: "duplicate-message" };
+      const inspected = this.inspectContinuationUnlocked(input);
+      if (!inspected.ok) return inspected;
+      if (inspected.duplicate) {
+        return { ok: true, duplicate: true, record: cloneRecord(inspected.record) };
       }
-      const index = this.findIndex(input.handlerId, input.taskId);
-      if (index < 0) return { ok: false, reason: "task-not-found" };
-      const record = this.records[index]!;
-      if (input.contextId && input.contextId !== record.task.contextId) {
-        return { ok: false, reason: "context-mismatch" };
-      }
-      if (record.task.status.state !== A2ATaskState.INPUT_REQUIRED) {
-        return { ok: false, reason: "task-not-resumable" };
-      }
-      const assignedMessage = normalizeStoredMessage({
-        ...structuredClone(input.message),
-        contextId: record.task.contextId,
-        taskId: record.task.id,
-      });
-      if (!assignedMessage) return { ok: false, reason: "invalid-message" };
-      if ((record.task.history?.length ?? 0) >= this.options.maxHistoryMessages) {
-        return { ok: false, reason: "history-capacity-exceeded" };
-      }
+      const record = inspected.record;
       const previous = structuredClone(this.records);
       const timestamp = this.now();
-      record.task.history = [...(record.task.history ?? []), assignedMessage];
+      record.task.history = [...(record.task.history ?? []), inspected.message];
       record.task.status = { state: A2ATaskState.WORKING, timestamp };
       record.updatedAt = timestamp;
       try {
@@ -591,6 +808,28 @@ export class A2ATaskStore {
         throw error;
       }
       return { ok: true, duplicate: false, record: cloneRecord(record) };
+    });
+  }
+
+  /**
+   * Validate a continuation without changing task state or durable history.
+   * Callers must still use {@link beginContinuation} after authorization so
+   * races are revalidated under the store lock before the mutation commits.
+   */
+  async preflightContinuation(input: {
+    handlerId: string;
+    taskId: string;
+    contextId?: string;
+    message: A2AMessage;
+  }): Promise<A2ATaskContinuationResult> {
+    return await this.withLock(() => {
+      const inspected = this.inspectContinuationUnlocked(input);
+      if (!inspected.ok) return inspected;
+      return {
+        ok: true,
+        duplicate: inspected.duplicate,
+        record: cloneRecord(inspected.record),
+      };
     });
   }
 
