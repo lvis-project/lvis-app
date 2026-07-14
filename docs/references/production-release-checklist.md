@@ -117,6 +117,11 @@ release and requires a SID/profile handoff fix before the full gate is rerun.
       URL, and `whoami /user` SID for both the initiating standard user and the
       distinct administrator. Attach a recording and installer/ASRT logs proving
       exactly one installer UAC consent and zero nested `srt-win` UAC prompts.
+- [ ] Install-to-launch ownership: after the distinct administrator approves
+      elevation and install, prove the launched LVIS process owner and every
+      resolved app/userData path belong to the initiating standard user. Prove
+      the administrator profile gained no LVIS data, and record both account
+      SIDs, process owner, resolved paths, and evidence URL.
 - [ ] Genuine KEEP: seed fixed-content sentinels in the initiating user's
       resolved `%USERPROFILE%\.lvis`, Roaming `LVIS`/`lvis-app`, and Local
       `LVIS`/`lvis-app` paths; approve with the distinct administrator and run
