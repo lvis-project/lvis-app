@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import type { IpcMainInvokeEvent } from "electron";
+import type { FeatureNamespaceHandle } from "../main/storage/feature-namespace.js";
 
 export function makeMockWebContents() {
   return {
@@ -85,16 +86,17 @@ export function withPlatformForTest(platform: NodeJS.Platform): void {
 
 export function createInMemoryFeatureNamespace() {
   let stored: unknown;
+  const handle = {
+    dir: "memory",
+    readJson: async <T>(_name: string, fallback: T): Promise<T> =>
+      structuredClone(stored === undefined ? fallback : stored) as T,
+    writeJson: async <T>(_name: string, value: T): Promise<void> => {
+      stored = structuredClone(value);
+    },
+    childDir: async (name: string): Promise<string> => name,
+  } satisfies FeatureNamespaceHandle;
   return {
-    handle: {
-      dir: "memory",
-      readJson: async (_name: string, fallback: unknown) =>
-        structuredClone(stored === undefined ? fallback : stored),
-      writeJson: async (_name: string, value: unknown) => {
-        stored = structuredClone(value);
-      },
-      childDir: async (name: string) => name,
-    } as never,
+    handle,
     getStored: () => structuredClone(stored),
   };
 }
