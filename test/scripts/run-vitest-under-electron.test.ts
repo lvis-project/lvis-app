@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
+import { assertElectronNodeVitestRuntime } from "../../scripts/assert-electron-node-vitest.mjs";
 import { normalizeElectronNodeRuntime } from "../../scripts/normalize-electron-node-runtime.mjs";
 import {
   applyElectronVitestResult,
@@ -17,6 +18,33 @@ class FakeChild extends EventEmitter {
 }
 
 describe("Electron Node-mode Vitest runner", () => {
+  it("fails fast for direct Node or Bun test runners", () => {
+    expect(() =>
+      assertElectronNodeVitestRuntime({
+        env: {},
+        execPath: "C:/runtime/node.exe",
+      }),
+    ).toThrow("[electron-vitest-runner-required]");
+    expect(() =>
+      assertElectronNodeVitestRuntime({
+        env: { ELECTRON_RUN_AS_NODE: "1" },
+        execPath: "/usr/bin/node",
+      }),
+    ).toThrow("[electron-vitest-runner-required]");
+    expect(() =>
+      assertElectronNodeVitestRuntime({
+        env: { ELECTRON_RUN_AS_NODE: "1" },
+        execPath: "C:/runtime/electron.exe",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertElectronNodeVitestRuntime({
+        env: { ELECTRON_RUN_AS_NODE: "1" },
+        execPath: "/opt/Electron",
+      }),
+    ).not.toThrow();
+  });
+
   it("resolves explicit runtime paths and rejects invalid resolvers", () => {
     expect(
       resolveElectronVitestRuntime({
