@@ -784,14 +784,14 @@ export class PermissionManager {
    * leaves the latter's path grants orphaned. On the SAME root being re-added
    * they would silently revive, re-authorizing writes the user thought they had
    * revoked. This closes that gap by revoking every allow rule whose pattern
-   * targets a path strictly under the removed root, in a single file rewrite.
+   * targets the removed root itself or a path under it, in a single file rewrite.
    *
    * Matching is canonical/case-folded via the SAME helpers the sensitive-path
    * and workspace scope guards use, so a trailing slash, `..`, symlink, or case
-   * variant of the stored path still resolves under the root. Only STRICT
-   * descendants are pruned — a grant on the root directory entry itself is left
-   * intact (removing a root does not imply the user disowned a grant on the
-   * folder they picked; it maps to the read-list entry, not a file under it).
+   * variant of the stored path still resolves under the root. The root entry is
+   * inclusive: otherwise an exact-root grant can silently revive when the same
+   * workspace is registered again. Separately registered descendant roots are
+   * carved out through `preserveRoots` below.
    *
    * Non-path allow rules (plain tool-name globs like `web_fetch`) and deny rules
    * are never touched.
@@ -813,22 +813,53 @@ export class PermissionManager {
    * root. This catches grants stored before AND after any future canonicalization
    * change with zero hot-path cost. See the commit body for the full rationale.
    */
-  async prunePathGrantsUnderRoot(root: string): Promise<PrunedGrant[]> {
+  async prunePathGrantsUnderRoot(
+    root: string,
+    options?: { preserveRoots?: readonly string[] },
+  ): Promise<PrunedGrant[]> {
     // Dual-form roots (item-5): canonical (realpath'd) and raw (pathResolve only).
     const rootCanon = caseFoldForMatch(canonicalizePathForMatch(root));
     const rootRaw = caseFoldForMatch(resolve(root).replace(/\\/g, "/"));
+    const preservedRoots = (options?.preserveRoots ?? []).flatMap((preserveRoot) => {
+      try {
+        const canonical = caseFoldForMatch(canonicalizePathForMatch(preserveRoot));
+        const raw = caseFoldForMatch(resolve(preserveRoot).replace(/\\/g, "/"));
+        // Only a genuine descendant may carve a hole in the removed root.
+        // Ignoring the root itself and unrelated paths prevents a malformed
+        // caller option from accidentally preserving the whole revoked scope.
+        if (
+          !isStrictPathDescendant(rootCanon, canonical)
+          && !isStrictPathDescendant(rootRaw, raw)
+        ) {
+          return [];
+        }
+        return [{ canonical, raw }];
+      } catch {
+        return [];
+      }
+    });
     const isUnderRoot = (pattern: string): boolean => {
       const target = extractGrantPath(pattern);
       if (target === null) return false;
-      // A grant matches if EITHER form places it strictly under the root. The two
+      // A grant matches if EITHER form equals the root or places it under the root. The two
       // forms are compared like-for-like (canonical↔canonical, raw↔raw) so a
       // realpath'd stored grant and a raw stored grant are both caught.
       // isStrictPathDescendant folds case defensively (item-7), so passing the
       // already-folded strings is safe + idempotent.
       const targetCanon = caseFoldForMatch(canonicalizePathForMatch(target));
-      if (isStrictPathDescendant(rootCanon, targetCanon)) return true;
       const targetRaw = caseFoldForMatch(resolve(target).replace(/\\/g, "/"));
-      return isStrictPathDescendant(rootRaw, targetRaw);
+      const covered = targetCanon === rootCanon
+        || targetRaw === rootRaw
+        || isStrictPathDescendant(rootCanon, targetCanon)
+        || isStrictPathDescendant(rootRaw, targetRaw);
+      if (!covered) return false;
+      const preserved = preservedRoots.some(
+        (preserveRoot) => targetCanon === preserveRoot.canonical
+          || isStrictPathDescendant(preserveRoot.canonical, targetCanon)
+          || targetRaw === preserveRoot.raw
+          || isStrictPathDescendant(preserveRoot.raw, targetRaw),
+      );
+      return !preserved;
     };
 
     // The persisted file is the SOT for path grants: addAlwaysAllowedPersist
@@ -849,15 +880,16 @@ export class PermissionManager {
         return true;
       });
     });
-    if (pruned.length === 0) return [];
-
-    // Reconcile in-memory caches with the persisted shrink (a boot-hydrated rule
-    // or a same-session Map entry for the pruned pattern must also drop).
-    const prunedPatterns = new Set(pruned.map((p) => p.pattern));
+    // Reconcile by scope on every retry, not only by patterns removed in this
+    // disk pass. A prior attempt may have committed the file shrink and then
+    // thrown while broadcasting/revoking bearers; the retry must still remove
+    // stale live cache entries and re-run the revoke signal.
     this.rules = this.rules.filter(
-      (r) => !(r.action === "allow" && !r.source && prunedPatterns.has(r.pattern)),
+      (r) => !(r.action === "allow" && !r.source && isUnderRoot(r.pattern)),
     );
-    for (const pattern of prunedPatterns) this.alwaysAllowed.delete(pattern);
+    for (const pattern of [...this.alwaysAllowed.keys()]) {
+      if (isUnderRoot(pattern)) this.alwaysAllowed.delete(pattern);
+    }
 
     this.broadcastConfigChanged?.();
     // A revoke narrows policy — outstanding bearers must re-resolve under it.

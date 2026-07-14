@@ -274,6 +274,79 @@ describe("A2ATaskStore", () => {
     await expect(store.get("profile-b", "sub-profile-b-active")).resolves.not.toBeNull();
   });
 
+  it("enforces a per-handler fair-share without blocking another handler", async () => {
+    const storage = memoryNamespace();
+    const store = new A2ATaskStore({
+      namespace: storage.namespace,
+      maxTasks: 4,
+      maxTasksPerHandler: 2,
+      maxHistoryMessages: 8,
+      now: clock(),
+    });
+    for (const suffix of ["one", "two"]) {
+      await store.create({
+        handlerId: "profile-a",
+        childSessionId: `sub-profile-a-${suffix}`,
+        contextId: `context-profile-a-${suffix}`,
+        message: userMessage(`message-profile-a-${suffix}`),
+      });
+    }
+
+    await expect(store.create({
+      handlerId: "profile-a",
+      childSessionId: "sub-profile-a-three",
+      contextId: "context-profile-a-three",
+      message: userMessage("message-profile-a-three"),
+    })).resolves.toEqual({ ok: false, reason: "capacity-exceeded" });
+    await expect(store.reserveInitialTaskAdmission({
+      handlerId: "profile-a",
+      message: userMessage("message-profile-a-reserved"),
+    })).resolves.toEqual({ ok: false, reason: "capacity-exceeded" });
+    await expect(store.create({
+      handlerId: "profile-b",
+      childSessionId: "sub-profile-b-one",
+      contextId: "context-profile-b-one",
+      message: userMessage("message-profile-b-one"),
+    })).resolves.toMatchObject({ ok: true, created: true });
+  });
+
+  it("drops persisted records outside the active handler snapshot", async () => {
+    const storage = memoryNamespace();
+    const seed = makeStore(storage);
+    await seed.create({
+      handlerId: "profile-a",
+      childSessionId: "sub-active-profile",
+      contextId: "context-active-profile",
+      message: userMessage("message-active-profile"),
+    });
+    await seed.create({
+      handlerId: "profile-b",
+      childSessionId: "sub-removed-profile",
+      contextId: "context-removed-profile",
+      message: userMessage("message-removed-profile"),
+    });
+    const audit = vi.fn();
+    const reloaded = new A2ATaskStore({
+      namespace: storage.namespace,
+      maxTasks: 4,
+      maxTasksPerHandler: 2,
+      maxHistoryMessages: 8,
+      activeHandlerIds: new Set(["profile-a"]),
+      audit,
+    });
+
+    await expect(reloaded.get("profile-a", "sub-active-profile")).resolves.not.toBeNull();
+    await expect(reloaded.get("profile-b", "sub-removed-profile")).resolves.toBeNull();
+    await expect(
+      reloaded.lookupTask("profile-a", "sub-removed-profile"),
+    ).resolves.toEqual({ ok: false, reason: "unknown-task" });
+    expect(audit).toHaveBeenCalledWith({
+      type: "a2a-task-store-drop",
+      reason: "inactive-handler",
+      count: 1,
+    });
+  });
+
   it("reserves initial admission before consent and releases the single slot", async () => {
     const storage = memoryNamespace();
     const store = makeStore(storage, { maxTasks: 1 });

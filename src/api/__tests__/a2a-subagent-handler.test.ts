@@ -14,6 +14,8 @@ import type {
   A2AWireHostBinding,
   SubAgentSpawnResult,
 } from "../../engine/subagent-runner.js";
+import { GUIDE_MAX_CHARS } from "../../engine/turn/guidance-limits.js";
+import { createInMemoryFeatureNamespace } from "../../__tests__/test-helpers.js";
 import {
   A2ASubAgentHandler,
   type A2AMutationAuthorizer,
@@ -23,17 +25,6 @@ import { A2ATaskStore } from "../a2a-task-store.js";
 
 const HANDLER_ID = "profile-a";
 const TASK_ID = "sub-wire-task-1";
-
-function memoryNamespace() {
-  let value: unknown;
-  return {
-    readJson: async <T>(_name: string, fallback: T): Promise<T> =>
-      (value === undefined ? structuredClone(fallback) : structuredClone(value)) as T,
-    writeJson: async <T>(_name: string, next: T): Promise<void> => {
-      value = structuredClone(next);
-    },
-  };
-}
 
 function clock() {
   let tick = 0;
@@ -131,7 +122,7 @@ function makeHarness(
   } = {},
 ) {
   const store = new A2ATaskStore({
-    namespace: memoryNamespace(),
+    namespace: createInMemoryFeatureNamespace().handle,
     maxTasks: options.maxTasks ?? 10,
     maxHistoryMessages: options.maxHistoryMessages ?? 16,
     now: clock(),
@@ -203,6 +194,30 @@ async function seedWorkingTask(
     handlerId,
     taskId,
     state: A2ATaskState.WORKING,
+  });
+}
+
+async function seedInputRequiredTask(
+  store: A2ATaskStore,
+  taskId: string,
+  contextId: string,
+  messageId: string,
+): Promise<void> {
+  await seedWorkingTask(
+    store,
+    HANDLER_ID,
+    taskId,
+    contextId,
+    messageId + "-start",
+  );
+  await store.transition({
+    handlerId: HANDLER_ID,
+    taskId,
+    state: A2ATaskState.INPUT_REQUIRED,
+    message: userMessage(messageId + "-waiting", {
+      role: A2ARole.AGENT,
+      parts: [{ text: "continue" }],
+    }),
   });
 }
 
@@ -392,6 +407,114 @@ describe("A2ASubAgentHandler", () => {
       { resumeId: TASK_ID, messageText: "continue" },
       { handlerId: HANDLER_ID },
     );
+  });
+
+  it("masks and bounds a suspension prompt without copying it into metadata", async () => {
+    const { handler, runner } = makeHarness();
+    const rawToken = "sk-abcdefgh12345678";
+    const rawPrompt = `Continue ${rawToken} ${"\u0000".repeat(GUIDE_MAX_CHARS)}`;
+    runner.spawnFromA2AWire.mockImplementation(async (_request, _binding, callbacks) => {
+      await callbacks.onDurablyLinked({ childSessionId: TASK_ID });
+      const result = waitingResult();
+      result.suspension = { ...result.suspension!, prompt: rawPrompt };
+      return result;
+    });
+
+    const first = taskFrom(await handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
+      message: userMessage("wire-sensitive-suspension"),
+    }));
+    const statusMessage = first.status.message!;
+    const text = (statusMessage.parts[0] as { text: string }).text;
+    const suspension = (statusMessage.metadata as {
+      suspension: { reason: string; resumeId: string; prompt?: string };
+    }).suspension;
+
+    expect(text).not.toContain(rawToken);
+    expect(text).toContain("[REDACTED:TOKEN]");
+    expect(JSON.stringify(statusMessage).length).toBeLessThanOrEqual(GUIDE_MAX_CHARS);
+    expect(suspension).toEqual({ reason: "budget", resumeId: TASK_ID });
+    expect(JSON.stringify(first)).not.toContain(rawToken);
+
+    const replay = await handler.handle(
+      A2AJsonRpcMethod.GET_TASK,
+      { id: TASK_ID },
+    ) as A2ATask;
+    expect(replay.status.message).toEqual(statusMessage);
+    expect(JSON.stringify(replay)).not.toContain(rawToken);
+  });
+
+  it("reconciles detached cancellation before accepting a continuation", async () => {
+    const { handler, runner, store, audit, authorizeMutation } = makeHarness();
+    await seedInputRequiredTask(
+      store,
+      TASK_ID,
+      "context-detached-continuation",
+      "message-detached-continuation",
+    );
+    runner.getA2AWireRunSnapshot.mockReturnValue({
+      childSessionId: TASK_ID,
+      title: "wire profile",
+      taskState: A2ATaskState.CANCELED,
+    });
+
+    await expect(handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
+      message: userMessage("message-detached-answer", {
+        taskId: TASK_ID,
+        contextId: "context-detached-continuation",
+        parts: [{ text: "continue" }],
+      }),
+    })).rejects.toMatchObject({ definition: { code: -32602 } });
+
+    expect(authorizeMutation).not.toHaveBeenCalled();
+    expect(runner.resumeFromA2AWire).not.toHaveBeenCalled();
+    await expect(store.get(HANDLER_ID, TASK_ID)).resolves.toMatchObject({
+      task: {
+        status: { state: A2ATaskState.CANCELED },
+        history: expect.not.arrayContaining([
+          expect.objectContaining({ messageId: "message-detached-answer" }),
+        ]),
+      },
+    });
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+      reason: "task-not-resumable",
+      taskId: TASK_ID,
+    }));
+  });
+
+  it("reconciles detached cancellation while continuation consent is pending", async () => {
+    const approval = deferred<boolean>();
+    const authorizeMutation = vi.fn(async () => await approval.promise);
+    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeMutation });
+    await seedInputRequiredTask(
+      store,
+      TASK_ID,
+      "context-detached-consent",
+      "message-detached-consent",
+    );
+
+    const pending = handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
+      message: userMessage("message-detached-consent-answer", {
+        taskId: TASK_ID,
+        contextId: "context-detached-consent",
+        parts: [{ text: "continue" }],
+      }),
+    });
+    const rejection = expect(pending).rejects.toMatchObject({
+      definition: { code: -32602 },
+    });
+    await vi.waitFor(() => expect(authorizeMutation).toHaveBeenCalledOnce());
+    runner.getA2AWireRunSnapshot.mockReturnValue({
+      childSessionId: TASK_ID,
+      title: "wire profile",
+      taskState: A2ATaskState.CANCELED,
+    });
+    approval.resolve(true);
+
+    await rejection;
+    expect(runner.resumeFromA2AWire).not.toHaveBeenCalled();
+    await expect(store.get(HANDLER_ID, TASK_ID)).resolves.toMatchObject({
+      task: { status: { state: A2ATaskState.CANCELED } },
+    });
   });
 
   it("preflights a continuation before consent and leaves it waiting when denied", async () => {
@@ -1169,6 +1292,60 @@ describe("A2ASubAgentHandler", () => {
     expect(runner.resumeFromA2AWire).not.toHaveBeenCalled();
   });
 
+  it("returns authoritative detached cancellation without canceling the runner again", async () => {
+    const { handler, runner, store, authorizeMutation } = makeHarness();
+    await seedInputRequiredTask(
+      store,
+      TASK_ID,
+      "context-detached-cancel",
+      "message-detached-cancel",
+    );
+    runner.getA2AWireRunSnapshot.mockReturnValue({
+      childSessionId: TASK_ID,
+      title: "wire profile",
+      taskState: A2ATaskState.CANCELED,
+    });
+
+    const canceled = await handler.handle(
+      A2AJsonRpcMethod.CANCEL_TASK,
+      { id: TASK_ID },
+    ) as A2ATask;
+
+    expect(canceled.status.state).toBe(A2ATaskState.CANCELED);
+    expect(authorizeMutation).not.toHaveBeenCalled();
+    expect(runner.cancelA2AWireRun).not.toHaveBeenCalled();
+    await expect(store.get(HANDLER_ID, TASK_ID)).resolves.toMatchObject({
+      task: { status: { state: A2ATaskState.CANCELED } },
+    });
+  });
+
+  it("reconciles detached cancellation while cancel consent is pending", async () => {
+    const approval = deferred<boolean>();
+    const authorizeMutation = vi.fn(async () => await approval.promise);
+    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeMutation });
+    await seedInputRequiredTask(
+      store,
+      TASK_ID,
+      "context-detached-cancel-consent",
+      "message-detached-cancel-consent",
+    );
+
+    const pending = handler.handle(A2AJsonRpcMethod.CANCEL_TASK, { id: TASK_ID });
+    await vi.waitFor(() => expect(authorizeMutation).toHaveBeenCalledOnce());
+    runner.getA2AWireRunSnapshot.mockReturnValue({
+      childSessionId: TASK_ID,
+      title: "wire profile",
+      taskState: A2ATaskState.CANCELED,
+    });
+    approval.resolve(true);
+
+    await expect(pending).resolves.toMatchObject({ status: { state: A2ATaskState.CANCELED } });
+    expect(runner.cancelA2AWireRun).not.toHaveBeenCalled();
+    await expect(store.get(HANDLER_ID, TASK_ID)).resolves.toMatchObject({
+      task: { status: { state: A2ATaskState.CANCELED } },
+    });
+  });
+
   it("keeps CANCELED terminal when a continuation finishes after cancellation", async () => {
     const { handler, runner, store } = makeHarness();
     await seedWorkingTask(
@@ -1464,6 +1641,36 @@ describe("A2ASubAgentHandler", () => {
     expect(second.tasks).toHaveLength(1);
     expect(second.tasks[0]?.id).not.toBe(first.tasks[0]?.id);
     expect(second.nextPageToken).toBe("");
+  });
+
+  it("includes runner-canceled detached tasks in a CANCELED filtered list", async () => {
+    const { handler, runner, store } = makeHarness();
+    await seedInputRequiredTask(
+      store,
+      TASK_ID,
+      "context-detached-list",
+      "message-detached-list",
+    );
+    runner.getA2AWireRunSnapshot.mockReturnValue({
+      childSessionId: TASK_ID,
+      title: "wire profile",
+      taskState: A2ATaskState.CANCELED,
+    });
+
+    const listed = await handler.handle(A2AJsonRpcMethod.LIST_TASKS, {
+      contextId: "context-detached-list",
+      status: A2ATaskState.CANCELED,
+    }) as A2AListTasksResult;
+
+    expect(listed.tasks).toHaveLength(1);
+    expect(listed.tasks[0]).toMatchObject({
+      id: TASK_ID,
+      status: { state: A2ATaskState.CANCELED },
+    });
+    expect(listed.totalSize).toBe(1);
+    await expect(store.get(HANDLER_ID, TASK_ID)).resolves.toMatchObject({
+      task: { status: { state: A2ATaskState.CANCELED } },
+    });
   });
 
   it("enforces protobuf int32 history lengths and RFC 3339 timestamps", async () => {

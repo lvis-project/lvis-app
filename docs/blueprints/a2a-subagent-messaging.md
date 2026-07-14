@@ -110,6 +110,19 @@ The loopback bearer authenticates the local caller; it does not authorize an A2A
 - **Two independent gates:** wire admission consent authorizes only this host mutation. Any tool call caused by the received Message still carries `agent-message` trust and the `[A2A Wire]` provenance label through the receiver's own `ApprovalGate`; the admission decision cannot bypass or pre-authorize that second gate.
 - **Audit privacy:** denial and ownership failures emit redacted host-owned identifiers only. Raw Parts, request arguments, ApprovalGate errors, and provider details never cross the diagnostic seam.
 
+### Ph3 production attachment contract (2026-07-14)
+
+The production attachment resolves the previously test-only router factory without adding another process, listener, or SDK runtime.
+
+- **Immutable handler snapshot:** the A2A gate lazily snapshots the current `AgentProfileStore` list, active `SubAgentRunner`, and conversation project binding once for the boot. At most 32 routable profiles are admitted. Missing runner/profile services, an invalid host binding, or an ID collision disables the whole A2A family for that boot; an empty profile list retains no A2A-only listener.
+- **Opaque addresses:** each handler URL uses `agent-<letter-encoded sha256(canonical-real-profile-path)[:32]>`. The letters-only structural alphabet prevents a random digest from being misclassified as phone/card PII by the mandatory DLP validator. Profile `name` remains display-only and never becomes a path segment. Name, body, tool, model, or mode edits keep the same address; moving the profile file changes it. Stable identity across moves would require a separately persisted host-minted profile UUID, which the current profile schema does not contain.
+- **Minimal Agent Cards:** the public card contains only a DLP-clean profile name, a bounded DLP-clean description (otherwise a fixed fallback), application version, one generic delegation skill, `text/plain` modes, explicit false unsupported capabilities, and the bearer scheme. It never includes the profile body/path/tools/triggers/model/mode, project metadata, provider state, approval state, prompts, or the bearer secret.
+- **Shared persistence with fair bounds:** every handler uses one `openFeatureNamespace("a2a-loopback")` Task store so cross-handler ownership remains detectable. The immutable active-handler set drops and audits removed-profile records in memory. Bounds are 100 Tasks per handler, 32 handlers/3,200 Tasks globally, and 64 history Messages per Task; a handler may evict only its own oldest terminal Tasks.
+- **One host consent coordinator:** the existing listener creates one boot-scoped single-flight `AgentActionApprover` and passes the same instance to `/v1` external mutations and every A2A handler. A startup retry may rebuild a disposed A2A runtime but never forks the consent coordinator within that boot.
+- **Local discovery and lifecycle:** the existing mode-`0o600` `~/.lvis/local-api/server.json` gains an optional `a2a` object containing protocol version and sorted relative Agent Card paths only when A2A is actually active. Shutdown, late factory completion, bind/discovery failure, and retry dispose each produced runtime exactly once; a cached `null` initialization remains disabled for the rest of the boot.
+
+This attachment intentionally does not invent the remaining wire TTL duration or expiry-state eligibility. D6 fixes the terminal projection (`CANCELED`) but the exact duration, refresh events, restart semantics, and exemption for active provider work still require an explicit ph3 policy before an age-out timer is added.
+
 ## Cross-host implementation review and follow-on constraints
 
 A fourth review lane compared current CLI/Desktop hosts using primary sources. The detailed notes and contribution drafts live in [the upstream contribution candidates](../research/a2a-upstream-contribution-candidates.md).

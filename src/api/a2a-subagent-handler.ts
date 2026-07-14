@@ -622,12 +622,12 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
       : state === A2ATaskState.INPUT_REQUIRED
         ? input.suspension?.prompt?.trim() || fallback
         : fallback;
-    const text = maskSensitiveData(rawText).masked.slice(0, GUIDE_MAX_CHARS);
+    const maskedText = maskSensitiveData(rawText).masked;
     const messageId = this.newId();
     if (!isSafeA2AMessageId(messageId)) {
       throw new Error("A2A id generator returned an invalid message id");
     }
-    return {
+    const buildMessage = (text: string): A2AMessage => ({
       messageId,
       contextId: record.task.contextId,
       taskId: record.task.id,
@@ -639,13 +639,22 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
           ? {
               suspension: {
                 reason: input.suspension.reason,
-                ...(input.suspension.prompt ? { prompt: input.suspension.prompt } : {}),
                 resumeId: input.suspension.resumeId,
               },
             }
           : {}),
       },
-    };
+    });
+    const envelopeLength = JSON.stringify(buildMessage("")).length;
+    let remaining = Math.max(0, GUIDE_MAX_CHARS - envelopeLength);
+    const textParts: string[] = [];
+    for (const character of maskedText) {
+      const serializedLength = JSON.stringify(character).length - 2;
+      if (serializedLength > remaining) break;
+      textParts.push(character);
+      remaining -= serializedLength;
+    }
+    return buildMessage(textParts.join(""));
   }
 
   private async transitionFromSnapshot(
@@ -969,6 +978,8 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
           contextId: parsed.message.contextId,
           message: parsed.message,
         };
+        const current = await this.options.store.lookupTask(this.id, taskId);
+        if (current.ok) await this.reconcile(current.record);
         const preflight = await this.options.store.preflightContinuation(input);
         if (!preflight.ok) return await this.rejectContinuation(
           preflight,
@@ -977,6 +988,8 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
         );
         if (preflight.duplicate) return { duplicate: true, record: preflight.record };
         await this.authorizeMutation(descriptor);
+        const revalidated = await this.options.store.lookupTask(this.id, taskId);
+        if (revalidated.ok) await this.reconcile(revalidated.record);
         const committed = await this.options.store.beginContinuation(input);
         if (!committed.ok) return await this.rejectContinuation(
           committed,
@@ -1035,7 +1048,6 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
     const parsed = parseList(params);
     const records = await this.options.store.list(this.id, {
       ...(parsed.contextId ? { contextId: parsed.contextId } : {}),
-      ...(parsed.state ? { state: parsed.state } : {}),
       ...(parsed.statusTimestampAfter
         ? { statusTimestampAfter: parsed.statusTimestampAfter }
         : {}),
@@ -1077,7 +1089,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
       this.auditUnavailableTask(lookup.reason, taskId);
       throw new A2AHandlerError(A2AJsonRpcErrorDefinition.TASK_NOT_FOUND);
     }
-    let record = lookup.record;
+    let record = await this.reconcile(lookup.record);
     let state = record.task.status.state;
     if (state === A2ATaskState.CANCELED) return record.task;
     if (isA2ATerminalTaskState(state)) {
@@ -1091,7 +1103,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
       this.auditUnavailableTask(revalidated.reason, taskId);
       throw new A2AHandlerError(A2AJsonRpcErrorDefinition.TASK_NOT_FOUND);
     }
-    record = revalidated.record;
+    record = await this.reconcile(revalidated.record);
     state = record.task.status.state;
     if (state === A2ATaskState.CANCELED) return record.task;
     if (isA2ATerminalTaskState(state)) {

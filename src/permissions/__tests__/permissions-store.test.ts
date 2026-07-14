@@ -3,8 +3,17 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { readFileMock } = vi.hoisted(() => ({
+const { atomicWriteMock, readFileMock } = vi.hoisted(() => ({
+  atomicWriteMock: vi.fn(),
   readFileMock: vi.fn(),
+}));
+
+vi.mock("../../lib/atomic-file.js", () => ({
+  writeUtf8FileAtomicSync: atomicWriteMock,
+}));
+
+vi.mock("../../lib/with-file-lock.js", () => ({
+  withFileLock: async <T>(_filePath: string, fn: () => Promise<T>): Promise<T> => fn(),
 }));
 
 vi.mock("node:fs/promises", () => ({
@@ -16,10 +25,11 @@ vi.mock("node:fs/promises", () => ({
   readFile: readFileMock,
 }));
 
-import { readPermissionsFile } from "../permissions-store.js";
+import { readPermissionsFile, updatePermissionsFile } from "../permissions-store.js";
 
 describe("readPermissionsFile", () => {
   beforeEach(() => {
+    atomicWriteMock.mockReset();
     readFileMock.mockReset();
   });
 
@@ -71,5 +81,19 @@ describe("readPermissionsFile", () => {
     readFileMock.mockResolvedValue(JSON.stringify(tiered));
 
     await expect(readPermissionsFile("/tmp/permissions.json")).resolves.toEqual(tiered);
+  });
+
+  it("publishes grant mutations through the atomic writer", async () => {
+    readFileMock.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+
+    await updatePermissionsFile("/tmp/permissions.json", (file) => {
+      file.mode = "trusted";
+    });
+
+    expect(atomicWriteMock).toHaveBeenCalledTimes(1);
+    const [filePath, raw, mode] = atomicWriteMock.mock.calls[0] as [string, string, number];
+    expect(filePath).toBe("/tmp/permissions.json");
+    expect(mode).toBe(0o600);
+    expect(JSON.parse(raw)).toMatchObject({ version: 1, mode: "trusted", rules: [] });
   });
 });
