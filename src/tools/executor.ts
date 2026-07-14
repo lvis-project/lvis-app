@@ -1722,7 +1722,9 @@ export class ToolExecutor {
       if (
         permissionResult.decision === "deny" &&
         permissionResult.reviewer?.route === "foreground-auto" &&
-        permissionResult.reviewer.verdict
+        permissionResult.reviewer.verdict &&
+        (permissionResult.reviewer.outcome === "fresh" ||
+          permissionResult.reviewer.outcome === "cache")
       ) {
         this.recordPendingReviewerAuthorization({
           sessionId,
