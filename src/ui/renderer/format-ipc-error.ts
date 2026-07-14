@@ -34,6 +34,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-payload": "formatIpcError.invalidPayload",
   "invalid-params": "formatIpcError.invalidParams",
   "invalid-input": "formatIpcError.invalidInput",
+  "invalid-native-context-menu": "formatIpcError.invalidInput",
   "invalid-value": "formatIpcError.invalidValue",
   "invalid-format": "formatIpcError.invalidFormat",
   "invalid-method": "formatIpcError.invalidMethod",
@@ -69,6 +70,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-path": "formatIpcError.invalidPath",
   "cannot-remove-default": "formatIpcError.cannotRemoveDefaultRoot",
   "not-an-additional-root": "formatIpcError.notAnAdditionalRoot",
+  "lifecycle-failed": "formatIpcError.persistFailed",
 
   // ── Args / canonicalization ──
   "args-not-object": "formatIpcError.argsNotObject",

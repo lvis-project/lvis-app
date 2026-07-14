@@ -7,7 +7,6 @@ import { SpotlightTour } from "./components/SpotlightTour.js";
 import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
 import { ScenarioShowcase } from "./onboarding/ScenarioShowcase.js";
 import { PersonalizedWelcome } from "./onboarding/PersonalizedWelcome.js";
-import { PluginShowcase } from "./onboarding/PluginShowcase.js";
 import type {
   OnboardingChainEvent,
   OnboardingChainStage,
@@ -35,6 +34,7 @@ export function AppDialogs({
   onDeferredQueueOpenChange,
   approvalQueue,
   onApprovalDecide,
+  onboardingDialogsSuspended,
   chainStage,
   dispatchChain,
   selectedScenarioId,
@@ -59,6 +59,8 @@ export function AppDialogs({
   onDeferredQueueOpenChange: (open: boolean) => void;
   approvalQueue: Parameters<typeof ApprovalDialog>[0]["queue"];
   onApprovalDecide: Parameters<typeof ApprovalDialog>[0]["onDecide"];
+  /** Keep the next onboarding dialog offscreen while inline Settings is active. */
+  onboardingDialogsSuspended: boolean;
   chainStage: OnboardingChainStage;
   dispatchChain: Dispatch<OnboardingChainEvent>;
   selectedScenarioId: string | null;
@@ -130,7 +132,7 @@ export function AppDialogs({
 
 
       <MemorySeedDialog
-        open={chainStage === "memory"}
+        open={chainStage === "memory" && !onboardingDialogsSuspended}
         selectedScenarioId={selectedScenarioId}
         onOpenChange={(next) => {
           if (chainStage !== "memory") return;
@@ -205,7 +207,8 @@ export function AppDialogs({
           useEffect above. State lives in `~/.lvis/onboarding/`. The
           `onComplete` callback fires only when the user reaches the
           final tour step (not on early-dismissal); the Z chain
-          dispatches `tour-finish` so PluginShowcase mounts next. */}
+          dispatches `tour-finish` and completes onboarding. Installed
+          plugins remain discoverable from their persistent management UI. */}
       <SpotlightTour
         api={api}
         onComplete={() => {
@@ -214,18 +217,6 @@ export function AppDialogs({
         onDismiss={() => {
           if (chainStage === "tour") dispatchChain({ type: "tour-skip" });
         }}
-      />
-      {/* Z onboarding chain — PluginShowcase. Mounted only at stage
-          "plugins"; carries the host's installed pluginCards so each
-          card reflects what the user actually has. Closing the
-          showcase finishes the chain (state → done) and the
-          markOnboardingCompleted side-effect persists the flag. */}
-      <PluginShowcase
-        open={chainStage === "plugins"}
-        installedPluginIds={installedPluginIds}
-        api={api}
-        onClose={() => dispatchChain({ type: "plugins-close" })}
-        prioritizedScenarioId={selectedScenarioId}
       />
       {/* Tutorial-X5 — Post-tour first-task proposal. Mounts always,
           stays invisible until the user finishes a tour AND at least one
