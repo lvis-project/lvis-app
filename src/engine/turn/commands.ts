@@ -145,7 +145,7 @@ export async function handlePermissionCommand(
       return t("be_conversationLoop.permissionShowCurrent", { mode });
     }
     if (outcome.kind === "dir") {
-      const result = await dispatchPermissionDirCommand(outcome.cmd);
+      const result = await dispatchPermissionDirCommand(outcome.cmd, undefined, self.deps.workspaceRootLifecycle);
       if (!result.ok) {
         const warnings = result.warnings?.length ? t("be_conversationLoop.permissionDirWarnings", { warnings: result.warnings.map((w) => `- ${w}`).join("\n") }) : "";
         const ack = result.requiresAcknowledgement ? t("be_conversationLoop.permissionDirAckRequired") : "";
