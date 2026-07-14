@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startLocalApiHttpServer, type LocalApiHttpServer } from "../../api/http-server.js";
-import type { LocalApi } from "../../api/local-api.js";
 import { createStreamBroadcaster } from "../../api/stream-broadcaster.js";
 import type { A2ASubAgentLifecycleRunner } from "../../api/a2a-subagent-handler.js";
+import { createInMemoryFeatureNamespace } from "../../__tests__/test-helpers.js";
+import { makeStubLocalApi } from "../../api/__tests__/a2a-test-helpers.js";
 import { A2AJsonRpcMethod } from "../../shared/a2a-wire.js";
 import { A2ARole } from "../../shared/a2a.js";
 import { maskSensitiveData } from "../../shared/dlp.js";
@@ -29,17 +30,6 @@ function profile(name: string, filePath: string): LoadedAgentProfile {
   };
 }
 
-function memoryNamespace() {
-  let value: unknown;
-  return {
-    readJson: async <T>(_name: string, fallback: T): Promise<T> =>
-      (value === undefined ? structuredClone(fallback) : structuredClone(value)) as T,
-    writeJson: async <T>(_name: string, next: T): Promise<void> => {
-      value = structuredClone(next);
-    },
-  };
-}
-
 function makeRunner(): A2ASubAgentLifecycleRunner {
   return {
     spawnFromA2AWire: vi.fn(),
@@ -63,13 +53,9 @@ function makeOptions(
     project: PROJECT,
     appVersion: "1.2.3",
     approveAgentAction: undefined,
-    namespace: memoryNamespace(),
+    namespace: createInMemoryFeatureNamespace().handle,
     ...overrides,
   };
-}
-
-function stubApi(): LocalApi {
-  return { dispatch: vi.fn(async () => ({ ok: true, data: {} })) };
 }
 
 let servers: LocalApiHttpServer[] = [];
@@ -135,7 +121,7 @@ describe("A2A production loopback runtime", () => {
     );
 
     const server = await startLocalApiHttpServer({
-      api: stubApi(),
+      api: makeStubLocalApi(),
       secret: SECRET,
       broadcaster: createStreamBroadcaster(),
       a2aRouter: runtime!.router,
@@ -190,7 +176,7 @@ describe("A2A production loopback runtime", () => {
     const runtime = await createA2ALoopbackRuntime(options);
     const handlerId = runtime!.router.handlerIds[0]!;
     const server = await startLocalApiHttpServer({
-      api: stubApi(),
+      api: makeStubLocalApi(),
       secret: SECRET,
       broadcaster: createStreamBroadcaster(),
       a2aRouter: runtime!.router,

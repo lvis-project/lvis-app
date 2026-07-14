@@ -5,7 +5,7 @@ import {
   type LocalApiHttpServer,
 } from "../http-server.js";
 import { createStreamBroadcaster } from "../stream-broadcaster.js";
-import type { LocalApi } from "../local-api.js";
+import { makeStubLocalApi } from "./a2a-test-helpers.js";
 import {
   A2AHostJsonRpcErrorDefinition,
   A2AJsonRpcErrorDefinition,
@@ -18,10 +18,6 @@ import { A2ARole, A2ATaskState, type A2ATask } from "../../shared/a2a.js";
 
 const SECRET = "a2a-test-secret-0123456789abcdef";
 const HANDLER_PATH = "/a2a/tck";
-
-function stubApi(): LocalApi {
-  return { dispatch: vi.fn(async () => ({ ok: true, data: {} })) };
-}
 
 function task(state = A2ATaskState.COMPLETED): A2ATask {
   return {
@@ -130,7 +126,7 @@ async function start(): Promise<{
   const audit = vi.fn();
   const log = vi.fn();
   const server = await startLocalApiHttpServer({
-    api: stubApi(),
+    api: makeStubLocalApi(),
     secret: SECRET,
     broadcaster: createStreamBroadcaster(),
     a2aRouter: createA2AHttpRouter({ handlers: [handler], audit, log }),
