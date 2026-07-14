@@ -29,7 +29,7 @@ export const RATIONALE_RESPONSE_TOOL = "permission_rationale";
 export const FOREGROUND_RATIONALE_PRODUCTION_ENABLED = false as const;
 export const RATIONALE_ACTIVATION_PREREQUISITES = [
   "persistent-ticket-store",
-  "anchor-round-budget-store",
+  "host-anchor-round-cas",
   "server-enforced-allowed-choices",
   "one-shot-resolution-cas",
   "rationale-only-provider-round",
@@ -38,6 +38,7 @@ export const RATIONALE_ACTIVATION_PREREQUISITES = [
   "current-action-identity-revalidation",
   "ordered-security-suffix-resume",
   "invocation-lifecycle-audit",
+  "host-invocation-start-cas",
   "bounded-modal-ui",
 ] as const;
 
@@ -109,6 +110,205 @@ export interface ActionIdentity {
   sandboxExecutionPlan: DeepReadonly<Record<string, unknown>>;
 }
 
+export interface TriggeringBatchDisposition {
+  contractVersion: typeof RATIONALE_CONTROL_CONTRACT_VERSION;
+  kind: "triggering-provider-batch-disposition";
+  batchId: string;
+  originalToolUseIds: readonly string[];
+  triggeringToolUseId: string;
+  completedToolUseIds: readonly string[];
+  cancelledUnexecutedToolUseIds: readonly string[];
+  unexecutedSiblingPolicy: "cancel-all";
+  followupRationaleBatchPolicy: "separate-rationale-only-batch";
+  batchDigest: string;
+}
+
+export function createTriggeringBatchDisposition(input: {
+  batchId: string;
+  originalToolUseIds: readonly string[];
+  triggeringToolUseId: string;
+  completedToolUseIds: readonly string[];
+}): TriggeringBatchDisposition {
+  assertBoundedText(input.batchId, "batchId", 256);
+  assertBoundedText(input.triggeringToolUseId, "triggeringToolUseId", 256);
+  const originalToolUseIds = cloneBoundedStringList(
+    input.originalToolUseIds, "originalToolUseIds", 64, 256,
+  );
+  const completedToolUseIds = cloneBoundedStringList(
+    input.completedToolUseIds, "completedToolUseIds", 63, 256, true,
+  );
+  const originalSet = new Set(originalToolUseIds);
+  const completedSet = new Set(completedToolUseIds);
+  if (originalSet.size !== originalToolUseIds.length ||
+      completedSet.size !== completedToolUseIds.length ||
+      !originalSet.has(input.triggeringToolUseId) ||
+      completedSet.has(input.triggeringToolUseId) ||
+      completedToolUseIds.some((id) => !originalSet.has(id)) ||
+      canonicalStringify(originalToolUseIds.filter((id) => completedSet.has(id))) !==
+        canonicalStringify(completedToolUseIds)) {
+    throw new TypeError("triggering batch partition is invalid");
+  }
+  const cancelledUnexecutedToolUseIds = originalToolUseIds.filter(
+    (id) => id !== input.triggeringToolUseId && !completedSet.has(id),
+  );
+  const snapshot = {
+    contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
+    kind: "triggering-provider-batch-disposition" as const,
+    batchId: input.batchId,
+    originalToolUseIds,
+    triggeringToolUseId: input.triggeringToolUseId,
+    completedToolUseIds,
+    cancelledUnexecutedToolUseIds,
+    unexecutedSiblingPolicy: "cancel-all" as const,
+    followupRationaleBatchPolicy: "separate-rationale-only-batch" as const,
+  };
+  return deepFreeze({ ...snapshot, batchDigest: digest(snapshot) });
+}
+
+export function validateTriggeringBatchDisposition(
+  value: TriggeringBatchDisposition,
+): boolean {
+  try {
+    assertCanonicalJson(value, "TriggeringBatchDisposition");
+    assertExactOwnKeys(value, ["contractVersion", "kind", "batchId",
+      "originalToolUseIds", "triggeringToolUseId", "completedToolUseIds",
+      "cancelledUnexecutedToolUseIds", "unexecutedSiblingPolicy",
+      "followupRationaleBatchPolicy", "batchDigest"], "TriggeringBatchDisposition");
+    assertBoundedText(value.batchId, "batchId", 256);
+    assertBoundedText(value.triggeringToolUseId, "triggeringToolUseId", 256);
+    const expected = createTriggeringBatchDisposition({
+      batchId: value.batchId,
+      originalToolUseIds: value.originalToolUseIds,
+      triggeringToolUseId: value.triggeringToolUseId,
+      completedToolUseIds: value.completedToolUseIds,
+    });
+    return canonicalStringify(expected) === canonicalStringify(value) &&
+      /^[0-9a-f]{64}$/.test(value.batchDigest);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Opaque reservation returned by the host-owned atomic anchor-round CAS.
+ * Structural validation is not authenticity; callers MUST obtain it from the
+ * trusted store. Reusing an identical reservation produces the same control
+ * identity because ticketId and nonce are assigned here, not by the factory.
+ */
+export interface HostAnchorRoundReservationReceipt {
+  contractVersion: typeof RATIONALE_CONTROL_CONTRACT_VERSION;
+  kind: "host-anchor-round-cas-reservation";
+  reservationId: string;
+  anchorId: string;
+  anchorDigest: string;
+  actionDigest: string;
+  batchDigest: string;
+  round: 1;
+  expectedAnchorVersion: 0;
+  committedAnchorVersion: 1;
+  ticketId: string;
+  nonce: string;
+  reservedAt: number;
+}
+
+export interface HostAnchorRoundCas {
+  tryReserve(input: {
+    anchor: RequestAnchor;
+    action: ActionIdentity;
+    triggeringBatchDisposition: TriggeringBatchDisposition;
+    round: 1;
+    now?: number;
+  }): HostAnchorRoundReservationReceipt | null;
+  isCurrentReservation(receipt: HostAnchorRoundReservationReceipt): boolean;
+}
+
+export function validateHostAnchorRoundReservationReceipt(
+  receipt: HostAnchorRoundReservationReceipt,
+  anchor: RequestAnchor,
+  action: ActionIdentity,
+  batch: TriggeringBatchDisposition,
+  now = Date.now(),
+): boolean {
+  try {
+    assertCanonicalJson(receipt, "HostAnchorRoundReservationReceipt");
+    assertExactOwnKeys(receipt, ["contractVersion", "kind", "reservationId",
+      "anchorId", "anchorDigest", "actionDigest", "batchDigest", "round",
+      "expectedAnchorVersion", "committedAnchorVersion", "ticketId", "nonce",
+      "reservedAt"], "HostAnchorRoundReservationReceipt");
+    if (!isValidRequestAnchor(anchor, now) || !verifyActionIdentity(action) ||
+        !validateTriggeringBatchDisposition(batch) || action.anchorId !== anchor.anchorId) {
+      return false;
+    }
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return receipt.contractVersion === RATIONALE_CONTROL_CONTRACT_VERSION &&
+      receipt.kind === "host-anchor-round-cas-reservation" &&
+      uuid.test(receipt.reservationId) && uuid.test(receipt.ticketId) &&
+      uuid.test(receipt.nonce) && receipt.anchorId === anchor.anchorId &&
+      receipt.anchorDigest === digest(anchor) &&
+      receipt.actionDigest === action.actionDigest &&
+      receipt.batchDigest === batch.batchDigest && receipt.round === 1 &&
+      receipt.expectedAnchorVersion === 0 && receipt.committedAnchorVersion === 1 &&
+      Number.isFinite(receipt.reservedAt) && receipt.reservedAt >= anchor.createdAt &&
+      receipt.reservedAt < anchor.expiresAt && receipt.reservedAt <= now;
+  } catch {
+    return false;
+  }
+}
+
+export class InMemoryHostAnchorRoundCasStore implements HostAnchorRoundCas {
+  readonly #reservations = new Map<string, HostAnchorRoundReservationReceipt>();
+
+  tryReserve(input: {
+    anchor: RequestAnchor;
+    action: ActionIdentity;
+    triggeringBatchDisposition: TriggeringBatchDisposition;
+    round: 1;
+    now?: number;
+  }): HostAnchorRoundReservationReceipt | null {
+    const now = input.now ?? Date.now();
+    if (!Number.isFinite(now) || input.round !== 1 ||
+        !isValidRequestAnchor(input.anchor, now) ||
+        !verifyActionIdentity(input.action) ||
+        !validateTriggeringBatchDisposition(input.triggeringBatchDisposition) ||
+        input.action.anchorId !== input.anchor.anchorId) {
+      throw new TypeError("invalid anchor-round CAS reservation input");
+    }
+    const current = this.#reservations.get(input.anchor.anchorId);
+    if (current) {
+      return current.anchorDigest === digest(input.anchor) &&
+        current.actionDigest === input.action.actionDigest &&
+        current.batchDigest === input.triggeringBatchDisposition.batchDigest
+        ? current : null;
+    }
+    const receipt = deepFreeze({
+      contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
+      kind: "host-anchor-round-cas-reservation" as const,
+      reservationId: randomUUID(), anchorId: input.anchor.anchorId,
+      anchorDigest: digest(input.anchor), actionDigest: input.action.actionDigest,
+      batchDigest: input.triggeringBatchDisposition.batchDigest, round: 1 as const,
+      expectedAnchorVersion: 0 as const, committedAnchorVersion: 1 as const,
+      ticketId: randomUUID(), nonce: randomUUID(), reservedAt: now,
+    });
+    this.#reservations.set(input.anchor.anchorId, receipt);
+    return receipt;
+  }
+
+  isCurrentReservation(receipt: HostAnchorRoundReservationReceipt): boolean {
+    try {
+      assertCanonicalJson(receipt, "HostAnchorRoundReservationReceipt");
+      assertExactOwnKeys(receipt, ["contractVersion", "kind", "reservationId",
+        "anchorId", "anchorDigest", "actionDigest", "batchDigest", "round",
+        "expectedAnchorVersion", "committedAnchorVersion", "ticketId", "nonce",
+        "reservedAt"], "HostAnchorRoundReservationReceipt");
+      const current = this.#reservations.get(receipt.anchorId);
+      return current !== undefined &&
+        canonicalStringify(current) === canonicalStringify(receipt);
+    } catch {
+      return false;
+    }
+  }
+}
+
 /**
  * `toolUseId` is the host invocation identity. It intentionally is not part of
  * the reusable ActionIdentity/actionDigest, but the full sealed action is bound
@@ -131,6 +331,8 @@ export interface RationaleRequiredControl {
   round: 1;
   anchor: RequestAnchor;
   action: ActionIdentity;
+  triggeringBatchDisposition: TriggeringBatchDisposition;
+  anchorRoundReservation: HostAnchorRoundReservationReceipt;
   sealedAction: SealedRationaleAction;
   eligibilityContext: HostRationaleEligibilityContext;
   reviewerOutcome: Extract<ReviewerDispatchOutcome, "fresh" | "cache">;
@@ -326,6 +528,7 @@ function cloneBoundedStringList(
   label: string,
   maxItems: number,
   maxLength: number,
+  allowEmpty = false,
 ): readonly string[] {
   if (!Array.isArray(value)) {
     throw new TypeError(label + " exceeds its bounded string-list contract");
@@ -339,7 +542,7 @@ function cloneBoundedStringList(
     throw new TypeError(label + " has an invalid length descriptor");
   }
   const length = lengthDescriptor.value as number;
-  if (length < 1 || length > maxItems) {
+  if (length < (allowEmpty ? 0 : 1) || length > maxItems) {
     throw new TypeError(label + " exceeds its bounded string-list contract");
   }
   const values: string[] = [];
@@ -489,6 +692,8 @@ function computeRationaleInvocationDigest(input: {
   // immutable digest stored by the host ticket CAS, never with a digest
   // supplied or recomputed by an untrusted caller.
   actionDigest: string;
+  triggeringBatchDisposition: TriggeringBatchDisposition;
+  anchorRoundReservation: HostAnchorRoundReservationReceipt;
   sealedAction: SealedRationaleAction;
   eligibilityContext: HostRationaleEligibilityContext;
   reviewerOutcome: "fresh" | "cache";
@@ -499,6 +704,8 @@ function computeRationaleInvocationDigest(input: {
     nonce: input.nonce,
     anchor: input.anchor,
     actionDigest: input.actionDigest,
+    triggeringBatchDisposition: input.triggeringBatchDisposition,
+    anchorRoundReservation: input.anchorRoundReservation,
     sealedAction: input.sealedAction,
     eligibilityContext: input.eligibilityContext,
     reviewerOutcome: input.reviewerOutcome,
@@ -813,6 +1020,9 @@ export function isRationaleEligible(input: {
 export function createRationaleRequiredControl(input: {
   anchor: RequestAnchor;
   action: ActionIdentity;
+  triggeringBatchDisposition: TriggeringBatchDisposition;
+  anchorRoundReservation: HostAnchorRoundReservationReceipt;
+  hostAnchorRoundCas: HostAnchorRoundCas;
   sealedAction: SealedRationaleAction;
   eligibilityContext: HostRationaleEligibilityContext;
   permission: PermissionCheckResult & {
@@ -832,6 +1042,16 @@ export function createRationaleRequiredControl(input: {
     !isValidRequestAnchor(input.anchor, now) ||
     input.anchor.anchorId !== input.action.anchorId ||
     !verifyActionIdentity(input.action) ||
+    !validateTriggeringBatchDisposition(input.triggeringBatchDisposition) ||
+    input.triggeringBatchDisposition.triggeringToolUseId !== input.sealedAction.toolUseId ||
+    !validateHostAnchorRoundReservationReceipt(
+      input.anchorRoundReservation,
+      input.anchor,
+      input.action,
+      input.triggeringBatchDisposition,
+      now,
+    ) ||
+    !input.hostAnchorRoundCas.isCurrentReservation(input.anchorRoundReservation) ||
     input.sealedAction.toolName !== input.action.toolName ||
     !isRationaleEligible({
       permission: input.permission,
@@ -849,6 +1069,14 @@ export function createRationaleRequiredControl(input: {
 
   const anchor = cloneCanonicalJson(input.anchor, "RequestAnchor") as RequestAnchor;
   const action = cloneCanonicalJson(input.action, "ActionIdentity") as ActionIdentity;
+  const triggeringBatchDisposition = cloneCanonicalJson(
+    input.triggeringBatchDisposition,
+    "TriggeringBatchDisposition",
+  ) as TriggeringBatchDisposition;
+  const anchorRoundReservation = cloneCanonicalJson(
+    input.anchorRoundReservation,
+    "HostAnchorRoundReservationReceipt",
+  ) as HostAnchorRoundReservationReceipt;
   const sealedAction = deepFreeze({
     toolUseId: input.sealedAction.toolUseId,
     toolName: input.sealedAction.toolName,
@@ -882,13 +1110,15 @@ export function createRationaleRequiredControl(input: {
     throw new Error("sealed rationale action does not match ActionIdentity");
   }
 
-  const ticketId = randomUUID();
-  const nonce = randomUUID();
+  const ticketId = anchorRoundReservation.ticketId;
+  const nonce = anchorRoundReservation.nonce;
   const invocationDigest = computeRationaleInvocationDigest({
     ticketId,
     nonce,
     anchor,
     actionDigest: action.actionDigest,
+    triggeringBatchDisposition,
+    anchorRoundReservation,
     sealedAction,
     eligibilityContext,
     reviewerOutcome,
@@ -904,6 +1134,8 @@ export function createRationaleRequiredControl(input: {
     round: 1,
     anchor,
     action,
+    triggeringBatchDisposition,
+    anchorRoundReservation,
     sealedAction,
     eligibilityContext,
     reviewerOutcome,
@@ -925,7 +1157,8 @@ export function verifyRationaleRequiredControl(
     assertCanonicalJson(control, "RationaleRequiredControl");
     assertExactOwnKeys(control, [
       "kind", "contractVersion", "state", "ticketId", "nonce",
-      "invocationDigest", "round", "anchor", "action", "sealedAction",
+      "invocationDigest", "round", "anchor", "action",
+      "triggeringBatchDisposition", "anchorRoundReservation", "sealedAction",
       "eligibilityContext", "reviewerOutcome", "initialVerdict", "reasonCode",
     ], "RationaleRequiredControl");
     if (
@@ -953,7 +1186,19 @@ export function verifyRationaleRequiredControl(
     if (
       !isValidRequestAnchor(control.anchor, now) ||
       !verifyActionIdentity(control.action) ||
-      control.anchor.anchorId !== control.action.anchorId
+      control.anchor.anchorId !== control.action.anchorId ||
+      !validateTriggeringBatchDisposition(control.triggeringBatchDisposition) ||
+      control.triggeringBatchDisposition.triggeringToolUseId !==
+        control.sealedAction.toolUseId ||
+      !validateHostAnchorRoundReservationReceipt(
+        control.anchorRoundReservation,
+        control.anchor,
+        control.action,
+        control.triggeringBatchDisposition,
+        now,
+      ) ||
+      control.ticketId !== control.anchorRoundReservation.ticketId ||
+      control.nonce !== control.anchorRoundReservation.nonce
     ) {
       return false;
     }
@@ -1006,6 +1251,8 @@ export function verifyRationaleRequiredControl(
       nonce: control.nonce,
       anchor: control.anchor,
       actionDigest: control.action.actionDigest,
+      triggeringBatchDisposition: control.triggeringBatchDisposition,
+      anchorRoundReservation: control.anchorRoundReservation,
       sealedAction,
       eligibilityContext: control.eligibilityContext,
       reviewerOutcome: control.reviewerOutcome,

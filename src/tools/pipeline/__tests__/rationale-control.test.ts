@@ -3,9 +3,11 @@ import type { PermissionCheckResult, ReviewerDispatchOutcome } from "../../../pe
 import {
   FOREGROUND_RATIONALE_PRODUCTION_ENABLED,
   RATIONALE_ACTIVATION_PREREQUISITES,
+  InMemoryHostAnchorRoundCasStore,
   createActionIdentity,
   createRationaleRequiredControl,
   createRequestAnchor,
+  createTriggeringBatchDisposition,
   isRationaleEligible,
   parseRationaleResponse,
   toRationaleProviderEnvelope,
@@ -73,12 +75,28 @@ function createAction(
   });
 }
 
+function anchorRoundFor(anchor: ReturnType<typeof createAnchor>, action: ActionIdentity) {
+  const triggeringBatchDisposition = createTriggeringBatchDisposition({
+    batchId: "provider-batch-1",
+    originalToolUseIds: ["tool-use-completed", "tool-use-1", "tool-use-cancelled"],
+    triggeringToolUseId: "tool-use-1",
+    completedToolUseIds: ["tool-use-completed"],
+  });
+  const hostAnchorRoundCas = new InMemoryHostAnchorRoundCasStore();
+  const anchorRoundReservation = hostAnchorRoundCas.tryReserve({
+    anchor, action, triggeringBatchDisposition, round: 1,
+  });
+  if (!anchorRoundReservation) throw new Error("expected anchor reservation");
+  return { triggeringBatchDisposition, anchorRoundReservation, hostAnchorRoundCas };
+}
+
 function createControl() {
   const anchor = createAnchor();
   const action = createAction(anchor.anchorId);
   const control = createRationaleRequiredControl({
     anchor,
     action,
+    ...anchorRoundFor(anchor, action),
     eligibilityContext,
     sealedAction: {
       toolUseId: "tool-use-1",
@@ -102,7 +120,7 @@ describe("foreground rationale contract", () => {
     expect(FOREGROUND_RATIONALE_PRODUCTION_ENABLED).toBe(false);
     expect(RATIONALE_ACTIVATION_PREREQUISITES).toEqual([
       "persistent-ticket-store",
-      "anchor-round-budget-store",
+      "host-anchor-round-cas",
       "server-enforced-allowed-choices",
       "one-shot-resolution-cas",
       "rationale-only-provider-round",
@@ -111,6 +129,7 @@ describe("foreground rationale contract", () => {
       "current-action-identity-revalidation",
       "ordered-security-suffix-resume",
       "invocation-lifecycle-audit",
+      "host-invocation-start-cas",
       "bounded-modal-ui",
     ]);
   });
@@ -173,6 +192,7 @@ describe("foreground rationale contract", () => {
     const control = createRationaleRequiredControl({
       anchor,
       action,
+      ...anchorRoundFor(anchor, action),
       eligibilityContext,
       sealedAction: {
         toolUseId: "tool-use-1",
