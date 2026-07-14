@@ -13,6 +13,7 @@
  * Every server is torn down in afterEach so vitest exits with no leaked handles.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { request as httpRequest } from "node:http";
 import {
   startLocalApiHttpServer,
   type LocalApiHttpServer,
@@ -76,6 +77,108 @@ describe("http-server — loopback binding", () => {
         port: 6000,
       }),
     ).rejects.toThrow(/blocked by Fetch clients/);
+  });
+});
+
+describe("http-server — route families", () => {
+  it("returns an unauthenticated 404 before a disabled A2A family can consume the body", async () => {
+    const api = stubApi(() => ({ ok: true, data: {} }));
+    const a2aRouter = {
+      isPublicAgentCardRequest: vi.fn(() => false),
+      tryHandle: vi.fn(async () => false),
+    };
+    const server = await startLocalApiHttpServer({
+      api,
+      secret: SECRET,
+      broadcaster: createStreamBroadcaster(),
+      a2aRouter,
+      routeFamilies: { localApi: true, a2a: false },
+      host: "127.0.0.1",
+      port: 0,
+    });
+    servers.push(server);
+
+    const response = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      let settled = false;
+      const req = httpRequest({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/a2a/agents/child",
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": "1048576",
+        },
+      }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          settled = true;
+          req.destroy();
+          resolve({
+            status: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      });
+      req.on("error", (err) => {
+        if (!settled) reject(err);
+      });
+      // Do not call end() or send the declared body: a pre-body gate must still reply.
+      req.flushHeaders();
+    });
+
+    expect(response.status).toBe(404);
+    expect(JSON.parse(response.body)).toEqual({ ok: false, error: "not-found" });
+    expect(a2aRouter.isPublicAgentCardRequest).not.toHaveBeenCalled();
+    expect(a2aRouter.tryHandle).not.toHaveBeenCalled();
+    expect(api.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("hides /v1 from an A2A-only listener before authentication", async () => {
+    const a2aRouter = {
+      isPublicAgentCardRequest: vi.fn(() => false),
+      tryHandle: vi.fn(async () => false),
+    };
+    const server = await startLocalApiHttpServer({
+      api: stubApi(() => ({ ok: true, data: {} })),
+      secret: SECRET,
+      broadcaster: createStreamBroadcaster(),
+      a2aRouter,
+      routeFamilies: { localApi: false, a2a: true },
+      host: "127.0.0.1",
+      port: 0,
+    });
+    servers.push(server);
+
+    const res = await fetch(url(server, "/v1/health"));
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ ok: false, error: "not-found" });
+    expect(a2aRouter.isPublicAgentCardRequest).not.toHaveBeenCalled();
+    expect(a2aRouter.tryHandle).not.toHaveBeenCalled();
+  });
+
+  it("rejects startup when every route family is disabled", async () => {
+    await expect(
+      startLocalApiHttpServer({
+        api: stubApi(() => ({ ok: true, data: {} })),
+        secret: SECRET,
+        broadcaster: createStreamBroadcaster(),
+        routeFamilies: { localApi: false, a2a: false },
+      }),
+    ).rejects.toThrow("loopback http server requires an enabled route family");
+  });
+
+  it("rejects startup when A2A is enabled without a router", async () => {
+    await expect(
+      startLocalApiHttpServer({
+        api: stubApi(() => ({ ok: true, data: {} })),
+        secret: SECRET,
+        broadcaster: createStreamBroadcaster(),
+        routeFamilies: { localApi: false, a2a: true },
+      }),
+    ).rejects.toThrow("loopback http server A2A route family requires a router");
   });
 });
 
