@@ -128,11 +128,16 @@ release and requires a SID/profile handoff fix before the full gate is rerun.
       genuine `/KEEP_APP_DATA` uninstall. Record the resolved paths and prove
       every original-user sentinel/profile is unchanged while the administrator
       profile's LVIS paths remain absent or byte-for-byte unchanged.
-- [ ] Genuine DELETE: reinstall and seed the same original-user sentinels, then
-      approve with the distinct administrator and run genuine DELETE uninstall.
-      Prove all original-user LVIS sentinel/profile paths are removed while the
-      administrator profile's LVIS paths remain absent or byte-for-byte
-      unchanged.
+- [ ] Genuine DELETE → guided reinstall: start from a fresh signed-candidate
+      install after the KEEP pass, seed the same original-user sentinels, approve
+      with the distinct administrator, and run genuine DELETE uninstall. First
+      prove every original-user LVIS sentinel/profile path is removed. Then
+      explicitly guide the initiating standard user to reinstall the signed
+      candidate and complete first launch as that original user. Record both
+      SIDs, candidate SHA, Windows build, resolved paths, and evidence URL; prove
+      the launched process owner and every recreated app/userData path belong to
+      the original user while the distinct administrator profile remains absent
+      or byte-for-byte unchanged.
 
 Do not add an online web bootstrapper to the NSIS path unless the product
 explicitly changes distribution strategy. Runtime assets such as the compressed
