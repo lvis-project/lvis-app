@@ -179,8 +179,9 @@ Each file's exact preserved-export set, extraction variant, and danger zones are
 
 ## 6. Migration sequence (21 atomic commits, dependency-ordered)
 
-`bunx vitest run` + `bun run build` after **every** commit; `bunx playwright test` after every
-renderer commit. Doc/SOT (§4.6.1 + CLAUDE.md) updated **in the same commit that creates each new
+`bun run test:vitest -- run <affected-tests>` while iterating; each push runs the full
+typecheck/test/build hook once. Renderer changes run only the affected Playwright flow locally.
+Doc/SOT (§4.6.1 + CLAUDE.md) is updated **in the same commit that creates each new
 top-level dir** (contract/api/cli/sdk), not trailed to the end.
 
 - **C0** `test(ipc)` — channel-inventory + preload-shape + **domain-export** snapshots + chat send/sessions/history handler tests. (Locks the #1409 wire; rename/leak is silent today.)

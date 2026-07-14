@@ -1,7 +1,7 @@
 [test]
 # Renderer tests require jsdom (via vitest). bun's native test runner has no
 # jsdom support, so these paths are excluded here. Run renderer tests via:
-#   bunx vitest run
+#   bun run test:vitest -- run
 # or:
 #   bun run test
 testPathIgnorePatterns = [
