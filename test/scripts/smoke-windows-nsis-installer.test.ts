@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,14 +8,44 @@ import { describe, expect, it } from "vitest";
 import {
   ACL_QUERY_SCRIPT,
   buildPowerShellScript,
+  captureOutputChunk,
+  MAX_OUTPUT_CHARS,
   parseExecutableFromCommand,
+  parseJsonProcessResult,
   REGISTRY_QUERY_SCRIPT,
+  validateRegistryQueryResult,
 } from "../../scripts/smoke-windows-nsis-installer.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 function readRepoFile(path: string): string {
   return readFileSync(join(repoRoot, path), "utf8");
+}
+
+const WINDOWS_UNINSTALL_REGISTRY_PATH =
+  "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
+
+function runRegistryQueryScript(overrides: Record<string, string>) {
+  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+  if (!systemRoot) {
+    throw new Error("SystemRoot/WINDIR is required for Windows registry tests");
+  }
+  const env = { ...process.env };
+  delete env.LVIS_REGISTRY_DISPLAY_NAME_FILTER;
+  Object.assign(env, overrides);
+  return spawnSync(
+    join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      REGISTRY_QUERY_SCRIPT,
+    ],
+    { encoding: "utf8", env, timeout: 30_000, windowsHide: true },
+  );
 }
 
 describe("Windows NSIS installer smoke contracts", () => {
@@ -51,6 +83,185 @@ describe("Windows NSIS installer smoke contracts", () => {
     expect(ACL_QUERY_SCRIPT).toContain("ForEach-Object {\n");
     expect(() => buildPowerShellScript([])).toThrow(/non-empty string array/);
   });
+
+  it("pre-filters registry trees by an exact display name before enumerating values", () => {
+    const smoke = readRepoFile("scripts/smoke-windows-nsis-installer.mjs");
+    const filterRequired = REGISTRY_QUERY_SCRIPT.indexOf(
+      "IsNullOrWhiteSpace($env:LVIS_REGISTRY_DISPLAY_NAME_FILTER)",
+    );
+    const displayNameRead = REGISTRY_QUERY_SCRIPT.indexOf(
+      "$displayName = $child.GetValue('DisplayName'",
+    );
+    const exactComparison = REGISTRY_QUERY_SCRIPT.indexOf(
+      "[System.StringComparison]::Ordinal",
+    );
+    const valueEnumeration = REGISTRY_QUERY_SCRIPT.indexOf(
+      "$child.GetValueNames()",
+    );
+
+    expect(MAX_OUTPUT_CHARS).toBe(16_000);
+    expect(filterRequired).toBeGreaterThanOrEqual(0);
+    expect(displayNameRead).toBeGreaterThan(filterRequired);
+    expect(exactComparison).toBeGreaterThan(displayNameRead);
+    expect(valueEnumeration).toBeGreaterThan(exactComparison);
+    expect(REGISTRY_QUERY_SCRIPT).toContain(
+      "[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames",
+    );
+    expect(smoke).toContain(
+      "env.LVIS_REGISTRY_DISPLAY_NAME_FILTER = displayNameFilter",
+    );
+    expect(smoke).toContain("entry.values.DisplayName === displayName");
+  });
+
+  it("retains the 16K output tail but reports truncation and rejects unsafe JSON", () => {
+    const atLimit = captureOutputChunk("", "x".repeat(MAX_OUTPUT_CHARS));
+    expect(atLimit).toEqual({
+      output: "x".repeat(MAX_OUTPUT_CHARS),
+      truncated: false,
+    });
+
+    const truncated = captureOutputChunk(atLimit.output, "tail");
+    expect(truncated.output).toHaveLength(MAX_OUTPUT_CHARS);
+    expect(truncated.output.endsWith("tail")).toBe(true);
+    expect(truncated.truncated).toBe(true);
+
+    const validResult = {
+      stdout: '{"ok":true}',
+      stderr: "",
+      stdoutTruncated: false,
+      stderrTruncated: false,
+    };
+    expect(parseJsonProcessResult(validResult, "test process")).toEqual({
+      ok: true,
+    });
+    expect(() =>
+      parseJsonProcessResult(
+        { ...validResult, stdoutTruncated: true },
+        "test process",
+      ),
+    ).toThrow(/stdout exceeded the 16000-character capture limit/);
+    expect(() =>
+      parseJsonProcessResult(
+        { ...validResult, stderrTruncated: true },
+        "test process",
+      ),
+    ).toThrow(/stderr exceeded the 16000-character capture limit/);
+    expect(() =>
+      parseJsonProcessResult({ ...validResult, stdout: "   " }, "test process"),
+    ).toThrow(/empty JSON output/);
+    expect(() =>
+      parseJsonProcessResult(
+        { ...validResult, stdout: "not json" },
+        "test process",
+      ),
+    ).toThrow(/malformed JSON/);
+    expect(() =>
+      parseJsonProcessResult(
+        { stdout: '{"ok":true}', stderr: "" },
+        "test process",
+      ),
+    ).toThrow(/invalid process output contract/);
+  });
+
+  it("rejects malformed registry tree entry shapes before absence checks", () => {
+    const context = {
+      hive: "HKLM",
+      path: WINDOWS_UNINSTALL_REGISTRY_PATH,
+      view: "64",
+      mode: "tree",
+    };
+    const validEntry = {
+      key: `HKEY_LOCAL_MACHINE\\${WINDOWS_UNINSTALL_REGISTRY_PATH}\\LVIS`,
+      view: "64",
+      values: { DisplayName: "LVIS" },
+    };
+    const validResult = {
+      keyExists: true,
+      valueExists: false,
+      value: null,
+      entries: [validEntry],
+    };
+    expect(validateRegistryQueryResult(validResult, context)).toBe(validResult);
+
+    for (const malformedEntry of [
+      null,
+      [],
+      { ...validEntry, key: "" },
+      { ...validEntry, view: "32" },
+      { ...validEntry, values: null },
+      { ...validEntry, values: [] },
+      { ...validEntry, values: { DisplayName: 7 } },
+    ]) {
+      expect(() =>
+        validateRegistryQueryResult(
+          { ...validResult, entries: [malformedEntry] },
+          context,
+        ),
+      ).toThrow(/malformed entry/);
+    }
+    expect(() =>
+      validateRegistryQueryResult(
+        { ...validResult, entries: "not-an-array" },
+        context,
+      ),
+    ).toThrow(/invalid contract/);
+  });
+
+  it.runIf(process.platform === "win32")(
+    "queries the real uninstall tree with a nonexistent exact filter and keeps JSON small",
+    () => {
+      const displayNameFilter = `LVIS-NOT-PRESENT-${randomUUID()}-${randomUUID()}`;
+      const keyExistence: boolean[] = [];
+
+      for (const view of ["64", "32"]) {
+        const result = runRegistryQueryScript({
+          LVIS_REGISTRY_HIVE: "HKLM",
+          LVIS_REGISTRY_PATH: WINDOWS_UNINSTALL_REGISTRY_PATH,
+          LVIS_REGISTRY_VIEW: view,
+          LVIS_REGISTRY_MODE: "tree",
+          LVIS_REGISTRY_DISPLAY_NAME_FILTER: displayNameFilter,
+        });
+        expect(result.error).toBeUndefined();
+        expect(result.status).toBe(0);
+        expect(result.stdout.length).toBeLessThan(2_000);
+        const parsed = parseJsonProcessResult(
+          {
+            stdout: result.stdout,
+            stderr: result.stderr,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          },
+          `PowerShell registry ${view}-bit query`,
+        );
+        expect(parsed.entries).toEqual([]);
+        keyExistence.push(parsed.keyExists);
+      }
+      expect(keyExistence).toContain(true);
+
+      const missingFilter = runRegistryQueryScript({
+        LVIS_REGISTRY_HIVE: "HKLM",
+        LVIS_REGISTRY_PATH: WINDOWS_UNINSTALL_REGISTRY_PATH,
+        LVIS_REGISTRY_VIEW: "64",
+        LVIS_REGISTRY_MODE: "tree",
+      });
+      expect(missingFilter.status).not.toBe(0);
+      expect(`${missingFilter.stdout}\n${missingFilter.stderr}`).toContain(
+        "LVIS_REGISTRY_DISPLAY_NAME_FILTER is required for tree mode",
+      );
+
+      const defaultMode = runRegistryQueryScript({
+        LVIS_REGISTRY_HIVE: "HKCU",
+        LVIS_REGISTRY_PATH: "SOFTWARE\\Classes\\lvis\\shell\\open\\command",
+        LVIS_REGISTRY_VIEW: "64",
+        LVIS_REGISTRY_MODE: "default",
+      });
+      expect(defaultMode.error).toBeUndefined();
+      expect(defaultMode.status).toBe(0);
+      const parsedDefault = JSON.parse(defaultMode.stdout.trim());
+      expect(typeof parsedDefault.keyExists).toBe("boolean");
+      expect(parsedDefault.entries).toEqual([]);
+    },
+  );
 
   it("uses fail-closed .NET registry views and cross-checks machine uninstall commands", () => {
     const smoke = readRepoFile("scripts/smoke-windows-nsis-installer.mjs");
