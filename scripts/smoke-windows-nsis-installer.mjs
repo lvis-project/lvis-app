@@ -38,7 +38,7 @@ import {
 const packageJson = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
-const MAX_OUTPUT_CHARS = 16_000;
+export const MAX_OUTPUT_CHARS = 16_000;
 const DESTRUCTIVE_SMOKE_ENV = "LVIS_ALLOW_DESTRUCTIVE_UNINSTALL_SMOKE";
 const DISPOSABLE_SMOKE_ENV = "LVIS_ALLOW_DISPOSABLE_WINDOWS_INSTALLER_SMOKE";
 const REGISTRY_VIEWS = ["64", "32"];
@@ -299,12 +299,15 @@ export const REGISTRY_QUERY_SCRIPT = buildPowerShellScript([
   "    return",
   "  }",
   "  if ($env:LVIS_REGISTRY_MODE -ne 'tree') { throw \"unsupported registry query mode: $env:LVIS_REGISTRY_MODE\" }",
+  '  if ([string]::IsNullOrWhiteSpace($env:LVIS_REGISTRY_DISPLAY_NAME_FILTER)) { throw "LVIS_REGISTRY_DISPLAY_NAME_FILTER is required for tree mode" }',
   "  $entries = @()",
   "  foreach ($subName in $key.GetSubKeyNames()) {",
   "    $child = $null",
   "    try {",
   "      $child = $key.OpenSubKey($subName, $false)",
   '      if ($null -eq $child) { throw "registry subkey disappeared during query: $subName" }',
+  "      $displayName = $child.GetValue('DisplayName', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)",
+  "      if ($null -eq $displayName -or -not ([string]::Equals([string]$displayName, $env:LVIS_REGISTRY_DISPLAY_NAME_FILTER, [System.StringComparison]::Ordinal))) { continue }",
   "      $values = [ordered]@{}",
   "      foreach ($valueName in $child.GetValueNames()) {",
   "        $name = if ($valueName.Length -eq 0) { '(Default)' } else { $valueName }",
@@ -323,15 +326,36 @@ export const REGISTRY_QUERY_SCRIPT = buildPowerShellScript([
   "}",
 ]);
 
-async function registryQuery(hive, path, view, mode) {
-  const result = await runPowerShellJson(REGISTRY_QUERY_SCRIPT, {
+async function registryQuery(hive, path, view, mode, displayNameFilter) {
+  if (
+    mode === "tree" &&
+    (typeof displayNameFilter !== "string" ||
+      displayNameFilter.trim().length === 0)
+  ) {
+    throw new Error(
+      "LVIS_REGISTRY_DISPLAY_NAME_FILTER is required for tree mode",
+    );
+  }
+  const env = {
     LVIS_REGISTRY_HIVE: hive,
     LVIS_REGISTRY_PATH: path,
     LVIS_REGISTRY_VIEW: view,
     LVIS_REGISTRY_MODE: mode,
-  });
+  };
+  if (mode === "tree")
+    env.LVIS_REGISTRY_DISPLAY_NAME_FILTER = displayNameFilter;
+  const result = await runPowerShellJson(REGISTRY_QUERY_SCRIPT, env);
+  return validateRegistryQueryResult(result, { hive, path, view, mode });
+}
+
+export function validateRegistryQueryResult(
+  result,
+  { hive, path, view, mode },
+) {
   if (
     !result ||
+    typeof result !== "object" ||
+    Array.isArray(result) ||
     typeof result.keyExists !== "boolean" ||
     typeof result.valueExists !== "boolean" ||
     !Array.isArray(result.entries)
@@ -340,11 +364,37 @@ async function registryQuery(hive, path, view, mode) {
       `registry query returned an invalid contract for ${hive} ${view}-bit ${path}: ${JSON.stringify(result)}`,
     );
   }
+  if (mode === "tree") {
+    for (const entry of result.entries) {
+      if (
+        !entry ||
+        typeof entry !== "object" ||
+        Array.isArray(entry) ||
+        typeof entry.key !== "string" ||
+        entry.key.length === 0 ||
+        entry.view !== view ||
+        !entry.values ||
+        typeof entry.values !== "object" ||
+        Array.isArray(entry.values) ||
+        typeof entry.values.DisplayName !== "string"
+      ) {
+        throw new Error(
+          `registry tree query returned a malformed entry for ${hive} ${view}-bit ${path}: ${JSON.stringify(result)}`,
+        );
+      }
+    }
+  }
   return result;
 }
 
-async function queryRegistryTree(hive, path, view) {
-  const result = await registryQuery(hive, path, view, "tree");
+async function queryRegistryTree(hive, path, view, displayNameFilter) {
+  const result = await registryQuery(
+    hive,
+    path,
+    view,
+    "tree",
+    displayNameFilter,
+  );
   return result.keyExists ? result.entries : [];
 }
 
@@ -361,15 +411,19 @@ function productDisplayName() {
 }
 
 async function productUninstallEntries(hive) {
+  const displayName = productDisplayName();
   const entries = [];
   for (const view of REGISTRY_VIEWS) {
     entries.push(
-      ...(await queryRegistryTree(hive, UNINSTALL_REGISTRY_PATH, view)),
+      ...(await queryRegistryTree(
+        hive,
+        UNINSTALL_REGISTRY_PATH,
+        view,
+        displayName,
+      )),
     );
   }
-  return entries.filter(
-    (entry) => entry.values.DisplayName === productDisplayName(),
-  );
+  return entries.filter((entry) => entry.values.DisplayName === displayName);
 }
 
 function machineUninstallExecutable(command, label) {
@@ -450,6 +504,38 @@ function resolveMachineInstall(entries) {
   };
 }
 
+export function parseJsonProcessResult(result, label) {
+  if (
+    !result ||
+    typeof result.stdout !== "string" ||
+    typeof result.stderr !== "string" ||
+    typeof result.stdoutTruncated !== "boolean" ||
+    typeof result.stderrTruncated !== "boolean"
+  ) {
+    throw new Error(`${label} returned an invalid process output contract`);
+  }
+  if (result.stdoutTruncated || result.stderrTruncated) {
+    const truncatedStreams = [
+      result.stdoutTruncated ? "stdout" : null,
+      result.stderrTruncated ? "stderr" : null,
+    ].filter(Boolean);
+    throw new Error(
+      `${label} ${truncatedStreams.join(" and ")} exceeded the ${MAX_OUTPUT_CHARS}-character capture limit`,
+    );
+  }
+  const stdout = result.stdout.trim();
+  if (stdout.length === 0) {
+    throw new Error(`${label} returned empty JSON output`);
+  }
+  try {
+    return JSON.parse(stdout);
+  } catch (error) {
+    throw new Error(
+      `${label} returned malformed JSON: ${error.message}; stdout=${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)}`,
+    );
+  }
+}
+
 async function runPowerShellJson(script, env) {
   const result = await runProcess(
     powershellExecutable(),
@@ -464,13 +550,7 @@ async function runPowerShellJson(script, env) {
     ],
     { timeoutMs: 30_000, env: { ...process.env, ...env } },
   );
-  try {
-    return JSON.parse(result.stdout.trim());
-  } catch (error) {
-    throw new Error(
-      `PowerShell returned malformed JSON: ${error.message}; stdout=${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)}`,
-    );
-  }
+  return parseJsonProcessResult(result, "PowerShell");
 }
 
 async function shortcutTarget(shortcutPath) {
@@ -671,11 +751,13 @@ async function assertUninstalledSurface(machineInstall) {
   }
 }
 
-function appendOutput(current, chunk) {
+export function captureOutputChunk(current, chunk) {
   const next = current + chunk.toString("utf8");
-  return next.length > MAX_OUTPUT_CHARS
-    ? next.slice(next.length - MAX_OUTPUT_CHARS)
-    : next;
+  const truncated = next.length > MAX_OUTPUT_CHARS;
+  return {
+    output: truncated ? next.slice(next.length - MAX_OUTPUT_CHARS) : next,
+    truncated,
+  };
 }
 
 function removeTempDirBestEffort(dir) {
@@ -740,6 +822,8 @@ async function runProcess(
   return await new Promise((resolvePromise, reject) => {
     let stdout = "";
     let stderr = "";
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
     let timedOut = false;
     let settled = false;
     let terminationReport = "not requested";
@@ -780,10 +864,14 @@ async function runProcess(
     };
 
     child.stdout?.on("data", (chunk) => {
-      stdout = appendOutput(stdout, chunk);
+      const captured = captureOutputChunk(stdout, chunk);
+      stdout = captured.output;
+      stdoutTruncated ||= captured.truncated;
     });
     child.stderr?.on("data", (chunk) => {
-      stderr = appendOutput(stderr, chunk);
+      const captured = captureOutputChunk(stderr, chunk);
+      stderr = captured.output;
+      stderrTruncated ||= captured.truncated;
     });
     child.on("error", (error) => {
       if (timedOut) {
@@ -808,7 +896,15 @@ async function runProcess(
         );
         return;
       }
-      const result = { code, signal, stdout, stderr, output };
+      const result = {
+        code,
+        signal,
+        stdout,
+        stderr,
+        output,
+        stdoutTruncated,
+        stderrTruncated,
+      };
       if (code === 0 || allowNonZero) {
         settle(resolvePromise, result);
         return;
@@ -984,13 +1080,7 @@ function resolveRepositorySrtWin() {
 
 async function runAsrtJson(srtWin, args) {
   const result = await runProcess(srtWin, args, { timeoutMs: 60_000 });
-  try {
-    return JSON.parse(result.stdout.trim());
-  } catch (error) {
-    throw new Error(
-      `srt-win ${args.join(" ")} returned malformed JSON: ${error.message}; stdout=${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)}`,
-    );
-  }
+  return parseJsonProcessResult(result, `srt-win ${args.join(" ")}`);
 }
 
 async function readAsrtSystemState(srtWin) {
@@ -1380,10 +1470,10 @@ async function startInstalledApp(executable, timeoutMs) {
       };
 
       child.stdout?.on("data", (chunk) => {
-        output = appendOutput(output, chunk);
+        output = captureOutputChunk(output, chunk).output;
       });
       child.stderr?.on("data", (chunk) => {
-        output = appendOutput(output, chunk);
+        output = captureOutputChunk(output, chunk).output;
       });
       child.on("error", (error) => {
         cleanupListeners();
