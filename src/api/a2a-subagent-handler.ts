@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
   A2ARole,
@@ -36,6 +35,7 @@ import {
 } from "../engine/subagent-runner.js";
 import { GUIDE_MAX_CHARS } from "../engine/turn/guidance-limits.js";
 import { maskSensitiveData } from "../shared/dlp.js";
+import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 import { A2AHandlerError, type A2ARequestHandler } from "./a2a-router.js";
 import {
   A2ATaskStore,
@@ -98,6 +98,11 @@ function isSafeChildSessionId(value: unknown): value is string {
   return typeof value === "string"
     && CHILD_SESSION_ID_PATTERN.test(value)
     && maskSensitiveData(value).detections.length === 0;
+}
+
+/** UUID-compatible context ID whose complete value passes the DLP scanner. */
+export function createA2AContextId(): string {
+  return createDlpSafeUuid();
 }
 
 function isValidHistoryLength(value: unknown): value is number {
@@ -436,7 +441,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
     }
     this.id = options.id;
     this.card = options.card;
-    this.makeId = options.makeId ?? randomUUID;
+    this.makeId = options.makeId ?? createA2AContextId;
   }
 
   private async withTaskLock<T>(taskId: string, operation: () => Promise<T>): Promise<T> {
