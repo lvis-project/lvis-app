@@ -15,6 +15,7 @@ import type {
   SubAgentSpawnResult,
 } from "../../engine/subagent-runner.js";
 import { GUIDE_MAX_CHARS } from "../../engine/turn/guidance-limits.js";
+import { createInMemoryFeatureNamespace } from "../../__tests__/test-helpers.js";
 import {
   A2ASubAgentHandler,
   type A2AMutationAuthorizer,
@@ -24,17 +25,6 @@ import { A2ATaskStore } from "../a2a-task-store.js";
 
 const HANDLER_ID = "profile-a";
 const TASK_ID = "sub-wire-task-1";
-
-function memoryNamespace() {
-  let value: unknown;
-  return {
-    readJson: async <T>(_name: string, fallback: T): Promise<T> =>
-      (value === undefined ? structuredClone(fallback) : structuredClone(value)) as T,
-    writeJson: async <T>(_name: string, next: T): Promise<void> => {
-      value = structuredClone(next);
-    },
-  };
-}
 
 function clock() {
   let tick = 0;
@@ -132,7 +122,7 @@ function makeHarness(
   } = {},
 ) {
   const store = new A2ATaskStore({
-    namespace: memoryNamespace(),
+    namespace: createInMemoryFeatureNamespace().handle,
     maxTasks: options.maxTasks ?? 10,
     maxHistoryMessages: options.maxHistoryMessages ?? 16,
     now: clock(),
