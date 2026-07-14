@@ -841,6 +841,36 @@ describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
     // In-memory alwaysAllowed entry also cleared → the grant no longer allows.
     expect(pm.checkDetailed(`write_file:path:${under}`, "builtin", "write").decision).toBe("ask");
   });
+
+  it("retries live cache and bearer revoke after disk prune committed before broadcast failed", async () => {
+    const under = join(root, "sub", "retry.md");
+    const pattern = `write_file:path:${under}`;
+    await pm.addAlwaysAllowedPersist(pattern, "write");
+    const broadcast = vi.fn()
+      .mockImplementationOnce(() => { throw new Error("renderer unavailable"); })
+      .mockImplementation(() => undefined);
+    pm.setBroadcastConfigChanged(broadcast);
+    const signal = pm.getPluginRevokeSignal("retry-plugin");
+
+    await expect(pm.prunePathGrantsUnderRoot(root)).rejects.toThrow("renderer unavailable");
+    expect(mockStore.rules).toEqual([]);
+    expect(signal.aborted).toBe(false);
+
+    // Model a stale live snapshot surviving the failed post-disk phase. The
+    // retry's disk result is empty, so scope-based reconciliation must still
+    // remove both caches and fire the bearer revoke.
+    const internals = pm as unknown as {
+      rules: Array<{ pattern: string; action: "allow"; tier: "write" }>;
+      alwaysAllowed: Map<string, "write">;
+    };
+    internals.rules.push({ pattern, action: "allow", tier: "write" });
+    internals.alwaysAllowed.set(pattern, "write");
+
+    await expect(pm.prunePathGrantsUnderRoot(root)).resolves.toEqual([]);
+    expect(pm.checkDetailed(pattern, "builtin", "write").decision).toBe("ask");
+    expect(signal.aborted).toBe(true);
+    expect(broadcast).toHaveBeenCalledTimes(2);
+  });
   it("preserves grants at or below a separately registered descendant root", async () => {
     const preservedChild = join(root, "child");
     const parentOnly = join(root, "parent-only.md");

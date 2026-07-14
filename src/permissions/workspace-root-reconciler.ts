@@ -1,12 +1,14 @@
 import type { Stats } from "node:fs";
 import { stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 
 import type { AuditEntry } from "../audit/audit-logger.js";
-import { redactFsPath } from "../audit/dlp-filter.js";
 import { sanitizeRuntimeAllowedDirectories } from "./allowed-directories.js";
 import {
+  beginWorkspaceRootRemovalPersist,
+  completeWorkspaceRootRemovalPersist,
   readPermissionSettings,
-  removeAllowedDirectoryPersist,
+  type PendingWorkspaceRootRemoval,
 } from "./permission-settings-store.js";
 import { withWorkspaceRootLifecycleLock } from "./workspace-root-lifecycle-lock.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "./sensitive-paths.js";
@@ -62,6 +64,18 @@ export interface RetainedWorkspaceRoot {
 export interface WorkspaceRootReconcileResult {
   removed: RemovedWorkspaceRoot[];
   retained: RetainedWorkspaceRoot[];
+  /** Roots already inactive whose durable cleanup will be retried. */
+  pending?: PendingWorkspaceRootCleanup[];
+  /** Every root kept out of runtime scope during this reconciliation. */
+  inactiveRoots?: string[];
+}
+
+export interface PendingWorkspaceRootCleanup {
+  operationId: string;
+  storedPath: string;
+  runtimePath: string;
+  code: string;
+  prunedGrants: number;
 }
 
 export interface ReconcileWorkspaceRootsOptions {
@@ -79,11 +93,27 @@ export interface ReconcileWorkspaceRootsOptions {
     runtimeRoot: string,
     context: WorkspaceRootRemovalContext,
   ) => Promise<number | void>;
+  /** Session detach/index repair after durable scope pruning, before completion. */
+  beforeComplete?: (
+    runtimeRoot: string,
+    context: WorkspaceRootRemovalContext,
+  ) => Promise<void>;
+  /** Runs immediately after active→pending cutover, before durable cleanup. */
+  onInactive?: (
+    intent: PendingWorkspaceRootRemoval,
+    context: WorkspaceRootRemovalContext,
+  ) => Promise<void>;
   /** Runs after persistence/grant cleanup while the canonical root lock is held. */
   onRemoved?: (
     removed: RemovedWorkspaceRoot,
     context: WorkspaceRootRemovalContext,
   ) => Promise<void>;
+}
+
+/** Stable, opaque audit identity that never reveals `/tmp` or another root. */
+export function opaqueWorkspaceRootAuditRef(root: string): string {
+  const digest = createHash("sha256").update(root).digest("hex").slice(0, 16);
+  return `<workspace-root:${digest}>`;
 }
 type RootProbe =
   | { storedPath: string; kind: "invalid-path" }
@@ -200,6 +230,136 @@ export function retainedDescendantWorkspaceRoots(
   return retained;
 }
 
+export interface WorkspaceRootRemovalExecution {
+  intent: PendingWorkspaceRootRemoval;
+  context: WorkspaceRootRemovalContext;
+  prunedGrants: number;
+  completed: boolean;
+  code?: string;
+}
+
+async function finishCommittedWorkspaceRootRemoval(
+  intent: PendingWorkspaceRootRemoval,
+  options: ReconcileWorkspaceRootsOptions,
+): Promise<WorkspaceRootRemovalExecution> {
+  const activeRoots = readPermissionSettings(
+    options.settingsPath,
+  ).permissions.additionalDirectories;
+  const context: WorkspaceRootRemovalContext = {
+    preserveRoots: retainedDescendantWorkspaceRoots(intent.runtimePath, activeRoots),
+    globalScopeWasAuthorized: true,
+  };
+  let prunedGrants = 0;
+  const cleanupErrors: unknown[] = [];
+
+  try {
+    await options.onInactive?.(intent, context);
+  } catch (error: unknown) {
+    cleanupErrors.push(error);
+  }
+
+  try {
+    if (options.beforeRemove) {
+      prunedGrants = (await options.beforeRemove(intent.runtimePath, context)) ?? 0;
+    } else {
+      const pruned = await options.permissionManager?.prunePathGrantsUnderRoot(
+        intent.runtimePath,
+        { preserveRoots: context.preserveRoots },
+      );
+      prunedGrants = pruned?.length ?? 0;
+    }
+  } catch (error: unknown) {
+    cleanupErrors.push(error);
+  }
+
+  try {
+    await options.beforeComplete?.(intent.runtimePath, context);
+  } catch (error: unknown) {
+    cleanupErrors.push(error);
+  }
+
+  if (cleanupErrors.length > 0) {
+    const aggregate = Object.assign(
+      new AggregateError(cleanupErrors, "workspace-root-cleanup-failed"),
+      { code: stableErrorCode(cleanupErrors[0]) },
+    );
+    return {
+      intent,
+      context,
+      prunedGrants,
+      completed: false,
+      code: stableErrorCode(aggregate),
+    };
+  }
+
+  try {
+    const completed = await completeWorkspaceRootRemovalPersist(
+      intent.operationId,
+      options.settingsPath,
+    );
+    if (!completed) {
+      const stillPending = (
+        readPermissionSettings(options.settingsPath).permissions.pendingWorkspaceRootRemovals ?? []
+      ).some(
+        (candidate) => candidate.operationId === intent.operationId,
+      );
+      if (stillPending) {
+        return { intent, context, prunedGrants, completed: false, code: "PERSIST_ERROR" };
+      }
+    }
+    return { intent, context, prunedGrants, completed: true };
+  } catch (error: unknown) {
+    return {
+      intent,
+      context,
+      prunedGrants,
+      completed: false,
+      code: stableErrorCode(error),
+    };
+  }
+}
+
+/**
+ * User/slash removal entry point. The active→pending cutover commits before
+ * live revocation and idempotent durable cleanup, so every post-commit failure
+ * is reported as pending rather than rolling the root back into active scope.
+ */
+export async function removeWorkspaceRootWithIntent(
+  root: string,
+  options: ReconcileWorkspaceRootsOptions,
+): Promise<WorkspaceRootRemovalExecution | null> {
+  return withWorkspaceRootLifecycleLock(root, async () => {
+    const begun = await beginWorkspaceRootRemovalPersist(
+      root,
+      options.source,
+      options.settingsPath,
+    );
+    if (!begun) return null;
+    return finishCommittedWorkspaceRootRemoval(begun.intent, options);
+  });
+}
+
+async function resumePendingWorkspaceRootRemovals(
+  options: ReconcileWorkspaceRootsOptions,
+): Promise<WorkspaceRootRemovalExecution[]> {
+  const snapshot = readPermissionSettings(
+    options.settingsPath,
+  ).permissions.pendingWorkspaceRootRemovals ?? [];
+  const results: WorkspaceRootRemovalExecution[] = [];
+  for (const intent of snapshot) {
+    const result = await withWorkspaceRootLifecycleLock(intent.runtimePath, async () => {
+      const current = (
+        readPermissionSettings(options.settingsPath).permissions.pendingWorkspaceRootRemovals ?? []
+      ).find(
+        (candidate) => candidate.operationId === intent.operationId,
+      );
+      return current ? finishCommittedWorkspaceRootRemoval(current, options) : null;
+    });
+    if (result) results.push(result);
+  }
+  return results;
+}
+
 /**
  * Reconcile persisted additional workspace roots with current filesystem state.
  *
@@ -211,8 +371,46 @@ export function retainedDescendantWorkspaceRoots(
 export async function reconcileWorkspaceRoots(
   options: ReconcileWorkspaceRootsOptions,
 ): Promise<WorkspaceRootReconcileResult> {
+  const removed: RemovedWorkspaceRoot[] = [];
+  const retained: RetainedWorkspaceRoot[] = [];
+  const pending: PendingWorkspaceRootCleanup[] = [];
+  const inactiveRoots = new Set<string>();
+  const resumed = await resumePendingWorkspaceRootRemovals(options);
+  for (const result of resumed) {
+    inactiveRoots.add(result.intent.runtimePath);
+    const path = opaqueWorkspaceRootAuditRef(result.intent.runtimePath);
+    if (result.completed) {
+      audit(options.auditLogger, options.source, "info", {
+        path,
+        operationId: result.intent.operationId,
+        outcome: "cleanup-complete",
+        prunedGrants: result.prunedGrants,
+      });
+    } else {
+      pending.push({
+        operationId: result.intent.operationId,
+        storedPath: result.intent.storedPath,
+        runtimePath: result.intent.runtimePath,
+        code: result.code ?? "UNKNOWN",
+        prunedGrants: result.prunedGrants,
+      });
+      audit(options.auditLogger, options.source, "warn", {
+        path,
+        operationId: result.intent.operationId,
+        outcome: "cleanup-pending",
+        code: result.code ?? "UNKNOWN",
+      });
+    }
+  }
   const storedPaths = readPermissionSettings(options.settingsPath).permissions.additionalDirectories;
-  if (storedPaths.length === 0) return { removed: [], retained: [] };
+  if (storedPaths.length === 0) {
+    return {
+      removed,
+      retained,
+      ...(pending.length > 0 ? { pending } : {}),
+      ...(inactiveRoots.size > 0 ? { inactiveRoots: [...inactiveRoots] } : {}),
+    };
+  }
 
   const timeoutMs = Math.max(1, Math.trunc(options.timeoutMs ?? DEFAULT_TIMEOUT_MS));
   const concurrency = Math.min(
@@ -220,12 +418,9 @@ export async function reconcileWorkspaceRoots(
     Math.max(1, Math.trunc(options.concurrency ?? DEFAULT_CONCURRENCY)),
   );
   const probes = await probeRootsBounded(storedPaths, options.statFn ?? stat, timeoutMs, concurrency);
-  const removed: RemovedWorkspaceRoot[] = [];
-  const retained: RetainedWorkspaceRoot[] = [];
-
   for (const probe of probes) {
     const runtimePath = "runtimePath" in probe ? probe.runtimePath : undefined;
-    const redactedPath = redactFsPath(runtimePath ?? probe.storedPath);
+    const redactedPath = opaqueWorkspaceRootAuditRef(runtimePath ?? probe.storedPath);
     if (probe.kind === "directory") {
       retained.push({ storedPath: probe.storedPath, runtimePath, reason: "directory" });
       continue;
@@ -330,16 +525,13 @@ export async function reconcileWorkspaceRoots(
         return;
       }
 
-      const lifecycleContext: WorkspaceRootRemovalContext = {
-        preserveRoots: retainedDescendantWorkspaceRoots(
-          probe.runtimePath,
-          current.filter((candidate) => candidate !== stillRegistered),
-        ),
-        globalScopeWasAuthorized: true,
-      };
-      let prunedGrants = 0;
+      let begun;
       try {
-        prunedGrants = (await options.beforeRemove?.(probe.runtimePath, lifecycleContext)) ?? 0;
+        begun = await beginWorkspaceRootRemovalPersist(
+          stillRegistered,
+          options.source,
+          options.settingsPath,
+        );
       } catch (error: unknown) {
         const code = stableErrorCode(error);
         retained.push({
@@ -351,61 +543,47 @@ export async function reconcileWorkspaceRoots(
         audit(options.auditLogger, options.source, "warn", {
           path: redactedPath,
           outcome: "retained",
-          reason: "lifecycle-prepare-failed",
+          reason: "intent-persist-failed",
           code,
         });
         return;
       }
-
-      try {
-        await removeAllowedDirectoryPersist(stillRegistered, options.settingsPath);
-      } catch (error: unknown) {
-        const code = stableErrorCode(error);
-        retained.push({
-          storedPath: stillRegistered,
-          runtimePath: probe.runtimePath,
-          reason: "persist-error",
-          code,
+      if (!begun) return;
+      inactiveRoots.add(begun.intent.runtimePath);
+      const execution = await finishCommittedWorkspaceRootRemoval(begun.intent, options);
+      if (!execution.completed) {
+        pending.push({
+          operationId: execution.intent.operationId,
+          storedPath: execution.intent.storedPath,
+          runtimePath: execution.intent.runtimePath,
+          code: execution.code ?? "UNKNOWN",
+          prunedGrants: execution.prunedGrants,
         });
         audit(options.auditLogger, options.source, "warn", {
           path: redactedPath,
-          outcome: "retained",
-          reason: "persist-error",
-          code,
+          operationId: execution.intent.operationId,
+          outcome: "cleanup-pending",
+          reason: confirmation.kind,
+          code: execution.code ?? "UNKNOWN",
         });
         return;
-      }
-
-      if (!options.beforeRemove) {
-        try {
-          const pruned = await options.permissionManager?.prunePathGrantsUnderRoot(
-            probe.runtimePath,
-            { preserveRoots: lifecycleContext.preserveRoots },
-          );
-          prunedGrants = pruned?.length ?? 0;
-        } catch (error: unknown) {
-          audit(options.auditLogger, options.source, "warn", {
-            path: redactedPath,
-            outcome: "grant-prune-failed",
-            code: stableErrorCode(error),
-          });
-        }
       }
       const removedRoot: RemovedWorkspaceRoot = {
-        storedPath: stillRegistered,
-        runtimePath: probe.runtimePath,
+        storedPath: execution.intent.storedPath,
+        runtimePath: execution.intent.runtimePath,
         reason: confirmation.kind,
-        prunedGrants,
+        prunedGrants: execution.prunedGrants,
       };
       removed.push(removedRoot);
       audit(options.auditLogger, options.source, "info", {
         path: redactedPath,
+        operationId: execution.intent.operationId,
         outcome: "removed",
         reason: confirmation.kind,
-        prunedGrants,
+        prunedGrants: execution.prunedGrants,
       });
       try {
-        await options.onRemoved?.(removedRoot, lifecycleContext);
+        await options.onRemoved?.(removedRoot, execution.context);
       } catch (error: unknown) {
         audit(options.auditLogger, options.source, "warn", {
           path: redactedPath,
@@ -416,5 +594,10 @@ export async function reconcileWorkspaceRoots(
     });
   }
 
-  return { removed, retained };
+  return {
+    removed,
+    retained,
+    ...(pending.length > 0 ? { pending } : {}),
+    ...(inactiveRoots.size > 0 ? { inactiveRoots: [...inactiveRoots] } : {}),
+  };
 }

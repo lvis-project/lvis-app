@@ -157,6 +157,7 @@ export class RoutineEngine {
     }
     let activeLoopsVisited = 0;
     let liveScopesRevoked = 0;
+    const errors: unknown[] = [];
     for (const loop of [...this.activeLoops]) {
       activeLoopsVisited += 1;
       try {
@@ -166,11 +167,18 @@ export class RoutineEngine {
         });
         liveScopesRevoked += result.sessionDirectoriesRemoved + result.turnDirectoriesRemoved;
       } catch (error: unknown) {
+        errors.push(error);
         log.warn(
           "routine workspace scope revocation failed (%s)",
           error instanceof Error ? error.name : "UnknownError",
         );
       }
+    }
+    if (errors.length > 0) {
+      throw Object.assign(
+        new AggregateError(errors, "routine-workspace-root-revoke-failed"),
+        { code: "ROUTINE_WORKSPACE_ROOT_REVOKE_FAILED" },
+      );
     }
     return { activeLoopsVisited, liveScopesRevoked };
   }

@@ -877,11 +877,13 @@ export class SubAgentRunner {
     });
   }
 
-  private cancelActiveWireChildrenForWorkspaceRoot(canonicalRoot: string): void {
+  private cancelActiveWireChildrenForWorkspaceRoot(canonicalRoot: string): unknown[] {
+    const errors: unknown[] = [];
     for (const child of [...this.activeChildren.values()]) {
       try {
         this.cancelActiveWireChildForWorkspaceRoot(child, canonicalRoot);
       } catch (error: unknown) {
+        errors.push(error);
         log.warn(
           {
             childSessionId: child.childSessionId,
@@ -891,12 +893,14 @@ export class SubAgentRunner {
         );
       }
     }
+    return errors;
   }
 
   /**
    * Remove a workspace root from every child loop that is live right now.
    * Iterate a snapshot and isolate failures so one child cannot prevent the
-   * remaining scopes from shrinking.
+   * remaining scopes from shrinking. Once every child has been attempted,
+   * surface an aggregate failure so the workspace removal intent stays pending.
    */
   revokeWorkspaceRoot(
     root: string,
@@ -912,7 +916,7 @@ export class SubAgentRunner {
       return { activeChildrenVisited: 0, liveScopesRevoked: 0 };
     }
 
-    this.cancelActiveWireChildrenForWorkspaceRoot(canonicalRoot);
+    const errors = this.cancelActiveWireChildrenForWorkspaceRoot(canonicalRoot);
     let activeChildrenVisited = 0;
     let liveScopesRevoked = 0;
     for (const child of [...this.activeChildren.values()]) {
@@ -921,6 +925,7 @@ export class SubAgentRunner {
         const result = child.loop.revokeWorkspaceRoot(canonicalRoot, options);
         liveScopesRevoked += result.sessionDirectoriesRemoved + result.turnDirectoriesRemoved;
       } catch (error: unknown) {
+        errors.push(error);
         log.warn(
           {
             childSessionId: child.childSessionId,
@@ -929,6 +934,12 @@ export class SubAgentRunner {
           "sub-agent workspace scope revocation failed",
         );
       }
+    }
+    if (errors.length > 0) {
+      throw Object.assign(
+        new AggregateError(errors, "sub-agent-workspace-root-revoke-failed"),
+        { code: "SUBAGENT_WORKSPACE_ROOT_REVOKE_FAILED" },
+      );
     }
     return { activeChildrenVisited, liveScopesRevoked };
   }
