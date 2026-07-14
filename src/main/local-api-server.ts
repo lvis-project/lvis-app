@@ -28,7 +28,7 @@
  * write path into `~/.lvis/local-api/` — this module never touches `fs`
  * directly, so the 0o700 dir / 0o600 file / atomic-write contract cannot drift.
  */
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { BrowserWindow } from "electron";
 import type { AppServices } from "../boot.js";
 import type { SettingsService } from "../data/settings-store.js";
@@ -44,6 +44,7 @@ import {
 } from "../api/http-server.js";
 import { createStreamBroadcaster } from "../api/stream-broadcaster.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
+import { buildSingleFlightAgentActionApprover } from "../permissions/agent-action-approver.js";
 import { openFeatureNamespace } from "./storage/feature-namespace.js";
 import { createLogger } from "../lib/logger.js";
 
@@ -195,7 +196,7 @@ function buildChatSendContext(sink: ChatSendContext["sink"]): ChatSendContext {
  * The request MIRRORS the existing agent-action call sites (work-board-engine /
  * agent-action-requester): `category: "agent-action"`, `toolName: <channel>`,
  * `toolCategory: "meta"`, a fresh `randomUUID()` id, `createdAt: Date.now()`, and
- * `trustOrigin: <external origin>`. The `reason` is renderer-facing Korean per
+ * `trustOrigin: <external origin>`. The `reason` is renderer-facing English per
  * the IPC-language convention. `requireExplicit` is NOT (and CANNOT be) passed
  * here — the gate's signature is `Omit<ApprovalRequest, "requireExplicit">` and
  * it derives `requireExplicit` from the active policy
@@ -227,46 +228,26 @@ export function buildExternalMutationApprover(
   approvalGate: ApprovalGate | undefined,
   emit: (message: string) => void,
 ): ExternalMutationApprover | undefined {
-  if (!approvalGate) return undefined;
-  let pending = false;
-  return async ({ channel, args, origin }) => {
-    if (pending) {
+  const approve = buildSingleFlightAgentActionApprover(approvalGate, {
+    onConcurrent: ({ toolName, trustOrigin }) => {
       emit(
-        `[local-api] external mutation approval already pending — denying concurrent request channel=${channel} origin=${origin}`,
+        `[local-api] external mutation approval already pending — denying concurrent request channel=${toolName} origin=${trustOrigin}`,
       );
-      return false;
-    }
-    pending = true;
-    try {
-      const decision = await approvalGate.requestAndWait({
-        id: randomUUID(),
-        category: "agent-action",
-        kind: "agent-action",
-        toolName: channel,
-        toolCategory: "meta",
-        args,
-        reason: "An external CLI/API requested a permission-mode change. Do you want to allow it?",
-        source: "builtin",
-        createdAt: Date.now(),
-        trustOrigin: origin,
-      });
-      // Mirror the agent-action call sites: only an `allow-*` choice approves;
-      // deny-once / deny-always (and the gate's timeout/send-failure deny-once)
-      // are all rejections. rememberPattern is ignored — no persisted grant.
-      return decision.choice.startsWith("allow");
-    } catch (err) {
-      // Fail-closed: an unexpected gate throw is a denial. One English line, no
-      // secrets (channel + origin only).
+    },
+    onError: ({ toolName, trustOrigin }) => {
       emit(
-        `[local-api] external-mutation approval errored channel=${channel} origin=${origin}: ${
-          err instanceof Error ? err.message : String(err)
-        } → denied`,
+        `[local-api] external-mutation approval errored channel=${toolName} origin=${trustOrigin} → denied`,
       );
-      return false;
-    } finally {
-      pending = false;
-    }
-  };
+    },
+  });
+  if (!approve) return undefined;
+
+  return async ({ channel, args, origin }) => await approve({
+    toolName: channel,
+    args,
+    reason: "An external CLI/API requested a permission-mode change. Do you want to allow it?",
+    trustOrigin: origin,
+  });
 }
 
 /**
