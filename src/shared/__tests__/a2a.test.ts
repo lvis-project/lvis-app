@@ -24,9 +24,39 @@ import {
   type A2ATaskStatus,
   type A2ATaskStatusUpdateEvent,
 } from "../a2a.js";
-import type { A2ASendMessageResult } from "../a2a-wire.js";
+import {
+  A2AHostJsonRpcErrorDefinition,
+  A2AJsonRpcErrorDefinition,
+  type A2AErrorDefinition,
+  type A2AErrorReason,
+  type A2ARouterErrorDefinition,
+  type A2ASendMessageResult,
+} from "../a2a-wire.js";
 
 describe("A2A v1.0 vendored core model", () => {
+  it("keeps the host consent error outside the vendored v1 registry", () => {
+    expect(A2AHostJsonRpcErrorDefinition.OPERATION_REJECTED).toEqual({
+      code: -32010,
+      message: "Operation rejected",
+      reason: "OPERATION_REJECTED",
+    });
+    expect(A2AJsonRpcErrorDefinition).not.toHaveProperty("OPERATION_REJECTED");
+
+    type HostReasonPollutesVendoredAlias =
+      "OPERATION_REJECTED" extends A2AErrorReason ? true : false;
+    type HostConsentDefinition =
+      (typeof A2AHostJsonRpcErrorDefinition)["OPERATION_REJECTED"];
+    type HostDefinitionAcceptedByRouter =
+      HostConsentDefinition extends A2ARouterErrorDefinition ? true : false;
+    const typeContract: [HostReasonPollutesVendoredAlias, HostDefinitionAcceptedByRouter] = [
+      false,
+      true,
+    ];
+    const vendoredDefinition: A2AErrorDefinition = A2AJsonRpcErrorDefinition.TASK_NOT_FOUND;
+    expect(typeContract).toEqual([false, true]);
+    expect(vendoredDefinition.reason).toBe("TASK_NOT_FOUND");
+  });
+
   it("pins canonical ProtoJSON TaskState values in proto numeric order", () => {
     expect(A2A_TASK_STATE_VALUES).toEqual([
       "TASK_STATE_UNSPECIFIED",
