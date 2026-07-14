@@ -1083,7 +1083,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     });
   });
 
-  it("registers a resumed child before mailbox I/O can race workspace removal", async () => {
+  it("keeps a generic waiting child resumable on the fallback after workspace removal", async () => {
     const removedRoot = join(tmpHome, "resume-removed-root");
     const fallbackRoot = join(tmpHome, "resume-fallback-root");
     mkdirSync(removedRoot, { recursive: true });
@@ -1138,15 +1138,16 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     }
     expect(spawned.incomplete).toBe(true);
 
-    let directoriesAtRun: readonly string[] = [];
+    const directoriesAtRuns: Array<readonly string[]> = [];
     const runTurnSpy = vi.spyOn(ConversationLoop.prototype, "runTurn")
       .mockImplementation(async function (this: ConversationLoop) {
-        directoriesAtRun = this.getTurnAdditionalDirectories();
+        directoriesAtRuns.push(this.getTurnAdditionalDirectories());
+        const firstResume = directoriesAtRuns.length === 1;
         return {
-          text: "safe",
+          text: firstResume ? "still waiting" : "safe",
           toolCalls: [],
           route: "default",
-          stopReason: "end_turn",
+          stopReason: firstResume ? "round-cap" as const : "end_turn" as const,
         };
       });
     restore = patchProvider(cleanSpawnProvider());
@@ -1170,15 +1171,36 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       });
 
       releaseMailbox();
-      const resumed = await resumePromise;
+      const stillWaiting = await resumePromise;
       resumePromise = undefined;
 
-      expect(resumed.ok).toBe(true);
+      expect(stillWaiting).toMatchObject({
+        ok: true,
+        incomplete: true,
+        stopReason: "round-cap",
+        suspension: { reason: "budget" },
+      });
       expect(runTurnSpy).toHaveBeenCalledTimes(1);
-      expect(directoriesAtRun).toContain(fallbackRoot);
-      expect(directoriesAtRun).not.toContain(removedRoot);
-      expect(subStore.loadSessionMetadata(spawned.childSessionId)).not.toMatchObject({
-        projectRoot: removedRoot,
+      expect(directoriesAtRuns[0]).toContain(fallbackRoot);
+      expect(directoriesAtRuns[0]).not.toContain(removedRoot);
+      expect(subStore.loadSessionMetadata(spawned.childSessionId)).toMatchObject({
+        projectRoot: undefined,
+        subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+        subAgentSuspensionReason: "budget",
+      });
+
+      const completed = await runner.resume(
+        spawned.childSessionId,
+        "continue again",
+        "resume removal race",
+      );
+      expect(completed).toMatchObject({ ok: true, stopReason: "end_turn" });
+      expect(runTurnSpy).toHaveBeenCalledTimes(2);
+      expect(directoriesAtRuns[1]).toContain(fallbackRoot);
+      expect(directoriesAtRuns[1]).not.toContain(removedRoot);
+      expect(subStore.loadSessionMetadata(spawned.childSessionId)).toMatchObject({
+        projectRoot: undefined,
+        subAgentTaskState: "TASK_STATE_COMPLETED",
       });
       expect((runner as unknown as { activeChildren: Map<string, unknown> }).activeChildren.size)
         .toBe(0);

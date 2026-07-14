@@ -1,6 +1,6 @@
 # A2A Inter-Subagent Messaging — Blueprint
 
-- Status: **Accepted; ph1 merged; ph2 implemented when this revision is merged** (D1-D8 locked by the owner on 2026-07-11)
+- Status: **Accepted; ph1-ph2 and the ph3 transport foundation merged; ph3 runtime attachment in progress** (D1-D8 locked by the owner on 2026-07-11)
 - Scope: upgrade LVIS sub-agents from "tool-call-level" (pull-only child→parent) to A2A-protocol-based messaging — child→parent push, sibling↔sibling messaging — while preserving every existing security invariant.
 - Protocol baseline: **A2A v1.0.0** (Linux Foundation, a2a-protocol.org). Complementary to MCP (MCP = agent↔tool, A2A = agent↔agent); coexists with the ext-apps adoption track.
 - Roadmap anchor: concretizes the Agent Hub vision item "A2A Runtime — 에이전트 간 비동기 위임·합의·결과 전달" (docs/ko/architecture/architecture.md Phase 5-6, previously ❌ 미구현).
@@ -87,6 +87,17 @@ The workspace rail renders a budget-suspended run as `done`: the done event hard
 | **ph2** | agent_send sibling messaging (parent-mediated); active-recipient round-boundary steering + idle mailbox reuse; per-tree budget + hop TTL; DLP chokepoint on Parts; audit edges; question-wait (reason: question) | M | next host minor |
 | **ph3** | Loopback wire binding: one 127.0.0.1 server path-multiplexing N handlers; Agent Card endpoint; protocol-version negotiation; SSE capability gating; A2A task TTL→CANCELED (D6); **official a2a-tck conformance**; re-evaluate the JavaScript SDK server glue; local external-host smoke against one A2A client | L | opt-in flag, default OFF |
 | **ph4** | External interop / Agent Hub: cross-machine, per-agent auth, Agent Card registry; plugin work-assistant registration; delegation-depth policy revisit (D8) | XL | separate opt-in |
+
+### Ph3 loopback listener and route-family opt-ins (locked 2026-07-13)
+
+Ph3 adds a second independently-consented route family to the existing loopback transport; it does not make the local API a prerequisite for A2A and does not open a second socket.
+
+- **Independent boot gates:** the existing `system.localApiServer` / `LVIS_LOCAL_API=1` gate controls only the `/v1` local-API family. The new `features.a2aLoopbackServer` / `LVIS_A2A=1` gate controls only `/a2a` operations and Agent Card routes. Both remain default OFF. Their values are captured once during boot as an immutable snapshot; changing either setting or environment value takes effect only after restart.
+- **One listener, OR startup:** open exactly one `127.0.0.1` listener when at least one route-family gate is enabled (`localEnabled || a2aEnabled`). The listener path-multiplexes all enabled profile handlers; enabling both families never creates a second listener, port, or bearer authority.
+- **Route-family gate before parsing:** dispatch by enabled route family before authentication, request-body parsing, or handler lookup. A request for a disabled family—including its Agent Card route—returns `404` without consuming credentials or a body. Thus an A2A-only boot exposes no `/v1` capability, and a local-API-only boot exposes no `/a2a` or Agent Card capability.
+- **Failure isolation:** A2A profile/card initialization failure disables the A2A family for that boot and is audited, but must not prevent an enabled `/v1` family from starting or continuing. If A2A was the only enabled family and initialization leaves no routable handler, no empty listener is retained. Listener-bind failure remains a boot-local external-surface failure and must not brick the desktop application.
+
+These rules refine only the ph3 wire attachment. They do not alter D1–D8: the in-process semantic bus remains authoritative, A2A runtime SDK adoption remains prohibited, and the depth-1 creation hard-stop remains unchanged.
 
 ## Cross-host implementation review and follow-on constraints
 

@@ -180,7 +180,12 @@ describe("check-test-coverage", () => {
     const vitestVersion = packageJson.devDependencies.vitest.replace(/^[^\d]*/, "");
     const coverageVersion = packageJson.devDependencies["@vitest/coverage-v8"].replace(/^[^\d]*/, "");
 
-    expect(packageJson.scripts["test:coverage"]).toBe("vitest run --coverage");
+    expect(packageJson.scripts["test:prepare"]).toBe("bun run build:icons");
+    expect(packageJson.scripts.test).toBe("bun run test:prepare && vitest run");
+    expect(packageJson.scripts["test:coverage"]).toBe(
+      "bun run test:prepare && vitest run --coverage",
+    );
+    expect(packageJson.scripts["test:watch"]).toBe("bun run test:prepare && vitest");
     expect(packageJson.scripts["check:test-coverage"]).toContain("scripts/run-test-coverage-gate.mjs");
     expect(packageJson.scripts["check:test-quality"]).toContain("check:test-duplicates");
     expect(coverageVersion).toBe(vitestVersion);
@@ -188,6 +193,7 @@ describe("check-test-coverage", () => {
     expect(vitestConfig).toContain('reportsDirectory: "coverage/vitest"');
     expect(vitestConfig).toContain('"json-summary"');
     expect(coverageGateScript).toContain('process.platform === "win32" ? "bun.exe" : "bun"');
+    expect(coverageGateScript).toContain('["run", "test:prepare"]');
     expect(coverageGateScript).not.toContain("shell: true");
     expect(coverageGateScript).toContain("rmSync(reportsDir");
   });
