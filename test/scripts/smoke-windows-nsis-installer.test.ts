@@ -42,6 +42,12 @@ describe("Windows NSIS installer smoke contracts", () => {
     expect(smoke).toContain("entry.values.UninstallString");
     expect(smoke).toContain("entry.values.QuietUninstallString");
     expect(smoke).toContain("const exactEntry = await registryQuery(");
+    expect(smoke).toMatch(
+      /for \(const view of REGISTRY_VIEWS\)[\s\S]+registryPath,\s+view,\s+"default"/,
+    );
+    expect(smoke).toContain(
+      "uninstall left exact HKLM ${view}-bit key (discovered in ${entry.view}-bit view)",
+    );
     expect(smoke).toContain("await assertUninstalledSurface(machineInstall)");
     expect(smoke).toContain(
       "await assertUninstalledSurface(state.machineInstall)",

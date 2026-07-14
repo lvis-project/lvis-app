@@ -109,16 +109,23 @@ ASRT precondition을 읽을 수 없거나 확인하지 못한 경우 성공/skip
 처리하지 말고 candidate를 명시적인 manual release gate로 전환합니다.
 Hosted CI는 interactive UAC와 계정 간 desktop 경계를 입증할 수 없습니다.
 
-Windows 수동 evidence gate:
+다음 Windows 수동 gate는 release-blocking입니다. 하나라도 실패하면 release를
+중단하고 SID/profile handoff를 수정한 뒤 전체 gate를 다시 수행합니다.
 
-- [ ] Clean VM의 standard-user session에서 별도 administrator credential로
-      signed candidate를 설치합니다. Candidate SHA, Windows build, 화면 녹화,
-      installer/ASRT log를 첨부하여 installer UAC는 정확히 1회이고 내부
-      `srt-win` UAC는 0회임을 입증합니다.
-- [ ] 시작한 사용자의 `whoami /user`를 기록하고, alternate administrator가
-      elevation을 승인한 뒤에도 LVIS process와 모든 app/userData path가 원래
-      사용자 소유임을 입증합니다. Resolved path와 administrator profile에 LVIS
-      user data가 없다는 evidence를 첨부합니다.
+- [ ] Clean VM에서 signed candidate SHA, Windows build, evidence URL,
+      시작 standard user와 별도 administrator의 `whoami /user` SID를 모두
+      기록합니다. 화면 녹화와 installer/ASRT log로 installer UAC는 정확히
+      1회이고 내부 `srt-win` UAC는 0회임을 입증합니다.
+- [ ] Genuine KEEP: 시작 사용자의 resolved `%USERPROFILE%\.lvis`, Roaming
+      `LVIS`/`lvis-app`, Local `LVIS`/`lvis-app` path에 고정 내용 sentinel을
+      만들고 별도 administrator로 승인한 뒤 genuine `/KEEP_APP_DATA` uninstall을
+      수행합니다. Resolved path를 기록하고 원래 사용자의 모든 sentinel/profile이
+      그대로이며 administrator profile의 LVIS path는 없거나 byte 단위로
+      변경되지 않았음을 입증합니다.
+- [ ] Genuine DELETE: 재설치 후 같은 원래 사용자 sentinel을 만들고 별도
+      administrator로 승인하여 genuine DELETE uninstall을 수행합니다. 원래
+      사용자의 모든 LVIS sentinel/profile path가 제거되고 administrator
+      profile의 LVIS path는 없거나 byte 단위로 변경되지 않았음을 입증합니다.
 
 제품 전략이 명시적으로 바뀌기 전에는 NSIS path에 online web bootstrapper를
 추가하지 않습니다. 압축된 `uv` payload 같은 runtime asset은 release build
