@@ -121,16 +121,16 @@ export function ComposerProjectSelector({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-6 gap-1 rounded-full px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="h-6 gap-1 rounded-full px-2 text-caption text-input-bar-placeholder transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-subtle hover:text-input-bar-action focus-visible:ring-input-bar-focus motion-reduce:transition-none"
           aria-label={t("composerProjectSelector.triggerAriaLabel")}
           data-testid="composer-project-selector-trigger"
           data-selected={hasRealSelection ? "true" : "false"}
         >
-          <Folder className={`h-3 w-3 shrink-0 ${hasRealSelection ? "text-primary" : "text-muted-foreground"}`} />
+          <Folder className={`h-3 w-3 shrink-0 ${hasRealSelection ? "text-input-bar-action" : "text-input-bar-placeholder"}`} />
           <span
             className={[
               "max-w-[12rem] truncate",
-              hasRealSelection ? "text-foreground" : "italic text-muted-foreground",
+              hasRealSelection ? "text-input-bar-foreground" : "italic text-input-bar-placeholder",
             ].join(" ")}
           >
             {label}
@@ -154,11 +154,11 @@ export function ComposerProjectSelector({
         avoidCollisions={false}
         sideOffset={6}
         forceMount
-        className="w-64 origin-top transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none data-[state=closed]:pointer-events-none data-[state=closed]:opacity-0 data-[state=closed]:scale-95 data-[state=open]:opacity-100 data-[state=open]:scale-100"
+        className="w-64 origin-top transition-[opacity,transform] duration-(--motion-normal) ease-(--motion-ease-out) motion-reduce:transition-none data-[state=closed]:pointer-events-none data-[state=closed]:opacity-0 data-[state=closed]:scale-95 data-[state=open]:opacity-100 data-[state=open]:scale-100"
         data-testid="composer-project-selector-menu"
       >
         {namedProjects.length > 0 ? (
-          <div className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <div className="px-2 py-1.5 text-caption font-semibold uppercase tracking-wider text-muted-foreground">
             {t("composerProjectSelector.projectsHeading")}
           </div>
         ) : null}
@@ -181,7 +181,7 @@ export function ComposerProjectSelector({
         {pendingWarning ? (
           <div
             data-testid="composer-project-selector-root-warning"
-            className="space-y-2 rounded-md border border-destructive bg-destructive/(--opacity-muted) p-2 text-[11px]"
+            className="space-y-2 rounded-md border border-destructive bg-destructive/(--opacity-muted) p-2 text-caption"
           >
             <div className="font-medium text-destructive">{t("composerProjectSelector.rootWarningTitle")}</div>
             <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground [overflow-wrap:anywhere]">

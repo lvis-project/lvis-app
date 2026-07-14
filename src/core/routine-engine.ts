@@ -9,6 +9,7 @@ import type { ConversationLoop } from "../engine/conversation-loop.js";
 import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import type { RoutineScope } from "../shared/routines-types.js";
+import { canonicalizePathForMatch, caseFoldForMatch } from "../permissions/sensitive-paths.js";
 const log = createLogger("routine-engine");
 
 export interface Routine {
@@ -77,7 +78,110 @@ function extractSummaryTag(text: string): string {
 }
 
 export class RoutineEngine {
+  private readonly activeLoops = new Set<ConversationLoop>();
+  private readonly workspaceRootPolicy = new Map<
+    string,
+    { allowed: boolean; sequence: number }
+  >();
+  private workspaceRootPolicySequence = 0;
+
   constructor(private readonly deps: RoutineEngineDeps) {}
+
+  private workspaceRootKey(root: string): string | null {
+    try {
+      const key = caseFoldForMatch(canonicalizePathForMatch(root)).replace(/\/+$/g, "");
+      return key || "/";
+    } catch {
+      return null;
+    }
+  }
+
+  private static isAtOrBelow(root: string, candidate: string): boolean {
+    return candidate === root || (root === "/"
+      ? candidate.startsWith("/")
+      : candidate.startsWith(`${root}/`));
+  }
+
+  private recordWorkspaceRootPolicy(root: string, allowed: boolean): string | null {
+    const key = this.workspaceRootKey(root);
+    if (!key) return null;
+    this.workspaceRootPolicy.set(key, {
+      allowed,
+      sequence: ++this.workspaceRootPolicySequence,
+    });
+    return key;
+  }
+
+  private isWorkspaceDirectoryRevoked(directory: string): boolean {
+    const candidate = this.workspaceRootKey(directory);
+    if (!candidate) return this.workspaceRootPolicy.size > 0;
+    let latest: { allowed: boolean; sequence: number } | null = null;
+    for (const [root, policy] of this.workspaceRootPolicy) {
+      if (!RoutineEngine.isAtOrBelow(root, candidate)) continue;
+      if (!latest || policy.sequence > latest.sequence) latest = policy;
+    }
+    return latest?.allowed === false;
+  }
+
+  /** Allow a newly registered root for future routine fires. */
+  allowWorkspaceRoot(root: string): void {
+    this.recordWorkspaceRootPolicy(root, true);
+  }
+
+  /** Revoke a root from live loops and stale future-fire scope snapshots. */
+  revokeWorkspaceRoot(
+    root: string,
+    options?: {
+      preserveRoots?: readonly string[];
+      globalScopeWasAuthorized?: boolean;
+    },
+  ): {
+    activeLoopsVisited: number;
+    liveScopesRevoked: number;
+  } {
+    const canonicalRoot = this.recordWorkspaceRootPolicy(root, false);
+    if (!canonicalRoot) return { activeLoopsVisited: 0, liveScopesRevoked: 0 };
+    const preservedRoots = [...new Set(
+      (options?.preserveRoots ?? [])
+        .map((preserveRoot) => this.workspaceRootKey(preserveRoot))
+        .filter((preserveRoot): preserveRoot is string =>
+          preserveRoot !== null
+          && preserveRoot !== canonicalRoot
+          && RoutineEngine.isAtOrBelow(canonicalRoot, preserveRoot),
+        ),
+    )];
+    // A separately registered descendant is a narrower, later policy override:
+    // the parent stays denied while the child remains eligible for future fires.
+    for (const preserveRoot of preservedRoots) {
+      this.recordWorkspaceRootPolicy(preserveRoot, true);
+    }
+    let activeLoopsVisited = 0;
+    let liveScopesRevoked = 0;
+    const errors: unknown[] = [];
+    for (const loop of [...this.activeLoops]) {
+      activeLoopsVisited += 1;
+      try {
+        const result = loop.revokeWorkspaceRoot(canonicalRoot, {
+          preserveRoots: preservedRoots,
+          globalScopeWasAuthorized: options?.globalScopeWasAuthorized,
+        });
+        liveScopesRevoked += result.sessionDirectoriesRemoved + result.turnDirectoriesRemoved;
+      } catch (error: unknown) {
+        errors.push(error);
+        log.warn(
+          "routine workspace scope revocation failed (%s)",
+          error instanceof Error ? error.name : "UnknownError",
+        );
+      }
+    }
+    if (errors.length > 0) {
+      throw Object.assign(
+        new AggregateError(errors, "routine-workspace-root-revoke-failed"),
+        { code: "ROUTINE_WORKSPACE_ROOT_REVOKE_FAILED" },
+      );
+    }
+    return { activeLoopsVisited, liveScopesRevoked };
+  }
 
   /**
    * Permission policy Layer 4 — snapshot `inherit` to a concrete allow-list at fire
@@ -94,15 +198,21 @@ export class RoutineEngine {
         directories: [],
       };
     }
-    if (scope.pluginIds.mode !== "inherit") return scope;
-    const active = this.deps.getActivePluginIds?.() ?? [];
+    const active = scope.pluginIds.mode === "inherit"
+      ? (this.deps.getActivePluginIds?.() ?? [])
+      : [];
     return {
-      pluginIds:
-        active.length > 0
-          ? { mode: "allow", ids: [...active] }
-          : { mode: "deny-all" },
-      forcedPluginIds: scope.forcedPluginIds,
-      directories: scope.directories,
+      pluginIds: scope.pluginIds.mode === "inherit"
+        ? (active.length > 0
+            ? { mode: "allow", ids: [...active] }
+            : { mode: "deny-all" })
+        : (scope.pluginIds.mode === "allow"
+            ? { mode: "allow", ids: [...scope.pluginIds.ids] }
+            : { mode: "deny-all" }),
+      forcedPluginIds: [...scope.forcedPluginIds],
+      directories: scope.directories.filter(
+        (directory) => !this.isWorkspaceDirectoryRevoked(directory),
+      ),
     };
   }
 
@@ -118,35 +228,39 @@ export class RoutineEngine {
     };
     // Each fire gets its own loop — no history sharing with main chat.
     const loop = this.deps.createConversationLoop(normalizedInput);
-    const sessionId = await loop.startRoutineConversation(
-      input.id,
-      input.title ?? input.id,
-      input.firedAt ?? generatedAt,
-    );
-
-    let summary = "";
+    this.activeLoops.add(loop);
     try {
-      const result = await loop.runTurn(input.prePrompt, undefined, input.signal, {
-        inputOrigin: "plugin-emitted",
-      });
-      summary = extractSummaryTag(result.text ?? "");
-    } catch (err) {
-      log.warn("runRoutine error (id=%s): %s", input.id, err instanceof Error ? err.message : String(err));
-      summary = t("be_routineEngine.runRoutineError", { message: err instanceof Error ? err.message : String(err) });
+      const sessionId = await loop.startRoutineConversation(
+        input.id,
+        input.title ?? input.id,
+        input.firedAt ?? generatedAt,
+      );
+
+      let summary = "";
+      try {
+        const result = await loop.runTurn(input.prePrompt, undefined, input.signal, {
+          inputOrigin: "plugin-emitted",
+        });
+        summary = extractSummaryTag(result.text ?? "");
+      } catch (err) {
+        log.warn("runRoutine error (id=%s): %s", input.id, err instanceof Error ? err.message : String(err));
+        summary = t("be_routineEngine.runRoutineError", { message: err instanceof Error ? err.message : String(err) });
+      }
+
+      return {
+        routineId: input.id,
+        trigger: input.trigger,
+        summary,
+        generatedAt,
+        sessionId,
+      };
     } finally {
+      this.activeLoops.delete(loop);
       // Clear this session's on-demand plugin activations from PluginRuntime.
       // The routine loop is discarded after runTurn completes and never calls
       // resetSession, so without this call the per-session Map entry would
       // accumulate as a stale entry in the PluginRuntime singleton.
       loop.cleanupSession();
     }
-
-    return {
-      routineId: input.id,
-      trigger: input.trigger,
-      summary,
-      generatedAt,
-      sessionId,
-    };
   }
 }
