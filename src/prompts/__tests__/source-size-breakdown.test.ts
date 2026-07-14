@@ -10,7 +10,7 @@
  *   - the dev-only LVIS_DEV_PROMPT_SOURCE_DUMP gate never alters the assembled
  *     prompt (measurement only — no behavior change)
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SystemPromptBuilder } from "../system-prompt-builder.js";
 import { ToolRegistry } from "../../tools/registry.js";
@@ -110,7 +110,13 @@ describe("SystemPromptBuilder — LVIS_DEV_PROMPT_SOURCE_DUMP gate (no behavior 
   const savedDump = process.env.LVIS_DEV_PROMPT_SOURCE_DUMP;
   const savedNodeEnv = process.env.NODE_ENV;
 
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-17T10:00:00.000Z"));
+  });
+
   afterEach(() => {
+    vi.useRealTimers();
     if (savedDump === undefined) delete process.env.LVIS_DEV_PROMPT_SOURCE_DUMP;
     else process.env.LVIS_DEV_PROMPT_SOURCE_DUMP = savedDump;
     if (savedNodeEnv === undefined) delete process.env.NODE_ENV;
