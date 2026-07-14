@@ -10,7 +10,7 @@
  *
  * Harness reuse (no new harness invented):
  *   - reviewer/approval wiring from `executor-reviewer-explicit-retry.test.ts`
- *     (`makePermissionManager(dir, classifySpy)` + `setMode("default")` +
+ *     (`makePermissionManager(dir, classifySpy)` + `setMode("auto")` +
  *     `setInteractiveAutoApprove("low")` + the mock `ApprovalGate`).
  *   - audit/effect-shadow reading from `executor-effect-ledger.test.ts`
  *     (`effectShadowRows(auditDir)` over the dedicated shadow channel; the
@@ -160,6 +160,7 @@ async function runParityPair(opts: { deny?: boolean } = {}): Promise<ParityRun> 
 
   const classifySpy = vi.fn(() => ({ level: "medium" as const, reason: "needs confirm" }));
   const permMgr = makePermissionManager(dir, classifySpy);
+  permMgr.setMode("auto");
   if (opts.deny) await permMgr.addAlwaysDeniedPersist(PROBE);
 
   const gate = {

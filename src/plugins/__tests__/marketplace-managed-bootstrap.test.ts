@@ -594,7 +594,51 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     ).rejects.toThrow(/networkAccess does not match the catalog-approved grant/i);
   });
 
-  it("rejects marketplace artifacts whose hostFetch capability exceeds the catalog-approved grant", async () => {
+  it("accepts matching runtime-enforced capabilities without a networkAccess grant", async () => {
+    const pluginDir = join(testDir, "plugins", "installed", "network-capability-positive");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "network-capability-positive",
+        name: "Network Capability Positive",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: [],
+        description: "Test fixture.",
+        capabilities: ["external-auth-consumer", "host:overlay"],
+      }),
+      "utf-8",
+    );
+
+    const service = makeManagedService(testDir, marketplacePath);
+    await expect(
+      (service as unknown as {
+        assertInstalledManifestMatchesCatalog: (
+          plugin: {
+            id: string;
+            installPolicy: "user";
+            capabilities?: string[];
+          },
+          version: string,
+          manifestFile: string,
+          pluginDir: string,
+        ) => Promise<void>;
+      }).assertInstalledManifestMatchesCatalog(
+        {
+          id: "network-capability-positive",
+          installPolicy: "user",
+          capabilities: ["external-auth-consumer", "host:overlay"],
+        },
+        "1.0.0",
+        manifestPath,
+        pluginDir,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects unapproved external-auth-consumer capability even without a networkAccess grant", async () => {
     const pluginDir = join(testDir, "plugins", "installed", "network-capability-plugin");
     await mkdir(pluginDir, { recursive: true });
     const manifestPath = join(pluginDir, "plugin.json");
@@ -608,10 +652,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         tools: [],
         description: "Test fixture.",
         capabilities: ["external-auth-consumer"],
-        networkAccess: {
-          allowedDomains: ["api.example.com"],
-          reasoning: "Artifact-completed grant.",
-        },
       }),
       "utf-8",
     );
@@ -624,11 +664,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             id: string;
             installPolicy: "user";
             capabilities?: string[];
-            networkAccess?: {
-              allowedDomains: string[];
-              reasoning?: string;
-              allowPrivateNetworks?: boolean;
-            };
+            requires?: { capabilities: string[] };
           },
           version: string,
           manifestFile: string,
@@ -639,16 +675,59 @@ describe("PluginMarketplaceService managed bootstrap", () => {
           id: "network-capability-plugin",
           installPolicy: "user",
           capabilities: [],
-          networkAccess: {
-            allowedDomains: ["api.example.com"],
-            reasoning: "Catalog-approved grant.",
-          },
+          // Dependency requirements are not catalog approval for capabilities
+          // declared by the artifact itself.
+          requires: { capabilities: ["external-auth-consumer"] },
         },
         "1.0.0",
         manifestPath,
         pluginDir,
       ),
     ).rejects.toThrow(/external-auth-consumer capability does not match the catalog-approved grant/i);
+  });
+
+  it("rejects an unapproved host:overlay capability", async () => {
+    const pluginDir = join(testDir, "plugins", "installed", "overlay-capability-plugin");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "overlay-capability-plugin",
+        name: "Overlay Capability Plugin",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: [],
+        description: "Test fixture.",
+        capabilities: ["host:overlay"],
+      }),
+      "utf-8",
+    );
+
+    const service = makeManagedService(testDir, marketplacePath);
+    await expect(
+      (service as unknown as {
+        assertInstalledManifestMatchesCatalog: (
+          plugin: {
+            id: string;
+            installPolicy: "user";
+            capabilities?: string[];
+          },
+          version: string,
+          manifestFile: string,
+          pluginDir: string,
+        ) => Promise<void>;
+      }).assertInstalledManifestMatchesCatalog(
+        {
+          id: "overlay-capability-plugin",
+          installPolicy: "user",
+          capabilities: [],
+        },
+        "1.0.0",
+        manifestPath,
+        pluginDir,
+      ),
+    ).rejects.toThrow(/host:overlay capability does not match the catalog-approved grant/i);
   });
 
   it("restores registry state during dependency rollback cleanup", async () => {

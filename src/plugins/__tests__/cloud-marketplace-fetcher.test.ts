@@ -79,6 +79,10 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
           installPolicy: "user",
           dependencies: ["calendar"],
           publisher: "Acme",
+          capabilities: ["external-auth-consumer", 7, null],
+          requires: {
+            capabilities: ["calendar-provider", false],
+          },
           network_access: {
             allowed_domains: ["api.acme.example", "login.acme.example"],
             reasoning: "Syncs notes with the Acme workspace API.",
@@ -101,6 +105,10 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
       installPolicy: "user",
       dependencies: ["calendar"],
       publisher: "Acme",
+      capabilities: ["external-auth-consumer"],
+      requires: {
+        capabilities: ["calendar-provider"],
+      },
       networkAccess: {
         allowedDomains: ["api.acme.example", "login.acme.example"],
         reasoning: "Syncs notes with the Acme workspace API.",
@@ -114,6 +122,29 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     // No apiKey configured → no authorization header
     const headers = (opts as RequestInit & { headers?: Record<string, string> }).headers ?? {};
     expect(headers["authorization"]).toBeUndefined();
+  });
+
+  it("maps malformed top-level capabilities to an empty approval set", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: "malformed-capabilities",
+          name: "Malformed Capabilities",
+          description: "Test fixture",
+          packageName: "@acme/malformed-capabilities",
+          packageSpec: "@acme/malformed-capabilities@1.0.0",
+          capabilities: "external-auth-consumer",
+        },
+      ]),
+    );
+
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    const plugins = await fetcher.listPlugins();
+
+    expect(plugins).toHaveLength(1);
+    expect(plugins[0]?.capabilities).toEqual([]);
   });
 
   it("listPlugins() accepts {plugins: [...]} wrapper shape (actual server shape)", async () => {

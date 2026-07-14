@@ -10,8 +10,11 @@ import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
 import { projectRootEquals, projectRootKey } from "../shared/project-identity.js";
+import { maskSensitiveData } from "../shared/dlp.js";
 import {
+  A2ATaskState,
   A2A_PROJECTED_TASK_STATE_VALUES,
+  isA2ATerminalTaskState,
   type A2AProjectedTaskState,
 } from "../shared/a2a.js";
 import type { SubAgentSuspensionReason } from "../shared/subagent-events.js";
@@ -286,8 +289,12 @@ export interface SessionMetadata {
   profileModel?: string;
   /** Agent profile's `mode:` frontmatter the child was spawned with (resume reuses it). */
   profileMode?: string;
-  /** Parent chat session that created this sub-agent. Used only for transcript lookup/join. */
+  /** Parent chat session or host-minted internal A2A origin bound to this child. */
   originSessionId?: string;
+  /** Host-only A2A profile handler id. Never populated from remote context ids. */
+  a2aWireHandlerId?: string;
+  /** Host-minted A2A origin; must match originSessionId for wire-bound tasks. */
+  a2aWireInternalOrigin?: string;
   /** Parent `agent_spawn` tool_use id that created this sub-agent. */
   originToolUseId?: string;
   /** Host-visible spawn id emitted on the live agent-spawn event stream. */
@@ -321,6 +328,73 @@ export interface SessionMetadata {
   subAgentSuspensionPrompt?: string;
 }
 
+function asTerminalA2ATaskState(value: unknown): A2AProjectedTaskState | undefined {
+  if (
+    typeof value !== "string"
+    || !(A2A_PROJECTED_TASK_STATE_VALUES as readonly string[]).includes(value)
+  ) {
+    return undefined;
+  }
+  const state = value as A2AProjectedTaskState;
+  return isA2ATerminalTaskState(state) ? state : undefined;
+}
+
+function hasA2AWireIdentity(metadata: Partial<SessionMetadata>): boolean {
+  return metadata.a2aWireHandlerId !== undefined
+    || metadata.a2aWireInternalOrigin !== undefined;
+}
+
+interface DetachedWireTerminalTombstone {
+  taskState: A2AProjectedTaskState;
+  handlerId: string;
+  internalOrigin: string;
+  originSessionId: string;
+  sourceTools: string[];
+  subAgentTitle?: string;
+}
+
+function detachProjectBinding<T extends object>(
+  metadata: T,
+  terminalTombstone?: A2AProjectedTaskState,
+): T {
+  const next = { ...metadata } as T & Partial<SessionMetadata>;
+  delete next.projectRoot;
+  delete next.projectName;
+
+  if (hasA2AWireIdentity(next)) {
+    // Terminal A2A outcomes are immutable. A removed workspace cancels only a
+    // live/waiting task; completed, failed, rejected, or already-canceled work
+    // keeps its first terminal projection for host observation after restart.
+    next.subAgentTaskState = asTerminalA2ATaskState(terminalTombstone)
+      ?? asTerminalA2ATaskState(next.subAgentTaskState)
+      ?? A2ATaskState.CANCELED;
+    delete next.subAgentSuspensionReason;
+    delete next.subAgentSuspensionPrompt;
+  }
+
+  return next;
+}
+
+function applyDetachedWireTerminalTombstone<T extends object>(
+  metadata: T,
+  tombstone: DetachedWireTerminalTombstone,
+): T {
+  return detachProjectBinding(
+    {
+      ...metadata,
+      sessionKind: "subagent",
+      sourceTools: [...tombstone.sourceTools],
+      originSessionId: tombstone.originSessionId,
+      a2aWireHandlerId: tombstone.handlerId,
+      a2aWireInternalOrigin: tombstone.internalOrigin,
+      ...(tombstone.subAgentTitle !== undefined
+        ? { subAgentTitle: tombstone.subAgentTitle }
+        : {}),
+    },
+    tombstone.taskState,
+  );
+}
+
 const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
 const MEMORY_PROJECT_ROOT_PREFIX = "<!-- lvis:project-root:";
 const MEMORY_PROJECT_NAME_PREFIX = "<!-- lvis:project-name:";
@@ -342,6 +416,7 @@ const MAX_SESSION_FILE_BYTES = 5_000_000;
 const MAX_SUMMARY_PREAMBLE_CHARS = 8_000;
 const MAX_PROJECT_ROOT_CHARS = 2_048;
 const MAX_PROJECT_NAME_CHARS = 120;
+const MAX_A2A_WIRE_ID_CHARS = 256;
 const ACTIVE_SESSION_STATE_FILE = ".active-session.json";
 
 /**
@@ -359,6 +434,11 @@ const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
  */
 export function isValidSessionId(id: unknown): id is string {
   return typeof id === "string" && SESSION_ID_REGEX.test(id);
+}
+function isValidA2AWireMetadataId(id: unknown): id is string {
+  return isValidSessionId(id)
+    && id.length <= MAX_A2A_WIRE_ID_CHARS
+    && maskSensitiveData(id).detections.length === 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -557,6 +637,36 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
   const profileModel = typeof raw.profileModel === "string" ? raw.profileModel : undefined;
   const profileMode = typeof raw.profileMode === "string" ? raw.profileMode : undefined;
   const originSessionId = isValidSessionId(raw.originSessionId) ? raw.originSessionId : undefined;
+  const subAgentTaskState = typeof raw.subAgentTaskState === "string"
+    && (A2A_PROJECTED_TASK_STATE_VALUES as readonly string[]).includes(raw.subAgentTaskState)
+    ? raw.subAgentTaskState as A2AProjectedTaskState
+    : undefined;
+  const hasA2AWireHandlerId = raw.a2aWireHandlerId !== undefined;
+  const hasA2AWireInternalOrigin = raw.a2aWireInternalOrigin !== undefined;
+  let a2aWireHandlerId: string | undefined;
+  let a2aWireInternalOrigin: string | undefined;
+  const isDetachedA2AWireTask = projectRoot === undefined
+    && subAgentTaskState !== undefined
+    && isA2ATerminalTaskState(subAgentTaskState)
+    && raw.subAgentSuspensionReason === undefined
+    && raw.subAgentSuspensionPrompt === undefined;
+  if (hasA2AWireHandlerId || hasA2AWireInternalOrigin) {
+    if (
+      !hasA2AWireHandlerId
+      || !hasA2AWireInternalOrigin
+      || !isValidA2AWireMetadataId(raw.a2aWireHandlerId)
+      || !isValidA2AWireMetadataId(raw.a2aWireInternalOrigin)
+      || raw.a2aWireInternalOrigin !== originSessionId
+      || (projectRoot === undefined && !isDetachedA2AWireTask)
+      || !Array.isArray(raw.sourceTools)
+      || !raw.sourceTools.every((tool) =>
+        typeof tool === "string" && tool.length > 0 && tool.length <= 256)
+    ) {
+      throw new Error("invalid A2A wire binding metadata (a2a-wire-binding-invalid)");
+    }
+    a2aWireHandlerId = raw.a2aWireHandlerId;
+    a2aWireInternalOrigin = raw.a2aWireInternalOrigin;
+  }
   const originToolUseId = normalizeMetadataString(raw.originToolUseId, 256);
   const spawnId = normalizeMetadataString(raw.spawnId, 128);
   const subAgentTitle = normalizeMetadataString(raw.subAgentTitle, MAX_PROJECT_NAME_CHARS);
@@ -571,10 +681,6 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     : undefined;
   const cumulativeRounds = typeof raw.cumulativeRounds === "number" && Number.isInteger(raw.cumulativeRounds) && raw.cumulativeRounds >= 0
     ? raw.cumulativeRounds
-    : undefined;
-  const subAgentTaskState = typeof raw.subAgentTaskState === "string"
-    && (A2A_PROJECTED_TASK_STATE_VALUES as readonly string[]).includes(raw.subAgentTaskState)
-    ? raw.subAgentTaskState as A2AProjectedTaskState
     : undefined;
   const subAgentSuspensionReason = raw.subAgentSuspensionReason === "budget"
     || raw.subAgentSuspensionReason === "question"
@@ -603,10 +709,16 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     branchedFromCompactNum: rawBranchedFromCompactNum,
     branchedAt: rawBranchedAt,
     // Sub-agent resume metadata (PR-B).
-    sourceTools: sourceTools && sourceTools.length > 0 ? sourceTools : undefined,
+    sourceTools: a2aWireHandlerId !== undefined
+      ? sourceTools
+      : sourceTools && sourceTools.length > 0
+        ? sourceTools
+        : undefined,
     profileModel,
     profileMode,
     originSessionId,
+    a2aWireHandlerId,
+    a2aWireInternalOrigin,
     originToolUseId,
     spawnId,
     subAgentTitle,
@@ -641,6 +753,18 @@ export class MemoryManager {
    * old project groupings.
    */
   private readonly detachedProjectRootsBySession = new Map<string, Set<string>>();
+  /**
+   * Monotonic root policy generation. Capturing this before lock acquisition
+   * detects detach -> allow ABA cycles even when the root-wide guard is clear
+   * again by the time a stale writer finally enters the critical section.
+   */
+  private readonly projectRootGenerations = new Map<string, number>();
+  /**
+   * First terminal outcome owned by a detached wire session. The binding and
+   * state are retained together so a late writer cannot regress the outcome,
+   * swap handlers, or downgrade the task into an ordinary resumable sub-agent.
+   */
+  private readonly detachedWireTerminalTombstones = new Map<string, DetachedWireTerminalTombstone>();
   private persistentContextWatchers: FSWatcher[] = [];
   private persistentContextReloadTimer: ReturnType<typeof setTimeout> | undefined;
   private persistentContextPollTimer: ReturnType<typeof setInterval> | undefined;
@@ -660,6 +784,46 @@ export class MemoryManager {
     this.sessionsDir = join(this.lvisDir, "sessions");
     this.searchIndex = new SessionSearchIndex(this.lvisDir);
     this.ensureStructure();
+  }
+
+  private projectRootGeneration(key: string): number {
+    return this.projectRootGenerations.get(key) ?? 0;
+  }
+
+  private bumpProjectRootGeneration(key: string): void {
+    this.projectRootGenerations.set(key, this.projectRootGeneration(key) + 1);
+  }
+
+  private rememberDetachedWireTerminal(
+    sessionId: string,
+    metadata: Partial<SessionMetadata>,
+  ): DetachedWireTerminalTombstone | undefined {
+    const existing = this.detachedWireTerminalTombstones.get(sessionId);
+    if (existing) return existing;
+
+    const taskState = asTerminalA2ATaskState(metadata.subAgentTaskState);
+    if (
+      taskState === undefined
+      || typeof metadata.a2aWireHandlerId !== "string"
+      || typeof metadata.a2aWireInternalOrigin !== "string"
+      || typeof metadata.originSessionId !== "string"
+      || metadata.a2aWireInternalOrigin !== metadata.originSessionId
+      || !Array.isArray(metadata.sourceTools)
+    ) {
+      return undefined;
+    }
+    const tombstone: DetachedWireTerminalTombstone = {
+      taskState,
+      handlerId: metadata.a2aWireHandlerId,
+      internalOrigin: metadata.a2aWireInternalOrigin,
+      originSessionId: metadata.originSessionId,
+      sourceTools: [...metadata.sourceTools],
+      ...(metadata.subAgentTitle !== undefined
+        ? { subAgentTitle: metadata.subAgentTitle }
+        : {}),
+    };
+    this.detachedWireTerminalTombstones.set(sessionId, tombstone);
+    return tombstone;
   }
 
 
@@ -1207,12 +1371,39 @@ export class MemoryManager {
         MAX_SUMMARY_PREAMBLE_CHARS,
       ),
     };
+    const hasA2AWireHandlerId = safe.a2aWireHandlerId !== undefined;
+    const hasA2AWireInternalOrigin = safe.a2aWireInternalOrigin !== undefined;
+    const detachedTerminalState = asTerminalA2ATaskState(safe.subAgentTaskState);
+    const isDetachedA2AWireTask = safe.projectRoot === undefined
+      && detachedTerminalState !== undefined
+      && safe.subAgentSuspensionReason === undefined
+      && safe.subAgentSuspensionPrompt === undefined;
+    if (hasA2AWireHandlerId || hasA2AWireInternalOrigin) {
+      if (
+        !isValidA2AWireMetadataId(safe.a2aWireHandlerId)
+        || !isValidA2AWireMetadataId(safe.a2aWireInternalOrigin)
+        || safe.a2aWireInternalOrigin !== safe.originSessionId
+        || (safe.projectRoot === undefined && !isDetachedA2AWireTask)
+        || !Array.isArray(safe.sourceTools)
+        || !safe.sourceTools.every((tool) =>
+          typeof tool === "string" && tool.length > 0 && tool.length <= 256)
+      ) {
+        throw new Error(
+          "saveSessionMetadata: invalid A2A wire binding metadata (a2a-wire-binding-invalid)",
+        );
+      }
+    }
     // Cap stored title to 20 chars.
     if (safe.title !== undefined && safe.title.length > 20) {
       safe = { ...safe, title: safe.title.slice(0, 20) };
     }
+    // Capture before the first asynchronous lock boundary. A detach and re-add
+    // can otherwise clear the Set guard before this writer enters the lock.
+    const guardedProjectKey = projectRootKey(safe.projectRoot);
+    const capturedRootGeneration = guardedProjectKey
+      ? this.projectRootGeneration(guardedProjectKey)
+      : undefined;
     await withFileLock(targetPath, async () => {
-      const guardedProjectKey = projectRootKey(safe.projectRoot);
       const sessionTombstones = this.detachedProjectRootsBySession.get(sessionId);
       const rootIsDetached = Boolean(
         guardedProjectKey && this.detachedProjectRoots.has(guardedProjectKey),
@@ -1220,19 +1411,30 @@ export class MemoryManager {
       const sessionWasDetached = Boolean(
         guardedProjectKey && sessionTombstones?.has(guardedProjectKey),
       );
-      if (guardedProjectKey && (rootIsDetached || sessionWasDetached)) {
+      const rootGenerationChanged = Boolean(
+        guardedProjectKey
+        && capturedRootGeneration !== this.projectRootGeneration(guardedProjectKey),
+      );
+      const shouldDetachProject = Boolean(
+        guardedProjectKey
+        && (rootIsDetached || sessionWasDetached || rootGenerationChanged),
+      );
+      if (shouldDetachProject && guardedProjectKey) {
         // A write that first arrives while the root-wide guard is active must
-        // also remain detached after re-add. This covers an active session that
-        // had not produced a metadata file when removal began.
-        if (rootIsDetached && !sessionWasDetached) {
+        // also remain detached after re-add. A generation mismatch covers the
+        // ABA case where detach and allow both completed before lock entry.
+        if (!sessionWasDetached) {
           const nextTombstones = sessionTombstones ?? new Set<string>();
           nextTombstones.add(guardedProjectKey);
           this.detachedProjectRootsBySession.set(sessionId, nextTombstones);
         }
-        const detached = { ...safe };
-        delete detached.projectRoot;
-        delete detached.projectName;
-        safe = detached;
+      }
+      const terminalTombstone = this.detachedWireTerminalTombstones.get(sessionId);
+      if (terminalTombstone) {
+        safe = applyDetachedWireTerminalTombstone(safe, terminalTombstone);
+      } else if (shouldDetachProject) {
+        safe = detachProjectBinding(safe);
+        this.rememberDetachedWireTerminal(sessionId, safe);
       }
       writeFileSync(targetPath, JSON.stringify(safe, null, 2), "utf-8");
     });
@@ -1256,18 +1458,22 @@ export class MemoryManager {
    */
   allowProjectRoot(projectRoot: string): void {
     const key = projectRootKey(projectRoot);
-    if (key) this.detachedProjectRoots.delete(key);
+    if (!key) return;
+    this.bumpProjectRootGeneration(key);
+    this.detachedProjectRoots.delete(key);
   }
 
   /**
    * Preserve conversation JSONL while detaching project metadata from sessions
    * that belonged to a removed workspace root. Each metadata file is re-read
-   * inside its file lock so concurrent detach calls are idempotent, and only the
-   * two project fields are removed so future metadata keys remain intact.
+   * inside its file lock so concurrent detach calls are idempotent. Project
+   * fields are removed; wire tasks also receive one immutable terminal outcome
+   * while their host-visible identity and unrelated future fields remain intact.
    */
   async detachSessionsFromProject(projectRoot: string): Promise<number> {
     const key = projectRootKey(projectRoot);
     if (!key) return 0;
+    this.bumpProjectRootGeneration(key);
     this.detachedProjectRoots.add(key);
 
     let detachedCount = 0;
@@ -1287,13 +1493,21 @@ export class MemoryManager {
           if (!parsed || typeof parsed !== "object") return;
           const storedRoot = typeof parsed.projectRoot === "string" ? parsed.projectRoot : undefined;
           if (!storedRoot || !projectRootEquals(storedRoot, projectRoot)) return;
+          const normalized = normalizeSessionMetadata(parsed);
 
           const sessionTombstones = this.detachedProjectRootsBySession.get(sessionId) ?? new Set<string>();
           sessionTombstones.add(key);
           this.detachedProjectRootsBySession.set(sessionId, sessionTombstones);
-          const next = { ...parsed };
-          delete next.projectRoot;
-          delete next.projectName;
+          const terminalTombstone = this.detachedWireTerminalTombstones.get(sessionId);
+          const next = terminalTombstone
+            ? applyDetachedWireTerminalTombstone(parsed, terminalTombstone)
+            : detachProjectBinding(parsed);
+          if (!terminalTombstone) {
+            this.rememberDetachedWireTerminal(sessionId, {
+              ...normalized,
+              subAgentTaskState: (next as Partial<SessionMetadata>).subAgentTaskState,
+            });
+          }
           writeFileSync(targetPath, JSON.stringify(next, null, 2), "utf-8");
           changed = true;
         } catch (error) {
@@ -1571,6 +1785,7 @@ export class MemoryManager {
       return;
     }
     this.detachedProjectRootsBySession.delete(sessionId);
+    this.detachedWireTerminalTombstones.delete(sessionId);
     const jsonlPath = join(this.sessionsDir, `${sessionId}.jsonl`);
     unlinkIfPresent(jsonlPath);
     const metaPath = join(this.sessionsDir, `${sessionId}.meta.json`);

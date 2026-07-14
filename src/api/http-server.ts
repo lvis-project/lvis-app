@@ -30,6 +30,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import type { AddressInfo } from "node:net";
+import type { A2AHttpRouter } from "./a2a-router.js";
 import type { LocalApi } from "./local-api.js";
 import type { StreamBroadcaster } from "./stream-broadcaster.js";
 
@@ -72,6 +73,8 @@ export interface LocalApiHttpServerOptions {
   secret: string;
   /** SSE fan-out source — wired now; consumed by a later commit's /v1/events. */
   broadcaster: StreamBroadcaster;
+  /** Optional A2A v1 path multiplexer. Omitted unless its opt-in wire feature is enabled. */
+  a2aRouter?: A2AHttpRouter;
   /** Bind host. Defaults to 127.0.0.1; MUST never default to 0.0.0.0. */
   host?: string;
   /** Bind port. Defaults to 0 (ephemeral); actual port read from address(). */
@@ -261,11 +264,16 @@ async function route(
   api: LocalApi,
   broadcaster: StreamBroadcaster,
   liveStreams: Set<() => void>,
+  a2aRouter: A2AHttpRouter | undefined,
   log?: (message: string) => void,
 ): Promise<void> {
   // Strip query/hash — routing is on the path only.
   const path = (req.url ?? "").split("?")[0].split("#")[0];
   const method = req.method ?? "GET";
+
+  if (a2aRouter && (await a2aRouter.tryHandle(req, res, path, method))) {
+    return;
+  }
 
   if (path === "/v1/dispatch") {
     if (method !== "POST") {
@@ -304,7 +312,8 @@ async function route(
 export function startLocalApiHttpServer(
   opts: LocalApiHttpServerOptions,
 ): Promise<LocalApiHttpServer> {
-  const { api, secret, broadcaster, host = DEFAULT_HOST, port = DEFAULT_PORT, log } = opts;
+  const { api, secret, broadcaster, a2aRouter, host = DEFAULT_HOST, port = DEFAULT_PORT, log } =
+    opts;
   if (port !== DEFAULT_PORT && isFetchForbiddenPort(port)) {
     return Promise.reject(
       new Error(`local-api http server port ${port} is blocked by Fetch clients`),
@@ -316,13 +325,16 @@ export function startLocalApiHttpServer(
   const liveStreams = new Set<() => void>();
 
   const server: Server = createServer((req, res) => {
-    // Auth on EVERY route before any other processing. Never log the secret or
-    // the Authorization header.
-    if (!isAuthorized(req.headers.authorization, secret)) {
+    const path = (req.url ?? "").split("?")[0].split("#")[0];
+    const method = req.method ?? "GET";
+    // Agent Card discovery is the only public route. Every operation and every
+    // pre-existing local API route still authenticates before processing.
+    const isPublicAgentCard = a2aRouter?.isPublicAgentCardRequest(path, method) === true;
+    if (!isPublicAgentCard && !isAuthorized(req.headers.authorization, secret)) {
       sendJson(res, 401, { ok: false, error: "unauthorized" });
       return;
     }
-    void route(req, res, api, broadcaster, liveStreams, log).catch((err) => {
+    void route(req, res, api, broadcaster, liveStreams, a2aRouter, log).catch((err) => {
       // Defensive: an unexpected error in the routing layer itself.
       log?.(`request routing error: ${err instanceof Error ? err.message : String(err)}`);
       if (!res.headersSent) {
@@ -391,7 +403,13 @@ export function startLocalApiHttpServer(
               }
               // Destroy idle keep-alive sockets so close() never hangs.
               server.closeAllConnections();
-              server.close((closeErr) => (closeErr ? rej(closeErr) : res()));
+              server.close((closeErr) => {
+                if (!closeErr || (closeErr as { code?: string }).code === "ERR_SERVER_NOT_RUNNING") {
+                  res();
+                  return;
+                }
+                rej(closeErr);
+              });
             }),
         });
       });

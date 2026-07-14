@@ -1,3 +1,6 @@
+import { createRequire } from "node:module";
+import { dirname } from "node:path";
+
 import type { PolicyFile } from "../policy-store.js";
 import type { ToolInvocationContext } from "../reviewer/risk-classifier.js";
 import {
@@ -36,7 +39,14 @@ let _winSpawnProbe: Promise<boolean> | undefined;
 async function windowsSandboxCanSpawn(): Promise<boolean> {
   if (_winSpawnProbe === undefined) {
     _winSpawnProbe = (async () => {
+      const previousCwd = process.cwd();
       try {
+        // The srt-sandbox probe inherits cwd. Test worktrees can be user-only,
+        // while the provisioned runtime directory is explicitly group-readable.
+        const runtimeEntry = createRequire(import.meta.url).resolve(
+          "@anthropic-ai/sandbox-runtime",
+        );
+        process.chdir(dirname(runtimeEntry));
         const { verifyWindowsWfpEgress } = await import("@anthropic-ai/sandbox-runtime");
         await verifyWindowsWfpEgress({ proxyPortRange: DEFAULT_WINDOWS_PROXY_PORT_RANGE });
         return true;
@@ -55,6 +65,8 @@ async function windowsSandboxCanSpawn(): Promise<boolean> {
             "'ASRT sandbox access denied' recovery.",
         );
         return false;
+      } finally {
+        process.chdir(previousCwd);
       }
     })();
   }

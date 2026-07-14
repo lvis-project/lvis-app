@@ -291,21 +291,21 @@ describe("LlmTab — manual-only Model tab", () => {
 
   it("scopes synced model-list cache by marketplace provider preset id", async () => {
     const api = llmTabApi();
-    (api.listLlmModels as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({
-        ok: true,
-        vendor: "openai-compatible",
-        endpoint: "https://shared.example/v1/models",
-        models: ["router-a/free"],
-        fetchedAt: "2026-07-07T00:00:00.000Z",
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        vendor: "openai-compatible",
-        endpoint: "https://shared.example/v1/models",
-        models: ["router-b/free"],
-        fetchedAt: "2026-07-07T00:00:01.000Z",
-      });
+    const listLlmModels = api.listLlmModels as ReturnType<typeof vi.fn>;
+    const routerAResult = {
+      ok: true,
+      vendor: "openai-compatible",
+      endpoint: "https://shared.example/v1/models",
+      models: ["router-a/free"],
+      fetchedAt: "2026-07-07T00:00:00.000Z",
+    };
+    const routerBResult = {
+      ok: true,
+      vendor: "openai-compatible",
+      endpoint: "https://shared.example/v1/models",
+      models: ["router-b/free"],
+      fetchedAt: "2026-07-07T00:00:01.000Z",
+    };
     const routerA: MarketplaceInstalledProviderPreset = {
       providerId: "router-a",
       label: "Router A",
@@ -331,6 +331,11 @@ describe("LlmTab — manual-only Model tab", () => {
       />,
     );
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    await waitFor(() => expect(listLlmModels).toHaveBeenCalledWith({ vendor: "openai" }));
+    listLlmModels
+      .mockClear()
+      .mockResolvedValueOnce(routerAResult)
+      .mockResolvedValueOnce(routerBResult);
 
     const vendorTrigger = container.querySelector("#vendor-select") as HTMLElement;
     fireEvent.mouseDown(vendorTrigger);
@@ -341,8 +346,8 @@ describe("LlmTab — manual-only Model tab", () => {
     fireEvent.click(await screen.findByText("Router A"));
     expect(screen.getByTestId("llm-tab:api-key-section"))
       .toHaveAttribute("data-api-key-required", "true");
-    await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledTimes(1));
-    expect(api.listLlmModels).toHaveBeenLastCalledWith({
+    await waitFor(() => expect(listLlmModels).toHaveBeenCalledTimes(1));
+    expect(listLlmModels).toHaveBeenLastCalledWith({
       vendor: "openai-compatible",
       baseUrl: "https://shared.example/v1",
       credentialScope: "router-a",
@@ -354,40 +359,42 @@ describe("LlmTab — manual-only Model tab", () => {
       target: { value: "Router B" },
     });
     fireEvent.click(await screen.findByText("Router B"));
-    await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledTimes(2));
-    expect(api.listLlmModels).toHaveBeenLastCalledWith({
+    await waitFor(() => expect(listLlmModels).toHaveBeenCalledTimes(2));
+    expect(listLlmModels).toHaveBeenLastCalledWith({
       vendor: "openai-compatible",
       baseUrl: "https://shared.example/v1",
       credentialScope: "router-b",
     });
 
-    expect(api.updateSettings).toHaveBeenCalledWith({
-      llm: {
-        modelListCache: {
-          [llmModelListCacheKey("openai-compatible", "https://shared.example/v1", "router-a")]: {
-            vendor: "openai-compatible",
-            baseUrl: "https://shared.example/v1",
-            credentialScope: "router-a",
-            endpoint: "https://shared.example/v1/models",
-            models: ["router-a/free"],
-            fetchedAt: "2026-07-07T00:00:00.000Z",
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        llm: {
+          modelListCache: {
+            [llmModelListCacheKey("openai-compatible", "https://shared.example/v1", "router-a")]: {
+              vendor: "openai-compatible",
+              baseUrl: "https://shared.example/v1",
+              credentialScope: "router-a",
+              endpoint: "https://shared.example/v1/models",
+              models: ["router-a/free"],
+              fetchedAt: "2026-07-07T00:00:00.000Z",
+            },
           },
         },
-      },
-    });
-    expect(api.updateSettings).toHaveBeenCalledWith({
-      llm: {
-        modelListCache: expect.objectContaining({
-          [llmModelListCacheKey("openai-compatible", "https://shared.example/v1", "router-b")]: {
-            vendor: "openai-compatible",
-            baseUrl: "https://shared.example/v1",
-            credentialScope: "router-b",
-            endpoint: "https://shared.example/v1/models",
-            models: ["router-b/free"],
-            fetchedAt: "2026-07-07T00:00:01.000Z",
-          },
-        }),
-      },
+      });
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        llm: {
+          modelListCache: expect.objectContaining({
+            [llmModelListCacheKey("openai-compatible", "https://shared.example/v1", "router-b")]: {
+              vendor: "openai-compatible",
+              baseUrl: "https://shared.example/v1",
+              credentialScope: "router-b",
+              endpoint: "https://shared.example/v1/models",
+              models: ["router-b/free"],
+              fetchedAt: "2026-07-07T00:00:01.000Z",
+            },
+          }),
+        },
+      });
     });
   });
 

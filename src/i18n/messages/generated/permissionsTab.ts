@@ -1,10 +1,13 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/tabs/PermissionsTab.tsx. Do not edit by hand.
 export const en = {
   // Reviewer interactive options
+  "permissionsTab.interactiveAutoApproveLabel": "Automatic approval threshold",
   "permissionsTab.interactiveOffLabel": "Off",
-  "permissionsTab.interactiveOffDescription": "Always shows a confirmation dialog before a tool runs. (Default, safest)",
+  "permissionsTab.interactiveOffDescription": "Always shows a confirmation dialog before a tool runs.",
   "permissionsTab.interactiveLowLabel": "Auto-approve low risk",
   "permissionsTab.interactiveLowDescription": "Actions judged as low risk are automatically allowed without confirmation. Medium and high risk still show a confirmation dialog.",
+  "permissionsTab.interactiveMediumLabel": "Auto-approve medium risk",
+  "permissionsTab.interactiveMediumDescription": "Actions judged as low or medium risk are automatically allowed without confirmation. High risk still requires confirmation.",
 
   // Reviewer mode options
   "permissionsTab.reviewerModeDisabledLabel": "Validation off (auto-pass)",
@@ -221,10 +224,13 @@ export const en = {
   "permissionsTab.auditLogHelp": "Open the audit log panel to view permission events from the last 7 days.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
+  "permissionsTab.interactiveAutoApproveLabel": "자동 허용 위험도",
   "permissionsTab.interactiveOffLabel": "끔",
-  "permissionsTab.interactiveOffDescription": "도구가 실행되기 전 항상 확인 창을 표시합니다. (기본값, 가장 안전)",
+  "permissionsTab.interactiveOffDescription": "도구가 실행되기 전 항상 확인 창을 표시합니다.",
   "permissionsTab.interactiveLowLabel": "저위험 자동 허용",
   "permissionsTab.interactiveLowDescription": "저위험으로 판단된 작업은 확인 없이 자동으로 허용합니다. 중·고위험은 여전히 확인 창이 표시됩니다.",
+  "permissionsTab.interactiveMediumLabel": "중위험까지 자동 허용",
+  "permissionsTab.interactiveMediumDescription": "저위험과 중위험으로 판단된 작업은 확인 없이 자동으로 허용합니다. 고위험은 계속 확인이 필요합니다.",
 
   "permissionsTab.reviewerModeDisabledLabel": "검증 끔 (자동 통과)",
   "permissionsTab.reviewerModeDisabledDescription": "권한 리뷰어를 끄고 카테고리 기본 정책만 적용합니다. 도구별 차단/허용 규칙은 그대로 유지됩니다.",

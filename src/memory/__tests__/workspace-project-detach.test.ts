@@ -103,6 +103,206 @@ describe("MemoryManager workspace project detachment", () => {
     expect(memory.loadSessionMetadata(SESSION_A)?.projectRoot).toBeUndefined();
   });
 
+  it("cancels a detached wire task while preserving its host-visible identity", async () => {
+    const originSessionId = "wire-origin-session";
+    const wireMetadata: SessionMetadata = {
+      sessionKind: "subagent",
+      projectRoot: ROOT,
+      projectName: "Alpha",
+      sourceTools: ["noop"],
+      originSessionId,
+      a2aWireHandlerId: "wire-handler",
+      a2aWireInternalOrigin: originSessionId,
+      subAgentTitle: "wire task",
+      subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      subAgentSuspensionReason: "question",
+      subAgentSuspensionPrompt: "Continue?",
+    };
+    await memory.saveSession(SESSION_A, [{ role: "user", content: "wire transcript" }]);
+    await memory.saveSessionMetadata(SESSION_A, wireMetadata);
+    const transcript = readFileSync(
+      join(dir, "sessions", `${SESSION_A}.jsonl`),
+      "utf-8",
+    );
+
+    await expect(memory.detachSessionsFromProject(ROOT)).resolves.toBe(1);
+
+    const assertDetachedWireTask = (): void => {
+      const metadata = memory.loadSessionMetadata(SESSION_A);
+      expect(metadata).toMatchObject({
+        sessionKind: "subagent",
+        originSessionId,
+        a2aWireHandlerId: "wire-handler",
+        a2aWireInternalOrigin: originSessionId,
+        sourceTools: ["noop"],
+        subAgentTaskState: "TASK_STATE_CANCELED",
+      });
+      expect(metadata?.projectRoot).toBeUndefined();
+      expect(metadata?.projectName).toBeUndefined();
+      expect(metadata?.subAgentSuspensionReason).toBeUndefined();
+      expect(metadata?.subAgentSuspensionPrompt).toBeUndefined();
+    };
+    assertDetachedWireTask();
+    expect(readFileSync(join(dir, "sessions", `${SESSION_A}.jsonl`), "utf-8"))
+      .toBe(transcript);
+
+    memory.allowProjectRoot(ROOT);
+    await memory.saveSessionMetadata(SESSION_A, wireMetadata);
+    assertDetachedWireTask();
+
+    memory.closeSearchIndex();
+    memory = new MemoryManager({ lvisDir: dir });
+    assertDetachedWireTask();
+  });
+
+  it.each([
+    "TASK_STATE_COMPLETED",
+    "TASK_STATE_FAILED",
+    "TASK_STATE_REJECTED",
+    "TASK_STATE_CANCELED",
+  ] as const)("preserves the first terminal wire outcome after detach and stale writes (%s)", async (
+    terminalState,
+  ) => {
+    const originSessionId = "wire-terminal-origin";
+    const terminalMetadata: SessionMetadata = {
+      sessionKind: "subagent",
+      projectRoot: ROOT,
+      projectName: "Alpha",
+      sourceTools: ["noop"],
+      originSessionId,
+      a2aWireHandlerId: "wire-terminal-handler",
+      a2aWireInternalOrigin: originSessionId,
+      subAgentTitle: "terminal wire task",
+      subAgentTaskState: terminalState,
+    };
+    await memory.saveSession(SESSION_A, [{ role: "user", content: "terminal transcript" }]);
+    await memory.saveSessionMetadata(SESSION_A, terminalMetadata);
+
+    await expect(memory.detachSessionsFromProject(ROOT)).resolves.toBe(1);
+    expect(memory.loadSessionMetadata(SESSION_A)).toMatchObject({
+      projectRoot: undefined,
+      a2aWireHandlerId: "wire-terminal-handler",
+      subAgentTaskState: terminalState,
+    });
+
+    memory.allowProjectRoot(ROOT);
+    await memory.saveSessionMetadata(SESSION_A, {
+      ...terminalMetadata,
+      subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      subAgentSuspensionReason: "question",
+      subAgentSuspensionPrompt: "stale writer",
+    });
+    const afterStaleWrite = memory.loadSessionMetadata(SESSION_A);
+    expect(afterStaleWrite).toMatchObject({
+      projectRoot: undefined,
+      a2aWireHandlerId: "wire-terminal-handler",
+      subAgentTaskState: terminalState,
+    });
+    expect(afterStaleWrite?.subAgentSuspensionReason).toBeUndefined();
+    expect(afterStaleWrite?.subAgentSuspensionPrompt).toBeUndefined();
+  });
+
+  it.each([
+    "TASK_STATE_COMPLETED",
+    "TASK_STATE_FAILED",
+    "TASK_STATE_REJECTED",
+    "TASK_STATE_CANCELED",
+  ] as const)("accepts a rootless terminal wire record (%s)", async (terminalState) => {
+    const originSessionId = "rootless-wire-origin";
+    await memory.saveSessionMetadata(SESSION_A, {
+      sessionKind: "subagent",
+      sourceTools: [],
+      originSessionId,
+      a2aWireHandlerId: "rootless-wire-handler",
+      a2aWireInternalOrigin: originSessionId,
+      subAgentTitle: "rootless terminal",
+      subAgentTaskState: terminalState,
+    });
+
+    expect(memory.loadSessionMetadata(SESSION_A)).toMatchObject({
+      projectRoot: undefined,
+      sourceTools: [],
+      a2aWireHandlerId: "rootless-wire-handler",
+      subAgentTaskState: terminalState,
+    });
+  });
+
+  it("does not treat explicitly undefined wire fields as a wire binding", async () => {
+    await memory.saveSession(SESSION_A, [{ role: "user", content: "ordinary sub-agent" }]);
+    await memory.saveSessionMetadata(SESSION_A, {
+      sessionKind: "subagent",
+      projectRoot: ROOT,
+      sourceTools: ["noop"],
+      originSessionId: "ordinary-origin",
+      a2aWireHandlerId: undefined,
+      a2aWireInternalOrigin: undefined,
+      subAgentTitle: "ordinary sub-agent",
+      subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      subAgentSuspensionReason: "question",
+      subAgentSuspensionPrompt: "ordinary question",
+    });
+
+    await expect(memory.detachSessionsFromProject(ROOT)).resolves.toBe(1);
+    expect(memory.loadSessionMetadata(SESSION_A)).toMatchObject({
+      projectRoot: undefined,
+      a2aWireHandlerId: undefined,
+      a2aWireInternalOrigin: undefined,
+      subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      subAgentSuspensionReason: "question",
+      subAgentSuspensionPrompt: "ordinary question",
+    });
+  });
+
+  it("clears detached wire terminal tombstones when a session is deleted", async () => {
+    const originSessionId = "wire-delete-origin";
+    await memory.saveSessionMetadata(SESSION_A, {
+      sessionKind: "subagent",
+      projectRoot: ROOT,
+      sourceTools: ["noop"],
+      originSessionId,
+      a2aWireHandlerId: "wire-delete-handler",
+      a2aWireInternalOrigin: originSessionId,
+      subAgentTitle: "wire delete",
+      subAgentTaskState: "TASK_STATE_COMPLETED",
+    });
+    await memory.detachSessionsFromProject(ROOT);
+    memory.allowProjectRoot(ROOT);
+    memory.deleteSession(SESSION_A);
+
+    await memory.saveSessionMetadata(SESSION_A, {
+      sessionKind: "main",
+      projectRoot: ROOT,
+      title: "replacement",
+    });
+    expect(memory.loadSessionMetadata(SESSION_A)).toMatchObject({
+      sessionKind: "main",
+      projectRoot: ROOT,
+      title: "replacement",
+    });
+  });
+
+  it("fails closed when matching metadata has a partial wire identity", async () => {
+    await seed(SESSION_A, ROOT, "partial-wire");
+    const metadataPath = join(dir, "sessions", `${SESSION_A}.meta.json`);
+    const raw = JSON.parse(readFileSync(metadataPath, "utf-8")) as Record<string, unknown>;
+    writeFileSync(
+      metadataPath,
+      JSON.stringify({
+        ...raw,
+        sessionKind: "subagent",
+        sourceTools: ["noop"],
+        originSessionId: "wire-origin-session",
+        a2aWireHandlerId: "wire-handler",
+        subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+      }),
+      "utf-8",
+    );
+
+    await expect(memory.detachSessionsFromProject(ROOT)).rejects.toMatchObject({
+      code: "SESSION_METADATA_INVALID",
+    });
+  });
+
   it("removes an orphaned FTS row when project metadata exists without JSONL", async () => {
     await seed(SESSION_A, ROOT, "orphaned-index-row");
     rmSync(join(dir, "sessions", `${SESSION_A}.jsonl`));
