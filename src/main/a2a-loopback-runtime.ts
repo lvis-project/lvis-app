@@ -258,20 +258,32 @@ export async function createA2ALoopbackRuntime(
       audit,
     });
   });
-
   const router = createA2AHttpRouter({
     handlers,
     audit: (event) => writeAudit(options.services, `a2a:wire:${event.reason}`),
   });
+  try {
+    await Promise.all(handlers.map((handler) => handler.startInputRequiredExpiry()));
+  } catch (error) {
+    await Promise.allSettled(handlers.map((handler) => handler.dispose()));
+    throw error;
+  }
   const agentCardPaths = Object.freeze(
     router.handlerIds.map((id) => `/a2a/${id}/.well-known/agent-card.json`),
   );
+  let disposePromise: Promise<void> | undefined;
   return Object.freeze({
     router,
     discovery: Object.freeze({
       protocolVersion: A2A_PROTOCOL_VERSION,
       agentCardPaths,
     }),
-    async dispose(): Promise<void> {},
+    dispose(): Promise<void> {
+      if (!disposePromise) {
+        disposePromise = Promise.all(handlers.map((handler) => handler.dispose()))
+          .then(() => undefined);
+      }
+      return disposePromise;
+    },
   });
 }

@@ -1,7 +1,7 @@
 # A2A upstream contribution candidates
 
-- Checked: **2026-07-12 (Asia/Seoul)**
-- Sources: official A2A Protocol, A2A TCK, and A2A JavaScript SDK repositories only
+- Checked: **2026-07-15 (Asia/Seoul)**
+- Sources: official A2A Protocol, A2A TCK, A2A Python SDK, and A2A JavaScript SDK repositories only
 - Submission status: research draft; no upstream issue or pull request has been submitted
 
 ## Purpose and non-goals
@@ -21,6 +21,7 @@ Primary references:
 - [A2A v1.0.0 specification](https://github.com/a2aproject/A2A/blob/v1.0.0/docs/specification.md)
 - [A2A v1.0.0 protocol definition](https://github.com/a2aproject/A2A/blob/v1.0.0/specification/a2a.proto)
 - [A2A TCK](https://github.com/a2aproject/a2a-tck)
+- [A2A Python SDK](https://github.com/a2aproject/a2a-python)
 - [A2A JavaScript SDK](https://github.com/a2aproject/a2a-js)
 
 ## Priority
@@ -144,7 +145,7 @@ Post to #1276 or #1992 after maintainers confirm the preferred tracking location
 - [#95: Add tests for Tasks in AUTH_REQUIRED state](https://github.com/a2aproject/a2a-tck/issues/95)
 - [#96: Add tests for Tasks in INPUT_REQUIRED state](https://github.com/a2aproject/a2a-tck/issues/96)
 
-Both issues were open when checked. Local state-projection unit tests are useful implementation evidence, but they cannot replace compatibility tests against an A2A binding.
+Both issues remained open when checked on 2026-07-15. Local state-projection unit tests are useful implementation evidence, but they cannot replace compatibility tests against an A2A binding.
 
 ### Minimal reproduction
 
@@ -279,6 +280,33 @@ Potential host-project contributions discovered during this review:
 
 - **Gemini CLI documentation/version matrix:** its remote-agent examples currently show an older protocol-version value while A2A v1.0 is released. Before filing anything, reproduce the current client's supported versions and search for an existing migration issue. If the client already supports v1, propose a documentation-only update plus a v1 INPUT_REQUIRED example; otherwise file a narrowly scoped compatibility question rather than claiming a bug.
 - **No Codex, goose, or OpenHands issue yet:** their active-turn injection, subagent event, and UI patterns are useful comparative evidence, but this ph1 work did not reproduce an upstream defect in those projects.
+
+## 7. Official upstream follow-up (2026-07-15)
+
+No issue or pull request was submitted during this follow-up. The findings below distinguish verified repository facts from candidates that still need an isolated upstream reproduction.
+
+### 7.1 TCK revision, maturity, and existing lifecycle work
+
+- The locally pinned TCK revision, [`5996b79f9cefa6fc390980e383e358a66fb9e49e`](https://github.com/a2aproject/a2a-tck/commit/5996b79f9cefa6fc390980e383e358a66fb9e49e), was still upstream `HEAD` when checked. Its [`pyproject.toml`](https://github.com/a2aproject/a2a-tck/blob/5996b79f9cefa6fc390980e383e358a66fb9e49e/pyproject.toml) classifies the package as Beta. Pinning the exact commit remains necessary; a passing run must not be generalized beyond that revision and the declared binding/capabilities.
+- [TCK #95](https://github.com/a2aproject/a2a-tck/issues/95) and [#96](https://github.com/a2aproject/a2a-tck/issues/96) remained open. Production INPUT_REQUIRED evidence should complement those tracked scenarios after the protocol-facing SUT is deterministic, not create replacement issues.
+- The repository's [`pyproject.toml`](https://github.com/a2aproject/a2a-tck/blob/5996b79f9cefa6fc390980e383e358a66fb9e49e/pyproject.toml) declares `license = "MIT"`, while its [`LICENSE`](https://github.com/a2aproject/a2a-tck/blob/5996b79f9cefa6fc390980e383e358a66fb9e49e/LICENSE) and README identify Apache License 2.0. This is a small, independently verifiable packaging-metadata correction candidate. Re-check current `main` and contribution guidance immediately before proposing it.
+
+### 7.2 TCK authentication gap and stale authentication CLI examples
+
+[TCK #163](https://github.com/a2aproject/a2a-tck/issues/163) already tracks the verified gap: the documented `A2A_AUTH_*` environment variables are not injected by the transport clients, so an authenticated SUT receives no credential and returns HTTP 401. Do not open a duplicate. The same pinned [`AUTHENTICATION_SETUP.md`](https://github.com/a2aproject/a2a-tck/blob/5996b79f9cefa6fc390980e383e358a66fb9e49e/docs/AUTHENTICATION_SETUP.md) also uses stale `--sut-url` and `--category` examples, whereas the current runner accepts `--sut-host` and `--level`. A bounded contribution should coordinate the implementation fix with #163 and correct the examples, preserving per-call header overrides for negative-auth tests.
+
+The local TCK harness currently uses a bearer-injecting proxy because of #163. Its official-suite result is binding/router evidence against a deterministic fixture, not production-handler evidence. A separate external-client smoke must address the production `A2ASubAgentHandler` and durable store directly.
+
+### 7.3 Python SDK v1.1.0 external-smoke candidate
+
+The official Python SDK [`v1.1.0`](https://github.com/a2aproject/a2a-python/releases/tag/v1.1.0) is the independent JSON-RPC client used by the production-handler smoke. Agent Card HTTP failures have the typed `AgentCardResolutionError.status_code`, while the locked smoke reproduced an operation-request HTTP 401 wrapped as a general `A2AClientError` whose status is available only through `error.__cause__.response.status_code`. This is local interoperability evidence, not yet an upstream-ready minimal reproduction; isolate it from the host runtime and repeat it against a minimal v1.1.0 client/server fixture before drafting anything.
+
+If confirmed, the narrow candidate is to preserve a typed public HTTP status for operation failures, with tests for 401 and non-auth HTTP failures. Do not fold basic bearer configuration complexity into a new issue: [a2a-python #445](https://github.com/a2aproject/a2a-python/issues/445) already tracks broader client authentication handling, so a reproduction about credential setup belongs there as evidence unless maintainers request a separate error-contract issue.
+
+### 7.4 JavaScript SDK release maturity
+
+The JavaScript SDK's stable package and README still target protocol v0.3, while v1.0 support is published through the `@next` beta line and developed on the breaking-changes branch. This maturity split is evidence for retaining the types-only decision and using an independent Python v1 client for the production smoke; it is not, by itself, an SDK defect or a reason to adopt the beta runtime.
+
 ## Duplicate-check checklist before any external submission
 
 - [ ] Search open and closed issues in `a2aproject/A2A`, `a2aproject/a2a-tck`, and `a2aproject/a2a-js` using the exact protocol terms and likely synonyms.
