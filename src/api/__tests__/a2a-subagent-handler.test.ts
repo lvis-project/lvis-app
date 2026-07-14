@@ -716,7 +716,7 @@ describe("A2ASubAgentHandler", () => {
   });
 
   it("returns WORKING immediately while the detached lifecycle finalizes durably", async () => {
-    const { handler, runner, store, authorizeMutation } = makeHarness();
+    const { handler, runner, store } = makeHarness();
     let finish!: (result: SubAgentSpawnResult) => void;
     const gate = new Promise<SubAgentSpawnResult>((resolve) => {
       finish = resolve;
