@@ -148,7 +148,7 @@ export function ChatComposerDock({
   // after `centered` flips false (first message sent), so ComposerProjectSelector
   // — including its own forceMount + data-state fade/scale-out — has time to
   // finish its close transition instead of being cut off by an instant unmount.
-  // Matches the outer dock's own `duration-300` descent so both animations
+  // Matches the outer dock's layout descent so both animations
   // read as one coordinated motion. Reduced-motion users skip the linger
   // entirely (no transition to wait out).
   const [showProjectSelectorSlot, setShowProjectSelectorSlot] = useState(centered);
@@ -175,7 +175,7 @@ export function ChatComposerDock({
   return (
     <div
       className={[
-        "relative z-30 w-full max-w-full min-w-0 overflow-visible transition-[margin,transform] duration-300 ease-out motion-reduce:transition-none",
+        "relative z-30 w-full max-w-full min-w-0 overflow-visible transition-[margin,transform] duration-[var(--motion-layout)] ease-[var(--motion-ease-out)] motion-reduce:transition-none",
         centeredMarginClass,
       ].join(" ")}
       data-composer-placement={centered ? "center" : "bottom"}
@@ -223,7 +223,7 @@ export function ChatComposerDock({
               finish. */}
           {showProjectSelectorSlot && onNewChatForProject ? (
             <div
-              className="absolute left-0 top-0 z-20 transition-opacity duration-200 ease-out motion-reduce:transition-none"
+              className="absolute left-0 top-0 z-20 transition-opacity duration-[var(--motion-normal)] ease-[var(--motion-ease-out)] motion-reduce:transition-none"
               data-testid="composer-project-selector-slot"
             >
               <ComposerProjectSelector
@@ -251,7 +251,7 @@ export function ChatComposerDock({
               <ComposerApiKeyChip onOpenSettings={onOpenSettings} />
             </div>
           ) : null}
-          <div className="lvis-surface-raised relative z-10 rounded-xl bg-input-bar overflow-hidden">
+          <div className="lvis-surface-raised relative z-10 overflow-hidden rounded-xl border border-input-bar-border bg-input-bar text-input-bar-foreground transition-colors duration-[var(--motion-fast)] ease-[var(--motion-ease-standard)] focus-within:border-input-bar-focus focus-within:ring-1 focus-within:ring-input-bar-focus motion-reduce:transition-none">
         <Composer
           ref={composerRef}
           text={question}

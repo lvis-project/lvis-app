@@ -79,4 +79,27 @@ describe("insights project group-by", () => {
     expect(projectLabelForSession(session({ projectRoot: "/x/y/zeta" }))).toBe("zeta");
     expect(projectLabelForSession(session({}))).toBeUndefined();
   });
+
+  it("uses the current canonical project label and keeps unscoped sessions in the fallback bucket", () => {
+    const projects = [
+      { projectRoot: "C:\\workspace", projectName: "workspace", isDefault: true },
+      { projectRoot: "C:\\work\\team-a\\shared", projectName: "shared — team-a" },
+      { projectRoot: "C:\\work\\team-b\\shared", projectName: "shared — team-b" },
+    ];
+    const scoped = session({
+      id: "scoped",
+      projectRoot: "c:/work/team-a/shared/",
+      projectName: "shared",
+    });
+    const general = session({ id: "general", projectName: "stale-name" });
+
+    expect(projectLabelForSession(scoped, projects)).toBe("shared — team-a");
+    expect(projectLabelForSession(general, projects)).toBeUndefined();
+    expect(
+      groupSessionsByProject([scoped, general], "일반 대화", projects).map((group) => group.name),
+    ).toEqual([
+      "shared — team-a",
+      "일반 대화",
+    ]);
+  });
 });

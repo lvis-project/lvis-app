@@ -74,8 +74,8 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
   const chainStage: OnboardingChainStage = chainState.stage;
   /**
    * ScenarioShowcase carry — which card the user clicked in the first
-   * step. Threaded into MemorySeed recommendations and PluginShowcase
-   * ordering so the chain is personalised by the user's first choice.
+   * step. Threaded into MemorySeed recommendations and post-tour
+   * suggestions so the chain is personalised by the user's first choice.
    * `null` means the user reached the chain via skip / returning-user
    * paths and downstream stages should use their default ordering.
    */
@@ -89,12 +89,10 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
 
   const [reactivationOpen, setReactivationOpen] = useState(false);
   // Z chain — `tourCompleted` gates the PostTourFirstTask proposal. It is
-  // true ONLY once the user finished the full funnel (PluginShowcase closed
-  // → `done` via `plugins-close`, recorded as completionReason "chain").
-  // Two cases that previously leaked the card are now excluded:
-  //   - `plugins` stage — PluginShowcase's own Dialog is still open, so a
-  //     z-9000 card would overlay it.
-  //   - `done` reached via `probe-skip` (returning user / demo relaunch) —
+  // true ONLY once the user finished or dismissed the first-run tour and
+  // reached `done` with completionReason "chain".
+  // `done` reached via `probe-skip` (returning user / demo relaunch)
+  // remains excluded because
   //     the tour was never shown, so a "post-tour" proposal is wrong.
   const tourCompleted =
     chainStage === "done" && chainState.completionReason === "chain";
@@ -143,10 +141,10 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
         }
         // Returning user who already saw the first-boot SpotlightTour — skip
         // the chain even if `onboardingCompleted` was never persisted. That
-        // flag only flips at the `done` stage (after PluginShowcase closes,
-        // two stages past the tour), so a user who finished the tour but quit
-        // before closing PluginShowcase left it `false` and the spotlight
-        // re-appeared on every launch. The tour-state store is the source of
+        // Older builds persisted the completion flag only after a separate
+        // plugin showcase. Users who finished the tour but quit before closing
+        // that popup could still have `onboardingCompleted=false`. The
+        // tour-state store remains the source of
         // truth for "has seen the tour"; the boot probe previously ignored it.
         const tourState = await api.tour.getState().catch(() => null);
         if (cancelled) return;
@@ -212,8 +210,7 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
       try {
         void api.tour.start("first-boot-essentials");
       } catch {
-        // tour.start failure is non-fatal — user can still reach the
-        // PluginShowcase via the SpotlightTour onComplete callback path
+        // tour.start failure is non-fatal; the help shortcut can retry it.
 
       }
       return;

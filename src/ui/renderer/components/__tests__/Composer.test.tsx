@@ -543,7 +543,7 @@ describe("Composer", () => {
       />,
     );
     const row = screen.getByTestId("suggested-replies-chip-row");
-    expect(row.className).toContain("transition-opacity");
+    expect(row.className).toContain("transition-[opacity,transform]");
     expect(row.className).toContain("animate-in");
   });
 
