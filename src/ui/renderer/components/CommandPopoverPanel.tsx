@@ -10,6 +10,10 @@ import {
 } from "../../../components/ui/command.js";
 import { PopoverContent } from "../../../components/ui/popover.js";
 import { useTranslation } from "../../../i18n/react.js";
+import {
+  useNativeContextMenu,
+  type NativeContextMenuHandlers,
+} from "../hooks/use-native-context-menu.js";
 import type { QuickAction } from "./command-actions.js";
 
 const SLASH_COMMANDS: { cmd: string; labelKey: string }[] = [
@@ -43,6 +47,7 @@ export function CommandPopoverPanel({ actions, onInsert, onClose }: CommandPopov
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
+  const openNativeContextMenu = useNativeContextMenu();
 
   useEffect(() => {
     const id = setTimeout(() => inputRef.current?.focus(), 50);
@@ -117,6 +122,10 @@ export function CommandPopoverPanel({ actions, onInsert, onClose }: CommandPopov
                   key={action.id}
                   value={action.label}
                   onSelect={() => handleSelectAction(action)}
+                  onContextMenu={(event) => openNativeContextMenu(event, "command-item", {
+                    "command.activate": () => handleSelectAction(action),
+                    "command.copy": () => navigator.clipboard.writeText(action.label),
+                  } as NativeContextMenuHandlers)}
                 >
                   {action.label}
                 </CommandItem>
@@ -131,6 +140,10 @@ export function CommandPopoverPanel({ actions, onInsert, onClose }: CommandPopov
                   key={cmd}
                   value={`${cmd} ${t(labelKey)}`}
                   onSelect={() => handleSelectSlash(cmd)}
+                  onContextMenu={(event) => openNativeContextMenu(event, "command-item", {
+                    "command.activate": () => handleSelectSlash(cmd),
+                    "command.copy": () => navigator.clipboard.writeText(cmd),
+                  } as NativeContextMenuHandlers)}
                 >
                   <span className="font-mono text-xs text-muted-foreground w-24 shrink-0">
                     {cmd}

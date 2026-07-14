@@ -406,7 +406,15 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         const intent = requireUserKeyboardIntent((args as { intent?: unknown } | undefined)?.intent);
         if (!intent.ok) return intent;
       }
-      const result = await dispatchPermissionDirCommand(parsed);
+      const lifecycle = deps.workspaceRootLifecycle;
+      const requiresPersistentLifecycle =
+        parsed.verb === "deny" || (parsed.verb === "allow" && !parsed.session);
+      if (requiresPersistentLifecycle && !lifecycle) {
+        // Fail closed: a Settings mutation must never fall back to the slash
+        // dispatcher's settings-only persistence path.
+        return { ok: false, error: "workspace lifecycle unavailable" };
+      }
+      const result = await dispatchPermissionDirCommand(parsed, undefined, lifecycle);
       if (result.ok && result.verb === "allow" && result.sessionOnly && result.sessionDirectory) {
         conversationLoop.addSessionAdditionalDirectory(result.sessionDirectory);
       }
