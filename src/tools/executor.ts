@@ -94,7 +94,6 @@ import {
   summarizeInputForDeferred,
 } from "./pipeline/display-mask.js";
 import { RateLimiter } from "./pipeline/rate-limiter.js";
-import { ReviewerAuthorizationStore } from "./pipeline/reviewer-authorization-store.js";
 import { resolveEnforcedCategory as resolveEnforcedCategoryImpl } from "./pipeline/risk-classification.js";
 import { tryUserApprovalMemorySkip as tryUserApprovalMemorySkipImpl } from "./pipeline/approval-memory-skip.js";
 import {
@@ -228,15 +227,6 @@ export interface ToolPermissionContext {
    * should leave this absent.
    */
   userIntent?: string;
-  /**
-   * User-keyboard-only approval phrase for the conversational reviewer retry
-   * path. Unlike `userIntent`, this is never populated for queue/headless/plugin
-   * origins; executor still requires a matching pending reviewer-blocked exact
-   * action before it can authorize anything.
-   */
-  explicitAuthorizationIntent?: string;
-
-
 
   onTurnDirectoryGrant?: (approvedDirectory: string) => void;
 
@@ -326,7 +316,6 @@ export class ToolExecutor {
    * directory approval fails closed instead of mutating settings alone.
    */
   private readonly workspaceRootLifecycleProvider: () => PermissionDirectoryLifecycle | undefined;
-  private readonly reviewerAuthorizations = new ReviewerAuthorizationStore();
   private readonly auditWriter: AuditWriter;
 
   constructor(
@@ -407,27 +396,6 @@ export class ToolExecutor {
     if (pm === "strict") return "ask_all";
     if (pm === "auto" || pm === "allow") return "full_auto";
     return "default";
-  }
-
-  private recordPendingReviewerAuthorization(input: {
-    sessionId: string | undefined;
-    toolName: string;
-    source: ToolSource;
-    finalInput: Record<string, unknown>;
-    context: ToolPermissionContext;
-    verdict: RiskVerdict;
-  }): void {
-    this.reviewerAuthorizations.record(input);
-  }
-
-  private consumePendingReviewerAuthorization(input: {
-    sessionId: string | undefined;
-    toolName: string;
-    source: ToolSource;
-    finalInput: Record<string, unknown>;
-    context: ToolPermissionContext;
-  }): PermissionCheckResult | null {
-    return this.reviewerAuthorizations.consume(input);
   }
 
   getHookRunner(): HookRunner {
@@ -1702,18 +1670,6 @@ export class ToolExecutor {
         }
       }
       if (permissionResult.decision === "ask" && permissionResult.reviewer?.route === "foreground-auto") {
-        const explicitAuthorization = this.consumePendingReviewerAuthorization({
-          sessionId,
-          toolName: toolUse.name,
-          source,
-          finalInput,
-          context: invocationPermissionContext,
-        });
-        if (explicitAuthorization) {
-          permissionResult = explicitAuthorization;
-        }
-      }
-      if (permissionResult.decision === "ask" && permissionResult.reviewer?.route === "foreground-auto") {
         const reviewerResult = await this.dispatchReviewerForInteractiveAuto(
           toolUse.name,
           source,
@@ -1735,23 +1691,12 @@ export class ToolExecutor {
           approvalPurpose,
           abortSignal,
         );
+        if (abortSignal?.aborted) {
+          return returnUserAbort(abortDeps(finalInput));
+        }
         if (reviewerResult) {
           permissionResult = reviewerResult;
         }
-      }
-      if (
-        permissionResult.decision === "deny" &&
-        permissionResult.reviewer?.route === "foreground-auto" &&
-        permissionResult.reviewer.verdict
-      ) {
-        this.recordPendingReviewerAuthorization({
-          sessionId,
-          toolName: toolUse.name,
-          source,
-          finalInput,
-          context: invocationPermissionContext,
-          verdict: permissionResult.reviewer.verdict,
-        });
       }
       if (permissionResult.decision === "deny") {
         const msg = t("be_executor.permBlockDeny", { name: toolUse.name, source, trust, reason: permissionResult.reason });
@@ -1800,6 +1745,9 @@ export class ToolExecutor {
             approvalPurpose,
             abortSignal,
           );
+          if (abortSignal?.aborted) {
+            return returnUserAbort(abortDeps(finalInput));
+          }
           if (reviewerResult.allowed) {
             permissionResult = reviewerResult.permissionResult;
           } else {
@@ -1948,6 +1896,9 @@ export class ToolExecutor {
               invocationPermissionContext,
               targetFilePath,
             );
+            if (abortSignal?.aborted) {
+              return returnUserAbort(abortDeps(finalInput));
+            }
             decision = await this.approvalGate.requestAndWait(approvalRequest);
           } catch (approvalErr) {
             const msg = t("be_executor.approvalGateError", { name: toolUse.name, error: approvalErr instanceof Error ? approvalErr.message : String(approvalErr) });

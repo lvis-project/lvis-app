@@ -197,7 +197,6 @@ export async function queryLoop(
       inputOrigin: ChatInputOrigin;
       toolTrustOrigin: ToolTrustOrigin;
       permissionUserIntent?: string;
-      permissionExplicitAuthorizationIntent?: string;
       rolePrompt?: ActiveRolePrompt;
     },
   ): Promise<{
@@ -1217,9 +1216,6 @@ export async function queryLoop(
             getAdditionalDirectories: () => self.getTurnAdditionalDirectories(),
             trustOrigin: toolTrustOrigin,
             ...(bounds.permissionUserIntent ? { userIntent: bounds.permissionUserIntent } : {}),
-            ...(bounds.permissionExplicitAuthorizationIntent
-              ? { explicitAuthorizationIntent: bounds.permissionExplicitAuthorizationIntent }
-              : {}),
             onTurnDirectoryGrant: (path) => self.addTurnAdditionalDirectory(path),
             onSessionDirectoryGrant: (path) => self.addSessionAdditionalDirectory(path),
           },
