@@ -188,7 +188,9 @@ function seedOne(
     }
     if (observedBuf?.equals(packagedBuf)) return;
 
-    const currentBuf = readRegularFileNoFollow(target);
+    const currentBuf = replaceableHashes.size > 0
+      ? readRegularFileNoFollow(target)
+      : null;
     if (currentBuf !== null) {
       const currentHash = sha256(currentBuf);
       if (
