@@ -56,7 +56,27 @@ export interface LlmRiskClassificationTrace {
   ruleVerdict: RiskVerdict;
   llmVerdict: RiskVerdict | null;
   finalVerdict: RiskVerdict;
+  outcome: "fresh" | "error" | "timeout" | "malformed";
 }
+export type ReviewerDispatchErrorCode = "timeout" | "error";
+
+export class ReviewerDispatchError extends Error {
+  constructor(
+    readonly code: ReviewerDispatchErrorCode,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "ReviewerDispatchError";
+  }
+}
+
+function reviewerFailureOutcome(error: unknown): "timeout" | "error" {
+  if (error instanceof ReviewerDispatchError) return error.code;
+  if (error instanceof Error && error.name === "TimeoutError") return "timeout";
+  return "error";
+}
+
 
 /** Numeric ordering for `final = max(rule, llm)`. */
 const LEVEL_RANK: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2 };
@@ -910,9 +930,9 @@ export class LlmRiskClassifier implements RiskClassifier {
         // Parse failure → fallbackOnError policy
         if (this.fallbackOnError === "deny") {
           const finalVerdict = { level: "high", reason: "llm parse failure — fallbackOnError=deny" } as const;
-          return { ruleVerdict, llmVerdict: finalVerdict, finalVerdict };
+          return { ruleVerdict, llmVerdict: finalVerdict, finalVerdict, outcome: "malformed" };
         }
-        return { ruleVerdict, llmVerdict: null, finalVerdict: ruleVerdict };
+        return { ruleVerdict, llmVerdict: null, finalVerdict: ruleVerdict, outcome: "malformed" };
       }
       llmVerdict = parsed;
     } catch (err) {
@@ -937,9 +957,11 @@ export class LlmRiskClassifier implements RiskClassifier {
         const { masked } = maskSensitiveData(rawMsg);
         const msg = masked.slice(0, 60);
         const finalVerdict = { level: "high", reason: `llm error — fallback=deny (${msg})` } as const;
-        return { ruleVerdict, llmVerdict: finalVerdict, finalVerdict };
+        const outcome = reviewerFailureOutcome(err);
+        return { ruleVerdict, llmVerdict: finalVerdict, finalVerdict, outcome };
       }
-      return { ruleVerdict, llmVerdict: null, finalVerdict: ruleVerdict };
+      const outcome = reviewerFailureOutcome(err);
+      return { ruleVerdict, llmVerdict: null, finalVerdict: ruleVerdict, outcome };
     }
 
     // Context-quality + per-category sandbox composition enforcement:
@@ -954,11 +976,11 @@ export class LlmRiskClassifier implements RiskClassifier {
     if (!sandboxRelaxes || weakContext) {
       if (LEVEL_RANK[llmVerdict.level] < LEVEL_RANK[ruleVerdict.level]) {
         // LLM attempted to downgrade — honour the rule verdict.
-        return { ruleVerdict, llmVerdict, finalVerdict: ruleVerdict };
+        return { ruleVerdict, llmVerdict, finalVerdict: ruleVerdict, outcome: "fresh" };
       }
     }
 
-    return { ruleVerdict, llmVerdict, finalVerdict: maxVerdict(ruleVerdict, llmVerdict) };
+    return { ruleVerdict, llmVerdict, finalVerdict: maxVerdict(ruleVerdict, llmVerdict), outcome: "fresh" };
   }
 }
 
