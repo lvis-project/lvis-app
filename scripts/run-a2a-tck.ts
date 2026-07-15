@@ -10,6 +10,7 @@ import { createStreamBroadcaster } from "../src/api/stream-broadcaster.js";
 import { A2AJsonRpcMethod } from "../src/shared/a2a-wire.js";
 import { startA2ATckAuthProxy } from "./a2a-tck/auth-proxy.js";
 import { A2ATckFixtureHandler } from "./a2a-tck/fixture.js";
+import { resolveUvTarget } from "./uv-targets.mjs";
 
 const PINNED_TCK_HEAD = "5996b79f9cefa6fc390980e383e358a66fb9e49e";
 const DEFAULT_TCK_PATH = fileURLToPath(
@@ -87,10 +88,22 @@ async function smokeBackend(baseUrl: string, secret: string): Promise<void> {
   assert(allowed.status === 200 && "result" in allowedBody, "correct bearer smoke failed");
 }
 
+function bundledUvPath(): string {
+  const target = resolveUvTarget(process.platform, process.arch);
+  return resolve(
+    fileURLToPath(new URL("../", import.meta.url)),
+    "resources",
+    "uv",
+    target.dir,
+    target.bin,
+  );
+}
+
 function runTck(tckPath: string, sutUrl: string): Promise<number> {
-  const executable = process.env.A2A_TCK_RUNNER ?? "uv";
+  const executable = process.env.A2A_TCK_RUNNER ?? bundledUvPath();
   const args = [
     "run",
+    "--frozen",
     "./run_tck.py",
     "--sut-host",
     sutUrl,

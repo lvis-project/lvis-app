@@ -274,6 +274,7 @@ export interface ToolSchema {
   inputSchema: {
     type: "object";
     properties: Record<string, unknown>;
+    additionalProperties?: boolean;
     required?: string[];
   };
 }

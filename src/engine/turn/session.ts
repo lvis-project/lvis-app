@@ -16,6 +16,7 @@ import { latestPersistedContextTokens } from "./context-carrier.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
 import { createLogger } from "../../lib/logger.js";
 import { projectBasename, projectRootEquals } from "../../shared/project-identity.js";
+import { createDlpSafeUuid } from "../../shared/dlp-safe-id.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../../permissions/sensitive-paths.js";
 
 const log = createLogger("lvis");
@@ -187,7 +188,7 @@ export function newConversation(
     // sessionId. Clearing after the reassignment would key on the NEW id and
     // orphan the OLD session's Map entry.
     self.deps.pluginRuntime?.clearSessionActivated?.(self.sessionId);
-    self.sessionId = crypto.randomUUID();
+    self.sessionId = createDlpSafeUuid();
     self.sessionKind = kind;
     self.sessionRoutineId = null;
     self.sessionRoutineTitle = null;
@@ -355,7 +356,7 @@ export async function branchFromCheckpoint(self: ConversationLoop, compactNum: n
       );
     }
 
-    const newSessionId = crypto.randomUUID();
+    const newSessionId = createDlpSafeUuid();
     const sliced = (snapshotMessages as import("../llm/types.js").GenericMessage[]).slice(0, target.messageCountAtTrigger);
 
     // Repair tool-pair invariant — loadCheckpointSnapshot skips malformed JSONL.
