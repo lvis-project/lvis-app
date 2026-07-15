@@ -121,6 +121,7 @@ blocker 또는 다음 행동만 포함한다. 긴 작업에서는 첫 도구 호
 
 ## Versioning
 
-byte-identical한 known packaged 사본은 다음 부팅에 새 계약으로 교체한다. 사용자가
+no-follow regular-file 검증이 가능한 환경에서는 byte-identical한 known packaged
+사본을 다음 부팅에 새 계약으로 교체한다. 검증할 수 없는 경로·환경이나 사용자가
 수정한 사본은 자동 병합하거나 덮어쓰지 않는다. 새 packaged 계약은 `.new` 또는
 `.new.<timestamp>` marker로 제공하므로 사용자가 diff 후 병합하거나 삭제한다.
