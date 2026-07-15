@@ -46,9 +46,11 @@ interface SeedOneOptions {
  *
  * Behavior:
  *   - If `~/.lvis/<path>` does not exist → copy from packaged resources.
- *   - AGENTS.md replaces byte-identical known packaged copies in place.
- *     User-edited AGENTS.md, skills/*.md, and prompts/*.md instead offer
- *     divergent packaged updates as `~/.lvis/<path>.new` for review.
+ *   - When descriptor-level no-follow validation is available, AGENTS.md
+ *     replaces byte-identical known packaged predecessors in place.
+ *     Unsupported paths/platforms and user-edited AGENTS.md, skills/*.md,
+ *     and prompts/*.md instead offer divergent packaged updates as
+ *     `~/.lvis/<path>.new` for review.
  *   - agents/*.md are seed-only. Shared agent operating guidance belongs in
  *     AGENTS.md; updating packaged agent profiles must not create a new
  *     apparent user agent such as `agents/executor.md.new`.
@@ -173,10 +175,20 @@ function seedOne(
   // performs the length check internally, so the stat shortcut had no
   // semantic value anyway.
   try {
+    // Byte-identical content is an idempotent no-op even when this platform
+    // cannot safely perform an in-place path replacement. This read may follow
+    // a user-owned symlink, but it never writes through it.
+    let observedBuf: Buffer | null = null;
+    try {
+      observedBuf = readFileSync(target);
+    } catch {
+      // Non-regular or transiently unavailable targets continue to the
+      // fail-closed `.new` path below.
+    }
+    if (observedBuf?.equals(packagedBuf)) return;
+
     const currentBuf = readRegularFileNoFollow(target);
     if (currentBuf !== null) {
-      if (currentBuf.equals(packagedBuf)) return;
-
       const currentHash = sha256(currentBuf);
       if (
         replaceableHashes.has(currentHash) &&

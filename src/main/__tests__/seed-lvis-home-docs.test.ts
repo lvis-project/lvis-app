@@ -264,6 +264,19 @@ describe("seedLvisHomeDocs — upgrade markers", () => {
     expect(readFileSync(join(home, "AGENTS.md.new"), "utf8")).toBe("AGENTS v2\n");
   });
 
+  it("offers .new without replacing a non-regular AGENTS.md target", () => {
+    seedLvisHomeDocs();
+    unlinkSync(join(home, "AGENTS.md"));
+    mkdirSync(join(home, "AGENTS.md"));
+    writeRes("AGENTS.md", "AGENTS v2\n");
+
+    const r = seedLvisHomeDocs();
+
+    expect(r.upgraded).toContain("AGENTS.md");
+    expect(lstatSync(join(home, "AGENTS.md")).isDirectory()).toBe(true);
+    expect(readFileSync(join(home, "AGENTS.md.new"), "utf8")).toBe("AGENTS v2\n");
+  });
+
   it("preserves a user edit and writes the new packaged version to <file>.new", () => {
     seedLvisHomeDocs();
     writeFileSync(join(home, "AGENTS.md"), "user edited\n");
