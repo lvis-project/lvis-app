@@ -8,6 +8,10 @@ const runtimeContract = readFileSync(
   resolve(repoRoot, "resources/AGENTS.md"),
   "utf8",
 );
+const seedSource = readFileSync(
+  resolve(repoRoot, "src/main/seed-lvis-home-docs.ts"),
+  "utf8",
+);
 
 describe("packaged runtime AGENTS.md contract", () => {
   it("stays within the lean prompt budget", () => {
@@ -27,5 +31,10 @@ describe("packaged runtime AGENTS.md contract", () => {
     expect(runtimeContract).not.toMatch(/manifest tool category/i);
     expect(runtimeContract).not.toMatch(/\b120_000\b|\b600_000\b/);
     expect(runtimeContract).not.toMatch(/architecture v\d|§\d/i);
+  });
+
+  it("fails closed when descriptor-level no-follow validation is unavailable", () => {
+    expect(seedSource).toContain('if (typeof noFollow !== "number") return null;');
+    expect(seedSource).not.toContain("O_NOFOLLOW ?? 0");
   });
 });
