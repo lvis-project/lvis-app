@@ -11,12 +11,14 @@ import { spawn } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import {
@@ -753,16 +755,111 @@ async function runPowerShellJson(script, env) {
   return parseJsonProcessResult(result, "PowerShell");
 }
 
-async function shortcutTarget(shortcutPath) {
+async function shortcutInfo(shortcutPath) {
   if (!existsSync(shortcutPath)) return null;
-  const result = await runPowerShellJson(
+  return runPowerShellJson(
     buildPowerShellScript([
       "$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LVIS_SHORTCUT_PATH)",
-      "[PSCustomObject]@{ target = $shortcut.TargetPath } | ConvertTo-Json -Compress",
+      "[PSCustomObject]@{ target = $shortcut.TargetPath; workingDirectory = $shortcut.WorkingDirectory; arguments = $shortcut.Arguments; description = $shortcut.Description } | ConvertTo-Json -Compress",
     ]),
     { LVIS_SHORTCUT_PATH: shortcutPath },
   );
-  return typeof result.target === "string" ? result.target : null;
+}
+
+async function shortcutTarget(shortcutPath) {
+  const result = await shortcutInfo(shortcutPath);
+  return typeof result?.target === "string" ? result.target : null;
+}
+
+export function isOwnedRuntimeShortcut(shortcut, expected) {
+  if (!shortcut || !expected) return false;
+  if (
+    typeof shortcut.target !== "string" ||
+    typeof shortcut.workingDirectory !== "string" ||
+    typeof shortcut.arguments !== "string" ||
+    typeof shortcut.description !== "string" ||
+    typeof expected.installedExe !== "string" ||
+    typeof expected.installDir !== "string" ||
+    typeof expected.description !== "string"
+  ) {
+    return false;
+  }
+  return (
+    samePath(shortcut.target, expected.installedExe) &&
+    samePath(shortcut.workingDirectory, expected.installDir) &&
+    shortcut.arguments === "" &&
+    shortcut.description === expected.description
+  );
+}
+
+async function waitForRuntimeShortcut(shortcutPath, timeoutMs = 5_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const shortcut = lstatSync(shortcutPath, { throwIfNoEntry: false });
+    if (shortcut) return shortcut;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  }
+  return null;
+}
+
+async function cleanupOwnedRuntimeShortcut(machineInstall) {
+  const provenance = machineInstall.runtimeShortcutProvenance;
+  if (!provenance?.absentBeforeLaunch || !provenance.path) {
+    throw new Error(
+      "refusing to clean a runtime shortcut without pre-launch absence provenance",
+    );
+  }
+
+  const shortcutStat = await waitForRuntimeShortcut(provenance.path);
+  if (!shortcutStat) {
+    process.stdout.write(
+      "[windows-installer-smoke] Electron runtime shortcut remained absent after launch; no cleanup needed\n",
+    );
+    return;
+  }
+  if (!shortcutStat.isFile()) {
+    throw new Error(
+      `refusing to clean a non-regular runtime shortcut: ${provenance.path}`,
+    );
+  }
+
+  const expected = {
+    installedExe: machineInstall.installedExe,
+    installDir: machineInstall.installDir,
+    description: requiredPackageString(
+      packageJson.build?.productName,
+      "build.productName",
+    ),
+  };
+  const shortcut = await shortcutInfo(provenance.path);
+  if (!isOwnedRuntimeShortcut(shortcut, expected)) {
+    throw new Error(
+      `refusing to clean a runtime shortcut whose ownership fields do not match: ${provenance.path}`,
+    );
+  }
+
+  // Recheck both ownership and file type immediately before the one-file
+  // unlink. Never use a recursive deletion for this per-user artifact.
+  const recheckedShortcut = await shortcutInfo(provenance.path);
+  const beforeUnlink = lstatSync(provenance.path, { throwIfNoEntry: false });
+  if (
+    !isOwnedRuntimeShortcut(recheckedShortcut, expected) ||
+    !beforeUnlink?.isFile()
+  ) {
+    throw new Error(
+      `runtime shortcut changed before owner cleanup: ${provenance.path}`,
+    );
+  }
+
+  unlinkSync(provenance.path);
+  if (lstatSync(provenance.path, { throwIfNoEntry: false })) {
+    throw new Error(
+      `owned Electron runtime shortcut survived one-file cleanup: ${provenance.path}`,
+    );
+  }
+  process.stdout.write(
+    `[windows-installer-smoke] removed exact Electron-owned current-user runtime shortcut: ${provenance.path}\n`,
+  );
 }
 
 export function isExactProtocolCommand(command, executable) {
@@ -947,16 +1044,17 @@ async function assertInstalledSurface(machineInstall) {
     }
   }
 
+  const userStartMenuShortcut = join(
+    appData,
+    "Microsoft",
+    "Windows",
+    "Start Menu",
+    "Programs",
+    `${shortcutName}.lnk`,
+  );
   const userShortcuts = [
     join(userProfile, "Desktop", `${shortcutName}.lnk`),
-    join(
-      appData,
-      "Microsoft",
-      "Windows",
-      "Start Menu",
-      "Programs",
-      `${shortcutName}.lnk`,
-    ),
+    userStartMenuShortcut,
   ];
   const userResidue = userShortcuts.filter((shortcut) => existsSync(shortcut));
   if (userResidue.length > 0) {
@@ -968,6 +1066,10 @@ async function assertInstalledSurface(machineInstall) {
   process.stdout.write(
     `[windows-installer-smoke] perMachine install surface verified from HKLM ${machineInstall.entry.view}-bit view: ${installDir}\n`,
   );
+  return {
+    path: userStartMenuShortcut,
+    absentBeforeLaunch: true,
+  };
 }
 
 async function assertUninstalledSurface(machineInstall) {
@@ -1327,9 +1429,10 @@ function assertUserDataTargetsRemoved() {
 export const ACL_QUERY_SCRIPT = buildPowerShellScript([
   "$ErrorActionPreference = 'Stop'",
   "$entries = @((Get-Acl -LiteralPath $env:LVIS_ACL_TARGET).Access | ForEach-Object {",
-  "  try { $sid = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }",
-  "  catch { $sid = $_.IdentityReference.Value }",
-  "  [PSCustomObject]@{ sid = $sid; rights = [int64]$_.FileSystemRights; type = $_.AccessControlType.ToString(); inheritance = $_.InheritanceFlags.ToString(); propagation = $_.PropagationFlags.ToString(); inherited = $_.IsInherited }",
+  "  $rule = $_",
+  "  try { $sid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }",
+  "  catch { $sid = $rule.IdentityReference.Value }",
+  "  [PSCustomObject]@{ sid = $sid; rights = [int64]$rule.FileSystemRights; type = $rule.AccessControlType.ToString(); inheritance = $rule.InheritanceFlags.ToString(); propagation = $rule.PropagationFlags.ToString(); inherited = $rule.IsInherited }",
   "})",
   "ConvertTo-Json -InputObject $entries -Compress",
 ]);
@@ -1832,7 +1935,8 @@ async function waitForMachineInstall(timeoutMs) {
 async function installAndDiscover(installer, timeoutMs) {
   await runProcess(installer, ["/S", "/allusers"], { timeoutMs });
   const machineInstall = await waitForMachineInstall(30_000);
-  await assertInstalledSurface(machineInstall);
+  machineInstall.runtimeShortcutProvenance =
+    await assertInstalledSurface(machineInstall);
   return machineInstall;
 }
 
@@ -1884,9 +1988,18 @@ async function cleanupFailedInstallerPass(state, timeoutMs) {
     });
   }
 
+  if (state.machineInstall?.runtimeShortcutProvenance?.absentBeforeLaunch) {
+    await step("exact-owner Electron runtime shortcut cleanup", async () => {
+      const shortcutPath =
+        state.machineInstall.runtimeShortcutProvenance.path;
+      if (!lstatSync(shortcutPath, { throwIfNoEntry: false })) return;
+      await cleanupOwnedRuntimeShortcut(state.machineInstall);
+    });
+  }
+
   if (state.machineInstall && existsSync(state.machineInstall.uninstaller)) {
     await step(
-      `genuine ${state.keepAppData ? "KEEP" : "DELETE"} uninstaller cleanup`,
+      `genuine ${state.keepAppData ? "KEEP" : "DELETE"} uninstaller process exit`,
       async () => {
         const args = [
           "/S",
@@ -1898,7 +2011,7 @@ async function cleanupFailedInstallerPass(state, timeoutMs) {
     );
   } else {
     notes.push(
-      "genuine uninstaller cleanup: no runnable uninstaller discovered",
+      "genuine uninstaller process exit: skipped (no runnable uninstaller discovered)",
     );
   }
 
@@ -1992,6 +2105,7 @@ async function runInstallerPass(
         await state.runningApp.stop();
         state.runningApp = null;
         await assertNoCurrentUserProtocolHandlers("installed app launch");
+        await cleanupOwnedRuntimeShortcut(state.machineInstall);
       }
     }
 
