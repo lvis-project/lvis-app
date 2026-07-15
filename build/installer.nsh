@@ -343,7 +343,7 @@ Function un.lvisCleanupCurrentUserNotificationArtifacts
   StrCpy $R8 "0"
   StrCpy $R9 "0"
   ClearErrors
-  System::Call 'kernel32::IsWow64Process2(p -1, *i .r7, *i .r8) i .r9'
+  System::Call 'kernel32::IsWow64Process2(p -1, *i .R7, *i .R8) i .R9'
   IfErrors lvis_notification_arch_probe_failed
   IntCmp $R9 0 lvis_notification_arch_probe_failed
   ; IMAGE_FILE_MACHINE_I386: native 32-bit Windows, where $SYSDIR is native.
