@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ACL_QUERY_SCRIPT,
+  assertRuntimeNotificationArtifactsRemoved,
   FOREIGN_PROTOCOL_FIXTURE_SCRIPT,
   buildPowerShellScript,
   captureOutputChunk,
@@ -773,14 +774,33 @@ describe("Windows NSIS installer smoke contracts", () => {
     expect(cleanup).toContain(
       'DeleteRegValue HKEY_CURRENT_USER "Software\\Classes\\lvis" "URL Protocol"',
     );
-    expect(cleanup).toContain(
-      'DeleteRegKey /ifempty SHELL_CONTEXT "Software\\Classes\\lvis"',
+    expect(installer).toContain(
+      "!macro lvisDeleteExactEmptyRegistryKey _root _parent _child",
     );
-    expect(cleanup).toContain(
-      'DeleteRegKey /ifempty HKEY_CURRENT_USER "Software\\Classes\\lvis"',
+    expect(installer).toContain("advapi32::RegOpenKeyExW");
+    expect(installer).toContain("shlwapi::SHDeleteEmptyKeyW");
+    expect(installer).toContain(
+      "IntOp $0 $0 | ${LVIS_KEY_WOW64_64KEY}",
+    );
+    expect(installer).toContain(
+      "IntOp $0 $0 | ${LVIS_KEY_WOW64_32KEY}",
+    );
+    expect(
+      cleanup.match(
+        /!insertmacro lvisDeleteExactEmptyRegistryKey 0x8000000[12] "Software\\Classes/g,
+      ),
+    ).toHaveLength(10);
+    expect(
+      cleanup.match(/!insertmacro lvisDeleteExactEmptyRegistryKey 0x80000002/g),
+    ).toHaveLength(5);
+    expect(
+      cleanup.match(/!insertmacro lvisDeleteExactEmptyRegistryKey 0x80000001/g),
+    ).toHaveLength(5);
+    expect(installer).not.toContain(
+      "!macro lvisDeleteRegKeyIfNoValuesOrSubkeys",
     );
     expect(cleanup).not.toMatch(
-      /^\s*DeleteRegKey (?!\/ifempty).*Software\\Classes\\lvis/m,
+      /^\s*DeleteRegKey .*Software\\Classes\\lvis/m,
     );
 
     expect(smoke).toContain("LVIS_REGISTRY_VALUE_NAME");
@@ -889,6 +909,68 @@ describe("Windows NSIS installer smoke contracts", () => {
     expect(smoke).toContain("foreignProtocolFixture: null");
   });
 
+  it("enforces notification residue only for exact owned provenance", async () => {
+    const unexpectedPathProbe = () => {
+      throw new Error("path probe must not run");
+    };
+    const unexpectedToastProbe = async () => {
+      throw new Error("toast probe must not run");
+    };
+    await expect(
+      assertRuntimeNotificationArtifactsRemoved(
+        { runtimeShortcutProvenance: null },
+        {
+          pathExists: unexpectedPathProbe,
+          findToastRegistrations: unexpectedToastProbe,
+        },
+      ),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      assertRuntimeNotificationArtifactsRemoved(
+        {
+          runtimeShortcutProvenance: {
+            ownedBeforeUninstall: true,
+            path: "",
+            toastClsid: null,
+          },
+        },
+        {
+          pathExists: unexpectedPathProbe,
+          findToastRegistrations: unexpectedToastProbe,
+        },
+      ),
+    ).rejects.toThrow("requires owned shortcut path and toast CLSID provenance");
+
+    const owned = {
+      runtimeShortcutProvenance: {
+        ownedBeforeUninstall: true,
+        path: "C:\\Users\\runner\\Programs\\LVIS.lnk",
+        toastClsid: "{62FD3EFB-B3D2-4235-9402-6979F52C0286}",
+      },
+    };
+    await expect(
+      assertRuntimeNotificationArtifactsRemoved(owned, {
+        pathExists: () => true,
+        findToastRegistrations: async () => [],
+      }),
+    ).rejects.toThrow("notification shortcut residue");
+
+    await expect(
+      assertRuntimeNotificationArtifactsRemoved(owned, {
+        pathExists: () => false,
+        findToastRegistrations: async () => [{ view: 64 }],
+      }),
+    ).rejects.toThrow("notification toast residue in HKCU views 64");
+
+    await expect(
+      assertRuntimeNotificationArtifactsRemoved(owned, {
+        pathExists: () => false,
+        findToastRegistrations: async () => [],
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it("requires the genuine uninstaller to clean exact current-user notification artifacts", () => {
     const smoke = readRepoFile("scripts/smoke-windows-nsis-installer.mjs");
     const installer = readRepoFile("build/installer.nsh");
@@ -942,13 +1024,33 @@ describe("Windows NSIS installer smoke contracts", () => {
     );
     expect(smoke).not.toContain("unlinkSync(");
 
-    const updaterGate = installer.indexOf('${GetOptions} $R0 "--updated" $R2');
-    const cleanupExitSentinel = installer.indexOf('StrCpy $R4 "1"');
+    const customUninstallStart = installer.indexOf("!macro customUnInstall");
+    const updaterGate = installer.indexOf(
+      '${GetOptions} $R0 "--updated" $R2',
+      customUninstallStart,
+    );
+    const cleanupExitSentinel = installer.indexOf(
+      'StrCpy $R4 "1"',
+      updaterGate,
+    );
     const cleanupFailureSentinel = installer.indexOf(
       'StrCpy $R5 "LVIS notification cleanup did not run"',
+      cleanupExitSentinel,
     );
     const productCleanup = installer.indexOf(
       "UAC_AsUser_Call Function un.lvisCleanupCurrentUserNotificationArtifacts",
+      cleanupFailureSentinel,
+    );
+    const cleanupFunctionStart = installer.indexOf(
+      "Function un.lvisCleanupCurrentUserNotificationArtifacts",
+    );
+    const cleanupFunctionEnd = installer.indexOf(
+      "FunctionEnd",
+      cleanupFunctionStart,
+    );
+    const cleanupFunction = installer.slice(
+      cleanupFunctionStart,
+      cleanupFunctionEnd,
     );
     const asrtTeardown = installer.indexOf("ASRT OS sandbox teardown");
     expect(cleanupExitSentinel).toBeGreaterThan(updaterGate);
@@ -958,14 +1060,104 @@ describe("Windows NSIS installer smoke contracts", () => {
     expect(installer).toContain("${UAC_SYNCREGISTERS}");
     expect(installer).toContain("${if} $R4 != 0");
 
+    expect(cleanupFunction).toContain(
+      'StrCpy $R6 "$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe"',
+    );
+    expect(cleanupFunction).toContain(
+      "kernel32::IsWow64Process2(p -1, *i .r7, *i .r8) i .r9",
+    );
+    expect(cleanupFunction).toContain(
+      "IntCmp $R8 0x014c lvis_notification_powershell_path_ready",
+    );
+    expect(cleanupFunction).toContain(
+      "IntCmp $R8 0x8664 lvis_notification_use_sysnative",
+    );
+    expect(cleanupFunction).toContain(
+      "IntCmp $R8 0xaa64 lvis_notification_use_sysnative",
+    );
+    expect(cleanupFunction).toContain(
+      'StrCpy $R6 "$WINDIR\\Sysnative\\WindowsPowerShell\\v1.0\\powershell.exe"',
+    );
+    expect(cleanupFunction).toContain("IfErrors lvis_notification_arch_probe_failed");
+    expect(cleanupFunction).toContain('IfFileExists "$R6"');
+    expect(cleanupFunction).toContain('StrCmp $R4 "error"');
+    expect(cleanupFunction).toContain(
+      "PowerShell executable is missing at $R6",
+    );
+    expect(cleanupFunction).toContain(
+      "Windows native architecture detection failed",
+    );
+    expect(installer).toContain("Push $R6");
+    expect(installer).toContain("Pop $R6");
+    expect(installer).toContain("Push $R7");
+    expect(installer).toContain("Pop $R7");
+    expect(installer).toContain("Push $R8");
+    expect(installer).toContain("Pop $R8");
+    expect(installer).toContain("Push $R9");
+    expect(installer).toContain("Pop $R9");
+
+    const uninstallFlow = smoke.slice(
+      smoke.indexOf("async function uninstallAndVerify"),
+      smoke.indexOf("async function cleanupFailedInstallerPass"),
+    );
+    const processExit = uninstallFlow.indexOf("await runProcess");
+    const notificationPostcondition = uninstallFlow.indexOf(
+      "await assertRuntimeNotificationArtifactsRemoved(machineInstall)",
+    );
+    const foreignProtocolPostcondition = uninstallFlow.indexOf(
+      "await assertForeignProtocolFixturePreserved",
+    );
+    expect(notificationPostcondition).toBeGreaterThan(processExit);
+    expect(notificationPostcondition).toBeLessThan(
+      foreignProtocolPostcondition,
+    );
+
     expect(cleanup).toContain("RegistryView]::Registry64");
     expect(cleanup).toContain("RegistryView]::Registry32");
     expect(cleanup).toContain("System.AppUserModel.ID");
     expect(cleanup).toContain("System.AppUserModel.ToastActivatorCLSID");
     expect(cleanup).toContain('GetValueKind("CustomActivator")');
     expect(cleanup).toContain("DoNotExpandEnvironmentNames");
-    expect(cleanup).toContain("[System.IO.File]::Delete($shortcutPath)");
+    expect(cleanup).toContain(
+      "[System.IO.File]::Move($shortcutPath, $quarantinePath)",
+    );
+    expect(cleanup).toContain("[System.IO.File]::Delete($quarantinePath)");
+    expect(cleanup).toContain(
+      "[System.IO.File]::Move($quarantinePath, $shortcutPath)",
+    );
     expect(cleanup).toContain(".lvis-nsis-per-machine-v1");
+    expect(cleanup).toContain(
+      'ValidateSet("removed", "foreign-preserved", "verified-absent", "contract-failed")',
+    );
+    expect(cleanup).toContain(
+      'throw "the exact zero-byte regular NSIS marker contract is unavailable:',
+    );
+    expect(cleanup).not.toContain(
+      "Preserved notification artifacts because the exact NSIS marker contract is unavailable.",
+    );
+    expect(cleanup).toContain("Get-ShortcutOwnershipMismatches");
+    expect(cleanup).toContain(
+      "if (-not (Test-SamePath $record.Target $installedExe))",
+    );
+    expect(cleanup).toContain(
+      "same-target shortcut has partial LVIS ownership; mismatched fields:",
+    );
+    expect(cleanup).toContain(
+      "the exact owned shortcut survived the final cleanup postcondition",
+    );
+    expect(cleanup).toContain(
+      'Write-CleanupEvent "contract-failed" "notification-artifacts"',
+    );
+    expect(cleanup).toContain(
+      'Write-CleanupEvent "foreign-preserved" "shortcut"',
+    );
+    const finalToastCheck = cleanup.indexOf(
+      "$remaining = @(Find-ExactToastRegistrations $installedExe)",
+    );
+    const finalShortcutCheck = cleanup.lastIndexOf(
+      "$shortcutResidue = Get-Item",
+    );
+    expect(finalShortcutCheck).toBeGreaterThan(finalToastCheck);
 
     expect(earlyBoot).toContain(
       '"{62FD3EFB-B3D2-4235-9402-6979F52C0286}"',
