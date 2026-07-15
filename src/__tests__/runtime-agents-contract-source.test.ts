@@ -35,7 +35,9 @@ describe("packaged runtime AGENTS.md contract", () => {
   });
 
   it("fails closed when descriptor-level no-follow validation is unavailable", () => {
-    expect(seedSource).toContain('if (typeof noFollow !== "number") return null;');
+    expect(seedSource).toMatch(
+      /if\s*\(\s*typeof\s+noFollow\s*!==\s*["']number["']\s*\)\s*return\s+null\s*;/,
+    );
     expect(seedSource).not.toContain("O_NOFOLLOW ?? 0");
   });
 });
