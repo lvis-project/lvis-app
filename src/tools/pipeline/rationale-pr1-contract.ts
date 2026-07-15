@@ -31,6 +31,33 @@ export const REVIEWER_REEVALUATION_FAILURE_OUTCOMES:
 readonly ReviewerReevaluationFailureOutcome[] = Object.freeze([
   "unavailable", "error", "timeout", "malformed", "sandbox-state-changed",
 ]);
+
+/**
+ * Outcome of the one-shot rationale generation round. This is intentionally
+ * separate from reviewer reevaluation: generation can fail before a reviewer
+ * request exists, and a reviewer can fail after generation was accepted.
+ */
+export type RationaleGenerationOutcome =
+  | "accepted-rationale"
+  | "generation-unavailable"
+  | "generation-error"
+  | "generation-timeout"
+  | "missing-rationale-call"
+  | "ordinary-tool-call-rejected"
+  | "multiple-calls-rejected"
+  | "malformed-rationale";
+
+export type RationaleGenerationFailureCause = Exclude<
+  RationaleGenerationOutcome,
+  "accepted-rationale"
+>;
+
+export const RATIONALE_GENERATION_FAILURE_CAUSES:
+readonly RationaleGenerationFailureCause[] = Object.freeze([
+  "generation-unavailable", "generation-error", "generation-timeout",
+  "missing-rationale-call", "ordinary-tool-call-rejected",
+  "multiple-calls-rejected", "malformed-rationale",
+]);
 const SCOPE_ALIGNMENTS: readonly Exclude<ReviewerScopeAlignment, "unknown">[] = [
   "aligned", "unclear", "outside",
 ];
@@ -152,10 +179,18 @@ export interface RationaleOnlyBatchDecision {
   response: RationaleResponse | null;
   rejectedCallIds: readonly string[];
   cancelledRationaleOnlySiblingCallIds: readonly string[];
+  generationOutcome: Extract<RationaleGenerationOutcome,
+    "accepted-rationale" | "missing-rationale-call" | "ordinary-tool-call-rejected" |
+    "multiple-calls-rejected" | "malformed-rationale">;
   reason: "accepted-rationale" | "missing-rationale-call" |
     "ordinary-tool-call-rejected" | "multiple-calls-rejected" | "malformed-rationale";
   ticketCreationAllowed: boolean; sideEffectsAllowed: false;
 }
+
+const BATCH_GENERATION_FAILURES: readonly RationaleGenerationFailureCause[] = [
+  "missing-rationale-call", "ordinary-tool-call-rejected",
+  "multiple-calls-rejected", "malformed-rationale",
+];
 
 function batchResult(
   control: RationaleRequiredControl,
@@ -188,11 +223,13 @@ export function evaluateRationaleOnlyBatch(
     const response = parseRationaleResponse(normalized[0]!.input, control, now);
     return response
       ? batchResult(control, { accepted: true, response, rejectedCallIds: [],
-          cancelledRationaleOnlySiblingCallIds: [], reason: "accepted-rationale",
+          cancelledRationaleOnlySiblingCallIds: [],
+          generationOutcome: "accepted-rationale", reason: "accepted-rationale",
           ticketCreationAllowed: true, sideEffectsAllowed: false })
       : batchResult(control, { accepted: false, response: null,
           rejectedCallIds: [normalized[0]!.id], cancelledRationaleOnlySiblingCallIds: [],
-          reason: "malformed-rationale", ticketCreationAllowed: false,
+          generationOutcome: "malformed-rationale", reason: "malformed-rationale",
+          ticketCreationAllowed: false,
           sideEffectsAllowed: false });
   }
   const ordinary = normalized.findIndex((call) => call.name !== RATIONALE_RESPONSE_TOOL);
@@ -200,11 +237,74 @@ export function evaluateRationaleOnlyBatch(
   const rejectedCallIds = normalized.length ? [normalized[rejected]!.id] : [];
   const cancelledRationaleOnlySiblingCallIds = normalized
     .filter((_, index) => index !== rejected).map((call) => call.id);
+  const generationOutcome = normalized.length === 0 ? "missing-rationale-call"
+    : ordinary >= 0 ? "ordinary-tool-call-rejected" : "multiple-calls-rejected";
   return batchResult(control, { accepted: false, response: null, rejectedCallIds,
-    cancelledRationaleOnlySiblingCallIds, reason: normalized.length === 0
-      ? "missing-rationale-call"
-      : ordinary >= 0 ? "ordinary-tool-call-rejected" : "multiple-calls-rejected",
+    cancelledRationaleOnlySiblingCallIds, generationOutcome, reason: generationOutcome,
     ticketCreationAllowed: false, sideEffectsAllowed: false });
+}
+
+export function validateRationaleOnlyBatchDecision(
+  value: unknown, control: RationaleRequiredControl, now = Date.now(),
+): value is RationaleOnlyBatchDecision {
+  try {
+    if (!verifyRationaleRequiredControl(control, { now })) return false;
+    assertRationaleCanonicalJson(value, "RationaleOnlyBatchDecision");
+    if (!isRecord(value)) return false;
+    exact(value, ["contractVersion", "batchKind", "ticketId", "actionDigest", "accepted",
+      "response", "rejectedCallIds", "cancelledRationaleOnlySiblingCallIds",
+      "generationOutcome", "reason", "ticketCreationAllowed", "sideEffectsAllowed"],
+    "RationaleOnlyBatchDecision");
+    if (value.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
+        value.batchKind !== "rationale-only-followup" ||
+        value.ticketId !== control.ticketId ||
+        value.actionDigest !== control.action.actionDigest ||
+        value.sideEffectsAllowed !== false ||
+        !Array.isArray(value.rejectedCallIds) ||
+        !Array.isArray(value.cancelledRationaleOnlySiblingCallIds)) return false;
+    const ids = [
+      ...value.rejectedCallIds,
+      ...value.cancelledRationaleOnlySiblingCallIds,
+    ];
+    const seen = new Set<string>();
+    for (const id of ids) {
+      text(id, "rationale batch call id");
+      if (seen.has(id)) return false;
+      seen.add(id);
+    }
+    if (value.accepted === true) {
+      const parsed = parseRationaleResponse(value.response, control, now);
+      return value.generationOutcome === "accepted-rationale" &&
+        value.reason === "accepted-rationale" &&
+        value.ticketCreationAllowed === true &&
+        value.rejectedCallIds.length === 0 &&
+        value.cancelledRationaleOnlySiblingCallIds.length === 0 &&
+        parsed !== null && equal(parsed, value.response);
+    }
+    if (value.accepted !== false ||
+        value.ticketCreationAllowed !== false ||
+        value.response !== null ||
+        value.generationOutcome !== value.reason ||
+        !BATCH_GENERATION_FAILURES.includes(
+          value.generationOutcome as RationaleGenerationFailureCause,
+        )) return false;
+    if (value.generationOutcome === "missing-rationale-call") {
+      return value.rejectedCallIds.length === 0 &&
+        value.cancelledRationaleOnlySiblingCallIds.length === 0;
+    }
+    if (value.generationOutcome === "malformed-rationale") {
+      return value.rejectedCallIds.length === 1 &&
+        value.cancelledRationaleOnlySiblingCallIds.length === 0;
+    }
+    if (value.generationOutcome === "ordinary-tool-call-rejected") {
+      return value.rejectedCallIds.length === 1;
+    }
+    return value.generationOutcome === "multiple-calls-rejected" &&
+      value.rejectedCallIds.length === 1 &&
+      value.cancelledRationaleOnlySiblingCallIds.length >= 1;
+  } catch {
+    return false;
+  }
 }
 
 export type ReviewerScopeAlignment = "aligned" | "unclear" | "outside" | "unknown";
