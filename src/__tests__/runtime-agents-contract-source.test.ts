@@ -22,6 +22,7 @@ describe("packaged runtime AGENTS.md contract", () => {
     expect(runtimeContract).toContain("# LVIS Runtime Assistant Contract");
     expect(runtimeContract).toContain("~/.lvis/plugins/<pluginId>/data/");
     expect(runtimeContract).toContain("~/.lvis/audit/*.jsonl");
+    expect(runtimeContract).toContain("~/.lvis/audit.log*");
     expect(runtimeContract).toContain("^[a-zA-Z_][a-zA-Z0-9_]*$");
     expect(runtimeContract).toContain("TOOL_TIMEOUT_POLICY");
 
