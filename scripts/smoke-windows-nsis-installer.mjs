@@ -948,6 +948,38 @@ async function cleanupOwnedRuntimeNotificationArtifacts(machineInstall) {
   );
 }
 
+export async function assertRuntimeNotificationArtifactsRemoved(
+  machineInstall,
+  {
+    pathExists = existsSync,
+    findToastRegistrations = toastActivatorRegistrations,
+  } = {},
+) {
+  const provenance = machineInstall.runtimeShortcutProvenance;
+  if (!provenance?.ownedBeforeUninstall) return;
+  if (!provenance.path || !provenance.toastClsid) {
+    throw new Error(
+      "notification cleanup postcondition requires owned shortcut path and toast CLSID provenance",
+    );
+  }
+  if (pathExists(provenance.path)) {
+    throw new Error(
+      `genuine uninstall left current-user notification shortcut residue: ${provenance.path}`,
+    );
+  }
+
+  const toastResidue = await findToastRegistrations(
+    provenance.toastClsid,
+  );
+  if (toastResidue.length > 0) {
+    throw new Error(
+      `genuine uninstall left current-user notification toast residue in HKCU views ${toastResidue
+        .map(({ view }) => view)
+        .join(", ")}: ${provenance.toastClsid}`,
+    );
+  }
+}
+
 export function isExactProtocolCommand(command, executable) {
   if (typeof command !== "string" || typeof executable !== "string") {
     return false;
@@ -2047,6 +2079,7 @@ async function uninstallAndVerify(
   const args = ["/S", "/allusers", ...(keepAppData ? ["/KEEP_APP_DATA"] : [])];
   await runProcess(machineInstall.uninstaller, args, { timeoutMs });
   await waitForFileRemoved(machineInstall.installedExe, 30_000);
+  await assertRuntimeNotificationArtifactsRemoved(machineInstall);
   await assertForeignProtocolFixturePreserved(foreignProtocolFixture);
   await cleanupForeignProtocolFixture(foreignProtocolFixture);
   await assertUninstalledSurface(machineInstall);

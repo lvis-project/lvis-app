@@ -44,6 +44,9 @@
 !define LVIS_RRF_SUBKEY_WOW6432KEY 0x00020000
 !define LVIS_RRF_NOEXPAND 0x10000000
 !define LVIS_RRF_ZEROONFAILURE 0x20000000
+!define LVIS_KEY_READ_WRITE 0x0002001F
+!define LVIS_KEY_WOW64_64KEY 0x00000100
+!define LVIS_KEY_WOW64_32KEY 0x00000200
 !define LVIS_NSIS_PER_MACHINE_MARKER ".lvis-nsis-per-machine-v1"
 !define LVIS_NOTIFICATION_CLEANUP_SCRIPT "uninstall-windows-notification-artifacts.ps1"
 
@@ -98,6 +101,47 @@
   Pop $5
   Pop $4
   Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+!macroend
+
+; NSIS 3.0.4.1's DeleteRegKey /ifempty checks only for subkeys, so it can
+; delete foreign named values. Open the exact electron-builder registry view
+; and let SHDeleteEmptyKeyW atomically delete only a child with zero values and
+; zero subkeys. Any open/query/access failure preserves the key.
+!macro lvisDeleteExactEmptyRegistryKey _root _parent _child
+  Push $0
+  Push $1
+  Push $2
+
+  StrCpy $0 ${LVIS_KEY_READ_WRITE}
+  !ifdef APP_ARM64
+    ${If} ${RunningX64}
+    ${OrIf} ${IsNativeARM64}
+      IntOp $0 $0 | ${LVIS_KEY_WOW64_64KEY}
+    ${Else}
+      IntOp $0 $0 | ${LVIS_KEY_WOW64_32KEY}
+    ${EndIf}
+  !else
+    !ifdef APP_64
+      ${If} ${RunningX64}
+        IntOp $0 $0 | ${LVIS_KEY_WOW64_64KEY}
+      ${Else}
+        IntOp $0 $0 | ${LVIS_KEY_WOW64_32KEY}
+      ${EndIf}
+    !else
+      IntOp $0 $0 | ${LVIS_KEY_WOW64_32KEY}
+    !endif
+  !endif
+
+  StrCpy $1 0
+  System::Call 'advapi32::RegOpenKeyExW(p ${_root}, w "${_parent}", i 0, i r0, *p .r1) i .r2'
+  ${If} $2 = 0
+    System::Call 'shlwapi::SHDeleteEmptyKeyW(p r1, w "${_child}") i .r2'
+    System::Call 'advapi32::RegCloseKey(p r1)'
+  ${EndIf}
+
   Pop $2
   Pop $1
   Pop $0
@@ -291,10 +335,50 @@
 Function un.lvisCleanupCurrentUserNotificationArtifacts
   InitPluginsDir
   File /oname=$PLUGINSDIR\${LVIS_NOTIFICATION_CLEANUP_SCRIPT} "${BUILD_RESOURCES_DIR}\${LVIS_NOTIFICATION_CLEANUP_SCRIPT}"
-  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\${LVIS_NOTIFICATION_CLEANUP_SCRIPT}" -InstalledExecutable "$R0" -ShortcutName "$R1" -AppUserModelId "$R2" -InstallMarker "$R3"'
+  ; electron-builder's NSIS is x86. IsWow64Process is ambiguous on ARM64, so
+  ; use IsWow64Process2's native-machine result to select native PowerShell on
+  ; both AMD64 and ARM64. Unknown architectures and API failures fail closed.
+  StrCpy $R6 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+  StrCpy $R7 "0"
+  StrCpy $R8 "0"
+  StrCpy $R9 "0"
+  ClearErrors
+  System::Call 'kernel32::IsWow64Process2(p -1, *i .r7, *i .r8) i .r9'
+  IfErrors lvis_notification_arch_probe_failed
+  IntCmp $R9 0 lvis_notification_arch_probe_failed
+  ; IMAGE_FILE_MACHINE_I386: native 32-bit Windows, where $SYSDIR is native.
+  IntCmp $R8 0x014c lvis_notification_powershell_path_ready
+  ; IMAGE_FILE_MACHINE_AMD64 / IMAGE_FILE_MACHINE_ARM64.
+  IntCmp $R8 0x8664 lvis_notification_use_sysnative
+  IntCmp $R8 0xaa64 lvis_notification_use_sysnative
+  Goto lvis_notification_arch_probe_failed
+
+  lvis_notification_use_sysnative:
+  StrCpy $R6 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+
+  lvis_notification_powershell_path_ready:
+  IfFileExists "$R6" lvis_notification_powershell_ready
+    StrCpy $R4 "1"
+    StrCpy $R5 "LVIS notification cleanup failed: PowerShell executable is missing at $R6"
+    Delete "$PLUGINSDIR\${LVIS_NOTIFICATION_CLEANUP_SCRIPT}"
+    Return
+
+  lvis_notification_arch_probe_failed:
+    StrCpy $R4 "1"
+    StrCpy $R5 "LVIS notification cleanup failed: Windows native architecture detection failed"
+    Delete "$PLUGINSDIR\${LVIS_NOTIFICATION_CLEANUP_SCRIPT}"
+    Return
+
+  lvis_notification_powershell_ready:
+  nsExec::ExecToStack '"$R6" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\${LVIS_NOTIFICATION_CLEANUP_SCRIPT}" -InstalledExecutable "$R0" -ShortcutName "$R1" -AppUserModelId "$R2" -InstallMarker "$R3"'
   Pop $R4
   Pop $R5
   Delete "$PLUGINSDIR\${LVIS_NOTIFICATION_CLEANUP_SCRIPT}"
+  StrCmp $R4 "error" 0 lvis_notification_cleanup_done
+    StrCpy $R4 "1"
+    StrCpy $R5 "LVIS notification cleanup failed: PowerShell process could not be started"
+
+  lvis_notification_cleanup_done:
 FunctionEnd
 !endif
 
@@ -305,6 +389,10 @@ FunctionEnd
   Push $R3
   Push $R4
   Push $R5
+  Push $R6
+  Push $R7
+  Push $R8
+  Push $R9
 
   ClearErrors
   ${GetParameters} $R0
@@ -420,6 +508,10 @@ FunctionEnd
 
   lvis_skip_userdata:
   lvis_skip_genuine_uninstall:
+  Pop $R9
+  Pop $R8
+  Pop $R7
+  Pop $R6
   Pop $R5
   Pop $R4
   Pop $R3
@@ -529,15 +621,15 @@ FunctionEnd
   ReadRegStr $R1 SHELL_CONTEXT "Software\Classes\lvis\shell\open\command" ""
   StrCmp $R1 $R2 0 lvis_protocol_cleanup_hkcu
   DeleteRegValue SHELL_CONTEXT "Software\Classes\lvis\shell\open\command" ""
-  DeleteRegKey /ifempty SHELL_CONTEXT "Software\Classes\lvis\shell\open\command"
-  DeleteRegKey /ifempty SHELL_CONTEXT "Software\Classes\lvis\shell\open"
-  DeleteRegKey /ifempty SHELL_CONTEXT "Software\Classes\lvis\shell"
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000002 "Software\Classes\lvis\shell\open" "command"
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000002 "Software\Classes\lvis\shell" "open"
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000002 "Software\Classes\lvis" "shell"
 
   ClearErrors
   ReadRegStr $R1 SHELL_CONTEXT "Software\Classes\lvis\DefaultIcon" ""
   StrCmp $R1 $R0 0 +2
     DeleteRegValue SHELL_CONTEXT "Software\Classes\lvis\DefaultIcon" ""
-  DeleteRegKey /ifempty SHELL_CONTEXT "Software\Classes\lvis\DefaultIcon"
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000002 "Software\Classes\lvis" "DefaultIcon"
 
   !insertmacro lvisIsExactEmptyUrlProtocolRegSz 0x80000002 $R1
   StrCmp $R1 "1" 0 +2
@@ -546,22 +638,22 @@ FunctionEnd
   ReadRegStr $R1 SHELL_CONTEXT "Software\Classes\lvis" ""
   StrCmpS $R1 "URL:lvis" 0 +2
     DeleteRegValue SHELL_CONTEXT "Software\Classes\lvis" ""
-  DeleteRegKey /ifempty SHELL_CONTEXT "Software\Classes\lvis"
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000002 "Software\Classes" "lvis"
 
   lvis_protocol_cleanup_hkcu:
   ClearErrors
   ReadRegStr $R1 HKEY_CURRENT_USER "Software\Classes\lvis\shell\open\command" ""
   StrCmp $R1 $R2 0 lvis_protocol_cleanup_done
   DeleteRegValue HKEY_CURRENT_USER "Software\Classes\lvis\shell\open\command" ""
-  DeleteRegKey /ifempty HKEY_CURRENT_USER "Software\Classes\lvis\shell\open\command"
-  DeleteRegKey /ifempty HKEY_CURRENT_USER "Software\Classes\lvis\shell\open"
-  DeleteRegKey /ifempty HKEY_CURRENT_USER "Software\Classes\lvis\shell"
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000001 "Software\Classes\lvis\shell\open" "command"
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000001 "Software\Classes\lvis\shell" "open"
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000001 "Software\Classes\lvis" "shell"
 
   ClearErrors
   ReadRegStr $R1 HKEY_CURRENT_USER "Software\Classes\lvis\DefaultIcon" ""
   StrCmp $R1 $R0 0 +2
     DeleteRegValue HKEY_CURRENT_USER "Software\Classes\lvis\DefaultIcon" ""
-  DeleteRegKey /ifempty HKEY_CURRENT_USER "Software\Classes\lvis\DefaultIcon"
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000001 "Software\Classes\lvis" "DefaultIcon"
 
   !insertmacro lvisIsExactEmptyUrlProtocolRegSz 0x80000001 $R1
   StrCmp $R1 "1" 0 +2
@@ -570,7 +662,7 @@ FunctionEnd
   ReadRegStr $R1 HKEY_CURRENT_USER "Software\Classes\lvis" ""
   StrCmpS $R1 "URL:lvis" 0 +2
     DeleteRegValue HKEY_CURRENT_USER "Software\Classes\lvis" ""
-  DeleteRegKey /ifempty HKEY_CURRENT_USER "Software\Classes\lvis"
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000001 "Software\Classes" "lvis"
 
   lvis_protocol_cleanup_done:
   Pop $R2

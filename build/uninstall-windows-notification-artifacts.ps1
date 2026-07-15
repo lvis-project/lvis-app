@@ -52,6 +52,23 @@ function Test-SamePath {
   }
 }
 
+function Write-CleanupEvent {
+  param(
+    [Parameter(Mandatory = $true)]
+    [ValidateSet("removed", "foreign-preserved", "verified-absent", "contract-failed")]
+    [string]$Status,
+    [Parameter(Mandatory = $true)][string]$Artifact,
+    [Parameter(Mandatory = $true)][string]$Detail
+  )
+
+  [PSCustomObject]@{
+    component = "lvis-notification-cleanup"
+    status = $Status
+    artifact = $Artifact
+    detail = $Detail
+  } | ConvertTo-Json -Compress
+}
+
 function Release-ComObject {
   param($Value)
 
@@ -104,7 +121,7 @@ function Get-ShortcutRecord {
   }
 }
 
-function Test-OwnedShortcut {
+function Get-ShortcutOwnershipMismatches {
   param(
     [Parameter(Mandatory = $true)]$Record,
     [Parameter(Mandatory = $true)][string]$ExpectedExecutable,
@@ -113,28 +130,39 @@ function Test-OwnedShortcut {
     [Parameter(Mandatory = $true)][string]$ExpectedAppUserModelId
   )
 
-  try {
-    $parsedClsid = [System.Guid]::Empty
-    return (
-      (Test-SamePath $Record.Target $ExpectedExecutable) -and
-      (Test-SamePath $Record.WorkingDirectory $ExpectedWorkingDirectory) -and
-      [string]::Equals($Record.Arguments, "", [System.StringComparison]::Ordinal) -and
-      [string]::Equals(
-        $Record.Description,
-        $ExpectedDescription,
-        [System.StringComparison]::Ordinal
-      ) -and
-      [string]::Equals(
-        $Record.AppUserModelId,
-        $ExpectedAppUserModelId,
-        [System.StringComparison]::Ordinal
-      ) -and
-      [System.Guid]::TryParse($Record.ToastClsid, [ref]$parsedClsid)
-    )
+  $mismatches = @()
+  if (-not (Test-SamePath $Record.Target $ExpectedExecutable)) {
+    $mismatches += "target"
   }
-  catch {
-    return $false
+  if (-not (Test-SamePath $Record.WorkingDirectory $ExpectedWorkingDirectory)) {
+    $mismatches += "workingDirectory"
   }
+  if (-not [string]::Equals(
+      $Record.Arguments,
+      "",
+      [System.StringComparison]::Ordinal
+    )) {
+    $mismatches += "arguments"
+  }
+  if (-not [string]::Equals(
+      $Record.Description,
+      $ExpectedDescription,
+      [System.StringComparison]::Ordinal
+    )) {
+    $mismatches += "description"
+  }
+  if (-not [string]::Equals(
+      $Record.AppUserModelId,
+      $ExpectedAppUserModelId,
+      [System.StringComparison]::Ordinal
+    )) {
+    $mismatches += "appUserModelId"
+  }
+  $parsedClsid = [System.Guid]::Empty
+  if (-not [System.Guid]::TryParse($Record.ToastClsid, [ref]$parsedClsid)) {
+    $mismatches += "toastClsid"
+  }
+  return @($mismatches)
 }
 
 function Get-RegistryViews {
@@ -355,8 +383,7 @@ try {
     (($markerItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) -or
     $markerItem.Length -ne 0
   ) {
-    Write-Output "Preserved notification artifacts because the exact NSIS marker contract is unavailable."
-    exit 0
+    throw "the exact zero-byte regular NSIS marker contract is unavailable: $expectedMarker"
   }
   $programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
   if ([string]::IsNullOrWhiteSpace($programs)) {
@@ -370,36 +397,93 @@ try {
       $shortcutItem.PSIsContainer -or
       (($shortcutItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
     ) {
-      Write-Output "Preserved non-regular or reparse-point shortcut candidate: $shortcutPath"
+      Write-CleanupEvent "foreign-preserved" "shortcut" (
+        "preserved non-regular or reparse-point candidate: $shortcutPath"
+      )
     }
     else {
       $record = Get-ShortcutRecord $shortcutPath
-      if (Test-OwnedShortcut $record $installedExe $installDir $ShortcutName $AppUserModelId) {
-        $recheckedItem = Get-Item -LiteralPath $shortcutPath -Force
-        $recheckedRecord = Get-ShortcutRecord $shortcutPath
-        if (
-          $recheckedItem.PSIsContainer -or
-          (($recheckedItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) -or
-          -not (Test-OwnedShortcut $recheckedRecord $installedExe $installDir $ShortcutName $AppUserModelId)
-        ) {
-          throw "the owned shortcut changed before cleanup"
-        }
-
-        [System.IO.File]::Delete($shortcutPath)
-        if (Test-Path -LiteralPath $shortcutPath) {
-          throw "the owned shortcut survived cleanup"
-        }
-        Write-Output "Removed exact current-user LVIS notification shortcut."
+      if (-not (Test-SamePath $record.Target $installedExe)) {
+        Write-CleanupEvent "foreign-preserved" "shortcut" (
+          "preserved different-target shortcut: $shortcutPath"
+        )
       }
       else {
-        Write-Output "Preserved a shortcut whose ownership fields do not exactly match LVIS."
+        $mismatches = @(
+          Get-ShortcutOwnershipMismatches $record $installedExe $installDir $ShortcutName $AppUserModelId
+        )
+        if ($mismatches.Count -ne 0) {
+          throw (
+            "same-target shortcut has partial LVIS ownership; mismatched fields: {0}" -f
+            ($mismatches -join ",")
+          )
+        }
+
+        # Move within the same directory first, then recheck the moved identity.
+        # A path swap before Move is quarantined and preserved after mismatch;
+        # a path created after Move is never the object we delete.
+        $quarantinePath = Join-Path $programs (
+          ".{0}.lvis-uninstall-{1}.lnk" -f
+          $ShortcutName,
+          [System.Guid]::NewGuid().ToString("N")
+        )
+        [System.IO.File]::Move($shortcutPath, $quarantinePath)
+        try {
+          $quarantinedItem = Get-Item -LiteralPath $quarantinePath -Force
+          if (
+            $quarantinedItem.PSIsContainer -or
+            (($quarantinedItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+          ) {
+            throw "the shortcut changed to a non-regular or reparse-point object before quarantine"
+          }
+          $quarantinedRecord = Get-ShortcutRecord $quarantinePath
+          $quarantinedMismatches = @(
+            Get-ShortcutOwnershipMismatches $quarantinedRecord $installedExe $installDir $ShortcutName $AppUserModelId
+          )
+          if ($quarantinedMismatches.Count -ne 0) {
+            throw (
+              "the shortcut changed before atomic quarantine; mismatched fields: {0}" -f
+              ($quarantinedMismatches -join ",")
+            )
+          }
+
+          [System.IO.File]::Delete($quarantinePath)
+          if (Test-Path -LiteralPath $quarantinePath) {
+            throw "the quarantined owned shortcut survived cleanup"
+          }
+        }
+        catch {
+          $quarantineFailure = $_
+          if (Test-Path -LiteralPath $quarantinePath) {
+            if (-not (Test-Path -LiteralPath $shortcutPath)) {
+              [System.IO.File]::Move($quarantinePath, $shortcutPath)
+              Write-CleanupEvent "foreign-preserved" "shortcut" (
+                "restored the quarantined shortcut after ownership changed"
+              )
+            }
+            else {
+              Write-CleanupEvent "contract-failed" "shortcut-quarantine" (
+                "preserved the changed candidate at $quarantinePath because the original path was reoccupied"
+              )
+            }
+          }
+          throw $quarantineFailure
+        }
+        Write-CleanupEvent "removed" "shortcut" (
+          "removed exact current-user LVIS notification shortcut: $shortcutPath"
+        )
       }
     }
+  }
+  else {
+    Write-CleanupEvent "verified-absent" "shortcut" (
+      "current-user LVIS notification shortcut was already absent: $shortcutPath"
+    )
   }
 
   foreach ($registration in @(Find-ExactToastRegistrations $installedExe)) {
     if (Remove-ExactToastRegistration $registration.View $registration.Clsid $installedExe) {
-      Write-Output (
+      Write-CleanupEvent "removed" "toast-registration" (
         "Removed exact current-user LVIS toast registration {0} ({1})." -f
         $registration.Clsid,
         $registration.View
@@ -411,12 +495,38 @@ try {
   if ($remaining.Count -ne 0) {
     throw "one or more exact LVIS toast registrations survived cleanup"
   }
+  Write-CleanupEvent "verified-absent" "toast-registration" (
+    "no exact current-user LVIS toast registrations remain"
+  )
+
+  $shortcutResidue = Get-Item -LiteralPath $shortcutPath -Force -ErrorAction SilentlyContinue
+  if (
+    $null -ne $shortcutResidue -and
+    -not $shortcutResidue.PSIsContainer -and
+    (($shortcutResidue.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0)
+  ) {
+    $residueRecord = Get-ShortcutRecord $shortcutPath
+    if (Test-SamePath $residueRecord.Target $installedExe) {
+      $residueMismatches = @(
+        Get-ShortcutOwnershipMismatches $residueRecord $installedExe $installDir $ShortcutName $AppUserModelId
+      )
+      if ($residueMismatches.Count -eq 0) {
+        throw "the exact owned shortcut survived the final cleanup postcondition"
+      }
+      throw (
+        "a same-target partial-owned shortcut survived; mismatched fields: {0}" -f
+        ($residueMismatches -join ",")
+      )
+    }
+  }
   exit 0
 }
 catch {
+  $failureMessage = $_.Exception.Message
+  Write-CleanupEvent "contract-failed" "notification-artifacts" $failureMessage
   [Console]::Error.WriteLine(
     "LVIS current-user notification artifact cleanup failed: {0}",
-    $_.Exception.Message
+    $failureMessage
   )
   exit 1
 }
