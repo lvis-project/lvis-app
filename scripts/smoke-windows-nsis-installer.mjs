@@ -44,6 +44,8 @@ const DISPOSABLE_SMOKE_ENV = "LVIS_ALLOW_DISPOSABLE_WINDOWS_INSTALLER_SMOKE";
 const REGISTRY_VIEWS = ["64", "32"];
 const UNINSTALL_REGISTRY_PATH =
   "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
+const PROTOCOL_REGISTRY_ROOT = "SOFTWARE\\Classes\\lvis";
+const PROTOCOL_ICON_REGISTRY_PATH = "SOFTWARE\\Classes\\lvis\\DefaultIcon";
 const PROTOCOL_REGISTRY_PATH = "SOFTWARE\\Classes\\lvis\\shell\\open\\command";
 const USER_DATA_SENTINEL_NAME = "nsis-smoke-sentinel.txt";
 const USER_DATA_SENTINEL_CONTENT = "LVIS Windows uninstall smoke\n";
@@ -289,13 +291,15 @@ export const REGISTRY_QUERY_SCRIPT = buildPowerShellScript([
   "try {",
   "  $key = $baseKey.OpenSubKey($env:LVIS_REGISTRY_PATH, $false)",
   "  if ($null -eq $key) {",
-  "    [PSCustomObject]@{ keyExists = $false; valueExists = $false; value = $null; entries = @() } | ConvertTo-Json -Depth 6 -Compress",
+  "    [PSCustomObject]@{ keyExists = $false; valueExists = $false; value = $null; valueKind = $null; entries = @() } | ConvertTo-Json -Depth 6 -Compress",
   "    return",
   "  }",
-  "  if ($env:LVIS_REGISTRY_MODE -eq 'default') {",
-  "    $valueExists = @($key.GetValueNames()) -contains ''",
-  "    $value = if ($valueExists) { [string]$key.GetValue('', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } else { $null }",
-  "    [PSCustomObject]@{ keyExists = $true; valueExists = $valueExists; value = $value; entries = @() } | ConvertTo-Json -Depth 6 -Compress",
+  "  if ($env:LVIS_REGISTRY_MODE -eq 'default' -or $env:LVIS_REGISTRY_MODE -eq 'value') {",
+  "    $valueName = if ($env:LVIS_REGISTRY_MODE -eq 'default') { '' } else { $env:LVIS_REGISTRY_VALUE_NAME }",
+  "    $valueExists = @($key.GetValueNames()) -contains $valueName",
+  "    $valueKind = if ($valueExists) { [string]$key.GetValueKind($valueName) } else { $null }",
+  "    $value = if ($valueExists) { [string]$key.GetValue($valueName, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } else { $null }",
+  "    [PSCustomObject]@{ keyExists = $true; valueExists = $valueExists; value = $value; valueKind = $valueKind; entries = @() } | ConvertTo-Json -Depth 6 -Compress",
   "    return",
   "  }",
   "  if ($env:LVIS_REGISTRY_MODE -ne 'tree') { throw \"unsupported registry query mode: $env:LVIS_REGISTRY_MODE\" }",
@@ -319,14 +323,160 @@ export const REGISTRY_QUERY_SCRIPT = buildPowerShellScript([
   "      if ($null -ne $child) { $child.Dispose() }",
   "    }",
   "  }",
-  "  [PSCustomObject]@{ keyExists = $true; valueExists = $false; value = $null; entries = @($entries) } | ConvertTo-Json -Depth 6 -Compress",
+  "  [PSCustomObject]@{ keyExists = $true; valueExists = $false; value = $null; valueKind = $null; entries = @($entries) } | ConvertTo-Json -Depth 6 -Compress",
   "} finally {",
   "  if ($null -ne $key) { $key.Dispose() }",
   "  $baseKey.Dispose()",
   "}",
 ]);
 
-async function registryQuery(hive, path, view, mode, displayNameFilter) {
+const FOREIGN_PROTOCOL_FIXTURE_VALUE_NAME = "LVIS NSIS Smoke Foreign";
+const FOREIGN_PROTOCOL_FIXTURE_SUBKEY_NAME = "foreign-smoke";
+
+export const FOREIGN_PROTOCOL_FIXTURE_SCRIPT = buildPowerShellScript([
+  `$ErrorActionPreference = 'Stop'`,
+  `$view = switch ($env:LVIS_REGISTRY_VIEW) {`,
+  `  '64' { [Microsoft.Win32.RegistryView]::Registry64; break }`,
+  `  '32' { [Microsoft.Win32.RegistryView]::Registry32; break }`,
+  `  default { throw "unsupported registry view: $env:LVIS_REGISTRY_VIEW" }`,
+  `}`,
+  `$rootPath = 'SOFTWARE\\Classes\\lvis'`,
+  `$commandPath = 'SOFTWARE\\Classes\\lvis\\shell\\open\\command'`,
+  `$iconPath = 'SOFTWARE\\Classes\\lvis\\DefaultIcon'`,
+  `$subkeyPath = "$rootPath\\$env:LVIS_FOREIGN_PROTOCOL_SUBKEY_NAME"`,
+  `$foreignName = $env:LVIS_FOREIGN_PROTOCOL_VALUE_NAME`,
+  `if ([string]::IsNullOrWhiteSpace($env:LVIS_FOREIGN_PROTOCOL_TOKEN)) { throw 'fixture token is required' }`,
+  `$token = $env:LVIS_FOREIGN_PROTOCOL_TOKEN`,
+  `$baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $view)`,
+  `$expectedUrlProtocolKind = switch ($env:LVIS_FOREIGN_PROTOCOL_KIND) {`,
+  `  'ExpandString' { [Microsoft.Win32.RegistryValueKind]::ExpandString; break }`,
+  `  'Binary' { [Microsoft.Win32.RegistryValueKind]::Binary; break }`,
+  `  default { throw "unsupported foreign URL Protocol kind: $env:LVIS_FOREIGN_PROTOCOL_KIND" }`,
+  `}`,
+  `function Remove-EmptyFixtureKey([string]$path) {`,
+  `  $key = $baseKey.OpenSubKey($path, $false)`,
+  `  if ($null -eq $key) { return }`,
+  `  try { $empty = @($key.GetValueNames()).Count -eq 0 -and @($key.GetSubKeyNames()).Count -eq 0 } finally { $key.Dispose() }`,
+  `  if ($empty) { $baseKey.DeleteSubKey($path, $false) }`,
+  `}`,
+  `try {`,
+  `  switch ($env:LVIS_FOREIGN_PROTOCOL_ACTION) {`,
+  `    'seed' {`,
+  `      $rootKey = $baseKey.CreateSubKey($rootPath, $true)`,
+  `      try {`,
+  `        if ($env:LVIS_FOREIGN_PROTOCOL_KIND -eq 'ExpandString') {`,
+  `          $rootKey.SetValue('URL Protocol', '', [Microsoft.Win32.RegistryValueKind]::ExpandString)`,
+  `        } else {`,
+  `          $rootKey.SetValue('URL Protocol', [byte[]]@(), [Microsoft.Win32.RegistryValueKind]::Binary)`,
+  `        }`,
+  `      } finally { $rootKey.Dispose() }`,
+  `      $commandKey = $baseKey.CreateSubKey($commandPath, $true)`,
+  `      try { $commandKey.SetValue($foreignName, $token, [Microsoft.Win32.RegistryValueKind]::String) } finally { $commandKey.Dispose() }`,
+  `      $foreignKey = $baseKey.CreateSubKey($subkeyPath, $true)`,
+  `      try { $foreignKey.SetValue('', $token, [Microsoft.Win32.RegistryValueKind]::String) } finally { $foreignKey.Dispose() }`,
+  `      break`,
+  `    }`,
+  `    'assert-preserved' {`,
+  `      $rootKey = $baseKey.OpenSubKey($rootPath, $false)`,
+  `      if ($null -eq $rootKey) { throw 'foreign fixture root was removed' }`,
+  `      try {`,
+  `        $names = @($rootKey.GetValueNames())`,
+  `        if ($names -contains '') { throw 'owned lvis root marker survived uninstall' }`,
+  `        if (-not ($names -contains 'URL Protocol')) { throw 'foreign wrong-typed URL Protocol was removed' }`,
+  `        if ($rootKey.GetValueKind('URL Protocol') -ne $expectedUrlProtocolKind) { throw 'foreign URL Protocol kind changed' }`,
+  `        if ($env:LVIS_FOREIGN_PROTOCOL_KIND -eq 'ExpandString') {`,
+  `          $foreignUrlProtocolValue = [string]$rootKey.GetValue('URL Protocol', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)`,
+  `          if (-not [string]::Equals($foreignUrlProtocolValue, '', [System.StringComparison]::Ordinal)) { throw 'foreign URL Protocol value changed' }`,
+  `        } elseif (([byte[]]$rootKey.GetValue('URL Protocol')).Length -ne 0) {`,
+  `          throw 'foreign URL Protocol value changed'`,
+  `        }`,
+  `      } finally { $rootKey.Dispose() }`,
+  `      $commandKey = $baseKey.OpenSubKey($commandPath, $false)`,
+  `      if ($null -eq $commandKey) { throw 'foreign command value key was removed' }`,
+  `      try {`,
+  `        $commandNames = @($commandKey.GetValueNames())`,
+  `        if ($commandNames -contains '') { throw 'owned lvis command survived uninstall' }`,
+  `        if (-not ($commandNames -contains $foreignName)) { throw 'foreign named command value was removed' }`,
+  `        if ($commandKey.GetValueKind($foreignName) -ne [Microsoft.Win32.RegistryValueKind]::String) { throw 'foreign named command value kind changed' }`,
+  `        $foreignValue = [string]$commandKey.GetValue($foreignName, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)`,
+  `        if (-not [string]::Equals($foreignValue, $token, [System.StringComparison]::Ordinal)) { throw 'foreign named command value changed' }`,
+  `      } finally { $commandKey.Dispose() }`,
+  `      $iconKey = $baseKey.OpenSubKey($iconPath, $false)`,
+  `      if ($null -ne $iconKey) { $iconKey.Dispose(); throw 'owned lvis DefaultIcon key survived uninstall' }`,
+  `      $foreignKey = $baseKey.OpenSubKey($subkeyPath, $false)`,
+  `      if ($null -eq $foreignKey) { throw 'foreign subkey was removed' }`,
+  `      try {`,
+  `        if ($foreignKey.GetValueKind('') -ne [Microsoft.Win32.RegistryValueKind]::String) { throw 'foreign subkey value kind changed' }`,
+  `        $foreignSubValue = [string]$foreignKey.GetValue('', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)`,
+  `        if (-not [string]::Equals($foreignSubValue, $token, [System.StringComparison]::Ordinal)) { throw 'foreign subkey value changed' }`,
+  `      } finally { $foreignKey.Dispose() }`,
+  `      break`,
+  `    }`,
+  `    'cleanup' {`,
+  `      $rootKey = $baseKey.OpenSubKey($rootPath, $true)`,
+  `      if ($null -ne $rootKey) {`,
+  `        try {`,
+  `          $names = @($rootKey.GetValueNames())`,
+  `          if ($names -contains 'URL Protocol') {`,
+  `            if ($rootKey.GetValueKind('URL Protocol') -ne $expectedUrlProtocolKind) { throw 'refusing to clean changed URL Protocol kind' }`,
+  `            if ($env:LVIS_FOREIGN_PROTOCOL_KIND -eq 'ExpandString') {`,
+  `              $foreignUrlProtocolValue = [string]$rootKey.GetValue('URL Protocol', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)`,
+  `              if (-not [string]::Equals($foreignUrlProtocolValue, '', [System.StringComparison]::Ordinal)) { throw 'refusing to clean changed URL Protocol value' }`,
+  `            } elseif (([byte[]]$rootKey.GetValue('URL Protocol')).Length -ne 0) {`,
+  `              throw 'refusing to clean changed URL Protocol value'`,
+  `            }`,
+  `            $rootKey.DeleteValue('URL Protocol', $false)`,
+  `          }`,
+  `        } finally { $rootKey.Dispose() }`,
+  `      }`,
+  `      $commandKey = $baseKey.OpenSubKey($commandPath, $true)`,
+  `      if ($null -ne $commandKey) {`,
+  `        try {`,
+  `          $commandNames = @($commandKey.GetValueNames())`,
+  `          if ($commandNames -contains $foreignName) {`,
+  `            if ($commandKey.GetValueKind($foreignName) -ne [Microsoft.Win32.RegistryValueKind]::String) { throw 'refusing to clean changed foreign command value kind' }`,
+  `            $foreignValue = [string]$commandKey.GetValue($foreignName, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)`,
+  `            if (-not [string]::Equals($foreignValue, $token, [System.StringComparison]::Ordinal)) { throw 'refusing to clean changed foreign command value' }`,
+  `            $commandKey.DeleteValue($foreignName, $false)`,
+  `          }`,
+  `        } finally { $commandKey.Dispose() }`,
+  `      }`,
+  `      $foreignKey = $baseKey.OpenSubKey($subkeyPath, $true)`,
+  `      if ($null -ne $foreignKey) {`,
+  `        try {`,
+  `          if (@($foreignKey.GetValueNames()).Count -ne 1 -or -not (@($foreignKey.GetValueNames()) -contains '') -or @($foreignKey.GetSubKeyNames()).Count -ne 0) { throw 'refusing to clean changed foreign subkey' }`,
+  `          if ($foreignKey.GetValueKind('') -ne [Microsoft.Win32.RegistryValueKind]::String) { throw 'refusing to clean changed foreign subkey kind' }`,
+  `          $foreignSubValue = [string]$foreignKey.GetValue('', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)`,
+  `          if (-not [string]::Equals($foreignSubValue, $token, [System.StringComparison]::Ordinal)) { throw 'refusing to clean changed foreign subkey value' }`,
+  `          $foreignKey.DeleteValue('', $false)`,
+  `        } finally { $foreignKey.Dispose() }`,
+  `        $baseKey.DeleteSubKey($subkeyPath, $false)`,
+  `      }`,
+  `      Remove-EmptyFixtureKey $commandPath`,
+  `      Remove-EmptyFixtureKey 'SOFTWARE\\Classes\\lvis\\shell\\open'`,
+  `      Remove-EmptyFixtureKey 'SOFTWARE\\Classes\\lvis\\shell'`,
+  `      $rootKey = $baseKey.OpenSubKey($rootPath, $false)`,
+  `      $rootIsEmpty = $false`,
+  `      if ($null -ne $rootKey) {`,
+  `        try { $rootIsEmpty = @($rootKey.GetValueNames()).Count -eq 0 -and @($rootKey.GetSubKeyNames()).Count -eq 0 } finally { $rootKey.Dispose() }`,
+  `      }`,
+  `      if ($rootIsEmpty) { $baseKey.DeleteSubKey($rootPath, $false) }`,
+  `      break`,
+  `    }`,
+  `    default { throw "unsupported foreign fixture action: $env:LVIS_FOREIGN_PROTOCOL_ACTION" }`,
+  `  }`,
+  `  [PSCustomObject]@{ ok = $true; action = $env:LVIS_FOREIGN_PROTOCOL_ACTION; view = $env:LVIS_REGISTRY_VIEW; kind = $env:LVIS_FOREIGN_PROTOCOL_KIND } | ConvertTo-Json -Compress`,
+  `} finally { $baseKey.Dispose() }`,
+]);
+
+async function registryQuery(
+  hive,
+  path,
+  view,
+  mode,
+  displayNameFilter,
+  valueName,
+) {
   if (
     mode === "tree" &&
     (typeof displayNameFilter !== "string" ||
@@ -336,6 +486,12 @@ async function registryQuery(hive, path, view, mode, displayNameFilter) {
       "LVIS_REGISTRY_DISPLAY_NAME_FILTER is required for tree mode",
     );
   }
+  if (
+    mode === "value" &&
+    (typeof valueName !== "string" || valueName.length === 0)
+  ) {
+    throw new Error("LVIS_REGISTRY_VALUE_NAME is required for value mode");
+  }
   const env = {
     LVIS_REGISTRY_HIVE: hive,
     LVIS_REGISTRY_PATH: path,
@@ -344,6 +500,7 @@ async function registryQuery(hive, path, view, mode, displayNameFilter) {
   };
   if (mode === "tree")
     env.LVIS_REGISTRY_DISPLAY_NAME_FILTER = displayNameFilter;
+  if (mode === "value") env.LVIS_REGISTRY_VALUE_NAME = valueName;
   const result = await runPowerShellJson(REGISTRY_QUERY_SCRIPT, env);
   return validateRegistryQueryResult(result, { hive, path, view, mode });
 }
@@ -352,7 +509,7 @@ export function validateRegistryQueryResult(
   result,
   { hive, path, view, mode },
 ) {
-  if (mode !== "tree" && mode !== "default") {
+  if (mode !== "tree" && mode !== "default" && mode !== "value") {
     throw new Error(
       `unsupported registry query validation mode: ${String(mode)}`,
     );
@@ -363,6 +520,9 @@ export function validateRegistryQueryResult(
     Array.isArray(result) ||
     typeof result.keyExists !== "boolean" ||
     typeof result.valueExists !== "boolean" ||
+    (result.valueKind !== null &&
+      (typeof result.valueKind !== "string" ||
+        result.valueKind.length === 0)) ||
     !Array.isArray(result.entries)
   ) {
     throw new Error(
@@ -371,14 +531,21 @@ export function validateRegistryQueryResult(
   }
   if (
     !result.keyExists &&
-    (result.valueExists || result.value !== null || result.entries.length !== 0)
+    (result.valueExists ||
+      result.value !== null ||
+      result.valueKind !== null ||
+      result.entries.length !== 0)
   ) {
     throw new Error(
       `registry query returned an invalid missing-key state for ${hive} ${view}-bit ${path}: ${JSON.stringify(result)}`,
     );
   }
   if (mode === "tree") {
-    if (result.valueExists || result.value !== null) {
+    if (
+      result.valueExists ||
+      result.value !== null ||
+      result.valueKind !== null
+    ) {
       throw new Error(
         `registry tree query returned an invalid state for ${hive} ${view}-bit ${path}: ${JSON.stringify(result)}`,
       );
@@ -404,11 +571,11 @@ export function validateRegistryQueryResult(
   } else if (
     result.entries.length !== 0 ||
     (result.valueExists
-      ? typeof result.value !== "string"
-      : result.value !== null)
+      ? typeof result.value !== "string" || typeof result.valueKind !== "string"
+      : result.value !== null || result.valueKind !== null)
   ) {
     throw new Error(
-      `registry default query returned an invalid state for ${hive} ${view}-bit ${path}: ${JSON.stringify(result)}`,
+      `registry ${mode} query returned an invalid state for ${hive} ${view}-bit ${path}: ${JSON.stringify(result)}`,
     );
   }
   return result;
@@ -427,6 +594,10 @@ async function queryRegistryTree(hive, path, view, displayNameFilter) {
 
 async function queryRegistryDefault(hive, path, view) {
   return await registryQuery(hive, path, view, "default");
+}
+
+async function queryRegistryValue(hive, path, view, valueName) {
+  return await registryQuery(hive, path, view, "value", undefined, valueName);
 }
 
 function productDisplayName() {
@@ -592,22 +763,96 @@ async function shortcutTarget(shortcutPath) {
   return typeof result.target === "string" ? result.target : null;
 }
 
-async function protocolCommands(hive) {
-  const commands = [];
+export function isExactProtocolCommand(command, executable) {
+  if (typeof command !== "string" || typeof executable !== "string") {
+    return false;
+  }
+  const expected = '\"' + executable + '\" \"%1\"';
+  return command.toLowerCase() === expected.toLowerCase();
+}
+
+export function isExactProtocolIcon(icon, executable) {
+  if (typeof icon !== "string" || typeof executable !== "string") {
+    return false;
+  }
+  const expected = '\"' + executable + '\",0';
+  return icon.toLowerCase() === expected.toLowerCase();
+}
+
+async function protocolRegistrations(hive) {
+  const registrations = [];
   for (const view of REGISTRY_VIEWS) {
-    const result = await queryRegistryDefault(
-      hive,
-      PROTOCOL_REGISTRY_PATH,
-      view,
-    );
-    if (result.keyExists) {
-      commands.push({
+    const [rootDefault, urlProtocol, command, defaultIcon] = await Promise.all([
+      queryRegistryDefault(hive, PROTOCOL_REGISTRY_ROOT, view),
+      queryRegistryValue(hive, PROTOCOL_REGISTRY_ROOT, view, "URL Protocol"),
+      queryRegistryDefault(hive, PROTOCOL_REGISTRY_PATH, view),
+      queryRegistryDefault(hive, PROTOCOL_ICON_REGISTRY_PATH, view),
+    ]);
+    if (rootDefault.keyExists || command.keyExists || defaultIcon.keyExists) {
+      registrations.push({
         view,
-        command: result.valueExists ? result.value : null,
+        rootDefault: rootDefault.valueExists ? rootDefault.value : null,
+        urlProtocol: urlProtocol.valueExists ? urlProtocol.value : null,
+        urlProtocolKind: urlProtocol.valueKind,
+        command: command.valueExists ? command.value : null,
+        defaultIcon: defaultIcon.valueExists ? defaultIcon.value : null,
       });
     }
   }
-  return commands;
+  return registrations;
+}
+
+async function runForeignProtocolFixtureAction(action, fixture) {
+  for (const view of REGISTRY_VIEWS) {
+    const result = await runPowerShellJson(FOREIGN_PROTOCOL_FIXTURE_SCRIPT, {
+      LVIS_FOREIGN_PROTOCOL_ACTION: action,
+      LVIS_FOREIGN_PROTOCOL_TOKEN: fixture.token,
+      LVIS_FOREIGN_PROTOCOL_KIND: fixture.kind,
+      LVIS_FOREIGN_PROTOCOL_VALUE_NAME: FOREIGN_PROTOCOL_FIXTURE_VALUE_NAME,
+      LVIS_FOREIGN_PROTOCOL_SUBKEY_NAME: FOREIGN_PROTOCOL_FIXTURE_SUBKEY_NAME,
+      LVIS_REGISTRY_VIEW: view,
+    });
+    if (
+      result?.ok !== true ||
+      result.action !== action ||
+      result.view !== view ||
+      result.kind !== fixture.kind
+    ) {
+      throw new Error(
+        `foreign protocol fixture ${action} returned an invalid ${view}-bit result`,
+      );
+    }
+  }
+}
+
+function createForeignProtocolFixture(keepAppData) {
+  return {
+    token: `LVIS-NSIS-SMOKE-FOREIGN-${keepAppData ? "KEEP" : "DELETE"}`,
+    kind: keepAppData ? "ExpandString" : "Binary",
+  };
+}
+
+async function seedForeignProtocolFixture(fixture) {
+  await runForeignProtocolFixtureAction("seed", fixture);
+}
+
+async function assertForeignProtocolFixturePreserved(fixture) {
+  await runForeignProtocolFixtureAction("assert-preserved", fixture);
+}
+
+async function cleanupForeignProtocolFixture(fixture) {
+  await runForeignProtocolFixtureAction("cleanup", fixture);
+}
+
+async function assertNoCurrentUserProtocolHandlers(context) {
+  const registrations = await protocolRegistrations("HKCU");
+  if (registrations.length !== 0) {
+    throw new Error(
+      `${context} wrote HKCU lvis protocol handlers: ${registrations
+        .map(({ view }) => view)
+        .join(", ")}`,
+    );
+  }
 }
 
 async function assertInstalledSurface(machineInstall) {
@@ -628,26 +873,38 @@ async function assertInstalledSurface(machineInstall) {
     );
   }
 
-  const machineProtocol = await protocolCommands("HKLM");
+  const machineProtocol = await protocolRegistrations("HKLM");
   if (machineProtocol.length === 0) {
     throw new Error(
       "lvis protocol handler is missing from HKLM 32/64-bit registry views",
     );
   }
-  for (const { view, command } of machineProtocol) {
-    const target = parseExecutableFromCommand(command);
-    if (!target || !samePath(target, installedExe)) {
+  for (const registration of machineProtocol) {
+    if (registration.rootDefault !== "URL:lvis") {
       throw new Error(
-        `HKLM ${view}-bit lvis protocol target does not match install: ${command}`,
+        `HKLM ${registration.view}-bit lvis protocol root default is invalid`,
+      );
+    }
+    if (
+      registration.urlProtocol !== "" ||
+      registration.urlProtocolKind !== "String"
+    ) {
+      throw new Error(
+        `HKLM ${registration.view}-bit lvis URL Protocol must be an empty REG_SZ`,
+      );
+    }
+    if (!isExactProtocolCommand(registration.command, installedExe)) {
+      throw new Error(
+        `HKLM ${registration.view}-bit lvis command must exactly equal the quoted installed executable plus \"%1\"`,
+      );
+    }
+    if (!isExactProtocolIcon(registration.defaultIcon, installedExe)) {
+      throw new Error(
+        `HKLM ${registration.view}-bit lvis DefaultIcon must exactly equal the quoted installed executable plus ,0`,
       );
     }
   }
-  const userProtocol = await protocolCommands("HKCU");
-  if (userProtocol.length !== 0) {
-    throw new Error(
-      `perMachine install wrote HKCU lvis protocol handlers: ${userProtocol.map(({ view }) => view).join(", ")}`,
-    );
-  }
+  await assertNoCurrentUserProtocolHandlers("perMachine install");
 
   const shortcutName = requiredPackageString(
     packageJson.build?.nsis?.shortcutName,
@@ -733,8 +990,8 @@ async function assertUninstalledSurface(machineInstall) {
     );
   }
   if (
-    (await protocolCommands("HKLM")).length !== 0 ||
-    (await protocolCommands("HKCU")).length !== 0
+    (await protocolRegistrations("HKLM")).length !== 0 ||
+    (await protocolRegistrations("HKCU")).length !== 0
   ) {
     throw new Error("uninstall left lvis protocol handler registry residue");
   }
@@ -1526,8 +1783,8 @@ async function startInstalledApp(executable, timeoutMs) {
 async function assertCleanInstallSurface() {
   const machineEntries = await productUninstallEntries("HKLM");
   const userEntries = await productUninstallEntries("HKCU");
-  const machineProtocol = await protocolCommands("HKLM");
-  const userProtocol = await protocolCommands("HKCU");
+  const machineProtocol = await protocolRegistrations("HKLM");
+  const userProtocol = await protocolRegistrations("HKCU");
   const programFilesResidue = programFilesInstallCandidates().filter((target) =>
     existsSync(target),
   );
@@ -1572,10 +1829,13 @@ async function uninstallAndVerify(
   keepAppData,
   timeoutMs,
   probe,
+  foreignProtocolFixture,
 ) {
   const args = ["/S", "/allusers", ...(keepAppData ? ["/KEEP_APP_DATA"] : [])];
   await runProcess(machineInstall.uninstaller, args, { timeoutMs });
   await waitForFileRemoved(machineInstall.installedExe, 30_000);
+  await assertForeignProtocolFixturePreserved(foreignProtocolFixture);
+  await cleanupForeignProtocolFixture(foreignProtocolFixture);
   await assertUninstalledSurface(machineInstall);
   await assertAsrtTeardown(probe);
   process.stdout.write(
@@ -1628,6 +1888,13 @@ async function cleanupFailedInstallerPass(state, timeoutMs) {
     notes.push(
       "genuine uninstaller cleanup: no runnable uninstaller discovered",
     );
+  }
+
+  if (state.foreignProtocolFixture) {
+    await step("foreign protocol fixture cleanup", async () => {
+      await cleanupForeignProtocolFixture(state.foreignProtocolFixture);
+      state.foreignProtocolFixture = null;
+    });
   }
 
   await step("machine install surface absent", async () => {
@@ -1691,6 +1958,7 @@ async function runInstallerPass(
     machineInstall: null,
     probe: null,
     runningApp: null,
+    foreignProtocolFixture: null,
   };
   try {
     state.machineInstall = await installAndDiscover(
@@ -1711,9 +1979,12 @@ async function runInstallerPass(
       if (state.runningApp) {
         await state.runningApp.stop();
         state.runningApp = null;
+        await assertNoCurrentUserProtocolHandlers("installed app launch");
       }
     }
 
+    state.foreignProtocolFixture = createForeignProtocolFixture(keepAppData);
+    await seedForeignProtocolFixture(state.foreignProtocolFixture);
     state.probe = await prepareAsrtUninstallProbe(
       state.machineInstall.installDir,
     );
@@ -1722,7 +1993,9 @@ async function runInstallerPass(
       keepAppData,
       options.uninstallTimeoutMs,
       state.probe,
+      state.foreignProtocolFixture,
     );
+    state.foreignProtocolFixture = null;
     state.machineInstall = null;
     state.probe = null;
     if (keepAppData) assertUserDataTargetsExist();
