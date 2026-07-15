@@ -907,9 +907,7 @@ describe("Windows NSIS installer smoke contracts", () => {
     expect(installer).toContain(
       `!define LVIS_NSIS_PER_MACHINE_MARKER "${markerName}"`,
     );
-    expect(
-      installer.match(new RegExp(markerName.replace(/\./g, "\\."), "g")),
-    ).toHaveLength(1);
+    expect(installer.split(markerName)).toHaveLength(2);
     expect(smoke).toContain(
       `const NSIS_PER_MACHINE_MARKER_NAME = "${markerName}"`,
     );
