@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const runtimeContract = readFileSync(
-  resolve(process.cwd(), "resources/AGENTS.md"),
+  resolve(repoRoot, "resources/AGENTS.md"),
   "utf8",
 );
 
@@ -15,7 +17,7 @@ describe("packaged runtime AGENTS.md contract", () => {
   it("keeps durable runtime sources of truth without stale implementation notes", () => {
     expect(runtimeContract).toContain("# LVIS Runtime Assistant Contract");
     expect(runtimeContract).toContain("~/.lvis/plugins/<pluginId>/data/");
-    expect(runtimeContract).toContain("~/.lvis/audit/<YYYY-MM-DD>.jsonl");
+    expect(runtimeContract).toContain("~/.lvis/audit/*.jsonl");
     expect(runtimeContract).toContain("^[a-zA-Z_][a-zA-Z0-9_]*$");
     expect(runtimeContract).toContain("TOOL_TIMEOUT_POLICY");
 

@@ -92,6 +92,41 @@ export function writeUtf8FileAtomicSync(
   mode = DEFAULT_FILE_MODE,
   directorySyncRuntime: ParentDirectorySyncRuntime = DEFAULT_PARENT_DIRECTORY_SYNC_RUNTIME,
 ): void {
+  writeUtf8FileAtomicSyncInternal(
+    filePath,
+    content,
+    mode,
+    directorySyncRuntime,
+  );
+}
+
+/**
+ * Atomically replace a UTF-8 file only while a caller-owned precondition still
+ * holds. The candidate is fully written and fsynced before the final check, so
+ * a false precondition or any staging failure leaves the destination intact.
+ */
+export function replaceUtf8FileAtomicSyncIf(
+  filePath: string,
+  content: string,
+  precondition: () => boolean,
+  mode = DEFAULT_FILE_MODE,
+): boolean {
+  return writeUtf8FileAtomicSyncInternal(
+    filePath,
+    content,
+    mode,
+    DEFAULT_PARENT_DIRECTORY_SYNC_RUNTIME,
+    precondition,
+  );
+}
+
+function writeUtf8FileAtomicSyncInternal(
+  filePath: string,
+  content: string,
+  mode: number,
+  directorySyncRuntime: ParentDirectorySyncRuntime,
+  precondition?: () => boolean,
+): boolean {
   const parentDir = dirname(filePath);
   mkdirSync(parentDir, { recursive: true, mode: 0o700 });
   const tempPath = join(
@@ -108,9 +143,11 @@ export function writeUtf8FileAtomicSync(
     fsyncSync(fd);
     closeSync(fd);
     fd = undefined;
+    if (precondition && !precondition()) return false;
     renameSync(tempPath, filePath);
     committed = true;
     syncParentDirectoryAfterRename(parentDir, directorySyncRuntime);
+    return true;
   } catch (error) {
     operationError = error;
     throw error;

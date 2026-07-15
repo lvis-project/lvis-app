@@ -65,7 +65,7 @@ feature 전용 상태는 `~/.lvis/<feature>/` 아래에 두고 root에는 cross-
 |---|---|
 | 런타임 계약 | `~/.lvis/AGENTS.md` |
 | host 설정 | `~/.lvis/settings.json` |
-| 감사 기록 | `~/.lvis/audit/<YYYY-MM-DD>.jsonl` |
+| 감사 기록 | `~/.lvis/audit/*.jsonl` (날짜별 audit와 권한·sandbox channel) |
 | 권한 상태 | `~/.lvis/permissions.json` |
 | 암호화 비밀 | `~/.lvis/secrets/` |
 | 채팅 세션 | `~/.lvis/sessions/<sessionId>.jsonl` |
