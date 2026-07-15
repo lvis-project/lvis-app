@@ -8,7 +8,13 @@ import {
   type RationaleRequiredControl,
 } from "./rationale-control.js";
 import {
+  RATIONALE_GENERATION_FAILURE_CAUSES,
   REVIEWER_REEVALUATION_FAILURE_OUTCOMES,
+  validateRationaleOnlyBatchDecision,
+  type RationaleGenerationFailureCause,
+  type RationaleGenerationOutcome,
+  type RationaleOnlyBatchDecision,
+  type ReviewerReevaluationFailureOutcome,
   type ReviewerReevaluationOutcome,
 } from "./rationale-pr1-contract.js";
 
@@ -23,6 +29,52 @@ function exact(value: object, expected: readonly string[], label: string): void 
     throw new TypeError(label + " contains unexpected or missing fields");
   }
 }
+export type RationaleGenerationProviderFailureCause = Extract<
+  RationaleGenerationFailureCause,
+  "generation-unavailable" | "generation-error" | "generation-timeout"
+>;
+
+const RATIONALE_GENERATION_PROVIDER_FAILURE_CAUSES:
+readonly RationaleGenerationProviderFailureCause[] = [
+  "generation-unavailable", "generation-error", "generation-timeout",
+];
+
+function isGenerationFailure(
+  outcome: RationaleGenerationOutcome | null,
+): outcome is RationaleGenerationFailureCause {
+  return RATIONALE_GENERATION_FAILURE_CAUSES.includes(outcome as never);
+}
+
+function isReevaluationFailure(
+  outcome: ReviewerReevaluationOutcome | null,
+): outcome is ReviewerReevaluationFailureOutcome {
+  return REVIEWER_REEVALUATION_FAILURE_OUTCOMES.includes(outcome as never);
+}
+
+/**
+ * The generation and reviewer stages are independent but ordered. A successful
+ * rationale is ready only after fresh reviewer reevaluation. A failed ticket
+ * records either a generation failure (no reviewer request existed) or a
+ * reviewer failure after accepted generation.
+ */
+export function isRationaleOutcomeBinding(
+  status: RationaleStatus,
+  generationOutcome: RationaleGenerationOutcome | null,
+  reevaluationOutcome: ReviewerReevaluationOutcome | null,
+): boolean {
+  if (status === "ready") {
+    return generationOutcome === "accepted-rationale" &&
+      reevaluationOutcome === "fresh";
+  }
+  if (status === "failed") {
+    return (isGenerationFailure(generationOutcome) && reevaluationOutcome === null) ||
+      (generationOutcome === "accepted-rationale" &&
+        isReevaluationFailure(reevaluationOutcome));
+  }
+  return (status === "not-requested" || status === "pending") &&
+    generationOutcome === null && reevaluationOutcome === null;
+}
+
 
 export type RationaleTicketState =
   | "review_required" | "rationale_requested" | "rationale_ready"
@@ -42,6 +94,7 @@ export interface RationaleTicketStateRecord {
   actionDigest: string;
   state: RationaleTicketState;
   rationaleStatus: RationaleStatus;
+  generationOutcome: RationaleGenerationOutcome | null;
   reevaluationOutcome: ReviewerReevaluationOutcome | null;
   terminalReason: RationaleTerminalReason | null;
 }
@@ -76,6 +129,7 @@ export interface RationaleTicketEvent {
   ticketId: string;
   actionDigest: string;
   event: RationaleTicketEventName;
+  generationOutcome: RationaleGenerationOutcome | null;
   reevaluationOutcome: ReviewerReevaluationOutcome | null;
 }
 
@@ -107,36 +161,92 @@ export function createRationaleReviewRequiredRecord(
   return seal({ contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
     ticketId: control.ticketId, actionDigest: control.action.actionDigest,
     state: "review_required", rationaleStatus: "not-requested",
-    reevaluationOutcome: null, terminalReason: null,
+    generationOutcome: null, reevaluationOutcome: null, terminalReason: null,
   }, "RationaleTicketStateRecord");
+}
+
+export interface RationaleTicketResolvedOutcomes {
+  generationOutcome: RationaleGenerationOutcome;
+  reevaluationOutcome: ReviewerReevaluationOutcome | null;
 }
 
 export function createRationaleTicketEvent(
   control: RationaleRequiredControl,
   event: RationaleTicketEventName,
-  reevaluationOutcome: ReviewerReevaluationOutcome | null =
-    event === "rationale-ready" ? "fresh" : null,
+  outcomes: RationaleTicketResolvedOutcomes | null =
+    event === "rationale-ready"
+      ? { generationOutcome: "accepted-rationale", reevaluationOutcome: "fresh" }
+      : null,
 ): RationaleTicketEvent {
   if (!EVENT_NAMES.includes(event)) throw new TypeError("invalid rationale ticket event");
-  const isFailure = REVIEWER_REEVALUATION_FAILURE_OUTCOMES.includes(
-    reevaluationOutcome as never,
-  );
-  if ((event === "rationale-ready" && reevaluationOutcome !== "fresh") ||
-      (event === "rationale-failed" && !isFailure) ||
-      (!["rationale-ready", "rationale-failed"].includes(event) &&
-        reevaluationOutcome !== null)) {
+  if (outcomes !== null) {
+    assertRationaleCanonicalJson(outcomes, "RationaleTicketResolvedOutcomes");
+    exact(outcomes, ["generationOutcome", "reevaluationOutcome"],
+      "RationaleTicketResolvedOutcomes");
+  }
+  const generationOutcome = outcomes?.generationOutcome ?? null;
+  const reevaluationOutcome = outcomes?.reevaluationOutcome ?? null;
+  const status = event === "rationale-ready" ? "ready"
+    : event === "rationale-failed" ? "failed" : null;
+  if ((status !== null &&
+        (outcomes === null ||
+          !isRationaleOutcomeBinding(status, generationOutcome, reevaluationOutcome))) ||
+      (status === null && outcomes !== null)) {
     throw new TypeError("rationale ticket event/outcome mismatch");
   }
   return seal({ contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
     ticketId: control.ticketId, actionDigest: control.action.actionDigest, event,
-    reevaluationOutcome,
+    generationOutcome, reevaluationOutcome,
   }, "RationaleTicketEvent");
+}
+
+export function createRationaleGenerationProviderFailureEvent(
+  control: RationaleRequiredControl,
+  generationOutcome: RationaleGenerationProviderFailureCause,
+): RationaleTicketEvent {
+  if (!RATIONALE_GENERATION_PROVIDER_FAILURE_CAUSES.includes(generationOutcome)) {
+    throw new TypeError("invalid rationale generation provider failure");
+  }
+  return createRationaleTicketEvent(control, "rationale-failed", {
+    generationOutcome, reevaluationOutcome: null,
+  });
+}
+
+export function createRationaleTicketEventFromBatchDecision(
+  control: RationaleRequiredControl,
+  decision: RationaleOnlyBatchDecision,
+  reevaluationOutcome: ReviewerReevaluationOutcome | null,
+  now = Date.now(),
+): RationaleTicketEvent {
+  if (!validateRationaleOnlyBatchDecision(decision, control, now)) {
+    throw new TypeError("invalid rationale-only batch decision");
+  }
+  if (decision.generationOutcome !== "accepted-rationale") {
+    if (reevaluationOutcome !== null) {
+      throw new TypeError("generation failure cannot have a reviewer outcome");
+    }
+    return createRationaleTicketEvent(control, "rationale-failed", {
+      generationOutcome: decision.generationOutcome,
+      reevaluationOutcome: null,
+    });
+  }
+  if (reevaluationOutcome === "fresh") {
+    return createRationaleTicketEvent(control, "rationale-ready", {
+      generationOutcome: decision.generationOutcome, reevaluationOutcome,
+    });
+  }
+  if (isReevaluationFailure(reevaluationOutcome)) {
+    return createRationaleTicketEvent(control, "rationale-failed", {
+      generationOutcome: decision.generationOutcome, reevaluationOutcome,
+    });
+  }
+  throw new TypeError("accepted rationale requires a fresh or failed reviewer outcome");
 }
 
 export function validateRationaleTicketRecord(record: RationaleTicketStateRecord): void {
   assertRationaleCanonicalJson(record, "RationaleTicketStateRecord");
   exact(record, ["contractVersion", "ticketId", "actionDigest", "state",
-    "rationaleStatus", "reevaluationOutcome", "terminalReason"],
+    "rationaleStatus", "generationOutcome", "reevaluationOutcome", "terminalReason"],
     "RationaleTicketStateRecord");
   if (record.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
       typeof record.ticketId !== "string" ||
@@ -146,14 +256,10 @@ export function validateRationaleTicketRecord(record: RationaleTicketStateRecord
       !STATE_NAMES.includes(record.state) || !STATUS_NAMES.includes(record.rationaleStatus)) {
     throw new TypeError("invalid rationale ticket binding");
   }
-  const failureOutcome = REVIEWER_REEVALUATION_FAILURE_OUTCOMES.includes(
-    record.reevaluationOutcome as never,
-  );
-  if ((record.rationaleStatus === "ready" && record.reevaluationOutcome !== "fresh") ||
-      (record.rationaleStatus === "failed" && !failureOutcome) ||
-      (["not-requested", "pending"].includes(record.rationaleStatus) &&
-        record.reevaluationOutcome !== null)) {
-    throw new TypeError("rationale status/reevaluation outcome mismatch");
+  if (!isRationaleOutcomeBinding(
+    record.rationaleStatus, record.generationOutcome, record.reevaluationOutcome,
+  )) {
+    throw new TypeError("rationale status/generation/reevaluation outcome mismatch");
   }
   if (record.state === "review_required" &&
       (record.rationaleStatus !== "not-requested" || record.terminalReason !== null)) {
@@ -226,12 +332,13 @@ export function validateHostConsumedAllowOnceReceipt(
 }
 function next(record: RationaleTicketStateRecord, state: RationaleTicketState,
   rationaleStatus: RationaleStatus,
+  generationOutcome: RationaleGenerationOutcome | null,
   reevaluationOutcome: ReviewerReevaluationOutcome | null,
   terminalReason: RationaleTerminalReason | null,
 ): RationaleTicketStateRecord {
   return seal({ contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
     ticketId: record.ticketId, actionDigest: record.actionDigest,
-    state, rationaleStatus, reevaluationOutcome, terminalReason },
+    state, rationaleStatus, generationOutcome, reevaluationOutcome, terminalReason },
     "RationaleTicketStateRecord");
 }
 
@@ -241,20 +348,21 @@ export function transitionRationaleTicket(
   validateRationaleTicketRecord(record);
   assertRationaleCanonicalJson(event, "RationaleTicketEvent");
   exact(event, ["contractVersion", "ticketId", "actionDigest", "event",
-    "reevaluationOutcome"],
+    "generationOutcome", "reevaluationOutcome"],
     "RationaleTicketEvent");
   if (event.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
       event.ticketId !== record.ticketId || event.actionDigest !== record.actionDigest ||
       !EVENT_NAMES.includes(event.event)) {
     throw new Error("ticket/action/event binding mismatch");
   }
-  const eventFailure = REVIEWER_REEVALUATION_FAILURE_OUTCOMES.includes(
-    event.reevaluationOutcome as never,
-  );
-  if ((event.event === "rationale-ready" && event.reevaluationOutcome !== "fresh") ||
-      (event.event === "rationale-failed" && !eventFailure) ||
-      (!["rationale-ready", "rationale-failed"].includes(event.event) &&
-        event.reevaluationOutcome !== null)) {
+  const eventStatus = event.event === "rationale-ready" ? "ready"
+    : event.event === "rationale-failed" ? "failed" : null;
+  if ((eventStatus !== null &&
+        !isRationaleOutcomeBinding(
+          eventStatus, event.generationOutcome, event.reevaluationOutcome,
+        )) ||
+      (eventStatus === null &&
+        (event.generationOutcome !== null || event.reevaluationOutcome !== null))) {
     throw new Error("ticket event/outcome binding mismatch");
   }
   if (TERMINAL_STATES.includes(record.state)) {
@@ -262,44 +370,46 @@ export function transitionRationaleTicket(
   }
   switch (event.event) {
     case "abort": return next(record, "cancelled", record.rationaleStatus,
-      record.reevaluationOutcome, "caller-abort");
+      record.generationOutcome, record.reevaluationOutcome, "caller-abort");
     case "session-close":
       return next(record, "cancelled", record.rationaleStatus,
-        record.reevaluationOutcome, "session-close");
+        record.generationOutcome, record.reevaluationOutcome, "session-close");
     case "identity-mismatch":
       return next(record, "rejected", record.rationaleStatus,
-        record.reevaluationOutcome, "identity-mismatch");
+        record.generationOutcome, record.reevaluationOutcome, "identity-mismatch");
     case "stale-replay":
       return next(record, "rejected", record.rationaleStatus,
-        record.reevaluationOutcome, "stale-replay");
+        record.generationOutcome, record.reevaluationOutcome, "stale-replay");
     case "expire": return next(record, "expired", record.rationaleStatus,
-      record.reevaluationOutcome, "expired");
+      record.generationOutcome, record.reevaluationOutcome, "expired");
     default: break;
   }
   const key = record.state + ":" + event.event;
   switch (key) {
     case "review_required:request-rationale":
-      return next(record, "rationale_requested", "pending", null, null);
+      return next(record, "rationale_requested", "pending", null, null, null);
     case "rationale_requested:rationale-ready":
-      return next(record, "rationale_ready", "ready", "fresh", null);
+      return next(record, "rationale_ready", "ready",
+        event.generationOutcome, event.reevaluationOutcome, null);
     case "rationale_requested:rationale-failed":
-      return next(record, "rationale_failed", "failed", event.reevaluationOutcome, null);
+      return next(record, "rationale_failed", "failed",
+        event.generationOutcome, event.reevaluationOutcome, null);
     case "rationale_ready:prompt-user":
     case "rationale_failed:prompt-user":
       return next(record, "user_pending", record.rationaleStatus,
-        record.reevaluationOutcome, null);
+        record.generationOutcome, record.reevaluationOutcome, null);
     case "user_pending:allow-once":
       return next(record, "allowed_once", record.rationaleStatus,
-        record.reevaluationOutcome, "allowed-once");
+        record.generationOutcome, record.reevaluationOutcome, "allowed-once");
     case "user_pending:deny":
       return next(record, "denied", record.rationaleStatus,
-        record.reevaluationOutcome, "user-deny");
+        record.generationOutcome, record.reevaluationOutcome, "user-deny");
     case "user_pending:cancel":
       return next(record, "cancelled", record.rationaleStatus,
-        record.reevaluationOutcome, "user-cancel");
+        record.generationOutcome, record.reevaluationOutcome, "user-cancel");
     case "user_pending:modal-timeout":
       return next(record, "cancelled", record.rationaleStatus,
-        record.reevaluationOutcome, "modal-timeout");
+        record.generationOutcome, record.reevaluationOutcome, "modal-timeout");
     default: throw new Error("invalid rationale ticket transition: " + key);
   }
 }
