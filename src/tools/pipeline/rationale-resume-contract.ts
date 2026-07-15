@@ -15,12 +15,14 @@ import {
 import {
   REVIEWER_REEVALUATION_FAILURE_OUTCOMES,
   validateReviewerScopeReevaluation,
+  type RationaleGenerationOutcome,
   type ReviewerScopeAlignment,
   type ReviewerReevaluationOutcome,
   type ReviewerScopeReevaluation,
 } from "./rationale-pr1-contract.js";
 import {
   createInvocationStartedAudit,
+  isRationaleOutcomeBinding,
   validateHostInvocationStartLease,
   validateInvocationAuditRecord,
   validateHostConsumedAllowOnceReceipt,
@@ -65,7 +67,8 @@ export interface RationaleUiAuditProjection {
   affectedResources: readonly string[];
   requiredAuthority: string;
   reviewerOutcome: "fresh" | "cache";
-  reevaluationOutcome: ReviewerReevaluationOutcome;
+  generationOutcome: RationaleGenerationOutcome;
+  reevaluationOutcome: ReviewerReevaluationOutcome | null;
   initialVerdict: RiskVerdict;
   reevaluatedVerdict: RiskVerdict;
   effectiveVerdict: RiskVerdict;
@@ -80,24 +83,37 @@ export interface RationaleUiAuditProjection {
 export function createRationaleUiAuditProjection(input: {
   control: RationaleRequiredControl;
   response: RationaleResponse | null;
-  reevaluation: ReviewerScopeReevaluation;
+  reevaluation: ReviewerScopeReevaluation | null;
   ticket: RationaleTicketStateRecord;
   now?: number;
 }): RationaleUiAuditProjection {
   const now = input.now ?? Date.now();
   if (!verifyRationaleRequiredControl(input.control, { now }) ||
-      !validateReviewerScopeReevaluation(input.reevaluation, input.control, now)) {
+      (input.reevaluation !== null &&
+        !validateReviewerScopeReevaluation(input.reevaluation, input.control, now))) {
     throw new Error("invalid rationale UI/audit binding");
   }
   validateRationaleTicketRecord(input.ticket);
+  const generationOutcome = input.ticket.generationOutcome;
   if (input.ticket.ticketId !== input.control.ticketId ||
       input.ticket.actionDigest !== input.control.action.actionDigest ||
-      input.ticket.reevaluationOutcome !== input.reevaluation.outcome) {
+      generationOutcome === null ||
+      input.ticket.reevaluationOutcome !== (input.reevaluation?.outcome ?? null) ||
+      !isRationaleOutcomeBinding(
+        input.ticket.rationaleStatus, generationOutcome, input.ticket.reevaluationOutcome,
+      )) {
     throw new Error("ticket/action projection mismatch");
   }
+
   let suggestion: string | null = null;
+  let reevaluatedVerdict = seal(input.control.initialVerdict, "reevaluatedVerdict");
+  let effectiveVerdict = seal(input.control.initialVerdict, "effectiveVerdict");
+  let scopeAlignment: ReviewerScopeAlignment = "unknown";
+  let scopeReasons: readonly string[] = ["rationale-generation-" + generationOutcome];
+  let modalFallbackRequired = true;
+
   if (input.ticket.rationaleStatus === "ready") {
-    if (input.reevaluation.outcome !== "fresh" ||
+    if (input.reevaluation === null || input.reevaluation.outcome !== "fresh" ||
         input.reevaluation.modalFallbackRequired !== false) {
       throw new Error("ready rationale requires fresh reviewer reevaluation");
     }
@@ -106,11 +122,28 @@ export function createRationaleUiAuditProjection(input: {
       throw new Error("ready projection requires sealed rationale response");
     }
     suggestion = parsed.suggestion;
+    reevaluatedVerdict = input.reevaluation.reevaluatedVerdict;
+    effectiveVerdict = input.reevaluation.effectiveVerdict;
+    scopeAlignment = input.reevaluation.scopeAlignment;
+    scopeReasons = input.reevaluation.scopeReasons;
+    modalFallbackRequired = false;
   } else if (input.ticket.rationaleStatus === "failed") {
-    if (!REVIEWER_REEVALUATION_FAILURE_OUTCOMES.includes(
-      input.reevaluation.outcome as never,
-    ) || input.reevaluation.modalFallbackRequired !== true || input.response !== null) {
-      throw new Error("failed rationale requires reviewer failure and modal fallback");
+    if (input.response !== null) {
+      throw new Error("failed rationale requires null response and modal fallback");
+    }
+    if (generationOutcome === "accepted-rationale") {
+      if (input.reevaluation === null ||
+          !REVIEWER_REEVALUATION_FAILURE_OUTCOMES.includes(
+            input.reevaluation.outcome as never,
+          ) || input.reevaluation.modalFallbackRequired !== true) {
+        throw new Error("failed reevaluation requires reviewer failure and modal fallback");
+      }
+      reevaluatedVerdict = input.reevaluation.reevaluatedVerdict;
+      effectiveVerdict = input.reevaluation.effectiveVerdict;
+      scopeAlignment = input.reevaluation.scopeAlignment;
+      scopeReasons = input.reevaluation.scopeReasons;
+    } else if (input.reevaluation !== null) {
+      throw new Error("generation failure must not contain reviewer reevaluation");
     }
   } else {
     throw new Error("UI/audit projection requires ready or failed rationale status");
@@ -124,15 +157,12 @@ export function createRationaleUiAuditProjection(input: {
     requestedEffects: input.control.action.requestedEffects,
     affectedResources: input.control.action.affectedResources,
     requiredAuthority: input.control.action.requiredAuthority,
-    reviewerOutcome: input.control.reviewerOutcome,
-    reevaluationOutcome: input.reevaluation.outcome,
-    initialVerdict: input.control.initialVerdict,
-    reevaluatedVerdict: input.reevaluation.reevaluatedVerdict,
-    effectiveVerdict: input.reevaluation.effectiveVerdict,
-    scopeAlignment: input.reevaluation.scopeAlignment,
-    scopeReasons: input.reevaluation.scopeReasons,
+    reviewerOutcome: input.control.reviewerOutcome, generationOutcome,
+    reevaluationOutcome: input.reevaluation?.outcome ?? null,
+    initialVerdict: input.control.initialVerdict, reevaluatedVerdict, effectiveVerdict,
+    scopeAlignment, scopeReasons,
     rationaleStatus: input.ticket.rationaleStatus, terminalReason: input.ticket.terminalReason,
-    suggestion, modalFallbackRequired: input.reevaluation.modalFallbackRequired,
+    suggestion, modalFallbackRequired,
   }, "RationaleUiAuditProjection");
 }
 
@@ -173,7 +203,8 @@ export interface SealedRationaleResumeRequest {
   control: RationaleRequiredControl;
   response: RationaleResponse | null;
   rationaleStatus: Extract<RationaleStatus, "ready" | "failed">;
-  reevaluation: ReviewerScopeReevaluation;
+  generationOutcome: RationaleGenerationOutcome;
+  reevaluation: ReviewerScopeReevaluation | null;
   ticket: RationaleTicketStateRecord;
   currentActionIdentity: ActionIdentity;
   currentEligibilityContext: HostRationaleEligibilityContext;
@@ -187,7 +218,7 @@ export function createSealedRationaleResumeRequest(input: {
   control: RationaleRequiredControl;
   response: unknown | null;
   rationaleStatus: "ready" | "failed";
-  reevaluation: ReviewerScopeReevaluation;
+  reevaluation: ReviewerScopeReevaluation | null;
   ticket: RationaleTicketStateRecord;
   currentActionIdentity: ActionIdentity;
   currentEligibilityContext: HostRationaleEligibilityContext;
@@ -205,33 +236,48 @@ export function createSealedRationaleResumeRequest(input: {
       !equal(input.currentActionIdentity, input.control.action)) {
     throw new Error("current ActionIdentity does not match sealed action");
   }
-  if (!validateReviewerScopeReevaluation(input.reevaluation, input.control, now)) {
+  if (input.reevaluation !== null &&
+      !validateReviewerScopeReevaluation(input.reevaluation, input.control, now)) {
     throw new Error("reviewer reevaluation binding mismatch");
   }
   validateRationaleTicketRecord(input.ticket);
   validateHostConsumedAllowOnceReceipt(
     input.hostConsumedAllowOnceReceipt, input.control, input.ticket, now,
   );
+  const generationOutcome = input.ticket.generationOutcome;
   if (input.ticket.ticketId !== input.control.ticketId ||
       input.ticket.actionDigest !== input.control.action.actionDigest ||
       input.ticket.state !== "allowed_once" || input.ticket.terminalReason !== "allowed-once" ||
       input.ticket.rationaleStatus !== input.rationaleStatus ||
-      input.ticket.reevaluationOutcome !== input.reevaluation.outcome) {
+      generationOutcome === null ||
+      input.ticket.reevaluationOutcome !== (input.reevaluation?.outcome ?? null) ||
+      !isRationaleOutcomeBinding(
+        input.rationaleStatus, generationOutcome, input.ticket.reevaluationOutcome,
+      )) {
     throw new Error("allow-once ticket binding mismatch");
   }
   let response: RationaleResponse | null;
   if (input.rationaleStatus === "ready") {
-    if (input.reevaluation.outcome !== "fresh" ||
+    if (generationOutcome !== "accepted-rationale" ||
+        input.reevaluation === null || input.reevaluation.outcome !== "fresh" ||
         input.reevaluation.modalFallbackRequired !== false) {
       throw new Error("ready rationale requires fresh reviewer reevaluation");
     }
     response = parseRationaleResponse(input.response, input.control, now);
     if (!response) throw new Error("invalid rationale response");
   } else {
-    if (!REVIEWER_REEVALUATION_FAILURE_OUTCOMES.includes(
-      input.reevaluation.outcome as never,
-    ) || input.reevaluation.modalFallbackRequired !== true || input.response !== null) {
-      throw new Error("failed rationale requires reviewer failure and null response");
+    if (input.response !== null) {
+      throw new Error("failed rationale requires null response");
+    }
+    if (generationOutcome === "accepted-rationale") {
+      if (input.reevaluation === null ||
+          !REVIEWER_REEVALUATION_FAILURE_OUTCOMES.includes(
+            input.reevaluation.outcome as never,
+          ) || input.reevaluation.modalFallbackRequired !== true) {
+        throw new Error("failed reevaluation requires reviewer failure");
+      }
+    } else if (input.reevaluation !== null) {
+      throw new Error("generation failure must not contain reviewer reevaluation");
     }
     response = null;
   }
@@ -241,7 +287,8 @@ export function createSealedRationaleResumeRequest(input: {
     invocationDigest: input.control.invocationDigest,
     authorizationReceiptId: input.hostConsumedAllowOnceReceipt.receiptId,
     control: seal(input.control, "control"), response,
-    rationaleStatus: input.rationaleStatus, reevaluation: input.reevaluation,
+    rationaleStatus: input.rationaleStatus, generationOutcome,
+    reevaluation: input.reevaluation,
     ticket: input.ticket, currentActionIdentity: seal(input.currentActionIdentity, "currentActionIdentity"),
     currentEligibilityContext: seal(input.currentEligibilityContext, "currentEligibilityContext"),
     securitySuffixVersion: RATIONALE_SECURITY_SUFFIX_VERSION,
@@ -262,9 +309,9 @@ export function validateSealedRationaleResumeRequest(
     if (!isRecord(request)) return false;
     exact(request, ["contractVersion", "kind", "ticketId", "actionDigest",
       "invocationDigest", "authorizationReceiptId", "control", "response", "rationaleStatus",
-      "reevaluation", "ticket", "currentActionIdentity", "currentEligibilityContext",
-      "securitySuffixVersion", "securitySuffix", "executionEntryPoint", "directToolExecute"],
-      "SealedRationaleResumeRequest");
+      "generationOutcome", "reevaluation", "ticket", "currentActionIdentity",
+      "currentEligibilityContext", "securitySuffixVersion", "securitySuffix",
+      "executionEntryPoint", "directToolExecute"], "SealedRationaleResumeRequest");
     const control = request.control as RationaleRequiredControl;
     if (!verifyRationaleRequiredControl(control, { now, currentEligibilityContext })) return false;
     const ticket = request.ticket as RationaleTicketStateRecord;
@@ -272,6 +319,10 @@ export function validateSealedRationaleResumeRequest(
     validateHostConsumedAllowOnceReceipt(
       hostConsumedAllowOnceReceipt, control, ticket, now,
     );
+    const generationOutcome = request.generationOutcome as RationaleGenerationOutcome;
+    const reevaluation = request.reevaluation === null
+      ? null : request.reevaluation as ReviewerScopeReevaluation;
+    const reevaluationOutcome = reevaluation?.outcome ?? null;
     if (request.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
       request.kind !== "sealed-rationale-resume" || request.ticketId !== control.ticketId ||
       request.actionDigest !== control.action.actionDigest ||
@@ -280,8 +331,12 @@ export function validateSealedRationaleResumeRequest(
       ticket.ticketId !== control.ticketId || ticket.actionDigest !== control.action.actionDigest ||
       ticket.state !== "allowed_once" || ticket.terminalReason !== "allowed-once" ||
       ticket.rationaleStatus !== request.rationaleStatus ||
-      ticket.reevaluationOutcome !==
-        (request.reevaluation as ReviewerScopeReevaluation).outcome ||
+      ticket.generationOutcome !== generationOutcome ||
+      ticket.reevaluationOutcome !== reevaluationOutcome ||
+      !isRationaleOutcomeBinding(
+        request.rationaleStatus as RationaleStatus,
+        generationOutcome, reevaluationOutcome,
+      ) ||
       request.executionEntryPoint !== "tool-executor-security-suffix" ||
       request.securitySuffixVersion !== RATIONALE_SECURITY_SUFFIX_VERSION ||
       request.directToolExecute !== "forbidden" ||
@@ -289,17 +344,19 @@ export function validateSealedRationaleResumeRequest(
       !equal(request.currentActionIdentity, currentActionIdentity) ||
       !equal(request.currentEligibilityContext, currentEligibilityContext) ||
       !equal(request.securitySuffix, RATIONALE_SECURITY_SUFFIX) ||
-      !validateReviewerScopeReevaluation(request.reevaluation, control, now)) return false;
+      (reevaluation !== null &&
+        !validateReviewerScopeReevaluation(reevaluation, control, now))) return false;
     if (request.rationaleStatus === "failed") {
-      const reevaluation = request.reevaluation as ReviewerScopeReevaluation;
-      return request.response === null && reevaluation.modalFallbackRequired === true &&
-        REVIEWER_REEVALUATION_FAILURE_OUTCOMES.includes(reevaluation.outcome as never);
+      if (request.response !== null) return false;
+      return generationOutcome === "accepted-rationale"
+        ? reevaluation !== null && reevaluation.modalFallbackRequired === true &&
+            REVIEWER_REEVALUATION_FAILURE_OUTCOMES.includes(reevaluation.outcome as never)
+        : reevaluation === null;
     }
-    if (request.rationaleStatus !== "ready") return false;
-    const reevaluation = request.reevaluation as ReviewerScopeReevaluation;
-    if (reevaluation.outcome !== "fresh" || reevaluation.modalFallbackRequired !== false) {
-      return false;
-    }
+    if (request.rationaleStatus !== "ready" ||
+        generationOutcome !== "accepted-rationale" ||
+        reevaluation === null || reevaluation.outcome !== "fresh" ||
+        reevaluation.modalFallbackRequired !== false) return false;
     const response = parseRationaleResponse(request.response, control, now);
     return response !== null && equal(response, request.response);
   } catch {

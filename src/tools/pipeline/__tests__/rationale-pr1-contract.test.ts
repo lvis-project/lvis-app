@@ -17,6 +17,7 @@ import {
   createRationaleOnlyRoundContract,
   createReviewerScopeReevaluation,
   evaluateRationaleOnlyBatch,
+  validateRationaleOnlyBatchDecision,
   validateReviewerScopeReevaluation,
 } from "../rationale-pr1-contract.js";
 import {
@@ -24,8 +25,10 @@ import {
   createAuthorizedInvocationAudit,
   createInvocationAuditEvent,
   createInvocationStartedAudit,
+  createRationaleGenerationProviderFailureEvent,
   createRationaleReviewRequiredRecord,
   createRationaleTicketEvent,
+  createRationaleTicketEventFromBatchDecision,
   transitionInvocationAudit,
   transitionRationaleTicket,
   type HostConsumedAllowOnceReceipt,
@@ -104,9 +107,9 @@ function responseFor(control: RationaleRequiredControl) {
 }
 
 function event(control: RationaleRequiredControl, name: RationaleTicketEventName) {
-  return createRationaleTicketEvent(
-    control, name, name === "rationale-failed" ? "timeout" : undefined,
-  );
+  return createRationaleTicketEvent(control, name, name === "rationale-failed"
+    ? { generationOutcome: "accepted-rationale", reevaluationOutcome: "timeout" }
+    : undefined);
 }
 
 function receiptFor(
@@ -294,7 +297,7 @@ describe("PR1 executor channel and rationale-only round", () => {
     }], NOW);
     expect(accepted).toMatchObject({
       accepted: true, ticketCreationAllowed: true, sideEffectsAllowed: false,
-      reason: "accepted-rationale",
+      generationOutcome: "accepted-rationale", reason: "accepted-rationale",
     });
 
     const rejected = evaluateRationaleOnlyBatch(control, [
@@ -305,10 +308,38 @@ describe("PR1 executor channel and rationale-only round", () => {
     expect(rejected).toMatchObject({
       batchKind: "rationale-only-followup",
       accepted: false, ticketCreationAllowed: false, sideEffectsAllowed: false,
+      generationOutcome: "ordinary-tool-call-rejected",
       reason: "ordinary-tool-call-rejected", rejectedCallIds: ["shell-1"],
       cancelledRationaleOnlySiblingCallIds: ["rationale-2", "write-1"],
     });
   });
+  it("validates single ordinary, missing, and multiple-call generation outcomes", () => {
+    const control = fixture();
+    const response = responseFor(control);
+    const ordinary = evaluateRationaleOnlyBatch(control, [{
+      id: "shell-1", name: "bash", input: { command: "whoami" },
+    }], NOW);
+    expect(ordinary).toMatchObject({
+      generationOutcome: "ordinary-tool-call-rejected",
+      rejectedCallIds: ["shell-1"], cancelledRationaleOnlySiblingCallIds: [],
+    });
+    expect(validateRationaleOnlyBatchDecision(ordinary, control, NOW)).toBe(true);
+
+    const missing = evaluateRationaleOnlyBatch(control, [], NOW);
+    expect(missing.generationOutcome).toBe("missing-rationale-call");
+    expect(validateRationaleOnlyBatchDecision(missing, control, NOW)).toBe(true);
+
+    const multiple = evaluateRationaleOnlyBatch(control, [
+      { id: "rationale-1", name: "permission_rationale", input: response },
+      { id: "rationale-2", name: "permission_rationale", input: responseFor(control) },
+    ], NOW);
+    expect(multiple.generationOutcome).toBe("multiple-calls-rejected");
+    expect(validateRationaleOnlyBatchDecision(multiple, control, NOW)).toBe(true);
+    expect(validateRationaleOnlyBatchDecision(
+      { ...ordinary, extra: true }, control, NOW,
+    )).toBe(false);
+  });
+
 
   it("never accepts scopeAlignment from the main LLM response", () => {
     const control = fixture();
@@ -423,6 +454,58 @@ describe("ticket/action-bound lifecycle truth table", () => {
         else expect(run).toThrow();
       }
     }
+  });
+
+  it("separates generation, reviewer, and modal timeout outcomes", () => {
+    const control = fixture();
+    const requested = transitionRationaleTicket(
+      createRationaleReviewRequiredRecord(control, NOW),
+      event(control, "request-rationale"),
+    );
+    const accepted = evaluateRationaleOnlyBatch(control, [{
+      id: "rationale-1", name: "permission_rationale", input: responseFor(control),
+    }], NOW);
+    const reviewerFailed = transitionRationaleTicket(
+      requested,
+      createRationaleTicketEventFromBatchDecision(control, accepted, "timeout", NOW),
+    );
+    expect(reviewerFailed).toMatchObject({
+      state: "rationale_failed", generationOutcome: "accepted-rationale",
+      reevaluationOutcome: "timeout", terminalReason: null,
+    });
+
+    const generationFailed = transitionRationaleTicket(
+      requested,
+      createRationaleGenerationProviderFailureEvent(control, "generation-timeout"),
+    );
+    expect(generationFailed).toMatchObject({
+      state: "rationale_failed", generationOutcome: "generation-timeout",
+      reevaluationOutcome: null, terminalReason: null,
+    });
+    const pending = transitionRationaleTicket(
+      generationFailed, event(control, "prompt-user"),
+    );
+    const modalTimedOut = transitionRationaleTicket(
+      pending, event(control, "modal-timeout"),
+    );
+    expect(modalTimedOut).toMatchObject({
+      state: "cancelled", rationaleStatus: "failed",
+      generationOutcome: "generation-timeout", reevaluationOutcome: null,
+      terminalReason: "modal-timeout",
+    });
+
+    const malformed = evaluateRationaleOnlyBatch(control, [{
+      id: "rationale-bad", name: "permission_rationale", input: {},
+    }], NOW);
+    expect(createRationaleTicketEventFromBatchDecision(
+      control, malformed, null, NOW,
+    )).toMatchObject({
+      event: "rationale-failed", generationOutcome: "malformed-rationale",
+      reevaluationOutcome: null,
+    });
+    expect(() => createRationaleTicketEventFromBatchDecision(
+      control, malformed, "timeout", NOW,
+    )).toThrow(/cannot have a reviewer outcome/);
   });
 
   it("rejects ticket/action mismatches and binds terminal reasons", () => {
@@ -603,7 +686,9 @@ describe("invocation audit and sealed resume", () => {
     ] as const) {
       const failure = createReviewerScopeReevaluation({ control, outcome, now: NOW });
       expect(() => createRationaleTicketEvent(
-        control, "rationale-ready", outcome,
+        control, "rationale-ready", {
+          generationOutcome: "accepted-rationale", reevaluationOutcome: outcome,
+        },
       )).toThrow(/event\/outcome mismatch/);
       expect(() => createRationaleUiAuditProjection({
         control, response, reevaluation: failure, ticket: allowedReady, now: NOW,
@@ -616,7 +701,9 @@ describe("invocation audit and sealed resume", () => {
       })).toThrow(/ticket binding mismatch/);
 
       const failed = transitionRationaleTicket(
-        requested, createRationaleTicketEvent(control, "rationale-failed", outcome),
+        requested, createRationaleTicketEvent(control, "rationale-failed", {
+          generationOutcome: "accepted-rationale", reevaluationOutcome: outcome,
+        }),
       );
       const pendingFailed = transitionRationaleTicket(
         failed, event(control, "prompt-user"),
@@ -636,7 +723,7 @@ describe("invocation audit and sealed resume", () => {
       })).toThrow(/ticket binding mismatch/);
       expect(() => createRationaleUiAuditProjection({
         control, response, reevaluation: failure, ticket: allowedFailed, now: NOW,
-      })).toThrow(/reviewer failure and modal fallback/);
+      })).toThrow(/null response/);
       expect(() => createSealedRationaleResumeRequest({
         control, response, rationaleStatus: "failed", reevaluation: failure,
         ticket: allowedFailed, currentActionIdentity: control.action,
@@ -645,7 +732,9 @@ describe("invocation audit and sealed resume", () => {
       })).toThrow(/null response/);
     }
     expect(() => createRationaleTicketEvent(
-      control, "rationale-failed", "fresh",
+      control, "rationale-failed", {
+        generationOutcome: "accepted-rationale", reevaluationOutcome: "fresh",
+      },
     )).toThrow(/event\/outcome mismatch/);
   });
 
@@ -665,7 +754,7 @@ describe("invocation audit and sealed resume", () => {
     expect(() => createAuthorizedInvocationAudit({
       control, ticket: { ...allowed, rationaleStatus: "not-requested" as never },
       hostConsumedAllowOnceReceipt: receipt, now: NOW,
-    })).toThrow(/status\/reevaluation outcome mismatch/);
+    })).toThrow(/status\/generation\/reevaluation outcome mismatch/);
 
     const authorized = createAuthorizedInvocationAudit({
       control, ticket: allowed, hostConsumedAllowOnceReceipt: receipt, now: NOW,
@@ -905,4 +994,41 @@ describe("invocation audit and sealed resume", () => {
     });
     expect(projection.effectiveVerdict).toEqual(control.initialVerdict);
   });
+  it("seals generation failure without a synthetic reviewer outcome", () => {
+    const control = fixture();
+    const requested = transitionRationaleTicket(
+      createRationaleReviewRequiredRecord(control, NOW),
+      event(control, "request-rationale"),
+    );
+    const failed = transitionRationaleTicket(
+      requested,
+      createRationaleGenerationProviderFailureEvent(control, "generation-error"),
+    );
+    const pending = transitionRationaleTicket(failed, event(control, "prompt-user"));
+    const allowed = transitionRationaleTicket(pending, event(control, "allow-once"));
+    const receipt = receiptFor(control, allowed);
+    const resume = createSealedRationaleResumeRequest({
+      control, response: null, rationaleStatus: "failed", reevaluation: null,
+      ticket: allowed, currentActionIdentity: control.action,
+      currentEligibilityContext: eligibilityContext,
+      hostConsumedAllowOnceReceipt: receipt, now: NOW,
+    });
+    expect(resume).toMatchObject({
+      generationOutcome: "generation-error", reevaluation: null, response: null,
+    });
+    expect(validateSealedRationaleResumeRequest(
+      resume, control.action, eligibilityContext, receipt, NOW,
+    )).toBe(true);
+
+    const projection = createRationaleUiAuditProjection({
+      control, response: null, reevaluation: null, ticket: allowed, now: NOW,
+    });
+    expect(projection).toMatchObject({
+      generationOutcome: "generation-error", reevaluationOutcome: null,
+      reevaluatedVerdict: control.initialVerdict,
+      effectiveVerdict: control.initialVerdict,
+      scopeAlignment: "unknown", modalFallbackRequired: true,
+    });
+  });
+
 });
