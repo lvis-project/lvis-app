@@ -45,6 +45,7 @@
 !define LVIS_RRF_NOEXPAND 0x10000000
 !define LVIS_RRF_ZEROONFAILURE 0x20000000
 !define LVIS_NSIS_PER_MACHINE_MARKER ".lvis-nsis-per-machine-v1"
+!define LVIS_NOTIFICATION_CLEANUP_SCRIPT "uninstall-windows-notification-artifacts.ps1"
 
 ; _root is a predefined HKEY handle. _out becomes 1 only for exactly one
 ; terminating NUL stored as REG_SZ in electron-builder's selected view.
@@ -286,11 +287,24 @@
   Pop $0
 !macroend
 
+!ifdef BUILD_UNINSTALLER
+Function un.lvisCleanupCurrentUserNotificationArtifacts
+  InitPluginsDir
+  File /oname=$PLUGINSDIR\${LVIS_NOTIFICATION_CLEANUP_SCRIPT} "${BUILD_RESOURCES_DIR}\${LVIS_NOTIFICATION_CLEANUP_SCRIPT}"
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\${LVIS_NOTIFICATION_CLEANUP_SCRIPT}" -InstalledExecutable "$R0" -ShortcutName "$R1" -AppUserModelId "$R2" -InstallMarker "$R3"'
+  Pop $R4
+  Pop $R5
+  Delete "$PLUGINSDIR\${LVIS_NOTIFICATION_CLEANUP_SCRIPT}"
+FunctionEnd
+!endif
+
 !macro customUnInstall
   Push $R0
   Push $R1
   Push $R2
   Push $R3
+  Push $R4
+  Push $R5
 
   ClearErrors
   ${GetParameters} $R0
@@ -307,6 +321,28 @@
     Goto lvis_skip_genuine_uninstall
   ${endif}
 
+  ; Electron 43 creates a current-user notification shortcut and HKCU toast
+  ; activator registration even for a per-machine app. Genuine uninstall must
+  ; remove only the exact invoking-user artifacts. In the normal alternate-
+  ; admin UAC path, execute synchronously in electron-builder's retained outer
+  ; user process; an already-elevated invocation runs as its current identity.
+  StrCpy $R0 "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+  StrCpy $R1 "${PRODUCT_NAME}"
+  StrCpy $R2 "${APP_ID}"
+  StrCpy $R3 "$INSTDIR\${LVIS_NSIS_PER_MACHINE_MARKER}"
+  ${if} ${UAC_IsInnerInstance}
+    !insertmacro UAC_AsUser_Call Function un.lvisCleanupCurrentUserNotificationArtifacts ${UAC_SYNCREGISTERS}
+  ${else}
+    Call un.lvisCleanupCurrentUserNotificationArtifacts
+  ${endif}
+  DetailPrint "$R5"
+  ${if} $R4 != 0
+    SetErrorLevel 1
+    Abort "LVIS uninstall failed: current-user notification artifact cleanup returned exit $R4"
+  ${endif}
+
+  ClearErrors
+  ${GetParameters} $R0
   StrCpy $R1 "0"
   ClearErrors
   ${GetOptions} $R0 "/KEEP_APP_DATA" $R2
@@ -380,6 +416,8 @@
 
   lvis_skip_userdata:
   lvis_skip_genuine_uninstall:
+  Pop $R5
+  Pop $R4
   Pop $R3
   Pop $R2
   Pop $R1
