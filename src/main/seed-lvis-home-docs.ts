@@ -1,13 +1,19 @@
 import { app } from "electron";
 import {
+  closeSync,
   existsSync,
+  ftruncateSync,
+  fsyncSync,
   mkdirSync,
   copyFileSync,
   chmodSync,
+  openSync,
   readFileSync,
   readdirSync,
+  writeSync,
   constants as fsConstants,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, dirname, parse as parsePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lvisHome } from "../shared/lvis-home.js";
@@ -21,6 +27,7 @@ const UPGRADE_MARKER_DOC_DIRS = ["", "skills", "prompts"] as const;
 
 interface SeedOneOptions {
   upgradePolicy: "marker" | "seed-only";
+  replaceableHashesResource?: string;
 }
 
 /**
@@ -40,14 +47,15 @@ interface SeedOneOptions {
  *
  * Behavior:
  *   - If `~/.lvis/<path>` does not exist → copy from packaged resources.
- *   - AGENTS.md, skills/*.md, and prompts/*.md still offer divergent
- *     packaged updates as `~/.lvis/<path>.new` for user review.
+ *   - AGENTS.md replaces byte-identical known packaged copies in place.
+ *     User-edited AGENTS.md, skills/*.md, and prompts/*.md instead offer
+ *     divergent packaged updates as `~/.lvis/<path>.new` for review.
  *   - agents/*.md are seed-only. Shared agent operating guidance belongs in
  *     AGENTS.md; updating packaged agent profiles must not create a new
  *     apparent user agent such as `agents/executor.md.new`.
  *
- * The user's edits are never overwritten — they may freely customize each
- * file to inject site-specific rules.
+ * User edits are never overwritten. In-place AGENTS.md replacement is gated by
+ * an exact SHA-256 allowlist of previously shipped packaged bytes.
  *
  * Non-fatal — failures log and continue. Boot must not block on doc seeding.
  */
@@ -62,7 +70,10 @@ export function seedLvisHomeDocs(): { seeded: string[]; upgraded: string[] } {
     return result;
   }
 
-  seedOne(home, "AGENTS.md", result, { upgradePolicy: "marker" });
+  seedOne(home, "AGENTS.md", result, {
+    upgradePolicy: "marker",
+    replaceableHashesResource: "AGENTS.md.replaceable-sha256",
+  });
   seedDir(home, "agents", result, { upgradePolicy: "seed-only" });
   seedDir(home, "skills", result, { upgradePolicy: "marker" });
   seedDir(home, "prompts", result, { upgradePolicy: "marker" });
@@ -133,6 +144,9 @@ function seedOne(
 
   const target = join(home, filename);
   const upgradeTarget = join(home, `${filename}.new`);
+  const replaceableHashes = options.replaceableHashesResource
+    ? readReplaceableHashes(options.replaceableHashesResource)
+    : new Set<string>();
 
   if (!existsSync(target)) {
     try {
@@ -153,13 +167,25 @@ function seedOne(
   if (options.upgradePolicy === "seed-only") return;
 
   // User has an existing copy. Compare to the packaged snapshot; write a
-  // .new sibling only when the packaged content differs. We read the
+  // .new sibling only when the packaged content differs and the current bytes
+  // are not a known packaged predecessor. We read the
   // target directly instead of statSync→readFileSync so CodeQL doesn't
   // flag the stat-then-read pair as `js/file-system-race`. Buffer.equals
   // performs the length check internally, so the stat shortcut had no
   // semantic value anyway.
   try {
-    if (readFileSync(target).equals(packagedBuf)) return;
+    const currentBuf = readFileSync(target);
+    if (currentBuf.equals(packagedBuf)) return;
+
+    const currentHash = sha256(currentBuf);
+    if (
+      replaceableHashes.has(currentHash) &&
+      replaceKnownPackagedCopy(target, packagedBuf, currentHash)
+    ) {
+      enforceUserFileMode(target);
+      result.upgraded.push(filename);
+      return;
+    }
 
     // If a previous `.new` is sitting unmerged, do not clobber it. Compare:
     //   - identical to the latest packaged content → no-op (already offered)
@@ -188,6 +214,57 @@ function seedOne(
     result.upgraded.push(filename);
   } catch (err) {
     console.warn(`[seed-lvis-home-docs] failed to compare ${filename}:`, err);
+  }
+}
+
+function readReplaceableHashes(resourceName: string): Set<string> {
+  const resource = resolvePackagedResource(resourceName);
+  if (resource === null) return new Set();
+
+  try {
+    const lines = readFileSync(resource, "utf8")
+      .split(/\r?\n/)
+      .map((line) => line.trim().toLowerCase())
+      .filter((line) => /^[a-f0-9]{64}$/.test(line));
+    return new Set(lines);
+  } catch (err) {
+    console.warn("[seed-lvis-home-docs] failed to read replaceable hash list:", err);
+    return new Set();
+  }
+}
+
+function sha256(value: Buffer): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+/**
+ * Replace a prior packaged copy without racing a concurrent user edit.
+ * The open file descriptor is re-read and hash-checked immediately before the
+ * write; if its bytes changed after discovery, the replacement is refused and
+ * the caller falls back to the non-clobbering `.new` path.
+ */
+function replaceKnownPackagedCopy(
+  target: string,
+  packagedBuf: Buffer,
+  expectedHash: string,
+): boolean {
+  let fd: number | null = null;
+  try {
+    fd = openSync(target, "r+");
+    if (sha256(readFileSync(fd)) !== expectedHash) return false;
+
+    let offset = 0;
+    while (offset < packagedBuf.length) {
+      offset += writeSync(fd, packagedBuf, offset, packagedBuf.length - offset, offset);
+    }
+    ftruncateSync(fd, packagedBuf.length);
+    fsyncSync(fd);
+    return true;
+  } catch (err) {
+    console.warn("[seed-lvis-home-docs] failed to replace known packaged copy:", err);
+    return false;
+  } finally {
+    if (fd !== null) closeSync(fd);
   }
 }
 

@@ -43,6 +43,19 @@ describe("desktop packaging", () => {
     expect(uvLicense).toContain("permission notice shall be included");
   });
 
+  it("packages runtime guidance with its safe replacement hash inventory", () => {
+    const pkg = readPackageJson();
+    expect(pkg.build.extraResources).toEqual(
+      expect.arrayContaining([
+        { from: "resources/AGENTS.md", to: "AGENTS.md" },
+        {
+          from: "resources/AGENTS.md.replaceable-sha256",
+          to: "AGENTS.md.replaceable-sha256",
+        },
+      ]),
+    );
+  });
+
   it("ships a macOS uninstall helper in the DMG extras", () => {
     const pkg = readPackageJson();
     expect(pkg.build.dmg.contents).toEqual(
