@@ -14,6 +14,7 @@ import {
   isExactProtocolIcon,
   isOwnedRuntimeShortcut,
   MAX_OUTPUT_CHARS,
+  normalizeToastActivatorClsid,
   parseExecutableFromCommand,
   parseJsonProcessResult,
   REGISTRY_QUERY_SCRIPT,
@@ -157,13 +158,30 @@ describe("Windows NSIS installer smoke contracts", () => {
       installedExe: "C:\\Program Files\\LVIS\\LVIS.exe",
       installDir: "C:\\Program Files\\LVIS",
       description: "LVIS",
+      appUserModelId: "xyz.lvisai.app",
     };
     const owned = {
       target: "c:\\PROGRAM FILES\\lvis\\LVIS.exe",
       workingDirectory: "c:\\PROGRAM FILES\\LVIS",
       arguments: "",
       description: "LVIS",
+      appUserModelId: "xyz.lvisai.app",
+      toastClsid: "{62fd3efb-b3d2-4235-9402-6979f52c0286}",
     };
+
+    expect(normalizeToastActivatorClsid(owned.toastClsid)).toBe(
+      "{62FD3EFB-B3D2-4235-9402-6979F52C0286}",
+    );
+    expect(
+      normalizeToastActivatorClsid("62fd3efb-b3d2-4235-9402-6979f52c0286"),
+    ).toBe("{62FD3EFB-B3D2-4235-9402-6979F52C0286}");
+    expect(
+      normalizeToastActivatorClsid("{62fd3efb-b3d2-4235-9402-6979f52c0286"),
+    ).toBeNull();
+    expect(
+      normalizeToastActivatorClsid("62fd3efb-b3d2-4235-9402-6979f52c0286}"),
+    ).toBeNull();
+    expect(normalizeToastActivatorClsid("not-a-guid")).toBeNull();
 
     expect(isOwnedRuntimeShortcut(owned, expected)).toBe(true);
     expect(
@@ -183,6 +201,15 @@ describe("Windows NSIS installer smoke contracts", () => {
     ).toBe(false);
     expect(
       isOwnedRuntimeShortcut({ ...owned, description: "Foreign" }, expected),
+    ).toBe(false);
+    expect(
+      isOwnedRuntimeShortcut(
+        { ...owned, appUserModelId: "foreign.app" },
+        expected,
+      ),
+    ).toBe(false);
+    expect(
+      isOwnedRuntimeShortcut({ ...owned, toastClsid: "invalid" }, expected),
     ).toBe(false);
     expect(isOwnedRuntimeShortcut(null, expected)).toBe(false);
     expect(
@@ -243,6 +270,9 @@ describe("Windows NSIS installer smoke contracts", () => {
         registry: REGISTRY_QUERY_SCRIPT,
         acl: ACL_QUERY_SCRIPT,
         foreignProtocolFixture: FOREIGN_PROTOCOL_FIXTURE_SCRIPT,
+        notificationCleanup: readRepoFile(
+          "build/uninstall-windows-notification-artifacts.ps1",
+        ),
       })) {
         const result = runPowerShellParser(script);
         expect(result.error, label).toBeUndefined();
@@ -859,8 +889,14 @@ describe("Windows NSIS installer smoke contracts", () => {
     expect(smoke).toContain("foreignProtocolFixture: null");
   });
 
-  it("cleans only a launch-created exact-owner runtime shortcut before uninstall", () => {
+  it("requires the genuine uninstaller to clean exact current-user notification artifacts", () => {
     const smoke = readRepoFile("scripts/smoke-windows-nsis-installer.mjs");
+    const installer = readRepoFile("build/installer.nsh");
+    const cleanup = readRepoFile(
+      "build/uninstall-windows-notification-artifacts.ps1",
+    );
+    const earlyBoot = readRepoFile("src/main/early-boot-env.ts");
+
     const runPassStart = smoke.indexOf("async function runInstallerPass");
     const runPassEnd = smoke.indexOf("async function main", runPassStart);
     const runPass = smoke.slice(runPassStart, runPassEnd);
@@ -868,31 +904,17 @@ describe("Windows NSIS installer smoke contracts", () => {
     const hkcuAfterStop = runPass.indexOf(
       'await assertNoCurrentUserProtocolHandlers("installed app launch")',
     );
-    const ownerCleanup = runPass.indexOf(
-      "await cleanupOwnedRuntimeShortcut(state.machineInstall)",
+    const ownershipAssertion = runPass.indexOf(
+      "await assertRuntimeNotificationArtifacts(state.machineInstall)",
     );
-    const normalUninstall = runPass.indexOf(
-      "await uninstallAndVerify(",
-      ownerCleanup,
-    );
+    const normalUninstall = runPass.indexOf("await uninstallAndVerify(");
 
-    const installedSurfaceStart = smoke.indexOf(
-      "async function assertInstalledSurface",
-    );
-    const installedSurfaceEnd = smoke.indexOf(
-      "async function assertUninstalledSurface",
-      installedSurfaceStart,
-    );
-    const installedSurface = smoke.slice(
-      installedSurfaceStart,
-      installedSurfaceEnd,
-    );
-    expect(installedSurface.indexOf("if (userResidue.length > 0)")).toBeLessThan(
-      installedSurface.indexOf("absentBeforeLaunch: true"),
-    );
     expect(hkcuAfterStop).toBeGreaterThan(appStop);
-    expect(ownerCleanup).toBeGreaterThan(hkcuAfterStop);
-    expect(normalUninstall).toBeGreaterThan(ownerCleanup);
+    expect(ownershipAssertion).toBeGreaterThan(hkcuAfterStop);
+    expect(normalUninstall).toBeGreaterThan(ownershipAssertion);
+    expect(runPass).not.toContain(
+      "cleanupOwnedRuntimeNotificationArtifacts(state.machineInstall)",
+    );
 
     const failureStart = smoke.indexOf(
       "async function cleanupFailedInstallerPass",
@@ -903,53 +925,45 @@ describe("Windows NSIS installer smoke contracts", () => {
     );
     const failureCleanup = smoke.slice(failureStart, failureEnd);
     const failureOwnerCleanup = failureCleanup.indexOf(
-      "await cleanupOwnedRuntimeShortcut(state.machineInstall)",
+      "await cleanupOwnedRuntimeNotificationArtifacts(state.machineInstall)",
     );
     const failureUninstaller = failureCleanup.indexOf(
       "uninstaller process exit",
       failureOwnerCleanup,
     );
-    expect(failureCleanup).toContain(
-      "if (!lstatSync(shortcutPath, { throwIfNoEntry: false })) return;",
-    );
     expect(failureOwnerCleanup).toBeGreaterThanOrEqual(0);
     expect(failureUninstaller).toBeGreaterThan(failureOwnerCleanup);
 
-    const waitStart = smoke.indexOf("async function waitForRuntimeShortcut");
-    const cleanupStart = smoke.indexOf(
-      "async function cleanupOwnedRuntimeShortcut",
+    expect(smoke).toContain("System.AppUserModel.ID");
+    expect(smoke).toContain("System.AppUserModel.ToastActivatorCLSID");
+    expect(smoke).toContain("toastActivatorRegistrations(toastClsid)");
+    expect(smoke).toContain(
+      "uninstall left current-user toast CLSID residue",
     );
-    const cleanupEnd = smoke.indexOf(
-      "export function isExactProtocolCommand",
-      cleanupStart,
-    );
-    const waitHelper = smoke.slice(waitStart, cleanupStart);
-    const cleanupHelper = smoke.slice(cleanupStart, cleanupEnd);
-    const provenanceGate = cleanupHelper.indexOf(
-      "!provenance?.absentBeforeLaunch",
-    );
-    const regularFileGate = cleanupHelper.indexOf(
-      "if (!shortcutStat.isFile())",
-    );
-    const ownerGate = cleanupHelper.indexOf(
-      "if (!isOwnedRuntimeShortcut(shortcut, expected))",
-    );
-    const recheck = cleanupHelper.indexOf(
-      "isOwnedRuntimeShortcut(recheckedShortcut, expected)",
-    );
-    const oneFileUnlink = cleanupHelper.indexOf(
-      "unlinkSync(provenance.path)",
-    );
+    expect(smoke).not.toContain("unlinkSync(");
 
-    expect(waitHelper).toContain("return null;");
-    expect(cleanupHelper).toContain("if (!shortcutStat)");
-    expect(provenanceGate).toBeGreaterThanOrEqual(0);
-    expect(regularFileGate).toBeGreaterThan(provenanceGate);
-    expect(ownerGate).toBeGreaterThan(regularFileGate);
-    expect(recheck).toBeGreaterThan(ownerGate);
-    expect(oneFileUnlink).toBeGreaterThan(recheck);
-    expect(cleanupHelper).not.toContain("rmSync(");
-    expect(smoke).toContain("uninstaller process exit");
+    const updaterGate = installer.indexOf('${GetOptions} $R0 "--updated" $R2');
+    const productCleanup = installer.indexOf(
+      "UAC_AsUser_Call Function un.lvisCleanupCurrentUserNotificationArtifacts",
+    );
+    const asrtTeardown = installer.indexOf("ASRT OS sandbox teardown");
+    expect(productCleanup).toBeGreaterThan(updaterGate);
+    expect(asrtTeardown).toBeGreaterThan(productCleanup);
+    expect(installer).toContain("${UAC_SYNCREGISTERS}");
+
+    expect(cleanup).toContain("RegistryView]::Registry64");
+    expect(cleanup).toContain("RegistryView]::Registry32");
+    expect(cleanup).toContain("System.AppUserModel.ID");
+    expect(cleanup).toContain("System.AppUserModel.ToastActivatorCLSID");
+    expect(cleanup).toContain('GetValueKind("CustomActivator")');
+    expect(cleanup).toContain("DoNotExpandEnvironmentNames");
+    expect(cleanup).toContain("[System.IO.File]::Delete($shortcutPath)");
+    expect(cleanup).toContain(".lvis-nsis-per-machine-v1");
+
+    expect(earlyBoot).toContain(
+      '"{62FD3EFB-B3D2-4235-9402-6979F52C0286}"',
+    );
+    expect(earlyBoot).toContain("app.setToastActivatorCLSID(");
   });
 
   it("requires real ASRT preconditions and verifies exact genuine teardown", () => {
@@ -1116,7 +1130,15 @@ describe("Windows NSIS installer smoke contracts", () => {
     );
     expect(customInstall.match(/Push \$R[123]/g)).toHaveLength(3);
     expect(customInstall.match(/Pop \$R[123]/g)).toHaveLength(3);
-    expect(customUninstall).not.toContain("LVIS_NSIS_PER_MACHINE_MARKER");
+    expect(customUninstall).toContain(
+      'StrCpy $R3 "$INSTDIR\\${LVIS_NSIS_PER_MACHINE_MARKER}"',
+    );
+    expect(customUninstall).not.toContain(
+      'FileOpen $R1 "$INSTDIR\\${LVIS_NSIS_PER_MACHINE_MARKER}"',
+    );
+    expect(customUninstall).not.toContain(
+      'Delete "$INSTDIR\\${LVIS_NSIS_PER_MACHINE_MARKER}"',
+    );
     expect(customRemoveFiles).not.toContain("LVIS_NSIS_PER_MACHINE_MARKER");
 
     expect(smoke).toContain(
