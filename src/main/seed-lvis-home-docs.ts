@@ -168,8 +168,9 @@ function seedOne(
   if (options.upgradePolicy === "seed-only") return;
 
   // User has an existing copy. Compare to the packaged snapshot; write a
-  // .new sibling only when the packaged content differs and the current bytes
-  // are not a known packaged predecessor. We read the
+  // .new sibling when content differs and a safe known-predecessor replacement
+  // is unsupported, rejected by its final precondition, or fails before commit.
+  // We read the
   // target directly instead of statSync→readFileSync so CodeQL doesn't
   // flag the stat-then-read pair as `js/file-system-race`. Buffer.equals
   // performs the length check internally, so the stat shortcut had no
@@ -291,7 +292,13 @@ function replaceKnownPackagedCopy(
       0o600,
     );
   } catch (err) {
-    if ((err as { committed?: boolean }).committed === true) return true;
+    if ((err as { committed?: boolean }).committed === true) {
+      console.warn(
+        "[seed-lvis-home-docs] packaged copy replaced, but parent directory durability sync failed:",
+        err,
+      );
+      return true;
+    }
     console.warn("[seed-lvis-home-docs] failed to replace known packaged copy:", err);
     return false;
   }
