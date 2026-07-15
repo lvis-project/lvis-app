@@ -12,6 +12,7 @@ import {
   captureOutputChunk,
   isExactProtocolCommand,
   isExactProtocolIcon,
+  isOwnedRuntimeShortcut,
   MAX_OUTPUT_CHARS,
   parseExecutableFromCommand,
   parseJsonProcessResult,
@@ -151,6 +152,44 @@ describe("Windows NSIS installer smoke contracts", () => {
     ).toMatchObject({ valueExists: true, value: "", valueKind: "String" });
   });
 
+  it("accepts only exact Electron-owned runtime shortcut fields", () => {
+    const expected = {
+      installedExe: "C:\\Program Files\\LVIS\\LVIS.exe",
+      installDir: "C:\\Program Files\\LVIS",
+      description: "LVIS",
+    };
+    const owned = {
+      target: "c:\\PROGRAM FILES\\lvis\\LVIS.exe",
+      workingDirectory: "c:\\PROGRAM FILES\\LVIS",
+      arguments: "",
+      description: "LVIS",
+    };
+
+    expect(isOwnedRuntimeShortcut(owned, expected)).toBe(true);
+    expect(
+      isOwnedRuntimeShortcut(
+        { ...owned, target: "C:\\Foreign\\LVIS.exe" },
+        expected,
+      ),
+    ).toBe(false);
+    expect(
+      isOwnedRuntimeShortcut(
+        { ...owned, workingDirectory: "C:\\Foreign" },
+        expected,
+      ),
+    ).toBe(false);
+    expect(
+      isOwnedRuntimeShortcut({ ...owned, arguments: "--foreign" }, expected),
+    ).toBe(false);
+    expect(
+      isOwnedRuntimeShortcut({ ...owned, description: "Foreign" }, expected),
+    ).toBe(false);
+    expect(isOwnedRuntimeShortcut(null, expected)).toBe(false);
+    expect(
+      isOwnedRuntimeShortcut({ ...owned, target: null }, expected),
+    ).toBe(false);
+  });
+
   it("preserves PowerShell block boundaries with newlines instead of semicolon joins", () => {
     const blockScript = buildPowerShellScript([
       "switch ($value) {",
@@ -174,6 +213,27 @@ describe("Windows NSIS installer smoke contracts", () => {
     expect(REGISTRY_QUERY_SCRIPT).toContain("\ntry {\n");
     expect(ACL_QUERY_SCRIPT).toContain("ForEach-Object {\n");
     expect(() => buildPowerShellScript([])).toThrow(/non-empty string array/);
+  });
+
+  it("binds each ACL rule before SID translation and never reads catch $_", () => {
+    expect(ACL_QUERY_SCRIPT).toContain("  $rule = $_\n");
+    expect(ACL_QUERY_SCRIPT).toContain(
+      "$rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value",
+    );
+    expect(ACL_QUERY_SCRIPT).toContain(
+      "catch { $sid = $rule.IdentityReference.Value }",
+    );
+    expect(ACL_QUERY_SCRIPT).not.toMatch(/catch\s*\{[^}]*\$_/s);
+    for (const field of [
+      "FileSystemRights",
+      "AccessControlType",
+      "InheritanceFlags",
+      "PropagationFlags",
+      "IsInherited",
+    ]) {
+      expect(ACL_QUERY_SCRIPT).toContain(`$rule.${field}`);
+      expect(ACL_QUERY_SCRIPT).not.toContain(`$_.${field}`);
+    }
   });
 
   it.runIf(process.platform === "win32")(
@@ -797,6 +857,99 @@ describe("Windows NSIS installer smoke contracts", () => {
     expect(fixtureAttachIndex).toBeGreaterThanOrEqual(0);
     expect(fixtureSeedIndex).toBeGreaterThan(fixtureAttachIndex);
     expect(smoke).toContain("foreignProtocolFixture: null");
+  });
+
+  it("cleans only a launch-created exact-owner runtime shortcut before uninstall", () => {
+    const smoke = readRepoFile("scripts/smoke-windows-nsis-installer.mjs");
+    const runPassStart = smoke.indexOf("async function runInstallerPass");
+    const runPassEnd = smoke.indexOf("async function main", runPassStart);
+    const runPass = smoke.slice(runPassStart, runPassEnd);
+    const appStop = runPass.indexOf("await state.runningApp.stop()");
+    const hkcuAfterStop = runPass.indexOf(
+      'await assertNoCurrentUserProtocolHandlers("installed app launch")',
+    );
+    const ownerCleanup = runPass.indexOf(
+      "await cleanupOwnedRuntimeShortcut(state.machineInstall)",
+    );
+    const normalUninstall = runPass.indexOf(
+      "await uninstallAndVerify(",
+      ownerCleanup,
+    );
+
+    const installedSurfaceStart = smoke.indexOf(
+      "async function assertInstalledSurface",
+    );
+    const installedSurfaceEnd = smoke.indexOf(
+      "async function assertUninstalledSurface",
+      installedSurfaceStart,
+    );
+    const installedSurface = smoke.slice(
+      installedSurfaceStart,
+      installedSurfaceEnd,
+    );
+    expect(installedSurface.indexOf("if (userResidue.length > 0)")).toBeLessThan(
+      installedSurface.indexOf("absentBeforeLaunch: true"),
+    );
+    expect(hkcuAfterStop).toBeGreaterThan(appStop);
+    expect(ownerCleanup).toBeGreaterThan(hkcuAfterStop);
+    expect(normalUninstall).toBeGreaterThan(ownerCleanup);
+
+    const failureStart = smoke.indexOf(
+      "async function cleanupFailedInstallerPass",
+    );
+    const failureEnd = smoke.indexOf(
+      "async function runInstallerPass",
+      failureStart,
+    );
+    const failureCleanup = smoke.slice(failureStart, failureEnd);
+    const failureOwnerCleanup = failureCleanup.indexOf(
+      "await cleanupOwnedRuntimeShortcut(state.machineInstall)",
+    );
+    const failureUninstaller = failureCleanup.indexOf(
+      "uninstaller process exit",
+      failureOwnerCleanup,
+    );
+    expect(failureCleanup).toContain(
+      "if (!lstatSync(shortcutPath, { throwIfNoEntry: false })) return;",
+    );
+    expect(failureOwnerCleanup).toBeGreaterThanOrEqual(0);
+    expect(failureUninstaller).toBeGreaterThan(failureOwnerCleanup);
+
+    const waitStart = smoke.indexOf("async function waitForRuntimeShortcut");
+    const cleanupStart = smoke.indexOf(
+      "async function cleanupOwnedRuntimeShortcut",
+    );
+    const cleanupEnd = smoke.indexOf(
+      "export function isExactProtocolCommand",
+      cleanupStart,
+    );
+    const waitHelper = smoke.slice(waitStart, cleanupStart);
+    const cleanupHelper = smoke.slice(cleanupStart, cleanupEnd);
+    const provenanceGate = cleanupHelper.indexOf(
+      "!provenance?.absentBeforeLaunch",
+    );
+    const regularFileGate = cleanupHelper.indexOf(
+      "if (!shortcutStat.isFile())",
+    );
+    const ownerGate = cleanupHelper.indexOf(
+      "if (!isOwnedRuntimeShortcut(shortcut, expected))",
+    );
+    const recheck = cleanupHelper.indexOf(
+      "isOwnedRuntimeShortcut(recheckedShortcut, expected)",
+    );
+    const oneFileUnlink = cleanupHelper.indexOf(
+      "unlinkSync(provenance.path)",
+    );
+
+    expect(waitHelper).toContain("return null;");
+    expect(cleanupHelper).toContain("if (!shortcutStat)");
+    expect(provenanceGate).toBeGreaterThanOrEqual(0);
+    expect(regularFileGate).toBeGreaterThan(provenanceGate);
+    expect(ownerGate).toBeGreaterThan(regularFileGate);
+    expect(recheck).toBeGreaterThan(ownerGate);
+    expect(oneFileUnlink).toBeGreaterThan(recheck);
+    expect(cleanupHelper).not.toContain("rmSync(");
+    expect(smoke).toContain("uninstaller process exit");
   });
 
   it("requires real ASRT preconditions and verifies exact genuine teardown", () => {
