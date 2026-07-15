@@ -64,4 +64,35 @@ describe("main.ts — single-instance gate on app.whenReady", () => {
     expect(negBranchCode, "second-instance must not bootstrap").not.toMatch(/\bmain\s*\(\s*\)/);
     expect(negBranchCode, "second-instance must not call whenReady").not.toMatch(/whenReady/);
   });
+
+  it("awaits the packaged-Windows association probe before primary bootstrap", () => {
+    const elseBlock = extractSingleInstanceElseBlock(source);
+    expect(elseBlock).not.toBeNull();
+
+    const ready = elseBlock!.slice(elseBlock!.indexOf("app.whenReady"));
+    const htmlPolicy = ready.indexOf("installHtmlPreviewPartitionBlock()");
+    const browserPolicy = ready.indexOf("installSideBrowserPartitionPolicy()");
+    const protocolProbe = ready.indexOf(
+      "await ensurePackagedWindowsLvisProtocolClient",
+    );
+    const mainCall = ready.indexOf("void main()");
+
+    expect(protocolProbe).toBeGreaterThan(htmlPolicy);
+    expect(protocolProbe).toBeGreaterThan(browserPolicy);
+    expect(mainCall).toBeGreaterThan(protocolProbe);
+    expect(
+      source.indexOf("if (!deferPackagedWindowsProtocolRegistration)"),
+    ).toBeLessThan(source.indexOf("app.requestSingleInstanceLock()"));
+    expect(source).not.toContain("app.isDefaultProtocolClient");
+
+    const helper = readFileSync(
+      "src/main/lvis-protocol-registration.ts",
+      "utf-8",
+    );
+    expect(helper).not.toContain("node:fs");
+    expect(helper).not.toContain("realpath");
+    expect(helper).toContain("win32.parse");
+    expect(helper).toContain("stripExtendedWindowsPathPrefix");
+    expect(helper).not.toMatch(/\blog\./);
+  });
 });

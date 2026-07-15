@@ -36,6 +36,70 @@
 
 ; ─────────────────────────────────────────────────────────────────────────────
 ; ASRT (OS execution sandbox) — provision the Windows srt-win backend at
+
+; Query URL Protocol with Win32 type+data constraints. ReadRegStr also accepts
+; REG_EXPAND_SZ, so it cannot enforce the per-value ownership rule by itself.
+!define LVIS_RRF_RT_REG_SZ 0x00000002
+!define LVIS_RRF_SUBKEY_WOW6464KEY 0x00010000
+!define LVIS_RRF_SUBKEY_WOW6432KEY 0x00020000
+!define LVIS_RRF_NOEXPAND 0x10000000
+!define LVIS_RRF_ZEROONFAILURE 0x20000000
+
+; _root is a predefined HKEY handle. _out becomes 1 only for exactly one
+; terminating NUL stored as REG_SZ in electron-builder's selected view.
+!macro lvisIsExactEmptyUrlProtocolRegSz _root _out
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  StrCpy ${_out} "0"
+
+  StrCpy $0 ${LVIS_RRF_RT_REG_SZ}
+  IntOp $0 $0 | ${LVIS_RRF_NOEXPAND}
+  IntOp $0 $0 | ${LVIS_RRF_ZEROONFAILURE}
+  StrCpy $1 ${LVIS_RRF_SUBKEY_WOW6432KEY}
+  !ifdef APP_ARM64
+    ${If} ${RunningX64}
+    ${OrIf} ${IsNativeARM64}
+      StrCpy $1 ${LVIS_RRF_SUBKEY_WOW6464KEY}
+    ${EndIf}
+  !else
+    !ifdef APP_64
+      ${If} ${RunningX64}
+        StrCpy $1 ${LVIS_RRF_SUBKEY_WOW6464KEY}
+      ${EndIf}
+    !endif
+  !endif
+  IntOp $0 $0 | $1
+
+  ; Sentinel plus size/type checks reject malformed strings and every foreign
+  ; registry kind. RegGetValueW includes the terminating UTF-16 NUL in size.
+  System::Call '*(&i2 65535) p .r2'
+  ${If} $2 != 0
+    StrCpy $4 2
+    System::Call 'advapi32::RegGetValueW(p ${_root}, w "Software\Classes\lvis", w "URL Protocol", i r0, *i .r3, p r2, *i r4r4) i .r5'
+    ${If} $5 = 0
+    ${AndIf} $3 = 1
+    ${AndIf} $4 = 2
+      System::Call '*$2(&i2 .r6)'
+      ${If} $6 = 0
+        StrCpy ${_out} "1"
+      ${EndIf}
+    ${EndIf}
+    System::Free $2
+  ${EndIf}
+
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+!macroend
 ; install time so the sandbox is ready at first launch (issue #1608). Runs after
 ; installApplicationFiles (electron-builder installSection.nsh inserts
 ; customInstall last), so srt-win.exe is present.
@@ -114,6 +178,12 @@
   ${endif}
 
   lvis_srtwin_install_done:
+  ; electron-builder 26.x does not consume build.protocols for NSIS. Own the
+  ; packaged lvis:// association explicitly in the all-users shell context.
+  WriteRegStr SHELL_CONTEXT "Software\Classes\lvis" "" "URL:lvis"
+  WriteRegStr SHELL_CONTEXT "Software\Classes\lvis" "URL Protocol" ""
+  WriteRegStr SHELL_CONTEXT "Software\Classes\lvis\DefaultIcon" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}",0'
+  WriteRegStr SHELL_CONTEXT "Software\Classes\lvis\shell\open\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"'
   ; electron-builder writes InstallLocation only to its private install key.
   ; Mirror it into Apps & Features so smoke/enterprise inventory can discover
   ; and cross-check the machine install without guessing a Program Files path.
@@ -297,6 +367,76 @@
     Abort "LVIS uninstall failed: app files remain at $R2"
 
   lvis_remove_files_done:
+  ; Updater uninstalls must preserve the association across atomic replacement.
+  ; Explicit --updated is checked independently because not every updater path
+  ; exposes electron-builder's compile-time isUpdated branch.
+  ${if} ${isUpdated}
+    Goto lvis_protocol_cleanup_done
+  ${endif}
+
+  ClearErrors
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "--updated" $R1
+  ${ifNot} ${Errors}
+    Goto lvis_protocol_cleanup_done
+  ${endif}
+
+  ; A genuine uninstall removes protocol values only when the full exact
+  ; quoted command is still owned by this exact install. Each additional value
+  ; is compared independently so user/foreign changes survive; parent keys are
+  ; removed only when no values or subkeys remain.
+  StrCpy $R2 '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"'
+  StrCpy $R0 '"$INSTDIR\${APP_EXECUTABLE_FILENAME}",0'
+
+  ClearErrors
+  ReadRegStr $R1 SHELL_CONTEXT "Software\Classes\lvis\shell\open\command" ""
+  StrCmp $R1 $R2 0 lvis_protocol_cleanup_hkcu
+  DeleteRegValue SHELL_CONTEXT "Software\Classes\lvis\shell\open\command" ""
+  DeleteRegKey /ifempty SHELL_CONTEXT "Software\Classes\lvis\shell\open\command"
+  DeleteRegKey /ifempty SHELL_CONTEXT "Software\Classes\lvis\shell\open"
+  DeleteRegKey /ifempty SHELL_CONTEXT "Software\Classes\lvis\shell"
+
+  ClearErrors
+  ReadRegStr $R1 SHELL_CONTEXT "Software\Classes\lvis\DefaultIcon" ""
+  StrCmp $R1 $R0 0 +2
+    DeleteRegValue SHELL_CONTEXT "Software\Classes\lvis\DefaultIcon" ""
+  DeleteRegKey /ifempty SHELL_CONTEXT "Software\Classes\lvis\DefaultIcon"
+
+  !insertmacro lvisIsExactEmptyUrlProtocolRegSz 0x80000002 $R1
+  StrCmp $R1 "1" 0 +2
+    DeleteRegValue SHELL_CONTEXT "Software\Classes\lvis" "URL Protocol"
+  ClearErrors
+  ReadRegStr $R1 SHELL_CONTEXT "Software\Classes\lvis" ""
+  StrCmpS $R1 "URL:lvis" 0 +2
+    DeleteRegValue SHELL_CONTEXT "Software\Classes\lvis" ""
+  DeleteRegKey /ifempty SHELL_CONTEXT "Software\Classes\lvis"
+
+  lvis_protocol_cleanup_hkcu:
+  ClearErrors
+  ReadRegStr $R1 HKEY_CURRENT_USER "Software\Classes\lvis\shell\open\command" ""
+  StrCmp $R1 $R2 0 lvis_protocol_cleanup_done
+  DeleteRegValue HKEY_CURRENT_USER "Software\Classes\lvis\shell\open\command" ""
+  DeleteRegKey /ifempty HKEY_CURRENT_USER "Software\Classes\lvis\shell\open\command"
+  DeleteRegKey /ifempty HKEY_CURRENT_USER "Software\Classes\lvis\shell\open"
+  DeleteRegKey /ifempty HKEY_CURRENT_USER "Software\Classes\lvis\shell"
+
+  ClearErrors
+  ReadRegStr $R1 HKEY_CURRENT_USER "Software\Classes\lvis\DefaultIcon" ""
+  StrCmp $R1 $R0 0 +2
+    DeleteRegValue HKEY_CURRENT_USER "Software\Classes\lvis\DefaultIcon" ""
+  DeleteRegKey /ifempty HKEY_CURRENT_USER "Software\Classes\lvis\DefaultIcon"
+
+  !insertmacro lvisIsExactEmptyUrlProtocolRegSz 0x80000001 $R1
+  StrCmp $R1 "1" 0 +2
+    DeleteRegValue HKEY_CURRENT_USER "Software\Classes\lvis" "URL Protocol"
+  ClearErrors
+  ReadRegStr $R1 HKEY_CURRENT_USER "Software\Classes\lvis" ""
+  StrCmpS $R1 "URL:lvis" 0 +2
+    DeleteRegValue HKEY_CURRENT_USER "Software\Classes\lvis" ""
+  DeleteRegKey /ifempty HKEY_CURRENT_USER "Software\Classes\lvis"
+
+  lvis_protocol_cleanup_done:
   Pop $R2
   Pop $R1
   Pop $R0

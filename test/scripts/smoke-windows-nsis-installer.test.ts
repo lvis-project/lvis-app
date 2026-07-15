@@ -7,8 +7,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   ACL_QUERY_SCRIPT,
+  FOREIGN_PROTOCOL_FIXTURE_SCRIPT,
   buildPowerShellScript,
   captureOutputChunk,
+  isExactProtocolCommand,
+  isExactProtocolIcon,
   MAX_OUTPUT_CHARS,
   parseExecutableFromCommand,
   parseJsonProcessResult,
@@ -48,6 +51,48 @@ function runRegistryQueryScript(overrides: Record<string, string>) {
   );
 }
 
+function runPowerShellParser(source: string) {
+  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+  if (!systemRoot) {
+    throw new Error(
+      "SystemRoot/WINDIR is required for PowerShell parser tests",
+    );
+  }
+  const parserScript = [
+    "$source = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:LVIS_POWERSHELL_SOURCE_BASE64))",
+    "$tokens = $null",
+    "$parseErrors = $null",
+    "[System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors) | Out-Null",
+    "if ($parseErrors.Count -gt 0) {",
+    "  $parseErrors | ForEach-Object { [Console]::Error.WriteLine($_.Message) }",
+    "  exit 1",
+    "}",
+  ].join("\n");
+  return spawnSync(
+    join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      parserScript,
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        LVIS_POWERSHELL_SOURCE_BASE64: Buffer.from(source, "utf8").toString(
+          "base64",
+        ),
+      },
+      timeout: 30_000,
+      windowsHide: true,
+    },
+  );
+}
+
 describe("Windows NSIS installer smoke contracts", () => {
   it("extracts quoted and unquoted executable paths from registry commands", () => {
     expect(
@@ -58,6 +103,52 @@ describe("Windows NSIS installer smoke contracts", () => {
     expect(
       parseExecutableFromCommand('C:\\Program Files\\LVIS\\LVIS.exe "%1"'),
     ).toBe("C:\\Program Files\\LVIS\\LVIS.exe");
+  });
+
+  it("accepts only the full quoted lvis command, case-insensitively", () => {
+    const executable = "C:\\Program Files\\LVIS\\LVIS.exe";
+    expect(
+      isExactProtocolCommand(
+        '"c:\\PROGRAM FILES\\lvis\\LVIS.EXE" "%1"',
+        executable,
+      ),
+    ).toBe(true);
+    expect(isExactProtocolCommand(executable + ' "%1"', executable)).toBe(
+      false,
+    );
+    expect(
+      isExactProtocolCommand('"C:\\Program Files\\LVIS\\LVIS.exe"', executable),
+    ).toBe(false);
+    expect(
+      isExactProtocolCommand(
+        '"C:\\Program Files\\LVIS\\LVIS.exe" "%1" --extra',
+        executable,
+      ),
+    ).toBe(false);
+
+    expect(
+      isExactProtocolIcon('"c:\\PROGRAM FILES\\lvis\\LVIS.EXE",0', executable),
+    ).toBe(true);
+    expect(isExactProtocolIcon(`"${executable}"`, executable)).toBe(false);
+    expect(isExactProtocolIcon(`"${executable}",1`, executable)).toBe(false);
+
+    expect(
+      validateRegistryQueryResult(
+        {
+          keyExists: true,
+          valueExists: true,
+          value: "",
+          valueKind: "String",
+          entries: [],
+        },
+        {
+          hive: "HKLM",
+          path: "SOFTWARE\\Classes\\lvis",
+          view: "64",
+          mode: "value",
+        },
+      ),
+    ).toMatchObject({ valueExists: true, value: "", valueKind: "String" });
   });
 
   it("preserves PowerShell block boundaries with newlines instead of semicolon joins", () => {
@@ -71,6 +162,7 @@ describe("Windows NSIS installer smoke contracts", () => {
       blockScript,
       REGISTRY_QUERY_SCRIPT,
       ACL_QUERY_SCRIPT,
+      FOREIGN_PROTOCOL_FIXTURE_SCRIPT,
     ]) {
       expect(script).toContain("\n");
       expect(script).not.toMatch(/\{\s*;/);
@@ -84,6 +176,23 @@ describe("Windows NSIS installer smoke contracts", () => {
     expect(() => buildPowerShellScript([])).toThrow(/non-empty string array/);
   });
 
+  it.runIf(process.platform === "win32")(
+    "parses every generated PowerShell program with the Windows AST parser",
+    () => {
+      for (const [label, script] of Object.entries({
+        registry: REGISTRY_QUERY_SCRIPT,
+        acl: ACL_QUERY_SCRIPT,
+        foreignProtocolFixture: FOREIGN_PROTOCOL_FIXTURE_SCRIPT,
+      })) {
+        const result = runPowerShellParser(script);
+        expect(result.error, label).toBeUndefined();
+        expect(
+          result.status,
+          `${label}: ${result.stdout}\n${result.stderr}`,
+        ).toBe(0);
+      }
+    },
+  );
   it("pre-filters registry trees by an exact display name before enumerating values", () => {
     const smoke = readRepoFile("scripts/smoke-windows-nsis-installer.mjs");
     const filterRequired = REGISTRY_QUERY_SCRIPT.indexOf(
@@ -184,12 +293,14 @@ describe("Windows NSIS installer smoke contracts", () => {
       keyExists: true,
       valueExists: false,
       value: null,
+      valueKind: null,
       entries: [validEntry],
     };
     const missingKey = {
       keyExists: false,
       valueExists: false,
       value: null,
+      valueKind: null,
       entries: [],
     };
 
@@ -212,6 +323,7 @@ describe("Windows NSIS installer smoke contracts", () => {
           keyExists: true,
           valueExists: false,
           value: null,
+          valueKind: null,
           entries: [],
         },
       },
@@ -222,6 +334,7 @@ describe("Windows NSIS installer smoke contracts", () => {
           keyExists: true,
           valueExists: true,
           value: '"C:\\Program Files\\LVIS\\LVIS.exe" "%1"',
+          valueKind: "String",
           entries: [],
         },
       },
@@ -232,6 +345,7 @@ describe("Windows NSIS installer smoke contracts", () => {
           keyExists: true,
           valueExists: true,
           value: "",
+          valueKind: "String",
           entries: [],
         },
       },
@@ -304,6 +418,52 @@ describe("Windows NSIS installer smoke contracts", () => {
         error: /default query returned an invalid state/,
       },
       {
+        name: "missing valueKind contract",
+        context: defaultContext,
+        result: {
+          keyExists: true,
+          valueExists: false,
+          value: null,
+          entries: [],
+        },
+        error: /invalid contract/,
+      },
+      {
+        name: "non-string valueKind contract",
+        context: defaultContext,
+        result: { ...missingKey, valueKind: 7 },
+        error: /invalid contract/,
+      },
+      {
+        name: "missing key with a value kind",
+        context: defaultContext,
+        result: { ...missingKey, valueKind: "String" },
+        error: /invalid missing-key state/,
+      },
+      {
+        name: "tree with a value kind",
+        context: treeContext,
+        result: { ...validTree, valueKind: "String" },
+        error: /tree query returned an invalid state/,
+      },
+      {
+        name: "default absent value with a kind",
+        context: defaultContext,
+        result: { ...missingKey, keyExists: true, valueKind: "String" },
+        error: /default query returned an invalid state/,
+      },
+      {
+        name: "default present value with a null kind",
+        context: defaultContext,
+        result: {
+          ...missingKey,
+          keyExists: true,
+          valueExists: true,
+          value: "command",
+        },
+        error: /default query returned an invalid state/,
+      },
+      {
         name: "non-array entries contract",
         context: treeContext,
         result: { ...validTree, entries: "not-an-array" },
@@ -334,6 +494,7 @@ describe("Windows NSIS installer smoke contracts", () => {
       keyExists: true,
       valueExists: false,
       value: null,
+      valueKind: null,
       entries: [validEntry],
     };
 
@@ -408,6 +569,14 @@ describe("Windows NSIS installer smoke contracts", () => {
       const parsedDefault = JSON.parse(defaultMode.stdout.trim());
       expect(typeof parsedDefault.keyExists).toBe("boolean");
       expect(parsedDefault.entries).toEqual([]);
+      expect(
+        validateRegistryQueryResult(parsedDefault, {
+          hive: "HKCU",
+          path: "SOFTWARE\\Classes\\lvis\\shell\\open\\command",
+          view: "64",
+          mode: "default",
+        }),
+      ).toBe(parsedDefault);
     },
   );
 
@@ -452,6 +621,182 @@ describe("Windows NSIS installer smoke contracts", () => {
       "pathToFileURL(resolve(process.argv[1])).href === import.meta.url",
     );
     expect(smoke).toContain("if (isEntrypoint) main().catch(failSmoke)");
+  });
+
+  it("verifies the complete machine protocol contract and owner-only cleanup", () => {
+    const smoke = readRepoFile("scripts/smoke-windows-nsis-installer.mjs");
+    const installer = readRepoFile("build/installer.nsh");
+
+    expect(installer).toContain(
+      'WriteRegStr SHELL_CONTEXT "Software\\Classes\\lvis" "" "URL:lvis"',
+    );
+    expect(installer).toContain(
+      'WriteRegStr SHELL_CONTEXT "Software\\Classes\\lvis" "URL Protocol" ""',
+    );
+    const expectedProtocolCommand =
+      "'\"" + "$INSTDIR\\${APP_EXECUTABLE_FILENAME}" + '" "%1"\'';
+    expect(installer).toContain(
+      'WriteRegStr SHELL_CONTEXT "Software\\Classes\\lvis\\shell\\open\\command" "" ' +
+        expectedProtocolCommand,
+    );
+    expect(installer).toContain(
+      'WriteRegStr SHELL_CONTEXT "Software\\Classes\\lvis\\DefaultIcon" ""',
+    );
+
+    const cleanupStart = installer.indexOf("lvis_remove_files_done:");
+    const cleanupEnd = installer.indexOf("lvis_protocol_cleanup_done:");
+    const cleanup = installer.slice(cleanupStart, cleanupEnd);
+    expect(cleanupStart).toBeGreaterThan(
+      installer.indexOf('RMDir /r "$INSTDIR"'),
+    );
+    expect(cleanupEnd).toBeGreaterThan(cleanupStart);
+    expect(cleanup).toContain("${if} ${isUpdated}");
+    expect(cleanup).toContain('${GetOptions} $R0 "--updated" $R1');
+    const firstOwnerRead = cleanup.indexOf("ReadRegStr $R1 SHELL_CONTEXT");
+    expect(
+      cleanup
+        .slice(0, firstOwnerRead)
+        .match(/Goto lvis_protocol_cleanup_done/g),
+    ).toHaveLength(2);
+    expect(cleanup).toContain(
+      'ReadRegStr $R1 SHELL_CONTEXT "Software\\Classes\\lvis\\shell\\open\\command" ""',
+    );
+    expect(cleanup).toContain(
+      'ReadRegStr $R1 HKEY_CURRENT_USER "Software\\Classes\\lvis\\shell\\open\\command" ""',
+    );
+    expect(cleanup).toContain("StrCmp $R1 $R2");
+    expect(cleanup).toContain(
+      "StrCpy $R0 '\"$INSTDIR\\${APP_EXECUTABLE_FILENAME}\",0'",
+    );
+    expect(cleanup).not.toContain(
+      "StrCpy $R0 '$INSTDIR\\${APP_EXECUTABLE_FILENAME}",
+    );
+    expect(
+      cleanup.match(
+        /ReadRegStr \$R1 (?:SHELL_CONTEXT|HKEY_CURRENT_USER) "Software\\Classes\\lvis\\DefaultIcon" ""/g,
+      ),
+    ).toHaveLength(2);
+    expect(cleanup.match(/StrCmpS \$R1 "URL:lvis"/g)).toHaveLength(2);
+    expect(cleanup).toContain(
+      'DeleteRegValue SHELL_CONTEXT "Software\\Classes\\lvis" "URL Protocol"',
+    );
+    expect(cleanup).toContain(
+      'DeleteRegValue HKEY_CURRENT_USER "Software\\Classes\\lvis" "URL Protocol"',
+    );
+    expect(cleanup).toContain(
+      'DeleteRegKey /ifempty SHELL_CONTEXT "Software\\Classes\\lvis"',
+    );
+    expect(cleanup).toContain(
+      'DeleteRegKey /ifempty HKEY_CURRENT_USER "Software\\Classes\\lvis"',
+    );
+    expect(cleanup).not.toMatch(
+      /^\s*DeleteRegKey (?!\/ifempty).*Software\\Classes\\lvis/m,
+    );
+
+    expect(smoke).toContain("LVIS_REGISTRY_VALUE_NAME");
+    expect(smoke).toContain('registration.rootDefault !== "URL:lvis"');
+    expect(smoke).toContain('registration.urlProtocol !== ""');
+    expect(smoke).toContain('registration.urlProtocolKind !== "String"');
+    expect(smoke).toContain("urlProtocolKind: urlProtocol.valueKind");
+    expect(smoke).toContain(
+      "isExactProtocolCommand(registration.command, installedExe)",
+    );
+    const appStop = smoke.indexOf("await state.runningApp.stop()");
+    const hkcuAfterStop = smoke.indexOf(
+      'await assertNoCurrentUserProtocolHandlers("installed app launch")',
+    );
+    const asrtProbe = smoke.indexOf(
+      "state.probe = await prepareAsrtUninstallProbe",
+    );
+    expect(hkcuAfterStop).toBeGreaterThan(appStop);
+    expect(hkcuAfterStop).toBeLessThan(asrtProbe);
+
+    expect(installer).toContain(
+      "!macro lvisIsExactEmptyUrlProtocolRegSz _root _out",
+    );
+    expect(installer).toContain("advapi32::RegGetValueW");
+    expect(installer).toContain("${LVIS_RRF_RT_REG_SZ}");
+    expect(installer).toContain("${LVIS_RRF_NOEXPAND}");
+    expect(installer).toContain("${LVIS_RRF_ZEROONFAILURE}");
+    expect(installer).toContain("${LVIS_RRF_SUBKEY_WOW6464KEY}");
+    expect(installer).toContain("${LVIS_RRF_SUBKEY_WOW6432KEY}");
+    expect(installer).toContain("System::Call '*(&i2 65535) p .r2'");
+    expect(installer).toContain("${AndIf} $3 = 1");
+    expect(installer).toContain("${AndIf} $4 = 2");
+    expect(installer).toContain("System::Call '*$2(&i2 .r6)'");
+    expect(installer).toContain("${If} $6 = 0");
+    expect(cleanup).toContain(
+      "!insertmacro lvisIsExactEmptyUrlProtocolRegSz 0x80000002 $R1",
+    );
+    expect(cleanup).toContain(
+      "!insertmacro lvisIsExactEmptyUrlProtocolRegSz 0x80000001 $R1",
+    );
+    expect(cleanup).not.toMatch(
+      /ReadRegStr \$R1 .* "Software\\Classes\\lvis" "URL Protocol"/,
+    );
+    expect(
+      cleanup.match(/!insertmacro lvisIsExactEmptyUrlProtocolRegSz/g),
+    ).toHaveLength(2);
+    expect(cleanup.match(/StrCmp \$R1 "1" 0 \+2/g)).toHaveLength(2);
+
+    expect(smoke).toContain("PROTOCOL_ICON_REGISTRY_PATH");
+    expect(smoke).toContain("defaultIcon:");
+    expect(smoke).toContain(
+      "isExactProtocolIcon(registration.defaultIcon, installedExe)",
+    );
+    expect(smoke).not.toContain("protocolCommands(");
+    expect(FOREIGN_PROTOCOL_FIXTURE_SCRIPT).toContain(
+      "[Microsoft.Win32.RegistryValueKind]::Binary",
+    );
+    expect(FOREIGN_PROTOCOL_FIXTURE_SCRIPT).toContain(
+      "[Microsoft.Win32.RegistryValueKind]::ExpandString",
+    );
+    expect(smoke).toContain('kind: keepAppData ? "ExpandString" : "Binary"');
+    expect(smoke).toContain("LVIS_FOREIGN_PROTOCOL_KIND: fixture.kind");
+    expect(FOREIGN_PROTOCOL_FIXTURE_SCRIPT).not.toContain(
+      "LVIS_REGISTRY_VIEW -eq '64'",
+    );
+    expect(FOREIGN_PROTOCOL_FIXTURE_SCRIPT).toContain(
+      "function Remove-EmptyFixtureKey",
+    );
+    expect(REGISTRY_QUERY_SCRIPT).not.toContain(
+      "function Remove-EmptyFixtureKey",
+    );
+    expect(FOREIGN_PROTOCOL_FIXTURE_SCRIPT).toContain(
+      "if (([byte[]]$rootKey.GetValue('URL Protocol')).Length -ne 0)",
+    );
+    expect(FOREIGN_PROTOCOL_FIXTURE_SCRIPT).not.toContain("::DWord");
+    expect(FOREIGN_PROTOCOL_FIXTURE_SCRIPT).not.toContain("$fixtureDword");
+    expect(FOREIGN_PROTOCOL_FIXTURE_SCRIPT).toContain(
+      "foreign named command value was removed",
+    );
+    expect(FOREIGN_PROTOCOL_FIXTURE_SCRIPT).toContain("'assert-preserved'");
+    expect(FOREIGN_PROTOCOL_FIXTURE_SCRIPT).toContain("'cleanup'");
+
+    const uninstallFlow = smoke.slice(
+      smoke.indexOf("async function uninstallAndVerify"),
+      smoke.indexOf("async function cleanupFailedInstallerPass"),
+    );
+    expect(uninstallFlow.indexOf("await runProcess")).toBeLessThan(
+      uninstallFlow.indexOf("await assertForeignProtocolFixturePreserved"),
+    );
+    expect(
+      uninstallFlow.indexOf("await assertForeignProtocolFixturePreserved"),
+    ).toBeLessThan(
+      uninstallFlow.indexOf("await cleanupForeignProtocolFixture"),
+    );
+    expect(
+      uninstallFlow.indexOf("await cleanupForeignProtocolFixture"),
+    ).toBeLessThan(uninstallFlow.indexOf("await assertUninstalledSurface"));
+    const fixtureAttachIndex = smoke.indexOf(
+      "state.foreignProtocolFixture = createForeignProtocolFixture(keepAppData)",
+    );
+    const fixtureSeedIndex = smoke.indexOf(
+      "await seedForeignProtocolFixture(state.foreignProtocolFixture)",
+    );
+    expect(fixtureAttachIndex).toBeGreaterThanOrEqual(0);
+    expect(fixtureSeedIndex).toBeGreaterThan(fixtureAttachIndex);
+    expect(smoke).toContain("foreignProtocolFixture: null");
   });
 
   it("requires real ASRT preconditions and verifies exact genuine teardown", () => {
