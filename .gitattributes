@@ -3,3 +3,4 @@
 build/**/*.txt text eol=lf
 build/*.svg text eol=lf
 build/*.ico binary
+resources/AGENTS.md* text eol=lf

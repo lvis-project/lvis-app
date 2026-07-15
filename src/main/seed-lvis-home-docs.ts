@@ -2,21 +2,20 @@ import { app } from "electron";
 import {
   closeSync,
   existsSync,
-  ftruncateSync,
-  fsyncSync,
+  fstatSync,
   mkdirSync,
   copyFileSync,
   chmodSync,
   openSync,
   readFileSync,
   readdirSync,
-  writeSync,
   constants as fsConstants,
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, dirname, parse as parsePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lvisHome } from "../shared/lvis-home.js";
+import * as atomicFile from "../lib/atomic-file.js";
 
 export interface LvisHomeDocUpgradeMarker {
   sourcePath: string;
@@ -174,17 +173,18 @@ function seedOne(
   // performs the length check internally, so the stat shortcut had no
   // semantic value anyway.
   try {
-    const currentBuf = readFileSync(target);
-    if (currentBuf.equals(packagedBuf)) return;
+    const currentBuf = readRegularFileNoFollow(target);
+    if (currentBuf !== null) {
+      if (currentBuf.equals(packagedBuf)) return;
 
-    const currentHash = sha256(currentBuf);
-    if (
-      replaceableHashes.has(currentHash) &&
-      replaceKnownPackagedCopy(target, packagedBuf, currentHash)
-    ) {
-      enforceUserFileMode(target);
-      result.upgraded.push(filename);
-      return;
+      const currentHash = sha256(currentBuf);
+      if (
+        replaceableHashes.has(currentHash) &&
+        replaceKnownPackagedCopy(target, packagedBuf, currentHash)
+      ) {
+        result.upgraded.push(filename);
+        return;
+      }
     }
 
     // If a previous `.new` is sitting unmerged, do not clobber it. Compare:
@@ -237,34 +237,47 @@ function sha256(value: Buffer): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+/** Refuse symlinks and non-files before hashing a user-owned target. */
+function readRegularFileNoFollow(target: string): Buffer | null {
+  let fd: number | null = null;
+  try {
+    const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+    fd = openSync(target, fsConstants.O_RDONLY | noFollow);
+    if (!fstatSync(fd).isFile()) return null;
+    return readFileSync(fd);
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+}
+
 /**
- * Replace a prior packaged copy without racing a concurrent user edit.
- * The open file descriptor is re-read and hash-checked immediately before the
- * write; if its bytes changed after discovery, the replacement is refused and
- * the caller falls back to the non-clobbering `.new` path.
+ * Replace a prior packaged copy through the shared atomic-file primitive.
+ * The successor is staged and fsynced first; immediately before rename, the
+ * target must still be a regular file with the same allowlisted hash. A false
+ * precondition or pre-commit failure leaves the original path intact and the
+ * caller falls back to the non-clobbering `.new` path.
  */
 function replaceKnownPackagedCopy(
   target: string,
   packagedBuf: Buffer,
   expectedHash: string,
 ): boolean {
-  let fd: number | null = null;
   try {
-    fd = openSync(target, "r+");
-    if (sha256(readFileSync(fd)) !== expectedHash) return false;
-
-    let offset = 0;
-    while (offset < packagedBuf.length) {
-      offset += writeSync(fd, packagedBuf, offset, packagedBuf.length - offset, offset);
-    }
-    ftruncateSync(fd, packagedBuf.length);
-    fsyncSync(fd);
-    return true;
+    return atomicFile.replaceUtf8FileAtomicSyncIf(
+      target,
+      packagedBuf.toString("utf8"),
+      () => {
+        const latest = readRegularFileNoFollow(target);
+        return latest !== null && sha256(latest) === expectedHash;
+      },
+      0o600,
+    );
   } catch (err) {
+    if ((err as { committed?: boolean }).committed === true) return true;
     console.warn("[seed-lvis-home-docs] failed to replace known packaged copy:", err);
     return false;
-  } finally {
-    if (fd !== null) closeSync(fd);
   }
 }
 

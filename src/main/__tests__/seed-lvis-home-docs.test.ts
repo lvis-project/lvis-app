@@ -33,8 +33,11 @@ import {
   readFileSync,
   existsSync,
   readdirSync,
+  lstatSync,
   statSync,
   rmSync,
+  symlinkSync,
+  unlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -47,6 +50,7 @@ import {
   listLvisHomeDocUpgradeMarkers,
   seedLvisHomeDocs,
 } from "../seed-lvis-home-docs.js";
+import * as atomicFile from "../../lib/atomic-file.js";
 
 let fixtures: string;
 let home: string;
@@ -90,6 +94,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   rmSync(fixtures, { recursive: true, force: true });
   rmSync(home, { recursive: true, force: true });
   if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
@@ -198,6 +203,57 @@ describe("seedLvisHomeDocs — upgrade markers", () => {
     expect(r.upgraded).toContain("AGENTS.md");
     expect(readFileSync(join(home, "AGENTS.md"), "utf8")).toBe("AGENTS v2\n");
     expect(existsSync(join(home, "AGENTS.md.new"))).toBe(false);
+  });
+
+  it("preserves a concurrent edit detected before the atomic replacement commit", () => {
+    seedLvisHomeDocs();
+    writeRes("AGENTS.md", "AGENTS v2\n");
+    const atomicReplace = atomicFile.replaceUtf8FileAtomicSyncIf;
+    vi.spyOn(atomicFile, "replaceUtf8FileAtomicSyncIf").mockImplementationOnce(
+      (target, content, precondition, mode) => {
+        writeFileSync(target, "concurrent user edit\n");
+        return atomicReplace(target, content, precondition, mode);
+      },
+    );
+
+    const r = seedLvisHomeDocs();
+
+    expect(r.upgraded).toContain("AGENTS.md");
+    expect(readFileSync(join(home, "AGENTS.md"), "utf8")).toBe(
+      "concurrent user edit\n",
+    );
+    expect(readFileSync(join(home, "AGENTS.md.new"), "utf8")).toBe("AGENTS v2\n");
+  });
+
+  it("keeps the predecessor intact when atomic staging fails", () => {
+    seedLvisHomeDocs();
+    writeRes("AGENTS.md", "AGENTS v2\n");
+    vi.spyOn(atomicFile, "replaceUtf8FileAtomicSyncIf").mockImplementationOnce(() => {
+      throw Object.assign(new Error("forced staging failure"), { code: "EIO" });
+    });
+
+    const r = seedLvisHomeDocs();
+
+    expect(r.upgraded).toContain("AGENTS.md");
+    expect(readFileSync(join(home, "AGENTS.md"), "utf8")).toBe("AGENTS v1\n");
+    expect(readFileSync(join(home, "AGENTS.md.new"), "utf8")).toBe("AGENTS v2\n");
+  });
+
+  it("does not follow an AGENTS.md symlink during packaged replacement", () => {
+    if (process.platform === "win32") return;
+    seedLvisHomeDocs();
+    const external = join(fixtures, "external-agents.md");
+    writeFileSync(external, "AGENTS v1\n");
+    unlinkSync(join(home, "AGENTS.md"));
+    symlinkSync(external, join(home, "AGENTS.md"));
+    writeRes("AGENTS.md", "AGENTS v2\n");
+
+    const r = seedLvisHomeDocs();
+
+    expect(r.upgraded).toContain("AGENTS.md");
+    expect(lstatSync(join(home, "AGENTS.md")).isSymbolicLink()).toBe(true);
+    expect(readFileSync(external, "utf8")).toBe("AGENTS v1\n");
+    expect(readFileSync(join(home, "AGENTS.md.new"), "utf8")).toBe("AGENTS v2\n");
   });
 
   it("preserves a user edit and writes the new packaged version to <file>.new", () => {
