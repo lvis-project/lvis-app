@@ -3,6 +3,7 @@ import {
   closeSync,
   existsSync,
   fstatSync,
+  lstatSync,
   mkdirSync,
   copyFileSync,
   chmodSync,
@@ -241,6 +242,10 @@ function sha256(value: Buffer): string {
 function readRegularFileNoFollow(target: string): Buffer | null {
   let fd: number | null = null;
   try {
+    // lstat rejects an existing symlink on every platform, including Windows
+    // where O_NOFOLLOW may be unavailable. O_NOFOLLOW then closes the
+    // lstat→open swap window on platforms that provide it.
+    if (!lstatSync(target).isFile()) return null;
     const noFollow = fsConstants.O_NOFOLLOW ?? 0;
     fd = openSync(target, fsConstants.O_RDONLY | noFollow);
     if (!fstatSync(fd).isFile()) return null;
