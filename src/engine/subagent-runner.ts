@@ -519,6 +519,7 @@ interface ActiveSubAgentChild {
   lease: symbol;
   childSessionId: string;
   originSessionId?: string;
+  /** Filesystem-canonical root frozen before any live workspace revocation. */
   wireProjectRoot?: string;
   title: string;
   loop: ConversationLoop;
@@ -1451,7 +1452,15 @@ export class SubAgentRunner {
     background: boolean;
   }): symbol {
     const lease = Symbol(args.childSessionId);
-    this.activeChildren.set(args.childSessionId, { ...args, lease });
+    this.activeChildren.set(args.childSessionId, {
+      ...args,
+      // Workspace removal supplies the same filesystem-canonical form. Freeze
+      // it here so symlink and dot-segment aliases cannot evade live aborts.
+      ...(args.wireProjectRoot
+        ? { wireProjectRoot: canonicalizePathForMatch(args.wireProjectRoot) }
+        : {}),
+      lease,
+    });
     return lease;
   }
 
