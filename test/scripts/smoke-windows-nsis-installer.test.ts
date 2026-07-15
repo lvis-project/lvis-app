@@ -943,11 +943,15 @@ describe("Windows NSIS installer smoke contracts", () => {
     expect(smoke).not.toContain("unlinkSync(");
 
     const updaterGate = installer.indexOf('${GetOptions} $R0 "--updated" $R2');
+    const cleanupFailureSentinel = installer.indexOf(
+      'StrCpy $R5 "LVIS notification cleanup did not run"',
+    );
     const productCleanup = installer.indexOf(
       "UAC_AsUser_Call Function un.lvisCleanupCurrentUserNotificationArtifacts",
     );
     const asrtTeardown = installer.indexOf("ASRT OS sandbox teardown");
-    expect(productCleanup).toBeGreaterThan(updaterGate);
+    expect(cleanupFailureSentinel).toBeGreaterThan(updaterGate);
+    expect(productCleanup).toBeGreaterThan(cleanupFailureSentinel);
     expect(asrtTeardown).toBeGreaterThan(productCleanup);
     expect(installer).toContain("${UAC_SYNCREGISTERS}");
 
