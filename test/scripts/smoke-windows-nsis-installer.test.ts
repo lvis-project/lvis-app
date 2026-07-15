@@ -1064,8 +1064,9 @@ describe("Windows NSIS installer smoke contracts", () => {
       'StrCpy $R6 "$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe"',
     );
     expect(cleanupFunction).toContain(
-      "kernel32::IsWow64Process2(p -1, *i .r7, *i .r8) i .r9",
+      "kernel32::IsWow64Process2(p -1, *i .R7, *i .R8) i .R9",
     );
+    expect(cleanupFunction).not.toContain("*i .r7");
     expect(cleanupFunction).toContain(
       "IntCmp $R8 0x014c lvis_notification_powershell_path_ready",
     );
