@@ -1,6 +1,6 @@
 # A2A Inter-Subagent Messaging — Blueprint
 
-- Status: **Accepted; ph1-ph3 merged; ph4 P4-0 closed and P4-1 registry admission merged** (D1-D8 locked by the owner on 2026-07-11; ph4 boundary locked 2026-07-15)
+- Status: **Accepted; ph1-ph3 merged; ph4 P4-0 closed, P4-1 registry admission merged, and P4-2 durable Agent Card registry contract locked** (D1-D8 locked by the owner on 2026-07-11; ph4 boundary locked 2026-07-15)
 - Scope: upgrade LVIS sub-agents from "tool-call-level" (pull-only child→parent) to A2A-protocol-based messaging — child→parent push, sibling↔sibling messaging — while preserving every existing security invariant.
 - Protocol baseline: **A2A v1.0.0** (Linux Foundation, a2a-protocol.org). Complementary to MCP (MCP = agent↔tool, A2A = agent↔agent); coexists with the ext-apps adoption track.
 - Roadmap anchor: concretizes the Agent Hub vision item "A2A Runtime — 에이전트 간 비동기 위임·합의·결과 전달" (docs/ko/architecture/architecture.md Phase 5-6, previously ❌ 미구현).
@@ -86,7 +86,7 @@ The workspace rail renders a budget-suspended run as `done`: the done event hard
 | **ph1** | Vendor v1.0 types; Task-state mapping; `suspension` type evolution (+ MAX_RESUMES decoupling prep); child→parent push (queueGuidance + mailbox + D3 wake); renderer `waiting` state (live-bug fix); TCK state-transition unit tests | M (~2-3wk) | host minor release |
 | **ph2** | agent_send sibling messaging (parent-mediated); active-recipient round-boundary steering + idle mailbox reuse; per-tree budget + hop TTL; DLP chokepoint on Parts; audit edges; question-wait (reason: question) | M | next host minor |
 | **ph3** | Loopback wire binding: one 127.0.0.1 server path-multiplexing N handlers; Agent Card endpoint; protocol-version negotiation; SSE capability gating; A2A task TTL→CANCELED (D6); **official a2a-tck conformance**; re-evaluate the JavaScript SDK server glue; local external-host smoke against one A2A client | L | opt-in flag, default OFF |
-| **ph4** | External interop / Agent Hub: cross-machine, per-agent auth, Agent Card registry; plugin work-assistant registration; delegation-depth policy revisit (D8) | XL | separate opt-in |
+| **ph4** | External interop / Agent Hub: durable administrator-reviewed Agent Card registry; explicit trust-key, credential, discovery, and health stages; later host↔Agent Hub remote routing. Plugin integration is outside this roadmap. D8 remains unchanged unless a separate policy decision is accepted after routing exists. | XL | separate opt-in |
 
 ### Ph3 loopback listener and route-family opt-ins (locked 2026-07-13)
 
@@ -132,7 +132,7 @@ The wire age-out policy is fixed and does not change D6's rule against an intern
 
 The official TCK and the production-handler smoke serve different evidence boundaries. `scripts/run-a2a-tck.ts` pins upstream commit `5996b79f9cefa6fc390980e383e358a66fb9e49e` and runs the official suite through the production JSON-RPC router and bearer boundary, but deliberately supplies the deterministic `A2ATckFixtureHandler`. That proves the router/binding contract and report expectations; it does not exercise `A2ASubAgentHandler`, the durable Task store, or the runner. The opt-in `bun run test:a2a-external` gate therefore uses the locked official Python SDK to address the real production Agent Card and handler and cover COMPLETED, INPUT_REQUIRED continuation, CANCELED, and rejected authentication.
 
-### Ph4 decomposition and P4-1 registry admission (locked 2026-07-15)
+### Ph4 decomposition: P4-1 admission and P4-2 durable registry (locked 2026-07-15)
 
 P4-0 closes the documentation/evidence lag after the ph3 runtime, expiry,
 official-TCK, and production-handler smoke changes merged. Ph4 starts from the
@@ -151,8 +151,10 @@ following boundary; it does not reopen ph3's loopback listener contract.
   unknown keys is `discovered`. A detached JWS `ES256` or `EdDSA` signature
   verified by an explicitly supplied active Agent Card trust key promotes it
   to `trusted`. A malformed signature, a revoked known key, or a failed
-  signature from a known key is rejected. P4-1 does not read the Agent Hub
-  identity database or implicitly treat signup keys as Agent Card trust anchors.
+  signature from a known key fails admission before any result is produced;
+  “rejected” is a fail-closed outcome, not an `admissionTrustState`. P4-1 does
+  not read the Agent Hub identity database or implicitly treat signup keys as
+  Agent Card trust anchors.
 - **No hidden I/O:** P4-1 performs no discovery fetch, `jku`/JWKS retrieval,
   credential lookup, database write, cache update, or endpoint probe. A `jku`,
   when present, is syntax-checked as HTTPS only; key retrieval belongs to a
@@ -191,9 +193,269 @@ following boundary; it does not reopen ph3's loopback listener contract.
   remains `routable=false`.
 
 Persistence, administrative trust review, key lifecycle distribution,
-credential provisioning, endpoint health, plugin work-assistant registration,
-and remote routing are deliberately deferred beyond P4-1. No later stage may
-infer routability from `trusted` alone.
+credential provisioning, endpoint health, and remote routing are deliberately
+deferred beyond P4-1. No later stage may infer routability from `trusted`
+alone. Plugin work-assistant registration is not part of this roadmap.
+
+#### P4-2 durable Agent Card registry contract
+
+P4-2 is owned by Agent Hub. It persists the evidence produced by the pure P4-1
+admission core and adds an administrator-reviewed lifecycle without adding a
+network or execution effect. The registry is a trust decision record, not a
+router: every returned card/interface projection remains `routable=false`.
+
+##### State and identity model
+
+P4-2 stores two independent state axes and never collapses one into the other:
+
+- Every successful card import, and every successful trust re-verification,
+  appends one immutable admission observation.
+  `admissionTrustState` belongs to that observation, not to the mutable registry
+  record, and is `discovered` or `trusted`. The observation snapshots the exact
+  P4-1 result, signature-verification evidence, supplied active trust-anchor
+  revisions, authenticated actor, `submission_id`, provenance, and timestamp.
+  Later imports or re-verification append observations; they never rewrite an
+  earlier `admissionTrustState` or verification snapshot. This evidence is not
+  an administrator decision and cannot make the card routable.
+- `registryState` is the administrator-owned lifecycle state:
+  `discovered`, `trusted`, `rejected`, or `revoked`. The first successful import
+  of a new canonical document with a P4-1 `discovered` or `trusted` result
+  creates one `registryState=discovered` record. A later submission of that same
+  canonical document appends an observation only and does not change its current
+  registry state, including `trusted`, `rejected`, or `revoked`.
+  A malformed, oversized, or signature-invalid admission, or a signature naming
+  a known revoked `key_id`, produces no P4-1 result; the HTTP import returns a
+  bounded 4xx response and persists no card, observation, audit, or idempotency
+  row.
+- The P4-1 policy input is the lifecycle-aware set of every known Agent Card
+  trust anchor, both `active` and `revoked`, with an explicit active flag. A
+  revoked `key_id` remains in the durable admission denylist and fails closed;
+  it can never be omitted or downgraded to an unknown key. An Agent Card
+  signature carries no public-key fingerprint, so P4-2 does not infer or match
+  `key_fingerprint_sha256` for a new unknown `key_id`. Until G003 performs its
+  separately bounded key discovery, such an unknown signature may therefore
+  remain `admissionTrustState=discovered`. The revoked fingerprint is instead a
+  lifetime re-registration/revival denylist at the trust-anchor creation
+  boundary. A successful immutable observation snapshots only the active trust
+  candidates used for verification, not the revoked admission-denylist rows.
+- The only legal persisted transitions are
+  `import -> discovered`, `discovered -> trusted | rejected`, and
+  `trusted -> revoked`. `rejected` and `revoked` are terminal. Re-importing a
+  changed card creates a new discovered record; it never mutates or revives a
+  terminal record. Re-importing the same canonical document with a new
+  submission records another immutable observation without changing its
+  `registryState`.
+- No observation, re-import, re-verification, trust-anchor addition, read, or
+  startup reconciliation may change `registryState`. Only an explicit
+  administrator trust/reject/revoke mutation, or the atomic cascade caused by
+  an explicit administrator trust-anchor revocation, may apply a legal state
+  transition.
+- One host-minted `recordId` identifies one immutable canonical document. A
+  changed canonical document receives a new record. Display name, signup
+  account, key ID, and mutable request metadata are not registry identities.
+
+##### Hashes, provenance, and trust anchors
+
+- `payloadSha256` preserves the P4-1 signing meaning: it is SHA-256 over the
+  canonical signature payload after signatures and protocol defaults are
+  stripped. It is not a raw-request-body hash and byte-different JSON encodings
+  of the same signing payload therefore produce the same value.
+- `canonicalDocumentHash` is SHA-256 over the complete validated Agent Card
+  encoded with RFC 8785 JSON Canonicalization Scheme (JCS), including the
+  signatures array. It is the complete-document identity used to resolve the
+  one immutable registry record. It is distinct from `payloadSha256`; a
+  signature-verification observation persists the algorithm, signature key ID,
+  outcome, selected anchor internal `id`/`row_version`/`key_id`/fingerprint, and
+  the sorted redacted active-anchor revision snapshot separately. That snapshot
+  contains only the active trust candidates supplied for signature verification,
+  as
+  `{ id, row_version, key_id, algorithm, key_fingerprint_sha256 }`. It never
+  copies revoked denylist rows, PEM material, raw signatures, or protected
+  headers. Here and in every anchor response, `id` is the host-minted numeric
+  internal anchor identifier; `key_id` is the administrator-supplied lifetime
+  signature-key identifier.
+- The registry persists the immutable canonical document, both hashes, import
+  source/provenance, importer identity, immutable per-submission admission and
+  verification observations, timestamps, administrator decision metadata, and
+  an append-only audit history. System-generated audit metadata never copies
+  credentials, raw bearer values, private keys, card documents, PEM material,
+  raw signatures, or protected headers. A bounded administrator decision reason
+  is the only free-text audit field; P4-2 does not claim to detect or redact an
+  arbitrary secret that an administrator types into that reason.
+- Agent Card trust anchors are explicit locally administered PEM public keys.
+  `key_fingerprint_sha256` is lowercase hexadecimal SHA-256 over the DER SPKI
+  bytes exported from the parsed canonical public key. This canonical
+  fingerprint identifies one trust-anchor aggregate for its entire lifetime.
+  That aggregate has one host-minted numeric internal `id`, one
+  administrator-supplied `key_id` used for signature-key lookup, algorithm,
+  fingerprint, `active -> revoked` terminal lifecycle, creation/revocation
+  metadata, monotonically increasing `row_version`, and append-only audit
+  history. Create/read responses expose both fields with those meanings;
+  mutations target the internal `id`, never `key_id` as an alias. Both
+  `key_fingerprint_sha256` and the administrator-supplied `key_id` are
+  lifetime-unique. Registering a duplicate active fingerprint or reused
+  `key_id` returns 409 with no new anchor, audit, or idempotency row. Once
+  revoked, the fingerprint cannot be restored or registered again under a new
+  `key_id`; the revoked `key_id` also cannot be reused. Agent Hub signup/login
+  identity keys, sessions, and credentials are a separate domain and are never
+  implicitly imported, queried, or accepted as Agent Card trust anchors.
+- P4-2 does not generate, rotate, fetch, or distribute keys. An administrator
+  supplies the PEM material through the explicit registry boundary. Private
+  keys are rejected and never persisted.
+- A rejected card body, PEM value, or private-key value is never echoed or
+  copied into a bounded 4xx response, application log, audit row, observation,
+  or idempotency row. The boundary returns only a generic bounded error code and
+  message; diagnostics may contain host-generated request identifiers and size
+  or category metadata, never rejected raw bytes.
+
+##### Administration, concurrency, and canonical interface
+
+Public HTTP JSON preserves Agent Hub's existing `snake_case` wire convention,
+including `expected_version` and `submission_id`. TypeScript internals may use
+camelCase, but serializers must keep the wire names explicit and must not add
+silent aliases.
+
+- Every P4-2 card, observation, audit, and trust-anchor read or write operation
+  is administrator-only. Authentication and administrator authorization run
+  before lookup or mutation so an unauthorized caller cannot enumerate record,
+  interface, observation, audit, or anchor existence. Caller claims supplied in
+  a request body are never authoritative.
+- `discovered -> trusted` requires successful re-verification of the exact
+  stored canonical document against an active, explicit local Agent Card trust
+  anchor, the administrator decision, and the record's current expected
+  version. The successful re-verification is appended as a new immutable
+  observation in the same transaction as the administrator decision; no prior
+  observation is rewritten. An unsigned `admissionTrustState=discovered`
+  observation cannot be trusted by administrator override alone.
+- Each mutable aggregate carries a monotonically increasing version. A mutation
+  of an existing record or trust anchor requires compare-and-swap against its
+  own `expected_version`; the state/anchor change, any new observation, the
+  audit record, and the successful idempotency result commit in one database
+  transaction. A stale version, competing distinct mutation, illegal
+  transition, or partial persistence failure fails closed with no mutation.
+- Every import, trust, reject, revoke, and trust-anchor mutation is idempotent by
+  authenticated administrator actor plus `submission_id`. The stored canonical
+  semantic request fingerprint is SHA-256 over JCS-canonicalized,
+  operation-tagged validated request semantics:
+  - import hashes `{ operation, canonical_document, provenance }`; the complete
+    canonical document already contains its preferred interface;
+  - trust-anchor creation hashes `{ operation, key_id, algorithm,
+    canonical_public_key_pem, key_fingerprint_sha256 }`; and
+  - card review/trust/reject/revoke and trust-anchor revoke hash `{ operation,
+    target, expected_version, decision, reason, ...validated_request_inputs }`
+    for the fields accepted by that specific operation.
+  For trust-anchor revoke, `target` is the host-minted internal numeric `id`;
+  the administrator-supplied `key_id` is not accepted as a target alias.
+  Transport-only headers and values derived from mutable database state are
+  excluded. In particular, replay does not recalculate the hash from a later
+  registry/anchor state, selected verification anchor, or normalized interface
+  read from the stored record; those values belong to the committed result and
+  observation. Replaying the same pair and identical semantic fingerprint
+  returns that original result without a second observation, state transition,
+  cascade, or audit event. A different operation or any different semantic
+  request field for that actor+`submission_id` returns 409 with no mutation. The
+  idempotency row is committed only with a successful mutation; malformed,
+  oversized, signature-invalid, revoked-key-ID, authorization, CAS,
+  conflict, and persistence failures create no new idempotency row and do not
+  alter an existing successful replay row.
+- The same canonical document submitted under a new `submission_id` appends an
+  observation without changing state. Concurrent imports converge on one
+  immutable document record while preserving each distinct successful
+  observation; changed documents remain distinct discovered records.
+- Revoking a trust anchor atomically revokes every currently `trusted` card
+  record whose successful administrator decision depends on that anchor.
+  Each cascade edge is recorded in the same transaction. Discovered and
+  rejected records remain unchanged; a revoked record cannot be restored.
+- The preferred A2A interface URL is normalized by exactly
+  `new URL(url).href`, persisted as `preferred_interface_uri`, and used
+  consistently for lookup, trust-conflict checks, and the trusted-record unique
+  constraint. No second normalizer, display-name grouping, endpoint fallback,
+  or last-write-wins rule may define interface identity.
+- At most one `trusted` record may own the same normalized
+  `preferred_interface_uri`. If an incumbent trusted record exists, trusting a
+  different discovered record returns 409 and commits no registry mutation. The
+  incumbent must be revoked through a separate administrator revoke request
+  using its own `expected_version` and `submission_id`; the candidate trust is a
+  later independent request. There is no replacement endpoint, implicit revoke,
+  or compound swap. Registry reads expose the one trusted canonical interface
+  or no interface.
+
+##### Zero-effect boundary and later stages
+
+- P4-2 performs no HTTP discovery, endpoint probe, `jku`/JWKS retrieval,
+  credential lookup/provisioning, automatic trust-key lifecycle, health check,
+  tool registration, remote invocation, or host routing. Persistence and
+  administrator-triggered local mutations are its only effects. Every returned
+  card/interface projection remains `routable=false`.
+- The configured Agent Hub database transaction is P4-2's only I/O. P4-2
+  performs zero network, filesystem, child-process, tool, or runner I/O; PEM
+  public-key material and card documents cross the authenticated HTTP boundary
+  as values, never as paths to be read. Tests inject seams that fail if any
+  prohibited I/O path is touched.
+- The next trust/connectivity stage owns HTTPS discovery, `jku`/JWKS and trust
+  key automation, per-agent credentials, and endpoint-health lifecycle. Those
+  operations must consume this registry through an explicit boundary and may
+  not rewrite its historical evidence.
+- A later remote-routing stage owns the only host↔Agent Hub route decision. It
+  must require an independently eligible, healthy, credentialed registry
+  interface and a host authorization path; neither `admissionTrustState` nor
+  `registryState=trusted` alone is sufficient.
+- Plugin/HostApi integration, Marketplace behavior, meeting and local-indexer
+  work, and SDK dependency alignment are explicitly outside P4-2 and this A2A
+  roadmap. They must not be introduced as hidden prerequisites or side effects.
+- D8 remains unchanged: delegation creation stops at depth 1. P4-2 changes
+  neither the local communication graph nor the creation graph.
+
+##### P4-2 completion evidence
+
+P4-2 is complete only when Agent Hub has durable migrations and tests proving:
+
+1. restart-safe persistence of canonical documents, `payloadSha256` and
+   `canonicalDocumentHash`, immutable per-submission admission/verification
+   observations and provenance, administrator decisions, trust anchors, and
+   append-only audit history;
+2. exact state-transition enforcement, terminal-state non-revival, and the
+   separation of observation-owned `admissionTrustState` from record-owned
+   `registryState`, including proof that observation/import/re-verification does
+   not change registry state; lifecycle-aware active+revoked policy input; and
+   proof that a revoked `key_id` remains a known fail-closed admission denylist
+   match with zero card, observation, audit, or idempotency persistence on
+   failure, while a new unknown `key_id` is not fingerprint-inferred and may
+   remain discovered before G003;
+3. administrator-only authorization before every card, observation, audit, and
+   trust-anchor read/write; transactionality; per-aggregate compare-and-swap;
+   actor+`submission_id` replay/conflict behavior; zero new or altered
+   idempotency rows for failed requests; and concurrent import/mutation safety;
+4. explicit PEM trust-anchor validation and separation from signup identity;
+   consistent host-minted numeric `id` versus administrator-supplied signature
+   `key_id` roles in DB rows, responses, snapshots, create fingerprints, and
+   revoke targets; canonical-fingerprint/key-ID lifetime uniqueness;
+   duplicate-active 409; terminal revocation; revoked-fingerprint
+   re-registration/revival denial; and rejection of re-registration under a new
+   `key_id`, with raw private-key/PEM bytes absent from error responses,
+   application logs, audit, observations, and idempotency rows;
+5. atomic trust-anchor revocation cascade; exact `new URL(url).href`
+   normalization; exactly one trusted record per normalized
+   `preferred_interface_uri`; 409/no-mutation incumbent conflicts; and separate
+   versioned incumbent revocation before a later candidate trust request;
+6. deterministic restart/migration behavior; proof that system-generated audit
+   metadata copies no credential, raw bearer, private key, card, PEM, signature,
+   or protected-header material; and a bounded administrator decision reason as
+   the only free-text field, without claiming arbitrary-secret detection;
+   rejected card/PEM/private-key inputs return generic bounded errors with their
+   raw bytes absent from API responses, application logs, and audit rows;
+7. full-semantic-request idempotency fingerprints, including import provenance
+   and every operation field, with 409 on any same-actor/submission mismatch;
+   and contract tests proving every returned card/interface projection is
+   `routable=false` and that the database is the only I/O—no network,
+   filesystem, child-process, tool, runner, discovery, health, plugin,
+   host-routing, or agent-execution seam is invoked.
+
+Non-goals for P4-2 are discovery, JWKS/key automation, credentials, health
+probing, routing, D8 changes, plugin registration, HostApi changes, Marketplace
+activation, meeting/local-indexer work, and SDK alignment. Passing unrelated
+plugin or host tests cannot substitute for the Agent Hub persistence,
+concurrency, authorization, and zero-effect evidence above.
 
 ## Cross-host implementation review and follow-on constraints
 
@@ -208,7 +470,7 @@ Resulting constraints:
 
 1. Ph2 sends to an active recipient only at its safe inter-round boundary; interrupt/restart is a separate explicit operation.
 2. Ph3 keeps the wire opt-in and loopback-only, runs the official TCK, and adds one local external-client smoke covering COMPLETED, INPUT_REQUIRED continuation, CANCELED, and rejected authentication.
-3. Ph4 owns cross-machine trust, Agent Card registry policy, and plugin/remote work-assistant registration. None of those relaxes D8's depth-1 creation stop.
+3. Ph4 owns cross-machine trust, the Agent Hub Agent Card registry, and the later host↔Agent Hub remote route. Plugin work-assistant registration is excluded. None of those relaxes D8's depth-1 creation stop.
 ## References
 
 Design inputs: A2A v1.0 spec + official SDK survey (2026-07-10 research, npm-registry-verified); transport/SDK-lane design review; INPUT_REQUIRED state-policy review (state inventory table with file:line evidence for `subagent-runner.ts`, `agent-spawn.ts`, `query-loop.ts`, `approval-gate.ts`, `tool-timeout-policy.ts`, `conversation-loop.ts`, `use-workflow-tools.ts`). All internal claims were verified against `main` at authoring time.
