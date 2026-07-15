@@ -20,6 +20,7 @@ import {
   sep,
 } from "node:path";
 import { createInterface } from "node:readline";
+import { finished } from "node:stream/promises";
 import { z } from "zod";
 
 import { validateSandboxPath } from "../sandbox/path-validator.js";
@@ -784,16 +785,20 @@ async function grepFile(
   const input = createReadStream(path, { encoding: "utf8" });
   const rl = createInterface({ input, crlfDelay: Infinity });
   let lineNo = 1;
-  for await (const line of rl) {
-    regex.lastIndex = 0;
-    if (regex.test(line)) {
-      matches.push({ path, line: lineNo, text: line });
-      if (matches.length >= limit) break;
+  try {
+    for await (const line of rl) {
+      regex.lastIndex = 0;
+      if (regex.test(line)) {
+        matches.push({ path, line: lineNo, text: line });
+        if (matches.length >= limit) break;
+      }
+      lineNo += 1;
     }
-    lineNo += 1;
+  } finally {
+    rl.close();
+    input.destroy();
+    await finished(input, { cleanup: true }).catch(() => undefined);
   }
-  rl.close();
-  input.destroy();
   return { ok: true, value: matches };
 }
 

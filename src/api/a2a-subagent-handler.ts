@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
   A2ARole,
@@ -36,6 +35,7 @@ import {
 } from "../engine/subagent-runner.js";
 import { GUIDE_MAX_CHARS } from "../engine/turn/guidance-limits.js";
 import { maskSensitiveData } from "../shared/dlp.js";
+import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 import { A2AHandlerError, type A2ARequestHandler } from "./a2a-router.js";
 import {
   A2ATaskStore,
@@ -69,6 +69,10 @@ const LIST_KEYS = new Set([
 ]);
 const CANCEL_KEYS = new Set(["tenant", "id", "metadata"]);
 const PROTO_INT32_MAX = 2_147_483_647;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+export const A2A_INPUT_REQUIRED_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+export const A2A_INPUT_REQUIRED_EXPIRY_RETRY_MS = 60_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -98,6 +102,11 @@ function isSafeChildSessionId(value: unknown): value is string {
   return typeof value === "string"
     && CHILD_SESSION_ID_PATTERN.test(value)
     && maskSensitiveData(value).detections.length === 0;
+}
+
+/** UUID-compatible context ID whose complete value passes the DLP scanner. */
+export function createA2AContextId(): string {
+  return createDlpSafeUuid();
 }
 
 function isValidHistoryLength(value: unknown): value is number {
@@ -349,7 +358,7 @@ export interface A2ASubAgentLifecycleRunner {
 
 export interface A2ATaskLifecycleAuditEvent {
   type: "a2a-task-lifecycle";
-  outcome: "masked" | "dropped";
+  outcome: "masked" | "dropped" | "canceled";
   reason:
     | "dlp-masked"
     | "consent-denied"
@@ -359,6 +368,7 @@ export interface A2ATaskLifecycleAuditEvent {
     | "task-not-resumable"
     | "task-not-cancelable"
     | "task-budget-exceeded"
+    | "task-expired"
     | "storage-failed"
     | "runner-failed";
   handlerId: string;
@@ -403,6 +413,11 @@ interface PendingInitialMutation {
   promise: Promise<A2AInitialAdmissionStart>;
 }
 
+interface ExpiryRetryState {
+  statusTimestamp: string;
+  retryNotBefore: number;
+}
+
 interface A2AInitialStart {
   execution: Promise<A2ATaskRecord>;
   linked: Promise<void>;
@@ -429,6 +444,14 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
   private readonly initialInFlight = new Map<string, PendingInitialMutation>();
   private readonly pendingTaskMutations = new Map<string, PendingTaskMutation>();
   private readonly taskQueues = new Map<string, Promise<void>>();
+  private readonly expiryRetries = new Map<string, ExpiryRetryState>();
+  private expiryTimer: ReturnType<typeof setTimeout> | undefined;
+  private expiryQueue: Promise<void> = Promise.resolve();
+  private expirySweepQueued = false;
+  private expiryStarted = false;
+  private expiryDisposed = false;
+  private expiryBootReconciled = false;
+  private expiryDisposePromise: Promise<void> | undefined;
 
   constructor(private readonly options: CreateA2ASubAgentHandlerOptions) {
     if (options.id !== options.binding.handlerId) {
@@ -436,7 +459,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
     }
     this.id = options.id;
     this.card = options.card;
-    this.makeId = options.makeId ?? randomUUID;
+    this.makeId = options.makeId ?? createA2AContextId;
   }
 
   private async withTaskLock<T>(taskId: string, operation: () => Promise<T>): Promise<T> {
@@ -449,6 +472,237 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
     } finally {
       if (this.taskQueues.get(taskId) === tail) this.taskQueues.delete(taskId);
     }
+  }
+
+  private clearExpiryTimer(): void {
+    if (!this.expiryTimer) return;
+    clearTimeout(this.expiryTimer);
+    this.expiryTimer = undefined;
+  }
+
+  private scheduleExpirySweep(delayMs: number): void {
+    this.clearExpiryTimer();
+    if (!this.expiryStarted || this.expiryDisposed) return;
+    const timer = setTimeout(() => {
+      if (this.expiryTimer === timer) this.expiryTimer = undefined;
+      void this.requestExpirySweep();
+    }, Math.min(MAX_TIMER_DELAY_MS, Math.max(0, delayMs)));
+    timer.unref();
+    this.expiryTimer = timer;
+  }
+
+  private requestExpirySweep(): Promise<void> {
+    if (!this.expiryStarted || this.expiryDisposed) return Promise.resolve();
+    if (this.expirySweepQueued) return this.expiryQueue;
+    this.expirySweepQueued = true;
+    const scheduled = this.expiryQueue.then(async () => {
+      this.expirySweepQueued = false;
+      if (!this.expiryDisposed) await this.runExpirySweep();
+    });
+    this.expiryQueue = scheduled.catch(() => undefined);
+    return scheduled;
+  }
+
+  private async reconcileExpiryBootRecords(): Promise<boolean> {
+    let retryNeeded = false;
+    const records = await this.options.store.list(this.id);
+    for (const record of records) {
+      if (isA2ATerminalTaskState(record.task.status.state)) continue;
+      try {
+        await this.withTaskLock(record.task.id, async () => {
+          const current = await this.options.store.lookupTask(this.id, record.task.id);
+          if (current.ok && !isA2ATerminalTaskState(current.record.task.status.state)) {
+            await this.reconcile(current.record);
+          }
+        });
+      } catch {
+        retryNeeded = true;
+        this.audit("storage-failed", "dropped", { taskId: record.task.id });
+      }
+    }
+    return !retryNeeded;
+  }
+
+  private expiryDeadline(record: A2ATaskRecord): number | null {
+    if (record.task.status.state !== A2ATaskState.INPUT_REQUIRED) return null;
+    const enteredAt = Date.parse(record.task.status.timestamp ?? "");
+    return Number.isFinite(enteredAt) ? enteredAt + A2A_INPUT_REQUIRED_TTL_MS : null;
+  }
+
+  private async expireInputRequiredTask(
+    taskId: string,
+    listedStatusTimestamp: string,
+  ): Promise<void> {
+    try {
+      await this.withTaskLock(taskId, async () => {
+        const lookup = await this.options.store.lookupTask(this.id, taskId);
+        if (!lookup.ok) {
+          this.expiryRetries.delete(taskId);
+          return;
+        }
+        await this.reconcile(lookup.record);
+
+        const revalidated = await this.options.store.lookupTask(this.id, taskId);
+        if (!revalidated.ok) {
+          this.expiryRetries.delete(taskId);
+          return;
+        }
+        const record = revalidated.record;
+        if (record.task.status.state !== A2ATaskState.INPUT_REQUIRED) {
+          this.expiryRetries.delete(taskId);
+          return;
+        }
+        const statusTimestamp = record.task.status.timestamp ?? "";
+        const existingRetry = this.expiryRetries.get(taskId);
+        if (existingRetry && existingRetry.statusTimestamp !== statusTimestamp) {
+          this.expiryRetries.delete(taskId);
+        } else if (existingRetry && existingRetry.retryNotBefore > Date.now()) {
+          return;
+        }
+        const deadline = this.expiryDeadline(record);
+        if (deadline === null) {
+          this.expiryRetries.set(taskId, {
+            statusTimestamp,
+            retryNotBefore: Date.now() + A2A_INPUT_REQUIRED_EXPIRY_RETRY_MS,
+          });
+          this.audit("storage-failed", "dropped", { taskId });
+          return;
+        }
+        if (deadline > Date.now()) return;
+
+        const canceled = await this.options.runner.cancelA2AWireRun(
+          record.childSessionId,
+          { handlerId: this.id },
+        );
+        if (!canceled.ok) {
+          const projected = canceled.run
+            ? await this.transitionFromSnapshot(record, canceled.run)
+            : record;
+          if (!isA2ATerminalTaskState(projected.task.status.state)) {
+            this.expiryRetries.set(taskId, {
+              statusTimestamp,
+              retryNotBefore: Date.now() + A2A_INPUT_REQUIRED_EXPIRY_RETRY_MS,
+            });
+            this.audit(
+              canceled.reason === "task-not-found"
+                ? "unknown-task"
+                : canceled.reason === "storage-failed"
+                  ? "storage-failed"
+                  : "task-not-cancelable",
+              "dropped",
+              { taskId },
+            );
+            return;
+          }
+          this.expiryRetries.delete(taskId);
+          return;
+        }
+
+        const transitioned = await this.options.store.transition({
+          handlerId: this.id,
+          taskId,
+          state: A2ATaskState.CANCELED,
+        });
+        if (!transitioned.ok) {
+          this.expiryRetries.set(taskId, {
+            statusTimestamp,
+            retryNotBefore: Date.now() + A2A_INPUT_REQUIRED_EXPIRY_RETRY_MS,
+          });
+          this.audit("storage-failed", "dropped", { taskId });
+          return;
+        }
+        if (transitioned.record.task.status.state === A2ATaskState.CANCELED) {
+          this.expiryRetries.delete(taskId);
+          this.audit("task-expired", "canceled", { taskId });
+          return;
+        }
+        if (isA2ATerminalTaskState(transitioned.record.task.status.state)) {
+          this.expiryRetries.delete(taskId);
+          return;
+        }
+        this.expiryRetries.set(taskId, {
+          statusTimestamp,
+          retryNotBefore: Date.now() + A2A_INPUT_REQUIRED_EXPIRY_RETRY_MS,
+        });
+        this.audit("task-not-cancelable", "dropped", { taskId });
+      });
+    } catch {
+      this.expiryRetries.set(taskId, {
+        statusTimestamp: listedStatusTimestamp,
+        retryNotBefore: Date.now() + A2A_INPUT_REQUIRED_EXPIRY_RETRY_MS,
+      });
+      this.audit("storage-failed", "dropped", { taskId });
+    }
+  }
+
+  private async runExpirySweep(): Promise<void> {
+    this.clearExpiryTimer();
+    let bootRetryNeeded = false;
+    try {
+      if (!this.expiryBootReconciled) {
+        this.expiryBootReconciled = await this.reconcileExpiryBootRecords();
+        bootRetryNeeded = !this.expiryBootReconciled;
+      }
+
+      const waiting = await this.options.store.list(this.id, {
+        state: A2ATaskState.INPUT_REQUIRED,
+      });
+      for (const record of waiting) {
+        if (this.expiryDisposed) return;
+        await this.expireInputRequiredTask(
+          record.task.id,
+          record.task.status.timestamp ?? "",
+        );
+      }
+
+      const remaining = await this.options.store.list(this.id, {
+        state: A2ATaskState.INPUT_REQUIRED,
+      });
+      const scheduleAt = Date.now();
+      let nextDelay = bootRetryNeeded ? A2A_INPUT_REQUIRED_EXPIRY_RETRY_MS : Infinity;
+      const remainingIds = new Set(remaining.map((record) => record.task.id));
+      for (const taskId of this.expiryRetries.keys()) {
+        if (!remainingIds.has(taskId)) this.expiryRetries.delete(taskId);
+      }
+      for (const record of remaining) {
+        const deadline = this.expiryDeadline(record);
+        if (deadline === null) {
+          nextDelay = Math.min(nextDelay, A2A_INPUT_REQUIRED_EXPIRY_RETRY_MS);
+          this.audit("storage-failed", "dropped", { taskId: record.task.id });
+          continue;
+        }
+        const retry = this.expiryRetries.get(record.task.id);
+        if (retry && retry.statusTimestamp !== (record.task.status.timestamp ?? "")) {
+          this.expiryRetries.delete(record.task.id);
+        }
+        const retryNotBefore = this.expiryRetries.get(record.task.id)?.retryNotBefore ?? 0;
+        const eligibleAt = Math.max(deadline, retryNotBefore);
+        nextDelay = Math.min(
+          nextDelay,
+          Math.max(0, eligibleAt - scheduleAt),
+        );
+      }
+      if (Number.isFinite(nextDelay)) this.scheduleExpirySweep(nextDelay);
+    } catch {
+      this.audit("storage-failed", "dropped");
+      this.scheduleExpirySweep(A2A_INPUT_REQUIRED_EXPIRY_RETRY_MS);
+    }
+  }
+
+  /** Start the handler-owned, restart-safe INPUT_REQUIRED age-out lifecycle. */
+  async startInputRequiredExpiry(): Promise<void> {
+    if (this.expiryDisposed || this.expiryStarted) return;
+    this.expiryStarted = true;
+    await this.requestExpirySweep();
+  }
+
+  async dispose(): Promise<void> {
+    if (!this.expiryDisposePromise) {
+      this.expiryDisposed = true;
+      this.clearExpiryTimer();
+      this.expiryDisposePromise = this.expiryQueue.then(() => undefined);
+    }
+    await this.expiryDisposePromise;
   }
 
   private reserveTaskMutation<T>(
@@ -657,6 +911,39 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
     return buildMessage(textParts.join(""));
   }
 
+  private async transitionRecord(
+    record: A2ATaskRecord,
+    state: A2AProjectedTaskState,
+    input: {
+      summary?: string;
+      suspension?: A2AWireRunSnapshot["suspension"];
+    } = {},
+  ) {
+    const message = this.makeStatusMessage(record, state, input);
+    const transitioned = await this.options.store.transition({
+      handlerId: this.id,
+      taskId: record.task.id,
+      state,
+      message,
+    });
+    if (
+      !transitioned.ok
+      && transitioned.reason === "history-capacity-exceeded"
+      && message
+      && isA2ATerminalTaskState(state)
+    ) {
+      const fallback = await this.options.store.transition({
+        handlerId: this.id,
+        taskId: record.task.id,
+        state,
+      });
+      if (fallback.ok) void this.requestExpirySweep();
+      return fallback;
+    }
+    if (transitioned.ok) void this.requestExpirySweep();
+    return transitioned;
+  }
+
   private async transitionFromSnapshot(
     record: A2ATaskRecord,
     snapshot: A2AWireRunSnapshot,
@@ -668,14 +955,9 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
     ) {
       return record;
     }
-    const transitioned = await this.options.store.transition({
-      handlerId: this.id,
-      taskId: record.task.id,
-      state: snapshot.taskState,
-      message: this.makeStatusMessage(record, snapshot.taskState, {
-        summary: snapshot.summary,
-        suspension: snapshot.suspension,
-      }),
+    const transitioned = await this.transitionRecord(record, snapshot.taskState, {
+      summary: snapshot.summary,
+      suspension: snapshot.suspension,
     });
     return transitioned.ok ? transitioned.record : record;
   }
@@ -698,14 +980,9 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
       throw new Error("A2A runner returned an invalid task binding");
     }
     const state = projectSubAgentResultState(result);
-    const transitioned = await this.options.store.transition({
-      handlerId: this.id,
-      taskId,
-      state,
-      message: this.makeStatusMessage(record, state, {
-        summary: result.summary,
-        suspension: result.suspension,
-      }),
+    const transitioned = await this.transitionRecord(record, state, {
+      summary: result.summary,
+      suspension: result.suspension,
     });
     if (!transitioned.ok) {
       this.audit(
@@ -723,12 +1000,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
   private async markRunnerFailure(taskId: string): Promise<A2ATaskRecord> {
     const current = await this.options.store.get(this.id, taskId);
     if (!current) throw new Error("A2A failed task is unavailable");
-    const failed = await this.options.store.transition({
-      handlerId: this.id,
-      taskId,
-      state: A2ATaskState.FAILED,
-      message: this.makeStatusMessage(current, A2ATaskState.FAILED),
-    });
+    const failed = await this.transitionRecord(current, A2ATaskState.FAILED);
     if (!failed.ok) throw new Error("A2A failed task could not be finalized");
     this.audit("runner-failed", "dropped", { taskId });
     return failed.record;
@@ -997,6 +1269,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
           parsed.message.messageId,
         );
         if (committed.duplicate) return { duplicate: true, record: committed.record };
+        void this.requestExpirySweep();
 
         // Invoke resume before releasing the task lock. Provider completion is
         // deliberately not awaited here, so cancel can run after resume starts.
@@ -1133,12 +1406,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
             : StandardJsonRpcErrorDefinition.INTERNAL_ERROR,
       );
     }
-    const transitioned = await this.options.store.transition({
-      handlerId: this.id,
-      taskId,
-      state: A2ATaskState.CANCELED,
-      message: this.makeStatusMessage(record, A2ATaskState.CANCELED),
-    });
+    const transitioned = await this.transitionRecord(record, A2ATaskState.CANCELED);
     if (!transitioned.ok) throw new A2AHandlerError(StandardJsonRpcErrorDefinition.INTERNAL_ERROR);
     if (transitioned.record.task.status.state !== A2ATaskState.CANCELED) {
       throw new A2AHandlerError(A2AJsonRpcErrorDefinition.TASK_NOT_CANCELABLE);

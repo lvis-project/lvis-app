@@ -1,6 +1,6 @@
 # A2A Inter-Subagent Messaging — Blueprint
 
-- Status: **Accepted; ph1-ph2 and the ph3 transport foundation merged; ph3 runtime attachment in progress** (D1-D8 locked by the owner on 2026-07-11)
+- Status: **Accepted; ph1-ph3 merged; ph4 P4-0 closed and P4-1 registry admission in progress** (D1-D8 locked by the owner on 2026-07-11; ph4 boundary locked 2026-07-15)
 - Scope: upgrade LVIS sub-agents from "tool-call-level" (pull-only child→parent) to A2A-protocol-based messaging — child→parent push, sibling↔sibling messaging — while preserving every existing security invariant.
 - Protocol baseline: **A2A v1.0.0** (Linux Foundation, a2a-protocol.org). Complementary to MCP (MCP = agent↔tool, A2A = agent↔agent); coexists with the ext-apps adoption track.
 - Roadmap anchor: concretizes the Agent Hub vision item "A2A Runtime — 에이전트 간 비동기 위임·합의·결과 전달" (docs/ko/architecture/architecture.md Phase 5-6, previously ❌ 미구현).
@@ -121,7 +121,54 @@ The production attachment resolves the previously test-only router factory witho
 - **One host consent coordinator:** the existing listener creates one boot-scoped single-flight `AgentActionApprover` and passes the same instance to `/v1` external mutations and every A2A handler. A startup retry may rebuild a disposed A2A runtime but never forks the consent coordinator within that boot.
 - **Local discovery and lifecycle:** the existing mode-`0o600` `~/.lvis/local-api/server.json` gains an optional `a2a` object containing protocol version and sorted relative Agent Card paths only when A2A is actually active. Shutdown, late factory completion, bind/discovery failure, and retry dispose each produced runtime exactly once; a cached `null` initialization remains disabled for the rest of the boot.
 
-This attachment intentionally does not invent the remaining wire TTL duration or expiry-state eligibility. D6 fixes the terminal projection (`CANCELED`) but the exact duration, refresh events, restart semantics, and exemption for active provider work still require an explicit ph3 policy before an age-out timer is added.
+### Ph3 wire Task expiry (locked 2026-07-15)
+
+The wire age-out policy is fixed and does not change D6's rule against an internal unanswered-question timer. It applies only to durable A2A Tasks exposed by the ph3 binding.
+
+- **Deadline and eligibility:** every `INPUT_REQUIRED` Task expires exactly seven days after its persisted `TaskStatus.timestamp`, for both `suspension.reason="budget"` and `suspension.reason="question"`. Only a new authoritative transition into an `INPUT_REQUIRED` episode resets that timestamp. Reads, replay, same-state reconciliation, process restart, and timer rescheduling do not refresh it. `SUBMITTED`, `WORKING`, and every terminal state are exempt; active provider work is therefore never canceled by this age-out.
+- **Bounded scheduler:** each production handler owns at most one timer for its nearest eligible deadline. Boot enumerates that handler's bounded nonterminal records and reconciles each against the runner before considering expiry, so a persisted terminal runner result wins over stale wire state. Shutdown/disposal clears the timer and drains its in-flight sweep.
+- **Race-safe expiry:** at a deadline, the handler acquires the existing per-Task lock, refetches the record, reconciles the runner first, refetches again, and rechecks state, timestamp, ownership, and deadline. It cancels the runner before persisting `CANCELED`. The terminal transition is message-less so a full 64-Message history cannot strand a successfully canceled run in `INPUT_REQUIRED`.
+- **Failure behavior:** a runner-cancel or storage failure preserves the current Task state, is audited without Message content, and retries after 60 seconds. There is no hot loop and no Task-schema TTL field; the persisted status timestamp remains the sole deadline source.
+
+The official TCK and the production-handler smoke serve different evidence boundaries. `scripts/run-a2a-tck.ts` pins upstream commit `5996b79f9cefa6fc390980e383e358a66fb9e49e` and runs the official suite through the production JSON-RPC router and bearer boundary, but deliberately supplies the deterministic `A2ATckFixtureHandler`. That proves the router/binding contract and report expectations; it does not exercise `A2ASubAgentHandler`, the durable Task store, or the runner. The opt-in `bun run test:a2a-external` gate therefore uses the locked official Python SDK to address the real production Agent Card and handler and cover COMPLETED, INPUT_REQUIRED continuation, CANCELED, and rejected authentication.
+
+### Ph4 decomposition and P4-1 registry admission (locked 2026-07-15)
+
+P4-0 closes the documentation/evidence lag after the ph3 runtime, expiry,
+official-TCK, and production-handler smoke changes merged. Ph4 starts from the
+following boundary; it does not reopen ph3's loopback listener contract.
+
+- **P4-1 owner and purpose:** the active public `agent-hub` Node/TypeScript
+  server owns a pure Agent Card registry admission module. It accepts one
+  already-retrieved card, validates the
+  bounded LVIS/A2A v1 subset, and returns an immutable admission result.
+- **Transport/auth floor:** every admitted interface is HTTPS, uses the A2A
+  `JSONRPC` binding and a supported protocol version, and declares at least one
+  internally consistent bearer security requirement. Missing or contradictory
+  authentication metadata fails closed even though those fields are optional
+  in the generic protocol.
+- **Trust states:** a structurally valid unsigned card or a card signed only by
+  unknown keys is `discovered`. A detached JWS `ES256` or `EdDSA` signature
+  verified by an explicitly supplied active Agent Card trust key promotes it
+  to `trusted`. A malformed signature, a revoked known key, or a failed
+  signature from a known key is rejected. P4-1 does not read the Agent Hub
+  identity database or implicitly treat signup keys as Agent Card trust anchors.
+- **No hidden I/O:** P4-1 performs no discovery fetch, `jku`/JWKS retrieval,
+  credential lookup, database write, cache update, or endpoint probe. A `jku`,
+  when present, is syntax-checked as HTTPS only; key retrieval belongs to a
+  later explicitly bounded stage.
+- **No execution effect:** both `discovered` and `trusted` results return
+  `routable=false`. P4-1 does not register a tool, select a remote agent, invoke
+  `SubAgentRunner`, or alter local mailbox/question/resume behavior.
+- **D8 remains locked:** ph4 registration expands the set of identities that
+  may become eligible for a future remote route; it does not relax the
+  depth-1 creation hard-stop. Any delegation-depth change requires a separate
+  policy decision and regression/security review after routing exists.
+
+Persistence, administrative trust review, key lifecycle distribution,
+credential provisioning, endpoint health, plugin work-assistant registration,
+and remote routing are deliberately deferred beyond P4-1. No later stage may
+infer routability from `trusted` alone.
 
 ## Cross-host implementation review and follow-on constraints
 

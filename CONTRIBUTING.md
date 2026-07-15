@@ -32,9 +32,15 @@ Electron's embedded Node is not on `PATH`, and the `postinstall` +
 ## Testing
 
 ```bash
-bunx vitest run path/to/affected.test.ts  # targeted tests while iterating
+bun run test:vitest -- run path/to/affected.test.ts  # targeted tests while iterating
 bunx playwright test path/to/flow.spec.ts # changed UI flow only
 ```
+
+The Vitest wrapper runs through Electron's Node mode so tests and the desktop
+runtime use the same native-module ABI. Do not rebuild `better-sqlite3` for
+standalone Node in place; that would replace the binary used by Electron.
+Direct `bunx vitest` and `bun test` invocations fail fast by design; use the
+canonical wrapper command above for both full and targeted tests.
 
 Use the smallest affected checks while iterating. For code-bearing changes and
 runtime, instruction, workflow, or sensitive-contract Markdown, the pre-push

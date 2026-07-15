@@ -232,7 +232,7 @@ If `src/permissions/__tests__/asrt-sandbox.test.ts` logs a `[asrt-sandbox] Windo
    - `net user srt-sandbox` → confirm active and still in `sandbox-runtime-users`
    - re-provision if the account/group looks wrong: `srt-win.exe uninstall` then `srt-win.exe install`
 3. Re-run validation:
-   - `bunx vitest run src/permissions/__tests__/asrt-sandbox.test.ts` → expect `46 passed`
+   - `bun run test:vitest -- run src/permissions/__tests__/asrt-sandbox.test.ts` → expect `46 passed`
 
 Known-good: granting `sandbox-runtime-users:(OI)(CI)(RX)` on the ASRT package dir made the direct probe report `OK: spawn works` and the test file pass (`46 passed`).
 

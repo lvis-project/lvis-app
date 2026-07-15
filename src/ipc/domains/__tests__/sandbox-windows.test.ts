@@ -75,6 +75,19 @@ vi.mock("@anthropic-ai/sandbox-runtime", () => ({
   DEFAULT_WINDOWS_PROXY_PORT_RANGE: [60080, 60089] as readonly [number, number],
 }));
 
+vi.mock("../../../permissions/asrt-windows-support.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../permissions/asrt-windows-support.js")
+  >();
+  return {
+    ...actual,
+    installAsrtWindowsSandbox: () =>
+      actual.installAsrtWindowsSandbox({
+        grantBackendAcl: async () => undefined,
+      }),
+  };
+});
+
 // validateSender: the test seam — null event (trusted) returns true; a foreign
 // frame object returns false so the UNAUTHORIZED_FRAME path is exercisable.
 vi.mock("../../gated.js", async (importOriginal) => {

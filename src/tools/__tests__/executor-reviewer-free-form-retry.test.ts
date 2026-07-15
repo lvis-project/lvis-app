@@ -43,8 +43,8 @@ function makeAutoPermissionManager(
   return permMgr;
 }
 
-describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
-  it("does not record or consume explicit reviewer authorization without a session id", async () => {
+describe("ToolExecutor foreground reviewer free-form retry boundaries", () => {
+  it("never treats free-form approval text as authority without a session id", async () => {
     const executeSpy = vi.fn(async () => "sent");
     const classifySpy = vi.fn(() => ({
       level: "medium" as const,
@@ -75,7 +75,6 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
         {
           permissionContext: userPermissionContext({
             userIntent: "진행해",
-            explicitAuthorizationIntent: "진행해",
           }),
         },
       );
@@ -88,14 +87,9 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
     }
   });
 
-  it("no longer auto-allows reviewer-rated retries via text authorization (modal supersedes text re-auth)", async () => {
-    // Phase 0: the foreground reviewer lane now ASKS (routes to the approval
-    // modal) instead of returning a silent deny. Because the deny-path-only
-    // recordPendingReviewerAuthorization is never reached, the text-based
-    // "진행해" re-authorization path is dormant: a chat retry no longer grants
-    // execution on its own — user authority lives in the approval modal. With
-    // no approval gate wired here, the reviewer-rated call fails closed both
-    // times, including the explicit-intent retry.
+  it("never auto-allows the same reviewed action from a free-form 진행해 retry", async () => {
+    // Free-form conversation text is reviewer context only, never an
+    // authorization bearer. Without ApprovalGate, both attempts fail closed.
     const executeSpy = vi.fn(async () => "sent");
     const classifySpy = vi.fn(() => ({
       level: "medium" as const,
@@ -128,12 +122,11 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
           sessionId: "sess-reviewer-retry-cap",
           permissionContext: userPermissionContext({
             userIntent: "진행해",
-            explicitAuthorizationIntent: "진행해",
           }),
         },
       );
 
-      // Text re-auth is dormant — the retry is NOT auto-allowed.
+      // Free-form text cannot directly authorize execution.
       expect(retry[0].is_error).toBe(true);
       expect(executeSpy).not.toHaveBeenCalled();
     } finally {
@@ -141,7 +134,7 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
     }
   });
 
-  it("does not reuse explicit reviewer authorization across trust origins", async () => {
+  it("never elevates free-form retry text across trust origins", async () => {
     const executeSpy = vi.fn(async () => "sent");
     const classifySpy = vi.fn(() => ({
       level: "medium" as const,
@@ -176,7 +169,6 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
           permissionContext: userPermissionContext({
             trustOrigin: "file-content",
             userIntent: "진행해",
-            explicitAuthorizationIntent: "진행해",
           }),
         },
       );
@@ -189,7 +181,7 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
     }
   });
 
-  it("does not consume explicit reviewer authorization during headless retry attempts", async () => {
+  it("never elevates free-form retry text in headless attempts", async () => {
     const executeSpy = vi.fn(async () => "sent");
     const classifySpy = vi.fn(() => ({
       level: "medium" as const,
@@ -223,7 +215,6 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
           permissionContext: userPermissionContext({
             headless: true,
             userIntent: "진행해",
-            explicitAuthorizationIntent: "진행해",
           }),
         },
       );
@@ -231,6 +222,76 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
       expect(second[0].is_error).toBe(true);
       expect(executeSpy).not.toHaveBeenCalled();
       expect(classifySpy).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("makes reviewer abort terminal before execution or modal open", async () => {
+    const executeSpy = vi.fn(async () => "sent");
+    const abortControllers = [new AbortController(), new AbortController()];
+    let classifyIndex = 0;
+    const classifySpy = vi.fn(async () => {
+      const controller = abortControllers[classifyIndex];
+      classifyIndex += 1;
+      controller?.abort();
+      await Promise.resolve();
+      return {
+        level: "medium" as const,
+        reason: "valid fresh result immediately before caller abort",
+      };
+    });
+    const requestAndWait = vi.fn(async () => ({
+      requestId: "must-not-open",
+      choice: "allow-once" as const,
+    }));
+    const statuses: string[] = [];
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-reviewer-abort-"));
+    try {
+      const toolName = "reviewed_network_abort_terminal";
+      const executor = new ToolExecutor(
+        makeReviewedNetworkProbe(toolName, executeSpy),
+        undefined,
+        makeAutoPermissionManager(dir, classifySpy),
+        undefined,
+        { requestAndWait } as never,
+      );
+      const input = { payload: "send release notice" };
+      const callbacks = {
+        onPermissionReview: (event: { status: string }) =>
+          statuses.push(event.status),
+      };
+
+      const first = await executor.executeAll(
+        [{ id: "tu-abort-first", name: toolName, input }],
+        {
+          sessionId: "sess-reviewer-abort",
+          abortSignal: abortControllers[0]!.signal,
+          callbacks,
+          permissionContext: userPermissionContext({
+            userIntent: "릴리즈 안내를 전송해줘",
+          }),
+        },
+      );
+      expect(first[0].is_error).toBe(true);
+
+      const second = await executor.executeAll(
+        [{ id: "tu-abort-retry", name: toolName, input }],
+        {
+          sessionId: "sess-reviewer-abort",
+          abortSignal: abortControllers[1]!.signal,
+          callbacks,
+          permissionContext: userPermissionContext({
+            userIntent: "진행해",
+          }),
+        },
+      );
+
+      expect(second[0].is_error).toBe(true);
+      expect(classifySpy).toHaveBeenCalledTimes(2);
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(requestAndWait).not.toHaveBeenCalled();
+      expect(statuses.filter((status) => status === "failed")).toHaveLength(2);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
