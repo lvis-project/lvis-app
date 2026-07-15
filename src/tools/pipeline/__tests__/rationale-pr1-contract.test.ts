@@ -508,6 +508,31 @@ describe("ticket/action-bound lifecycle truth table", () => {
     )).toThrow(/cannot have a reviewer outcome/);
   });
 
+  it.each([
+    "generation-unavailable",
+    "generation-error",
+    "generation-timeout",
+  ] as const)("records provider generation failure %s without reviewer outcome", (outcome) => {
+    const control = fixture();
+    const requested = transitionRationaleTicket(
+      createRationaleReviewRequiredRecord(control, NOW),
+      event(control, "request-rationale"),
+    );
+    const failed = transitionRationaleTicket(
+      requested,
+      createRationaleGenerationProviderFailureEvent(control, outcome),
+    );
+    expect(failed).toMatchObject({
+      state: "rationale_failed",
+      generationOutcome: outcome,
+      reevaluationOutcome: null,
+    });
+    expect(() => createRationaleTicketEvent(control, "rationale-failed", {
+      generationOutcome: outcome,
+      reevaluationOutcome: "timeout",
+    })).toThrow(/event\/outcome mismatch/);
+  });
+
   it("rejects ticket/action mismatches and binds terminal reasons", () => {
     const control = fixture();
     const review = createRationaleReviewRequiredRecord(control, NOW);
