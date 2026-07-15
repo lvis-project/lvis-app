@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { maskSensitiveData } from "../../shared/dlp.js";
@@ -167,6 +167,10 @@ describe("SubAgentRunner A2A wire security contract", () => {
         name: "Host Project",
       },
     };
+  }
+
+  function makeNonCanonicalProjectRoot(): string {
+    return `${join(tmpHome, "project-parent")}${sep}..${sep}host-project`;
   }
 
   async function saveWaitingMetadata(
@@ -434,6 +438,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
       .mockResolvedValue(COMPLETED_TURN);
     const runner = makeRunner();
     const binding = makeBinding();
+    binding.project.root = makeNonCanonicalProjectRoot();
     const running = runner.spawnFromA2AWire(
       { messageText: "Do the work." },
       binding,
@@ -470,7 +475,9 @@ describe("SubAgentRunner A2A wire security contract", () => {
     const originSessionId = "wire-origin-handler-a";
     const resumeId = makeResumeId(originSessionId);
     const binding = makeBinding();
+    binding.project.root = makeNonCanonicalProjectRoot();
     await saveWaitingMetadata(resumeId, originSessionId, {
+      projectRoot: binding.project.root,
       a2aWireHandlerId: binding.handlerId,
       a2aWireInternalOrigin: originSessionId,
     });
