@@ -14,6 +14,7 @@ import { createReadStream, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve as pathResolve } from "node:path";
 import { createInterface } from "node:readline";
+import { finished } from "node:stream/promises";
 
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import {
@@ -89,8 +90,13 @@ export function assertReadableFilePath(
 export async function isBinaryFile(path: string): Promise<boolean> {
   const stream = createReadStream(path, { start: 0, end: BINARY_SAMPLE_BYTES - 1 });
   const chunks: Buffer[] = [];
-  for await (const chunk of stream) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  try {
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+  } finally {
+    stream.destroy();
+    await finished(stream, { cleanup: true }).catch(() => undefined);
   }
   return Buffer.concat(chunks).includes(0);
 }
@@ -110,16 +116,20 @@ export async function readTextFileWindow(
   let lineNo = 0;
   let truncated = false;
 
-  for await (const line of rl) {
-    if (lineNo >= offset && lines.length < limit) {
-      lines.push(line);
-    } else if (lineNo >= offset && lines.length >= limit) {
-      truncated = true;
-      break;
+  try {
+    for await (const line of rl) {
+      if (lineNo >= offset && lines.length < limit) {
+        lines.push(line);
+      } else if (lineNo >= offset && lines.length >= limit) {
+        truncated = true;
+        break;
+      }
+      lineNo += 1;
     }
-    lineNo += 1;
+  } finally {
+    rl.close();
+    input.destroy();
+    await finished(input, { cleanup: true }).catch(() => undefined);
   }
-  rl.close();
-  input.destroy();
   return { lines, truncated };
 }

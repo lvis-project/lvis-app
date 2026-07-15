@@ -23,7 +23,7 @@ function validInventory(overrides: Record<string, unknown> = {}) {
         rationale: "Test migration inventory entry.",
         codeReferences: ["src/boot.ts"],
         dataPreservationTests: ["src/boot/steps/__tests__/work-board-migration.test.ts"],
-        validation: ["bun test src/boot/steps/__tests__/work-board-migration.test.ts"],
+        validation: ["bun run test:vitest -- run src/boot/steps/__tests__/work-board-migration.test.ts"],
         sunsetNotBefore: "2026-08-30",
         sunsetCriteria: ["The migration is outside the supported upgrade floor."],
         ...overrides,

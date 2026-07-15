@@ -19,10 +19,9 @@ try {
     process.exitCode = prepare.status ?? 1;
   } else {
     const coverage = spawnSync(
-      bunCommand,
+      process.execPath,
       [
-        "run",
-        "vitest",
+        join("scripts", "run-vitest-under-electron.mjs"),
         "run",
         "--coverage",
         "--silent",

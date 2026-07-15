@@ -2512,8 +2512,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const tagA = createHash("sha256").update(originA).digest("hex").slice(0, 8);
     // We need a real spawn with origin. Manually write metadata under a
     // correctly-tagged id (mirrors what spawn writes when passed originSessionId).
-    const { randomUUID } = await import("node:crypto");
-    const resumeId = `sub-${tagA}-${randomUUID()}`;
+    const { createDlpSafeUuid } = await import("../../shared/dlp-safe-id.js");
+    const resumeId = createDlpSafeUuid(`sub-${tagA}`);
     await subStore.saveSessionMetadata(resumeId, {
       sessionKind: "subagent",
       sourceTools: ["noop"],
@@ -2560,7 +2560,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   });
 
   it("rejects a tag-matching id when persisted origin metadata mismatches", async () => {
-    const { createHash, randomUUID } = await import("node:crypto");
+    const { createHash } = await import("node:crypto");
+    const { createDlpSafeUuid } = await import("../../shared/dlp-safe-id.js");
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
     const subStore = makeSubStore();
@@ -2572,7 +2573,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
 
     const callerOrigin = "session-A";
     const tag = createHash("sha256").update(callerOrigin).digest("hex").slice(0, 8);
-    const resumeId = "sub-" + tag + "-" + randomUUID();
+    const resumeId = createDlpSafeUuid("sub-" + tag);
     await subStore.saveSessionMetadata(resumeId, {
       sessionKind: "subagent",
       sourceTools: ["noop"],
@@ -2674,8 +2675,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     // corrupted or tampered .meta.json (a real spawn always persists a non-empty
     // allowlist because the resolved scoped surface is non-empty after blocklist
     // strip; the only way to get [] is external tampering or corruption).
-    const { randomUUID } = await import("node:crypto");
-    const resumeId = `sub-${randomUUID()}`;
+    const { createDlpSafeUuid } = await import("../../shared/dlp-safe-id.js");
+    const resumeId = createDlpSafeUuid("sub");
     await subStore.saveSessionMetadata(resumeId, {
       sessionKind: "subagent",
       sourceTools: [], // deliberately empty — corruption signal
