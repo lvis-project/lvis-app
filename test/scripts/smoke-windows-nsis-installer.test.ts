@@ -899,6 +899,116 @@ describe("Windows NSIS installer smoke contracts", () => {
     expect(smoke).toContain("DELETE userData absent");
   });
 
+  it("attests completed NSIS installs with a final installer-only marker", () => {
+    const markerName = ".lvis-nsis-per-machine-v1";
+    const installer = readRepoFile("build/installer.nsh");
+    const smoke = readRepoFile("scripts/smoke-windows-nsis-installer.mjs");
+
+    expect(installer).toContain(
+      `!define LVIS_NSIS_PER_MACHINE_MARKER "${markerName}"`,
+    );
+    expect(
+      installer.match(new RegExp(markerName.replace(/\./g, "\\."), "g")),
+    ).toHaveLength(1);
+    expect(smoke).toContain(
+      `const NSIS_PER_MACHINE_MARKER_NAME = "${markerName}"`,
+    );
+
+    const installStart = installer.indexOf("!macro customInstall");
+    const installEnd = installer.indexOf("!macroend", installStart);
+    const customInstall = installer.slice(installStart, installEnd);
+    const uninstallStart = installer.indexOf("!macro customUnInstall");
+    const uninstallEnd = installer.indexOf("!macroend", uninstallStart);
+    const customUninstall = installer.slice(uninstallStart, uninstallEnd);
+    const removeStart = installer.indexOf("!macro customRemoveFiles");
+    const removeEnd = installer.indexOf("!macroend", removeStart);
+    const customRemoveFiles = installer.slice(removeStart, removeEnd);
+
+    const staleDelete = customInstall.indexOf(
+      'Delete "$INSTDIR\\${LVIS_NSIS_PER_MACHINE_MARKER}"',
+    );
+    const protocolWrite = customInstall.indexOf(
+      'WriteRegStr SHELL_CONTEXT "Software\\Classes\\lvis" "" "URL:lvis"',
+    );
+    const installLocationWrite = customInstall.indexOf(
+      'WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "InstallLocation" "$INSTDIR"',
+    );
+    const stickyWriteCheck = customInstall.indexOf(
+      'StrCpy $R3 "could not write the per-machine registry contract"',
+    );
+    const urlTypeReadback = customInstall.indexOf(
+      "!insertmacro lvisIsExactEmptyUrlProtocolRegSz 0x80000002 $R1",
+    );
+    const installLocationReadback = customInstall.indexOf(
+      'ReadRegStr $R1 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "InstallLocation"',
+    );
+    const markerCreate = customInstall.indexOf(
+      'FileOpen $R1 "$INSTDIR\\${LVIS_NSIS_PER_MACHINE_MARKER}" w',
+    );
+
+    expect(staleDelete).toBeGreaterThanOrEqual(0);
+    expect(protocolWrite).toBeGreaterThan(staleDelete);
+    expect(stickyWriteCheck).toBeGreaterThan(installLocationWrite);
+    expect(customInstall.slice(protocolWrite, stickyWriteCheck)).not.toContain(
+      "ClearErrors",
+    );
+    expect(urlTypeReadback).toBeGreaterThan(stickyWriteCheck);
+    expect(installLocationReadback).toBeGreaterThan(urlTypeReadback);
+    expect(markerCreate).toBeGreaterThan(installLocationReadback);
+    expect(customInstall.lastIndexOf("WriteRegStr")).toBeLessThan(markerCreate);
+    expect(customInstall).toContain(
+      'FileOpen $R1 "$INSTDIR\\${LVIS_NSIS_PER_MACHINE_MARKER}" r',
+    );
+    expect(customInstall).toContain("FileSeek $R1 0 END $R2");
+    expect(customInstall).toContain(
+      'Abort "LVIS install failed: $R3; the incomplete marker could not be removed"',
+    );
+    expect(customInstall.match(/Push \$R[123]/g)).toHaveLength(3);
+    expect(customInstall.match(/Pop \$R[123]/g)).toHaveLength(3);
+    expect(customUninstall).not.toContain("LVIS_NSIS_PER_MACHINE_MARKER");
+    expect(customRemoveFiles).not.toContain("LVIS_NSIS_PER_MACHINE_MARKER");
+
+    expect(smoke).toContain(
+      "markerPath: join(installLocation, NSIS_PER_MACHINE_MARKER_NAME)",
+    );
+    expect(smoke).toContain("const marker = statSync(markerPath)");
+    expect(smoke).toContain("!marker.isFile() || marker.size !== 0");
+    expect(smoke).toContain("uninstall left NSIS per-machine marker");
+    expect(smoke).not.toContain("readFileSync(markerPath");
+    expect(smoke).not.toContain("writeFileSync(markerPath");
+    const discover = smoke.indexOf(
+      "state.machineInstall = await installAndDiscover",
+    );
+    const installedLaunch = smoke.indexOf(
+      "state.runningApp = await startInstalledApp",
+    );
+    expect(installedLaunch).toBeGreaterThan(discover);
+    const installAndDiscoverStart = smoke.indexOf(
+      "async function installAndDiscover",
+    );
+    const installAndDiscoverEnd = smoke.indexOf(
+      "async function uninstallAndVerify",
+      installAndDiscoverStart,
+    );
+    const installAndDiscover = smoke.slice(
+      installAndDiscoverStart,
+      installAndDiscoverEnd,
+    );
+    expect(
+      installAndDiscover.indexOf("await assertInstalledSurface"),
+    ).toBeLessThan(installAndDiscover.indexOf("return machineInstall"));
+    const failureLabel = customInstall.indexOf(
+      "lvis_machine_install_contract_failed:",
+    );
+    expect(failureLabel).toBeGreaterThan(markerCreate);
+    expect(
+      customInstall.indexOf(
+        'Delete "$INSTDIR\\${LVIS_NSIS_PER_MACHINE_MARKER}"',
+        failureLabel,
+      ),
+    ).toBeGreaterThan(failureLabel);
+  });
+
   it("enables machine and destructive gates only on disposable Windows CI", () => {
     const workflow = readRepoFile(".github/workflows/build-installers.yml");
     expect(workflow).toContain(

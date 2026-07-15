@@ -7,7 +7,7 @@
  * such as ERR_MODULE_NOT_FOUND before installers are uploaded.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,6 +23,8 @@ const MAX_OUTPUT_CHARS = 64_000;
 const MODULE_LOAD_FAILURE =
   /(ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|Cannot find package|Cannot find module)/i;
 
+const WINDOWS_NSIS_PER_MACHINE_MARKER_FILENAME =
+  ".lvis-nsis-per-machine-v1";
 const WINDOWS_PROTOCOL_CLEANUP_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
   "$rootPath = 'Software\\Classes\\lvis'",
@@ -47,7 +49,7 @@ const WINDOWS_PROTOCOL_CLEANUP_SCRIPT = [
   "  if ($empty) { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKey($path, $false) }",
   "}",
   "$rootKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($rootPath, $false)",
-  "if ($null -eq $rootKey) { return }",
+  "if ($null -eq $rootKey) { throw 'expected win-unpacked HKCU lvis protocol root is missing' }",
   "$rootKey.Dispose()",
   "$commandKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($commandPath, $false)",
   "if ($null -eq $commandKey) { throw 'lvis protocol root exists without an owned command' }",
@@ -422,6 +424,21 @@ async function runPackagedAppOnce(executable, timeoutMs, env, label) {
   });
 }
 
+function assertWindowsPerMachineMarkerAbsent(executable) {
+  if (process.platform !== "win32") return;
+
+  const markerPath = join(
+    dirname(executable),
+    WINDOWS_NSIS_PER_MACHINE_MARKER_FILENAME,
+  );
+  const marker = lstatSync(markerPath, { throwIfNoEntry: false });
+  if (marker !== undefined) {
+    throw new Error(
+      "win-unpacked must not contain the NSIS per-machine marker before launch",
+    );
+  }
+}
+
 function cleanupOwnedWindowsProtocolHandler(executable) {
   if (process.platform !== "win32") return;
 
@@ -458,6 +475,7 @@ function cleanupOwnedWindowsProtocolHandler(executable) {
   }
 }
 async function launchSmoke(executable, timeoutMs) {
+  assertWindowsPerMachineMarkerAbsent(executable);
   const userDataDir = mkdtempSync(join(tmpdir(), "lvis-packaged-smoke-"));
   const lvisHomeDir = mkdtempSync(join(tmpdir(), "lvis-packaged-home-"));
   const env = prepareElectronLaunchEnv({

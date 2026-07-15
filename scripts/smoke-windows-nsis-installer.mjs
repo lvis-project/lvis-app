@@ -49,6 +49,7 @@ const PROTOCOL_ICON_REGISTRY_PATH = "SOFTWARE\\Classes\\lvis\\DefaultIcon";
 const PROTOCOL_REGISTRY_PATH = "SOFTWARE\\Classes\\lvis\\shell\\open\\command";
 const USER_DATA_SENTINEL_NAME = "nsis-smoke-sentinel.txt";
 const USER_DATA_SENTINEL_CONTENT = "LVIS Windows uninstall smoke\n";
+const NSIS_PER_MACHINE_MARKER_NAME = ".lvis-nsis-per-machine-v1";
 
 function usage() {
   process.stdout.write(
@@ -699,6 +700,7 @@ function resolveMachineInstall(entries) {
     installDir: installLocation,
     uninstaller: uninstallExe,
     installedExe: join(installLocation, "LVIS.exe"),
+    markerPath: join(installLocation, NSIS_PER_MACHINE_MARKER_NAME),
   };
 }
 
@@ -856,9 +858,16 @@ async function assertNoCurrentUserProtocolHandlers(context) {
 }
 
 async function assertInstalledSurface(machineInstall) {
-  const { installDir, installedExe, uninstaller } = machineInstall;
+  const { installDir, installedExe, markerPath, uninstaller } = machineInstall;
   await waitForFile(installedExe, 30_000);
   await waitForFile(uninstaller, 30_000);
+  await waitForFile(markerPath, 30_000);
+  const marker = statSync(markerPath);
+  if (!marker.isFile() || marker.size !== 0) {
+    throw new Error(
+      `NSIS per-machine marker must be a zero-byte regular file: ${markerPath}`,
+    );
+  }
 
   if (existsSync(localAppDataInstallDir())) {
     throw new Error(
@@ -962,8 +971,11 @@ async function assertInstalledSurface(machineInstall) {
 }
 
 async function assertUninstalledSurface(machineInstall) {
-  const { installDir, entry, registryPath } = machineInstall;
+  const { installDir, entry, markerPath, registryPath } = machineInstall;
   await waitForPathRemoved(installDir, 30_000);
+  if (existsSync(markerPath)) {
+    throw new Error(`uninstall left NSIS per-machine marker: ${markerPath}`);
+  }
   for (const view of REGISTRY_VIEWS) {
     const exactEntry = await registryQuery(
       "HKLM",

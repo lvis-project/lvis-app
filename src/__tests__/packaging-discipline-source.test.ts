@@ -53,6 +53,20 @@ describe("installer smoke and packaging discipline", () => {
     expect(
       smoke.lastIndexOf("cleanupOwnedWindowsProtocolHandler(executable)"),
     ).toBeGreaterThan(smoke.indexOf("} finally {"));
+    const launchBody = smoke.slice(
+      smoke.indexOf("async function launchSmoke"),
+      smoke.indexOf("async function runWindowsInstallerSmoke"),
+    );
+    expect(launchBody.indexOf(
+      "assertWindowsPerMachineMarkerAbsent(executable)",
+    )).toBeLessThan(launchBody.indexOf("runPackagedAppOnce"));
+    expect(smoke).toContain(".lvis-nsis-per-machine-v1");
+    expect(smoke).toContain(
+      "lstatSync(markerPath, { throwIfNoEntry: false })",
+    );
+    expect(readRepoFile("src/main/lvis-protocol-registration.ts"))
+      .toContain(".lvis-nsis-per-machine-v1");
+
 
     const cleanupScript = smoke.slice(
       smoke.indexOf("const WINDOWS_PROTOCOL_CLEANUP_SCRIPT"),
@@ -71,6 +85,13 @@ describe("installer smoke and packaging discipline", () => {
     expect(cleanupScript).toContain("function Remove-RegistryValueIfEquals");
     expect(cleanupScript).toContain("$key.GetValueKind($name)");
     expect(cleanupScript).toContain("$commandKind = $commandKey.GetValueKind('')");
+    expect(cleanupScript).toContain(
+      "if ($null -eq $rootKey) { throw 'expected win-unpacked HKCU lvis protocol root is missing' }",
+    );
+    expect(cleanupScript).not.toContain(
+      "if ($null -eq $rootKey) { return }",
+    );
+
     expect(cleanupScript).toContain(
       "[Microsoft.Win32.RegistryValueKind]::String",
     );

@@ -65,34 +65,41 @@ describe("main.ts — single-instance gate on app.whenReady", () => {
     expect(negBranchCode, "second-instance must not call whenReady").not.toMatch(/whenReady/);
   });
 
-  it("awaits the packaged-Windows association probe before primary bootstrap", () => {
-    const elseBlock = extractSingleInstanceElseBlock(source);
-    expect(elseBlock).not.toBeNull();
-
-    const ready = elseBlock!.slice(elseBlock!.indexOf("app.whenReady"));
-    const htmlPolicy = ready.indexOf("installHtmlPreviewPartitionBlock()");
-    const browserPolicy = ready.indexOf("installSideBrowserPartitionPolicy()");
-    const protocolProbe = ready.indexOf(
-      "await ensurePackagedWindowsLvisProtocolClient",
+  it("keeps packaged-Windows marker registration synchronous before the lock", () => {
+    const markerProbe = source.indexOf(
+      "getPackagedWindowsProtocolMarkerState(process.execPath)",
     );
-    const mainCall = ready.indexOf("void main()");
+    const protocolSetter = source.indexOf(
+      'app.setAsDefaultProtocolClient("lvis")',
+    );
+    const lock = source.indexOf("app.requestSingleInstanceLock()");
 
-    expect(protocolProbe).toBeGreaterThan(htmlPolicy);
-    expect(protocolProbe).toBeGreaterThan(browserPolicy);
-    expect(mainCall).toBeGreaterThan(protocolProbe);
-    expect(
-      source.indexOf("if (!deferPackagedWindowsProtocolRegistration)"),
-    ).toBeLessThan(source.indexOf("app.requestSingleInstanceLock()"));
+    expect(markerProbe).toBeGreaterThanOrEqual(0);
+    expect(protocolSetter).toBeGreaterThan(markerProbe);
+    expect(lock).toBeGreaterThan(protocolSetter);
+    expect(source).toContain(
+      'app.isPackaged && process.platform === "win32"',
+    );
+    expect(source).toContain(
+      'packagedWindowsProtocolMarkerState === "unknown"',
+    );
+    expect(source).toContain("skipped self-registration");
+    expect(source).toContain("app.whenReady().then(() => {");
+    expect(source).not.toContain("ensurePackagedWindowsLvisProtocolClient");
+    expect(source).not.toContain("getApplicationInfoForProtocol");
     expect(source).not.toContain("app.isDefaultProtocolClient");
 
     const helper = readFileSync(
       "src/main/lvis-protocol-registration.ts",
       "utf-8",
     );
-    expect(helper).not.toContain("node:fs");
+    expect(helper).toContain('import { lstatSync } from "node:fs"');
+    expect(helper).toContain(".lvis-nsis-per-machine-v1");
+    expect(helper).toContain("inspectMarker(markerPath, { throwIfNoEntry: false })");
+    expect(helper).toContain('return "unknown"');
     expect(helper).not.toContain("realpath");
+    expect(helper).not.toMatch(/\bstatSync\s*\(/);
     expect(helper).toContain("win32.parse");
-    expect(helper).toContain("stripExtendedWindowsPathPrefix");
     expect(helper).not.toMatch(/\blog\./);
   });
 });
