@@ -18,7 +18,6 @@ import {
   readdirSync,
   rmSync,
   statSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import {
@@ -52,6 +51,9 @@ const PROTOCOL_REGISTRY_PATH = "SOFTWARE\\Classes\\lvis\\shell\\open\\command";
 const USER_DATA_SENTINEL_NAME = "nsis-smoke-sentinel.txt";
 const USER_DATA_SENTINEL_CONTENT = "LVIS Windows uninstall smoke\n";
 const NSIS_PER_MACHINE_MARKER_NAME = ".lvis-nsis-per-machine-v1";
+const WINDOWS_TOAST_ACTIVATOR_CLSID =
+  "{62FD3EFB-B3D2-4235-9402-6979F52C0286}";
+const TOAST_CLSID_REGISTRY_ROOT = "SOFTWARE\\Classes\\CLSID";
 
 function usage() {
   process.stdout.write(
@@ -759,8 +761,14 @@ async function shortcutInfo(shortcutPath) {
   if (!existsSync(shortcutPath)) return null;
   return runPowerShellJson(
     buildPowerShellScript([
-      "$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LVIS_SHORTCUT_PATH)",
-      "[PSCustomObject]@{ target = $shortcut.TargetPath; workingDirectory = $shortcut.WorkingDirectory; arguments = $shortcut.Arguments; description = $shortcut.Description } | ConvertTo-Json -Compress",
+      "$shortcutPath = $env:LVIS_SHORTCUT_PATH",
+      "$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)",
+      "$shell = New-Object -ComObject Shell.Application",
+      "$folder = $shell.Namespace([System.IO.Path]::GetDirectoryName($shortcutPath))",
+      "if ($null -eq $folder) { throw 'could not open shortcut parent folder' }",
+      "$item = $folder.ParseName([System.IO.Path]::GetFileName($shortcutPath))",
+      "if ($null -eq $item) { throw 'could not read shortcut property store' }",
+      "[PSCustomObject]@{ target = $shortcut.TargetPath; workingDirectory = $shortcut.WorkingDirectory; arguments = $shortcut.Arguments; description = $shortcut.Description; appUserModelId = [string]$item.ExtendedProperty('System.AppUserModel.ID'); toastClsid = [string]$item.ExtendedProperty('System.AppUserModel.ToastActivatorCLSID') } | ConvertTo-Json -Compress",
     ]),
     { LVIS_SHORTCUT_PATH: shortcutPath },
   );
@@ -771,6 +779,16 @@ async function shortcutTarget(shortcutPath) {
   return typeof result?.target === "string" ? result.target : null;
 }
 
+export function normalizeToastActivatorClsid(value) {
+  if (typeof value !== "string") return null;
+  const match =
+    /^(?:\{([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\}|([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}))$/i.exec(
+      value,
+    );
+  const normalized = match?.[1] ?? match?.[2];
+  return normalized ? `{${normalized.toUpperCase()}}` : null;
+}
+
 export function isOwnedRuntimeShortcut(shortcut, expected) {
   if (!shortcut || !expected) return false;
   if (
@@ -778,9 +796,12 @@ export function isOwnedRuntimeShortcut(shortcut, expected) {
     typeof shortcut.workingDirectory !== "string" ||
     typeof shortcut.arguments !== "string" ||
     typeof shortcut.description !== "string" ||
+    typeof shortcut.appUserModelId !== "string" ||
+    normalizeToastActivatorClsid(shortcut.toastClsid) === null ||
     typeof expected.installedExe !== "string" ||
     typeof expected.installDir !== "string" ||
-    typeof expected.description !== "string"
+    typeof expected.description !== "string" ||
+    typeof expected.appUserModelId !== "string"
   ) {
     return false;
   }
@@ -788,7 +809,8 @@ export function isOwnedRuntimeShortcut(shortcut, expected) {
     samePath(shortcut.target, expected.installedExe) &&
     samePath(shortcut.workingDirectory, expected.installDir) &&
     shortcut.arguments === "" &&
-    shortcut.description === expected.description
+    shortcut.description === expected.description &&
+    shortcut.appUserModelId === expected.appUserModelId
   );
 }
 
@@ -802,27 +824,42 @@ async function waitForRuntimeShortcut(shortcutPath, timeoutMs = 5_000) {
   return null;
 }
 
-async function cleanupOwnedRuntimeShortcut(machineInstall) {
+async function toastActivatorRegistrations(toastClsid) {
+  const normalizedClsid = normalizeToastActivatorClsid(toastClsid);
+  if (!normalizedClsid) throw new Error("invalid toast activator CLSID");
+  const path = `${TOAST_CLSID_REGISTRY_ROOT}\\${normalizedClsid}`;
+  const registrations = [];
+  for (const view of REGISTRY_VIEWS) {
+    const [rootDefault, customActivator, localServer] = await Promise.all([
+      queryRegistryDefault("HKCU", path, view),
+      queryRegistryValue("HKCU", path, view, "CustomActivator"),
+      queryRegistryDefault("HKCU", `${path}\\LocalServer32`, view),
+    ]);
+    if (
+      rootDefault.keyExists ||
+      customActivator.keyExists ||
+      localServer.keyExists
+    ) {
+      registrations.push({ view, rootDefault, customActivator, localServer });
+    }
+  }
+  return registrations;
+}
+
+async function assertRuntimeNotificationArtifacts(machineInstall) {
   const provenance = machineInstall.runtimeShortcutProvenance;
   if (!provenance?.absentBeforeLaunch || !provenance.path) {
     throw new Error(
-      "refusing to clean a runtime shortcut without pre-launch absence provenance",
+      "runtime notification artifact assertion requires pre-launch absence provenance",
     );
   }
 
   const shortcutStat = await waitForRuntimeShortcut(provenance.path);
-  if (!shortcutStat) {
-    process.stdout.write(
-      "[windows-installer-smoke] Electron runtime shortcut remained absent after launch; no cleanup needed\n",
-    );
-    return;
-  }
-  if (!shortcutStat.isFile()) {
+  if (!shortcutStat?.isFile()) {
     throw new Error(
-      `refusing to clean a non-regular runtime shortcut: ${provenance.path}`,
+      `Electron runtime shortcut was not created as a regular file: ${provenance.path}`,
     );
   }
-
   const expected = {
     installedExe: machineInstall.installedExe,
     installDir: machineInstall.installDir,
@@ -830,35 +867,84 @@ async function cleanupOwnedRuntimeShortcut(machineInstall) {
       packageJson.build?.productName,
       "build.productName",
     ),
+    appUserModelId: requiredPackageString(
+      packageJson.build?.appId,
+      "build.appId",
+    ),
   };
   const shortcut = await shortcutInfo(provenance.path);
   if (!isOwnedRuntimeShortcut(shortcut, expected)) {
     throw new Error(
-      `refusing to clean a runtime shortcut whose ownership fields do not match: ${provenance.path}`,
+      `Electron runtime shortcut ownership fields do not match: ${provenance.path}`,
+    );
+  }
+  const toastClsid = normalizeToastActivatorClsid(shortcut.toastClsid);
+  if (toastClsid !== WINDOWS_TOAST_ACTIVATOR_CLSID) {
+    throw new Error(
+      `Electron runtime shortcut toast CLSID is not the product-owned fixed value: ${toastClsid}`,
     );
   }
 
-  // Recheck both ownership and file type immediately before the one-file
-  // unlink. Never use a recursive deletion for this per-user artifact.
-  const recheckedShortcut = await shortcutInfo(provenance.path);
-  const beforeUnlink = lstatSync(provenance.path, { throwIfNoEntry: false });
-  if (
-    !isOwnedRuntimeShortcut(recheckedShortcut, expected) ||
-    !beforeUnlink?.isFile()
-  ) {
-    throw new Error(
-      `runtime shortcut changed before owner cleanup: ${provenance.path}`,
-    );
+  const registrations = await toastActivatorRegistrations(toastClsid);
+  if (registrations.length === 0) {
+    throw new Error("Electron runtime toast CLSID registration is missing");
+  }
+  for (const registration of registrations) {
+    if (
+      registration.rootDefault.value !== "Electron Notification Activator" ||
+      registration.rootDefault.valueKind !== "String" ||
+      registration.customActivator.value !== "1" ||
+      registration.customActivator.valueKind !== "DWord" ||
+      !registration.localServer.valueExists ||
+      registration.localServer.valueKind !== "String" ||
+      !samePath(registration.localServer.value, machineInstall.installedExe)
+    ) {
+      throw new Error(
+        `Electron runtime toast registration is not exact in HKCU ${registration.view}-bit view`,
+      );
+    }
   }
 
-  unlinkSync(provenance.path);
-  if (lstatSync(provenance.path, { throwIfNoEntry: false })) {
-    throw new Error(
-      `owned Electron runtime shortcut survived one-file cleanup: ${provenance.path}`,
-    );
-  }
+  provenance.toastClsid = toastClsid;
+  provenance.ownedBeforeUninstall = true;
   process.stdout.write(
-    `[windows-installer-smoke] removed exact Electron-owned current-user runtime shortcut: ${provenance.path}\n`,
+    `[windows-installer-smoke] exact current-user notification shortcut and CLSID registration verified: ${toastClsid}\n`,
+  );
+}
+
+async function cleanupOwnedRuntimeNotificationArtifacts(machineInstall) {
+  const provenance = machineInstall.runtimeShortcutProvenance;
+  if (!provenance?.absentBeforeLaunch || !provenance.path) {
+    throw new Error(
+      "refusing failure cleanup without pre-launch absence provenance",
+    );
+  }
+  const cleanupScript = fileURLToPath(
+    new URL(
+      "../build/uninstall-windows-notification-artifacts.ps1",
+      import.meta.url,
+    ),
+  );
+  await runProcess(
+    powershellExecutable(),
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      cleanupScript,
+      "-InstalledExecutable",
+      machineInstall.installedExe,
+      "-ShortcutName",
+      requiredPackageString(packageJson.build?.productName, "build.productName"),
+      "-AppUserModelId",
+      requiredPackageString(packageJson.build?.appId, "build.appId"),
+      "-InstallMarker",
+      machineInstall.markerPath,
+    ],
+    { timeoutMs: 30_000 },
   );
 }
 
@@ -1146,6 +1232,17 @@ async function assertUninstalledSurface(machineInstall) {
     throw new Error(
       `uninstall left shortcut residue: ${shortcutResidue.join(", ")}`,
     );
+  }
+
+  const toastClsid =
+    machineInstall.runtimeShortcutProvenance?.toastClsid ?? null;
+  if (toastClsid) {
+    const toastResidue = await toastActivatorRegistrations(toastClsid);
+    if (toastResidue.length > 0) {
+      throw new Error(
+        `uninstall left current-user toast CLSID residue: ${toastClsid}`,
+      );
+    }
   }
 }
 
@@ -1989,11 +2086,8 @@ async function cleanupFailedInstallerPass(state, timeoutMs) {
   }
 
   if (state.machineInstall?.runtimeShortcutProvenance?.absentBeforeLaunch) {
-    await step("exact-owner Electron runtime shortcut cleanup", async () => {
-      const shortcutPath =
-        state.machineInstall.runtimeShortcutProvenance.path;
-      if (!lstatSync(shortcutPath, { throwIfNoEntry: false })) return;
-      await cleanupOwnedRuntimeShortcut(state.machineInstall);
+    await step("exact-owner notification artifact failure cleanup", async () => {
+      await cleanupOwnedRuntimeNotificationArtifacts(state.machineInstall);
     });
   }
 
@@ -2105,7 +2199,7 @@ async function runInstallerPass(
         await state.runningApp.stop();
         state.runningApp = null;
         await assertNoCurrentUserProtocolHandlers("installed app launch");
-        await cleanupOwnedRuntimeShortcut(state.machineInstall);
+        await assertRuntimeNotificationArtifacts(state.machineInstall);
       }
     }
 
