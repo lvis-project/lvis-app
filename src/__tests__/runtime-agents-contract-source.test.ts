@@ -14,12 +14,16 @@ describe("packaged runtime AGENTS.md contract", () => {
 
   it("keeps durable runtime sources of truth without stale implementation notes", () => {
     expect(runtimeContract).toContain("# LVIS Runtime Assistant Contract");
-    expect(runtimeContract).toContain("~/.lvis/AGENTS.md.new");
+    expect(runtimeContract).toContain("~/.lvis/plugins/<pluginId>/data/");
+    expect(runtimeContract).toContain("~/.lvis/audit/<YYYY-MM-DD>.jsonl");
+    expect(runtimeContract).toContain("^[a-zA-Z_][a-zA-Z0-9_]*$");
     expect(runtimeContract).toContain("TOOL_TIMEOUT_POLICY");
 
     expect(runtimeContract).not.toContain("addTask");
-    expect(runtimeContract).not.toContain("## Quick Reference");
-    expect(runtimeContract).not.toContain("## Further Reading");
+    expect(runtimeContract).not.toMatch(/^##\s+(?:\d+\.\s+)?Quick Reference/m);
+    expect(runtimeContract).not.toMatch(/^##\s+(?:\d+\.\s+)?Further Reading/m);
+    expect(runtimeContract).not.toMatch(/manifest tool category/i);
+    expect(runtimeContract).not.toMatch(/\b120_000\b|\b600_000\b/);
     expect(runtimeContract).not.toMatch(/architecture v\d|§\d/i);
   });
 });
