@@ -5,12 +5,17 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PermissionManager } from "../permission-manager.js";
+import {
+  isReviewerAutoDecisionOutcome,
+  PermissionManager,
+} from "../permission-manager.js";
 import { VerdictCache } from "../reviewer/verdict-cache.js";
 import { DeferredQueue } from "../reviewer/deferred-queue.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
 import {
   RuleBasedRiskClassifier,
+  LlmRiskClassifier,
+  ReviewerDispatchError,
   type RiskClassifier,
   type ToolInvocationContext,
   type RiskVerdict,
@@ -714,5 +719,147 @@ describe("PermissionManager.checkDetailed — headless mutating reviewer lane", 
     });
     expect(result.decision).toBe("ask");
     expect(result.layer).toBe(6);
+  });
+});
+
+describe("reviewer outcome provenance and base-cache safety", () => {
+  const input = {
+    source: "builtin" as const,
+    category: "shell" as const,
+    pathFields: [] as string[],
+    finalInput: { command: "echo hello" },
+    allowedDirectories: [] as string[],
+    sensitivePathsAdjacent: [] as string[],
+    trustOrigin: "llm-tool-arg" as const,
+  };
+
+  function makeLlmManager(
+    complete: () => Promise<import("../reviewer/risk-classifier.js").LlmCompletionResult>,
+  ) {
+    const pm = new PermissionManager(tmpFile("permissions.json"));
+    const cache = new VerdictCache(tmpFile("reviewer-cache.jsonl"));
+    const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
+    const provider = { complete: vi.fn(complete) };
+    pm.setReviewer({
+      classifier: new LlmRiskClassifier(provider, "test-model", "deny"),
+      cache,
+      deferredQueue: queue,
+    });
+    return { pm, complete: provider.complete };
+  }
+
+  it("auto-decides only the three explicitly successful outcomes", () => {
+    for (const outcome of [
+      "fresh",
+      "cache",
+      "approval-memory",
+    ] as const) {
+      expect(isReviewerAutoDecisionOutcome(outcome)).toBe(true);
+    }
+    for (const outcome of [
+      "unavailable",
+      "error",
+      "timeout",
+      "malformed",
+      "sandbox-state-changed",
+    ] as const) {
+      expect(isReviewerAutoDecisionOutcome(outcome)).toBe(false);
+    }
+    expect(isReviewerAutoDecisionOutcome(undefined)).toBe(false);
+  });
+
+  it("stores only a typed fresh success and reports the subsequent hit as cache", async () => {
+    const { pm, complete } = makeLlmManager(async () => ({
+      text: '{"level":"medium","reason":"bounded shell action"}',
+      tokensIn: 1,
+      tokensOut: 1,
+      costUsd: 0,
+    }));
+
+    const first = await pm.dispatchReviewer("bash", input, undefined, { defer: "none" });
+    const second = await pm.dispatchReviewer("bash", input, undefined, { defer: "none" });
+
+    expect(first.outcome).toBe("fresh");
+    expect(first.cacheReason).toBe("miss-not-found");
+    expect(second.outcome).toBe("cache");
+    expect(second.cacheReason).toBe("hit");
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not cache a malformed provider response", async () => {
+    const { pm, complete } = makeLlmManager(async () => ({
+      text: "not-json",
+      tokensIn: 1,
+      tokensOut: 1,
+      costUsd: 0,
+    }));
+
+    const first = await pm.dispatchReviewer("bash", input, undefined, { defer: "none" });
+    const second = await pm.dispatchReviewer("bash", input, undefined, { defer: "none" });
+
+    expect(first.outcome).toBe("malformed");
+    expect(second.outcome).toBe("malformed");
+    expect(first.cacheReason).toBe("miss-not-found");
+    expect(second.cacheReason).toBe("miss-not-found");
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    {
+      name: "provider error",
+      expected: "error",
+      makeError: () => new Error("provider unavailable"),
+    },
+    {
+      name: "provider timeout",
+      expected: "timeout",
+      makeError: () => new ReviewerDispatchError("timeout", "provider timed out"),
+    },
+  ] as const)("does not cache a $name fallback", async ({ expected, makeError }) => {
+    const { pm, complete } = makeLlmManager(async () => {
+      throw makeError();
+    });
+
+    const first = await pm.dispatchReviewer("bash", input, undefined, { defer: "none" });
+    const second = await pm.dispatchReviewer("bash", input, undefined, { defer: "none" });
+
+    expect(first.outcome).toBe(expected);
+    expect(second.outcome).toBe(expected);
+    expect(first.cacheReason).toBe("miss-not-found");
+    expect(second.cacheReason).toBe("miss-not-found");
+    expect(complete).toHaveBeenCalledTimes(6);
+  });
+
+  it("does not cache a valid fresh verdict when the caller aborts before return", async () => {
+    const abortController = new AbortController();
+    const classify = vi.fn(async () => {
+      abortController.abort();
+      return { level: "medium" as const, reason: "valid fresh result" };
+    });
+    const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
+    const pm = new PermissionManager(tmpFile("permissions.json"));
+    pm.setReviewer({
+      classifier: { classify },
+      cache: new VerdictCache(tmpFile("reviewer-cache.jsonl")),
+      deferredQueue: queue,
+    });
+
+    const aborted = await pm.dispatchReviewer(
+      "bash",
+      input,
+      undefined,
+      { defer: "medium-high", abortSignal: abortController.signal },
+    );
+    const next = await pm.dispatchReviewer(
+      "bash",
+      input,
+      undefined,
+      { defer: "none" },
+    );
+
+    expect(aborted.outcome).toBe("error");
+    expect(next.outcome).toBe("fresh");
+    expect(classify).toHaveBeenCalledTimes(2);
+    expect(queue.listPending()).toHaveLength(0);
   });
 });
