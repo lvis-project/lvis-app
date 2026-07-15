@@ -17,6 +17,10 @@ import { shouldBlockGlobalWebviewNavigation } from "./main/webview-navigation-po
 import { installSideBrowserPartitionPolicy } from "./main/side-browser-webview.js";
 import { findLvisProtocolUri } from "./main/lvis-protocol.js";
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
+import {
+  ensurePackagedWindowsLvisProtocolClient,
+  shouldDeferPackagedWindowsProtocolRegistration,
+} from "./main/lvis-protocol-registration.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
 import { WindowManager } from "./main/window-manager.js";
 import { createLogger } from "./lib/logger.js";
@@ -235,7 +239,13 @@ async function main() {
   }
 }
 
-// lvis:// custom URI scheme — register before app ready.
+// lvis:// custom URI scheme.
+// The per-machine Windows installer owns the packaged association in HKLM.
+// Electron's Windows setter always writes HKCU, so packaged Windows first checks
+// the effective association after app ready and skips the setter when HKLM
+// already resolves to this exact executable. Every other platform/build keeps
+// the existing synchronous registration here.
+//
 // In dev mode (unpackaged) on Windows, Electron requires explicit execPath + args
 // so the OS can locate the app correctly when launching from a protocol URI.
 // We must also propagate the running process's --user-data-dir so the OS-spawned
@@ -252,21 +262,30 @@ async function main() {
 // inherits the env var. Boot also calls `setIsPackaged` later for any other
 // dev-flag callers; this top-level call early-seeds the cache.
 setIsPackaged(app.isPackaged);
-const _protocolRegistered = app.isPackaged
-  ? app.setAsDefaultProtocolClient("lvis")
-  : app.setAsDefaultProtocolClient(
-      "lvis",
-      process.execPath,
-      buildDevProtocolArgs({
-        argv1: process.argv[1],
-        userDataDir: app.getPath("userData") || undefined,
-        platform: process.platform,
-        disableGpu: process.env.LVIS_KEEP_GPU !== "1",
-        disableSandbox: devNoSandboxAllowed(),
-      }),
+const deferPackagedWindowsProtocolRegistration =
+  shouldDeferPackagedWindowsProtocolRegistration(
+    app.isPackaged,
+    process.platform,
+  );
+if (!deferPackagedWindowsProtocolRegistration) {
+  const protocolRegistered = app.isPackaged
+    ? app.setAsDefaultProtocolClient("lvis")
+    : app.setAsDefaultProtocolClient(
+        "lvis",
+        process.execPath,
+        buildDevProtocolArgs({
+          argv1: process.argv[1],
+          userDataDir: app.getPath("userData") || undefined,
+          platform: process.platform,
+          disableGpu: process.env.LVIS_KEEP_GPU !== "1",
+          disableSandbox: devNoSandboxAllowed(),
+        }),
+      );
+  if (!protocolRegistered) {
+    log.warn(
+      "setAsDefaultProtocolClient('lvis') failed — deep links may not work in this environment",
     );
-if (!_protocolRegistered) {
-  log.warn("setAsDefaultProtocolClient('lvis') failed — deep links may not work in this environment");
+  }
 }
 
 // macOS: URI delivered via open-url event (register before whenReady to avoid missing cold-start)
@@ -312,10 +331,26 @@ if (!gotSingleInstanceLock) {
 
   // whenReady is scoped to the primary-instance branch — second-instance
   // processes must NOT run main(). See the comment on `app.quit()` above.
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     applyRuntimeAppIcon();
     installHtmlPreviewPartitionBlock();
     installSideBrowserPartitionPolicy();
+    if (deferPackagedWindowsProtocolRegistration) {
+      const protocolRegistered = await ensurePackagedWindowsLvisProtocolClient(
+        {
+          getApplicationInfoForProtocol: (url) =>
+            app.getApplicationInfoForProtocol(url),
+          setAsDefaultProtocolClient: (protocol) =>
+            app.setAsDefaultProtocolClient(protocol),
+        },
+        process.execPath,
+      );
+      if (!protocolRegistered) {
+        log.warn(
+          "setAsDefaultProtocolClient('lvis') failed — deep links may not work in this environment",
+        );
+      }
+    }
     void main().catch((error) => {
       log.error({ err: error }, "bootstrap failed");
       app.quit();
