@@ -4,7 +4,7 @@ import type { SettingsService } from "../data/settings-store.js";
 import { isCanonicalA2APublicHttpsOrigin } from "../shared/a2a-public-origin.js";
 import type { AgentActionApprover } from "../permissions/agent-action-approver.js";
 import type { A2ARequestHandler } from "../api/a2a-router.js";
-import { A2AAgentHubClient } from "../api/a2a-agent-hub-client.js";
+import { A2ARouteControlClient } from "../api/a2a-route-control-client.js";
 import { A2AExactReplayHandler } from "../api/a2a-exact-replay-handler.js";
 import { A2AExactReplayStore } from "../api/a2a-exact-replay-store.js";
 import { A2ARemoteClient, type A2ARemoteClientResult, type A2ARemoteExecuteInput } from "../api/a2a-remote-client.js";
@@ -17,7 +17,7 @@ import {
 import { openFeatureNamespace, type FeatureNamespaceHandle } from "./storage/feature-namespace.js";
 import { snapshotA2ARemoteGates, type A2ARemoteGateSnapshot } from "./a2a-remote-gates.js";
 
-export const A2A_REMOTE_HUB_SECRET_KEY = "a2a.remote.hub-auth";
+export const A2A_REMOTE_ROUTE_CONTROL_SECRET_KEY = "a2a.remote.route-control-auth";
 export const A2A_REMOTE_RECEIVER_SECRET_KEY = "a2a.remote.receiver-bearer";
 export const a2aRemoteDataSecretKey = (bindingId: number, revisionId: number): string => `a2a.remote.data.${bindingId}.${revisionId}`;
 
@@ -136,7 +136,7 @@ export function createA2ARemoteRuntime(options: CreateA2ARemoteRuntimeOptions): 
       || !isCanonicalA2APublicHttpsOrigin(config.receiverPublicOrigin)))) {
     throw new Error("a2a-remote-config-incomplete");
   }
-  if (gates.outboundRouting && (!config.agentHubBaseUrl || config.targets.length === 0 || !options.settings.getEncryptedSecret(A2A_REMOTE_HUB_SECRET_KEY))) throw new Error("a2a-remote-outbound-config-incomplete");
+  if (gates.outboundRouting && (!config.routeControlBaseUrl || config.targets.length === 0 || !options.settings.getEncryptedSecret(A2A_REMOTE_ROUTE_CONTROL_SECRET_KEY))) throw new Error("a2a-remote-outbound-config-incomplete");
   const receiverValue = gates.receiverProfile ? options.settings.getEncryptedSecret(A2A_REMOTE_RECEIVER_SECRET_KEY) : null;
   if (gates.receiverProfile && !receiverValue) throw new Error("a2a-remote-receiver-secret-missing");
   const namespace = options.namespace ?? openFeatureNamespace("a2a-remote");
@@ -161,7 +161,7 @@ export function createA2ARemoteRuntime(options: CreateA2ARemoteRuntimeOptions): 
     approver,
     store,
     secretResolver: { prepare: async ({ credentialBindingId, credentialRevisionId }) => { const value = options.settings.getEncryptedSecret(a2aRemoteDataSecretKey(credentialBindingId, credentialRevisionId)); if (!value) throw new Error("a2a-remote-data-secret-missing"); return secretHandle(value); } },
-    controlPlane: new A2AAgentHubClient({ baseUrl: config.agentHubBaseUrl, authResolver: { prepare: async () => { const value = options.settings.getEncryptedSecret(A2A_REMOTE_HUB_SECRET_KEY); if (!value) throw new Error("a2a-remote-hub-secret-missing"); return secretHandle(value); } } }),
+    controlPlane: new A2ARouteControlClient({ baseUrl: config.routeControlBaseUrl, authResolver: { prepare: async () => { const value = options.settings.getEncryptedSecret(A2A_REMOTE_ROUTE_CONTROL_SECRET_KEY); if (!value) throw new Error("a2a-remote-route-control-secret-missing"); return secretHandle(value); } } }),
     transport,
     audit: (event) => options.audit?.(`${event.operation}:${event.outcome}:${event.code}`),
   }) : null;

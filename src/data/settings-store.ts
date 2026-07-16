@@ -194,7 +194,7 @@ export interface A2ARemoteTargetSettings {
 }
 
 export interface A2ARemoteSettings {
-  agentHubBaseUrl: string;
+  routeControlBaseUrl: string;
   /** Canonical public HTTPS origin advertised by the receiver Agent Card. */
   receiverPublicOrigin: string;
   outboundCallerGenerationId: string;
@@ -662,7 +662,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     autoCompact: true,
   },
   a2aRemote: {
-    agentHubBaseUrl: "",
+    routeControlBaseUrl: "",
     receiverPublicOrigin: "",
     outboundCallerGenerationId: "",
     receiverCallerGenerationId: "",
@@ -2474,11 +2474,11 @@ function normalizeA2ARemote(input: unknown): A2ARemoteSettings {
   const result = structuredClone(DEFAULT_SETTINGS.a2aRemote);
   if (!input || typeof input !== "object" || Array.isArray(input)) return result;
   const value = input as Record<string, unknown>;
-  if (typeof value.agentHubBaseUrl === "string") {
+  if (typeof value.routeControlBaseUrl === "string") {
     try {
-      const url = new URL(value.agentHubBaseUrl);
+      const url = new URL(value.routeControlBaseUrl);
       if (url.protocol === "https:" && !url.port && !url.username && !url.password && !url.search && !url.hash && isIP(url.hostname) === 0 && url.hostname !== "localhost" && !url.hostname.endsWith(".localhost")
-        && (url.pathname === "/" || url.pathname === "") && url.toString() === value.agentHubBaseUrl) result.agentHubBaseUrl = value.agentHubBaseUrl;
+        && (url.pathname === "/" || url.pathname === "") && url.toString() === value.routeControlBaseUrl) result.routeControlBaseUrl = value.routeControlBaseUrl;
     } catch { /* invalid remains fail-closed empty */ }
   }
   if (isCanonicalA2APublicHttpsOrigin(value.receiverPublicOrigin)) {

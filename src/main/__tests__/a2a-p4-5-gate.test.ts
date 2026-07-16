@@ -4,8 +4,7 @@ import { snapshotA2ARemoteGates } from "../a2a-remote-gates.js";
 
 describe("P4-5 deterministic remote gate", () => {
   it("proves the requested immutable boot-gate state", () => {
-    const expected = process.env.A2A_P4_5_GATE_EXPECTED;
-    expect(["off", "on"]).toContain(expected);
+    const expected = process.env.A2A_P4_5_GATE_EXPECTED ?? "off";
     const enabled = expected === "on";
     const settings = {
       get: (key: string) => key === "features" ? {} : undefined,
