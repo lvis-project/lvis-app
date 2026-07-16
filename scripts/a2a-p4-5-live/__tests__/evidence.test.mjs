@@ -618,6 +618,21 @@ test("independent attestation rerun keeps source-digest and scopes GH_TOKEN to g
   }
 });
 
+test("fixed programs validate and honor per-call timeouts", () => {
+  assert.throws(
+    () => runFixedProgram(process.execPath, ["-e", "process.exit(0)"], { timeoutMs: 0 }),
+    /timeoutMs must be an integer/u,
+  );
+  assert.throws(
+    () => runFixedProgram(process.execPath, ["-e", "setTimeout(() => {}, 5000)"], { timeoutMs: 25 }),
+    /ETIMEDOUT/u,
+  );
+  assert.equal(
+    runFixedProgram(process.execPath, ["-e", "process.stdout.write('ok')"], { timeoutMs: 1000 }).stdout,
+    "ok",
+  );
+});
+
 test("isolated evidence workflow is dispatch-only, immutable-action pinned, exact-head/lock pinned, publisher-verified, and independently attested", () => {
   const workflow = readFileSync(resolve(ROOT, ".github/workflows/a2a-p4-5-packaged-evidence.yml"), "utf8");
   for (const required of [
