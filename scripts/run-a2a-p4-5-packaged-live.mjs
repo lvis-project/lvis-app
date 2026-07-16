@@ -143,7 +143,10 @@ async function verifyLiveEndpointIdentity(endpoints, expected, { run = runFixedP
     } catch (error) {
       fail(`${side} endpoint: invalid TLS leaf certificate (${error.message})`);
     }
-    if (!certificate.checkHost(endpointUrl.hostname)) fail(`${side} endpoint: leaf certificate does not cover the exact hostname`);
+    // Node returns the matching subject name on success and undefined on a
+    // mismatch; make that contract explicit instead of relying on truthiness.
+    const matchedSubject = certificate.checkHost(endpointUrl.hostname);
+    if (matchedSubject === undefined) fail(`${side} endpoint: leaf certificate does not cover the exact hostname`);
     const certificateSha256 = normalizedCertificateSha256(certificate);
     if (certificateSha256 !== signed.certificateSha256) fail(`${side} endpoint: live certificate fingerprint does not match signed evidence`);
     result[side] = { hostname: endpointUrl.hostname, resolvedIpv4: resolved, certificateSha256 };
