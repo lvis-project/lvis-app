@@ -1,11 +1,12 @@
 ; LVIS NSIS installer hook — user-data cleanup on uninstall.
 ;
-; electron-builder의 `nsis.include` 로 wiring. `deleteAppDataOnUninstall: true`
-; 가 `%APPDATA%\LVIS\` (Electron userData = Roaming\LVIS\) 자동 제거를 처리하므로,
-; 이 hook 은 *그 범위 밖* 의 사용자 데이터 정리만 책임진다:
+; electron-builder의 `nsis.include` 로 wiring. `/KEEP_APP_DATA`가 모든 userData를
+; 실제로 보존할 수 있도록 `deleteAppDataOnUninstall: false`를 사용하고, 이 hook이
+; Roaming/Local/홈 데이터 삭제를 한 분기에서 책임진다:
 ;
 ;   - `%USERPROFILE%\.lvis\`   — LVIS_HOME (sessions, memories, secrets, plugins data)
-;   - `%LOCALAPPDATA%\LVIS\`   — Local AppData (Chromium GPU cache 등 Electron 잔여)
+;   - `%APPDATA%\${APP_*}\`    — Electron userData/cache의 현재/과거 이름
+;   - `%LOCALAPPDATA%\${APP_*}\` — Chromium GPU cache 등 Electron 잔여
 ;
 ; 사용자 confirmation:
 ;   - GUI 설치 제거 → MessageBox 로 "Yes/No" 묻기. Default 는 Yes.
@@ -35,6 +36,116 @@
 
 ; ─────────────────────────────────────────────────────────────────────────────
 ; ASRT (OS execution sandbox) — provision the Windows srt-win backend at
+
+; Query URL Protocol with Win32 type+data constraints. ReadRegStr also accepts
+; REG_EXPAND_SZ, so it cannot enforce the per-value ownership rule by itself.
+!define LVIS_RRF_RT_REG_SZ 0x00000002
+!define LVIS_RRF_SUBKEY_WOW6464KEY 0x00010000
+!define LVIS_RRF_SUBKEY_WOW6432KEY 0x00020000
+!define LVIS_RRF_NOEXPAND 0x10000000
+!define LVIS_RRF_ZEROONFAILURE 0x20000000
+!define LVIS_KEY_READ_WRITE 0x0002001F
+!define LVIS_KEY_WOW64_64KEY 0x00000100
+!define LVIS_KEY_WOW64_32KEY 0x00000200
+!define LVIS_NSIS_PER_MACHINE_MARKER ".lvis-nsis-per-machine-v1"
+!define LVIS_NOTIFICATION_CLEANUP_SCRIPT "uninstall-windows-notification-artifacts.ps1"
+
+; _root is a predefined HKEY handle. _out becomes 1 only for exactly one
+; terminating NUL stored as REG_SZ in electron-builder's selected view.
+!macro lvisIsExactEmptyUrlProtocolRegSz _root _out
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  StrCpy ${_out} "0"
+
+  StrCpy $0 ${LVIS_RRF_RT_REG_SZ}
+  IntOp $0 $0 | ${LVIS_RRF_NOEXPAND}
+  IntOp $0 $0 | ${LVIS_RRF_ZEROONFAILURE}
+  StrCpy $1 ${LVIS_RRF_SUBKEY_WOW6432KEY}
+  !ifdef APP_ARM64
+    ${If} ${RunningX64}
+    ${OrIf} ${IsNativeARM64}
+      StrCpy $1 ${LVIS_RRF_SUBKEY_WOW6464KEY}
+    ${EndIf}
+  !else
+    !ifdef APP_64
+      ${If} ${RunningX64}
+        StrCpy $1 ${LVIS_RRF_SUBKEY_WOW6464KEY}
+      ${EndIf}
+    !endif
+  !endif
+  IntOp $0 $0 | $1
+
+  ; Sentinel plus size/type checks reject malformed strings and every foreign
+  ; registry kind. RegGetValueW includes the terminating UTF-16 NUL in size.
+  System::Call '*(&i2 65535) p .r2'
+  ${If} $2 != 0
+    StrCpy $4 2
+    System::Call 'advapi32::RegGetValueW(p ${_root}, w "Software\Classes\lvis", w "URL Protocol", i r0, *i .r3, p r2, *i r4r4) i .r5'
+    ${If} $5 = 0
+    ${AndIf} $3 = 1
+    ${AndIf} $4 = 2
+      System::Call '*$2(&i2 .r6)'
+      ${If} $6 = 0
+        StrCpy ${_out} "1"
+      ${EndIf}
+    ${EndIf}
+    System::Free $2
+  ${EndIf}
+
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+!macroend
+
+; NSIS 3.0.4.1's DeleteRegKey /ifempty checks only for subkeys, so it can
+; delete foreign named values. Open the exact electron-builder registry view
+; and let SHDeleteEmptyKeyW atomically delete only a child with zero values and
+; zero subkeys. Any open/query/access failure preserves the key.
+!macro lvisDeleteExactEmptyRegistryKey _root _parent _child
+  Push $0
+  Push $1
+  Push $2
+
+  StrCpy $0 ${LVIS_KEY_READ_WRITE}
+  !ifdef APP_ARM64
+    ${If} ${RunningX64}
+    ${OrIf} ${IsNativeARM64}
+      IntOp $0 $0 | ${LVIS_KEY_WOW64_64KEY}
+    ${Else}
+      IntOp $0 $0 | ${LVIS_KEY_WOW64_32KEY}
+    ${EndIf}
+  !else
+    !ifdef APP_64
+      ${If} ${RunningX64}
+        IntOp $0 $0 | ${LVIS_KEY_WOW64_64KEY}
+      ${Else}
+        IntOp $0 $0 | ${LVIS_KEY_WOW64_32KEY}
+      ${EndIf}
+    !else
+      IntOp $0 $0 | ${LVIS_KEY_WOW64_32KEY}
+    !endif
+  !endif
+
+  StrCpy $1 0
+  System::Call 'advapi32::RegOpenKeyExW(p ${_root}, w "${_parent}", i 0, i r0, *p .r1) i .r2'
+  ${If} $2 = 0
+    System::Call 'shlwapi::SHDeleteEmptyKeyW(p r1, w "${_child}") i .r2'
+    System::Call 'advapi32::RegCloseKey(p r1)'
+  ${EndIf}
+
+  Pop $2
+  Pop $1
+  Pop $0
+!macroend
 ; install time so the sandbox is ready at first launch (issue #1608). Runs after
 ; installApplicationFiles (electron-builder installSection.nsh inserts
 ; customInstall last), so srt-win.exe is present.
@@ -65,6 +176,9 @@
 !macro customInstall
   Push $0
   Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
 
   !insertmacro resolveSrtWinPath $R0
   ${if} $R0 == ""
@@ -113,70 +227,293 @@
   ${endif}
 
   lvis_srtwin_install_done:
+  ; This installer-only marker distinguishes a completed elevated NSIS install
+  ; from a ZIP/win-unpacked launch. Remove a stale marker first so every
+  ; subsequent failure is represented by its absence.
+  ClearErrors
+  Delete "$INSTDIR\${LVIS_NSIS_PER_MACHINE_MARKER}"
+  IfFileExists "$INSTDIR\${LVIS_NSIS_PER_MACHINE_MARKER}" 0 lvis_machine_marker_absent
+    StrCpy $R3 "could not remove the stale per-machine install marker"
+    Goto lvis_machine_install_contract_failed
+
+  lvis_machine_marker_absent:
+  ; Keep the error flag sticky across the complete registry write set.
+  ClearErrors
+  ; electron-builder 26.x does not consume build.protocols for NSIS. Own the
+  ; packaged lvis:// association explicitly in the all-users shell context.
+  WriteRegStr SHELL_CONTEXT "Software\Classes\lvis" "" "URL:lvis"
+  WriteRegStr SHELL_CONTEXT "Software\Classes\lvis" "URL Protocol" ""
+  WriteRegStr SHELL_CONTEXT "Software\Classes\lvis\DefaultIcon" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}",0'
+  WriteRegStr SHELL_CONTEXT "Software\Classes\lvis\shell\open\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"'
+  ; electron-builder writes InstallLocation only to its private install key.
+  ; Mirror it into Apps & Features so smoke/enterprise inventory can discover
+  ; and cross-check the machine install without guessing a Program Files path.
+  WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "InstallLocation" "$INSTDIR"
+  ${If} ${Errors}
+    StrCpy $R3 "could not write the per-machine registry contract"
+    Goto lvis_machine_install_contract_failed
+  ${EndIf}
+
+  ; Verify exact values and types before attesting completion with the marker.
+  StrCpy $R3 "per-machine registry readback did not match the install contract"
+  ClearErrors
+  ReadRegStr $R1 SHELL_CONTEXT "Software\Classes\lvis" ""
+  ${If} ${Errors}
+    Goto lvis_machine_install_contract_failed
+  ${EndIf}
+  StrCmpS $R1 "URL:lvis" 0 lvis_machine_install_contract_failed
+
+  !insertmacro lvisIsExactEmptyUrlProtocolRegSz 0x80000002 $R1
+  StrCmp $R1 "1" 0 lvis_machine_install_contract_failed
+
+  ClearErrors
+  ReadRegStr $R1 SHELL_CONTEXT "Software\Classes\lvis\DefaultIcon" ""
+  ${If} ${Errors}
+    Goto lvis_machine_install_contract_failed
+  ${EndIf}
+  StrCmpS $R1 '"$INSTDIR\${APP_EXECUTABLE_FILENAME}",0' 0 lvis_machine_install_contract_failed
+
+  ClearErrors
+  ReadRegStr $R1 SHELL_CONTEXT "Software\Classes\lvis\shell\open\command" ""
+  ${If} ${Errors}
+    Goto lvis_machine_install_contract_failed
+  ${EndIf}
+  StrCmpS $R1 '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"' 0 lvis_machine_install_contract_failed
+
+  ClearErrors
+  ReadRegStr $R1 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "InstallLocation"
+  ${If} ${Errors}
+    Goto lvis_machine_install_contract_failed
+  ${EndIf}
+  StrCmpS $R1 "$INSTDIR" 0 lvis_machine_install_contract_failed
+
+  ; Create a zero-byte regular file as the final successful install action.
+  ; No runtime code reads marker contents; existence and file type are the
+  ; complete contract.
+  StrCpy $R3 "could not create the per-machine install marker"
+  ClearErrors
+  FileOpen $R1 "$INSTDIR\${LVIS_NSIS_PER_MACHINE_MARKER}" w
+  ${If} ${Errors}
+    Goto lvis_machine_install_contract_failed
+  ${EndIf}
+  FileClose $R1
+
+  StrCpy $R2 "-1"
+  ClearErrors
+  FileOpen $R1 "$INSTDIR\${LVIS_NSIS_PER_MACHINE_MARKER}" r
+  ${If} ${Errors}
+    Goto lvis_machine_install_contract_failed
+  ${EndIf}
+  FileSeek $R1 0 END $R2
+  FileClose $R1
+  ${If} ${Errors}
+    Goto lvis_machine_install_contract_failed
+  ${EndIf}
+  StrCmp $R2 "0" lvis_machine_install_contract_verified
+
+  StrCpy $R3 "per-machine install marker is not a zero-byte regular file"
+  Goto lvis_machine_install_contract_failed
+
+  lvis_machine_install_contract_failed:
+  ClearErrors
+  Delete "$INSTDIR\${LVIS_NSIS_PER_MACHINE_MARKER}"
+  IfFileExists "$INSTDIR\${LVIS_NSIS_PER_MACHINE_MARKER}" 0 +3
+    SetErrorLevel 1
+    Abort "LVIS install failed: $R3; the incomplete marker could not be removed"
+  SetErrorLevel 1
+  Abort "LVIS install failed: $R3"
+
+  lvis_machine_install_contract_verified:
+  Pop $R3
+  Pop $R2
+  Pop $R1
   Pop $R0
   Pop $0
 !macroend
+
+!ifdef BUILD_UNINSTALLER
+Function un.lvisCleanupCurrentUserNotificationArtifacts
+  InitPluginsDir
+  File /oname=$PLUGINSDIR\${LVIS_NOTIFICATION_CLEANUP_SCRIPT} "${BUILD_RESOURCES_DIR}\${LVIS_NOTIFICATION_CLEANUP_SCRIPT}"
+  ; electron-builder's NSIS is x86. IsWow64Process is ambiguous on ARM64, so
+  ; use IsWow64Process2's native-machine result to select native PowerShell on
+  ; both AMD64 and ARM64. Unknown architectures and API failures fail closed.
+  StrCpy $R6 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+  StrCpy $R7 "0"
+  StrCpy $R8 "0"
+  StrCpy $R9 "0"
+  ClearErrors
+  System::Call 'kernel32::IsWow64Process2(p -1, *i .R7, *i .R8) i .R9'
+  IfErrors lvis_notification_arch_probe_failed
+  IntCmp $R9 0 lvis_notification_arch_probe_failed
+  ; IMAGE_FILE_MACHINE_I386: native 32-bit Windows, where $SYSDIR is native.
+  IntCmp $R8 0x014c lvis_notification_powershell_path_ready
+  ; IMAGE_FILE_MACHINE_AMD64 / IMAGE_FILE_MACHINE_ARM64.
+  IntCmp $R8 0x8664 lvis_notification_use_sysnative
+  IntCmp $R8 0xaa64 lvis_notification_use_sysnative
+  Goto lvis_notification_arch_probe_failed
+
+  lvis_notification_use_sysnative:
+  StrCpy $R6 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+
+  lvis_notification_powershell_path_ready:
+  IfFileExists "$R6" lvis_notification_powershell_ready
+    StrCpy $R4 "1"
+    StrCpy $R5 "LVIS notification cleanup failed: PowerShell executable is missing at $R6"
+    Delete "$PLUGINSDIR\${LVIS_NOTIFICATION_CLEANUP_SCRIPT}"
+    Return
+
+  lvis_notification_arch_probe_failed:
+    StrCpy $R4 "1"
+    StrCpy $R5 "LVIS notification cleanup failed: Windows native architecture detection failed"
+    Delete "$PLUGINSDIR\${LVIS_NOTIFICATION_CLEANUP_SCRIPT}"
+    Return
+
+  lvis_notification_powershell_ready:
+  nsExec::ExecToStack '"$R6" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\${LVIS_NOTIFICATION_CLEANUP_SCRIPT}" -InstalledExecutable "$R0" -ShortcutName "$R1" -AppUserModelId "$R2" -InstallMarker "$R3"'
+  Pop $R4
+  Pop $R5
+  Delete "$PLUGINSDIR\${LVIS_NOTIFICATION_CLEANUP_SCRIPT}"
+  StrCmp $R4 "error" 0 lvis_notification_cleanup_done
+    StrCpy $R4 "1"
+    StrCpy $R5 "LVIS notification cleanup failed: PowerShell process could not be started"
+
+  lvis_notification_cleanup_done:
+FunctionEnd
+!endif
 
 !macro customUnInstall
   Push $R0
   Push $R1
   Push $R2
   Push $R3
+  Push $R4
+  Push $R5
+  Push $R6
+  Push $R7
+  Push $R8
+  Push $R9
 
-  ; electron-builder invokes the old uninstaller with /KEEP_APP_DATA and
-  ; --updated during upgrades. Preserve user state on that path; manual
-  ; uninstall still asks below.
+  ClearErrors
+  ${GetParameters} $R0
+
+  ; Only electron-builder's updater uninstall may preserve machine-level ASRT.
+  ; /KEEP_APP_DATA is a genuine uninstall choice and controls userData only.
   ${if} ${isUpdated}
-    Goto lvis_skip_userdata
+    Goto lvis_skip_genuine_uninstall
+  ${endif}
+
+  ClearErrors
+  ${GetOptions} $R0 "--updated" $R2
+  ${ifNot} ${Errors}
+    Goto lvis_skip_genuine_uninstall
+  ${endif}
+
+  ; Electron 43 creates a current-user notification shortcut and HKCU toast
+  ; activator registration even for a per-machine app. Genuine uninstall must
+  ; remove only the exact invoking-user artifacts. In the normal alternate-
+  ; admin UAC path, execute synchronously in electron-builder's retained outer
+  ; user process; an already-elevated invocation runs as its current identity.
+  StrCpy $R0 "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+  StrCpy $R1 "${PRODUCT_NAME}"
+  StrCpy $R2 "${APP_ID}"
+  StrCpy $R3 "$INSTDIR\${LVIS_NSIS_PER_MACHINE_MARKER}"
+  ; Fail closed if the UAC outer-process call itself fails before the cleanup
+  ; function can overwrite its synchronized result registers.
+  StrCpy $R4 "1"
+  StrCpy $R5 "LVIS notification cleanup did not run"
+  ${if} ${UAC_IsInnerInstance}
+    !insertmacro UAC_AsUser_Call Function un.lvisCleanupCurrentUserNotificationArtifacts ${UAC_SYNCREGISTERS}
+  ${else}
+    Call un.lvisCleanupCurrentUserNotificationArtifacts
+  ${endif}
+  DetailPrint "$R5"
+  ${if} $R4 != 0
+    SetErrorLevel 1
+    Abort "LVIS uninstall failed: current-user notification artifact cleanup returned exit $R4"
   ${endif}
 
   ClearErrors
   ${GetParameters} $R0
-  ${GetOptions} $R0 "/KEEP_APP_DATA" $R1
-  ${ifNot} ${Errors}
-    Goto lvis_skip_userdata
-  ${endif}
-
+  StrCpy $R1 "0"
   ClearErrors
-  ${GetOptions} $R0 "--updated" $R1
+  ${GetOptions} $R0 "/KEEP_APP_DATA" $R2
   ${ifNot} ${Errors}
-    Goto lvis_skip_userdata
+    StrCpy $R1 "1"
   ${endif}
 
-  ; ── ASRT OS sandbox teardown (genuine uninstall only) ──
-  ; Remove the machine-level srt-sandbox user + user-SID-keyed WFP rules that
-  ; customInstall provisioned. Placed AFTER the upgrade guards above so an
-  ; upgrade (isUpdated / KEEP_APP_DATA / --updated) does NOT tear the sandbox
-  ; down, and BEFORE customRemoveFiles deletes $INSTDIR (electron-builder
-  ; uninstaller.nsh inserts customUnInstall first) so srt-win.exe is still
-  ; present. Deliberately BEFORE the user-data MessageBox: removing the
-  ; system-level provisioning is orthogonal to whether the user keeps their chat
-  ; data. Non-fatal + idempotent ({cancelled:true} on UAC dismiss).
+  ; ── ASRT OS sandbox teardown (every genuine uninstall) ──
+  ; Recover dead holder-PID grants before deleting the sandbox principal, then
+  ; remove the WFP filters, sandbox user/group, credential and setup marker.
+  ; Both operations are fail-closed here: silently deleting app files while
+  ; leaving machine security state behind would make a green smoke misleading.
   !insertmacro resolveSrtWinPath $R2
   ${if} $R2 != ""
+    DetailPrint "LVIS: recovering stranded ASRT holder ACLs…"
+    nsExec::ExecToLog '"$R2" acl recover --force'
+    Pop $R3
+    ${if} $R3 != 0
+      SetErrorLevel 1
+      Abort "LVIS uninstall failed: ASRT holder ACL recovery returned exit $R3"
+    ${endif}
+
     DetailPrint "LVIS: removing the Windows OS sandbox (srt-win uninstall)…"
     nsExec::ExecToLog '"$R2" uninstall'
     Pop $R3
-    ${if} $R3 == 0
-      DetailPrint "LVIS: OS sandbox removed (srt-sandbox user + WFP rules)."
-    ${else}
-      DetailPrint "LVIS: OS sandbox removal returned exit $R3 (non-fatal; srt-win uninstall is idempotent)."
+    ${if} $R3 != 0
+      SetErrorLevel 1
+      Abort "LVIS uninstall failed: ASRT teardown returned exit $R3"
     ${endif}
+    DetailPrint "LVIS: OS sandbox removed (holder ACLs + srt-sandbox user/group + credential + WFP rules)."
+  ${else}
+    SetErrorLevel 1
+    Abort "LVIS uninstall failed: packaged srt-win.exe is missing; ASRT teardown cannot be verified"
+  ${endif}
+
+  ; KEEP_APP_DATA is evaluated only after ASRT teardown.
+  ${if} $R1 == "1"
+    Goto lvis_skip_userdata
   ${endif}
 
   MessageBox MB_YESNO|MB_ICONQUESTION \
     "LVIS 사용자 데이터를 함께 삭제하시겠습니까?$\n$\n[예]: 모든 채팅 기록, 설정, 메모리, plugin 데이터, 데모 활성 상태가 영구 삭제됩니다.$\n[아니오]: 사용자 데이터는 보존됩니다 — 같은 사용자가 LVIS 를 재설치하면 이어서 사용할 수 있습니다." \
     /SD IDYES IDNO lvis_skip_userdata
 
+  ; A perMachine uninstaller normally has all-users shell context. User data
+  ; belongs to the original interactive user, matching electron-builder's own
+  ; deletion template, so switch only inside the DELETE branch and restore it.
+  ${if} $installMode == "all"
+    SetShellVarContext current
+  ${endif}
+
   ; LVIS_HOME — sessions / memories / secrets / plugins / audit / .env.demo
   RMDir /r "$PROFILE\.lvis"
 
-  ; Local AppData 잔여 (Chromium GPU cache, partition cache 등). Roaming\LVIS\ 는
-  ; electron-builder 의 `deleteAppDataOnUninstall: true` 가 별도 처리하므로 여기서
-  ; 다시 손대지 않는다.
-  RMDir /r "$LOCALAPPDATA\LVIS"
+  ; Keep electron-builder's current/legacy APPDATA candidates together with
+  ; their Local AppData counterparts. KEEP_APP_DATA skips this whole block.
+  RMDir /r "$APPDATA\${APP_FILENAME}"
+  RMDir /r "$LOCALAPPDATA\${APP_FILENAME}"
+  !ifdef APP_PRODUCT_FILENAME
+    RMDir /r "$APPDATA\${APP_PRODUCT_FILENAME}"
+    RMDir /r "$LOCALAPPDATA\${APP_PRODUCT_FILENAME}"
+  !endif
+  !ifdef APP_PACKAGE_NAME
+    RMDir /r "$APPDATA\${APP_PACKAGE_NAME}"
+    RMDir /r "$LOCALAPPDATA\${APP_PACKAGE_NAME}"
+  !endif
+
+  ${if} $installMode == "all"
+    SetShellVarContext all
+  ${endif}
 
   lvis_skip_userdata:
+  lvis_skip_genuine_uninstall:
+  Pop $R9
+  Pop $R8
+  Pop $R7
+  Pop $R6
+  Pop $R5
+  Pop $R4
   Pop $R3
   Pop $R2
   Pop $R1
@@ -258,6 +595,76 @@
     Abort "LVIS uninstall failed: app files remain at $R2"
 
   lvis_remove_files_done:
+  ; Updater uninstalls must preserve the association across atomic replacement.
+  ; Explicit --updated is checked independently because not every updater path
+  ; exposes electron-builder's compile-time isUpdated branch.
+  ${if} ${isUpdated}
+    Goto lvis_protocol_cleanup_done
+  ${endif}
+
+  ClearErrors
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "--updated" $R1
+  ${ifNot} ${Errors}
+    Goto lvis_protocol_cleanup_done
+  ${endif}
+
+  ; A genuine uninstall removes protocol values only when the full exact
+  ; quoted command is still owned by this exact install. Each additional value
+  ; is compared independently so user/foreign changes survive; parent keys are
+  ; removed only when no values or subkeys remain.
+  StrCpy $R2 '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"'
+  StrCpy $R0 '"$INSTDIR\${APP_EXECUTABLE_FILENAME}",0'
+
+  ClearErrors
+  ReadRegStr $R1 SHELL_CONTEXT "Software\Classes\lvis\shell\open\command" ""
+  StrCmp $R1 $R2 0 lvis_protocol_cleanup_hkcu
+  DeleteRegValue SHELL_CONTEXT "Software\Classes\lvis\shell\open\command" ""
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000002 "Software\Classes\lvis\shell\open" "command"
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000002 "Software\Classes\lvis\shell" "open"
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000002 "Software\Classes\lvis" "shell"
+
+  ClearErrors
+  ReadRegStr $R1 SHELL_CONTEXT "Software\Classes\lvis\DefaultIcon" ""
+  StrCmp $R1 $R0 0 +2
+    DeleteRegValue SHELL_CONTEXT "Software\Classes\lvis\DefaultIcon" ""
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000002 "Software\Classes\lvis" "DefaultIcon"
+
+  !insertmacro lvisIsExactEmptyUrlProtocolRegSz 0x80000002 $R1
+  StrCmp $R1 "1" 0 +2
+    DeleteRegValue SHELL_CONTEXT "Software\Classes\lvis" "URL Protocol"
+  ClearErrors
+  ReadRegStr $R1 SHELL_CONTEXT "Software\Classes\lvis" ""
+  StrCmpS $R1 "URL:lvis" 0 +2
+    DeleteRegValue SHELL_CONTEXT "Software\Classes\lvis" ""
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000002 "Software\Classes" "lvis"
+
+  lvis_protocol_cleanup_hkcu:
+  ClearErrors
+  ReadRegStr $R1 HKEY_CURRENT_USER "Software\Classes\lvis\shell\open\command" ""
+  StrCmp $R1 $R2 0 lvis_protocol_cleanup_done
+  DeleteRegValue HKEY_CURRENT_USER "Software\Classes\lvis\shell\open\command" ""
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000001 "Software\Classes\lvis\shell\open" "command"
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000001 "Software\Classes\lvis\shell" "open"
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000001 "Software\Classes\lvis" "shell"
+
+  ClearErrors
+  ReadRegStr $R1 HKEY_CURRENT_USER "Software\Classes\lvis\DefaultIcon" ""
+  StrCmp $R1 $R0 0 +2
+    DeleteRegValue HKEY_CURRENT_USER "Software\Classes\lvis\DefaultIcon" ""
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000001 "Software\Classes\lvis" "DefaultIcon"
+
+  !insertmacro lvisIsExactEmptyUrlProtocolRegSz 0x80000001 $R1
+  StrCmp $R1 "1" 0 +2
+    DeleteRegValue HKEY_CURRENT_USER "Software\Classes\lvis" "URL Protocol"
+  ClearErrors
+  ReadRegStr $R1 HKEY_CURRENT_USER "Software\Classes\lvis" ""
+  StrCmpS $R1 "URL:lvis" 0 +2
+    DeleteRegValue HKEY_CURRENT_USER "Software\Classes\lvis" ""
+  !insertmacro lvisDeleteExactEmptyRegistryKey 0x80000001 "Software\Classes" "lvis"
+
+  lvis_protocol_cleanup_done:
   Pop $R2
   Pop $R1
   Pop $R0
