@@ -1,6 +1,6 @@
 # A2A Inter-Subagent Messaging — Blueprint
 
-- Status: **Accepted; ph1-ph3 merged; ph4 P4-0 closed, P4-1 registry admission merged, and P4-2 durable Agent Card registry contract locked** (D1-D8 locked by the owner on 2026-07-11; ph4 boundary locked 2026-07-15)
+- Status: **Accepted; ph1-ph3 merged; ph4 P4-0 closed, P4-1 registry admission merged, P4-2 durable Agent Card registry contract locked, and P4-3/G003 trust-connectivity security contract locked** (D1-D8 locked by the owner on 2026-07-11; ph4 boundary locked 2026-07-15; P4-3 locked 2026-07-16)
 - Scope: upgrade LVIS sub-agents from "tool-call-level" (pull-only child→parent) to A2A-protocol-based messaging — child→parent push, sibling↔sibling messaging — while preserving every existing security invariant.
 - Protocol baseline: **A2A v1.0.0** (Linux Foundation, a2a-protocol.org). Complementary to MCP (MCP = agent↔tool, A2A = agent↔agent); coexists with the ext-apps adoption track.
 - Roadmap anchor: concretizes the Agent Hub vision item "A2A Runtime — 에이전트 간 비동기 위임·합의·결과 전달" (docs/ko/architecture/architecture.md Phase 5-6, previously ❌ 미구현).
@@ -457,6 +457,512 @@ activation, meeting/local-indexer work, and SDK alignment. Passing unrelated
 plugin or host tests cannot substitute for the Agent Hub persistence,
 concurrency, authorization, and zero-effect evidence above.
 
+#### P4-3 / G003 trust-connectivity security contract (locked 2026-07-16)
+
+P4-3 is the first bounded network-bearing stage and is owned entirely by Agent
+Hub. `lvis-app` owns this contract and later documentation alignment only; it
+adds no discovery client, credential resolver, health worker, remote route,
+plugin branch, HostApi method, or renderer surface in P4-3. The desktop host
+continues to own final execution authorization under the architecture v4
+host-trust invariant. Agent Hub registry/discovery metadata evidence is only a
+possible input to a later route decision, never permission to execute or a
+claim that any advertised A2A interface is reachable or healthy.
+
+The A2A release history includes a v1.0.1 tag, while the normative specification
+heading available at lock time identifies v1.0.0 and specifies that patch
+versions are not negotiated. P4-3 consequently locks the A2A `1.0` wire
+contract and the official v1.0 discovery, JWS, and caching semantics. The patch
+tag may clarify the text but cannot silently widen this security boundary.
+
+##### First-slice ownership and entry point
+
+- The first slice is an administrator-triggered operation against one explicit
+  public origin. Agent Hub derives exactly
+  `https://<origin>/.well-known/agent-card.json`; callers cannot supply an
+  arbitrary path, query, fragment, username, password, scheme, or non-default
+  port. Background scheduling and authenticated extended-card retrieval are
+  deferred.
+- One discovery target has a host-minted numeric `id` and one immutable,
+  WHATWG-normalized public HTTPS origin protected by a database-wide unique
+  constraint. Before that uniqueness check, its hostname undergoes the same
+  WHATWG/IDNA ASCII conversion, lowercase normalization, and trailing-dot
+  removal used for `jku`. The result must be the exact canonical HTTPS origin
+  with effective port 443, from which Agent Hub alone derives
+  `https://<canonical-host>/.well-known/agent-card.json`. Target creation
+  performs zero network I/O. Concurrent or different-submission creates for the
+  same normalized origin converge on the same target or return a bounded 409;
+  they never create duplicate target, cache, metadata-health, or key namespaces.
+  Discovery and revalidation accept only the numeric target `id`,
+  `expected_version`, and `submission_id`; the origin is never editable or
+  caller-overridable after creation.
+- Target disable is an employee-administrator CAS mutation. It returns 409 with
+  zero mutation while any operation lease for that target is running. A
+  successful disable increments target `row_version`; disabled targets reject
+  new discovery or revalidation claims. Discovery/revalidation completion,
+  including health, cache, or attempt persistence, never changes target
+  `row_version`.
+- The public well-known Card and a same-origin `jku` JWKS are fetched without
+  credentials. P4-3 never sends `Authorization`, cookies, proxy credentials,
+  client certificates, or another ambient secret. A protected or authenticated
+  endpoint fails closed in this slice instead of falling back to another fetch
+  path.
+- Every P4-3 card, discovery, key-revision, credential-reference, health, and
+  audit read or write is administrator-only. The existing bounded credential
+  lookup is allowed and required to authenticate the caller. Authentication,
+  employee-administrator authorization, and complete request validation then
+  finish before any P4-3 target or domain-repository lookup, existence
+  disclosure, idempotency claim, lease, mutation, DNS lookup, or socket creation.
+- Human administrators and host-created system principals are different
+  principal kinds with different identifiers and scopes. The durable principal
+  row has an `employee | system` kind check and exactly one matching identity;
+  no fake employee represents a system. Every operation and lease records a
+  non-null, immutable `requested_by_employee_id` for the initiating employee
+  administrator. `executed_by_principal_id` is that administrator at claim and
+  may change only to the system principal that wins fenced recovery of the same
+  already-authorized expired lease; recovery never clears, rewrites, or
+  substitutes the original requester. Administrator endpoints accept employee
+  principals only. A system principal cannot originate an operation and may
+  only recover an already-authorized expired lease; it cannot create a discovery
+  target, approve trust, activate a key, provision a credential reference, or
+  start an unrequested background job. Employee signup identity, Agent Card
+  signing keys, and trust anchors remain separate namespaces.
+
+##### One fail-closed HTTPS fetcher
+
+Card and JWKS retrieval use one injected Agent Hub fetcher. Direct `fetch`, a
+second HTTP client, proxy-environment inheritance, or caller-supplied transport
+options are prohibited.
+
+- Parse and serialize with the WHATWG `URL` implementation. The only allowed
+  scheme is `https:` and the only allowed port is the default 443. The hostname
+  used for DNS, the HTTP `Host` field, TLS SNI, and certificate identity remains
+  the original normalized hostname; it is never replaced by an IP literal.
+- Resolve all A and AAAA answers before connecting. The resolver must return 1-8
+  unique addresses, every address must be a fully validated public unicast
+  address, and the complete effective set must be known. A NODATA result for one
+  family is allowed only when the other family succeeds; timeout, truncation,
+  contradictory resolver results, or any other indeterminate family result
+  fails closed. Classification rejects every IANA special-purpose prefix,
+  including loopback, private, link-local, shared, translated, tunneled, mapped,
+  multicast, unspecified, documentation, benchmark, and reserved space.
+  Embedded IPv4 is extracted and classified before accepting an IPv6 answer.
+  Any duplicate answer or mixed public/non-public answer rejects the entire
+  request.
+- The socket is pinned through an injected `lookup`/connection hook to one of
+  the already validated answers. The network client must not resolve the name a
+  second time. The client preserves resolver order and attempts each approved
+  address at most once, sequentially, under the one shared five-second deadline.
+  Every attempt uses a fresh non-reusable socket; failure closes it before the
+  next approved address is tried. The custom socket lookup returns the selected
+  exact address once and never invokes ambient resolution. The canonical
+  hostname remains the HTTP `Host`, TLS SNI, and RFC 9525 certificate service
+  identity on every attempt. There is no re-resolution, parallel racing,
+  connection reuse, or proxy path. The transport constructor is the only test
+  seam; production callers cannot inject a resolver, socket, agent, proxy, CA,
+  or TLS option.
+- Redirect budget is exactly zero. Every 3xx response, including a same-origin
+  redirect, is a bounded failure. There is no HTTP downgrade, Location recovery,
+  alternate well-known path, or last-known-good network fallback.
+- One monotonic five-second deadline covers DNS, connect, TLS, response headers,
+  and body. Timeout, cancellation, or any rejected response destroys the
+  request, closes the socket, and prevents connection reuse. Response
+  headers are capped at 16 KiB and the decoded body at 64 KiB; `Content-Length`
+  is prechecked but never trusted as the streaming limit.
+- Requests send `Accept-Encoding: identity`. A response with any non-identity
+  `Content-Encoding` is rejected, preventing a compressed body from bypassing
+  the 64 KiB bound. Only status 200 is accepted for a first fetch; a conditional
+  revalidation may also accept 304 under the cache rules below.
+- TLS uses the platform trust store, `rejectUnauthorized=true`, an explicit
+  minimum of TLS 1.2, original-hostname certificate verification, and no custom
+  CA, pin bypass, wildcard relaxation, insecure development mode, or
+  environment-controlled proxy. TLS 1.3 is preferred when negotiated.
+- A 200 response must use `application/json` or `application/*+json` and contain
+  valid UTF-8. The transport hashes the exact response-byte sequence, including
+  any BOM, before decoding; the decoded UTF-8 view exists only for strict JSON
+  parsing and P4-1 admission. Duplicate keys, comments, trailing data,
+  non-finite numbers, or a top-level non-object are rejected. In addition to the
+  64 KiB byte limit, the parser caps nesting depth at 32, total JSON nodes at
+  4,096, object members at 256 per object, and array items at 1,024 per array.
+  Any JSON syntax, duplicate-key, shape, or structural-bound failure returns the
+  fixed `json-rejected` outcome before P4-1 admission.
+
+##### Discovery, JWS, and JWKS trust boundary
+
+- The fetched Card is passed unchanged through the existing P4-1 bounded
+  admission and canonicalization contract. Network success is not admission;
+  admission success is not administrator trust; administrator trust is not
+  connectivity health; and none of those states is routing.
+- A protected `jku` is eligible for observation only when it is an absolute
+  HTTPS URL with no userinfo or fragment, default port 443, and exactly the same
+  canonical origin as the well-known Card. Its path and query are allowed; they
+  do not change origin identity. Before comparing, both hostnames undergo the
+  same WHATWG/IDNA ASCII normalization, lowercase conversion, and trailing-dot
+  removal. Relative URLs, origin drift after canonicalization, non-default
+  ports, redirects, fragments, userinfo, or credentialed JWKS retrieval are
+  rejected.
+- JWKS parsing follows the JWS/JWK algorithm-verification model and an explicit
+  allowlist. At most 32 unique `kid` entries are accepted. `ES256` requires an
+  EC P-256 public verification key; `EdDSA` requires an OKP Ed25519 public
+  verification key. `alg`, when present, must equal the reviewed algorithm;
+  `use`, when present, must be `sig`; `key_ops`, when present, must contain
+  `verify`; private-key members and duplicate `kid` values reject the document.
+  The JOSE `alg`, `kid`, `jku`, `crit`, and `b64` parameters are protected-only;
+  their unprotected appearance or any duplicate protected/unprotected parameter
+  name rejects the signature. P4-3 supports no critical extension, so `crit`
+  must be absent and `b64` must be absent or `true`. Embedded `jwk`, `x5u`,
+  `x5c`, and every other key source are rejected. Algorithm inference, `none`,
+  HMAC, RSA, other curves, and recursive key retrieval are prohibited.
+- Signature/key/payload mismatch is a fixed failed-attempt outcome. It creates
+  no Card import, key revision, anchor, registry-state change, or other trust
+  mutation.
+- A key from the Card's own `jku` is self-asserted evidence. Fetching it and even
+  verifying the Card with it creates only an immutable key observation and a
+  candidate revision; it never creates or activates a P4-2 trust anchor, never
+  changes `registryState`, and never changes `routable=false`. The same `kid`
+  with different canonical public-key bytes creates a new immutable observed
+  revision and always appends an explicit key-material-mismatch security finding
+  plus redacted audit row. It never updates or replaces the earlier revision and
+  is never automatically promoted, linked, or activated.
+- The only key-revision transitions are `observed -> active -> revoked`;
+  revoked is terminal and no revision can reactivate. `linked_trust_anchor_id`
+  is unique. Activation names one exact immutable stored revision and atomically
+  creates and links the P4-2 anchor for those exact canonical public-key bytes.
+  A same-`kid` replacement is a different observed revision and cannot inherit
+  the link or trust decision. Only an authenticated employee administrator may
+  activate or revoke, using the revision's numeric `id`, `expected_version`,
+  `submission_id`, and a bounded decision reason.
+- Revocation locks the active revision and linked anchor, changes the revision
+  to `revoked`, executes the existing P4-2 anchor revocation and dependent
+  trusted-card cascade exactly once, and commits audit plus the idempotent result
+  in the same transaction. The revoked anchor is ineligible for every future
+  P4-1/P4-2 verification and cannot be replaced or revived. Rotation activates
+  the replacement revision before a separate CAS revocation of the incumbent.
+  Non-cascading planned retirement is deferred until a later P4-2 lifecycle
+  extension can represent a non-verifying, non-revoked anchor state. P4-3 has no
+  `retired` API or database value. JWKS disappearance never mutates lifecycle,
+  and the lifetime `key_id`/fingerprint denylist remains authoritative.
+- A P4-2 trust anchor referenced by a P4-3 `linked_trust_anchor_id` is
+  revision-managed. The existing P4-2 direct anchor-revocation endpoint locks
+  and checks that relationship and returns 409 with zero mutation when the
+  anchor is linked; it remains available only for unlinked legacy anchors. Only
+  P4-3 revision revocation may lock and CAS the linked revision plus anchor and
+  invoke the shared P4-2 dependent-card cascade once in the same transaction.
+  Direct and revision revocation use the same lock order, so no concurrent path
+  can commit an `active` revision whose linked anchor is `revoked` or run the
+  cascade twice.
+- A 200 response with a changed canonical Card is submitted through the existing
+  P4-2 import path as a distinct `registryState=discovered` record. It never
+  edits the incumbent document in place and never transfers trust. Administrator
+  review remains a separate request.
+
+##### Credential references, attempts, and Agent Card/JWKS metadata-endpoint health
+
+- P4-3 persists credential metadata only as an opaque secret-manager reference:
+  provider, reference, external version, intended origin, lifecycle state, row
+  version, and audit metadata. Raw bearer values, refresh tokens, client
+  secrets, private keys, or encrypted secret blobs never cross the Agent Hub API
+  and never enter its database, logs, audit, observations, or idempotency rows.
+- `secret_reference` is opaque and is never dereferenced, validated against a
+  remote secret manager, included in an outbound request, or copied to an error,
+  log, audit row, observation, or idempotency response. Credential-reference
+  lifecycle is `active -> revoked` and revoked is terminal. Rotation is one
+  administrator CAS transaction that creates a new active reference and revokes
+  the incumbent; it never edits a reference in place. Secret resolution, remote
+  credential use, and authenticated extended-card fetch require a later contract.
+- Credential create or rotation requires an active target and an
+  `intended_origin` exactly equal to that target's immutable canonical origin;
+  credential revocation remains allowed after target disable. Each credential
+  binding's `active_revision_id` must reference an `active` revision belonging
+  to the same binding. Database foreign-key/check and unique constraints enforce
+  that relationship and exactly one active revision per binding in both SQLite
+  and PostgreSQL.
+- A secret-reference fingerprint is only a non-reversible `HMAC-SHA-256` audit
+  token computed with a dedicated server-only audit key. A raw or deterministic
+  SHA digest, raw reference, or any unkeyed derivative never enters an API
+  response, audit row, application log, observation, or idempotency record. Only
+  the keyed token may be retained internally for credential metadata, audit, and
+  idempotency correlation, and it is never returned to callers. Every credential
+  create, rotate, revoke, or replay path fails closed before mutation when the
+  audit key is unavailable; there is no unkeyed, plaintext, random-token, or
+  skip-audit fallback.
+- After the allowed bounded credential lookup, administrator authentication,
+  employee-administrator authorization, and complete request validation, Agent
+  Hub atomically claims the database-wide unique key
+  `(requested_by_employee_id, submission_id)`, creates one mutable operation
+  lease with a monotonically increasing fence token, and then begins network I/O.
+  `requested_by_employee_id` is the immutable initiating employee identity, not
+  an employee-principal ID or `executed_by_principal_id`. Failed
+  authentication, authorization, or malformed input performs no P4-3 target or
+  domain-repository lookup, idempotency/lease/domain mutation, DNS lookup, or
+  socket creation. Exact completed replay returns the stored result with zero
+  I/O and zero mutation; a semantic mismatch returns 409 before I/O.
+- The mutable lease names `requested_by_employee_id`,
+  `executed_by_principal_id`, owner, expiry, row version, and fence token.
+  `requested_by_employee_id` is non-null and immutable for the lease lifetime;
+  `executed_by_principal_id` starts as that employee administrator and changes
+  only when the system principal wins recovery. Only a system principal may
+  recover an expired lease; it cannot originate one. Completion is conditional
+  on the current fence; a late owner cannot append evidence, audit, health, or
+  an idempotent result. The newer fence always wins.
+- Only the outcome-to-health table below may create endpoint evidence. A mapped
+  network or representation result atomically appends one immutable discovery
+  attempt and exactly one immutable metadata-health observation under the
+  current fence, together with the fixed outcome, redacted audit row, completed
+  idempotent response, and lease release. A failure persists no Card, P4-2
+  import, key revision, credential-reference change, reusable cache
+  representation or validator, or trust mutation.
+
+  | Fixed outcome or accepted result | Discovery attempt | Metadata health |
+  | --- | --- | --- |
+  | `dns-rejected`, `connect-rejected`, `tls-rejected`, `redirect-rejected`, `http-rejected`, `timeout` | exactly one | `unreachable` |
+  | `headers-too-large`, `body-too-large`, `content-rejected` including compression/MIME/UTF-8, `json-rejected`, `card-rejected`, `jwks-rejected` | exactly one | `invalid` |
+  | `cache-miss`, `stale-version`, `persistence-failed`, or any post-claim pre-network domain failure | none | none |
+  | accepted 200 or eligible 304 whose validation and P4-2 transaction commit | exactly one | `healthy` |
+
+- A successful accepted-200 or eligible-304 discovery/revalidation atomically
+  commits the terminal attempt, bounded transport evidence, P4-2 import result,
+  corresponding `healthy` metadata-health observation, audit, completed
+  idempotent response, and lease release. Attempt evidence may contain
+  normalized origin, timing
+  buckets, body hashes, TLS protocol, certificate fingerprint, selected public
+  address, allowlisted cache validators, and a fixed outcome code; it never
+  contains response bodies, credentials, secret references, PEM/JWK bytes, raw
+  signatures, protected headers, private/special-use IPs, raw OS/TLS errors, or
+  arbitrary response headers.
+- Agent Card/JWKS metadata-endpoint health is an observation-owned axis separate
+  from P4-2
+  `admissionTrustState`, administrator-owned `registryState`, and key lifecycle.
+  It is derived solely from fetch, validation, and revalidation of
+  `/.well-known/agent-card.json` and an accepted same-origin JWKS. Manual
+  revalidation of an existing target may append an immutable health observation
+  (`healthy`, `unreachable`, or `invalid`) without
+  rewriting any earlier discovery, verification, trust, or audit row. It does
+  not prove `supportedInterfaces[].url` reachability, readiness, authentication,
+  conformance, or routability and is not service, A2A-operation, or credential
+  health. `HEAD`, `OPTIONS`, TLS-only, and A2A method probes against an
+  advertised interface are rejected as non-standard scope widening. Advertised-
+  interface smoke belongs to G005 only if that goal is later enabled. `unknown`
+  means no endpoint attempt from the table has been committed. `healthy`
+  requires an accepted 200 or eligible 304 whose validation and P4-2 transaction
+  committed. `unreachable` and `invalid` are assigned only by the exact table;
+  in particular local `cache-miss`, concurrency/version, pre-network domain, and
+  persistence outcomes never fabricate endpoint evidence. `degraded` is not a
+  P4-3 state. `stale` is derived on read only after prior `healthy` evidence
+  expires and is never persisted by a timer; a mapped failed revalidation
+  instead appends its explicit `unreachable` or `invalid` observation. Late
+  fenced results cannot replace a newer snapshot. No health state changes trust
+  and no trust state changes health.
+- Every returned Card, interface, key, credential-reference, and health
+  projection remains `routable=false`. P4-3 performs no A2A JSON-RPC operation,
+  task creation, tool registration, remote invocation, local runner call, host
+  authorization, or route selection.
+
+##### Cache, idempotency, concurrency, and audit
+
+- A cacheable 200 may persist exactly one dedicated, bounded, immutable raw
+  representation blob as SQLite `BLOB` or PostgreSQL `BYTEA`, its SHA-256 digest,
+  and only bounded `ETag`, `Last-Modified`, `Date`, and `Cache-Control` metadata.
+  The blob and digest cover the exact response bytes, including any BOM; decoded
+  UTF-8 is a parsing view and is never a reconstructed cache representation.
+  Terminal attempts and metadata-health observations contain only the digest and
+  bounded diagnostics, never the body. A manual revalidation sends conditional
+  headers only to the exact same normalized origin. A 304 is accepted only when
+  an eligible prior cache blob exists; it re-hashes those exact immutable bytes,
+  requires equality with the stored digest, and re-verifies them against the
+  current active-anchor policy before a new healthy snapshot can commit. The
+  transaction may append one verification and one terminal attempt/metadata-
+  health observation, but never duplicates the Card document, registry record,
+  or key revision. A missing or hash-mismatched blob fails closed as
+  `cache-miss`. The P4-2 canonical business record, canonical Card, and key
+  observations are never reconstruction or cache fallbacks.
+- Before the claimed operation's final transaction, duplicate `ETag` or
+  `Last-Modified` fields fail terminally as `http-rejected` with no cache
+  mutation. One `ETag` is bounded to 1,024 bytes and one `Last-Modified` to 256
+  bytes. A fresh 200 replaces each stored validator with the received bounded
+  value or clears it when absent. Only an accepted 304 retains an absent prior
+  validator and merges a received bounded replacement. Multiple `Cache-Control`
+  fields may be combined only when every freshness directive is syntactically
+  valid and unambiguous.
+- Each healthy metadata snapshot persists `committed_at` and computes
+  `effective_fresh_until = committed_at + min(valid max-age, 15 minutes)`.
+  `max-age=0` produces zero freshness; an absent `Cache-Control` or absent
+  `max-age` defaults to five minutes. A syntactically invalid directive or
+  conflicting/duplicate freshness directive produces effective freshness zero,
+  never the five-minute default. `no-cache` forces freshness to zero and
+  requires revalidation. `no-store` persists neither a reusable representation
+  blob nor validators or other reusable cache metadata and also forces freshness
+  to zero; its snapshot may retain only the digest and bounded non-reusable
+  diagnostics. The HTTP `Date` value is diagnostic only and never a clock
+  source. An accepted 304 uses the same calculation for its newly committed
+  healthy snapshot. `stale` is true only when the latest metadata-health
+  observation is `healthy` and `now >= effective_fresh_until`.
+- The separately required P4-2 canonical business record and trust evidence are
+  not an HTTP cache. The first slice has no automatic scheduler and never
+  converts freshness into trust.
+- Every discovery, manual revalidation, key-revision mutation, and
+  credential-reference mutation uses the canonical idempotency key
+  `(requested_by_employee_id, submission_id)`, matching P4-2's global
+  per-employee submission namespace. Its row stores immutable `operation_kind`
+  and `semantic_request_hash`; the latter includes normalized origin or numeric
+  target, `expected_version`, and every accepted request field. Lookup compares
+  both stored values before replay. Any operation-kind or semantic-hash mismatch
+  returns 409 with zero P4-3 lookup beyond the idempotency row, lease/mutation,
+  audit, attempt, health, DNS, socket, or other side effect. Fenced system
+  recovery retains the employee-owned key while `executed_by_principal_id`
+  records the recovery executor. Exact success or failure replay returns the
+  committed result without network I/O, audit, attempt, lease, or state
+  mutation. Only authentication and pre-claim validation failures create no
+  idempotency row.
+- Expected post-claim, pre-network domain failures—including target-not-found
+  404, disabled/stale-version/conflict 409, and invalid-stored-target 422—commit
+  only an operation-terminal fixed outcome, redacted audit row, completed
+  idempotent response, and lease release. They create no discovery attempt,
+  metadata-health observation, business record, cache entry or validator, key
+  observation/revision, credential mutation, or outbound I/O. The target remains
+  `unknown` when it has no earlier outbound terminal attempt.
+- Mutable target, key-revision, and credential-reference aggregates use
+  per-aggregate compare-and-swap. State change, immutable evidence, audit, and
+  successful idempotency result commit in one database transaction. Concurrent
+  distinct mutations have one winner; losers return bounded stale/conflict
+  errors with no partial persistence. An unexpected finalization persistence
+  failure first rolls back the terminal attempt, metadata-health observation,
+  audit, domain changes, and completed idempotent response together. Agent Hub
+  then makes one best-effort minimal transaction to store terminal
+  `persistence-failed`, redacted audit, and the replayable fixed response while
+  releasing the lease. This infrastructure terminalization is not a successful
+  discovery/revalidation completion, creates no discovery attempt,
+  metadata-health observation, or trust/cache/domain evidence, and never
+  converts uncommitted remote evidence into health. If the database failure also
+  prevents that minimal transaction,
+  the claim remains fenced and `running`; the winning system recovery later
+  terminalizes it as `persistence-failed` without new DNS, socket, HTTP, JWKS,
+  secret-manager, or other outbound I/O.
+- Audit is append-only and principal-aware. It distinguishes human and system
+  actors, records bounded reason and before/after state, and never treats
+  employee signup keys, Agent Card keys, secret-manager references, or bearer
+  credentials as interchangeable identities. Persistent error outcomes use only
+  this fixed enum: `dns-rejected`, `connect-rejected`, `tls-rejected`,
+  `redirect-rejected`, `http-rejected`, `timeout`, `headers-too-large`,
+  `body-too-large`, `content-rejected`, `json-rejected`, `card-rejected`,
+  `jwks-rejected`, `cache-miss`, `stale-version`, or `persistence-failed`. TCP
+  connection refused, reset, or connect failure maps to `connect-rejected`; 3xx
+  maps to `redirect-rejected`; every other non-200/304 status maps to
+  `http-rejected`. The mapping covers every terminal DNS, connection, TLS,
+  timeout, redirect, HTTP, size, JSON, and content failure without overloading
+  TLS or content codes. No raw OS, resolver, socket, TLS, actual HTTP status or
+  body, header, URL credential, or private-address value is copied into an API
+  response, log, audit row, attempt, metadata-health observation, or idempotency
+  record. The actual HTTP status is never persisted or returned; callers receive
+  only the fixed outcome and bounded message.
+
+##### Deferred and excluded work
+
+- Deferred beyond the first P4-3 slice: background scheduling, retry workers,
+  authenticated extended Agent Card fetch, secret-manager resolution, remote
+  credential use, cross-origin JWKS policy, private-network discovery, endpoint
+  application probes, advertised-interface smoke, and every host↔Agent Hub route
+  or invocation. Advertised-interface smoke belongs to G005 only if that goal is
+  later enabled.
+- Plugin/HostApi integration, Marketplace behavior, meeting, local-indexer,
+  plugin-SDK dependency alignment, and any `lvis-app` runtime change are
+  excluded. They are neither prerequisites nor acceptable substitutes for
+  Agent Hub security evidence.
+- D8 is unchanged: delegation creation stops at depth 1. P4-3 changes neither
+  the local communication graph nor the creation graph.
+
+##### P4-3 normative completion matrix
+
+| Gate | Required evidence |
+| --- | --- |
+| Ownership | Agent Hub-only runtime diff; `lvis-app` diff is documentation-only |
+| Admin boundary | the existing bounded credential lookup is the only allowed pre-auth repository access; authentication, employee-admin authorization, and complete validation precede every P4-3 target/domain lookup, existence disclosure, idempotency/lease/mutation, DNS, and socket operation |
+| Principal separation | human/system principals have distinct IDs, scopes, and schema checks; immutable non-null employee requester survives fenced system recovery while execution attribution changes to the winning system principal |
+| Target identity | host-minted numeric ID plus immutable unique public HTTPS origin whose hostname uses the same WHATWG/IDNA ASCII, lowercase, and trailing-dot removal as `jku`; effective port is 443 and the exact well-known URL is host-derived; create has zero network I/O; same-origin concurrency never forks namespaces; disable returns zero-mutation 409 with a running lease, otherwise CAS-increments target version while discovery completion never does |
+| Fetch limits | HTTPS/443, redirect 0, one 5 s deadline, 16 KiB headers, 64 KiB body, identity encoding |
+| SSRF | 1-8 unique fully public A/AAAA answers, mixed/duplicate rejection, resolver-order sequential once-only attempts under one 5 s deadline, fresh, non-reused sockets, canonical SNI/Host, no re-resolution or proxy |
+| TLS | platform roots, minimum TLS 1.2, RFC 9525 hostname verification, no insecure override |
+| Admission | exact response bytes are hashed including BOM, decoded only for strict UTF-8 JSON parsing, bounded at depth 32/nodes 4,096/object members 256/array items 1,024, then passed to existing P4-1 before any durable success commit |
+| JOSE/JWKS | protected-only `alg`/`kid`/`jku`/`crit`/`b64`; protected same-origin `jku` may contain query but no fragment/userinfo/nondefault port/origin drift after IDNA/lowercase/trailing-dot canonicalization; maximum 32 keys; exact ES256/P-256 and EdDSA/Ed25519 checks |
+| Trust lifecycle | self-JWKS stays observed; changed same-`kid` material always creates a new observed revision plus security finding/audit and never auto-promotes; exact revision/anchor activation; linked anchors reject direct P4-2 revoke with zero-mutation 409; only P4-3 revision revoke CASes both and cascades once; no active-revision/revoked-anchor split; no `retired` value |
+| Credentials | opaque reference only; `active -> revoked`; create/rotate requires active target, exact canonical intended origin, same-binding active revision, and exactly one DB-enforced active revision; revoke allowed when disabled; reference correlation uses only dedicated-key HMAC-SHA-256 and fails closed when the key is unavailable |
+| Operations | database-wide unique idempotency key `(requested_by_employee_id, submission_id)` with immutable stored `operation_kind` and `semantic_request_hash`; any mismatch is zero-effect 409 and executor principal is attribution only; pre-network post-claim 404/409/422 records only operation terminal/audit/replay and no attempt/health/domain mutation; only exact mapped endpoint outcomes record one attempt plus exactly one fenced health; late-owner suppression and fixed errors; unrecoverable finalization uses best-effort no-attempt/no-health `persistence-failed` and otherwise leaves a running fenced lease for zero-outbound system terminalization |
+| Agent Card/JWKS metadata-endpoint health | DNS/connect/TLS/redirect/HTTP/timeout outcomes are `unreachable`; header/body/content including compression/MIME/UTF-8, JSON, Card, or JWKS rejection is `invalid`; cache miss, stale version, persistence failure, and all pre-network domain failures create no attempt/health; accepted 200/304 plus P4-2 commit is `healthy`; `unknown` iff no mapped endpoint attempt exists; `stale` is read-derived after prior healthy expiry; no `degraded` state; proves no advertised-interface reachability/readiness/authentication/conformance/routability and performs no interface probe |
+| Evidence | immutable discovery/metadata-health/audit rows remain separate from admission, registry trust, and advertised-interface health |
+| Cache | exact raw SQLite BLOB/PostgreSQL BYTEA plus SHA-256 and allowlisted validators; duplicate/oversized validator rejection, 200 replace-or-clear, 304 retain-or-merge and exact-blob re-hash/current-anchor verification; no reconstruction; freshness 0/5-minute default/15-minute cap, invalid/conflicting directives zero, `Date` ignored, `no-cache`/`no-store` zero and `no-store` persists no blob/validator |
+| Failure taxonomy | deterministic fixed mapping includes `json-rejected`, `connect-rejected`, and `http-rejected`; actual HTTP status and raw OS/TLS/status/body evidence are never persisted or returned |
+| Transactions | success/failure replay is zero-I/O, mismatch 409, CAS/fence winner, fixed failure outcome plus one fenced health observation for classifiable completions, all-or-nothing domain finalization, best-effort infrastructure terminalization with no fabricated health |
+| Database parity | identical SQLite/PostgreSQL BLOB/BYTEA, unique target origin, credential binding/active-revision, CAS, and transaction semantics; configured PostgreSQL suite has zero skips |
+| Regression | existing P4-1/P4-2 semantic, lifecycle, replay, cascade, and `routable=false` suites remain green |
+| No execution | every projection is `routable=false`; no task, tool, runner, plugin, host route, or invocation |
+
+The attack-test acceptance set must prove at least: loopback/private/link-local/
+metadata, duplicate-answer, and mixed DNS rejection; DNS rebinding resistance;
+preserved resolver order, sequential once-only address attempts, fresh socket per
+attempt, one shared deadline, and no re-resolution/proxy; IP-literal, userinfo,
+fragment, port, HTTP, redirect, proxy, timeout, oversized-header, oversized-body,
+compressed-body, non-JSON MIME, invalid UTF-8, duplicate-key, depth 33, node
+4,097, object-member 257, and array-item 1,025 rejection as `json-rejected`
+where applicable, with exact-boundary acceptance;
+wrong-host, expired, self-signed, TLS 1.1, and SNI/certificate mismatch rejection;
+cross-origin/redirected/oversized/duplicate-`kid`/private-key/algorithm-confusion
+JWKS rejection; protected same-origin `jku` query acceptance; IDNA, case, and
+trailing-dot equivalence; userinfo/fragment/nondefault-port/origin-drift
+rejection; self-JWKS non-promotion; same-`kid` changed-material isolation with a
+new observed revision and explicit security finding/audit on every change, with
+no auto-promotion; key/payload mismatch with no trust mutation; revoked-key non-
+revival; secret and reference non-leakage; database-wide unique employee-ID plus
+submission-ID idempotency ownership across administrator execution and fenced
+system recovery; immutable stored operation/hash comparison; operation/hash
+mismatch 409 with zero P4-3 side effect or I/O; and proof that executor principal
+ID never substitutes into that key; HMAC-SHA-256 reference-token stability
+under one audit key, non-equivalence across keys, absence of raw/unkeyed
+derivatives, and fail-closed credential APIs when the audit key is unavailable;
+credential create/rotate rejection for disabled target, origin mismatch,
+cross-binding/non-active revision, or second active revision, plus revoke on a
+disabled target; unauthorized/malformed requests performing only the
+bounded credential lookup and zero P4-3 target/domain-repository lookup,
+idempotency/lease/domain mutation, DNS, or socket operation; non-null immutable
+requester schema checks, administrator execution attribution, fenced system-
+recovery attribution, and audit preservation; success and failure replay with no
+new I/O/audit/attempt; CAS concurrency; lease expiry, fenced recovery, and late-
+owner suppression; target-disable 409/zero-mutation during a running lease,
+successful disable row-version increment, and no target-version change from
+discovery completion; expected pre-network post-claim 404/409/422 terminal
+replay with zero discovery attempt, metadata-health, business/cache/key/
+credential mutation, or outbound I/O; domain-finalization rollback; best-effort
+no-attempt/no-health `persistence-failed`; and database-failure retained running
+lease followed by fenced system terminalization with zero new outbound I/O;
+linked-anchor direct-revoke 409 with zero mutation, concurrent
+direct/revision revocation, exactly-once cascade, and impossibility of an active
+revision with a revoked linked anchor; exact BLOB/BYTEA response bytes and
+SHA-256 including BOM; decoded-view non-reconstruction; cache-body hash tamper,
+missing-blob, and business-record reconstruction rejection; duplicate `ETag` or
+`Last-Modified` as terminal `http-rejected` with no cache mutation; 1,024/256-
+byte validator boundaries; 200 validator replace-or-clear; 304 validator retain-
+or-merge plus exact-blob re-hash/current-anchor re-verification and no-body
+failure; unambiguous multi-field `Cache-Control` combination; invalid or
+conflicting/duplicate freshness directives forcing zero freshness; freshness
+boundaries at zero, five-minute default, and fifteen-minute cap; skewed `Date`
+ignored; `no-cache` and `no-store` freshness zero; `no-store` blob/validator
+non-persistence;
+metadata-endpoint healthy only after P4-2 commit; proof that no advertised-
+interface `HEAD`, `OPTIONS`, TLS-only, or A2A method probe occurs;
+exact outcome-table mapping of DNS/connect/TLS/redirect/HTTP/timeout to one
+`unreachable` attempt, header/body/content/JSON/Card/JWKS rejection to one
+`invalid` attempt, accepted 200/304 plus P4-2 commit to one `healthy` attempt,
+and cache-miss/stale-version/persistence/pre-network-domain outcomes to no
+attempt or health; `unknown` iff no mapped endpoint attempt exists; stale-on-
+expired-healthy derivation; absence of a `degraded` state;
+deterministic TCP refused/reset/connect and non-200/304 HTTP outcome mapping with
+no raw OS/status/body persistence or return of the actual HTTP status; zero-
+network target creation; target-host IDNA ASCII/lowercase/trailing-dot
+equivalence before DB uniqueness; exact host-derived HTTPS/443 well-known URL;
+immutable-origin enforcement; and concurrent same-origin create parity in SQLite
+and PostgreSQL;
+`routable=false`; zero-skipped PostgreSQL gates; existing P4-1/P4-2 regressions;
+and absence of plugin, HostApi, runner, tool, route, advertised-interface health,
+or remote-invocation effects.
+
 ## Cross-host implementation review and follow-on constraints
 
 A fourth review lane compared current CLI/Desktop hosts using primary sources. The detailed notes and contribution drafts live in [the upstream contribution candidates](../research/a2a-upstream-contribution-candidates.md).
@@ -471,6 +977,9 @@ Resulting constraints:
 1. Ph2 sends to an active recipient only at its safe inter-round boundary; interrupt/restart is a separate explicit operation.
 2. Ph3 keeps the wire opt-in and loopback-only, runs the official TCK, and adds one local external-client smoke covering COMPLETED, INPUT_REQUIRED continuation, CANCELED, and rejected authentication.
 3. Ph4 owns cross-machine trust, the Agent Hub Agent Card registry, and the later host↔Agent Hub remote route. Plugin work-assistant registration is excluded. None of those relaxes D8's depth-1 creation stop.
+
 ## References
 
 Design inputs: A2A v1.0 spec + official SDK survey (2026-07-10 research, npm-registry-verified); transport/SDK-lane design review; INPUT_REQUIRED state-policy review (state inventory table with file:line evidence for `subagent-runner.ts`, `agent-spawn.ts`, `query-loop.ts`, `approval-gate.ts`, `tool-timeout-policy.ts`, `conversation-loop.ts`, `use-workflow-tools.ts`). All internal claims were verified against `main` at authoring time.
+
+P4-3 security references: [A2A specification](https://a2a-protocol.org/latest/specification/), [Node.js HTTPS](https://nodejs.org/api/https.html), [JWS (RFC 7515)](https://www.rfc-editor.org/rfc/rfc7515.html), [JWK (RFC 7517)](https://www.rfc-editor.org/rfc/rfc7517.html), [JWT BCP algorithm-verification guidance (RFC 8725)](https://www.rfc-editor.org/rfc/rfc8725.html), [HTTP caching (RFC 9111)](https://www.rfc-editor.org/rfc/rfc9111.html), [TLS service identity (RFC 9525)](https://www.rfc-editor.org/rfc/rfc9525.html), [WHATWG URL](https://url.spec.whatwg.org/), [OWASP SSRF Prevention](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html), and [OWASP Secrets Management](https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html).
