@@ -5,6 +5,7 @@ import { createRemoteA2AActionController } from "../remote-a2a-action-controller
 const digest = "a".repeat(64);
 const config = {
   agentHubBaseUrl: "https://hub.example.test/",
+  receiverPublicOrigin: "https://receiver.lvis.ai/",
   outboundCallerGenerationId: "generation-1",
   receiverCallerGenerationId: "receiver-1",
   extensionSpecDigestSha256: digest,
@@ -67,6 +68,13 @@ describe("production remote A2A action controller", () => {
     expect(value.execute).toHaveBeenCalledOnce();
   });
 
+  it("blocks a second continuation mutation until prompt-free GetTask reconciles the prior fence", async () => {
+    const value = runtime({ taskActionDisposition: vi.fn(async (_handle: string, operation: string) => operation === "continue" ? { kind: "blocked", outcome: "post-socket-validation-ambiguous" } : { kind: "none" }) });
+    const controller = createRemoteA2AActionController({ runtime: value as never, config, projectRoot: "/project", makeId: ids() });
+    await expect(controller.resume({ taskHandle: "task_handle_123456", intent: "continue again" })).resolves.toMatchObject({ state: "failed", outcome: "continue-reconciliation-required:post-socket-validation-ambiguous" });
+    expect(value.execute).not.toHaveBeenCalled();
+  });
+
   it("replays only an outcome-unknown operation handle without requiring a Task route", async () => {
     const value = runtime({
       getTaskRoute: vi.fn(async () => { throw new Error("must-not-read-task-route"); }),
@@ -78,15 +86,49 @@ describe("production remote A2A action controller", () => {
     expect(value.execute).toHaveBeenCalledWith(expect.objectContaining({ operation: "replay", operationId: "initial-op", intendedCredentialRevisionId: 12, predecessorCredentialRevisionId: 11, messageId: "initial-message" }));
   });
 
+  it("reuses an authorized active revision when no rotation successor exists and rejects stale revisions", async () => {
+    const sameRevisionConfig = { ...config, targets: [{ ...config.targets[0]!, replayCredentialRevisionIds: [] }] };
+    const same = runtime({ getOperationRecoveryRoute: vi.fn(async () => ({ handle: "recovery_handle_123", operationId: "initial-op", targetAgentId: 1, targetLabel: "Agent one", lineage, messageId: "initial-message", credentialRevisionId: 11 })) });
+    const sameController = createRemoteA2AActionController({ runtime: same as never, config: sameRevisionConfig, projectRoot: "/project", makeId: ids() });
+    await sameController.replay({ taskHandle: "recovery_handle_123" });
+    expect(same.execute).toHaveBeenCalledWith(expect.objectContaining({ intendedCredentialRevisionId: 11, predecessorCredentialRevisionId: 11 }));
+
+    const stale = runtime({ getOperationRecoveryRoute: vi.fn(async () => ({ handle: "recovery_handle_123", operationId: "initial-op", targetAgentId: 1, targetLabel: "Agent one", lineage, messageId: "initial-message", credentialRevisionId: 99 })) });
+    const staleController = createRemoteA2AActionController({ runtime: stale as never, config, projectRoot: "/project", makeId: ids() });
+    await expect(staleController.replay({ taskHandle: "recovery_handle_123" })).rejects.toThrow("a2a-remote-recovery-revision-not-authorized");
+    expect(stale.execute).not.toHaveBeenCalled();
+  });
+
   it("returns a successful stored Cancel projection locally and blocks ambiguous prior Cancel without a second socket", async () => {
-    const success = runtime({ taskActionDisposition: vi.fn(async () => ({ kind: "success", projection: { handle: "task_handle_123456", targetAgentId: 1, targetLabel: "Agent one", state: A2ATaskState.CANCELED, updatedAt: "2026-07-16T00:00:00.000Z", terminal: true } })) });
+    const canceledRoute = { ...(await runtime().getTaskRoute()), state: A2ATaskState.CANCELED };
+    const success = runtime({ getTaskRoute: vi.fn(async () => canceledRoute), taskActionDisposition: vi.fn(async () => ({ kind: "success", projection: { handle: "task_handle_123456", targetAgentId: 1, targetLabel: "Agent one", state: A2ATaskState.CANCELED, updatedAt: "2026-07-16T00:00:00.000Z", terminal: true } })) });
     const successController = createRemoteA2AActionController({ runtime: success as never, config, projectRoot: "/project", makeId: ids() });
+    await expect(successController.cancel({ taskHandle: "task_handle_123456" })).resolves.toMatchObject({ state: "sent", outcome: "cancel-already-settled", taskState: A2ATaskState.CANCELED });
     await expect(successController.cancel({ taskHandle: "task_handle_123456" })).resolves.toMatchObject({ state: "sent", outcome: "cancel-already-settled", taskState: A2ATaskState.CANCELED });
     expect(success.execute).not.toHaveBeenCalled();
 
-    const blocked = runtime({ taskActionDisposition: vi.fn(async () => ({ kind: "blocked", outcome: "transport-ambiguous" })) });
+    const blocked = runtime({ getTaskRoute: vi.fn(async () => canceledRoute), taskActionDisposition: vi.fn(async () => ({ kind: "blocked", outcome: "transport-ambiguous" })) });
     const blockedController = createRemoteA2AActionController({ runtime: blocked as never, config, projectRoot: "/project", makeId: ids() });
     await expect(blockedController.cancel({ taskHandle: "task_handle_123456" })).resolves.toMatchObject({ state: "failed", outcome: "cancel-reconciliation-required:transport-ambiguous" });
     expect(blocked.execute).not.toHaveBeenCalled();
+
+    const completed = runtime({ getTaskRoute: vi.fn(async () => ({ ...canceledRoute, state: A2ATaskState.COMPLETED })) });
+    const completedController = createRemoteA2AActionController({ runtime: completed as never, config, projectRoot: "/project", makeId: ids() });
+    await expect(completedController.cancel({ taskHandle: "task_handle_123456" })).rejects.toThrow("a2a-remote-task-terminal");
+    expect(completed.execute).not.toHaveBeenCalled();
+  });
+
+  it("does not expose runtime/provider/store error messages to renderer outcomes", async () => {
+    const sendRuntime = runtime({ execute: vi.fn(async () => { throw new Error("private-gate-provider-detail"); }) });
+    const sendController = createRemoteA2AActionController({ runtime: sendRuntime as never, config, projectRoot: "/project", makeId: ids() });
+    const send = await sendController.send({ targetAgentId: 1, intent: "hello" });
+    expect(send).toMatchObject({ state: "failed", outcome: "a2a-remote-send-failed" });
+    expect(JSON.stringify(send)).not.toContain("private-gate-provider-detail");
+
+    const taskRuntime = runtime({ execute: vi.fn(async () => { throw new Error("private-store-detail"); }) });
+    const taskController = createRemoteA2AActionController({ runtime: taskRuntime as never, config, projectRoot: "/project", makeId: ids() });
+    const taskStatus = await taskController.get({ taskHandle: "task_handle_123456" });
+    expect(taskStatus).toMatchObject({ state: "failed", outcome: "a2a-remote-task-action-failed" });
+    expect(JSON.stringify(taskStatus)).not.toContain("private-store-detail");
   });
 });
