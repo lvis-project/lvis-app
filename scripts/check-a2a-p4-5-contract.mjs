@@ -156,9 +156,13 @@ function requireExactErrorContracts(text) {
 }
 
 function requireExactSuccessContracts(text) {
-  const jsonBlocks = [...text.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) =>
-    JSON.parse(match[1]),
-  );
+  const jsonBlocks = [...text.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match, index) => {
+    try {
+      return JSON.parse(match[1]);
+    } catch (error) {
+      fail(`spec JSON block ${index + 1} is invalid: ${error.message}`);
+    }
+  });
   const envelopes = jsonBlocks.filter((block) => block?.result !== undefined);
   if (envelopes.length !== 2) fail("expected exactly two JSON success-envelope contracts");
   const branches = new Set();
