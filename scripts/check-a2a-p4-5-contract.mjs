@@ -22,6 +22,10 @@ function requireText(text, needle, label) {
   if (!text.includes(needle)) fail(`${label}: missing ${JSON.stringify(needle)}`);
 }
 
+function rejectText(text, needle, label) {
+  if (text.includes(needle)) fail(`${label}: forbidden ${JSON.stringify(needle)}`);
+}
+
 function requireOrdered(text, needles, label) {
   let cursor = -1;
   for (const needle of needles) {
@@ -44,6 +48,14 @@ function isInsideRoot(base, candidate, pathApi) {
   );
 }
 
+function decodeLinkTarget(target) {
+  try {
+    return { ok: true, value: decodeURIComponent(target) };
+  } catch {
+    return { ok: false };
+  }
+}
+
 function validateContainmentPortability() {
   const windowsRoot = "C:\\repo";
   if (!isInsideRoot(windowsRoot, "C:\\repo\\docs\\contract.md", win32)) {
@@ -55,6 +67,15 @@ function validateContainmentPortability() {
   if (isInsideRoot(windowsRoot, "D:\\other\\contract.md", win32)) {
     fail("Windows containment self-test accepted a cross-drive escape");
   }
+  if (decodeLinkTarget("%ZZ").ok) {
+    fail("malformed percent-encoding self-test was accepted");
+  }
+  const traversal = decodeLinkTarget("%2e%2e%5c%2e%2e%5cescape.md");
+  if (!traversal.ok) fail("encoded traversal self-test did not decode");
+  const escaped = win32.resolve(windowsRoot, "docs", traversal.value);
+  if (isInsideRoot(windowsRoot, escaped, win32)) {
+    fail("Windows containment self-test accepted encoded traversal");
+  }
 }
 
 function validateLocalLinks(path, text) {
@@ -64,13 +85,11 @@ function validateLocalLinks(path, text) {
     if (/^(?:https?:|mailto:)/i.test(raw) || raw.startsWith("#")) continue;
     const target = raw.split("#", 1)[0];
     if (target.length === 0) continue;
-    let decoded;
-    try {
-      decoded = decodeURIComponent(target);
-    } catch {
+    const decoded = decodeLinkTarget(target);
+    if (!decoded.ok) {
       fail(`${path}: malformed percent-encoding in local link: ${raw}`);
     }
-    const absolute = resolve(dirname(path), decoded);
+    const absolute = resolve(dirname(path), decoded.value);
     if (!isInsideRoot(root, absolute, { relative, isAbsolute, sep })) {
       fail(`${path}: local link escapes repository: ${raw}`);
     }
@@ -97,9 +116,19 @@ function requireExactErrorContracts(text) {
   ];
   const seen = new Set();
   for (const [code, message, reason, metadata] of expected) {
-    const matches = jsonBlocks.filter((block) => block?.code === code);
+    const matches = jsonBlocks.filter((block) => block?.error?.code === code);
     if (matches.length !== 1) fail(`expected exactly one JSON error contract for ${code}`);
-    const block = matches[0];
+    const envelope = matches[0];
+    if (JSON.stringify(Object.keys(envelope).sort()) !== JSON.stringify(["error", "id", "jsonrpc"])) {
+      fail(`${code}: response must be a full JSON-RPC error envelope`);
+    }
+    if (envelope.jsonrpc !== "2.0" || envelope.id !== "<exact request id>") {
+      fail(`${code}: envelope must preserve the exact request id marker`);
+    }
+    const block = envelope.error;
+    if (JSON.stringify(Object.keys(block).sort()) !== JSON.stringify(["code", "data", "message"])) {
+      fail(`${code}: error member has unexpected fields`);
+    }
     if (seen.has(block.code)) fail(`duplicate JSON error code ${block.code}`);
     seen.add(block.code);
     if (block.message !== message) fail(`${code}: unexpected message`);
@@ -117,6 +146,37 @@ function requireExactErrorContracts(text) {
     if (JSON.stringify(detail.metadata) !== JSON.stringify(metadata)) {
       fail(`${code}: unexpected ErrorInfo metadata`);
     }
+    const expectedDetailKeys = metadata
+      ? ["@type", "domain", "metadata", "reason"]
+      : ["@type", "domain", "reason"];
+    if (JSON.stringify(Object.keys(detail).sort()) !== JSON.stringify(expectedDetailKeys)) {
+      fail(`${code}: ErrorInfo has unexpected fields`);
+    }
+  }
+}
+
+function requireExactSuccessContracts(text) {
+  const jsonBlocks = [...text.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) =>
+    JSON.parse(match[1]),
+  );
+  const envelopes = jsonBlocks.filter((block) => block?.result !== undefined);
+  if (envelopes.length !== 2) fail("expected exactly two JSON success-envelope contracts");
+  const branches = new Set();
+  for (const envelope of envelopes) {
+    if (JSON.stringify(Object.keys(envelope).sort()) !== JSON.stringify(["id", "jsonrpc", "result"])) {
+      fail("success response must be a full JSON-RPC result envelope");
+    }
+    if (envelope.jsonrpc !== "2.0" || envelope.id !== "<exact request id>") {
+      fail("success envelope must preserve the exact request id marker");
+    }
+    const resultKeys = Object.keys(envelope.result);
+    if (resultKeys.length !== 1 || !["message", "task"].includes(resultKeys[0])) {
+      fail("SendMessageResponse result must contain exactly one message or task branch");
+    }
+    branches.add(resultKeys[0]);
+  }
+  if (!branches.has("message") || !branches.has("task")) {
+    fail("success contracts must cover both SendMessageResponse branches");
   }
 }
 
@@ -127,6 +187,7 @@ const p45End = blueprint.indexOf("## Cross-host implementation review", p45Start
 if (p45Start < 0 || p45End < 0) fail("cannot isolate the P4-5 blueprint section");
 const p45 = blueprint.slice(p45Start, p45End);
 const normalizedP45 = p45.replace(/\s+/g, " ");
+const normalizedSpec = spec.replace(/\s+/g, " ");
 validateContainmentPortability();
 
 for (const [needle, label] of [
@@ -150,10 +211,20 @@ for (const [needle, label] of [
   ["official `a2aproject/a2a-tck` release/tag and full commit", "TCK pin"],
   ["explicit two-stage transaction", "two-stage journal"],
   ["absent, not null placeholders", "prepared stage snapshot exclusion"],
-  ["at the earlier of settlement or its bounded", "encrypted payload deletion boundary"],
+  ["at the earlier of client-observed", "encrypted payload deletion boundary"],
   ["lost before that durable commit is not settled", "lost response retention"],
   ["foreground approval is required because neither creates", "existing-operation prompt-free recovery"],
   ["Every new `SendMessage`, continuation, or live `CancelTask`", "new mutation reapproval"],
+  ["non-sendable `staged`", "staged encrypted payload"],
+  ["One durable transaction then creates", "payload-journal atomic binding"],
+  ["unbound staged record whose", "orphan cleanup"],
+  ["never persist a raw HTTP body", "continuation cancel metadata-only persistence"],
+  ["`SendMessageResponse` oneof wrapper", "A2A send response wrapper"],
+  ["`GetTask`, and `CancelTask` MUST omit", "initial-send-only extension scope"],
+  ["same immutable credential binding", "successor binding invariant"],
+  ["authenticated caller generation", "successor caller generation invariant"],
+  ["predecessor/successor revision pair", "successor journal lineage"],
+  ["one CAS terminalizes live/in-progress fences as RETENTION_EXPIRED", "retention fence CAS"],
 ]) {
   requireText(p45, needle, label);
 }
@@ -173,15 +244,37 @@ requireOrdered(
   "new-mutation security order",
 );
 
+requireOrdered(
+  normalizedP45,
+  [
+    "non-sendable `staged`",
+    "stage `prepared` referencing those exact fields",
+    "changes the payload to `bound`",
+    "secret preparation",
+    "final no-store Hub resolve",
+    "stage `resolved`",
+    "socket may start",
+  ],
+  "payload-journal-route ordering",
+);
+
 for (const [needle, label] of [
   [extensionUri, "canonical URI"],
   ["RFC 2119 and", "requirements language"],
   ["`A2A-Extensions`", "request activation header"],
-  ["The server MUST echo exactly the activated URI", "response activation echo"],
+  ["every successful response", "response activation echo"],
+  ["every `-32090` through `-32094`", "all error response echoes"],
+  ["Only `-32092` carries `Retry-After`", "exclusive retry-after"],
+  ["first non-streaming JSON-RPC `SendMessage`", "initial send applicability"],
+  ["exact replay of that same initial send", "initial replay applicability"],
+  ["MUST NOT send this profile's `A2A-Extensions`", "continuation other-method exclusion"],
   ["same authenticated caller", "caller identity match"],
-  ["byte-for-byte identical serialized body", "exact body match"],
+  ["byte-for-byte identical serialized HTTP body", "exact body match"],
   ["identical body SHA-256", "body hash match"],
-  ["same union kind and durable identity", "durable Message or Task identity"],
+  ["`SendMessageResponse` oneof wrapper", "durable send response wrapper"],
+  ["`{ \"message\": Message }` or `{ \"task\": Task }`", "exact oneof branches"],
+  ["place this oneof wrapper under `result`", "JSON-RPC success result wrapper"],
+  ["exact request `id` value and type", "success request id fidelity"],
   ["EXACT_SEND_REPLAY_CONFLICT", "conflict error"],
   ["EXACT_SEND_REPLAY_RETENTION_EXPIRED", "retention error"],
   ["EXACT_SEND_REPLAY_IN_PROGRESS", "in-progress error"],
@@ -196,13 +289,31 @@ for (const [needle, label] of [
   ["never evicted to admit a new key", "no tombstone eviction"],
   ["same external subject later enrolls again", "re-enrollment generation isolation"],
   ["A one-entry quota accepts no new replay key", "capacity conformance vector"],
-  ["Every custom error uses the exact numeric code", "error conformance vector"],
+  ["Every custom error uses the complete JSON-RPC envelope", "error conformance vector"],
+  ["atomically CAS any live or in-progress fence", "retention boundary CAS"],
+  ["revoke its execution owner token", "retention owner revocation"],
+  ["worker result arriving after that CAS", "late commit suppression"],
   ["Authentication and ordinary A2A authorization MUST complete", "auth ordering"],
   ["Required conformance vectors", "wire vectors"],
   [officialSpec, "official specification pin"],
 ]) {
-  requireText(spec, needle, label);
+  requireText(normalizedSpec, needle, label);
 }
+rejectText(spec, "byte-equivalent canonical", "canonical-body replay wording");
+rejectText(spec, "`Message | Task` union result", "raw Message-or-Task union wording");
+
+requireOrdered(
+  normalizedSpec,
+  [
+    "first non-streaming JSON-RPC `SendMessage`",
+    "exact replay of that same initial send",
+    "MUST NOT send this profile's `A2A-Extensions`",
+    "every successful response",
+    "every `-32090` through `-32094` extension-error response",
+  ],
+  "extension applicability and echo scope",
+);
+requireExactSuccessContracts(spec);
 requireExactErrorContracts(spec);
 
 const linkCount = validateLocalLinks(blueprintPath, blueprint) + validateLocalLinks(specPath, spec);

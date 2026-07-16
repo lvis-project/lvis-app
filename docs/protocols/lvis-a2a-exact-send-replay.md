@@ -19,10 +19,12 @@ extension defines the narrow server contract required by LVIS for an exact repla
 of that ambiguous initial send. It does not make other A2A methods idempotent, add
 streaming, authorize a caller, weaken Task ownership, or permit route substitution.
 
-The extension applies only to non-streaming JSON-RPC `SendMessage`. `GetTask`,
-`CancelTask`, continuation Messages, streaming, push notifications, and other
-bindings are outside this extension. LVIS implements its own durable operation
-fencing for those methods.
+The extension applies exactly to the first non-streaming JSON-RPC `SendMessage`
+of a new operation and an exact replay of that same initial send. A continuation
+`SendMessage`, `GetTask`, `CancelTask`, streaming, push notification, or any other
+method MUST NOT send this profile's `A2A-Extensions` header or extension metadata,
+and the server MUST NOT echo or apply this profile to such a request. LVIS uses
+its separate durable operation fencing for those methods.
 
 ## Declaration and bounded parameters
 
@@ -68,18 +70,21 @@ A2A-Extensions: https://lvis.ai/a2a/extensions/exact-send-replay/v1
 ```
 
 The value MUST contain this URI exactly once. The client MUST NOT activate any
-other extension on the request. The server MUST echo exactly the activated URI in
-the successful response:
+other extension on the initial request or its exact replay. After activation has
+been validated, the server MUST echo exactly the activated URI on every successful
+response and on every `-32090` through `-32094` extension-error response:
 
 ```http
 A2A-Extensions: https://lvis.ai/a2a/extensions/exact-send-replay/v1
 ```
 
 The echo is REQUIRED by this profile even though the general A2A extension guide
-uses a SHOULD. A missing, duplicated, malformed, or conflicting response echo
-means the client cannot treat the response as extension-conformant. Unsupported
-requested extensions MAY be ignored under the base protocol, but an LVIS route
-MUST fail closed unless this extension is activated.
+uses a SHOULD. A missing, duplicated, malformed, or conflicting required echo
+means the client cannot treat that initial-send response as extension-conformant.
+Unsupported requested extensions MAY be ignored under the base protocol, but an
+LVIS initial-send route MUST fail closed unless this extension is activated. The
+echo rule does not widen applicability: continuation and other-method requests
+MUST omit the profile and their responses MUST omit its echo.
 
 The request `params.metadata` MUST contain one member whose key is the canonical
 extension URI and whose value is exactly:
@@ -125,8 +130,8 @@ whitespace, and escaping. It excludes HTTP headers and credentials. The server
 MUST NOT parse and reserialize a request to obtain this hash.
 
 An exact replay is valid only when the same authenticated caller supplies the
-same `messageId`, byte-for-byte identical serialized body, identical body SHA-256,
-and identical `intentSha256`. It MUST join the existing in-progress owner or
+same `messageId`, byte-for-byte identical serialized HTTP body, identical body
+SHA-256, and identical `intentSha256`. It MUST join the existing in-progress owner or
 return the stored completed result. It MUST NOT execute the Message again, mint a
 new Message or Task identity, change context, or select another route.
 
@@ -135,25 +140,34 @@ fixed JSON-RPC error:
 
 ```json
 {
-  "code": -32090,
-  "message": "Exact send replay conflict",
-  "data": [
-    {
-      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-      "reason": "EXACT_SEND_REPLAY_CONFLICT",
-      "domain": "lvis.ai"
-    }
-  ]
+  "jsonrpc": "2.0",
+  "id": "<exact request id>",
+  "error": {
+    "code": -32090,
+    "message": "Exact send replay conflict",
+    "data": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "EXACT_SEND_REPLAY_CONFLICT",
+        "domain": "lvis.ai"
+      }
+    ]
+  }
 }
 ```
 
-The response MUST carry the activated `A2A-Extensions` echo. Error data MUST NOT
+The response `id` MUST preserve the exact request JSON-RPC ID value and type; the
+string above is only a schema marker. The response MUST carry the activated
+`A2A-Extensions` echo. Error data MUST NOT
 reveal which field, byte, hash, credential, caller, or stored result differed.
 
-Every extension error in this document is a JSON-RPC server error with exactly one
-A2A v1 data-array entry of `type.googleapis.com/google.rpc.ErrorInfo`. Codes,
-messages, reasons, domains, metadata, and retry headers are exact wire values; a
-server MUST NOT add a second data entry or substitute an object for the array.
+Every extension error in this document is a complete JSON-RPC 2.0 response with
+the exact request ID and an `error` member containing exactly one A2A v1 data-array
+entry of `type.googleapis.com/google.rpc.ErrorInfo`. Codes, messages, reasons,
+domains, metadata, and retry headers are exact wire values; a server MUST NOT add
+a second data entry, substitute an object for the array, or place error fields at
+the response root. Every `-32090` through `-32094` response carries the activated
+`A2A-Extensions` echo. Only `-32092` carries `Retry-After`; the other four MUST NOT.
 
 If the authenticated caller generation has reached its configured replay-key
 capacity, the server MUST NOT evict or reuse an existing fence. It MUST accept no
@@ -161,15 +175,19 @@ new key, execute nothing, and return:
 
 ```json
 {
-  "code": -32094,
-  "message": "Exact send replay capacity exhausted",
-  "data": [
-    {
-      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-      "reason": "EXACT_SEND_REPLAY_CAPACITY_EXHAUSTED",
-      "domain": "lvis.ai"
-    }
-  ]
+  "jsonrpc": "2.0",
+  "id": "<exact request id>",
+  "error": {
+    "code": -32094,
+    "message": "Exact send replay capacity exhausted",
+    "data": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "EXACT_SEND_REPLAY_CAPACITY_EXHAUSTED",
+        "domain": "lvis.ai"
+      }
+    ]
+  }
 }
 ```
 
@@ -182,12 +200,50 @@ approved new operation rather than retry this failed initial send automatically.
 ## Durable result and restart behavior
 
 Before returning the first successful response, the server MUST durably replace
-the in-progress fence with the complete original A2A `Message | Task` union result
-and its identity fields. A replay after either client or server restart MUST
-return the same union kind and durable identity: the same direct
-`Message.messageId`, or the same `Task.id` and `Task.contextId`. It MUST NOT
-re-execute the Message. The stored original result is authoritative even if the
-Task later advances; current Task state is obtained separately with `GetTask`.
+the in-progress fence with the complete original A2A v1 `SendMessageResponse`
+oneof wrapper and its identity fields. The stored value is exactly one of
+`{ "message": Message }` or `{ "task": Task }`; it is never a raw `Message`, a
+raw `Task`, both branches, or an unwrapped `Message | Task` union. The JSON-RPC
+success envelope MUST preserve `jsonrpc: "2.0"`, the exact request `id` value and
+type, and place this oneof wrapper under `result`. A replay after either client or
+server restart MUST return the same wrapper branch and durable identity: the same
+`result.message.messageId`, or the same `result.task.id` and
+`result.task.contextId`. It MUST NOT re-execute the Message. The stored original
+wrapper is authoritative even if the Task later advances; current Task state is
+obtained separately with `GetTask`.
+
+The two permitted success-envelope shapes are:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "<exact request id>",
+  "result": {
+    "message": {
+      "messageId": "<original message id>",
+      "role": "ROLE_AGENT",
+      "parts": [{"text": "<response>"}]
+    }
+  }
+}
+```
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "<exact request id>",
+  "result": {
+    "task": {
+      "id": "<original task id>",
+      "contextId": "<original context id>",
+      "status": {"state": "TASK_STATE_SUBMITTED"}
+    }
+  }
+}
+```
+
+Placeholder strings stand for the complete original A2A values; they do not
+authorize truncation. No success envelope may contain an `error` member.
 
 Concurrent exact requests MUST elect one execution owner. Losing owners MUST wait
 within a bounded deadline or return a fixed retryable in-progress error without
@@ -195,16 +251,20 @@ executing:
 
 ```json
 {
-  "code": -32092,
-  "message": "Exact send replay in progress",
-  "data": [
-    {
-      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-      "reason": "EXACT_SEND_REPLAY_IN_PROGRESS",
-      "domain": "lvis.ai",
-      "metadata": {"retryAfterSeconds": "1"}
-    }
-  ]
+  "jsonrpc": "2.0",
+  "id": "<exact request id>",
+  "error": {
+    "code": -32092,
+    "message": "Exact send replay in progress",
+    "data": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "EXACT_SEND_REPLAY_IN_PROGRESS",
+        "domain": "lvis.ai",
+        "metadata": {"retryAfterSeconds": "1"}
+      }
+    ]
+  }
 }
 ```
 
@@ -225,15 +285,19 @@ the fence, execute nothing, omit `Retry-After`, and return:
 
 ```json
 {
-  "code": -32093,
-  "message": "Exact send replay outcome unknown",
-  "data": [
-    {
-      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-      "reason": "EXACT_SEND_REPLAY_OUTCOME_UNKNOWN",
-      "domain": "lvis.ai"
-    }
-  ]
+  "jsonrpc": "2.0",
+  "id": "<exact request id>",
+  "error": {
+    "code": -32093,
+    "message": "Exact send replay outcome unknown",
+    "data": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "EXACT_SEND_REPLAY_OUTCOME_UNKNOWN",
+        "domain": "lvis.ai"
+      }
+    ]
+  }
 }
 ```
 
@@ -242,9 +306,13 @@ The client maps `-32093` to terminal local
 fabricates no remote Message, Task, or terminal Task state.
 
 The server MUST retain the complete fence and completed result for 604800 seconds
-from the first accepted request. At expiry it MUST atomically delete any exact
-body and Message-or-Task result while retaining a durable non-sensitive tombstone
-containing only the generation-scoped opaque caller token, opaque Message-ID token,
+from the first accepted request. At the boundary one transaction MUST atomically
+CAS any live or in-progress fence to terminal `RETENTION_EXPIRED`, revoke its
+execution owner token, delete any exact body and `SendMessageResponse` result, and
+write the durable non-sensitive tombstone. A worker result arriving after that CAS
+MUST fail its owner-token/terminal-state CAS and be suppressed; it can neither
+restore the result nor change the terminal fence. The tombstone contains only the
+generation-scoped opaque caller token, opaque Message-ID token,
 body hash, intent hash, first-accepted time, expiry time, and terminal fence state.
 The tombstone remains until that caller generation is permanently retired. It is
 never evicted to admit a new key, and its deletion after permanent retirement is
@@ -253,15 +321,19 @@ MUST NOT execute and MUST return:
 
 ```json
 {
-  "code": -32091,
-  "message": "Exact send replay retention expired",
-  "data": [
-    {
-      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-      "reason": "EXACT_SEND_REPLAY_RETENTION_EXPIRED",
-      "domain": "lvis.ai"
-    }
-  ]
+  "jsonrpc": "2.0",
+  "id": "<exact request id>",
+  "error": {
+    "code": -32091,
+    "message": "Exact send replay retention expired",
+    "data": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "EXACT_SEND_REPLAY_RETENTION_EXPIRED",
+        "domain": "lvis.ai"
+      }
+    ]
+  }
 }
 ```
 
@@ -301,13 +373,16 @@ remote-server commit, exact A2A v1.0 TCK release and full commit, this specifica
 SHA-256, Agent Card hash, and test artifact SHA-256. It MUST prove all of the
 following with zero skipped cases:
 
-1. First send returns a direct Message; exact replay before and after server
-   restart returns the same union kind and `Message.messageId`, with one execution.
-2. First send returns a Task; exact replay before and after client and server
-   restart returns the same original `Task.id` and `Task.contextId`, with one
-   execution.
-3. The response is dropped only after the body and durable result commit; the
-   client's stored exact bytes replay to the same result.
+1. First send returns JSON-RPC `result: { message: Message }`; exact replay before
+   and after server restart returns the same oneof branch and
+   `result.message.messageId`, with one execution and no raw-Message result.
+2. First send returns JSON-RPC `result: { task: Task }`; exact replay before and
+   after client and server restart returns the same oneof branch,
+   `result.task.id`, and `result.task.contextId`, with one execution and neither a
+   raw-Task result nor both branches.
+3. The response is dropped only after the byte-for-byte serialized HTTP body and
+   durable oneof wrapper commit; the client's stored exact bytes replay to the
+   same JSON-RPC `result` wrapper and exact request ID value/type.
 4. Two concurrent exact sends elect one owner and return one durable result.
 5. Same caller and Message ID with one changed body byte, changed escaping,
    changed member order, or changed `intentSha256` returns `-32090` and executes
@@ -315,13 +390,16 @@ following with zero skipped cases:
 6. A different authenticated caller cannot observe or reuse another caller's
    replay entry.
 7. Missing declaration, wrong URI, `required: false`, malformed or extra params,
-   wrong served-spec digest, missing request activation, or missing response echo
-   fails closed.
-8. Retention-boundary replay succeeds immediately before expiry; at expiry the
-   body/result is deleted, exact reuse returns `-32091`, mismatch returns `-32090`,
-   and both remain deterministic after restart without execution or tombstone
-   eviction.
-9. A live owner returns `-32092` with the exact data array and `Retry-After: 1`;
+   wrong served-spec digest, missing request activation, or missing required echo
+   on an activated success/error fails closed. Continuation `SendMessage`,
+   `GetTask`, and `CancelTask` send no profile header/metadata and receive no echo.
+8. Retention-boundary replay succeeds immediately before expiry; at expiry one
+   CAS changes even a live/in-progress fence to `RETENTION_EXPIRED`, revokes its
+   owner token, deletes body/result, writes the tombstone, and suppresses a late
+   owner commit. Exact reuse returns `-32091`, mismatch returns `-32090`, and both
+   remain deterministic after restart without execution or tombstone eviction.
+9. A live owner returns the full `-32092` JSON-RPC error envelope with exact
+   request ID, required extension echo, exact data array, and `Retry-After: 1`;
    a bounded same-byte retry joins that owner and never extends its deadline.
 10. Crash at every fence/result transaction boundary proves restart recovery,
     late-owner suppression, and no second execution. Every boundary whose single
@@ -332,9 +410,10 @@ following with zero skipped cases:
 12. Credential rotation preserves the caller generation and replay key; permanent
     retirement followed by re-enrollment mints a new generation whose same
     external subject and Message ID cannot collide with the retired key.
-13. Every custom error uses the exact numeric code, message, one-element A2A v1
-    `data` array, `google.rpc.ErrorInfo` type, reason, domain, metadata, retry
-    header, and client mapping defined above.
+13. Every custom error uses the complete JSON-RPC envelope, exact request ID,
+    `error` member, numeric code, message, one-element A2A v1 `data` array,
+    `google.rpc.ErrorInfo` type, reason, domain, metadata, required extension echo,
+    and client mapping defined above. Only `-32092` carries `Retry-After`.
 14. Logs, audit, metrics, traces, Hub storage, and packet-path assertions contain
     no bearer, secret reference, prompt Part, artifact, or raw replay body.
 
