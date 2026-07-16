@@ -46,11 +46,30 @@ async function setup(options: { rejectReads?: boolean } = {}) {
   return controller;
 }
 
+async function setupDisabled() {
+  handlers.clear();
+  vi.clearAllMocks();
+  const { registerRemoteA2AHandlers } = await import("../remote-a2a.js");
+  registerRemoteA2AHandlers({ auditLogger: { log: vi.fn() } } as never);
+}
+
 beforeEach(() => {
   handlers.clear();
 });
 
 describe("remote A2A IPC rejection boundary", () => {
+  it.each([
+    [CHANNELS.remoteA2a.send, { targetAgentId: 7, userIntent: "send this task" }],
+    [CHANNELS.remoteA2a.action, { action: "cancel", taskHandle: "task_handle_123456" }],
+  ])("returns the disabled code before requiring keyboard intent on %s", async (channel, payload) => {
+    await setupDisabled();
+
+    await expect(invokeFileIpcHandler(handlers, channel, payload)).resolves.toEqual({
+      ok: false,
+      error: "a2a-remote-disabled",
+    });
+  });
+
   it.each([CHANNELS.remoteA2a.targets, CHANNELS.remoteA2a.status])(
     "returns the stable code when read channel %s throws",
     async (channel) => {
