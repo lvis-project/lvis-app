@@ -105,8 +105,8 @@ export function readRegularFile(path, label, { maxBytes = 128 * 1024 * 1024, all
     if (descriptor !== undefined) closeSync(descriptor);
   }
   if (bytes.length !== opened.size) fail(`${label}: file size changed while reading`);
-  const realPath = realpathSync(path);
-  return { path: realPath, bytes, size: opened.size, sha256: sha256Buffer(bytes) };
+  const resolvedPath = realpathSync(path);
+  return { path: resolvedPath, bytes, size: opened.size, sha256: sha256Buffer(bytes) };
 }
 
 export function resolveEvidencePath(manifestPath, candidate, label) {
