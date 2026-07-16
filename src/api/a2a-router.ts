@@ -415,7 +415,7 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
             ...(typeof authorization === "string" ? { authorization } : {}),
             ...((typeof extensions === "string" || Array.isArray(extensions)) ? { extensions } : {}),
           }));
-          sendSuccess(res, request.id, reply.result, { ...reply.headers });
+          sendSuccess(res, request.id, reply.result, reply.headers === undefined ? {} : { ...reply.headers });
         } else {
           const result = await handler.handle(
             request.method as A2ADirectJsonRpcMethod,

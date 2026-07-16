@@ -76,6 +76,20 @@ describe("remote A2A IPC rejection boundary", () => {
     expect(JSON.stringify(result)).not.toContain("secret-provider-detail");
   });
 
+  it.each(["", " ", " leading", "trailing ", "x".repeat(8_193)])(
+    "rejects an invalid send intent at the IPC boundary: %j",
+    async (userIntent) => {
+      const controller = await setup();
+
+      await expect(invokeFileIpcHandler(handlers, CHANNELS.remoteA2a.send, {
+        intentToken: USER_INTENT,
+        targetAgentId: 7,
+        userIntent,
+      })).resolves.toEqual({ ok: false, error: "a2a-remote-input-invalid" });
+      expect(controller.send).not.toHaveBeenCalled();
+    },
+  );
+
   it("uses ok only as the discriminant when a controller returns a failed delivery status", async () => {
     handlers.clear();
     const failedStatus = {
@@ -127,4 +141,19 @@ describe("remote A2A IPC rejection boundary", () => {
       ...extra,
     })).resolves.toEqual({ ok: false, error: "a2a-remote-operation-rejected" });
   });
+
+  it.each(["", " ", " leading", "trailing ", "x".repeat(8_193)])(
+    "rejects an invalid Resume intent at the IPC boundary: %j",
+    async (userIntent) => {
+      const controller = await setup();
+
+      await expect(invokeFileIpcHandler(handlers, CHANNELS.remoteA2a.action, {
+        intentToken: USER_INTENT,
+        action: "resume",
+        taskHandle: "task_handle_123456",
+        userIntent,
+      })).resolves.toEqual({ ok: false, error: "a2a-remote-input-invalid" });
+      expect(controller.resume).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -6,6 +6,14 @@ import type { IpcDeps } from "../types.js";
 
 const DISABLED = { ok: false, error: "a2a-remote-disabled" as const };
 const OPERATION_REJECTED = { ok: false, error: "a2a-remote-operation-rejected" as const };
+const MAX_REMOTE_A2A_USER_INTENT_LENGTH = 8_192;
+
+function isValidUserIntent(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= MAX_REMOTE_A2A_USER_INTENT_LENGTH
+    && value.trim() === value;
+}
 
 export function registerRemoteA2AHandlers(deps: IpcDeps): void {
   ipcMain.handle(CHANNELS.remoteA2a.targets, (event) => {
@@ -49,7 +57,7 @@ export function registerRemoteA2AHandlers(deps: IpcDeps): void {
     }
     const controller = deps.remoteA2AActionController;
     if (!controller) return DISABLED;
-    if (!Number.isSafeInteger(value.targetAgentId) || typeof value.userIntent !== "string") {
+    if (!Number.isSafeInteger(value.targetAgentId) || !isValidUserIntent(value.userIntent)) {
       return { ok: false, error: "a2a-remote-input-invalid" as const };
     }
     try {
@@ -97,7 +105,7 @@ export function registerRemoteA2AHandlers(deps: IpcDeps): void {
     if (!controller) return DISABLED;
     if ((value.action !== "resume" && value.action !== "cancel" && value.action !== "replay")
       || typeof value.taskHandle !== "string"
-      || (value.action === "resume" ? typeof value.userIntent !== "string" : value.userIntent !== undefined)) {
+      || (value.action === "resume" ? !isValidUserIntent(value.userIntent) : value.userIntent !== undefined)) {
       return { ok: false, error: "a2a-remote-input-invalid" as const };
     }
     try {
