@@ -17,6 +17,7 @@ import { shouldBlockGlobalWebviewNavigation } from "./main/webview-navigation-po
 import { installSideBrowserPartitionPolicy } from "./main/side-browser-webview.js";
 import { findLvisProtocolUri } from "./main/lvis-protocol.js";
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
+import { getPackagedWindowsProtocolMarkerState } from "./main/lvis-protocol-registration.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
 import { WindowManager } from "./main/window-manager.js";
 import { createLogger } from "./lib/logger.js";
@@ -235,7 +236,13 @@ async function main() {
   }
 }
 
-// lvis:// custom URI scheme — register before app ready.
+// lvis:// custom URI scheme.
+// The per-machine Windows installer owns the packaged association in HKLM.
+// Its adjacent regular-file marker prevents Electron's Windows setter from
+// shadowing HKLM with HKCU. ZIP/win-unpacked builds have no marker and keep
+// self-registering; macOS/Linux and every unpackaged build retain the existing
+// synchronous registration behavior.
+//
 // In dev mode (unpackaged) on Windows, Electron requires explicit execPath + args
 // so the OS can locate the app correctly when launching from a protocol URI.
 // We must also propagate the running process's --user-data-dir so the OS-spawned
@@ -252,21 +259,37 @@ async function main() {
 // inherits the env var. Boot also calls `setIsPackaged` later for any other
 // dev-flag callers; this top-level call early-seeds the cache.
 setIsPackaged(app.isPackaged);
-const _protocolRegistered = app.isPackaged
-  ? app.setAsDefaultProtocolClient("lvis")
-  : app.setAsDefaultProtocolClient(
-      "lvis",
-      process.execPath,
-      buildDevProtocolArgs({
-        argv1: process.argv[1],
-        userDataDir: app.getPath("userData") || undefined,
-        platform: process.platform,
-        disableGpu: process.env.LVIS_KEEP_GPU !== "1",
-        disableSandbox: devNoSandboxAllowed(),
-      }),
+const packagedWindowsProtocolMarkerState =
+  app.isPackaged && process.platform === "win32"
+    ? getPackagedWindowsProtocolMarkerState(process.execPath)
+    : null;
+if (packagedWindowsProtocolMarkerState === "unknown") {
+  log.warn(
+    "Unable to verify the packaged Windows protocol marker; skipped self-registration",
+  );
+}
+if (
+  packagedWindowsProtocolMarkerState !== "present" &&
+  packagedWindowsProtocolMarkerState !== "unknown"
+) {
+  const protocolRegistered = app.isPackaged
+    ? app.setAsDefaultProtocolClient("lvis")
+    : app.setAsDefaultProtocolClient(
+        "lvis",
+        process.execPath,
+        buildDevProtocolArgs({
+          argv1: process.argv[1],
+          userDataDir: app.getPath("userData") || undefined,
+          platform: process.platform,
+          disableGpu: process.env.LVIS_KEEP_GPU !== "1",
+          disableSandbox: devNoSandboxAllowed(),
+        }),
+      );
+  if (!protocolRegistered) {
+    log.warn(
+      "setAsDefaultProtocolClient('lvis') failed — deep links may not work in this environment",
     );
-if (!_protocolRegistered) {
-  log.warn("setAsDefaultProtocolClient('lvis') failed — deep links may not work in this environment");
+  }
 }
 
 // macOS: URI delivered via open-url event (register before whenReady to avoid missing cold-start)

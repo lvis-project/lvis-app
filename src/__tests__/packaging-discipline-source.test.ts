@@ -38,6 +38,82 @@ describe("installer smoke and packaging discipline", () => {
     expect(smokeScript).toContain("prompts");
   });
 
+
+  it("runs the NSIS smoke before win-unpacked and owner-cleans HKCU afterward", () => {
+    const smoke = readRepoFile("scripts/smoke-packaged-app.mjs");
+    const installerSmoke = smoke.indexOf(
+      "await runWindowsInstallerSmoke(releaseDir, timeoutMs)",
+    );
+    const unpackedSmoke = smoke.indexOf(
+      "await launchSmoke(executable, timeoutMs)",
+    );
+
+    expect(installerSmoke).toBeGreaterThanOrEqual(0);
+    expect(unpackedSmoke).toBeGreaterThan(installerSmoke);
+    expect(
+      smoke.lastIndexOf("cleanupOwnedWindowsProtocolHandler(executable)"),
+    ).toBeGreaterThan(smoke.indexOf("} finally {"));
+    const launchBody = smoke.slice(
+      smoke.indexOf("async function launchSmoke"),
+      smoke.indexOf("async function runWindowsInstallerSmoke"),
+    );
+    expect(launchBody.indexOf(
+      "assertWindowsPerMachineMarkerAbsent(executable)",
+    )).toBeLessThan(launchBody.indexOf("runPackagedAppOnce"));
+    expect(smoke).toContain(".lvis-nsis-per-machine-v1");
+    expect(smoke).toContain(
+      "lstatSync(markerPath, { throwIfNoEntry: false })",
+    );
+    expect(readRepoFile("src/main/lvis-protocol-registration.ts"))
+      .toContain(".lvis-nsis-per-machine-v1");
+
+
+    const cleanupScript = smoke.slice(
+      smoke.indexOf("const WINDOWS_PROTOCOL_CLEANUP_SCRIPT"),
+      smoke.indexOf("const TARGET_PLATFORM"),
+    );
+    expect(cleanupScript).toContain("$expectedCommand");
+    expect(cleanupScript).toContain(
+      "$expectedCommand = '\\\"' + $env:LVIS_PROTOCOL_OWNER_EXE + '\\\" \\\"%1\\\"'",
+    );
+    expect(cleanupScript).not.toContain("$launchExecutable");
+    expect(cleanupScript).not.toContain("-match '\\s'");
+    expect(cleanupScript).not.toContain(
+      "owned lvis protocol cleanup left registry residue",
+    );
+    expect(cleanupScript).toContain("$expectedIcon");
+    expect(cleanupScript).toContain("function Remove-RegistryValueIfEquals");
+    expect(cleanupScript).toContain("$key.GetValueKind($name)");
+    expect(cleanupScript).toContain("$commandKind = $commandKey.GetValueKind('')");
+    expect(cleanupScript).toContain(
+      "if ($null -eq $rootKey) { throw 'expected win-unpacked HKCU lvis protocol root is missing' }",
+    );
+    expect(cleanupScript).not.toContain(
+      "if ($null -eq $rootKey) { return }",
+    );
+
+    expect(cleanupScript).toContain(
+      "[Microsoft.Win32.RegistryValueKind]::String",
+    );
+    expect(cleanupScript).toContain(
+      "Remove-RegistryValueIfEquals $commandPath '' $expectedCommand",
+    );
+    expect(cleanupScript).toContain("DefaultIcon' '' $expectedIcon");
+    expect(cleanupScript).toContain(
+      "Remove-RegistryValueIfEquals $rootPath 'URL Protocol' ''",
+    );
+    expect(cleanupScript).toContain(
+      "Remove-RegistryValueIfEquals $rootPath '' 'URL:lvis'",
+    );
+    expect(cleanupScript).toContain(
+      "[System.StringComparison]::OrdinalIgnoreCase",
+    );
+    expect(cleanupScript).toContain("$key.DeleteValue($name, $false)");
+    expect(cleanupScript).toContain("Remove-EmptyRegistryKey");
+    expect(cleanupScript).not.toContain("$expectedQuoted");
+    expect(cleanupScript).not.toContain("$expectedUnquoted");
+    expect(cleanupScript).not.toContain("StartsWith");
+  });
   it("documents runtime package imports as dependencies, not devDependencies", () => {
     const agents = readRepoFile("AGENTS.md");
 

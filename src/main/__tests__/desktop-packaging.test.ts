@@ -24,7 +24,10 @@ describe("desktop packaging", () => {
         { from: "build/tray-icon.png", to: "tray-icon.png" },
         { from: "build/tray-icon@2x.png", to: "tray-icon@2x.png" },
         { from: "build/tray-iconTemplate.png", to: "tray-iconTemplate.png" },
-        { from: "build/tray-iconTemplate@2x.png", to: "tray-iconTemplate@2x.png" },
+        {
+          from: "build/tray-iconTemplate@2x.png",
+          to: "tray-iconTemplate@2x.png",
+        },
       ]),
     );
   });
@@ -38,8 +41,13 @@ describe("desktop packaging", () => {
       ]),
     );
 
-    const uvLicense = readFileSync(join(root, "resources", "licenses", "uv", "LICENSE-MIT"), "utf8");
-    expect(uvLicense).toContain("MIT License Copyright (c) 2025 Astral Software Inc.");
+    const uvLicense = readFileSync(
+      join(root, "resources", "licenses", "uv", "LICENSE-MIT"),
+      "utf8",
+    );
+    expect(uvLicense).toContain(
+      "MIT License Copyright (c) 2025 Astral Software Inc.",
+    );
     expect(uvLicense).toContain("permission notice shall be included");
   });
 
@@ -50,7 +58,9 @@ describe("desktop packaging", () => {
         expect.objectContaining({ path: "build/dmg-extras/uninstall.command" }),
       ]),
     );
-    const scriptStat = statSync(join(root, "build", "dmg-extras", "uninstall.command"));
+    const scriptStat = statSync(
+      join(root, "build", "dmg-extras", "uninstall.command"),
+    );
     if (process.platform === "win32") {
       expect(scriptStat.size).toBeGreaterThan(0);
     } else {
@@ -59,7 +69,10 @@ describe("desktop packaging", () => {
   });
 
   it("keeps the macOS uninstaller on fixed LVIS data paths", () => {
-    const script = readFileSync(join(root, "build", "dmg-extras", "uninstall.command"), "utf8");
+    const script = readFileSync(
+      join(root, "build", "dmg-extras", "uninstall.command"),
+      "utf8",
+    );
     expect(script).toContain('LVIS_HOME="$HOME/.lvis"');
     expect(script).not.toContain("${LVIS_HOME:-");
     expect(script).not.toContain("LVIS_HOME:-");
@@ -71,12 +84,36 @@ describe("desktop packaging", () => {
       oneClick: true,
       createStartMenuShortcut: true,
       uninstallDisplayName: "LVIS",
-      // electron-builder auto-removes `%APPDATA%\LVIS\` (Roaming userData).
-      deleteAppDataOnUninstall: true,
-      // Custom NSIS hook covers what `deleteAppDataOnUninstall` cannot —
-      // `%USERPROFILE%\.lvis\` (LVIS_HOME) and `%LOCALAPPDATA%\LVIS\` residuals.
+      // The custom hook owns every user-data path so `/KEEP_APP_DATA` can
+      // preserve Roaming data as well as LVIS_HOME and Local AppData.
+      deleteAppDataOnUninstall: false,
       include: "build/installer.nsh",
     });
+  });
+
+  it("keeps KEEP_APP_DATA ahead of current-user Windows data deletion", () => {
+    const script = readFileSync(join(root, "build", "installer.nsh"), "utf8");
+    const keepBranch = script.indexOf('${if} $R1 == "1"');
+    const currentContext = script.indexOf("SetShellVarContext current");
+    const roamingDelete = script.indexOf(
+      'RMDir /r "$APPDATA\\${APP_FILENAME}"',
+    );
+    const restoreContext = script.indexOf(
+      "SetShellVarContext all",
+      currentContext,
+    );
+
+    expect(keepBranch).toBeGreaterThanOrEqual(0);
+    expect(currentContext).toBeGreaterThan(keepBranch);
+    expect(roamingDelete).toBeGreaterThan(currentContext);
+    expect(restoreContext).toBeGreaterThan(roamingDelete);
+    expect(script).toContain('RMDir /r "$APPDATA\\${APP_PRODUCT_FILENAME}"');
+    expect(script).toContain('RMDir /r "$APPDATA\\${APP_PACKAGE_NAME}"');
+    expect(script).toContain('RMDir /r "$LOCALAPPDATA\\${APP_FILENAME}"');
+    expect(script).toContain(
+      'RMDir /r "$LOCALAPPDATA\\${APP_PRODUCT_FILENAME}"',
+    );
+    expect(script).toContain('RMDir /r "$LOCALAPPDATA\\${APP_PACKAGE_NAME}"');
   });
 
   it("uses LVIS-branded icon assets for the one-click Windows installer", () => {
@@ -101,7 +138,9 @@ describe("desktop packaging", () => {
     expect(script).toContain("!macro customRemoveFiles");
     expect(script).toContain('RMDir /r "$INSTDIR"');
     expect(script).toContain('"$INSTDIR\\${APP_EXECUTABLE_FILENAME}"');
-    expect(script).toContain('ExecShell "runas" "$EXEPATH" "$R0 /KEEP_APP_DATA /LVIS_ELEVATED_RETRY"');
+    expect(script).toContain(
+      'ExecShell "runas" "$EXEPATH" "$R0 /KEEP_APP_DATA /LVIS_ELEVATED_RETRY"',
+    );
     expect(script).toContain("SetErrorLevel 1");
     expect(script).toContain("LVIS uninstall failed: app files remain");
   });
