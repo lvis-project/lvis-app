@@ -110,10 +110,22 @@ function verifyMacos(installerPath, run, expected) {
   );
   if (!/accepted/iu.test(assessment)) fail("spctl assessment: installer was not accepted");
   const attach = run("hdiutil", ["attach", "-readonly", "-nobrowse", "-plist", installerPath], { label: "read-only DMG mount" });
-  const mountMatches = [...attach.stdout.matchAll(/<key>mount-point<\/key>\s*<string>([^<]+)<\/string>/gu)];
-  if (mountMatches.length !== 1) fail("read-only DMG mount: expected exactly one mount point");
-  const decodeXml = (value) => value.replace(/&(amp|lt|gt|quot|apos);/gu, (entity, name) => ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" })[name]);
-  const mountPoint = decodeXml(mountMatches[0][1]);
+  const mountJson = requireNonemptyOutput(
+    run("plutil", ["-convert", "json", "-o", "-", "-"], {
+      input: attach.stdout,
+      label: "DMG mount plist conversion",
+    }),
+    "DMG mount plist conversion",
+  );
+  const mountPlist = assertRecord(parseStrictJson(mountJson, "DMG mount plist"), "DMG mount plist");
+  const systemEntities = assertArray(mountPlist["system-entities"], "DMG mount plist.system-entities");
+  const mountPoints = systemEntities.flatMap((entry, index) => {
+    const entity = assertRecord(entry, `DMG mount plist.system-entities[${index}]`);
+    if (entity["mount-point"] === undefined) return [];
+    return [assertSafeString(entity["mount-point"], `DMG mount plist.system-entities[${index}].mount-point`, { max: 4096 })];
+  });
+  if (mountPoints.length !== 1) fail("read-only DMG mount: expected exactly one mount point");
+  const [mountPoint] = mountPoints;
   if (!mountPoint.startsWith("/Volumes/") || mountPoint.includes("\0") || mountPoint.includes("&") || mountPoint.split("/").includes("..")) fail("read-only DMG mount: unsafe mount point");
   const appPath = resolve(mountPoint, "LVIS.app");
   let appIdentity;

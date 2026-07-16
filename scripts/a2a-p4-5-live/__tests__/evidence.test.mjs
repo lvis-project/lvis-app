@@ -453,9 +453,14 @@ test("native verifier commands are fixed and require verified identities", () =>
   const calls = [];
   const installerCertificate = Buffer.from("installer-leaf-certificate");
   const installerCertificateSha256 = createHash("sha256").update(installerCertificate).digest("hex");
-  const macRun = (command, args) => {
+  const macRun = (command, args, options = {}) => {
     calls.push([command, args]);
     if (command === "hdiutil" && args[0] === "attach") return { stdout: "<plist><dict><key>mount-point</key><string>/Volumes/LVIS</string></dict></plist>", stderr: "" };
+    if (command === "plutil") {
+      assert.deepEqual(args, ["-convert", "json", "-o", "-", "-"]);
+      assert.match(options.input, /<plist>/u);
+      return { stdout: JSON.stringify({ "system-entities": [{ "mount-point": "/Volumes/LVIS" }] }), stderr: "" };
+    }
     if (command === "hdiutil" || command === "/usr/bin/test") return { stdout: "ok", stderr: "" };
     if (command === "codesign" && args[1] === "--extract-certificates") {
       writeFileSync(`${args[2]}0`, installerCertificate);
@@ -467,11 +472,25 @@ test("native verifier commands are fixed and require verified identities", () =>
   };
   const macExpected = { macTeamId: "ABCDE12345", macCertificateSha256: installerCertificateSha256 };
   assert.equal(verifyInstallerIdentity("macos", "/Applications/LVIS.dmg", { run: macRun, expected: macExpected }).status, "publisher-verified");
-  assert.deepEqual(calls.map(([command]) => command), ["codesign", "codesign", "codesign", "spctl", "hdiutil", "/usr/bin/test", "/usr/bin/test", "codesign", "codesign", "codesign", "spctl", "hdiutil"]);
+  assert.deepEqual(calls.map(([command]) => command), ["codesign", "codesign", "codesign", "spctl", "hdiutil", "plutil", "/usr/bin/test", "/usr/bin/test", "codesign", "codesign", "codesign", "spctl", "hdiutil"]);
   assert.equal(calls.some(([command]) => command === "security"), false, "keychain lookup must not substitute for embedded certificate extraction");
   assert.throws(() => verifyInstallerIdentity("macos", "/Applications/LVIS.dmg", { run: macRun, expected: { ...macExpected, macTeamId: "ZZZZZ12345" } }), /TeamIdentifier/u);
-  const mismatchedAppRun = (command, args) => {
+  const duplicateMountRun = (command, args, options = {}) => {
+    if (command === "plutil") {
+      return { stdout: JSON.stringify({ "system-entities": [
+        { "mount-point": "/Volumes/LVIS" },
+        { "mount-point": "/Volumes/LVIS 2" },
+      ] }), stderr: "" };
+    }
+    return macRun(command, args, options);
+  };
+  assert.throws(
+    () => verifyInstallerIdentity("macos", "/Applications/LVIS.dmg", { run: duplicateMountRun, expected: macExpected }),
+    /expected exactly one mount point/u,
+  );
+  const mismatchedAppRun = (command, args, options = {}) => {
     if (command === "hdiutil" && args[0] === "attach") return { stdout: "<plist><dict><key>mount-point</key><string>/Volumes/LVIS</string></dict></plist>", stderr: "" };
+    if (command === "plutil") return macRun(command, args, options);
     if (command === "hdiutil" && args[0] === "detach") throw new Error("detach failed after primary verification failure");
     if (command === "hdiutil" || command === "/usr/bin/test") return { stdout: "ok", stderr: "" };
     if (command === "codesign" && args[1] === "--extract-certificates") {
