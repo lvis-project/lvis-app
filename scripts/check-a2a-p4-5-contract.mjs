@@ -8,6 +8,8 @@ const blueprintPath = resolve(root, "docs/blueprints/a2a-subagent-messaging.md")
 const specPath = resolve(root, "docs/protocols/lvis-a2a-exact-send-replay.md");
 const extensionUri = "https://lvis.ai/a2a/extensions/exact-send-replay/v1";
 const officialSpec = "https://a2a-protocol.org/v1.0.0/specification/";
+const exactProtocolBindingPhrase = "`JSONRPC` (JSON-RPC) binding";
+const proseNameAsProtocolBinding = /`JSON-RPC`(?:\s+\(JSON-RPC\))?\s+binding/;
 const expectedExtensionParams = {
   profile: "lvis-exact-send-replay",
   profileVersion: "1",
@@ -81,6 +83,47 @@ function validateExactObjectEntryComparison() {
     if (hasExactObjectEntries(candidate, expectedExtensionParams)) {
       fail(`exact-object self-test accepted ${label} params`);
     }
+  }
+}
+
+function countOccurrences(text, needle) {
+  return text.split(needle).length - 1;
+}
+
+function validateProtocolBindingFixture() {
+  const fixtures = [
+    {
+      label: "exact wire token",
+      text: `uses the ${exactProtocolBindingPhrase}`,
+      exactCount: 1,
+      rejectsProseToken: false,
+    },
+    {
+      label: "prose name used as wire token",
+      text: "uses the `JSON-RPC` binding",
+      exactCount: 0,
+      rejectsProseToken: true,
+    },
+  ];
+  for (const fixture of fixtures) {
+    if (countOccurrences(fixture.text, exactProtocolBindingPhrase) !== fixture.exactCount) {
+      fail(`protocol-binding fixture count mismatch: ${fixture.label}`);
+    }
+    if (proseNameAsProtocolBinding.test(fixture.text) !== fixture.rejectsProseToken) {
+      fail(`protocol-binding fixture classification mismatch: ${fixture.label}`);
+    }
+  }
+}
+
+function requireExactProtocolBinding(text, expectedCount, label) {
+  const actualCount = countOccurrences(text, exactProtocolBindingPhrase);
+  if (actualCount !== expectedCount) {
+    fail(
+      `${label}: expected ${expectedCount} exact ${JSON.stringify(exactProtocolBindingPhrase)} occurrence(s), found ${actualCount}`,
+    );
+  }
+  if (proseNameAsProtocolBinding.test(text)) {
+    fail(`${label}: backticked prose name JSON-RPC cannot be the protocolBinding token`);
   }
 }
 
@@ -259,14 +302,22 @@ function requireExactAgentExtensionContract(text) {
 
 const blueprint = readRequired(blueprintPath);
 const spec = readRequired(specPath);
+const p41Start = blueprint.indexOf("### Ph4 decomposition: P4-1 admission");
+const p41End = blueprint.indexOf("#### P4-2 durable Agent Card registry contract", p41Start);
 const p45Start = blueprint.indexOf("#### P4-5 / G005 direct remote-routing contract");
 const p45End = blueprint.indexOf("## Cross-host implementation review", p45Start);
+if (p41Start < 0 || p41End < 0) fail("cannot isolate the P4-1 blueprint section");
 if (p45Start < 0 || p45End < 0) fail("cannot isolate the P4-5 blueprint section");
+const p41 = blueprint.slice(p41Start, p41End);
 const p45 = blueprint.slice(p45Start, p45End);
+const normalizedP41 = p41.replace(/\s+/g, " ");
 const normalizedP45 = p45.replace(/\s+/g, " ");
 const normalizedSpec = spec.replace(/\s+/g, " ");
 validateContainmentPortability();
 validateExactObjectEntryComparison();
+validateProtocolBindingFixture();
+requireExactProtocolBinding(normalizedP41, 1, "P4-1 protocol binding");
+requireExactProtocolBinding(normalizedP45, 2, "P4-5 protocol binding");
 
 for (const [needle, label] of [
   [extensionUri, "extension URI"],
