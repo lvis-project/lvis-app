@@ -35,6 +35,7 @@ function statusCopy(status: RemoteA2AActionStatus | null, t: Translate): string 
   if (!status || status.state === "idle") return t("remoteA2aActionButton.ready");
   if (status.taskState === "TASK_STATE_AUTH_REQUIRED") return t("remoteA2aActionButton.authRequired");
   if (status.state === "awaiting-approval") return t("remoteA2aActionButton.awaitingApproval");
+  if (status.outcome === "cancel-already-settled") return outcomeCopy(status.outcome, t);
   if (status.state === "sent") {
     return t("remoteA2aActionButton.sentTo", {
       target: status.targetLabel ?? t("remoteA2aActionButton.remoteAgentFallback"),
