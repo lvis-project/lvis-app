@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RemoteA2AActionButton } from "../RemoteA2AActionButton.js";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
+import { t } from "../../../../i18n/runtime.js";
 
 function installApi(status: Record<string, unknown> = { state: "idle", updatedAt: "2026-07-16T00:00:00.000Z" }) {
   const send = vi.fn(async () => ({ ok: true, status: { state: "sent", taskHandle: "task_handle_123456", taskAvailable: true, taskState: "TASK_STATE_WORKING", targetAgentId: 1, targetLabel: "Agent one", outcome: "success", updatedAt: "2026-07-16T00:00:01.000Z" } }));
@@ -51,6 +52,7 @@ describe("RemoteA2AActionButton production IPC surface", () => {
     expect(screen.queryByTestId("remote-a2a-get")).toBeNull();
     expect(screen.queryByTestId("remote-a2a-resume")).toBeNull();
     expect(screen.queryByTestId("remote-a2a-cancel")).toBeNull();
+    expect(screen.getByTestId("remote-a2a-status").textContent).not.toContain("unknown-manual-reconciliation-required");
     fireEvent.click(screen.getByTestId("remote-a2a-replay"));
     await waitFor(() => expect(api.action).toHaveBeenCalledWith("replay", "recovery_handle_123", undefined));
   });
@@ -58,7 +60,7 @@ describe("RemoteA2AActionButton production IPC surface", () => {
   it("shows AUTH_REQUIRED as out-of-band and disables credential-bearing Resume", async () => {
     installApi({ state: "sent", taskHandle: "task_handle_123456", taskAvailable: true, recoveryEligible: false, taskState: "TASK_STATE_AUTH_REQUIRED", updatedAt: "2026-07-16T00:00:00.000Z" });
     await openPanel();
-    expect(screen.getByTestId("remote-a2a-status").textContent).toContain("out of band");
+    expect(screen.getByTestId("remote-a2a-status").textContent).toBe(t("remoteA2aActionButton.authRequired"));
     expect(screen.getByTestId("remote-a2a-resume")).toHaveProperty("disabled", true);
     expect(screen.queryByTestId("remote-a2a-replay")).toBeNull();
   });
@@ -72,6 +74,50 @@ describe("RemoteA2AActionButton production IPC surface", () => {
     await openPanel();
 
     expect(screen.getByTestId("remote-a2a-target")).toHaveProperty("value", "1");
-    expect(screen.getByTestId("remote-a2a-status").textContent).toContain("Ready");
+    expect(screen.getByTestId("remote-a2a-status").textContent).toBe(t("remoteA2aActionButton.ready"));
+  });
+
+  it("retains typed intent when a resolved send reports a failed delivery state", async () => {
+    installApi();
+    window.lvisApi.remoteA2a.send = vi.fn(async () => ({
+      ok: true as const,
+      status: { state: "failed" as const, outcome: "remote-task-failed", updatedAt: "2026-07-16T00:00:01.000Z" },
+    }));
+    await openPanel();
+    const input = screen.getByTestId("remote-a2a-intent");
+    fireEvent.change(input, { target: { value: "Keep this text" } });
+    fireEvent.click(screen.getByTestId("remote-a2a-send"));
+
+    await waitFor(() => expect(screen.getByTestId("remote-a2a-status").getAttribute("data-state")).toBe("failed"));
+    expect(input).toHaveProperty("value", "Keep this text");
+  });
+
+  it("retains typed intent when a resolved Resume reports a failed delivery state", async () => {
+    installApi({ state: "sent", taskHandle: "task_handle_123456", taskAvailable: true, recoveryEligible: false, taskState: "TASK_STATE_INPUT_REQUIRED", updatedAt: "2026-07-16T00:00:00.000Z" });
+    window.lvisApi.remoteA2a.action = vi.fn(async () => ({
+      ok: true as const,
+      status: { state: "failed" as const, taskHandle: "task_handle_123456", outcome: "resume-failed", updatedAt: "2026-07-16T00:00:01.000Z" },
+    }));
+    await openPanel();
+    const input = screen.getByTestId("remote-a2a-intent");
+    fireEvent.change(input, { target: { value: "Keep resume text" } });
+    fireEvent.click(screen.getByTestId("remote-a2a-resume"));
+
+    await waitFor(() => expect(screen.getByTestId("remote-a2a-status").getAttribute("data-state")).toBe("failed"));
+    expect(input).toHaveProperty("value", "Keep resume text");
+  });
+
+  it("does not surface rejected IPC exception details", async () => {
+    installApi();
+    window.lvisApi.remoteA2a.send = vi.fn(async () => {
+      throw new Error("private-provider-detail");
+    });
+    await openPanel();
+    fireEvent.change(screen.getByTestId("remote-a2a-intent"), { target: { value: "Bounded request" } });
+    fireEvent.click(screen.getByTestId("remote-a2a-send"));
+
+    await waitFor(() => expect(screen.getByTestId("remote-a2a-status").getAttribute("data-state")).toBe("failed"));
+    expect(screen.getByTestId("remote-a2a-status").textContent).not.toContain("private-provider-detail");
+    expect(screen.getByTestId("remote-a2a-status").textContent).not.toContain("a2a-remote-send-failed");
   });
 });

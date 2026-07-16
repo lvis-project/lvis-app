@@ -15,7 +15,10 @@ function settings(features: Record<string, boolean>, secrets: Record<string, str
 }
 const encryption = { isEncryptionAvailable: () => true, encryptString: (value: string) => Buffer.from(value), decryptString: (value: Buffer) => value.toString() };
 const namespace = { readJson: async <T>(_name: string, fallback: T) => fallback, writeJson: async () => undefined };
-const agentActionApprover = vi.fn(async () => true);
+const agentActionApprover = vi.fn(async () => ({
+  decisionId: "test-approval",
+  decidedAt: "2026-07-16T00:00:00.000Z",
+}));
 
 describe("A2A remote boot runtime", () => {
   it("has zero config, secret, namespace, Hub, DNS, and listener effect when both gates are OFF", () => {
