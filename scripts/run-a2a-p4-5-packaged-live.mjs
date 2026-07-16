@@ -3,23 +3,28 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { closeSync, lstatSync, mkdirSync, openSync, realpathSync, writeFileSync } from "node:fs";
+import { resolve4 } from "node:dns/promises";
+import { X509Certificate } from "node:crypto";
 
 import {
   assertArray,
+  assertArtifactStable,
   assertExactKeys,
   fail,
   verifySignedManifest,
 } from "./a2a-p4-5-live/evidence-lib.mjs";
 import { verifyHubDatabaseAbsent } from "./a2a-p4-5-live/hub-db-verifier.mjs";
-import { runFixedProgram } from "./a2a-p4-5-live/installer-provenance-lib.mjs";
+import { independentlyVerifyInstallerAttestation, runFixedProgram } from "./a2a-p4-5-live/installer-provenance-lib.mjs";
 import {
   PACKAGED_LIVE_CASE_IDS,
   STABLE_TEST_IDS,
   UI_CASE_EXPECTATIONS,
   parseTsharkFields,
+  parseTsharkSniFields,
   readAndValidateManifestArtifacts,
   validatePackagedLiveManifest,
   verifyHubEvidenceAbsent,
+  verifyCapturedEndpointSni,
   verifyRemoteServerEvidence,
   verifyTaskTraffic,
 } from "./a2a-p4-5-live/packaged-live-contract.mjs";
@@ -56,12 +61,12 @@ function validateUiResult(value) {
   return value;
 }
 
-function runTshark(capturePath, keyLogPath, expectedVersion, run = runFixedProgram) {
+function runTshark(captureArtifact, keyLogArtifact, expectedVersion, run = runFixedProgram) {
   const actualVersion = run("tshark", ["--version"], { label: "tshark version" }).stdout.split(/\r?\n/u)[0];
   if (actualVersion !== expectedVersion) fail(`tshark version mismatch (expected ${expectedVersion}, got ${actualVersion})`);
   const result = run("tshark", [
-    "-r", capturePath,
-    "-o", `tls.keylog_file:${keyLogPath}`,
+    "-r", captureArtifact.path,
+    "-o", `tls.keylog_file:${keyLogArtifact.path}`,
     "-Y", "http.file_data",
     "-T", "fields",
     "-E", "separator=/t",
@@ -74,7 +79,20 @@ function runTshark(capturePath, keyLogPath, expectedVersion, run = runFixedProgr
     "-e", "http.request.uri",
     "-e", "http.file_data",
   ], { label: "fixed tshark packet parser", maxBuffer: 256 * 1024 * 1024 });
-  return { version: actualVersion, records: parseTsharkFields(result.stdout) };
+  const sniResult = run("tshark", [
+    "-r", captureArtifact.path,
+    "-Y", "tls.handshake.extensions_server_name",
+    "-T", "fields",
+    "-E", "separator=/t",
+    "-E", "occurrence=f",
+    "-e", "ip.src",
+    "-e", "ip.dst",
+    "-e", "tcp.dstport",
+    "-e", "tls.handshake.extensions_server_name",
+  ], { label: "fixed tshark TLS SNI parser", maxBuffer: 16 * 1024 * 1024 });
+  assertArtifactStable(captureArtifact, "packet capture", { maxBytes: 4 * 1024 * 1024 * 1024 });
+  assertArtifactStable(keyLogArtifact, "TLS key log", { maxBytes: 64 * 1024 * 1024 });
+  return { version: actualVersion, records: parseTsharkFields(result.stdout), sniRecords: parseTsharkSniFields(sniResult.stdout) };
 }
 
 function runUi(manifestPath, run = runFixedProgram) {
@@ -86,10 +104,48 @@ function runUi(manifestPath, run = runFixedProgram) {
   const result = run(process.execPath, [uiDriver, "--manifest", manifestPath], {
     label: "fixed packaged-app UI driver",
     maxBuffer: 8 * 1024 * 1024,
-    inheritEnv: false,
     env: allowedEnvironment,
   });
   return validateUiResult(parseStrictJson(result.stdout, "fixed UI driver result"));
+}
+
+function normalizedCertificateSha256(certificate) {
+  return certificate.fingerprint256.replaceAll(":", "").toLowerCase();
+}
+
+async function verifyLiveEndpointIdentity(endpoints, expected, { run = runFixedProgram, resolveIpv4 = resolve4 } = {}) {
+  const result = Object.create(null);
+  for (const side of ["remote", "hub"]) {
+    const endpointUrl = new URL(side === "remote" ? endpoints.remoteUrl : endpoints.hubUrl);
+    const endpointIp = side === "remote" ? endpoints.remoteIp : endpoints.hubIp;
+    const signed = expected[side];
+    const resolved = [...new Set(await resolveIpv4(endpointUrl.hostname))].sort();
+    const signedResolved = [...signed.resolvedIpv4].sort();
+    if (JSON.stringify(resolved) !== JSON.stringify(signedResolved) || !resolved.includes(endpointIp)) {
+      fail(`${side} endpoint: live DNS resolution does not match signed/captured IPv4 evidence`);
+    }
+    const handshake = run("openssl", [
+      "s_client",
+      "-connect", `${endpointIp}:443`,
+      "-servername", endpointUrl.hostname,
+      "-verify_hostname", endpointUrl.hostname,
+      "-verify_return_error",
+      "-showcerts",
+    ], { label: `${side} endpoint TLS certificate verification`, maxBuffer: 8 * 1024 * 1024, input: "" });
+    const pem = /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/u.exec(handshake.stdout)?.[0];
+    if (!pem) fail(`${side} endpoint: TLS verifier did not return a leaf certificate`);
+    let certificate;
+    try {
+      certificate = new X509Certificate(pem);
+    } catch (error) {
+      fail(`${side} endpoint: invalid TLS leaf certificate (${error.message})`);
+    }
+    if (!certificate.checkHost(endpointUrl.hostname)) fail(`${side} endpoint: leaf certificate does not cover the exact hostname`);
+    const certificateSha256 = normalizedCertificateSha256(certificate);
+    if (certificateSha256 !== signed.certificateSha256) fail(`${side} endpoint: live certificate fingerprint does not match signed evidence`);
+    result[side] = { hostname: endpointUrl.hostname, resolvedIpv4: resolved, certificateSha256 };
+  }
+  return result;
 }
 
 function writeExclusiveOutput(value) {
@@ -107,17 +163,40 @@ function writeExclusiveOutput(value) {
   return outputPath;
 }
 
-export function buildPackagedLiveEvidence({ manifestPath, run = runFixedProgram }) {
+export async function buildPackagedLiveEvidence({ manifestPath, run = runFixedProgram, resolveIpv4 = resolve4 }) {
   const signed = verifySignedManifest(manifestPath);
   const manifest = validatePackagedLiveManifest(signed.manifest);
   const artifacts = readAndValidateManifestArtifacts(manifestPath, manifest);
 
+  const independentAttestation = independentlyVerifyInstallerAttestation(artifacts.installer, {
+    appHead: manifest.heads.app,
+    repository: manifest.repository,
+    workflowRunId: manifest.workflow.runId,
+    workflowRunAttempt: manifest.workflow.attempt,
+    run,
+  });
+  assertArtifactStable(artifacts.installer, "attested installer", { maxBytes: 4 * 1024 * 1024 * 1024 });
   const ui = runUi(manifestPath, run);
-  const capture = runTshark(artifacts.capturePcap.path, artifacts.tlsKeyLog.path, manifest.capture.tsharkVersion, run);
+  assertArtifactStable(artifacts.installedExecutable, "installed packaged executable", { maxBytes: 1024 * 1024 * 1024 });
+  const capture = runTshark(artifacts.capturePcap, artifacts.tlsKeyLog, manifest.capture.tsharkVersion, run);
   const traffic = verifyTaskTraffic(capture.records, manifest.endpoints);
+  const capturedSni = verifyCapturedEndpointSni(capture.sniRecords, manifest.endpoints);
+  const liveEndpointIdentity = await verifyLiveEndpointIdentity(manifest.endpoints, artifacts.endpointIdentityValue, { run, resolveIpv4 });
   verifyHubEvidenceAbsent(artifacts.hubEvidence);
   verifyRemoteServerEvidence(artifacts.remoteServerEvidence);
-  const databaseCounts = verifyHubDatabaseAbsent({ run });
+  const hubDatabase = verifyHubDatabaseAbsent({
+    run,
+    expected: {
+      snapshotId: manifest.hubControlPlane.snapshotId,
+      databaseIdentitySha256: manifest.hubControlPlane.databaseIdentitySha256,
+      agentHubHead: manifest.heads.hub,
+      appHead: manifest.heads.app,
+      serverHead: manifest.heads.server,
+      agentHubLockDigestSha256: manifest.hubControlPlane.agentHubLockDigestSha256,
+      wireConformanceArtifactDigestSha256: manifest.hubControlPlane.wireConformanceArtifactDigestSha256,
+      remoteUrl: manifest.endpoints.remoteUrl,
+    },
+  });
 
   return {
     schemaVersion: 1,
@@ -132,12 +211,13 @@ export function buildPackagedLiveEvidence({ manifestPath, run = runFixedProgram 
     installer: {
       provenanceSha256: artifacts.provenance.sha256,
       installerSha256: artifacts.provenanceValue.installer.sha256,
+      attestationReportSha256: artifacts.attestationReport.sha256,
       executableSha256: artifacts.installedExecutable.sha256,
       installReceiptSha256: artifacts.installReceipt.sha256,
-      signaturePlatform: artifacts.provenanceValue.signature.platform,
-      signatureStatus: artifacts.provenanceValue.signature.status,
-      attestationReportSha256: artifacts.provenanceValue.attestation.reportSha256,
-      attestationSourceHead: artifacts.provenanceValue.attestation.sourceHead,
+      platformIdentityPlatform: artifacts.provenanceValue.platformIdentity.platform,
+      platformIdentityStatus: artifacts.provenanceValue.platformIdentity.status,
+      storedAttestationSourceHead: artifacts.storedAttestation.sourceHead,
+      independentAttestationSourceHead: independentAttestation.sourceHead,
     },
     network: {
       rawCaptureSha256: artifacts.captureRaw.sha256,
@@ -149,11 +229,15 @@ export function buildPackagedLiveEvidence({ manifestPath, run = runFixedProgram 
       caseIds: traffic.caseIds,
       noSocketCaseIds: traffic.noSocketCaseIds,
       responseAssertions: traffic.responseAssertions,
+      capturedSni,
+      liveEndpointIdentity,
       hubTaskTrafficCount: 0,
       remoteServerEvidenceSha256: artifacts.remoteServerEvidence.map((artifact) => artifact.sha256),
     },
     hubAbsence: {
-      databaseCounts,
+      databaseIdentitySha256: hubDatabase.databaseIdentitySha256,
+      controlPlaneSnapshotId: hubDatabase.snapshotId,
+      databaseCounts: hubDatabase.counts,
       logsChecked: artifacts.hubEvidence.logs.length,
       auditsChecked: artifacts.hubEvidence.audits.length,
       tracesChecked: artifacts.hubEvidence.traces.length,
@@ -178,16 +262,16 @@ export function buildPackagedLiveEvidence({ manifestPath, run = runFixedProgram 
   };
 }
 
-function main() {
+async function main() {
   const manifestPath = parseArguments(process.argv.slice(2));
-  const evidence = buildPackagedLiveEvidence({ manifestPath });
+  const evidence = await buildPackagedLiveEvidence({ manifestPath });
   const outputPath = writeExclusiveOutput(evidence);
   process.stdout.write(`${outputPath}\n`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
   try {
-    main();
+    await main();
   } catch (error) {
     process.stderr.write(`${error.stack ?? error.message}\n`);
     process.exitCode = 1;

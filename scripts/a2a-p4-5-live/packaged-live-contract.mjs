@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { basename } from "node:path";
 
 import {
   assertArray,
@@ -11,7 +12,7 @@ import {
   readEvidenceDescriptor,
   validateDescriptor,
 } from "./evidence-lib.mjs";
-import { validateProvenance } from "./installer-provenance-lib.mjs";
+import { validateProvenance, verifyAttestationReport } from "./installer-provenance-lib.mjs";
 import { parseStrictJson } from "./strict-json.mjs";
 
 export const TASK_METHODS = Object.freeze(["SendMessage", "GetTask", "CancelTask"]);
@@ -129,7 +130,11 @@ function assertIpv4(value, label, { publicOnly = false } = {}) {
   return value;
 }
 
-function assertPublicHttpsUrl(value, label) {
+const SPECIAL_USE_HOSTS = Object.freeze(new Set([
+  "localhost", "localhost.localdomain", "local", "internal", "invalid", "test", "example", "home.arpa", "onion",
+]));
+
+export function assertPublicHttpsUrl(value, label) {
   assertSafeString(value, label, { max: 2048 });
   let url;
   try {
@@ -142,6 +147,15 @@ function assertPublicHttpsUrl(value, label) {
   }
   if (isIP(url.hostname)) fail(`${label}: IP-literal targets are forbidden`);
   if (url.hostname !== url.hostname.toLowerCase() || url.hostname.endsWith(".")) fail(`${label}: hostname must be canonical lowercase without trailing dot`);
+  const labels = url.hostname.split(".");
+  if (labels.length < 2 || labels.some((part) => !/^(?!-)[a-z0-9-]{1,63}(?<!-)$/u.test(part))) {
+    fail(`${label}: expected a canonical multi-label public DNS hostname`);
+  }
+  const suffix = labels.at(-1);
+  const lastTwo = labels.slice(-2).join(".");
+  if (SPECIAL_USE_HOSTS.has(url.hostname) || SPECIAL_USE_HOSTS.has(suffix) || SPECIAL_USE_HOSTS.has(lastTwo)) {
+    fail(`${label}: special-use and private hostnames are forbidden`);
+  }
   return url;
 }
 
@@ -165,6 +179,40 @@ function validateEndpointBlock(value) {
   if (remote.hostname === hub.hostname) fail("manifest.endpoints: remote A2A and Agent Hub hosts must differ");
 }
 
+function validateEndpointPeer(value, label, expectedUrl, expectedIp) {
+  assertExactKeys(value, ["hostname", "resolvedIpv4", "tlsServerName", "certificateSha256", "certificateSanDnsNames", "captureDestinationIp"], label);
+  const hostname = new URL(expectedUrl).hostname;
+  if (value.hostname !== hostname || value.tlsServerName !== hostname || value.captureDestinationIp !== expectedIp) {
+    fail(`${label}: DNS, TLS SNI, and capture destination must bind the exact endpoint`);
+  }
+  assertArray(value.resolvedIpv4, `${label}.resolvedIpv4`, { min: 1, max: 32 });
+  value.resolvedIpv4.forEach((address, index) => assertIpv4(address, `${label}.resolvedIpv4[${index}]`, { publicOnly: true }));
+  assertUnique(value.resolvedIpv4, `${label}.resolvedIpv4`);
+  if (!value.resolvedIpv4.includes(expectedIp)) fail(`${label}: signed DNS evidence does not include the captured endpoint IP`);
+  assertSha256(value.certificateSha256, `${label}.certificateSha256`);
+  assertArray(value.certificateSanDnsNames, `${label}.certificateSanDnsNames`, { min: 1, max: 128 });
+  value.certificateSanDnsNames.forEach((name, index) => assertSafeString(name, `${label}.certificateSanDnsNames[${index}]`, { max: 253 }));
+  assertUnique(value.certificateSanDnsNames, `${label}.certificateSanDnsNames`);
+  if (!value.certificateSanDnsNames.includes(hostname)) fail(`${label}: certificate SAN evidence must contain the exact canonical hostname`);
+}
+
+export function validateEndpointIdentity(value, endpoints) {
+  assertExactKeys(value, ["schemaVersion", "remote", "hub"], "endpoint identity");
+  if (value.schemaVersion !== 1) fail("endpoint identity.schemaVersion: expected 1");
+  validateEndpointPeer(value.remote, "endpoint identity.remote", endpoints.remoteUrl, endpoints.remoteIp);
+  validateEndpointPeer(value.hub, "endpoint identity.hub", endpoints.hubUrl, endpoints.hubIp);
+  if (value.remote.certificateSha256 === value.hub.certificateSha256) fail("endpoint identity: remote and Hub certificates must differ");
+  return value;
+}
+
+function validateHubControlPlane(value) {
+  assertExactKeys(value, ["snapshotId", "databaseIdentitySha256", "agentHubLockDigestSha256", "wireConformanceArtifactDigestSha256"], "manifest.hubControlPlane");
+  assertSafeString(value.snapshotId, "manifest.hubControlPlane.snapshotId", { min: 64, max: 64, pattern: /^[0-9a-f]{64}$/u });
+  for (const key of ["databaseIdentitySha256", "agentHubLockDigestSha256", "wireConformanceArtifactDigestSha256"]) {
+    assertSha256(value[key], `manifest.hubControlPlane.${key}`);
+  }
+}
+
 function validateCapture(value) {
   assertExactKeys(value, ["format", "raw", "decodedPcap", "tlsKeyLog", "tsharkVersion"], "manifest.capture");
   if (!new Set(["pcap", "pcapng", "etl"]).has(value.format)) fail("manifest.capture.format: expected pcap, pcapng, or etl");
@@ -183,7 +231,7 @@ function validateDescriptorArray(values, label) {
 }
 
 export function validatePackagedLiveManifest(value) {
-  assertExactKeys(value, ["schemaVersion", "repository", "heads", "workflow", "target", "endpoints", "installerProvenance", "installedExecutable", "installReceipt", "capture", "hubEvidence", "remoteServerEvidence", "hostIdentity", "wireConformance", "faultMatrix", "caseIds", "vectorCount"], "manifest");
+  assertExactKeys(value, ["schemaVersion", "repository", "heads", "workflow", "target", "endpoints", "installerArtifact", "attestationReport", "installerProvenance", "installedExecutable", "installReceipt", "capture", "hubEvidence", "remoteServerEvidence", "hostIdentity", "endpointIdentity", "hubControlPlane", "wireConformance", "faultMatrix", "caseIds", "vectorCount"], "manifest");
   if (value.schemaVersion !== 1) fail("manifest.schemaVersion: expected 1");
   if (value.repository !== "lvis-project/lvis-app") fail("manifest.repository: unexpected repository");
   assertExactKeys(value.heads, ["app", "hub", "server"], "manifest.heads");
@@ -195,6 +243,8 @@ export function validatePackagedLiveManifest(value) {
   if (!Number.isSafeInteger(value.target.targetAgentId) || value.target.targetAgentId <= 0 || value.target.targetAgentId > 2_147_483_647) fail("manifest.target.targetAgentId: expected bounded positive integer");
   assertSafeString(value.target.label, "manifest.target.label", { max: 256 });
   validateEndpointBlock(value.endpoints);
+  validateDescriptor(value.installerArtifact, "manifest.installerArtifact");
+  validateDescriptor(value.attestationReport, "manifest.attestationReport");
   validateDescriptor(value.installerProvenance, "manifest.installerProvenance");
   validateDescriptor(value.installedExecutable, "manifest.installedExecutable");
   if (!value.installedExecutable.path.startsWith("installed/")) fail("manifest.installedExecutable.path: expected a manifest-root installed bundle path");
@@ -204,6 +254,8 @@ export function validatePackagedLiveManifest(value) {
   for (const key of ["logs", "audits", "traces"]) validateDescriptorArray(value.hubEvidence[key], `manifest.hubEvidence.${key}`);
   validateDescriptorArray(value.remoteServerEvidence, "manifest.remoteServerEvidence");
   validateDescriptor(value.hostIdentity, "manifest.hostIdentity");
+  validateDescriptor(value.endpointIdentity, "manifest.endpointIdentity");
+  validateHubControlPlane(value.hubControlPlane);
   validateDescriptor(value.wireConformance, "manifest.wireConformance");
   validateDescriptor(value.faultMatrix, "manifest.faultMatrix");
   validateCaseIds(value.caseIds, "manifest.caseIds");
@@ -215,25 +267,46 @@ export function readAndValidateManifestArtifacts(manifestPath, manifest) {
   const artifacts = Object.create(null);
   artifacts.provenance = readEvidenceDescriptor(manifestPath, manifest.installerProvenance, "installer provenance", { maxBytes: 2 * 1024 * 1024 });
   const provenance = validateProvenance(parseStrictJson(artifacts.provenance.bytes.toString("utf8"), "installer provenance"));
-  if (provenance.source.appHead !== manifest.heads.app || provenance.source.agentHubHead !== manifest.heads.hub || provenance.workflow.runId !== manifest.workflow.runId || provenance.workflow.attempt !== manifest.workflow.attempt) {
+  if (provenance.source.appHead !== manifest.heads.app || provenance.source.agentHubHead !== manifest.heads.hub
+    || provenance.source.agentHubLockDigestSha256 !== manifest.hubControlPlane.agentHubLockDigestSha256
+    || provenance.workflow.runId !== manifest.workflow.runId || provenance.workflow.attempt !== manifest.workflow.attempt) {
     fail("installer provenance: head/workflow bindings do not match signed live manifest");
   }
   artifacts.provenanceValue = provenance;
-  artifacts.installedExecutable = readEvidenceDescriptor(manifestPath, manifest.installedExecutable, "installed packaged executable", { maxBytes: 1024 * 1024 * 1024 });
+  artifacts.installer = readEvidenceDescriptor(manifestPath, manifest.installerArtifact, "attested installer", { maxBytes: 4 * 1024 * 1024 * 1024, loadBytes: false });
+  artifacts.attestationReport = readEvidenceDescriptor(manifestPath, manifest.attestationReport, "stored gh attestation report", { maxBytes: 8 * 1024 * 1024 });
+  if (artifacts.installer.sha256 !== provenance.installer.sha256 || artifacts.installer.size !== provenance.installer.size
+    || basename(artifacts.installer.path) !== provenance.installer.name || artifacts.attestationReport.sha256 !== provenance.attestation.reportSha256) {
+    fail("installer provenance: installer/report artifacts do not match the signed provenance claims");
+  }
+  artifacts.storedAttestation = verifyAttestationReport(artifacts.attestationReport, {
+    installerSha256: artifacts.installer.sha256,
+    appHead: manifest.heads.app,
+    repository: manifest.repository,
+    workflowRunId: manifest.workflow.runId,
+    workflowRunAttempt: manifest.workflow.attempt,
+  });
+  artifacts.installedExecutable = readEvidenceDescriptor(manifestPath, manifest.installedExecutable, "installed packaged executable", { maxBytes: 1024 * 1024 * 1024, loadBytes: false });
   artifacts.installReceipt = readEvidenceDescriptor(manifestPath, manifest.installReceipt, "install receipt", { maxBytes: 1024 * 1024 });
   validateInstallReceipt(parseStrictJson(artifacts.installReceipt.bytes.toString("utf8"), "install receipt"), manifest, provenance);
-  artifacts.captureRaw = readEvidenceDescriptor(manifestPath, manifest.capture.raw, "raw packet capture", { maxBytes: 4 * 1024 * 1024 * 1024 });
+  artifacts.captureRaw = readEvidenceDescriptor(manifestPath, manifest.capture.raw, "raw packet capture", { maxBytes: 4 * 1024 * 1024 * 1024, loadBytes: false });
   artifacts.capturePcap = manifest.capture.format === "etl"
-    ? readEvidenceDescriptor(manifestPath, manifest.capture.decodedPcap, "ETL decoded pcap", { maxBytes: 4 * 1024 * 1024 * 1024 })
+    ? readEvidenceDescriptor(manifestPath, manifest.capture.decodedPcap, "ETL decoded pcap", { maxBytes: 4 * 1024 * 1024 * 1024, loadBytes: false })
     : artifacts.captureRaw;
-  artifacts.tlsKeyLog = readEvidenceDescriptor(manifestPath, manifest.capture.tlsKeyLog, "TLS key log", { maxBytes: 64 * 1024 * 1024 });
+  artifacts.tlsKeyLog = readEvidenceDescriptor(manifestPath, manifest.capture.tlsKeyLog, "TLS key log", { maxBytes: 64 * 1024 * 1024, loadBytes: false });
   artifacts.hostIdentity = readEvidenceDescriptor(manifestPath, manifest.hostIdentity, "two-host identity", { maxBytes: 1024 * 1024 });
+  artifacts.endpointIdentity = readEvidenceDescriptor(manifestPath, manifest.endpointIdentity, "DNS TLS endpoint identity", { maxBytes: 1024 * 1024 });
   artifacts.wireConformance = readEvidenceDescriptor(manifestPath, manifest.wireConformance, "wire conformance", { maxBytes: 8 * 1024 * 1024 });
   artifacts.faultMatrix = readEvidenceDescriptor(manifestPath, manifest.faultMatrix, "fault matrix", { maxBytes: 2 * 1024 * 1024 });
-  artifacts.hubEvidence = Object.fromEntries(["logs", "audits", "traces"].map((kind) => [kind, manifest.hubEvidence[kind].map((descriptor, index) => readEvidenceDescriptor(manifestPath, descriptor, `Hub ${kind}[${index}]`, { maxBytes: 512 * 1024 * 1024 }))]));
-  artifacts.remoteServerEvidence = manifest.remoteServerEvidence.map((descriptor, index) => readEvidenceDescriptor(manifestPath, descriptor, `remote server evidence[${index}]`, { maxBytes: 512 * 1024 * 1024 }));
+  artifacts.hubEvidence = Object.fromEntries(["logs", "audits", "traces"].map((kind) => [kind, manifest.hubEvidence[kind].map((descriptor, index) => readEvidenceDescriptor(manifestPath, descriptor, `Hub ${kind}[${index}]`, { maxBytes: 512 * 1024 * 1024, loadBytes: false, needles: CANARIES }))]));
+  const remoteNeedles = [...CANARIES, ...PACKAGED_LIVE_CASE_IDS.map((caseId) => `[LVIS-P4-5:${caseId}]`)];
+  artifacts.remoteServerEvidence = manifest.remoteServerEvidence.map((descriptor, index) => readEvidenceDescriptor(manifestPath, descriptor, `remote server evidence[${index}]`, { maxBytes: 512 * 1024 * 1024, loadBytes: false, needles: remoteNeedles }));
   validateHostIdentity(parseStrictJson(artifacts.hostIdentity.bytes.toString("utf8"), "two-host identity"), manifest.endpoints);
-  validateWireConformance(parseStrictJson(artifacts.wireConformance.bytes.toString("utf8"), "wire conformance"), manifest.heads);
+  artifacts.endpointIdentityValue = validateEndpointIdentity(parseStrictJson(artifacts.endpointIdentity.bytes.toString("utf8"), "DNS TLS endpoint identity"), manifest.endpoints);
+  artifacts.wireConformanceValue = validateWireConformance(parseStrictJson(artifacts.wireConformance.bytes.toString("utf8"), "wire conformance"), manifest.heads);
+  if (artifacts.wireConformanceValue.bundleSha256 !== manifest.hubControlPlane.wireConformanceArtifactDigestSha256) {
+    fail("wire conformance: bundle digest does not match the immutable Hub control-plane record expectation");
+  }
   validateFaultMatrix(parseStrictJson(artifacts.faultMatrix.bytes.toString("utf8"), "fault matrix"));
   return artifacts;
 }
@@ -274,6 +347,7 @@ export function validateWireConformance(value, heads) {
   assertHeadSha(value.tckCommit, "wire conformance.tckCommit");
   assertSha256(value.bundleSha256, "wire conformance.bundleSha256");
   if (!Number.isSafeInteger(value.vectorCount) || value.vectorCount <= 0 || value.skipped !== 0 || value.passed !== value.vectorCount) fail("wire conformance: positive vector count, zero skips, and all-pass are required");
+  return value;
 }
 
 export function validateFaultMatrix(value) {
@@ -350,6 +424,37 @@ export function parseTsharkFields(text) {
   return records;
 }
 
+export function parseTsharkSniFields(text) {
+  const records = [];
+  for (const [lineIndex, line] of text.split(/\r?\n/u).entries()) {
+    if (!line) continue;
+    const fields = line.split("\t");
+    if (fields.length !== 4) fail(`tshark SNI line ${lineIndex + 1}: expected exactly 4 fields`);
+    const [sourceIp, destinationIp, destinationPort, serverName] = fields;
+    assertIpv4(sourceIp, `tshark SNI line ${lineIndex + 1} source IP`);
+    assertIpv4(destinationIp, `tshark SNI line ${lineIndex + 1} destination IP`);
+    if (destinationPort !== "443") fail(`tshark SNI line ${lineIndex + 1}: expected destination port 443`);
+    assertSafeString(serverName, `tshark SNI line ${lineIndex + 1} server name`, { max: 253, pattern: /^[a-z0-9.-]+$/u });
+    records.push({ sourceIp, destinationIp, destinationPort, serverName });
+  }
+  return records;
+}
+
+export function verifyCapturedEndpointSni(records, endpoints) {
+  const required = [
+    { label: "remote", hostname: new URL(endpoints.remoteUrl).hostname, destinationIp: endpoints.remoteIp },
+    { label: "Hub", hostname: new URL(endpoints.hubUrl).hostname, destinationIp: endpoints.hubIp },
+  ];
+  for (const endpoint of required) {
+    const matches = records.filter((record) => record.sourceIp === endpoints.clientIp
+      && record.destinationIp === endpoint.destinationIp
+      && record.destinationPort === "443"
+      && record.serverName === endpoint.hostname);
+    if (matches.length < 1) fail(`capture: missing exact client -> ${endpoint.label} TLS SNI/IP binding`);
+  }
+  return required.map((endpoint) => ({ hostname: endpoint.hostname, destinationIp: endpoint.destinationIp }));
+}
+
 export function verifyTaskTraffic(records, endpoints) {
   const taskRecords = records.filter((record) => TASK_METHODS.includes(record.message.method));
   const methods = new Set(taskRecords.map((record) => record.message.method));
@@ -382,16 +487,28 @@ export function verifyTaskTraffic(records, endpoints) {
 }
 
 export function verifyHubEvidenceAbsent(hubEvidence) {
+  const contains = (artifact, needle, label) => {
+    if (artifact.bytes) return artifact.bytes.includes(Buffer.from(needle, "utf8"));
+    if (!artifact.needleMatches || !Object.hasOwn(artifact.needleMatches, needle)) fail(`${label}: missing bounded streaming scan result`);
+    return artifact.needleMatches[needle] === true;
+  };
   for (const [kind, artifacts] of Object.entries(hubEvidence)) {
     for (const artifact of artifacts) {
-      for (const canary of CANARIES) if (artifact.bytes.includes(Buffer.from(canary, "utf8"))) fail(`Hub ${kind}: retained forbidden canary ${canary}`);
+      for (const canary of CANARIES) {
+        const found = contains(artifact, canary, `Hub ${kind}`);
+        if (found) fail(`Hub ${kind}: retained forbidden canary ${canary}`);
+      }
     }
   }
 }
 
 export function verifyRemoteServerEvidence(artifacts) {
-  const corpus = Buffer.concat(artifacts.flatMap((artifact) => [artifact.bytes, Buffer.from("\n")]));
-  for (const canary of CANARIES) if (!corpus.includes(Buffer.from(canary, "utf8"))) fail(`remote server evidence: missing canary ${canary}`);
-  for (const caseId of REMOTE_OBSERVED_CASE_IDS) if (!corpus.includes(Buffer.from(`[LVIS-P4-5:${caseId}]`, "utf8"))) fail(`remote server evidence: missing case marker ${caseId}`);
-  for (const caseId of NO_SOCKET_CASE_IDS) if (corpus.includes(Buffer.from(`[LVIS-P4-5:${caseId}]`, "utf8"))) fail(`remote server evidence: no-socket case unexpectedly arrived: ${caseId}`);
+  const contains = (needle) => artifacts.some((artifact) => {
+    if (artifact.bytes) return artifact.bytes.includes(Buffer.from(needle, "utf8"));
+    if (!artifact.needleMatches || !Object.hasOwn(artifact.needleMatches, needle)) fail("remote server evidence: missing bounded streaming scan result");
+    return artifact.needleMatches[needle] === true;
+  });
+  for (const canary of CANARIES) if (!contains(canary)) fail(`remote server evidence: missing canary ${canary}`);
+  for (const caseId of REMOTE_OBSERVED_CASE_IDS) if (!contains(`[LVIS-P4-5:${caseId}]`)) fail(`remote server evidence: missing case marker ${caseId}`);
+  for (const caseId of NO_SOCKET_CASE_IDS) if (contains(`[LVIS-P4-5:${caseId}]`)) fail(`remote server evidence: no-socket case unexpectedly arrived: ${caseId}`);
 }

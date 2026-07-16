@@ -7,9 +7,8 @@ import {
   closeSync,
   constants,
   fstatSync,
-  lstatSync,
   openSync,
-  readFileSync,
+  readSync,
   realpathSync,
 } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -76,37 +75,102 @@ export function canonicalJson(value) {
   return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
 }
 
-export function readRegularFile(path, label, { maxBytes = 128 * 1024 * 1024, allowAbsolute = true } = {}) {
-  if (!allowAbsolute && isAbsolute(path)) fail(`${label}: absolute path is forbidden`);
-  let stat;
-  try {
-    stat = lstatSync(path);
-  } catch (error) {
-    fail(`${label}: cannot stat (${error.message})`);
+const STREAM_CHUNK_BYTES = 1024 * 1024;
+
+function sameFileIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size;
+}
+
+function normalizeNeedles(needles, label) {
+  assertArray(needles, `${label} streaming needles`, { max: 512 });
+  return needles.map((needle, index) => {
+    assertSafeString(needle, `${label} streaming needles[${index}]`, { max: 4096 });
+    return { text: needle, bytes: Buffer.from(needle, "utf8") };
+  });
+}
+
+function updateNeedleMatches(chunk, carry, needles, matches) {
+  if (needles.length === 0) return Buffer.alloc(0);
+  const searchable = carry.length === 0 ? chunk : Buffer.concat([carry, chunk]);
+  for (const needle of needles) {
+    if (!matches[needle.text] && searchable.includes(needle.bytes)) matches[needle.text] = true;
   }
-  if (stat.isSymbolicLink() || !stat.isFile()) fail(`${label}: must be a regular non-symlink file`);
-  if (stat.size <= 0 || stat.size > maxBytes) fail(`${label}: invalid file size ${stat.size}`);
+  const maxNeedleBytes = Math.max(...needles.map((needle) => needle.bytes.length));
+  return searchable.subarray(Math.max(0, searchable.length - Math.max(0, maxNeedleBytes - 1)));
+}
+
+export function readRegularFile(path, label, {
+  maxBytes = 128 * 1024 * 1024,
+  allowAbsolute = true,
+  loadBytes = true,
+  needles = [],
+} = {}) {
+  if (!allowAbsolute && isAbsolute(path)) fail(`${label}: absolute path is forbidden`);
   let descriptor;
+  let canonicalDescriptor;
   let bytes;
   let opened;
+  let canonicalPath;
   try {
+    // Open first with O_NOFOLLOW. There is intentionally no path-based lstat
+    // check before this operation: the descriptor is the authority for type,
+    // size, hashing, and identity, avoiding the check/use race CodeQL flags.
     descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     opened = fstatSync(descriptor);
-    const current = lstatSync(path);
-    if (!opened.isFile() || current.isSymbolicLink() || !current.isFile()
-      || opened.dev !== current.dev || opened.ino !== current.ino || opened.size !== current.size) {
-      fail(`${label}: file identity changed while opening`);
+    if (!opened.isFile()) fail(`${label}: must be a regular non-symlink file`);
+    if (opened.size <= 0 || opened.size > maxBytes) fail(`${label}: invalid file size ${opened.size}`);
+
+    canonicalPath = realpathSync(path);
+    canonicalDescriptor = openSync(canonicalPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const canonicalOpened = fstatSync(canonicalDescriptor);
+    if (!canonicalOpened.isFile() || !sameFileIdentity(opened, canonicalOpened)) {
+      fail(`${label}: canonical path does not identify the opened file`);
     }
-    bytes = readFileSync(descriptor);
+
+    const hash = createHash("sha256");
+    const chunks = loadBytes ? [] : null;
+    const normalizedNeedles = normalizeNeedles(needles, label);
+    const needleMatches = Object.fromEntries(normalizedNeedles.map((needle) => [needle.text, false]));
+    let carry = Buffer.alloc(0);
+    let offset = 0;
+    while (offset < opened.size) {
+      const chunk = Buffer.allocUnsafe(Math.min(STREAM_CHUNK_BYTES, opened.size - offset));
+      const count = readSync(descriptor, chunk, 0, chunk.length, offset);
+      if (count <= 0) fail(`${label}: file ended before its descriptor size`);
+      const data = count === chunk.length ? chunk : chunk.subarray(0, count);
+      hash.update(data);
+      if (chunks) chunks.push(data);
+      carry = updateNeedleMatches(data, carry, normalizedNeedles, needleMatches);
+      offset += count;
+    }
+    const afterRead = fstatSync(descriptor);
+    if (!sameFileIdentity(opened, afterRead)) fail(`${label}: descriptor identity changed while reading`);
+    bytes = chunks ? Buffer.concat(chunks, opened.size) : undefined;
+    return {
+      path: canonicalPath,
+      bytes,
+      size: opened.size,
+      sha256: hash.digest("hex"),
+      device: opened.dev,
+      inode: opened.ino,
+      needleMatches,
+    };
   } catch (error) {
     if (String(error.message).startsWith("[a2a-p4-5-evidence]")) throw error;
     fail(`${label}: cannot open without following links (${error.message})`);
   } finally {
+    if (canonicalDescriptor !== undefined) closeSync(canonicalDescriptor);
     if (descriptor !== undefined) closeSync(descriptor);
   }
-  if (bytes.length !== opened.size) fail(`${label}: file size changed while reading`);
-  const resolvedPath = realpathSync(path);
-  return { path: resolvedPath, bytes, size: opened.size, sha256: sha256Buffer(bytes) };
+}
+
+export function assertArtifactStable(artifact, label, { maxBytes = artifact.size } = {}) {
+  const current = readRegularFile(artifact.path, `${label} stability check`, { maxBytes, loadBytes: false });
+  if (current.sha256 !== artifact.sha256 || current.size !== artifact.size
+    || current.device !== artifact.device || current.inode !== artifact.inode) {
+    fail(`${label}: artifact identity or digest changed after verification`);
+  }
+  return artifact;
 }
 
 export function resolveEvidencePath(manifestPath, candidate, label) {
@@ -120,18 +184,16 @@ export function resolveEvidencePath(manifestPath, candidate, label) {
   if (!rel || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
     fail(`${label}: path escapes or aliases the evidence root`);
   }
-  let cursor = base;
-  const components = rel.split(sep);
-  for (const [index, component] of components.entries()) {
-    cursor = resolve(cursor, component);
-    let componentStat;
-    try {
-      componentStat = lstatSync(cursor);
-    } catch (error) {
-      fail(`${label}: missing path component (${error.message})`);
-    }
-    if (componentStat.isSymbolicLink()) fail(`${label}: symlink path components are forbidden`);
-    if (index < components.length - 1 && !componentStat.isDirectory()) fail(`${label}: non-directory path component`);
+  let canonicalTarget;
+  try {
+    canonicalTarget = realpathSync(target);
+  } catch (error) {
+    fail(`${label}: missing path component (${error.message})`);
+  }
+  if (canonicalTarget !== target) fail(`${label}: symlink path components or non-canonical aliases are forbidden`);
+  const canonicalRelative = relative(base, canonicalTarget);
+  if (!canonicalRelative || canonicalRelative === ".." || canonicalRelative.startsWith(`..${sep}`) || isAbsolute(canonicalRelative)) {
+    fail(`${label}: canonical artifact escapes the evidence root`);
   }
   return target;
 }

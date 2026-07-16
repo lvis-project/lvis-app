@@ -10,17 +10,31 @@ import {
   assertSha256,
   fail,
   readRegularFile,
+  sha256Buffer,
 } from "./evidence-lib.mjs";
 import { parseStrictJson } from "./strict-json.mjs";
 
 export const SUPPORTED_INSTALLER_OSES = Object.freeze(["macos", "windows", "linux"]);
 
-export function runFixedProgram(command, args, { env = {}, inheritEnv = true, unsetEnv = [], label = command, maxBuffer = 4 * 1024 * 1024 } = {}) {
-  const childEnv = { ...(inheritEnv ? process.env : {}), ...env };
-  for (const key of unsetEnv) delete childEnv[key];
+const SAFE_CHILD_ENV_KEYS = Object.freeze([
+  "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP",
+  "USERPROFILE", "SystemRoot", "WINDIR", "ComSpec", "PATHEXT",
+]);
+
+function baseChildEnvironment() {
+  return Object.fromEntries(SAFE_CHILD_ENV_KEYS
+    .filter((key) => process.env[key] !== undefined)
+    .map((key) => [key, process.env[key]]));
+}
+
+export function runFixedProgram(command, args, {
+  env = {}, label = command, maxBuffer = 4 * 1024 * 1024, input,
+} = {}) {
+  const childEnv = { ...baseChildEnvironment(), ...env };
   const result = spawnSync(command, args, {
     encoding: "utf8",
     env: childEnv,
+    input,
     maxBuffer,
     timeout: 60_000,
     windowsHide: true,
@@ -38,14 +52,40 @@ function requireNonemptyOutput(result, label) {
   return output;
 }
 
-function verifyMacos(installerPath, run) {
+function normalizeHexFingerprint(value, label, { lengths = [64] } = {}) {
+  const ordered = [...new Set(lengths)].sort((left, right) => left - right);
+  const alternatives = ordered.map((length) => `[0-9A-Fa-f]{${length}}`).join("|");
+  assertSafeString(value, label, { min: ordered[0], max: ordered.at(-1), pattern: new RegExp(`^(?:${alternatives})$`, "u") });
+  return value.toUpperCase();
+}
+
+function parseMacIdentity(details, label) {
+  const authority = /(?:^|\n)Authority=(.+)$/mu.exec(details)?.[1]?.trim();
+  const teamId = /(?:^|\n)TeamIdentifier=([0-9A-Z]+)$/mu.exec(details)?.[1]?.trim();
+  if (!authority || !teamId) fail(`${label}: missing Authority or TeamIdentifier`);
+  return { authority, teamId };
+}
+
+function verifyMacos(installerPath, run, expected) {
+  const expectedTeamId = assertSafeString(expected.macTeamId, "expected macOS Team ID", {
+    min: 10, max: 64, pattern: /^[0-9A-Z]+$/u,
+  });
+  const expectedCertificateSha256 = normalizeHexFingerprint(expected.macCertificateSha256, "expected macOS certificate SHA-256");
   run("codesign", ["--verify", "--deep", "--strict", "--verbose=4", installerPath], { label: "codesign verification" });
   const details = requireNonemptyOutput(
     run("codesign", ["--display", "--verbose=4", installerPath], { label: "codesign identity" }),
     "codesign identity",
   );
-  const identity = /(?:^|\n)Authority=(.+)$/mu.exec(details)?.[1]?.trim();
-  if (!identity) fail("codesign identity: missing Authority");
+  const identity = parseMacIdentity(details, "codesign identity");
+  if (identity.teamId !== expectedTeamId) fail("codesign identity: TeamIdentifier does not match the pinned LVIS Team ID");
+  const certificateOutput = requireNonemptyOutput(
+    run("security", ["find-certificate", "-c", identity.authority, "-Z"], { label: "macOS signer certificate fingerprint" }),
+    "macOS signer certificate fingerprint",
+  );
+  const certificateMatches = [...certificateOutput.matchAll(/SHA-256 hash:\s*([0-9A-F]{64})/gu)].map((match) => match[1]);
+  if (certificateMatches.length !== 1 || certificateMatches[0] !== expectedCertificateSha256) {
+    fail("macOS signer certificate fingerprint does not match the pinned LVIS certificate");
+  }
   const assessment = requireNonemptyOutput(
     run("spctl", ["--assess", "--type", "open", "--context", "context:primary-signature", "--verbose=4", installerPath], { label: "spctl assessment" }),
     "spctl assessment",
@@ -68,8 +108,10 @@ function verifyMacos(installerPath, run) {
       run("codesign", ["--display", "--verbose=4", appPath], { label: "inner app codesign identity" }),
       "inner app codesign identity",
     );
-    appIdentity = /(?:^|\n)Authority=(.+)$/mu.exec(appDetails)?.[1]?.trim();
-    if (!appIdentity) fail("inner app codesign identity: missing Authority");
+    appIdentity = parseMacIdentity(appDetails, "inner app codesign identity");
+    if (appIdentity.teamId !== expectedTeamId || appIdentity.authority !== identity.authority) {
+      fail("inner app codesign identity does not match the pinned installer identity");
+    }
     appAssessment = requireNonemptyOutput(
       run("spctl", ["--assess", "--type", "execute", "--verbose=4", appPath], { label: "inner app Gatekeeper assessment" }),
       "inner app Gatekeeper assessment",
@@ -80,16 +122,21 @@ function verifyMacos(installerPath, run) {
   }
   return {
     platform: "macos",
-    status: "verified",
-    installerCodesignIdentity: identity,
+    status: "publisher-verified",
+    identityKind: "native-signature",
+    installerCodesignIdentity: identity.authority,
+    teamId: expectedTeamId,
+    certificateSha256: expectedCertificateSha256,
     installerSpctlAssessment: assessment.slice(0, 2000),
-    appCodesignIdentity: appIdentity,
+    appCodesignIdentity: appIdentity.authority,
     appSpctlAssessment: appAssessment.slice(0, 2000),
     verifier: "codesign+spctl",
   };
 }
 
-function verifyWindows(installerPath, run) {
+function verifyWindows(installerPath, run, expected) {
+  const expectedSubject = assertSafeString(expected.windowsPublisherSubject, "expected Windows publisher subject", { max: 2048 });
+  const expectedThumbprint = normalizeHexFingerprint(expected.windowsCertificateThumbprint, "expected Windows certificate thumbprint", { lengths: [40, 64] });
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "$signature = Get-AuthenticodeSignature -LiteralPath $env:LVIS_INSTALLER_PATH",
@@ -113,9 +160,13 @@ function verifyWindows(installerPath, run) {
     max: 128,
     pattern: /^[0-9A-F]+$/u,
   });
+  if (value.subject !== expectedSubject || value.thumbprint !== expectedThumbprint) {
+    fail("Authenticode result: publisher subject or certificate thumbprint does not match the pinned LVIS identity");
+  }
   return {
     platform: "windows",
-    status: "verified",
+    status: "publisher-verified",
+    identityKind: "native-signature",
     subject: value.subject,
     thumbprint: value.thumbprint,
     statusMessage: String(value.statusMessage).slice(0, 2000),
@@ -134,7 +185,7 @@ function verifyLinux(installerPath, run) {
     }));
     assertExactKeys(fields, ["Package", "Version", "Architecture"], "dpkg-deb identity");
     return {
-      platform: "linux", status: "verified", format: "deb",
+      platform: "linux", status: "metadata-only", identityKind: "package-metadata", format: "deb",
       packageName: assertSafeString(fields.Package, "deb package name", { max: 128 }),
       version: assertSafeString(fields.Version, "deb package version", { max: 128 }),
       architecture: assertSafeString(fields.Architecture, "deb architecture", { max: 64 }),
@@ -146,7 +197,7 @@ function verifyLinux(installerPath, run) {
     const fields = raw.split(/\r?\n/u).filter(Boolean);
     if (fields.length !== 3) fail("rpm identity: expected name, version-release, architecture");
     return {
-      platform: "linux", status: "verified", format: "rpm",
+      platform: "linux", status: "metadata-only", identityKind: "package-metadata", format: "rpm",
       packageName: assertSafeString(fields[0], "rpm package name", { max: 128 }),
       version: assertSafeString(fields[1], "rpm package version", { max: 128 }),
       architecture: assertSafeString(fields[2], "rpm architecture", { max: 64 }),
@@ -162,7 +213,7 @@ function verifyLinux(installerPath, run) {
     const version = /^LVIS-(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)-linux-[A-Za-z0-9_-]+\.AppImage$/u.exec(basename(installerPath))?.[1];
     if (!version) fail("AppImage identity: filename does not bind an exact semantic version");
     return {
-      platform: "linux", status: "verified", format: "appimage",
+      platform: "linux", status: "metadata-only", identityKind: "package-metadata", format: "appimage",
       packageName: "LVIS", version,
       architecture: assertSafeString(machine, "AppImage machine", { max: 128 }),
       verifier: "file+readelf",
@@ -171,10 +222,10 @@ function verifyLinux(installerPath, run) {
   fail(`linux installer: unsupported extension for ${basename(installerPath)}`);
 }
 
-export function verifyInstallerIdentity(os, installerPath, run = runFixedProgram) {
+export function verifyInstallerIdentity(os, installerPath, { run = runFixedProgram, expected = {} } = {}) {
   if (!SUPPORTED_INSTALLER_OSES.includes(os)) fail(`unsupported installer OS ${os}`);
-  if (os === "macos") return verifyMacos(installerPath, run);
-  if (os === "windows") return verifyWindows(installerPath, run);
+  if (os === "macos") return verifyMacos(installerPath, run, expected);
+  if (os === "windows") return verifyWindows(installerPath, run, expected);
   return verifyLinux(installerPath, run);
 }
 
@@ -337,6 +388,39 @@ export function verifyAttestationReport(reportArtifact, {
   };
 }
 
+export function independentlyVerifyInstallerAttestation(installerArtifact, {
+  appHead,
+  repository,
+  workflowRunId,
+  workflowRunAttempt,
+  run = runFixedProgram,
+  token = process.env.GH_TOKEN,
+}) {
+  if (!token) fail("GH_TOKEN is required only for independent installer attestation verification");
+  const result = run("gh", [
+    "attestation", "verify", installerArtifact.path,
+    "--repo", repository,
+    "--source-digest", appHead,
+    "--signer-workflow", "lvis-project/lvis-app/.github/workflows/a2a-p4-5-packaged-evidence.yml",
+    "--predicate-type", SLSA_PROVENANCE_V1,
+    "--deny-self-hosted-runners",
+    "--format", "json",
+  ], {
+    env: { GH_TOKEN: token },
+    label: "independent gh installer attestation verification",
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  const bytes = Buffer.from(result.stdout, "utf8");
+  if (bytes.length === 0) fail("independent gh installer attestation verification returned no report");
+  return verifyAttestationReport({ bytes, sha256: sha256Buffer(bytes) }, {
+    installerSha256: installerArtifact.sha256,
+    appHead,
+    repository,
+    workflowRunId,
+    workflowRunAttempt,
+  });
+}
+
 export function collectFixedToolVersions(run = runFixedProgram) {
   const firstLine = (result, label) => assertSafeString(result.stdout.split(/\r?\n/u)[0], label, { max: 512 });
   return {
@@ -348,20 +432,21 @@ export function collectFixedToolVersions(run = runFixedProgram) {
 }
 
 export function validateProvenance(value, label = "installer provenance") {
-  assertExactKeys(value, ["schemaVersion", "generatedAt", "installer", "source", "workflow", "signature", "attestation", "locks", "tools"], label);
+  assertExactKeys(value, ["schemaVersion", "generatedAt", "installer", "source", "workflow", "platformIdentity", "attestation", "locks", "tools"], label);
   if (value.schemaVersion !== 1) fail(`${label}.schemaVersion: expected 1`);
   assertSafeString(value.generatedAt, `${label}.generatedAt`, { pattern: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u });
   assertExactKeys(value.installer, ["name", "size", "sha256"], `${label}.installer`);
   assertSafeString(value.installer.name, `${label}.installer.name`, { max: 512 });
   if (!Number.isSafeInteger(value.installer.size) || value.installer.size <= 0) fail(`${label}.installer.size: invalid`);
   assertSafeString(value.installer.sha256, `${label}.installer.sha256`, { min: 64, max: 64, pattern: /^[0-9a-f]{64}$/u });
-  assertExactKeys(value.source, ["repository", "appHead", "agentHubHead"], `${label}.source`);
+  assertExactKeys(value.source, ["repository", "appHead", "agentHubHead", "agentHubLockDigestSha256"], `${label}.source`);
   if (value.source.repository !== "lvis-project/lvis-app") fail(`${label}.source.repository: unexpected repository`);
   assertHeadSha(value.source.appHead, `${label}.source.appHead`);
   assertHeadSha(value.source.agentHubHead, `${label}.source.agentHubHead`);
+  assertSha256(value.source.agentHubLockDigestSha256, `${label}.source.agentHubLockDigestSha256`);
   assertExactKeys(value.workflow, ["runId", "attempt"], `${label}.workflow`);
   if (!/^\d+$/u.test(value.workflow.runId) || !/^\d+$/u.test(value.workflow.attempt)) fail(`${label}.workflow: runId/attempt must be decimal strings`);
-  assertRecordWithStatus(value.signature, `${label}.signature`);
+  assertPlatformIdentity(value.platformIdentity, `${label}.platformIdentity`);
   assertExactKeys(value.attestation, ["reportSha256", "subjectSha256", "sourceHead", "repository", "workflowRunId", "workflowRunAttempt"], `${label}.attestation`);
   if (value.attestation.subjectSha256 !== value.installer.sha256 || value.attestation.sourceHead !== value.source.appHead || value.attestation.repository !== value.source.repository || value.attestation.workflowRunId !== value.workflow.runId || value.attestation.workflowRunAttempt !== value.workflow.attempt) {
     fail(`${label}.attestation: source/subject bindings do not match provenance`);
@@ -370,24 +455,29 @@ export function validateProvenance(value, label = "installer provenance") {
   assertHeadSha(value.attestation.sourceHead, `${label}.attestation.sourceHead`);
   assertExactKeys(value.locks, ["packageJsonSha256", "bunLockSha256"], `${label}.locks`);
   for (const key of Object.keys(value.locks)) assertSafeString(value.locks[key], `${label}.locks.${key}`, { min: 64, max: 64, pattern: /^[0-9a-f]{64}$/u });
-  assertExactKeys(value.tools, ["node", "bun", "git", "gh", "signatureVerifier"], `${label}.tools`);
+  assertExactKeys(value.tools, ["node", "bun", "git", "gh", "identityVerifier"], `${label}.tools`);
   for (const [key, tool] of Object.entries(value.tools)) assertSafeString(tool, `${label}.tools.${key}`, { max: 512 });
   return value;
 }
 
-function assertRecordWithStatus(value, label) {
+function assertPlatformIdentity(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${label}: expected object`);
-  if (value.status !== "verified" || !SUPPORTED_INSTALLER_OSES.includes(value.platform)) fail(`${label}: expected verified supported platform`);
+  if (!SUPPORTED_INSTALLER_OSES.includes(value.platform)) fail(`${label}: expected supported platform`);
   if (value.platform === "macos") {
-    assertExactKeys(value, ["platform", "status", "installerCodesignIdentity", "installerSpctlAssessment", "appCodesignIdentity", "appSpctlAssessment", "verifier"], label);
+    assertExactKeys(value, ["platform", "status", "identityKind", "installerCodesignIdentity", "teamId", "certificateSha256", "installerSpctlAssessment", "appCodesignIdentity", "appSpctlAssessment", "verifier"], label);
+    if (value.status !== "publisher-verified" || value.identityKind !== "native-signature") fail(`${label}: expected pinned macOS publisher identity`);
     for (const key of ["installerCodesignIdentity", "installerSpctlAssessment", "appCodesignIdentity", "appSpctlAssessment"]) assertSafeString(value[key], `${label}.${key}`, { max: 2048 });
+    assertSafeString(value.teamId, `${label}.teamId`, { min: 10, max: 64, pattern: /^[0-9A-Z]+$/u });
+    normalizeHexFingerprint(value.certificateSha256, `${label}.certificateSha256`);
   } else if (value.platform === "windows") {
-    assertExactKeys(value, ["platform", "status", "subject", "thumbprint", "statusMessage", "verifier"], label);
+    assertExactKeys(value, ["platform", "status", "identityKind", "subject", "thumbprint", "statusMessage", "verifier"], label);
+    if (value.status !== "publisher-verified" || value.identityKind !== "native-signature") fail(`${label}: expected pinned Windows publisher identity`);
     assertSafeString(value.subject, `${label}.subject`, { max: 2048 });
-    assertSafeString(value.thumbprint, `${label}.thumbprint`, { min: 40, max: 128, pattern: /^[0-9A-F]+$/u });
+    normalizeHexFingerprint(value.thumbprint, `${label}.thumbprint`, { lengths: [40, 64] });
     assertSafeString(value.statusMessage, `${label}.statusMessage`, { max: 2048 });
   } else {
-    assertExactKeys(value, ["platform", "status", "format", "packageName", "version", "architecture", "verifier"], label);
+    assertExactKeys(value, ["platform", "status", "identityKind", "format", "packageName", "version", "architecture", "verifier"], label);
+    if (value.status !== "metadata-only" || value.identityKind !== "package-metadata") fail(`${label}: Linux evidence must be labeled non-cryptographic package metadata`);
     if (!["deb", "rpm", "appimage"].includes(value.format)) fail(`${label}.format: invalid Linux package format`);
     for (const key of ["packageName", "version", "architecture"]) assertSafeString(value[key], `${label}.${key}`, { max: 256 });
   }
