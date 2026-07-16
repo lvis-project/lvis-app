@@ -26,6 +26,12 @@ method MUST NOT send this profile's `A2A-Extensions` header or extension metadat
 and the server MUST NOT echo or apply this profile to such a request. LVIS uses
 its separate durable operation fencing for those methods.
 
+The client MUST send `A2A-Version: 1.0` on every A2A operation, including
+continuation `SendMessage`, `GetTask`, and `CancelTask`. That per-operation
+version header does not activate this extension. Only the initial Send and an
+exact replay of that same initial Send use the activation header and metadata
+defined below.
+
 ## Declaration and bounded parameters
 
 An eligible Agent Card MUST contain exactly one entry in
@@ -35,7 +41,7 @@ An eligible Agent Card MUST contain exactly one entry in
 {
   "uri": "https://lvis.ai/a2a/extensions/exact-send-replay/v1",
   "description": "Durable exact replay for ambiguous non-streaming SendMessage responses.",
-  "required": true,
+  "required": false,
   "params": {
     "profile": "lvis-exact-send-replay",
     "profileVersion": "1",
@@ -50,10 +56,18 @@ The entry MUST satisfy the bounded P4-1 `AgentExtension` parser. `params` MUST b
 a strict object containing exactly the five string members above. Values MUST
 byte-match the literals shown, except `specDigestSha256`, which MUST equal the
 SHA-256 digest of the exact specification bytes served at the canonical URI.
-`resultRetentionSeconds` is the decimal string for seven days. Unknown, missing,
+`resultRetentionSeconds` is the decimal string for seven days and `required`
+MUST be the literal boolean `false`. Unknown, missing,
 duplicated, non-string, differently cased, or differently encoded fields make the
 route ineligible. The extension URI, `required`, and `params` MUST participate in
 the signed Agent Card payload and complete canonical-document hash.
+
+`required: false` avoids claiming that every A2A operation on the interface must
+activate this initial-Send-only profile. LVIS route policy, not the A2A
+`AgentExtension.required` flag, nevertheless mandates the exact entry, exact
+parameters, exact Agent Card digest, and exact served-specification digest before
+an initial Send route is eligible. A route with `required: true` therefore fails
+this LVIS profile just as a missing or malformed entry does.
 
 Before enabling a live route, Agent Hub and the packaged LVIS client MUST fetch or
 provision the canonical-URI document through their independently bounded trust
@@ -96,10 +110,55 @@ extension URI and whose value is exactly:
 ```
 
 No other extension-owned metadata member is allowed. `intentSha256` is the
-client's semantic hash over its approved owner, pinned target/interface lineage,
-Task/context identity if present, Message identity, configuration, and canonical
-DLP-processed payload. It is not a credential, authorization token, or substitute
-for hashing the received body.
+client's semantic hash over its approved owner; the exact immutable lineage tuple
+(`targetAgentId`, canonical exact `interfaceUrl`, `agentCardDigestSha256`,
+`trustKeyId`, `credentialBindingId`, `callerGenerationId`,
+`routePolicyVersion`, `routePolicyDigestSha256`, and
+`extensionSpecDigestSha256`); Task/context identity if present; Message identity;
+configuration; and canonical DLP-processed payload. It excludes mutable attempt
+`credentialRevisionId`, `predecessorRevisionId`, and
+`intendedSuccessorRevisionId`, which are journaled separately and cannot change
+the approved semantic intent. It is not a credential, authorization token, or
+substitute for hashing the received body.
+
+## LVIS host transaction binding
+
+These client-side requirements bind use of this profile to the approved route;
+they do not add fields to the A2A wire protocol.
+
+- Every new initial `SendMessage`, continuation `SendMessage`, and live
+  `CancelTask` MUST commit prepared journal metadata before credential
+  preparation, final no-store route resolve, resolved CAS, or socket I/O. Only an
+  initial Send MUST additionally retain the byte-for-byte serialized body in the
+  OS-bound encrypted payload store and journal its opaque pointer. Continuation
+  and Cancel MUST retain bounded metadata plus semantic hash only and MUST NOT
+  persist a raw/encrypted body or payload pointer. Staged/bound payload creation,
+  failed-preparation deletion, and orphan cleanup are initial-Send-only paths.
+- Initial-Send encryption AAD MUST be the versioned canonical encoding of the
+  authenticated owner ID, operation ID, Message ID, exact body SHA-256, and exact
+  immutable lineage tuple (`targetAgentId`, canonical exact `interfaceUrl`,
+  `agentCardDigestSha256`, `trustKeyId`, `credentialBindingId`,
+  `callerGenerationId`, `routePolicyVersion`, `routePolicyDigestSha256`, and
+  `extensionSpecDigestSha256`). Mutable attempt `credentialRevisionId`,
+  `predecessorRevisionId`, `intendedSuccessorRevisionId`, snapshot ID, and
+  snapshot times MUST be excluded from both this AAD and immutable semantic
+  lineage; revision intent is journaled separately.
+- The exhaustive prepared schema is limited to host operation/attempt IDs;
+  DLP-clean owner and operation kind; A2A method; the exact immutable lineage
+  tuple; D8 depth; semantic-request hash; initial-Send-only ciphertext hash,
+  opaque payload record ID, size, and expiry; Message ID; any known Task/context
+  IDs; mutation approval decision ID/time; created/attempt deadlines; and bounded
+  optional `predecessorRevisionId`/`intendedSuccessorRevisionId`. The optional
+  revision IDs are non-authoritative reconciliation intent only and cannot grant
+  a route or credential. Snapshot ID, resolved credential revision, resolve time,
+  and snapshot issue/expiry times MUST be absent rather than null.
+- Prompt-free `GetTask` and an already-approved exact initial-Send replay are the
+  only attempts that MAY change `credentialRevisionId`, and only inside the exact
+  same `credentialBindingId` and `callerGenerationId`; every other immutable
+  field remains exact. Every new mutation requires foreground approval. When
+  predecessor/intended-successor IDs are present, the final no-store resolve and
+  winning resolved CAS MUST prove the same immutable lineage and exact intended
+  revision IDs before any socket starts.
 
 ## Replay key and exact-match rule
 
@@ -131,9 +190,12 @@ MUST NOT parse and reserialize a request to obtain this hash.
 
 An exact replay is valid only when the same authenticated caller supplies the
 same `messageId`, byte-for-byte identical serialized HTTP body, identical body
-SHA-256, and identical `intentSha256`. It MUST join the existing in-progress owner or
-return the stored completed result. It MUST NOT execute the Message again, mint a
-new Message or Task identity, change context, or select another route.
+SHA-256, and identical `intentSha256`, and the LVIS client preserves the exact
+immutable lineage tuple with only the same-binding/generation
+`credentialRevisionId` carve-out above. It MUST join the existing in-progress
+owner or return the stored completed result. It MUST NOT execute the Message
+again, mint a new Message or Task identity, change context, or select another
+route.
 
 Reuse of the replay key with any mismatch MUST execute nothing and return the
 fixed JSON-RPC error:
@@ -270,9 +332,11 @@ executing:
 
 The `-32092` response MUST also carry the HTTP header `Retry-After: 1`. The client
 maps it to `reconciling` and MAY retry only the same authenticated caller,
-byte-for-byte body, Message ID, and intent hash after at least one second, within
-the original bounded reconciliation deadline. Such a retry is an attempt of the
-already-approved operation: it requires fresh local authorization, credential
+byte-for-byte body, Message ID, intent hash, and exact immutable lineage tuple,
+subject only to the credential-revision carve-out above, after at least one
+second and within the original bounded reconciliation deadline. Such a retry is
+an attempt of the already-approved operation: it requires fresh local
+authorization, credential
 preparation, and final no-store route resolve, but no new foreground approval. It
 MUST NOT reconstruct the body, select another route, or extend the deadline.
 
@@ -389,10 +453,12 @@ following with zero skipped cases:
    nothing further.
 6. A different authenticated caller cannot observe or reuse another caller's
    replay entry.
-7. Missing declaration, wrong URI, `required: false`, malformed or extra params,
+7. Missing declaration, wrong URI, `required: true`, malformed or extra params,
    wrong served-spec digest, missing request activation, or missing required echo
    on an activated success/error fails closed. Continuation `SendMessage`,
-   `GetTask`, and `CancelTask` send no profile header/metadata and receive no echo.
+   `GetTask`, and `CancelTask` send `A2A-Version: 1.0` but no profile
+   header/metadata and receive no echo. The suite proves LVIS route policy rejects
+   a missing profile despite its Agent Card `required: false` declaration.
 8. Retention-boundary replay succeeds immediately before expiry; at expiry one
    CAS changes even a live/in-progress fence to `RETENTION_EXPIRED`, revokes its
    owner token, deletes body/result, writes the tombstone, and suppresses a late
@@ -414,7 +480,15 @@ following with zero skipped cases:
     `error` member, numeric code, message, one-element A2A v1 `data` array,
     `google.rpc.ErrorInfo` type, reason, domain, metadata, required extension echo,
     and client mapping defined above. Only `-32092` carries `Retry-After`.
-14. Logs, audit, metrics, traces, Hub storage, and packet-path assertions contain
+14. Prompt-free `GetTask` and an already-approved exact initial-Send replay may
+    change only `credentialRevisionId` inside the exact same
+    `credentialBindingId` and `callerGenerationId`; vectors change each other
+    immutable-lineage field in turn and prove fail-closed behavior. New mutation
+    vectors prove that even an in-binding revision change requires foreground
+    approval. The attempt journal's bounded optional `predecessorRevisionId` and
+    `intendedSuccessorRevisionId` remain non-authoritative until final resolve and
+    resolved CAS prove the exact same lineage and exact intended IDs.
+15. Logs, audit, metrics, traces, Hub storage, and packet-path assertions contain
     no bearer, secret reference, prompt Part, artifact, or raw replay body.
 
 Interface health may establish only bounded declaration and reachability. It MUST
