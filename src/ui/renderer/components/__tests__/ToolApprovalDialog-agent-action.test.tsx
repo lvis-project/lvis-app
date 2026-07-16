@@ -86,4 +86,22 @@ describe("ToolApprovalDialog external agent-action affordances", () => {
     fireEvent.click(approve);
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
   });
+
+  it("keeps durable controls for an explicit plugin source with remote-wire metadata", () => {
+    const onDecide = vi.fn();
+    render(
+      <ToolApprovalDialog
+        open
+        request={makeAgentActionRequest("a2a-remote-wire", "a2a-send", "plugin")}
+        onDecide={onDecide}
+      />,
+    );
+
+    expect(screen.getByText("항상 허용")).toBeInTheDocument();
+    expect(screen.getByText("승인 범위")).toBeInTheDocument();
+    const approve = screen.getByTestId("approve-button");
+    expect(approve).toHaveTextContent("허용");
+    fireEvent.click(approve);
+    expect(onDecide).toHaveBeenCalledWith("allow-session", undefined);
+  });
 });
