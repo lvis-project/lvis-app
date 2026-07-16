@@ -54,7 +54,7 @@ describe("RemoteA2AActionButton production IPC surface", () => {
     expect(screen.queryByTestId("remote-a2a-cancel")).toBeNull();
     expect(screen.getByTestId("remote-a2a-status").textContent).not.toContain("unknown-manual-reconciliation-required");
     fireEvent.click(screen.getByTestId("remote-a2a-replay"));
-    await waitFor(() => expect(api.action).toHaveBeenCalledWith("replay", "recovery_handle_123", undefined));
+    await waitFor(() => expect(api.action).toHaveBeenCalledWith("replay", "recovery_handle_123"));
   });
 
   it("shows AUTH_REQUIRED as out-of-band and disables credential-bearing Resume", async () => {
@@ -94,16 +94,18 @@ describe("RemoteA2AActionButton production IPC surface", () => {
 
   it("retains typed intent when a resolved Resume reports a failed delivery state", async () => {
     installApi({ state: "sent", taskHandle: "task_handle_123456", taskAvailable: true, recoveryEligible: false, taskState: "TASK_STATE_INPUT_REQUIRED", updatedAt: "2026-07-16T00:00:00.000Z" });
-    window.lvisApi.remoteA2a.action = vi.fn(async () => ({
+    const action = vi.fn(async () => ({
       ok: true as const,
       status: { state: "failed" as const, taskHandle: "task_handle_123456", outcome: "resume-failed", updatedAt: "2026-07-16T00:00:01.000Z" },
     }));
+    window.lvisApi.remoteA2a.action = action;
     await openPanel();
     const input = screen.getByTestId("remote-a2a-intent");
     fireEvent.change(input, { target: { value: "Keep resume text" } });
     fireEvent.click(screen.getByTestId("remote-a2a-resume"));
 
     await waitFor(() => expect(screen.getByTestId("remote-a2a-status").getAttribute("data-state")).toBe("failed"));
+    expect(action).toHaveBeenCalledWith("resume", "task_handle_123456", "Keep resume text");
     expect(input).toHaveProperty("value", "Keep resume text");
   });
 
