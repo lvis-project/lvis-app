@@ -35,6 +35,8 @@ export function isCanonicalA2APublicHttpsOrigin(value: unknown): value is string
       && !url.password
       && !url.search
       && !url.hash
+      && !value.includes("?")
+      && !value.includes("#")
       && url.pathname === "/"
       && url.toString() === value
       && !hostname.endsWith(".")

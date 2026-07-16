@@ -127,6 +127,8 @@ describe("independent remote A2A receiver listener", () => {
     ["https://127.0.0.1/", "a2a-remote-receiver-public-origin-invalid"],
     ["https://receiver/", "a2a-remote-receiver-public-origin-invalid"],
     ["https://receiver.lvis.ai./", "a2a-remote-receiver-public-origin-invalid"],
+    ["https://receiver.lvis.ai/?", "a2a-remote-receiver-public-origin-invalid"],
+    ["https://receiver.lvis.ai/#", "a2a-remote-receiver-public-origin-invalid"],
     ["https://receiver.local/", "a2a-remote-receiver-public-origin-invalid"],
     ["https://receiver.internal/", "a2a-remote-receiver-public-origin-invalid"],
     ["https://receiver.home.arpa/", "a2a-remote-receiver-public-origin-invalid"],
