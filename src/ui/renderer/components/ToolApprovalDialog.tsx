@@ -305,7 +305,7 @@ export function ToolApprovalDialog({
     request?.category === "agent-action" &&
     request.kind === "agent-action" &&
     request.source === "builtin" &&
-    request.toolName.startsWith("a2a-remote-");
+    (request.trustOrigin === "a2a-remote-wire" || request.toolName.startsWith("a2a-remote-"));
 
   // HIGH verdict → focus NL field when dialog opens.
   useEffect(() => {
