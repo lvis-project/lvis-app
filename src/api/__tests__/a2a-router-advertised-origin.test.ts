@@ -44,6 +44,8 @@ describe("A2A advertised public origin", () => {
     "https://user@receiver.example.test/",
     "https://receiver/",
     "https://receiver.lvis.ai./",
+    "https://receiver.lvis.ai/?",
+    "https://receiver.lvis.ai/#",
     "https://receiver.local/",
     "https://receiver.internal/",
     "https://receiver.home.arpa/",
