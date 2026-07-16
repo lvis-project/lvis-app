@@ -1,5 +1,7 @@
 import { basename, extname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 import {
   assertArray,
@@ -66,6 +68,22 @@ function parseMacIdentity(details, label) {
   return { authority, teamId };
 }
 
+function extractMacLeafCertificateSha256(subjectPath, run, label) {
+  const directory = mkdtempSync(resolve(tmpdir(), "lvis-codesign-certificate-"));
+  const prefix = resolve(directory, "certificate-");
+  try {
+    run("codesign", ["--display", "--extract-certificates", prefix, subjectPath], {
+      label: `${label} embedded certificate extraction`,
+    });
+    return readRegularFile(`${prefix}0`, `${label} embedded leaf certificate`, {
+      maxBytes: 1024 * 1024,
+      loadBytes: false,
+    }).sha256.toUpperCase();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 function verifyMacos(installerPath, run, expected) {
   const expectedTeamId = assertSafeString(expected.macTeamId, "expected macOS Team ID", {
     min: 10, max: 64, pattern: /^[0-9A-Z]+$/u,
@@ -78,12 +96,12 @@ function verifyMacos(installerPath, run, expected) {
   );
   const identity = parseMacIdentity(details, "codesign identity");
   if (identity.teamId !== expectedTeamId) fail("codesign identity: TeamIdentifier does not match the pinned LVIS Team ID");
-  const certificateOutput = requireNonemptyOutput(
-    run("security", ["find-certificate", "-c", identity.authority, "-Z"], { label: "macOS signer certificate fingerprint" }),
-    "macOS signer certificate fingerprint",
+  const installerCertificateSha256 = extractMacLeafCertificateSha256(
+    installerPath,
+    run,
+    "installer codesign identity",
   );
-  const certificateMatches = [...certificateOutput.matchAll(/SHA-256 hash:\s*([0-9A-F]{64})/gu)].map((match) => match[1]);
-  if (certificateMatches.length !== 1 || certificateMatches[0] !== expectedCertificateSha256) {
+  if (installerCertificateSha256 !== expectedCertificateSha256) {
     fail("macOS signer certificate fingerprint does not match the pinned LVIS certificate");
   }
   const assessment = requireNonemptyOutput(
@@ -100,6 +118,7 @@ function verifyMacos(installerPath, run, expected) {
   const appPath = resolve(mountPoint, "LVIS.app");
   let appIdentity;
   let appAssessment;
+  let verificationError;
   try {
     run("/usr/bin/test", ["-d", appPath], { label: "mounted LVIS.app directory" });
     run("/usr/bin/test", ["!", "-L", appPath], { label: "mounted LVIS.app symlink rejection" });
@@ -112,13 +131,29 @@ function verifyMacos(installerPath, run, expected) {
     if (appIdentity.teamId !== expectedTeamId || appIdentity.authority !== identity.authority) {
       fail("inner app codesign identity does not match the pinned installer identity");
     }
+    const appCertificateSha256 = extractMacLeafCertificateSha256(
+      appPath,
+      run,
+      "inner app codesign identity",
+    );
+    if (appCertificateSha256 !== expectedCertificateSha256
+      || appCertificateSha256 !== installerCertificateSha256) {
+      fail("inner app codesign certificate does not match the pinned installer certificate");
+    }
     appAssessment = requireNonemptyOutput(
       run("spctl", ["--assess", "--type", "execute", "--verbose=4", appPath], { label: "inner app Gatekeeper assessment" }),
       "inner app Gatekeeper assessment",
     );
     if (!/accepted/iu.test(appAssessment)) fail("inner app Gatekeeper assessment: app was not accepted");
+  } catch (error) {
+    verificationError = error;
+    throw error;
   } finally {
-    run("hdiutil", ["detach", mountPoint], { label: "DMG detach" });
+    try {
+      run("hdiutil", ["detach", mountPoint], { label: "DMG detach" });
+    } catch (detachError) {
+      if (!verificationError) throw detachError;
+    }
   }
   return {
     platform: "macos",

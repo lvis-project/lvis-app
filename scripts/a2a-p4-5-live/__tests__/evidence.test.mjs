@@ -297,7 +297,8 @@ test("packaged-live manifest requires the exact closed schema and case/vector se
 test("public endpoint identity binds canonical DNS, TLS certificate, SNI, and captured IP", () => {
   const endpoints = validManifest().endpoints;
   assert.equal(assertPublicHttpsUrl(endpoints.remoteUrl, "remote").hostname, "a2a.lvis.ai");
-  for (const invalid of ["https://localhost/rpc", "https://internal/rpc", "https://node.local/rpc", "https://127.0.0.1/rpc", "https://a2a.lvis.ai./rpc"]) {
+  assert.equal(assertPublicHttpsUrl("https://a2a.lvis.ai/rpc?tenant=17", "remote").search, "?tenant=17");
+  for (const invalid of ["https://localhost/rpc", "https://internal/rpc", "https://node.local/rpc", "https://127.0.0.1/rpc", "https://a2a.lvis.ai./rpc", "https://a2a.lvis.ai/rpc#fragment"]) {
     assert.throws(() => assertPublicHttpsUrl(invalid, "remote"), /public|IP-literal|trailing dot|multi-label|special-use/u);
   }
   const identity = {
@@ -328,8 +329,8 @@ test("host identity proves independent machine and network identities", () => {
   assert.throws(() => validateHostIdentity(identity, endpoints), /must differ/u);
 });
 
-function captureJson(message, sourceIp, destinationIp, destinationPort = "443") {
-  return ["1", sourceIp, destinationIp, destinationPort, "a2a.lvis.ai", "/rpc", Buffer.from(JSON.stringify(message)).toString("hex")].join("\t");
+function captureJson(message, sourceIp, destinationIp, destinationPort = "443", uri = "/rpc") {
+  return ["1", sourceIp, destinationIp, destinationPort, "a2a.lvis.ai", uri, Buffer.from(JSON.stringify(message)).toString("hex")].join("\t");
 }
 
 function captureLine(method, sourceIp, destinationIp, payload = {}, id = method) {
@@ -360,6 +361,11 @@ test("actual tshark field parser proves Task methods client-to-remote and zero H
   const text = lines.join("\n");
   const result = verifyTaskTraffic(parseTsharkFields(text), endpoints);
   assert.equal(result.responseAssertions.length, 7);
+  const queriedEndpoints = { ...endpoints, remoteUrl: "https://a2a.lvis.ai/rpc?tenant=17" };
+  const queryText = text.replaceAll("\t/rpc\t", "\t/rpc?tenant=17\t");
+  assert.equal(verifyTaskTraffic(parseTsharkFields(queryText), queriedEndpoints).responseAssertions.length, 7);
+  const tamperedQuery = queryText.replace("\t/rpc?tenant=17\t", "\t/rpc?tenant=18\t");
+  assert.throws(() => verifyTaskTraffic(parseTsharkFields(tamperedQuery), queriedEndpoints), /exact remote interface Host\/path/u);
   const hubText = `${text}\n${captureLine("GetTask", endpoints.clientIp, endpoints.hubIp)}`;
   assert.throws(() => verifyTaskTraffic(parseTsharkFields(hubText), endpoints), /reached Agent Hub/u);
   const duplicateJson = Buffer.from('{"jsonrpc":"2.0","method":"SendMessage","method":"GetTask"}').toString("hex");
@@ -421,19 +427,42 @@ test("wire and fault artifacts require pinned heads, positive vectors, all pass,
 
 test("native verifier commands are fixed and require verified identities", () => {
   const calls = [];
+  const installerCertificate = Buffer.from("installer-leaf-certificate");
+  const installerCertificateSha256 = createHash("sha256").update(installerCertificate).digest("hex");
   const macRun = (command, args) => {
     calls.push([command, args]);
     if (command === "hdiutil" && args[0] === "attach") return { stdout: "<plist><dict><key>mount-point</key><string>/Volumes/LVIS</string></dict></plist>", stderr: "" };
     if (command === "hdiutil" || command === "/usr/bin/test") return { stdout: "ok", stderr: "" };
+    if (command === "codesign" && args[1] === "--extract-certificates") {
+      writeFileSync(`${args[2]}0`, installerCertificate);
+      return { stdout: "", stderr: "certificate extracted" };
+    }
     if (command === "codesign" && args[0] === "--display") return { stdout: "Authority=Developer ID Application: LVIS\nTeamIdentifier=ABCDE12345", stderr: "" };
-    if (command === "security") return { stdout: `SHA-256 hash: ${"A".repeat(64)}`, stderr: "" };
     if (command === "spctl") return { stdout: "accepted", stderr: "" };
     return { stdout: "", stderr: "verified" };
   };
-  const macExpected = { macTeamId: "ABCDE12345", macCertificateSha256: "A".repeat(64) };
+  const macExpected = { macTeamId: "ABCDE12345", macCertificateSha256: installerCertificateSha256 };
   assert.equal(verifyInstallerIdentity("macos", "/Applications/LVIS.dmg", { run: macRun, expected: macExpected }).status, "publisher-verified");
-  assert.deepEqual(calls.map(([command]) => command), ["codesign", "codesign", "security", "spctl", "hdiutil", "/usr/bin/test", "/usr/bin/test", "codesign", "codesign", "spctl", "hdiutil"]);
+  assert.deepEqual(calls.map(([command]) => command), ["codesign", "codesign", "codesign", "spctl", "hdiutil", "/usr/bin/test", "/usr/bin/test", "codesign", "codesign", "codesign", "spctl", "hdiutil"]);
+  assert.equal(calls.some(([command]) => command === "security"), false, "keychain lookup must not substitute for embedded certificate extraction");
   assert.throws(() => verifyInstallerIdentity("macos", "/Applications/LVIS.dmg", { run: macRun, expected: { ...macExpected, macTeamId: "ZZZZZ12345" } }), /TeamIdentifier/u);
+  const mismatchedAppRun = (command, args) => {
+    if (command === "hdiutil" && args[0] === "attach") return { stdout: "<plist><dict><key>mount-point</key><string>/Volumes/LVIS</string></dict></plist>", stderr: "" };
+    if (command === "hdiutil" && args[0] === "detach") throw new Error("detach failed after primary verification failure");
+    if (command === "hdiutil" || command === "/usr/bin/test") return { stdout: "ok", stderr: "" };
+    if (command === "codesign" && args[1] === "--extract-certificates") {
+      const certificate = args[3].endsWith(".app") ? Buffer.from("different-app-certificate") : installerCertificate;
+      writeFileSync(`${args[2]}0`, certificate);
+      return { stdout: "", stderr: "certificate extracted" };
+    }
+    if (command === "codesign" && args[0] === "--display") return { stdout: "Authority=Developer ID Application: LVIS\nTeamIdentifier=ABCDE12345", stderr: "" };
+    if (command === "spctl") return { stdout: "accepted", stderr: "" };
+    return { stdout: "", stderr: "verified" };
+  };
+  assert.throws(
+    () => verifyInstallerIdentity("macos", "/Applications/LVIS.dmg", { run: mismatchedAppRun, expected: macExpected }),
+    /inner app codesign certificate/u,
+  );
   const winRun = (command, args, options) => {
     assert.equal(command, "powershell");
     assert.equal(options.env.LVIS_INSTALLER_PATH, "C:\\LVIS.exe");
