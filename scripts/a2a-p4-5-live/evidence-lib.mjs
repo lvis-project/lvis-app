@@ -133,6 +133,9 @@ export function readRegularFile(path, label, {
     if (opened.size <= 0 || opened.size > maxBytes) fail(`${label}: invalid file size ${opened.size}`);
 
     canonicalPath = realpathSync(path);
+    if (canonicalPath !== resolve(path)) {
+      fail(`${label}: symlink path components or non-canonical aliases are forbidden`);
+    }
     assertNoFollowFallbackPath(path, label);
     canonicalDescriptor = openSync(canonicalPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     const canonicalOpened = fstatSync(canonicalDescriptor);

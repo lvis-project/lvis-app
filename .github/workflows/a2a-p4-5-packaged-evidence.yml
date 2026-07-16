@@ -238,7 +238,7 @@ jobs:
             hdiutil detach "$mount_point"
             trap - EXIT
           done
-      - name: Verify Windows Authenticode identity
+      - name: Verify Windows Authenticode signature validity
         if: matrix.target == 'win'
         shell: powershell
         run: |
