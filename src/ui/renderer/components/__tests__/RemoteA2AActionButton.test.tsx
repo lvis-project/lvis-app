@@ -62,4 +62,16 @@ describe("RemoteA2AActionButton production IPC surface", () => {
     expect(screen.getByTestId("remote-a2a-resume")).toHaveProperty("disabled", true);
     expect(screen.queryByTestId("remote-a2a-replay")).toBeNull();
   });
+
+  it("keeps approved targets visible when only the initial status request rejects", async () => {
+    installApi();
+    window.lvisApi.remoteA2a.status = vi.fn(async () => {
+      throw new Error("transient status failure");
+    });
+
+    await openPanel();
+
+    expect(screen.getByTestId("remote-a2a-target")).toHaveProperty("value", "1");
+    expect(screen.getByTestId("remote-a2a-status").textContent).toContain("Ready");
+  });
 });

@@ -76,6 +76,35 @@ describe("remote A2A IPC rejection boundary", () => {
     expect(JSON.stringify(result)).not.toContain("secret-provider-detail");
   });
 
+  it("uses ok only as the discriminant when a controller returns a failed delivery status", async () => {
+    handlers.clear();
+    const failedStatus = {
+      state: "failed" as const,
+      outcome: "remote-task-failed",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+    };
+    const controller = {
+      listTargets: vi.fn(() => []),
+      status: vi.fn(() => failedStatus),
+      send: vi.fn(async () => failedStatus),
+      get: vi.fn(async () => failedStatus),
+      resume: vi.fn(async () => failedStatus),
+      cancel: vi.fn(async () => failedStatus),
+      replay: vi.fn(async () => failedStatus),
+    };
+    const { registerRemoteA2AHandlers } = await import("../remote-a2a.js");
+    registerRemoteA2AHandlers({
+      auditLogger: { log: vi.fn() },
+      remoteA2AActionController: controller,
+    } as never);
+
+    await expect(invokeFileIpcHandler(handlers, CHANNELS.remoteA2a.send, {
+      intentToken: USER_INTENT,
+      targetAgentId: 7,
+      userIntent: "send this task",
+    })).resolves.toEqual({ ok: true, status: failedStatus });
+  });
+
   it("returns the same stable code when task lookup throws", async () => {
     await setup();
 
