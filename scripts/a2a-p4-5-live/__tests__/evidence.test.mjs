@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   renameSync,
   readFileSync,
+  realpathSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -19,6 +20,7 @@ import test from "node:test";
 import {
   assertExactKeys,
   assertArtifactStable,
+  assertNoFollowFallbackPath,
   assertSafeString,
   readEvidenceDescriptor,
   readRegularFile,
@@ -236,6 +238,28 @@ test("evidence descriptors reject escapes, empty files, symlinks, and digest mis
   writeFileSync(resolve(outside, "escaped.bin"), "immutable bytes");
   symlinkSync(outside, resolve(directory, "linked-directory"), "dir");
   assert.throws(() => readEvidenceDescriptor(manifestPath, descriptor("linked-directory/escaped.bin", sha256), "artifact"), /symlink path components/u);
+});
+
+test("O_NOFOLLOW fallback rejects symlink path components explicitly", () => {
+  // Resolve the fixture root first so macOS's /tmp -> /private/tmp alias is
+  // not itself the path component under test.
+  const directory = realpathSync(mkdtempSync(resolve(tmpdir(), "lvis-no-follow-fallback-")));
+  const artifactPath = resolve(directory, "artifact.bin");
+  const linkPath = resolve(directory, "artifact-link.bin");
+  writeFileSync(artifactPath, "immutable bytes");
+  symlinkSync(artifactPath, linkPath);
+
+  assert.doesNotThrow(() => assertNoFollowFallbackPath(artifactPath, "artifact", undefined));
+  assert.throws(
+    () => assertNoFollowFallbackPath(linkPath, "artifact", undefined),
+    /symlink path components are forbidden/u,
+  );
+});
+
+test("packaged verifier keeps TShark's documented /t tab separator token", () => {
+  const source = readFileSync(resolve(ROOT, "scripts/run-a2a-p4-5-packaged-live.mjs"), "utf8");
+  assert.equal(source.match(/"separator=\/t"/gu)?.length, 2);
+  assert.match(source, /documents `separator=\/t` as the TShark fields token/u);
 });
 
 test("large evidence uses bounded streaming hashing/scanning and detects descriptor races", () => {
