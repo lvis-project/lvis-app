@@ -5,7 +5,11 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { ToolApprovalDialog } from "../ToolApprovalDialog.js";
 import type { ApprovalRequest } from "../../types.js";
 
-function makeAgentActionRequest(trustOrigin: string, toolName = "permission:set-mode"): ApprovalRequest {
+function makeAgentActionRequest(
+  trustOrigin: string,
+  toolName = "permission:set-mode",
+  source: ApprovalRequest["source"] | null = "builtin",
+): ApprovalRequest {
   return {
     id: "agent-action-1",
     category: "agent-action",
@@ -14,7 +18,7 @@ function makeAgentActionRequest(trustOrigin: string, toolName = "permission:set-
     toolCategory: "meta",
     args: { mode: "allow" },
     reason: "external permission mutation",
-    source: "builtin",
+    ...(source === null ? {} : { source }),
     createdAt: Date.now(),
     requireExplicit: true,
     sourcePluginId: "local-api",
@@ -62,12 +66,15 @@ describe("ToolApprovalDialog external agent-action affordances", () => {
     expect(screen.getByTestId("approve-button")).toHaveTextContent("허용");
   });
 
-  it("forces one-shot approval for remote-wire agent actions with protocol tool names", () => {
+  it.each([
+    ["explicit builtin source", "builtin"],
+    ["omitted legacy source", null],
+  ] as const)("forces one-shot approval for remote-wire agent actions with %s", (_label, source) => {
     const onDecide = vi.fn();
     render(
       <ToolApprovalDialog
         open
-        request={makeAgentActionRequest("a2a-remote-wire", "a2a-send")}
+        request={makeAgentActionRequest("a2a-remote-wire", "a2a-send", source)}
         onDecide={onDecide}
       />,
     );
