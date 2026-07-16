@@ -421,7 +421,7 @@ export async function handleChatSend(
   const expectedSessionId = conversationLoop.getSessionId();
   const parsed = parseChatSendPayload(payload);
   if (!parsed.ok) return { ok: false, error: parsed.error };
-  const { input, attachments, inputOrigin, personaPromptId } = parsed.payload;
+  const { input, attachments, inputOrigin, userActivation, personaPromptId } = parsed.payload;
   const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId);
   if (conversationLoop.getSessionId() !== expectedSessionId) {
     return { ok: false, error: "session-mismatch" };
@@ -462,6 +462,9 @@ export async function handleChatSend(
         ...STREAM_TURN_OPTIONS,
         attachments: validated,
         inputOrigin,
+        ...(inputOrigin === "user-keyboard" && userActivation === true
+          ? { requestAnchorRawIntent: input }
+          : {}),
         ...(personaPrompt.rolePrompt ? { rolePrompt: personaPrompt.rolePrompt } : {}),
         ...(mailboxTurn
           ? {

@@ -27,19 +27,63 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import {
+  closeSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
   chmodSync,
 } from "node:fs";
 import { join } from "node:path";
+import { platform } from "node:process";
 import { lvisHome } from "../shared/lvis-home.js";
 
 export const GENESIS_MARKER = "genesis";
 const AUDIT_HMAC_SECRET_NAME = "audit-hmac.key";
 const SAFE_STORAGE_SECRET_PREFIX = "safe:v1:";
+
+function hardenSecretDirectory(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (platform !== "win32") chmodSync(dir, 0o700);
+}
+
+function fsyncDirectory(dir: string): void {
+  if (platform === "win32") return;
+  const fd = openSync(dir, "r");
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Atomic temp -> fsync -> rename -> directory-fsync secret replacement. */
+function atomicWriteSecretFile(dir: string, path: string, value: string): void {
+  hardenSecretDirectory(dir);
+  const tempPath = `${path}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
+  let fd: number | undefined;
+  try {
+    fd = openSync(tempPath, "wx", 0o600);
+    writeFileSync(fd, value, { encoding: "utf-8" });
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
+    if (platform !== "win32") chmodSync(tempPath, 0o600);
+    renameSync(tempPath, path);
+    if (platform !== "win32") chmodSync(path, 0o600);
+    fsyncDirectory(dir);
+  } catch (cause) {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* preserve primary failure */ }
+    }
+    try { unlinkSync(tempPath); } catch { /* absent or already renamed */ }
+    throw cause;
+  }
+}
 
 /**
  * Stable storage interface — abstracts keychain vs file persistence.
@@ -68,9 +112,7 @@ export class FileSecretStore implements SecretStore {
 
   constructor(dir?: string) {
     this.dir = dir ?? join(lvisHome(), "secrets");
-    if (!existsSync(this.dir)) {
-      mkdirSync(this.dir, { recursive: true, mode: 0o700 });
-    }
+    hardenSecretDirectory(this.dir);
   }
 
   private path(name: string): string {
@@ -89,13 +131,7 @@ export class FileSecretStore implements SecretStore {
 
   write(name: string, value: string): void {
     const p = this.path(name);
-    // Best-effort dir mode hardening — re-issue 0o700 each write so a
-    // post-install perm change doesn't slowly drift open.
-    if (existsSync(this.dir)) {
-      try { chmodSync(this.dir, 0o700); } catch { /* non-fatal */ }
-    }
-    writeFileSync(p, value, { encoding: "utf-8", mode: 0o600 });
-    try { chmodSync(p, 0o600); } catch { /* non-fatal */ }
+    atomicWriteSecretFile(this.dir, p, value);
   }
 }
 
@@ -112,9 +148,7 @@ export class SafeStorageSecretStore implements SecretStore {
     dir?: string,
   ) {
     this.dir = dir ?? join(lvisHome(), "secrets");
-    if (!existsSync(this.dir)) {
-      mkdirSync(this.dir, { recursive: true, mode: 0o700 });
-    }
+    hardenSecretDirectory(this.dir);
   }
 
   private path(name: string): string {
@@ -195,12 +229,8 @@ export class SafeStorageSecretStore implements SecretStore {
   write(name: string, value: string): void {
     this.assertAvailable();
     const p = this.path(name);
-    if (existsSync(this.dir)) {
-      try { chmodSync(this.dir, 0o700); } catch { /* non-fatal */ }
-    }
     const encrypted = SAFE_STORAGE_SECRET_PREFIX + this.safeStorage.encryptString(value).toString("base64");
-    writeFileSync(p, encrypted, { encoding: "utf-8", mode: 0o600 });
-    try { chmodSync(p, 0o600); } catch { /* non-fatal */ }
+    atomicWriteSecretFile(this.dir, p, encrypted);
   }
 }
 

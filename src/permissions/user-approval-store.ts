@@ -104,6 +104,12 @@ interface ApprovalsFile {
  * Cleared on process exit.
  */
 const sessionStore = new Map<string, UserApprovalEntry>();
+let approvalGeneration = 0;
+
+/** Monotonic identity for Store B approval mutations. */
+export function getUserApprovalGeneration(): string {
+  return String(approvalGeneration);
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -263,6 +269,7 @@ export async function recordApproval(
 
   if (entry.scope === "session") {
     sessionStore.set(key, full);
+    approvalGeneration += 1;
     return;
   }
 
@@ -272,6 +279,7 @@ export async function recordApproval(
   });
   // Mirror into session cache for fast lookups.
   sessionStore.set(key, full);
+  approvalGeneration += 1;
 }
 
 /**
@@ -334,6 +342,7 @@ export async function revokeApproval(
     if (!existing) return;
     existing.revokedAt = new Date().toISOString();
   });
+  approvalGeneration += 1;
 }
 
 /**
@@ -350,6 +359,7 @@ export async function revokeApprovalByKey(rawKey: string): Promise<void> {
     if (!existing) return;
     existing.revokedAt = new Date().toISOString();
   });
+  approvalGeneration += 1;
 }
 
 /**
@@ -521,6 +531,7 @@ export async function migrateCanonicalization(): Promise<void> {
         await atomicWrite({ approvals: updated });
         // Invalidate session cache entries that were re-keyed.
         sessionStore.clear();
+        approvalGeneration += 1;
       }
     }
 
@@ -562,6 +573,7 @@ export async function migrateCanonicalization(): Promise<void> {
 
 /** @internal Test only — clears the session cache between test cases. */
 export function __resetSessionStoreForTest(): void {
+  if (sessionStore.size > 0) approvalGeneration += 1;
   sessionStore.clear();
   persistentWriteQueue = Promise.resolve();
 }

@@ -2,7 +2,11 @@
  * ApprovalGate unit tests
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ApprovalGate } from "../approval-gate.js";
+import {
+  ApprovalGate,
+  isHostApprovalRejectedDecision,
+  isHostApprovalTimeoutDecision,
+} from "../approval-gate.js";
 import type { ApprovalRequest, ApprovalDecision } from "../approval-gate.js";
 import { makeTestPolicy } from "./test-helpers.js";
 
@@ -210,6 +214,8 @@ describe("ApprovalGate", () => {
     const result = await promise;
     expect(result.choice).toBe("deny-once");
     expect(result.requestId).toBe("req-timeout");
+    expect(isHostApprovalTimeoutDecision(result)).toBe(true);
+    expect(isHostApprovalRejectedDecision(result)).toBe(false);
 
     vi.useRealTimers();
   });
@@ -923,5 +929,124 @@ describe("ApprovalGate", () => {
     expect(stub).not.toHaveBeenCalled();
     const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
     expect(sent.sandboxCapability).toBeUndefined();
+  });
+
+  describe("rationale approval boundary", () => {
+    it.each(["allow-once", "deny-once"] as const)(
+      "accepts the non-persistent %s choice",
+      async (choice) => {
+        const wc = makeMockWebContents();
+        const gate = new ApprovalGate(wc as never);
+        const req = makeRequest({
+          id: `req-rationale-${choice}`,
+          kind: "rationale",
+          allowedChoices: ["allow-always"],
+        });
+
+        const promise = gate.requestAndWait(req);
+        const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
+        expect(sent.allowedChoices).toEqual(["allow-once", "deny-once"]);
+        expect(sent.requireExplicit).toBe(true);
+
+        const { nonce, hmac } = lastSentNonceHmac(wc);
+        const resolved = gate.resolve(req.id, {
+          requestId: req.id,
+          choice,
+          nonce,
+          hmac,
+        });
+
+        expect(resolved?.choice).toBe(choice);
+        await expect(promise).resolves.toMatchObject({ choice });
+      },
+    );
+
+    it.each(["allow-session", "allow-always", "deny-always"] as const)(
+      "forces persistent %s responses to deny-once",
+      async (choice) => {
+        const wc = makeMockWebContents();
+        const gate = new ApprovalGate(wc as never);
+        const req = makeRequest({
+          id: `req-rationale-reject-${choice}`,
+          kind: "rationale",
+        });
+
+        const promise = gate.requestAndWait(req);
+        const { nonce, hmac } = lastSentNonceHmac(wc);
+        const resolved = gate.resolve(req.id, {
+          requestId: req.id,
+          choice,
+          nonce,
+          hmac,
+        });
+
+        expect(resolved).toMatchObject({
+          requestId: req.id,
+          choice: "deny-once",
+          rememberPattern: "approval choice not allowed",
+        });
+        await expect(promise).resolves.toEqual(resolved);
+        expect(isHostApprovalRejectedDecision(resolved)).toBe(true);
+        expect(isHostApprovalTimeoutDecision(resolved)).toBe(false);
+        expect(gate.pendingCount).toBe(0);
+      },
+    );
+
+    it("never exposes a rationale request through getRequestSnapshot", async () => {
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const req = makeRequest({
+        id: "req-rationale-snapshot",
+        kind: "rationale",
+        approvalCacheKey: "must-not-be-cacheable",
+      });
+
+      const promise = gate.requestAndWait(req);
+      expect(gate.pendingCount).toBe(1);
+      expect(gate.getRequestSnapshot(req.id)).toBeNull();
+
+      const { nonce, hmac } = lastSentNonceHmac(wc);
+      gate.resolve(req.id, {
+        requestId: req.id,
+        choice: "deny-once",
+        nonce,
+        hmac,
+      });
+      await promise;
+    });
+
+    it("does not auto-approve a read-only rationale request", async () => {
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(
+        wc as never,
+        makeTestPolicy({ requireExplicitApproval: false }),
+      );
+      const req = makeRequest({
+        id: "req-rationale-readonly",
+        kind: "rationale",
+        isReadOnly: true,
+        mode: "default",
+      });
+
+      const promise = gate.requestAndWait(req);
+      expect(wc.send).toHaveBeenCalledOnce();
+      expect(gate.pendingCount).toBe(1);
+      const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
+      expect(sent).toMatchObject({
+        kind: "rationale",
+        isReadOnly: true,
+        requireExplicit: true,
+        allowedChoices: ["allow-once", "deny-once"],
+      });
+
+      const { nonce, hmac } = lastSentNonceHmac(wc);
+      gate.resolve(req.id, {
+        requestId: req.id,
+        choice: "deny-once",
+        nonce,
+        hmac,
+      });
+      await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
+    });
   });
 });

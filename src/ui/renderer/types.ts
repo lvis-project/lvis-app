@@ -1257,13 +1257,15 @@ export type ApprovalChoice = "allow-once" | "allow-session" | "allow-always" | "
  * Permission policy — discriminated approval kinds. Renderer routes on this to
  * pick the right card. Default `"tool"` is the standard approval dialog.
  */
-export type ApprovalKind = "tool" | "out-of-allowed-dir" | "agent-action";
+export type ApprovalKind = "tool" | "out-of-allowed-dir" | "agent-action" | "rationale";
 
 export type ApprovalRequest = {
   id: string;
   category: "tool" | "agent-action";
   /** Permission policy — discriminator (defaults to "tool" when absent). */
   kind?: ApprovalKind;
+  /** Choices the host will accept for this request. */
+  allowedChoices?: readonly ApprovalChoice[];
   toolName: string;
   /** Permission policy category for the invocation shown in the UI. */
   toolCategory?: "read" | "write" | "shell" | "network" | "meta";

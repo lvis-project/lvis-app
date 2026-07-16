@@ -127,7 +127,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     };
   };
   const rewireReviewerAgent = (): void => {
-    wireReviewerAgent({
+    const reviewerResult = wireReviewerAgent({
       permissionManager,
       readActiveLlm: readActiveReviewerLlm,
       streamProviderFor: reviewerStreamProviderFor,
@@ -146,6 +146,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
         sendToWindow(getMainWindow(), PERMISSIONS.deferredPending, summary, log);
       },
     });
+    ctx.rationaleScopeReviewer = reviewerResult.rationaleScopeReviewer;
     // A re-wire updates the runtime reviewer mode (notably the
     // llm-degraded-to-rule → llm heal driven by login or settings:update).
     // setReviewer itself does not broadcast, so an already-open PermissionsTab
