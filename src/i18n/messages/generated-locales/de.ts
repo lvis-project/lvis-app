@@ -1295,6 +1295,8 @@ export const deMessages: Record<string, string> = {
   "formatIpcError.personaPromptOriginRestricted": "Persona-Eingabeaufforderungen können nur von einem Benutzereingabeursprung aus geändert werden.",
   "formatIpcError.pluginNotLoaded": "Das Plugin ist nicht geladen.",
   "formatIpcError.preferenceRefreshServiceUnavailable": "Der Dienst zum Aktualisieren der Einstellungen ist nicht verfügbar.",
+  "formatIpcError.remoteA2aDisabled": "Remote-A2A ist in dieser App-Konfiguration deaktiviert.",
+  "formatIpcError.remoteA2aOperationRejected": "Die Remote-A2A-Anfrage konnte nicht abgeschlossen werden.",
   "formatIpcError.productionDisabled": "In der Produktionsumgebung nicht verfügbar.",
   "formatIpcError.exportFailed": "Diagnosepaket konnte nicht erstellt werden.",
   "formatIpcError.crashListFailed": "Absturzabbilder konnten nicht gelesen werden.",
