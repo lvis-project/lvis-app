@@ -221,8 +221,12 @@ jobs:
           for installer in "${installers[@]}"; do
             codesign --verify --deep --strict --verbose=4 "$installer"
             spctl --assess --type open --context context:primary-signature --verbose=4 "$installer"
-            attach_output="$(hdiutil attach -readonly -nobrowse "$installer")"
-            mount_point="$(printf '%s\n' "$attach_output" | awk -F '\t' '/\/Volumes\// { print $NF; exit }')"
+            attach_plist="$(hdiutil attach -readonly -nobrowse -plist "$installer")"
+            mount_point="$(
+              printf '%s\n' "$attach_plist" |
+                plutil -convert json -o - - |
+                node -e 'let input=""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { const entities = JSON.parse(input)["system-entities"]; const points = Array.isArray(entities) ? entities.map((entry) => entry?.["mount-point"]).filter((value) => typeof value === "string") : []; if (points.length !== 1) process.exit(2); process.stdout.write(points[0]); });'
+            )"
             if [[ "$mount_point" != /Volumes/* ]]; then
               echo "DMG mount point was not canonical" >&2
               exit 1

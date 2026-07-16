@@ -57,7 +57,7 @@
     "check:i18n-catalog": "node --import tsx scripts/i18n-validate-catalog.ts",
     "check:sunset-inventory": "node scripts/check-sunset-inventory.mjs",
     "check:a2a-p4-5-contract": "node scripts/check-a2a-p4-5-contract.mjs",
-    "test:a2a-p4-5:evidence": "node --test scripts/a2a-p4-5-live/__tests__/*.test.mjs",
+    "test:a2a-p4-5:evidence": "node --test scripts/a2a-p4-5-live/__tests__/evidence.test.mjs",
     "check:a2a-p4-5:evidence": "bun run test:a2a-p4-5:evidence && bun run check:a2a-p4-5-contract",
     "test:a2a-p4-5:packaged-live": "node scripts/run-a2a-p4-5-packaged-live.mjs",
     "check:no-inline-channels": "node scripts/check-no-inline-channels.mjs",

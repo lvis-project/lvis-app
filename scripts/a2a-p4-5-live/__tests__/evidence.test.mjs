@@ -579,12 +579,13 @@ test("isolated evidence workflow is dispatch-only, immutable-action pinned, exac
     "repository: lvis-project/agent-hub", "codesign --verify --deep --strict", "spctl --assess", "Get-AuthenticodeSignature",
     "dpkg-deb --field", "rpm -qp", "readelf --file-header", "actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4", "gh attestation verify",
     "write-installer-provenance.mjs", "codesign --display --verbose=4 \"$mount_point/LVIS.app\"",
+    "hdiutil attach -readonly -nobrowse -plist", "plutil -convert json -o - -", "system-entities",
     "spctl --assess --type execute", "--source-digest \"$REQUESTED_HEAD\"",
     "--signer-workflow lvis-project/lvis-app/.github/workflows/a2a-p4-5-packaged-evidence.yml", "--deny-self-hosted-runners",
     "--predicate-type https://slsa.dev/provenance/v1", "Requested head must equal the immutable workflow source head",
     "LVIS_MAC_SIGNER_CERT_SHA256", "LVIS_WINDOWS_PUBLISHER_SUBJECT", "LVIS_WINDOWS_SIGNER_THUMBPRINT", "env -u GH_TOKEN node",
   ]) assert.ok(workflow.includes(required), `missing workflow invariant: ${required}`);
-  for (const forbidden of ["skip_code_sign", "--skip-code-sign", "graceful degradation", "inputs.ref", "\n  push:", "publish-release", "softprops/action-gh-release", "vars.AGENT_HUB_RELEASE_HEAD_SHA", "actions/checkout@v7", "actions/cache@v6", "actions/attest@v4", "actions/upload-artifact@v7", "oven-sh/setup-bun@v2"]) {
+  for (const forbidden of ["skip_code_sign", "--skip-code-sign", "graceful degradation", "inputs.ref", "\n  push:", "publish-release", "softprops/action-gh-release", "vars.AGENT_HUB_RELEASE_HEAD_SHA", "actions/checkout@v7", "actions/cache@v6", "actions/attest@v4", "actions/upload-artifact@v7", "oven-sh/setup-bun@v2", "awk -F '\\t'"]) {
     assert.ok(!workflow.includes(forbidden), `forbidden workflow fallback: ${forbidden}`);
   }
   const installerJobEnv = workflow.slice(workflow.indexOf("jobs:"), workflow.indexOf("    steps:"));
@@ -594,6 +595,13 @@ test("isolated evidence workflow is dispatch-only, immutable-action pinned, exac
   for (const existingBehavior of ["skip_code_sign:", "inputs.ref", "publish-release:", "softprops/action-gh-release@v3"]) {
     assert.ok(releaseWorkflow.includes(existingBehavior), `existing installer workflow behavior changed: ${existingBehavior}`);
   }
+
+  const packageJson = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
+  assert.equal(
+    packageJson.scripts["test:a2a-p4-5:evidence"],
+    "node --test scripts/a2a-p4-5-live/__tests__/evidence.test.mjs",
+    "evidence test command must not depend on shell glob expansion",
+  );
 });
 
 test("packaged-live runner has no manifest-provided command or result adapter", () => {
