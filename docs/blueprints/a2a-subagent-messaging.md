@@ -985,20 +985,23 @@ stay on the direct A2A data-plane connection between the two hosts.
   snapshot. Snapshot issuance is an authorization decision record, not proof
   that the caller may execute a Task and not a substitute for the foreground
   approval described below.
-- **Exact immutable route:** a snapshot identifies one target version, one
-  accepted Agent Card digest, one advertised interface and canonical public
-  HTTPS URL, one active trust-key revision, one active credential revision by
-  binding/revision ID plus bounded non-secret version, provider, and
+- **Exact immutable route:** a snapshot identifies one `targetAgentId`, one
+  accepted `agentCardDigestSha256`, one advertised interface and canonical public
+  HTTPS `interfaceUrl`, one active `trustKeyId`, one active credential revision by
+  `credentialBindingId`/`credentialRevisionId` plus the authenticated
+  `callerGenerationId` and bounded non-secret version, provider, and
   `external_version` metadata, one advertised-interface health observation, one
-  route-policy version, and the verified canonical LVIS exact-send-replay
+  `routePolicyVersion` plus `routePolicyDigestSha256`, and the verified canonical
+  LVIS exact-send-replay
   extension identifier
   `https://lvis.ai/a2a/extensions/exact-send-replay/v1`. The checked-in
   [exact-send-replay profile](../protocols/lvis-a2a-exact-send-replay.md) is
   normative for implementation, but live route eligibility is forbidden until
   the identical specification is served at that exact URI and its published
   SHA-256 digest is pinned by both Agent Hub route policy and the packaged
-  client. The snapshot also carries that digest, a control-plane-minted snapshot
-  ID, and finite expiry. `secret_reference`, raw
+  client. The snapshot carries that pinned digest as
+  `extensionSpecDigestSha256`, plus a control-plane-minted snapshot ID and finite
+  expiry. `secret_reference`, raw
   reference derivatives, and secret values are never snapshot fields.
   The client validates the complete shape and exact versions before any secret
   lookup or data-plane I/O. Missing, duplicated, ambiguous, expired, or changed
@@ -1012,13 +1015,22 @@ stay on the direct A2A data-plane connection between the two hosts.
   slice additionally requires the exact-send-replay extension contract below.
   Every term must remain independently represented; no broad `trusted` or
   `healthy` alias may collapse them.
-- **No route substitution:** the client pins the snapshot for the operation. It
-  never chooses another interface, rotates to another credential, changes target,
-  falls back to a local sub-agent, or asks Agent Hub for an automatic alternate
-  after validation, network, authentication, timeout, or remote Task failure.
-  A later operation may use a successor snapshot only for the same target and
-  interface, after a new explicit request and foreground approval. It records
-  the revision succession and never migrates the Task to another route.
+- **No route substitution:** the immutable lineage tuple is exactly
+  (`targetAgentId`, canonical exact `interfaceUrl`, `agentCardDigestSha256`,
+  `trustKeyId`, `credentialBindingId`, `callerGenerationId`,
+  `routePolicyVersion`, `routePolicyDigestSha256`,
+  `extensionSpecDigestSha256`). The client pins that complete tuple for the Task
+  lineage and never chooses another interface, target, binding, caller
+  generation, key, Card, policy, extension specification, or local sub-agent,
+  and never asks Agent Hub for an automatic alternate after validation, network,
+  authentication, timeout, or remote Task failure. Only prompt-free `GetTask`
+  and an already-approved exact initial-Send replay may select a different active
+  `credentialRevisionId`, and only while `credentialBindingId`,
+  `callerGenerationId`, and every other immutable-lineage field remain exact.
+  Every new mutation requires a new explicit request and foreground approval,
+  including one that intends a different credential revision in the same
+  binding. Revision succession is journaled separately and never migrates the
+  Task to another route.
 
 The first lvis-app slice consumes this generic control-plane contract through a
 host-owned interface. Live source must not hard-code an Agent Hub plugin ID,
@@ -1050,26 +1062,35 @@ them.
   boot snapshot. A disabled gate performs no Agent Hub call, credential lookup,
   DNS lookup, or remote socket creation. Enabling it never widens or publishes
   the ph3 `127.0.0.1` listener.
-- Every new `SendMessage`, continuation, or live `CancelTask`, including one
-  that selects an explicitly approved successor credential revision, follows
+- Every new initial `SendMessage`, continuation `SendMessage`, or live
+  `CancelTask`, including one that selects a different in-binding
+  credential revision, follows
   one strict order: (1) the gate, D8 depth, explicit target/interface identity,
   and authoritative project/profile/origin/task ownership pass host
   authorization; (2) a visible foreground `agent-action` approval names that
-  exact target/interface identity and intended credential lineage; (3) the exact
-  serialized mutation body is placed in the OS-bound encrypted payload store and
-  the prepared metadata-journal intent commits; (4) the OS-safe local resolver
+  exact immutable lineage tuple and intended credential revision; (3) durable
+  preparation commits the prepared metadata-journal intent for every mutation;
+  for an initial Send only, the exact serialized body is first placed in the
+  OS-bound encrypted payload store and atomically bound by its opaque pointer,
+  while continuation and Cancel preparation stores bounded metadata plus the
+  semantic hash only and never stores a raw/encrypted body or payload pointer;
+  (4) the OS-safe local resolver
   prepares the exact intended credential revision as one short-lived operation-
   bound secret handle; (5) the host performs the final authenticated no-store
   route resolve as the last control-plane gate; (6) the resolved target/interface
-  and credential lineage must byte-match the approved identity, after which the
-  host CAS-attaches the complete snapshot ID, revision tuple, expiry, extension-
-  specification digest, and resolve timestamp to the prepared journal; and (7)
+  and immutable lineage must byte-match the approved identity, and the resolved
+  revision IDs must prove the exact intended attempt revision metadata, after
+  which the host CAS-attaches the complete snapshot ID, revision tuple, expiry,
+  extension-specification digest, and resolve timestamp to the prepared journal;
+  and (7)
   the data-plane socket starts immediately. The bearer never enters the journal
   and the prepared handle is destroyed on every pre-socket failure. If the final
   resolve changes identity or lineage, the operation stops before snapshot
-  attachment or data-plane I/O and requires a new foreground approval. The
-  superseded encrypted payload and prepared intent are retained only under the
-  fixed failed-preparation retention rule and can never be sent. Headless or
+  attachment or data-plane I/O and requires a new foreground approval. For an
+  initial Send only, failed-preparation and orphan cleanup applies to its staged
+  or bound encrypted payload; continuation and Cancel have no body payload or
+  payload-pointer cleanup path. A failed prepared intent can never be sent.
+  Headless or
   background approval, remembered allow-always state, bearer possession, or
   earlier route evidence cannot replace this sequence. Denial or approval
   failure creates no payload, mutation intent, secret preparation, final resolve,
@@ -1090,7 +1111,11 @@ them.
   final no-store resolve as the last gate, CAS-attaches the fresh matching
   snapshot metadata, and starts the socket immediately. Exact replay additionally
   decrypts and reuses the already-approved immutable request bytes and Message ID;
-  it cannot reconstruct or alter them. Neither operation can discover or
+  it cannot reconstruct or alter them. These are the only prompt-free carve-outs:
+  a fresh resolve may change only `credentialRevisionId` within the same exact
+  `credentialBindingId` and `callerGenerationId`; `targetAgentId`, exact
+  `interfaceUrl`, `agentCardDigestSha256`, `trustKeyId`, route-policy version and
+  digest, and `extensionSpecDigestSha256` remain fixed. Neither operation can discover or
   enumerate unrelated remote Tasks.
 - Agent Hub returns only the credential binding/revision ID plus bounded
   non-secret version, provider, and `external_version` metadata. It never returns
@@ -1114,10 +1139,16 @@ them.
   authentication only. It rejects HTTP, other bindings, embedded URL
   credentials, cookies, API-key query parameters, and mTLS-only profiles. The
   client selects an exact interface-advertised `1.0` protocol version and sends
-  `A2A-Version: 1.0` on every operation. It negotiates and sends only the
+  `A2A-Version: 1.0` on every operation. That version header never activates an
+  extension. Only an initial Send and its already-approved exact replay negotiate
+  and send the
   canonical LVIS exact-send-replay extension
-  `https://lvis.ai/a2a/extensions/exact-send-replay/v1`. If that required
-  contract is absent or malformed, the route is ineligible. Any additional
+  `https://lvis.ai/a2a/extensions/exact-send-replay/v1`; continuation, `GetTask`,
+  and `CancelTask` omit its activation header and metadata. The Agent Card entry
+  uses `required: false`; LVIS route policy, not the A2A `required` flag, mandates
+  its exact presence, parameters, served-specification digest, and Card digest
+  for an eligible initial Send. If that route-policy-mandated contract is absent
+  or malformed, the route is ineligible. Any additional
   extension marked `required: true` is unsupported and fails closed; unrelated
   optional extensions are ignored and are never negotiated, echoed, or
   executed. Patch versions never create a separate compatibility lane.
@@ -1161,23 +1192,35 @@ are obtained out of band rather than embedded in an Agent Card.
 
 - The metadata journal is an explicit two-stage transaction. Before local secret
   preparation or the final Hub resolve, stage `prepared` durably contains only:
-  host operation/attempt IDs; DLP-clean owner and operation kind; A2A method;
-  approved target/interface, Agent Card, key, credential-binding and credential-
-  lineage IDs; D8 depth; semantic-request hash; for an initial Send only, the
-  ciphertext hash plus opaque encrypted-payload record ID, size, and expiry;
-  host-minted Message ID; any already-known Task/context IDs; approval decision
-  ID/time for a mutation; and created/attempt deadlines. `snapshotId`, resolved
-  revision tuple, resolve timestamp, snapshot expiry, and extension-specification
-  digest are absent, not null placeholders.
+  host operation/attempt IDs; DLP-clean owner and operation kind; A2A method; the
+  exact immutable lineage tuple (`targetAgentId`, canonical exact `interfaceUrl`,
+  `agentCardDigestSha256`, `trustKeyId`, `credentialBindingId`,
+  `callerGenerationId`, `routePolicyVersion`, `routePolicyDigestSha256`, and
+  `extensionSpecDigestSha256`); D8 depth; semantic-request hash; for an initial
+  Send only, the ciphertext hash plus opaque encrypted-payload record ID, size,
+  and expiry; host-minted Message ID; any already-known Task/context IDs;
+  approval decision ID/time for a mutation; created/attempt deadlines; and the
+  bounded optional `predecessorRevisionId` and `intendedSuccessorRevisionId`.
+  Those optional revision IDs are non-authoritative intent metadata for
+  reconciliation only: they cannot authorize a route, credential, or successor,
+  and they are absent unless the attempt is reconciling an already-approved
+  operation. `snapshotId`, resolved credential revision, resolve timestamp, and
+  snapshot issue/expiry times are absent, not null placeholders. The immutable
+  extension-specification digest is prepared lineage, not resolved authorization.
   Task text, Parts, artifacts, bearer, raw credential reference,
   `secret_reference`, and raw response are never stored in this journal.
   Persistence failure means zero secret lookup, Hub resolve, and data-plane I/O.
 - Only after secret preparation and a successful final no-store Hub resolve may a
   compare-and-swap change that exact attempt to stage `resolved`. The CAS adds the
-  snapshot ID, complete target/interface/Card/key/credential revision tuple,
-  resolve timestamp, snapshot issue/expiry times, and exact extension-
-  specification digest. Every added value must byte-match the stage-`prepared`
-  approval lineage; a missing/mismatched field or losing CAS destroys the local
+  snapshot ID, resolved `credentialRevisionId`, resolve timestamp, and snapshot
+  issue/expiry times. It also re-proves the complete immutable lineage tuple from
+  the final resolve. Every immutable value must byte-match stage `prepared`; when
+  optional `predecessorRevisionId`/`intendedSuccessorRevisionId` are present, the
+  final no-store resolve and winning `resolved` CAS must prove that same lineage
+  and those exact intended revision IDs. The resolved revision must equal the
+  intended successor, and the predecessor must equal the prior durable attempt;
+  inference from "active" or "same binding" is insufficient. A missing or
+  mismatched field, unauthorized revision, or losing CAS destroys the local
   secret handle and performs zero socket I/O. The socket may start only from the
   winning `resolved` revision and does so immediately; the snapshot is never a
   reusable grant.
@@ -1185,15 +1228,23 @@ are obtained out of band rather than embedded in an Agent Card.
   payload store, never in the metadata journal. The journal carries only an
   opaque payload-record ID, ciphertext hash, and semantic hash. Before first
   data-plane I/O, the byte-for-byte serialized HTTP body of the initial
-  `SendMessage` is encrypted with an OS-bound host key and the authenticated
-  owner, route tuple, operation ID,
-  and Message ID as authenticated binding data. The record contains no bearer or
+  `SendMessage` is encrypted with an OS-bound host key. Encryption AAD is the
+  versioned canonical encoding of the authenticated owner ID, operation ID,
+  Message ID, exact body SHA-256, and the exact immutable lineage tuple
+  (`targetAgentId`, canonical exact `interfaceUrl`, `agentCardDigestSha256`,
+  `trustKeyId`, `credentialBindingId`, `callerGenerationId`,
+  `routePolicyVersion`, `routePolicyDigestSha256`, and
+  `extensionSpecDigestSha256`). Mutable attempt `credentialRevisionId`,
+  `predecessorRevisionId`, `intendedSuccessorRevisionId`, snapshot ID, and
+  snapshot times are excluded from AAD and are journaled separately. The record
+  contains no bearer or
   transport header, has a fixed maximum size and retention TTL, and is never
   returned to Agent Hub or copied into audit, logs, metrics, traces, errors, or
   crash reports. A continuation `SendMessage` and `CancelTask` retain only bounded
   journal metadata plus the semantic hash; they never persist a raw HTTP body or
   encrypted replay payload because this extension cannot replay them.
-- Payload/journal creation is a fail-closed two-phase storage transaction. The
+- Initial-Send payload/journal creation is a fail-closed two-phase storage
+  transaction; it does not apply to continuation or Cancel preparation. The
   host first writes ciphertext as non-sendable `staged` with its operation ID,
   hash, size, and bounded orphan deadline. One durable transaction then creates
   stage `prepared` referencing those exact fields and changes the payload to
@@ -1218,8 +1269,11 @@ are obtained out of band rather than embedded in an Agent Card.
   hash-mismatched, or undecryptable recovery ciphertext settles locally as
   `unknown-manual-reconciliation-required` with zero resend and no fabricated
   remote state.
-- The semantic hash covers the canonical method, route tuple, Task/context/
-  Message identities, configuration, and the canonical DLP-processed payload.
+- The semantic hash covers the canonical method, exact immutable lineage tuple,
+  Task/context/Message identities, configuration, and the canonical
+  DLP-processed payload. It excludes mutable attempt `credentialRevisionId`,
+  `predecessorRevisionId`, and `intendedSuccessorRevisionId`; those revisions are
+  separate journal fields and cannot change the approved semantic intent.
   An exact replay joins or returns the existing operation. Reuse of an operation
   or Message ID with any semantic difference is rejected before approval,
   credential lookup, or network I/O. Concurrent identical callers have one
@@ -1230,13 +1284,15 @@ are obtained out of band rather than embedded in an Agent Card.
   without another prompt only after fresh local authorization, secret preparation,
   final no-store resolve, and a new winning stage-`resolved` CAS. A `resolved`,
   `in-flight`, or partially settled attempt is outcome-ambiguous: it never reuses
-  the snapshot. A known Task ID permits only prompt-free same-lineage `GetTask`;
+  the snapshot. A known Task ID permits only prompt-free exact-immutable-lineage
+  `GetTask` with the credential-revision-only carve-out above;
   a lost initial-Send response permits only the immutable exact-byte replay below;
   other mutations are never resent. Invalid field combinations, including any
   snapshot field at stage `prepared` or missing required field at stage `resolved`,
   are quarantined with zero outbound I/O.
-- A first-slice route is eligible only when its Agent Card and route policy
-  explicitly advertise the required LVIS exact-send-replay extension identifier
+- A first-slice route is eligible only when its Agent Card has the exact LVIS
+  exact-send-replay extension entry with `required: false` and exact parameters,
+  and route policy explicitly mandates that identifier
   `https://lvis.ai/a2a/extensions/exact-send-replay/v1` and the
   route policy pins the served specification digest plus a passing pinned-head
   wire-conformance artifact. Advertised-interface health proves only declaration
@@ -1251,7 +1307,7 @@ are obtained out of band rather than embedded in an Agent Card.
   conflict. The client negotiates and sends this extension only on the initial
   Send and an exact replay of that same initial Send. Continuation `SendMessage`,
   `GetTask`, and `CancelTask` MUST omit its header and metadata, and their server
-  responses MUST omit its echo. An absent or malformed required
+  responses MUST omit its echo. An absent or malformed route-policy-mandated
   contract makes the route ineligible; any additional `required: true`
   extension is unsupported and fails closed, while unrelated optional
   extensions are ignored without negotiation, echo, or execution. This is an
@@ -1261,7 +1317,8 @@ are obtained out of band rather than embedded in an Agent Card.
   `SendMessageResponse` oneof wrapper. Its `message` branch is a successful terminal result
   for that operation and has no fabricated Task ID. A Task result records the
   remote Task/context IDs before exposing success. Continuations reuse the exact
-  Task, context, target/interface lineage, and a new host-minted Message ID.
+  Task, context, complete immutable lineage tuple, and a new host-minted Message
+  ID; any intended credential-revision change is separately approved.
   `INPUT_REQUIRED` preserves the ph3 typed `reason` and resume semantics.
   `AUTH_REQUIRED` remains a confirmed remote interrupted Task state; it is not
   converted into a fabricated local failure or terminal remote state, and the
@@ -1269,12 +1326,14 @@ are obtained out of band rather than embedded in an Agent Card.
   authorization details were negotiated out of band or through another accepted
   extension, `AUTH_REQUIRED` MUST include a `TaskStatus.message` explaining the
   required authorization. The current operation settles with one fixed local
-  auth-required outcome. After a successor credential is provisioned out of
-  band, the server MAY continue processing without a follow-up Message. The host
+  auth-required outcome. After a different in-binding credential revision is
+  provisioned out of band, the server MAY continue processing without a follow-up
+  Message. The host
   therefore reconciles with prompt-free `GetTask` attempts using the fresh local/
   journal/secret/final-resolve order. If a new continuation Message is actually
   required, it is a successor mutation and requires new explicit foreground
-  approval while preserving the same Task/context/target/interface lineage. No
+  approval while preserving the same Task/context and complete immutable lineage
+  tuple. No
   credential or route retry occurs inside the settled operation.
 - A confirmed A2A Task state advances monotonically and terminal states never
   regress. Local transport state (`prepared`, `in-flight`, `outcome-unknown`,
@@ -1282,13 +1341,15 @@ are obtained out of band rather than embedded in an Agent Card.
   remote Task state. A timeout, reset, partition, app stop, or audit failure
   cannot claim that a remote Task failed or was canceled without remote evidence.
 - Once a remote Task ID is durable, an ambiguous send/resume/cancel outcome is
-  reconciled only with bounded `GetTask` calls against the same pinned interface
-  and credential lineage. Reconciliation never resends that mutation, creates a
-  new Message ID, or changes route.
+  reconciled only with bounded `GetTask` calls against the exact immutable
+  lineage tuple. A fresh attempt may change only `credentialRevisionId` inside
+  the same `credentialBindingId`/`callerGenerationId`. Reconciliation never
+  resends that mutation, creates a new Message ID, or changes route.
 - If the initial `SendMessage` body was written but its response was lost before
   a remote Task ID became durable, `GetTask` is impossible. The host may perform
-  a bounded replay only after a fresh no-store route resolve confirms the same
-  authenticated caller, target/interface and exact-send-replay contract; it
+  a bounded replay only after a fresh no-store route resolve confirms the exact
+  immutable lineage tuple; only `credentialRevisionId` may differ inside the
+  same binding/generation. The attempt
   must decrypt and reuse the stored exact serialized body, Message ID, and
   semantic intent hash, including after host restart. It never reconstructs the
   request, changes an accepted field, or retries under an assumed spec-wide
@@ -1322,15 +1383,19 @@ are obtained out of band rather than embedded in an Agent Card.
   widens the original host-owned tool/project scope. A confirmed remote
   `AUTH_REQUIRED` is a distinct interrupted state: the settled operation accepts
   no Task-carried credential or automatic retry. After an administrator or user
-  provisions a successor credential out of band, the server may continue the
-  same Task automatically. Prompt-free `GetTask` observes that transition only
-  through an active successor revision of the same immutable credential binding
-  and authenticated caller generation; the attempt journal records predecessor
-  and successor revision IDs before the final resolve. A
+  provisions a different in-binding credential revision out of band, the server
+  may continue the same Task automatically. Prompt-free `GetTask` observes that
+  transition only
+  through an active revision of the same exact `credentialBindingId` and
+  `callerGenerationId`, with every other immutable-lineage field unchanged. The
+  attempt journal records exact bounded `predecessorRevisionId` and
+  `intendedSuccessorRevisionId` intent metadata before the final resolve; those
+  fields are non-authoritative, and both final resolve and resolved CAS must prove
+  their exact values against the same immutable lineage. A
   client continuation Message is permitted only when the server still requires
   one, after new explicit foreground approval and the ordered durable-preparation,
-  local-secret, final-no-store-resolve sequence proves the same target/interface
-  lineage and eligible successor credential revision.
+  local-secret, final-no-store-resolve sequence proves the exact immutable
+  lineage tuple and explicitly approved credential revision.
 - Timeout has three independent meanings: one bounded HTTP attempt deadline,
   one bounded reconciliation window, and the existing ph3 unanswered-input Task
   TTL. None is silently extended by Agent Hub or the remote server. Expiring the
@@ -1341,16 +1406,21 @@ are obtained out of band rather than embedded in an Agent Card.
   merely to retrieve or cancel a Task. An already approved operation remains
   durable and its remote Task remains unresolved. After an administrator restores
   eligibility, prompt-free `GetTask` reconciliation and an immutable exact-byte
-  initial-Send replay may resume that same operation only with an active successor
-  revision in the same immutable credential binding and caller generation, fresh
-  local authorization, secret preparation, final no-store resolve, and snapshot
-  CAS. The attempt journal records the predecessor/successor revision pair before
-  socket I/O. They never reuse prior route evidence or substitute caller identity,
-  binding, target, or interface. No new
+  initial-Send replay may resume that same operation with a changed credential
+  revision only when it is active in the same exact `credentialBindingId` and
+  `callerGenerationId`, every other immutable-lineage field is unchanged, and
+  fresh local authorization, secret preparation, final no-store resolve, and
+  snapshot CAS succeed. The attempt journal records exact
+  `predecessorRevisionId`/`intendedSuccessorRevisionId` metadata before resolve;
+  the final resolve and resolved CAS prove both IDs before socket I/O. They never
+  reuse prior route evidence or substitute caller identity, binding, target,
+  interface, Card digest, key ID, route policy, or extension digest. No new
   foreground approval is required because neither creates a successor mutation.
-  Every new `SendMessage`, continuation, or live `CancelTask` is a new mutation
+  Every new initial `SendMessage`, continuation `SendMessage`, or live
+  `CancelTask` is a new mutation
   and still requires the visible foreground approval sequence, even if it follows
-  revocation recovery or uses an eligible successor credential revision.
+  revocation recovery or uses a different eligible in-binding credential
+  revision.
 - On restart, the host loads only structurally valid prepared/in-flight/unknown
   records, revalidates ownership and the current exact route state, and resumes
   bounded reconciliation where a remote Task ID exists. Invalid, duplicate,
@@ -1387,20 +1457,20 @@ are obtained out of band rather than embedded in an Agent Card.
 | Plane separation | Agent Hub issues only bounded no-store route snapshots; packet capture plus Hub response/storage/log/audit assertions prove every Task payload, response, Task/context ID, artifact, `secret_reference`, raw reference derivative, and secret stays outside Hub and every Task method travels only between the client host and exact remote A2A server |
 | Opt-in | separate immutable boot gate defaults OFF; disabled mode performs zero control-plane, secret, DNS, socket, listener, or Task-journal effect and does not change ph3 loopback behavior |
 | Eligibility | one immutable unambiguous no-store snapshot proves active target + active exact trust-key revision + active exact credential binding/revision ID and bounded version/provider/external_version metadata + current advertised-interface declaration/reachability health + explicit host/operation route policy + separately pinned exact-send-replay specification digest and pinned-head wire-conformance artifact; health is never replay-conformance evidence, trusted or healthy alone is never enough, and every Send/Get/continue/Cancel resolves again as the last control-plane gate before data-plane I/O |
-| Host authorization | new-mutation order is gate/depth/explicit target+interface host authorization -> foreground approval -> encrypted payload plus prepared journal -> OS-safe local secret preparation -> final no-store resolve -> exact approved identity/lineage match plus CAS snapshot-metadata attachment -> immediate socket; identity drift requires reapproval and zero data-plane I/O; GetTask and exact replay omit only the prompt and still perform fresh local authorization, attempt journal, local secret preparation, final resolve, and snapshot attachment before the socket |
-| Protocol | A2A v1.0, public HTTPS/443, JSONRPC, non-streaming, Bearer only; exact supported interface and per-interface `1.0` negotiation; `A2A-Version: 1.0` on every request; `https://lvis.ai/a2a/extensions/exact-send-replay/v1` is sent only for an initial Send and exact replay of it, never continuation/Get/Cancel; every activated success and `-32090..-32094` error echoes it, only `-32092` carries Retry-After, and all errors are full JSON-RPC envelopes with exact request ID; absent/malformed required contract is ineligible; additional `required: true` extensions fail closed while unrelated optional extensions are ignored without negotiation/echo/execution |
+| Host authorization | new-mutation order is gate/depth/explicit target+interface host authorization -> foreground approval -> prepared journal for every mutation, with an encrypted exact-body record+pointer only for initial Send and metadata+semantic hash only for continuation/Cancel -> OS-safe local secret preparation -> final no-store resolve -> exact immutable-lineage and intended-revision proof plus CAS snapshot-metadata attachment -> immediate socket; identity drift requires reapproval and zero data-plane I/O; failed-preparation/orphan body cleanup is initial-Send-only; GetTask and exact replay omit only the prompt and still perform fresh local authorization, attempt journal, local secret preparation, final resolve, and snapshot attachment before the socket |
+| Protocol | A2A v1.0, public HTTPS/443, JSONRPC, non-streaming, Bearer only; exact supported interface and per-interface `1.0` negotiation; `A2A-Version: 1.0` on every request without activating any extension; Agent Card declares the exact profile with `required: false`, while LVIS route policy mandates its exact presence/params/Card/spec digests for eligible initial Send; `https://lvis.ai/a2a/extensions/exact-send-replay/v1` activation is sent only for an initial Send and exact replay of it, never continuation/Get/Cancel; every activated success and `-32090..-32094` error echoes it, only `-32092` carries Retry-After, and all errors are full JSON-RPC envelopes with exact request ID; absent/malformed route-policy-mandated contract is ineligible; additional `required: true` extensions fail closed while unrelated optional extensions are ignored without negotiation/echo/execution |
 | Credential | snapshot exposes only exact binding/revision ID plus bounded version/provider/external_version metadata; P4-3's internal keyed fingerprint is never returned; an out-of-band provisioned OS-safe local resolver maps the exact revision per operation but cannot pre-prove bearer bytes; no `secret_reference`, secret, or derivative in Hub response, journal, logs, audit, traces, metrics, errors, or crash reports; wrong bearer yields one fixed auth failure with zero retry/fallback and rotation/revocation mismatch is zero data-plane I/O |
 | Network | P4-3 public-address, DNS-rebinding, fresh-socket, no-proxy, redirect-zero, TLS/hostname, size, encoding, and deadline invariants apply independently to control and data planes; no private/LAN/development bypass |
-| Route pinning | exact target/interface/key/credential/health/policy tuple stays fixed for each operation; target/interface stay fixed for the Task lineage and any approved successor key/credential snapshot is recorded explicitly; no automatic alternate interface, credential, target, local-agent fallback, proxy relay, or route migration |
-| Durable intent | initial Send ciphertext first enters non-sendable `staged`; one durable transaction binds it to stage `prepared`, and failure/restart deletes bounded unbound orphans/quarantines missing references with zero I/O; continuation/Cancel persist metadata+semantic hash only, never raw/encrypted body; stage `resolved` CAS-attaches the byte-matching full revision tuple, snapshot ID/times, and specification digest immediately before socket I/O; client-observed durable settlement after full envelope/ID/wrapper-or-error/echo validation or TTL, whichever occurs first, deletes ciphertext, while a lost response retains it until replay/reconciliation or TTL |
-| Idempotency and concurrency | identical local replay joins one owner and produces no duplicate mutation/audit; distinct concurrent Task mutations serialize and revalidate; post-write initial Send recovery replays only the same caller generation + byte-for-byte identical serialized HTTP body + same Message ID + same intent hash and returns the same complete `SendMessageResponse` oneof wrapper under JSON-RPC `result`; at seven days one CAS terminalizes live/in-progress fences as RETENTION_EXPIRED, revokes owner tokens, writes tombstone, and suppresses late commits; fixed in-progress, outcome-unknown, capacity, conflict, and retention envelopes/client mappings |
-| State | a first non-streaming Send accepts either a terminal direct Message or a Task without inventing a Task ID; confirmed remote Task state is monotonic and separate from local delivery state; INPUT_REQUIRED resume preserves typed reason; remote AUTH_REQUIRED remains interrupted, MUST carry an explanatory TaskStatus.message unless details were negotiated out of band or through an accepted extension, settles the operation with a fixed local auth-required outcome, solicits no Task-carried credential, permits server auto-continuation after out-of-band provisioning observed through prompt-free GetTask, and requires new approval only if a successor continuation Message is sent on the same Task/context/target/interface lineage; transport failure never fabricates remote FAILED/CANCELED |
-| Recovery | known Task ID reconciles ambiguity only through bounded same-route `GetTask`; lost initial response without Task ID, including after host restart, decrypts and reuses only the exact bound serialized bytes under verified exact-send replay; missing/expired/hash-mismatched/undecryptable ciphertext or unavailable/conflicting extension terminates locally as `unknown-manual-reconciliation-required` with zero resend/fabricated remote state; restart, partition, late response, terminal race, retention deletion, and corrupted/duplicate record tests prove fencing and zero route substitution |
+| Route pinning | the immutable lineage tuple is exact `targetAgentId` + canonical exact `interfaceUrl` + Agent Card digest + key ID + `credentialBindingId` + `callerGenerationId` + route-policy version/digest + extension-spec digest; only prompt-free GetTask and already-approved exact initial-Send replay may change `credentialRevisionId` inside the same binding/generation, while every new mutation requires approval; no automatic alternate interface, binding, target, local-agent fallback, proxy relay, or route migration |
+| Durable intent | every new mutation commits prepared metadata; only initial Send ciphertext first enters non-sendable `staged` and is atomically bound by opaque pointer, and its failure/restart performs bounded orphan cleanup with zero I/O; continuation/Cancel persist metadata+semantic hash only, never raw/encrypted body or pointer; encryption AAD and semantic intent bind the exact immutable lineage tuple while excluding mutable attempt credential revision; bounded optional `predecessorRevisionId`/`intendedSuccessorRevisionId` are non-authoritative reconciliation metadata only, and final resolve plus stage-`resolved` CAS prove the same lineage and exact intended IDs before attaching snapshot/revision/times; client-observed durable settlement after full envelope/ID/wrapper-or-error/echo validation or TTL, whichever occurs first, deletes initial ciphertext, while a lost response retains it until replay/reconciliation or TTL |
+| Idempotency and concurrency | identical local replay joins one owner and produces no duplicate mutation/audit; distinct concurrent Task mutations serialize and revalidate; post-write initial Send recovery replays only the exact immutable lineage tuple (with credential-revision-only same-binding/generation carve-out) + byte-for-byte identical serialized HTTP body + same Message ID + same intent hash and returns the same complete `SendMessageResponse` oneof wrapper under JSON-RPC `result`; at seven days one CAS terminalizes live/in-progress fences as RETENTION_EXPIRED, revokes owner tokens, writes tombstone, and suppresses late commits; fixed in-progress, outcome-unknown, capacity, conflict, and retention envelopes/client mappings |
+| State | a first non-streaming Send accepts either a terminal direct Message or a Task without inventing a Task ID; confirmed remote Task state is monotonic and separate from local delivery state; INPUT_REQUIRED resume preserves typed reason; remote AUTH_REQUIRED remains interrupted, MUST carry an explanatory TaskStatus.message unless details were negotiated out of band or through an accepted extension, settles the operation with a fixed local auth-required outcome, solicits no Task-carried credential, permits server auto-continuation after out-of-band provisioning observed through prompt-free GetTask, and requires new approval only if a successor continuation Message is sent on the same Task/context/immutable-lineage tuple; transport failure never fabricates remote FAILED/CANCELED |
+| Recovery | known Task ID reconciles ambiguity only through bounded exact-immutable-lineage `GetTask` with the credential-revision-only same-binding/generation carve-out; lost initial response without Task ID, including after host restart, decrypts and reuses only the exact bound serialized bytes under verified exact-send replay and the same carve-out; missing/expired/hash-mismatched/undecryptable ciphertext or unavailable/conflicting extension terminates locally as `unknown-manual-reconciliation-required` with zero resend/fabricated remote state; restart, partition, late response, terminal race, retention deletion, and corrupted/duplicate record tests prove fencing and zero route substitution |
 | Cancel/Get/resume/TTL | exact-owner nonterminal cancel and confirmed INPUT_REQUIRED resume persist intent, reauthorize, and preserve terminal winner; exact local Cancel replay is idempotent with no second request, successful Cancel returns updated Task, inaccessible/purged is TaskNotFoundError, and present terminal is TaskNotCancelableError; GetTask preserves TaskNotFound nondisclosure and exact bounded historyLength semantics; AUTH_REQUIRED tests prove required explanatory status unless OOB-negotiated, no Task credential solicitation/fabricated failure/retry, server auto-continuation after OOB provisioning observed by prompt-free GetTask, and new approval only for an actual successor Message; HTTP, reconciliation, and unanswered-input deadlines are distinct, bounded, and tested |
-| Revocation | target/key/credential/policy/health loss is detected by per-attempt no-store resolve and blocks data-plane I/O while retaining unresolved Tasks; stale credentials are never used for cleanup; only the resolve-commit-to-socket race remains and receives one fixed audit outcome without retry/fallback; prompt-free exact replay/GetTask may use only an active successor revision in the same immutable credential binding and caller generation with journaled predecessor/successor IDs plus fresh authorization/secret/final-resolve/CAS and no identity/target/interface substitution; every successor Send/continue/Cancel mutation requires new explicit approval |
+| Revocation | target/key/credential/policy/health loss is detected by per-attempt no-store resolve and blocks data-plane I/O while retaining unresolved Tasks; stale credentials are never used for cleanup; only the resolve-commit-to-socket race remains and receives one fixed audit outcome without retry/fallback; prompt-free exact replay/GetTask may change only credential revision in the same exact `credentialBindingId`/`callerGenerationId`, with every other immutable field fixed and exact predecessor/intended-successor IDs proved by final resolve+CAS; every new Send/continue/Cancel mutation requires new explicit approval |
 | Audit | append-only control/data-plane records correlate snapshot and operation without payload/secrets/raw refs/raw network evidence; replay is non-duplicating, the resolve-commit-to-socket race has one fixed redacted outcome, and recovery attribution never rewrites predecessor evidence |
 | D8 | remote Task creation is unavailable at depth 1 and refuses before any control-plane, approval, credential, journal, or network side effect; current local spawnDepth and tool-blocklist regressions remain green |
-| Packaged live | two independent hosts plus live Agent Hub: packaged LVIS client talks directly to a public-HTTPS remote A2A server and proves both `result.message` and `result.task` oneof branches, exact JSON-RPC IDs, all-five error envelopes/echoes with Retry-After only on `-32092`, initial-only extension activation, denied auth, AUTH_REQUIRED successor revision constrained to the same binding/generation, INPUT_REQUIRED resume, cancel, prompt-free GetTask, staged/bound orphan cleanup, lost-response exact replay across restarts, live-owner expiry CAS/late-commit suppression, missing ciphertext manual reconciliation, malformed extension ineligibility, timeout/partition/revocation/no fallback, and zero Hub payload/secret/reference retention |
+| Packaged live | two independent hosts plus live Agent Hub: packaged LVIS client talks directly to a public-HTTPS remote A2A server and proves both `result.message` and `result.task` oneof branches, exact JSON-RPC IDs, all-five error envelopes/echoes with Retry-After only on `-32092`, `A2A-Version` on every operation but extension activation only initial Send/exact replay, `required: false` plus route-policy mandate, denied auth, AUTH_REQUIRED revision carve-out constrained to the same binding/generation and immutable lineage, INPUT_REQUIRED resume, cancel, prompt-free GetTask, initial-only staged/bound orphan cleanup, continuation/Cancel metadata-only preparation, lost-response exact replay across restarts, live-owner expiry CAS/late-commit suppression, missing ciphertext manual reconciliation, malformed extension ineligibility, timeout/partition/revocation/no fallback, and zero Hub payload/secret/reference retention |
 | Regression | ph1-ph3 in-process messaging, mailbox, approval, task-store/TTL, loopback bearer, official TCK, and external-SDK smoke remain green with the P4-5 gate both OFF and ON |
 
 P4-5 evidence is four distinct blocking gates. A passing later gate never waives
