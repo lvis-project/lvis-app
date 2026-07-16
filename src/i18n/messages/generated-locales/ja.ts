@@ -1295,6 +1295,8 @@ export const jaMessages: Record<string, string> = {
   "formatIpcError.personaPromptOriginRestricted": "ペルソナ プロンプトは、ユーザー入力元からのみ変更できます。",
   "formatIpcError.pluginNotLoaded": "プラグインが読み込まれていません。",
   "formatIpcError.preferenceRefreshServiceUnavailable": "設定更新サービスは利用できません。",
+  "formatIpcError.remoteA2aDisabled": "このアプリ設定ではリモート A2A が無効です。",
+  "formatIpcError.remoteA2aOperationRejected": "リモート A2A リクエストを完了できませんでした。",
   "formatIpcError.productionDisabled": "本番環境では使用できません。",
   "formatIpcError.exportFailed": "診断バンドルの生成に失敗しました。",
   "formatIpcError.crashListFailed": "クラッシュダンプの読み取りに失敗しました。",

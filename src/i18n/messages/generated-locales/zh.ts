@@ -1295,6 +1295,8 @@ export const zhMessages: Record<string, string> = {
   "formatIpcError.personaPromptOriginRestricted": "角色提示只能从用户输入源进行更改。",
   "formatIpcError.pluginNotLoaded": "插件未加载。",
   "formatIpcError.preferenceRefreshServiceUnavailable": "设置刷新服务不可用。",
+  "formatIpcError.remoteA2aDisabled": "此应用配置中已关闭远程 A2A。",
+  "formatIpcError.remoteA2aOperationRejected": "无法完成远程 A2A 请求。",
   "formatIpcError.productionDisabled": "在生产环境中不可用。",
   "formatIpcError.exportFailed": "生成诊断包失败。",
   "formatIpcError.crashListFailed": "读取崩溃转储失败。",

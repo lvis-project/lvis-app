@@ -1295,6 +1295,8 @@ export const esMessages: Record<string, string> = {
   "formatIpcError.personaPromptOriginRestricted": "Las indicaciones de persona solo se pueden cambiar desde un origen de entrada del usuario.",
   "formatIpcError.pluginNotLoaded": "El complemento no está cargado.",
   "formatIpcError.preferenceRefreshServiceUnavailable": "El servicio de actualización de configuración no está disponible.",
+  "formatIpcError.remoteA2aDisabled": "A2A remoto está desactivado en esta configuración de la aplicación.",
+  "formatIpcError.remoteA2aOperationRejected": "No se pudo completar la solicitud de A2A remoto.",
   "formatIpcError.productionDisabled": "No disponible en el entorno de producción.",
   "formatIpcError.exportFailed": "No se pudo crear el paquete de diagnóstico.",
   "formatIpcError.crashListFailed": "No se pudieron leer los volcados de fallos.",
