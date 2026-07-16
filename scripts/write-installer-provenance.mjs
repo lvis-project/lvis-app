@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { closeSync, lstatSync, openSync, realpathSync, writeFileSync } from "node:fs";
 
 import {
+  assertArtifactStable,
   assertHeadSha,
   assertSafeString,
   fail,
@@ -24,11 +25,16 @@ const REQUIRED_OPTIONS = Object.freeze([
   "os",
   "app-head",
   "hub-head",
+  "hub-lock-digest",
   "workflow-run-id",
   "workflow-run-attempt",
   "repository",
   "attestation",
   "output",
+  "mac-team-id",
+  "mac-certificate-sha256",
+  "windows-publisher-subject",
+  "windows-certificate-thumbprint",
 ]);
 
 function parseArguments(args) {
@@ -69,6 +75,7 @@ function writeExclusiveJson(path, value) {
 export function createInstallerProvenance(options, { run = runFixedProgram, cwd = process.cwd() } = {}) {
   assertHeadSha(options["app-head"], "--app-head");
   assertHeadSha(options["hub-head"], "--hub-head");
+  if (!/^[0-9a-f]{64}$/u.test(options["hub-lock-digest"])) fail("--hub-lock-digest must be exactly 64 lowercase hexadecimal characters");
   if (options.repository !== "lvis-project/lvis-app") fail("--repository must be lvis-project/lvis-app");
   if (!/^\d+$/u.test(options["workflow-run-id"]) || !/^\d+$/u.test(options["workflow-run-attempt"])) {
     fail("workflow run id and attempt must be decimal strings");
@@ -76,11 +83,19 @@ export function createInstallerProvenance(options, { run = runFixedProgram, cwd 
   const checkoutHead = run("git", ["rev-parse", "HEAD"], { label: "checkout HEAD" }).stdout;
   if (checkoutHead !== options["app-head"]) fail(`checkout HEAD ${checkoutHead} does not equal requested app head`);
 
-  const installer = readRegularFile(resolve(options.installer), "installer", { maxBytes: 4 * 1024 * 1024 * 1024 });
+  const installer = readRegularFile(resolve(options.installer), "installer", { maxBytes: 4 * 1024 * 1024 * 1024, loadBytes: false });
   const attestationReport = readRegularFile(resolve(options.attestation), "gh attestation report", { maxBytes: 8 * 1024 * 1024 });
   const packageJson = readLock(resolve(cwd, "package.json"), "package.json lock");
   const bunLock = readLock(resolve(cwd, "bun.lock"), "bun.lock lock");
-  const signature = verifyInstallerIdentity(options.os, installer.path, run);
+  const platformIdentity = verifyInstallerIdentity(options.os, installer.path, {
+    run,
+    expected: {
+      macTeamId: options["mac-team-id"],
+      macCertificateSha256: options["mac-certificate-sha256"],
+      windowsPublisherSubject: options["windows-publisher-subject"],
+      windowsCertificateThumbprint: options["windows-certificate-thumbprint"],
+    },
+  });
   const attestation = verifyAttestationReport(attestationReport, {
     installerSha256: installer.sha256,
     appHead: options["app-head"],
@@ -88,8 +103,9 @@ export function createInstallerProvenance(options, { run = runFixedProgram, cwd 
     workflowRunId: options["workflow-run-id"],
     workflowRunAttempt: options["workflow-run-attempt"],
   });
+  assertArtifactStable(installer, "installer", { maxBytes: 4 * 1024 * 1024 * 1024 });
   const tools = collectFixedToolVersions(run);
-  tools.signatureVerifier = signature.verifier;
+  tools.identityVerifier = platformIdentity.verifier;
 
   return validateProvenance({
     schemaVersion: 1,
@@ -103,12 +119,13 @@ export function createInstallerProvenance(options, { run = runFixedProgram, cwd 
       repository: options.repository,
       appHead: options["app-head"],
       agentHubHead: options["hub-head"],
+      agentHubLockDigestSha256: options["hub-lock-digest"],
     },
     workflow: {
       runId: options["workflow-run-id"],
       attempt: options["workflow-run-attempt"],
     },
-    signature,
+    platformIdentity,
     attestation,
     locks: {
       packageJsonSha256: packageJson.sha256,
