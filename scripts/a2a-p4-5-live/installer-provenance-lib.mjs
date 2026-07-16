@@ -1,6 +1,6 @@
 import { basename, extname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 import {
@@ -76,7 +76,7 @@ function parseMacIdentity(details, label) {
 }
 
 function extractMacLeafCertificateSha256(subjectPath, run, label) {
-  const directory = mkdtempSync(resolve(tmpdir(), "lvis-codesign-certificate-"));
+  const directory = mkdtempSync(resolve(realpathSync(tmpdir()), "lvis-codesign-certificate-"));
   const prefix = resolve(directory, "certificate-");
   try {
     run("codesign", ["--display", "--extract-certificates", prefix, subjectPath], {
