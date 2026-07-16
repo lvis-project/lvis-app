@@ -65,6 +65,24 @@ describe("RemoteA2AActionButton production IPC surface", () => {
     expect(screen.queryByTestId("remote-a2a-replay")).toBeNull();
   });
 
+  it("shows already-settled cancellation feedback instead of a sent message", async () => {
+    installApi({
+      state: "sent",
+      taskHandle: "task_handle_123456",
+      taskAvailable: true,
+      recoveryEligible: false,
+      taskState: "TASK_STATE_CANCELED",
+      targetLabel: "Agent one",
+      outcome: "cancel-already-settled",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+    });
+
+    await openPanel();
+
+    expect(screen.getByTestId("remote-a2a-status").textContent).toBe(t("remoteA2aActionButton.alreadySettled"));
+    expect(screen.getByTestId("remote-a2a-status").textContent).not.toContain("Agent one");
+  });
+
   it("keeps approved targets visible when only the initial status request rejects", async () => {
     installApi();
     window.lvisApi.remoteA2a.status = vi.fn(async () => {
