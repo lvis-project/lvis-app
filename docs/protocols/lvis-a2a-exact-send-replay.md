@@ -2,7 +2,7 @@
 
 - Canonical URI: `https://lvis.ai/a2a/extensions/exact-send-replay/v1`
 - Protocol profile: A2A v1.0, JSON-RPC binding, non-streaming `SendMessage`
-- Status: normative implementation contract; live activation is prohibited until
+- Status: normative implementation contract, locked 2026-07-16; live activation is prohibited until
   this exact document is served at the canonical URI and its SHA-256 digest is
   pinned by both route policy and the packaged client
 
