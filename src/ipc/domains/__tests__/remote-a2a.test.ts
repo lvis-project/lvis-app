@@ -90,6 +90,20 @@ describe("remote A2A IPC rejection boundary", () => {
     },
   );
 
+  it.each([0, -1, Number.MIN_SAFE_INTEGER])(
+    "rejects invalid target agent ID %s at the IPC boundary",
+    async (targetAgentId) => {
+      const controller = await setup();
+
+      await expect(invokeFileIpcHandler(handlers, CHANNELS.remoteA2a.send, {
+        intentToken: USER_INTENT,
+        targetAgentId,
+        userIntent: "send this task",
+      })).resolves.toEqual({ ok: false, error: "a2a-remote-input-invalid" });
+      expect(controller.send).not.toHaveBeenCalled();
+    },
+  );
+
   it("uses ok only as the discriminant when a controller returns a failed delivery status", async () => {
     handlers.clear();
     const failedStatus = {
@@ -127,6 +141,18 @@ describe("remote A2A IPC rejection boundary", () => {
     })).resolves.toEqual({ ok: false, error: "a2a-remote-operation-rejected" });
   });
 
+  it.each(["", "short", "a".repeat(257), "invalid!task_handle"])(
+    "rejects malformed task handle %j before task lookup",
+    async (taskHandle) => {
+      const controller = await setup();
+
+      await expect(invokeFileIpcHandler(handlers, CHANNELS.remoteA2a.task, {
+        taskHandle,
+      })).resolves.toEqual({ ok: false, error: "a2a-remote-input-invalid" });
+      expect(controller.get).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     ["resume", { userIntent: "continue" }],
     ["cancel", {}],
@@ -154,6 +180,20 @@ describe("remote A2A IPC rejection boundary", () => {
         userIntent,
       })).resolves.toEqual({ ok: false, error: "a2a-remote-input-invalid" });
       expect(controller.resume).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["", "short", "a".repeat(257), "invalid!task_handle"])(
+    "rejects malformed task handle %j before an action",
+    async (taskHandle) => {
+      const controller = await setup();
+
+      await expect(invokeFileIpcHandler(handlers, CHANNELS.remoteA2a.action, {
+        intentToken: USER_INTENT,
+        action: "cancel",
+        taskHandle,
+      })).resolves.toEqual({ ok: false, error: "a2a-remote-input-invalid" });
+      expect(controller.cancel).not.toHaveBeenCalled();
     },
   );
 });

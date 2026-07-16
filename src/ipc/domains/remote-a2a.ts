@@ -1,5 +1,6 @@
 import { ipcMain } from "electron";
 import { CHANNELS } from "../../contract/app-contract.js";
+import { isValidRemoteA2ATargetAgentId, isValidRemoteA2ATaskHandle } from "../../shared/a2a-remote-input.js";
 import { hasUserKeyboardIntent } from "../../shared/chat-origin.js";
 import { auditUnauthorized, UNAUTHORIZED_FRAME, validateHostRendererSender } from "../gated.js";
 import type { IpcDeps } from "../types.js";
@@ -57,7 +58,7 @@ export function registerRemoteA2AHandlers(deps: IpcDeps): void {
     }
     const controller = deps.remoteA2AActionController;
     if (!controller) return DISABLED;
-    if (!Number.isSafeInteger(value.targetAgentId) || !isValidUserIntent(value.userIntent)) {
+    if (!isValidRemoteA2ATargetAgentId(value.targetAgentId) || !isValidUserIntent(value.userIntent)) {
       return { ok: false, error: "a2a-remote-input-invalid" as const };
     }
     try {
@@ -79,7 +80,7 @@ export function registerRemoteA2AHandlers(deps: IpcDeps): void {
     const value = payload && typeof payload === "object" && !Array.isArray(payload)
       ? payload as Record<string, unknown>
       : {};
-    if (Object.keys(value).sort().join(",") !== "taskHandle" || typeof value.taskHandle !== "string") {
+    if (Object.keys(value).sort().join(",") !== "taskHandle" || !isValidRemoteA2ATaskHandle(value.taskHandle)) {
       return { ok: false, error: "a2a-remote-input-invalid" as const };
     }
     const controller = deps.remoteA2AActionController;
@@ -104,7 +105,7 @@ export function registerRemoteA2AHandlers(deps: IpcDeps): void {
     const controller = deps.remoteA2AActionController;
     if (!controller) return DISABLED;
     if ((value.action !== "resume" && value.action !== "cancel" && value.action !== "replay")
-      || typeof value.taskHandle !== "string"
+      || !isValidRemoteA2ATaskHandle(value.taskHandle)
       || (value.action === "resume" ? !isValidUserIntent(value.userIntent) : value.userIntent !== undefined)) {
       return { ok: false, error: "a2a-remote-input-invalid" as const };
     }
