@@ -170,7 +170,7 @@ export function readRegularFile(path, label, {
     };
   } catch (error) {
     if (String(error.message).startsWith("[a2a-p4-5-evidence]")) throw error;
-    fail(`${label}: cannot open without following links (${error.message})`);
+    fail(`${label}: cannot read canonical regular file (${error.message})`);
   } finally {
     if (canonicalDescriptor !== undefined) closeSync(canonicalDescriptor);
     if (descriptor !== undefined) closeSync(descriptor);

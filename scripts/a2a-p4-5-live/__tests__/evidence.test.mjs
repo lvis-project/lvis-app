@@ -233,6 +233,10 @@ test("evidence descriptors reject escapes, empty files, symlinks, and digest mis
   assert.throws(() => readEvidenceDescriptor(manifestPath, descriptor("artifact.bin", SHA), "artifact"), /digest mismatch/u);
   writeFileSync(resolve(directory, "empty"), "");
   assert.throws(() => readEvidenceDescriptor(manifestPath, descriptor("empty", sha256), "artifact"), /file size/u);
+  assert.throws(
+    () => readRegularFile(resolve(directory, "missing"), "missing artifact"),
+    /cannot read canonical regular file \(.*ENOENT/u,
+  );
   symlinkSync(artifactPath, resolve(directory, "link"));
   assert.throws(() => readEvidenceDescriptor(manifestPath, descriptor("link", sha256), "artifact"), /non-symlink|symlink path components/u);
   const outside = mkdtempSync(resolve(tmpdir(), "lvis-outside-"));
