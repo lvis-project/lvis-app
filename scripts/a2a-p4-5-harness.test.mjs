@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash, generateKeyPairSync } from "node:crypto";
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { test } from "node:test";
@@ -139,12 +139,18 @@ test("signer requires an exact Ed25519 trust pin and refuses key symlinks", () =
   }
 });
 
-test("immutable evidence writer refuses replacement", () => {
+test("immutable evidence writer refuses regular-file and symlink replacement", () => {
   const directory = mkdtempSync(resolve(tmpdir(), "p4-5-immutable-"));
   try {
     const path = resolve(directory, "evidence.json");
+    const target = resolve(directory, "target.json");
+    const link = resolve(directory, "evidence-link.json");
     writeImmutable(path, Buffer.from("{}"));
     assert.throws(() => writeImmutable(path, Buffer.from("{}")), /already exists/u);
+    writeFileSync(target, "trusted\n");
+    symlinkSync(target, link);
+    assert.throws(() => writeImmutable(link, Buffer.from("replaced\n")), /already exists/u);
+    assert.equal(createHash("sha256").update("trusted\n").digest("hex"), createHash("sha256").update(readFileSync(target)).digest("hex"));
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

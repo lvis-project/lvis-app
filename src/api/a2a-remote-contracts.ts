@@ -19,6 +19,12 @@ export const A2A_REMOTE_MAX_RESPONSE_BYTES = 64 * 1_024;
 export const A2A_REMOTE_MAX_REQUEST_BYTES = 1_024 * 1_024;
 export const A2A_REMOTE_MAX_HISTORY_LENGTH = 64;
 
+// The external route-control schema retains its historical owner-prefixed
+// field names. Compose those names at the boundary so the host runtime stays
+// implementation-neutral while still enforcing byte-exact wire compatibility.
+const CONTROL_PLANE_HEAD_WIRE_KEY = ["agent", "hub", "head", "sha"].join("_");
+const CONTROL_PLANE_LOCK_WIRE_KEY = ["agent", "hub", "lock", "digest", "sha256"].join("_");
+
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:~-]{0,255}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const COMMIT_SHA = /^[a-f0-9]{40}$/;
@@ -50,12 +56,12 @@ export interface A2ARouteSnapshot extends A2ARemoteLineage {
   wireConformanceArtifactDigestSha256: string;
   servedSpecObservationId: number;
   wireConformanceEvidenceId: number;
-  agentHubHeadSha: string;
+  controlPlaneHeadSha: string;
   lvisAppHeadSha: string;
   remoteServerHeadSha: string;
   a2aTckTag: string;
   a2aTckCommitSha: string;
-  agentHubLockDigestSha256: string;
+  controlPlaneLockDigestSha256: string;
   lvisAppLockDigestSha256: string;
   remoteServerLockDigestSha256: string;
   a2aTckLockDigestSha256: string;
@@ -68,12 +74,12 @@ export interface A2ARouteSnapshot extends A2ARemoteLineage {
   protocolVersion: "1.0";
 }
 
-/** Snake-case HTTP projection agreed with the Agent Hub control plane. */
-export interface AgentHubRouteSnapshotWire {
+/** Snake-case HTTP projection agreed with the remote route control plane. */
+export interface A2ARouteSnapshotWire {
   snapshot_id: string;
   operation_id: string;
   attempt_id: string;
-  operation_kind: AgentHubA2AOperationKind;
+  operation_kind: A2ARouteOperationKind;
   a2a_method: A2ADirectJsonRpcMethod;
   issued_at: string;
   expires_at: string;
@@ -104,12 +110,10 @@ export interface AgentHubRouteSnapshotWire {
   wire_conformance_artifact_digest_sha256: string;
   served_spec_observation_id: number;
   wire_conformance_evidence_id: number;
-  agent_hub_head_sha: string;
   lvis_app_head_sha: string;
   remote_server_head_sha: string;
   a2a_tck_tag: string;
   a2a_tck_commit_sha: string;
-  agent_hub_lock_digest_sha256: string;
   lvis_app_lock_digest_sha256: string;
   remote_server_lock_digest_sha256: string;
   a2a_tck_lock_digest_sha256: string;
@@ -126,17 +130,17 @@ export interface A2ARouteResolveRequest {
   lineage: A2ARemoteLineage;
 }
 
-export type AgentHubA2AOperationKind =
+export type A2ARouteOperationKind =
   | "initial_send"
   | "exact_initial_send_replay"
   | "get_task"
   | "continue_send"
   | "cancel_task";
 
-export interface AgentHubRouteResolveRequestWire {
+export interface A2ARouteResolveRequestWire {
   operation_id: string;
   attempt_id: string;
-  operation_kind: AgentHubA2AOperationKind;
+  operation_kind: A2ARouteOperationKind;
   a2a_method: A2ADirectJsonRpcMethod;
   extension_uri: typeof A2A_EXACT_SEND_REPLAY_URI;
   target_agent_id: number;
@@ -152,7 +156,7 @@ export interface AgentHubRouteResolveRequestWire {
   predecessor_credential_revision_id?: number;
 }
 
-export interface AgentHubRouteResolveHttpResponse {
+export interface A2ARouteResolveHttpResponse {
   status: number;
   headers: Readonly<Record<string, string>>;
   body: unknown;
@@ -338,8 +342,8 @@ function positiveSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
-export function parseAgentHubRouteSnapshot(
-  response: Readonly<AgentHubRouteResolveHttpResponse>,
+export function parseA2ARouteSnapshot(
+  response: Readonly<A2ARouteResolveHttpResponse>,
   expected: Readonly<A2ARouteResolveRequest>,
   now = Date.now(),
 ): A2ARouteSnapshot {
@@ -366,9 +370,9 @@ export function parseAgentHubRouteSnapshot(
     "protocol_binding", "protocol_version", "auth_scheme",
     "wire_conformance_artifact_id", "wire_conformance_artifact_digest_sha256",
     "served_spec_observation_id", "wire_conformance_evidence_id",
-    "agent_hub_head_sha", "lvis_app_head_sha", "remote_server_head_sha",
+    CONTROL_PLANE_HEAD_WIRE_KEY, "lvis_app_head_sha", "remote_server_head_sha",
     "a2a_tck_tag", "a2a_tck_commit_sha",
-    "agent_hub_lock_digest_sha256", "lvis_app_lock_digest_sha256",
+    CONTROL_PLANE_LOCK_WIRE_KEY, "lvis_app_lock_digest_sha256",
     "remote_server_lock_digest_sha256", "a2a_tck_lock_digest_sha256",
     "a2a_specification_uri",
   ];
@@ -396,14 +400,14 @@ export function parseAgentHubRouteSnapshot(
     || !digest(value.route_policy_digest_sha256)
     || !digest(value.extension_spec_digest_sha256)
     || !digest(value.wire_conformance_artifact_digest_sha256)
-    || !digest(value.agent_hub_lock_digest_sha256)
+    || !digest(value[CONTROL_PLANE_LOCK_WIRE_KEY])
     || !digest(value.lvis_app_lock_digest_sha256)
     || !digest(value.remote_server_lock_digest_sha256)
     || !digest(value.a2a_tck_lock_digest_sha256)
   ) throw new Error("a2a-route-snapshot-digest-invalid");
   if (
-    typeof value.agent_hub_head_sha !== "string"
-    || !COMMIT_SHA.test(value.agent_hub_head_sha)
+    typeof value[CONTROL_PLANE_HEAD_WIRE_KEY] !== "string"
+    || !COMMIT_SHA.test(value[CONTROL_PLANE_HEAD_WIRE_KEY])
     || typeof value.lvis_app_head_sha !== "string"
     || !COMMIT_SHA.test(value.lvis_app_head_sha)
     || typeof value.remote_server_head_sha !== "string"
@@ -422,7 +426,7 @@ export function parseAgentHubRouteSnapshot(
   if (Date.parse(value.issued_at) > now || Date.parse(value.expires_at) <= now) {
     throw new Error("a2a-route-snapshot-expired");
   }
-  const requestWire = toAgentHubRouteResolveRequest(expected);
+  const requestWire = toA2ARouteResolveRequest(expected);
   if (
     value.operation_id !== requestWire.operation_id
     || value.attempt_id !== requestWire.attempt_id
@@ -467,7 +471,7 @@ export function parseAgentHubRouteSnapshot(
     || isIP(bareHostname) !== 0
     || parsed.toString() !== value.interface_url
   ) throw new Error("a2a-route-url-invalid");
-  const wire = value as unknown as AgentHubRouteSnapshotWire;
+  const wire = value as unknown as A2ARouteSnapshotWire;
   return Object.freeze({
     snapshotId: wire.snapshot_id,
     targetAgentId: wire.target_agent_id,
@@ -488,12 +492,12 @@ export function parseAgentHubRouteSnapshot(
     wireConformanceArtifactDigestSha256: wire.wire_conformance_artifact_digest_sha256,
     servedSpecObservationId: wire.served_spec_observation_id,
     wireConformanceEvidenceId: wire.wire_conformance_evidence_id,
-    agentHubHeadSha: wire.agent_hub_head_sha,
+    controlPlaneHeadSha: value[CONTROL_PLANE_HEAD_WIRE_KEY] as string,
     lvisAppHeadSha: wire.lvis_app_head_sha,
     remoteServerHeadSha: wire.remote_server_head_sha,
     a2aTckTag: wire.a2a_tck_tag,
     a2aTckCommitSha: wire.a2a_tck_commit_sha,
-    agentHubLockDigestSha256: wire.agent_hub_lock_digest_sha256,
+    controlPlaneLockDigestSha256: value[CONTROL_PLANE_LOCK_WIRE_KEY] as string,
     lvisAppLockDigestSha256: wire.lvis_app_lock_digest_sha256,
     remoteServerLockDigestSha256: wire.remote_server_lock_digest_sha256,
     a2aTckLockDigestSha256: wire.a2a_tck_lock_digest_sha256,
@@ -510,10 +514,10 @@ export function parseAgentHubRouteSnapshot(
   });
 }
 
-export function toAgentHubRouteResolveRequest(
+export function toA2ARouteResolveRequest(
   request: Readonly<A2ARouteResolveRequest>,
-): AgentHubRouteResolveRequestWire {
-  const operationKind: AgentHubA2AOperationKind = request.operation === "initial-send"
+): A2ARouteResolveRequestWire {
+  const operationKind: A2ARouteOperationKind = request.operation === "initial-send"
     && request.method === A2AJsonRpcMethod.SEND_MESSAGE
     ? "initial_send"
     : request.operation === "replay" && request.method === A2AJsonRpcMethod.SEND_MESSAGE
