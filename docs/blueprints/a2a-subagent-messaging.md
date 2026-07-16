@@ -1,6 +1,6 @@
 # A2A Inter-Subagent Messaging — Blueprint
 
-- Status: **Accepted; ph1-ph3 merged; ph4 P4-0 closed, P4-1 registry admission merged, P4-2 durable Agent Card registry contract locked, and P4-3/G003 trust-connectivity security contract locked** (D1-D8 locked by the owner on 2026-07-11; ph4 boundary locked 2026-07-15; P4-3 locked 2026-07-16)
+- Status: **Accepted; ph1-ph3 merged; ph4 P4-0 closed, P4-1 registry admission merged, P4-2 durable Agent Card registry contract locked, P4-3/G003 trust-connectivity security contract locked, and P4-5/G005 direct remote-routing contract locked** (D1-D8 locked by the owner on 2026-07-11; ph4 boundary locked 2026-07-15; P4-3 and P4-5 locked 2026-07-16)
 - Scope: upgrade LVIS sub-agents from "tool-call-level" (pull-only child→parent) to A2A-protocol-based messaging — child→parent push, sibling↔sibling messaging — while preserving every existing security invariant.
 - Protocol baseline: **A2A v1.0.0** (Linux Foundation, a2a-protocol.org). Complementary to MCP (MCP = agent↔tool, A2A = agent↔agent); coexists with the ext-apps adoption track.
 - Roadmap anchor: concretizes the Agent Hub vision item "A2A Runtime — 에이전트 간 비동기 위임·합의·결과 전달" (docs/ko/architecture/architecture.md Phase 5-6, previously ❌ 미구현).
@@ -964,7 +964,7 @@ and PostgreSQL;
 and absence of plugin, HostApi, runner, tool, route, advertised-interface health,
 or remote-invocation effects.
 
-#### P4-5 / G005 direct remote-routing contract (proposed for owner acceptance 2026-07-16)
+#### P4-5 / G005 direct remote-routing contract (locked 2026-07-16)
 
 P4-5 adds an opt-in route from the host-owned A2A client to an independently
 operated remote A2A server. Agent Hub is the administrator-reviewed control
