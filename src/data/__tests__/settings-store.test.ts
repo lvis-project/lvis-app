@@ -48,8 +48,14 @@ describe("SettingsService remote A2A canonical route-control origin", () => {
     await service.patch({ a2aRemote: { routeControlBaseUrl: "https://hub.example.test/" } } as never);
     expect(service.get("a2aRemote").routeControlBaseUrl).toBe("https://hub.example.test/");
 
-    await service.patch({ a2aRemote: { routeControlBaseUrl: "https://hub.example.test" } } as never);
-    expect(service.get("a2aRemote").routeControlBaseUrl).toBe("");
+    for (const noncanonical of [
+      "https://hub.example.test",
+      "https://hub.example.test/?",
+      "https://hub.example.test/#",
+    ]) {
+      await service.patch({ a2aRemote: { routeControlBaseUrl: noncanonical } } as never);
+      expect(service.get("a2aRemote").routeControlBaseUrl).toBe("");
+    }
   });
 });
 
