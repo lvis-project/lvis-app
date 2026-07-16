@@ -10,7 +10,9 @@ const extensionUri = "https://lvis.ai/a2a/extensions/exact-send-replay/v1";
 const officialSpec = "https://a2a-protocol.org/v1.0.0/specification/";
 const exactProtocolBindingPhrase = "`JSONRPC` (JSON-RPC) binding";
 const proseNameAsProtocolBinding = /`JSON-RPC`(?:\s+\(JSON-RPC\))?\s+binding/;
-const jsonFencePattern = /```json[ \t]*\r?\n([\s\S]*?)\r?\n```/g;
+const fenceOpeningPattern = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const fenceClosingPattern = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+const jsonFenceInfoPattern = /^[ \t]*json[ \t]*$/;
 const expectedExtensionParams = {
   profile: "lvis-exact-send-replay",
   profileVersion: "1",
@@ -129,16 +131,55 @@ function requireExactProtocolBinding(text, expectedCount, label) {
 }
 
 function parseJsonFences(text) {
-  return [...text.matchAll(jsonFencePattern)].map((match, index) => {
-    try {
-      return JSON.parse(match[1]);
-    } catch (error) {
-      fail(`spec JSON block ${index + 1} is invalid: ${error.message}`);
+  const parsed = [];
+  let jsonBlockCount = 0;
+  let openFence = null;
+
+  for (const line of text.split(/\r\n|\n/)) {
+    if (openFence === null) {
+      const opening = line.match(fenceOpeningPattern);
+      if (opening === null) continue;
+      const marker = opening[1];
+      const isJson = jsonFenceInfoPattern.test(opening[2]);
+      if (isJson) jsonBlockCount += 1;
+      openFence = {
+        char: marker[0],
+        length: marker.length,
+        isJson,
+        jsonIndex: isJson ? jsonBlockCount : null,
+        lines: [],
+      };
+      continue;
     }
-  });
+
+    const closing = line.match(fenceClosingPattern);
+    const closesCurrent =
+      closing !== null &&
+      closing[1][0] === openFence.char &&
+      closing[1].length >= openFence.length;
+    if (closesCurrent) {
+      if (openFence.isJson) {
+        try {
+          parsed.push(JSON.parse(openFence.lines.join("\n")));
+        } catch (error) {
+          fail(`spec JSON block ${openFence.jsonIndex} is invalid: ${error.message}`);
+        }
+      }
+      openFence = null;
+      continue;
+    }
+
+    if (openFence.isJson) openFence.lines.push(line);
+  }
+
+  if (openFence?.isJson) {
+    fail(`spec JSON block ${openFence.jsonIndex} is invalid: unclosed JSON fence`);
+  }
+  // An unclosed non-JSON fence contributes no JSON block and is ignored.
+  return parsed;
 }
 
-function expectJsonFenceParseFailure(text, expectedIndex, label) {
+function expectJsonFenceParseFailure(text, expectedIndex, label, expectedDetail) {
   let caught;
   try {
     parseJsonFences(text);
@@ -149,17 +190,20 @@ function expectJsonFenceParseFailure(text, expectedIndex, label) {
   if (!(caught instanceof Error) || !caught.message.startsWith(expectedPrefix)) {
     fail(`${label}: expected parse failure with prefix ${JSON.stringify(expectedPrefix)}`);
   }
+  if (expectedDetail !== undefined && !caught.message.endsWith(expectedDetail)) {
+    fail(`${label}: expected parse failure ending ${JSON.stringify(expectedDetail)}`);
+  }
 }
 
 function validateJsonFenceExtraction() {
   const lfFixture = [
     "prose before",
-    "```json",
+    "   ```json",
     '{"branch":"message"}',
-    "```",
-    "```json \t",
+    "   ````  ",
+    "~~~ \tjson\t ",
     '{"branch":"task","count":2}',
-    "```",
+    "~~~~~",
     "prose after",
   ].join("\n");
   const crlfFixture = lfFixture.replaceAll("\n", "\r\n");
@@ -185,6 +229,30 @@ function validateJsonFenceExtraction() {
     2,
     "malformed second JSON fence",
   );
+  expectJsonFenceParseFailure(
+    ["```json", "{}", "```", "~~~ json", "{}"].join("\n"),
+    2,
+    "unclosed JSON fence",
+    "unclosed JSON fence",
+  );
+
+  for (const [label, fixture] of [
+    ["inline fake fence", ["prefix ```json", '{"fake":true}', "```"].join("\n")],
+    ["four-space-indented fake fence", ["    ```json", '{"fake":true}', "    ```"].join("\n")],
+    [
+      "nested triple fence",
+      ["````text", "```json", '{"fake":true}', "```", "````"].join("\n"),
+    ],
+    [
+      "unclosed non-JSON fence",
+      ["~~~text", "```json", '{"fake":true}', "```"].join("\n"),
+    ],
+    ["non-lowercase info string", ["```JSON", "{}", "```"].join("\n")],
+  ]) {
+    if (parseJsonFences(fixture).length !== 0) {
+      fail(`${label} fixture produced a JSON block`);
+    }
+  }
 }
 
 function sha256(text) {
