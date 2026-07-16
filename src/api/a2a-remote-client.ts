@@ -683,8 +683,6 @@ export class A2ARemoteClient {
           outcomeCode: task?.status.state === "TASK_STATE_AUTH_REQUIRED"
             ? "authentication-required-out-of-band"
             : "success",
-          ...(task && typeof task.id === "string" ? { remoteTaskId: task.id } : {}),
-          ...(task && typeof task.contextId === "string" ? { remoteContextId: task.contextId } : {}),
           ...(task && input.taskHandle && input.targetLabel ? {
             taskProjection: {
               handle: input.taskHandle,

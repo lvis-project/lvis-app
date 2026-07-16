@@ -2,6 +2,7 @@ import { ArrowDownToLine, Download, PanelRightClose, PanelRightOpen, RefreshCw, 
 import { Button } from "../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { useTranslation } from "../../i18n/react.js";
+import { RemoteA2AActionButton } from "./components/RemoteA2AActionButton.js";
 
 /**
  * Every interactive control in the toolbar lives inside the window-control
@@ -107,6 +108,10 @@ export function MainToolbar({
     >
       {/* ── Spacer pushes the trailing controls to the far-right edge (stays drag) */}
       <div className="flex-1" aria-hidden="true" />
+
+      <NoDrag>
+        <RemoteA2AActionButton />
+      </NoDrag>
 
       {/* ── App update badge — permanent (NOT a toast) until acted on; clicking
           maps to download (available) → install (downloaded). The download step

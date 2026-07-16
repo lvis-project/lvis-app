@@ -31,6 +31,8 @@ import type { PluginTelemetryClient } from "../telemetry/client.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
 import type { PreferenceRefreshService } from "../memory/preference-refresh-service.js";
+import type { A2ARemoteRuntime } from "../main/a2a-remote-runtime.js";
+import type { RemoteA2AActionController } from "../main/remote-a2a-action-controller.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
 
@@ -70,6 +72,10 @@ export interface AppServices {
   pluginRuntime: PluginRuntime;
   pluginMarketplace: PluginMarketplaceService;
   settingsService: SettingsService;
+  /** Optional host-owned P4-5 runtime. Absent means both immutable boot gates were OFF. */
+  a2aRemoteRuntime?: A2ARemoteRuntime;
+  /** Main-owned renderer action boundary; renderer supplies only target id and user intent. */
+  remoteA2AActionController?: RemoteA2AActionController;
   memoryManager: MemoryManager;
   keywordEngine: KeywordEngine;
   routeEngine: RouteEngine;

@@ -85,5 +85,6 @@ describe("A2A remote exact initial replay", () => {
     expect(disk.attempts).toHaveLength(2);
     expect(disk.attempts.find((entry: any) => entry.prepared.attemptId === "loser")).toMatchObject({ stage: "NOT_SENT", outcomeCode: "INTENDED_CREDENTIAL_REVISION_CONFLICT" });
     expect(disk.attempts.find((entry: any) => entry.prepared.attemptId === "loser").prepared).not.toHaveProperty("payloadRecordId");
+    expect(disk.attempts.find((entry: any) => entry.prepared.attemptId === "winner").prepared).toMatchObject({ approvalDecisionId: "gate-decision", approvalDecidedAt: "2026-07-16T00:00:00.000Z" });
   });
 });

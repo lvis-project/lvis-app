@@ -176,6 +176,13 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
 
   const api: MockLvisApi = {
     notifyPluginTheme: vi.fn(async () => ({ ok: true })),
+    remoteA2a: {
+      targets: vi.fn(async () => ({ ok: false, error: "a2a-remote-disabled" })),
+      status: vi.fn(async () => ({ ok: false, error: "a2a-remote-disabled" })),
+      send: vi.fn(async () => ({ ok: false, error: "a2a-remote-disabled" })),
+      task: vi.fn(async () => ({ ok: false, error: "a2a-remote-disabled" })),
+      action: vi.fn(async () => ({ ok: false, error: "a2a-remote-disabled" })),
+    },
     tour: {
       getState: vi.fn(async () => ({
         ok: true,
