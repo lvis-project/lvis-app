@@ -63,6 +63,8 @@ interface ActiveReceiver {
 
 let activeReceiver: ActiveReceiver | null = null;
 let startPromise: Promise<RemoteA2AReceiverServer | null> | null = null;
+let startAttemptSequence = 0;
+let activeStartAttempt: number | null = null;
 let stopPromise: Promise<void> | null = null;
 let lifecycleGeneration = 0;
 let stopped = false;
@@ -165,12 +167,17 @@ export async function maybeStartRemoteA2AReceiverServer(
   }
   if (activeReceiver) return Object.freeze({ port: activeReceiver.server.port });
   if (startPromise) return await startPromise;
+  const attempt = ++startAttemptSequence;
+  activeStartAttempt = attempt;
   const pending = startForBoot(options, lifecycleGeneration);
   startPromise = pending;
   try {
     return await pending;
   } finally {
-    if (startPromise === pending) startPromise = null;
+    if (activeStartAttempt === attempt) {
+      startPromise = null;
+      activeStartAttempt = null;
+    }
   }
 }
 
@@ -214,7 +221,7 @@ export function resetRemoteA2AReceiverServerForTests(): void {
   if (process.env.NODE_ENV !== "test") {
     throw new Error("a2a-remote-receiver-test-reset-outside-test");
   }
-  if (activeReceiver || startPromise || stopPromise) {
+  if (activeReceiver || startPromise || stopPromise || activeStartAttempt !== null) {
     throw new Error("a2a-remote-receiver-test-reset-while-active");
   }
   lifecycleGeneration += 1;

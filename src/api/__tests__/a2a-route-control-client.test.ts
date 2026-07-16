@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { A2AJsonRpcMethod } from "../../shared/a2a-wire.js";
-import { A2AAgentHubClient } from "../a2a-agent-hub-client.js";
+import { A2ARouteControlClient } from "../a2a-route-control-client.js";
 import {
   A2A_EXACT_SEND_REPLAY_URI,
   A2A_SPECIFICATION_URI,
-  parseAgentHubRouteSnapshot,
-  toAgentHubRouteResolveRequest,
+  parseA2ARouteSnapshot,
+  toA2ARouteResolveRequest,
   type A2ARouteResolveRequest,
 } from "../a2a-remote-contracts.js";
 
@@ -49,7 +49,7 @@ const proof = {
 function hubResponse() {
   return {
     snapshot_id: "snapshot-1",
-    ...toAgentHubRouteResolveRequest(input),
+    ...toA2ARouteResolveRequest(input),
     issued_at: "2026-07-16T00:00:00.000Z",
     expires_at: "2099-01-01T00:00:00.000Z",
     credential_revision_id: 12,
@@ -68,14 +68,14 @@ function hubResponse() {
 }
 
 function parse(body: unknown) {
-  return parseAgentHubRouteSnapshot({
+  return parseA2ARouteSnapshot({
     status: 200,
     headers: { "cache-control": "no-store, max-age=0", pragma: "no-cache" },
     body,
   }, input, Date.parse("2026-07-16T00:01:00.000Z"));
 }
 
-describe("Agent Hub route client plane separation", () => {
+describe("A2A route-control client plane separation", () => {
   it("posts only the strict route projection with a separate Hub credential", async () => {
     let wireBody = "";
     const transport = { invoke: vi.fn(async (request) => {
@@ -87,7 +87,7 @@ describe("Agent Hub route client plane separation", () => {
       };
     }) };
     let zeroized = false;
-    const client = new A2AAgentHubClient({
+    const client = new A2ARouteControlClient({
       baseUrl: "https://hub.example.test/",
       transport,
       authResolver: {
@@ -102,12 +102,12 @@ describe("Agent Hub route client plane separation", () => {
       credentialRevisionId: 12,
       servedSpecObservationId: 7,
       wireConformanceEvidenceId: 8,
-      agentHubHeadSha: proof.agent_hub_head_sha,
+      controlPlaneHeadSha: proof.agent_hub_head_sha,
       lvisAppHeadSha: proof.lvis_app_head_sha,
       remoteServerHeadSha: proof.remote_server_head_sha,
       a2aTckTag: "1.0.0.alpha2",
       a2aTckCommitSha: proof.a2a_tck_commit_sha,
-      agentHubLockDigestSha256: proof.agent_hub_lock_digest_sha256,
+      controlPlaneLockDigestSha256: proof.agent_hub_lock_digest_sha256,
       lvisAppLockDigestSha256: proof.lvis_app_lock_digest_sha256,
       remoteServerLockDigestSha256: proof.remote_server_lock_digest_sha256,
       a2aTckLockDigestSha256: proof.a2a_tck_lock_digest_sha256,

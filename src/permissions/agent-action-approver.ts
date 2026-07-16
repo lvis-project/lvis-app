@@ -25,7 +25,7 @@ export type AgentActionApprover = (
 ) => Promise<AgentActionApprovalReceipt | null>;
 
 export interface AgentActionApprovalReceipt {
-  /** The exact ApprovalGate request/decision correlation, never caller-minted. */
+  /** Host-generated ApprovalGate request/decision correlation identifier. */
   decisionId: string;
   decidedAt: string;
 }

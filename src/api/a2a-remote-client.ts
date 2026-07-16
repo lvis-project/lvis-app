@@ -212,13 +212,13 @@ function validateSnapshot(snapshot: A2ARouteSnapshot, input: A2ARemoteExecuteInp
     || snapshot.servedSpecObservationId <= 0
     || !Number.isSafeInteger(snapshot.wireConformanceEvidenceId)
     || snapshot.wireConformanceEvidenceId <= 0
-    || !FULL_COMMIT_SHA.test(snapshot.agentHubHeadSha)
+    || !FULL_COMMIT_SHA.test(snapshot.controlPlaneHeadSha)
     || !FULL_COMMIT_SHA.test(snapshot.lvisAppHeadSha)
     || !FULL_COMMIT_SHA.test(snapshot.remoteServerHeadSha)
     || !FULL_COMMIT_SHA.test(snapshot.a2aTckCommitSha)
     || snapshot.a2aTckTag.length > 64
     || !TCK_TAG.test(snapshot.a2aTckTag)
-    || !SHA256_DIGEST.test(snapshot.agentHubLockDigestSha256)
+    || !SHA256_DIGEST.test(snapshot.controlPlaneLockDigestSha256)
     || !SHA256_DIGEST.test(snapshot.lvisAppLockDigestSha256)
     || !SHA256_DIGEST.test(snapshot.remoteServerLockDigestSha256)
     || !SHA256_DIGEST.test(snapshot.a2aTckLockDigestSha256)

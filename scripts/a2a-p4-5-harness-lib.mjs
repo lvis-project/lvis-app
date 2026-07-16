@@ -1,9 +1,12 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-  chmodSync,
+  closeSync,
+  constants,
   existsSync,
+  fchmodSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   realpathSync,
   writeFileSync,
@@ -29,7 +32,7 @@ const BOUNDED_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const MUTABLE_OR_PLACEHOLDER = /(?:^|[._:-])(latest|main|master|head|placeholder|replace(?:-?me)?|todo)(?:$|[._:-])/iu;
 
 export const DETERMINISTIC_TEST_FILES = Object.freeze([
-  "src/api/__tests__/a2a-agent-hub-client.test.ts",
+  "src/api/__tests__/a2a-route-control-client.test.ts",
   "src/api/__tests__/a2a-exact-replay-handler.test.ts",
   "src/api/__tests__/a2a-exact-replay-store.test.ts",
   "src/api/__tests__/a2a-remote-client.test.ts",
@@ -240,10 +243,24 @@ export function signCanonicalBundle(bundle, signer) {
 
 export function writeImmutable(path, bytes) {
   const absolute = resolve(path);
-  if (existsSync(absolute)) throw new Error(`immutable evidence already exists: ${absolute}`);
   mkdirSync(dirname(absolute), { recursive: true });
-  writeFileSync(absolute, bytes, { flag: "wx", mode: 0o444 });
-  chmodSync(absolute, 0o444);
+  let descriptor;
+  try {
+    descriptor = openSync(
+      absolute,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
+      0o444,
+    );
+    writeFileSync(descriptor, bytes);
+    fchmodSync(descriptor, 0o444);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {
+      throw new Error(`immutable evidence already exists: ${absolute}`, { cause: error });
+    }
+    throw error;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
   return absolute;
 }
 
