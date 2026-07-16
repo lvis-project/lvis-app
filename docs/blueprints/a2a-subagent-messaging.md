@@ -963,6 +963,341 @@ and PostgreSQL;
 and absence of plugin, HostApi, runner, tool, route, advertised-interface health,
 or remote-invocation effects.
 
+#### P4-5 / G005 direct remote-routing contract (proposed for owner acceptance 2026-07-16)
+
+P4-5 adds an opt-in route from the host-owned A2A client to an independently
+operated remote A2A server. Agent Hub is the administrator-reviewed control
+plane for route eligibility. It is not an A2A Task proxy, broker, or transcript
+store. This boundary is deliberate: administrative discovery and policy remain
+centralized while prompts, Parts, artifacts, Task responses, and credentials
+stay on the direct A2A data-plane connection between the two hosts.
+
+##### Control plane, data plane, and route identity
+
+- **Direct data plane only:** the packaged LVIS host obtains one immutable route
+  snapshot from Agent Hub and sends A2A requests directly to the exact
+  `supportedInterfaces[]` URL named by that snapshot. Agent Hub never relays,
+  terminates, queues, retries, inspects, or stores an A2A request or response.
+  Task prompts, message Parts, artifacts, status messages, context IDs, remote
+  Task IDs, and bearer values never cross the Agent Hub API.
+- **Agent Hub control plane only:** Agent Hub authenticates the host runtime,
+  applies the administrator-owned route policy, and returns a bounded route
+  snapshot. Snapshot issuance is an authorization decision record, not proof
+  that the caller may execute a Task and not a substitute for the foreground
+  approval described below.
+- **Exact immutable route:** a snapshot identifies one target version, one
+  accepted Agent Card digest, one advertised interface and canonical public
+  HTTPS URL, one active trust-key revision, one active credential revision by
+  binding/revision ID plus bounded non-secret version, provider, and
+  `external_version` metadata, one advertised-interface health observation, one
+  route-policy version, and the verified canonical LVIS exact-send-replay
+  extension identifier
+  `https://lvis.ai/a2a/extensions/exact-send-replay/v1`. This URI is a protocol
+  identifier, not a claim that a document is served at that location. It also carries a
+  control-plane-minted snapshot ID and finite expiry. `secret_reference`, raw
+  reference derivatives, and secret values are never snapshot fields.
+  The client validates the complete shape and exact versions before any secret
+  lookup or data-plane I/O. Missing, duplicated, ambiguous, expired, or changed
+  fields make the snapshot ineligible.
+- **Eligibility is conjunctive:** `trusted` admission alone is never routable.
+  Agent Hub may mark the exact snapshot eligible only while the registry target
+  is active, the exact key revision is active and bound to that target/card, the
+  exact credential revision is active and bound to that target/interface, the
+  exact advertised interface has a current healthy observation, and an explicit
+  route policy authorizes the requesting host and operation class. The first
+  slice additionally requires the exact-send-replay extension contract below.
+  Every term must remain independently represented; no broad `trusted` or
+  `healthy` alias may collapse them.
+- **No route substitution:** the client pins the snapshot for the operation. It
+  never choose-another-interface, rotates to another credential, changes target,
+  falls back to a local sub-agent, or asks Agent Hub for an automatic alternate
+  after validation, network, authentication, timeout, or remote Task failure.
+  A later operation may use a successor snapshot only for the same target and
+  interface, after a new explicit request and foreground approval. It records
+  the revision succession and never migrates the Task to another route.
+
+The first lvis-app slice consumes this generic control-plane contract through a
+host-owned interface. Live source must not hard-code an Agent Hub plugin ID,
+plugin tool name, HostApi method, or Marketplace route. Agent Hub is one service
+implementation of the control plane, not an in-process plugin dependency.
+
+##### Host authorization, approval, and credential boundary
+
+- The remote-routing boot and settings gate is independent from the existing
+  local API and ph3 loopback gates, defaults OFF, and is captured as an immutable
+  boot snapshot. A disabled gate performs no Agent Hub call, credential lookup,
+  DNS lookup, or remote socket creation. Enabling it never widens or publishes
+  the ph3 `127.0.0.1` listener.
+- Every non-replayed `SendMessage`, continuation, or live `CancelTask` follows
+  one strict order: (1) the gate, D8 depth, explicit target/interface identity,
+  and authoritative project/profile/origin/task ownership pass host
+  authorization; (2) a visible foreground `agent-action` approval names that
+  exact target/interface identity; (3) the host performs the final authenticated
+  no-store route resolve; (4) the resolved target/interface must byte-match the
+  approved identity; (5) the prepared Task-journal intent commits; (6) the local
+  OS-safe secret resolves; and (7) the data-plane socket starts immediately. If
+  the final resolve changes identity, the operation stops before journal, secret,
+  or data-plane I/O and requires a new foreground approval. Headless/background
+  approval, remembered allow-always state, bearer possession, or earlier route
+  evidence cannot replace this sequence. Denial or approval failure creates no
+  final resolve, mutation intent, secret lookup, or data-plane I/O.
+- Route evidence is never an authorization cache. The final resolve immediately
+  before every `SendMessage`, `GetTask`, continuation, or `CancelTask` makes
+  Agent Hub re-evaluate the complete conjunctive eligibility predicate and
+  return a fresh exact snapshot with `Cache-Control: no-store`; the host neither
+  persists it as a reusable grant nor reuses it for a later operation. A cached,
+  expired, incomplete, unavailable, or identity-mismatched result fails closed
+  before local secret resolution or data-plane I/O.
+- Reads used to reconcile an already-approved operation (`GetTask`) do not create
+  another Task mutation and do not show another foreground prompt. They still
+  validate exact owner/task/target/interface policy, perform a final no-store
+  resolve, require the same target/interface lineage, resolve the exact local
+  credential, and start the socket immediately. They cannot discover or
+  enumerate unrelated remote Tasks.
+- Agent Hub returns only the credential binding/revision ID plus bounded
+  non-secret version, provider, and `external_version` metadata. It never returns
+  P4-3's raw `secret_reference`, its server-internal keyed fingerprint, or any
+  value derived from the reference or secret. After the no-store route resolve
+  and all other non-secret gates pass, an injected local resolver looks up an
+  OS-safe, out-of-band provisioned secret by the exact binding/revision ID and
+  verifies only the revision mapping. It cannot pre-prove the bearer bytes; the
+  remote server remains the authentication authority. A wrong bearer produces
+  one fixed authentication failure with zero credential or route retry. The
+  resolver does not call Agent Hub or dereference a Hub value. The secret is held
+  only for the bounded operation, is sent solely as
+  `Authorization: Bearer <value>` to the
+  pinned remote interface, and is never copied into Hub responses, persistence,
+  logs, errors, metrics, traces, crash reports, Task journals, or audit. Missing,
+  mismatched, rotated, or revoked local resolution fails closed with zero remote
+  I/O.
+- The first slice accepts A2A v1.0 over public HTTPS, `JSONRPC`, and HTTP Bearer
+  authentication only. It rejects HTTP, other bindings, embedded URL
+  credentials, cookies, API-key query parameters, and mTLS-only profiles. The
+  client selects an exact interface-advertised `1.0` protocol version and sends
+  `A2A-Version: 1.0` on every operation. It negotiates and sends only the
+  canonical LVIS exact-send-replay extension
+  `https://lvis.ai/a2a/extensions/exact-send-replay/v1`. If that required
+  contract is absent or malformed, the route is ineligible. Any additional
+  extension marked `required: true` is unsupported and fails closed; unrelated
+  optional extensions are ignored and are never negotiated, echoed, or
+  executed. Patch versions never create a separate compatibility lane.
+  Unsupported versions, bindings, authentication, or required extension
+  contracts fail before credential resolution.
+
+This profile follows the official A2A v1.0 rule that version negotiation is per
+`AgentInterface`, that clients send the `A2A-Version` header, and that credentials
+are obtained out of band rather than embedded in an Agent Card.
+
+##### Public-network and transport invariants
+
+- P4-5 does not weaken the P4-3 public-network boundary. Target and interface
+  URLs use canonical public HTTPS with effective port 443; IP literals,
+  loopback, private, link-local, carrier-grade NAT, multicast, documentation,
+  benchmark, reserved, and otherwise non-global addresses are rejected. There
+  is no LAN mode, insecure-development override, proxy fallback, redirect
+  following, certificate bypass, alternate DNS path, or user-supplied Host/SNI.
+- Route-snapshot retrieval and data-plane invocation have independent bounded
+  host-owned deadlines, header/body limits, redirect limit zero, identity
+  encoding, fresh DNS validation, fresh non-reused sockets, canonical SNI/Host,
+  platform trust roots, and minimum TLS 1.2. Configuration delivered by the
+  wire cannot increase a bound. Each implementation PR must name the constants
+  and prove their exact boundaries before merge.
+- Advertised-interface health is separate from P4-3 Agent Card/JWKS metadata-
+  endpoint health. The snapshot references one current, versioned interface-
+  health observation produced without a Task payload or credential disclosure.
+  Health neither changes trust nor proves the bearer remains valid. The direct
+  client still performs TLS, snapshot, authorization, and authentication checks
+  on every operation.
+- A revocation committed before the no-store resolve completes blocks the
+  operation. The only unavoidable cross-plane gap is a revocation that commits
+  after the resolve decision and before the already-authorized data-plane socket
+  starts. That resolve-commit-to-socket race receives one fixed redacted audit
+  outcome when observed; it never permits cached authorization, stale-secret
+  retry, route substitution, or a fabricated remote Task result.
+
+##### Durable Task transaction and idempotency
+
+- Before data-plane I/O, the host durably stores a prepared operation containing
+  a host operation ID, semantic-request hash, DLP-clean local owner, route-
+  snapshot ID and exact revision tuple, A2A method, host-minted Message ID, and
+  any already-known remote Task/context IDs. Task text, Parts, artifacts, bearer,
+  raw credential reference, `secret_reference`, and raw response are not stored
+  in this routing journal. The prepared record is bound to the immediately
+  preceding no-store resolve. Persistence failure means zero data-plane I/O.
+- Initial-Send recovery bytes live in a separate host-only encrypted operation-
+  payload store, never in the metadata journal. The journal carries only an
+  opaque payload-record ID, ciphertext hash, and semantic hash. Before first
+  data-plane I/O, the exact serialized JSON-RPC request bytes are encrypted with
+  an OS-bound host key and the authenticated owner, route tuple, operation ID,
+  and Message ID as authenticated binding data. The record contains no bearer or
+  transport header, has a fixed maximum size and retention TTL, and is never
+  returned to Agent Hub or copied into audit, logs, metrics, traces, errors, or
+  crash reports. The host deletes it after the Message-or-Task result settles
+  and its bounded recovery retention expires; expiry also deletes unresolved
+  ciphertext after recording the fixed manual-reconciliation outcome.
+  Encryption failure means zero initial data-plane I/O. Missing, expired,
+  hash-mismatched, or undecryptable recovery ciphertext settles locally as
+  `unknown-manual-reconciliation-required` with zero resend and no fabricated
+  remote state.
+- The semantic hash covers the canonical method, route tuple, Task/context/
+  Message identities, configuration, and the canonical DLP-processed payload.
+  An exact replay joins or returns the existing operation. Reuse of an operation
+  or Message ID with any semantic difference is rejected before approval,
+  credential lookup, or network I/O. Concurrent identical callers have one
+  owner; concurrent distinct mutations against one Task serialize and revalidate.
+- A first-slice route is eligible only when its Agent Card and route policy
+  explicitly advertise the required LVIS exact-send-replay extension identifier
+  `https://lvis.ai/a2a/extensions/exact-send-replay/v1` and the
+  advertised-interface health gate has verified that exact contract. The server
+  must durably map the same authenticated caller, `SendMessage` Message ID, and
+  byte-equivalent canonical request/semantic intent hash to one direct
+  Message-or-Task union result across process restart. An exact retry returns
+  the same union result without executing again, while the same Message ID with
+  a different body or intent hash fails with one fixed conflict. The client
+  negotiates and sends only this extension. An absent or malformed required
+  contract makes the route ineligible; any additional `required: true`
+  extension is unsupported and fails closed, while unrelated optional
+  extensions are ignored without negotiation, echo, or execution. This is an
+  LVIS route requirement, not a claim that A2A v1.0 universally guarantees Send
+  idempotency.
+- The first `SendMessage` is non-streaming and accepts the protocol-defined
+  direct Message-or-Task union. A direct Message is a successful terminal result
+  for that operation and has no fabricated Task ID. A Task result records the
+  remote Task/context IDs before exposing success. Continuations reuse the exact
+  Task, context, target/interface lineage, and a new host-minted Message ID.
+  `INPUT_REQUIRED` preserves the ph3 typed `reason` and resume semantics.
+  `AUTH_REQUIRED` remains a confirmed remote interrupted Task state; it is not
+  converted into a fabricated local failure or terminal remote state, and the
+  host never solicits credentials through a Task Message. The current operation
+  settles with one fixed local auth-required outcome. After a successor
+  credential is provisioned out of band, continuation of the same Task/context
+  is allowed only through a new explicit foreground approval and final no-store
+  resolve that preserve the same target/interface lineage; no credential or
+  route retry occurs inside the settled operation.
+- A confirmed A2A Task state advances monotonically and terminal states never
+  regress. Local transport state (`prepared`, `in-flight`, `outcome-unknown`,
+  `reconciling`, or `settled`) is stored separately and never fabricated as a
+  remote Task state. A timeout, reset, partition, app stop, or audit failure
+  cannot claim that a remote Task failed or was canceled without remote evidence.
+- Once a remote Task ID is durable, an ambiguous send/resume/cancel outcome is
+  reconciled only with bounded `GetTask` calls against the same pinned interface
+  and credential lineage. Reconciliation never resends that mutation, creates a
+  new Message ID, or changes route.
+- If the initial `SendMessage` body was written but its response was lost before
+  a remote Task ID became durable, `GetTask` is impossible. The host may perform
+  a bounded replay only after a fresh no-store route resolve confirms the same
+  authenticated caller, target/interface and exact-send-replay contract; it
+  must decrypt and reuse the stored exact serialized body, Message ID, and
+  semantic intent hash, including after host restart. It never reconstructs the
+  request, changes an accepted field, or retries under an assumed spec-wide
+  deduplication rule. Missing/expired/invalid ciphertext, encryption/decryption
+  failure, or an extension that is unavailable, disappears, conflicts, or
+  cannot return an unambiguous original result makes the local recovery outcome
+  terminal
+  `unknown-manual-reconciliation-required`. No further automatic resend occurs
+  and no remote A2A terminal state is fabricated.
+
+##### Cancellation, revocation, partition, and restart recovery
+
+- `CancelTask` is permitted only for the exact owned, nonterminal remote Task.
+  The host persists intent before the request, applies the same foreground
+  approval and current-route checks, and confirms `CANCELED` only from the
+  remote result or later `GetTask`. Losing the race to another terminal state
+  preserves the remote terminal winner.
+- Resume from confirmed `INPUT_REQUIRED` revalidates the exact context and route
+  lineage after approval, commits its Message intent before I/O, and never
+  widens the original host-owned tool/project scope. A confirmed remote
+  `AUTH_REQUIRED` is a distinct interrupted state: the settled operation accepts
+  no Task-carried credential or automatic retry. After an administrator or user
+  provisions a successor credential out of band, the host may continue the same
+  Task/context only after new explicit foreground approval and a final no-store
+  resolve prove the same target/interface lineage and the eligible successor
+  credential revision; it then commits a new Message intent before I/O.
+- Timeout has three independent meanings: one bounded HTTP attempt deadline,
+  one bounded reconciliation window, and the existing ph3 unanswered-input Task
+  TTL. None is silently extended by Agent Hub or the remote server. Expiring the
+  reconciliation window retains an explicit local `outcome-unknown`; expiring
+  the input TTL requests cancellation and still requires remote confirmation.
+- Credential/key/target/policy revocation or unhealthy/stale interface evidence
+  blocks every new mutation and reconciliation before secret use. An already
+  remote Task is retained as unresolved; revocation never authorizes a stale
+  credential merely to cancel it. Recovery resumes only after an administrator
+  issues a newly eligible exact snapshot and the user explicitly approves the
+  recovery. It never migrates the Task to another interface.
+- On restart, the host loads only structurally valid prepared/in-flight/unknown
+  records, revalidates ownership and the current exact route state, and resumes
+  bounded reconciliation where a remote Task ID exists. Invalid, duplicate,
+  cross-owner, expired, or conflicting records are quarantined and audited with
+  zero outbound I/O. Shutdown aborts live requests but does not delete durable
+  unknown outcomes.
+
+##### Audit, D8, and exclusions
+
+- Control-plane snapshot issuance and host data-plane execution have separate
+  append-only audit streams joined by the host operation ID and snapshot ID.
+  Host audit records fixed operation/state/outcome codes and opaque keyed tokens
+  for target, interface, task, and credential revision. It never records Task
+  content, remote status text, artifacts, raw URLs, raw IDs, raw credential
+  references, secrets, headers, bodies, DNS answers, or raw OS/TLS errors.
+  Replay emits no duplicate execution audit; recovery records the recovery actor
+  and predecessor operation without rewriting earlier evidence.
+- D8 remains depth-1. P4-5 adds a remote route, not a nested-creation loophole:
+  a depth-1 local child cannot create a remote Task, the remote route is absent
+  from its scoped tool surface, and the hard depth check runs before Agent Hub,
+  approval, secret, or network effects. Any decision to allow deeper delegation
+  is a separate post-routing policy change with its own threat model, user
+  approval contract, limits, and regression review.
+- Plugin/HostApi integration, Marketplace behavior, meeting, local-indexer,
+  plugin-SDK alignment, work-assistant registration, private/LAN routing,
+  streaming, push notification, non-Bearer authentication, and Agent Hub Task
+  relay/storage are excluded. They are neither prerequisites nor fallback paths.
+
+##### P4-5 normative completion matrix
+
+| Gate | Required evidence |
+| --- | --- |
+| Ownership | generic host-owned remote A2A client and control-plane interfaces; no plugin, HostApi, Marketplace, work-assistant, meeting, local-indexer, or plugin-SDK dependency |
+| Plane separation | Agent Hub issues only bounded no-store route snapshots; packet capture plus Hub response/storage/log/audit assertions prove every Task payload, response, Task/context ID, artifact, `secret_reference`, raw reference derivative, and secret stays outside Hub and every Task method travels only between the client host and exact remote A2A server |
+| Opt-in | separate immutable boot gate defaults OFF; disabled mode performs zero control-plane, secret, DNS, socket, listener, or Task-journal effect and does not change ph3 loopback behavior |
+| Eligibility | one immutable unambiguous no-store snapshot proves active target + active exact trust-key revision + active exact credential binding/revision ID and bounded version/provider/external_version metadata + current advertised-interface health + explicit host/operation route policy + verified LVIS exact-send-replay extension; trusted or healthy alone is never enough and every Send/Get/continue/Cancel resolves again immediately before data-plane I/O |
+| Host authorization | mutation order is gate/depth/explicit target+interface host authorization -> foreground approval -> final no-store resolve -> exact approved-identity match -> journal commit -> local secret resolve -> immediate socket; identity drift requires reapproval with zero journal/secret/data-plane I/O; GetTask omits only the prompt and still performs owner/policy checks plus final resolve immediately before secret/socket |
+| Protocol | A2A v1.0, public HTTPS/443, JSONRPC, non-streaming, Bearer only; exact supported interface and per-interface `1.0` negotiation; `A2A-Version: 1.0` on every request; only `https://lvis.ai/a2a/extensions/exact-send-replay/v1` is negotiated/sent, and its absent or malformed required contract is ineligible; additional `required: true` extensions fail closed while unrelated optional extensions are ignored without negotiation/echo/execution; unsupported binding/version/auth/required extension fails before secret lookup |
+| Credential | snapshot exposes only exact binding/revision ID plus bounded version/provider/external_version metadata; P4-3's internal keyed fingerprint is never returned; an out-of-band provisioned OS-safe local resolver maps the exact revision per operation but cannot pre-prove bearer bytes; no `secret_reference`, secret, or derivative in Hub response, journal, logs, audit, traces, metrics, errors, or crash reports; wrong bearer yields one fixed auth failure with zero retry/fallback and rotation/revocation mismatch is zero data-plane I/O |
+| Network | P4-3 public-address, DNS-rebinding, fresh-socket, no-proxy, redirect-zero, TLS/hostname, size, encoding, and deadline invariants apply independently to control and data planes; no private/LAN/development bypass |
+| Route pinning | exact target/interface/key/credential/health/policy tuple stays fixed for each operation; target/interface stay fixed for the Task lineage and any approved successor key/credential snapshot is recorded explicitly; no automatic alternate interface, credential, target, local-agent fallback, proxy relay, or route migration |
+| Durable intent | prepared metadata-journal commit precedes every mutation I/O and contains only bounded correlation/revision/hash metadata plus opaque encrypted-payload record ID; exact initial-Send JSON-RPC bytes are separately OS-bound encrypted to owner/route/operation/Message ID with no bearer/header, bounded size/TTL, ciphertext hash, zero Hub/audit/log exposure, and deletion after settlement/retention expiry; persistence/encryption failure is zero-I/O and semantic mismatch or ID reuse rejects before approval/secret/network |
+| Idempotency and concurrency | identical local replay joins one owner and produces no duplicate mutation/audit; distinct concurrent Task mutations serialize and revalidate; post-write initial Send recovery replays only the same authenticated caller + byte-equivalent canonical body + same Message ID + same intent hash under `https://lvis.ai/a2a/extensions/exact-send-replay/v1`, returning the same durable Message-or-Task union across restart with fixed mismatch conflict |
+| State | a first non-streaming Send accepts either a terminal direct Message or a Task without inventing a Task ID; confirmed remote Task state is monotonic and separate from local delivery state; INPUT_REQUIRED resume preserves typed reason; remote AUTH_REQUIRED remains an interrupted state, settles the operation with a fixed local auth-required outcome, solicits no Task-carried credential, and permits only an out-of-band successor credential plus new approval/final resolve continuation on the same Task/context/target/interface lineage; transport failure never fabricates remote FAILED/CANCELED |
+| Recovery | known Task ID reconciles ambiguity only through bounded same-route `GetTask`; lost initial response without Task ID, including after host restart, decrypts and reuses only the exact bound serialized bytes under verified exact-send replay; missing/expired/hash-mismatched/undecryptable ciphertext or unavailable/conflicting extension terminates locally as `unknown-manual-reconciliation-required` with zero resend/fabricated remote state; restart, partition, late response, terminal race, retention deletion, and corrupted/duplicate record tests prove fencing and zero route substitution |
+| Cancel/resume/TTL | exact-owner nonterminal cancel and confirmed INPUT_REQUIRED resume persist intent, reauthorize, and preserve terminal winner; AUTH_REQUIRED remains interrupted and tests prove no Task credential solicitation/fabricated failure/retry, then out-of-band successor provisioning + new approval/final resolve continues the same Task/context/target/interface lineage; HTTP, reconciliation, and unanswered-input deadlines are distinct, bounded, and tested |
+| Revocation | target/key/credential/policy/health loss is detected by per-operation no-store resolve and blocks new data-plane I/O while retaining unresolved Tasks; stale credentials are never used for cleanup; only the resolve-commit-to-socket race remains and it receives one fixed audit outcome without retry/fallback; recovery requires a new eligible same-route snapshot and explicit approval without Task migration |
+| Audit | append-only control/data-plane records correlate snapshot and operation without payload/secrets/raw refs/raw network evidence; replay is non-duplicating, the resolve-commit-to-socket race has one fixed redacted outcome, and recovery attribution never rewrites predecessor evidence |
+| D8 | remote Task creation is unavailable at depth 1 and refuses before any control-plane, approval, credential, journal, or network side effect; current local spawnDepth and tool-blocklist regressions remain green |
+| Packaged live | two independent hosts plus live Agent Hub: packaged LVIS client talks directly to a public-HTTPS remote A2A server and proves both direct-Message and Task success, denied auth, AUTH_REQUIRED interrupted state plus out-of-band successor-credential continuation on the same lineage, INPUT_REQUIRED resume, cancel, known-Task GetTask recovery, lost-initial-response exact replay with one identical Message-or-Task result across client and server restart from the bound encrypted payload store, missing/invalid ciphertext manual reconciliation with zero resend, absent/malformed required-extension ineligibility, additional-required-extension rejection, unrelated-optional-extension ignore, timeout/partition, restart, revocation, stale/unhealthy route, no fallback, and zero Hub payload/secret/reference retention |
+| Regression | ph1-ph3 in-process messaging, mailbox, approval, task-store/TTL, loopback bearer, official TCK, and external-SDK smoke remain green with the P4-5 gate both OFF and ON |
+
+The packaged-live gate must use two independent machines or network namespaces,
+not two loopback processes. One runs the packaged LVIS A2A client, the other the
+remote A2A v1.0 server, and both use a live Agent Hub control plane. The capture
+must demonstrate that the client connects to the snapshot's remote interface,
+not to Agent Hub for Task methods; Agent Hub database, application logs, audit,
+and traces must remain free of Task payloads, remote responses, and secrets.
+Failure scenarios must preserve one durable correlation chain and prove no
+automatic alternate route or local-agent fallback. The live matrix also drops
+an initial `SendMessage` response after the body reaches the server and proves
+that the negotiated exact-send-replay extension executes it once and returns
+the same direct-Message-or-Task union across both client and server restart from
+the OS-bound encrypted payload record. Missing, expired, hash-mismatched, or
+undecryptable ciphertext must instead produce the fixed manual-reconciliation
+outcome with zero resend. Repeating the case
+without verified extension support must produce
+`unknown-manual-reconciliation-required` and zero automatic resend. Repeated
+operations must also prove absent/malformed canonical-extension ineligibility,
+additional-`required: true` rejection, unrelated-optional-extension ignore, and
+Agent Hub route resolution is no-store. Revocation before resolve blocks the
+socket and the only residual resolve-commit-to-socket race is recorded with its
+fixed redacted audit outcome.
+
 ## Cross-host implementation review and follow-on constraints
 
 A fourth review lane compared current CLI/Desktop hosts using primary sources. The detailed notes and contribution drafts live in [the upstream contribution candidates](../research/a2a-upstream-contribution-candidates.md).
@@ -983,3 +1318,5 @@ Resulting constraints:
 Design inputs: A2A v1.0 spec + official SDK survey (2026-07-10 research, npm-registry-verified); transport/SDK-lane design review; INPUT_REQUIRED state-policy review (state inventory table with file:line evidence for `subagent-runner.ts`, `agent-spawn.ts`, `query-loop.ts`, `approval-gate.ts`, `tool-timeout-policy.ts`, `conversation-loop.ts`, `use-workflow-tools.ts`). All internal claims were verified against `main` at authoring time.
 
 P4-3 security references: [A2A specification](https://a2a-protocol.org/latest/specification/), [Node.js HTTPS](https://nodejs.org/api/https.html), [JWS (RFC 7515)](https://www.rfc-editor.org/rfc/rfc7515.html), [JWK (RFC 7517)](https://www.rfc-editor.org/rfc/rfc7517.html), [JWT BCP algorithm-verification guidance (RFC 8725)](https://www.rfc-editor.org/rfc/rfc8725.html), [HTTP caching (RFC 9111)](https://www.rfc-editor.org/rfc/rfc9111.html), [TLS service identity (RFC 9525)](https://www.rfc-editor.org/rfc/rfc9525.html), [WHATWG URL](https://url.spec.whatwg.org/), [OWASP SSRF Prevention](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html), and [OWASP Secrets Management](https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html).
+
+P4-5 protocol references: the official [A2A v1.0.0 release](https://github.com/a2aproject/A2A/releases/tag/v1.0.0), [A2A v1.0 specification](https://a2a-protocol.org/latest/specification/), [Agent Discovery guidance](https://a2a-protocol.org/latest/topics/agent-discovery/), and [v1.0 interface changes](https://a2a-protocol.org/latest/whats-new-v1/).
