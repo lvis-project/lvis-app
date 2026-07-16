@@ -66,6 +66,11 @@ export interface CreateA2ALoopbackRuntimeOptions {
    * hook, so its handlers and gate behavior remain byte-for-byte unchanged.
    */
   transformHandler?: (handler: A2ARequestHandler) => A2ARequestHandler;
+  advertisedOrigin?: string;
+  wireTrustOrigin?: string;
+  approvalReason?: string;
+  auditSessionId?: string;
+  auditScope?: string;
 }
 
 function canonicalProfilePath(filePath: string, platform: NodeJS.Platform): string {
@@ -196,11 +201,12 @@ function buildBinding(
 function writeAudit(
   services: CreateA2ALoopbackRuntimeOptions["services"],
   input: string,
+  sessionId = "a2a-loopback",
 ): void {
   try {
     services.auditLogger.log({
       timestamp: new Date().toISOString(),
-      sessionId: "a2a-loopback",
+      sessionId,
       type: "warn",
       input,
     });
@@ -236,7 +242,7 @@ export async function createA2ALoopbackRuntime(
     maxHistoryMessages: MAX_HISTORY_MESSAGES,
     activeHandlerIds: handlerIds,
     audit: (event: A2ATaskStoreAuditEvent) => {
-      writeAudit(options.services, `a2a:task-store:${event.reason}:${event.count}`);
+      writeAudit(options.services, `${options.auditScope ?? "a2a"}:task-store:${event.reason}:${event.count}`, options.auditSessionId);
     },
   });
 
@@ -245,8 +251,8 @@ export async function createA2ALoopbackRuntime(
     return Boolean(await options.approveAgentAction({
       toolName: `a2a-${descriptor.operation}`,
       args: { operation: descriptor.operation, handlerId: descriptor.handlerId },
-      reason: "An external A2A client requested a sub-agent mutation. Do you want to allow it?",
-      trustOrigin: "a2a-loopback",
+      reason: options.approvalReason ?? "An external A2A client requested a sub-agent mutation. Do you want to allow it?",
+      trustOrigin: options.wireTrustOrigin ?? "a2a-loopback",
     }));
   };
 
@@ -254,7 +260,8 @@ export async function createA2ALoopbackRuntime(
     const audit = (event: A2ATaskLifecycleAuditEvent): void => {
       writeAudit(
         options.services,
-        `a2a:task-lifecycle:${event.outcome}:${event.reason}:${handlerId}`,
+        `${options.auditScope ?? "a2a"}:task-lifecycle:${event.outcome}:${event.reason}:${handlerId}`,
+        options.auditSessionId,
       );
     };
     return new A2ASubAgentHandler({
@@ -272,7 +279,8 @@ export async function createA2ALoopbackRuntime(
     : handlers;
   const router = createA2AHttpRouter({
     handlers: wireHandlers,
-    audit: (event) => writeAudit(options.services, `a2a:wire:${event.reason}`),
+    advertisedOrigin: options.advertisedOrigin,
+    audit: (event) => writeAudit(options.services, `${options.auditScope ?? "a2a"}:wire:${event.reason}`, options.auditSessionId),
   });
   try {
     await Promise.all(handlers.map((handler) => handler.startInputRequiredExpiry()));

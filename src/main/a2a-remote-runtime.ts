@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { safeStorage } from "electron";
 import type { SettingsService } from "../data/settings-store.js";
+import { isCanonicalA2APublicHttpsOrigin } from "../shared/a2a-public-origin.js";
 import type { AgentActionApprover } from "../permissions/agent-action-approver.js";
 import type { A2ARequestHandler } from "../api/a2a-router.js";
 import { A2AAgentHubClient } from "../api/a2a-agent-hub-client.js";
@@ -22,6 +23,8 @@ export const a2aRemoteDataSecretKey = (bindingId: number, revisionId: number): s
 
 export interface A2ARemoteRuntime {
   readonly gates: Readonly<A2ARemoteGateSnapshot>;
+  /** One boot-owned single-flight coordinator shared by remote ingress/egress. */
+  readonly agentActionApprover: AgentActionApprover;
   execute(input: Readonly<A2ARemoteExecuteInput>): Promise<A2ARemoteClientResult>;
   getTaskProjection(handle: string, ownerId: string): Promise<A2ARemoteTaskProjection | null>;
   getTaskRoute(handle: string, ownerId: string): Promise<A2ARemoteTaskRoute | null>;
@@ -41,6 +44,72 @@ export interface CreateA2ARemoteRuntimeOptions {
   encryption?: A2AOsEncryption;
   namespace?: Pick<FeatureNamespaceHandle, "readJson" | "writeJson">;
   audit?: (code: string) => void;
+}
+
+interface A2AReceiverExpiryStore {
+  expireDue(): Promise<number>;
+}
+
+interface A2AOutboundCleanupStore {
+  cleanup(): Promise<{ orphaned: number; expired: number }>;
+}
+
+export interface A2AReceiverExpiryLifecycle {
+  ready(): Promise<void>;
+  dispose(): void;
+}
+
+type A2AReceiverSweepScheduler = (sweep: () => void) => () => void;
+
+const scheduleReceiverSweep: A2AReceiverSweepScheduler = (sweep) => {
+  const timer = setInterval(sweep, 60_000);
+  timer.unref();
+  return () => clearInterval(timer);
+};
+
+/**
+ * Starts one boot sweep and one recurring sweep, and returns an idempotent
+ * shutdown disposer. Kept as a small seam so timer ownership is provable
+ * without opening a listener in unit tests.
+ */
+export function createA2AReceiverExpiryLifecycle(
+  store: A2AReceiverExpiryStore,
+  audit?: (code: string) => void,
+  schedule: A2AReceiverSweepScheduler = scheduleReceiverSweep,
+): A2AReceiverExpiryLifecycle {
+  const initialSweep = store.expireDue().then(() => undefined);
+  const cancel = schedule(() => {
+    void store.expireDue().catch(() => audit?.("receiver-expiry-sweep-failed"));
+  });
+  let disposed = false;
+  return Object.freeze({
+    ready: async () => { await initialSweep; },
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      cancel();
+    },
+  });
+}
+
+export function createA2AOutboundCleanupLifecycle(
+  store: A2AOutboundCleanupStore,
+  audit?: (code: string) => void,
+  schedule: A2AReceiverSweepScheduler = scheduleReceiverSweep,
+): A2AReceiverExpiryLifecycle {
+  const initialSweep = store.cleanup().then(() => undefined);
+  const cancel = schedule(() => {
+    void store.cleanup().catch(() => audit?.("outbound-cleanup-sweep-failed"));
+  });
+  let disposed = false;
+  return Object.freeze({
+    ready: async () => { await initialSweep; },
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      cancel();
+    },
+  });
 }
 
 function secretHandle(value: string) {
@@ -63,7 +132,8 @@ export function createA2ARemoteRuntime(options: CreateA2ARemoteRuntimeOptions): 
   const config = options.settings.get("a2aRemote");
   if (!config.extensionSpecDigestSha256
     || (gates.outboundRouting && !config.outboundCallerGenerationId)
-    || (gates.receiverProfile && !config.receiverCallerGenerationId)) {
+    || (gates.receiverProfile && (!config.receiverCallerGenerationId
+      || !isCanonicalA2APublicHttpsOrigin(config.receiverPublicOrigin)))) {
     throw new Error("a2a-remote-config-incomplete");
   }
   if (gates.outboundRouting && (!config.agentHubBaseUrl || config.targets.length === 0 || !options.settings.getEncryptedSecret(A2A_REMOTE_HUB_SECRET_KEY))) throw new Error("a2a-remote-outbound-config-incomplete");
@@ -97,17 +167,20 @@ export function createA2ARemoteRuntime(options: CreateA2ARemoteRuntimeOptions): 
   }) : null;
   const receiverSecret = receiverValue ? Buffer.from(receiverValue, "utf8") : null;
   const receiverStore = gates.receiverProfile ? new A2AExactReplayStore({ namespace, encryption, maxKeysPerGeneration: config.receiverMaxKeysPerGeneration }) : null;
+  const receiverExpiry = receiverStore
+    ? createA2AReceiverExpiryLifecycle(receiverStore, options.audit)
+    : null;
+  const outboundCleanup = store
+    ? createA2AOutboundCleanupLifecycle(store, options.audit)
+    : null;
   const ready = (async () => {
-    if (store) await store.cleanup();
-    if (receiverStore) await receiverStore.expireDue();
+    await outboundCleanup?.ready();
+    await receiverExpiry?.ready();
   })();
-  const receiverSweepTimer = receiverStore ? setInterval(() => {
-    void receiverStore.expireDue().catch(() => options.audit?.("receiver-expiry-sweep-failed"));
-  }, 60_000) : null;
-  receiverSweepTimer?.unref();
   let disposed = false;
   return Object.freeze({
     gates,
+    agentActionApprover: options.agentActionApprover,
     ready: async () => { await ready; },
     execute: async (input: Readonly<A2ARemoteExecuteInput>) => {
       if (disposed || !client) throw new Error("a2a-remote-outbound-disabled");
@@ -148,6 +221,6 @@ export function createA2ARemoteRuntime(options: CreateA2ARemoteRuntimeOptions): 
         },
       });
     },
-    dispose: () => { disposed = true; if (receiverSweepTimer) clearInterval(receiverSweepTimer); receiverSecret?.fill(0); },
+    dispose: () => { disposed = true; outboundCleanup?.dispose(); receiverExpiry?.dispose(); receiverSecret?.fill(0); },
   });
 }

@@ -2,6 +2,7 @@ import { safeStorage } from "electron";
 import { closeSync, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { isIP } from "node:net";
+import { isCanonicalA2APublicHttpsOrigin } from "../shared/a2a-public-origin.js";
 import { withFileLock } from "../lib/with-file-lock.js";
 import {
   SIDE_PANEL_DEFAULT_WIDTH,
@@ -194,6 +195,8 @@ export interface A2ARemoteTargetSettings {
 
 export interface A2ARemoteSettings {
   agentHubBaseUrl: string;
+  /** Canonical public HTTPS origin advertised by the receiver Agent Card. */
+  receiverPublicOrigin: string;
   outboundCallerGenerationId: string;
   receiverCallerGenerationId: string;
   extensionSpecDigestSha256: string;
@@ -660,6 +663,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   a2aRemote: {
     agentHubBaseUrl: "",
+    receiverPublicOrigin: "",
     outboundCallerGenerationId: "",
     receiverCallerGenerationId: "",
     extensionSpecDigestSha256: "",
@@ -2476,6 +2480,9 @@ function normalizeA2ARemote(input: unknown): A2ARemoteSettings {
       if (url.protocol === "https:" && !url.port && !url.username && !url.password && !url.search && !url.hash && isIP(url.hostname) === 0 && url.hostname !== "localhost" && !url.hostname.endsWith(".localhost")
         && (url.pathname === "/" || url.pathname === "") && url.toString() === value.agentHubBaseUrl) result.agentHubBaseUrl = value.agentHubBaseUrl;
     } catch { /* invalid remains fail-closed empty */ }
+  }
+  if (isCanonicalA2APublicHttpsOrigin(value.receiverPublicOrigin)) {
+    result.receiverPublicOrigin = value.receiverPublicOrigin;
   }
   for (const field of ["outboundCallerGenerationId", "receiverCallerGenerationId"] as const) {
     if (typeof value[field] === "string" && /^[A-Za-z0-9][A-Za-z0-9._:~-]{0,255}$/.test(value[field])) result[field] = value[field];
