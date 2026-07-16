@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -36,6 +36,27 @@ function sha256(text) {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
+function isInsideRoot(base, candidate, pathApi) {
+  const fromBase = pathApi.relative(base, candidate);
+  return (
+    fromBase === "" ||
+    (fromBase !== ".." && !fromBase.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(fromBase))
+  );
+}
+
+function validateContainmentPortability() {
+  const windowsRoot = "C:\\repo";
+  if (!isInsideRoot(windowsRoot, "C:\\repo\\docs\\contract.md", win32)) {
+    fail("Windows containment self-test rejected an in-repository path");
+  }
+  if (isInsideRoot(windowsRoot, "C:\\repo-escape\\contract.md", win32)) {
+    fail("Windows containment self-test accepted a sibling-prefix escape");
+  }
+  if (isInsideRoot(windowsRoot, "D:\\other\\contract.md", win32)) {
+    fail("Windows containment self-test accepted a cross-drive escape");
+  }
+}
+
 function validateLocalLinks(path, text) {
   const links = [...text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)].map((match) => match[1]);
   let checked = 0;
@@ -43,15 +64,60 @@ function validateLocalLinks(path, text) {
     if (/^(?:https?:|mailto:)/i.test(raw) || raw.startsWith("#")) continue;
     const target = raw.split("#", 1)[0];
     if (target.length === 0) continue;
-    const decoded = decodeURIComponent(target);
+    let decoded;
+    try {
+      decoded = decodeURIComponent(target);
+    } catch {
+      fail(`${path}: malformed percent-encoding in local link: ${raw}`);
+    }
     const absolute = resolve(dirname(path), decoded);
-    if (!absolute.startsWith(`${root}/`) && absolute !== root) {
+    if (!isInsideRoot(root, absolute, { relative, isAbsolute, sep })) {
       fail(`${path}: local link escapes repository: ${raw}`);
     }
     if (!existsSync(absolute)) fail(`${path}: broken local link: ${raw}`);
     checked += 1;
   }
   return checked;
+}
+
+function requireExactErrorContracts(text) {
+  const jsonBlocks = [...text.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match, index) => {
+    try {
+      return JSON.parse(match[1]);
+    } catch (error) {
+      fail(`spec JSON block ${index + 1} is invalid: ${error.message}`);
+    }
+  });
+  const expected = [
+    [-32090, "Exact send replay conflict", "EXACT_SEND_REPLAY_CONFLICT"],
+    [-32091, "Exact send replay retention expired", "EXACT_SEND_REPLAY_RETENTION_EXPIRED"],
+    [-32092, "Exact send replay in progress", "EXACT_SEND_REPLAY_IN_PROGRESS", { retryAfterSeconds: "1" }],
+    [-32093, "Exact send replay outcome unknown", "EXACT_SEND_REPLAY_OUTCOME_UNKNOWN"],
+    [-32094, "Exact send replay capacity exhausted", "EXACT_SEND_REPLAY_CAPACITY_EXHAUSTED"],
+  ];
+  const seen = new Set();
+  for (const [code, message, reason, metadata] of expected) {
+    const matches = jsonBlocks.filter((block) => block?.code === code);
+    if (matches.length !== 1) fail(`expected exactly one JSON error contract for ${code}`);
+    const block = matches[0];
+    if (seen.has(block.code)) fail(`duplicate JSON error code ${block.code}`);
+    seen.add(block.code);
+    if (block.message !== message) fail(`${code}: unexpected message`);
+    if (!Array.isArray(block.data) || block.data.length !== 1) {
+      fail(`${code}: data must be a one-element A2A v1 array`);
+    }
+    const detail = block.data[0];
+    if (
+      detail?.["@type"] !== "type.googleapis.com/google.rpc.ErrorInfo" ||
+      detail.reason !== reason ||
+      detail.domain !== "lvis.ai"
+    ) {
+      fail(`${code}: unexpected google.rpc.ErrorInfo detail`);
+    }
+    if (JSON.stringify(detail.metadata) !== JSON.stringify(metadata)) {
+      fail(`${code}: unexpected ErrorInfo metadata`);
+    }
+  }
 }
 
 const blueprint = readRequired(blueprintPath);
@@ -61,6 +127,7 @@ const p45End = blueprint.indexOf("## Cross-host implementation review", p45Start
 if (p45Start < 0 || p45End < 0) fail("cannot isolate the P4-5 blueprint section");
 const p45 = blueprint.slice(p45Start, p45End);
 const normalizedP45 = p45.replace(/\s+/g, " ");
+validateContainmentPortability();
 
 for (const [needle, label] of [
   [extensionUri, "extension URI"],
@@ -81,6 +148,12 @@ for (const [needle, label] of [
   ["Cross-repo pinned-head wire vectors", "wire gate"],
   ["Packaged live", "packaged live gate"],
   ["official `a2aproject/a2a-tck` release/tag and full commit", "TCK pin"],
+  ["explicit two-stage transaction", "two-stage journal"],
+  ["absent, not null placeholders", "prepared stage snapshot exclusion"],
+  ["at the earlier of settlement or its bounded", "encrypted payload deletion boundary"],
+  ["lost before that durable commit is not settled", "lost response retention"],
+  ["foreground approval is required because neither creates", "existing-operation prompt-free recovery"],
+  ["Every new `SendMessage`, continuation, or live `CancelTask`", "new mutation reapproval"],
 ]) {
   requireText(p45, needle, label);
 }
@@ -109,14 +182,28 @@ for (const [needle, label] of [
   ["byte-for-byte identical serialized body", "exact body match"],
   ["identical body SHA-256", "body hash match"],
   ["same union kind and durable identity", "durable Message or Task identity"],
-  ["exact-send-replay-conflict", "conflict error"],
-  ["exact-send-replay-retention-expired", "retention error"],
+  ["EXACT_SEND_REPLAY_CONFLICT", "conflict error"],
+  ["EXACT_SEND_REPLAY_RETENTION_EXPIRED", "retention error"],
+  ["EXACT_SEND_REPLAY_IN_PROGRESS", "in-progress error"],
+  ["EXACT_SEND_REPLAY_OUTCOME_UNKNOWN", "outcome-unknown error"],
+  ["EXACT_SEND_REPLAY_CAPACITY_EXHAUSTED", "capacity error"],
+  ["Retry-After: 1", "fixed retry-after"],
+  ["maps it to `reconciling`", "in-progress client mapping"],
+  ["unknown-manual-reconciliation-required", "outcome-unknown client mapping"],
+  ["capacity-manual-intervention-required", "capacity client mapping"],
+  ["immutable caller-generation token", "caller generation"],
+  ["durable non-sensitive tombstone", "post-retention tombstone"],
+  ["never evicted to admit a new key", "no tombstone eviction"],
+  ["same external subject later enrolls again", "re-enrollment generation isolation"],
+  ["A one-entry quota accepts no new replay key", "capacity conformance vector"],
+  ["Every custom error uses the exact numeric code", "error conformance vector"],
   ["Authentication and ordinary A2A authorization MUST complete", "auth ordering"],
   ["Required conformance vectors", "wire vectors"],
   [officialSpec, "official specification pin"],
 ]) {
   requireText(spec, needle, label);
 }
+requireExactErrorContracts(spec);
 
 const linkCount = validateLocalLinks(blueprintPath, blueprint) + validateLocalLinks(specPath, spec);
 if (linkCount < 2) fail(`expected at least two checked local links, got ${linkCount}`);
