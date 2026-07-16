@@ -12,6 +12,7 @@ import {
   UI_CASE_EXPECTATIONS,
   validatePackagedLiveManifest,
 } from "./packaged-live-contract.mjs";
+import { buildPackagedUiEnvironment } from "./ui-driver-environment.mjs";
 
 const CORE_TEST_IDS = Object.freeze([
   "remote-a2a-trigger",
@@ -36,7 +37,7 @@ function parseArguments(args) {
 }
 
 async function launchInstalledApp(executablePath) {
-  return electron.launch({ executablePath, args: [], env: { ...process.env }, timeout: 60_000 });
+  return electron.launch({ executablePath, args: [], env: buildPackagedUiEnvironment(), timeout: 60_000 });
 }
 
 async function getEvidenceWindow(app, target) {

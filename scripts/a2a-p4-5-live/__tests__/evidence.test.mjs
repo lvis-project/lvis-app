@@ -57,6 +57,7 @@ import {
   verifyTaskTraffic,
 } from "../packaged-live-contract.mjs";
 import { parseStrictJson } from "../strict-json.mjs";
+import { buildPackagedUiEnvironment } from "../ui-driver-environment.mjs";
 import { writeExclusiveOutput } from "../../run-a2a-p4-5-packaged-live.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -638,6 +639,28 @@ test("fixed programs validate and honor per-call timeouts", () => {
   );
 });
 
+test("packaged UI environment allowlists runtime state and excludes parent secrets", () => {
+  const environment = buildPackagedUiEnvironment({
+    PATH: "/usr/bin:/bin",
+    DISPLAY: ":99",
+    SystemRoot: "C:\\Windows",
+    LVIS_A2A_EVIDENCE_PUBLIC_KEY_FILE: "/evidence/public.pem",
+    GH_TOKEN: "github-secret",
+    AWS_SECRET_ACCESS_KEY: "aws-secret",
+    NPM_TOKEN: "npm-secret",
+    NODE_OPTIONS: "--require=/tmp/untrusted.cjs",
+  });
+  assert.deepEqual(environment, {
+    PATH: "/usr/bin:/bin",
+    SystemRoot: "C:\\Windows",
+    DISPLAY: ":99",
+    LVIS_A2A_EVIDENCE_PUBLIC_KEY_FILE: "/evidence/public.pem",
+  });
+  for (const secret of ["GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "NPM_TOKEN", "NODE_OPTIONS"]) {
+    assert.equal(Object.hasOwn(environment, secret), false, `${secret} must not reach the packaged app`);
+  }
+});
+
 test("packaged-live output rejects a symlinked ancestor before writing", () => {
   const baseDirectory = mkdtempSync(resolve(tmpdir(), "lvis-packaged-output-"));
   const outsideDirectory = mkdtempSync(resolve(tmpdir(), "lvis-packaged-output-outside-"));
@@ -697,6 +720,8 @@ test("packaged-live runner has no manifest-provided command or result adapter", 
   }
   assert.ok(driver.includes("_electron as electron"));
   assert.ok(driver.includes("executablePath"));
+  assert.ok(driver.includes("buildPackagedUiEnvironment()"));
+  assert.ok(!driver.includes("env: { ...process.env }"));
   assert.ok(driver.includes("selectOption(String(target.targetAgentId))"));
   assert.ok(!driver.includes("P4-5 PASS"));
 });
