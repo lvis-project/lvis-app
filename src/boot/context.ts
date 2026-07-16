@@ -63,6 +63,8 @@ import type { TelemetryService } from "../main/telemetry.js";
 import type { PluginTelemetryClient } from "../telemetry/client.js";
 import type { HookRunner } from "../hooks/hook-runner.js";
 import type { ScriptHookManager } from "../hooks/script-hook-manager.js";
+import type { RationaleScopeReviewer } from "../permissions/reviewer/rationale-scope-reviewer.js";
+import type { RationaleHostService } from "../tools/pipeline/rationale-host-service.js";
 
 type PluginPaths = ReturnType<typeof import("../plugins/plugin-paths.js").resolvePluginPaths>;
 type WorkBoardStorage = ReturnType<typeof import("../work-board/storage.js").createDirStorage>;
@@ -145,6 +147,8 @@ export interface BootContext {
    * READS the active session's slots at turn build. Nothing pushes.
    */
   mcpAppModelContext: McpAppModelContextStore;
+  rationaleScopeReviewer: RationaleScopeReviewer;
+  rationaleHostService: RationaleHostService | undefined;
   rewireReviewerAgent: () => void;
 
   // ── Hooks + plugin tool execution surface ──────────────────────────────────
@@ -205,5 +209,6 @@ export function createBootContext(inputs: {
     // Initialised so the shutdown handle can clear it even if the due-soon
     // scanner was never started.
     dueSoonTimer: undefined,
+    rationaleHostService: undefined,
   } as BootContext;
 }

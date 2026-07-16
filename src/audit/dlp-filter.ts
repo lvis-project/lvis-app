@@ -120,6 +120,43 @@ export function redactFsPath(p: string): string {
   return codePoints.length > MAX_AUDIT_PATH ? codePoints.slice(0, MAX_AUDIT_PATH).join("") + "…" : out;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^{}$()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Redact home-directory paths wherever they occur in display/audit text.
+ * Unlike redactFsPath(), this is intentionally not prefix-only and recognizes
+ * the standard Windows, macOS, and Linux home layouts plus file:// URLs.
+ */
+export function redactHomePathsInText(value: string): string {
+  if (!value) return value;
+  let out = value;
+  if (_homeDir) {
+    const standardFileUrlHome = pathToFileURL(_homeDir).toString().replace(/\/$/u, "");
+    const homeForms = [
+      ["file://" + _homeDir.replace(/\\/g, "/"), "file://[home]"],
+      [standardFileUrlHome, "file://[home]"],
+      [_homeDir.replace(/\\/g, "/"), "[home]"],
+      [_homeDir, "[home]"],
+    ] as const;
+    for (const [home, replacement] of homeForms) {
+      if (!home) continue;
+      out = out.replace(
+        new RegExp(escapeRegExp(home), os.platform() === "win32" ? "giu" : "gu"),
+        replacement,
+      );
+    }
+  }
+  return out
+    .replace(/file:\/\/\/[a-z]:\/users\/[a-z0-9._-]+/giu, "file://[home]")
+    .replace(/file:\/\/\/users\/[a-z0-9._-]+/giu, "file://[home]")
+    .replace(/file:\/\/\/home\/[a-z0-9._-]+/giu, "file://[home]")
+    .replace(/[a-z]:[\\/]+users[\\/]+[a-z0-9._-]+/giu, "[home]")
+    .replace(/\/users\/[a-z0-9._-]+/giu, "[home]")
+    .replace(/\/home\/[a-z0-9._-]+/giu, "[home]");
+}
+
 /**
  * Path-like fields in audit log payloads that may contain the user's home
  * directory. Shallow: nested objects are not walked.

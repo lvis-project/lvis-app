@@ -60,6 +60,10 @@ export const TOOL_TIMEOUT_POLICY = {
   mcpRequestDefaultMs: 60_000,
   mcpRequestMaxMs: 120_000,
   networkFetchDefaultMs: 15_000,
+  // Host-owned LLM boundaries for the permission-rationale path. These are
+  // separate from ordinary tool execution and the interactive user wait.
+  rationaleGenerationMs: 15_000,
+  rationaleScopeReviewMs: 15_000,
   approvalGateUserWaitMs: 5 * 60 * 1000,
   // Hard ceiling for the Electron `before-quit` cleanup chain
   // (runShutdownRoutines → svc.shutdown → pluginRuntime.stopAll →

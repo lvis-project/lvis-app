@@ -340,6 +340,11 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       name: "agent_spawn",
       input: { instructions: "inspect tests" },
     },
+    {
+      category: "meta",
+      name: "agent_interrupt",
+      input: { id: "child-session" },
+    },
   ] as const)(
     "auto-review medium threshold auto-approves the common $category reviewer route",
     async ({ category, name, input }) => {

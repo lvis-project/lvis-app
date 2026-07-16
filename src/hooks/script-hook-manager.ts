@@ -132,6 +132,7 @@ export interface UserPromptSubmitPayload {
 
 export class ScriptHookManager {
   private registry: HookRegistryEntry[] = [];
+  private generation = 0;
 
   /**
    * Replace the trusted hook list with legacy `.sh` hooks only. Retained for
@@ -154,6 +155,7 @@ export class ScriptHookManager {
    */
   setTrustedRegistry(shHooks: DiscoveredHook[], configEntries: HookConfigEntry[]): void {
     this.registry = buildHookRegistry(shHooks, configEntries);
+    this.generation += 1;
   }
 
   /** Registry entries for the given type. Used by tests + diagnostics. */
@@ -164,6 +166,10 @@ export class ScriptHookManager {
   /** Total trusted entry count. */
   size(): number {
     return this.registry.length;
+  }
+
+  getGeneration(): string {
+    return String(this.generation);
   }
 
   /**
