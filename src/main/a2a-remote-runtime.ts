@@ -61,6 +61,26 @@ export interface A2AReceiverExpiryLifecycle {
 
 type A2AReceiverSweepScheduler = (sweep: () => void) => () => void;
 
+function runLifecycleSweep(
+  sweep: () => Promise<unknown>,
+  audit: ((code: string) => void) | undefined,
+  failureCode: string,
+): Promise<void> {
+  return Promise.resolve()
+    .then(sweep)
+    .then(
+      () => undefined,
+      () => {
+        try {
+          audit?.(failureCode);
+        } catch {
+          // Cleanup and expiry are fail-open by contract; diagnostics must not
+          // turn their failure into a boot or unhandled-rejection failure.
+        }
+      },
+    );
+}
+
 const scheduleReceiverSweep: A2AReceiverSweepScheduler = (sweep) => {
   const timer = setInterval(sweep, 60_000);
   timer.unref();
@@ -77,9 +97,13 @@ export function createA2AReceiverExpiryLifecycle(
   audit?: (code: string) => void,
   schedule: A2AReceiverSweepScheduler = scheduleReceiverSweep,
 ): A2AReceiverExpiryLifecycle {
-  const initialSweep = store.expireDue().then(() => undefined);
+  const initialSweep = runLifecycleSweep(
+    () => store.expireDue(),
+    audit,
+    "receiver-expiry-sweep-failed",
+  );
   const cancel = schedule(() => {
-    void store.expireDue().catch(() => audit?.("receiver-expiry-sweep-failed"));
+    void runLifecycleSweep(() => store.expireDue(), audit, "receiver-expiry-sweep-failed");
   });
   let disposed = false;
   return Object.freeze({
@@ -97,9 +121,13 @@ export function createA2AOutboundCleanupLifecycle(
   audit?: (code: string) => void,
   schedule: A2AReceiverSweepScheduler = scheduleReceiverSweep,
 ): A2AReceiverExpiryLifecycle {
-  const initialSweep = store.cleanup().then(() => undefined);
+  const initialSweep = runLifecycleSweep(
+    () => store.cleanup(),
+    audit,
+    "outbound-cleanup-sweep-failed",
+  );
   const cancel = schedule(() => {
-    void store.cleanup().catch(() => audit?.("outbound-cleanup-sweep-failed"));
+    void runLifecycleSweep(() => store.cleanup(), audit, "outbound-cleanup-sweep-failed");
   });
   let disposed = false;
   return Object.freeze({
