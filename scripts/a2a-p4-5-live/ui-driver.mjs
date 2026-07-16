@@ -4,7 +4,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { _electron as electron } from "playwright";
 
-import { readEvidenceDescriptor, fail, verifySignedManifest } from "./evidence-lib.mjs";
+import { assertArtifactStable, readEvidenceDescriptor, fail, verifySignedManifest } from "./evidence-lib.mjs";
 import {
   CANARIES,
   PACKAGED_LIVE_CASE_IDS,
@@ -180,8 +180,9 @@ async function main() {
   const manifestPath = parseArguments(process.argv.slice(2));
   const signed = verifySignedManifest(manifestPath);
   const manifest = validatePackagedLiveManifest(signed.manifest);
-  const executable = readEvidenceDescriptor(manifestPath, manifest.installedExecutable, "installed packaged executable", { maxBytes: 1024 * 1024 * 1024 });
+  const executable = readEvidenceDescriptor(manifestPath, manifest.installedExecutable, "installed packaged executable", { maxBytes: 1024 * 1024 * 1024, loadBytes: false });
   const result = await runFixedUiMatrix({ executablePath: executable.path, target: manifest.target });
+  assertArtifactStable(executable, "installed packaged executable", { maxBytes: 1024 * 1024 * 1024 });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 

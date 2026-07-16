@@ -6,6 +6,7 @@ import {
 } from "node:crypto";
 import {
   mkdtempSync,
+  renameSync,
   readFileSync,
   symlinkSync,
   writeFileSync,
@@ -17,15 +18,21 @@ import test from "node:test";
 
 import {
   assertExactKeys,
+  assertArtifactStable,
   assertSafeString,
   readEvidenceDescriptor,
+  readRegularFile,
   sha256Buffer,
   verifySignedManifest,
 } from "../evidence-lib.mjs";
 import {
+  buildHubVerificationSql,
   parseHubCanaryCounts,
+  parseHubVerificationOutput,
 } from "../hub-db-verifier.mjs";
 import {
+  independentlyVerifyInstallerAttestation,
+  runFixedProgram,
   validateProvenance,
   verifyAttestationReport,
   verifyInstallerIdentity,
@@ -34,12 +41,16 @@ import {
   CANARIES,
   PACKAGED_LIVE_CASE_IDS,
   REMOTE_OBSERVED_CASE_IDS,
+  assertPublicHttpsUrl,
   parseTsharkFields,
+  parseTsharkSniFields,
   validateFaultMatrix,
   validateHostIdentity,
+  validateEndpointIdentity,
   validatePackagedLiveManifest,
   validateWireConformance,
   verifyHubEvidenceAbsent,
+  verifyCapturedEndpointSni,
   verifyRemoteServerEvidence,
   verifyTaskTraffic,
 } from "../packaged-live-contract.mjs";
@@ -71,6 +82,8 @@ function validManifest() {
       remoteUrl: "https://a2a.lvis.ai/rpc",
       hubUrl: "https://hub.lvis.ai/control",
     },
+    installerArtifact: descriptor("LVIS-1.0.0.dmg"),
+    attestationReport: descriptor("LVIS-1.0.0.dmg.attestation.json", SHA_B),
     installerProvenance: descriptor("provenance.json"),
     installedExecutable: descriptor("installed/LVIS.app/Contents/MacOS/LVIS", SHA_B),
     installReceipt: descriptor("install-receipt.json", "c".repeat(64)),
@@ -88,6 +101,13 @@ function validManifest() {
     },
     remoteServerEvidence: [descriptor("remote-server.log", "6".repeat(64))],
     hostIdentity: descriptor("hosts.json", "3".repeat(64)),
+    endpointIdentity: descriptor("endpoints.json", "7".repeat(64)),
+    hubControlPlane: {
+      snapshotId: "8".repeat(64),
+      databaseIdentitySha256: "9".repeat(64),
+      agentHubLockDigestSha256: "c".repeat(64),
+      wireConformanceArtifactDigestSha256: SHA,
+    },
     wireConformance: descriptor("wire.json", "4".repeat(64)),
     faultMatrix: descriptor("faults.json", "5".repeat(64)),
     caseIds: [...PACKAGED_LIVE_CASE_IDS],
@@ -100,11 +120,13 @@ function validProvenance() {
     schemaVersion: 1,
     generatedAt: "2026-07-16T00:00:00.000Z",
     installer: { name: "LVIS-1.0.0.dmg", size: 123, sha256: SHA },
-    source: { repository: "lvis-project/lvis-app", appHead: HEAD, agentHubHead: HUB_HEAD },
+    source: { repository: "lvis-project/lvis-app", appHead: HEAD, agentHubHead: HUB_HEAD, agentHubLockDigestSha256: "c".repeat(64) },
     workflow: { runId: "12345", attempt: "1" },
-    signature: {
-      platform: "macos", status: "verified",
+    platformIdentity: {
+      platform: "macos", status: "publisher-verified", identityKind: "native-signature",
       installerCodesignIdentity: "Developer ID Application: LVIS",
+      teamId: "ABCDE12345",
+      certificateSha256: "A".repeat(64),
       installerSpctlAssessment: "accepted",
       appCodesignIdentity: "Developer ID Application: LVIS",
       appSpctlAssessment: "accepted",
@@ -115,7 +137,7 @@ function validProvenance() {
       repository: "lvis-project/lvis-app", workflowRunId: "12345", workflowRunAttempt: "1",
     },
     locks: { packageJsonSha256: "c".repeat(64), bunLockSha256: "d".repeat(64) },
-    tools: { node: "v26.1.0", bun: "1.3.14", git: "git version 2.51.0", gh: "gh version 2.76.0", signatureVerifier: "codesign+spctl" },
+    tools: { node: "v26.1.0", bun: "1.3.14", git: "git version 2.51.0", gh: "gh version 2.76.0", identityVerifier: "codesign+spctl" },
   };
 }
 
@@ -216,6 +238,27 @@ test("evidence descriptors reject escapes, empty files, symlinks, and digest mis
   assert.throws(() => readEvidenceDescriptor(manifestPath, descriptor("linked-directory/escaped.bin", sha256), "artifact"), /symlink path components/u);
 });
 
+test("large evidence uses bounded streaming hashing/scanning and detects descriptor races", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "lvis-streaming-"));
+  const path = resolve(directory, "large.log");
+  const marker = CANARIES[0];
+  const prefix = Buffer.alloc((1024 * 1024) - 5, "x");
+  writeFileSync(path, Buffer.concat([prefix, Buffer.from(marker), Buffer.alloc(1024 * 1024, "y")]));
+  const artifact = readRegularFile(path, "large streaming fixture", {
+    maxBytes: 3 * 1024 * 1024,
+    loadBytes: false,
+    needles: [marker],
+  });
+  assert.equal(artifact.bytes, undefined);
+  assert.equal(artifact.needleMatches[marker], true, "marker spanning the 1 MiB chunk boundary must be found");
+  assertArtifactStable(artifact, "large streaming fixture", { maxBytes: 3 * 1024 * 1024 });
+
+  const replacement = resolve(directory, "replacement.log");
+  writeFileSync(replacement, Buffer.alloc(artifact.size, "z"));
+  renameSync(replacement, path);
+  assert.throws(() => assertArtifactStable(artifact, "large streaming fixture", { maxBytes: 3 * 1024 * 1024 }), /identity or digest changed/u);
+});
+
 test("Ed25519 manifest verification pins the signer fingerprint and raw bytes", () => {
   const directory = mkdtempSync(resolve(tmpdir(), "lvis-signed-"));
   const manifestPath = resolve(directory, "live-input.json");
@@ -246,6 +289,31 @@ test("packaged-live manifest requires the exact closed schema and case/vector se
   const mutableRef = structuredClone(manifest);
   mutableRef.heads.app = "main";
   assert.throws(() => validatePackagedLiveManifest(mutableRef), /length 40|invalid format/u);
+  const missingAttestation = structuredClone(manifest);
+  delete missingAttestation.attestationReport;
+  assert.throws(() => validatePackagedLiveManifest(missingAttestation), /missing=attestationReport/u);
+});
+
+test("public endpoint identity binds canonical DNS, TLS certificate, SNI, and captured IP", () => {
+  const endpoints = validManifest().endpoints;
+  assert.equal(assertPublicHttpsUrl(endpoints.remoteUrl, "remote").hostname, "a2a.lvis.ai");
+  for (const invalid of ["https://localhost/rpc", "https://internal/rpc", "https://node.local/rpc", "https://127.0.0.1/rpc", "https://a2a.lvis.ai./rpc"]) {
+    assert.throws(() => assertPublicHttpsUrl(invalid, "remote"), /public|IP-literal|trailing dot|multi-label|special-use/u);
+  }
+  const identity = {
+    schemaVersion: 1,
+    remote: { hostname: "a2a.lvis.ai", resolvedIpv4: [endpoints.remoteIp], tlsServerName: "a2a.lvis.ai", certificateSha256: SHA, certificateSanDnsNames: ["a2a.lvis.ai"], captureDestinationIp: endpoints.remoteIp },
+    hub: { hostname: "hub.lvis.ai", resolvedIpv4: [endpoints.hubIp], tlsServerName: "hub.lvis.ai", certificateSha256: SHA_B, certificateSanDnsNames: ["hub.lvis.ai"], captureDestinationIp: endpoints.hubIp },
+  };
+  validateEndpointIdentity(identity, endpoints);
+  const sni = parseTsharkSniFields([
+    `${endpoints.clientIp}\t${endpoints.remoteIp}\t443\ta2a.lvis.ai`,
+    `${endpoints.clientIp}\t${endpoints.hubIp}\t443\thub.lvis.ai`,
+  ].join("\n"));
+  assert.equal(verifyCapturedEndpointSni(sni, endpoints).length, 2);
+  identity.remote.tlsServerName = "hub.lvis.ai";
+  assert.throws(() => validateEndpointIdentity(identity, endpoints), /exact endpoint/u);
+  assert.throws(() => verifyCapturedEndpointSni(sni.slice(0, 1), endpoints), /missing exact/u);
 });
 
 test("host identity proves independent machine and network identities", () => {
@@ -306,6 +374,29 @@ test("Hub file and database checks derive zero canary retention", () => {
   const zeroRows = [...CANARIES].sort().map((canary) => `${canary}\t0`).join("\n");
   assert.equal(Object.keys(parseHubCanaryCounts(zeroRows)).length, 3);
   assert.throws(() => parseHubCanaryCounts(zeroRows.replace("\t0", "\t1")), /retained forbidden canary/u);
+
+  const identity = { systemIdentifier: "7612345678901234567", databaseOid: "16384", databaseName: "agent_hub", serverAddress: "10.0.0.12", serverPort: "5432" };
+  const databaseIdentitySha256 = createHash("sha256").update(JSON.stringify(identity, Object.keys(identity).sort())).digest("hex");
+  const manifest = validManifest();
+  const expected = {
+    snapshotId: manifest.hubControlPlane.snapshotId,
+    databaseIdentitySha256,
+    agentHubHead: manifest.heads.hub,
+    appHead: manifest.heads.app,
+    serverHead: manifest.heads.server,
+    agentHubLockDigestSha256: manifest.hubControlPlane.agentHubLockDigestSha256,
+    wireConformanceArtifactDigestSha256: manifest.hubControlPlane.wireConformanceArtifactDigestSha256,
+    remoteUrl: manifest.endpoints.remoteUrl,
+  };
+  const output = [
+    ["identity", identity.systemIdentifier, identity.databaseOid, identity.databaseName, identity.serverAddress, identity.serverPort].join("\t"),
+    ["control", expected.snapshotId, expected.agentHubHead, expected.appHead, expected.serverHead, expected.agentHubLockDigestSha256, expected.wireConformanceArtifactDigestSha256, expected.remoteUrl].join("\t"),
+    ...[...CANARIES].sort().map((canary) => ["canary", canary, "0"].join("\t")),
+  ].join("\n");
+  assert.equal(parseHubVerificationOutput(output, expected).snapshotId, expected.snapshotId);
+  assert.match(buildHubVerificationSql(expected.snapshotId), /a2a_route_snapshot_issuance_audit/u);
+  assert.throws(() => parseHubVerificationOutput(output, { ...expected, databaseIdentitySha256: SHA }), /database identity/u);
+  assert.throws(() => parseHubVerificationOutput(output, { ...expected, agentHubHead: SERVER_HEAD }), /control-plane record/u);
 });
 
 test("remote server raw evidence cross-binds every fixed case and canary", () => {
@@ -334,20 +425,28 @@ test("native verifier commands are fixed and require verified identities", () =>
     calls.push([command, args]);
     if (command === "hdiutil" && args[0] === "attach") return { stdout: "<plist><dict><key>mount-point</key><string>/Volumes/LVIS</string></dict></plist>", stderr: "" };
     if (command === "hdiutil" || command === "/usr/bin/test") return { stdout: "ok", stderr: "" };
-    if (command === "codesign" && args[0] === "--display") return { stdout: "Authority=Developer ID Application: LVIS", stderr: "" };
+    if (command === "codesign" && args[0] === "--display") return { stdout: "Authority=Developer ID Application: LVIS\nTeamIdentifier=ABCDE12345", stderr: "" };
+    if (command === "security") return { stdout: `SHA-256 hash: ${"A".repeat(64)}`, stderr: "" };
     if (command === "spctl") return { stdout: "accepted", stderr: "" };
     return { stdout: "", stderr: "verified" };
   };
-  assert.equal(verifyInstallerIdentity("macos", "/Applications/LVIS.dmg", macRun).status, "verified");
-  assert.deepEqual(calls.map(([command]) => command), ["codesign", "codesign", "spctl", "hdiutil", "/usr/bin/test", "/usr/bin/test", "codesign", "codesign", "spctl", "hdiutil"]);
+  const macExpected = { macTeamId: "ABCDE12345", macCertificateSha256: "A".repeat(64) };
+  assert.equal(verifyInstallerIdentity("macos", "/Applications/LVIS.dmg", { run: macRun, expected: macExpected }).status, "publisher-verified");
+  assert.deepEqual(calls.map(([command]) => command), ["codesign", "codesign", "security", "spctl", "hdiutil", "/usr/bin/test", "/usr/bin/test", "codesign", "codesign", "spctl", "hdiutil"]);
+  assert.throws(() => verifyInstallerIdentity("macos", "/Applications/LVIS.dmg", { run: macRun, expected: { ...macExpected, macTeamId: "ZZZZZ12345" } }), /TeamIdentifier/u);
   const winRun = (command, args, options) => {
     assert.equal(command, "powershell");
     assert.equal(options.env.LVIS_INSTALLER_PATH, "C:\\LVIS.exe");
     return { stdout: JSON.stringify({ status: "Valid", subject: "CN=LVIS", thumbprint: "A".repeat(40), statusMessage: "Signature verified." }), stderr: "" };
   };
-  assert.equal(verifyInstallerIdentity("windows", "C:\\LVIS.exe", winRun).status, "verified");
+  const winExpected = { windowsPublisherSubject: "CN=LVIS", windowsCertificateThumbprint: "A".repeat(40) };
+  assert.equal(verifyInstallerIdentity("windows", "C:\\LVIS.exe", { run: winRun, expected: winExpected }).status, "publisher-verified");
+  assert.throws(() => verifyInstallerIdentity("windows", "C:\\LVIS.exe", { run: winRun, expected: { ...winExpected, windowsPublisherSubject: "CN=Other" } }), /pinned LVIS identity/u);
   const debRun = () => ({ stdout: "Package: lvis\nVersion: 1.0.0\nArchitecture: amd64", stderr: "" });
-  assert.equal(verifyInstallerIdentity("linux", "/opt/LVIS.deb", debRun).format, "deb");
+  const linux = verifyInstallerIdentity("linux", "/opt/LVIS.deb", { run: debRun });
+  assert.equal(linux.format, "deb");
+  assert.equal(linux.status, "metadata-only");
+  assert.equal(linux.identityKind, "package-metadata");
 });
 
 test("provenance schema binds installer, signature, attestation, heads, workflow, locks, and fixed tools", () => {
@@ -388,18 +487,51 @@ test("attestation report rejects missing, duplicate, and wrong-location bindings
   assert.throws(() => verifyFixtureAttestation(wrongSubject), /subject digest/u);
 });
 
-test("isolated evidence workflow is dispatch-only, fail-closed, exact-head pinned, native-verified, and independently attested", () => {
+test("independent attestation rerun keeps source-digest and scopes GH_TOKEN to gh only", () => {
+  const previousToken = process.env.GH_TOKEN;
+  process.env.GH_TOKEN = "sensitive-test-token";
+  try {
+    const child = runFixedProgram(process.execPath, ["-e", "process.stdout.write(String(process.env.GH_TOKEN))"]);
+    assert.equal(child.stdout, "undefined", "generic child processes must not inherit GH_TOKEN");
+    const calls = [];
+    const run = (command, args, options) => {
+      calls.push({ command, args, options });
+      return { stdout: JSON.stringify(validAttestationReport()), stderr: "" };
+    };
+    const verified = independentlyVerifyInstallerAttestation({ path: "/tmp/LVIS-1.0.0.dmg", sha256: SHA }, {
+      appHead: HEAD,
+      repository: "lvis-project/lvis-app",
+      workflowRunId: "12345",
+      workflowRunAttempt: "1",
+      run,
+      token: "scoped-token",
+    });
+    assert.equal(verified.sourceHead, HEAD);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].command, "gh");
+    assert.deepEqual(calls[0].options.env, { GH_TOKEN: "scoped-token" });
+    assert.ok(calls[0].args.includes("--source-digest"));
+    assert.ok(calls[0].args.includes("--deny-self-hosted-runners"));
+  } finally {
+    if (previousToken === undefined) delete process.env.GH_TOKEN;
+    else process.env.GH_TOKEN = previousToken;
+  }
+});
+
+test("isolated evidence workflow is dispatch-only, immutable-action pinned, exact-head/lock pinned, publisher-verified, and independently attested", () => {
   const workflow = readFileSync(resolve(ROOT, ".github/workflows/a2a-p4-5-packaged-evidence.yml"), "utf8");
   for (const required of [
     "head_sha:", "agent_hub_head_sha:", "contents: read", "id-token: write", "attestations: write",
-    "git rev-parse HEAD", "codesign --verify --deep --strict", "spctl --assess", "Get-AuthenticodeSignature",
-    "dpkg-deb --field", "rpm -qp", "readelf --file-header", "actions/attest@v4", "gh attestation verify",
+    "git rev-parse HEAD", "git -C .evidence/agent-hub rev-parse HEAD", ".evidence/agent-hub/server/bun.lock", "AGENT_HUB_LOCK_DIGEST_SHA256",
+    "repository: lvis-project/agent-hub", "codesign --verify --deep --strict", "spctl --assess", "Get-AuthenticodeSignature",
+    "dpkg-deb --field", "rpm -qp", "readelf --file-header", "actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4", "gh attestation verify",
     "write-installer-provenance.mjs", "codesign --display --verbose=4 \"$mount_point/LVIS.app\"",
     "spctl --assess --type execute", "--source-digest \"$REQUESTED_HEAD\"",
     "--signer-workflow lvis-project/lvis-app/.github/workflows/a2a-p4-5-packaged-evidence.yml", "--deny-self-hosted-runners",
     "--predicate-type https://slsa.dev/provenance/v1", "Requested head must equal the immutable workflow source head",
+    "LVIS_MAC_SIGNER_CERT_SHA256", "LVIS_WINDOWS_PUBLISHER_SUBJECT", "LVIS_WINDOWS_SIGNER_THUMBPRINT", "env -u GH_TOKEN node",
   ]) assert.ok(workflow.includes(required), `missing workflow invariant: ${required}`);
-  for (const forbidden of ["skip_code_sign", "--skip-code-sign", "graceful degradation", "inputs.ref", "\n  push:", "publish-release", "softprops/action-gh-release", "vars.AGENT_HUB_RELEASE_HEAD_SHA"]) {
+  for (const forbidden of ["skip_code_sign", "--skip-code-sign", "graceful degradation", "inputs.ref", "\n  push:", "publish-release", "softprops/action-gh-release", "vars.AGENT_HUB_RELEASE_HEAD_SHA", "actions/checkout@v7", "actions/cache@v6", "actions/attest@v4", "actions/upload-artifact@v7", "oven-sh/setup-bun@v2"]) {
     assert.ok(!workflow.includes(forbidden), `forbidden workflow fallback: ${forbidden}`);
   }
   const installerJobEnv = workflow.slice(workflow.indexOf("jobs:"), workflow.indexOf("    steps:"));

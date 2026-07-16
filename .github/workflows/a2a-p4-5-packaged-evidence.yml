@@ -42,9 +42,16 @@ jobs:
       REQUESTED_HEAD: ${{ inputs.head_sha }}
       AGENT_HUB_HEAD: ${{ inputs.agent_hub_head_sha }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ inputs.head_sha }}
+          persist-credentials: false
+      - name: Checkout exact Agent Hub source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: lvis-project/agent-hub
+          ref: ${{ inputs.agent_hub_head_sha }}
+          path: .evidence/agent-hub
           persist-credentials: false
       - name: Pin exact source heads
         shell: bash
@@ -67,9 +74,25 @@ jobs:
             echo "Requested head must equal the immutable workflow source head for attestation binding" >&2
             exit 1
           fi
-      - uses: oven-sh/setup-bun@v2
+          actual_hub_head="$(git -C .evidence/agent-hub rev-parse HEAD)"
+          if [ "$actual_hub_head" != "$AGENT_HUB_HEAD" ]; then
+            echo "Agent Hub checkout HEAD does not equal the requested exact commit" >&2
+            exit 1
+          fi
+          hub_lock=.evidence/agent-hub/server/bun.lock
+          if [ ! -f "$hub_lock" ] || [ -L "$hub_lock" ]; then
+            echo "Agent Hub server lock must be one regular file" >&2
+            exit 1
+          fi
+          hub_lock_digest="$(node -e 'const {createHash}=require("node:crypto");const {readFileSync}=require("node:fs");process.stdout.write(createHash("sha256").update(readFileSync(process.argv[1])).digest("hex"))' "$hub_lock")"
+          if [[ ! "$hub_lock_digest" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Agent Hub server lock digest was not canonical SHA-256" >&2
+            exit 1
+          fi
+          echo "AGENT_HUB_LOCK_DIGEST_SHA256=$hub_lock_digest" >> "$GITHUB_ENV"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: Restore package manager and installer caches
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/.bun/install/cache
@@ -83,7 +106,7 @@ jobs:
       # Key is pinned to uv-targets.mjs so version bumps invalidate the cache. Saves
       # ~30s per matrix job on cold runners and avoids re-downloading from GitHub releases.
       - name: Restore uv runtime cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: resources/uv
           key: ${{ runner.os }}-uv-${{ hashFiles('scripts/uv-targets.mjs', 'scripts/fetch-uv.mjs') }}
@@ -123,6 +146,9 @@ jobs:
           APPLE_TEAM_ID: ${{ matrix.target == 'mac' && secrets.APPLE_TEAM_ID || '' }}
           WIN_CSC_LINK: ${{ matrix.target == 'win' && secrets.WIN_CSC_LINK || '' }}
           WIN_CSC_KEY_PASSWORD: ${{ matrix.target == 'win' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+          LVIS_MAC_SIGNER_CERT_SHA256: ${{ matrix.target == 'mac' && secrets.LVIS_MAC_SIGNER_CERT_SHA256 || '' }}
+          LVIS_WINDOWS_PUBLISHER_SUBJECT: ${{ matrix.target == 'win' && secrets.LVIS_WINDOWS_PUBLISHER_SUBJECT || '' }}
+          LVIS_WINDOWS_SIGNER_THUMBPRINT: ${{ matrix.target == 'win' && secrets.LVIS_WINDOWS_SIGNER_THUMBPRINT || '' }}
         run: |
           set -euo pipefail
           require_secret() {
@@ -133,11 +159,11 @@ jobs:
             fi
           }
           if [ "${{ matrix.target }}" = "mac" ]; then
-            for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID LVIS_MAC_SIGNER_CERT_SHA256; do
               require_secret "$name"
             done
           elif [ "${{ matrix.target }}" = "win" ]; then
-            for name in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; do
+            for name in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD LVIS_WINDOWS_PUBLISHER_SUBJECT LVIS_WINDOWS_SIGNER_THUMBPRINT; do
               require_secret "$name"
             done
           fi
@@ -225,7 +251,7 @@ jobs:
               throw "Authenticode verification failed for $($installer.Name): $($signature.Status)"
             }
           }
-      - name: Verify Linux package identities
+      - name: Verify Linux package metadata before independent attestation
         if: matrix.target == 'linux'
         shell: bash
         run: |
@@ -243,33 +269,37 @@ jobs:
           done
       - name: Attest macOS installer
         if: matrix.target == 'mac'
-        uses: actions/attest@v4
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
           subject-path: release/*.dmg
       - name: Attest Windows installer
         if: matrix.target == 'win'
-        uses: actions/attest@v4
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
           subject-path: release/*.exe
       - name: Attest Linux AppImage
         if: matrix.target == 'linux'
-        uses: actions/attest@v4
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
           subject-path: release/*.AppImage
       - name: Attest Linux deb
         if: matrix.target == 'linux'
-        uses: actions/attest@v4
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
           subject-path: release/*.deb
       - name: Attest Linux rpm
         if: matrix.target == 'linux'
-        uses: actions/attest@v4
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
           subject-path: release/*.rpm
       - name: Verify attestations and write strict provenance
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          LVIS_EXPECTED_MAC_TEAM_ID: ${{ matrix.target == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+          LVIS_EXPECTED_MAC_CERT_SHA256: ${{ matrix.target == 'mac' && secrets.LVIS_MAC_SIGNER_CERT_SHA256 || '' }}
+          LVIS_EXPECTED_WINDOWS_PUBLISHER_SUBJECT: ${{ matrix.target == 'win' && secrets.LVIS_WINDOWS_PUBLISHER_SUBJECT || '' }}
+          LVIS_EXPECTED_WINDOWS_CERT_THUMBPRINT: ${{ matrix.target == 'win' && secrets.LVIS_WINDOWS_SIGNER_THUMBPRINT || '' }}
         run: |
           set -euo pipefail
           mkdir -p release/evidence
@@ -291,19 +321,24 @@ jobs:
               --predicate-type https://slsa.dev/provenance/v1 \
               --deny-self-hosted-runners \
               --format json > "$report"
-            node scripts/write-installer-provenance.mjs \
+            env -u GH_TOKEN node scripts/write-installer-provenance.mjs \
               --installer "$installer" \
               --os "${{ matrix.provenance_os }}" \
               --app-head "$REQUESTED_HEAD" \
               --hub-head "$AGENT_HUB_HEAD" \
+              --hub-lock-digest "$AGENT_HUB_LOCK_DIGEST_SHA256" \
               --workflow-run-id "$GITHUB_RUN_ID" \
               --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
               --repository "$GITHUB_REPOSITORY" \
               --attestation "$report" \
-              --output "release/evidence/${name}.provenance.json"
+              --output "release/evidence/${name}.provenance.json" \
+              --mac-team-id "$LVIS_EXPECTED_MAC_TEAM_ID" \
+              --mac-certificate-sha256 "$LVIS_EXPECTED_MAC_CERT_SHA256" \
+              --windows-publisher-subject "$LVIS_EXPECTED_WINDOWS_PUBLISHER_SUBJECT" \
+              --windows-certificate-thumbprint "$LVIS_EXPECTED_WINDOWS_CERT_THUMBPRINT"
           done
       - name: Upload attested installers and provenance
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: a2a-p4-5-${{ matrix.target }}-packaged-evidence
           path: |
