@@ -610,6 +610,9 @@ test("packaged-live runner has no manifest-provided command or result adapter", 
   for (const forbidden of ["verificationCommands", "manifest.command", "resultPath", "shell: true"]) {
     assert.ok(!runner.includes(forbidden), `runner contains forbidden adapter: ${forbidden}`);
   }
+  assert.ok(runner.includes("const matchedSubject = certificate.checkHost(endpointUrl.hostname)"));
+  assert.ok(runner.includes("if (matchedSubject === undefined)"), "checkHost must fail only when Node returns no matching subject");
+  assert.ok(!runner.includes("!certificate.checkHost("), "checkHost return semantics must remain explicit");
   for (const testId of ["remote-a2a-trigger", "remote-a2a-status", "remote-a2a-send", "remote-a2a-replay"]) {
     assert.ok(driver.includes(testId), `fixed UI driver missing stable test ID ${testId}`);
   }
