@@ -413,65 +413,67 @@ try {
           Get-ShortcutOwnershipMismatches $record $installedExe $installDir $ShortcutName $AppUserModelId
         )
         if ($mismatches.Count -ne 0) {
-          throw (
-            "same-target shortcut has partial LVIS ownership; mismatched fields: {0}" -f
+          Write-CleanupEvent "foreign-preserved" "shortcut" (
+            "preserved same-target partial-owned shortcut; mismatched fields: {0}" -f
             ($mismatches -join ",")
           )
         }
+        else {
 
-        # Move within the same directory first, then recheck the moved identity.
-        # A path swap before Move is quarantined and preserved after mismatch;
-        # a path created after Move is never the object we delete.
-        $quarantinePath = Join-Path $programs (
-          ".{0}.lvis-uninstall-{1}.lnk" -f
-          $ShortcutName,
-          [System.Guid]::NewGuid().ToString("N")
-        )
-        [System.IO.File]::Move($shortcutPath, $quarantinePath)
-        try {
-          $quarantinedItem = Get-Item -LiteralPath $quarantinePath -Force
-          if (
-            $quarantinedItem.PSIsContainer -or
-            (($quarantinedItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
-          ) {
-            throw "the shortcut changed to a non-regular or reparse-point object before quarantine"
-          }
-          $quarantinedRecord = Get-ShortcutRecord $quarantinePath
-          $quarantinedMismatches = @(
-            Get-ShortcutOwnershipMismatches $quarantinedRecord $installedExe $installDir $ShortcutName $AppUserModelId
+          # Move within the same directory first, then recheck the moved identity.
+          # A path swap before Move is quarantined and preserved after mismatch;
+          # a path created after Move is never the object we delete.
+          $quarantinePath = Join-Path $programs (
+            ".{0}.lvis-uninstall-{1}.lnk" -f
+            $ShortcutName,
+            [System.Guid]::NewGuid().ToString("N")
           )
-          if ($quarantinedMismatches.Count -ne 0) {
-            throw (
-              "the shortcut changed before atomic quarantine; mismatched fields: {0}" -f
-              ($quarantinedMismatches -join ",")
+          [System.IO.File]::Move($shortcutPath, $quarantinePath)
+          try {
+            $quarantinedItem = Get-Item -LiteralPath $quarantinePath -Force
+            if (
+              $quarantinedItem.PSIsContainer -or
+              (($quarantinedItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+            ) {
+              throw "the shortcut changed to a non-regular or reparse-point object before quarantine"
+            }
+            $quarantinedRecord = Get-ShortcutRecord $quarantinePath
+            $quarantinedMismatches = @(
+              Get-ShortcutOwnershipMismatches $quarantinedRecord $installedExe $installDir $ShortcutName $AppUserModelId
             )
-          }
+            if ($quarantinedMismatches.Count -ne 0) {
+              throw (
+                "the shortcut changed before atomic quarantine; mismatched fields: {0}" -f
+                ($quarantinedMismatches -join ",")
+              )
+            }
 
-          [System.IO.File]::Delete($quarantinePath)
-          if (Test-Path -LiteralPath $quarantinePath) {
-            throw "the quarantined owned shortcut survived cleanup"
-          }
-        }
-        catch {
-          $quarantineFailure = $_
-          if (Test-Path -LiteralPath $quarantinePath) {
-            if (-not (Test-Path -LiteralPath $shortcutPath)) {
-              [System.IO.File]::Move($quarantinePath, $shortcutPath)
-              Write-CleanupEvent "foreign-preserved" "shortcut" (
-                "restored the quarantined shortcut after ownership changed"
-              )
-            }
-            else {
-              Write-CleanupEvent "contract-failed" "shortcut-quarantine" (
-                "preserved the changed candidate at $quarantinePath because the original path was reoccupied"
-              )
+            [System.IO.File]::Delete($quarantinePath)
+            if (Test-Path -LiteralPath $quarantinePath) {
+              throw "the quarantined owned shortcut survived cleanup"
             }
           }
-          throw $quarantineFailure
+          catch {
+            $quarantineFailure = $_
+            if (Test-Path -LiteralPath $quarantinePath) {
+              if (-not (Test-Path -LiteralPath $shortcutPath)) {
+                [System.IO.File]::Move($quarantinePath, $shortcutPath)
+                Write-CleanupEvent "foreign-preserved" "shortcut" (
+                  "restored the quarantined shortcut after ownership changed"
+                )
+              }
+              else {
+                Write-CleanupEvent "contract-failed" "shortcut-quarantine" (
+                  "preserved the changed candidate at $quarantinePath because the original path was reoccupied"
+                )
+              }
+            }
+            throw $quarantineFailure
+          }
+          Write-CleanupEvent "removed" "shortcut" (
+            "removed exact current-user LVIS notification shortcut: $shortcutPath"
+          )
         }
-        Write-CleanupEvent "removed" "shortcut" (
-          "removed exact current-user LVIS notification shortcut: $shortcutPath"
-        )
       }
     }
   }
@@ -513,8 +515,8 @@ try {
       if ($residueMismatches.Count -eq 0) {
         throw "the exact owned shortcut survived the final cleanup postcondition"
       }
-      throw (
-        "a same-target partial-owned shortcut survived; mismatched fields: {0}" -f
+      Write-CleanupEvent "foreign-preserved" "shortcut" (
+        "preserved same-target partial-owned shortcut at final postcondition; mismatched fields: {0}" -f
         ($residueMismatches -join ",")
       )
     }

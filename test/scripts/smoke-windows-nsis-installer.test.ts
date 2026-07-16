@@ -1,7 +1,15 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -20,6 +28,7 @@ import {
   parseJsonProcessResult,
   REGISTRY_QUERY_SCRIPT,
   validateRegistryQueryResult,
+  waitForExactUninstallRegistrationRemoved,
 } from "../../scripts/smoke-windows-nsis-installer.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -218,6 +227,119 @@ describe("Windows NSIS installer smoke contracts", () => {
     ).toBe(false);
   });
 
+  it("waits for both exact uninstall registry views to disappear", async () => {
+    const machineInstall = {
+      registryPath:
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\LVIS-Test",
+      entry: {
+        view: "64",
+        key: "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\LVIS-Test",
+      },
+    };
+    const states: Array<Record<string, boolean>> = [
+      { "64": true, "32": false },
+      { "64": false, "32": true },
+      { "64": false, "32": false },
+    ];
+    const calls: Array<{
+      hive: string;
+      path: string;
+      view: string;
+      mode: string;
+    }> = [];
+    let elapsedMs = 0;
+    let round = 0;
+
+    await waitForExactUninstallRegistrationRemoved(machineInstall, 2_000, {
+      now: () => elapsedMs,
+      queryRegistry: async (hive, path, view, mode) => {
+        calls.push({ hive, path, view, mode });
+        return { keyExists: states[round]?.[view] ?? false };
+      },
+      delay: async (delayMs) => {
+        expect(delayMs).toBe(500);
+        elapsedMs += delayMs;
+        round += 1;
+      },
+    });
+
+    expect(calls.map(({ view }) => view)).toEqual([
+      "64",
+      "32",
+      "64",
+      "32",
+      "64",
+      "32",
+    ]);
+    for (const call of calls) {
+      expect(call).toMatchObject({
+        hive: "HKLM",
+        path: machineInstall.registryPath,
+        mode: "default",
+      });
+    }
+    expect(elapsedMs).toBe(1_000);
+  });
+
+  it("fails closed for uninstall registry timeout and invalid queries", async () => {
+    const machineInstall = {
+      registryPath:
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\LVIS-Test",
+      entry: {
+        view: "64",
+        key: "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\LVIS-Test",
+      },
+    };
+    const views: string[] = [];
+    let elapsedMs = 0;
+    let timeoutMessage = "";
+    try {
+      await waitForExactUninstallRegistrationRemoved(machineInstall, 1_000, {
+        now: () => elapsedMs,
+        queryRegistry: async (_hive, _path, view) => {
+          views.push(view);
+          return { keyExists: view === "32" };
+        },
+        delay: async (delayMs) => {
+          elapsedMs += delayMs;
+        },
+      });
+      throw new Error("expected the uninstall registration wait to time out");
+    } catch (error) {
+      timeoutMessage = error instanceof Error ? error.message : String(error);
+    }
+    expect(views).toEqual(["64", "32", "64", "32"]);
+    expect(timeoutMessage).toContain(machineInstall.registryPath);
+    expect(timeoutMessage).toContain("key survived in registry views: 32");
+    expect(timeoutMessage).toContain(
+      `discovered 64-bit key ${machineInstall.entry.key}`,
+    );
+
+    await expect(
+      waitForExactUninstallRegistrationRemoved(machineInstall, 1_000, {
+        now: () => 0,
+        queryRegistry: async () => ({}),
+        delay: async () => {},
+      }),
+    ).rejects.toThrow(
+      "invalid exact HKLM uninstall registration query contract for 64-bit view",
+    );
+
+    const queryFailure = new Error("registry probe failed");
+    await expect(
+      waitForExactUninstallRegistrationRemoved(machineInstall, 1_000, {
+        now: () => 0,
+        queryRegistry: async () => {
+          throw queryFailure;
+        },
+        delay: async () => {},
+      }),
+    ).rejects.toBe(queryFailure);
+    await expect(
+      waitForExactUninstallRegistrationRemoved(machineInstall, 0),
+    ).rejects.toThrow("uninstall registration wait timeout must be positive");
+  });
+
   it("preserves PowerShell block boundaries with newlines instead of semicolon joins", () => {
     const blockScript = buildPowerShellScript([
       "switch ($value) {",
@@ -284,6 +406,213 @@ describe("Windows NSIS installer smoke contracts", () => {
       }
     },
   );
+  it.runIf(process.platform === "win32")(
+    "preserves a real same-target partial-owned shortcut without aborting",
+    () => {
+      const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+      if (!systemRoot) {
+        throw new Error("SystemRoot/WINDIR is required for shortcut tests");
+      }
+      const powerShell = join(
+        systemRoot,
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      );
+      const installDir = mkdtempSync(
+        join(tmpdir(), "lvis-notification-cleanup-"),
+      );
+      const installedExe = join(installDir, "LVIS.exe");
+      const installMarker = join(
+        installDir,
+        ".lvis-nsis-per-machine-v1",
+      );
+      const shortcutName = `LVIS-test-${randomUUID()}`;
+      const appUserModelId = `xyz.lvisai.test.${randomUUID()}`;
+      let shortcutPath: string | null = null;
+      writeFileSync(installedExe, "test executable");
+      writeFileSync(installMarker, "");
+
+      try {
+        const programsResult = spawnSync(
+          powerShell,
+          [
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[PSCustomObject]@{ path = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs) } | ConvertTo-Json -Compress",
+          ],
+          { encoding: "utf8", timeout: 30_000, windowsHide: true },
+        );
+        expect(programsResult.error).toBeUndefined();
+        expect(
+          programsResult.status,
+          `${programsResult.stdout}\n${programsResult.stderr}`,
+        ).toBe(0);
+        const programs = JSON.parse(programsResult.stdout.trim()) as {
+          path?: unknown;
+        };
+        expect(typeof programs.path).toBe("string");
+        expect((programs.path as string).trim().length).toBeGreaterThan(0);
+        shortcutPath = join(programs.path as string, `${shortcutName}.lnk`);
+        expect(existsSync(shortcutPath)).toBe(false);
+
+        const createShortcutScript = buildPowerShellScript([
+          "$shortcutPath = $env:LVIS_FIXTURE_SHORTCUT_PATH",
+          "if ([string]::IsNullOrWhiteSpace($shortcutPath) -or -not [IO.Path]::IsPathRooted($shortcutPath)) { throw 'shortcut fixture path is invalid' }",
+          "if (Test-Path -LiteralPath $shortcutPath) { throw 'shortcut fixture already exists' }",
+          "$wscript = $null",
+          "$shortcut = $null",
+          "try {",
+          "  $wscript = New-Object -ComObject WScript.Shell",
+          "  $shortcut = $wscript.CreateShortcut($shortcutPath)",
+          "  $shortcut.TargetPath = $env:LVIS_FIXTURE_EXE",
+          "  $shortcut.WorkingDirectory = $env:LVIS_FIXTURE_INSTALL_DIR",
+          "  $shortcut.Arguments = ''",
+          "  $shortcut.Description = $env:LVIS_FIXTURE_DESCRIPTION",
+          "  $shortcut.Save()",
+          "}",
+          "finally {",
+          "  if ($null -ne $shortcut -and [Runtime.InteropServices.Marshal]::IsComObject($shortcut)) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut) }",
+          "  if ($null -ne $wscript -and [Runtime.InteropServices.Marshal]::IsComObject($wscript)) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($wscript) }",
+          "}",
+          "[PSCustomObject]@{ path = $shortcutPath } | ConvertTo-Json -Compress",
+        ]);
+        const createResult = spawnSync(
+          powerShell,
+          [
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            createShortcutScript,
+          ],
+          {
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              LVIS_FIXTURE_SHORTCUT_PATH: shortcutPath,
+              LVIS_FIXTURE_EXE: installedExe,
+              LVIS_FIXTURE_INSTALL_DIR: installDir,
+              LVIS_FIXTURE_DESCRIPTION: `${shortcutName}-foreign`,
+            },
+            timeout: 30_000,
+            windowsHide: true,
+          },
+        );
+        expect(createResult.error).toBeUndefined();
+        expect(
+          createResult.status,
+          `${createResult.stdout}\n${createResult.stderr}`,
+        ).toBe(0);
+        const created = JSON.parse(createResult.stdout.trim()) as {
+          path?: unknown;
+        };
+        expect(created.path).toBe(shortcutPath);
+        expect(shortcutPath.endsWith(`${sep}${shortcutName}.lnk`)).toBe(true);
+        expect(existsSync(shortcutPath)).toBe(true);
+        const before = readFileSync(shortcutPath);
+
+        const cleanupResult = spawnSync(
+          powerShell,
+          [
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            join(
+              repoRoot,
+              "build",
+              "uninstall-windows-notification-artifacts.ps1",
+            ),
+            "-InstalledExecutable",
+            installedExe,
+            "-ShortcutName",
+            shortcutName,
+            "-AppUserModelId",
+            appUserModelId,
+            "-InstallMarker",
+            installMarker,
+          ],
+          {
+            encoding: "utf8",
+            timeout: 60_000,
+            windowsHide: true,
+          },
+        );
+        expect(cleanupResult.error).toBeUndefined();
+        expect(
+          cleanupResult.status,
+          `${cleanupResult.stdout}\n${cleanupResult.stderr}`,
+        ).toBe(0);
+        expect(cleanupResult.stderr.trim()).toBe("");
+        const events = cleanupResult.stdout
+          .split(/\r?\n/)
+          .filter((line) => line.trim().length > 0)
+          .map(
+            (line) =>
+              JSON.parse(line) as {
+                component?: string;
+                status?: string;
+                artifact?: string;
+                detail?: string;
+              },
+          );
+        const preserved = events.find(
+          (event) =>
+            event.component === "lvis-notification-cleanup" &&
+            event.status === "foreign-preserved" &&
+            event.artifact === "shortcut" &&
+            event.detail?.includes(
+              "preserved same-target partial-owned shortcut; mismatched fields:",
+            ),
+        );
+        expect(preserved?.detail).toContain("description");
+        expect(
+          events.some(
+            (event) =>
+              event.artifact === "shortcut" && event.status === "removed",
+          ),
+        ).toBe(false);
+        expect(
+          events.some((event) => event.status === "contract-failed"),
+        ).toBe(false);
+        expect(existsSync(shortcutPath)).toBe(true);
+        expect(readFileSync(shortcutPath)).toEqual(before);
+      } finally {
+        try {
+          if (shortcutPath && existsSync(shortcutPath)) {
+            const shortcut = lstatSync(shortcutPath);
+            if (!shortcut.isFile() || shortcut.isSymbolicLink()) {
+              throw new Error(
+                `refusing to remove non-regular shortcut fixture: ${shortcutPath}`,
+              );
+            }
+            rmSync(shortcutPath, { force: true });
+          }
+        } finally {
+          const resolvedTemp = resolve(tmpdir()).toLowerCase();
+          const resolvedFixture = resolve(installDir).toLowerCase();
+          if (!resolvedFixture.startsWith(`${resolvedTemp}${sep}`)) {
+            throw new Error(
+              `refusing to remove fixture outside temp: ${installDir}`,
+            );
+          }
+          rmSync(installDir, { recursive: true, force: true });
+        }
+      }
+    },
+    90_000,
+  );
+
   it("pre-filters registry trees by an exact display name before enumerating values", () => {
     const smoke = readRepoFile("scripts/smoke-windows-nsis-installer.mjs");
     const filterRequired = REGISTRY_QUERY_SCRIPT.indexOf(
@@ -887,8 +1216,33 @@ describe("Windows NSIS installer smoke contracts", () => {
       smoke.indexOf("async function uninstallAndVerify"),
       smoke.indexOf("async function cleanupFailedInstallerPass"),
     );
-    expect(uninstallFlow.indexOf("await runProcess")).toBeLessThan(
-      uninstallFlow.indexOf("await assertForeignProtocolFixturePreserved"),
+    const processExit = uninstallFlow.indexOf("await runProcess");
+    const uninstallRegistrationBarrier = uninstallFlow.indexOf(
+      "await waitForExactUninstallRegistrationRemoved",
+    );
+    const installedExeRemoval = uninstallFlow.indexOf(
+      "await waitForFileRemoved",
+    );
+    const notificationPostcondition = uninstallFlow.indexOf(
+      "await assertRuntimeNotificationArtifactsRemoved(machineInstall)",
+    );
+    const foreignProtocolPostcondition = uninstallFlow.indexOf(
+      "await assertForeignProtocolFixturePreserved",
+    );
+    for (const index of [
+      processExit,
+      uninstallRegistrationBarrier,
+      installedExeRemoval,
+      notificationPostcondition,
+      foreignProtocolPostcondition,
+    ]) {
+      expect(index).toBeGreaterThanOrEqual(0);
+    }
+    expect(uninstallRegistrationBarrier).toBeGreaterThan(processExit);
+    expect(installedExeRemoval).toBeGreaterThan(uninstallRegistrationBarrier);
+    expect(notificationPostcondition).toBeGreaterThan(installedExeRemoval);
+    expect(foreignProtocolPostcondition).toBeGreaterThan(
+      notificationPostcondition,
     );
     expect(
       uninstallFlow.indexOf("await assertForeignProtocolFixturePreserved"),
@@ -1102,16 +1456,41 @@ describe("Windows NSIS installer smoke contracts", () => {
       smoke.indexOf("async function cleanupFailedInstallerPass"),
     );
     const processExit = uninstallFlow.indexOf("await runProcess");
+    const uninstallRegistrationBarrier = uninstallFlow.indexOf(
+      "await waitForExactUninstallRegistrationRemoved",
+    );
+    const installedExeRemoval = uninstallFlow.indexOf(
+      "await waitForFileRemoved",
+    );
     const notificationPostcondition = uninstallFlow.indexOf(
       "await assertRuntimeNotificationArtifactsRemoved(machineInstall)",
     );
     const foreignProtocolPostcondition = uninstallFlow.indexOf(
       "await assertForeignProtocolFixturePreserved",
     );
-    expect(notificationPostcondition).toBeGreaterThan(processExit);
+    for (const index of [
+      processExit,
+      uninstallRegistrationBarrier,
+      installedExeRemoval,
+      notificationPostcondition,
+      foreignProtocolPostcondition,
+    ]) {
+      expect(index).toBeGreaterThanOrEqual(0);
+    }
+    expect(uninstallRegistrationBarrier).toBeGreaterThan(processExit);
+    expect(installedExeRemoval).toBeGreaterThan(uninstallRegistrationBarrier);
+    expect(notificationPostcondition).toBeGreaterThan(installedExeRemoval);
     expect(notificationPostcondition).toBeLessThan(
       foreignProtocolPostcondition,
     );
+    expect(uninstallFlow).toContain(
+      "await waitForExactUninstallRegistrationRemoved(machineInstall, timeoutMs);",
+    );
+    expect(uninstallFlow).toContain(
+      "await waitForFileRemoved(machineInstall.installedExe, timeoutMs);",
+    );
+    expect(smoke).toContain("machineInstall.registryPath");
+    expect(smoke).toContain("key survived in registry views:");
 
     expect(cleanup).toContain("RegistryView]::Registry64");
     expect(cleanup).toContain("RegistryView]::Registry32");
@@ -1141,8 +1520,32 @@ describe("Windows NSIS installer smoke contracts", () => {
       "if (-not (Test-SamePath $record.Target $installedExe))",
     );
     expect(cleanup).toContain(
+      "preserved same-target partial-owned shortcut; mismatched fields:",
+    );
+    expect(cleanup).toContain(
+      "preserved same-target partial-owned shortcut at final postcondition; mismatched fields:",
+    );
+    expect(cleanup).not.toContain(
       "same-target shortcut has partial LVIS ownership; mismatched fields:",
     );
+    expect(cleanup).not.toContain(
+      "a same-target partial-owned shortcut survived; mismatched fields:",
+    );
+    const mismatchCheck = cleanup.indexOf("if ($mismatches.Count -ne 0)");
+    const partialPreserve = cleanup.indexOf(
+      "preserved same-target partial-owned shortcut;",
+      mismatchCheck,
+    );
+    const exactOwnedElse = cleanup.indexOf("else {", partialPreserve);
+    const quarantineMove = cleanup.indexOf(
+      "[System.IO.File]::Move($shortcutPath, $quarantinePath)",
+      exactOwnedElse,
+    );
+    expect(mismatchCheck).toBeGreaterThanOrEqual(0);
+    expect(partialPreserve).toBeGreaterThan(mismatchCheck);
+    expect(exactOwnedElse).toBeGreaterThan(partialPreserve);
+    expect(quarantineMove).toBeGreaterThan(exactOwnedElse);
+    expect(cleanup.slice(mismatchCheck, exactOwnedElse)).not.toContain("throw");
     expect(cleanup).toContain(
       "the exact owned shortcut survived the final cleanup postcondition",
     );
