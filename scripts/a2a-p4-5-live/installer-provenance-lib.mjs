@@ -18,6 +18,9 @@ import { parseStrictJson } from "./strict-json.mjs";
 
 export const SUPPORTED_INSTALLER_OSES = Object.freeze(["macos", "windows", "linux"]);
 
+const DEFAULT_PROGRAM_TIMEOUT_MS = 5 * 60_000;
+const MAX_PROGRAM_TIMEOUT_MS = 60 * 60_000;
+
 const SAFE_CHILD_ENV_KEYS = Object.freeze([
   "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP",
   "USERPROFILE", "SystemRoot", "WINDIR", "ComSpec", "PATHEXT",
@@ -31,14 +34,18 @@ function baseChildEnvironment() {
 
 export function runFixedProgram(command, args, {
   env = {}, label = command, maxBuffer = 4 * 1024 * 1024, input,
+  timeoutMs = DEFAULT_PROGRAM_TIMEOUT_MS,
 } = {}) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_PROGRAM_TIMEOUT_MS) {
+    fail(`${label}: timeoutMs must be an integer from 1 to ${MAX_PROGRAM_TIMEOUT_MS}`);
+  }
   const childEnv = { ...baseChildEnvironment(), ...env };
   const result = spawnSync(command, args, {
     encoding: "utf8",
     env: childEnv,
     input,
     maxBuffer,
-    timeout: 60_000,
+    timeout: timeoutMs,
     windowsHide: true,
   });
   if (result.error) fail(`${label}: ${result.error.message}`);
