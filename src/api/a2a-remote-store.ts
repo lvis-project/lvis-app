@@ -110,8 +110,6 @@ export interface A2ARemoteAttemptRecord {
   prepared: A2ARemotePreparedAttempt;
   stage: A2ARemoteDeliveryState;
   resolved?: A2ARemoteResolvedFields;
-  remoteTaskId?: string;
-  remoteContextId?: string;
   outcomeCode?: string;
   /** Durable lower bound for a user-triggered retry after -32092. */
   retryNotBefore?: string;
@@ -281,7 +279,7 @@ export class A2ARemoteDurableStore {
   private validAttempt(value: unknown): value is A2ARemoteAttemptRecord {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
     const item = value as Record<string, unknown>;
-    if (!Object.keys(item).every((key) => ["prepared", "stage", "resolved", "remoteTaskId", "remoteContextId", "outcomeCode", "retryNotBefore", "updatedAt"].includes(key))) return false;
+    if (!Object.keys(item).every((key) => ["prepared", "stage", "resolved", "outcomeCode", "retryNotBefore", "updatedAt"].includes(key))) return false;
     if (!this.validPrepared(item.prepared) || typeof item.stage !== "string" || !ATTEMPT_STAGES.has(item.stage as A2ARemoteDeliveryState)) return false;
     if (typeof item.updatedAt !== "string" || !Number.isFinite(Date.parse(item.updatedAt))) return false;
     const stage = item.stage as A2ARemoteDeliveryState;
@@ -787,8 +785,6 @@ export class A2ARemoteDurableStore {
     stage: A2ARemoteDeliveryState,
     update: Readonly<{
       outcomeCode?: string;
-      remoteTaskId?: string;
-      remoteContextId?: string;
       deletePayload?: boolean;
       retryAfterSeconds?: number;
       taskProjection?: Readonly<{
@@ -813,8 +809,6 @@ export class A2ARemoteDurableStore {
         record.retryNotBefore = new Date(this.now().getTime() + 1_000).toISOString();
       }
       if (update.outcomeCode !== undefined) record.outcomeCode = update.outcomeCode;
-      if (update.remoteTaskId !== undefined) record.remoteTaskId = update.remoteTaskId;
-      if (update.remoteContextId !== undefined) record.remoteContextId = update.remoteContextId;
       record.updatedAt = this.now().toISOString();
       if (update.deletePayload && record.prepared.payloadRecordId) {
         next.payloads = next.payloads.filter((item) => item.id !== record.prepared.payloadRecordId);

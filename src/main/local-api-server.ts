@@ -350,12 +350,12 @@ function buildExternalMutationApproverFromAgentAction(
 ): ExternalMutationApprover | undefined {
   if (!approve) return undefined;
 
-  return async ({ channel, args, origin }) => await approve({
+  return async ({ channel, args, origin }) => Boolean(await approve({
     toolName: channel,
     args,
     reason: "An external CLI/API requested a permission-mode change. Do you want to allow it?",
     trustOrigin: origin,
-  });
+  }));
 }
 
 /**

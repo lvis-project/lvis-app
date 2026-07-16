@@ -238,6 +238,19 @@ export function buildInternalApiSurface() {
   getSettings: async () => ipcRenderer.invoke(CHANNELS.settings.get),
   updateSettings: async (partial: unknown) => ipcRenderer.invoke(CHANNELS.settings.update, partial),
   applyHostMap: async (hostResolverMap: string) => ipcRenderer.invoke(SETTINGS.applyHostMap, hostResolverMap),
+  remoteA2a: {
+    targets: async () => ipcRenderer.invoke(CHANNELS.remoteA2a.targets),
+    status: async () => ipcRenderer.invoke(CHANNELS.remoteA2a.status),
+    send: async (targetAgentId: number, userIntent: string) => ipcRenderer.invoke(
+      CHANNELS.remoteA2a.send,
+      { targetAgentId, userIntent, intentToken: ipcUserKeyboardIntent() },
+    ),
+    task: async (taskHandle: string) => ipcRenderer.invoke(CHANNELS.remoteA2a.task, { taskHandle }),
+    action: async (action: "resume" | "cancel" | "replay", taskHandle: string, userIntent?: string) => ipcRenderer.invoke(
+      CHANNELS.remoteA2a.action,
+      { action, taskHandle, ...(userIntent === undefined ? {} : { userIntent }), intentToken: ipcUserKeyboardIntent() },
+    ),
+  },
   onSettingsUpdated: (handler: (settings: unknown) => void) => {
     const listener = (_event: unknown, settings: unknown) => handler(settings);
     ipcRenderer.on(SETTINGS.updated, listener);
