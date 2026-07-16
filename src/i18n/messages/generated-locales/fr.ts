@@ -1295,6 +1295,8 @@ export const frMessages: Record<string, string> = {
   "formatIpcError.personaPromptOriginRestricted": "Les invites personnelles ne peuvent être modifiées qu’à partir d’une origine de saisie utilisateur.",
   "formatIpcError.pluginNotLoaded": "Le plugin n'est pas chargé.",
   "formatIpcError.preferenceRefreshServiceUnavailable": "Le service d'actualisation des paramètres n'est pas disponible.",
+  "formatIpcError.remoteA2aDisabled": "L'A2A distant est désactivé dans cette configuration de l'application.",
+  "formatIpcError.remoteA2aOperationRejected": "La requête A2A distante n'a pas pu être traitée.",
   "formatIpcError.productionDisabled": "Non disponible dans l'environnement de production.",
   "formatIpcError.exportFailed": "Échec de la création du paquet de diagnostic.",
   "formatIpcError.crashListFailed": "Échec de la lecture des vidages de plantage.",
