@@ -108,6 +108,34 @@ describe("A2A remote boot runtime", () => {
     expect(cancel).toHaveBeenCalledOnce();
   });
 
+  it("contains and audits initial lifecycle sweep failures without rejecting readiness", async () => {
+    const receiverAudit = vi.fn();
+    const receiverCancel = vi.fn();
+    const receiver = createA2AReceiverExpiryLifecycle(
+      { expireDue: vi.fn(() => { throw new Error("private-receiver-detail"); }) },
+      receiverAudit,
+      () => receiverCancel,
+    );
+    await expect(receiver.ready()).resolves.toBeUndefined();
+    expect(receiverAudit).toHaveBeenCalledWith("receiver-expiry-sweep-failed");
+    expect(JSON.stringify(receiverAudit.mock.calls)).not.toContain("private-receiver-detail");
+    receiver.dispose();
+    expect(receiverCancel).toHaveBeenCalledOnce();
+
+    const outboundAudit = vi.fn(() => { throw new Error("private-audit-detail"); });
+    const outboundCancel = vi.fn();
+    const outbound = createA2AOutboundCleanupLifecycle(
+      { cleanup: vi.fn().mockRejectedValueOnce(new Error("private-cleanup-detail")) },
+      outboundAudit,
+      () => outboundCancel,
+    );
+    await expect(outbound.ready()).resolves.toBeUndefined();
+    expect(outboundAudit).toHaveBeenCalledWith("outbound-cleanup-sweep-failed");
+    expect(JSON.stringify(outboundAudit.mock.calls)).not.toContain("private-cleanup-detail");
+    outbound.dispose();
+    expect(outboundCancel).toHaveBeenCalledOnce();
+  });
+
   it("retries redacted outbound cleanup sweeps and disposes the timer", async () => {
     const cleanup = vi.fn()
       .mockResolvedValueOnce({ orphaned: 1, expired: 1 })
