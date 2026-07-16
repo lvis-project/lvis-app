@@ -154,11 +154,15 @@ async function verifyLiveEndpointIdentity(endpoints, expected, { run = runFixedP
   return result;
 }
 
-function writeExclusiveOutput(value) {
-  const directory = resolve(root, "artifacts/a2a-p4-5");
+export function writeExclusiveOutput(value, { baseDirectory = root } = {}) {
+  const directory = resolve(baseDirectory, "artifacts/a2a-p4-5");
+  const parent = dirname(directory);
+  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  if (realpathSync(parent) !== resolve(parent)) fail("packaged-live output parent path must be canonical");
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const stat = lstatSync(directory);
   if (stat.isSymbolicLink() || !stat.isDirectory()) fail("packaged-live output directory must be a regular directory");
+  if (realpathSync(directory) !== resolve(directory)) fail("packaged-live output directory path must be canonical");
   const outputPath = resolve(directory, "packaged-live.json");
   const descriptor = openSync(outputPath, "wx", 0o600);
   try {

@@ -57,6 +57,7 @@ import {
   verifyTaskTraffic,
 } from "../packaged-live-contract.mjs";
 import { parseStrictJson } from "../strict-json.mjs";
+import { writeExclusiveOutput } from "../../run-a2a-p4-5-packaged-live.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../../..");
@@ -630,6 +631,16 @@ test("fixed programs validate and honor per-call timeouts", () => {
   assert.equal(
     runFixedProgram(process.execPath, ["-e", "process.stdout.write('ok')"], { timeoutMs: 1000 }).stdout,
     "ok",
+  );
+});
+
+test("packaged-live output rejects a symlinked ancestor before writing", () => {
+  const baseDirectory = mkdtempSync(resolve(tmpdir(), "lvis-packaged-output-"));
+  const outsideDirectory = mkdtempSync(resolve(tmpdir(), "lvis-packaged-output-outside-"));
+  symlinkSync(outsideDirectory, resolve(baseDirectory, "artifacts"), "dir");
+  assert.throws(
+    () => writeExclusiveOutput({ verificationState: "passed" }, { baseDirectory }),
+    /output parent path must be canonical/u,
   );
 });
 
