@@ -649,6 +649,7 @@ test("isolated evidence workflow is dispatch-only, immutable-action pinned, exac
   for (const required of [
     "head_sha:", "agent_hub_head_sha:", "contents: read", "id-token: write", "attestations: write",
     "git rev-parse HEAD", "git -C .evidence/agent-hub rev-parse HEAD", ".evidence/agent-hub/server/bun.lock", "AGENT_HUB_LOCK_DIGEST_SHA256",
+    "readRegularFile", "Agent Hub server lock", "loadBytes:false",
     "repository: lvis-project/agent-hub", "codesign --verify --deep --strict", "spctl --assess", "Get-AuthenticodeSignature",
     "dpkg-deb --field", "rpm -qp", "readelf --file-header", "actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4", "gh attestation verify",
     "write-installer-provenance.mjs", "codesign --display --verbose=4 \"$mount_point/LVIS.app\"",
@@ -661,6 +662,7 @@ test("isolated evidence workflow is dispatch-only, immutable-action pinned, exac
   for (const forbidden of ["skip_code_sign", "--skip-code-sign", "graceful degradation", "inputs.ref", "\n  push:", "publish-release", "softprops/action-gh-release", "vars.AGENT_HUB_RELEASE_HEAD_SHA", "actions/checkout@v7", "actions/cache@v6", "actions/attest@v4", "actions/upload-artifact@v7", "oven-sh/setup-bun@v2", "awk -F '\\t'"]) {
     assert.ok(!workflow.includes(forbidden), `forbidden workflow fallback: ${forbidden}`);
   }
+  assert.ok(!workflow.includes("readFileSync(process.argv[1])"), "Hub lock digest must use descriptor-safe canonical file reading");
   const installerJobEnv = workflow.slice(workflow.indexOf("jobs:"), workflow.indexOf("    steps:"));
   for (const secretName of ["CSC_LINK", "APPLE_ID", "WIN_CSC_LINK"]) assert.ok(!installerJobEnv.includes(secretName), `${secretName} leaked into job-wide env`);
 
