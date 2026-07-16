@@ -9,8 +9,10 @@ import {
 } from "node:crypto";
 import type { FeatureNamespaceHandle } from "../main/storage/feature-namespace.js";
 import type { A2ASendMessageResult } from "../shared/a2a-wire.js";
+import { maskA2AMessage } from "../engine/a2a-subagent-message-codec.js";
 import { A2A_EXACT_SEND_REPLAY_RETENTION_MS } from "./a2a-remote-contracts.js";
 import type { A2AOsEncryption } from "./a2a-remote-store.js";
+import { canonicalizeA2ARemoteTask } from "./a2a-task-store.js";
 
 const STORE_VERSION = 2;
 const DEFAULT_FILE = "exact-send-replay.json";
@@ -64,6 +66,12 @@ function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function decodeCanonicalBase64(value: string): Buffer | null {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) return null;
+  const decoded = Buffer.from(value, "base64");
+  return decoded.toString("base64") === value ? decoded : null;
+}
+
 function hmac(key: Buffer, domain: string, value: string): string {
   return createHmac("sha256", key).update(domain).update("\0").update(value).digest("hex");
 }
@@ -106,7 +114,10 @@ function validState(value: unknown): value is ReplayStateFile {
 function validResult(value: unknown): value is A2ASendMessageResult {
   if (!isRecord(value)) return false;
   const keys = Object.keys(value);
-  return keys.length === 1 && (keys[0] === "message" || keys[0] === "task") && isRecord(value[keys[0]!]);
+  if (keys.length !== 1) return false;
+  if (keys[0] === "task") return canonicalizeA2ARemoteTask(value.task) !== null;
+  if (keys[0] !== "message" || !isRecord(value.message)) return false;
+  try { return isRecord(maskA2AMessage(value.message as never).message); } catch { return false; }
 }
 
 export class A2AExactReplayStore {
@@ -141,8 +152,12 @@ export class A2AExactReplayStore {
       state.encryptedDataKey = this.options.encryption.encryptString(key.toString("base64")).toString("base64");
       return key;
     }
-    const key = Buffer.from(this.options.encryption.decryptString(Buffer.from(state.encryptedDataKey, "base64")), "base64");
-    if (key.length !== 32) throw new Error("a2a-replay-key-invalid");
+    const encrypted = decodeCanonicalBase64(state.encryptedDataKey);
+    if (!encrypted) throw new Error("a2a-replay-key-invalid");
+    const decoded = this.options.encryption.decryptString(encrypted);
+    encrypted.fill(0);
+    const key = decodeCanonicalBase64(decoded);
+    if (!key || key.length !== 32) throw new Error("a2a-replay-key-invalid");
     return key;
   }
 
@@ -151,6 +166,7 @@ export class A2AExactReplayStore {
     const raw = await this.options.namespace.readJson<unknown>(this.fileName, initialState());
     if (!validState(raw)) throw new Error("a2a-replay-store-invalid");
     const state = structuredClone(raw);
+    this.validateLoadedState(state);
     let changed = false;
     for (const record of state.records) {
       if (record.state === "in-progress") {
@@ -162,6 +178,41 @@ export class A2AExactReplayStore {
     this.state = state;
     if (changed) await this.persist(state);
     return state;
+  }
+
+  private validateLoadedState(state: ReplayStateFile): void {
+    if (state.records.length > 0 && !state.encryptedDataKey) throw new Error("a2a-replay-store-invalid");
+    if (state.encryptedDataKey) { const key = this.dataKey(state); key.fill(0); }
+    const keys = new Set<string>();
+    const callerMessages = new Set<string>();
+    const owners = new Set<string>();
+    const perCaller = new Map<string, number>();
+    for (const record of state.records) {
+      const callerMessage = `${record.callerToken}\0${record.messageToken}`;
+      if (keys.has(record.keyToken) || callerMessages.has(callerMessage)) throw new Error("a2a-replay-store-invalid");
+      keys.add(record.keyToken); callerMessages.add(callerMessage);
+      const count = (perCaller.get(record.callerToken) ?? 0) + 1;
+      perCaller.set(record.callerToken, count);
+      if (count > this.options.maxKeysPerGeneration) throw new Error("a2a-replay-store-invalid");
+      const first = Date.parse(record.firstAcceptedAt);
+      const expires = Date.parse(record.expiresAt);
+      if (expires <= first || expires - first !== this.retentionMs) throw new Error("a2a-replay-store-invalid");
+      if (record.ownerTokenHmac) {
+        if (owners.has(record.ownerTokenHmac)) throw new Error("a2a-replay-store-invalid");
+        owners.add(record.ownerTokenHmac);
+      }
+      if (record.state === "completed") {
+        const ciphertext = decodeCanonicalBase64(record.resultCiphertext!);
+        const iv = decodeCanonicalBase64(record.resultIv!);
+        const tag = decodeCanonicalBase64(record.resultAuthTag!);
+        const valid = ciphertext !== null && ciphertext.byteLength > 0
+          && iv?.byteLength === 12 && tag?.byteLength === 16
+          && sha256(ciphertext) === record.resultCiphertextSha256;
+        ciphertext?.fill(0); iv?.fill(0); tag?.fill(0);
+        if (!valid) throw new Error("a2a-replay-store-invalid");
+        try { this.decryptResult(state, record); } catch { throw new Error("a2a-replay-store-invalid"); }
+      }
+    }
   }
 
   private async persist(state: ReplayStateFile): Promise<void> {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startLocalApiHttpServer, type LocalApiHttpServer } from "../../api/http-server.js";
 import { createStreamBroadcaster } from "../../api/stream-broadcaster.js";
+import type { A2ARequestHandler } from "../../api/a2a-router.js";
 import {
   A2ASubAgentHandler,
   type A2ASubAgentLifecycleRunner,
@@ -121,6 +122,49 @@ describe("A2A production loopback runtime", () => {
     }));
 
     expect(transformed.sort()).toEqual(runtime!.router.handlerIds);
+    await runtime!.dispose();
+  });
+
+  it("applies remote receiver approval and audit provenance to actual mutations", async () => {
+    const approveAgentAction = vi.fn(async () => null);
+    const auditLog = vi.fn();
+    let captured: A2ARequestHandler | undefined;
+    const runtime = await createA2ALoopbackRuntime(makeOptions([
+      profile("alpha", "C:/profiles/alpha.md"),
+    ], {
+      services: {
+        agentProfileStore: { list: vi.fn(async () => [profile("alpha", "C:/profiles/alpha.md")]) } as never,
+        getSubAgentRunner: () => makeRunner() as never,
+        auditLogger: { log: auditLog } as never,
+      },
+      approveAgentAction,
+      advertisedOrigin: "https://receiver.lvis.ai/",
+      wireTrustOrigin: "a2a-remote-wire",
+      approvalReason: "[A2A Wire: Remote] Approve the remote mutation?",
+      auditSessionId: "a2a-remote-wire",
+      auditScope: "a2a-remote-wire",
+      transformHandler: (handler) => {
+        captured = handler;
+        return handler;
+      },
+    }));
+
+    await expect(captured!.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
+      message: {
+        messageId: "remote-message-1",
+        role: A2ARole.USER,
+        parts: [{ text: "remote work" }],
+      },
+    })).rejects.toBeDefined();
+    expect(approveAgentAction).toHaveBeenCalledWith(expect.objectContaining({
+      toolName: expect.stringContaining("send"),
+      reason: "[A2A Wire: Remote] Approve the remote mutation?",
+      trustOrigin: "a2a-remote-wire",
+    }));
+    expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "a2a-remote-wire",
+      input: expect.stringContaining("a2a-remote-wire:task-lifecycle:dropped:consent-denied:"),
+    }));
     await runtime!.dispose();
   });
 
