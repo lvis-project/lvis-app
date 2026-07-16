@@ -57,7 +57,7 @@ export function registerRemoteA2AHandlers(deps: IpcDeps): void {
         targetAgentId: value.targetAgentId as number,
         intent: value.userIntent,
       });
-      return { ok: status.state === "sent", status };
+      return { ok: true, status };
     } catch {
       return OPERATION_REJECTED;
     }
@@ -78,7 +78,7 @@ export function registerRemoteA2AHandlers(deps: IpcDeps): void {
     if (!controller) return DISABLED;
     try {
       const status = await controller.get({ taskHandle: value.taskHandle });
-      return { ok: status.state === "sent", status };
+      return { ok: true, status };
     } catch {
       return OPERATION_REJECTED;
     }
@@ -106,7 +106,7 @@ export function registerRemoteA2AHandlers(deps: IpcDeps): void {
         : value.action === "cancel"
           ? await controller.cancel({ taskHandle: value.taskHandle })
           : await controller.replay({ taskHandle: value.taskHandle });
-      return { ok: status.state === "sent", status };
+      return { ok: true, status };
     } catch {
       return OPERATION_REJECTED;
     }

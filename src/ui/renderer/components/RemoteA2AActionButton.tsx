@@ -29,13 +29,16 @@ export function RemoteA2AActionButton() {
     let live = true;
     const api = window.lvisApi?.remoteA2a;
     if (!api) { setTargets([]); return; }
-    void Promise.all([api.targets(), api.status()]).then(([targetResult, statusResult]) => {
+    void api.targets().then((targetResult) => {
       if (!live) return;
       const nextTargets = targetResult.ok ? targetResult.targets : [];
       setTargets(nextTargets);
       setSelected(nextTargets[0] ? String(nextTargets[0].targetAgentId) : "");
-      if (statusResult.ok) setStatus(statusResult.status);
     }).catch(() => { if (live) setTargets([]); });
+    void api.status().then((statusResult) => {
+      if (!live) return;
+      if (statusResult.ok) setStatus(statusResult.status);
+    }).catch(() => undefined);
     return () => { live = false; };
   }, []);
 
@@ -56,9 +59,9 @@ export function RemoteA2AActionButton() {
     setStatus({ state: "awaiting-approval", targetAgentId: targetId, targetLabel: targets.find((target) => target.targetAgentId === targetId)?.label, updatedAt: new Date().toISOString() });
     try {
       const result = await window.lvisApi.remoteA2a.send(targetId, intent);
-      if ("status" in result) {
+      if (result.ok) {
         setStatus(result.status);
-        if (result.ok) setIntent("");
+        setIntent("");
       } else {
         setStatus({ state: "failed", targetAgentId: targetId, outcome: result.error, updatedAt: new Date().toISOString() });
       }
@@ -76,9 +79,9 @@ export function RemoteA2AActionButton() {
       const result = action === "get"
         ? await window.lvisApi.remoteA2a.task(taskHandle)
         : await window.lvisApi.remoteA2a.action(action, taskHandle, action === "resume" ? intent : undefined);
-      if ("status" in result) {
+      if (result.ok) {
         setStatus(result.status);
-        if (action === "resume" && result.ok) setIntent("");
+        if (action === "resume") setIntent("");
       } else {
         setStatus({ state: "failed", taskHandle, outcome: result.error, updatedAt: new Date().toISOString() });
       }

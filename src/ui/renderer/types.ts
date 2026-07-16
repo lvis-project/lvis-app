@@ -442,15 +442,15 @@ export type LvisApi = {
       | { ok: false; error: string }
     >;
     send: (targetAgentId: number, userIntent: string) => Promise<
-      | { ok: boolean; status: RemoteA2AActionStatus }
+      | { ok: true; status: RemoteA2AActionStatus }
       | { ok: false; error: string }
     >;
     task: (taskHandle: string) => Promise<
-      | { ok: boolean; status: RemoteA2AActionStatus }
+      | { ok: true; status: RemoteA2AActionStatus }
       | { ok: false; error: string }
     >;
     action: (action: "resume" | "cancel" | "replay", taskHandle: string, userIntent?: string) => Promise<
-      | { ok: boolean; status: RemoteA2AActionStatus }
+      | { ok: true; status: RemoteA2AActionStatus }
       | { ok: false; error: string }
     >;
   };
