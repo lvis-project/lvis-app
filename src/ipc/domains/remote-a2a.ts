@@ -77,14 +77,14 @@ export function registerRemoteA2AHandlers(deps: IpcDeps): void {
       auditUnauthorized(deps.auditLogger, CHANNELS.remoteA2a.task, event);
       return UNAUTHORIZED_FRAME;
     }
+    const controller = deps.remoteA2AActionController;
+    if (!controller) return DISABLED;
     const value = payload && typeof payload === "object" && !Array.isArray(payload)
       ? payload as Record<string, unknown>
       : {};
     if (Object.keys(value).sort().join(",") !== "taskHandle" || !isValidRemoteA2ATaskHandle(value.taskHandle)) {
       return { ok: false, error: "a2a-remote-input-invalid" as const };
     }
-    const controller = deps.remoteA2AActionController;
-    if (!controller) return DISABLED;
     try {
       const status = await controller.get({ taskHandle: value.taskHandle });
       return { ok: true, status };

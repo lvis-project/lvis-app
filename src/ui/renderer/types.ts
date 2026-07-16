@@ -400,6 +400,15 @@ export type RemoteA2AActionStatus = {
   updatedAt: string;
 };
 
+type RemoteA2AStatusResult =
+  | { ok: true; status: RemoteA2AActionStatus }
+  | { ok: false; error: string };
+
+type RemoteA2AActionCall = {
+  (action: "resume", taskHandle: string, userIntent: string): Promise<RemoteA2AStatusResult>;
+  (action: "cancel" | "replay", taskHandle: string): Promise<RemoteA2AStatusResult>;
+};
+
 export type ProjectQueryOptions = {
   projectRoot?: string;
   projectName?: string;
@@ -437,22 +446,10 @@ export type LvisApi = {
       | { ok: true; targets: Array<{ targetAgentId: number; label: string }> }
       | { ok: false; error: string }
     >;
-    status: () => Promise<
-      | { ok: true; status: RemoteA2AActionStatus }
-      | { ok: false; error: string }
-    >;
-    send: (targetAgentId: number, userIntent: string) => Promise<
-      | { ok: true; status: RemoteA2AActionStatus }
-      | { ok: false; error: string }
-    >;
-    task: (taskHandle: string) => Promise<
-      | { ok: true; status: RemoteA2AActionStatus }
-      | { ok: false; error: string }
-    >;
-    action: (action: "resume" | "cancel" | "replay", taskHandle: string, userIntent?: string) => Promise<
-      | { ok: true; status: RemoteA2AActionStatus }
-      | { ok: false; error: string }
-    >;
+    status: () => Promise<RemoteA2AStatusResult>;
+    send: (targetAgentId: number, userIntent: string) => Promise<RemoteA2AStatusResult>;
+    task: (taskHandle: string) => Promise<RemoteA2AStatusResult>;
+    action: RemoteA2AActionCall;
   };
   /**
    * Deterministic file:// URL of the bundled `plugin-ui-shell.html`. Same

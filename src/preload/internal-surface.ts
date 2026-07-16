@@ -232,6 +232,26 @@ function normalizeMarketplacePackageActionResult(
   return normalized;
 }
 
+function invokeRemoteA2AAction(
+  action: "resume",
+  taskHandle: string,
+  userIntent: string,
+): Promise<unknown>;
+function invokeRemoteA2AAction(
+  action: "cancel" | "replay",
+  taskHandle: string,
+): Promise<unknown>;
+async function invokeRemoteA2AAction(
+  action: "resume" | "cancel" | "replay",
+  taskHandle: string,
+  userIntent?: string,
+): Promise<unknown> {
+  return ipcRenderer.invoke(
+    CHANNELS.remoteA2a.action,
+    { action, taskHandle, ...(userIntent === undefined ? {} : { userIntent }), intentToken: ipcUserKeyboardIntent() },
+  );
+}
+
 export function buildInternalApiSurface() {
   return {
   // ─── Settings ────────────────────────────────────
@@ -246,10 +266,7 @@ export function buildInternalApiSurface() {
       { targetAgentId, userIntent, intentToken: ipcUserKeyboardIntent() },
     ),
     task: async (taskHandle: string) => ipcRenderer.invoke(CHANNELS.remoteA2a.task, { taskHandle }),
-    action: async (action: "resume" | "cancel" | "replay", taskHandle: string, userIntent?: string) => ipcRenderer.invoke(
-      CHANNELS.remoteA2a.action,
-      { action, taskHandle, ...(userIntent === undefined ? {} : { userIntent }), intentToken: ipcUserKeyboardIntent() },
-    ),
+    action: invokeRemoteA2AAction,
   },
   onSettingsUpdated: (handler: (settings: unknown) => void) => {
     const listener = (_event: unknown, settings: unknown) => handler(settings);

@@ -104,7 +104,9 @@ export function RemoteA2AActionButton() {
     try {
       const result = action === "get"
         ? await window.lvisApi.remoteA2a.task(taskHandle)
-        : await window.lvisApi.remoteA2a.action(action, taskHandle, action === "resume" ? intent : undefined);
+        : action === "resume"
+          ? await window.lvisApi.remoteA2a.action("resume", taskHandle, intent)
+          : await window.lvisApi.remoteA2a.action(action, taskHandle);
       if (result.ok) {
         setStatus(result.status);
         if (action === "resume" && result.status.state === "sent") setIntent("");
