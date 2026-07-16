@@ -142,8 +142,8 @@ export function assertPublicHttpsUrl(value, label) {
   } catch {
     fail(`${label}: invalid URL`);
   }
-  if (url.protocol !== "https:" || (url.port && url.port !== "443") || url.username || url.password || url.search || url.hash) {
-    fail(`${label}: expected credential-free public HTTPS/443 URL without query or fragment`);
+  if (url.protocol !== "https:" || (url.port && url.port !== "443") || url.username || url.password || url.hash) {
+    fail(`${label}: expected credential-free public HTTPS/443 URL without a fragment`);
   }
   if (isIP(url.hostname)) fail(`${label}: IP-literal targets are forbidden`);
   if (url.hostname !== url.hostname.toLowerCase() || url.hostname.endsWith(".")) fail(`${label}: hostname must be canonical lowercase without trailing dot`);
@@ -465,7 +465,8 @@ export function verifyTaskTraffic(records, endpoints) {
       fail(`capture: Task method ${record.message.method} did not travel client -> exact remote HTTPS/443`);
     }
     const interfaceUrl = new URL(endpoints.remoteUrl);
-    if (![interfaceUrl.hostname, `${interfaceUrl.hostname}:443`].includes(record.host) || record.uri !== interfaceUrl.pathname) {
+    if (![interfaceUrl.hostname, `${interfaceUrl.hostname}:443`].includes(record.host)
+      || record.uri !== `${interfaceUrl.pathname}${interfaceUrl.search}`) {
       fail(`capture: Task method ${record.message.method} did not use the exact remote interface Host/path`);
     }
   }
