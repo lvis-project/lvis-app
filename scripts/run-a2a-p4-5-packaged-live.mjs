@@ -64,6 +64,9 @@ function validateUiResult(value) {
 function runTshark(captureArtifact, keyLogArtifact, expectedVersion, run = runFixedProgram) {
   const actualVersion = run("tshark", ["--version"], { label: "tshark version" }).stdout.split(/\r?\n/u)[0];
   if (actualVersion !== expectedVersion) fail(`tshark version mismatch (expected ${expectedVersion}, got ${actualVersion})`);
+  // Wireshark documents `separator=/t` as the TShark fields token for ASCII
+  // horizontal tab; the parsers below intentionally split the resulting "\t".
+  // https://www.wireshark.org/docs/wsug_html_chunked/AppToolstshark.html
   const result = run("tshark", [
     "-r", captureArtifact.path,
     "-o", `tls.keylog_file:${keyLogArtifact.path}`,
