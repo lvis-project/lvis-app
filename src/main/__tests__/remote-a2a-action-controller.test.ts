@@ -130,5 +130,20 @@ describe("production remote A2A action controller", () => {
     const taskStatus = await taskController.get({ taskHandle: "task_handle_123456" });
     expect(taskStatus).toMatchObject({ state: "failed", outcome: "a2a-remote-task-action-failed" });
     expect(JSON.stringify(taskStatus)).not.toContain("private-store-detail");
+
+    const replayRuntime = runtime({
+      execute: vi.fn(async () => { throw new Error("private-replay-provider-detail"); }),
+      getOperationRecoveryRoute: vi.fn(async () => ({ handle: "recovery_handle_123", operationId: "initial-op", targetAgentId: 1, targetLabel: "Agent one", lineage, messageId: "initial-message", credentialRevisionId: 11 })),
+    });
+    const replayController = createRemoteA2AActionController({ runtime: replayRuntime as never, config, projectRoot: "/project", makeId: ids() });
+    const replayStatus = await replayController.replay({ taskHandle: "recovery_handle_123" });
+    expect(replayStatus).toMatchObject({ state: "failed", recoveryEligible: true, outcome: "a2a-remote-replay-failed" });
+    expect(replayController.status()).toEqual(replayStatus);
+    expect(JSON.stringify(replayStatus)).not.toContain("private-replay-provider-detail");
+    await expect(replayController.replay({ taskHandle: "recovery_handle_123" })).resolves.toMatchObject({
+      state: "failed",
+      outcome: "a2a-remote-replay-failed",
+    });
+    expect(replayRuntime.execute).toHaveBeenCalledTimes(2);
   });
 });

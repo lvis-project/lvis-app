@@ -221,6 +221,8 @@ export function createRemoteA2AActionController(
         messageId: recovery.messageId,
       });
       latest = Object.freeze({ state: result.ok ? "sent" : "failed", operationId: recovery.operationId, taskHandle: input.taskHandle, targetAgentId: recovery.targetAgentId, targetLabel: recovery.targetLabel, recoveryEligible: !result.ok && (result.outcome === "reconciling" || result.outcome === "unknown-manual-reconciliation-required"), outcome: result.ok ? "success" : result.outcome, updatedAt: now().toISOString() });
+    } catch {
+      latest = Object.freeze({ state: "failed", operationId: recovery.operationId, taskHandle: input.taskHandle, targetAgentId: recovery.targetAgentId, targetLabel: recovery.targetLabel, recoveryEligible: true, outcome: "a2a-remote-replay-failed", updatedAt: now().toISOString() });
     } finally {
       pending = false;
     }
