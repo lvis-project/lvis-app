@@ -412,6 +412,27 @@ function requireExactAgentExtensionContract(text) {
 
 const blueprint = readRequired(blueprintPath);
 const spec = readRequired(specPath);
+requireText(
+  blueprint,
+  "P4-5/G005 direct remote-routing contract locked",
+  "blueprint accepted-status lifecycle",
+);
+requireText(
+  blueprint,
+  "#### P4-5 / G005 direct remote-routing contract (locked 2026-07-16)",
+  "P4-5 locked lifecycle",
+);
+requireText(
+  spec,
+  "Status: normative implementation contract, locked 2026-07-16",
+  "exact-send-replay locked lifecycle",
+);
+for (const staleLifecycleMarker of [
+  "P4-5 / G005 direct remote-routing contract (proposed for owner acceptance",
+  "P4-5/G005 direct remote-routing contract proposed for owner acceptance",
+]) {
+  rejectText(blueprint, staleLifecycleMarker, "stale P4-5 proposal lifecycle");
+}
 const p41Start = blueprint.indexOf("### Ph4 decomposition: P4-1 admission");
 const p41End = blueprint.indexOf("#### P4-2 durable Agent Card registry contract", p41Start);
 const p45Start = blueprint.indexOf("#### P4-5 / G005 direct remote-routing contract");
