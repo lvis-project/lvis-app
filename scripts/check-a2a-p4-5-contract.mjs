@@ -10,6 +10,7 @@ const extensionUri = "https://lvis.ai/a2a/extensions/exact-send-replay/v1";
 const officialSpec = "https://a2a-protocol.org/v1.0.0/specification/";
 const exactProtocolBindingPhrase = "`JSONRPC` (JSON-RPC) binding";
 const proseNameAsProtocolBinding = /`JSON-RPC`(?:\s+\(JSON-RPC\))?\s+binding/;
+const jsonFencePattern = /```json[ \t]*\r?\n([\s\S]*?)\r?\n```/g;
 const expectedExtensionParams = {
   profile: "lvis-exact-send-replay",
   profileVersion: "1",
@@ -127,6 +128,65 @@ function requireExactProtocolBinding(text, expectedCount, label) {
   }
 }
 
+function parseJsonFences(text) {
+  return [...text.matchAll(jsonFencePattern)].map((match, index) => {
+    try {
+      return JSON.parse(match[1]);
+    } catch (error) {
+      fail(`spec JSON block ${index + 1} is invalid: ${error.message}`);
+    }
+  });
+}
+
+function expectJsonFenceParseFailure(text, expectedIndex, label) {
+  let caught;
+  try {
+    parseJsonFences(text);
+  } catch (error) {
+    caught = error;
+  }
+  const expectedPrefix = `[a2a-p4-5-contract] spec JSON block ${expectedIndex} is invalid:`;
+  if (!(caught instanceof Error) || !caught.message.startsWith(expectedPrefix)) {
+    fail(`${label}: expected parse failure with prefix ${JSON.stringify(expectedPrefix)}`);
+  }
+}
+
+function validateJsonFenceExtraction() {
+  const lfFixture = [
+    "prose before",
+    "```json",
+    '{"branch":"message"}',
+    "```",
+    "```json \t",
+    '{"branch":"task","count":2}',
+    "```",
+    "prose after",
+  ].join("\n");
+  const crlfFixture = lfFixture.replaceAll("\n", "\r\n");
+  const expected = [
+    { branch: "message" },
+    { branch: "task", count: 2 },
+  ];
+  for (const [label, fixture] of [
+    ["LF", lfFixture],
+    ["CRLF", crlfFixture],
+  ]) {
+    const actual = parseJsonFences(fixture);
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      fail(`${label} JSON-fence fixture extracted an unexpected value`);
+    }
+  }
+  if (parseJsonFences("prose without a JSON fence").length !== 0) {
+    fail("fence-free fixture produced a JSON block");
+  }
+  expectJsonFenceParseFailure("```json\r\n\r\n```", 1, "empty JSON fence");
+  expectJsonFenceParseFailure(
+    ["```json", "{}", "```", "```json", "{malformed", "```"].join("\n"),
+    2,
+    "malformed second JSON fence",
+  );
+}
+
 function sha256(text) {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
@@ -191,13 +251,7 @@ function validateLocalLinks(path, text) {
 }
 
 function requireExactErrorContracts(text) {
-  const jsonBlocks = [...text.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match, index) => {
-    try {
-      return JSON.parse(match[1]);
-    } catch (error) {
-      fail(`spec JSON block ${index + 1} is invalid: ${error.message}`);
-    }
-  });
+  const jsonBlocks = parseJsonFences(text);
   const expected = [
     [-32090, "Exact send replay conflict", "EXACT_SEND_REPLAY_CONFLICT"],
     [-32091, "Exact send replay retention expired", "EXACT_SEND_REPLAY_RETENTION_EXPIRED"],
@@ -247,13 +301,7 @@ function requireExactErrorContracts(text) {
 }
 
 function requireExactSuccessContracts(text) {
-  const jsonBlocks = [...text.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match, index) => {
-    try {
-      return JSON.parse(match[1]);
-    } catch (error) {
-      fail(`spec JSON block ${index + 1} is invalid: ${error.message}`);
-    }
-  });
+  const jsonBlocks = parseJsonFences(text);
   const envelopes = jsonBlocks.filter((block) => block?.result !== undefined);
   if (envelopes.length !== 2) fail("expected exactly two JSON success-envelope contracts");
   const branches = new Set();
@@ -276,13 +324,7 @@ function requireExactSuccessContracts(text) {
 }
 
 function requireExactAgentExtensionContract(text) {
-  const jsonBlocks = [...text.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match, index) => {
-    try {
-      return JSON.parse(match[1]);
-    } catch (error) {
-      fail(`spec JSON block ${index + 1} is invalid: ${error.message}`);
-    }
-  });
+  const jsonBlocks = parseJsonFences(text);
   const declarations = jsonBlocks.filter((block) => block?.uri === extensionUri);
   if (declarations.length !== 1) fail("expected exactly one canonical Agent Card declaration");
   const declaration = declarations[0];
@@ -316,6 +358,7 @@ const normalizedSpec = spec.replace(/\s+/g, " ");
 validateContainmentPortability();
 validateExactObjectEntryComparison();
 validateProtocolBindingFixture();
+validateJsonFenceExtraction();
 requireExactProtocolBinding(normalizedP41, 1, "P4-1 protocol binding");
 requireExactProtocolBinding(normalizedP45, 2, "P4-5 protocol binding");
 
