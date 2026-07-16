@@ -1,16 +1,21 @@
 import { app } from "electron";
 import {
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
   copyFileSync,
   chmodSync,
+  openSync,
   readFileSync,
   readdirSync,
   constants as fsConstants,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, dirname, parse as parsePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lvisHome } from "../shared/lvis-home.js";
+import * as atomicFile from "../lib/atomic-file.js";
 
 export interface LvisHomeDocUpgradeMarker {
   sourcePath: string;
@@ -21,6 +26,7 @@ const UPGRADE_MARKER_DOC_DIRS = ["", "skills", "prompts"] as const;
 
 interface SeedOneOptions {
   upgradePolicy: "marker" | "seed-only";
+  replaceableHashesResource?: string;
 }
 
 /**
@@ -40,14 +46,17 @@ interface SeedOneOptions {
  *
  * Behavior:
  *   - If `~/.lvis/<path>` does not exist → copy from packaged resources.
- *   - AGENTS.md, skills/*.md, and prompts/*.md still offer divergent
- *     packaged updates as `~/.lvis/<path>.new` for user review.
+ *   - When descriptor-level no-follow validation is available, AGENTS.md
+ *     replaces byte-identical known packaged predecessors in place.
+ *     Unsupported paths/platforms and user-edited AGENTS.md, skills/*.md,
+ *     and prompts/*.md instead offer divergent packaged updates as
+ *     `~/.lvis/<path>.new` for review.
  *   - agents/*.md are seed-only. Shared agent operating guidance belongs in
  *     AGENTS.md; updating packaged agent profiles must not create a new
  *     apparent user agent such as `agents/executor.md.new`.
  *
- * The user's edits are never overwritten — they may freely customize each
- * file to inject site-specific rules.
+ * User edits are never overwritten. In-place AGENTS.md replacement is gated by
+ * an exact SHA-256 allowlist of previously shipped packaged bytes.
  *
  * Non-fatal — failures log and continue. Boot must not block on doc seeding.
  */
@@ -62,7 +71,10 @@ export function seedLvisHomeDocs(): { seeded: string[]; upgraded: string[] } {
     return result;
   }
 
-  seedOne(home, "AGENTS.md", result, { upgradePolicy: "marker" });
+  seedOne(home, "AGENTS.md", result, {
+    upgradePolicy: "marker",
+    replaceableHashesResource: "AGENTS.md.replaceable-sha256",
+  });
   seedDir(home, "agents", result, { upgradePolicy: "seed-only" });
   seedDir(home, "skills", result, { upgradePolicy: "marker" });
   seedDir(home, "prompts", result, { upgradePolicy: "marker" });
@@ -133,6 +145,9 @@ function seedOne(
 
   const target = join(home, filename);
   const upgradeTarget = join(home, `${filename}.new`);
+  const replaceableHashes = options.replaceableHashesResource
+    ? readReplaceableHashes(options.replaceableHashesResource)
+    : new Set<string>();
 
   if (!existsSync(target)) {
     try {
@@ -153,13 +168,39 @@ function seedOne(
   if (options.upgradePolicy === "seed-only") return;
 
   // User has an existing copy. Compare to the packaged snapshot; write a
-  // .new sibling only when the packaged content differs. We read the
+  // .new sibling when content differs and a safe known-predecessor replacement
+  // is unsupported, rejected by its final precondition, or fails before commit.
+  // We read the
   // target directly instead of statSync→readFileSync so CodeQL doesn't
   // flag the stat-then-read pair as `js/file-system-race`. Buffer.equals
   // performs the length check internally, so the stat shortcut had no
   // semantic value anyway.
   try {
-    if (readFileSync(target).equals(packagedBuf)) return;
+    // Byte-identical content is an idempotent no-op even when this platform
+    // cannot safely perform an in-place path replacement. This read may follow
+    // a user-owned symlink, but it never writes through it.
+    let observedBuf: Buffer | null = null;
+    try {
+      observedBuf = readFileSync(target);
+    } catch {
+      // Non-regular or transiently unavailable targets continue to the
+      // fail-closed `.new` path below.
+    }
+    if (observedBuf?.equals(packagedBuf)) return;
+
+    const currentBuf = replaceableHashes.size > 0
+      ? readRegularFileNoFollow(target)
+      : null;
+    if (currentBuf !== null) {
+      const currentHash = sha256(currentBuf);
+      if (
+        replaceableHashes.has(currentHash) &&
+        replaceKnownPackagedCopy(target, packagedBuf, currentHash)
+      ) {
+        result.upgraded.push(filename);
+        return;
+      }
+    }
 
     // If a previous `.new` is sitting unmerged, do not clobber it. Compare:
     //   - identical to the latest packaged content → no-op (already offered)
@@ -188,6 +229,80 @@ function seedOne(
     result.upgraded.push(filename);
   } catch (err) {
     console.warn(`[seed-lvis-home-docs] failed to compare ${filename}:`, err);
+  }
+}
+
+function readReplaceableHashes(resourceName: string): Set<string> {
+  const resource = resolvePackagedResource(resourceName);
+  if (resource === null) return new Set();
+
+  try {
+    const lines = readFileSync(resource, "utf8")
+      .split(/\r?\n/)
+      .map((line) => line.trim().toLowerCase())
+      .filter((line) => /^[a-f0-9]{64}$/.test(line));
+    return new Set(lines);
+  } catch (err) {
+    console.warn("[seed-lvis-home-docs] failed to read replaceable hash list:", err);
+    return new Set();
+  }
+}
+
+function sha256(value: Buffer): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+/** Refuse symlinks and non-files before hashing a user-owned target. */
+function readRegularFileNoFollow(target: string): Buffer | null {
+  let fd: number | null = null;
+  try {
+    // A pre-open lstat check creates its own path-swap race. Require the
+    // descriptor-level primitive instead; platforms without O_NOFOLLOW fail
+    // closed into the non-clobbering `.new` path.
+    const noFollow = fsConstants.O_NOFOLLOW;
+    if (typeof noFollow !== "number") return null;
+    fd = openSync(target, fsConstants.O_RDONLY | noFollow);
+    if (!fstatSync(fd).isFile()) return null;
+    return readFileSync(fd);
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+}
+
+/**
+ * Replace a prior packaged copy through the shared atomic-file primitive.
+ * The successor is staged and fsynced first; immediately before rename, the
+ * target must still be a regular file with the same allowlisted hash. A false
+ * precondition or pre-commit failure leaves the original path intact and the
+ * caller falls back to the non-clobbering `.new` path.
+ */
+function replaceKnownPackagedCopy(
+  target: string,
+  packagedBuf: Buffer,
+  expectedHash: string,
+): boolean {
+  try {
+    return atomicFile.replaceUtf8FileAtomicSyncIf(
+      target,
+      packagedBuf.toString("utf8"),
+      () => {
+        const latest = readRegularFileNoFollow(target);
+        return latest !== null && sha256(latest) === expectedHash;
+      },
+      0o600,
+    );
+  } catch (err) {
+    if ((err as { committed?: boolean }).committed === true) {
+      console.warn(
+        "[seed-lvis-home-docs] packaged copy replaced, but parent directory durability sync failed:",
+        err,
+      );
+      return true;
+    }
+    console.warn("[seed-lvis-home-docs] failed to replace known packaged copy:", err);
+    return false;
   }
 }
 
