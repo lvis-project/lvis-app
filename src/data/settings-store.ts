@@ -2480,7 +2480,7 @@ function normalizeA2ARemote(input: unknown): A2ARemoteSettings {
       // Route-control snapshots bind canonical URL bytes. Require serializer
       // identity (including the root slash) instead of silently rewriting a
       // near-canonical value that would later compare unequal on the wire.
-      if (url.protocol === "https:" && !url.port && !url.username && !url.password && !url.search && !url.hash && isIP(url.hostname) === 0 && url.hostname !== "localhost" && !url.hostname.endsWith(".localhost")
+      if (url.protocol === "https:" && !url.port && !url.username && !url.password && !url.search && !url.hash && !value.routeControlBaseUrl.includes("?") && !value.routeControlBaseUrl.includes("#") && isIP(url.hostname) === 0 && url.hostname !== "localhost" && !url.hostname.endsWith(".localhost")
         && (url.pathname === "/" || url.pathname === "") && url.toString() === value.routeControlBaseUrl) result.routeControlBaseUrl = value.routeControlBaseUrl;
     } catch { /* invalid remains fail-closed empty */ }
   }
