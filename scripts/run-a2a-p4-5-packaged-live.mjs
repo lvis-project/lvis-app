@@ -29,6 +29,7 @@ import {
   verifyTaskTraffic,
 } from "./a2a-p4-5-live/packaged-live-contract.mjs";
 import { parseStrictJson } from "./a2a-p4-5-live/strict-json.mjs";
+import { buildPackagedUiEnvironment } from "./a2a-p4-5-live/ui-driver-environment.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const uiDriver = resolve(root, "scripts/a2a-p4-5-live/ui-driver.mjs");
@@ -99,15 +100,10 @@ function runTshark(captureArtifact, keyLogArtifact, expectedVersion, run = runFi
 }
 
 function runUi(manifestPath, run = runFixedProgram) {
-  const allowedEnvironment = Object.fromEntries([
-    "HOME", "USER", "LOGNAME", "PATH", "SHELL", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP",
-    "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
-    "DBUS_SESSION_BUS_ADDRESS", "LVIS_A2A_EVIDENCE_PUBLIC_KEY_FILE", "LVIS_A2A_EVIDENCE_SIGNER_SHA256",
-  ].filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]]));
   const result = run(process.execPath, [uiDriver, "--manifest", manifestPath], {
     label: "fixed packaged-app UI driver",
     maxBuffer: 8 * 1024 * 1024,
-    env: allowedEnvironment,
+    env: buildPackagedUiEnvironment(),
   });
   return validateUiResult(parseStrictJson(result.stdout, "fixed UI driver result"));
 }
