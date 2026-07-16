@@ -80,11 +80,7 @@ jobs:
             exit 1
           fi
           hub_lock=.evidence/agent-hub/server/bun.lock
-          if [ ! -f "$hub_lock" ] || [ -L "$hub_lock" ]; then
-            echo "Agent Hub server lock must be one regular file" >&2
-            exit 1
-          fi
-          hub_lock_digest="$(node -e 'const {createHash}=require("node:crypto");const {readFileSync}=require("node:fs");process.stdout.write(createHash("sha256").update(readFileSync(process.argv[1])).digest("hex"))' "$hub_lock")"
+          hub_lock_digest="$(node --input-type=module -e 'import {resolve} from "node:path";import {readRegularFile} from "./scripts/a2a-p4-5-live/evidence-lib.mjs";const lock=readRegularFile(resolve(process.argv[1]),"Agent Hub server lock",{maxBytes:16*1024*1024,loadBytes:false});process.stdout.write(lock.sha256)' "$hub_lock")"
           if [[ ! "$hub_lock_digest" =~ ^[0-9a-f]{64}$ ]]; then
             echo "Agent Hub server lock digest was not canonical SHA-256" >&2
             exit 1
