@@ -84,6 +84,32 @@ function extractMacLeafCertificateSha256(subjectPath, run, label) {
   }
 }
 
+const MAC_DEVICE_ENTRY_RE = /^\/dev\/disk[0-9]+(?:s[0-9]+)*$/u;
+
+function isSafeMacMountPoint(value) {
+  return value.startsWith("/Volumes/")
+    && !value.includes("\0")
+    && !value.includes("&")
+    && !value.split("/").includes("..");
+}
+
+/**
+ * Cleanup-only fallback for the raw plist returned by hdiutil. Acceptance
+ * always uses plutil + strict JSON below; these candidates exist solely so a
+ * converter/schema failure can still detach an image that was already mounted.
+ */
+function cleanupTargetsFromRawAttachPlist(rawPlist) {
+  const devices = new Set();
+  const mounts = new Set();
+  const decodeXml = (value) => value.replace(/&(amp|lt|gt|quot|apos);/gu, (_entity, name) => ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" })[name]);
+  for (const match of rawPlist.matchAll(/<key>(dev-entry|mount-point)<\/key>\s*<string>([^<]+)<\/string>/gu)) {
+    const value = decodeXml(match[2]);
+    if (MAC_DEVICE_ENTRY_RE.test(value)) devices.add(value);
+    else if (isSafeMacMountPoint(value)) mounts.add(value);
+  }
+  return devices.size > 0 ? devices : mounts;
+}
+
 function verifyMacos(installerPath, run, expected) {
   const expectedTeamId = assertSafeString(expected.macTeamId, "expected macOS Team ID", {
     min: 10, max: 64, pattern: /^[0-9A-Z]+$/u,
@@ -110,28 +136,40 @@ function verifyMacos(installerPath, run, expected) {
   );
   if (!/accepted/iu.test(assessment)) fail("spctl assessment: installer was not accepted");
   const attach = run("hdiutil", ["attach", "-readonly", "-nobrowse", "-plist", installerPath], { label: "read-only DMG mount" });
-  const mountJson = requireNonemptyOutput(
-    run("plutil", ["-convert", "json", "-o", "-", "-"], {
-      input: attach.stdout,
-      label: "DMG mount plist conversion",
-    }),
-    "DMG mount plist conversion",
-  );
-  const mountPlist = assertRecord(parseStrictJson(mountJson, "DMG mount plist"), "DMG mount plist");
-  const systemEntities = assertArray(mountPlist["system-entities"], "DMG mount plist.system-entities");
-  const mountPoints = systemEntities.flatMap((entry, index) => {
-    const entity = assertRecord(entry, `DMG mount plist.system-entities[${index}]`);
-    if (entity["mount-point"] === undefined) return [];
-    return [assertSafeString(entity["mount-point"], `DMG mount plist.system-entities[${index}].mount-point`, { max: 4096 })];
-  });
-  if (mountPoints.length !== 1) fail("read-only DMG mount: expected exactly one mount point");
-  const [mountPoint] = mountPoints;
-  if (!mountPoint.startsWith("/Volumes/") || mountPoint.includes("\0") || mountPoint.includes("&") || mountPoint.split("/").includes("..")) fail("read-only DMG mount: unsafe mount point");
-  const appPath = resolve(mountPoint, "LVIS.app");
+  const cleanupTargets = cleanupTargetsFromRawAttachPlist(attach.stdout);
   let appIdentity;
   let appAssessment;
   let verificationError;
   try {
+    const mountJson = requireNonemptyOutput(
+      run("plutil", ["-convert", "json", "-o", "-", "-"], {
+        input: attach.stdout,
+        label: "DMG mount plist conversion",
+      }),
+      "DMG mount plist conversion",
+    );
+    const mountPlist = assertRecord(parseStrictJson(mountJson, "DMG mount plist"), "DMG mount plist");
+    const systemEntities = assertArray(mountPlist["system-entities"], "DMG mount plist.system-entities");
+    const parsedCleanupTargets = new Set();
+    const mountPoints = systemEntities.flatMap((entry, index) => {
+      const entity = assertRecord(entry, `DMG mount plist.system-entities[${index}]`);
+      const deviceEntry = entity["dev-entry"] === undefined
+        ? undefined
+        : assertSafeString(entity["dev-entry"], `DMG mount plist.system-entities[${index}].dev-entry`, { max: 128, pattern: MAC_DEVICE_ENTRY_RE });
+      if (entity["mount-point"] === undefined) return [];
+      const point = assertSafeString(entity["mount-point"], `DMG mount plist.system-entities[${index}].mount-point`, { max: 4096 });
+      if (deviceEntry) parsedCleanupTargets.add(deviceEntry);
+      else if (isSafeMacMountPoint(point)) parsedCleanupTargets.add(point);
+      return [point];
+    });
+    if (parsedCleanupTargets.size > 0) {
+      cleanupTargets.clear();
+      for (const target of parsedCleanupTargets) cleanupTargets.add(target);
+    }
+    if (mountPoints.length !== 1) fail("read-only DMG mount: expected exactly one mount point");
+    const [mountPoint] = mountPoints;
+    if (!isSafeMacMountPoint(mountPoint)) fail("read-only DMG mount: unsafe mount point");
+    const appPath = resolve(mountPoint, "LVIS.app");
     run("/usr/bin/test", ["-d", appPath], { label: "mounted LVIS.app directory" });
     run("/usr/bin/test", ["!", "-L", appPath], { label: "mounted LVIS.app symlink rejection" });
     run("codesign", ["--verify", "--deep", "--strict", "--verbose=4", appPath], { label: "inner app codesign verification" });
@@ -161,11 +199,15 @@ function verifyMacos(installerPath, run, expected) {
     verificationError = error;
     throw error;
   } finally {
-    try {
-      run("hdiutil", ["detach", mountPoint], { label: "DMG detach" });
-    } catch (detachError) {
-      if (!verificationError) throw detachError;
+    let firstDetachError;
+    for (const target of cleanupTargets) {
+      try {
+        run("hdiutil", ["detach", target], { label: "DMG detach" });
+      } catch (detachError) {
+        firstDetachError ??= detachError;
+      }
     }
+    if (!verificationError && firstDetachError) throw firstDetachError;
   }
   return {
     platform: "macos",
@@ -251,6 +293,8 @@ function verifyLinux(installerPath, run) {
       verifier: "rpm",
     };
   }
+  // The workflow admits only release/*.AppImage. Preserve that canonical,
+  // case-sensitive artifact name instead of widening the live-evidence gate.
   if (installerPath.endsWith(".AppImage")) {
     const fileIdentity = run("file", ["--brief", "--dereference", installerPath], { label: "AppImage file identity" }).stdout;
     if (!/ELF .+ executable/iu.test(fileIdentity)) fail("AppImage identity: expected an ELF executable");

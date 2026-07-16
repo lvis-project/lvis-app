@@ -455,11 +455,11 @@ test("native verifier commands are fixed and require verified identities", () =>
   const installerCertificateSha256 = createHash("sha256").update(installerCertificate).digest("hex");
   const macRun = (command, args, options = {}) => {
     calls.push([command, args]);
-    if (command === "hdiutil" && args[0] === "attach") return { stdout: "<plist><dict><key>mount-point</key><string>/Volumes/LVIS</string></dict></plist>", stderr: "" };
+    if (command === "hdiutil" && args[0] === "attach") return { stdout: "<plist><dict><key>dev-entry</key><string>/dev/disk9s1</string><key>mount-point</key><string>/Volumes/LVIS</string></dict></plist>", stderr: "" };
     if (command === "plutil") {
       assert.deepEqual(args, ["-convert", "json", "-o", "-", "-"]);
       assert.match(options.input, /<plist>/u);
-      return { stdout: JSON.stringify({ "system-entities": [{ "mount-point": "/Volumes/LVIS" }] }), stderr: "" };
+      return { stdout: JSON.stringify({ "system-entities": [{ "dev-entry": "/dev/disk9s1", "mount-point": "/Volumes/LVIS" }] }), stderr: "" };
     }
     if (command === "hdiutil" || command === "/usr/bin/test") return { stdout: "ok", stderr: "" };
     if (command === "codesign" && args[1] === "--extract-certificates") {
@@ -475,12 +475,17 @@ test("native verifier commands are fixed and require verified identities", () =>
   assert.deepEqual(calls.map(([command]) => command), ["codesign", "codesign", "codesign", "spctl", "hdiutil", "plutil", "/usr/bin/test", "/usr/bin/test", "codesign", "codesign", "codesign", "spctl", "hdiutil"]);
   assert.equal(calls.some(([command]) => command === "security"), false, "keychain lookup must not substitute for embedded certificate extraction");
   assert.throws(() => verifyInstallerIdentity("macos", "/Applications/LVIS.dmg", { run: macRun, expected: { ...macExpected, macTeamId: "ZZZZZ12345" } }), /TeamIdentifier/u);
+  const duplicateDetaches = [];
   const duplicateMountRun = (command, args, options = {}) => {
     if (command === "plutil") {
       return { stdout: JSON.stringify({ "system-entities": [
-        { "mount-point": "/Volumes/LVIS" },
-        { "mount-point": "/Volumes/LVIS 2" },
+        { "dev-entry": "/dev/disk10s1", "mount-point": "/Volumes/LVIS" },
+        { "dev-entry": "/dev/disk11s1", "mount-point": "/Volumes/LVIS 2" },
       ] }), stderr: "" };
+    }
+    if (command === "hdiutil" && args[0] === "detach") {
+      duplicateDetaches.push(args[1]);
+      return { stdout: "detached", stderr: "" };
     }
     return macRun(command, args, options);
   };
@@ -488,8 +493,23 @@ test("native verifier commands are fixed and require verified identities", () =>
     () => verifyInstallerIdentity("macos", "/Applications/LVIS.dmg", { run: duplicateMountRun, expected: macExpected }),
     /expected exactly one mount point/u,
   );
+  assert.deepEqual(duplicateDetaches, ["/dev/disk10s1", "/dev/disk11s1"]);
+  const conversionFailureDetaches = [];
+  const conversionFailureRun = (command, args, options = {}) => {
+    if (command === "plutil") throw new Error("plist conversion failed");
+    if (command === "hdiutil" && args[0] === "detach") {
+      conversionFailureDetaches.push(args[1]);
+      return { stdout: "detached", stderr: "" };
+    }
+    return macRun(command, args, options);
+  };
+  assert.throws(
+    () => verifyInstallerIdentity("macos", "/Applications/LVIS.dmg", { run: conversionFailureRun, expected: macExpected }),
+    /plist conversion failed/u,
+  );
+  assert.deepEqual(conversionFailureDetaches, ["/dev/disk9s1"]);
   const mismatchedAppRun = (command, args, options = {}) => {
-    if (command === "hdiutil" && args[0] === "attach") return { stdout: "<plist><dict><key>mount-point</key><string>/Volumes/LVIS</string></dict></plist>", stderr: "" };
+    if (command === "hdiutil" && args[0] === "attach") return { stdout: "<plist><dict><key>dev-entry</key><string>/dev/disk9s1</string><key>mount-point</key><string>/Volumes/LVIS</string></dict></plist>", stderr: "" };
     if (command === "plutil") return macRun(command, args, options);
     if (command === "hdiutil" && args[0] === "detach") throw new Error("detach failed after primary verification failure");
     if (command === "hdiutil" || command === "/usr/bin/test") return { stdout: "ok", stderr: "" };
@@ -519,6 +539,14 @@ test("native verifier commands are fixed and require verified identities", () =>
   assert.equal(linux.format, "deb");
   assert.equal(linux.status, "metadata-only");
   assert.equal(linux.identityKind, "package-metadata");
+  const appImageRun = (command) => command === "file"
+    ? { stdout: "ELF 64-bit LSB pie executable", stderr: "" }
+    : { stdout: "Machine: Advanced Micro Devices X86-64", stderr: "" };
+  assert.equal(verifyInstallerIdentity("linux", "/opt/LVIS-1.0.0-linux-x64.AppImage", { run: appImageRun }).format, "appimage");
+  assert.throws(
+    () => verifyInstallerIdentity("linux", "/opt/LVIS-1.0.0-linux-x64.appimage", { run: appImageRun }),
+    /unsupported extension/u,
+  );
 });
 
 test("provenance schema binds installer, signature, attestation, heads, workflow, locks, and fixed tools", () => {
