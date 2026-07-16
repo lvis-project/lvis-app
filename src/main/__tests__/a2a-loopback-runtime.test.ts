@@ -108,6 +108,22 @@ describe("A2A production loopback runtime", () => {
     );
   });
 
+  it("decorates receiver wire handlers without changing ph3 lifecycle ownership", async () => {
+    const transformed: string[] = [];
+    const runtime = await createA2ALoopbackRuntime(makeOptions([
+      profile("alpha", "C:/profiles/alpha.md"),
+      profile("zeta", "C:/profiles/zeta.md"),
+    ], {
+      transformHandler: (base) => {
+        transformed.push(base.id);
+        return { ...base, handleWire: vi.fn() };
+      },
+    }));
+
+    expect(transformed.sort()).toEqual(runtime!.router.handlerIds);
+    await runtime!.dispose();
+  });
+
   it("publishes sorted minimal cards and no host-private profile or project fields", async () => {
     const profiles = [
       profile("zeta", "C:/profiles/zeta.md"),

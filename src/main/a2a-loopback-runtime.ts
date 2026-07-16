@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import type { AppServices } from "../boot.js";
-import { createA2AHttpRouter, type A2AHttpRouter } from "../api/a2a-router.js";
+import {
+  createA2AHttpRouter,
+  type A2AHttpRouter,
+  type A2ARequestHandler,
+} from "../api/a2a-router.js";
 import {
   A2ASubAgentHandler,
   type A2AMutationAuthorizer,
@@ -57,6 +61,11 @@ export interface CreateA2ALoopbackRuntimeOptions {
   approveAgentAction: AgentActionApprover | undefined;
   namespace?: Pick<FeatureNamespaceHandle, "readJson" | "writeJson">;
   deriveHandlerId?: (profile: LoadedAgentProfile) => string;
+  /**
+   * Optional receiver-only wire decorator. The ph3/local listener omits this
+   * hook, so its handlers and gate behavior remain byte-for-byte unchanged.
+   */
+  transformHandler?: (handler: A2ARequestHandler) => A2ARequestHandler;
 }
 
 function canonicalProfilePath(filePath: string, platform: NodeJS.Platform): string {
@@ -258,8 +267,11 @@ export async function createA2ALoopbackRuntime(
       audit,
     });
   });
+  const wireHandlers = options.transformHandler
+    ? handlers.map((handler) => options.transformHandler!(handler))
+    : handlers;
   const router = createA2AHttpRouter({
-    handlers,
+    handlers: wireHandlers,
     audit: (event) => writeAudit(options.services, `a2a:wire:${event.reason}`),
   });
   try {
