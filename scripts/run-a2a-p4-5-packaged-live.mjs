@@ -13,7 +13,7 @@ import {
   fail,
   verifySignedManifest,
 } from "./a2a-p4-5-live/evidence-lib.mjs";
-import { verifyHubDatabaseAbsent } from "./a2a-p4-5-live/hub-db-verifier.mjs";
+import { verifyHubDatabaseControlPlaneAndCanaryAbsence } from "./a2a-p4-5-live/hub-db-verifier.mjs";
 import { independentlyVerifyInstallerAttestation, runFixedProgram } from "./a2a-p4-5-live/installer-provenance-lib.mjs";
 import {
   PACKAGED_LIVE_CASE_IDS,
@@ -81,7 +81,7 @@ function runTshark(captureArtifact, keyLogArtifact, expectedVersion, run = runFi
     "-e", "http.host",
     "-e", "http.request.uri",
     "-e", "http.file_data",
-  ], { label: "fixed tshark packet parser", maxBuffer: 256 * 1024 * 1024 });
+  ], { label: "fixed tshark packet parser", maxBuffer: 256 * 1024 * 1024, timeoutMs: 30 * 60_000 });
   const sniResult = run("tshark", [
     "-r", captureArtifact.path,
     "-Y", "tls.handshake.extensions_server_name",
@@ -92,7 +92,7 @@ function runTshark(captureArtifact, keyLogArtifact, expectedVersion, run = runFi
     "-e", "ip.dst",
     "-e", "tcp.dstport",
     "-e", "tls.handshake.extensions_server_name",
-  ], { label: "fixed tshark TLS SNI parser", maxBuffer: 16 * 1024 * 1024 });
+  ], { label: "fixed tshark TLS SNI parser", maxBuffer: 16 * 1024 * 1024, timeoutMs: 30 * 60_000 });
   assertArtifactStable(captureArtifact, "packet capture", { maxBytes: 4 * 1024 * 1024 * 1024 });
   assertArtifactStable(keyLogArtifact, "TLS key log", { maxBytes: 64 * 1024 * 1024 });
   return { version: actualVersion, records: parseTsharkFields(result.stdout), sniRecords: parseTsharkSniFields(sniResult.stdout) };
@@ -190,7 +190,7 @@ export async function buildPackagedLiveEvidence({ manifestPath, run = runFixedPr
   const liveEndpointIdentity = await verifyLiveEndpointIdentity(manifest.endpoints, artifacts.endpointIdentityValue, { run, resolveIpv4 });
   verifyHubEvidenceAbsent(artifacts.hubEvidence);
   verifyRemoteServerEvidence(artifacts.remoteServerEvidence);
-  const hubDatabase = verifyHubDatabaseAbsent({
+  const hubDatabase = verifyHubDatabaseControlPlaneAndCanaryAbsence({
     run,
     expected: {
       snapshotId: manifest.hubControlPlane.snapshotId,
