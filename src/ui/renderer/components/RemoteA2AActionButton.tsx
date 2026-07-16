@@ -114,7 +114,7 @@ export function RemoteA2AActionButton() {
           <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
             <span className="relative flex h-2 w-5 items-center" aria-hidden="true">
               <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-              <span className="h-px flex-1 bg-primary/50" />
+              <span className="h-px flex-1 bg-primary/(--opacity-half)" />
               <span className="h-1.5 w-1.5 rounded-full border border-primary bg-background" />
             </span>
             Direct agent route
