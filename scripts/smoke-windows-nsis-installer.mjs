@@ -2061,6 +2061,51 @@ async function waitForMachineInstall(timeoutMs) {
   );
 }
 
+export async function waitForExactUninstallRegistrationRemoved(
+  machineInstall,
+  timeoutMs = 30_000,
+  {
+    queryRegistry = registryQuery,
+    now = Date.now,
+    delay = (delayMs) =>
+      new Promise((resolvePromise) => setTimeout(resolvePromise, delayMs)),
+  } = {},
+) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("uninstall registration wait timeout must be positive");
+  }
+  const startedAt = now();
+  let remainingViews = [];
+  while (now() - startedAt < timeoutMs) {
+    const registrations = await Promise.all(
+      REGISTRY_VIEWS.map(async (view) => ({
+        view,
+        registration: await queryRegistry(
+          "HKLM",
+          machineInstall.registryPath,
+          view,
+          "default",
+        ),
+      })),
+    );
+    for (const { view, registration } of registrations) {
+      if (typeof registration?.keyExists !== "boolean") {
+        throw new Error(
+          `invalid exact HKLM uninstall registration query contract for ${view}-bit view`,
+        );
+      }
+    }
+    remainingViews = registrations
+      .filter(({ registration }) => registration.keyExists)
+      .map(({ view }) => view);
+    if (remainingViews.length === 0) return;
+    await delay(500);
+  }
+  throw new Error(
+    `timed out waiting for exact HKLM uninstall registration removal at ${machineInstall.registryPath}; key survived in registry views: ${remainingViews.join(", ") || "unknown"} (discovered ${machineInstall.entry.view}-bit key ${machineInstall.entry.key})`,
+  );
+}
+
 async function installAndDiscover(installer, timeoutMs) {
   await runProcess(installer, ["/S", "/allusers"], { timeoutMs });
   const machineInstall = await waitForMachineInstall(30_000);
@@ -2078,7 +2123,8 @@ async function uninstallAndVerify(
 ) {
   const args = ["/S", "/allusers", ...(keepAppData ? ["/KEEP_APP_DATA"] : [])];
   await runProcess(machineInstall.uninstaller, args, { timeoutMs });
-  await waitForFileRemoved(machineInstall.installedExe, 30_000);
+  await waitForExactUninstallRegistrationRemoved(machineInstall, timeoutMs);
+  await waitForFileRemoved(machineInstall.installedExe, timeoutMs);
   await assertRuntimeNotificationArtifactsRemoved(machineInstall);
   await assertForeignProtocolFixturePreserved(foreignProtocolFixture);
   await cleanupForeignProtocolFixture(foreignProtocolFixture);
