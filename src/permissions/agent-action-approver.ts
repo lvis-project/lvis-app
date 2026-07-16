@@ -22,7 +22,13 @@ export interface AgentActionApprovalDiagnostics {
 
 export type AgentActionApprover = (
   request: AgentActionApprovalRequest,
-) => Promise<boolean>;
+) => Promise<AgentActionApprovalReceipt | null>;
+
+export interface AgentActionApprovalReceipt {
+  /** The exact ApprovalGate request/decision correlation, never caller-minted. */
+  decisionId: string;
+  decidedAt: string;
+}
 
 /**
  * Build a fail-closed, single-flight ApprovalGate adapter for host mutations.
@@ -36,6 +42,7 @@ export type AgentActionApprover = (
 export function buildSingleFlightAgentActionApprover(
   approvalGate: Pick<ApprovalGate, "requestAndWait"> | undefined,
   diagnostics: AgentActionApprovalDiagnostics = {},
+  options: Readonly<{ allowOnceOnly?: boolean }> = {},
 ): AgentActionApprover | undefined {
   if (!approvalGate) return undefined;
 
@@ -48,7 +55,7 @@ export function buildSingleFlightAgentActionApprover(
       } catch {
         // Diagnostic failures must not change the fail-closed decision.
       }
-      return false;
+      return null;
     }
 
     pending = true;
@@ -65,14 +72,19 @@ export function buildSingleFlightAgentActionApprover(
         createdAt: Date.now(),
         trustOrigin,
       });
-      return decision.choice.startsWith("allow");
+      const allowed = options.allowOnceOnly
+        ? decision.choice === "allow-once"
+        : decision.choice.startsWith("allow");
+      return allowed
+        ? Object.freeze({ decisionId: decision.requestId, decidedAt: new Date().toISOString() })
+        : null;
     } catch {
       try {
         diagnostics.onError?.(diagnostic);
       } catch {
         // Diagnostic failures must not change the fail-closed decision.
       }
-      return false;
+      return null;
     } finally {
       pending = false;
     }

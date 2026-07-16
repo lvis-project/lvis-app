@@ -63,6 +63,8 @@ import type { TelemetryService } from "../main/telemetry.js";
 import type { PluginTelemetryClient } from "../telemetry/client.js";
 import type { HookRunner } from "../hooks/hook-runner.js";
 import type { ScriptHookManager } from "../hooks/script-hook-manager.js";
+import type { A2ARemoteRuntime } from "../main/a2a-remote-runtime.js";
+import type { RemoteA2AActionController } from "../main/remote-a2a-action-controller.js";
 
 type PluginPaths = ReturnType<typeof import("../plugins/plugin-paths.js").resolvePluginPaths>;
 type WorkBoardStorage = ReturnType<typeof import("../work-board/storage.js").createDirStorage>;
@@ -91,6 +93,8 @@ export interface BootContext {
   bashAstValidator: BashAstValidator;
   auditService: AuditService;
   settingsService: SettingsService;
+  a2aRemoteRuntime: A2ARemoteRuntime | undefined;
+  remoteA2AActionController: RemoteA2AActionController | undefined;
   memoryManager: MemoryManager;
   keywordEngine: KeywordEngine;
   toolRegistry: ToolRegistry;

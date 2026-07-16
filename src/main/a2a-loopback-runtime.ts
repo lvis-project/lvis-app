@@ -233,12 +233,12 @@ export async function createA2ALoopbackRuntime(
 
   const authorizeMutation: A2AMutationAuthorizer = async (descriptor) => {
     if (!options.approveAgentAction) return false;
-    return await options.approveAgentAction({
+    return Boolean(await options.approveAgentAction({
       toolName: `a2a-${descriptor.operation}`,
       args: { operation: descriptor.operation, handlerId: descriptor.handlerId },
       reason: "An external A2A client requested a sub-agent mutation. Do you want to allow it?",
       trustOrigin: "a2a-loopback",
-    });
+    }));
   };
 
   const handlers = snapshots.map(({ profile, handlerId }) => {
