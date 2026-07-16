@@ -9,16 +9,13 @@
  * replay handler before execution.
  */
 import type { AppServices } from "../boot.js";
+import { isCanonicalA2APublicHttpsOrigin } from "../shared/a2a-public-origin.js";
 import type { LocalApi } from "../api/local-api.js";
 import {
   startLocalApiHttpServer,
   type LocalApiHttpServer,
 } from "../api/http-server.js";
 import { createStreamBroadcaster } from "../api/stream-broadcaster.js";
-import {
-  buildSingleFlightAgentActionApprover,
-  type AgentActionApprover,
-} from "../permissions/agent-action-approver.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
 import {
   A2A_REMOTE_RECEIVER_SECRET_KEY,
@@ -50,10 +47,6 @@ interface RemoteA2AReceiverServerDependencies {
   ) => Promise<A2ALoopbackRuntime | null>;
   startHttpServer: typeof startLocalApiHttpServer;
   openNamespace: (featureId: string) => FeatureNamespaceHandle;
-  buildApprover: (
-    services: AppServices,
-    log?: (message: string) => void,
-  ) => AgentActionApprover | undefined;
 }
 
 export interface StartRemoteA2AReceiverServerOptions {
@@ -74,20 +67,6 @@ let stopPromise: Promise<void> | null = null;
 let lifecycleGeneration = 0;
 let stopped = false;
 
-function defaultBuildApprover(
-  services: AppServices,
-  log?: (message: string) => void,
-): AgentActionApprover | undefined {
-  return buildSingleFlightAgentActionApprover(
-    services.approvalGate,
-    {
-      onConcurrent: () => log?.("[a2a-remote-receiver] concurrent approval denied"),
-      onError: () => log?.("[a2a-remote-receiver] approval failed closed"),
-    },
-    { allowOnceOnly: true },
-  );
-}
-
 function dependencies(
   overrides: Partial<RemoteA2AReceiverServerDependencies> | undefined,
 ): RemoteA2AReceiverServerDependencies {
@@ -95,7 +74,6 @@ function dependencies(
     createRuntime: createA2ALoopbackRuntime,
     startHttpServer: startLocalApiHttpServer,
     openNamespace: openFeatureNamespace,
-    buildApprover: defaultBuildApprover,
     ...overrides,
   };
 }
@@ -115,6 +93,11 @@ async function startForBoot(
   if (!remote) return null;
 
   const deps = dependencies(options.dependencies);
+  const receiverPublicOrigin = options.services.settingsService.get("a2aRemote").receiverPublicOrigin;
+  if (!receiverPublicOrigin) throw new Error("a2a-remote-receiver-public-origin-missing");
+  if (!isCanonicalA2APublicHttpsOrigin(receiverPublicOrigin)) {
+    throw new Error("a2a-remote-receiver-public-origin-invalid");
+  }
   const receiverSecret = options.services.settingsService.getEncryptedSecret(
     A2A_REMOTE_RECEIVER_SECRET_KEY,
   );
@@ -129,9 +112,14 @@ async function startForBoot(
       ...(project.projectName ? { name: project.projectName } : {}),
     },
     appVersion: getLvisAppVersion(),
-    approveAgentAction: deps.buildApprover(options.services, options.log),
+    approveAgentAction: remote.agentActionApprover,
     namespace: deps.openNamespace(A2A_REMOTE_RECEIVER_TASK_FEATURE),
     transformHandler: (handler) => remote.wrapReceiver(handler),
+    advertisedOrigin: receiverPublicOrigin,
+    wireTrustOrigin: "a2a-remote-wire",
+    approvalReason: "[A2A Wire: Remote] A trusted remote caller requested a sub-agent mutation. Do you want to allow it?",
+    auditSessionId: "a2a-remote-wire",
+    auditScope: "a2a-remote-wire",
   });
   if (!runtime) return null;
   if (generation !== lifecycleGeneration) {
