@@ -157,6 +157,34 @@ function sha256(value: Uint8Array | string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function compareCodePoints(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function decodeCanonicalBase64(value: string): Buffer | null {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) return null;
+  const decoded = Buffer.from(value, "base64");
+  return decoded.toString("base64") === value ? decoded : null;
+}
+
+function payloadAadFromOwnerDigest(input: Readonly<{
+  ownerDigestSha256: string;
+  operationId: string;
+  messageId: string;
+  bodySha256: string;
+  lineage: A2ARemoteLineage;
+}>): string {
+  const lineage = Object.fromEntries(Object.entries(input.lineage).sort(([a], [b]) => compareCodePoints(a, b)));
+  return JSON.stringify({
+    version: 1,
+    ownerDigestSha256: input.ownerDigestSha256,
+    operationId: input.operationId,
+    messageId: input.messageId,
+    bodySha256: input.bodySha256,
+    lineage,
+  });
+}
+
 function cloneRecord(value: A2ARemoteAttemptRecord): A2ARemoteAttemptRecord {
   return structuredClone(value);
 }
@@ -286,7 +314,8 @@ export class A2ARemoteDurableStore {
     const prepared = item.prepared as A2ARemotePreparedAttempt;
     if (stage !== "NOT_SENT" && (prepared.operation === "initial-send" || prepared.operation === "continue" || prepared.operation === "cancel" || prepared.operation === "replay")
       && (typeof prepared.approvalDecisionId !== "string" || typeof prepared.approvalDecidedAt !== "string")) return false;
-    if (["resolved", "in-flight", "outcome-unknown", "reconciling", "settled"].includes(stage) !== (item.resolved !== undefined)) return false;
+    if (["resolved", "in-flight", "outcome-unknown", "reconciling", "settled"].includes(stage) && item.resolved === undefined) return false;
+    if (["prepared", "NOT_SENT"].includes(stage) && item.resolved !== undefined) return false;
     if (item.resolved !== undefined && !this.validResolved(item.resolved, prepared)) return false;
     if (["outcome-unknown", "reconciling", "settled", "NOT_SENT", "RETENTION_EXPIRED"].includes(stage) && typeof item.outcomeCode !== "string") return false;
     if (stage === "reconciling" && (typeof item.retryNotBefore !== "string" || !Number.isFinite(Date.parse(item.retryNotBefore)))) return false;
@@ -320,11 +349,21 @@ export class A2ARemoteDurableStore {
     if (![item.aadSha256, item.ciphertextSha256, item.bodySha256].every((entry) => typeof entry === "string" && DIGEST.test(entry))) return false;
     if (![item.ciphertext, item.iv, item.authTag].every((entry) => typeof entry === "string" && entry.length > 0 && entry.length <= 2_000_000)) return false;
     if (!Number.isSafeInteger(item.size) || (item.size as number) < 1 || (item.size as number) > A2A_REMOTE_MAX_REQUEST_BYTES) return false;
+    const ciphertext = decodeCanonicalBase64(item.ciphertext as string);
+    const iv = decodeCanonicalBase64(item.iv as string);
+    const authTag = decodeCanonicalBase64(item.authTag as string);
+    const validEncoding = ciphertext?.byteLength === item.size
+      && iv?.byteLength === 12
+      && authTag?.byteLength === 16;
+    ciphertext?.fill(0); iv?.fill(0); authTag?.fill(0);
+    if (!validEncoding) return false;
     return [item.createdAt, item.orphanDeadline, item.expiresAt].every((entry) => typeof entry === "string" && Number.isFinite(Date.parse(entry)));
   }
 
   private async validateAndRecover(state: StoreState): Promise<StoreState> {
     const quarantine: QuarantineEntry[] = [];
+    let routineRecoveryChanged = false;
+    const abortedPayloadIds = new Set<string>();
     if (state.encryptedDataKey !== undefined) {
       try { const key = this.dataKey(state); key.fill(0); } catch { quarantine.push(this.quarantine("state", "encrypted-data-key-invalid", state.encryptedDataKey)); }
     }
@@ -341,26 +380,50 @@ export class A2ARemoteDurableStore {
       const material = !(item.stage === "NOT_SENT" && item.outcomeCode === INTENDED_CREDENTIAL_REVISION_CONFLICT);
       if (material && item.prepared.operation !== "replay" && materialOperations.has(item.prepared.operationId)) { quarantine.push(this.quarantine("attempt", "operation-attempt-conflict", item)); return false; }
       if (material && item.prepared.operation !== "replay") materialOperations.add(item.prepared.operationId);
-      if (["prepared", "resolved", "in-flight"].includes(item.stage) && Date.parse(item.prepared.attemptDeadline) <= this.now().getTime()) { quarantine.push(this.quarantine("attempt", "active-attempt-expired", item)); return false; }
+      if (item.stage === "prepared" || item.stage === "resolved") {
+        if (item.prepared.payloadRecordId) abortedPayloadIds.add(item.prepared.payloadRecordId);
+        this.scrubPayloadBinding(item);
+        item.stage = "NOT_SENT";
+        item.outcomeCode = "restart-before-socket-aborted";
+        delete item.resolved;
+        item.updatedAt = this.now().toISOString();
+        routineRecoveryChanged = true;
+      } else if (item.stage === "in-flight") {
+        item.stage = "outcome-unknown";
+        item.outcomeCode = "restart-in-flight-ambiguous";
+        item.updatedAt = this.now().toISOString();
+        routineRecoveryChanged = true;
+      }
       uniqueAttempts.add(item.prepared.attemptId); uniqueOwners.add(item.prepared.ownerToken); return true;
     });
+    const expiredBoundIds = new Set<string>();
     const payloadIds = new Set<string>();
     state.payloads = state.payloads.filter((item) => {
       if (!this.validPayload(item) || payloadIds.has(item.id)) { quarantine.push(this.quarantine("payload", "payload-schema-or-identity-invalid", item)); return false; }
-      if (Date.parse(item.expiresAt) <= this.now().getTime()
-        || (item.state === "staged" && Date.parse(item.orphanDeadline) <= this.now().getTime())) {
-        quarantine.push(this.quarantine("payload", "payload-expired-or-orphaned", item)); return false;
-      }
+      if (abortedPayloadIds.has(item.id)) { routineRecoveryChanged = true; return false; }
       payloadIds.add(item.id);
-      const ciphertext = Buffer.from(item.ciphertext, "base64");
-      const valid = sha256(ciphertext) === item.ciphertextSha256 && ciphertext.byteLength === item.size;
-      ciphertext.fill(0);
-      if (!valid) quarantine.push(this.quarantine("payload", "payload-ciphertext-invalid", item));
-      return valid;
+      const expired = Date.parse(item.expiresAt) <= this.now().getTime();
+      const orphaned = item.state === "staged"
+        && Date.parse(item.orphanDeadline) <= this.now().getTime();
+      if (orphaned) { routineRecoveryChanged = true; return false; }
+      if (expired && item.state === "bound") expiredBoundIds.add(item.id);
+      const stagedCiphertext = item.state === "staged"
+        ? decodeCanonicalBase64(item.ciphertext)
+        : null;
+      const cryptographyValid = item.state === "bound"
+        ? this.payloadCryptographyValid(state, item)
+        : stagedCiphertext !== null && sha256(stagedCiphertext) === item.ciphertextSha256;
+      stagedCiphertext?.fill(0);
+      if (!expired && !cryptographyValid) {
+        quarantine.push(this.quarantine("payload", "payload-cryptography-invalid", item));
+        return false;
+      }
+      return true;
     });
     const payloadReferences = new Map<string, number>();
     for (const attempt of state.attempts) if (attempt.prepared.payloadRecordId) payloadReferences.set(attempt.prepared.payloadRecordId, (payloadReferences.get(attempt.prepared.payloadRecordId) ?? 0) + 1);
     state.payloads = state.payloads.filter((payload) => {
+      if (payload.state === "staged") return true;
       const references = payloadReferences.get(payload.id) ?? 0;
       const bound = state.attempts.find((attempt) => attempt.prepared.payloadRecordId === payload.id);
       const valid = payload.state === "bound" && references === 1 && bound?.prepared.operationId === payload.operationId
@@ -369,14 +432,24 @@ export class A2ARemoteDurableStore {
       if (!valid) quarantine.push(this.quarantine("payload", "payload-binding-invalid", payload));
       return valid;
     });
-    const retainedPayloadIds = new Set(state.payloads.map((item) => item.id));
-    state.attempts = state.attempts.filter((attempt) => {
-      if (attempt.prepared.payloadRecordId && !retainedPayloadIds.has(attempt.prepared.payloadRecordId)
-        && ["prepared", "resolved", "in-flight", "outcome-unknown", "reconciling"].includes(attempt.stage)) {
-        quarantine.push(this.quarantine("attempt", "attempt-payload-missing", attempt)); return false;
+    for (const payloadId of expiredBoundIds) {
+      const source = state.attempts.find((attempt) =>
+        attempt.prepared.payloadRecordId === payloadId);
+      if (source) {
+        this.terminalizePayloadOperation(state, source);
+        routineRecoveryChanged = true;
       }
-      return true;
-    });
+    }
+    const retainedPayloadIds = new Set(state.payloads.map((item) => item.id));
+    const missingSources = state.attempts.filter((attempt) =>
+      attempt.prepared.operation === "initial-send"
+      && attempt.prepared.payloadRecordId
+      && !retainedPayloadIds.has(attempt.prepared.payloadRecordId)
+      && ["prepared", "resolved", "in-flight", "outcome-unknown", "reconciling"].includes(attempt.stage));
+    for (const source of missingSources) {
+      this.terminalizePayloadOperation(state, source);
+      routineRecoveryChanged = true;
+    }
     const taskHandles = new Set<string>();
     state.tasks = state.tasks.filter((task) => {
       const valid = typeof task.handle === "string" && SAFE_TOKEN.test(task.handle)
@@ -396,12 +469,70 @@ export class A2ARemoteDurableStore {
       this.audit("startup-quarantine", quarantine.length);
       await this.options.namespace.writeJson(DEFAULT_QUARANTINE_FILE, { version: 1, entries: quarantine.slice(0, this.maxQuarantine) });
       await this.persist(state);
+    } else if (routineRecoveryChanged) {
+      await this.persist(state);
     }
     return state;
   }
 
   private async persist(state: StoreState): Promise<void> {
     await this.options.namespace.writeJson(this.fileName, state);
+  }
+
+  private async withAttemptCapacity(state: StoreState): Promise<StoreState> {
+    if (state.attempts.length < this.maxAttempts) return state;
+    const evictable = state.attempts
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.stage === "settled" || item.stage === "NOT_SENT" || item.stage === "RETENTION_EXPIRED")
+      .sort((a, b) => Date.parse(a.item.updatedAt) - Date.parse(b.item.updatedAt))[0];
+    if (!evictable) throw new Error("a2a-remote-attempt-capacity-exhausted");
+    const compacted = structuredClone(state);
+    compacted.attempts.splice(evictable.index, 1);
+    await this.persist(compacted);
+    this.state = compacted;
+    return compacted;
+  }
+
+  private scrubPayloadBinding(record: A2ARemoteAttemptRecord): void {
+    for (const key of [
+      "payloadRecordId",
+      "payloadCiphertextSha256",
+      "payloadBodySha256",
+      "payloadSize",
+      "payloadExpiresAt",
+    ] as const) delete record.prepared[key];
+    if (record.resolved) {
+      for (const key of [
+        "payloadRecordId",
+        "payloadCiphertextSha256",
+        "payloadBodySha256",
+        "payloadSize",
+      ] as const) delete record.resolved[key];
+    }
+  }
+
+  private terminalizePayloadOperation(
+    state: StoreState,
+    source: A2ARemoteAttemptRecord,
+  ): A2ARemoteAttemptRecord {
+    const payloadRecordId = source.prepared.payloadRecordId;
+    if (payloadRecordId) {
+      state.payloads = state.payloads.filter((item) => item.id !== payloadRecordId);
+      this.scrubPayloadBinding(source);
+    }
+    const now = this.now().toISOString();
+    let latest = source;
+    for (const attempt of state.attempts) {
+      if (attempt.prepared.operationId !== source.prepared.operationId) continue;
+      if (["prepared", "resolved", "in-flight", "outcome-unknown", "reconciling"].includes(attempt.stage)) {
+        attempt.stage = "RETENTION_EXPIRED";
+        attempt.outcomeCode = "unknown-manual-reconciliation-required";
+        delete attempt.retryNotBefore;
+        attempt.updatedAt = now;
+      }
+      latest = attempt;
+    }
+    return latest;
   }
 
   private dataKey(state: StoreState): Buffer {
@@ -422,6 +553,46 @@ export class A2ARemoteDurableStore {
     const key = Buffer.from(decoded, "base64");
     if (key.length !== 32) throw new Error("a2a-remote-key-invalid");
     return key;
+  }
+
+  private payloadCryptographyValid(
+    state: StoreState,
+    payload: EncryptedPayloadRecord,
+  ): boolean {
+    const source = state.attempts.find((attempt) =>
+      attempt.prepared.payloadRecordId === payload.id
+      && attempt.prepared.operationId === payload.operationId
+      && attempt.prepared.operation === "initial-send");
+    if (!source?.prepared.ownerDigestSha256 || !source.prepared.messageId) return false;
+    const aad = payloadAadFromOwnerDigest({
+      ownerDigestSha256: source.prepared.ownerDigestSha256,
+      operationId: source.prepared.operationId,
+      messageId: source.prepared.messageId,
+      bodySha256: payload.bodySha256,
+      lineage: source.prepared.lineage,
+    });
+    if (payload.aadSha256 !== sha256(aad)) return false;
+    const key = this.dataKey(state);
+    let plaintext: Buffer | undefined;
+    try {
+      const ciphertext = decodeCanonicalBase64(payload.ciphertext);
+      const iv = decodeCanonicalBase64(payload.iv);
+      const authTag = decodeCanonicalBase64(payload.authTag);
+      if (!ciphertext || !iv || !authTag
+        || ciphertext.byteLength !== payload.size
+        || sha256(ciphertext) !== payload.ciphertextSha256) return false;
+      const decipher = createDecipheriv("aes-256-gcm", key, iv);
+      decipher.setAAD(Buffer.from(aad, "utf8"));
+      decipher.setAuthTag(authTag);
+      plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      return plaintext.byteLength === payload.size
+        && sha256(plaintext) === payload.bodySha256;
+    } catch {
+      return false;
+    } finally {
+      plaintext?.fill(0);
+      key.fill(0);
+    }
   }
 
   private encryptPayload(
@@ -476,7 +647,7 @@ export class A2ARemoteDurableStore {
       operationId: input.operationId,
       targetAgentId: input.targetAgentId,
       lineageDigestSha256: sha256(JSON.stringify(Object.fromEntries(
-        Object.entries(input.lineage).sort(([a], [b]) => a.localeCompare(b)),
+        Object.entries(input.lineage).sort(([a], [b]) => compareCodePoints(a, b)),
       ))),
     });
   }
@@ -570,18 +741,6 @@ export class A2ARemoteDurableStore {
     return await this.withLock(async (state) => {
       if (this.recoveryBlocked) throw new Error("a2a-remote-recovery-quarantined");
       if (Date.parse(prepared.attemptDeadline) <= this.now().getTime()) throw new Error("a2a-remote-attempt-deadline-expired");
-      if (state.attempts.length >= this.maxAttempts) {
-        const evictable = state.attempts
-          .map((item, index) => ({ item, index }))
-          .filter(({ item }) => item.stage === "settled" || item.stage === "NOT_SENT" || item.stage === "RETENTION_EXPIRED")
-          .sort((a, b) => Date.parse(a.item.updatedAt) - Date.parse(b.item.updatedAt))[0];
-        if (!evictable) throw new Error("a2a-remote-attempt-capacity-exhausted");
-        const compacted = structuredClone(state);
-        compacted.attempts.splice(evictable.index, 1);
-        await this.persist(compacted);
-        this.state = compacted;
-        state = compacted;
-      }
       const sameAttempt = state.attempts.find((item) =>
         item.prepared.attemptId === prepared.attemptId);
       if (sameAttempt) {
@@ -589,6 +748,7 @@ export class A2ARemoteDurableStore {
           ? { ok: true, duplicate: true, record: cloneRecord(sameAttempt) }
           : { ok: false, reason: "attempt-conflict" };
       }
+      state = await this.withAttemptCapacity(state);
       const priorAttempts = state.attempts.filter((item) => item.prepared.operationId === prepared.operationId);
       const live = state.attempts.find((item) =>
         item.prepared.operationId === prepared.operationId
@@ -631,7 +791,7 @@ export class A2ARemoteDurableStore {
         if (state.payloads.length >= this.maxPayloads) throw new Error("a2a-remote-payload-capacity-exhausted");
         payload = this.encryptPayload(state, prepared.operationId, initialPayload.body, initialPayload.aad);
         const stagedState = structuredClone(state);
-        stagedState.payloads.push(payload);
+        stagedState.payloads.push(structuredClone(payload));
         await this.persist(stagedState);
         this.state = stagedState;
         state = stagedState;
@@ -644,7 +804,7 @@ export class A2ARemoteDurableStore {
         boundPrepared.payloadBodySha256 = payload.bodySha256;
         boundPrepared.payloadSize = payload.size;
         boundPrepared.payloadExpiresAt = payload.expiresAt;
-        payload.state = "bound";
+        payload = { ...payload, state: "bound" };
       }
       const record: A2ARemoteAttemptRecord = {
         prepared: boundPrepared,
@@ -692,6 +852,7 @@ export class A2ARemoteDurableStore {
         }
         return cloneRecord(sameAttempt);
       }
+      state = await this.withAttemptCapacity(state);
       const record: A2ARemoteAttemptRecord = {
         prepared: structuredClone(prepared),
         stage: "NOT_SENT",
@@ -810,8 +971,56 @@ export class A2ARemoteDurableStore {
       }
       if (update.outcomeCode !== undefined) record.outcomeCode = update.outcomeCode;
       record.updatedAt = this.now().toISOString();
-      if (update.deletePayload && record.prepared.payloadRecordId) {
-        next.payloads = next.payloads.filter((item) => item.id !== record.prepared.payloadRecordId);
+      if (update.deletePayload) {
+        let source = record;
+        if (record.prepared.operation === "replay") {
+          // A pre-socket replay failure is not a terminal observation and must
+          // leave the original bytes available for a later approved replay.
+          if (stage === "settled") {
+            const candidates = next.attempts.filter((item) =>
+              item.prepared.operationId === record.prepared.operationId
+              && item.prepared.operation === "initial-send"
+              && item.prepared.payloadRecordId !== undefined);
+            if (candidates.length !== 1) {
+              throw new Error("a2a-remote-replay-source-binding-invalid");
+            }
+            source = candidates[0]!;
+            const stableBindingMatches =
+              source.prepared.ownerDigestSha256 === record.prepared.ownerDigestSha256
+              && source.prepared.projectRootDigestSha256 === record.prepared.projectRootDigestSha256
+              && source.prepared.profileDigestSha256 === record.prepared.profileDigestSha256
+              && source.prepared.originDigestSha256 === record.prepared.originDigestSha256
+              && source.prepared.depth === record.prepared.depth
+              && source.prepared.semanticRequestHash === record.prepared.semanticRequestHash
+              && source.prepared.messageId === record.prepared.messageId
+              && source.prepared.approvalDecisionId === record.prepared.approvalDecisionId
+              && source.prepared.approvalDecidedAt === record.prepared.approvalDecidedAt
+              && source.prepared.createdAt === record.prepared.createdAt
+              && source.prepared.attemptDeadline === record.prepared.attemptDeadline
+              && JSON.stringify(source.prepared.lineage) === JSON.stringify(record.prepared.lineage);
+            const payload = next.payloads.find((item) =>
+              item.id === source.prepared.payloadRecordId);
+            const payloadBindingMatches = payload?.state === "bound"
+              && payload.operationId === source.prepared.operationId
+              && payload.ciphertextSha256 === source.prepared.payloadCiphertextSha256
+              && payload.bodySha256 === source.prepared.payloadBodySha256
+              && payload.size === source.prepared.payloadSize
+              && payload.expiresAt === source.prepared.payloadExpiresAt
+              && next.attempts.filter((item) =>
+                item.prepared.payloadRecordId === payload.id).length === 1;
+            if (!stableBindingMatches || !payloadBindingMatches) {
+              throw new Error("a2a-remote-replay-source-binding-invalid");
+            }
+          }
+        }
+        if (source.prepared.payloadRecordId) {
+          const payloadRecordId = source.prepared.payloadRecordId;
+          next.payloads = next.payloads.filter((item) => item.id !== payloadRecordId);
+          // Scrub stale pointers in the same durable write. This lets restart
+          // validation distinguish an intentional terminal deletion from a
+          // missing/corrupt active payload while retaining all semantic proof.
+          this.scrubPayloadBinding(source);
+        }
       }
       if (update.taskProjection) {
         const taskInput = update.taskProjection;
@@ -846,6 +1055,21 @@ export class A2ARemoteDurableStore {
             next.tasks.splice(evictable.index, 1);
           }
           next.tasks.push(encrypted);
+        }
+        if (record.prepared.operation === "get") {
+          for (const prior of next.attempts) {
+            if (prior.prepared.taskHandle !== taskInput.handle
+              || (prior.prepared.operation !== "continue" && prior.prepared.operation !== "cancel")
+              || (prior.stage !== "outcome-unknown" && prior.stage !== "reconciling")) continue;
+            const reconciled = prior.prepared.operation === "cancel"
+              ? taskInput.task.status.state === "TASK_STATE_CANCELED"
+              : taskInput.task.status.state !== "TASK_STATE_INPUT_REQUIRED";
+            if (!reconciled) continue;
+            prior.stage = "settled";
+            prior.outcomeCode = "success";
+            delete prior.retryNotBefore;
+            prior.updatedAt = this.now().toISOString();
+          }
         }
       }
       await this.persist(next);
@@ -886,6 +1110,41 @@ export class A2ARemoteDurableStore {
     });
   }
 
+  async terminalizeUnrecoverableReplay(input: Readonly<{
+    sourceAttemptId: string;
+    operationId: string;
+    ownerDigestSha256: string;
+    projectRootDigestSha256: string;
+    profileDigestSha256: string;
+    originDigestSha256: string;
+    lineage: A2ARemoteLineage;
+    messageId: string;
+    semanticRequestHash: string;
+  }>): Promise<A2ARemoteAttemptRecord> {
+    return await this.withLock(async (state) => {
+      const sourceIndex = state.attempts.findIndex((item) =>
+        item.prepared.attemptId === input.sourceAttemptId
+        && item.prepared.operationId === input.operationId
+        && item.prepared.operation === "initial-send");
+      if (sourceIndex < 0) throw new Error("a2a-remote-replay-source-binding-invalid");
+      const source = state.attempts[sourceIndex]!;
+      if (source.prepared.ownerDigestSha256 !== input.ownerDigestSha256
+        || source.prepared.projectRootDigestSha256 !== input.projectRootDigestSha256
+        || source.prepared.profileDigestSha256 !== input.profileDigestSha256
+        || source.prepared.originDigestSha256 !== input.originDigestSha256
+        || source.prepared.messageId !== input.messageId
+        || source.prepared.semanticRequestHash !== input.semanticRequestHash
+        || JSON.stringify(source.prepared.lineage) !== JSON.stringify(input.lineage)) {
+        throw new Error("a2a-remote-replay-source-binding-invalid");
+      }
+      const next = structuredClone(state);
+      const latest = this.terminalizePayloadOperation(next, next.attempts[sourceIndex]!);
+      await this.persist(next);
+      this.state = next;
+      return cloneRecord(latest);
+    });
+  }
+
   async getAttempt(attemptId: string): Promise<A2ARemoteAttemptRecord | null> {
     return await this.withLock((state) => {
       const value = state.attempts.find((item) => item.prepared.attemptId === attemptId);
@@ -897,7 +1156,9 @@ export class A2ARemoteDurableStore {
     return await this.withLock((state) => {
       const value = [...state.attempts]
         .reverse()
-        .find((item) => item.prepared.operationId === operationId);
+        .find((item) => item.prepared.operationId === operationId
+          && !(item.stage === "NOT_SENT"
+            && item.outcomeCode === INTENDED_CREDENTIAL_REVISION_CONFLICT));
       return value ? cloneRecord(value) : null;
     });
   }
@@ -975,7 +1236,9 @@ export class A2ARemoteDurableStore {
       if (latest.prepared.ownerDigestSha256 !== sha256(ownerId)) return { kind: "blocked", outcome: "task-owner-mismatch" };
       if (latest.stage === "settled" && latest.outcomeCode === "success") {
         const task = state.tasks.find((item) => item.handle === handle && item.ownerDigestSha256 === sha256(ownerId));
-        if (task && Date.parse(task.updatedAt) >= Date.parse(latest.updatedAt)) {
+        if (task
+          && (operation !== "cancel" || task.taskState === "TASK_STATE_CANCELED")
+          && Date.parse(task.updatedAt) >= Date.parse(latest.updatedAt)) {
           return { kind: "success", projection: {
             handle: task.handle,
             targetAgentId: task.targetAgentId,
@@ -995,14 +1258,30 @@ export class A2ARemoteDurableStore {
     ownerId: string,
   ): Promise<A2ARemoteOperationRecoveryRoute | null> {
     return await this.withLock((state) => {
-      const attempts = state.attempts.filter((item) => item.prepared.taskHandle === handle);
-      const initial = attempts.find((item) => item.prepared.operation === "initial-send");
-      const latest = attempts.at(-1);
-      const latestResolved = [...attempts].reverse().find((item) => item.resolved)?.resolved;
+      const attempts = state.attempts.filter((item) =>
+        item.prepared.taskHandle === handle
+        && !(item.stage === "NOT_SENT"
+          && item.outcomeCode === INTENDED_CREDENTIAL_REVISION_CONFLICT));
+      const initial = attempts.find((item) =>
+        item.prepared.operation === "initial-send"
+        && item.prepared.payloadRecordId !== undefined);
+      const operationAttempts = initial
+        ? attempts.filter((item) => item.prepared.operationId === initial.prepared.operationId)
+        : [];
+      const latest = operationAttempts.at(-1);
+      const latestResolved = [...operationAttempts].reverse().find((item) => item.resolved)?.resolved;
+      const sourcePayload = initial?.prepared.payloadRecordId
+        ? state.payloads.find((payload) =>
+            payload.id === initial.prepared.payloadRecordId
+            && payload.operationId === initial.prepared.operationId
+            && payload.state === "bound")
+        : undefined;
       if (!initial?.prepared.messageId || !initial.prepared.targetLabel
         || initial.prepared.ownerDigestSha256 !== sha256(ownerId)
+        || !sourcePayload
         || !latestResolved
         || !latest
+        || (latest.prepared.operation !== "initial-send" && latest.prepared.operation !== "replay")
         || (latest.stage !== "outcome-unknown" && latest.stage !== "reconciling")) return null;
       return structuredClone({
         handle,
@@ -1028,15 +1307,13 @@ export class A2ARemoteDurableStore {
         .map((item) => item.id));
       if (expiredIds.size === 0 && orphanIds.size === 0) return { orphaned: 0, expired: 0 };
       const next = structuredClone(state);
-      next.payloads = next.payloads.filter((item) =>
-        !expiredIds.has(item.id) && !orphanIds.has(item.id));
-      for (const attempt of next.attempts) {
-        if (attempt.prepared.payloadRecordId && expiredIds.has(attempt.prepared.payloadRecordId)) {
-          attempt.stage = "RETENTION_EXPIRED";
-          attempt.outcomeCode = "unknown-manual-reconciliation-required";
-          attempt.updatedAt = this.now().toISOString();
-        }
+      for (const payloadId of expiredIds) {
+        const source = next.attempts.find((attempt) =>
+          attempt.prepared.payloadRecordId === payloadId);
+        if (source) this.terminalizePayloadOperation(next, source);
+        else next.payloads = next.payloads.filter((item) => item.id !== payloadId);
       }
+      next.payloads = next.payloads.filter((item) => !orphanIds.has(item.id));
       await this.persist(next);
       this.state = next;
       return { orphaned: orphanIds.size, expired: expiredIds.size };
@@ -1051,13 +1328,11 @@ export function createA2APayloadAad(input: Readonly<{
   bodySha256: string;
   lineage: A2ARemoteLineage;
 }>): string {
-  const lineage = Object.fromEntries(Object.entries(input.lineage).sort(([a], [b]) => a.localeCompare(b)));
-  return JSON.stringify({
-    version: 1,
-    ownerId: input.ownerId,
+  return payloadAadFromOwnerDigest({
+    ownerDigestSha256: sha256(input.ownerId),
     operationId: input.operationId,
     messageId: input.messageId,
     bodySha256: input.bodySha256,
-    lineage,
+    lineage: input.lineage,
   });
 }

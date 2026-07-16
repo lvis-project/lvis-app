@@ -9,6 +9,7 @@ import { A2AJsonRpcMethod } from "../shared/a2a-wire.js";
 
 export const A2A_EXACT_SEND_REPLAY_URI =
   "https://lvis.ai/a2a/extensions/exact-send-replay/v1" as const;
+export const A2A_SPECIFICATION_URI = "https://a2a-protocol.org/v1.0.0/specification/" as const;
 export const A2A_EXACT_SEND_REPLAY_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 export const A2A_REMOTE_ROUTE_TIMEOUT_MS = 5_000;
 export const A2A_REMOTE_HTTP_TIMEOUT_MS = 15_000;
@@ -20,6 +21,8 @@ export const A2A_REMOTE_MAX_HISTORY_LENGTH = 64;
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:~-]{0,255}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
+const COMMIT_SHA = /^[a-f0-9]{40}$/;
+const A2A_TCK_TAG = /^v?[0-9]+\.[0-9]+\.[0-9]+(?:[.-][0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/;
 
 export interface A2ARemoteLineage {
   targetAgentId: number;
@@ -45,6 +48,18 @@ export interface A2ARouteSnapshot extends A2ARemoteLineage {
   healthExpiresAt: string;
   wireConformanceArtifactId: string;
   wireConformanceArtifactDigestSha256: string;
+  servedSpecObservationId: number;
+  wireConformanceEvidenceId: number;
+  agentHubHeadSha: string;
+  lvisAppHeadSha: string;
+  remoteServerHeadSha: string;
+  a2aTckTag: string;
+  a2aTckCommitSha: string;
+  agentHubLockDigestSha256: string;
+  lvisAppLockDigestSha256: string;
+  remoteServerLockDigestSha256: string;
+  a2aTckLockDigestSha256: string;
+  a2aSpecificationUri: typeof A2A_SPECIFICATION_URI;
   issuedAt: string;
   expiresAt: string;
   extensionUri: typeof A2A_EXACT_SEND_REPLAY_URI;
@@ -87,6 +102,18 @@ export interface AgentHubRouteSnapshotWire {
   auth_scheme: "Bearer";
   wire_conformance_artifact_id: string;
   wire_conformance_artifact_digest_sha256: string;
+  served_spec_observation_id: number;
+  wire_conformance_evidence_id: number;
+  agent_hub_head_sha: string;
+  lvis_app_head_sha: string;
+  remote_server_head_sha: string;
+  a2a_tck_tag: string;
+  a2a_tck_commit_sha: string;
+  agent_hub_lock_digest_sha256: string;
+  lvis_app_lock_digest_sha256: string;
+  remote_server_lock_digest_sha256: string;
+  a2a_tck_lock_digest_sha256: string;
+  a2a_specification_uri: typeof A2A_SPECIFICATION_URI;
 }
 
 export interface A2ARouteResolveRequest {
@@ -338,6 +365,12 @@ export function parseAgentHubRouteSnapshot(
     "interface_health_observation_id", "health_observed_at", "health_expires_at",
     "protocol_binding", "protocol_version", "auth_scheme",
     "wire_conformance_artifact_id", "wire_conformance_artifact_digest_sha256",
+    "served_spec_observation_id", "wire_conformance_evidence_id",
+    "agent_hub_head_sha", "lvis_app_head_sha", "remote_server_head_sha",
+    "a2a_tck_tag", "a2a_tck_commit_sha",
+    "agent_hub_lock_digest_sha256", "lvis_app_lock_digest_sha256",
+    "remote_server_lock_digest_sha256", "a2a_tck_lock_digest_sha256",
+    "a2a_specification_uri",
   ];
   if (!exactKeys(value, required)) throw new Error("a2a-route-snapshot-fields-invalid");
   const idFields = [
@@ -351,6 +384,7 @@ export function parseAgentHubRouteSnapshot(
     value.intended_credential_revision_id, value.credential_revision_id,
     value.credential_revision_version, value.advertised_interface_id,
     value.interface_health_observation_id, value.route_policy_version,
+    value.served_spec_observation_id, value.wire_conformance_evidence_id,
     ...(expected.predecessorCredentialRevisionId === undefined
       ? [] : [value.predecessor_credential_revision_id]),
   ];
@@ -362,7 +396,26 @@ export function parseAgentHubRouteSnapshot(
     || !digest(value.route_policy_digest_sha256)
     || !digest(value.extension_spec_digest_sha256)
     || !digest(value.wire_conformance_artifact_digest_sha256)
+    || !digest(value.agent_hub_lock_digest_sha256)
+    || !digest(value.lvis_app_lock_digest_sha256)
+    || !digest(value.remote_server_lock_digest_sha256)
+    || !digest(value.a2a_tck_lock_digest_sha256)
   ) throw new Error("a2a-route-snapshot-digest-invalid");
+  if (
+    typeof value.agent_hub_head_sha !== "string"
+    || !COMMIT_SHA.test(value.agent_hub_head_sha)
+    || typeof value.lvis_app_head_sha !== "string"
+    || !COMMIT_SHA.test(value.lvis_app_head_sha)
+    || typeof value.remote_server_head_sha !== "string"
+    || !COMMIT_SHA.test(value.remote_server_head_sha)
+    || typeof value.a2a_tck_commit_sha !== "string"
+    || !COMMIT_SHA.test(value.a2a_tck_commit_sha)
+  ) throw new Error("a2a-route-snapshot-head-invalid");
+  if (
+    typeof value.a2a_tck_tag !== "string"
+    || value.a2a_tck_tag.length > 64
+    || !A2A_TCK_TAG.test(value.a2a_tck_tag)
+  ) throw new Error("a2a-route-snapshot-tck-tag-invalid");
   if (!timestamp(value.issued_at) || !timestamp(value.expires_at)) {
     throw new Error("a2a-route-snapshot-time-invalid");
   }
@@ -388,6 +441,7 @@ export function parseAgentHubRouteSnapshot(
     || value.predecessor_credential_revision_id !== requestWire.predecessor_credential_revision_id
     || value.credential_revision_id !== value.intended_credential_revision_id
     || value.extension_uri !== A2A_EXACT_SEND_REPLAY_URI
+    || value.a2a_specification_uri !== A2A_SPECIFICATION_URI
   ) {
     throw new Error("a2a-route-snapshot-protocol-invalid");
   }
@@ -432,6 +486,18 @@ export function parseAgentHubRouteSnapshot(
     healthExpiresAt: wire.health_expires_at,
     wireConformanceArtifactId: wire.wire_conformance_artifact_id,
     wireConformanceArtifactDigestSha256: wire.wire_conformance_artifact_digest_sha256,
+    servedSpecObservationId: wire.served_spec_observation_id,
+    wireConformanceEvidenceId: wire.wire_conformance_evidence_id,
+    agentHubHeadSha: wire.agent_hub_head_sha,
+    lvisAppHeadSha: wire.lvis_app_head_sha,
+    remoteServerHeadSha: wire.remote_server_head_sha,
+    a2aTckTag: wire.a2a_tck_tag,
+    a2aTckCommitSha: wire.a2a_tck_commit_sha,
+    agentHubLockDigestSha256: wire.agent_hub_lock_digest_sha256,
+    lvisAppLockDigestSha256: wire.lvis_app_lock_digest_sha256,
+    remoteServerLockDigestSha256: wire.remote_server_lock_digest_sha256,
+    a2aTckLockDigestSha256: wire.a2a_tck_lock_digest_sha256,
+    a2aSpecificationUri: A2A_SPECIFICATION_URI,
     routePolicyVersion: wire.route_policy_version,
     routePolicyDigestSha256: wire.route_policy_digest_sha256,
     extensionSpecDigestSha256: wire.extension_spec_digest_sha256,

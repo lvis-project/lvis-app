@@ -10,6 +10,7 @@ import {
 } from "../shared/a2a-wire.js";
 import {
   A2A_EXACT_SEND_REPLAY_URI,
+  A2A_SPECIFICATION_URI,
   A2A_REMOTE_MAX_HISTORY_LENGTH,
   A2A_REMOTE_RECONCILIATION_MS,
   a2aRemoteLineageDigestSha256,
@@ -35,6 +36,9 @@ import { parseA2AStrictJson } from "./a2a-strict-json.js";
 import { canonicalizeA2ARemoteTask } from "./a2a-task-store.js";
 
 const EXTENSION_ERROR_CODES = new Set([-32090, -32091, -32092, -32093, -32094]);
+const FULL_COMMIT_SHA = /^[a-f0-9]{40}$/;
+const SHA256_DIGEST = /^[a-f0-9]{64}$/;
+const TCK_TAG = /^v?[0-9]+\.[0-9]+\.[0-9]+(?:[.-][0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/;
 const EXTENSION_ERRORS: Readonly<Record<number, Readonly<{ message: string; reason: string }>>> = {
   [-32090]: { message: "Exact send replay conflict", reason: "EXACT_SEND_REPLAY_CONFLICT" },
   [-32091]: { message: "Exact send replay retention expired", reason: "EXACT_SEND_REPLAY_RETENTION_EXPIRED" },
@@ -184,6 +188,17 @@ function validateOperationMethod(input: A2ARemoteExecuteInput): void {
   }
 }
 
+function responseTaskHistoryLimit(input: Readonly<A2ARemoteExecuteInput>): number {
+  if (input.operation !== "get") return A2A_REMOTE_MAX_HISTORY_LENGTH;
+  const requested = input.request.params.historyLength;
+  // validateOperationMethod already rejects malformed values. Omission keeps
+  // the protocol-wide bounded maximum; an explicit value is an exact response
+  // upper bound and may intentionally be zero.
+  return requested === undefined
+    ? A2A_REMOTE_MAX_HISTORY_LENGTH
+    : requested as number;
+}
+
 function validateSnapshot(snapshot: A2ARouteSnapshot, input: A2ARemoteExecuteInput, now: number): void {
   if (
     !sameA2ARemoteLineage(snapshot, input.lineage)
@@ -192,6 +207,21 @@ function validateSnapshot(snapshot: A2ARouteSnapshot, input: A2ARemoteExecuteInp
     || snapshot.authenticationScheme !== "Bearer"
     || snapshot.protocolBinding !== "JSONRPC"
     || snapshot.protocolVersion !== "1.0"
+    || snapshot.a2aSpecificationUri !== A2A_SPECIFICATION_URI
+    || !Number.isSafeInteger(snapshot.servedSpecObservationId)
+    || snapshot.servedSpecObservationId <= 0
+    || !Number.isSafeInteger(snapshot.wireConformanceEvidenceId)
+    || snapshot.wireConformanceEvidenceId <= 0
+    || !FULL_COMMIT_SHA.test(snapshot.agentHubHeadSha)
+    || !FULL_COMMIT_SHA.test(snapshot.lvisAppHeadSha)
+    || !FULL_COMMIT_SHA.test(snapshot.remoteServerHeadSha)
+    || !FULL_COMMIT_SHA.test(snapshot.a2aTckCommitSha)
+    || snapshot.a2aTckTag.length > 64
+    || !TCK_TAG.test(snapshot.a2aTckTag)
+    || !SHA256_DIGEST.test(snapshot.agentHubLockDigestSha256)
+    || !SHA256_DIGEST.test(snapshot.lvisAppLockDigestSha256)
+    || !SHA256_DIGEST.test(snapshot.remoteServerLockDigestSha256)
+    || !SHA256_DIGEST.test(snapshot.a2aTckLockDigestSha256)
     || Date.parse(snapshot.issuedAt) > now
     || Date.parse(snapshot.expiresAt) <= now
     || Date.parse(snapshot.healthExpiresAt) <= now
@@ -267,14 +297,17 @@ function validateExtensionFailure(error: A2AJsonRpcFailure["error"]): void {
     || Object.keys(error).sort().join(",") !== "code,data,message" || !Array.isArray(error.data)
     || error.data.length !== 1 || !isRecord(error.data[0])) throw new Error("a2a-remote-extension-error-invalid");
   const info = error.data[0];
-  const metadata = error.code === -32092 ? { retryAfterSeconds: "1" } : undefined;
-  const expectedInfo = {
-    "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-    reason: expected.reason,
-    domain: "lvis.ai",
-    ...(metadata ? { metadata } : {}),
-  };
-  if (!isDeepStrictEqual(info, expectedInfo)) throw new Error("a2a-remote-extension-error-invalid");
+  const hasRetryMetadata = error.code === -32092;
+  const expectedKeys = hasRetryMetadata ? "@type,domain,metadata,reason" : "@type,domain,reason";
+  if (Object.keys(info).sort().join(",") !== expectedKeys
+    || info["@type"] !== "type.googleapis.com/google.rpc.ErrorInfo"
+    || info.reason !== expected.reason
+    || info.domain !== "lvis.ai") throw new Error("a2a-remote-extension-error-invalid");
+  if (hasRetryMetadata) {
+    if (!isRecord(info.metadata)
+      || Object.keys(info.metadata).join(",") !== "retryAfterSeconds"
+      || info.metadata.retryAfterSeconds !== "1") throw new Error("a2a-remote-extension-error-invalid");
+  }
 }
 
 export class A2ARemoteClient {
@@ -398,7 +431,10 @@ export class A2ARemoteClient {
         || !sameA2ARemoteLineage(replaySource.prepared.lineage, input.lineage)
         || !predecessor?.resolved
         || input.predecessorCredentialRevisionId !== predecessor.resolved.credentialRevisionId) {
-        return { ok: false, outcome: "unknown-manual-reconciliation-required" };
+        const latest = await this.options.store.latestOperation(input.operationId);
+        return { ok: false, outcome: latest?.stage === "RETENTION_EXPIRED"
+          ? "retention-expired"
+          : "unknown-manual-reconciliation-required", ...(latest ? { record: latest } : {}) };
       }
     }
 
@@ -409,15 +445,23 @@ export class A2ARemoteClient {
       if (!input.targetLabel || input.targetLabel.length > 80) throw new Error("a2a-remote-target-label-invalid");
       const approvedLineage = Object.freeze(structuredClone(input.lineage));
       const lineageDigestSha256 = a2aRemoteLineageDigestSha256(approvedLineage);
-      const approval = await this.options.approver.approve({
-        operation: input.operation,
-        operationId: input.operationId,
-        lineage: approvedLineage,
-        intendedCredentialRevisionId: input.intendedCredentialRevisionId,
-        lineageDigestSha256,
-        semanticDigestSha256: approvedSemanticDigestSha256,
-        targetLabel: input.targetLabel,
-      });
+      let approval;
+      try {
+        approval = await this.options.approver.approve({
+          operation: input.operation,
+          operationId: input.operationId,
+          lineage: approvedLineage,
+          intendedCredentialRevisionId: input.intendedCredentialRevisionId,
+          lineageDigestSha256,
+          semanticDigestSha256: approvedSemanticDigestSha256,
+          targetLabel: input.targetLabel,
+        });
+      } catch {
+        // ApprovalGate denial, timeout-shaped rejection, and thrown failures
+        // are one fail-closed decision. Never expose the gate error or advance
+        // to journal/secret/control-plane/data-plane work.
+        approval = null;
+      }
       const semanticStillBound = semanticDigest(input) === approvedSemanticDigestSha256;
       if (!approval
         || approval.intendedCredentialRevisionId !== input.intendedCredentialRevisionId
@@ -463,7 +507,20 @@ export class A2ARemoteClient {
       });
       const recovered = await this.options.store.readPayload(replaySource.prepared.attemptId, sourceAad);
       body.fill(0);
-      if (!recovered) return { ok: false, outcome: "unknown-manual-reconciliation-required" };
+      if (!recovered) {
+        const record = await this.options.store.terminalizeUnrecoverableReplay({
+          sourceAttemptId: replaySource.prepared.attemptId,
+          operationId: input.operationId,
+          ownerDigestSha256: sha256(input.authorization.ownerId),
+          projectRootDigestSha256: sha256(input.authorization.projectRoot),
+          profileDigestSha256: sha256(input.authorization.profileId),
+          originDigestSha256: sha256(input.authorization.origin),
+          lineage: input.lineage,
+          messageId: replaySource.prepared.messageId,
+          semanticRequestHash: replaySource.prepared.semanticRequestHash,
+        });
+        return { ok: false, outcome: "retention-expired", record };
+      }
       body = Buffer.from(recovered);
       const sourceEnvelope = parseA2AStrictJson(body, { maxBytes: 1_024 * 1_024 });
       if (!isRecord(sourceEnvelope) || sourceEnvelope.jsonrpc !== A2A_JSONRPC_VERSION
@@ -673,7 +730,9 @@ export class A2ARemoteClient {
         : (input.operation === "get" || input.operation === "cancel") && isRecord(result)
           ? result
           : undefined;
-      const task = taskValue ? canonicalizeA2ARemoteTask(taskValue, A2A_REMOTE_MAX_HISTORY_LENGTH) : undefined;
+      const task = taskValue
+        ? canonicalizeA2ARemoteTask(taskValue, responseTaskHistoryLimit(input))
+        : undefined;
       if (taskValue && !task) throw new Error("a2a-remote-task-projection-invalid");
       const record = await this.options.store.transition(
         input.attemptId,
