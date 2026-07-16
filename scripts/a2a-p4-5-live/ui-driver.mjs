@@ -13,6 +13,7 @@ import {
   validatePackagedLiveManifest,
 } from "./packaged-live-contract.mjs";
 import { buildPackagedUiEnvironment } from "./ui-driver-environment.mjs";
+import { resolveCanonicalUiManifestPath } from "./ui-driver-input.mjs";
 
 const CORE_TEST_IDS = Object.freeze([
   "remote-a2a-trigger",
@@ -33,7 +34,7 @@ function parseArguments(args) {
   if (args.length !== 2 || args[0] !== "--manifest" || !args[1] || args[1].startsWith("--")) {
     fail("UI driver accepts exactly --manifest <signed-manifest-path>");
   }
-  return args[1];
+  return resolveCanonicalUiManifestPath(args[1]);
 }
 
 async function launchInstalledApp(executablePath) {
