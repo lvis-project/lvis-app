@@ -81,6 +81,14 @@ function sameFileIdentity(left, right) {
   return left.dev === right.dev && left.ino === right.ino && left.size === right.size;
 }
 
+export function assertNoFollowFallbackPath(path, label, ...noFollowOverride) {
+  const noFollowFlag = noFollowOverride.length > 0 ? noFollowOverride[0] : constants.O_NOFOLLOW;
+  if (noFollowFlag !== undefined) return;
+  if (resolve(path) !== realpathSync(path)) {
+    fail(`${label}: symlink path components are forbidden when O_NOFOLLOW is unavailable`);
+  }
+}
+
 function normalizeNeedles(needles, label) {
   assertArray(needles, `${label} streaming needles`, { max: 512 });
   return needles.map((needle, index) => {
@@ -112,6 +120,10 @@ export function readRegularFile(path, label, {
   let opened;
   let canonicalPath;
   try {
+    // Platforms without O_NOFOLLOW must prove the lexical path is already its
+    // canonical path. Repeat after opening so a link swap cannot make the
+    // fallback silently follow a symlink between validation and open.
+    assertNoFollowFallbackPath(path, label);
     // Open first with O_NOFOLLOW. There is intentionally no path-based lstat
     // check before this operation: the descriptor is the authority for type,
     // size, hashing, and identity, avoiding the check/use race CodeQL flags.
@@ -121,6 +133,7 @@ export function readRegularFile(path, label, {
     if (opened.size <= 0 || opened.size > maxBytes) fail(`${label}: invalid file size ${opened.size}`);
 
     canonicalPath = realpathSync(path);
+    assertNoFollowFallbackPath(path, label);
     canonicalDescriptor = openSync(canonicalPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     const canonicalOpened = fstatSync(canonicalDescriptor);
     if (!canonicalOpened.isFile() || !sameFileIdentity(opened, canonicalOpened)) {
