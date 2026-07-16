@@ -100,6 +100,11 @@ for hashing the received body.
 
 After authenticating and authorizing the request, the server MUST derive a stable
 caller identity that survives credential rotation without exposing the credential.
+That identity includes an immutable caller-generation token. Credential rotation
+within one generation preserves the token. Permanently retiring a caller identity
+retires that generation forever; if the same external subject later enrolls again,
+the server MUST mint a new generation token, so its replay keys cannot collide with
+the retired generation.
 The replay key is:
 
 ```text
@@ -132,12 +137,47 @@ fixed JSON-RPC error:
 {
   "code": -32090,
   "message": "Exact send replay conflict",
-  "data": {"reason": "exact-send-replay-conflict"}
+  "data": [
+    {
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      "reason": "EXACT_SEND_REPLAY_CONFLICT",
+      "domain": "lvis.ai"
+    }
+  ]
 }
 ```
 
 The response MUST carry the activated `A2A-Extensions` echo. Error data MUST NOT
 reveal which field, byte, hash, credential, caller, or stored result differed.
+
+Every extension error in this document is a JSON-RPC server error with exactly one
+A2A v1 data-array entry of `type.googleapis.com/google.rpc.ErrorInfo`. Codes,
+messages, reasons, domains, metadata, and retry headers are exact wire values; a
+server MUST NOT add a second data entry or substitute an object for the array.
+
+If the authenticated caller generation has reached its configured replay-key
+capacity, the server MUST NOT evict or reuse an existing fence. It MUST accept no
+new key, execute nothing, and return:
+
+```json
+{
+  "code": -32094,
+  "message": "Exact send replay capacity exhausted",
+  "data": [
+    {
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      "reason": "EXACT_SEND_REPLAY_CAPACITY_EXHAUSTED",
+      "domain": "lvis.ai"
+    }
+  ]
+}
+```
+
+The client maps `-32090` to a non-retryable local conflict and `-32094` to
+`capacity-manual-intervention-required`. Neither result permits an automatic
+send, a new Message ID, route substitution, or eviction. An administrator may
+raise the generation's capacity, but a client MUST still start a separately
+approved new operation rather than retry this failed initial send automatically.
 
 ## Durable result and restart behavior
 
@@ -151,25 +191,84 @@ Task later advances; current Task state is obtained separately with `GetTask`.
 
 Concurrent exact requests MUST elect one execution owner. Losing owners MUST wait
 within a bounded deadline or return a fixed retryable in-progress error without
-executing. A crash after the durable in-progress fence but before a result MUST be
-recovered by a fenced server worker; it MUST NOT allow an unfenced second
-execution. If the implementation cannot prove a single execution, it MUST retain
-the fence and return an outcome-unknown error rather than execute again.
+executing:
 
-The server MUST retain the fence and completed result for 604800 seconds from the
-first accepted request. Deletion MUST be fenced and auditable. After retention
-expiry, reuse of the replay key MUST NOT execute and MUST return:
+```json
+{
+  "code": -32092,
+  "message": "Exact send replay in progress",
+  "data": [
+    {
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      "reason": "EXACT_SEND_REPLAY_IN_PROGRESS",
+      "domain": "lvis.ai",
+      "metadata": {"retryAfterSeconds": "1"}
+    }
+  ]
+}
+```
+
+The `-32092` response MUST also carry the HTTP header `Retry-After: 1`. The client
+maps it to `reconciling` and MAY retry only the same authenticated caller,
+byte-for-byte body, Message ID, and intent hash after at least one second, within
+the original bounded reconciliation deadline. Such a retry is an attempt of the
+already-approved operation: it requires fresh local authorization, credential
+preparation, and final no-store route resolve, but no new foreground approval. It
+MUST NOT reconstruct the body, select another route, or extend the deadline.
+
+A crash after the durable in-progress fence but before a result MUST be recovered
+only by a worker that acquires the same durable execution fence and can prove that
+the prior owner performed no uncommitted external execution. A late owner may
+commit a result only while its owner token still matches. The server MUST NOT allow
+an unfenced second execution. If it cannot prove single execution, it MUST retain
+the fence, execute nothing, omit `Retry-After`, and return:
+
+```json
+{
+  "code": -32093,
+  "message": "Exact send replay outcome unknown",
+  "data": [
+    {
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      "reason": "EXACT_SEND_REPLAY_OUTCOME_UNKNOWN",
+      "domain": "lvis.ai"
+    }
+  ]
+}
+```
+
+The client maps `-32093` to terminal local
+`unknown-manual-reconciliation-required`, performs no automatic resend, and
+fabricates no remote Message, Task, or terminal Task state.
+
+The server MUST retain the complete fence and completed result for 604800 seconds
+from the first accepted request. At expiry it MUST atomically delete any exact
+body and Message-or-Task result while retaining a durable non-sensitive tombstone
+containing only the generation-scoped opaque caller token, opaque Message-ID token,
+body hash, intent hash, first-accepted time, expiry time, and terminal fence state.
+The tombstone remains until that caller generation is permanently retired. It is
+never evicted to admit a new key, and its deletion after permanent retirement is
+fenced and auditable. Reuse of an exact-match replay key at or after result expiry
+MUST NOT execute and MUST return:
 
 ```json
 {
   "code": -32091,
   "message": "Exact send replay retention expired",
-  "data": {"reason": "exact-send-replay-retention-expired"}
+  "data": [
+    {
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      "reason": "EXACT_SEND_REPLAY_RETENTION_EXPIRED",
+      "domain": "lvis.ai"
+    }
+  ]
 }
 ```
 
-The client maps this to manual reconciliation and never reconstructs or resends a
-new body under the expired Message ID.
+Any mismatch against the tombstone still returns `-32090`. The client maps
+`-32091` to manual reconciliation and never reconstructs or resends a new body
+under the expired Message ID. Because the A2A Message-ID namespace has no bounded
+lifetime, a shorter tombstone TTL or least-recently-used eviction is prohibited.
 
 ## Authentication, authorization, and audit
 
@@ -180,11 +279,12 @@ new request. Bearer bytes, headers, raw body, Parts, Task status text, artifacts
 and response bodies MUST NOT be stored in the replay audit stream.
 
 The replay store MAY retain the exact request body only when independently
-encrypted and bounded by the same retention deadline; LVIS servers SHOULD retain
-only the body hash, intent hash, fence metadata, and durable result required by
-this contract. Logs, metrics, traces, crash reports, and audit MUST use fixed
-outcome codes plus keyed opaque caller/Message/result tokens. Credential rotation
-MUST preserve the authenticated caller identity; credential revocation MUST block
+encrypted and bounded by the same result-retention deadline; LVIS servers SHOULD
+retain only the body hash, intent hash, fence metadata, and durable result required
+by this contract. After result expiry, only the non-sensitive tombstone above may
+remain. Logs, metrics, traces, crash reports, and audit MUST use fixed outcome
+codes plus keyed opaque caller/Message/result tokens. Credential rotation MUST
+preserve the authenticated caller generation; credential revocation MUST block
 new requests before replay-store access and MUST NOT authorize a stale credential
 solely to retrieve a result.
 
@@ -217,11 +317,25 @@ following with zero skipped cases:
 7. Missing declaration, wrong URI, `required: false`, malformed or extra params,
    wrong served-spec digest, missing request activation, or missing response echo
    fails closed.
-8. Retention-boundary replay succeeds immediately before expiry and returns
-   `-32091` at or after expiry without execution.
-9. Crash at every fence/result transaction boundary proves restart recovery,
-   late-owner suppression, and no second execution.
-10. Logs, audit, metrics, traces, Hub storage, and packet-path assertions contain
+8. Retention-boundary replay succeeds immediately before expiry; at expiry the
+   body/result is deleted, exact reuse returns `-32091`, mismatch returns `-32090`,
+   and both remain deterministic after restart without execution or tombstone
+   eviction.
+9. A live owner returns `-32092` with the exact data array and `Retry-After: 1`;
+   a bounded same-byte retry joins that owner and never extends its deadline.
+10. Crash at every fence/result transaction boundary proves restart recovery,
+    late-owner suppression, and no second execution. Every boundary whose single
+    execution cannot be proved returns `-32093` with no retry header or execution.
+11. A one-entry quota accepts no new replay key and returns `-32094` after the
+    first tombstone exists; raising capacity admits only a separately approved new
+    operation, and no test evicts or reuses the first key.
+12. Credential rotation preserves the caller generation and replay key; permanent
+    retirement followed by re-enrollment mints a new generation whose same
+    external subject and Message ID cannot collide with the retired key.
+13. Every custom error uses the exact numeric code, message, one-element A2A v1
+    `data` array, `google.rpc.ErrorInfo` type, reason, domain, metadata, retry
+    header, and client mapping defined above.
+14. Logs, audit, metrics, traces, Hub storage, and packet-path assertions contain
     no bearer, secret reference, prompt Part, artifact, or raw replay body.
 
 Interface health may establish only bounded declaration and reachability. It MUST
