@@ -116,7 +116,7 @@ function testHandler(): {
 
 let servers: LocalApiHttpServer[] = [];
 
-async function start(): Promise<{
+async function start(handlerOverride?: A2ARequestHandler): Promise<{
   server: LocalApiHttpServer;
   handle: ReturnType<typeof vi.fn>;
   audit: ReturnType<typeof vi.fn>;
@@ -129,7 +129,7 @@ async function start(): Promise<{
     api: makeStubLocalApi(),
     secret: SECRET,
     broadcaster: createStreamBroadcaster(),
-    a2aRouter: createA2AHttpRouter({ handlers: [handler], audit, log }),
+    a2aRouter: createA2AHttpRouter({ handlers: [handlerOverride ?? handler], audit, log }),
     host: "127.0.0.1",
     port: 0,
   });
@@ -233,6 +233,23 @@ describe("A2A v1 loopback router", () => {
       result: { task: task() },
     });
     expect(handle).toHaveBeenCalledOnce();
+  });
+
+  it("accepts a successful wire handler result without optional response headers", async () => {
+    const fixture = testHandler();
+    const handleWire = vi.fn(async () => ({ result: task() }));
+    const { server } = await start({ ...fixture.handler, handleWire });
+    const response = await fetch(url(server), {
+      method: "POST",
+      headers: headers(),
+      body: rpc(A2AJsonRpcMethod.GET_TASK, { id: "task-1" }, "wire-no-headers"),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("a2a-version")).toBe("1.0");
+    expect(response.headers.get("a2a-extensions")).toBeNull();
+    expect(await response.json()).toEqual({ jsonrpc: "2.0", id: "wire-no-headers", result: task() });
+    expect(handleWire).toHaveBeenCalledOnce();
   });
 
   it("returns VersionNotSupported with mandatory ErrorInfo", async () => {
