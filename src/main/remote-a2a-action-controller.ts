@@ -84,16 +84,27 @@ export function createRemoteA2AActionController(
     if (!target || JSON.stringify(targetLineage(target, options.config)) !== JSON.stringify(route.lineage)) {
       throw new Error("a2a-remote-task-route-not-authorized");
     }
-    if (action === "continue" && route.state !== "TASK_STATE_INPUT_REQUIRED") {
-      throw new Error("a2a-remote-task-not-input-required");
-    }
-    if (action === "cancel" && isA2ATerminalTaskState(route.state)) {
-      throw new Error("a2a-remote-task-terminal");
+    if (action === "continue") {
+      const disposition = await options.runtime.taskActionDisposition(input.taskHandle, action, ownerId);
+      if (disposition.kind === "blocked") {
+        return Object.freeze({ state: "failed", taskHandle: input.taskHandle, targetAgentId: route.targetAgentId, targetLabel: route.targetLabel, taskState: route.state, outcome: `continue-reconciliation-required:${disposition.outcome}`, updatedAt: now().toISOString() });
+      }
+      if (route.state !== "TASK_STATE_INPUT_REQUIRED") {
+        throw new Error("a2a-remote-task-not-input-required");
+      }
     }
     if (action === "cancel") {
       const disposition = await options.runtime.taskActionDisposition(input.taskHandle, action, ownerId);
       if (disposition.kind === "success") {
         const projection = disposition.projection;
+        if (route.state !== "TASK_STATE_CANCELED"
+          || projection.handle !== input.taskHandle
+          || projection.targetAgentId !== route.targetAgentId
+          || projection.targetLabel !== route.targetLabel
+          || projection.state !== "TASK_STATE_CANCELED"
+          || projection.terminal !== true) {
+          return Object.freeze({ state: "failed", taskHandle: input.taskHandle, targetAgentId: route.targetAgentId, targetLabel: route.targetLabel, taskState: route.state, outcome: "cancel-reconciliation-required:stored-cancel-projection-invalid", updatedAt: now().toISOString() });
+        }
         return Object.freeze({
           state: "sent",
           taskHandle: input.taskHandle,
@@ -106,6 +117,9 @@ export function createRemoteA2AActionController(
       }
       if (disposition.kind === "blocked") {
         return Object.freeze({ state: "failed", taskHandle: input.taskHandle, targetAgentId: route.targetAgentId, targetLabel: route.targetLabel, taskState: route.state, outcome: `cancel-reconciliation-required:${disposition.outcome}`, updatedAt: now().toISOString() });
+      }
+      if (isA2ATerminalTaskState(route.state)) {
+        throw new Error("a2a-remote-task-terminal");
       }
     }
     if (pending) return Object.freeze({ state: "failed", taskHandle: input.taskHandle, targetAgentId: route.targetAgentId, targetLabel: route.targetLabel, outcome: "a2a-remote-busy", updatedAt: now().toISOString() });
@@ -164,8 +178,8 @@ export function createRemoteA2AActionController(
         outcome: result.ok ? "success" : result.outcome,
         updatedAt: now().toISOString(),
       });
-    } catch (error) {
-      latest = Object.freeze({ state: "failed", operationId, taskHandle: input.taskHandle, taskState: route.state, targetAgentId: route.targetAgentId, targetLabel: route.targetLabel, outcome: error instanceof Error ? error.message : "a2a-remote-task-action-failed", updatedAt: now().toISOString() });
+    } catch {
+      latest = Object.freeze({ state: "failed", operationId, taskHandle: input.taskHandle, taskState: route.state, targetAgentId: route.targetAgentId, targetLabel: route.targetLabel, outcome: "a2a-remote-task-action-failed", updatedAt: now().toISOString() });
     } finally {
       pending = false;
     }
@@ -183,8 +197,11 @@ export function createRemoteA2AActionController(
     if (!target || JSON.stringify(targetLineage(target, options.config)) !== JSON.stringify(recovery.lineage)) throw new Error("a2a-remote-task-route-not-authorized");
     const revisions = [target.intendedCredentialRevisionId, ...(target.replayCredentialRevisionIds ?? [])];
     const currentIndex = revisions.indexOf(recovery.credentialRevisionId);
-    const successor = revisions[currentIndex + 1];
-    if (!successor) throw new Error("a2a-remote-successor-revision-unavailable");
+    if (currentIndex < 0) throw new Error("a2a-remote-recovery-revision-not-authorized");
+    // Exact replay may legitimately reuse the still-active credential
+    // revision. Prefer an explicitly configured rotation successor when one
+    // exists; otherwise keep the authorized current revision.
+    const successor = revisions[currentIndex + 1] ?? recovery.credentialRevisionId;
     if (pending) return Object.freeze({ state: "failed", taskHandle: input.taskHandle, targetAgentId: recovery.targetAgentId, targetLabel: recovery.targetLabel, recoveryEligible: true, outcome: "a2a-remote-busy", updatedAt: now().toISOString() });
     pending = true;
     const attemptId = makeId();
@@ -272,14 +289,14 @@ export function createRemoteA2AActionController(
           outcome: result.ok ? "success" : result.outcome,
           updatedAt: now().toISOString(),
         });
-      } catch (error) {
+      } catch {
         latest = Object.freeze({
           state: "failed",
           operationId,
           taskHandle,
           targetAgentId: target.targetAgentId,
           targetLabel: target.label,
-          outcome: error instanceof Error ? error.message : "a2a-remote-send-failed",
+          outcome: "a2a-remote-send-failed",
           updatedAt: now().toISOString(),
         });
       } finally {
