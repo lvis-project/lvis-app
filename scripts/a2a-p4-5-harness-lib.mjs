@@ -192,8 +192,16 @@ export function parseVitestReport(path, expectedFiles) {
     throw new Error(`P4-5 suite must pass every real case with zero skips: total=${total} passed=${passed} failed=${failed} skipped=${skipped}`);
   }
   const files = [...new Set((report.testResults ?? []).map((entry) => entry.name))].sort();
-  if (expectedFiles !== undefined && files.length !== expectedFiles.length) {
-    throw new Error(`P4-5 suite file count mismatch: expected ${expectedFiles.length}, got ${files.length}`);
+  if (expectedFiles !== undefined) {
+    const expected = [...expectedFiles].map((file) => file.replaceAll("\\", "/")).sort();
+    const actual = files.map((file) => file.replaceAll("\\", "/")).sort();
+    if (
+      actual.length !== expected.length ||
+      actual.some((file, index) => !file.endsWith(`/${expected[index]}`))
+    ) {
+      throw new Error(`P4-5 suite file enumeration mismatch: expected ${expected.join(", ")}`);
+    }
+    return Object.freeze({ total, passed, failed, skipped, files: expected });
   }
   return Object.freeze({ total, passed, failed, skipped, files });
 }
