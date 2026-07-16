@@ -993,7 +993,7 @@ stay on the direct A2A data-plane connection between the two hosts.
   route-policy version, and the verified canonical LVIS exact-send-replay
   extension identifier
   `https://lvis.ai/a2a/extensions/exact-send-replay/v1`. The checked-in
-  [exact-send-replay profile](../protocols/lvis-a2a-exact-send-replay-v1.md) is
+  [exact-send-replay profile](../protocols/lvis-a2a-exact-send-replay.md) is
   normative for implementation, but live route eligibility is forbidden until
   the identical specification is served at that exact URI and its published
   SHA-256 digest is pinned by both Agent Hub route policy and the packaged
@@ -1400,4 +1400,4 @@ Design inputs: A2A v1.0 spec + official SDK survey (2026-07-10 research, npm-reg
 
 P4-3 security references: [A2A specification](https://a2a-protocol.org/latest/specification/), [Node.js HTTPS](https://nodejs.org/api/https.html), [JWS (RFC 7515)](https://www.rfc-editor.org/rfc/rfc7515.html), [JWK (RFC 7517)](https://www.rfc-editor.org/rfc/rfc7517.html), [JWT BCP algorithm-verification guidance (RFC 8725)](https://www.rfc-editor.org/rfc/rfc8725.html), [HTTP caching (RFC 9111)](https://www.rfc-editor.org/rfc/rfc9111.html), [TLS service identity (RFC 9525)](https://www.rfc-editor.org/rfc/rfc9525.html), [WHATWG URL](https://url.spec.whatwg.org/), [OWASP SSRF Prevention](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html), and [OWASP Secrets Management](https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html).
 
-P4-5 protocol references: the official [A2A v1.0.0 release](https://github.com/a2aproject/A2A/releases/tag/v1.0.0), immutable [A2A v1.0 specification](https://a2a-protocol.org/v1.0.0/specification/), [A2A extension guide](https://a2a-protocol.org/latest/topics/extensions/), [Agent Discovery guidance](https://a2a-protocol.org/latest/topics/agent-discovery/), [v1.0 interface changes](https://a2a-protocol.org/latest/whats-new-v1/), and the checked-in [LVIS exact-send-replay v1 profile](../protocols/lvis-a2a-exact-send-replay-v1.md). Every wire-conformance artifact pins the official TCK release/tag, full commit, and dependency-lock hash used by the run; a mutable TCK branch is not evidence.
+P4-5 protocol references: the official [A2A v1.0.0 release](https://github.com/a2aproject/A2A/releases/tag/v1.0.0), immutable [A2A v1.0 specification](https://a2a-protocol.org/v1.0.0/specification/), [A2A extension guide](https://a2a-protocol.org/latest/topics/extensions/), [Agent Discovery guidance](https://a2a-protocol.org/latest/topics/agent-discovery/), [v1.0 interface changes](https://a2a-protocol.org/latest/whats-new-v1/), and the checked-in [LVIS exact-send-replay v1 profile](../protocols/lvis-a2a-exact-send-replay.md). Every wire-conformance artifact pins the official TCK release/tag, full commit, and dependency-lock hash used by the run; a mutable TCK branch is not evidence.

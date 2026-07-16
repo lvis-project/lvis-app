@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const blueprintPath = resolve(root, "docs/blueprints/a2a-subagent-messaging.md");
-const specPath = resolve(root, "docs/protocols/lvis-a2a-exact-send-replay-v1.md");
+const specPath = resolve(root, "docs/protocols/lvis-a2a-exact-send-replay.md");
 const extensionUri = "https://lvis.ai/a2a/extensions/exact-send-replay/v1";
 const officialSpec = "https://a2a-protocol.org/v1.0.0/specification/";
 
