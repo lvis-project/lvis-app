@@ -56,6 +56,7 @@ The entry MUST satisfy the bounded P4-1 `AgentExtension` parser. `params` MUST b
 a strict object containing exactly the five string members above. Values MUST
 byte-match the literals shown, except `specDigestSha256`, which MUST equal the
 SHA-256 digest of the exact specification bytes served at the canonical URI.
+JSON object member order is not semantic; exact key membership and values are.
 `resultRetentionSeconds` is the decimal string for seven days and `required`
 MUST be the literal boolean `false`. Unknown, missing,
 duplicated, non-string, differently cased, or differently encoded fields make the
@@ -115,50 +116,68 @@ client's semantic hash over its approved owner; the exact immutable lineage tupl
 `trustKeyId`, `credentialBindingId`, `callerGenerationId`,
 `routePolicyVersion`, `routePolicyDigestSha256`, and
 `extensionSpecDigestSha256`); Task/context identity if present; Message identity;
-configuration; and canonical DLP-processed payload. It excludes mutable attempt
-`credentialRevisionId`, `predecessorRevisionId`, and
-`intendedSuccessorRevisionId`, which are journaled separately and cannot change
-the approved semantic intent. It is not a credential, authorization token, or
-substitute for hashing the received body.
+configuration; and canonical DLP-processed payload. It excludes attempt
+`credentialRevisionId`, mandatory `intendedCredentialRevisionId`, and optional
+`predecessorCredentialRevisionId`, which are journaled separately and cannot
+change the approved semantic intent. It is not a credential, authorization token,
+or substitute for hashing the received body.
 
 ## LVIS host transaction binding
 
 These client-side requirements bind use of this profile to the approved route;
 they do not add fields to the A2A wire protocol.
 
-- Every new initial `SendMessage`, continuation `SendMessage`, and live
-  `CancelTask` MUST commit prepared journal metadata before credential
-  preparation, final no-store route resolve, resolved CAS, or socket I/O. Only an
-  initial Send MUST additionally retain the byte-for-byte serialized body in the
-  OS-bound encrypted payload store and journal its opaque pointer. Continuation
-  and Cancel MUST retain bounded metadata plus semantic hash only and MUST NOT
-  persist a raw/encrypted body or payload pointer. Staged/bound payload creation,
+- Every attempt—new initial `SendMessage`, continuation `SendMessage`, live
+  `CancelTask`, prompt-free `GetTask`, or already-approved exact initial-Send
+  replay—MUST commit prepared journal metadata before credential preparation,
+  final no-store route resolve, resolved CAS, or socket I/O. Only an initial Send
+  MUST additionally retain the byte-for-byte serialized body in the OS-bound
+  encrypted payload store and journal its opaque pointer. Continuation and Cancel
+  MUST retain bounded metadata plus semantic hash only and MUST NOT persist a
+  raw/encrypted body or payload pointer. Staged/bound payload creation,
   failed-preparation deletion, and orphan cleanup are initial-Send-only paths.
 - Initial-Send encryption AAD MUST be the versioned canonical encoding of the
   authenticated owner ID, operation ID, Message ID, exact body SHA-256, and exact
   immutable lineage tuple (`targetAgentId`, canonical exact `interfaceUrl`,
   `agentCardDigestSha256`, `trustKeyId`, `credentialBindingId`,
   `callerGenerationId`, `routePolicyVersion`, `routePolicyDigestSha256`, and
-  `extensionSpecDigestSha256`). Mutable attempt `credentialRevisionId`,
-  `predecessorRevisionId`, `intendedSuccessorRevisionId`, snapshot ID, and
-  snapshot times MUST be excluded from both this AAD and immutable semantic
-  lineage; revision intent is journaled separately.
+  `extensionSpecDigestSha256`). Attempt `credentialRevisionId`, mandatory
+  `intendedCredentialRevisionId`, optional `predecessorCredentialRevisionId`,
+  snapshot ID, and snapshot times MUST be excluded from both this AAD and
+  immutable semantic lineage; revision intent is journaled separately.
 - The exhaustive prepared schema is limited to host operation/attempt IDs;
   DLP-clean owner and operation kind; A2A method; the exact immutable lineage
   tuple; D8 depth; semantic-request hash; initial-Send-only ciphertext hash,
   opaque payload record ID, size, and expiry; Message ID; any known Task/context
-  IDs; mutation approval decision ID/time; created/attempt deadlines; and bounded
-  optional `predecessorRevisionId`/`intendedSuccessorRevisionId`. The optional
-  revision IDs are non-authoritative reconciliation intent only and cannot grant
-  a route or credential. Snapshot ID, resolved credential revision, resolve time,
-  and snapshot issue/expiry times MUST be absent rather than null.
+  IDs; mutation approval decision ID/time; created/attempt deadlines; mandatory
+  bounded `intendedCredentialRevisionId` on every attempt; and bounded optional
+  `predecessorCredentialRevisionId` only when a prior durable attempt exists. A
+  new mutation's intended ID is the exact revision named by foreground approval;
+  prompt-free `GetTask` and exact replay use the exact fresh locally authorized
+  intended revision. Neither field grants route or credential authority, but both
+  are authoritative intent constraints. Final resolve and resolved CAS cannot
+  substitute `intendedCredentialRevisionId`, and a present predecessor must match
+  the prior durable attempt. Snapshot ID, resolved credential revision, resolve
+  time, and snapshot issue/expiry times MUST be absent rather than null.
 - Prompt-free `GetTask` and an already-approved exact initial-Send replay are the
   only attempts that MAY change `credentialRevisionId`, and only inside the exact
   same `credentialBindingId` and `callerGenerationId`; every other immutable
-  field remains exact. Every new mutation requires foreground approval. When
-  predecessor/intended-successor IDs are present, the final no-store resolve and
-  winning resolved CAS MUST prove the same immutable lineage and exact intended
-  revision IDs before any socket starts.
+  field remains exact. Every new mutation requires foreground approval. The final
+  no-store Hub resolve and winning resolved CAS MUST prove the same immutable
+  lineage and exact mandatory `intendedCredentialRevisionId`; when present,
+  `predecessorCredentialRevisionId` MUST equal the prior durable attempt. A
+  missing or mismatched intended ID zeroizes the prepared secret, deletes any
+  unbound initial-Send staged payload, durably terminalizes the attempt as
+  `NOT_SENT`, and starts no socket.
+- Credential intent remains independently fenced although revision fields are
+  excluded from semantic hash and AAD. Approval/prepared revision A followed by
+  an active same-binding Hub resolution for revision B MUST reject B as a
+  substitute and take the `NOT_SENT` path above. Concurrent attempts with the
+  same operation ID and byte-for-byte body but different
+  `intendedCredentialRevisionId` values conflict rather than coalesce. At most the
+  candidate whose intended ID exactly matches final resolve may win; every other
+  candidate receives deterministic `INTENDED_CREDENTIAL_REVISION_CONFLICT` and
+  `NOT_SENT`, with no duplicate socket.
 
 ## Replay key and exact-match rule
 
@@ -453,12 +472,14 @@ following with zero skipped cases:
    nothing further.
 6. A different authenticated caller cannot observe or reuse another caller's
    replay entry.
-7. Missing declaration, wrong URI, `required: true`, malformed or extra params,
+7. Missing declaration, wrong URI, `required: true`, malformed params,
    wrong served-spec digest, missing request activation, or missing required echo
    on an activated success/error fails closed. Continuation `SendMessage`,
    `GetTask`, and `CancelTask` send `A2A-Version: 1.0` but no profile
    header/metadata and receive no echo. The suite proves LVIS route policy rejects
-   a missing profile despite its Agent Card `required: false` declaration.
+   a missing profile despite its Agent Card `required: false` declaration. A
+   declaration with all five exact params in a different JSON member order is
+   valid; an extra key, missing key, or wrong value fails closed.
 8. Retention-boundary replay succeeds immediately before expiry; at expiry one
    CAS changes even a live/in-progress fence to `RETENTION_EXPIRED`, revokes its
    owner token, deletes body/result, writes the tombstone, and suppresses a late
@@ -485,10 +506,20 @@ following with zero skipped cases:
     `credentialBindingId` and `callerGenerationId`; vectors change each other
     immutable-lineage field in turn and prove fail-closed behavior. New mutation
     vectors prove that even an in-binding revision change requires foreground
-    approval. The attempt journal's bounded optional `predecessorRevisionId` and
-    `intendedSuccessorRevisionId` remain non-authoritative until final resolve and
-    resolved CAS prove the exact same lineage and exact intended IDs.
-15. Logs, audit, metrics, traces, Hub storage, and packet-path assertions contain
+    approval. Every prepared attempt has mandatory
+    `intendedCredentialRevisionId`; a new mutation takes it from approval and a
+    prompt-free attempt from fresh local authorization. Optional
+    `predecessorCredentialRevisionId` exists only with a prior durable attempt.
+    Neither field grants route authority, but both are authoritative intent
+    constraints: final resolve and resolved CAS MUST satisfy the exact intended
+    ID, and a present predecessor must match the prior durable attempt.
+15. Approval/prepared revision A with an active same-binding Hub resolution for B
+    zeroizes the secret, deletes any unbound initial staged payload, records
+    `NOT_SENT`, and opens no socket. Concurrent attempts with the same operation
+    and body but different intended IDs produce at most one exact-match winner;
+    every other attempt deterministically conflicts/records `NOT_SENT`, and no
+    duplicate socket is observed.
+16. Logs, audit, metrics, traces, Hub storage, and packet-path assertions contain
     no bearer, secret reference, prompt Part, artifact, or raw replay body.
 
 Interface health may establish only bounded declaration and reachability. It MUST
