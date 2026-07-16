@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { A2ARemoteSettings, A2ARemoteTargetSettings } from "../data/settings-store.js";
+import { isValidRemoteA2ATargetAgentId, isValidRemoteA2ATaskHandle } from "../shared/a2a-remote-input.js";
 import { A2AJsonRpcMethod, type A2AJsonObject } from "../shared/a2a-wire.js";
 import type { A2ARemoteRuntime } from "./a2a-remote-runtime.js";
 import { maskA2AMessage } from "../engine/a2a-subagent-message-codec.js";
@@ -66,7 +67,7 @@ export function createRemoteA2AActionController(
   const ownerId = `local-project:${createHash("sha256").update(options.projectRoot).digest("hex")}`;
 
   const validateHandle = (handle: string) => {
-    if (typeof handle !== "string" || !/^[A-Za-z0-9_-]{16,256}$/.test(handle)) {
+    if (!isValidRemoteA2ATaskHandle(handle)) {
       throw new Error("a2a-remote-task-handle-invalid");
     }
   };
@@ -236,7 +237,7 @@ export function createRemoteA2AActionController(
     }))),
     status: () => Object.freeze(structuredClone(latest)),
     send: async (input: Readonly<{ targetAgentId: number; intent: string }>) => {
-      if (!Number.isSafeInteger(input.targetAgentId) || input.targetAgentId <= 0) throw new Error("a2a-remote-target-invalid");
+      if (!isValidRemoteA2ATargetAgentId(input.targetAgentId)) throw new Error("a2a-remote-target-invalid");
       if (typeof input.intent !== "string" || input.intent.trim() !== input.intent
         || input.intent.length < 1 || input.intent.length > MAX_INTENT_LENGTH) throw new Error("a2a-remote-intent-invalid");
       const target = targets.get(input.targetAgentId);
