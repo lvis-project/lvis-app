@@ -8,6 +8,13 @@ const blueprintPath = resolve(root, "docs/blueprints/a2a-subagent-messaging.md")
 const specPath = resolve(root, "docs/protocols/lvis-a2a-exact-send-replay.md");
 const extensionUri = "https://lvis.ai/a2a/extensions/exact-send-replay/v1";
 const officialSpec = "https://a2a-protocol.org/v1.0.0/specification/";
+const expectedExtensionParams = {
+  profile: "lvis-exact-send-replay",
+  profileVersion: "1",
+  requestBody: "exact-serialized-jsonrpc",
+  resultRetentionSeconds: "604800",
+  specDigestSha256: "<64 lowercase hexadecimal characters>",
+};
 
 function fail(message) {
   throw new Error(`[a2a-p4-5-contract] ${message}`);
@@ -33,6 +40,47 @@ function requireOrdered(text, needles, label) {
     if (next < 0) fail(`${label}: missing ordered step ${JSON.stringify(needle)}`);
     if (next <= cursor) fail(`${label}: out-of-order step ${JSON.stringify(needle)}`);
     cursor = next;
+  }
+}
+
+function hasExactObjectEntries(actual, expected) {
+  if (actual === null || typeof actual !== "object" || Array.isArray(actual)) return false;
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  return (
+    actualKeys.length === expectedKeys.length &&
+    actualKeys.every((key, index) => key === expectedKeys[index]) &&
+    expectedKeys.every((key) => actual[key] === expected[key])
+  );
+}
+
+function validateExactObjectEntryComparison() {
+  const reorderedValid = {
+    specDigestSha256: "<64 lowercase hexadecimal characters>",
+    resultRetentionSeconds: "604800",
+    requestBody: "exact-serialized-jsonrpc",
+    profileVersion: "1",
+    profile: "lvis-exact-send-replay",
+  };
+  const missing = {
+    profile: "lvis-exact-send-replay",
+    profileVersion: "1",
+    requestBody: "exact-serialized-jsonrpc",
+    resultRetentionSeconds: "604800",
+  };
+  const extra = { ...expectedExtensionParams, unexpected: "rejected" };
+  const wrong = { ...expectedExtensionParams, profileVersion: "2" };
+  if (!hasExactObjectEntries(reorderedValid, expectedExtensionParams)) {
+    fail("exact-object self-test rejected reordered valid params");
+  }
+  for (const [label, candidate] of [
+    ["missing", missing],
+    ["extra", extra],
+    ["wrong", wrong],
+  ]) {
+    if (hasExactObjectEntries(candidate, expectedExtensionParams)) {
+      fail(`exact-object self-test accepted ${label} params`);
+    }
   }
 }
 
@@ -204,14 +252,7 @@ function requireExactAgentExtensionContract(text) {
   if (declaration.required !== false) {
     fail("Agent Card extension declaration must use required: false");
   }
-  const expectedParams = {
-    profile: "lvis-exact-send-replay",
-    profileVersion: "1",
-    requestBody: "exact-serialized-jsonrpc",
-    resultRetentionSeconds: "604800",
-    specDigestSha256: "<64 lowercase hexadecimal characters>",
-  };
-  if (JSON.stringify(declaration.params) !== JSON.stringify(expectedParams)) {
+  if (!hasExactObjectEntries(declaration.params, expectedExtensionParams)) {
     fail("Agent Card extension declaration has unexpected params");
   }
 }
@@ -225,6 +266,7 @@ const p45 = blueprint.slice(p45Start, p45End);
 const normalizedP45 = p45.replace(/\s+/g, " ");
 const normalizedSpec = spec.replace(/\s+/g, " ");
 validateContainmentPortability();
+validateExactObjectEntryComparison();
 
 for (const [needle, label] of [
   [extensionUri, "extension URI"],
@@ -263,11 +305,32 @@ for (const [needle, label] of [
   ["`GetTask`, and `CancelTask` MUST omit", "initial-send-only extension scope"],
   ["same exact `credentialBindingId` and", "successor binding invariant"],
   ["`callerGenerationId`", "successor caller generation invariant"],
-  ["`predecessorRevisionId` and `intendedSuccessorRevisionId`", "successor journal lineage"],
-  ["optional revision IDs are non-authoritative intent metadata", "revision metadata authority boundary"],
-  ["final no-store resolve and winning `resolved` CAS must prove", "exact revision CAS proof"],
+  [
+    "mandatory bounded `intendedCredentialRevisionId` on every attempt",
+    "mandatory intended credential revision",
+  ],
+  [
+    "`predecessorCredentialRevisionId` only when a prior durable attempt exists",
+    "optional predecessor credential revision",
+  ],
+  [
+    "new mutation, `intendedCredentialRevisionId` is the exact revision named",
+    "mutation approval revision source",
+  ],
+  ["exact fresh locally authorized revision intended", "prompt-free revision source"],
+  [
+    "Neither revision field grants route or credential authority",
+    "revision route-authority boundary",
+  ],
+  ["authoritative intent constraint", "revision intent authority"],
+  ["final no-store Hub resolve and winning `resolved` CAS must match", "exact revision CAS proof"],
+  ["zeroizes the prepared secret", "revision mismatch secret zeroize"],
+  ["deletes any unbound initial-Send staged payload", "revision mismatch staged cleanup"],
+  ["terminalizes the attempt as `NOT_SENT`", "revision mismatch terminal state"],
+  ["INTENDED_CREDENTIAL_REVISION_CONFLICT", "revision conflict outcome"],
+  ["no case opens a duplicate socket", "revision conflict socket fence"],
   ["the immutable lineage tuple is exactly", "immutable route lineage"],
-  ["Mutable attempt `credentialRevisionId`", "mutable revision exclusion"],
+  ["Attempt `credentialRevisionId`", "attempt revision exclusion"],
   ["Encryption AAD is the versioned canonical encoding", "encryption AAD definition"],
   ["semantic hash covers the canonical method, exact immutable lineage tuple", "semantic lineage definition"],
   ["Only prompt-free `GetTask`", "credential revision carve-out"],
@@ -302,9 +365,24 @@ for (const [needle, label] of [
   ["approved successor", "legacy approved-successor wording"],
   ["activates the extension on every operation", "unqualified per-operation activation"],
   ["extension activation on every operation", "unqualified per-operation activation"],
+  ["`predecessorRevisionId`", "legacy predecessor revision field"],
+  ["`intendedSuccessorRevisionId`", "legacy intended successor field"],
+  ["optional `intendedCredentialRevisionId`", "optional intended credential revision"],
 ]) {
   rejectText(normalizedP45, needle, label);
 }
+
+requireOrdered(
+  normalizedP45,
+  [
+    "mandatory bounded `intendedCredentialRevisionId` on every attempt",
+    "final no-store Hub resolve and winning `resolved` CAS must match",
+    "zeroizes the prepared secret",
+    "terminalizes the attempt as `NOT_SENT`",
+    "zero socket I/O",
+  ],
+  "prepared intended-revision fence ordering",
+);
 
 requireOrdered(
   normalizedP45,
@@ -333,16 +411,38 @@ for (const [needle, label] of [
   ["MUST send `A2A-Version: 1.0` on every A2A operation", "per-operation version header"],
   ["does not activate this extension", "version header activation boundary"],
   ["`required` MUST be the literal boolean `false`", "Agent Card required flag"],
+  ["JSON object member order is not semantic", "params member-order independence"],
   ["LVIS route policy, not the A2A", "route policy mandate"],
-  ["Every new initial `SendMessage`, continuation `SendMessage`, and live", "all mutation preparation scope"],
+  [
+    "Every attempt—new initial `SendMessage`, continuation `SendMessage`, live",
+    "all-attempt preparation scope",
+  ],
   ["Only an initial Send MUST additionally retain", "initial-only body retention"],
   ["MUST NOT persist a raw/encrypted body or payload pointer", "metadata-only continuation cancel"],
   ["Staged/bound payload creation", "initial-only orphan cleanup"],
   ["The exhaustive prepared schema", "prepared schema exhaustiveness"],
-  ["non-authoritative reconciliation intent only", "revision metadata authority boundary"],
-  ["final no-store resolve and winning resolved CAS MUST prove", "exact revision CAS proof"],
+  [
+    "mandatory bounded `intendedCredentialRevisionId` on every attempt",
+    "mandatory intended credential revision",
+  ],
+  [
+    "`predecessorCredentialRevisionId` only when a prior durable attempt exists",
+    "optional predecessor credential revision",
+  ],
+  ["exact revision named by foreground approval", "mutation approval revision source"],
+  ["exact fresh locally authorized", "prompt-free revision source"],
+  ["Neither field grants route or credential authority", "revision route-authority boundary"],
+  ["authoritative intent constraint", "revision intent authority"],
+  ["final no-store Hub resolve and winning resolved CAS MUST prove", "exact revision CAS proof"],
+  ["zeroizes the prepared secret", "revision mismatch secret zeroize"],
+  ["deletes any unbound initial-Send staged payload", "revision mismatch staged cleanup"],
+  ["durably terminalizes the attempt as", "revision mismatch terminal state"],
+  ["INTENDED_CREDENTIAL_REVISION_CONFLICT", "revision conflict outcome"],
+  ["no duplicate socket", "revision conflict socket fence"],
+  ["all five exact params in a different JSON member order is", "params order conformance vector"],
+  ["extra key, missing key, or wrong value fails closed", "params negative conformance vector"],
   ["Prompt-free `GetTask` and an already-approved exact initial-Send replay", "credential revision carve-out"],
-  ["Mutable attempt `credentialRevisionId`", "mutable revision exclusion"],
+  ["Attempt `credentialRevisionId`", "attempt revision exclusion"],
   ["same authenticated caller", "caller identity match"],
   ["byte-for-byte identical serialized HTTP body", "exact body match"],
   ["identical body SHA-256", "body hash match"],
@@ -378,6 +478,21 @@ rejectText(spec, "byte-equivalent canonical", "canonical-body replay wording");
 rejectText(spec, "`Message | Task` union result", "raw Message-or-Task union wording");
 rejectText(spec, '"required": true', "legacy Agent Card required flag");
 rejectText(spec, "extension on every A2A operation", "unqualified per-operation activation");
+rejectText(spec, "`predecessorRevisionId`", "legacy predecessor revision field");
+rejectText(spec, "`intendedSuccessorRevisionId`", "legacy intended successor field");
+rejectText(spec, "optional `intendedCredentialRevisionId`", "optional intended credential revision");
+
+requireOrdered(
+  normalizedSpec,
+  [
+    "mandatory bounded `intendedCredentialRevisionId` on every attempt",
+    "final no-store Hub resolve and winning resolved CAS MUST prove",
+    "zeroizes the prepared secret",
+    "durably terminalizes the attempt as `NOT_SENT`",
+    "starts no socket",
+  ],
+  "spec intended-revision fence ordering",
+);
 
 requireOrdered(
   normalizedSpec,
