@@ -419,7 +419,7 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
           const authorization = req.headers.authorization;
           const extensions = req.headers["a2a-extensions"];
           const reply = await handler.handleWire(request, Object.freeze({
-            rawBody: Uint8Array.from(raw),
+            rawBody: raw,
             ...(typeof authorization === "string" ? { authorization } : {}),
             ...((typeof extensions === "string" || Array.isArray(extensions)) ? { extensions } : {}),
           }));
