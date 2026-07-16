@@ -184,6 +184,38 @@ function requireExactSuccessContracts(text) {
   }
 }
 
+function requireExactAgentExtensionContract(text) {
+  const jsonBlocks = [...text.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match, index) => {
+    try {
+      return JSON.parse(match[1]);
+    } catch (error) {
+      fail(`spec JSON block ${index + 1} is invalid: ${error.message}`);
+    }
+  });
+  const declarations = jsonBlocks.filter((block) => block?.uri === extensionUri);
+  if (declarations.length !== 1) fail("expected exactly one canonical Agent Card declaration");
+  const declaration = declarations[0];
+  if (
+    JSON.stringify(Object.keys(declaration).sort()) !==
+    JSON.stringify(["description", "params", "required", "uri"])
+  ) {
+    fail("Agent Card extension declaration has unexpected fields");
+  }
+  if (declaration.required !== false) {
+    fail("Agent Card extension declaration must use required: false");
+  }
+  const expectedParams = {
+    profile: "lvis-exact-send-replay",
+    profileVersion: "1",
+    requestBody: "exact-serialized-jsonrpc",
+    resultRetentionSeconds: "604800",
+    specDigestSha256: "<64 lowercase hexadecimal characters>",
+  };
+  if (JSON.stringify(declaration.params) !== JSON.stringify(expectedParams)) {
+    fail("Agent Card extension declaration has unexpected params");
+  }
+}
+
 const blueprint = readRequired(blueprintPath);
 const spec = readRequired(specPath);
 const p45Start = blueprint.indexOf("#### P4-5 / G005 direct remote-routing contract");
@@ -218,19 +250,32 @@ for (const [needle, label] of [
   ["at the earlier of client-observed", "encrypted payload deletion boundary"],
   ["lost before that durable commit is not settled", "lost response retention"],
   ["foreground approval is required because neither creates", "existing-operation prompt-free recovery"],
-  ["Every new `SendMessage`, continuation, or live `CancelTask`", "new mutation reapproval"],
+  ["Every new initial `SendMessage`, continuation `SendMessage`, or live", "new mutation reapproval"],
+  ["prepared metadata-journal intent for every mutation", "universal metadata preparation"],
+  ["for an initial Send only, the exact serialized body", "initial-only encrypted body"],
+  ["never stores a raw/encrypted body or payload pointer", "continuation cancel no body pointer"],
+  ["For an initial Send only, failed-preparation and orphan cleanup", "initial-only failed preparation cleanup"],
   ["non-sendable `staged`", "staged encrypted payload"],
   ["One durable transaction then creates", "payload-journal atomic binding"],
   ["unbound staged record whose", "orphan cleanup"],
   ["never persist a raw HTTP body", "continuation cancel metadata-only persistence"],
   ["`SendMessageResponse` oneof wrapper", "A2A send response wrapper"],
   ["`GetTask`, and `CancelTask` MUST omit", "initial-send-only extension scope"],
-  ["same immutable credential binding", "successor binding invariant"],
-  ["authenticated caller generation", "successor caller generation invariant"],
-  ["predecessor/successor revision pair", "successor journal lineage"],
+  ["same exact `credentialBindingId` and", "successor binding invariant"],
+  ["`callerGenerationId`", "successor caller generation invariant"],
+  ["`predecessorRevisionId` and `intendedSuccessorRevisionId`", "successor journal lineage"],
+  ["optional revision IDs are non-authoritative intent metadata", "revision metadata authority boundary"],
+  ["final no-store resolve and winning `resolved` CAS must prove", "exact revision CAS proof"],
+  ["the immutable lineage tuple is exactly", "immutable route lineage"],
+  ["Mutable attempt `credentialRevisionId`", "mutable revision exclusion"],
+  ["Encryption AAD is the versioned canonical encoding", "encryption AAD definition"],
+  ["semantic hash covers the canonical method, exact immutable lineage tuple", "semantic lineage definition"],
+  ["Only prompt-free `GetTask`", "credential revision carve-out"],
+  ["`required: false`; LVIS route policy", "route-policy extension mandate"],
+  ["That version header never activates an extension", "version and activation separation"],
   ["one CAS terminalizes live/in-progress fences as RETENTION_EXPIRED", "retention fence CAS"],
 ]) {
-  requireText(p45, needle, label);
+  requireText(normalizedP45, needle, label);
 }
 
 requireOrdered(
@@ -238,8 +283,8 @@ requireOrdered(
   [
     "pass host authorization",
     "visible foreground `agent-action` approval",
-    "OS-bound encrypted payload store",
-    "prepared metadata-journal intent commits",
+    "durable preparation commits the prepared metadata-journal intent for every mutation",
+    "for an initial Send only, the exact serialized body",
     "OS-safe local resolver",
     "final authenticated no-store route resolve",
     "CAS-attaches the complete snapshot ID",
@@ -247,6 +292,19 @@ requireOrdered(
   ],
   "new-mutation security order",
 );
+
+for (const [needle, label] of [
+  ["the exact serialized mutation body is placed in the OS-bound encrypted payload store", "universal mutation body store"],
+  ["foreground approval -> encrypted payload plus prepared journal", "universal matrix body store"],
+  ["rotates to another credential", "unqualified credential rotation ban"],
+  ["never rotates credential", "legacy credential rotation wording"],
+  ["exact credential tuple stays fixed", "legacy fixed credential tuple"],
+  ["approved successor", "legacy approved-successor wording"],
+  ["activates the extension on every operation", "unqualified per-operation activation"],
+  ["extension activation on every operation", "unqualified per-operation activation"],
+]) {
+  rejectText(normalizedP45, needle, label);
+}
 
 requireOrdered(
   normalizedP45,
@@ -272,6 +330,19 @@ for (const [needle, label] of [
   ["first non-streaming JSON-RPC `SendMessage`", "initial send applicability"],
   ["exact replay of that same initial send", "initial replay applicability"],
   ["MUST NOT send this profile's `A2A-Extensions`", "continuation other-method exclusion"],
+  ["MUST send `A2A-Version: 1.0` on every A2A operation", "per-operation version header"],
+  ["does not activate this extension", "version header activation boundary"],
+  ["`required` MUST be the literal boolean `false`", "Agent Card required flag"],
+  ["LVIS route policy, not the A2A", "route policy mandate"],
+  ["Every new initial `SendMessage`, continuation `SendMessage`, and live", "all mutation preparation scope"],
+  ["Only an initial Send MUST additionally retain", "initial-only body retention"],
+  ["MUST NOT persist a raw/encrypted body or payload pointer", "metadata-only continuation cancel"],
+  ["Staged/bound payload creation", "initial-only orphan cleanup"],
+  ["The exhaustive prepared schema", "prepared schema exhaustiveness"],
+  ["non-authoritative reconciliation intent only", "revision metadata authority boundary"],
+  ["final no-store resolve and winning resolved CAS MUST prove", "exact revision CAS proof"],
+  ["Prompt-free `GetTask` and an already-approved exact initial-Send replay", "credential revision carve-out"],
+  ["Mutable attempt `credentialRevisionId`", "mutable revision exclusion"],
   ["same authenticated caller", "caller identity match"],
   ["byte-for-byte identical serialized HTTP body", "exact body match"],
   ["identical body SHA-256", "body hash match"],
@@ -305,6 +376,8 @@ for (const [needle, label] of [
 }
 rejectText(spec, "byte-equivalent canonical", "canonical-body replay wording");
 rejectText(spec, "`Message | Task` union result", "raw Message-or-Task union wording");
+rejectText(spec, '"required": true', "legacy Agent Card required flag");
+rejectText(spec, "extension on every A2A operation", "unqualified per-operation activation");
 
 requireOrdered(
   normalizedSpec,
@@ -319,6 +392,7 @@ requireOrdered(
 );
 requireExactSuccessContracts(spec);
 requireExactErrorContracts(spec);
+requireExactAgentExtensionContract(spec);
 
 const linkCount = validateLocalLinks(blueprintPath, blueprint) + validateLocalLinks(specPath, spec);
 if (linkCount < 2) fail(`expected at least two checked local links, got ${linkCount}`);
