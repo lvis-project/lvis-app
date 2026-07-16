@@ -115,6 +115,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const CORE_A2A_RESPONSE_HEADERS = new Set(["content-type", "a2a-version"]);
+
+function hasCoreA2AResponseHeader(headers: Readonly<Record<string, string>> | undefined): boolean {
+  return headers !== undefined && Object.keys(headers).some(
+    (name) => CORE_A2A_RESPONSE_HEADERS.has(name.toLowerCase()),
+  );
+}
+
 function sendJson(
   res: ServerResponse,
   status: number,
@@ -122,9 +130,9 @@ function sendJson(
   headers: Record<string, string> = {},
 ): void {
   res.writeHead(status, {
+    ...headers,
     "content-type": JSON_CONTENT_TYPE,
     "a2a-version": A2A_PROTOCOL_VERSION,
-    ...headers,
   });
   res.end(JSON.stringify(body));
 }
@@ -415,6 +423,9 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
             ...(typeof authorization === "string" ? { authorization } : {}),
             ...((typeof extensions === "string" || Array.isArray(extensions)) ? { extensions } : {}),
           }));
+          if (hasCoreA2AResponseHeader(reply.headers)) {
+            throw new Error("a2a-wire-core-response-header-reserved");
+          }
           sendSuccess(res, request.id, reply.result, reply.headers === undefined ? {} : { ...reply.headers });
         } else {
           const result = await handler.handle(
@@ -425,6 +436,17 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
         }
       } catch (error) {
         if (error instanceof A2AWireResponseError) {
+          if (hasCoreA2AResponseHeader(error.headers)) {
+            options.audit?.({
+              type: "a2a-wire-drop",
+              reason: "handler-error",
+              handlerId,
+              method: request.method,
+            });
+            options.log?.("A2A handler " + handlerId + " failed");
+            sendFailure(res, request.id, StandardJsonRpcErrorDefinition.INTERNAL_ERROR);
+            return true;
+          }
           sendWireFailure(res, request.id, error);
           return true;
         }

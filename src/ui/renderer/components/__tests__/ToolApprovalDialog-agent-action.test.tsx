@@ -5,12 +5,12 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { ToolApprovalDialog } from "../ToolApprovalDialog.js";
 import type { ApprovalRequest } from "../../types.js";
 
-function makeAgentActionRequest(trustOrigin: string): ApprovalRequest {
+function makeAgentActionRequest(trustOrigin: string, toolName = "permission:set-mode"): ApprovalRequest {
   return {
     id: "agent-action-1",
     category: "agent-action",
     kind: "agent-action",
-    toolName: "permission:set-mode",
+    toolName,
     toolCategory: "meta",
     args: { mode: "allow" },
     reason: "external permission mutation",
@@ -60,5 +60,23 @@ describe("ToolApprovalDialog external agent-action affordances", () => {
     expect(screen.getByText("승인 범위")).toBeInTheDocument();
     expect(screen.getByText("지속 허용")).toBeInTheDocument();
     expect(screen.getByTestId("approve-button")).toHaveTextContent("허용");
+  });
+
+  it("forces one-shot approval for remote-wire agent actions with protocol tool names", () => {
+    const onDecide = vi.fn();
+    render(
+      <ToolApprovalDialog
+        open
+        request={makeAgentActionRequest("a2a-remote-wire", "a2a-send")}
+        onDecide={onDecide}
+      />,
+    );
+
+    expect(screen.queryByText("항상 허용")).not.toBeInTheDocument();
+    expect(screen.queryByText("승인 범위")).not.toBeInTheDocument();
+    const approve = screen.getByTestId("approve-button");
+    expect(approve).toHaveTextContent("한 번만 허용");
+    fireEvent.click(approve);
+    expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
   });
 });
