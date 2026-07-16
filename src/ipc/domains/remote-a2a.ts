@@ -50,14 +50,14 @@ export function registerRemoteA2AHandlers(deps: IpcDeps): void {
       auditUnauthorized(deps.auditLogger, CHANNELS.remoteA2a.send, event);
       return UNAUTHORIZED_FRAME;
     }
+    const controller = deps.remoteA2AActionController;
+    if (!controller) return DISABLED;
     const value = payload && typeof payload === "object" && !Array.isArray(payload)
       ? payload as Record<string, unknown>
       : {};
     if (!hasUserKeyboardIntent(value.intentToken)) {
       return { ok: false, error: "user-keyboard-required" as const };
     }
-    const controller = deps.remoteA2AActionController;
-    if (!controller) return DISABLED;
     if (!isValidRemoteA2ATargetAgentId(value.targetAgentId) || !isValidUserIntent(value.userIntent)) {
       return { ok: false, error: "a2a-remote-input-invalid" as const };
     }
@@ -98,12 +98,12 @@ export function registerRemoteA2AHandlers(deps: IpcDeps): void {
       auditUnauthorized(deps.auditLogger, CHANNELS.remoteA2a.action, event);
       return UNAUTHORIZED_FRAME;
     }
+    const controller = deps.remoteA2AActionController;
+    if (!controller) return DISABLED;
     const value = payload && typeof payload === "object" && !Array.isArray(payload)
       ? payload as Record<string, unknown>
       : {};
     if (!hasUserKeyboardIntent(value.intentToken)) return { ok: false, error: "user-keyboard-required" as const };
-    const controller = deps.remoteA2AActionController;
-    if (!controller) return DISABLED;
     if ((value.action !== "resume" && value.action !== "cancel" && value.action !== "replay")
       || !isValidRemoteA2ATaskHandle(value.taskHandle)
       || (value.action === "resume" ? !isValidUserIntent(value.userIntent) : value.userIntent !== undefined)) {

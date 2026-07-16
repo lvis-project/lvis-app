@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createA2AHttpRouter, A2AHandlerError, type A2ARequestHandler } from "../a2a-router.js";
+import {
+  createA2AHttpRouter,
+  A2AHandlerError,
+  A2AWireResponseError,
+  type A2ARequestHandler,
+} from "../a2a-router.js";
 import {
   startLocalApiHttpServer,
   type LocalApiHttpServer,
@@ -453,18 +458,61 @@ describe("A2A v1 loopback router", () => {
     expect(JSON.stringify(log.mock.calls)).not.toContain("sensitive-handler-detail");
   });
 
-  it("rejects wire-handler attempts to override core A2A response headers", async () => {
+  it.each([
+    ["Content-Type", "text/plain"],
+    ["A2A-Version", "0.1"],
+  ])("rejects a successful wire handler overriding core header %s", async (headerName, headerValue) => {
     const { handler } = testHandler();
     const { server, audit, log } = await start({
       ...handler,
       handleWire: async () => ({
         result: { task: task() },
         headers: {
-          "Content-Type": "text/plain",
-          "A2A-Version": "0.1",
+          [headerName]: headerValue,
           "a2a-extensions": "https://example.test/extension",
         },
       }),
+    });
+    const response = await fetch(url(server), {
+      method: "POST",
+      headers: headers(),
+      body: rpc(A2AJsonRpcMethod.GET_TASK, { id: "task-1" }),
+    });
+
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(response.headers.get("a2a-version")).toBe("1.0");
+    expect(response.headers.get("a2a-extensions")).toBeNull();
+    expect(await response.json()).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      error: { code: -32603, message: "Internal error" },
+    });
+    expect(audit).toHaveBeenCalledWith({
+      type: "a2a-wire-drop",
+      reason: "handler-error",
+      handlerId: "tck",
+      method: A2AJsonRpcMethod.GET_TASK,
+    });
+    expect(log).toHaveBeenCalledWith("A2A handler tck failed");
+  });
+
+  it.each([
+    ["Content-Type", "text/plain"],
+    ["A2A-Version", "0.1"],
+  ])("rejects a wire error overriding core header %s", async (headerName, headerValue) => {
+    const { handler } = testHandler();
+    const { server, audit, log } = await start({
+      ...handler,
+      handleWire: async () => {
+        throw new A2AWireResponseError(
+          422,
+          { code: -32099, message: "handler-selected-error" },
+          {
+            [headerName]: headerValue,
+            "a2a-extensions": "https://example.test/extension",
+          },
+        );
+      },
     });
     const response = await fetch(url(server), {
       method: "POST",
