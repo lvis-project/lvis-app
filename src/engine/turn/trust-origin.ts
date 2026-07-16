@@ -8,6 +8,7 @@
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import { isUserKeyboardOrigin } from "../../shared/chat-origin.js";
 import type { ToolTrustOrigin } from "../../tools/types.js";
+import type { RationaleEligibilityProvenance } from "../../tools/pipeline/rationale-control.js";
 import type { ToolResult, ToolUseBlock } from "../../tools/executor.js";
 
 const INLINE_PASTED_TEXT_RE = /(^|\n)-{5} Pasted text #\d+ \(\d+ lines\) -{5}\n/;
@@ -35,6 +36,17 @@ export function initialToolTrustOrigin(inputOrigin: ChatInputOrigin, turnInput: 
     return "app-emitted";
   }
   return "llm-tool-arg";
+}
+
+/** Project the monotonic trust-origin SOT into rationale provenance. */
+export function rationaleProvenanceFor(
+  startedFromUserKeyboard: boolean,
+  current: ToolTrustOrigin,
+): RationaleEligibilityProvenance {
+  const taint = current === "llm-tool-arg" || current === "user-keyboard"
+    ? "none"
+    : current;
+  return { startedFromUserKeyboard, taint };
 }
 
 export function summarizePermissionUserIntent(

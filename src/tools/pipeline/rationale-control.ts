@@ -17,14 +17,15 @@ import type { RiskVerdict } from "../../permissions/reviewer/risk-classifier.js"
 import type { ToolSchema } from "../../engine/llm/types.js";
 import { maskSensitiveData } from "../../audit/dlp-filter.js";
 import { canonicalStringify } from "../../permissions/user-approval-store.js";
+import { assertValidToolUseId } from "../../shared/tool-use-id.js";
 
 export const RATIONALE_CONTROL_CONTRACT_VERSION = 1 as const;
 export const RATIONALE_RESPONSE_TOOL = "permission_rationale";
 
 /**
- * PR(1) is contract-only. Production activation remains a hard NO-GO until
- * PR(2) supplies the server-side one-shot ticket store/CAS enforcement and
- * PR(3) supplies the bounded modal UI.
+ * PR(2) supplies the dormant host orchestration and durable one-shot
+ * enforcement. Production activation remains a hard NO-GO until PR(3)
+ * supplies the bounded modal UI and guarded activation checks.
  */
 export const FOREGROUND_RATIONALE_PRODUCTION_ENABLED = false as const;
 export const RATIONALE_ACTIVATION_PREREQUISITES = [
@@ -67,6 +68,17 @@ export type RationaleTaint =
 export interface RationaleEligibilityProvenance {
   startedFromUserKeyboard: boolean;
   taint: RationaleTaint;
+}
+
+/**
+ * Host-only marker for an unexecuted sibling proposal. The digest binds the
+ * keyboard-turn anchor, tool name, and canonical original input while
+ * deliberately excluding the provider-assigned tool-use id.
+ */
+export interface CancelledSiblingProposalGuard {
+  contractVersion: typeof RATIONALE_CONTROL_CONTRACT_VERSION;
+  anchorId: string;
+  proposalDigest: string;
 }
 
 export interface HostRationaleEligibilityContext {
@@ -130,13 +142,19 @@ export function createTriggeringBatchDisposition(input: {
   completedToolUseIds: readonly string[];
 }): TriggeringBatchDisposition {
   assertBoundedText(input.batchId, "batchId", 256);
-  assertBoundedText(input.triggeringToolUseId, "triggeringToolUseId", 256);
+  assertValidToolUseId(input.triggeringToolUseId, "triggering tool use ID");
   const originalToolUseIds = cloneBoundedStringList(
     input.originalToolUseIds, "originalToolUseIds", 64, 256,
   );
   const completedToolUseIds = cloneBoundedStringList(
     input.completedToolUseIds, "completedToolUseIds", 63, 256, true,
   );
+  for (const toolUseId of originalToolUseIds) {
+    assertValidToolUseId(toolUseId, "original tool use ID");
+  }
+  for (const toolUseId of completedToolUseIds) {
+    assertValidToolUseId(toolUseId, "completed tool use ID");
+  }
   const originalSet = new Set(originalToolUseIds);
   const completedSet = new Set(completedToolUseIds);
   if (originalSet.size !== originalToolUseIds.length ||
@@ -175,7 +193,7 @@ export function validateTriggeringBatchDisposition(
       "cancelledUnexecutedToolUseIds", "unexecutedSiblingPolicy",
       "followupRationaleBatchPolicy", "batchDigest"], "TriggeringBatchDisposition");
     assertBoundedText(value.batchId, "batchId", 256);
-    assertBoundedText(value.triggeringToolUseId, "triggeringToolUseId", 256);
+    assertValidToolUseId(value.triggeringToolUseId, "triggering tool use ID");
     const expected = createTriggeringBatchDisposition({
       batchId: value.batchId,
       originalToolUseIds: value.originalToolUseIds,
@@ -257,6 +275,8 @@ export function validateHostAnchorRoundReservationReceipt(
 
 export class InMemoryHostAnchorRoundCasStore implements HostAnchorRoundCas {
   readonly #reservations = new Map<string, HostAnchorRoundReservationReceipt>();
+  readonly #reservationSessions = new Map<string, string>();
+  readonly #reservationExpiries = new Map<string, number>();
 
   tryReserve(input: {
     anchor: RequestAnchor;
@@ -273,6 +293,7 @@ export class InMemoryHostAnchorRoundCasStore implements HostAnchorRoundCas {
         input.action.anchorId !== input.anchor.anchorId) {
       throw new TypeError("invalid anchor-round CAS reservation input");
     }
+    this.#pruneExpired(now);
     const current = this.#reservations.get(input.anchor.anchorId);
     if (current) {
       return current.anchorDigest === digest(input.anchor) &&
@@ -290,6 +311,8 @@ export class InMemoryHostAnchorRoundCasStore implements HostAnchorRoundCas {
       ticketId: randomUUID(), nonce: randomUUID(), reservedAt: now,
     });
     this.#reservations.set(input.anchor.anchorId, receipt);
+    this.#reservationSessions.set(input.anchor.anchorId, input.anchor.sessionId);
+    this.#reservationExpiries.set(input.anchor.anchorId, input.anchor.expiresAt);
     return receipt;
   }
 
@@ -306,6 +329,37 @@ export class InMemoryHostAnchorRoundCasStore implements HostAnchorRoundCas {
     } catch {
       return false;
     }
+  }
+
+  closeSession(sessionId: string): number {
+    if (typeof sessionId !== "string" || sessionId.length === 0) {
+      throw new TypeError("invalid anchor-round CAS session id");
+    }
+    let removed = 0;
+    for (const [anchorId, currentSessionId] of this.#reservationSessions) {
+      if (currentSessionId !== sessionId) continue;
+      this.#deleteReservation(anchorId);
+      removed += 1;
+    }
+    return removed;
+  }
+
+  clear(): void {
+    this.#reservations.clear();
+    this.#reservationSessions.clear();
+    this.#reservationExpiries.clear();
+  }
+
+  #pruneExpired(now: number): void {
+    for (const [anchorId, expiresAt] of this.#reservationExpiries) {
+      if (expiresAt <= now) this.#deleteReservation(anchorId);
+    }
+  }
+
+  #deleteReservation(anchorId: string): void {
+    this.#reservations.delete(anchorId);
+    this.#reservationSessions.delete(anchorId);
+    this.#reservationExpiries.delete(anchorId);
   }
 }
 
@@ -397,7 +451,37 @@ function digest(value: unknown): string {
   return createHash("sha256").update(canonicalStringify(value)).digest("hex");
 }
 
-function sanitizeDisplayText(value: string, maxLength: number): string {
+export function createCancelledSiblingProposalGuard(input: {
+  readonly anchorId: string;
+  readonly toolName: string;
+  readonly originalInput: Readonly<Record<string, unknown>>;
+}): CancelledSiblingProposalGuard {
+  assertBoundedText(input.anchorId, "anchorId", 256);
+  assertBoundedText(input.toolName, "toolName", 256);
+  if (
+    input.originalInput === null ||
+    typeof input.originalInput !== "object" ||
+    Array.isArray(input.originalInput)
+  ) {
+    throw new TypeError("cancelled sibling input must be a plain record");
+  }
+  const originalInput = cloneCanonicalJson(
+    input.originalInput,
+    "cancelledSibling.originalInput",
+    CANCELLED_SIBLING_GUARD_LIMITS,
+  );
+  return deepFreeze({
+    contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
+    anchorId: input.anchorId,
+    proposalDigest: digest({
+      anchorId: input.anchorId,
+      toolName: input.toolName,
+      originalInput,
+    }),
+  }) as CancelledSiblingProposalGuard;
+}
+
+export function sanitizeDisplayText(value: string, maxLength: number): string {
   const normalized = value
     .replace(/<[^>]*>/g, " ")
     .replace(/[\u0000-\u001f\u007f]/g, " ")
@@ -417,20 +501,38 @@ function deepFreeze<T>(value: T): DeepReadonly<T> {
 }
 
 
+interface CanonicalJsonLimits {
+  readonly maxDepth: number;
+  readonly maxNodes: number;
+  readonly maxBytes: number;
+}
+
 const MAX_CANONICAL_DEPTH = 12;
 const MAX_CANONICAL_NODES = 1_024;
 const MAX_CANONICAL_BYTES = 64 * 1_024;
+const DEFAULT_CANONICAL_JSON_LIMITS: CanonicalJsonLimits = Object.freeze({
+  maxDepth: MAX_CANONICAL_DEPTH,
+  maxNodes: MAX_CANONICAL_NODES,
+  maxBytes: MAX_CANONICAL_BYTES,
+});
+const CANCELLED_SIBLING_GUARD_LIMITS: CanonicalJsonLimits = Object.freeze({
+  maxDepth: 32, maxNodes: 16_384, maxBytes: 1024 * 1024,
+});
 
-function assertCanonicalJson(value: unknown, label: string): void {
+function assertCanonicalJson(
+  value: unknown,
+  label: string,
+  limits: CanonicalJsonLimits = DEFAULT_CANONICAL_JSON_LIMITS,
+): void {
   const seen = new WeakSet<object>();
   let nodes = 0;
 
   const visit = (current: unknown, depth: number, path: string): void => {
     nodes += 1;
-    if (nodes > MAX_CANONICAL_NODES) {
+    if (nodes > limits.maxNodes) {
       throw new TypeError(label + " exceeds canonical JSON node limit");
     }
-    if (depth > MAX_CANONICAL_DEPTH) {
+    if (depth > limits.maxDepth) {
       throw new TypeError(label + " exceeds canonical JSON depth limit");
     }
     if (
@@ -511,15 +613,19 @@ function assertCanonicalJson(value: unknown, label: string): void {
   };
 
   visit(value, 0, label);
-  if (Buffer.byteLength(canonicalStringify(value), "utf8") > MAX_CANONICAL_BYTES) {
+  if (Buffer.byteLength(canonicalStringify(value), "utf8") > limits.maxBytes) {
     throw new TypeError(label + " exceeds canonical JSON byte limit");
   }
 }
 
-function cloneCanonicalJson<T>(value: T, label: string): DeepReadonly<T> {
-  assertCanonicalJson(value, label);
+function cloneCanonicalJson<T>(
+  value: T,
+  label: string,
+  limits = DEFAULT_CANONICAL_JSON_LIMITS,
+): DeepReadonly<T> {
+  assertCanonicalJson(value, label, limits);
   const cloned = structuredClone(value);
-  assertCanonicalJson(cloned, label);
+  assertCanonicalJson(cloned, label, limits);
   return deepFreeze(cloned);
 }
 
@@ -1036,7 +1142,7 @@ export function createRationaleRequiredControl(input: {
 }): RationaleRequiredControl {
   const now = input.now ?? Date.now();
   assertHostEligibilityContext(input.eligibilityContext);
-  assertBoundedText(input.sealedAction.toolUseId, "sealedAction.toolUseId", 256);
+  assertValidToolUseId(input.sealedAction.toolUseId, "sealed action tool use ID");
   assertBoundedText(input.sealedAction.toolName, "sealedAction.toolName", 256);
   if (
     !isValidRequestAnchor(input.anchor, now) ||
@@ -1216,7 +1322,7 @@ export function verifyRationaleRequiredControl(
       ["toolUseId", "toolName", "originalInput", "finalInput"],
       "SealedRationaleAction",
     );
-    assertBoundedText(sealedAction.toolUseId, "sealedAction.toolUseId", 256);
+    assertValidToolUseId(sealedAction.toolUseId, "sealed action tool use ID");
     assertBoundedText(sealedAction.toolName, "sealedAction.toolName", 256);
     assertCanonicalJson(sealedAction.originalInput, "sealedAction.originalInput");
     assertCanonicalJson(sealedAction.finalInput, "sealedAction.finalInput");

@@ -114,6 +114,39 @@ function toolOwnerKey(tool: Tool): string {
   throw new Error(`Unsupported tool source for '${tool.name}': ${String(tool.source)}`);
 }
 
+function assertToolGovernanceShape(tool: Tool): void {
+  const external = tool.source !== "builtin";
+  const hasDecisionOverride = tool.decisionOverride !== undefined;
+  const hasDynamicCategory = tool.categoryForInput !== undefined;
+
+  if (external && tool.category === "meta") {
+    throw new Error(`External tool '${tool.name}' cannot declare the host-only meta category`);
+  }
+  if (external && hasDecisionOverride) {
+    throw new Error(`External tool '${tool.name}' cannot declare decisionOverride`);
+  }
+  if (external && hasDynamicCategory) {
+    throw new Error(`External tool '${tool.name}' cannot declare categoryForInput`);
+  }
+  if (tool.category === "meta") {
+    if (hasDynamicCategory) {
+      throw new Error(`Meta tool '${tool.name}' cannot declare categoryForInput`);
+    }
+    if (
+      tool.decisionOverride !== "ask" &&
+      tool.decisionOverride !== "always-allow-with-audit"
+    ) {
+      throw new Error(
+        `Builtin meta tool '${tool.name}' requires a supported decisionOverride`,
+      );
+    }
+    return;
+  }
+  if (hasDecisionOverride) {
+    throw new Error(`Non-meta builtin tool '${tool.name}' cannot declare decisionOverride`);
+  }
+}
+
 export class ToolRegistry {
   /**
    * `name → latest active tool` — fast path for the common lookup.
@@ -128,6 +161,9 @@ export class ToolRegistry {
    */
   private readonly versioned = new Map<string, Map<string, Tool>>();
   private denyRules: DenyRule[] = [];
+  private generation = 0;
+
+  constructor(private readonly parentGeneration?: () => string) {}
 
   /**
    * Register a tool.
@@ -141,10 +177,12 @@ export class ToolRegistry {
   register(tool: Tool): void {
     const versionMap = this.addToVersioned(this.versioned, tool);
     this.tools.set(tool.name, this.pickLatest(versionMap));
+    this.generation += 1;
   }
 
   /** Bulk register — used by plugin load and builtin tool registration. */
   registerBatch(tools: Tool[]): void {
+    for (const tool of tools) assertToolGovernanceShape(tool);
     for (const tool of tools) this.register(tool);
   }
 
@@ -213,6 +251,7 @@ export class ToolRegistry {
     for (const [name, tool] of nextTools) {
       this.tools.set(name, tool);
     }
+    this.generation += 1;
   }
 
   /**
@@ -220,12 +259,17 @@ export class ToolRegistry {
    * given MCP server in one pass. Called by McpManager.killSwitch.
    */
   unregisterByMcp(mcpServerId: string): void {
+    let changed = false;
     for (const [name, versionMap] of this.versioned) {
       for (const [version, tool] of versionMap) {
-        if (tool.mcpServerId === mcpServerId) versionMap.delete(version);
+        if (tool.mcpServerId === mcpServerId) {
+          versionMap.delete(version);
+          changed = true;
+        }
       }
       this.syncLatest(name, versionMap);
     }
+    if (changed) this.generation += 1;
   }
 
   /**
@@ -415,7 +459,14 @@ export class ToolRegistry {
 
   /** Replace the deny-rule list (admin policy load). */
   setDenyRules(rules: DenyRule[]): void {
-    this.denyRules = rules;
+    this.denyRules = [...rules];
+    this.generation += 1;
+  }
+
+  /** Monotonic host identity used to invalidate sealed rationale actions. */
+  getGeneration(): string {
+    const local = String(this.generation);
+    return this.parentGeneration ? `${this.parentGeneration()}:${local}` : local;
   }
 
   /** Registered tool count (includes denied). */
@@ -430,7 +481,7 @@ export class ToolRegistry {
    */
   createScopedView(allowedNames: Set<string> | string[]): ToolRegistry {
     const allowed = new Set(allowedNames);
-    const scoped = new ToolRegistry();
+    const scoped = new ToolRegistry(() => this.getGeneration());
     for (const [name, tool] of this.tools) {
       if (allowed.has(name)) scoped.register(tool);
     }
@@ -455,6 +506,7 @@ export class ToolRegistry {
   }
 
   private addToVersioned(index: Map<string, Map<string, Tool>>, tool: Tool): Map<string, Tool> {
+    assertToolGovernanceShape(tool);
     const versionMap = index.get(tool.name) ?? new Map<string, Tool>();
     this.assertNameOwnerCompatible(versionMap, tool);
     if (versionMap.has(tool.version)) {

@@ -1,10 +1,13 @@
 import { canonicalStringify } from "../../permissions/user-approval-store.js";
 import type { RiskVerdict } from "../../permissions/reviewer/risk-classifier.js";
+import { redactHomePathsInText } from "../../audit/dlp-filter.js";
 import {
   RATIONALE_CONTROL_CONTRACT_VERSION,
   assertRationaleCanonicalJson,
   cloneRationaleCanonicalJson,
+  normalizeRationaleRiskVerdict,
   parseRationaleResponse,
+  sanitizeDisplayText,
   verifyActionIdentity,
   verifyRationaleRequiredControl,
   type ActionIdentity,
@@ -28,7 +31,6 @@ import {
   validateHostConsumedAllowOnceReceipt,
   validateRationaleTicketRecord,
   type HostConsumedAllowOnceReceipt,
-  type HostInvocationStartCas,
   type HostInvocationStartLease,
   type InvocationAuditRecord,
   type RationaleStatus,
@@ -80,6 +82,207 @@ export interface RationaleUiAuditProjection {
   modalFallbackRequired: boolean;
 }
 
+const PROJECTION_GENERATION_OUTCOMES: readonly RationaleGenerationOutcome[] = [
+  "accepted-rationale",
+  "generation-unavailable",
+  "generation-error",
+  "generation-timeout",
+  "missing-rationale-call",
+  "ordinary-tool-call-rejected",
+  "multiple-calls-rejected",
+  "malformed-rationale",
+];
+const PROJECTION_REEVALUATION_OUTCOMES: readonly ReviewerReevaluationOutcome[] = [
+  "fresh",
+  ...REVIEWER_REEVALUATION_FAILURE_OUTCOMES,
+];
+const PROJECTION_SCOPE_ALIGNMENTS: readonly ReviewerScopeAlignment[] = [
+  "aligned",
+  "unclear",
+  "outside",
+  "unknown",
+];
+const PROJECTION_TERMINAL_REASONS: readonly RationaleTerminalReason[] = [
+  "allowed-once",
+  "user-deny",
+  "user-cancel",
+  "modal-timeout",
+  "caller-abort",
+  "session-close",
+  "identity-mismatch",
+  "stale-replay",
+  "expired",
+];
+const PROJECTION_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+function sanitizeProjectionDisplayText(value: string, maxLength: number): string {
+  return redactHomePathsInText(sanitizeDisplayText(value, 4_096)).slice(0, maxLength);
+}
+
+function isBoundedProjectionText(
+  value: unknown,
+  maxLength: number,
+): value is string {
+  return typeof value === "string" &&
+    value.trim().length > 0 &&
+    value.length <= maxLength;
+}
+
+function isSanitizedProjectionText(
+  value: unknown,
+  maxLength: number,
+): value is string {
+  return isBoundedProjectionText(value, maxLength) &&
+    sanitizeProjectionDisplayText(value, maxLength) === value;
+}
+
+function isBoundedProjectionList(
+  value: unknown,
+  maxItems: number,
+  maxLength: number,
+): value is readonly string[] {
+  return Array.isArray(value) &&
+    value.length >= 1 &&
+    value.length <= maxItems &&
+    value.every((item) => isSanitizedProjectionText(item, maxLength));
+}
+
+function normalizedProjectionVerdict(value: unknown, label: string): RiskVerdict {
+  const normalized = normalizeRationaleRiskVerdict(value as RiskVerdict, label);
+  if (!equal(normalized, value)) {
+    throw new TypeError(label + " is not canonical");
+  }
+  return normalized;
+}
+
+export function validateRationaleUiAuditProjection(
+  value: unknown,
+): value is RationaleUiAuditProjection {
+  try {
+    assertRationaleCanonicalJson(value, "RationaleUiAuditProjection");
+    if (!isRecord(value)) return false;
+    exact(value, [
+      "contractVersion", "projection", "ticketId", "anchorId", "actionDigest",
+      "round", "reasonCode", "toolName", "canonicalTargets", "requestedEffects",
+      "affectedResources", "requiredAuthority", "reviewerOutcome",
+      "generationOutcome", "reevaluationOutcome", "initialVerdict",
+      "reevaluatedVerdict", "effectiveVerdict", "scopeAlignment", "scopeReasons",
+      "rationaleStatus", "terminalReason", "suggestion", "modalFallbackRequired",
+    ], "RationaleUiAuditProjection");
+    if (
+      value.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
+      value.projection !== "rationale-ui-audit" ||
+      typeof value.ticketId !== "string" ||
+      !PROJECTION_UUID_RE.test(value.ticketId) ||
+      typeof value.anchorId !== "string" ||
+      !PROJECTION_UUID_RE.test(value.anchorId) ||
+      typeof value.actionDigest !== "string" ||
+      !/^[0-9a-f]{64}$/u.test(value.actionDigest) ||
+      value.round !== 1 ||
+      value.reasonCode !== "foreground-reviewer-threshold" ||
+      !isSanitizedProjectionText(value.toolName, 256) ||
+      !isBoundedProjectionList(value.canonicalTargets, 32, 1_024) ||
+      !isBoundedProjectionList(value.requestedEffects, 8, 160) ||
+      !isBoundedProjectionList(value.affectedResources, 8, 160) ||
+      !isSanitizedProjectionText(value.requiredAuthority, 160) ||
+      (value.reviewerOutcome !== "fresh" && value.reviewerOutcome !== "cache") ||
+      !PROJECTION_GENERATION_OUTCOMES.includes(
+        value.generationOutcome as RationaleGenerationOutcome,
+      ) ||
+      (value.reevaluationOutcome !== null &&
+        !PROJECTION_REEVALUATION_OUTCOMES.includes(
+          value.reevaluationOutcome as ReviewerReevaluationOutcome,
+        )) ||
+      !PROJECTION_SCOPE_ALIGNMENTS.includes(
+        value.scopeAlignment as ReviewerScopeAlignment,
+      ) ||
+      !isBoundedProjectionList(value.scopeReasons, 8, 160) ||
+      (value.rationaleStatus !== "ready" && value.rationaleStatus !== "failed") ||
+      (value.terminalReason !== null &&
+        !PROJECTION_TERMINAL_REASONS.includes(
+          value.terminalReason as RationaleTerminalReason,
+        )) ||
+      typeof value.modalFallbackRequired !== "boolean"
+    ) {
+      return false;
+    }
+
+    const initial = normalizedProjectionVerdict(value.initialVerdict, "initialVerdict");
+    const reevaluated = normalizedProjectionVerdict(
+      value.reevaluatedVerdict,
+      "reevaluatedVerdict",
+    );
+    const effective = normalizedProjectionVerdict(
+      value.effectiveVerdict,
+      "effectiveVerdict",
+    );
+    if (
+      !isSanitizedProjectionText(initial.reason, 500) ||
+      !isSanitizedProjectionText(reevaluated.reason, 500) ||
+      !isSanitizedProjectionText(effective.reason, 500)
+    ) {
+      return false;
+    }
+    const rank: Record<RiskVerdict["level"], number> = {
+      low: 0,
+      medium: 1,
+      high: 2,
+    };
+    const expectedEffective =
+      rank[reevaluated.level] > rank[initial.level] ? reevaluated : initial;
+    if (!equal(effective, expectedEffective)) return false;
+
+    if (value.rationaleStatus === "ready") {
+      return value.generationOutcome === "accepted-rationale" &&
+        value.reevaluationOutcome === "fresh" &&
+        value.scopeAlignment !== "unknown" &&
+        value.modalFallbackRequired === false &&
+        isSanitizedProjectionText(value.suggestion, 500);
+    }
+
+    const acceptedThenReviewerFailed =
+      value.generationOutcome === "accepted-rationale" &&
+      value.reevaluationOutcome !== null &&
+      value.reevaluationOutcome !== "fresh";
+    const generationFailed =
+      value.generationOutcome !== "accepted-rationale" &&
+      value.reevaluationOutcome === null;
+    return (acceptedThenReviewerFailed || generationFailed) &&
+      value.scopeAlignment === "unknown" &&
+      value.modalFallbackRequired === true &&
+      value.suggestion === null &&
+      equal(reevaluated, initial) &&
+      equal(effective, initial);
+  } catch {
+    return false;
+  }
+}
+
+function projectUiText(value: string, maxLength: number, label: string): string {
+  const projected = sanitizeProjectionDisplayText(value, maxLength);
+  if (!projected) throw new TypeError(label + " has no safe display text");
+  return projected;
+}
+
+function projectUiList(
+  values: readonly string[],
+  maxLength: number,
+  label: string,
+): readonly string[] {
+  const projected = values.map((value, index) =>
+    projectUiText(value, maxLength, label + "[" + index + "]"));
+  return seal(projected, label);
+}
+
+function projectUiVerdict(value: RiskVerdict, label: string): RiskVerdict {
+  const normalized = normalizeRationaleRiskVerdict(value, label);
+  return seal({
+    level: normalized.level,
+    reason: projectUiText(normalized.reason, 500, label + ".reason"),
+  }, label);
+}
+
 export function createRationaleUiAuditProjection(input: {
   control: RationaleRequiredControl;
   response: RationaleResponse | null;
@@ -121,7 +324,7 @@ export function createRationaleUiAuditProjection(input: {
     if (!parsed || !equal(parsed, input.response)) {
       throw new Error("ready projection requires sealed rationale response");
     }
-    suggestion = parsed.suggestion;
+    suggestion = projectUiText(parsed.suggestion, 500, "suggestion");
     reevaluatedVerdict = input.reevaluation.reevaluatedVerdict;
     effectiveVerdict = input.reevaluation.effectiveVerdict;
     scopeAlignment = input.reevaluation.scopeAlignment;
@@ -148,19 +351,40 @@ export function createRationaleUiAuditProjection(input: {
   } else {
     throw new Error("UI/audit projection requires ready or failed rationale status");
   }
+  const initialVerdict = projectUiVerdict(input.control.initialVerdict, "initialVerdict");
+  reevaluatedVerdict = projectUiVerdict(reevaluatedVerdict, "reevaluatedVerdict");
+  effectiveVerdict = projectUiVerdict(effectiveVerdict, "effectiveVerdict");
   return seal({ contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
     projection: "rationale-ui-audit", ticketId: input.control.ticketId,
     anchorId: input.control.anchor.anchorId,
     actionDigest: input.control.action.actionDigest, round: 1,
-    reasonCode: input.control.reasonCode, toolName: input.control.action.toolName,
-    canonicalTargets: input.control.action.canonicalTargets,
-    requestedEffects: input.control.action.requestedEffects,
-    affectedResources: input.control.action.affectedResources,
-    requiredAuthority: input.control.action.requiredAuthority,
+    reasonCode: input.control.reasonCode,
+    toolName: projectUiText(input.control.action.toolName, 256, "toolName"),
+    canonicalTargets: projectUiList(
+      input.control.action.canonicalTargets,
+      1_024,
+      "canonicalTargets",
+    ),
+    requestedEffects: projectUiList(
+      input.control.action.requestedEffects,
+      160,
+      "requestedEffects",
+    ),
+    affectedResources: projectUiList(
+      input.control.action.affectedResources,
+      160,
+      "affectedResources",
+    ),
+    requiredAuthority: projectUiText(
+      input.control.action.requiredAuthority,
+      160,
+      "requiredAuthority",
+    ),
     reviewerOutcome: input.control.reviewerOutcome, generationOutcome,
     reevaluationOutcome: input.reevaluation?.outcome ?? null,
-    initialVerdict: input.control.initialVerdict, reevaluatedVerdict, effectiveVerdict,
-    scopeAlignment, scopeReasons,
+    initialVerdict, reevaluatedVerdict, effectiveVerdict,
+    scopeAlignment,
+    scopeReasons: projectUiList(scopeReasons, 160, "scopeReasons"),
     rationaleStatus: input.ticket.rationaleStatus, terminalReason: input.ticket.terminalReason,
     suggestion, modalFallbackRequired,
   }, "RationaleUiAuditProjection");
@@ -388,7 +612,7 @@ export function createRationaleExecutionAuthorityEntry(input: {
   hostConsumedAllowOnceReceipt: HostConsumedAllowOnceReceipt;
   authorizedInvocationAudit: InvocationAuditRecord;
   hostInvocationStartLease: HostInvocationStartLease;
-  hostStartCas: HostInvocationStartCas;
+  startedInvocationAudit: InvocationAuditRecord;
   now?: number;
 }): RationaleExecutionAuthorityEntry {
   const now = input.now ?? Date.now();
@@ -403,6 +627,7 @@ export function createRationaleExecutionAuthorityEntry(input: {
   validateHostInvocationStartLease(
     input.hostInvocationStartLease, input.authorizedInvocationAudit, now,
   );
+  validateInvocationAuditRecord(input.startedInvocationAudit);
   const control = input.resumeRequest.control;
   if (input.authorizedInvocationAudit.state !== "authorized" ||
       input.authorizedInvocationAudit.ticketId !== control.ticketId ||
@@ -413,12 +638,14 @@ export function createRationaleExecutionAuthorityEntry(input: {
         input.resumeRequest.authorizationReceiptId) {
     throw new Error("authorized invocation does not match resume request");
   }
-  const startedInvocationAudit = createInvocationStartedAudit({
+  const expectedStartedInvocationAudit = createInvocationStartedAudit({
     authorized: input.authorizedInvocationAudit,
     startLease: input.hostInvocationStartLease,
-    hostStartCas: input.hostStartCas,
     now,
   });
+  if (!equal(expectedStartedInvocationAudit, input.startedInvocationAudit)) {
+    throw new Error("started invocation audit does not match committed start");
+  }
   return seal({
     contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
     kind: "rationale-execution-authority-entry",
@@ -431,7 +658,7 @@ export function createRationaleExecutionAuthorityEntry(input: {
     securitySuffixVersion: RATIONALE_SECURITY_SUFFIX_VERSION,
     resumeRequest: input.resumeRequest,
     startLease: input.hostInvocationStartLease,
-    startedInvocationAudit,
+    startedInvocationAudit: input.startedInvocationAudit,
     executionAuthority: "single-host-cas-start-lease",
     directToolExecute: "forbidden",
   }, "RationaleExecutionAuthorityEntry");

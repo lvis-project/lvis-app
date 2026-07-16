@@ -14,6 +14,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
+  chmodSync,
+  mkdirSync,
   mkdtempSync,
   rmSync,
   writeFileSync,
@@ -86,6 +88,24 @@ describe("FileSecretStore", () => {
     const store = new FileSecretStore(join(workDir, "secrets"));
     store.write("audit-hmac.key", "hello-secret");
     expect(store.read("audit-hmac.key")).toBe("hello-secret");
+  });
+
+  it("atomically replaces an existing value without leaving temp files", () => {
+    const dir = join(workDir, "secrets");
+    const store = new FileSecretStore(dir);
+    store.write("audit-hmac.key", "first");
+    store.write("audit-hmac.key", "second");
+    expect(store.read("audit-hmac.key")).toBe("second");
+    expect(readdirSync(dir).filter((name) => name.includes(".tmp-"))).toEqual([]);
+  });
+
+  it.skipIf(process.platform === "win32")("re-hardens a pre-existing secret directory", () => {
+    const dir = join(workDir, "secrets");
+    mkdirSync(dir, { mode: 0o777 });
+    chmodSync(dir, 0o777);
+    const store = new FileSecretStore(dir);
+    store.write("audit-hmac.key", "secret");
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
   });
 
   it("rejects path-traversal in secret name", () => {

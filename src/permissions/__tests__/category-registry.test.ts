@@ -82,10 +82,11 @@ describe("Category Registry — registerStandardCategories", () => {
     expect(d.decisionFor({ mode: "allow", source: "builtin", headless: true })).toBe("allow");
   });
 
-  it("meta descriptor returns the override sentinel — executor reads decisionOverride", () => {
+  it("meta descriptor keeps override host-only and denies external sources", () => {
     const d = getToolCategoryDescriptor("meta");
     expect(d.decisionFor({ mode: "default", source: "builtin", headless: false })).toBe("override");
-    expect(d.decisionFor({ mode: "auto", source: "plugin", headless: true })).toBe("override");
+    expect(d.decisionFor({ mode: "auto", source: "plugin", headless: true })).toBe("deny");
+    expect(d.decisionFor({ mode: "allow", source: "mcp", headless: false })).toBe("deny");
   });
 
   it("riskWeight ordering matches Phase 3 classifier expectation: shell > network > write > read > meta", () => {

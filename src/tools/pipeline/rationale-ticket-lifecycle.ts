@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { canonicalStringify } from "../../permissions/user-approval-store.js";
+import { assertValidToolUseId } from "../../shared/tool-use-id.js";
 import {
   RATIONALE_CONTROL_CONTRACT_VERSION,
   assertRationaleCanonicalJson,
@@ -453,19 +454,64 @@ export interface HostInvocationStartLease {
   startedAt: number;
 }
 
+export type InvocationAuditSink = (
+  record: InvocationAuditRecord,
+) => Promise<void> | void;
+
+export interface HostInvocationStartCommit {
+  readonly lease: HostInvocationStartLease;
+  readonly startedInvocationAudit: InvocationAuditRecord;
+}
+
 /**
  * Host-owned atomic store boundary. A lease is an opaque result loaded from
  * this trusted store; its canonical fields are consistency bindings, not a
  * caller-verifiable authenticity primitive.
  */
 export interface HostInvocationStartCas {
-  tryStart(input: {
+  commitStart(input: {
+    sessionId: string;
+    control: RationaleRequiredControl;
     authorized: InvocationAuditRecord;
     expectedInvocationVersion: 0;
+    persistAudit: InvocationAuditSink;
     now?: number;
-  }): HostInvocationStartLease | null;
-  consumeStartLease(lease: HostInvocationStartLease): boolean;
-  markTerminal(lease: HostInvocationStartLease, terminal: InvocationAuditRecord): boolean;
+  }): Promise<HostInvocationStartCommit | null>;
+  commitTerminal(input: {
+    lease: HostInvocationStartLease;
+    terminal: InvocationAuditRecord;
+    persistAudit: InvocationAuditSink;
+  }): Promise<boolean>;
+}
+
+export function validateHostInvocationStartAuthorization(input: {
+  sessionId: string;
+  control: RationaleRequiredControl;
+  authorized: InvocationAuditRecord;
+  expectedInvocationVersion: 0;
+  persistAudit: InvocationAuditSink;
+  now: number;
+}): void {
+  validateInvocationAuditRecord(input.authorized);
+  if (
+    typeof input.sessionId !== "string" ||
+    input.sessionId.length === 0 ||
+    input.sessionId.length > 256 ||
+    !Number.isFinite(input.now) ||
+    input.now < 0 ||
+    input.expectedInvocationVersion !== 0 ||
+    typeof input.persistAudit !== "function" ||
+    !verifyRationaleRequiredControl(input.control, { now: input.now }) ||
+    input.sessionId !== input.control.anchor.sessionId ||
+    input.authorized.state !== "authorized" ||
+    input.authorized.version !== 0 ||
+    input.authorized.ticketId !== input.control.ticketId ||
+    input.authorized.actionDigest !== input.control.action.actionDigest ||
+    input.authorized.invocationDigest !== input.control.invocationDigest ||
+    input.authorized.toolUseId !== input.control.sealedAction.toolUseId
+  ) {
+    throw new Error("invalid invocation-start CAS expectation");
+  }
 }
 
 const INVOCATION_STATES: readonly InvocationAuditState[] = [
@@ -486,11 +532,11 @@ export function validateInvocationAuditRecord(record: InvocationAuditRecord): vo
   exact(record, ["contractVersion", "ticketId", "actionDigest", "invocationDigest",
     "toolUseId", "authorizationReceiptId", "invocationStartLeaseId", "version",
     "state", "automaticRetry"], "InvocationAuditRecord");
+  assertValidToolUseId(record.toolUseId, "invocation audit tool use ID");
   if (record.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
       !UUID_PATTERN.test(record.ticketId) ||
       !/^[0-9a-f]{64}$/.test(record.actionDigest) ||
       !/^[0-9a-f]{64}$/.test(record.invocationDigest) ||
-      typeof record.toolUseId !== "string" || !record.toolUseId ||
       !UUID_PATTERN.test(record.authorizationReceiptId) ||
       !INVOCATION_STATES.includes(record.state) || record.automaticRetry !== "forbidden") {
     throw new TypeError("invalid invocation audit record");
@@ -514,12 +560,12 @@ function validateHostInvocationStartLeaseShape(lease: HostInvocationStartLease):
     "invocationDigest", "toolUseId", "authorizationReceiptId",
     "authorizedRecordDigest", "expectedInvocationVersion",
     "committedInvocationVersion", "startedAt"], "HostInvocationStartLease");
+  assertValidToolUseId(lease.toolUseId, "invocation lease tool use ID");
   if (lease.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
       lease.kind !== "host-invocation-start-cas-lease" ||
       !UUID_PATTERN.test(lease.leaseId) || !UUID_PATTERN.test(lease.ticketId) ||
       !/^[0-9a-f]{64}$/.test(lease.actionDigest) ||
       !/^[0-9a-f]{64}$/.test(lease.invocationDigest) ||
-      typeof lease.toolUseId !== "string" || !lease.toolUseId ||
       !UUID_PATTERN.test(lease.authorizationReceiptId) ||
       !/^[0-9a-f]{64}$/.test(lease.authorizedRecordDigest) ||
       lease.expectedInvocationVersion !== 0 || lease.committedInvocationVersion !== 1 ||
@@ -548,66 +594,100 @@ export function validateHostInvocationStartLease(
   }
 }
 
+export function createHostInvocationStartLease(input: {
+  authorized: InvocationAuditRecord;
+  now?: number;
+}): HostInvocationStartLease {
+  const now = input.now ?? Date.now();
+  validateInvocationAuditRecord(input.authorized);
+  if (input.authorized.state !== "authorized" || input.authorized.version !== 0 ||
+      !Number.isFinite(now) || now < 0) {
+    throw new Error("invalid invocation-start CAS expectation");
+  }
+  return seal({
+    contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
+    kind: "host-invocation-start-cas-lease", leaseId: randomUUID(),
+    ticketId: input.authorized.ticketId, actionDigest: input.authorized.actionDigest,
+    invocationDigest: input.authorized.invocationDigest,
+    toolUseId: input.authorized.toolUseId,
+    authorizationReceiptId: input.authorized.authorizationReceiptId,
+    authorizedRecordDigest: invocationRecordDigest(input.authorized),
+    expectedInvocationVersion: 0, committedInvocationVersion: 1, startedAt: now,
+  }, "HostInvocationStartLease") as HostInvocationStartLease;
+}
+
+export function validateInvocationTerminalForLease(
+  terminal: InvocationAuditRecord,
+  lease: HostInvocationStartLease,
+): void {
+  validateHostInvocationStartLeaseShape(lease);
+  validateInvocationAuditRecord(terminal);
+  if (!["completed", "failed", "unknown-after-crash"].includes(terminal.state) ||
+      terminal.version !== 2 || terminal.invocationStartLeaseId !== lease.leaseId ||
+      terminal.ticketId !== lease.ticketId ||
+      terminal.actionDigest !== lease.actionDigest ||
+      terminal.invocationDigest !== lease.invocationDigest ||
+      terminal.toolUseId !== lease.toolUseId ||
+      terminal.authorizationReceiptId !== lease.authorizationReceiptId) {
+    throw new Error("terminal invocation audit lease binding mismatch");
+  }
+}
+
 export class InMemoryHostInvocationStartCasStore implements HostInvocationStartCas {
   readonly #states = new Map<string, {
     lease: HostInvocationStartLease;
-    state: "leased" | "started" | "terminal";
+    startedInvocationAudit: InvocationAuditRecord;
+    terminal: InvocationAuditRecord | null;
+    terminalAuditDelivered: boolean;
   }>();
 
-  tryStart(input: {
+  async commitStart(input: {
+    sessionId: string;
+    control: RationaleRequiredControl;
     authorized: InvocationAuditRecord;
     expectedInvocationVersion: 0;
+    persistAudit: InvocationAuditSink;
     now?: number;
-  }): HostInvocationStartLease | null {
+  }): Promise<HostInvocationStartCommit | null> {
     const now = input.now ?? Date.now();
-    validateInvocationAuditRecord(input.authorized);
-    if (input.expectedInvocationVersion !== 0 ||
-        input.authorized.state !== "authorized" || input.authorized.version !== 0 ||
-        !Number.isFinite(now)) {
-      throw new Error("invalid invocation-start CAS expectation");
-    }
+    validateHostInvocationStartAuthorization({ ...input, now });
     if (this.#states.has(input.authorized.invocationDigest)) return null;
-    const lease = seal({
-      contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
-      kind: "host-invocation-start-cas-lease", leaseId: randomUUID(),
-      ticketId: input.authorized.ticketId, actionDigest: input.authorized.actionDigest,
-      invocationDigest: input.authorized.invocationDigest,
-      toolUseId: input.authorized.toolUseId,
-      authorizationReceiptId: input.authorized.authorizationReceiptId,
-      authorizedRecordDigest: invocationRecordDigest(input.authorized),
-      expectedInvocationVersion: 0, committedInvocationVersion: 1, startedAt: now,
-    }, "HostInvocationStartLease") as HostInvocationStartLease;
-    this.#states.set(input.authorized.invocationDigest, { lease, state: "leased" });
-    return lease;
+    const lease = createHostInvocationStartLease({
+      authorized: input.authorized,
+      now,
+    });
+    const startedInvocationAudit = createInvocationStartedAudit({
+      authorized: input.authorized,
+      startLease: lease,
+      now,
+    });
+    this.#states.set(input.authorized.invocationDigest, {
+      lease, startedInvocationAudit, terminal: null, terminalAuditDelivered: false,
+    });
+    await input.persistAudit(input.authorized);
+    await input.persistAudit(startedInvocationAudit);
+    return { lease, startedInvocationAudit };
   }
 
-  consumeStartLease(lease: HostInvocationStartLease): boolean {
+  async commitTerminal(input: {
+    lease: HostInvocationStartLease;
+    terminal: InvocationAuditRecord;
+    persistAudit: InvocationAuditSink;
+  }): Promise<boolean> {
     try {
-      validateHostInvocationStartLeaseShape(lease);
-      const current = this.#states.get(lease.invocationDigest);
-      if (!current || current.state !== "leased" || !equal(current.lease, lease)) {
+      if (typeof input.persistAudit !== "function") return false;
+      validateInvocationTerminalForLease(input.terminal, input.lease);
+      const current = this.#states.get(input.lease.invocationDigest);
+      if (!current || !equal(current.lease, input.lease)) return false;
+      if (current.terminal && !equal(current.terminal, input.terminal)) return false;
+      current.terminal ??= input.terminal;
+      if (current.terminalAuditDelivered) return true;
+      try {
+        await input.persistAudit(input.terminal);
+      } catch {
         return false;
       }
-      current.state = "started";
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  markTerminal(lease: HostInvocationStartLease, terminal: InvocationAuditRecord): boolean {
-    try {
-      validateHostInvocationStartLeaseShape(lease);
-      validateInvocationAuditRecord(terminal);
-      const current = this.#states.get(lease.invocationDigest);
-      if (!current || current.state !== "started" || !equal(current.lease, lease) ||
-          !["completed", "failed", "unknown-after-crash"].includes(terminal.state) ||
-          terminal.version !== 2 || terminal.invocationStartLeaseId !== lease.leaseId ||
-          terminal.ticketId !== lease.ticketId || terminal.actionDigest !== lease.actionDigest ||
-          terminal.invocationDigest !== lease.invocationDigest ||
-          terminal.toolUseId !== lease.toolUseId ||
-          terminal.authorizationReceiptId !== lease.authorizationReceiptId) return false;
-      current.state = "terminal";
+      current.terminalAuditDelivered = true;
       return true;
     } catch {
       return false;
@@ -646,14 +726,10 @@ export function createAuthorizedInvocationAudit(input: {
 export function createInvocationStartedAudit(input: {
   authorized: InvocationAuditRecord;
   startLease: HostInvocationStartLease;
-  hostStartCas: HostInvocationStartCas;
   now?: number;
 }): InvocationAuditRecord {
   const now = input.now ?? Date.now();
   validateHostInvocationStartLease(input.startLease, input.authorized, now);
-  if (!input.hostStartCas.consumeStartLease(input.startLease)) {
-    throw new Error("invocation-start lease was already consumed or is not current");
-  }
   return seal({ ...input.authorized, invocationStartLeaseId: input.startLease.leaseId,
     version: 1, state: "started" }, "InvocationAuditRecord");
 }

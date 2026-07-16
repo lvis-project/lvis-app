@@ -103,6 +103,32 @@ jobs:
         run: >
           bun run test --
           src/permissions/__tests__/allowed-directories.test.ts
+          src/permissions/__tests__/permission-manager-meta-override.test.ts
           src/tools/__tests__/executor.test.ts
+          src/tools/__tests__/registry-meta-governance.test.ts
+          src/tools/__tests__/executor-rationale-batch.test.ts
+          src/engine/turn/__tests__/rationale-real-stack.integration.test.ts
+          src/audit/__tests__/rationale-audit-adapter.test.ts
           src/boot/__tests__/plugin-surface-permissions.test.ts
           src/permissions/__tests__/windows-sandbox-logic.test.ts
+
+  macos-permission-tests:
+    name: macOS permission path tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: lvis-app
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+        working-directory: lvis-app
+      - name: Run macOS permission regressions
+        working-directory: lvis-app
+        run: >
+          bun run test --
+          src/permissions/__tests__/allowed-directories.test.ts
+          src/permissions/__tests__/permission-manager-meta-override.test.ts
+          src/tools/__tests__/registry-meta-governance.test.ts
+          src/tools/__tests__/executor-rationale-batch.test.ts
+          src/engine/turn/__tests__/rationale-real-stack.integration.test.ts
+          src/audit/__tests__/rationale-audit-adapter.test.ts

@@ -12,6 +12,7 @@ import {
   type ProviderErrorDiagnostics,
 } from "../llm/provider-error-diagnostics.js";
 import { t } from "../../i18n/index.js";
+import { isValidToolUseId } from "../../shared/tool-use-id.js";
 
 export interface StreamCollectParams {
   provider: LLMProvider;
@@ -98,6 +99,7 @@ export async function collectRoundStream(
   let thought = "";
   let thinkingBlocks: ThinkingBlock[] = [];
   const toolCalls: ToolCallBlock[] = [];
+  const toolCallIds = new Set<string>();
   let stopReason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
   let usage: TokenUsage | undefined;
   let sawMessageComplete = false;
@@ -129,6 +131,35 @@ export async function collectRoundStream(
           onTextDelta?.(event.text);
           break;
         case "tool_call":
+          if (!isValidToolUseId(event.id)) {
+            return {
+              kind: "stream_error",
+              userMessage: t("be_streamCollector.streamError", {
+                userMessage: "Provider returned an invalid tool call ID.",
+              }),
+              classification: "unknown",
+              providerError: {
+                origin: "unknown",
+                classification: "unknown",
+                messagePreview: "invalid tool_call id in assistant response",
+              },
+            };
+          }
+          if (toolCallIds.has(event.id)) {
+            return {
+              kind: "stream_error",
+              userMessage: t("be_streamCollector.streamError", {
+                userMessage: "Provider returned duplicate tool call IDs.",
+              }),
+              classification: "unknown",
+              providerError: {
+                origin: "unknown",
+                classification: "unknown",
+                messagePreview: "duplicate tool_call id in one assistant response",
+              },
+            };
+          }
+          toolCallIds.add(event.id);
           toolCalls.push({ id: event.id, name: event.name, input: event.input });
           break;
         case "message_complete":

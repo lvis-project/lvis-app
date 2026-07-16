@@ -34,6 +34,7 @@ import type { HookRunner } from "../../hooks/hook-runner.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
 import type { HookTrustCommandOptions } from "../../hooks/hook-trust-commands.js";
 import type { PermissionDirectoryLifecycle } from "../../permissions/permission-slash.js";
+import type { RationaleCoordinatorFactory } from "./rationale-conversation-orchestration.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -234,6 +235,15 @@ export interface ConversationLoopDeps {
   keywordEngine: KeywordEngine;
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
+  /**
+   * Dormant PR(2) host seam. Boot may inject the shared host factory while
+   * production activation remains off; query-loop owns the activation gate.
+   */
+  rationaleCoordinatorFactory?: RationaleCoordinatorFactory;
+  /** Invalidates host rationale authority before this loop changes sessions. */
+  closeRationaleSession?: (sessionId: string) => void;
+  /** Test-only override; ignored unless NODE_ENV is exactly "test". */
+  enableDormantRationaleForTesting?: boolean;
   /** Host-owned capability; omitted/false surfaces cannot accept background parent delivery. */
   supportsA2AParentDelivery?: boolean;
   memoryManager: MemoryManager;

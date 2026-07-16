@@ -10,8 +10,24 @@ import type { TurnCallbacks, TurnInputRequired, TurnStopReason, ToolScope } from
 import type { LLMVendor, TokenUsage, TokenUsageByModel, ToolSchema } from "../llm/types.js";
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import type { ToolTrustOrigin } from "../../tools/types.js";
+import type { RequestAnchor } from "../../tools/pipeline/rationale-control.js";
+import {
+  createCancelledSiblingProposalGuard,
+  FOREGROUND_RATIONALE_PRODUCTION_ENABLED,
+} from "../../tools/pipeline/rationale-control.js";
+import {
+  executeRationaleAwareConversationBatch,
+  RATIONALE_SIBLING_REPLAY_BLOCKED_RESULT,
+  RATIONALE_TRIGGER_FAILED_RESULT,
+} from "./rationale-conversation-orchestration.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
-import type { ToolCallMeta, ToolUseBlock } from "../../tools/executor.js";
+import type {
+  ConversationExecuteOptions,
+  InterceptedMetaToolHandler,
+  ToolCallMeta,
+  ToolResult,
+  ToolUseBlock,
+} from "../../tools/executor.js";
 import { collectRoundStream } from "./stream-collector.js";
 import { FallbackProvider } from "../llm/vercel/fallback-chain.js";
 import { vendorSupportsLengthContinuation } from "../llm/vendor-capabilities.js";
@@ -19,7 +35,7 @@ import { rejectedToolNameFromError, withoutDroppedTools } from "../llm/rejected-
 import { handleRequestPlugin, REQUEST_PLUGIN_TOOL } from "./plugin-expansion.js";
 import { handleToolSearch, TOOL_SEARCH_TOOL } from "./tool-search.js";
 import { applyKnowledgeDepthCap } from "./knowledge-cap.js";
-import { nextToolTrustOrigin } from "./trust-origin.js";
+import { nextToolTrustOrigin, rationaleProvenanceFor } from "./trust-origin.js";
 import { markStaleToolResults, getModelPreflightThreshold, isContextLengthError } from "../auto-compact.js";
 import { estimateRequestInputProjection } from "../request-input-projection.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
@@ -196,6 +212,7 @@ export async function queryLoop(
       a2aCausalContext?: A2AAgentCausalContext;
       inputOrigin: ChatInputOrigin;
       toolTrustOrigin: ToolTrustOrigin;
+      requestAnchor?: RequestAnchor;
       permissionUserIntent?: string;
       rolePrompt?: ActiveRolePrompt;
     },
@@ -237,6 +254,10 @@ export async function queryLoop(
     // Provider-as-oracle: tools the provider 400'd on (invalid_function_parameters)
     // and we dropped this turn. Turn-scoped — resets naturally each queryLoop call.
     const droppedToolSchemaNames = new Set<string>();
+    // Same-anchor replay protection for siblings cancelled by a rationale batch.
+    // The digest is host-only and resets with this queryLoop invocation.
+    const cancelledSiblingProposalDigests = new Set<string>();
+    let cancelledSiblingProposalGuardIncomplete = false;
     // Option C: scope is mutable within the turn. Mutating the caller's Set
     // directly means the next turn's fallback sees every plugin that was
     // activated here. Route EVERY turn rebuild through this so already-dropped
@@ -281,6 +302,43 @@ export async function queryLoop(
     const allToolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }> = [];
     const toolMetaByUseId = new Map<string, ToolCallMeta>();
     let turnUsage: TokenUsage | undefined;
+    const recordProviderUsage = (
+      usage: TokenUsage,
+      updateContextCalibration: boolean,
+    ): void => {
+      const cacheRead = usage.cacheReadTokens ?? 0;
+      const cacheWrite = usage.cacheWriteTokens ?? 0;
+      const adjustedInput = Math.max(
+        0,
+        usage.inputTokens - cacheRead - cacheWrite,
+      );
+
+      if (updateContextCalibration) {
+        self.lastRoundProviderInputTokens = usage.inputTokens;
+        self.lastContextInputTokens = usage.inputTokens;
+        self.lastContextInputProjectionTokens =
+          self.lastRoundInputProjection?.totalTokens ?? 0;
+      }
+
+      turnUsage = {
+        inputTokens: (turnUsage?.inputTokens ?? 0) + usage.inputTokens,
+        outputTokens: (turnUsage?.outputTokens ?? 0) + usage.outputTokens,
+        cacheReadTokens: (turnUsage?.cacheReadTokens ?? 0) + cacheRead,
+        cacheWriteTokens: (turnUsage?.cacheWriteTokens ?? 0) + cacheWrite,
+      };
+      addUsageForServingModel({
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheReadTokens: cacheRead,
+        cacheWriteTokens: cacheWrite,
+      });
+      self.cumulativeUsage.inputTokens += adjustedInput;
+      self.cumulativeUsage.outputTokens += usage.outputTokens;
+      self.cumulativeUsage.cacheReadTokens =
+        (self.cumulativeUsage.cacheReadTokens ?? 0) + cacheRead;
+      self.cumulativeUsage.cacheWriteTokens =
+        (self.cumulativeUsage.cacheWriteTokens ?? 0) + cacheWrite;
+    };
     let pluginExpansions = 0;
     // Tool-Level Deferral — per-turn tool_search counter (mirror pluginExpansions).
     let toolSearches = 0;
@@ -804,37 +862,7 @@ export async function queryLoop(
       //    write 1.25×) 적용 가능하도록 분리 보존. Audit/UsageDashboard
       //    경계에서는 `normalizeAiSdkUsageForCost` 로 computeCost 계약에 맞춘다.
       if (stream.usage) {
-        const u = stream.usage;
-        const cacheRead = u.cacheReadTokens ?? 0;
-        const cacheWrite = u.cacheWriteTokens ?? 0;
-        const adjustedIn = Math.max(0, u.inputTokens - cacheRead - cacheWrite);
-
-        // Last-round overwrite. runTurn uses this as the provider-calibration
-        // anchor for turn_summary.tokensIn; billing 합산은 turnUsage.inputTokens /
-        // cumulativeUsage 가 별도 추적.
-        self.lastRoundProviderInputTokens = u.inputTokens;
-        self.lastContextInputTokens = u.inputTokens;
-        self.lastContextInputProjectionTokens = self.lastRoundInputProjection?.totalTokens ?? 0;
-
-        turnUsage = {
-          inputTokens: (turnUsage?.inputTokens ?? 0) + u.inputTokens,
-          outputTokens: (turnUsage?.outputTokens ?? 0) + u.outputTokens,
-          cacheReadTokens: (turnUsage?.cacheReadTokens ?? 0) + cacheRead,
-          cacheWriteTokens: (turnUsage?.cacheWriteTokens ?? 0) + cacheWrite,
-        };
-        addUsageForServingModel({
-          inputTokens: u.inputTokens,
-          outputTokens: u.outputTokens,
-          cacheReadTokens: cacheRead,
-          cacheWriteTokens: cacheWrite,
-        });
-
-        self.cumulativeUsage.inputTokens += adjustedIn;
-        self.cumulativeUsage.outputTokens += u.outputTokens;
-        self.cumulativeUsage.cacheReadTokens =
-          (self.cumulativeUsage.cacheReadTokens ?? 0) + cacheRead;
-        self.cumulativeUsage.cacheWriteTokens =
-          (self.cumulativeUsage.cacheWriteTokens ?? 0) + cacheWrite;
+        recordProviderUsage(stream.usage, true);
       }
 
       const { text: streamText, thought: thoughtContent, thinkingBlocks: roundThinkingBlocks, toolCalls: pendingToolCalls, stopReason } = stream;
@@ -997,9 +1025,27 @@ export async function queryLoop(
         id: tc.id, name: tc.name, input: tc.input,
       }));
 
+      const rationaleOrchestrationEnabled =
+        FOREGROUND_RATIONALE_PRODUCTION_ENABLED ||
+        (process.env.NODE_ENV === "test" &&
+          self.deps.enableDormantRationaleForTesting === true);
+      const firstNonMetaIndex = rationaleOrchestrationEnabled
+        ? toolUses.findIndex(
+            (toolUse) =>
+              toolUse.name !== REQUEST_PLUGIN_TOOL &&
+              toolUse.name !== TOOL_SEARCH_TOOL,
+          )
+        : -1;
+      const eagerMetaToolUses = firstNonMetaIndex >= 0
+        ? toolUses.slice(0, firstNonMetaIndex)
+        : toolUses;
+      const deferredOrderedToolUses = firstNonMetaIndex >= 0
+        ? toolUses.slice(firstNonMetaIndex)
+        : [];
+
       const interceptedMetaGate = await gateCrossAgentInterceptedMetaTools(
         self,
-        toolUses,
+        eagerMetaToolUses,
         activeApprovalReasonPrefix,
         toolTrustOrigin,
         effectiveSessionId,
@@ -1126,7 +1172,7 @@ export async function queryLoop(
       });
       toolSearches = searchOutcome.nextTurnSearches;
       self.sessionToolSearches = searchOutcome.nextSessionSearches;
-      toolUsesForExecutor = searchOutcome.remaining;
+      toolUsesForExecutor = [...searchOutcome.remaining, ...deferredOrderedToolUses];
       searchPromotedThisRound = searchOutcome.promotedToolNames.length > 0;
       promotedToolNamesForTurn.push(...searchOutcome.promotedToolNames);
 
@@ -1174,9 +1220,7 @@ export async function queryLoop(
         toolNames: capResult.allowed.map((tu) => tu.name),
         capped: capResult.blocked.length,
       });
-      const toolResults = await self.toolExecutor.executeConversationTools(
-        capResult.allowed,
-        {
+      const executeOptions = {
           callbacks: {
             onToolStart: (name, input, meta) => {
               toolMetaByUseId.set(meta.toolUseId, meta);
@@ -1215,12 +1259,228 @@ export async function queryLoop(
             additionalDirectories: self.getTurnAdditionalDirectories(),
             getAdditionalDirectories: () => self.getTurnAdditionalDirectories(),
             trustOrigin: toolTrustOrigin,
+            ...(bounds.requestAnchor
+              ? {
+                  requestAnchor: bounds.requestAnchor,
+                  rationaleProvenance: rationaleProvenanceFor(true, toolTrustOrigin),
+                }
+              : {}),
             ...(bounds.permissionUserIntent ? { userIntent: bounds.permissionUserIntent } : {}),
             onTurnDirectoryGrant: (path) => self.addTurnAdditionalDirectory(path),
             onSessionDirectoryGrant: (path) => self.addSessionAdditionalDirectory(path),
           },
+      } satisfies ConversationExecuteOptions;
+      const orderedMetaToolHandler: InterceptedMetaToolHandler | undefined =
+        rationaleOrchestrationEnabled
+          ? async (toolUse) => {
+              const gated = await gateCrossAgentInterceptedMetaTools(
+                self,
+                [toolUse],
+                activeApprovalReasonPrefix,
+                toolTrustOrigin,
+                effectiveSessionId,
+              );
+              const denied = gated.denied[0];
+              if (denied) {
+                return {
+                  tool_use_id: toolUse.id,
+                  content: denied.content,
+                  is_error: true,
+                  durationMs: 0,
+                };
+              }
+              if (gated.approved.length !== 1) return null;
+
+              if (toolUse.name === REQUEST_PLUGIN_TOOL) {
+                const sessionActivatedBefore = new Set(self.sessionActivatedPluginIds);
+                const outcome = handleRequestPlugin([toolUse], {
+                  turnExpansions: pluginExpansions,
+                  sessionExpansions: self.sessionPluginExpansions,
+                  activePluginIds: scope.activePluginIds,
+                  availablePluginIds: self.filterAllowedPluginIds(
+                    (self.deps.pluginRuntime?.listPluginIds() ?? [])
+                      .filter((pluginId) =>
+                        self.deps.pluginRuntime?.isPluginEnabled?.(pluginId) !== false ||
+                        self.deps.allowedPluginIds?.has(pluginId) === true),
+                  ),
+                  sessionActivatedPluginIds: self.sessionActivatedPluginIds,
+                  isPluginEnabled: (pluginId) =>
+                    self.deps.pluginRuntime?.isPluginEnabled?.(pluginId) !== false,
+                });
+                pluginExpansions = outcome.nextTurnExpansions;
+                self.sessionPluginExpansions = outcome.nextSessionExpansions;
+
+                for (const activated of self.sessionActivatedPluginIds) {
+                  if (!sessionActivatedBefore.has(activated)) {
+                    self.deps.pluginRuntime?.setSessionActivated?.(
+                      effectiveSessionId,
+                      activated,
+                    );
+                    self.auditLogger.log({
+                      timestamp: new Date().toISOString(),
+                      sessionId: effectiveSessionId,
+                      type: "info",
+                      input: `session_activated_disabled_plugin pluginId=${activated} (non-persistent; registry stays enabled:false)`,
+                    });
+                  }
+                }
+
+                const rebuilt = outcome.activatedPluginIds.length > 0;
+                if (rebuilt) {
+                  scope.deferral = self.shouldDeferToolSchemas(scope.activePluginIds);
+                  toolSchemas = rebuildTurnToolSchemas();
+                }
+                const result = outcome.results[0];
+                if (!result) return null;
+                const catalogCount =
+                  self.deps.toolRegistry.getToolCatalogForScope(scope).length;
+                const content = !result.is_error && rebuilt
+                  ? scope.deferral
+                    ? t("be_conversationLoop.pluginToolsDeferred", {
+                        content: result.content,
+                        catalogCount,
+                        loadedCount: toolSchemas.length,
+                      })
+                    : t("be_conversationLoop.pluginToolsEager", {
+                        content: result.content,
+                        loadedCount: toolSchemas.length,
+                      })
+                  : result.content;
+                return {
+                  tool_use_id: toolUse.id,
+                  content,
+                  is_error: result.is_error,
+                  durationMs: 0,
+                };
+              }
+
+              if (toolUse.name === TOOL_SEARCH_TOOL) {
+                const previousToolCount = toolSchemas.length;
+                const outcome = handleToolSearch([toolUse], {
+                  turnSearches: toolSearches,
+                  sessionSearches: self.sessionToolSearches,
+                  activeToolNames: scope.activeToolNames,
+                  loadedToolNames: new Set(toolSchemas.map((tool) => tool.name)),
+                  loadedTools: toolSchemas.map((tool) => ({
+                    name: tool.name,
+                    description: tool.description,
+                  })),
+                  catalog: self.deps.toolRegistry.getToolCatalogForScope(scope),
+                });
+                toolSearches = outcome.nextTurnSearches;
+                self.sessionToolSearches = outcome.nextSessionSearches;
+                promotedToolNamesForTurn.push(...outcome.promotedToolNames);
+                const rebuilt = outcome.promotedToolNames.length > 0;
+                if (rebuilt) toolSchemas = rebuildTurnToolSchemas();
+                const result = outcome.results[0];
+                if (!result) return null;
+                const addedToolCount = Math.max(
+                  0,
+                  toolSchemas.length - previousToolCount,
+                );
+                return {
+                  tool_use_id: toolUse.id,
+                  content: !result.is_error && rebuilt
+                    ? t("be_conversationLoop.searchToolLoaded", {
+                        content: result.content,
+                        loadedCount: toolSchemas.length,
+                        added: addedToolCount,
+                      })
+                    : result.content,
+                  is_error: result.is_error,
+                  durationMs: 0,
+                };
+              }
+
+              return null;
+            }
+          : undefined;
+      const currentRationaleProvenance = rationaleProvenanceFor(
+        bounds.requestAnchor !== undefined,
+        toolTrustOrigin,
+      );
+      const replayBlockedResultsById = new Map<string, ToolResult>();
+      const executableToolUses = capResult.allowed.filter((toolUse) => {
+        if (
+          bounds.requestAnchor === undefined ||
+          (cancelledSiblingProposalDigests.size === 0 && !cancelledSiblingProposalGuardIncomplete)
+        ) {
+          return true;
+        }
+        try {
+          const guard = createCancelledSiblingProposalGuard({
+            anchorId: bounds.requestAnchor.anchorId,
+            toolName: toolUse.name,
+            originalInput: toolUse.input,
+          });
+          if (!cancelledSiblingProposalGuardIncomplete && !cancelledSiblingProposalDigests.has(guard.proposalDigest)) {
+            return true;
+          }
+        } catch {
+          // A non-canonical proposal cannot prove that it differs from a
+          // cancelled sibling, so fail it closed once this anchor has guards.
+        }
+        log.warn(
+          { sessionId: effectiveSessionId, toolName: toolUse.name },
+          "rationale cancelled sibling replay blocked",
+        );
+        replayBlockedResultsById.set(toolUse.id, {
+          tool_use_id: toolUse.id,
+          content: RATIONALE_SIBLING_REPLAY_BLOCKED_RESULT,
+          is_error: true,
+          durationMs: 0,
+        });
+        return false;
+      });
+      const rationaleBatch = executableToolUses.length === 0
+        ? {
+            results: [],
+            rationaleUsage: null,
+            rationaleAttempted: false,
+            cancelledSiblingProposalGuards: [],
+            cancelledSiblingProposalGuardIncomplete: false,
+          }
+        : await executeRationaleAwareConversationBatch({
+            executor: self.toolExecutor,
+            toolUses: executableToolUses,
+            executeOptions,
+            provider: turnProvider,
+            model,
+            llmSettings: { ...activeBlock, streamSmoothing: llmSettings.streamSmoothing },
+            ...(abortSignal ? { abortSignal } : {}),
+            requestAnchor: bounds.requestAnchor ?? null,
+            rationaleProvenance: currentRationaleProvenance,
+            sessionId: effectiveSessionId,
+            ...(rationaleOrchestrationEnabled &&
+            self.deps.rationaleCoordinatorFactory
+              ? { coordinatorFactory: self.deps.rationaleCoordinatorFactory }
+              : {}),
+            ...(orderedMetaToolHandler
+              ? { interceptedMetaToolHandler: orderedMetaToolHandler }
+              : {}),
+          });
+      for (const guard of rationaleBatch.cancelledSiblingProposalGuards) {
+        if (guard.anchorId === bounds.requestAnchor?.anchorId) {
+          cancelledSiblingProposalDigests.add(guard.proposalDigest);
+        }
+      }
+      cancelledSiblingProposalGuardIncomplete ||=
+        rationaleBatch.cancelledSiblingProposalGuardIncomplete;
+      const executedResultsById = new Map(
+        rationaleBatch.results.map((result) => [result.tool_use_id, result] as const),
+      );
+      const toolResults = capResult.allowed.map((toolUse): ToolResult =>
+        replayBlockedResultsById.get(toolUse.id) ??
+        executedResultsById.get(toolUse.id) ?? {
+          tool_use_id: toolUse.id,
+          content: RATIONALE_TRIGGER_FAILED_RESULT,
+          is_error: true,
+          durationMs: 0,
         },
       );
+      if (rationaleBatch.rationaleUsage) {
+        recordProviderUsage(rationaleBatch.rationaleUsage, false);
+      }
       toolTrustOrigin = nextToolTrustOrigin(toolTrustOrigin, capResult.allowed, toolResults);
 
       for (let i = 0; i < capResult.allowed.length; i++) {

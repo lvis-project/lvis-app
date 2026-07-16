@@ -1455,7 +1455,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       name: "question_probe",
       description: "question answer security probe",
       source: "builtin",
-      category: "read",
+      category: "meta",
       modelVisible: true,
       decisionOverride: "always-allow-with-audit",
       isReadOnly: () => true,
