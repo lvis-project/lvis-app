@@ -76,6 +76,19 @@ function parse(body: unknown) {
 }
 
 describe("A2A route-control client plane separation", () => {
+  it.each([
+    "https://hub.example.test",
+    "https://HUB.example.test/",
+    "https://hub.example.test/?",
+    "https://hub.example.test/#",
+  ])("rejects non-canonical route-control serializer input %s", (baseUrl) => {
+    expect(() => new A2ARouteControlClient({
+      baseUrl,
+      transport: { invoke: vi.fn() },
+      authResolver: { prepare: vi.fn() },
+    })).toThrow("a2a-route-control-url-invalid");
+  });
+
   it("posts only the strict route projection with a separate Hub credential", async () => {
     let wireBody = "";
     const transport = { invoke: vi.fn(async (request) => {
