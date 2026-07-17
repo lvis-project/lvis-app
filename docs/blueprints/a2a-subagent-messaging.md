@@ -995,7 +995,7 @@ stay on the direct A2A data-plane connection between the two hosts.
   `routePolicyVersion` plus `routePolicyDigestSha256`, and the verified canonical
   LVIS exact-send-replay
   extension identifier
-  `https://lvis.ai/a2a/extensions/exact-send-replay/v1`. The checked-in
+  `urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44`. The checked-in
   [exact-send-replay profile](../protocols/lvis-a2a-exact-send-replay.md) is
   normative for implementation, but live route eligibility is forbidden until
   the identical specification is served at that exact URI and its published
@@ -1041,7 +1041,8 @@ implementation of the control plane, not an in-process plugin dependency.
 Before P4-5 may consume extension declarations, the pure P4-1 parser expands its
 strict `capabilities` schema with an optional `extensions` array. Admission
 accepts at most 16 entries and rejects duplicate canonical URIs. Each entry is a
-strict `AgentExtension`: an absolute HTTPS `uri` of at most 2,048 UTF-8 bytes, an
+strict `AgentExtension`: either the exact reviewed UUID URN for the replay profile
+or an absolute HTTPS `uri`, in either case at most 2,048 UTF-8 bytes, plus an
 optional 512-byte `description`, an optional boolean `required`, and an optional
 plain-object `params`. Parameters are bounded to 4,096 canonical UTF-8 bytes,
 depth 4, 64 total values, 32 members per object or items per array, 128-byte
@@ -1145,10 +1146,10 @@ them.
   extension. Only an initial Send and its already-approved exact replay negotiate
   and send the
   canonical LVIS exact-send-replay extension
-  `https://lvis.ai/a2a/extensions/exact-send-replay/v1`; continuation, `GetTask`,
+  `urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44`; continuation, `GetTask`,
   and `CancelTask` omit its activation header and metadata. The Agent Card entry
   uses `required: false`; LVIS route policy, not the A2A `required` flag, mandates
-  its exact presence, parameters, served-specification digest, and Card digest
+  its exact presence, parameters, pinned-specification digest, and Card digest
   for an eligible initial Send. If that route-policy-mandated contract is absent
   or malformed, the route is ineligible. Any additional
   extension marked `required: true` is unsupported and fails closed; unrelated
@@ -1315,8 +1316,8 @@ are obtained out of band rather than embedded in an Agent Card.
 - A first-slice route is eligible only when its Agent Card has the exact LVIS
   exact-send-replay extension entry with `required: false` and exact parameters,
   and route policy explicitly mandates that identifier
-  `https://lvis.ai/a2a/extensions/exact-send-replay/v1` and the
-  route policy pins the served specification digest plus a passing pinned-head
+  `urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44` and the
+  route policy pins the provisioned specification digest plus a passing pinned-head
   wire-conformance artifact. Advertised-interface health proves only declaration
   reachability and never supplies this evidence. The server must durably map the
   same authenticated caller, initial `SendMessage` Message ID, byte-for-byte
@@ -1483,7 +1484,7 @@ are obtained out of band rather than embedded in an Agent Card.
 | Opt-in | separate immutable boot gate defaults OFF; disabled mode performs zero control-plane, secret, DNS, socket, listener, or Task-journal effect and does not change ph3 loopback behavior |
 | Eligibility | one immutable unambiguous no-store snapshot proves active target + active exact trust-key revision + active exact credential binding/revision ID and bounded version/provider/external_version metadata + current advertised-interface declaration/reachability health + explicit host/operation route policy + separately pinned exact-send-replay specification digest and pinned-head wire-conformance artifact; health is never replay-conformance evidence, trusted or healthy alone is never enough, and every Send/Get/continue/Cancel resolves again as the last control-plane gate before data-plane I/O |
 | Host authorization | new-mutation order is gate/depth/explicit target+interface host authorization -> foreground approval -> prepared journal for every mutation, with an encrypted exact-body record+pointer only for initial Send and metadata+semantic hash only for continuation/Cancel -> OS-safe local secret preparation -> final no-store resolve -> exact immutable-lineage and intended-revision proof plus CAS snapshot-metadata attachment -> immediate socket; identity drift requires reapproval and zero data-plane I/O; failed-preparation/orphan body cleanup is initial-Send-only; GetTask and exact replay omit only the prompt and still perform fresh local authorization, attempt journal, local secret preparation, final resolve, and snapshot attachment before the socket |
-| Protocol | A2A v1.0, public HTTPS/443, exact `JSONRPC` (JSON-RPC) binding, non-streaming, Bearer only; exact supported interface and per-interface `1.0` negotiation; `A2A-Version: 1.0` on every request without activating any extension; Agent Card declares the exact profile with `required: false`, while LVIS route policy mandates its exact presence/params/Card/spec digests for eligible initial Send; `https://lvis.ai/a2a/extensions/exact-send-replay/v1` activation is sent only for an initial Send and exact replay of it, never continuation/Get/Cancel; every activated success and `-32090..-32094` error echoes it, only `-32092` carries Retry-After, and all errors are full JSON-RPC envelopes with exact request ID; absent/malformed route-policy-mandated contract is ineligible; additional `required: true` extensions fail closed while unrelated optional extensions are ignored without negotiation/echo/execution |
+| Protocol | A2A v1.0, public HTTPS/443, exact `JSONRPC` (JSON-RPC) binding, non-streaming, Bearer only; exact supported interface and per-interface `1.0` negotiation; `A2A-Version: 1.0` on every request without activating any extension; Agent Card declares the exact profile with `required: false`, while LVIS route policy mandates its exact presence/params/Card/spec digests for eligible initial Send; `urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44` activation is sent only for an initial Send and exact replay of it, never continuation/Get/Cancel; every activated success and `-32090..-32094` error echoes it, only `-32092` carries Retry-After, and all errors are full JSON-RPC envelopes with exact request ID; absent/malformed route-policy-mandated contract is ineligible; additional `required: true` extensions fail closed while unrelated optional extensions are ignored without negotiation/echo/execution |
 | Credential | snapshot exposes only exact binding/revision ID plus bounded version/provider/external_version metadata; P4-3's internal keyed fingerprint is never returned; an out-of-band provisioned OS-safe local resolver maps the exact revision per operation but cannot pre-prove bearer bytes; no `secret_reference`, secret, or derivative in Hub response, journal, logs, audit, traces, metrics, errors, or crash reports; wrong bearer yields one fixed auth failure with zero retry/fallback and rotation/revocation mismatch is zero data-plane I/O |
 | Network | P4-3 public-address, DNS-rebinding, fresh-socket, no-proxy, redirect-zero, TLS/hostname, size, encoding, and deadline invariants apply independently to control and data planes; no private/LAN/development bypass |
 | Route pinning | the immutable lineage tuple is exact `targetAgentId` + canonical exact `interfaceUrl` + Agent Card digest + key ID + `credentialBindingId` + `callerGenerationId` + route-policy version/digest + extension-spec digest; only prompt-free GetTask and already-approved exact initial-Send replay may change `credentialRevisionId` inside the same binding/generation, while every new mutation requires approval; no automatic alternate interface, binding, target, local-agent fallback, proxy relay, or route migration |

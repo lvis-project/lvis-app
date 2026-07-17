@@ -27,6 +27,8 @@ const calls: string[] = [];
 const unregisterAllGlobalShortcuts = vi.fn(() => calls.push("unregister"));
 const persistAll = vi.fn(() => calls.push("persistAll"));
 const closeFileLogSink = vi.fn(() => calls.push("closeFileLogSink"));
+const stopLocalApiServer = vi.fn(async () => { calls.push("stopLocalApi"); });
+const stopRemoteA2AReceiverServer = vi.fn(async () => { calls.push("stopRemoteReceiver"); });
 
 vi.mock("electron", () => ({ app: { exit: vi.fn() } }));
 vi.mock("../../lib/logger.js", () => ({
@@ -35,7 +37,10 @@ vi.mock("../../lib/logger.js", () => ({
   closeFileLogSink: (...a: unknown[]) => closeFileLogSink(...a),
 }));
 vi.mock("../shutdown-routines.js", () => ({ runShutdownRoutines: vi.fn(async () => undefined) }));
-vi.mock("../local-api-server.js", () => ({ stopLocalApiServer: vi.fn(async () => undefined) }));
+vi.mock("../local-api-server.js", () => ({ stopLocalApiServer: (...a: unknown[]) => stopLocalApiServer(...a) }));
+vi.mock("../a2a-remote-receiver-server.js", () => ({
+  stopRemoteA2AReceiverServer: (...a: unknown[]) => stopRemoteA2AReceiverServer(...a),
+}));
 vi.mock("../global-shortcuts.js", () => ({
   unregisterAllGlobalShortcuts: (...a: unknown[]) => unregisterAllGlobalShortcuts(...a),
 }));
@@ -70,7 +75,7 @@ vi.mock("../app-state.js", () => ({
 function makeServices() {
   return {
     runPluginShutdownHandlers: vi.fn(async () => undefined),
-    shutdown: vi.fn(async () => undefined),
+    shutdown: vi.fn(async () => { calls.push("servicesShutdown"); }),
     pluginRuntime: { stopAll: vi.fn(async () => undefined) },
   };
 }
@@ -119,5 +124,14 @@ describe("runAppShutdownCleanup ordering (critic M1)", () => {
     expect(calls[0]).toBe("unregister");
     expect(calls.at(-1)).toBe("closeFileLogSink");
     expect(calls.indexOf("unregister")).toBeLessThan(calls.indexOf("closeFileLogSink"));
+  });
+
+  it("stops the independent receiver before disposing its owning services runtime", async () => {
+    getServices.mockReturnValue(makeServices());
+    vi.resetModules();
+    const { runAppShutdownCleanup } = await import("../app-shutdown.js");
+    await runAppShutdownCleanup({ reason: "before-quit", exitOnTimeout: false });
+    expect(calls.indexOf("stopLocalApi")).toBeLessThan(calls.indexOf("stopRemoteReceiver"));
+    expect(calls.indexOf("stopRemoteReceiver")).toBeLessThan(calls.indexOf("servicesShutdown"));
   });
 });

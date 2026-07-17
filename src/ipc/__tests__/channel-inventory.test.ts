@@ -193,6 +193,11 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
     const sorted = [...new Set(channels)].sort();
     expect(sorted).toMatchInlineSnapshot(`
       [
+        "lvis:a2a-remote:action",
+        "lvis:a2a-remote:send",
+        "lvis:a2a-remote:status",
+        "lvis:a2a-remote:targets",
+        "lvis:a2a-remote:task",
         "lvis:agents:install",
         "lvis:agents:list",
         "lvis:agents:uninstall",
