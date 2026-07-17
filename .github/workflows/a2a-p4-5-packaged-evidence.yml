@@ -34,9 +34,11 @@ jobs:
       - id: select
         name: Build closed platform matrix
         shell: bash
+        env:
+          PLATFORM_PROFILE: ${{ inputs.platform }}
         run: |
           set -euo pipefail
-          case "${{ inputs.platform }}" in
+          case "$PLATFORM_PROFILE" in
             all)
               matrix='{"include":[{"name":"macOS installer","os":"macos-15","target":"mac","provenance_os":"macos","artifact_name":"mac"},{"name":"Linux x64 installer","os":"ubuntu-24.04","target":"linux","provenance_os":"linux","artifact_name":"linux"},{"name":"Windows installer","os":"windows-latest","target":"win","provenance_os":"windows","artifact_name":"win"}]}'
               ;;
