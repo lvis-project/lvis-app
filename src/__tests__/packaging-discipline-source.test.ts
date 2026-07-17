@@ -26,6 +26,8 @@ describe("installer smoke and packaging discipline", () => {
     expect(smokeScript).toContain("ERR_MODULE_NOT_FOUND");
     expect(smokeScript).toContain("Cannot find package");
     expect(smokeScript).toContain("linux-unpacked");
+    expect(smokeScript).toContain("/^linux-.+-unpacked$/u");
+    expect(smokeScript).toContain("linux-${process.arch}-unpacked");
     expect(smokeScript).toContain("win-unpacked");
     expect(smokeScript).toContain(".app");
     expect(smokeScript).toContain("LVIS_HOME");

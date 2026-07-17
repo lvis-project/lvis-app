@@ -205,11 +205,16 @@ function findPackagedExecutable(target, releaseDir) {
   if (target === "linux") {
     const executableNames = new Set(["LVIS", "lvis", "lvis-app"]);
     const matches = files.filter((file) =>
-      file.includes(`linux-unpacked${sep}`) &&
+      file.split(sep).some((part) => part === "linux-unpacked" || /^linux-.+-unpacked$/u.test(part)) &&
       executableNames.has(basename(file)) &&
       canExecute(file)
     );
-    return pickBest(matches, [`linux-unpacked${sep}LVIS`, `linux-unpacked${sep}lvis-app`]);
+    return pickBest(matches, [
+      `linux-${process.arch}-unpacked${sep}LVIS`,
+      `linux-${process.arch}-unpacked${sep}lvis-app`,
+      `linux-unpacked${sep}LVIS`,
+      `linux-unpacked${sep}lvis-app`,
+    ]);
   }
 
   const matches = files.filter((file) =>
