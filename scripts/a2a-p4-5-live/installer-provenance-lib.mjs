@@ -380,6 +380,15 @@ function assertHttpsUrl(value, label) {
   return parsed;
 }
 
+function assertOptionalHttpsLocator(value, label) {
+  // gh's JSON verification contract carries the verified bundle inline. The
+  // auxiliary bundle_url locator can be empty, including for an attestation
+  // that was uploaded to GitHub and Rekor, so it must not be a trust input.
+  if (value === "") return value;
+  assertHttpsUrl(value, label);
+  return value;
+}
+
 function assertSignerWorkflowUri(value, repository, label) {
   const workflowUri = `https://github.com/${repository}/${SIGNER_WORKFLOW_PATH}`;
   const marker = `${workflowUri}@`;
@@ -413,8 +422,12 @@ export function verifyAttestationReport(reportArtifact, {
   assertExactKeys(entry.attestation, ["bundle", "bundle_url", "initiator"], "gh attestation report[0].attestation");
   assertRecord(entry.attestation.bundle, "gh attestation report[0].attestation.bundle");
   if (Object.keys(entry.attestation.bundle).length === 0) fail("gh attestation report[0].attestation.bundle: empty bundle");
-  assertHttpsUrl(entry.attestation.bundle_url, "gh attestation report[0].attestation.bundle_url");
-  assertSafeString(entry.attestation.initiator, "gh attestation report[0].attestation.initiator", { max: 256 });
+  assertOptionalHttpsLocator(entry.attestation.bundle_url, "gh attestation report[0].attestation.bundle_url");
+  // gh may leave the required display-only initiator empty for GitHub Actions attestations.
+  // Identity remains bound by the verified certificate and SLSA statement below.
+  if (entry.attestation.initiator !== "") {
+    assertSafeString(entry.attestation.initiator, "gh attestation report[0].attestation.initiator", { max: 256 });
+  }
 
   const result = entry.verificationResult;
   assertExactKeys(result, ["mediaType", "statement", "signature", "verifiedTimestamps", "verifiedIdentity"], "gh attestation report[0].verificationResult");
