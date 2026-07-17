@@ -1,6 +1,8 @@
 import { safeStorage } from "electron";
 import { closeSync, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { isIP } from "node:net";
+import { isCanonicalA2APublicHttpsOrigin } from "../shared/a2a-public-origin.js";
 import { withFileLock } from "../lib/with-file-lock.js";
 import {
   SIDE_PANEL_DEFAULT_WIDTH,
@@ -177,6 +179,31 @@ export interface ChatSettings {
   autoCompact: boolean;
 }
 
+export interface A2ARemoteTargetSettings {
+  targetAgentId: number;
+  label: string;
+  interfaceUrl: string;
+  agentCardDigestSha256: string;
+  trustKeyId: number;
+  credentialBindingId: number;
+  routePolicyVersion: number;
+  routePolicyDigestSha256: string;
+  intendedCredentialRevisionId: number;
+  /** Main-owned ordered successor revisions used by explicit manual Replay actions. */
+  replayCredentialRevisionIds: number[];
+}
+
+export interface A2ARemoteSettings {
+  routeControlBaseUrl: string;
+  /** Canonical public HTTPS origin advertised by the receiver Agent Card. */
+  receiverPublicOrigin: string;
+  outboundCallerGenerationId: string;
+  receiverCallerGenerationId: string;
+  extensionSpecDigestSha256: string;
+  targets: A2ARemoteTargetSettings[];
+  receiverMaxKeysPerGeneration: number;
+}
+
 /**
  * §14.2 Audit log rotation + retention settings.
  * - auditRotationMaxBytes: rotate when file exceeds this size (default 10 MB)
@@ -212,6 +239,10 @@ export interface FeatureFlags {
    * change takes effect only after restart.
    */
   a2aLoopbackServer?: boolean;
+  /** Enables outbound P4-5 remote A2A routing after restart. Independent of loopback. */
+  a2aRemoteRouting?: boolean;
+  /** Enables the P4-5 exact-replay receiver profile after restart. Independent of loopback. */
+  a2aRemoteReceiver?: boolean;
 
 
 
@@ -287,6 +318,8 @@ export interface DiagnosticsSettings {
 export interface AppSettings {
   llm: LLMSettings;
   chat: ChatSettings;
+  /** Host-owned P4-5 routing configuration. Secrets remain in SettingsService secret storage. */
+  a2aRemote: A2ARemoteSettings;
   webSearch: WebSearchSettings;
   marketplace: MarketplaceSettings;
   routine: RoutineSettings;
@@ -628,6 +661,15 @@ const DEFAULT_SETTINGS: AppSettings = {
       "You are LVIS, a local knowledge assistant. You provide accurate, helpful answers grounded in the user's documents and context. Respond in the user's language.",
     autoCompact: true,
   },
+  a2aRemote: {
+    routeControlBaseUrl: "",
+    receiverPublicOrigin: "",
+    outboundCallerGenerationId: "",
+    receiverCallerGenerationId: "",
+    extensionSpecDigestSha256: "",
+    targets: [],
+    receiverMaxKeysPerGeneration: 100,
+  },
   webSearch: {
     provider: "duckduckgo",
   },
@@ -710,6 +752,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     subAgentAutonomousWake: false,
     // External A2A wire routes are independently opt-in and default OFF.
     a2aLoopbackServer: false,
+    a2aRemoteRouting: false,
+    a2aRemoteReceiver: false,
 
     // Fresh installs MUST start the Z onboarding chain. Persisting an
     // explicit `false` (instead of relying on `undefined`) keeps the
@@ -841,6 +885,7 @@ export class SettingsService {
       );
     }
     if (partial.chat) this.settings.chat = { ...this.settings.chat, ...partial.chat };
+    if (partial.a2aRemote) this.settings.a2aRemote = normalizeA2ARemote({ ...this.settings.a2aRemote, ...partial.a2aRemote });
     if (partial.webSearch) this.settings.webSearch = { ...this.settings.webSearch, ...partial.webSearch };
     if (partial.marketplace) {
       this.settings.marketplace = nextMarketplace;
@@ -1251,6 +1296,13 @@ export class SettingsService {
     }
   }
 
+  /** Security-sensitive consumers that must reject legacy `plain:` secret entries. */
+  getEncryptedSecret(key: string): string | null {
+    const stored = this.loadSecrets()[key];
+    if (!stored || stored.startsWith("plain:") || !safeStorage.isEncryptionAvailable()) return null;
+    try { return safeStorage.decryptString(Buffer.from(stored, "base64")); } catch { return null; }
+  }
+
   async deleteSecret(key: string): Promise<void> {
     const secrets = this.loadSecrets();
     delete secrets[key];
@@ -1357,6 +1409,7 @@ export class SettingsService {
       const result: AppSettings & { __needsV2WriteBack?: boolean } = {
         llm,
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
+        a2aRemote: normalizeA2ARemote(parsed.a2aRemote),
         webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
         marketplace,
         routine: normalizedRoutine,
@@ -2417,6 +2470,76 @@ function normalizeDiagnostics(input: unknown): DiagnosticsSettings {
   return result;
 }
 
+function normalizeA2ARemote(input: unknown): A2ARemoteSettings {
+  const result = structuredClone(DEFAULT_SETTINGS.a2aRemote);
+  if (!input || typeof input !== "object" || Array.isArray(input)) return result;
+  const value = input as Record<string, unknown>;
+  if (typeof value.routeControlBaseUrl === "string") {
+    try {
+      const url = new URL(value.routeControlBaseUrl);
+      // Route-control snapshots bind canonical URL bytes. Require serializer
+      // identity (including the root slash) instead of silently rewriting a
+      // near-canonical value that would later compare unequal on the wire.
+      if (url.protocol === "https:" && !url.port && !url.username && !url.password && !url.search && !url.hash && !value.routeControlBaseUrl.includes("?") && !value.routeControlBaseUrl.includes("#") && isIP(url.hostname) === 0 && url.hostname !== "localhost" && !url.hostname.endsWith(".localhost")
+        && (url.pathname === "/" || url.pathname === "") && url.toString() === value.routeControlBaseUrl) result.routeControlBaseUrl = value.routeControlBaseUrl;
+    } catch { /* invalid remains fail-closed empty */ }
+  }
+  if (isCanonicalA2APublicHttpsOrigin(value.receiverPublicOrigin)) {
+    result.receiverPublicOrigin = value.receiverPublicOrigin;
+  }
+  for (const field of ["outboundCallerGenerationId", "receiverCallerGenerationId"] as const) {
+    if (typeof value[field] === "string" && /^[A-Za-z0-9][A-Za-z0-9._:~-]{0,255}$/.test(value[field])) result[field] = value[field];
+  }
+  if (typeof value.extensionSpecDigestSha256 === "string" && /^[a-f0-9]{64}$/.test(value.extensionSpecDigestSha256)) result.extensionSpecDigestSha256 = value.extensionSpecDigestSha256;
+  if (Number.isSafeInteger(value.receiverMaxKeysPerGeneration) && (value.receiverMaxKeysPerGeneration as number) >= 1 && (value.receiverMaxKeysPerGeneration as number) <= 10_000) result.receiverMaxKeysPerGeneration = value.receiverMaxKeysPerGeneration as number;
+  if (Array.isArray(value.targets) && value.targets.length <= 64) {
+    const unique = new Set<string>();
+    result.targets = value.targets.flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+      const candidate = entry as Record<string, unknown>;
+      if (!Number.isSafeInteger(candidate.targetAgentId) || (candidate.targetAgentId as number) <= 0
+        || typeof candidate.label !== "string" || candidate.label.trim() !== candidate.label || candidate.label.length < 1 || candidate.label.length > 80
+        || typeof candidate.interfaceUrl !== "string"
+        || typeof candidate.agentCardDigestSha256 !== "string" || !/^[a-f0-9]{64}$/.test(candidate.agentCardDigestSha256)
+        || !Number.isSafeInteger(candidate.trustKeyId) || (candidate.trustKeyId as number) <= 0
+        || !Number.isSafeInteger(candidate.credentialBindingId) || (candidate.credentialBindingId as number) <= 0
+        || !Number.isSafeInteger(candidate.routePolicyVersion) || (candidate.routePolicyVersion as number) <= 0
+        || typeof candidate.routePolicyDigestSha256 !== "string" || !/^[a-f0-9]{64}$/.test(candidate.routePolicyDigestSha256)
+        || !Number.isSafeInteger(candidate.intendedCredentialRevisionId) || (candidate.intendedCredentialRevisionId as number) <= 0) return [];
+      const replayCredentialRevisionIds = candidate.replayCredentialRevisionIds === undefined
+        ? []
+        : Array.isArray(candidate.replayCredentialRevisionIds)
+          && candidate.replayCredentialRevisionIds.length <= 16
+          && candidate.replayCredentialRevisionIds.every((revision) => Number.isSafeInteger(revision) && (revision as number) > 0)
+          && new Set(candidate.replayCredentialRevisionIds).size === candidate.replayCredentialRevisionIds.length
+          && !candidate.replayCredentialRevisionIds.includes(candidate.intendedCredentialRevisionId)
+          ? candidate.replayCredentialRevisionIds as number[]
+          : null;
+      if (!replayCredentialRevisionIds) return [];
+      try {
+        const url = new URL(candidate.interfaceUrl);
+        if (url.protocol !== "https:" || url.port || url.username || url.password || url.hash || isIP(url.hostname) !== 0 || url.hostname === "localhost" || url.hostname.endsWith(".localhost") || url.toString() !== candidate.interfaceUrl) return [];
+      } catch { return []; }
+      const key = String(candidate.targetAgentId);
+      if (unique.has(key)) return [];
+      unique.add(key);
+      return [{
+        targetAgentId: candidate.targetAgentId as number,
+        label: candidate.label,
+        interfaceUrl: candidate.interfaceUrl,
+        agentCardDigestSha256: candidate.agentCardDigestSha256,
+        trustKeyId: candidate.trustKeyId as number,
+        credentialBindingId: candidate.credentialBindingId as number,
+        routePolicyVersion: candidate.routePolicyVersion as number,
+        routePolicyDigestSha256: candidate.routePolicyDigestSha256,
+        intendedCredentialRevisionId: candidate.intendedCredentialRevisionId as number,
+        replayCredentialRevisionIds: [...replayCredentialRevisionIds],
+      }];
+    });
+  }
+  return result;
+}
+
 function normalizeFeatureFlags(input: unknown): FeatureFlags {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return {};
@@ -2432,6 +2555,8 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   if (typeof obj.a2aLoopbackServer === "boolean") {
     result.a2aLoopbackServer = obj.a2aLoopbackServer;
   }
+  if (typeof obj.a2aRemoteRouting === "boolean") result.a2aRemoteRouting = obj.a2aRemoteRouting;
+  if (typeof obj.a2aRemoteReceiver === "boolean") result.a2aRemoteReceiver = obj.a2aRemoteReceiver;
   if (typeof obj.onboardingCompleted === "boolean") {
     result.onboardingCompleted = obj.onboardingCompleted;
   }

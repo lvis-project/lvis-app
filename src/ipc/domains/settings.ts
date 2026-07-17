@@ -30,6 +30,13 @@ import type { LlmModelListRequest } from "../../shared/llm-model-list.js";
 import type { IpcDeps } from "../types.js";
 import type { LLMSettings, ShortcutSettings } from "../../data/settings-store.js";
 
+/** Authoritative remote route lineage is main-only and never projected to the renderer. */
+function rendererSettingsSnapshot(snapshot: ReturnType<IpcDeps["settingsService"]["getAll"]>) {
+  const projected = structuredClone(snapshot) as Partial<typeof snapshot>;
+  delete projected.a2aRemote;
+  return projected;
+}
+
 /** Minor-1: extracted helper — 6 handlers share identical 5-line broadcast. */
 async function broadcastSettingsSnapshot(deps: IpcDeps): Promise<void> {
   const snapshot = deps.settingsService.getAll();
@@ -43,7 +50,7 @@ async function broadcastSettingsSnapshot(deps: IpcDeps): Promise<void> {
     setLocale(nextLocale);
   }
   for (const win of deps.getAppWindows?.() ?? []) {
-    sendToWindow(win, SETTINGS.updated, snapshot);
+    sendToWindow(win, SETTINGS.updated, rendererSettingsSnapshot(snapshot));
   }
 }
 
@@ -218,10 +225,13 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   const { settingsService, conversationLoop, auditLogger } = deps;
 
   // read-only — no sender guard needed
-  ipcMain.handle(CHANNELS.settings.get, () => settingsService.getAll());
+  ipcMain.handle(CHANNELS.settings.get, () => rendererSettingsSnapshot(settingsService.getAll()));
 
   ipcMain.handle(CHANNELS.settings.update, async (e, partial) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.update, e); return UNAUTHORIZED_FRAME; }
+    if (partial && typeof partial === "object" && Object.prototype.hasOwnProperty.call(partial, "a2aRemote")) {
+      return { ok: false, error: "a2a-remote-settings-main-owned" };
+    }
     const llmPatch = (partial as Record<string, unknown> | null | undefined)
       ?.llm as Record<string, unknown> | undefined;
     if (

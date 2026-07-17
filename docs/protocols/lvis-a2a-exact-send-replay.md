@@ -1,10 +1,12 @@
 # LVIS A2A Exact Send Replay Extension v1
 
-- Canonical URI: `https://lvis.ai/a2a/extensions/exact-send-replay/v1`
+- Canonical URI: `urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44`
+- Identifier kind: domain-free UUID URN; this value is not a network endpoint
 - Protocol profile: A2A v1.0, JSON-RPC binding, non-streaming `SendMessage`
-- Status: normative implementation contract, locked 2026-07-16; live activation is prohibited until
-  this exact document is served at the canonical URI and its SHA-256 digest is
-  pinned by both route policy and the packaged client
+- Status: normative implementation contract, re-locked 2026-07-17 after removing
+  the unowned DNS assumption; live activation is prohibited until
+  these exact checked-in specification bytes are independently provisioned and
+  their SHA-256 digest is pinned by both route policy and the packaged client
 
 The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHALL**, **SHALL NOT**,
 **SHOULD**, **SHOULD NOT**, **RECOMMENDED**, **NOT RECOMMENDED**, **MAY**, and
@@ -39,7 +41,7 @@ An eligible Agent Card MUST contain exactly one entry in
 
 ```json
 {
-  "uri": "https://lvis.ai/a2a/extensions/exact-send-replay/v1",
+  "uri": "urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44",
   "description": "Durable exact replay for ambiguous non-streaming SendMessage responses.",
   "required": false,
   "params": {
@@ -55,7 +57,7 @@ An eligible Agent Card MUST contain exactly one entry in
 The entry MUST satisfy the bounded P4-1 `AgentExtension` parser. `params` MUST be
 a strict object containing exactly the five string members above. Values MUST
 byte-match the literals shown, except `specDigestSha256`, which MUST equal the
-SHA-256 digest of the exact specification bytes served at the canonical URI.
+SHA-256 digest of the exact provisioned specification bytes.
 JSON object member order is not semantic; exact key membership and values are.
 `resultRetentionSeconds` is the decimal string for seven days and `required`
 MUST be the literal boolean `false`. Unknown, missing,
@@ -66,22 +68,23 @@ the signed Agent Card payload and complete canonical-document hash.
 `required: false` avoids claiming that every A2A operation on the interface must
 activate this initial-Send-only profile. LVIS route policy, not the A2A
 `AgentExtension.required` flag, nevertheless mandates the exact entry, exact
-parameters, exact Agent Card digest, and exact served-specification digest before
+parameters, exact Agent Card digest, and exact pinned-specification digest before
 an initial Send route is eligible. A route with `required: true` therefore fails
 this LVIS profile just as a missing or malformed entry does.
 
-Before enabling a live route, Agent Hub and the packaged LVIS client MUST fetch or
-provision the canonical-URI document through their independently bounded trust
-paths, verify identical exact bytes and SHA-256, and pin the digest. A route MUST
-NOT become eligible merely because the URI string is declared or the interface is
-reachable. Updating normative bytes requires a new extension URI.
+Before enabling a live route, Agent Hub and the packaged LVIS client MUST receive
+the exact specification bytes through independently bounded provisioning paths,
+verify identical bytes and SHA-256, and pin the digest. The UUID URN is an opaque
+protocol identifier and MUST NOT be dereferenced or treated as an endpoint. A
+route MUST NOT become eligible merely because the identifier is declared or the
+interface is reachable. Updating normative bytes requires a new extension URI.
 
 ## Activation
 
 The client MUST send exactly one HTTP request header for the extension:
 
 ```http
-A2A-Extensions: https://lvis.ai/a2a/extensions/exact-send-replay/v1
+A2A-Extensions: urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44
 ```
 
 The value MUST contain this URI exactly once. The client MUST NOT activate any
@@ -90,7 +93,7 @@ been validated, the server MUST echo exactly the activated URI on every successf
 response and on every `-32090` through `-32094` extension-error response:
 
 ```http
-A2A-Extensions: https://lvis.ai/a2a/extensions/exact-send-replay/v1
+A2A-Extensions: urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44
 ```
 
 The echo is REQUIRED by this profile even though the general A2A extension guide
@@ -230,7 +233,7 @@ fixed JSON-RPC error:
       {
         "@type": "type.googleapis.com/google.rpc.ErrorInfo",
         "reason": "EXACT_SEND_REPLAY_CONFLICT",
-        "domain": "lvis.ai"
+        "domain": "urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44"
       }
     ]
   }
@@ -265,7 +268,7 @@ new key, execute nothing, and return:
       {
         "@type": "type.googleapis.com/google.rpc.ErrorInfo",
         "reason": "EXACT_SEND_REPLAY_CAPACITY_EXHAUSTED",
-        "domain": "lvis.ai"
+        "domain": "urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44"
       }
     ]
   }
@@ -341,7 +344,7 @@ executing:
       {
         "@type": "type.googleapis.com/google.rpc.ErrorInfo",
         "reason": "EXACT_SEND_REPLAY_IN_PROGRESS",
-        "domain": "lvis.ai",
+        "domain": "urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44",
         "metadata": {"retryAfterSeconds": "1"}
       }
     ]
@@ -377,7 +380,7 @@ the fence, execute nothing, omit `Retry-After`, and return:
       {
         "@type": "type.googleapis.com/google.rpc.ErrorInfo",
         "reason": "EXACT_SEND_REPLAY_OUTCOME_UNKNOWN",
-        "domain": "lvis.ai"
+        "domain": "urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44"
       }
     ]
   }
@@ -413,7 +416,7 @@ MUST NOT execute and MUST return:
       {
         "@type": "type.googleapis.com/google.rpc.ErrorInfo",
         "reason": "EXACT_SEND_REPLAY_RETENTION_EXPIRED",
-        "domain": "lvis.ai"
+        "domain": "urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44"
       }
     ]
   }
@@ -473,7 +476,7 @@ following with zero skipped cases:
 6. A different authenticated caller cannot observe or reuse another caller's
    replay entry.
 7. Missing declaration, wrong URI, `required: true`, malformed params,
-   wrong served-spec digest, missing request activation, or missing required echo
+   wrong pinned-spec digest, missing request activation, or missing required echo
    on an activated success/error fails closed. Continuation `SendMessage`,
    `GetTask`, and `CancelTask` send `A2A-Version: 1.0` but no profile
    header/metadata and receive no echo. The suite proves LVIS route policy rejects
