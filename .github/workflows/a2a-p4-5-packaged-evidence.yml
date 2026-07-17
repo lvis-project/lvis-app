@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       platform:
-        description: Exact packaged-evidence platform profile
+        description: Exact profile; all means macOS, Linux x64, and Windows (select Linux ARM64 separately)
         required: true
         default: all
         type: choice
