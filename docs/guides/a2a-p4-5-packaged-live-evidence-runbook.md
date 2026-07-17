@@ -48,6 +48,15 @@ Cloudflare Tunnel can publish a loopback Hub origin once a real Cloudflare zone
 and hostname are selected. It does not remove the separate Remote identity and
 distinct-IP requirements.
 
+For a Tunnel-backed Hub, target a loopback-only header-normalizing edge rather
+than the Hub Compose ports directly. The edge may forward only to the Hub web
+origin on its private network; it must not publish PostgreSQL. Trust
+`CF-Connecting-IP` only from the verified immediate connector boundary, then
+overwrite `X-Real-IP` and `X-Forwarded-For` instead of forwarding an incoming
+chain. Use the matching Agent Hub deployment template from the exact Hub head;
+do not put the actual Zone, hostname, Tunnel token, or gateway address in this
+runbook or source tree.
+
 ## Trust material and secrets
 
 Configure secrets outside the repository and do not paste their values into
