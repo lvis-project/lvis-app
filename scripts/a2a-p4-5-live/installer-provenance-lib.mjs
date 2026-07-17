@@ -422,7 +422,11 @@ export function verifyAttestationReport(reportArtifact, {
   assertRecord(entry.attestation.bundle, "gh attestation report[0].attestation.bundle");
   if (Object.keys(entry.attestation.bundle).length === 0) fail("gh attestation report[0].attestation.bundle: empty bundle");
   assertOptionalHttpsLocator(entry.attestation.bundle_url, "gh attestation report[0].attestation.bundle_url");
-  assertSafeString(entry.attestation.initiator, "gh attestation report[0].attestation.initiator", { max: 256 });
+  // gh may omit the display-only initiator for GitHub Actions attestations.
+  // Identity remains bound by the verified certificate and SLSA statement below.
+  if (entry.attestation.initiator !== "") {
+    assertSafeString(entry.attestation.initiator, "gh attestation report[0].attestation.initiator", { max: 256 });
+  }
 
   const result = entry.verificationResult;
   assertExactKeys(result, ["mediaType", "statement", "signature", "verifiedTimestamps", "verifiedIdentity"], "gh attestation report[0].verificationResult");
