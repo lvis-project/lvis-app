@@ -187,7 +187,10 @@ export interface ConversationDeps {
   keywordEngine: KeywordEngine;
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
-  /** Dormant host factory; query-loop remains the activation authority. */
+  /**
+   * Boot-published factory for the guarded rationale path. Query-loop owns
+   * activation and retains the legacy flow when no concrete factory is ready.
+   */
   rationaleCoordinatorFactory?: RationaleCoordinatorFactory;
   /** Invalidates host rationale authority before a session is discarded. */
   closeRationaleSession?: (sessionId: string) => void;

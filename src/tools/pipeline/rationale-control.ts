@@ -17,35 +17,11 @@ import type { RiskVerdict } from "../../permissions/reviewer/risk-classifier.js"
 import type { ToolSchema } from "../../engine/llm/types.js";
 import { maskSensitiveData } from "../../audit/dlp-filter.js";
 import { canonicalStringify } from "../../permissions/user-approval-store.js";
+import { normalizeRationaleApprovalDisplayText } from "../../shared/rationale-approval-display.js";
 import { assertValidToolUseId } from "../../shared/tool-use-id.js";
 
 export const RATIONALE_CONTROL_CONTRACT_VERSION = 1 as const;
 export const RATIONALE_RESPONSE_TOOL = "permission_rationale";
-
-/**
- * PR(2) supplies the dormant host orchestration and durable one-shot
- * enforcement. Production activation remains a hard NO-GO until PR(3)
- * supplies the bounded modal UI and guarded activation checks.
- */
-export const FOREGROUND_RATIONALE_PRODUCTION_ENABLED = false as const;
-
-export interface ForegroundRationaleActivationContext {
-  readonly productionEnabled: boolean;
-  readonly nodeEnv: string | undefined;
-  readonly enableDormantRationaleForTesting: boolean | undefined;
-}
-
-/**
- * Single host predicate for the dormant PR(2) orchestration gate.
- * Test-only activation is impossible outside an exact NODE_ENV=test process.
- */
-export function isForegroundRationaleOrchestrationEnabled(
-  context: Readonly<ForegroundRationaleActivationContext>,
-): boolean {
-  if (context.productionEnabled === true) return true;
-  return context.nodeEnv === "test" &&
-    context.enableDormantRationaleForTesting === true;
-}
 
 export const RATIONALE_ACTIVATION_PREREQUISITES = [
   "persistent-ticket-store",
@@ -61,6 +37,77 @@ export const RATIONALE_ACTIVATION_PREREQUISITES = [
   "host-invocation-start-cas",
   "bounded-modal-ui",
 ] as const;
+
+export type RationaleActivationPrerequisite =
+  typeof RATIONALE_ACTIVATION_PREREQUISITES[number];
+
+/**
+ * Versioned release ledger for the foreground rationale path. This is a
+ * source-controlled attestation rather than a user or environment setting:
+ * adding or changing a prerequisite must update this ledger and its scenario
+ * board before the production gate can be enabled.
+ */
+export const RATIONALE_GUARDED_ACTIVATION_EVIDENCE = Object.freeze({
+  "persistent-ticket-store": true,
+  "host-anchor-round-cas": true,
+  "server-enforced-allowed-choices": true,
+  "one-shot-resolution-cas": true,
+  "rationale-only-provider-round": true,
+  "same-batch-sibling-cancellation": true,
+  "reviewer-reevaluation-cache-isolation": true,
+  "current-action-identity-revalidation": true,
+  "ordered-security-suffix-resume": true,
+  "invocation-lifecycle-audit": true,
+  "host-invocation-start-cas": true,
+  "bounded-modal-ui": true,
+} satisfies Readonly<Record<RationaleActivationPrerequisite, true>>);
+
+/**
+ * Keeps the release decision fail-closed if any explicitly versioned
+ * prerequisite is omitted or false. The optional argument exists solely so
+ * the scenario board can exercise every missing-attestation path.
+ */
+export function isRationaleGuardedActivationReady(
+  evidence: Readonly<
+    Partial<Record<RationaleActivationPrerequisite, boolean>>
+  > = RATIONALE_GUARDED_ACTIVATION_EVIDENCE,
+): boolean {
+  return RATIONALE_ACTIVATION_PREREQUISITES.every(
+    (prerequisite) => evidence[prerequisite] === true,
+  );
+}
+
+/**
+ * PR(3) turns on the production path only after every versioned attestation
+ * above has landed. The query loop still requires a boot-published host
+ * coordinator before it changes ordering or injects rationale orchestration.
+ */
+export const FOREGROUND_RATIONALE_PRODUCTION_ENABLED =
+  isRationaleGuardedActivationReady();
+
+export interface ForegroundRationaleActivationContext {
+  readonly productionEnabled: boolean;
+  readonly nodeEnv: string | undefined;
+  /** True only when boot published an executable host coordinator factory. */
+  readonly hostCoordinatorAvailable: boolean;
+  readonly enableDormantRationaleForTesting: boolean | undefined;
+}
+
+/**
+ * One predicate controls both meta-tool ordering and coordinator injection.
+ * Test activation remains impossible outside an exact NODE_ENV=test process;
+ * a missing or failed boot publication leaves the legacy batch path intact.
+ */
+export function isForegroundRationaleOrchestrationEnabled(
+  context: Readonly<ForegroundRationaleActivationContext>,
+): boolean {
+  if (!context.hostCoordinatorAvailable) return false;
+  if (context.nodeEnv === "test") {
+    return context.enableDormantRationaleForTesting === true;
+  }
+  return context.productionEnabled === true &&
+    isRationaleGuardedActivationReady();
+}
 
 export const RATIONALE_UNKNOWN_SCOPE_SENTINEL = "[unknown]" as const;
 export interface RequestAnchor {
@@ -501,12 +548,16 @@ export function createCancelledSiblingProposalGuard(input: {
 }
 
 export function sanitizeDisplayText(value: string, maxLength: number): string {
-  const normalized = value
+  const withoutMarkup = value
     .replace(/<[^>]*>/g, " ")
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .replace(/\s+/g, " ")
     .trim();
-  return maskSensitiveData(normalized).masked.slice(0, maxLength);
+  // Keep every host display projection on the same Unicode policy as the
+  // renderer contract. Run it again after DLP masking so a future masker
+  // cannot reintroduce an invisible directional or control character.
+  const masked = maskSensitiveData(
+    normalizeRationaleApprovalDisplayText(withoutMarkup),
+  ).masked;
+  return normalizeRationaleApprovalDisplayText(masked).slice(0, maxLength);
 }
 
 function deepFreeze<T>(value: T): DeepReadonly<T> {

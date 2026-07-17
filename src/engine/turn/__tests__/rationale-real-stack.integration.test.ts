@@ -329,12 +329,66 @@ describe("foreground rationale real-stack integration", () => {
 
       expect(modalRequests).toHaveLength(1);
       expect(modalRequests[0]).toMatchObject({
+        category: "tool",
         kind: "rationale",
         allowedChoices: ["allow-once", "deny-once"],
         requireExplicit: true,
         toolName: "write_fixture",
-        toolCategory: "write",
       });
+      // Main-to-renderer rationale IPC intentionally carries only the
+      // renderer-safe approval card. Execution metadata stays in the host.
+      expect(Object.keys(modalRequests[0] ?? {}).sort()).toEqual([
+        "allowedChoices",
+        "args",
+        "category",
+        "createdAt",
+        "hmac",
+        "id",
+        "kind",
+        "nonce",
+        "reason",
+        "requireExplicit",
+        "reviewerVerdict",
+        "toolName",
+      ]);
+      expect(modalRequests[0]?.args).toMatchObject({
+        contractVersion: 1,
+        display: "rationale-approval-display",
+        toolName: "write_fixture",
+        canonicalTargets: expect.any(Array),
+        requestedEffects: expect.any(Array),
+        affectedResources: expect.any(Array),
+        requiredAuthority: expect.any(String),
+        effectiveVerdict: expect.objectContaining({
+          level: expect.any(String),
+          reason: expect.any(String),
+        }),
+        scopeAlignment: expect.any(String),
+        scopeReasons: expect.any(Array),
+        rationaleStatus: expect.any(String),
+        suggestion: expect.any(String),
+        modalFallbackRequired: false,
+      });
+      expect(Object.keys(
+        (modalRequests[0]?.args ?? {}) as Record<string, unknown>,
+      ).sort()).toEqual([
+        "affectedResources",
+        "canonicalTargets",
+        "contractVersion",
+        "display",
+        "effectiveVerdict",
+        "modalFallbackRequired",
+        "rationaleStatus",
+        "requestedEffects",
+        "requiredAuthority",
+        "scopeAlignment",
+        "scopeReasons",
+        "suggestion",
+        "toolName",
+      ]);
+      expect(modalRequests[0]?.args).not.toHaveProperty("ticketId");
+      expect(modalRequests[0]?.args).not.toHaveProperty("anchorId");
+      expect(modalRequests[0]?.args).not.toHaveProperty("actionDigest");
       expect(invocationRecords.map((record) => record.state)).toEqual([
         "authorized",
         "started",
