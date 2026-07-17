@@ -26,7 +26,7 @@ on:
 jobs:
   plan:
     name: Select packaged-evidence platform
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     permissions: {}
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
