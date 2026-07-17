@@ -380,6 +380,14 @@ function assertHttpsUrl(value, label) {
   return parsed;
 }
 
+function assertOptionalHttpsLocator(value, label) {
+  // gh's JSON verification contract carries the verified bundle inline. The
+  // auxiliary bundle_url locator can be empty, including for an attestation
+  // that was uploaded to GitHub and Rekor, so it must not be a trust input.
+  if (value === "") return value;
+  return assertHttpsUrl(value, label);
+}
+
 function assertSignerWorkflowUri(value, repository, label) {
   const workflowUri = `https://github.com/${repository}/${SIGNER_WORKFLOW_PATH}`;
   const marker = `${workflowUri}@`;
@@ -413,7 +421,7 @@ export function verifyAttestationReport(reportArtifact, {
   assertExactKeys(entry.attestation, ["bundle", "bundle_url", "initiator"], "gh attestation report[0].attestation");
   assertRecord(entry.attestation.bundle, "gh attestation report[0].attestation.bundle");
   if (Object.keys(entry.attestation.bundle).length === 0) fail("gh attestation report[0].attestation.bundle: empty bundle");
-  assertHttpsUrl(entry.attestation.bundle_url, "gh attestation report[0].attestation.bundle_url");
+  assertOptionalHttpsLocator(entry.attestation.bundle_url, "gh attestation report[0].attestation.bundle_url");
   assertSafeString(entry.attestation.initiator, "gh attestation report[0].attestation.initiator", { max: 256 });
 
   const result = entry.verificationResult;
