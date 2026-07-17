@@ -14,6 +14,7 @@ import type { RequestAnchor } from "../../tools/pipeline/rationale-control.js";
 import {
   createCancelledSiblingProposalGuard,
   FOREGROUND_RATIONALE_PRODUCTION_ENABLED,
+  isForegroundRationaleOrchestrationEnabled,
 } from "../../tools/pipeline/rationale-control.js";
 import {
   executeRationaleAwareConversationBatch,
@@ -1025,10 +1026,12 @@ export async function queryLoop(
         id: tc.id, name: tc.name, input: tc.input,
       }));
 
-      const rationaleOrchestrationEnabled =
-        FOREGROUND_RATIONALE_PRODUCTION_ENABLED ||
-        (process.env.NODE_ENV === "test" &&
-          self.deps.enableDormantRationaleForTesting === true);
+      const rationaleOrchestrationEnabled = isForegroundRationaleOrchestrationEnabled({
+        productionEnabled: FOREGROUND_RATIONALE_PRODUCTION_ENABLED,
+        nodeEnv: process.env.NODE_ENV,
+        enableDormantRationaleForTesting:
+          self.deps.enableDormantRationaleForTesting,
+      });
       const firstNonMetaIndex = rationaleOrchestrationEnabled
         ? toolUses.findIndex(
             (toolUse) =>

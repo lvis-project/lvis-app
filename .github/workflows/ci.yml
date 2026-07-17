@@ -107,7 +107,12 @@ jobs:
           src/tools/__tests__/executor.test.ts
           src/tools/__tests__/registry-meta-governance.test.ts
           src/tools/__tests__/executor-rationale-batch.test.ts
+          src/tools/pipeline/__tests__/rationale-host-coordinator.test.ts
+          src/tools/pipeline/__tests__/rationale-host-service.test.ts
+          src/tools/pipeline/__tests__/rationale-invocation-journal.test.ts
+          src/tools/pipeline/__tests__/rationale-ticket-store.test.ts
           src/engine/turn/__tests__/rationale-real-stack.integration.test.ts
+          src/audit/__tests__/hmac-chain.test.ts
           src/audit/__tests__/rationale-audit-adapter.test.ts
           src/boot/__tests__/plugin-surface-permissions.test.ts
           src/permissions/__tests__/windows-sandbox-logic.test.ts
@@ -130,5 +135,10 @@ jobs:
           src/permissions/__tests__/permission-manager-meta-override.test.ts
           src/tools/__tests__/registry-meta-governance.test.ts
           src/tools/__tests__/executor-rationale-batch.test.ts
+          src/tools/pipeline/__tests__/rationale-host-coordinator.test.ts
+          src/tools/pipeline/__tests__/rationale-host-service.test.ts
+          src/tools/pipeline/__tests__/rationale-invocation-journal.test.ts
+          src/tools/pipeline/__tests__/rationale-ticket-store.test.ts
           src/engine/turn/__tests__/rationale-real-stack.integration.test.ts
+          src/audit/__tests__/hmac-chain.test.ts
           src/audit/__tests__/rationale-audit-adapter.test.ts

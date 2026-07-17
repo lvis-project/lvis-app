@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { AuditLogger } from "../../../audit/audit-logger.js";
+import { MemorySecretStore } from "../../../audit/hmac-chain.js";
 import type { RationaleAuditSink } from "../../../audit/rationale-audit-adapter.js";
 import { KeywordEngine } from "../../../core/keyword-engine.js";
 import { RouteEngine } from "../../../core/route-engine.js";
@@ -257,6 +258,8 @@ describe("foreground rationale real-stack integration", () => {
     }, "scope-review-model");
     const invocationStartCas = new DurableHostInvocationStartCasStore({
       filePath: join(directory, "invocation-journal.json"),
+      auditSecret: "rationale-real-stack-journal-secret-v1",
+      sealStore: new MemorySecretStore(),
     });
     const hostService = new RationaleHostService({
       approvalGate,

@@ -806,11 +806,40 @@ export class RationaleHostCoordinator implements RationaleHostRuntime, Rationale
     }
 
     context.approvalStarted = true;
+    type ApprovalAbortOutcome = {
+      readonly kind: "aborted";
+      readonly failure: { readonly error: unknown } | null;
+    };
+    const abortState: { current: ApprovalAbortOutcome | null } = {
+      current: null,
+    };
+    let settleAbort: ((outcome: ApprovalAbortOutcome) => void) | null = null;
+    const abortWait = new Promise<ApprovalAbortOutcome>((resolve) => {
+      settleAbort = resolve;
+    });
     const abortPending = (): void => {
-      this.abort(ticketId, this.#now());
+      if (abortState.current !== null) return;
+      let failure: ApprovalAbortOutcome["failure"] = null;
+      try {
+        this.abort(ticketId, Math.max(requestedAt, this.#now()));
+      } catch (error) {
+        failure = { error };
+      }
+      const outcome: ApprovalAbortOutcome = {
+        kind: "aborted",
+        failure,
+      };
+      abortState.current = outcome;
+      settleAbort?.(outcome);
     };
     input.abortSignal?.addEventListener("abort", abortPending, { once: true });
     if (input.abortSignal?.aborted) abortPending();
+    const subscribedAbort = abortState.current;
+    if (subscribedAbort !== null) {
+      input.abortSignal?.removeEventListener("abort", abortPending);
+      if (subscribedAbort.failure !== null) throw subscribedAbort.failure.error;
+      return null;
+    }
     if (this.#contexts.get(ticketId) !== context) {
       input.abortSignal?.removeEventListener("abort", abortPending);
       return null;
@@ -841,14 +870,35 @@ export class RationaleHostCoordinator implements RationaleHostRuntime, Rationale
       isReadOnly: false,
     };
 
-    let decision: ApprovalDecision | null = null;
+    const approvalWait = (() => {
+      try {
+        return Promise.resolve(this.#approvalGate.requestAndWait(request)).then(
+          (decision) => ({ kind: "decision" as const, decision }),
+          () => ({ kind: "decision" as const, decision: null }),
+        );
+      } catch {
+        return Promise.resolve({
+          kind: "decision" as const,
+          decision: null,
+        });
+      }
+    })();
+    let waitOutcome: Awaited<typeof approvalWait> | ApprovalAbortOutcome;
     try {
-      decision = await this.#approvalGate.requestAndWait(request);
-    } catch {
-      decision = null;
+      waitOutcome = await Promise.race([approvalWait, abortWait]);
     } finally {
       input.abortSignal?.removeEventListener("abort", abortPending);
     }
+    const observedAbort = abortState.current;
+    if (observedAbort !== null) {
+      if (observedAbort.failure !== null) throw observedAbort.failure.error;
+      return null;
+    }
+    if (waitOutcome.kind === "aborted") {
+      if (waitOutcome.failure !== null) throw waitOutcome.failure.error;
+      return null;
+    }
+    const decision: ApprovalDecision | null = waitOutcome.decision;
     const decidedAt = input.now ?? this.#now();
     if (
       !this.#isCoordinatorCurrent() ||
@@ -890,13 +940,11 @@ export class RationaleHostCoordinator implements RationaleHostRuntime, Rationale
       };
     }
 
+    const requestedDeny = decision?.requestId === ticketId &&
+      decision.choice === "deny-once";
     const timedOut = isHostApprovalTimeoutDecision(decision);
     const hostRejected = isHostApprovalRejectedDecision(decision);
-    const denied =
-      !timedOut &&
-      !hostRejected &&
-      decision?.requestId === ticketId &&
-      decision.choice === "deny-once";
+    const denied = !timedOut && !hostRejected && requestedDeny;
     const terminal = timedOut
       ? this.#ticketStore.modalTimeout(expectation, decidedAt)
       : denied
@@ -998,23 +1046,27 @@ export class RationaleHostCoordinator implements RationaleHostRuntime, Rationale
     } catch (error) {
       errors.push(error);
     }
-    let result: RationaleTicketStateRecord | null = null;
-    if (context.receipt !== null) {
-      result = context.receipt.ticket;
-      this.#retiringContexts.delete(ticketId);
-    } else {
+    let result: RationaleTicketStateRecord | null =
+      context.receipt?.ticket ?? context.terminalTicket;
+    let ticketRetired = context.receipt !== null;
+    if (!ticketRetired) {
       try {
-        const terminal = this.#ticketStore.abort(
-          createRationaleTicketCasExpectation(context.snapshot),
-          now,
-        );
-        if (terminal) {
-          result = terminal.ticket;
-          this.#retiringContexts.delete(ticketId);
-        } else if (!this.#ticketStore.activeTicketIds(context.sessionId).includes(ticketId)) {
-          this.#retiringContexts.delete(ticketId);
+        if (!this.#ticketStore.activeTicketIds(context.sessionId, now).includes(ticketId)) {
+          ticketRetired = true;
         } else {
-          errors.push(new Error("rationale abort CAS did not retire the active ticket"));
+          const terminal = this.#ticketStore.abort(
+            createRationaleTicketCasExpectation(context.snapshot),
+            now,
+          );
+          if (terminal) {
+            context.terminalTicket = terminal.ticket;
+            result = terminal.ticket;
+            ticketRetired = true;
+          } else if (!this.#ticketStore.activeTicketIds(context.sessionId, now).includes(ticketId)) {
+            ticketRetired = true;
+          } else {
+            errors.push(new Error("rationale abort CAS did not retire the active ticket"));
+          }
         }
       } catch (error) {
         errors.push(error);
@@ -1023,6 +1075,7 @@ export class RationaleHostCoordinator implements RationaleHostRuntime, Rationale
     if (errors.length > 0) {
       throw new AggregateError(errors, "rationale coordinator abort failed");
     }
+    if (ticketRetired) this.#retiringContexts.delete(ticketId);
     return result;
   }
 
@@ -1047,9 +1100,11 @@ export class RationaleHostCoordinator implements RationaleHostRuntime, Rationale
       }
     }
     const errors: unknown[] = [];
+    const cancelledAtGate = new Set<string>();
     for (const [ticketId] of retiring) {
       try {
         this.#approvalGate.cancelPendingRationale(ticketId, "session-close");
+        cancelledAtGate.add(ticketId);
       } catch (error) {
         errors.push(error);
       }
@@ -1064,7 +1119,8 @@ export class RationaleHostCoordinator implements RationaleHostRuntime, Rationale
     }
     if (storeClosed) {
       for (const [ticketId, context] of retiring) {
-        if (this.#retiringContexts.get(ticketId) === context) {
+        if (cancelledAtGate.has(ticketId) &&
+            this.#retiringContexts.get(ticketId) === context) {
           this.#retiringContexts.delete(ticketId);
         }
       }

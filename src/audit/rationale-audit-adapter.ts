@@ -34,6 +34,7 @@ const CHECKPOINT_KEY_DOMAIN = "lvis:rationale-audit:checkpoint:v2";
 const CHECKPOINT_KIND = "rationale-audit-checkpoint";
 const CHECKPOINT_SCHEMA_VERSION = 2 as const;
 const CHECKPOINT_NAME_PREFIX = "rationale-audit-checkpoint-v2-";
+const CHECKPOINT_MAX_BYTES = 4 * 1024;
 const LOCK_STALE_MS = 30_000;
 const LOCK_RETRY_DELAY_MS = 25;
 const DEFAULT_LOCK_RETRIES = 5;
@@ -638,7 +639,10 @@ export class DurableRationaleAuditAdapter implements RationaleAuditSink {
     const candidates: AuditCheckpoint[] = [];
     let storedSlots = 0;
     for (const slot of ["a", "b"] as const) {
-      const raw = this.#sealStore.read(checkpointName(day, slot));
+      const raw = this.#sealStore.read(
+        checkpointName(day, slot),
+        CHECKPOINT_MAX_BYTES,
+      );
       if (raw === null) continue;
       storedSlots += 1;
       // SecretStore replacement is atomic. A present-but-invalid slot is

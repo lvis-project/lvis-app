@@ -60,6 +60,7 @@ export class RationaleHostService {
   readonly #anchorRoundCas = new InMemoryHostAnchorRoundCasStore();
   readonly #sessionGenerations = new Map<string, number>();
   readonly #knownSessions = new Set<string>();
+  readonly #retiringTicketIdsBySession = new Map<string, Set<string>>();
   #closed = false;
   #shutdownComplete = false;
 
@@ -191,21 +192,43 @@ export class RationaleHostService {
       sessionId,
       (this.#sessionGenerations.get(sessionId) ?? 0) + 1,
     );
-    const ticketIds = this.#ticketStore.activeTicketIds(sessionId);
-
     const errors: unknown[] = [];
+    const ticketIds = new Set(
+      this.#retiringTicketIdsBySession.get(sessionId) ?? [],
+    );
+    let activeTicketsListed = false;
+    try {
+      for (const ticketId of this.#ticketStore.activeTicketIds(sessionId, now)) {
+        ticketIds.add(ticketId);
+      }
+      activeTicketsListed = true;
+    } catch (error) {
+      errors.push(error);
+    }
+    const failedGateCancellations = new Set<string>();
     let closed: readonly HostRationaleTicketSnapshot[] = [];
     for (const ticketId of ticketIds) {
       try {
         this.#approvalGate.cancelPendingRationale(ticketId, "session-close");
       } catch (error) {
+        failedGateCancellations.add(ticketId);
         errors.push(error);
       }
     }
-    try {
-      closed = this.#ticketStore.closeSession(sessionId, now);
-    } catch (error) {
-      errors.push(error);
+    if (failedGateCancellations.size > 0) {
+      this.#retiringTicketIdsBySession.set(
+        sessionId,
+        failedGateCancellations,
+      );
+    } else {
+      this.#retiringTicketIdsBySession.delete(sessionId);
+    }
+    if (activeTicketsListed) {
+      try {
+        closed = this.#ticketStore.closeSession(sessionId, now);
+      } catch (error) {
+        errors.push(error);
+      }
     }
     try {
       this.#anchorRoundCas.closeSession(sessionId);
@@ -216,6 +239,7 @@ export class RationaleHostService {
     if (errors.length > 0) {
       throw new AggregateError(errors, "rationale host session close failed");
     }
+    this.#retiringTicketIdsBySession.delete(sessionId);
     this.#knownSessions.delete(sessionId);
     return closed;
   }

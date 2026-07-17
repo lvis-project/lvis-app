@@ -158,9 +158,10 @@ function setup() {
     requestId: request.id,
     choice: "deny-once" as const,
   }));
+  const cancelPendingRationale = vi.fn(() => false);
   const approvalGate = {
     requestAndWait,
-    cancelPendingRationale: vi.fn(() => false),
+    cancelPendingRationale,
   };
   const commitStart = vi.fn(async (
     _input: Parameters<HostInvocationStartCas["commitStart"]>[0],
@@ -205,6 +206,7 @@ function setup() {
     getRationaleScopeReviewer,
     reviewer,
     requestAndWait,
+    cancelPendingRationale,
     commitStart,
   };
 }
@@ -284,6 +286,50 @@ describe("RationaleHostService", () => {
       { now: NOW + 1 },
     )).toBeNull();
     expect(state.requestAndWait).not.toHaveBeenCalled();
+  });
+
+  it("retries gate cancellation after the ticket store already closed", async () => {
+    const state = setup();
+    const coordinator = await state.createCoordinator();
+    const materialized = coordinator.materializeRationaleControl(
+      createCandidate(state.anchor),
+    );
+    if (!materialized) throw new Error("expected materialized rationale control");
+    await coordinator.handleRationaleRoundResult({
+      ticketId: materialized.control.ticketId,
+      result: {
+        kind: "generation-failure",
+        generationOutcome: "generation-error",
+      },
+      now: NOW,
+    });
+
+    let settleApproval: ((value: null) => void) | undefined;
+    state.requestAndWait.mockImplementationOnce(() => new Promise((resolve) => {
+      settleApproval = resolve as (value: null) => void;
+    }));
+    state.cancelPendingRationale
+      .mockImplementationOnce(() => {
+        throw new Error("gate cancellation unavailable");
+      })
+      .mockImplementationOnce(() => {
+        settleApproval?.(null);
+        return true;
+      });
+    const pendingPrompt = coordinator.promptForApproval(
+      materialized.control.ticketId,
+      { now: NOW + 1 },
+    );
+    expect(state.requestAndWait).toHaveBeenCalledOnce();
+
+    expect(() => state.service.closeSession(SESSION_ID, NOW + 2)).toThrow(
+      AggregateError,
+    );
+    expect(state.cancelPendingRationale).toHaveBeenCalledTimes(1);
+
+    expect(() => state.service.closeSession(SESSION_ID, NOW + 3)).not.toThrow();
+    expect(state.cancelPendingRationale).toHaveBeenCalledTimes(2);
+    await expect(pendingPrompt).resolves.toBeNull();
   });
 
   it("quarantines coordinator contexts before a close audit failure", async () => {

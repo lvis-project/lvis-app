@@ -24,10 +24,7 @@ import {
   deriveConservativeRationaleActionSummary,
 } from "../rationale-host-coordinator.js";
 import type { RationaleControlCandidate } from "../rationale-orchestrator.js";
-import {
-  createReviewerScopeReevaluation,
-  evaluateRationaleOnlyBatch,
-} from "../rationale-pr1-contract.js";
+import { createReviewerScopeReevaluation } from "../rationale-pr1-contract.js";
 import {
   InMemoryHostInvocationStartCasStore,
   type InvocationAuditRecord,
@@ -837,6 +834,108 @@ describe("RationaleHostCoordinator", () => {
     });
   });
 
+  it("surfaces abort-listener audit failure through the prompt promise", async () => {
+    let failAbortAudit = false;
+    const state = setup({
+      deferApproval: true,
+      onTicketAudit: (event) => {
+        if (failAbortAudit && event.event === "abort") {
+          throw new Error("listener abort audit unavailable");
+        }
+      },
+    });
+    const materialized = materialize(state);
+    await state.coordinator.handleRationaleRoundResult({
+      ticketId: materialized.control.ticketId,
+      result: {
+        kind: "generation-failure",
+        generationOutcome: "generation-error",
+      },
+      now: NOW + 1,
+    });
+    failAbortAudit = true;
+    const caller = new AbortController();
+    const pending = state.coordinator.promptForApproval(
+      materialized.control.ticketId,
+      { abortSignal: caller.signal, now: NOW + 2 },
+    );
+    await vi.waitFor(() => {
+      expect(state.approvalGate.requestAndWait).toHaveBeenCalledOnce();
+    });
+
+    expect(() => caller.abort(new Error("caller cancelled"))).not.toThrow();
+    await expect(pending).rejects.toThrow(AggregateError);
+    expect(state.ticketStore.get({
+      sessionId: materialized.control.anchor.sessionId,
+      ticketId: materialized.control.ticketId,
+      now: NOW + 2,
+    })?.ticket.state).toBe("user_pending");
+
+    failAbortAudit = false;
+    expect(state.coordinator.abort(
+      materialized.control.ticketId,
+      NOW + 3,
+    )).toMatchObject({
+      state: "cancelled",
+      terminalReason: "caller-abort",
+    });
+  });
+
+  it("settles an abort when gate cancellation throws and approval never settles", async () => {
+    let failCancellation = true;
+    const ticketAudits: RationaleTicketStoreAuditEvent[] = [];
+    const approvalGate = {
+      requestAndWait: vi.fn((_request: Omit<ApprovalRequest, "requireExplicit">) =>
+        new Promise<ApprovalDecision>(() => {})),
+      cancelPendingRationale: vi.fn(() => {
+        if (failCancellation) throw new Error("approval cancellation unavailable");
+        return false;
+      }),
+    } satisfies Pick<ApprovalGate, "requestAndWait" | "cancelPendingRationale">;
+    const state = setup({
+      approvalGate,
+      onTicketAudit: (event) => ticketAudits.push(event),
+    });
+    const materialized = materialize(state);
+    await state.coordinator.handleRationaleRoundResult({
+      ticketId: materialized.control.ticketId,
+      result: {
+        kind: "generation-failure",
+        generationOutcome: "generation-error",
+      },
+      now: NOW + 1,
+    });
+    const caller = new AbortController();
+    const pending = state.coordinator.promptForApproval(
+      materialized.control.ticketId,
+      { abortSignal: caller.signal, now: NOW + 2 },
+    );
+    await vi.waitFor(() => {
+      expect(approvalGate.requestAndWait).toHaveBeenCalledOnce();
+    });
+
+    expect(() => caller.abort()).not.toThrow();
+    await expect(pending).rejects.toThrow(AggregateError);
+    expect(state.ticketStore.get({
+      sessionId: materialized.control.anchor.sessionId,
+      ticketId: materialized.control.ticketId,
+      now: NOW + 2,
+    })).toBeNull();
+    expect(ticketAudits.filter((event) => event.event === "abort")).toHaveLength(1);
+
+    failCancellation = false;
+    expect(state.coordinator.abort(
+      materialized.control.ticketId,
+      NOW + 3,
+    )).toMatchObject({
+      state: "cancelled",
+      terminalReason: "caller-abort",
+    });
+    expect(approvalGate.cancelPendingRationale).toHaveBeenCalledTimes(2);
+    expect(ticketAudits.some((event) => event.operation === "replay-rejected"))
+      .toBe(false);
+  });
+
   it("quarantines session close contexts until ticket audit recovery", async () => {
     let failCloseAudit = false;
     const state = setup({
@@ -883,5 +982,56 @@ describe("RationaleHostCoordinator", () => {
         }),
       }),
     ]);
+  });
+
+  it("retains session-close context until gate cancellation can be retried", async () => {
+    let failCancellation = true;
+    let settleApproval: ((decision: ApprovalDecision) => void) | null = null;
+    const approvalGate = {
+      requestAndWait: vi.fn((_request: Omit<ApprovalRequest, "requireExplicit">) =>
+        new Promise<ApprovalDecision>((resolve) => {
+          settleApproval = resolve;
+        })),
+      cancelPendingRationale: vi.fn((requestId: string) => {
+        if (failCancellation) throw new Error("session cancellation unavailable");
+        settleApproval?.({ requestId, choice: "deny-once" });
+        return true;
+      }),
+    } satisfies Pick<ApprovalGate, "requestAndWait" | "cancelPendingRationale">;
+    const state = setup({ approvalGate });
+    const materialized = materialize(state);
+    await state.coordinator.handleRationaleRoundResult({
+      ticketId: materialized.control.ticketId,
+      result: {
+        kind: "generation-failure",
+        generationOutcome: "generation-error",
+      },
+      now: NOW + 1,
+    });
+    const pending = state.coordinator.promptForApproval(
+      materialized.control.ticketId,
+      { now: NOW + 2 },
+    );
+    await vi.waitFor(() => {
+      expect(approvalGate.requestAndWait).toHaveBeenCalledOnce();
+    });
+
+    expect(() => state.coordinator.closeSession(
+      materialized.control.anchor.sessionId,
+      NOW + 2,
+    )).toThrow(AggregateError);
+    expect(state.ticketStore.get({
+      sessionId: materialized.control.anchor.sessionId,
+      ticketId: materialized.control.ticketId,
+      now: NOW + 2,
+    })).toBeNull();
+
+    failCancellation = false;
+    expect(state.coordinator.closeSession(
+      materialized.control.anchor.sessionId,
+      NOW + 3,
+    )).toEqual([]);
+    await expect(pending).resolves.toBeNull();
+    expect(approvalGate.cancelPendingRationale).toHaveBeenCalledTimes(2);
   });
 });
