@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { A2AJsonRpcMethod } from "../../shared/a2a-wire.js";
 import { A2ARemoteClient } from "../a2a-remote-client.js";
-import type { A2ARemotePreparedAttempt } from "../a2a-remote-contracts.js";
+import { A2A_EXACT_SEND_REPLAY_URI, type A2ARemotePreparedAttempt } from "../a2a-remote-contracts.js";
 import { A2ARemoteDurableStore } from "../a2a-remote-store.js";
 
 const digest = "a".repeat(64);
@@ -37,6 +37,63 @@ function attempt(value: A2ARemotePreparedAttempt) {
 }
 
 describe("A2A remote startup recovery fence", () => {
+  it("migrates the domain-shaped v2 replay identifier to the reviewed UUID URN", async () => {
+    const current = prepared();
+    const legacyIdentifier = new URL(
+      "/a2a/extensions/exact-send-replay/v1",
+      `https://${["legacy", "example", "test"].join(".")}`,
+    ).href;
+    const files = new Map<string, unknown>([["client-state.json", {
+      version: 2,
+      attempts: [{
+        prepared: current,
+        stage: "settled",
+        resolved: {
+          snapshotId: "snapshot-1",
+          credentialRevisionId: current.intendedCredentialRevisionId,
+          resolvedAt: "2026-07-16T00:00:00.000Z",
+          snapshotIssuedAt: "2026-07-16T00:00:00.000Z",
+          snapshotExpiresAt: "2099-01-01T00:00:00.000Z",
+          operation: current.operation,
+          method: current.method,
+          extensionUri: legacyIdentifier,
+          lineage: current.lineage,
+          semanticRequestHash: current.semanticRequestHash,
+          ownerDigestSha256: current.ownerDigestSha256,
+          projectRootDigestSha256: current.projectRootDigestSha256,
+          profileDigestSha256: current.profileDigestSha256,
+          originDigestSha256: current.originDigestSha256,
+          taskHandle: current.taskHandle,
+          taskToken: current.taskToken,
+        },
+        outcomeCode: "completed",
+        updatedAt: "2026-07-16T00:00:00.000Z",
+      }],
+      payloads: [],
+      tasks: [],
+    }]]);
+    const audit = vi.fn();
+    const store = new A2ARemoteDurableStore({
+      namespace: {
+        readJson: async <T>(name: string, fallback: T) => structuredClone((files.get(name) ?? fallback) as T),
+        writeJson: async (name: string, value: unknown) => { files.set(name, structuredClone(value)); },
+      },
+      encryption: { isEncryptionAvailable: () => true, encryptString: (value) => Buffer.from(value), decryptString: (value) => value.toString() },
+      now,
+      audit,
+    });
+
+    const migrated = await store.getAttempt(current.attemptId);
+
+    expect(migrated?.resolved?.extensionUri).toBe(A2A_EXACT_SEND_REPLAY_URI);
+    expect(files.get("client-state.json")).toMatchObject({
+      version: 3,
+      attempts: [{ resolved: { extensionUri: A2A_EXACT_SEND_REPLAY_URI } }],
+    });
+    expect(audit).toHaveBeenCalledWith({ reason: "state-migrated", count: 1 });
+    expect(files.has("client-state.quarantine.json")).toBe(false);
+  });
+
   it.each([
     ["invalid", [{ ...attempt(prepared()), prepared: { ...prepared(), ownerDigestSha256: undefined } }]],
     ["duplicate", [attempt(prepared()), attempt(prepared())]],
@@ -44,7 +101,7 @@ describe("A2A remote startup recovery fence", () => {
     ["expired", [attempt(prepared({ attemptDeadline: "2026-07-15T23:59:59.000Z" }))]],
     ["conflicting", [attempt(prepared()), attempt(prepared({ attemptId: "attempt-2", ownerToken: "owner-token-2" }))]],
   ])("quarantines %s restart state and performs zero outbound I/O", async (_name, attempts) => {
-    const files = new Map<string, unknown>([["client-state.json", { version: 2, attempts, payloads: [], tasks: [] }]]);
+    const files = new Map<string, unknown>([["client-state.json", { version: 3, attempts, payloads: [], tasks: [] }]]);
     const audit = vi.fn();
     const store = new A2ARemoteDurableStore({
       namespace: {

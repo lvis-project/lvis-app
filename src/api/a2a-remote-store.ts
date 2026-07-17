@@ -22,7 +22,8 @@ import {
   type A2ARemoteResolvedFields,
 } from "./a2a-remote-contracts.js";
 
-const STORE_VERSION = 2;
+const LEGACY_STORE_VERSION = 2;
+const STORE_VERSION = 3;
 const DEFAULT_FILE = "client-state.json";
 const DEFAULT_QUARANTINE_FILE = "client-state.quarantine.json";
 const DIGEST = /^[a-f0-9]{64}$/;
@@ -194,15 +195,54 @@ function initialState(): StoreState {
   return { version: STORE_VERSION, attempts: [], payloads: [], tasks: [] };
 }
 
-function isStoreState(value: unknown): value is StoreState {
+type StoreStateEnvelope = Omit<StoreState, "version"> & { version: number };
+
+function isStoreStateEnvelope(value: unknown): value is StoreStateEnvelope {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const candidate = value as Partial<StoreState>;
+  const candidate = value as Partial<StoreStateEnvelope>;
   return Object.keys(candidate).every((key) => ["version", "encryptedDataKey", "attempts", "payloads", "tasks"].includes(key))
-    && candidate.version === STORE_VERSION
+    && Number.isSafeInteger(candidate.version)
     && Array.isArray(candidate.attempts)
     && Array.isArray(candidate.payloads)
     && Array.isArray(candidate.tasks)
     && (candidate.encryptedDataKey === undefined || typeof candidate.encryptedDataKey === "string");
+}
+
+function isLegacyExactReplayUri(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:"
+      && parsed.port === ""
+      && parsed.username === ""
+      && parsed.password === ""
+      && parsed.search === ""
+      && parsed.hash === ""
+      && parsed.pathname === "/a2a/extensions/exact-send-replay/v1"
+      && parsed.href === value;
+  } catch {
+    return false;
+  }
+}
+
+function migrateStoreState(value: unknown): { state: StoreState; migrated: boolean } | null {
+  if (!isStoreStateEnvelope(value)) return null;
+  if (value.version === STORE_VERSION) {
+    return { state: structuredClone(value) as StoreState, migrated: false };
+  }
+  if (value.version !== LEGACY_STORE_VERSION) return null;
+  const migrated = structuredClone(value) as StoreStateEnvelope;
+  for (const attempt of migrated.attempts as unknown[]) {
+    if (!attempt || typeof attempt !== "object" || Array.isArray(attempt)) continue;
+    const resolved = (attempt as { resolved?: unknown }).resolved;
+    if (!resolved || typeof resolved !== "object" || Array.isArray(resolved)) continue;
+    const record = resolved as { extensionUri?: unknown };
+    if (isLegacyExactReplayUri(record.extensionUri)) {
+      record.extensionUri = A2A_EXACT_SEND_REPLAY_URI;
+    }
+  }
+  migrated.version = STORE_VERSION;
+  return { state: migrated as StoreState, migrated: true };
 }
 
 /**
@@ -252,11 +292,13 @@ export class A2ARemoteDurableStore {
   private async load(): Promise<StoreState> {
     if (this.state) return this.state;
     const raw = await this.options.namespace.readJson<unknown>(this.fileName, initialState());
-    if (!isStoreState(raw)) {
+    const loaded = migrateStoreState(raw);
+    if (!loaded) {
       this.audit("state-schema-invalid", 1);
       throw new Error("a2a-remote-store-invalid");
     }
-    const recovered = await this.validateAndRecover(structuredClone(raw));
+    if (loaded.migrated) this.audit("state-migrated", 1);
+    const recovered = await this.validateAndRecover(loaded.state, loaded.migrated);
     this.state = recovered;
     return this.state;
   }
@@ -361,7 +403,7 @@ export class A2ARemoteDurableStore {
     return [item.createdAt, item.orphanDeadline, item.expiresAt].every((entry) => typeof entry === "string" && Number.isFinite(Date.parse(entry)));
   }
 
-  private async validateAndRecover(state: StoreState): Promise<StoreState> {
+  private async validateAndRecover(state: StoreState, migrated = false): Promise<StoreState> {
     const quarantine: QuarantineEntry[] = [];
     let routineRecoveryChanged = false;
     const abortedPayloadIds = new Set<string>();
@@ -470,7 +512,7 @@ export class A2ARemoteDurableStore {
       this.audit("startup-quarantine", quarantine.length);
       await this.options.namespace.writeJson(DEFAULT_QUARANTINE_FILE, { version: 1, entries: quarantine.slice(0, this.maxQuarantine) });
       await this.persist(state);
-    } else if (routineRecoveryChanged) {
+    } else if (routineRecoveryChanged || migrated) {
       await this.persist(state);
     }
     return state;
