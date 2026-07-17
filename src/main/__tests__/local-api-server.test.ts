@@ -372,7 +372,7 @@ describe("local-api-server", () => {
       expect(localMutation.status).toBe(403);
       expect(requestAndWait).toHaveBeenCalledOnce();
       releaseGate({ requestId: "shared-consent", choice: "allow-once" });
-      await expect(pendingA2A).resolves.toBe(true);
+      await expect(pendingA2A).resolves.toMatchObject({ decisionId: "shared-consent" });
     });
 
     it("isolates A2A initialization failure while keeping /v1 available", async () => {

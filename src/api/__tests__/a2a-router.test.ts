@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createA2AHttpRouter, A2AHandlerError, type A2ARequestHandler } from "../a2a-router.js";
+import { request as httpRequest } from "node:http";
+import {
+  createA2AHttpRouter,
+  A2AHandlerError,
+  A2AWireResponseError,
+  type A2ARequestHandler,
+} from "../a2a-router.js";
 import {
   startLocalApiHttpServer,
   type LocalApiHttpServer,
@@ -116,7 +122,7 @@ function testHandler(): {
 
 let servers: LocalApiHttpServer[] = [];
 
-async function start(): Promise<{
+async function start(handlerOverride?: A2ARequestHandler): Promise<{
   server: LocalApiHttpServer;
   handle: ReturnType<typeof vi.fn>;
   audit: ReturnType<typeof vi.fn>;
@@ -129,7 +135,7 @@ async function start(): Promise<{
     api: makeStubLocalApi(),
     secret: SECRET,
     broadcaster: createStreamBroadcaster(),
-    a2aRouter: createA2AHttpRouter({ handlers: [handler], audit, log }),
+    a2aRouter: createA2AHttpRouter({ handlers: [handlerOverride ?? handler], audit, log }),
     host: "127.0.0.1",
     port: 0,
   });
@@ -207,6 +213,64 @@ describe("A2A v1 loopback router", () => {
     expect(health.status).toBe(401);
   });
 
+  it("returns 413 and closes an over-cap upload without waiting for its end", async () => {
+    const { server, handle } = await start();
+    const result = await new Promise<{
+      status: number | undefined;
+      body: string;
+      connection: string | undefined;
+    }>((resolve, reject) => {
+      let responseEnded = false;
+      let requestClosed = false;
+      let responseStatus: number | undefined;
+      let responseBody = "";
+      let responseConnection: string | undefined;
+      let receivedResponse = false;
+      const timeout = setTimeout(() => {
+        request.destroy();
+        reject(new Error("oversized A2A request was not terminated"));
+      }, 2_000);
+      const finish = () => {
+        if (!responseEnded || !requestClosed) return;
+        clearTimeout(timeout);
+        resolve({ status: responseStatus, body: responseBody, connection: responseConnection });
+      };
+      const request = httpRequest(url(server), {
+        method: "POST",
+        headers: { ...headers(), "content-length": String(2 * 1024 * 1024) },
+      }, (response) => {
+        receivedResponse = true;
+        responseStatus = response.statusCode;
+        responseConnection = response.headers.connection;
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => { responseBody += chunk; });
+        response.on("end", () => {
+          responseEnded = true;
+          finish();
+        });
+      });
+      request.on("close", () => {
+        requestClosed = true;
+        finish();
+      });
+      request.on("error", (error) => {
+        if (!receivedResponse) {
+          clearTimeout(timeout);
+          reject(error);
+        }
+      });
+      request.write(Buffer.alloc(1024 * 1024 + 1, 0x61));
+      // Deliberately do not call end(); the server must terminate the upload.
+    });
+
+    expect(result).toEqual({
+      status: 413,
+      body: JSON.stringify({ ok: false, error: "payload-too-large" }),
+      connection: "close",
+    });
+    expect(handle).not.toHaveBeenCalled();
+  });
+
   it("preserves a numeric zero request id and delegates direct methods", async () => {
     const { server, handle } = await start();
     const response = await fetch(url(server), {
@@ -233,6 +297,23 @@ describe("A2A v1 loopback router", () => {
       result: { task: task() },
     });
     expect(handle).toHaveBeenCalledOnce();
+  });
+
+  it("accepts a successful wire handler result without optional response headers", async () => {
+    const fixture = testHandler();
+    const handleWire = vi.fn(async () => ({ result: task() }));
+    const { server } = await start({ ...fixture.handler, handleWire });
+    const response = await fetch(url(server), {
+      method: "POST",
+      headers: headers(),
+      body: rpc(A2AJsonRpcMethod.GET_TASK, { id: "task-1" }, "wire-no-headers"),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("a2a-version")).toBe("1.0");
+    expect(response.headers.get("a2a-extensions")).toBeNull();
+    expect(await response.json()).toEqual({ jsonrpc: "2.0", id: "wire-no-headers", result: task() });
+    expect(handleWire).toHaveBeenCalledOnce();
   });
 
   it("returns VersionNotSupported with mandatory ErrorInfo", async () => {
@@ -434,6 +515,85 @@ describe("A2A v1 loopback router", () => {
     expect(JSON.stringify(body)).not.toContain("sensitive-handler-detail");
     expect(log).toHaveBeenCalledWith("A2A handler tck failed");
     expect(JSON.stringify(log.mock.calls)).not.toContain("sensitive-handler-detail");
+  });
+
+  it.each([
+    ["Content-Type", "text/plain"],
+    ["A2A-Version", "0.1"],
+  ])("rejects a successful wire handler overriding core header %s", async (headerName, headerValue) => {
+    const { handler } = testHandler();
+    const { server, audit, log } = await start({
+      ...handler,
+      handleWire: async () => ({
+        result: { task: task() },
+        headers: {
+          [headerName]: headerValue,
+          "a2a-extensions": "https://example.test/extension",
+        },
+      }),
+    });
+    const response = await fetch(url(server), {
+      method: "POST",
+      headers: headers(),
+      body: rpc(A2AJsonRpcMethod.GET_TASK, { id: "task-1" }),
+    });
+
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(response.headers.get("a2a-version")).toBe("1.0");
+    expect(response.headers.get("a2a-extensions")).toBeNull();
+    expect(await response.json()).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      error: { code: -32603, message: "Internal error" },
+    });
+    expect(audit).toHaveBeenCalledWith({
+      type: "a2a-wire-drop",
+      reason: "handler-error",
+      handlerId: "tck",
+      method: A2AJsonRpcMethod.GET_TASK,
+    });
+    expect(log).toHaveBeenCalledWith("A2A handler tck failed");
+  });
+
+  it.each([
+    ["Content-Type", "text/plain"],
+    ["A2A-Version", "0.1"],
+  ])("rejects a wire error overriding core header %s", async (headerName, headerValue) => {
+    const { handler } = testHandler();
+    const { server, audit, log } = await start({
+      ...handler,
+      handleWire: async () => {
+        throw new A2AWireResponseError(
+          422,
+          { code: -32099, message: "handler-selected-error" },
+          {
+            [headerName]: headerValue,
+            "a2a-extensions": "https://example.test/extension",
+          },
+        );
+      },
+    });
+    const response = await fetch(url(server), {
+      method: "POST",
+      headers: headers(),
+      body: rpc(A2AJsonRpcMethod.GET_TASK, { id: "task-1" }),
+    });
+
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(response.headers.get("a2a-version")).toBe("1.0");
+    expect(response.headers.get("a2a-extensions")).toBeNull();
+    expect(await response.json()).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      error: { code: -32603, message: "Internal error" },
+    });
+    expect(audit).toHaveBeenCalledWith({
+      type: "a2a-wire-drop",
+      reason: "handler-error",
+      handlerId: "tck",
+      method: A2AJsonRpcMethod.GET_TASK,
+    });
+    expect(log).toHaveBeenCalledWith("A2A handler tck failed");
   });
 
   it("exposes only definition-owned handler errors", async () => {

@@ -301,6 +301,11 @@ export function ToolApprovalDialog({
     request?.category === "agent-action" &&
     request.kind === "agent-action" &&
     (request.trustOrigin === "local-api" || request.trustOrigin === "cli");
+  const isRemoteA2AAction =
+    request?.category === "agent-action" &&
+    request.kind === "agent-action" &&
+    (request.source ?? "builtin") === "builtin" &&
+    (request.trustOrigin === "a2a-remote-wire" || request.toolName.startsWith("a2a-remote-"));
 
   // HIGH verdict → focus NL field when dialog opens.
   useEffect(() => {
@@ -384,7 +389,7 @@ export function ToolApprovalDialog({
 
   // HIGH verdict forces session (no persistent grant for HIGH-risk actions).
   // This is the durable choice that the memory store records.
-  const approvalIsOneShot = isMcpElicitation || isExternalOriginAgentAction;
+  const approvalIsOneShot = isMcpElicitation || isExternalOriginAgentAction || isRemoteA2AAction;
   const primaryApproveChoice: ApprovalChoice =
     approvalIsOneShot
       ? "allow-once"

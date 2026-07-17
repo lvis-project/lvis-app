@@ -141,6 +141,13 @@ export const CHANNELS = {
     counts: "lvis:runtime:counts",
     env: "lvis:runtime:env",
   },
+  remoteA2a: {
+    targets: "lvis:a2a-remote:targets",
+    send: "lvis:a2a-remote:send",
+    status: "lvis:a2a-remote:status",
+    task: "lvis:a2a-remote:task",
+    action: "lvis:a2a-remote:action",
+  },
   marketplace: {
     ping: "lvis:marketplace:ping",
   },
