@@ -587,6 +587,21 @@ test("attestation report binds exact subject, SLSA predicate, certificate source
   assert.equal(verified.workflowRunAttempt, "1");
 });
 
+test("attestation report accepts an empty bundle locator but still requires the verified embedded bundle", () => {
+  const withoutLocator = validAttestationReport();
+  withoutLocator[0].attestation.bundle_url = "";
+  assert.equal(verifyFixtureAttestation(withoutLocator).subjectSha256, SHA);
+
+  const emptyBundle = validAttestationReport();
+  emptyBundle[0].attestation.bundle_url = "";
+  emptyBundle[0].attestation.bundle = {};
+  assert.throws(() => verifyFixtureAttestation(emptyBundle), /empty bundle/u);
+
+  const unsafeLocator = validAttestationReport();
+  unsafeLocator[0].attestation.bundle_url = "http://api.github.com/attestations/1";
+  assert.throws(() => verifyFixtureAttestation(unsafeLocator), /credential-free HTTPS URL/u);
+});
+
 test("attestation report rejects missing, duplicate, and wrong-location bindings", () => {
   const missing = validAttestationReport();
   delete missing[0].verificationResult.signature.certificate.runInvocationURI;
