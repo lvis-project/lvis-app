@@ -44,9 +44,11 @@ export interface RationaleHostWiringOverrides {
 }
 
 /**
- * Publishes a dormant process-owned rationale authority on the disabled path.
- * The enabled path publishes only after durable audit preflight and crash
- * recovery. Neither path resolves the reviewer until a query-loop invocation.
+ * Prepares process-owned rationale authority for the guarded production path.
+ * When guarded production activation is requested, it publishes a concrete
+ * runtime only after durable audit preflight and crash recovery. Unavailable
+ * preparation leaves query-loop on the legacy path.
+ * Neither path resolves the reviewer until a query-loop invocation.
  */
 export async function wireRationaleHost(
   ctx: BootContext,

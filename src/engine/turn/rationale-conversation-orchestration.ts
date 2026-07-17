@@ -73,6 +73,18 @@ export type RationaleCoordinatorFactory = (
   input: RationaleCoordinatorFactoryInput,
 ) => Promise<RationaleConversationRuntime | null> | RationaleConversationRuntime | null;
 
+/**
+ * The query loop prepares a runtime before it changes meta-tool ordering.
+ * A null/throwing factory must therefore be observable before the legacy
+ * batch is split, while the executor still revalidates every actual action.
+ */
+export interface RationaleRuntimePreparationInput {
+  readonly coordinatorFactory?: RationaleCoordinatorFactory;
+  readonly requestAnchor: RequestAnchor | null;
+  readonly rationaleProvenance: RationaleEligibilityProvenance;
+  readonly sessionId: string;
+}
+
 export interface ExecuteRationaleAwareBatchInput {
   readonly executor: ToolExecutor;
   readonly toolUses: ToolUseBlock[];
@@ -85,6 +97,12 @@ export interface ExecuteRationaleAwareBatchInput {
   readonly requestAnchor: RequestAnchor | null;
   readonly rationaleProvenance: RationaleEligibilityProvenance;
   readonly sessionId: string;
+  /**
+   * A runtime prepared before query-loop meta-tool ordering changed. `null`
+   * explicitly preserves the legacy executor path and avoids retrying a
+   * failed factory after the split.
+   */
+  readonly rationaleRuntime?: RationaleConversationRuntime | null;
   readonly coordinatorFactory?: RationaleCoordinatorFactory;
 }
 
@@ -158,8 +176,8 @@ function runtimeMatchesBatch(
     runtime.rationaleProvenance.taint === provenance.taint;
 }
 
-async function createRuntime(
-  input: ExecuteRationaleAwareBatchInput,
+export async function prepareRationaleConversationRuntime(
+  input: Readonly<RationaleRuntimePreparationInput>,
 ): Promise<RationaleConversationRuntime | null> {
   if (!input.coordinatorFactory || input.requestAnchor === null) return null;
   try {
@@ -181,6 +199,20 @@ async function createRuntime(
   }
 }
 
+function preparedRuntimeMatchesBatch(
+  input: ExecuteRationaleAwareBatchInput,
+): RationaleConversationRuntime | null | undefined {
+  if (input.rationaleRuntime === undefined) return undefined;
+  return input.rationaleRuntime !== null && input.requestAnchor !== null &&
+      runtimeMatchesBatch(
+        input.rationaleRuntime,
+        input.requestAnchor,
+        input.rationaleProvenance,
+      )
+    ? input.rationaleRuntime
+    : null;
+}
+
 /**
  * Resolve one executable tool batch without ever exposing the host control as
  * an ordinary result. Once a control exists, every exit completes the original
@@ -189,7 +221,10 @@ async function createRuntime(
 export async function executeRationaleAwareConversationBatch(
   input: ExecuteRationaleAwareBatchInput,
 ): Promise<RationaleAwareBatchResult> {
-  const runtime = await createRuntime(input);
+  const preparedRuntime = preparedRuntimeMatchesBatch(input);
+  const runtime = preparedRuntime === undefined
+    ? await prepareRationaleConversationRuntime(input)
+    : preparedRuntime;
   const batch = await input.executor.executeConversationBatch(input.toolUses, {
     ...input.executeOptions,
     ...(runtime ? { rationaleRuntime: runtime } : {}),

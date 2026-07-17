@@ -432,12 +432,15 @@ open the existing main-owned approval modal. The modal decision is bound to the
 current approval request and sealed tool/input; natural-language intent matching,
 tool output, and in-process retry tuples do not grant execution authority.
 
-The follow-up rationale PR1 modules are a dormant contract only:
-`FOREGROUND_RATIONALE_PRODUCTION_ENABLED=false`, with no ConversationLoop or
-ToolExecutor activation import. A future activation must keep one rationale-only
-round, record generation outcome separately from reviewer reevaluation, route
-either failure to the same modal fallback, consume host-owned allow-once CAS
-exactly once, and re-run current permission/sandbox/effect gates before execute.
+The follow-up rationale path is guarded-on in production only after boot has
+prepared a concrete host coordinator runtime and all versioned release
+prerequisites are attested. The ConversationLoop uses one activation predicate
+for both ordering and coordinator injection; an unavailable or failed runtime
+preparation retains the legacy batch and ordinary approval-modal flow. The
+enabled path keeps one rationale-only round, records generation outcome
+separately from reviewer reevaluation, routes either failure to the same modal
+fallback, consumes host-owned allow-once CAS exactly once, and re-runs current
+permission/sandbox/effect gates before execution.
 
 **Sandbox capability SOT (issue #691):**
 
@@ -937,7 +940,9 @@ PR #664 + PR #860 ratified.
 
 **Out-of-scope (deferred to follow-up issues, see PR #860 description for links):**
 
-- Foreground rationale activation wiring (dormant PR1 contract; production flag remains hard-off)
+- Foreground rationale activation was separately tracked; its current production
+  path is guarded by concrete host-runtime availability, with legacy fallback
+  when that runtime is unavailable.
 - Sandbox spawn-path full adoption — Node Readable compat (PR #791)
 - missing tests (PR #779)
 - Sandbox A1/A2/A3 UX polish leftover (PR #806)

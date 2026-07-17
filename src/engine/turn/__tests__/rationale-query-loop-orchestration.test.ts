@@ -13,6 +13,7 @@ import {
   RATIONALE_SIBLING_CANCELLED_RESULT,
   RATIONALE_SIBLING_REPLAY_BLOCKED_RESULT,
   type RationaleConversationCoordinator,
+  type RationaleCoordinatorFactory,
   type RationaleCoordinatorFactoryInput,
 } from "../rationale-conversation-orchestration.js";
 import { runRationaleOnlyRound } from "../rationale-round.js";
@@ -35,7 +36,7 @@ class Provider implements LLMProvider {
 
 function makeLoop(
   turns: StreamEvent[][],
-  factory?: (input: RationaleCoordinatorFactoryInput) => RationaleConversationCoordinator | null,
+  factory?: RationaleCoordinatorFactory,
   enabled = false,
 ) {
   const registry = new ToolRegistry();
@@ -126,13 +127,13 @@ beforeEach(() => vi.mocked(runRationaleOnlyRound).mockReset());
 afterEach(() => vi.unstubAllEnvs());
 
 describe("ConversationLoop rationale orchestration", () => {
-  it("keeps the factory dormant in production even when the test override is injected", async () => {
+  it("activates guarded production when a host coordinator factory is available", async () => {
     vi.stubEnv("NODE_ENV", "production");
     const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input));
     const fixture = makeLoop([
       toolRound([{ id: "prod-bash", name: "bash" }]),
       endRound(),
-    ], factory, true);
+    ], factory);
     const executeConversationBatch = vi.fn(async (toolUses: ToolUseBlock[]) => ({
       outcome: "completed" as const,
       results: toolUses.map(({ id }) => tr(id, "legacy")),
@@ -148,10 +149,116 @@ describe("ConversationLoop rationale orchestration", () => {
       requestAnchorRawIntent: "run it",
     });
 
-    expect(factory).not.toHaveBeenCalled();
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(executeConversationBatch).toHaveBeenCalledTimes(1);
+    expect(executeConversationBatch.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ rationaleRuntime: expect.any(Object) }),
+    );
+  });
+
+  it("retains legacy batch orchestration when boot did not publish a factory", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const fixture = makeLoop([
+      toolRound([{ id: "legacy-bash", name: "bash" }]),
+      endRound(),
+    ]);
+    const executeConversationBatch = vi.fn(async (toolUses: ToolUseBlock[]) => ({
+      outcome: "completed" as const,
+      results: toolUses.map(({ id }) => tr(id, "legacy")),
+    }));
+    (
+      fixture.loop.toolExecutor as unknown as {
+        executeConversationBatch: typeof executeConversationBatch;
+      }
+    ).executeConversationBatch = executeConversationBatch;
+
+    await fixture.loop.runTurn("run it", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+      requestAnchorRawIntent: "run it",
+    });
+
     expect(executeConversationBatch).toHaveBeenCalledTimes(1);
     expect(executeConversationBatch.mock.calls[0]?.[1]).not.toHaveProperty(
       "rationaleRuntime",
+    );
+    expect(executeConversationBatch.mock.calls[0]?.[1]).not.toHaveProperty(
+      "interceptedMetaToolHandler",
+    );
+  });
+
+  it("keeps a production shell-plus-meta batch on the legacy path when the factory returns null", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const factory = vi.fn(() => null);
+    const fixture = makeLoop([
+      toolRound([
+        { id: "shell", name: "bash" },
+        { id: "late-plugin", name: "request_plugin", input: { pluginId: "missing" } },
+      ]),
+      endRound(),
+    ], factory);
+    const executeConversationBatch = vi.fn(async (toolUses: ToolUseBlock[]) => ({
+      outcome: "completed" as const,
+      results: toolUses.map(({ id }) => tr(id, "legacy")),
+    }));
+    (
+      fixture.loop.toolExecutor as unknown as {
+        executeConversationBatch: typeof executeConversationBatch;
+      }
+    ).executeConversationBatch = executeConversationBatch;
+
+    await fixture.loop.runTurn("run it", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+      requestAnchorRawIntent: "run it",
+    });
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(executeConversationBatch.mock.calls[0]?.[0]).toEqual([
+      { id: "shell", name: "bash", input: {} },
+    ]);
+    expect(executeConversationBatch.mock.calls[0]?.[1]).not.toHaveProperty(
+      "rationaleRuntime",
+    );
+    expect(executeConversationBatch.mock.calls[0]?.[1]).not.toHaveProperty(
+      "interceptedMetaToolHandler",
+    );
+  });
+
+  it("keeps a production shell-plus-meta batch on the legacy path when the factory throws", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const factory = vi.fn(() => {
+      throw new Error("host factory unavailable");
+    });
+    const fixture = makeLoop([
+      toolRound([
+        { id: "shell", name: "bash" },
+        { id: "late-plugin", name: "request_plugin", input: { pluginId: "missing" } },
+      ]),
+      endRound(),
+    ], factory);
+    const executeConversationBatch = vi.fn(async (toolUses: ToolUseBlock[]) => ({
+      outcome: "completed" as const,
+      results: toolUses.map(({ id }) => tr(id, "legacy")),
+    }));
+    (
+      fixture.loop.toolExecutor as unknown as {
+        executeConversationBatch: typeof executeConversationBatch;
+      }
+    ).executeConversationBatch = executeConversationBatch;
+
+    await fixture.loop.runTurn("run it", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+      requestAnchorRawIntent: "run it",
+    });
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(executeConversationBatch.mock.calls[0]?.[0]).toEqual([
+      { id: "shell", name: "bash", input: {} },
+    ]);
+    expect(executeConversationBatch.mock.calls[0]?.[1]).not.toHaveProperty(
+      "rationaleRuntime",
+    );
+    expect(executeConversationBatch.mock.calls[0]?.[1]).not.toHaveProperty(
+      "interceptedMetaToolHandler",
     );
   });
 

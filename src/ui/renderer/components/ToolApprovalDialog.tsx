@@ -18,6 +18,10 @@ import { SOURCE_BADGE } from "../constants.js";
 import type { ApprovalDecisionExtras } from "../hooks/use-approval.js";
 import type { ApprovalChoice, ApprovalRequest } from "../types.js";
 import { canonicalStringify as canonicalStringifyForRenderer } from "../../../shared/canonical-json.js";
+import {
+  parseRationaleApprovalDisplay,
+  type RationaleApprovalDisplay,
+} from "../../../shared/rationale-approval-display.js";
 import { isNonUserTrustOrigin, trustOriginLabel } from "../utils/trust-origin-label.js";
 import {
   SummaryTile,
@@ -251,6 +255,142 @@ function hasRequestedElicitationSchema(request: ApprovalRequest | null): boolean
   return isRecord(args) && args.requestedSchema !== undefined;
 }
 
+const RATIONALE_INVALID_APPROVAL_MESSAGE =
+  "Rationale details could not be verified. Approval is unavailable; you can deny this request.";
+const RATIONALE_FAILED_EXPLANATION_MESSAGE =
+  "The model explanation is unavailable. Review the host-sealed action before deciding.";
+
+function rationaleScopeAlignmentLabel(
+  alignment: RationaleApprovalDisplay["scopeAlignment"],
+): string {
+  switch (alignment) {
+    case "aligned":
+      return "Aligned with the current request";
+    case "unclear":
+      return "Needs a closer scope review";
+    case "outside":
+      return "Outside the current request";
+    case "unknown":
+      return "Unavailable";
+  }
+}
+
+function RationaleTextList({
+  values,
+  testId,
+}: {
+  values: readonly string[];
+  testId: string;
+}) {
+  return (
+    <ul className="space-y-1" data-testid={testId}>
+      {values.map((value, index) => (
+        <li key={`${index}:${value}`} className="break-words">
+          {value}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Rationale approvals expose only the narrow, HMAC-bound display contract.
+ * Never reuse the normal request/args review path here: its payload can carry
+ * audit-only identifiers and model-provided text that do not belong in the
+ * decision card.
+ */
+function RationaleApprovalCard({
+  display,
+}: {
+  display: RationaleApprovalDisplay | null;
+}) {
+  if (display === null) {
+    return (
+      <div
+        className="rounded-md border border-destructive/(--opacity-muted) bg-destructive/(--opacity-faint) p-3 text-xs text-destructive"
+        data-testid="rationale-approval-invalid"
+        id="rationale-approval-invalid"
+        role="alert"
+      >
+        {RATIONALE_INVALID_APPROVAL_MESSAGE}
+      </div>
+    );
+  }
+
+  return (
+    <section
+      className="min-w-0 overflow-hidden rounded-md border"
+      data-testid="rationale-approval-card"
+    >
+      <h4 className="flex items-center justify-between gap-2 border-b px-3 py-2 text-xs font-semibold">
+        <span>Host-sealed action</span>
+        <code data-testid="rationale-approval-tool">{display.toolName}</code>
+      </h4>
+      <div className="divide-y">
+        <ReviewRow label={t("toolApprovalDialog.rowTarget")}>
+          <RationaleTextList
+            testId="rationale-approval-targets"
+            values={display.canonicalTargets}
+          />
+        </ReviewRow>
+        <ReviewRow label={t("toolApprovalDialog.rowChange")}>
+          <RationaleTextList
+            testId="rationale-approval-effects"
+            values={display.requestedEffects}
+          />
+        </ReviewRow>
+        <ReviewRow label={t("toolApprovalDialog.rowSideEffects")}>
+          <RationaleTextList
+            testId="rationale-approval-resources"
+            values={display.affectedResources}
+          />
+        </ReviewRow>
+        <ReviewRow label={t("toolApprovalDialog.rowAuthScope")}>
+          <span data-testid="rationale-approval-authority">
+            {display.requiredAuthority}
+          </span>
+        </ReviewRow>
+        <ReviewRow label={t("toolApprovalDialog.rowVerdict")}>
+          <span data-testid="rationale-approval-verdict">
+            {riskLevelKoLabel(display.effectiveVerdict.level)} · {display.effectiveVerdict.reason}
+          </span>
+        </ReviewRow>
+        <ReviewRow label={t("toolApprovalDialog.rowScope")}>
+          <div className="space-y-1" data-testid="rationale-approval-scope">
+            <p>{rationaleScopeAlignmentLabel(display.scopeAlignment)}</p>
+            <RationaleTextList
+              testId="rationale-approval-scope-reasons"
+              values={display.scopeReasons}
+            />
+          </div>
+        </ReviewRow>
+      </div>
+
+      {/* The model's explanation is visibly separate from host-sealed facts.
+          It is rendered as a React text node, never as markup or input. */}
+      <div
+        className="border-t bg-muted/(--opacity-light) px-3 py-2"
+        data-testid="rationale-model-explanation"
+      >
+        <p className="text-xs font-semibold">Model suggestion</p>
+        {display.rationaleStatus === "ready" ? (
+          <p className="mt-1 text-xs" data-testid="rationale-model-suggestion">
+            {display.suggestion}
+          </p>
+        ) : (
+          <p
+            className="mt-1 text-xs text-muted-foreground"
+            data-testid="rationale-model-fallback"
+            role="status"
+          >
+            {RATIONALE_FAILED_EXPLANATION_MESSAGE}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function ToolApprovalDialog({
   open,
   request,
@@ -282,6 +422,14 @@ export function ToolApprovalDialog({
     () => parseElicitationFields(request?.args),
     [request?.args],
   );
+  const isRationaleApproval = request?.kind === "rationale";
+  const rationaleDisplay = useMemo(
+    () => isRationaleApproval
+      ? parseRationaleApprovalDisplay(request?.args)
+      : null,
+    [isRationaleApproval, request?.args],
+  );
+  const rationaleDisplayInvalid = isRationaleApproval && rationaleDisplay === null;
   const elicitationFields = elicitationParse.fields;
   const isMcpElicitation = isMcpElicitationRequest(request);
   const hasElicitationSchema = isMcpElicitation && hasRequestedElicitationSchema(request);
@@ -296,7 +444,9 @@ export function ToolApprovalDialog({
     setElicitationValues(initialElicitationValues(elicitationFields));
   }, [request?.id, suggestedPurpose, elicitationFields]);
 
-  const finalVerdict = request?.reviewerVerdict?.level ?? riskLevelForCategory(request?.toolCategory ?? "meta");
+  const finalVerdict = isRationaleApproval
+    ? rationaleDisplay?.effectiveVerdict.level ?? "high"
+    : request?.reviewerVerdict?.level ?? riskLevelForCategory(request?.toolCategory ?? "meta");
   const isExternalOriginAgentAction =
     request?.category === "agent-action" &&
     request.kind === "agent-action" &&
@@ -309,12 +459,17 @@ export function ToolApprovalDialog({
 
   // HIGH verdict → focus NL field when dialog opens.
   useEffect(() => {
-    if (open && finalVerdict === "high" && suggestedPurpose.length === 0) {
+    if (
+      open &&
+      !isRationaleApproval &&
+      finalVerdict === "high" &&
+      suggestedPurpose.length === 0
+    ) {
       // Small delay so the dialog animation completes first.
       const t = setTimeout(() => nlInputRef.current?.focus(), 100);
       return () => clearTimeout(t);
     }
-  }, [open, finalVerdict, suggestedPurpose.length]);
+  }, [open, isRationaleApproval, finalVerdict, suggestedPurpose.length]);
 
   const elicitationInvalid = isElicitationFormInvalid(elicitationFields, elicitationValues);
   const elicitationContent = useMemo(
@@ -322,10 +477,13 @@ export function ToolApprovalDialog({
     [elicitationFields, elicitationValues],
   );
 
-  // Approve is disabled for HIGH when NL field is empty, and for incomplete
-  // MCP elicitation forms.
+  // Rationale cards are one-shot host-sealed decisions: they never ask for a
+  // durable NL justification. A malformed rationale display fails closed.
+  // Other approvals retain the existing HIGH / MCP form constraints.
+  const requiresNarrativeJustification = finalVerdict === "high" && !isRationaleApproval;
   const approveDisabled =
-    (finalVerdict === "high" && nlJustification.trim().length === 0) ||
+    rationaleDisplayInvalid ||
+    (requiresNarrativeJustification && nlJustification.trim().length === 0) ||
     isUnsupportedElicitationForm ||
     elicitationInvalid;
 
@@ -349,7 +507,7 @@ export function ToolApprovalDialog({
   ) => {
     let recordPromise: Promise<unknown> | undefined;
     const isDurable = choice === "allow-session" || choice === "allow-always";
-    if (request && isDurable && !isMcpElicitation) {
+    if (request && isDurable && !isMcpElicitation && !isRationaleApproval) {
       // canonicalStringify: sort object keys so {a,b} and {b,a} produce the
       // same string — matching how dispatchReviewer builds the lookup key.
       const canonicalArgs = canonicalStringifyForRenderer(request.args ?? {});
@@ -383,13 +541,24 @@ export function ToolApprovalDialog({
     }
     // Await the record promise in the background (non-blocking for the user).
     await recordPromise;
-  }, [request, finalVerdict, nlJustification, onDecide, isMcpElicitation]);
+  }, [
+    request,
+    finalVerdict,
+    nlJustification,
+    onDecide,
+    isMcpElicitation,
+    isRationaleApproval,
+  ]);
 
   // The primary Approve button grants for the scope selected in the radio
 
   // HIGH verdict forces session (no persistent grant for HIGH-risk actions).
   // This is the durable choice that the memory store records.
-  const approvalIsOneShot = isMcpElicitation || isExternalOriginAgentAction || isRemoteA2AAction;
+  const approvalIsOneShot =
+    isRationaleApproval ||
+    isMcpElicitation ||
+    isExternalOriginAgentAction ||
+    isRemoteA2AAction;
   const primaryApproveChoice: ApprovalChoice =
     approvalIsOneShot
       ? "allow-once"
@@ -402,6 +571,15 @@ export function ToolApprovalDialog({
       : undefined,
     [hasElicitationSchema, elicitationParse.supported, elicitationContent],
   );
+
+  const approveDisabledDescriptionId = rationaleDisplayInvalid
+    ? "rationale-approval-invalid"
+    : (requiresNarrativeJustification ? "nl-justification-hint" : undefined);
+  const approveButtonTitle = rationaleDisplayInvalid
+    ? RATIONALE_INVALID_APPROVAL_MESSAGE
+    : (approveDisabled
+        ? tHook("toolApprovalDialog.enterReason")
+        : tHook("toolApprovalDialog.shortcutA"));
 
 
   useEffect(() => {
@@ -427,7 +605,9 @@ export function ToolApprovalDialog({
   // insertion-order keys). The IPC approval record uses canonicalStringify (#828)
   // which sorts object keys — key ordering may differ between what is shown here
   // and the canonical form used for cache-key lookups in dispatchReviewer.
-  const argsStr = JSON.stringify(request.args, null, 2) ?? "";
+  const argsStr = isRationaleApproval
+    ? ""
+    : (JSON.stringify(request.args, null, 2) ?? "");
   const argsTruncated = argsStr.length > 500 && !expanded;
   const argsDisplay = argsTruncated ? argsStr.slice(0, 500) + "\n…" : argsStr;
   const source = request.source ?? "unknown";
@@ -437,7 +617,9 @@ export function ToolApprovalDialog({
   const category = request.toolCategory ?? "meta";
   // finalVerdict already computed above (before the null-check guard) — use it here.
   const badgeClassName = levelBadgeClass(finalVerdict as RiskLevel);
-  const rows = approvalReviewRows(request, category, argsStr, originLabel, source, sourceBadge);
+  const rows = isRationaleApproval
+    ? []
+    : approvalReviewRows(request, category, argsStr, originLabel, source, sourceBadge);
 
   return (
     <Dialog open={open} onOpenChange={() => {}}>
@@ -489,7 +671,8 @@ export function ToolApprovalDialog({
           </div>
 
           <div className="space-y-3">
-            <div className="grid min-w-0 gap-2 sm:grid-cols-2">
+            {!isRationaleApproval && (
+              <div className="grid min-w-0 gap-2 sm:grid-cols-2">
               <SummaryTile label={tHook("toolApprovalDialog.tileToolSource")}>
                 {/* Compact `source:tool` token (builtin:bash / {pluginId}:{tool})
                     — one line so the dialog fits without scrolling. Origin +
@@ -508,9 +691,13 @@ export function ToolApprovalDialog({
                     Korean and the duplicate looked like a code leak. */}
                 {categoryLabel(category)}
               </SummaryTile>
-            </div>
+              </div>
+            )}
 
-            <div className={`min-w-0 overflow-hidden rounded-md border ${reviewBoxClass(finalVerdict as RiskLevel)}`}>
+            {isRationaleApproval ? (
+              <RationaleApprovalCard display={rationaleDisplay} />
+            ) : (
+              <div className={`min-w-0 overflow-hidden rounded-md border ${reviewBoxClass(finalVerdict as RiskLevel)}`}>
               <h4 className="border-b px-3 py-2 text-xs font-semibold">
                 {reviewTitleForCategory(category)}
               </h4>
@@ -535,14 +722,17 @@ export function ToolApprovalDialog({
                   )}
                 </ReviewRow>
               ))}
-            </div>
+              </div>
+            )}
 
-            <PermissionEvaluationContextPanel context={request.evaluationContext} />
+            {!isRationaleApproval && (
+              <PermissionEvaluationContextPanel context={request.evaluationContext} />
+            )}
 
             {/* MAJOR 1.6: NL justification moved above collapsible details so it's
                 visible without scrolling when the HIGH verdict disables Approve. */}
             {/* NL justification — required for HIGH verdict */}
-            {finalVerdict === "high" && (
+            {requiresNarrativeJustification && (
               <div className="mt-3 rounded-md border border-destructive/(--opacity-muted) bg-destructive/(--opacity-faint) p-3">
                 <Label
                   htmlFor="nl-justification"
@@ -572,7 +762,7 @@ export function ToolApprovalDialog({
               </div>
             )}
 
-            {isElicitationForm && (
+            {!isRationaleApproval && isElicitationForm && (
               <div
                 className="mt-3 rounded-md border bg-background p-3"
                 data-testid="mcp-elicitation-form"
@@ -660,7 +850,7 @@ export function ToolApprovalDialog({
               </div>
             )}
 
-            {isUnsupportedElicitationForm && (
+            {!isRationaleApproval && isUnsupportedElicitationForm && (
               <div
                 className="mt-3 rounded-md border border-destructive/(--opacity-muted) bg-destructive/(--opacity-faint) p-3 text-xs text-destructive"
                 data-testid="mcp-elicitation-unsupported"
@@ -669,7 +859,8 @@ export function ToolApprovalDialog({
               </div>
             )}
 
-            <details className="min-w-0 rounded-md border bg-muted/(--opacity-light)">
+            {!isRationaleApproval && (
+              <details className="min-w-0 rounded-md border bg-muted/(--opacity-light)">
               <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
                 {tHook("toolApprovalDialog.showFullInput")}
               </summary>
@@ -687,7 +878,8 @@ export function ToolApprovalDialog({
                   {expanded ? tHook("toolApprovalDialog.collapse") : tHook("toolApprovalDialog.showAll")}
                 </Button>
               )}
-            </details>
+              </details>
+            )}
           </div>
 
           {/* Scope selector — LOW/MEDIUM only (HIGH is always session) */}
@@ -737,7 +929,7 @@ export function ToolApprovalDialog({
                 onClick={() => void handleApprove("allow-always", request.toolName)}
                 disabled={approveDisabled}
                 title={approveDisabled ? tHook("toolApprovalDialog.enterReason") : undefined}
-                aria-describedby={approveDisabled ? "nl-justification-hint" : undefined}
+                aria-describedby={approveDisabled ? approveDisabledDescriptionId : undefined}
               >
                 {tHook("toolApprovalDialog.allowAlways")}
               </Button>
@@ -747,15 +939,17 @@ export function ToolApprovalDialog({
               variant="default"
               onClick={() => void handleApprove(primaryApproveChoice, undefined, approvalExtras)}
               disabled={approveDisabled}
-              title={approveDisabled ? tHook("toolApprovalDialog.enterReason") : tHook("toolApprovalDialog.shortcutA")}
-              aria-describedby={approveDisabled ? "nl-justification-hint" : undefined}
+              title={approveButtonTitle}
+              aria-describedby={approveDisabled ? approveDisabledDescriptionId : undefined}
               data-testid="approve-button"
             >
               {approvalIsOneShot ? tHook("toolApprovalDialog.allowOnce") : tHook("toolApprovalDialog.allow")}
             </Button>
-            <span id="nl-justification-hint" className="sr-only">
-              {tHook("toolApprovalDialog.highRiskNlRequired")}
-            </span>
+            {!isRationaleApproval && (
+              <span id="nl-justification-hint" className="sr-only">
+                {tHook("toolApprovalDialog.highRiskNlRequired")}
+              </span>
+            )}
           </div>
         </section>
       </DialogContent>

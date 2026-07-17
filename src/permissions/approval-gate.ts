@@ -1,7 +1,3 @@
-
-
-
-
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { WebContents } from "electron";
 import { t } from "../i18n/index.js";
@@ -10,18 +6,25 @@ import type { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { ToolCategory } from "../tools/types.js";
 import type { RiskVerdict } from "./reviewer/risk-classifier.js";
-import { detectSandboxCapability, type SandboxCapability } from "./sandbox-capability.js";
+import {
+  detectSandboxCapability,
+  type SandboxCapability,
+} from "./sandbox-capability.js";
 import type { PermissionEvaluationContext } from "./evaluation-context.js";
-import { isSensitivePath, canonicalizePathForMatch } from "./sensitive-paths.js";
+import {
+  isSensitivePath,
+  canonicalizePathForMatch,
+} from "./sensitive-paths.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import { canonicalStringify } from "../shared/canonical-json.js";
+import {
+  parseRationaleApprovalDisplay,
+  type RationaleApprovalDisplay,
+} from "../shared/rationale-approval-display.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import type { ApprovalPurposeSuggestion } from "../shared/permission-review-status.js";
 
 // ─── Args DLP masking ────────────────────────────────
-
-
-
 
 function maskArgsForDisplay(value: unknown, detections: Set<string>): unknown {
   if (typeof value === "string") {
@@ -51,8 +54,6 @@ function maskApprovalPurposeForDisplay(
   return { ...purpose, text: masked };
 }
 
-
-
 /**
  * Permission mode hint passed alongside an ApprovalRequest. Drives the
  * §S4 isReadOnly short-circuit: in "ask_all" and "plan" modes even
@@ -69,7 +70,8 @@ export type ApprovalMode = "default" | "ask_all" | "plan" | "full_auto";
  * `"agent-action"` is a plugin-origin host approval request that does
  * not correspond to a host tool execution.
  */
-export type ApprovalKind = "tool" | "out-of-allowed-dir" | "agent-action" | "rationale";
+export type ApprovalKind =
+  "tool" | "out-of-allowed-dir" | "agent-action" | "rationale";
 
 export interface ApprovalRequest {
   id: string;
@@ -190,11 +192,7 @@ export interface ApprovalRequest {
 }
 
 export type ApprovalChoice =
-  | "allow-once"
-  | "allow-session"
-  | "allow-always"
-  | "deny-once"
-  | "deny-always";
+  "allow-once" | "allow-session" | "allow-always" | "deny-once" | "deny-always";
 
 export interface ApprovalDecision {
   requestId: string;
@@ -221,8 +219,6 @@ export interface ApprovalDecision {
   hmac?: string;
 }
 
-
-
 export const IPC_APPROVAL_REQUEST = "lvis:approval:request";
 export const IPC_APPROVAL_RESPOND = "lvis:approval:respond";
 
@@ -232,8 +228,11 @@ const hostTimeoutDecisions = new WeakSet<ApprovalDecision>();
 export function isHostApprovalTimeoutDecision(
   decision: ApprovalDecision | null | undefined,
 ): decision is ApprovalDecision {
-  return decision !== null && decision !== undefined &&
-    hostTimeoutDecisions.has(decision);
+  return (
+    decision !== null &&
+    decision !== undefined &&
+    hostTimeoutDecisions.has(decision)
+  );
 }
 
 /** Host-generated fail-closed denials are not user-authored deny choices. */
@@ -242,8 +241,11 @@ const hostRejectedApprovalDecisions = new WeakSet<ApprovalDecision>();
 export function isHostApprovalRejectedDecision(
   decision: ApprovalDecision | null | undefined,
 ): decision is ApprovalDecision {
-  return decision !== null && decision !== undefined &&
-    hostRejectedApprovalDecisions.has(decision);
+  return (
+    decision !== null &&
+    decision !== undefined &&
+    hostRejectedApprovalDecisions.has(decision)
+  );
 }
 
 function markHostApprovalRejectedDecision(
@@ -252,7 +254,6 @@ function markHostApprovalRejectedDecision(
   hostRejectedApprovalDecisions.add(decision);
   return decision;
 }
-
 
 interface PendingEntry {
   resolve: (decision: ApprovalDecision) => void;
@@ -302,6 +303,72 @@ function formatApprovalAuditFields(fields: {
     `approvalScope=${fields.approvalScope ?? "none"}`,
     `trustOrigin=${fields.trustOrigin ?? "unknown"}`,
   ].join(" ");
+}
+/**
+ * Rationale cards have a narrow, host-audited display contract. Reject every
+ * malformed or semantically mismatched request before it can mint integrity
+ * material, notify the user, or cross the main-to-renderer boundary.
+ */
+function parseValidRationaleApprovalDisplay(
+  request: Omit<ApprovalRequest, "requireExplicit">,
+): RationaleApprovalDisplay | null {
+  if (request.kind !== "rationale") return null;
+  try {
+    const display = parseRationaleApprovalDisplay(request.args);
+    return display !== null &&
+      request.category === "tool" &&
+      request.toolName === display.toolName &&
+      request.reviewerVerdict !== undefined &&
+      canonicalStringify(request.reviewerVerdict) ===
+        canonicalStringify(display.effectiveVerdict)
+      ? display
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Rationale requests are assembled from a host-sealed projection, but callers
+ * still supply the generic ApprovalRequest shape. Never let that generic
+ * `reason` field become notification, audit, pending-state, or renderer data:
+ * it is not part of the rationale display contract and could otherwise carry
+ * model-controlled text.
+ */
+const RATIONALE_HOST_OWNED_REASON =
+  "Review the host-sealed action and its permission rationale.";
+
+/**
+ * The renderer needs an opaque request id to respond and a bounded rationale
+ * display card to inform the one-shot decision. It does not need execution
+ * metadata. Keep the full request in the main process for sensitive-path
+ * enforcement, audit, pending state, and HMAC verification, then whitelist
+ * this separate IPC payload after signing.
+ */
+function createRendererSafeRationaleApprovalRequest(
+  request: ApprovalRequest,
+  display: RationaleApprovalDisplay,
+  detections: Set<string>,
+): ApprovalRequest {
+  const maskedVerdict = maskSensitiveData(display.effectiveVerdict.reason);
+  for (const hit of maskedVerdict.detections) detections.add(hit);
+  return {
+    id: request.id,
+    category: "tool",
+    kind: "rationale",
+    allowedChoices: ["allow-once", "deny-once"],
+    toolName: display.toolName,
+    reviewerVerdict: {
+      level: display.effectiveVerdict.level,
+      reason: maskedVerdict.masked,
+    },
+    args: maskArgsForDisplay(display, detections),
+    reason: RATIONALE_HOST_OWNED_REASON,
+    createdAt: request.createdAt,
+    requireExplicit: true,
+    nonce: request.nonce,
+    hmac: request.hmac,
+  };
 }
 
 /**
@@ -398,6 +465,26 @@ export class ApprovalGate {
   async requestAndWait(
     req: Omit<ApprovalRequest, "requireExplicit">,
   ): Promise<ApprovalDecision> {
+    const rationaleDisplay = parseValidRationaleApprovalDisplay(req);
+
+    // Rationale is a host-owned, one-shot approval surface. Validate its
+    // narrow explanatory card before any enrichment, notification, nonce
+    // minting, or renderer IPC so a malformed/mismatched request cannot turn
+    // into a clickable approval dialog.
+    if (req.kind === "rationale" && rationaleDisplay === null) {
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "approval-gate",
+        type: "approval",
+        output: `[approval:rationale-display-invalid] ${req.id} ${formatApprovalAuditFields(req)} -> deny-once`,
+      });
+      return markHostApprovalRejectedDecision({
+        requestId: req.id,
+        choice: "deny-once",
+        rememberPattern: "invalid rationale approval display",
+      });
+    }
+
     // Round-3 code-reviewer MAJOR + round-4 critic CRITICAL + round-5
     // critic MAJOR-1 — sandbox capability injection is scoped to the
     // tool-execution approval surface. Non-execution surfaces
@@ -417,16 +504,30 @@ export class ApprovalGate {
     //
     // Caller-supplied capability is always preserved (`??` semantics).
     const isExecutionKind =
-      (req.kind === undefined || req.kind === "tool" || req.kind === "rationale") &&
+      (req.kind === undefined ||
+        req.kind === "tool" ||
+        req.kind === "rationale") &&
       req.toolCategory !== "meta";
     const fullReq: ApprovalRequest = {
       ...req,
-      sandboxCapability: req.sandboxCapability ??
+      // Rationale's generic reason is deliberately not caller-controlled.
+      // Set this before all downstream handling, including audit, OS
+      // notification, HMAC sealing, pending state, and renderer narrowing.
+      reason:
+        req.kind === "rationale" && rationaleDisplay !== null
+          ? RATIONALE_HOST_OWNED_REASON
+          : req.reason,
+      sandboxCapability:
+        req.sandboxCapability ??
         (isExecutionKind ? this.sandboxCapabilityProvider() : undefined),
       allowedChoices:
-        req.kind === "rationale" ? ["allow-once", "deny-once"] : req.allowedChoices,
+        req.kind === "rationale"
+          ? ["allow-once", "deny-once"]
+          : req.allowedChoices,
       requireExplicit:
-        req.kind === "rationale" ? true : this.currentPolicy.requireExplicitApproval,
+        req.kind === "rationale"
+          ? true
+          : this.currentPolicy.requireExplicitApproval,
     };
 
     // §S1: sensitive-path hard-block — runs BEFORE anything else so that
@@ -492,7 +593,10 @@ export class ApprovalGate {
         type: "approval",
         output: `[approval:send-failed] ${fullReq.id} ${formatApprovalAuditFields(fullReq)} — webContents already destroyed → deny-once`,
       });
-      return markHostApprovalRejectedDecision({ requestId: fullReq.id, choice: "deny-once" });
+      return markHostApprovalRejectedDecision({
+        requestId: fullReq.id,
+        choice: "deny-once",
+      });
     }
 
     // §S8 phase: requested
@@ -575,14 +679,25 @@ export class ApprovalGate {
       // and are still used for tool execution.
       // Attach nonce+hmac to the masked payload for confused-deputy defense.
       const dlpHits = new Set<string>();
-      const maskedApprovalPurpose = signedReq.approvalPurpose
-        ? maskApprovalPurposeForDisplay(signedReq.approvalPurpose, dlpHits)
-        : undefined;
-      const maskedSignedReq: ApprovalRequest = {
-        ...signedReq,
-        args: maskArgsForDisplay(fullReq.args, dlpHits),
-        ...(maskedApprovalPurpose ? { approvalPurpose: maskedApprovalPurpose } : {}),
-      };
+      const maskedSignedReq: ApprovalRequest =
+        fullReq.kind === "rationale" && rationaleDisplay !== null
+          ? createRendererSafeRationaleApprovalRequest(
+              signedReq,
+              rationaleDisplay,
+              dlpHits,
+            )
+          : {
+              ...signedReq,
+              args: maskArgsForDisplay(fullReq.args, dlpHits),
+              ...(signedReq.approvalPurpose
+                ? {
+                    approvalPurpose: maskApprovalPurposeForDisplay(
+                      signedReq.approvalPurpose,
+                      dlpHits,
+                    ),
+                  }
+                : {}),
+            };
       if (dlpHits.size > 0) {
         this.auditLogger?.log({
           timestamp: new Date().toISOString(),
@@ -604,10 +719,12 @@ export class ApprovalGate {
           type: "approval",
           output: `[approval:send-failed] ${fullReq.id} ${formatApprovalAuditFields(fullReq)} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
         });
-        resolve(markHostApprovalRejectedDecision({
-          requestId: fullReq.id,
-          choice: "deny-once",
-        }));
+        resolve(
+          markHostApprovalRejectedDecision({
+            requestId: fullReq.id,
+            choice: "deny-once",
+          }),
+        );
       }
     });
   }
@@ -616,7 +733,10 @@ export class ApprovalGate {
    * Called by the IPC handler when the renderer responds.
    * Ignores unknown pending entries, making duplicate responses safe.
    */
-  resolve(requestId: string, decision: ApprovalDecision): ApprovalDecision | null {
+  resolve(
+    requestId: string,
+    decision: ApprovalDecision,
+  ): ApprovalDecision | null {
     const entry = this.pending.get(requestId);
     if (!entry) return null;
 
@@ -643,7 +763,10 @@ export class ApprovalGate {
       return forcedDecision;
     }
 
-    if (entry.allowedChoices && !entry.allowedChoices.includes(decision.choice)) {
+    if (
+      entry.allowedChoices &&
+      !entry.allowedChoices.includes(decision.choice)
+    ) {
       clearTimeout(entry.timer);
       this.pending.delete(requestId);
       this.auditLogger?.log({
@@ -661,6 +784,18 @@ export class ApprovalGate {
       entry.resolve(forcedDecision);
       return forcedDecision;
     }
+    // A rationale response is a sealed, one-shot verdict. Do not pass any
+    // renderer-provided auxiliary text or structured content to audit or the
+    // caller after the authenticated choice has been accepted.
+    const resolvedDecision: ApprovalDecision =
+      entry.kind === "rationale"
+        ? {
+            requestId,
+            choice: decision.choice,
+            nonce: decision.nonce,
+            hmac: decision.hmac,
+          }
+        : decision;
     clearTimeout(entry.timer);
     this.pending.delete(requestId);
     // §S8 phase: decided
@@ -668,10 +803,10 @@ export class ApprovalGate {
       timestamp: new Date().toISOString(),
       sessionId: "approval-gate",
       type: "approval",
-      output: `[approval:decided] ${requestId} ${formatApprovalAuditFields(entry)} choice=${decision.choice} rememberPattern=${decision.rememberPattern ?? "none"}`,
+      output: `[approval:decided] ${requestId} ${formatApprovalAuditFields(entry)} choice=${resolvedDecision.choice} rememberPattern=${resolvedDecision.rememberPattern ?? "none"}`,
     });
-    entry.resolve(decision);
-    return decision;
+    entry.resolve(resolvedDecision);
+    return resolvedDecision;
   }
 
   /**
@@ -697,11 +832,13 @@ export class ApprovalGate {
       type: "approval",
       output: `[approval:cancelled] ${requestId} ${formatApprovalAuditFields(entry)} reason=${reason} → deny-once`,
     });
-    entry.resolve(markHostApprovalRejectedDecision({
-      requestId,
-      choice: "deny-once",
-      rememberPattern: `rationale approval cancelled: ${reason}`,
-    }));
+    entry.resolve(
+      markHostApprovalRejectedDecision({
+        requestId,
+        choice: "deny-once",
+        rememberPattern: `rationale approval cancelled: ${reason}`,
+      }),
+    );
     return true;
   }
   /**
@@ -742,10 +879,12 @@ export class ApprovalGate {
   disposeAll(): void {
     for (const [id, entry] of this.pending) {
       clearTimeout(entry.timer);
-      entry.resolve(markHostApprovalRejectedDecision({
-        requestId: id,
-        choice: "deny-once",
-      }));
+      entry.resolve(
+        markHostApprovalRejectedDecision({
+          requestId: id,
+          choice: "deny-once",
+        }),
+      );
     }
     this.pending.clear();
   }

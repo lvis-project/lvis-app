@@ -18,6 +18,7 @@ import {
 } from "../../tools/pipeline/rationale-control.js";
 import {
   executeRationaleAwareConversationBatch,
+  prepareRationaleConversationRuntime,
   RATIONALE_SIBLING_REPLAY_BLOCKED_RESULT,
   RATIONALE_TRIGGER_FAILED_RESULT,
 } from "./rationale-conversation-orchestration.js";
@@ -1026,12 +1027,33 @@ export async function queryLoop(
         id: tc.id, name: tc.name, input: tc.input,
       }));
 
-      const rationaleOrchestrationEnabled = isForegroundRationaleOrchestrationEnabled({
+      const availableRationaleCoordinatorFactory =
+        typeof self.deps.rationaleCoordinatorFactory === "function"
+          ? self.deps.rationaleCoordinatorFactory
+          : undefined;
+      const currentRationaleProvenance = rationaleProvenanceFor(
+        bounds.requestAnchor !== undefined,
+        toolTrustOrigin,
+      );
+      const rationaleActivationRequested = isForegroundRationaleOrchestrationEnabled({
         productionEnabled: FOREGROUND_RATIONALE_PRODUCTION_ENABLED,
         nodeEnv: process.env.NODE_ENV,
+        hostCoordinatorAvailable: availableRationaleCoordinatorFactory !== undefined,
         enableDormantRationaleForTesting:
           self.deps.enableDormantRationaleForTesting,
       });
+      // Materialize the runtime before meta-tool ordering changes. A callable
+      // factory is not enough: a stale/failed/null factory must leave the full
+      // batch on the exact legacy request_plugin/tool_search path.
+      const preparedRationaleRuntime = rationaleActivationRequested
+        ? await prepareRationaleConversationRuntime({
+            coordinatorFactory: availableRationaleCoordinatorFactory,
+            requestAnchor: bounds.requestAnchor ?? null,
+            rationaleProvenance: currentRationaleProvenance,
+            sessionId: effectiveSessionId,
+          })
+        : null;
+      const rationaleOrchestrationEnabled = preparedRationaleRuntime !== null;
       const firstNonMetaIndex = rationaleOrchestrationEnabled
         ? toolUses.findIndex(
             (toolUse) =>
@@ -1398,10 +1420,6 @@ export async function queryLoop(
               return null;
             }
           : undefined;
-      const currentRationaleProvenance = rationaleProvenanceFor(
-        bounds.requestAnchor !== undefined,
-        toolTrustOrigin,
-      );
       const replayBlockedResultsById = new Map<string, ToolResult>();
       const executableToolUses = capResult.allowed.filter((toolUse) => {
         if (
@@ -1454,10 +1472,7 @@ export async function queryLoop(
             requestAnchor: bounds.requestAnchor ?? null,
             rationaleProvenance: currentRationaleProvenance,
             sessionId: effectiveSessionId,
-            ...(rationaleOrchestrationEnabled &&
-            self.deps.rationaleCoordinatorFactory
-              ? { coordinatorFactory: self.deps.rationaleCoordinatorFactory }
-              : {}),
+            rationaleRuntime: preparedRationaleRuntime,
             ...(orderedMetaToolHandler
               ? { interceptedMetaToolHandler: orderedMetaToolHandler }
               : {}),

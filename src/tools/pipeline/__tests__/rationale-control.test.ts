@@ -3,12 +3,14 @@ import type { PermissionCheckResult, ReviewerDispatchOutcome } from "../../../pe
 import {
   FOREGROUND_RATIONALE_PRODUCTION_ENABLED,
   RATIONALE_ACTIVATION_PREREQUISITES,
+  RATIONALE_GUARDED_ACTIVATION_EVIDENCE,
   InMemoryHostAnchorRoundCasStore,
   createActionIdentity,
   createRationaleRequiredControl,
   createRequestAnchor,
   createTriggeringBatchDisposition,
   isForegroundRationaleOrchestrationEnabled,
+  isRationaleGuardedActivationReady,
   isRationaleEligible,
   parseRationaleResponse,
   toRationaleProviderEnvelope,
@@ -117,8 +119,8 @@ function createControl() {
 }
 
 describe("foreground rationale contract", () => {
-  it("remains production-disabled until the server and UI prerequisites land", () => {
-    expect(FOREGROUND_RATIONALE_PRODUCTION_ENABLED).toBe(false);
+  it("attests every versioned prerequisite before enabling production", () => {
+    expect(FOREGROUND_RATIONALE_PRODUCTION_ENABLED).toBe(true);
     expect(RATIONALE_ACTIVATION_PREREQUISITES).toEqual([
       "persistent-ticket-store",
       "host-anchor-round-cas",
@@ -133,23 +135,44 @@ describe("foreground rationale contract", () => {
       "host-invocation-start-cas",
       "bounded-modal-ui",
     ]);
+    expect(isRationaleGuardedActivationReady()).toBe(true);
   });
 
   it.each([
-    [false, undefined, undefined, false],
-    [false, "production", true, false],
-    [false, "development", true, false],
-    [false, "test", false, false],
-    [false, "test", true, true],
-    [true, "production", false, true],
+    [false, undefined, true, undefined, false],
+    [false, "production", true, true, false],
+    [false, "development", true, true, false],
+    [false, "test", true, false, false],
+    [false, "test", false, true, false],
+    [false, "test", true, true, true],
+    [true, "test", true, false, false],
+    [true, "production", false, undefined, false],
+    [true, "production", true, false, true],
   ] as const)(
-    "resolves activation for production=%s env=%s testOverride=%s",
-    (productionEnabled, nodeEnv, enableDormantRationaleForTesting, expected) => {
+    "scenario board: production=%s env=%s hostFactory=%s testOverride=%s",
+    (
+      productionEnabled,
+      nodeEnv,
+      hostCoordinatorAvailable,
+      enableDormantRationaleForTesting,
+      expected,
+    ) => {
       expect(isForegroundRationaleOrchestrationEnabled({
         productionEnabled,
         nodeEnv,
+        hostCoordinatorAvailable,
         enableDormantRationaleForTesting,
       })).toBe(expected);
+    },
+  );
+
+  it.each(RATIONALE_ACTIVATION_PREREQUISITES)(
+    "fails closed when versioned prerequisite %s is not attested",
+    (missingPrerequisite) => {
+      expect(isRationaleGuardedActivationReady({
+        ...RATIONALE_GUARDED_ACTIVATION_EVIDENCE,
+        [missingPrerequisite]: false,
+      })).toBe(false);
     },
   );
 
