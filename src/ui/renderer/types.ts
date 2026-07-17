@@ -379,6 +379,36 @@ export type UsageDailySummaryResult =
   | { ok: true; summary: string; generatedAt: string }
   | { ok: false; error: string };
 
+export type RemoteA2AActionStatus = {
+  state: "idle" | "awaiting-approval" | "sent" | "failed";
+  operationId?: string;
+  taskHandle?: string;
+  recoveryEligible?: boolean;
+  taskAvailable?: boolean;
+  taskState?:
+    | "TASK_STATE_SUBMITTED"
+    | "TASK_STATE_WORKING"
+    | "TASK_STATE_COMPLETED"
+    | "TASK_STATE_FAILED"
+    | "TASK_STATE_CANCELED"
+    | "TASK_STATE_INPUT_REQUIRED"
+    | "TASK_STATE_REJECTED"
+    | "TASK_STATE_AUTH_REQUIRED";
+  targetAgentId?: number;
+  targetLabel?: string;
+  outcome?: string;
+  updatedAt: string;
+};
+
+type RemoteA2AStatusResult =
+  | { ok: true; status: RemoteA2AActionStatus }
+  | { ok: false; error: string };
+
+type RemoteA2AActionCall = {
+  (action: "resume", taskHandle: string, userIntent: string): Promise<RemoteA2AStatusResult>;
+  (action: "cancel" | "replay", taskHandle: string): Promise<RemoteA2AStatusResult>;
+};
+
 export type ProjectQueryOptions = {
   projectRoot?: string;
   projectName?: string;
@@ -411,6 +441,16 @@ export type LvisApi = {
   policy: LvisPolicyApi;
   mcp: LvisMcpApi;
   attach: LvisAttachApi;
+  remoteA2a: {
+    targets: () => Promise<
+      | { ok: true; targets: Array<{ targetAgentId: number; label: string }> }
+      | { ok: false; error: string }
+    >;
+    status: () => Promise<RemoteA2AStatusResult>;
+    send: (targetAgentId: number, userIntent: string) => Promise<RemoteA2AStatusResult>;
+    task: (taskHandle: string) => Promise<RemoteA2AStatusResult>;
+    action: RemoteA2AActionCall;
+  };
   /**
    * Deterministic file:// URL of the bundled `plugin-ui-shell.html`. Same
    * stability guarantee as `pluginPreloadUrl` — read directly from the host

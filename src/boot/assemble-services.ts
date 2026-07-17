@@ -28,6 +28,8 @@ export function assembleAppServices(ctx: BootContext): AppServices {
     pluginRuntime: ctx.pluginRuntime,
     pluginMarketplace: ctx.pluginMarketplace,
     settingsService: ctx.settingsService,
+    a2aRemoteRuntime: ctx.a2aRemoteRuntime,
+    remoteA2AActionController: ctx.remoteA2AActionController,
     memoryManager: ctx.memoryManager,
     keywordEngine: ctx.keywordEngine,
     routeEngine: ctx.routeEngine,
@@ -116,6 +118,7 @@ export function assembleAppServices(ctx: BootContext): AppServices {
         attempt(() => ctx.pluginTelemetry?.stop());
         attempt(() => ctx.preferenceRefreshService.stop());
         attempt(() => ctx.idleScheduler?.stop());
+        attempt(() => ctx.a2aRemoteRuntime?.dispose());
         attempt(() => ctx.routinesScheduler.stop());
         if (ctx.dueSoonTimer) attempt(() => clearInterval(ctx.dueSoonTimer));
 

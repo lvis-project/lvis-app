@@ -399,7 +399,7 @@ async function main(): Promise<void> {
     appVersion: "1.0.0",
     approveAgentAction: async () => {
       runner.counts.approvals += 1;
-      return true;
+      return { decisionId: "external-smoke-approval", decidedAt: new Date().toISOString() };
     },
     namespace: inMemoryNamespace(),
   });

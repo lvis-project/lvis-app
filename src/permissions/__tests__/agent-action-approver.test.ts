@@ -26,8 +26,8 @@ describe("single-flight agent-action approver", () => {
     }));
     const approve = buildSingleFlightAgentActionApprover(gate(requestAndWait))!;
 
-    await expect(approve(REQUEST)).resolves.toBe(true);
-    await expect(approve(REQUEST)).resolves.toBe(true);
+    await expect(approve(REQUEST)).resolves.toMatchObject({ decisionId: "approval-1", decidedAt: expect.any(String) });
+    await expect(approve(REQUEST)).resolves.toMatchObject({ decisionId: "approval-1", decidedAt: expect.any(String) });
 
     expect(requestAndWait).toHaveBeenCalledTimes(2);
     expect(requestAndWait).toHaveBeenNthCalledWith(1, expect.objectContaining({
@@ -52,7 +52,7 @@ describe("single-flight agent-action approver", () => {
     }));
     const approve = buildSingleFlightAgentActionApprover(gate(requestAndWait))!;
 
-    await expect(approve(REQUEST)).resolves.toBe(false);
+    await expect(approve(REQUEST)).resolves.toBeNull();
   });
 
   it("single-flights attention prompts and exposes only safe diagnostic identity", async () => {
@@ -72,7 +72,7 @@ describe("single-flight agent-action approver", () => {
     const first = approve(REQUEST);
     await Promise.resolve();
     await expect(approve({ ...REQUEST, args: { secret: "second-secret" } }))
-      .resolves.toBe(false);
+      .resolves.toBeNull();
 
     expect(requestAndWait).toHaveBeenCalledOnce();
     expect(onConcurrent).toHaveBeenCalledWith({
@@ -82,7 +82,7 @@ describe("single-flight agent-action approver", () => {
     expect(JSON.stringify(onConcurrent.mock.calls)).not.toContain("secret");
 
     release();
-    await expect(first).resolves.toBe(true);
+    await expect(first).resolves.toMatchObject({ decisionId: "approval-1", decidedAt: expect.any(String) });
   });
 
   it("fails closed on a gate error and releases the single-flight guard", async () => {
@@ -97,8 +97,8 @@ describe("single-flight agent-action approver", () => {
       { onError },
     )!;
 
-    await expect(approve(REQUEST)).resolves.toBe(false);
-    await expect(approve(REQUEST)).resolves.toBe(true);
+    await expect(approve(REQUEST)).resolves.toBeNull();
+    await expect(approve(REQUEST)).resolves.toMatchObject({ decisionId: "approval-2", decidedAt: expect.any(String) });
 
     expect(requestAndWait).toHaveBeenCalledTimes(2);
     expect(onError).toHaveBeenCalledWith({
