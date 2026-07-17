@@ -2,6 +2,11 @@ import { canonicalStringify } from "../../permissions/user-approval-store.js";
 import type { RiskVerdict } from "../../permissions/reviewer/risk-classifier.js";
 import { redactHomePathsInText } from "../../audit/dlp-filter.js";
 import {
+  createRationaleApprovalDisplay,
+  normalizeRationaleApprovalDisplayText,
+  type RationaleApprovalDisplay,
+} from "../../shared/rationale-approval-display.js";
+import {
   RATIONALE_CONTROL_CONTRACT_VERSION,
   assertRationaleCanonicalJson,
   cloneRationaleCanonicalJson,
@@ -117,7 +122,18 @@ const PROJECTION_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 function sanitizeProjectionDisplayText(value: string, maxLength: number): string {
-  return redactHomePathsInText(sanitizeDisplayText(value, 4_096)).slice(0, maxLength);
+  // The renderer display contract rejects angle brackets outright. The
+  // generic sanitizer removes balanced HTML-like tags, but a lone bracket
+  // would otherwise survive projection validation and make the later
+  // projection-to-display conversion throw after the ticket is user_pending.
+  // normalizeRationaleApprovalDisplayText removes Cc/Cf directional and
+  // formatting characters both before and after home-path redaction, so every
+  // validated projection is convertible while forged rows remain fail-closed.
+  const sanitized = sanitizeDisplayText(value, 4_096)
+    .replace(/[<>]/gu, " ");
+  return normalizeRationaleApprovalDisplayText(
+    redactHomePathsInText(sanitized),
+  ).slice(0, maxLength);
 }
 
 function isBoundedProjectionText(
@@ -388,6 +404,47 @@ export function createRationaleUiAuditProjection(input: {
     rationaleStatus: input.ticket.rationaleStatus, terminalReason: input.ticket.terminalReason,
     suggestion, modalFallbackRequired,
   }, "RationaleUiAuditProjection");
+}
+
+/**
+ * Derive the only rationale payload that may cross into the renderer.
+ *
+ * The full projection remains the host/audit record and deliberately keeps
+ * replay-sensitive bindings such as ticket, anchor, and action digests. The
+ * display contract contains only bounded explanatory facts, and is rebuilt
+ * through its strict parser so an invalid projection never widens the modal
+ * surface.
+ */
+export function createRationaleApprovalDisplayFromProjection(
+  projection: RationaleUiAuditProjection,
+): RationaleApprovalDisplay {
+  if (!validateRationaleUiAuditProjection(projection)) {
+    throw new TypeError("invalid rationale UI/audit projection");
+  }
+  // validateRationaleUiAuditProjection proves this dynamically, but the
+  // audit projection's static status type is intentionally broader because
+  // audit records also model pre-terminal lifecycle states. Keep the narrow
+  // renderer contract explicit rather than relying on an unchecked cast.
+  const rationaleStatus = projection.rationaleStatus;
+  if (rationaleStatus !== "ready" && rationaleStatus !== "failed") {
+    throw new TypeError("projection has no renderer-safe rationale status");
+  }
+  return createRationaleApprovalDisplay({
+    toolName: projection.toolName,
+    canonicalTargets: projection.canonicalTargets,
+    requestedEffects: projection.requestedEffects,
+    affectedResources: projection.affectedResources,
+    requiredAuthority: projection.requiredAuthority,
+    effectiveVerdict: {
+      level: projection.effectiveVerdict.level,
+      reason: projection.effectiveVerdict.reason,
+    },
+    scopeAlignment: projection.scopeAlignment,
+    scopeReasons: projection.scopeReasons,
+    rationaleStatus,
+    suggestion: projection.suggestion,
+    modalFallbackRequired: projection.modalFallbackRequired,
+  });
 }
 
 export const RATIONALE_SECURITY_SUFFIX_VERSION = 2 as const;

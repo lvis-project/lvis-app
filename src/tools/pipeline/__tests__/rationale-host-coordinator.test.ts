@@ -407,6 +407,23 @@ describe("RationaleHostCoordinator", () => {
     });
     expect(state.approvalRequests[0]).not.toHaveProperty("approvalCacheKey");
     expect(JSON.stringify(state.approvalRequests[0]?.args)).not.toContain("rm -rf");
+    const modalArgs = state.approvalRequests[0]!.args as Record<string, unknown>;
+    expect(modalArgs).toMatchObject({
+      display: "rationale-approval-display",
+      toolName: materialized.action.toolName,
+      rationaleStatus: "ready",
+    });
+    // The renderer receives only explanatory display facts. Replay-sensitive
+    // bindings remain in the host/audit projection and never cross the modal
+    // boundary.
+    expect(modalArgs).not.toHaveProperty("ticketId");
+    expect(modalArgs).not.toHaveProperty("anchorId");
+    expect(modalArgs).not.toHaveProperty("actionDigest");
+    expect(state.projectionAudits[0]?.projection).toMatchObject({
+      ticketId: materialized.control.ticketId,
+      anchorId: materialized.control.anchor.anchorId,
+      actionDigest: materialized.action.actionDigest,
+    });
     expect(await state.coordinator.promptForApproval(
       materialized.control.ticketId,
       { now: NOW + 2 },
