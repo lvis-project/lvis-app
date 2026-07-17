@@ -715,7 +715,8 @@ test("packaged-live output rejects a symlinked ancestor before writing", () => {
 test("isolated evidence workflow is dispatch-only, immutable-action pinned, exact-head/lock pinned, publisher-verified, and independently attested", () => {
   const workflow = readFileSync(resolve(ROOT, ".github/workflows/a2a-p4-5-packaged-evidence.yml"), "utf8");
   for (const required of [
-    "head_sha:", "agent_hub_head_sha:", "contents: read", "id-token: write", "attestations: write",
+    "head_sha:", "agent_hub_head_sha:", "platform:", "linux-arm64", "ubuntu-24.04-arm",
+    "fromJSON(needs.plan.outputs.matrix)", "matrix.artifact_name", "contents: read", "id-token: write", "attestations: write",
     "git rev-parse HEAD", "git -C .evidence/agent-hub rev-parse HEAD", ".evidence/agent-hub/server/bun.lock", "AGENT_HUB_LOCK_DIGEST_SHA256",
     "readRegularFile", "Agent Hub server lock", "loadBytes:false",
     "repository: lvis-project/agent-hub", "codesign --verify --deep --strict", "spctl --assess", "Get-AuthenticodeSignature",
