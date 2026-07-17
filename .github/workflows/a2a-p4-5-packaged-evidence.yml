@@ -11,9 +11,58 @@ on:
         description: Exact 40-character Agent Hub commit paired with this evidence build
         required: true
         type: string
+      platform:
+        description: Exact profile; all means macOS, Linux x64, and Windows (select Linux ARM64 separately)
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - macos
+          - linux-x64
+          - linux-arm64
+          - windows
 
 jobs:
+  plan:
+    name: Select packaged-evidence platform
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - id: select
+        name: Build closed platform matrix
+        shell: bash
+        env:
+          PLATFORM_PROFILE: ${{ inputs.platform }}
+        run: |
+          set -euo pipefail
+          case "$PLATFORM_PROFILE" in
+            all)
+              matrix='{"include":[{"name":"macOS installer","os":"macos-15","target":"mac","provenance_os":"macos","artifact_name":"mac"},{"name":"Linux x64 installer","os":"ubuntu-24.04","target":"linux","provenance_os":"linux","artifact_name":"linux"},{"name":"Windows installer","os":"windows-latest","target":"win","provenance_os":"windows","artifact_name":"win"}]}'
+              ;;
+            macos)
+              matrix='{"include":[{"name":"macOS installer","os":"macos-15","target":"mac","provenance_os":"macos","artifact_name":"mac"}]}'
+              ;;
+            linux-x64)
+              matrix='{"include":[{"name":"Linux x64 installer","os":"ubuntu-24.04","target":"linux","provenance_os":"linux","artifact_name":"linux"}]}'
+              ;;
+            linux-arm64)
+              matrix='{"include":[{"name":"Linux ARM64 installer","os":"ubuntu-24.04-arm","target":"linux","provenance_os":"linux","artifact_name":"linux-arm64"}]}'
+              ;;
+            windows)
+              matrix='{"include":[{"name":"Windows installer","os":"windows-latest","target":"win","provenance_os":"windows","artifact_name":"win"}]}'
+              ;;
+            *)
+              echo "Unsupported packaged-evidence platform profile" >&2
+              exit 1
+              ;;
+          esac
+          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+
   installers:
+    needs: plan
     name: ${{ matrix.name }}
     permissions:
       contents: read
@@ -21,20 +70,7 @@ jobs:
       attestations: write
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: macOS installer
-            os: macos-15
-            target: mac
-            provenance_os: macos
-          - name: Linux installer
-            os: ubuntu-latest
-            target: linux
-            provenance_os: linux
-          - name: Windows installer
-            os: windows-latest
-            target: win
-            provenance_os: windows
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     env:
       ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
@@ -340,7 +376,7 @@ jobs:
       - name: Upload attested installers and provenance
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: a2a-p4-5-${{ matrix.target }}-packaged-evidence
+          name: a2a-p4-5-${{ matrix.artifact_name }}-packaged-evidence
           path: |
             release/*.dmg
             release/*.AppImage

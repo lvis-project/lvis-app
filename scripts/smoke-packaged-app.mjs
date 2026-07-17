@@ -15,6 +15,10 @@ import {
   prepareElectronLaunchArgs,
   prepareElectronLaunchEnv,
 } from "./lib/electron-launch-options.mjs";
+import {
+  linuxExecutablePreferenceSuffixes,
+  pickBestByExactSuffix,
+} from "./lib/packaged-executable-selection.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -205,11 +209,14 @@ function findPackagedExecutable(target, releaseDir) {
   if (target === "linux") {
     const executableNames = new Set(["LVIS", "lvis", "lvis-app"]);
     const matches = files.filter((file) =>
-      file.includes(`linux-unpacked${sep}`) &&
+      file.split(sep).some((part) => part === "linux-unpacked" || /^linux-.+-unpacked$/u.test(part)) &&
       executableNames.has(basename(file)) &&
       canExecute(file)
     );
-    return pickBest(matches, [`linux-unpacked${sep}LVIS`, `linux-unpacked${sep}lvis-app`]);
+    return pickBestByExactSuffix(
+      matches,
+      linuxExecutablePreferenceSuffixes(process.arch, sep),
+    );
   }
 
   const matches = files.filter((file) =>
