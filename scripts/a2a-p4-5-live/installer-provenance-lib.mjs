@@ -385,7 +385,8 @@ function assertOptionalHttpsLocator(value, label) {
   // auxiliary bundle_url locator can be empty, including for an attestation
   // that was uploaded to GitHub and Rekor, so it must not be a trust input.
   if (value === "") return value;
-  return assertHttpsUrl(value, label);
+  assertHttpsUrl(value, label);
+  return value;
 }
 
 function assertSignerWorkflowUri(value, repository, label) {
@@ -422,7 +423,7 @@ export function verifyAttestationReport(reportArtifact, {
   assertRecord(entry.attestation.bundle, "gh attestation report[0].attestation.bundle");
   if (Object.keys(entry.attestation.bundle).length === 0) fail("gh attestation report[0].attestation.bundle: empty bundle");
   assertOptionalHttpsLocator(entry.attestation.bundle_url, "gh attestation report[0].attestation.bundle_url");
-  // gh may omit the display-only initiator for GitHub Actions attestations.
+  // gh may leave the required display-only initiator empty for GitHub Actions attestations.
   // Identity remains bound by the verified certificate and SLSA statement below.
   if (entry.attestation.initiator !== "") {
     assertSafeString(entry.attestation.initiator, "gh attestation report[0].attestation.initiator", { max: 256 });
