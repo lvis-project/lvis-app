@@ -1,8 +1,8 @@
 export function linuxExecutablePreferenceSuffixes(arch, separator) {
   const names = ["LVIS", "lvis", "lvis-app"];
   return [
-    ...names.map((name) => `linux-${arch}-unpacked${separator}${name}`),
-    ...names.map((name) => `linux-unpacked${separator}${name}`),
+    ...names.map((name) => `${separator}linux-${arch}-unpacked${separator}${name}`),
+    ...names.map((name) => `${separator}linux-unpacked${separator}${name}`),
   ];
 }
 

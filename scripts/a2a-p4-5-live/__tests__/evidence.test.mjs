@@ -646,6 +646,13 @@ test("Linux packaged executable selection prefers exact native-architecture suff
     pickBestByExactSuffix(["/release/linux-arm64-unpacked/lvis-app", "/release/linux-arm64-unpacked/LVIS"], preferences),
     "/release/linux-arm64-unpacked/LVIS",
   );
+  assert.equal(
+    pickBestByExactSuffix([
+      "/release/linux-x64-unpacked/resources/notlinux-arm64-unpacked/LVIS",
+      "/release/linux-unpacked/LVIS",
+    ], preferences),
+    "/release/linux-unpacked/LVIS",
+  );
   assert.equal(pickBestByExactSuffix([], preferences), null);
 });
 
