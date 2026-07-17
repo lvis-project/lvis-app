@@ -721,6 +721,7 @@ test("isolated evidence workflow is dispatch-only, immutable-action pinned, exac
   const workflow = readFileSync(resolve(ROOT, ".github/workflows/a2a-p4-5-packaged-evidence.yml"), "utf8");
   for (const required of [
     "head_sha:", "agent_hub_head_sha:", "platform:", "linux-arm64", "ubuntu-24.04-arm",
+    "PLATFORM_PROFILE: ${{ inputs.platform }}", 'case "$PLATFORM_PROFILE" in',
     "fromJSON(needs.plan.outputs.matrix)", "matrix.artifact_name", "contents: read", "id-token: write", "attestations: write",
     "git rev-parse HEAD", "git -C .evidence/agent-hub rev-parse HEAD", ".evidence/agent-hub/server/bun.lock", "AGENT_HUB_LOCK_DIGEST_SHA256",
     "readRegularFile", "Agent Hub server lock", "loadBytes:false",
@@ -733,7 +734,7 @@ test("isolated evidence workflow is dispatch-only, immutable-action pinned, exac
     "--predicate-type https://slsa.dev/provenance/v1", "Requested head must equal the immutable workflow source head",
     "LVIS_MAC_SIGNER_CERT_SHA256", "LVIS_WINDOWS_PUBLISHER_SUBJECT", "LVIS_WINDOWS_SIGNER_THUMBPRINT", "env -u GH_TOKEN node",
   ]) assert.ok(workflow.includes(required), `missing workflow invariant: ${required}`);
-  for (const forbidden of ["skip_code_sign", "--skip-code-sign", "graceful degradation", "inputs.ref", "\n  push:", "publish-release", "softprops/action-gh-release", "vars.AGENT_HUB_RELEASE_HEAD_SHA", "actions/checkout@v7", "actions/cache@v6", "actions/attest@v4", "actions/upload-artifact@v7", "oven-sh/setup-bun@v2", "awk -F '\\t'"]) {
+  for (const forbidden of ["skip_code_sign", "--skip-code-sign", "graceful degradation", "inputs.ref", 'case "${{ inputs.platform }}" in', "\n  push:", "publish-release", "softprops/action-gh-release", "vars.AGENT_HUB_RELEASE_HEAD_SHA", "actions/checkout@v7", "actions/cache@v6", "actions/attest@v4", "actions/upload-artifact@v7", "oven-sh/setup-bun@v2", "awk -F '\\t'"]) {
     assert.ok(!workflow.includes(forbidden), `forbidden workflow fallback: ${forbidden}`);
   }
   assert.ok(!workflow.includes("readFileSync(process.argv[1])"), "Hub lock digest must use descriptor-safe canonical file reading");
