@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { request as httpRequest } from "node:http";
 import {
   createA2AHttpRouter,
   A2AHandlerError,
@@ -210,6 +211,64 @@ describe("A2A v1 loopback router", () => {
 
     const health = await fetch(url(server, "/v1/health"));
     expect(health.status).toBe(401);
+  });
+
+  it("returns 413 and closes an over-cap upload without waiting for its end", async () => {
+    const { server, handle } = await start();
+    const result = await new Promise<{
+      status: number | undefined;
+      body: string;
+      connection: string | undefined;
+    }>((resolve, reject) => {
+      let responseEnded = false;
+      let requestClosed = false;
+      let responseStatus: number | undefined;
+      let responseBody = "";
+      let responseConnection: string | undefined;
+      let receivedResponse = false;
+      const timeout = setTimeout(() => {
+        request.destroy();
+        reject(new Error("oversized A2A request was not terminated"));
+      }, 2_000);
+      const finish = () => {
+        if (!responseEnded || !requestClosed) return;
+        clearTimeout(timeout);
+        resolve({ status: responseStatus, body: responseBody, connection: responseConnection });
+      };
+      const request = httpRequest(url(server), {
+        method: "POST",
+        headers: { ...headers(), "content-length": String(2 * 1024 * 1024) },
+      }, (response) => {
+        receivedResponse = true;
+        responseStatus = response.statusCode;
+        responseConnection = response.headers.connection;
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => { responseBody += chunk; });
+        response.on("end", () => {
+          responseEnded = true;
+          finish();
+        });
+      });
+      request.on("close", () => {
+        requestClosed = true;
+        finish();
+      });
+      request.on("error", (error) => {
+        if (!receivedResponse) {
+          clearTimeout(timeout);
+          reject(error);
+        }
+      });
+      request.write(Buffer.alloc(1024 * 1024 + 1, 0x61));
+      // Deliberately do not call end(); the server must terminate the upload.
+    });
+
+    expect(result).toEqual({
+      status: 413,
+      body: JSON.stringify({ ok: false, error: "payload-too-large" }),
+      connection: "close",
+    });
+    expect(handle).not.toHaveBeenCalled();
   });
 
   it("preserves a numeric zero request id and delegates direct methods", async () => {
