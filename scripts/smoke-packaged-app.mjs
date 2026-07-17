@@ -211,8 +211,10 @@ function findPackagedExecutable(target, releaseDir) {
     );
     return pickBest(matches, [
       `linux-${process.arch}-unpacked${sep}LVIS`,
+      `linux-${process.arch}-unpacked${sep}lvis`,
       `linux-${process.arch}-unpacked${sep}lvis-app`,
       `linux-unpacked${sep}LVIS`,
+      `linux-unpacked${sep}lvis`,
       `linux-unpacked${sep}lvis-app`,
     ]);
   }
