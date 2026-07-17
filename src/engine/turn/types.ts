@@ -236,8 +236,9 @@ export interface ConversationLoopDeps {
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
   /**
-   * Dormant PR(2) host seam. Boot may inject the shared host factory while
-   * production activation remains off; query-loop owns the activation gate.
+   * Boot-published host seam for guarded rationale orchestration. The query
+   * loop enables that path only when this concrete runtime is available;
+   * otherwise it preserves the legacy batch and approval flow.
    */
   rationaleCoordinatorFactory?: RationaleCoordinatorFactory;
   /** Invalidates host rationale authority before this loop changes sessions. */
