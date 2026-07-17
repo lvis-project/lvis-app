@@ -12,6 +12,7 @@ import { createLogger, closeFileLogSink } from "../lib/logger.js";
 import { logger as rootPinoLogger } from "../lib/logger.js";
 import { runShutdownRoutines } from "./shutdown-routines.js";
 import { stopLocalApiServer } from "./local-api-server.js";
+import { stopRemoteA2AReceiverServer } from "./a2a-remote-receiver-server.js";
 import { unregisterAllGlobalShortcuts } from "./global-shortcuts.js";
 import { forceKillManagedChildProcesses } from "./managed-child-processes.js";
 import { killAllTerminals } from "./terminal/pty-manager.js";
@@ -99,6 +100,11 @@ export async function runAppShutdownCleanup(options: {
       // so a stale secret + port never lingers after quit. Idempotent + a no-op
       // when the gate was off this boot.
       await stopLocalApiServer();
+      if (signal.aborted) return;
+      // Independent P4-5 listener: close it before the owning remote runtime
+      // is disposed by services.shutdown(). This is a no-op when its gate was
+      // OFF and is idempotent on repeated cleanup attempts.
+      await stopRemoteA2AReceiverServer();
       if (signal.aborted) return;
       await svc.runPluginShutdownHandlers?.();
       if (signal.aborted) return;

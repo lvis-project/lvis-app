@@ -45,6 +45,7 @@ import { reconcileOsIntegrationOnBoot } from "./main/reconcile-os-integration.js
 import { registerSettingsWindowHandlers } from "./main/settings-window.js";
 import { maybeStartLocalApiServer } from "./main/local-api-server.js";
 import { createA2ALoopbackRuntime } from "./main/a2a-loopback-runtime.js";
+import { maybeStartRemoteA2AReceiverServer } from "./main/a2a-remote-receiver-server.js";
 import { getLvisAppVersion } from "./shared/app-version.js";
 import { installNativeEditContextMenu } from "./main/native-edit-context-menu.js";
 import { handleLvisUri, lvisDevLog } from "./main/lvis-deep-link.js";
@@ -182,6 +183,21 @@ async function main() {
     if (localApi) log.info(`local API server listening on 127.0.0.1:${localApi.port}`);
   } catch (err) {
     log.error({ err }, "local API server failed to start (continuing boot)");
+  }
+
+  // P4-5 receiver ingress has an independent immutable gate and listener. It
+  // never widens or reuses the ph3/local API route family. The app binds only
+  // loopback; a separately trusted HTTPS tunnel/terminator owns public ingress.
+  try {
+    const receiver = await maybeStartRemoteA2AReceiverServer({
+      services,
+      log: (message) => log.info(message),
+    });
+    if (receiver) {
+      log.info(`remote A2A receiver listening on 127.0.0.1:${receiver.port}`);
+    }
+  } catch (err) {
+    log.error({ err }, "remote A2A receiver failed to start (continuing boot)");
   }
 
   // L1: start the routines scheduler AFTER IPC handlers are wired so a
