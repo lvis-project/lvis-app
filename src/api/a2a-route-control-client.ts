@@ -25,7 +25,10 @@ export interface CreateA2ARouteControlClientOptions {
 
 function routeControlResolveUrl(value: string): string {
   const url = new URL(value);
-  if (url.protocol !== "https:" || url.port || url.username || url.password || url.search || url.hash || (url.pathname !== "/" && url.pathname !== "")) throw new Error("a2a-route-control-url-invalid");
+  if (url.protocol !== "https:" || url.port || url.username || url.password || url.search || url.hash
+    || value.includes("?") || value.includes("#") || url.pathname !== "/" || url.toString() !== value) {
+    throw new Error("a2a-route-control-url-invalid");
+  }
   return new URL(RESOLVE_PATH, url).toString();
 }
 
