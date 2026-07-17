@@ -42,16 +42,22 @@ export interface ToolCategoryDescriptor {
   riskWeight: number;
   /**
    * Pure function — given mode/source/headless, returns the lane the
-   * executor should follow. `meta` returns the `"override"` sentinel so
-   * the executor reads `tool.decisionOverride` instead.
+   * executor should follow. Builtin `meta` returns the `"override"` sentinel
+   * so the host reads `tool.decisionOverride`; external `meta` is denied.
    */
   decisionFor: (input: CategoryDecisionInput) => CategoryDecision;
 }
 
 const _registry = new Map<ToolCategory, ToolCategoryDescriptor>();
+let _categoryGeneration = 0;
 
 export function registerToolCategory(d: ToolCategoryDescriptor): void {
   _registry.set(d.name, d);
+  _categoryGeneration += 1;
+}
+
+export function getCategoryRegistryGeneration(): string {
+  return String(_categoryGeneration);
 }
 
 export function getToolCategoryDescriptor(name: ToolCategory): ToolCategoryDescriptor {
@@ -70,6 +76,7 @@ export function listKnownCategories(): ToolCategory[] {
 }
 
 export function clearCategoryRegistry(): void {
+  if (_registry.size > 0) _categoryGeneration += 1;
   _registry.clear();
 }
 
@@ -88,7 +95,8 @@ export function clearCategoryRegistry(): void {
  *               default+auto headless: reviewer / strict headless: ask
  *   - network — default+strict: ask / auto: reviewer at executor / allow: allow+audit /
  *               default+auto headless: reviewer / strict headless: ask.
- *   - meta    — `decisionOverride` sentinel; executor short-circuits.
+ *   - meta    — host-only. Builtins use the `decisionOverride` sentinel;
+ *               external sources are denied defensively.
  */
 export function registerStandardCategories(): void {
   registerToolCategory({
@@ -133,7 +141,7 @@ export function registerStandardCategories(): void {
   registerToolCategory({
     name: "meta",
     riskWeight: 0.0,
-    decisionFor: () => "override",
+    decisionFor: ({ source }) => source === "builtin" ? "override" : "deny",
   });
 }
 

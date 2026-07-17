@@ -97,6 +97,12 @@ export interface SandboxCapability {
  * then reports `kind: "none"`).
  */
 let _activeCapability: SandboxCapability | undefined;
+let _sandboxGeneration = 0;
+
+/** Monotonic identity for capability and wrapped-worker membership changes. */
+export function getSandboxGeneration(): string {
+  return String(_sandboxGeneration);
+}
 
 /**
  * Store the active sandbox capability after the ASRT sandbox is initialized at
@@ -106,6 +112,7 @@ let _activeCapability: SandboxCapability | undefined;
  */
 export function setActiveSandboxCapability(cap: SandboxCapability): void {
   _activeCapability = cap;
+  _sandboxGeneration += 1;
 }
 
 /**
@@ -113,6 +120,7 @@ export function setActiveSandboxCapability(cap: SandboxCapability): void {
  * @internal
  */
 export function __resetActiveSandboxCapabilityForTest(): void {
+  if (_activeCapability !== undefined) _sandboxGeneration += 1;
   _activeCapability = undefined;
 }
 
@@ -176,6 +184,7 @@ const _wrappedMcpServerIds = new Set<string>();
  * @internal — only StdioTransport's wrapped-spawn path and tests call this.
  */
 export function markMcpServerWrapped(serverId: string): void {
+  if (!_wrappedMcpServerIds.has(serverId)) _sandboxGeneration += 1;
   _wrappedMcpServerIds.add(serverId);
 }
 
@@ -184,7 +193,7 @@ export function markMcpServerWrapped(serverId: string): void {
  * @internal — only StdioTransport and tests call this.
  */
 export function unmarkMcpServerWrapped(serverId: string): void {
-  _wrappedMcpServerIds.delete(serverId);
+  if (_wrappedMcpServerIds.delete(serverId)) _sandboxGeneration += 1;
 }
 
 /**
@@ -201,6 +210,7 @@ export function isMcpServerWrapped(serverId: string): boolean {
  * @internal
  */
 export function clearWrappedMcpServers(): void {
+  if (_wrappedMcpServerIds.size > 0) _sandboxGeneration += 1;
   _wrappedMcpServerIds.clear();
 }
 
@@ -263,7 +273,9 @@ function pluginWorkerKey(pluginId: string, workerId: string): string {
  * @internal — only {@link spawnWorker}'s wrapped-spawn path and tests call this.
  */
 export function markPluginWorkerWrapped(pluginId: string, workerId: string): void {
-  _wrappedPluginWorkerIds.add(pluginWorkerKey(pluginId, workerId));
+  const key = pluginWorkerKey(pluginId, workerId);
+  if (!_wrappedPluginWorkerIds.has(key)) _sandboxGeneration += 1;
+  _wrappedPluginWorkerIds.add(key);
 }
 
 /**
@@ -272,7 +284,9 @@ export function markPluginWorkerWrapped(pluginId: string, workerId: string): voi
  * @internal — only {@link spawnWorker} and tests call this.
  */
 export function unmarkPluginWorkerWrapped(pluginId: string, workerId: string): void {
-  _wrappedPluginWorkerIds.delete(pluginWorkerKey(pluginId, workerId));
+  if (_wrappedPluginWorkerIds.delete(pluginWorkerKey(pluginId, workerId))) {
+    _sandboxGeneration += 1;
+  }
 }
 
 /**
@@ -289,6 +303,7 @@ export function isPluginWorkerWrapped(pluginId: string, workerId: string): boole
  * @internal
  */
 export function clearWrappedPluginWorkers(): void {
+  if (_wrappedPluginWorkerIds.size > 0) _sandboxGeneration += 1;
   _wrappedPluginWorkerIds.clear();
 }
 

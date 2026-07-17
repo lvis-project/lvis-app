@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { PermissionCheckResult } from "../../../permissions/permission-manager.js";
 import {
@@ -41,6 +42,7 @@ import {
   createRationaleExecutionAuthorityEntry,
   createRationaleUiAuditProjection,
   createSealedRationaleResumeRequest,
+  validateRationaleUiAuditProjection,
   validateSealedRationaleResumeRequest,
 } from "../rationale-resume-contract.js";
 
@@ -57,7 +59,14 @@ const permission = {
   },
 } as const satisfies PermissionCheckResult;
 
-function fixture(): RationaleRequiredControl {
+function fixture(display: {
+  readonly toolName?: string;
+  readonly canonicalTargets?: readonly string[];
+  readonly requestedEffects?: readonly string[];
+  readonly affectedResources?: readonly string[];
+  readonly requiredAuthority?: string;
+  readonly initialVerdictReason?: string;
+} = {}): RationaleRequiredControl {
   const anchor = createRequestAnchor({
     sessionId: "session-1", turnId: "turn-1", inputMessageId: "message-1",
     inputOrigin: "user-keyboard", rawIntent: "빌드 산출물을 정리해줘",
@@ -65,14 +74,16 @@ function fixture(): RationaleRequiredControl {
   });
   if (!anchor) throw new Error("expected anchor");
   const finalInput = { command: "Remove-Item -Recurse build" };
+  const toolName = display.toolName ?? "bash";
   const action = createActionIdentity({
     anchorId: anchor.anchorId,
     invocationTrustOrigin: "llm-tool-arg",
     rationaleProvenance: { startedFromUserKeyboard: true, taint: "none" },
-    toolName: "bash", toolVersion: "1", source: "builtin", category: "shell",
-    finalInput, canonicalTargets: ["workspace/build"],
-    requestedEffects: ["delete-files"], affectedResources: ["workspace/build"],
-    requiredAuthority: "shell", policyEpoch: "policy-1",
+    toolName, toolVersion: "1", source: "builtin", category: "shell",
+    finalInput, canonicalTargets: display.canonicalTargets ?? ["workspace/build"],
+    requestedEffects: display.requestedEffects ?? ["delete-files"],
+    affectedResources: display.affectedResources ?? ["workspace/build"],
+    requiredAuthority: display.requiredAuthority ?? "shell", policyEpoch: "policy-1",
     registryGeneration: "registry-1", sandboxGeneration: "sandbox-1",
     sandboxExecutionPlan: { cwd: "workspace", filesystem: "workspace-only" },
   });
@@ -87,12 +98,24 @@ function fixture(): RationaleRequiredControl {
     anchor, action, triggeringBatchDisposition, round: 1, now: NOW,
   });
   if (!anchorRoundReservation) throw new Error("expected anchor reservation");
+  const fixturePermission = display.initialVerdictReason === undefined
+    ? permission
+    : {
+        ...permission,
+        reviewer: {
+          ...permission.reviewer,
+          verdict: {
+            ...permission.reviewer.verdict,
+            reason: display.initialVerdictReason,
+          },
+        },
+      } satisfies PermissionCheckResult;
   return createRationaleRequiredControl({
     anchor, action, triggeringBatchDisposition, anchorRoundReservation,
     hostAnchorRoundCas,
-    eligibilityContext, permission, now: NOW,
+    eligibilityContext, permission: fixturePermission, now: NOW,
     sealedAction: {
-      toolUseId: "tool-use-1", toolName: "bash",
+      toolUseId: "tool-use-1", toolName,
       originalInput: finalInput, finalInput,
     },
   });
@@ -763,6 +786,94 @@ describe("invocation audit and sealed resume", () => {
     )).toThrow(/event\/outcome mismatch/);
   });
 
+  it("creates a DLP-safe 3OS projection and rejects malformed durable rows", () => {
+    const rawEmail = "operator@example.com";
+    const windowsHome = "C:\\Users\\alice";
+    const macHome = "/Users/alice";
+    const linuxHome = "/home/alice";
+    const control = fixture({
+      toolName: "bash<script>alert(1)</script>",
+      canonicalTargets: [
+        join(windowsHome, "private", "output"),
+        macHome + "/private/output",
+        linuxHome + "/private/output",
+        "file:///Users/alice/private/output",
+      ],
+      affectedResources: [
+        windowsHome + "\\private\\output",
+        linuxHome + "/private/output",
+      ],
+      requiredAuthority: "shell " + rawEmail,
+      initialVerdictReason:
+        "Writes " + windowsHome + "\\private for " + rawEmail + "\u0000",
+    });
+    const response = parseRationaleResponse({
+      ...responseFor(control),
+      suggestion:
+        "Use " + macHome + "/private/output for " + rawEmail +
+        "<script>alert(1)</script>\u0000",
+    }, control, NOW);
+    if (!response) throw new Error("expected sanitized rationale response");
+    const reevaluation = createReviewerScopeReevaluation({
+      control,
+      outcome: "fresh",
+      scopeAlignment: "aligned",
+      scopeReasons: [
+        "Matches " + linuxHome + "/private/output and " + rawEmail,
+      ],
+      reevaluatedVerdict: {
+        level: "high",
+        reason: "Touches file:///home/alice/private/output for " + rawEmail,
+      },
+      now: NOW,
+    });
+    const requested = transitionRationaleTicket(
+      createRationaleReviewRequiredRecord(control, NOW),
+      event(control, "request-rationale"),
+    );
+    const ready = transitionRationaleTicket(
+      requested,
+      createRationaleTicketEvent(control, "rationale-ready", {
+        generationOutcome: "accepted-rationale",
+        reevaluationOutcome: "fresh",
+      }),
+    );
+    const pending = transitionRationaleTicket(ready, event(control, "prompt-user"));
+    const projection = createRationaleUiAuditProjection({
+      control,
+      response,
+      reevaluation,
+      ticket: pending,
+      now: NOW,
+    });
+    const serialized = JSON.stringify(projection);
+
+    expect(validateRationaleUiAuditProjection(projection)).toBe(true);
+    expect(serialized).not.toContain(rawEmail);
+    expect(serialized).not.toContain("<script>");
+    expect(serialized).not.toContain("\u0000");
+    expect(serialized).not.toContain(windowsHome);
+    expect(serialized).not.toContain(macHome);
+    expect(serialized).not.toContain(linuxHome);
+    expect(serialized).toContain("[home]");
+    expect(validateRationaleUiAuditProjection({
+      ...projection,
+      ticketId: "not-a-uuid",
+    })).toBe(false);
+    expect(validateRationaleUiAuditProjection({
+      ...projection,
+      effectiveVerdict: { level: "low", reason: "downgraded" },
+    })).toBe(false);
+    expect(validateRationaleUiAuditProjection({
+      ...projection,
+      suggestion: rawEmail,
+    })).toBe(false);
+    expect(validateRationaleUiAuditProjection({
+      ...projection,
+      unexpected: true,
+    })).toBe(false);
+  });
+
   it("allows exactly one host-CAS start and no replay after started or terminal", async () => {
     const control = fixture();
     const review = createRationaleReviewRequiredRecord(control, NOW);
@@ -800,60 +911,56 @@ describe("invocation audit and sealed resume", () => {
     );
 
     const startStore = new InMemoryHostInvocationStartCasStore();
-    expect(() => startStore.tryStart({
-      authorized, expectedInvocationVersion: 1 as never, now: NOW,
-    })).toThrow(/invalid invocation-start CAS expectation/);
-    const startLease = startStore.tryStart({
-      authorized, expectedInvocationVersion: 0, now: NOW,
+    await expect(startStore.commitStart({
+      sessionId: control.anchor.sessionId,
+      control,
+      authorized, expectedInvocationVersion: 1 as never,
+      persistAudit: () => {}, now: NOW,
+    })).rejects.toThrow(/invalid invocation-start CAS expectation/);
+    const startCommit = await startStore.commitStart({
+      sessionId: control.anchor.sessionId,
+      control,
+      authorized, expectedInvocationVersion: 0,
+      persistAudit: () => {}, now: NOW,
     });
-    if (!startLease) throw new Error("expected invocation start lease");
+    if (!startCommit) throw new Error("expected invocation start lease");
+    const { lease: startLease, startedInvocationAudit: started } = startCommit;
     expect(() => createInvocationStartedAudit({
       authorized,
       startLease: { ...startLease, toolUseId: "forged-tool-use" },
-      hostStartCas: startStore, now: NOW,
+      now: NOW,
     })).toThrow(/lease binding mismatch/);
     expect(() => createInvocationStartedAudit({
       authorized,
       startLease: { ...startLease, extra: true } as never,
-      hostStartCas: startStore, now: NOW,
+      now: NOW,
     })).toThrow(/unexpected or missing fields/);
     expect(() => createInvocationStartedAudit({
-      authorized, startLease, hostStartCas: startStore, now: Number.NaN,
+      authorized, startLease, now: Number.NaN,
     })).toThrow(/lease binding mismatch/);
-    expect(startStore.tryStart({
-      authorized, expectedInvocationVersion: 0, now: NOW,
+    expect(await startStore.commitStart({
+      sessionId: control.anchor.sessionId,
+      control,
+      authorized, expectedInvocationVersion: 0,
+      persistAudit: () => {}, now: NOW,
     })).toBeNull();
-    const started = createInvocationStartedAudit({
-      authorized, startLease, hostStartCas: startStore, now: NOW,
-    });
     expect(started).toMatchObject({ state: "started", version: 1,
       invocationStartLeaseId: startLease.leaseId });
-    expect(() => createInvocationStartedAudit({
-      authorized, startLease, hostStartCas: startStore, now: NOW,
-    })).toThrow(/already consumed or is not current/);
-
-    const sameLeaseStore = new InMemoryHostInvocationStartCasStore();
-    const sameLease = sameLeaseStore.tryStart({
-      authorized, expectedInvocationVersion: 0, now: NOW,
-    });
-    if (!sameLease) throw new Error("expected same-lease replay fixture");
-    const sameLeaseAttempts = await Promise.allSettled([0, 1, 2, 3].map(async () => {
-      await Promise.resolve();
-      return createInvocationStartedAudit({
-        authorized, startLease: sameLease, hostStartCas: sameLeaseStore, now: NOW,
-      });
-    }));
-    expect(sameLeaseAttempts.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
-    expect(sameLeaseAttempts.filter(({ status }) => status === "rejected")).toHaveLength(3);
+    expect(createInvocationStartedAudit({
+      authorized, startLease, now: NOW,
+    })).toEqual(started);
 
     const concurrentStore = new InMemoryHostInvocationStartCasStore();
     const concurrent = await Promise.all([0, 1, 2, 3].map(async () => {
       await Promise.resolve();
-      return concurrentStore.tryStart({
-        authorized, expectedInvocationVersion: 0, now: NOW,
+      return concurrentStore.commitStart({
+        sessionId: control.anchor.sessionId,
+        control,
+        authorized, expectedInvocationVersion: 0,
+        persistAudit: () => {}, now: NOW,
       });
     }));
-    expect(concurrent.filter((lease) => lease !== null)).toHaveLength(1);
+    expect(concurrent.filter((commit) => commit !== null)).toHaveLength(1);
 
     for (const terminalEvent of ["complete", "fail", "crash-recovery"] as const) {
       const terminal = transitionInvocationAudit(
@@ -869,13 +976,20 @@ describe("invocation audit and sealed resume", () => {
     const completed = transitionInvocationAudit(
       started, createInvocationAuditEvent(started, "complete"),
     );
-    expect(startStore.markTerminal(startLease, completed)).toBe(true);
-    expect(startStore.tryStart({
-      authorized, expectedInvocationVersion: 0, now: NOW,
+    expect(await startStore.commitTerminal({
+      lease: startLease,
+      terminal: completed,
+      persistAudit: () => {},
+    })).toBe(true);
+    expect(await startStore.commitStart({
+      sessionId: control.anchor.sessionId,
+      control,
+      authorized, expectedInvocationVersion: 0,
+      persistAudit: () => {}, now: NOW,
     })).toBeNull();
   });
 
-  it("requires exact current identity/context, host CAS, and ordered security suffix", () => {
+  it("requires exact current identity/context, host CAS, and ordered security suffix", async () => {
     const control = fixture();
     const response = responseFor(control);
     const reevaluation = createReviewerScopeReevaluation({
@@ -904,23 +1018,26 @@ describe("invocation audit and sealed resume", () => {
       control, ticket: allowed, hostConsumedAllowOnceReceipt: receipt, now: NOW,
     });
     const startStore = new InMemoryHostInvocationStartCasStore();
-    const startLease = startStore.tryStart({
-      authorized, expectedInvocationVersion: 0, now: NOW,
+    const startCommit = await startStore.commitStart({
+      sessionId: control.anchor.sessionId,
+      control,
+      authorized, expectedInvocationVersion: 0,
+      persistAudit: () => {}, now: NOW,
     });
-    if (!startLease) throw new Error("expected start lease");
+    if (!startCommit) throw new Error("expected start lease");
     const authorityEntry = createRationaleExecutionAuthorityEntry({
       resumeRequest: resume,
       currentActionIdentity: control.action,
       currentEligibilityContext: eligibilityContext,
       hostConsumedAllowOnceReceipt: receipt,
       authorizedInvocationAudit: authorized,
-      hostInvocationStartLease: startLease,
-      hostStartCas: startStore,
+      hostInvocationStartLease: startCommit.lease,
+      startedInvocationAudit: startCommit.startedInvocationAudit,
       now: NOW,
     });
     expect(authorityEntry).toMatchObject({
       executionAuthority: "single-host-cas-start-lease",
-      invocationStartLeaseId: startLease.leaseId,
+      invocationStartLeaseId: startCommit.lease.leaseId,
       directToolExecute: "forbidden",
       startedInvocationAudit: { state: "started", version: 1 },
     });
@@ -930,10 +1047,13 @@ describe("invocation audit and sealed resume", () => {
       currentEligibilityContext: eligibilityContext,
       hostConsumedAllowOnceReceipt: receipt,
       authorizedInvocationAudit: authorized,
-      hostInvocationStartLease: startLease,
-      hostStartCas: startStore,
+      hostInvocationStartLease: startCommit.lease,
+      startedInvocationAudit: {
+        ...startCommit.startedInvocationAudit,
+        toolUseId: "forged-tool-use",
+      },
       now: NOW,
-    })).toThrow(/already consumed or is not current/);
+    })).toThrow(/started invocation audit/);
     expect(validateSealedRationaleResumeRequest(
       { ...resume, securitySuffix: [...RATIONALE_SECURITY_SUFFIX].reverse() },
       control.action, eligibilityContext, receipt, NOW,

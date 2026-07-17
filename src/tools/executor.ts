@@ -107,6 +107,24 @@ import { AuditWriter } from "./pipeline/audit-writer.js";
 // mutable locals stay INLINE in executeOne (byte-identical). See
 // ./pipeline/invocation-context.ts for what was deliberately left inline.
 import { createInvocationContext, returnUserAbort } from "./pipeline/invocation-context.js";
+import {
+  maybeMaterializeRationaleControl,
+  type RationaleHostRuntime,
+} from "./pipeline/rationale-orchestrator.js";
+import type { RationaleExecutorControlOutcome } from "./pipeline/rationale-pr1-contract.js";
+import { canonicalStringify } from "../permissions/user-approval-store.js";
+import type { SealedRationaleResumeRequest } from "./pipeline/rationale-resume-contract.js";
+import {
+  authorizeRationaleResume,
+  extractSealedRationaleExecutionTarget,
+  finishRationaleResume,
+  prepareRationaleResume,
+  startRationaleResume,
+  type AuthorizedRationaleResume,
+  type PreparedRationaleResume,
+  type RationaleResumeHostRuntime,
+  type StartedRationaleResume,
+} from "./pipeline/rationale-resume-runner.js";
 const log = createLogger("executor");
 /**
  * One-time guard for the shadow-sink construction warning. Process-wide so the
@@ -276,6 +294,62 @@ export interface ExecuteOptions {
 
 export interface ConversationExecuteOptions extends ExecuteOptions {
   executionCwd: string;
+}
+
+export type InterceptedMetaToolHandler = (
+  toolUse: ToolUseBlock,
+) => Promise<ToolResult | null>;
+
+export interface ConversationBatchExecuteOptions extends ConversationExecuteOptions {
+  rationaleRuntime?: RationaleHostRuntime;
+  interceptedMetaToolHandler?: InterceptedMetaToolHandler;
+}
+
+export interface RationaleResumeExecuteOptions extends ConversationExecuteOptions {
+  rationaleResumeRuntime?: RationaleResumeHostRuntime;
+}
+
+export type ConversationBatchExecutionOutcome =
+  | {
+      outcome: "completed";
+      results: ToolResult[];
+    }
+  | {
+      outcome: "rationale-required";
+      completedResults: ToolResult[];
+      control: RationaleExecutorControlOutcome;
+    };
+
+interface RationaleBatchExecutionContext {
+  runtime: RationaleHostRuntime;
+  batchId: string;
+  originalToolUseIds: readonly string[];
+  completedToolUseIds: readonly string[];
+}
+
+interface RationaleRequiredExecuteOneOutcome {
+  outcome: "rationale-required";
+  control: RationaleExecutorControlOutcome;
+}
+
+export const RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT =
+  "Rationale-authorized action ran, but its terminal audit could not be committed. " +
+  "The execution outcome is unknown; the action will not be retried automatically.";
+
+interface RationaleResumeExecutionContext {
+  request: SealedRationaleResumeRequest;
+  runtime?: RationaleResumeHostRuntime;
+  prepared?: PreparedRationaleResume;
+  authorized?: AuthorizedRationaleResume;
+  started?: StartedRationaleResume;
+  terminalizationAttempted?: boolean;
+  terminalized?: boolean;
+}
+
+function isRationaleRequiredExecuteOneOutcome(
+  value: ToolResult | RationaleRequiredExecuteOneOutcome,
+): value is RationaleRequiredExecuteOneOutcome {
+  return "outcome" in value && value.outcome === "rationale-required";
 }
 
 // ─── Executor ──────────────────────────────────────
@@ -636,6 +710,124 @@ export class ToolExecutor {
     return this.executeAll(toolUses, opts);
   }
 
+  async executeConversationBatch(
+    toolUses: ToolUseBlock[],
+    opts: ConversationBatchExecuteOptions,
+  ): Promise<ConversationBatchExecutionOutcome> {
+    const runtime = opts.rationaleRuntime;
+    if (!runtime?.requestAnchor && !opts.interceptedMetaToolHandler) {
+      return {
+        outcome: "completed",
+        results: await this.executeAll(toolUses, opts),
+      };
+    }
+
+    const batchId = randomUUID();
+    const originalToolUseIds = toolUses.map((toolUse) => toolUse.id);
+    const completedResults: ToolResult[] = [];
+    for (let displayOrder = 0; displayOrder < toolUses.length; displayOrder += 1) {
+      const toolUse = toolUses[displayOrder];
+      const registeredTool = this.toolRegistry.findByName(toolUse.name);
+      const interceptedMetaToolHandler = opts.interceptedMetaToolHandler;
+      const shouldInterceptMetaTool =
+        interceptedMetaToolHandler !== undefined &&
+        registeredTool?.source === "builtin" &&
+        (toolUse.name === "request_plugin" ||
+          toolUse.name === "tool_search");
+      let result: ToolResult | RationaleRequiredExecuteOneOutcome;
+      if (shouldInterceptMetaTool && interceptedMetaToolHandler) {
+        try {
+          const intercepted = await interceptedMetaToolHandler(toolUse);
+          result = intercepted?.tool_use_id === toolUse.id
+            ? intercepted
+            : {
+                tool_use_id: toolUse.id,
+                content: "Intercepted meta-tool handling failed closed",
+                is_error: true,
+                durationMs: 0,
+              };
+        } catch {
+          result = {
+            tool_use_id: toolUse.id,
+            content: "Intercepted meta-tool handling failed closed",
+            is_error: true,
+            durationMs: 0,
+          };
+        }
+      } else if (runtime?.requestAnchor) {
+        result = await this.executeOne(
+          toolUse,
+          batchId,
+          displayOrder,
+          opts,
+          {
+            runtime,
+            batchId,
+            originalToolUseIds,
+            completedToolUseIds: completedResults.map((item) => item.tool_use_id),
+          },
+        );
+      } else {
+        result = await this.executeOne(toolUse, batchId, displayOrder, opts);
+      }
+      if (isRationaleRequiredExecuteOneOutcome(result)) {
+        return {
+          outcome: "rationale-required",
+          completedResults,
+          control: result.control,
+        };
+      }
+      completedResults.push(result);
+    }
+
+    return { outcome: "completed", results: completedResults };
+  }
+
+  async executeSealedRationaleResume(
+    request: SealedRationaleResumeRequest,
+    opts: RationaleResumeExecuteOptions,
+  ): Promise<ToolResult> {
+    const target = extractSealedRationaleExecutionTarget(request);
+    if (!target) {
+      return {
+        tool_use_id: "rationale-resume",
+        content: "Rationale resume blocked: invalid or expired sealed resume request",
+        is_error: true,
+        durationMs: 0,
+      };
+    }
+    const toolUse: ToolUseBlock = {
+      id: target.control.sealedAction.toolUseId,
+      name: target.control.sealedAction.toolName,
+      input: target.control.sealedAction.originalInput,
+    };
+    const rationaleResumeContext: RationaleResumeExecutionContext = {
+      request: target.request,
+      runtime: opts.rationaleResumeRuntime,
+    };
+    try {
+      return await this.executeOne(
+        toolUse,
+        randomUUID(),
+        0,
+        opts,
+        undefined,
+        rationaleResumeContext,
+      );
+    } finally {
+      // Once the host start CAS has committed, every exit path must close the
+      // invocation. The ordinary success/error paths finalize below; this
+      // guard covers callback, hook, and audit exceptions after start.
+      if (rationaleResumeContext.started && !rationaleResumeContext.terminalizationAttempted) {
+        rationaleResumeContext.terminalizationAttempted = true;
+        rationaleResumeContext.terminalized = await finishRationaleResume(
+          rationaleResumeContext.started,
+          false,
+        );
+      }
+    }
+  }
+
   private isParallelSafeToolUse(toolUse: ToolUseBlock): boolean {
     const tool = this.toolRegistry.findByName(toolUse.name);
     return tool?.parallelSafe === true;
@@ -646,8 +838,31 @@ export class ToolExecutor {
     toolUse: ToolUseBlock,
     groupId: string,
     displayOrder: number,
+    opts?: ExecuteOptions,
+  ): Promise<ToolResult>;
+  private async executeOne(
+    toolUse: ToolUseBlock,
+    groupId: string,
+    displayOrder: number,
+    opts: ExecuteOptions,
+    rationaleBatchContext: RationaleBatchExecutionContext,
+  ): Promise<ToolResult | RationaleRequiredExecuteOneOutcome>;
+  private async executeOne(
+    toolUse: ToolUseBlock,
+    groupId: string,
+    displayOrder: number,
+    opts: ExecuteOptions,
+    rationaleBatchContext: undefined,
+    rationaleResumeContext: RationaleResumeExecutionContext,
+  ): Promise<ToolResult>;
+  private async executeOne(
+    toolUse: ToolUseBlock,
+    groupId: string,
+    displayOrder: number,
     opts: ExecuteOptions = {},
-  ): Promise<ToolResult> {
+    rationaleBatchContext?: RationaleBatchExecutionContext,
+    rationaleResumeContext?: RationaleResumeExecutionContext,
+  ): Promise<ToolResult | RationaleRequiredExecuteOneOutcome> {
     const {
       callbacks,
       sessionId,
@@ -685,6 +900,40 @@ export class ToolExecutor {
     if (tool.pluginId) meta.pluginId = tool.pluginId;
     if (tool.workerId) meta.workerId = tool.workerId;
     if (tool.mcpServerId) meta.mcpServerId = tool.mcpServerId;
+
+    const returnRationaleResumeBlock = async (
+      reason: string,
+      input: Record<string, unknown>,
+      blockedPermission: PermissionCheckResult = {
+        decision: "deny",
+        reason,
+        layer: 0,
+      },
+      hookChain?: HookResult[],
+    ): Promise<ToolResult> => {
+      const content = "Rationale resume blocked: " + reason;
+      const durationMs = Date.now() - startTime;
+      callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
+      await this.auditToolCall(
+        sessionId,
+        toolUse.name,
+        source,
+        trust,
+        input,
+        content,
+        true,
+        startTime,
+        { ...blockedPermission, decision: "deny", reason },
+        Infinity,
+        permissionContext,
+        invocationCategory,
+        executionCwd,
+        undefined,
+        undefined,
+        hookChain,
+      );
+      return { tool_use_id: toolUse.id, content, is_error: true, durationMs };
+    };
 
     // ── MAJOR-1 (cluster review) — the model MUST NOT execute a tool hidden from it ──
     // `findByName` deliberately does NOT filter `modelVisible` (an app-only tool is a
@@ -780,6 +1029,13 @@ export class ToolExecutor {
     });
 
     if (preResult.action === "deny") {
+      if (rationaleResumeContext) {
+        return returnRationaleResumeBlock(
+          "argument PreToolUse hook denied the sealed action: " +
+            (preResult.reason ?? "no reason"),
+          toolUse.input,
+        );
+      }
       const msg = t("be_executor.hookBlockPre", { reason: preResult.reason ?? t("be_executor.hookBlockPreDefaultReason") });
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
@@ -791,6 +1047,26 @@ export class ToolExecutor {
     const finalInput = preResult.action === "modify" && preResult.updatedInput
       ? preResult.updatedInput
       : toolUse.input;
+    if (rationaleResumeContext) {
+      let inputsMatch = false;
+      try {
+        inputsMatch =
+          canonicalStringify(toolUse.input) === canonicalStringify(
+            rationaleResumeContext.request.control.sealedAction.originalInput,
+          ) &&
+          canonicalStringify(finalInput) === canonicalStringify(
+            rationaleResumeContext.request.control.sealedAction.finalInput,
+          );
+      } catch {
+        inputsMatch = false;
+      }
+      if (!inputsMatch) {
+        return returnRationaleResumeBlock(
+          "sealed original/final input changed after argument PreToolUse hooks",
+          finalInput,
+        );
+      }
+    }
     if (finalInput !== toolUse.input) {
       invocationCategory = resolveInvocationCategory(tool, finalInput);
       meta.category = invocationCategory;
@@ -1309,6 +1585,13 @@ export class ToolExecutor {
             },
           ],
         };
+        if (rationaleResumeContext) {
+          return returnRationaleResumeBlock(
+            "current allowed-directory scope no longer covers the sealed action",
+            finalInput,
+            dirLayerResult,
+          );
+        }
         const resolution = await requestOutOfAllowedDirectoryAccess(
           outOfAllowedTarget,
           dirLayerResult,
@@ -1564,6 +1847,7 @@ export class ToolExecutor {
       //      cost the flag deliberately buys; documented so the default-flip
       //      decision weighs it.
       if (
+        rationaleResumeContext === undefined &&
         this.hostClassifiesRiskProvider() &&
         this.sandboxFsContainedProvider(tool) &&
         source === "plugin" &&
@@ -1601,6 +1885,7 @@ export class ToolExecutor {
         };
       }
       if (
+        rationaleResumeContext === undefined &&
         source === "plugin" &&
         invocationPermissionContext.pluginPanelUserAction === true &&
         invocationPermissionContext.headless !== true &&
@@ -1644,6 +1929,7 @@ export class ToolExecutor {
       let foregroundMemorySkipChecked = false;
       if (permissionResult.decision === "ask" && permissionResult.reviewer?.route === "foreground-auto") {
         if (
+          rationaleResumeContext === undefined &&
           permissionResult.layer >= 3 &&
           permissionResult.forceModal !== true &&
           invocationPermissionContext.headless !== true
@@ -1697,6 +1983,121 @@ export class ToolExecutor {
         if (reviewerResult) {
           permissionResult = reviewerResult;
         }
+      }
+      const needsRationaleSecurityContext =
+        rationaleBatchContext !== undefined || rationaleResumeContext !== undefined;
+      const sandboxCapability = needsRationaleSecurityContext
+        ? resolveReviewerSandboxCapability(
+            source,
+            toolUse.name,
+            tool.mcpServerId,
+            tool.workerId,
+            tool.pluginId,
+          )
+        : undefined;
+      const sandboxExecutionPlan: Record<string, unknown> | undefined =
+        sandboxCapability === undefined
+          ? undefined
+          : {
+              version: "rationale-sandbox-execution-plan/v1",
+              executionCwd,
+              allowedDirectories: [...invocationAllowedScope.directories],
+              capability: {
+                kind: sandboxCapability.kind,
+                confidence: sandboxCapability.confidence,
+                platform: sandboxCapability.platform,
+                reason: sandboxCapability.reason,
+                ...(sandboxCapability.confines === undefined
+                  ? {}
+                  : {
+                      confines: {
+                        filesystem: sandboxCapability.confines.filesystem,
+                        process: sandboxCapability.confines.process,
+                        network: sandboxCapability.confines.network,
+                      },
+                    }),
+              },
+            };
+      if (rationaleBatchContext && sandboxCapability && sandboxExecutionPlan) {
+        const rationaleControl = await maybeMaterializeRationaleControl(
+          rationaleBatchContext.runtime,
+          {
+            batchId: rationaleBatchContext.batchId,
+            originalToolUseIds: rationaleBatchContext.originalToolUseIds,
+            completedToolUseIds: rationaleBatchContext.completedToolUseIds,
+            toolUseId: toolUse.id,
+            originalInput: toolUse.input,
+            finalInput,
+            toolName: toolUse.name,
+            toolVersion: tool.version,
+            source,
+            category: invocationCategory,
+            ...(tool.pluginId === undefined ? {} : { pluginId: tool.pluginId }),
+            ...(tool.mcpServerId === undefined ? {} : { mcpServerId: tool.mcpServerId }),
+            ...(tool.workerId === undefined ? {} : { workerId: tool.workerId }),
+            invocationTrustOrigin: invocationPermissionContext.trustOrigin,
+            targetFilePaths,
+            canonicalTargets: canonicalTargets.map((target) => target.canonicalPath),
+            allowedDirectories: invocationAllowedScope.directories,
+            ...(approvalCacheKey === undefined ? {} : { approvalCacheKey }),
+            sandboxCapability,
+            sandboxExecutionPlan,
+            permission: permissionResult,
+            permissionEvaluationContext: evaluationContext,
+            eligibilityContext: {
+              headless: invocationPermissionContext.headless === true,
+              forceModal: permissionResult.forceModal === true,
+              approvalReasonPrefix: approvalReasonPrefix ?? null,
+            },
+          },
+        );
+        if (rationaleControl) {
+          return { outcome: "rationale-required", control: rationaleControl };
+        }
+      }
+      if (rationaleResumeContext) {
+        if (!sandboxCapability || !sandboxExecutionPlan) {
+          return returnRationaleResumeBlock(
+            "current sandbox capability could not be resolved",
+            finalInput,
+            permissionResult,
+          );
+        }
+        const prepared = await prepareRationaleResume(
+          rationaleResumeContext.request,
+          {
+            finalInput,
+            toolName: toolUse.name,
+            toolVersion: tool.version,
+            source,
+            category: invocationCategory,
+            ...(tool.pluginId === undefined ? {} : { pluginId: tool.pluginId }),
+            ...(tool.mcpServerId === undefined ? {} : { mcpServerId: tool.mcpServerId }),
+            ...(tool.workerId === undefined ? {} : { workerId: tool.workerId }),
+            invocationTrustOrigin: invocationPermissionContext.trustOrigin,
+            canonicalTargets: canonicalTargets.map((target) => target.canonicalPath),
+            allowedDirectories: invocationAllowedScope.directories,
+            ...(approvalCacheKey === undefined ? {} : { approvalCacheKey }),
+            sandboxCapability,
+            sandboxExecutionPlan,
+            permission: permissionResult,
+            permissionEvaluationContext: evaluationContext,
+            eligibilityContext: {
+              headless: invocationPermissionContext.headless === true,
+              forceModal: permissionResult.forceModal === true,
+              approvalReasonPrefix: approvalReasonPrefix ?? null,
+            },
+          },
+          rationaleResumeContext.runtime,
+        );
+        if (!prepared.ok) {
+          return returnRationaleResumeBlock(
+            prepared.reason,
+            finalInput,
+            permissionResult,
+          );
+        }
+        rationaleResumeContext.prepared = prepared.value;
       }
       if (permissionResult.decision === "deny") {
         const msg = t("be_executor.permBlockDeny", { name: toolUse.name, source, trust, reason: permissionResult.reason });
@@ -1795,6 +2196,7 @@ export class ToolExecutor {
         };
       }
       if (
+        rationaleResumeContext === undefined &&
         permissionResult.decision === "ask" &&
         permissionResult.layer >= 3 &&
         // Only an explicit forceModal marker is a per-invocation hard gate;
@@ -1823,7 +2225,69 @@ export class ToolExecutor {
         }
       }
       if (permissionResult.decision === "ask") {
-        if (this.approvalGate) {
+        if (rationaleResumeContext?.prepared) {
+          const permHook = await this.runScriptHook(
+            "perm",
+            toolUse.name,
+            source,
+            invocationCategory,
+            finalInput,
+            sessionId,
+            invocationPermissionContext,
+            tool.mcpServerId,
+            tool.pluginId,
+          );
+          if (permHook.decision === "deny") {
+            return returnRationaleResumeBlock(
+              "permission-request hook denied the sealed action: " + permHook.reason,
+              finalInput,
+              { ...permissionResult, decision: "deny", reason: permHook.reason },
+              hookChainFromDispatch("perm", permHook),
+            );
+          }
+          try {
+            await this.auditPermissionAsk(
+              toolUse.name,
+              source,
+              invocationCategory,
+              finalInput,
+              permissionResult,
+              executionCwd,
+              invocationPermissionContext,
+              targetFilePath,
+            );
+          } catch (error) {
+            return returnRationaleResumeBlock(
+              "permission ask audit failed: " +
+                (error instanceof Error ? error.message : String(error)),
+              finalInput,
+              permissionResult,
+            );
+          }
+          if (abortSignal?.aborted) {
+            return returnRationaleResumeBlock(
+              "resume was aborted before allow-once receipt consumption",
+              finalInput,
+              permissionResult,
+            );
+          }
+          const authorized = await authorizeRationaleResume(
+            rationaleResumeContext.prepared,
+          );
+          if (!authorized.ok) {
+            return returnRationaleResumeBlock(
+              authorized.reason,
+              finalInput,
+              permissionResult,
+            );
+          }
+          rationaleResumeContext.authorized = authorized.value;
+          permissionResult = {
+            decision: "allow",
+            reason: "host-authentic rationale allow-once receipt consumed",
+            layer: permissionResult.layer,
+          };
+        } else if (this.approvalGate) {
           // Layer 3: wire target.filePath + isReadOnly + mode so the
           // approval gate can apply sensitive-path and read-only checks to
           // the exact invocation shown to the user.
@@ -1973,6 +2437,14 @@ export class ToolExecutor {
       }
     }
 
+    if (rationaleResumeContext && !rationaleResumeContext.authorized) {
+      return returnRationaleResumeBlock(
+        "current permission path did not produce an eligible sealed resume authorization",
+        finalInput,
+        permissionResult,
+      );
+    }
+
     const scriptPre = await this.runScriptHook(
       "pre",
       toolUse.name,
@@ -1985,6 +2457,14 @@ export class ToolExecutor {
       tool.pluginId,
     );
     if (scriptPre.decision === "deny") {
+      if (rationaleResumeContext) {
+        return returnRationaleResumeBlock(
+          "script PreToolUse hook denied the sealed action: " + scriptPre.reason,
+          finalInput,
+          { decision: "deny", reason: scriptPre.reason, layer: 6 },
+          hookChainFromDispatch("pre", scriptPre),
+        );
+      }
       const msg = t("be_executor.hookBlockScript", { reason: scriptPre.reason });
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
@@ -1996,6 +2476,13 @@ export class ToolExecutor {
     // ── Step 5: Rate Limit (trust별) ────────────────
     const rateResult = this.rateLimiter.check(toolUse.name, trust);
     if (!rateResult.allowed) {
+      if (rationaleResumeContext) {
+        return returnRationaleResumeBlock(
+          "rate limit denied the sealed action",
+          finalInput,
+          permissionResult,
+        );
+      }
       const msg = t("be_executor.rateLimitExceeded", { name: toolUse.name, trust });
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
@@ -2008,6 +2495,14 @@ export class ToolExecutor {
       try {
         this.auditLogger.assertPermissionAuditWritable();
       } catch (err) {
+        if (rationaleResumeContext) {
+          return returnRationaleResumeBlock(
+            "permission audit chain is not writable: " +
+              (err instanceof Error ? err.message : String(err)),
+            finalInput,
+            permissionResult,
+          );
+        }
         const msg = t("be_executor.auditChainBlock", { name: toolUse.name, error: err instanceof Error ? err.message : String(err) });
         const durationMs = Date.now() - startTime;
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
@@ -2031,6 +2526,25 @@ export class ToolExecutor {
         });
         return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
       }
+    }
+
+    if (rationaleResumeContext) {
+      if (!rationaleResumeContext.authorized) {
+        return returnRationaleResumeBlock(
+          "rationale resume authorization was lost before invocation start",
+          finalInput,
+          permissionResult,
+        );
+      }
+      const started = await startRationaleResume(rationaleResumeContext.authorized);
+      if (!started.ok) {
+        return returnRationaleResumeBlock(
+          started.reason,
+          finalInput,
+          permissionResult,
+        );
+      }
+      rationaleResumeContext.started = started.value;
     }
 
     emitToolStart(callbacks, toolUse.name, finalInput, meta);
@@ -2182,7 +2696,9 @@ export class ToolExecutor {
 
     if (terminationReason === "user-abort") {
       const durationMs = Date.now() - startTime;
-      callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
+      if (!rationaleResumeContext?.started) {
+        callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
+      }
       await this.auditToolCall(
         sessionId,
         toolUse.name,
@@ -2200,6 +2716,19 @@ export class ToolExecutor {
         targetFilePath,
         terminationReason,
       );
+      if (rationaleResumeContext?.started) {
+        rationaleResumeContext.terminalizationAttempted = true;
+        const terminalCommitted = await finishRationaleResume(
+          rationaleResumeContext.started,
+          false,
+        );
+        rationaleResumeContext.terminalized = terminalCommitted;
+        if (!terminalCommitted) {
+          callbacks?.onToolEnd?.(toolUse.name, RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, true, meta, undefined, durationMs);
+          return { tool_use_id: toolUse.id, content: RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, is_error: true, durationMs };
+        }
+        callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
+      }
       return { tool_use_id: toolUse.id, content, is_error: true, durationMs };
     }
 
@@ -2283,7 +2812,9 @@ export class ToolExecutor {
 
     // ── Step 8: Audit + Result (항상 실행) ──────────
     const durationMs = Date.now() - startTime;
-    callbacks?.onToolEnd?.(toolUse.name, displayContent, isError, meta, uiPayload, durationMs);
+    if (!rationaleResumeContext?.started) {
+      callbacks?.onToolEnd?.(toolUse.name, displayContent, isError, meta, uiPayload, durationMs);
+    }
     // Redact the user's freeText answer before it lands in the audit
     // log. The DLP filter at Step 7b only catches structured patterns
     // (emails, IDs); a free-form answer ("내 비밀번호는 …") wouldn't match
@@ -2308,6 +2839,22 @@ export class ToolExecutor {
       hookChainFromDispatch("post", scriptPost),
     );
     await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd, targetFilePath, terminationReason, successHookChain);
+    if (rationaleResumeContext?.started) {
+      rationaleResumeContext.terminalizationAttempted = true;
+      const terminalCommitted = await finishRationaleResume(
+        rationaleResumeContext.started,
+        !isError && terminationReason === "ok",
+      );
+      rationaleResumeContext.terminalized = terminalCommitted;
+      if (!terminalCommitted) {
+        log.error("Rationale resume invocation terminal audit CAS failed");
+        callbacks?.onToolEnd?.(toolUse.name, RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, true, meta, undefined, durationMs);
+        return { tool_use_id: toolUse.id, content: RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, is_error: true, durationMs };
+      }
+    }
+    if (rationaleResumeContext?.started) {
+      callbacks?.onToolEnd?.(toolUse.name, displayContent, isError, meta, uiPayload, durationMs);
+    }
 
     return {
       tool_use_id: toolUse.id,

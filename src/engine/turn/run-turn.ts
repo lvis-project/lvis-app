@@ -25,6 +25,7 @@ import { sessionContext } from "../session-context.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
 import type { A2AAgentCausalContext } from "../a2a-agent-message-envelope.js";
+import { createRequestAnchor } from "../../tools/pipeline/rationale-control.js";
 
 const log = createLogger("lvis");
 
@@ -73,6 +74,8 @@ export async function runTurn(
       /** Host-owned causal hop inherited from durable A2A guidance. */
       a2aCausalContext?: A2AAgentCausalContext;
       inputOrigin: ChatInputOrigin;
+      /** Host-validated, DLP-before-send keyboard text used only for anchoring. */
+      requestAnchorRawIntent?: string;
       rolePrompt?: ActiveRolePrompt;
     },
   ): Promise<TurnResult> {
@@ -82,8 +85,20 @@ export async function runTurn(
     }
     const inputOrigin: ChatInputOrigin = options.inputOrigin;
     const turnInput = isUserKeyboardOrigin(inputOrigin) ? input : stripLeadingSlash(input);
-    const toolTrustOrigin = initialToolTrustOrigin(inputOrigin, turnInput);
+    const attachmentParts = options.attachments ?? [];
+    const toolTrustOrigin = attachmentParts.length > 0
+      ? "file-content"
+      : initialToolTrustOrigin(inputOrigin, turnInput);
     const permissionUserIntent = summarizePermissionUserIntent(inputOrigin, turnInput);
+    const requestAnchor = options.requestAnchorRawIntent !== undefined && self.deps.headless !== true
+      ? createRequestAnchor({
+          sessionId: effectiveSessionId,
+          turnId: randomUUID(),
+          inputMessageId: randomUUID(),
+          inputOrigin,
+          rawIntent: options.requestAnchorRawIntent,
+        })
+      : null;
     // Deterministic completed-plan clear: execute any clear the post-turn hook
     // marked for this session. Unconditional (no input-origin gate) so
     // routine/headless turns clear too; unfinished plans were never marked.
@@ -256,7 +271,6 @@ export async function runTurn(
     const baseText = routeResult.route === "skill"
       ? t("be_conversationLoop.skillRoutePrefix", { skillId: routeResult.skillId, input: turnInput })
       : turnInput;
-    const attachmentParts = options?.attachments ?? [];
     const userContent: string | import("../llm/types.js").UserContentPart[] =
       attachmentParts.length > 0
         ? [{ type: "text" as const, text: baseText }, ...attachmentParts]
@@ -374,6 +388,7 @@ export async function runTurn(
             inputOrigin,
             a2aCausalContext: options?.a2aCausalContext,
             toolTrustOrigin,
+            ...(requestAnchor ? { requestAnchor } : {}),
             permissionUserIntent,
             rolePrompt: options?.rolePrompt,
           },

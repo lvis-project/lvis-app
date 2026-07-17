@@ -86,6 +86,7 @@ import { setupWorkflowStores } from "./boot/steps/workflow-stores.js";
 import { setupMarketplace } from "./boot/steps/marketplace-setup.js";
 import { wireReviewerAndPermissions } from "./boot/steps/reviewer-permission-wiring.js";
 import { setupPluginToolExecutor } from "./boot/steps/plugin-tool-executor.js";
+import { wireRationaleHost } from "./boot/steps/rationale-host-wiring.js";
 import {
   createIsolatedConversationMemoryManagers,
   wireConversation,
@@ -424,6 +425,9 @@ export async function bootstrap(
 
   // Permission policy P4 — Layer 6 plugin tool execution surface + delegate.
   await setupPluginToolExecutor(ctx);
+
+  // #17 follow-up — recover durable rationale authority before loop publication.
+  await wireRationaleHost(ctx);
 
   // §4.5 + §7: routine engine, ConversationLoop, late bindings, SubAgentRunner,
   // WorkBoardEngine/reporter, and manifest-driven plugin IPC bridges.

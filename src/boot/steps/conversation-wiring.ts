@@ -44,12 +44,49 @@ import { fanOutToAllWindows } from "../../ipc/broadcast-helpers.js";
 import { emitEvent } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
+import type { ConversationLoop } from "../../engine/conversation-loop.js";
+import { captureRationalePolicyEpoch } from "../../tools/pipeline/rationale-policy-epoch.js";
+import type { RationaleCoordinatorFactory } from "../../engine/turn/rationale-conversation-orchestration.js";
 
 const log = createLogger("lvis");
 
 export interface IsolatedConversationMemoryManagers {
   sideChatMemoryManager: MemoryManager;
   subAgentMemoryManager: MemoryManager;
+}
+
+export interface LoopRationaleBindings {
+  readonly rationaleCoordinatorFactory?: RationaleCoordinatorFactory;
+  readonly closeRationaleSession?: (sessionId: string) => void;
+}
+
+export function createLoopRationaleBindings(input: {
+  readonly service: BootContext["rationaleHostService"];
+  readonly permissionManager: BootContext["permissionManager"];
+  readonly hookRunner: BootContext["hookRunner"];
+  readonly scriptHookManager: BootContext["scriptHookManager"];
+  readonly getLoop: () => ConversationLoop;
+}): LoopRationaleBindings {
+  const service = input.service;
+  if (!service) return {};
+
+  const rationaleCoordinatorFactory = service.createCoordinatorFactory({
+    getRationalePolicyEpoch: () =>
+      captureRationalePolicyEpoch({
+        permissionManager: input.permissionManager,
+        hookRunner: input.hookRunner,
+        scriptHookManager: input.scriptHookManager,
+        additionalDirectories:
+          input.getLoop().getTurnAdditionalDirectories(),
+      }),
+    isSessionCurrent: (sessionId) =>
+      input.getLoop().getSessionId() === sessionId,
+  });
+
+  return {
+    rationaleCoordinatorFactory,
+    closeRationaleSession: (sessionId) => service.closeSession(sessionId),
+  };
 }
 
 export function createIsolatedConversationMemoryManagers(): IsolatedConversationMemoryManagers {
@@ -80,6 +117,7 @@ export async function wireConversation(
     approvalGate,
     hookRunner,
     scriptHookManager,
+    rationaleHostService,
     bashAstValidator,
     pluginRuntime,
     bootAuditLogger,
@@ -163,7 +201,15 @@ export async function wireConversation(
   // approvalGateRef was bound at construction time.
 
   // §4.5: ConversationLoop.
-  const conversationLoop = createConversationLoop({
+  let conversationLoop!: ConversationLoop;
+  const rationaleBindings = createLoopRationaleBindings({
+    service: rationaleHostService,
+    permissionManager,
+    hookRunner,
+    scriptHookManager,
+    getLoop: () => conversationLoop,
+  });
+  conversationLoop = createConversationLoop({
     settingsService,
     systemPromptBuilder,
     keywordEngine,
@@ -194,6 +240,7 @@ export async function wireConversation(
     auditLogger: bootAuditLogger,
     rewireReviewerAgent,
     llmFetch,
+    ...rationaleBindings,
   });
 
   // Side-chat (workspace rail) — a SECOND ConversationLoop with an ISOLATED
@@ -205,7 +252,15 @@ export async function wireConversation(
   // inheritance) as the main chat but never mixes sessions with it — the
   // isolated store guarantees `chat.sessions` (main) never lists a side-chat
   // session. Its own history/sessionId keep the two streams fully independent.
-  const sideChatConversationLoop = createSideChatConversationLoop({
+  let sideChatConversationLoop!: ConversationLoop;
+  const sideChatRationaleBindings = createLoopRationaleBindings({
+    service: rationaleHostService,
+    permissionManager,
+    hookRunner,
+    scriptHookManager,
+    getLoop: () => sideChatConversationLoop,
+  });
+  sideChatConversationLoop = createSideChatConversationLoop({
     settingsService,
     keywordEngine,
     routeEngine,
@@ -220,6 +275,7 @@ export async function wireConversation(
     llmFetch,
     sideChatMemoryManager,
     getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
+    ...sideChatRationaleBindings,
   });
   ctx.sideChatConversationLoop = sideChatConversationLoop;
 

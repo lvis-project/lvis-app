@@ -41,11 +41,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 // hoisted vi.mock factories run, so each mocked seam can record when it fires.
 const h = vi.hoisted(() => {
   const order: string[] = [];
+  const captured: Record<string, unknown> = {};
   const rec = (label: string) => {
     order.push(label);
   };
   const disposer = () => () => {};
-  return { order, rec, disposer };
+  return { order, captured, rec, disposer };
 });
 
 // ── electron ───────────────────────────────────────────────────────────────
@@ -124,18 +125,44 @@ vi.mock("../conversation.js", () => ({
     return {};
   }),
   createHookRunner: vi.fn(() => ({})),
-  createConversationLoop: vi.fn(() => {
+  createConversationLoop: vi.fn((deps) => {
     h.rec("conversationLoop");
-    return { getSessionId: vi.fn(() => undefined) };
+    h.captured["mainConversationDeps"] = deps;
+    return {
+      getSessionId: vi.fn(() => undefined),
+      getTurnAdditionalDirectories: vi.fn(() => []),
+    };
   }),
-  createRoutineConversationLoop: vi.fn(() => ({})),
-  createSideChatConversationLoop: vi.fn(() => ({ getSessionId: vi.fn(() => "side-1") })),
+  createRoutineConversationLoop: vi.fn((deps) => {
+    h.captured["routineLoopDeps"] = deps;
+    return {};
+  }),
+  createSideChatConversationLoop: vi.fn((deps) => {
+    h.captured["sideConversationDeps"] = deps;
+    return {
+      getSessionId: vi.fn(() => "side-1"),
+      getTurnAdditionalDirectories: vi.fn(() => []),
+    };
+  }),
   createCallLlm: vi.fn(() => vi.fn()),
   createCallLlmForPlugin: vi.fn(() => vi.fn()),
 }));
 
 vi.mock("../routine.js", () => ({
-  createRoutineEngine: vi.fn(() => ({ runRoutine: vi.fn() })),
+  createRoutineEngine: vi.fn((options) => {
+    h.captured["routineEngineOptions"] = options;
+    return { runRoutine: vi.fn() };
+  }),
+}));
+
+vi.mock("../steps/rationale-host-wiring.js", () => ({
+  wireRationaleHost: vi.fn(async (ctx) => {
+    ctx.rationaleHostService = {
+      createCoordinatorFactory: vi.fn(() => vi.fn()),
+      closeSession: vi.fn(),
+      shutdown: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock("../tools.js", () => ({
@@ -205,7 +232,9 @@ vi.mock("../steps/post-boot.js", () => ({
 }));
 
 vi.mock("../steps/reviewer-wiring.js", () => ({
-  wireReviewerAgent: vi.fn(),
+  wireReviewerAgent: vi.fn(() => ({
+    rationaleScopeReviewer: { reevaluate: vi.fn() },
+  })),
 }));
 
 vi.mock("../steps/hook-system-wiring.js", () => ({
@@ -356,8 +385,9 @@ vi.mock("../../memory/preference-refresh-service.js", () => ({
 
 vi.mock("../../engine/subagent-runner.js", () => ({
   SubAgentRunner: class {
-    constructor() {
+    constructor(options: unknown) {
       h.rec("subAgentRunner");
+      h.captured["subAgentOptions"] = options;
     }
   },
 }));
@@ -435,12 +465,16 @@ vi.mock("../../audit/audit-logger.js", () => ({
     setupPermissionAuditChain = vi.fn();
     log = vi.fn();
     logSandboxGate = vi.fn();
+    getAuditDir = vi.fn(() => "C:\\tmp\\lvis-boot-test\\audit");
+    getPermissionAuditSecret = vi.fn(() => "s".repeat(64));
+    getPermissionAuditSealStore = vi.fn(() => ({ read: vi.fn(() => null), write: vi.fn() }));
   },
 }));
 vi.mock("../../audit/hmac-chain.js", () => ({
   FileSecretStore: class {},
   SafeStorageSecretStore: class {},
   ensureAuditSecret: vi.fn(() => ({})),
+  computeLineHmac: vi.fn(() => "h".repeat(64)),
 }));
 
 // ── ipc/domains/permissions.js — mocked so the concurrently-edited IPC domain
@@ -593,5 +627,40 @@ describe("bootstrap() integration lock", () => {
     expect(services.mcpArtifactStore).toBeUndefined();
     expect(services.agentArtifactStore).toBeUndefined();
     expect(services.skillArtifactStore).toBeUndefined();
+  });
+
+  it("injects dormant rationale only into interactive loop dependencies", () => {
+    const mainDeps = h.captured["mainConversationDeps"] as {
+      rationaleCoordinatorFactory?: unknown;
+      closeRationaleSession?: unknown;
+    };
+    const sideDeps = h.captured["sideConversationDeps"] as {
+      rationaleCoordinatorFactory?: unknown;
+      closeRationaleSession?: unknown;
+    };
+
+    expect(typeof mainDeps.rationaleCoordinatorFactory).toBe("function");
+    expect(typeof sideDeps.rationaleCoordinatorFactory).toBe("function");
+    expect(mainDeps.rationaleCoordinatorFactory).not.toBe(
+      sideDeps.rationaleCoordinatorFactory,
+    );
+    expect(typeof mainDeps.closeRationaleSession).toBe("function");
+    expect(typeof sideDeps.closeRationaleSession).toBe("function");
+
+    const routineEngineOptions = h.captured["routineEngineOptions"] as {
+      createConversationLoop: (input: { scope: unknown }) => unknown;
+    };
+    routineEngineOptions.createConversationLoop({ scope: {} });
+    const routineDeps = h.captured["routineLoopDeps"] as Record<string, unknown>;
+    expect(routineDeps["rationaleCoordinatorFactory"]).toBeUndefined();
+    expect(routineDeps["closeRationaleSession"]).toBeUndefined();
+
+    const subAgentOptions = h.captured["subAgentOptions"] as {
+      parentDeps: Record<string, unknown>;
+    };
+    expect(
+      subAgentOptions.parentDeps["rationaleCoordinatorFactory"],
+    ).toBeUndefined();
+    expect(subAgentOptions.parentDeps["closeRationaleSession"]).toBeUndefined();
   });
 });
