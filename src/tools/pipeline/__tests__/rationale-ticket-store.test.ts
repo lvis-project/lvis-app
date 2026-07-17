@@ -213,6 +213,39 @@ describe("InProcessRationaleTicketStore", () => {
     expect(auditJson).not.toContain("Remove-Item");
   });
 
+  it("prunes expired tombstones without allowing clock-rollback replay", () => {
+    const audit: RationaleTicketStoreAuditEvent[] = [];
+    const store = new InProcessRationaleTicketStore({
+      onAudit: (event) => audit.push(event),
+    });
+    const control = fixture("session-tombstone-expiry", "tombstone-expiry");
+    const initial = createStored(store, control);
+    const expectation = createRationaleTicketCasExpectation(initial);
+
+    expect(required(store.abort(expectation, NOW + 1)).ticket).toMatchObject({
+      state: "cancelled",
+      terminalReason: "caller-abort",
+    });
+    expect(store.abort(expectation, NOW + 2)).toBeNull();
+    expect(audit.filter((event) => event.operation === "replay-rejected"))
+      .toHaveLength(1);
+
+    expect(store.get({
+      sessionId: control.anchor.sessionId,
+      ticketId: control.ticketId,
+      now: control.anchor.expiresAt,
+    })).toBeNull();
+    expect(store.abort(expectation, control.anchor.expiresAt)).toBeNull();
+    expect(store.abort(expectation, control.anchor.expiresAt + 1)).toBeNull();
+    expect(audit.filter((event) => event.operation === "replay-rejected"))
+      .toHaveLength(1);
+    expect(() => store.create({
+      sessionId: control.anchor.sessionId,
+      control,
+      now: NOW + 2,
+    })).toThrow(/invalid rationale control\/session binding/);
+  });
+
   it("issues exactly one valid allow-once receipt after the CAS sequence", () => {
     const audit: RationaleTicketStoreAuditEvent[] = [];
     const store = new InProcessRationaleTicketStore({

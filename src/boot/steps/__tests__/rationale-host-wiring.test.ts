@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import type { RationaleAuditSink } from "../../../audit/rationale-audit-adapter.js";
+import type {
+  DurableRationaleAuditAdapterOptions,
+  RationaleAuditSink,
+} from "../../../audit/rationale-audit-adapter.js";
 import type { BootContext } from "../../context.js";
 import type { RationaleHostService } from "../../../tools/pipeline/rationale-host-service.js";
 import { MemorySecretStore } from "../../../audit/hmac-chain.js";
+import type { DurableHostInvocationStartCasStoreOptions } from "../../../tools/pipeline/rationale-invocation-journal.js";
 import { wireRationaleHost } from "../rationale-host-wiring.js";
 
 function makeContext(): BootContext {
@@ -51,12 +55,22 @@ describe("wireRationaleHost", () => {
     } as unknown as RationaleHostService;
     const auditSink = makeAuditSink();
     const recoverAfterCrash = vi.fn();
-    const createAuditSink = vi.fn(() => auditSink);
-    const createInvocationJournal = vi.fn(() => ({
-      commitStart: vi.fn(),
-      commitTerminal: vi.fn(),
-      recoverAfterCrash,
-    }));
+    let capturedAuditOptions: DurableRationaleAuditAdapterOptions | undefined;
+    let capturedJournalOptions: DurableHostInvocationStartCasStoreOptions | undefined;
+    const createAuditSink = vi.fn((options: DurableRationaleAuditAdapterOptions) => {
+      capturedAuditOptions = options;
+      return auditSink;
+    });
+    const createInvocationJournal = vi.fn(
+      (options: DurableHostInvocationStartCasStoreOptions) => {
+        capturedJournalOptions = options;
+        return {
+          commitStart: vi.fn(),
+          commitTerminal: vi.fn(),
+          recoverAfterCrash,
+        };
+      },
+    );
     const createHostService = vi.fn(() => service);
 
     await wireRationaleHost(ctx, {
@@ -72,6 +86,12 @@ describe("wireRationaleHost", () => {
     expect(ctx.bootAuditLogger.getPermissionAuditSealStore).toHaveBeenCalledOnce();
     expect(createAuditSink).toHaveBeenCalledOnce();
     expect(createInvocationJournal).toHaveBeenCalledOnce();
+    expect(capturedJournalOptions?.auditSecret).toBe(
+      capturedAuditOptions?.auditSecret,
+    );
+    expect(capturedJournalOptions?.sealStore).toBe(
+      capturedAuditOptions?.sealStore,
+    );
     expect(createHostService).toHaveBeenCalledOnce();
     expect(auditSink.assertWritable).not.toHaveBeenCalled();
     expect(auditSink.appendInvocation).not.toHaveBeenCalled();

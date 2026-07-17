@@ -44,6 +44,7 @@ import {
 } from "../hmac-chain.js";
 
 let workDir: string;
+const SAFE_STORAGE_TEST_PREFIX = "safe:v1:";
 
 beforeEach(() => {
   workDir = mkdtempSync(join(tmpdir(), "lvis-hmac-chain-"));
@@ -117,6 +118,13 @@ describe("FileSecretStore", () => {
     const store = new FileSecretStore(join(workDir, "secrets"));
     expect(store.read("missing")).toBe(null);
   });
+
+  it("rejects an oversized secret before reading it into a string", () => {
+    const dir = join(workDir, "secrets");
+    const store = new FileSecretStore(dir);
+    writeFileSync(join(dir, "oversized"), "x".repeat(65));
+    expect(() => store.read("oversized", 64)).toThrow(/read byte limit/);
+  });
 });
 
 describe("SafeStorageSecretStore", () => {
@@ -179,6 +187,41 @@ describe("SafeStorageSecretStore", () => {
     const files = readdirSync(join(workDir, "secrets"));
     expect(files.some((file) => file.startsWith("audit-hmac.key.safe-storage.quarantined-"))).toBe(true);
     expect(files.some((file) => file.startsWith("audit-hmac.key.safe-storage.recovery-"))).toBe(true);
+  });
+
+  it("rejects oversized ciphertext without invoking safeStorage decrypt", () => {
+    let decryptCalls = 0;
+    const dir = join(workDir, "secrets");
+    const store = new SafeStorageSecretStore({
+      isEncryptionAvailable: () => true,
+      encryptString: (value: string) => Buffer.from(value, "utf8"),
+      decryptString: () => {
+        decryptCalls += 1;
+        return "unused";
+      },
+    }, dir);
+    writeFileSync(
+      join(dir, "oversized.safe-storage"),
+      SAFE_STORAGE_TEST_PREFIX + "A".repeat(6_000),
+    );
+
+    expect(() => store.read("oversized", 64)).toThrow(/read byte limit/);
+    expect(decryptCalls).toBe(0);
+  });
+
+  it("rejects an oversized decrypted value", () => {
+    const dir = join(workDir, "secrets");
+    const store = new SafeStorageSecretStore({
+      isEncryptionAvailable: () => true,
+      encryptString: (value: string) => Buffer.from(value, "utf8"),
+      decryptString: () => "x".repeat(65),
+    }, dir);
+    writeFileSync(
+      join(dir, "oversized-plain.safe-storage"),
+      SAFE_STORAGE_TEST_PREFIX + Buffer.from("ciphertext").toString("base64"),
+    );
+
+    expect(() => store.read("oversized-plain", 64)).toThrow(/value exceeds/);
   });
 });
 

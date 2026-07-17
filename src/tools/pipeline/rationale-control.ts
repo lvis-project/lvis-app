@@ -28,6 +28,25 @@ export const RATIONALE_RESPONSE_TOOL = "permission_rationale";
  * supplies the bounded modal UI and guarded activation checks.
  */
 export const FOREGROUND_RATIONALE_PRODUCTION_ENABLED = false as const;
+
+export interface ForegroundRationaleActivationContext {
+  readonly productionEnabled: boolean;
+  readonly nodeEnv: string | undefined;
+  readonly enableDormantRationaleForTesting: boolean | undefined;
+}
+
+/**
+ * Single host predicate for the dormant PR(2) orchestration gate.
+ * Test-only activation is impossible outside an exact NODE_ENV=test process.
+ */
+export function isForegroundRationaleOrchestrationEnabled(
+  context: Readonly<ForegroundRationaleActivationContext>,
+): boolean {
+  if (context.productionEnabled === true) return true;
+  return context.nodeEnv === "test" &&
+    context.enableDormantRationaleForTesting === true;
+}
+
 export const RATIONALE_ACTIVATION_PREREQUISITES = [
   "persistent-ticket-store",
   "host-anchor-round-cas",
