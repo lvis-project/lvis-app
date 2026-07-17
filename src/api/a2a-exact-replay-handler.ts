@@ -19,9 +19,11 @@ import {
   type A2AJsonRpcRequest,
   type A2ASendMessageResult,
 } from "../shared/a2a-wire.js";
-import { A2A_EXACT_SEND_REPLAY_URI } from "./a2a-remote-contracts.js";
+import {
+  A2A_EXACT_SEND_REPLAY_ERROR_NAMESPACE,
+  A2A_EXACT_SEND_REPLAY_URI,
+} from "./a2a-remote-contracts.js";
 
-const ERROR_DOMAIN = "lvis.ai";
 const SHA256 = /^[a-f0-9]{64}$/;
 const MAX_EXTENSION_HEADER_BYTES = 2_048;
 const MAX_EXTENSION_ENTRIES = 8;
@@ -63,7 +65,7 @@ function exactReplayError(kind: keyof typeof EXACT_REPLAY_ERRORS): A2AWireRespon
       data: [{
         "@type": A2A_ERROR_INFO_TYPE,
         reason,
-        domain: ERROR_DOMAIN,
+        domain: A2A_EXACT_SEND_REPLAY_ERROR_NAMESPACE,
         ...(inProgress ? { metadata: { retryAfterSeconds: "1" } } : {}),
       }],
     },
@@ -111,10 +113,12 @@ function parseExtensions(value: A2AWireRequestContext["extensions"]): Readonly<{
     const required = entry.endsWith(";required");
     const uri = required ? entry.slice(0, -9) : entry;
     if (!uri || uri.length > 512 || seen.has(uri)) throw extensionRequired();
-    try {
-      const parsed = new URL(uri);
-      if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.hash || parsed.toString() !== uri) throw new Error();
-    } catch { throw extensionRequired(); }
+    if (uri !== A2A_EXACT_SEND_REPLAY_URI) {
+      try {
+        const parsed = new URL(uri);
+        if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.hash || parsed.toString() !== uri) throw new Error();
+      } catch { throw extensionRequired(); }
+    }
     seen.add(uri);
     if (uri === A2A_EXACT_SEND_REPLAY_URI) {
       // This profile is advertised optional. A caller may activate only the

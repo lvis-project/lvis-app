@@ -22,7 +22,7 @@ import { dirname, resolve } from "node:path";
 export const WIRE_CONFORMANCE_SCHEMA = "lvis-wire-conformance-bundle/v1";
 export const WIRE_RESULT_SCHEMA = "lvis-wire-conformance-result-bundle/v1";
 export const A2A_SPECIFICATION_URI = "https://a2a-protocol.org/v1.0.0/specification/";
-export const EXACT_REPLAY_EXTENSION_URI = "https://lvis.ai/a2a/extensions/exact-send-replay/v1";
+export const EXACT_REPLAY_EXTENSION_URI = "urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44";
 export const PINNED_TCK_TAG = "1.0.0.alpha2";
 export const PINNED_TCK_COMMIT = "29063fe95e903cddac5d8ff811ab94df1ad6ef86";
 
