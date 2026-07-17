@@ -1660,11 +1660,13 @@ MED/HIGH 는 main-owned approval modal 로 사용자 결정을 받는다. 승인
 메모리를 권한 근거로 사용하지 않는다. Headless reviewer 는 LOW 만 실행하고
 MED/HIGH 는 deferred queue 에 append 되어 사용자가 큐 버튼을 열 때 surface 된다.
 
-후속 rationale 경로의 PR1 타입/상태 계약은 dormant 상태다.
-`FOREGROUND_RATIONALE_PRODUCTION_ENABLED=false` 이며 ConversationLoop 또는
-ToolExecutor 활성화 import 가 없다. 향후 활성화 시에만 1회 rationale-only round,
+후속 rationale 경로는 boot 이 concrete host coordinator runtime 을 준비하고
+versioned release prerequisite 가 모두 attest 된 경우에만 production 에서
+guarded-on 된다. ConversationLoop 는 ordering 과 coordinator injection 에 같은
+activation predicate 를 사용하며, runtime 준비가 없거나 실패하면 기존 batch 및
+ordinary approval modal 흐름을 유지한다. 활성 경로는 1회 rationale-only round,
 생성 결과와 reviewer 재평가 결과의 독립 기록, 실패 시 동일 approval modal
-fallback, host CAS allow-once 및 현재 권한 재검증을 모두 충족해야 한다.
+fallback, host CAS allow-once 및 현재 권한 재검증을 모두 충족한다.
 
 **Mode semantics (post issue #664 normalization):**
 
