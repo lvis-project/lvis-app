@@ -24,6 +24,10 @@ import {
 
 const LEGACY_STORE_VERSION = 2;
 const STORE_VERSION = 3;
+// Migration-only fingerprint of the one v2 exact-replay identifier. It is not
+// an endpoint or fallback. Owner: A2A remote-store v3 migration. Remove this
+// fingerprint when LEGACY_STORE_VERSION support is removed.
+const LEGACY_EXACT_REPLAY_URI_SHA256 = "ce3c65bce72ed74dfb8c4442e48d059cdc3a05c5c55a381e2099881cf3f5536b";
 const DEFAULT_FILE = "client-state.json";
 const DEFAULT_QUARANTINE_FILE = "client-state.quarantine.json";
 const DIGEST = /^[a-f0-9]{64}$/;
@@ -209,20 +213,7 @@ function isStoreStateEnvelope(value: unknown): value is StoreStateEnvelope {
 }
 
 function isLegacyExactReplayUri(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "https:"
-      && parsed.port === ""
-      && parsed.username === ""
-      && parsed.password === ""
-      && parsed.search === ""
-      && parsed.hash === ""
-      && parsed.pathname === "/a2a/extensions/exact-send-replay/v1"
-      && parsed.href === value;
-  } catch {
-    return false;
-  }
+  return typeof value === "string" && sha256(value) === LEGACY_EXACT_REPLAY_URI_SHA256;
 }
 
 function migrateStoreState(value: unknown): { state: StoreState; migrated: boolean } | null {
