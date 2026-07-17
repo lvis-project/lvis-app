@@ -46,11 +46,13 @@ import {
   type ReviewerScopeReevaluation,
 } from "./rationale-pr1-contract.js";
 import {
+  createRationaleApprovalDisplayFromProjection,
   createRationaleUiAuditProjection,
   createSealedRationaleResumeRequest as createContractSealedRationaleResumeRequest,
   type RationaleUiAuditProjection,
   type SealedRationaleResumeRequest,
 } from "./rationale-resume-contract.js";
+import type { RationaleApprovalDisplay } from "../../shared/rationale-approval-display.js";
 import {
   type HostConsumedAllowOnceReceipt,
   type HostInvocationStartCas,
@@ -261,6 +263,7 @@ interface TicketContext {
   response: RationaleResponse | null;
   reevaluation: ReviewerScopeReevaluation | null;
   projection: RationaleUiAuditProjection | null;
+  display: RationaleApprovalDisplay | null;
   projectionAuditCommitted: boolean;
   terminalTicket: RationaleTicketStateRecord | null;
   receipt: HostConsumedAllowOnceReceipt | null;
@@ -571,6 +574,7 @@ export class RationaleHostCoordinator implements RationaleHostRuntime, Rationale
         response: null,
         reevaluation: null,
         projection: null,
+        display: null,
         projectionAuditCommitted: false,
         terminalTicket: null,
         receipt: null,
@@ -766,8 +770,26 @@ export class RationaleHostCoordinator implements RationaleHostRuntime, Rationale
     context.snapshot = pending;
     context.response = response;
     context.reevaluation = reevaluation;
+    let display: RationaleApprovalDisplay;
+    try {
+      display = createRationaleApprovalDisplayFromProjection(projection);
+    } catch (error) {
+      // A projection/display contract drift must fail closed. `snapshot` is
+      // already the user_pending ticket, allowing abort() to retire it rather
+      // than stranding a non-modal approval state.
+      try {
+        this.abort(input.ticketId, settledAt);
+      } catch (abortError) {
+        throw new AggregateError(
+          [error, abortError],
+          "rationale display conversion and ticket abort failed",
+        );
+      }
+      throw error;
+    }
     this.#commitProjectionAudit(context.sessionId, projection, settledAt);
     context.projection = projection;
+    context.display = display;
     context.projectionAuditCommitted = true;
     return {
       status: ready ? "ready" : "failed",
@@ -795,6 +817,7 @@ export class RationaleHostCoordinator implements RationaleHostRuntime, Rationale
       context.approvalStarted ||
       context.snapshot.ticket.state !== "user_pending" ||
       context.projection === null ||
+      context.display === null ||
       !context.projectionAuditCommitted ||
       !Number.isFinite(requestedAt)
     ) {
@@ -853,9 +876,9 @@ export class RationaleHostCoordinator implements RationaleHostRuntime, Rationale
       allowedChoices: ["allow-once", "deny-once"],
       toolName: metadata.toolName,
       toolCategory: metadata.category,
-      reviewerVerdict: context.projection.effectiveVerdict,
+      reviewerVerdict: context.display.effectiveVerdict,
       evaluationContext: metadata.evaluationContext,
-      args: context.projection,
+      args: context.display,
       reason: "Review the host-sealed action and its permission rationale.",
       source: metadata.source,
       ...(metadata.pluginId === undefined
