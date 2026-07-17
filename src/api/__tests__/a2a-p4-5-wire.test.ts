@@ -20,7 +20,7 @@ import {
 import { A2ARole, A2ATaskState } from "../../shared/a2a.js";
 
 const SECRET = "p4-5-wire-receiver-secret";
-const PUBLIC_ORIGIN = "https://receiver.lvis.ai/";
+const PUBLIC_ORIGIN = "https://receiver-a2a-383a1d70.com/";
 const HANDLER_URL = `${PUBLIC_ORIGIN}a2a/receiver`;
 const INTENT_DIGEST = "b".repeat(64);
 const SPEC_DIGEST = createHash("sha256")
@@ -260,7 +260,7 @@ describe("P4-5 production wire vectors", () => {
           data: [{
             "@type": "type.googleapis.com/google.rpc.ErrorInfo",
             reason,
-            domain: "lvis.ai",
+            domain: A2A_EXACT_SEND_REPLAY_URI,
           }],
         },
       });

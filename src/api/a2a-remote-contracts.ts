@@ -8,7 +8,11 @@ import { createHash } from "node:crypto";
 import { A2AJsonRpcMethod } from "../shared/a2a-wire.js";
 
 export const A2A_EXACT_SEND_REPLAY_URI =
-  "https://lvis.ai/a2a/extensions/exact-send-replay/v1" as const;
+  "urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44" as const;
+// google.rpc.ErrorInfo.domain is a logical namespace, not a network endpoint.
+// Reuse the domain-free extension identifier so protocol errors never imply
+// ownership of a DNS name.
+export const A2A_EXACT_SEND_REPLAY_ERROR_NAMESPACE = A2A_EXACT_SEND_REPLAY_URI;
 export const A2A_SPECIFICATION_URI = "https://a2a-protocol.org/v1.0.0/specification/" as const;
 export const A2A_EXACT_SEND_REPLAY_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 export const A2A_REMOTE_ROUTE_TIMEOUT_MS = 5_000;

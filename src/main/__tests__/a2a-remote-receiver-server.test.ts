@@ -28,7 +28,7 @@ function handler(): A2ARequestHandler {
 
 function fixture(
   receiverProfile: boolean,
-  receiverPublicOrigin = "https://receiver.lvis.ai/",
+  receiverPublicOrigin = "https://receiver-a2a-383a1d70.com/",
 ) {
   const get = vi.fn((key: string) => key === "features"
     ? { a2aLoopbackServer: false, a2aRemoteReceiver: receiverProfile }
@@ -122,13 +122,13 @@ describe("independent remote A2A receiver listener", () => {
 
   it.each([
     ["", "a2a-remote-receiver-public-origin-missing"],
-    ["http://receiver.example.test/", "a2a-remote-receiver-public-origin-invalid"],
-    ["https://receiver.example.test/extra", "a2a-remote-receiver-public-origin-invalid"],
+    ["http://receiver-a2a-383a1d70.com/", "a2a-remote-receiver-public-origin-invalid"],
+    ["https://receiver-a2a-383a1d70.com/extra", "a2a-remote-receiver-public-origin-invalid"],
     ["https://127.0.0.1/", "a2a-remote-receiver-public-origin-invalid"],
     ["https://receiver/", "a2a-remote-receiver-public-origin-invalid"],
-    ["https://receiver.lvis.ai./", "a2a-remote-receiver-public-origin-invalid"],
-    ["https://receiver.lvis.ai/?", "a2a-remote-receiver-public-origin-invalid"],
-    ["https://receiver.lvis.ai/#", "a2a-remote-receiver-public-origin-invalid"],
+    ["https://receiver-a2a-383a1d70.com./", "a2a-remote-receiver-public-origin-invalid"],
+    ["https://receiver-a2a-383a1d70.com/?", "a2a-remote-receiver-public-origin-invalid"],
+    ["https://receiver-a2a-383a1d70.com/#", "a2a-remote-receiver-public-origin-invalid"],
     ["https://receiver.local/", "a2a-remote-receiver-public-origin-invalid"],
     ["https://receiver.internal/", "a2a-remote-receiver-public-origin-invalid"],
     ["https://receiver.home.arpa/", "a2a-remote-receiver-public-origin-invalid"],
@@ -165,7 +165,7 @@ describe("independent remote A2A receiver listener", () => {
     expect(f.get("features")).toMatchObject({ a2aLoopbackServer: false });
     expect(f.openNamespace).toHaveBeenCalledWith(A2A_REMOTE_RECEIVER_TASK_FEATURE);
     expect(f.runtimeOptions()).toMatchObject({
-      advertisedOrigin: "https://receiver.lvis.ai/",
+      advertisedOrigin: "https://receiver-a2a-383a1d70.com/",
       wireTrustOrigin: "a2a-remote-wire",
       approvalReason: expect.stringContaining("[A2A Wire: Remote]"),
       auditSessionId: "a2a-remote-wire",

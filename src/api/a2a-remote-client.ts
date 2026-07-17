@@ -10,6 +10,7 @@ import {
 } from "../shared/a2a-wire.js";
 import {
   A2A_EXACT_SEND_REPLAY_URI,
+  A2A_EXACT_SEND_REPLAY_ERROR_NAMESPACE,
   A2A_SPECIFICATION_URI,
   A2A_REMOTE_MAX_HISTORY_LENGTH,
   A2A_REMOTE_RECONCILIATION_MS,
@@ -302,7 +303,7 @@ function validateExtensionFailure(error: A2AJsonRpcFailure["error"]): void {
   if (Object.keys(info).sort().join(",") !== expectedKeys
     || info["@type"] !== "type.googleapis.com/google.rpc.ErrorInfo"
     || info.reason !== expected.reason
-    || info.domain !== "lvis.ai") throw new Error("a2a-remote-extension-error-invalid");
+    || info.domain !== A2A_EXACT_SEND_REPLAY_ERROR_NAMESPACE) throw new Error("a2a-remote-extension-error-invalid");
   if (hasRetryMetadata) {
     if (!isRecord(info.metadata)
       || Object.keys(info.metadata).join(",") !== "retryAfterSeconds"

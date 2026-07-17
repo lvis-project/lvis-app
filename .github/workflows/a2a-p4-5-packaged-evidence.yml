@@ -1,0 +1,353 @@
+name: A2A P4-5 Packaged Evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      head_sha:
+        description: Exact 40-character lvis-app commit to build
+        required: true
+        type: string
+      agent_hub_head_sha:
+        description: Exact 40-character Agent Hub commit paired with this evidence build
+        required: true
+        type: string
+
+jobs:
+  installers:
+    name: ${{ matrix.name }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS installer
+            os: macos-15
+            target: mac
+            provenance_os: macos
+          - name: Linux installer
+            os: ubuntu-latest
+            target: linux
+            provenance_os: linux
+          - name: Windows installer
+            os: windows-latest
+            target: win
+            provenance_os: windows
+    runs-on: ${{ matrix.os }}
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+      REQUESTED_HEAD: ${{ inputs.head_sha }}
+      AGENT_HUB_HEAD: ${{ inputs.agent_hub_head_sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ inputs.head_sha }}
+          persist-credentials: false
+      - name: Checkout exact Agent Hub source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: lvis-project/agent-hub
+          ref: ${{ inputs.agent_hub_head_sha }}
+          path: .evidence/agent-hub
+          persist-credentials: false
+      - name: Pin exact source heads
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$REQUESTED_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Requested lvis-app head must be exactly 40 lowercase hexadecimal characters" >&2
+            exit 1
+          fi
+          if [[ ! "$AGENT_HUB_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Agent Hub head must be exactly 40 lowercase hexadecimal characters" >&2
+            exit 1
+          fi
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$REQUESTED_HEAD" ]; then
+            echo "Checkout HEAD does not equal the requested head" >&2
+            exit 1
+          fi
+          if [ "$REQUESTED_HEAD" != "$GITHUB_SHA" ]; then
+            echo "Requested head must equal the immutable workflow source head for attestation binding" >&2
+            exit 1
+          fi
+          actual_hub_head="$(git -C .evidence/agent-hub rev-parse HEAD)"
+          if [ "$actual_hub_head" != "$AGENT_HUB_HEAD" ]; then
+            echo "Agent Hub checkout HEAD does not equal the requested exact commit" >&2
+            exit 1
+          fi
+          hub_lock=.evidence/agent-hub/server/bun.lock
+          hub_lock_digest="$(node --input-type=module -e 'import {resolve} from "node:path";import {readRegularFile} from "./scripts/a2a-p4-5-live/evidence-lib.mjs";const lock=readRegularFile(resolve(process.argv[1]),"Agent Hub server lock",{maxBytes:16*1024*1024,loadBytes:false});process.stdout.write(lock.sha256)' "$hub_lock")"
+          if [[ ! "$hub_lock_digest" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Agent Hub server lock digest was not canonical SHA-256" >&2
+            exit 1
+          fi
+          echo "AGENT_HUB_LOCK_DIGEST_SHA256=$hub_lock_digest" >> "$GITHUB_ENV"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Restore package manager and installer caches
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.bun/install/cache
+            .cache/electron
+            .cache/electron-builder
+          key: ${{ runner.os }}-installers-${{ hashFiles('bun.lock') }}-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-installers-${{ hashFiles('bun.lock') }}-
+            ${{ runner.os }}-installers-
+      # Cache fetched uv runtime (downloaded by scripts/fetch-uv.mjs during postinstall).
+      # Key is pinned to uv-targets.mjs so version bumps invalidate the cache. Saves
+      # ~30s per matrix job on cold runners and avoids re-downloading from GitHub releases.
+      - name: Restore uv runtime cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: resources/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('scripts/uv-targets.mjs', 'scripts/fetch-uv.mjs') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+      # electron-builder >= 26.14 extracts its icon-conversion helper
+      # (icons@x.y.z/icon-tool.js — CommonJS, uses `require`) under
+      # ELECTRON_BUILDER_CACHE, which this workflow places INSIDE the
+      # workspace (.cache/). Node resolves that file's module scope by
+      # walking up to the nearest package.json — the repo root, whose
+      # "type": "module" makes the CJS tool execute as ESM and die with
+      # "ReferenceError: require is not defined in ES module scope"
+      # (v0.3.0 mac/win installer failure; linux passed because AppImage
+      # consumes the png directly). Scoping the ELECTRON_BUILDER_CACHE
+      # directory itself as CommonJS stops the walk at that boundary for
+      # every tool electron-builder extracts there, without touching the
+      # sibling ELECTRON_CACHE (.cache/electron) or anything else under
+      # .cache/. Local builds are unaffected — the default cache lives in
+      # the OS cache dir, outside any workspace package.json scope.
+      - name: Scope electron-builder cache dir as CommonJS
+        shell: bash
+        run: |
+          mkdir -p "$ELECTRON_BUILDER_CACHE"
+          printf '{ "type": "commonjs" }\n' > "$ELECTRON_BUILDER_CACHE/package.json"
+      - name: Install Linux packaging tools
+        if: matrix.target == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot rpm xvfb
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Require platform signing credentials
+        shell: bash
+        env:
+          CSC_LINK: ${{ matrix.target == 'mac' && secrets.CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ matrix.target == 'mac' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.target == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.target == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+          WIN_CSC_LINK: ${{ matrix.target == 'win' && secrets.WIN_CSC_LINK || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ matrix.target == 'win' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+          LVIS_MAC_SIGNER_CERT_SHA256: ${{ matrix.target == 'mac' && secrets.LVIS_MAC_SIGNER_CERT_SHA256 || '' }}
+          LVIS_WINDOWS_PUBLISHER_SUBJECT: ${{ matrix.target == 'win' && secrets.LVIS_WINDOWS_PUBLISHER_SUBJECT || '' }}
+          LVIS_WINDOWS_SIGNER_THUMBPRINT: ${{ matrix.target == 'win' && secrets.LVIS_WINDOWS_SIGNER_THUMBPRINT || '' }}
+        run: |
+          set -euo pipefail
+          require_secret() {
+            local name="$1"
+            if [ -z "${!name:-}" ]; then
+              echo "Required signing secret is unavailable: $name" >&2
+              exit 1
+            fi
+          }
+          if [ "${{ matrix.target }}" = "mac" ]; then
+            for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID LVIS_MAC_SIGNER_CERT_SHA256; do
+              require_secret "$name"
+            done
+          elif [ "${{ matrix.target }}" = "win" ]; then
+            for name in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD LVIS_WINDOWS_PUBLISHER_SUBJECT LVIS_WINDOWS_SIGNER_THUMBPRINT; do
+              require_secret "$name"
+            done
+          fi
+      - name: Build installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=("--${{ matrix.target }}" "--skip-native-rebuild")
+          # Evidence builds never publish or mutate a GitHub Release.
+          node scripts/build-installers.mjs "${args[@]}"
+        env:
+          # Embedded demo activation key for internal-distribution builds.
+          # The secret value is ALREADY the codec ciphertext
+          # (LVIS-DEMO:v1:<...>), NOT the raw API key. When set,
+          # scripts/build-main-esbuild.mjs validates it and embeds it verbatim
+          # into the bundle so the demo chip activates with no paste step on
+          # fresh installs (on-the-fly encryption only happens for a plaintext
+          # repo-root .env.demo, which CI does not use). This workflow runs only
+          # on workflow_dispatch, and the secret is unavailable to
+          # fork / untrusted contexts (and absent when not configured), so those
+          # builds embed nothing and keep the manual-paste flow.
+          # See docs/onboarding/demo-activation.md (Embedded activation key).
+          LVIS_EMBED_DEMO_ACTIVATION: ${{ secrets.LVIS_EMBED_DEMO_ACTIVATION }}
+          CSC_LINK: ${{ matrix.target == 'mac' && secrets.CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ matrix.target == 'mac' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.target == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.target == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+          WIN_CSC_LINK: ${{ matrix.target == 'win' && secrets.WIN_CSC_LINK || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ matrix.target == 'win' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+      - name: Smoke launch packaged app
+        shell: bash
+        env:
+          # Explicitly authorize machine-wide mutation only on the disposable
+          # Windows runner, then verify both preservation and full cleanup.
+          LVIS_ALLOW_DISPOSABLE_WINDOWS_INSTALLER_SMOKE: ${{ matrix.target == 'win' && '1' || '' }}
+          # Windows runners are disposable, so the installer smoke can verify
+          # both /KEEP_APP_DATA preservation and the full uninstall cleanup.
+          LVIS_ALLOW_DESTRUCTIVE_UNINSTALL_SMOKE: ${{ matrix.target == 'win' && '1' || '' }}
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.target }}" = "linux" ]; then
+            xvfb-run -a node scripts/smoke-packaged-app.mjs --target "${{ matrix.target }}"
+          else
+            node scripts/smoke-packaged-app.mjs --target "${{ matrix.target }}"
+          fi
+      - name: Verify macOS codesign and Gatekeeper identity
+        if: matrix.target == 'mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          installers=(release/*.dmg)
+          [ "${#installers[@]}" -eq 1 ]
+          for installer in "${installers[@]}"; do
+            codesign --verify --deep --strict --verbose=4 "$installer"
+            spctl --assess --type open --context context:primary-signature --verbose=4 "$installer"
+            attach_plist="$(hdiutil attach -readonly -nobrowse -plist "$installer")"
+            mount_point="$(
+              printf '%s\n' "$attach_plist" |
+                plutil -convert json -o - - |
+                node -e 'let input=""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { const entities = JSON.parse(input)["system-entities"]; const points = Array.isArray(entities) ? entities.map((entry) => entry?.["mount-point"]).filter((value) => typeof value === "string") : []; if (points.length !== 1) process.exit(2); process.stdout.write(points[0]); });'
+            )"
+            if [[ "$mount_point" != /Volumes/* ]]; then
+              echo "DMG mount point was not canonical" >&2
+              exit 1
+            fi
+            trap 'hdiutil detach "$mount_point"' EXIT
+            if [ -L "$mount_point/LVIS.app" ] || [ ! -d "$mount_point/LVIS.app" ]; then
+              echo "DMG did not contain one regular LVIS.app bundle" >&2
+              exit 1
+            fi
+            codesign --verify --deep --strict --verbose=4 "$mount_point/LVIS.app"
+            codesign --display --verbose=4 "$mount_point/LVIS.app"
+            spctl --assess --type execute --verbose=4 "$mount_point/LVIS.app"
+            hdiutil detach "$mount_point"
+            trap - EXIT
+          done
+      - name: Verify Windows Authenticode signature validity
+        if: matrix.target == 'win'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installers = @(Get-ChildItem release -Filter *.exe -File)
+          if ($installers.Count -eq 0) { throw 'No Windows installer found' }
+          foreach ($installer in $installers) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+            if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate) {
+              throw "Authenticode verification failed for $($installer.Name): $($signature.Status)"
+            }
+          }
+      - name: Verify Linux package metadata before independent attestation
+        if: matrix.target == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          installers=(release/*.deb release/*.rpm release/*.AppImage)
+          [ "${#installers[@]}" -gt 0 ]
+          for installer in "${installers[@]}"; do
+            case "$installer" in
+              *.deb) dpkg-deb --field "$installer" Package Version Architecture ;;
+              *.rpm) rpm -qp --qf '%{NAME}\n%{VERSION}-%{RELEASE}\n%{ARCH}\n' "$installer" ;;
+              *.AppImage) file --brief --dereference "$installer"; readelf --file-header "$installer" ;;
+              *) exit 1 ;;
+            esac
+          done
+      - name: Attest macOS installer
+        if: matrix.target == 'mac'
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: release/*.dmg
+      - name: Attest Windows installer
+        if: matrix.target == 'win'
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: release/*.exe
+      - name: Attest Linux AppImage
+        if: matrix.target == 'linux'
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: release/*.AppImage
+      - name: Attest Linux deb
+        if: matrix.target == 'linux'
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: release/*.deb
+      - name: Attest Linux rpm
+        if: matrix.target == 'linux'
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: release/*.rpm
+      - name: Verify attestations and write strict provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LVIS_EXPECTED_MAC_TEAM_ID: ${{ matrix.target == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+          LVIS_EXPECTED_MAC_CERT_SHA256: ${{ matrix.target == 'mac' && secrets.LVIS_MAC_SIGNER_CERT_SHA256 || '' }}
+          LVIS_EXPECTED_WINDOWS_PUBLISHER_SUBJECT: ${{ matrix.target == 'win' && secrets.LVIS_WINDOWS_PUBLISHER_SUBJECT || '' }}
+          LVIS_EXPECTED_WINDOWS_CERT_THUMBPRINT: ${{ matrix.target == 'win' && secrets.LVIS_WINDOWS_SIGNER_THUMBPRINT || '' }}
+        run: |
+          set -euo pipefail
+          mkdir -p release/evidence
+          shopt -s nullglob
+          case "${{ matrix.target }}" in
+            mac) installers=(release/*.dmg) ;;
+            win) installers=(release/*.exe) ;;
+            linux) installers=(release/*.AppImage release/*.deb release/*.rpm) ;;
+            *) exit 1 ;;
+          esac
+          [ "${#installers[@]}" -gt 0 ]
+          for installer in "${installers[@]}"; do
+            name="$(basename "$installer")"
+            report="release/evidence/${name}.attestation.json"
+            gh attestation verify "$installer" \
+              --repo "$GITHUB_REPOSITORY" \
+              --source-digest "$REQUESTED_HEAD" \
+              --signer-workflow lvis-project/lvis-app/.github/workflows/a2a-p4-5-packaged-evidence.yml \
+              --predicate-type https://slsa.dev/provenance/v1 \
+              --deny-self-hosted-runners \
+              --format json > "$report"
+            env -u GH_TOKEN node scripts/write-installer-provenance.mjs \
+              --installer "$installer" \
+              --os "${{ matrix.provenance_os }}" \
+              --app-head "$REQUESTED_HEAD" \
+              --hub-head "$AGENT_HUB_HEAD" \
+              --hub-lock-digest "$AGENT_HUB_LOCK_DIGEST_SHA256" \
+              --workflow-run-id "$GITHUB_RUN_ID" \
+              --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+              --repository "$GITHUB_REPOSITORY" \
+              --attestation "$report" \
+              --output "release/evidence/${name}.provenance.json" \
+              --mac-team-id "$LVIS_EXPECTED_MAC_TEAM_ID" \
+              --mac-certificate-sha256 "$LVIS_EXPECTED_MAC_CERT_SHA256" \
+              --windows-publisher-subject "$LVIS_EXPECTED_WINDOWS_PUBLISHER_SUBJECT" \
+              --windows-certificate-thumbprint "$LVIS_EXPECTED_WINDOWS_CERT_THUMBPRINT"
+          done
+      - name: Upload attested installers and provenance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: a2a-p4-5-${{ matrix.target }}-packaged-evidence
+          path: |
+            release/*.dmg
+            release/*.AppImage
+            release/*.deb
+            release/*.rpm
+            release/*.exe
+            release/evidence/*.attestation.json
+            release/evidence/*.provenance.json
+          if-no-files-found: error
+          retention-days: 14
