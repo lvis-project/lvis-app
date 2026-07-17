@@ -117,6 +117,7 @@ interface TicketTombstone {
   readonly ticketId: string;
   readonly actionDigest: string;
   readonly invocationDigest: string;
+  readonly expiresAt: number;
   readonly state: RationaleTicketState;
   readonly version: number;
   readonly terminalReason: RationaleTerminalReason;
@@ -198,6 +199,7 @@ export class InProcessRationaleTicketStore {
   readonly #tombstones = new Map<string, TicketTombstone>();
   readonly #receipts = new Map<string, AuthenticReceiptEntry>();
   readonly #onAudit: RationaleTicketStoreAuditCallback;
+  #lastObservedAt = Number.NEGATIVE_INFINITY;
 
   constructor(options: InProcessRationaleTicketStoreOptions) {
     if (!options || typeof options.onAudit !== "function") {
@@ -211,9 +213,10 @@ export class InProcessRationaleTicketStore {
     control: RationaleRequiredControl;
     now?: number;
   }): HostRationaleTicketSnapshot | null {
-    const now = input.now ?? Date.now();
-    assertFiniteNow(now);
+    const requestedNow = input.now ?? Date.now();
+    assertFiniteNow(requestedNow);
     assertSessionId(input.sessionId);
+    const now = this.#observeTimeAndPrune(requestedNow);
     if (
       input.control.anchor.sessionId !== input.sessionId ||
       !verifyRationaleRequiredControl(input.control, { now })
@@ -277,9 +280,10 @@ export class InProcessRationaleTicketStore {
     ticketId: string;
     now?: number;
   }): HostRationaleTicketSnapshot | null {
-    const now = input.now ?? Date.now();
-    assertFiniteNow(now);
+    const requestedNow = input.now ?? Date.now();
+    assertFiniteNow(requestedNow);
     assertSessionId(input.sessionId);
+    const now = this.#observeTimeAndPrune(requestedNow);
     const entry = this.#entries.get(input.ticketId);
     if (!entry || entry.sessionId !== input.sessionId) return null;
     this.#assertMonotonicTime(entry, now);
@@ -303,7 +307,9 @@ export class InProcessRationaleTicketStore {
     if ((input.event as RationaleTicketEventName) === "allow-once") {
       throw new TypeError("allow-once requires one-shot receipt consumption");
     }
-    const now = input.now ?? Date.now();
+    const requestedNow = input.now ?? Date.now();
+    assertFiniteNow(requestedNow);
+    const now = this.#observeTimeAndPrune(requestedNow);
     const entry = this.#resolveExpectation(input.expectation, now, input.event);
     if (!entry) return null;
     return this.#applyEvent(entry, input.event, input.outcomes ?? null, now);
@@ -378,6 +384,8 @@ export class InProcessRationaleTicketStore {
     expectation: RationaleTicketCasExpectation,
     now = Date.now(),
   ): HostConsumedAllowOnceReceipt | null {
+    assertFiniteNow(now);
+    now = this.#observeTimeAndPrune(now);
     const entry = this.#resolveExpectation(expectation, now, "allow-once");
     if (!entry) return null;
 
@@ -431,6 +439,7 @@ export class InProcessRationaleTicketStore {
   ): boolean {
     try {
       assertFiniteNow(now);
+      now = this.#observeTimeAndPrune(now);
       const candidate = seal(receipt, "HostConsumedAllowOnceReceipt");
       const stored = this.#receipts.get(candidate.receiptId);
       if (
@@ -451,8 +460,10 @@ export class InProcessRationaleTicketStore {
     }
   }
 
-  activeTicketIds(sessionId: string): readonly string[] {
+  activeTicketIds(sessionId: string, now = Date.now()): readonly string[] {
+    assertFiniteNow(now);
     assertSessionId(sessionId);
+    this.#observeTimeAndPrune(now);
     return seal(
       [...(this.#activeBySession.get(sessionId) ?? [])],
       "ActiveRationaleTicketIds",
@@ -465,6 +476,7 @@ export class InProcessRationaleTicketStore {
   ): readonly HostRationaleTicketSnapshot[] {
     assertFiniteNow(now);
     assertSessionId(sessionId);
+    now = this.#observeTimeAndPrune(now);
     const ticketIds = [...(this.#activeBySession.get(sessionId) ?? [])];
     const receiptEntries = [...this.#receipts.values()]
       .filter((entry) => entry.sessionId === sessionId);
@@ -508,7 +520,6 @@ export class InProcessRationaleTicketStore {
     now: number,
     requestedEvent: RationaleTicketEventName,
   ): HostRationaleTicketSnapshot | null {
-    assertFiniteNow(now);
     assertExpectation(expectation);
     const entry = this.#entries.get(expectation.ticketId);
     if (!entry) {
@@ -634,16 +645,21 @@ export class InProcessRationaleTicketStore {
     if (isTerminal(ticket.state)) {
       this.#entries.delete(ticket.ticketId);
       this.#removeActiveSessionTicket(previous.sessionId, ticket.ticketId);
-      this.#tombstones.set(ticket.ticketId, seal({
-        sessionId: previous.sessionId,
-        ticketId: ticket.ticketId,
-        actionDigest: ticket.actionDigest,
-        invocationDigest: previous.control.invocationDigest,
-        state: ticket.state,
-        version: snapshot.version,
-        terminalReason: ticket.terminalReason!,
-        retiredAt: now,
-      }, "RationaleTicketTombstone"));
+      if (now < previous.control.anchor.expiresAt) {
+        this.#tombstones.set(ticket.ticketId, seal({
+          sessionId: previous.sessionId,
+          ticketId: ticket.ticketId,
+          actionDigest: ticket.actionDigest,
+          invocationDigest: previous.control.invocationDigest,
+          expiresAt: previous.control.anchor.expiresAt,
+          state: ticket.state,
+          version: snapshot.version,
+          terminalReason: ticket.terminalReason!,
+          retiredAt: now,
+        }, "RationaleTicketTombstone"));
+      } else {
+        this.#tombstones.delete(ticket.ticketId);
+      }
     } else {
       this.#entries.set(ticket.ticketId, snapshot);
     }
@@ -674,6 +690,15 @@ export class InProcessRationaleTicketStore {
     if (now < entry.createdAt || now < entry.updatedAt) {
       throw new TypeError("ticket store time cannot move backwards");
     }
+  }
+
+  #observeTimeAndPrune(now: number): number {
+    const effectiveNow = Math.max(this.#lastObservedAt, now);
+    this.#lastObservedAt = effectiveNow;
+    for (const [ticketId, tombstone] of this.#tombstones) {
+      if (effectiveNow >= tombstone.expiresAt) this.#tombstones.delete(ticketId);
+    }
+    return effectiveNow;
   }
 
   #dispatchAudit(event: RationaleTicketStoreAuditEvent): void {

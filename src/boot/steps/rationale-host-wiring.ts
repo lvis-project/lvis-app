@@ -74,6 +74,8 @@ export async function wireRationaleHost(
 
     const journalOptions: DurableHostInvocationStartCasStoreOptions = {
       filePath: join(lvisHome(), "rationale", "invocation-journal-v1.json"),
+      auditSecret,
+      sealStore,
     };
     const invocationStartCas =
       overrides.createInvocationJournal?.(journalOptions) ??
