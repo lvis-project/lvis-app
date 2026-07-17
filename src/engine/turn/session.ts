@@ -181,6 +181,7 @@ export function newConversation(
         log.warn("newConversation saveSession failed: %s", (err as Error).message);
       });
     }
+    self.deps.closeRationaleSession?.(self.sessionId);
     // C2(c): drop the previous session's loaded skills so a fresh chat
     // starts with a clean overlay. Tests / stubs without overlay omit self.
     self.deps.skillOverlay?.clear(self.sessionId);
@@ -238,6 +239,7 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
         log.warn("loadSession repair saveSession failed: %s", (err as Error).message);
       });
     }
+    self.deps.closeRationaleSession?.(self.sessionId);
 
     // Clear the OLD session's on-demand plugin activations BEFORE reassigning
     // sessionId. Clearing after the reassignment would key on the NEW id and

@@ -177,7 +177,7 @@ describe("foreground rationale hostile input rejection", () => {
       eligibilityContext,
       sealedAction: { ...sealedAction, toolUseId: "" },
       permission,
-    })).toThrow(/bounded text contract/);
+    })).toThrow(/tool use ID is invalid/);
     expect(() => createRationaleRequiredControl({
       anchor,
       action,

@@ -9,11 +9,12 @@
  * fired for a layer-3 allow-rule hit OR a layer-5 `alwaysAllowed` hit as well
  * as the layer-6 override path.
  *
- * The SOT is now a **post-computation guard at the bottom of `checkDetailed`**
- * (after all layers have been evaluated). Placing it there is the only correct
- * single-source: the override branch in `categoryBasedDecision` only covers
- * layer 6; layer-3 and layer-5 return early before `categoryBasedDecision` is
- * called and would silently bypass an override-branch-only guard.
+ * The SOT is now split between an immutable host-governance guard at the top
+ * of `checkDetailed` and the existing post-computation re-elevation guard.
+ * Forged external meta and builtin meta missing a valid override are denied
+ * before mode/rules can weaken the trust boundary. Valid builtin `ask` meta is
+ * still re-elevated after the normal layers so layer-3 and layer-5 allows
+ * cannot bypass the common foreground reviewer path.
  *
  * The `mode !== "allow"` check in the post-guard is NOT dead code: at that
  * point in `checkDetailed` the mode is not narrowed (unlike inside the override
@@ -31,7 +32,7 @@
  *   - decisionOverride="ask" × layer-5 alwaysAllowed       → still ask + forceModal (MAJOR-2 fix)
  *   - decisionOverride="ask" × layer-5 alwaysAllowed+allow → allow, NO prompt
  *   - decisionOverride="ask" × layer-3 allow-rule          → still ask + forceModal (MAJOR-2 fix)
- *   - decisionOverride=undefined                           → override-`allow` (unchanged)
+ *   - decisionOverride=undefined                           → immutable deny at layer 0
  *   - decisionOverride="always-allow-with-audit"           → override-`allow` (only "ask" elevates)
  *
  * `always-allow-with-audit` is short-circuited by the executor BEFORE
@@ -101,16 +102,57 @@ describe("PermissionManager — meta decisionOverride re-elevation (V1 SOT)", ()
     expect(result.forceModal).toBeUndefined();
   });
 
-  it("default mode + no decisionOverride → override allow (post-guard skips)", () => {
-    // Non-meta callers pass undefined; the post-guard condition
-    // `context.decisionOverride === "ask"` is false, so the result is the
-    // historical override-allow unchanged.
+  it("default mode + no decisionOverride → immutable deny", () => {
     pm.setMode("default");
     const result = pm.checkDetailed("some_meta_tool", "builtin", "meta");
-    expect(result.decision).toBe("allow");
-    expect(result.forceModal).toBeUndefined();
-    expect(result.layer).toBe(6);
+    expect(result).toMatchObject({
+      decision: "deny",
+      layer: 0,
+      denyReasons: [{
+        layer: 0,
+        reason: "builtin-meta-missing-decision-override",
+        source: "host-tool-governance",
+      }],
+    });
   });
+
+  it.each(["default", "auto", "strict", "allow"] as const)(
+    "forged external meta remains denied in %s mode despite an allow rule",
+    (mode) => {
+      pm.setMode(mode);
+      pm.setRules([{ pattern: "forged_meta", action: "allow" }]);
+      for (const source of ["plugin", "mcp"] as const) {
+        const result = pm.checkDetailed("forged_meta", source, "meta", null, {
+          decisionOverride: "ask",
+        });
+        expect(result).toMatchObject({
+          decision: "deny",
+          layer: 0,
+          denyReasons: [{
+            reason: "external-meta-forbidden",
+            source: "host-tool-governance",
+          }],
+        });
+      }
+    },
+  );
+
+  it.each(["agent_spawn", "agent_interrupt"])(
+    "%s uses the common foreground reviewer marker",
+    (toolName) => {
+      pm.setMode("auto");
+      pm.setInteractiveAutoApprove("medium");
+      const result = pm.checkDetailed(toolName, "builtin", "meta", null, {
+        decisionOverride: "ask",
+      });
+      expect(result).toMatchObject({
+        decision: "ask",
+        layer: 6,
+        reviewer: { route: "foreground-auto" },
+      });
+      expect(result.forceModal).toBeUndefined();
+    },
+  );
 
   it("default mode + decisionOverride='always-allow-with-audit' → allow (post-guard skips)", () => {
     // Only "ask" triggers the post-guard; "always-allow-with-audit" keeps the

@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 /**
  * Single source of truth for the LVIS user-data root.
@@ -14,5 +14,5 @@ import { join } from "node:path";
  * `homedir()` directly, otherwise the env override leaks past one feature.
  */
 export function lvisHome(): string {
-  return process.env.LVIS_HOME ?? join(homedir(), ".lvis");
+  return resolve(process.env.LVIS_HOME ?? join(homedir(), ".lvis"));
 }

@@ -502,6 +502,7 @@ export class ConversationLoop {
    * routine-fire path where the loop is discarded without a resetSession.
    */
   cleanupSession(): void {
+    this.deps.closeRationaleSession?.(this.sessionId);
     this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
   }
 
@@ -793,6 +794,8 @@ export class ConversationLoop {
       /** Host-owned causal hop inherited from durable A2A guidance. */
       a2aCausalContext?: A2AAgentCausalContext;
       inputOrigin: ChatInputOrigin;
+      /** Host-validated, DLP-before-send keyboard text used only for anchoring. */
+      requestAnchorRawIntent?: string;
       rolePrompt?: ActiveRolePrompt;
     },
   ): Promise<TurnResult> {

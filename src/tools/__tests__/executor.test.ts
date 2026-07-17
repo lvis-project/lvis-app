@@ -126,7 +126,6 @@ describe("ToolExecutor — A2A parent delivery capability provenance", () => {
         description: "Captures host-owned execution metadata.",
         source: "builtin",
         category: "read",
-        decisionOverride: "allow",
         isReadOnly: () => true,
         jsonSchema: {
           type: "object",

@@ -363,6 +363,7 @@ export class PermissionManager {
    * decide whether to set `reviewer.route='foreground-auto'`.
    */
   private interactiveAutoApprove: ReviewerInteractiveAutoApprove = "off";
+  private policyGeneration = 0;
   /** CRITICAL 4.1: optional broadcast for memory-hit auto-approve disclosure */
   private broadcastUserApprovalHit: ((payload: UserApprovalHitPayload) => void) | null = null;
   /**
@@ -420,6 +421,7 @@ export class PermissionManager {
     this.deferredQueue = deps.deferredQueue;
     this.reviewerCacheScope = deps.cacheScope ?? {};
     this.reviewerDegradedToRule = deps.degradedToRule ?? false;
+    this.policyGeneration += 1;
   }
 
   /**
@@ -557,6 +559,7 @@ export class PermissionManager {
    * does not have to re-read the file on every tool call.
    */
   setInteractiveAutoApprove(autoApprove: ReviewerInteractiveAutoApprove): void {
+    if (this.interactiveAutoApprove !== autoApprove) this.policyGeneration += 1;
     this.interactiveAutoApprove = autoApprove;
   }
 
@@ -653,6 +656,7 @@ export class PermissionManager {
   // ─── Settings ─────────────────────────────────────
 
   setMode(mode: ExecutionMode): void {
+    if (this.mode !== mode) this.policyGeneration += 1;
     this.mode = mode;
   }
 
@@ -660,20 +664,27 @@ export class PermissionManager {
     return this.mode;
   }
 
+  /** Monotonic host policy identity for sealed rationale revalidation. */
+  getPolicyEpoch(): string {
+    return `${this.policyGeneration}:${this.mode}:${this.interactiveAutoApprove}`;
+  }
+
   setRules(rules: PermissionRule[]): void {
     this.rules = [...rules];
+    this.policyGeneration += 1;
   }
 
   setToolModeOverride(toolName: string, mode: ExecutionMode): void {
     if (mode === "default") {
-      this.toolModeOverrides.delete(toolName);
+      if (this.toolModeOverrides.delete(toolName)) this.policyGeneration += 1;
       return;
     }
+    if (this.toolModeOverrides.get(toolName) !== mode) this.policyGeneration += 1;
     this.toolModeOverrides.set(toolName, mode);
   }
 
   clearToolModeOverride(toolName: string): void {
-    this.toolModeOverrides.delete(toolName);
+    if (this.toolModeOverrides.delete(toolName)) this.policyGeneration += 1;
   }
 
   getVisibilityDenyRules(): DenyRule[] {
@@ -714,6 +725,7 @@ export class PermissionManager {
     // In-memory cache is updated only after the durable write succeeds.
     // maxTier keeps the invariant that the Map holds the highest granted tier.
     this.alwaysAllowed.set(pattern, maxTier(this.alwaysAllowed.get(pattern), tier));
+    this.policyGeneration += 1;
     this.broadcastConfigChanged?.();
     // Cluster review M1 — rule change aborts outstanding bearers so plugins
     // re-resolve their keys under the new policy. An allow rule going wider
@@ -742,6 +754,7 @@ export class PermissionManager {
         file.rules.unshift({ pattern, action: "deny" });
       }
     });
+    this.policyGeneration += 1;
     this.broadcastConfigChanged?.();
     // Cluster review M1 — deny added → outstanding bearers MUST be aborted
     // so a plugin that held a bearer captured in a closure can't continue
@@ -758,6 +771,7 @@ export class PermissionManager {
       (r) => !(r.pattern === pattern && r.action === action && !r.source),
     );
     if (action === "allow") this.alwaysAllowed.delete(pattern);
+    this.policyGeneration += 1;
     // Persistent file.
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
       file.rules = file.rules.filter(
@@ -891,6 +905,7 @@ export class PermissionManager {
       if (isUnderRoot(pattern)) this.alwaysAllowed.delete(pattern);
     }
 
+    this.policyGeneration += 1;
     this.broadcastConfigChanged?.();
     // A revoke narrows policy — outstanding bearers must re-resolve under it.
     this.revokeAllPluginAccess(`root-removed-prune:${root}`);
@@ -952,6 +967,7 @@ export class PermissionManager {
         if (surviving) surviving.tier = merged;
       }
     }
+    this.policyGeneration += 1;
   }
 
   /**
@@ -972,6 +988,7 @@ export class PermissionManager {
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
       file.mode = mode;
     });
+    if (this.mode !== mode) this.policyGeneration += 1;
     this.mode = mode;
   }
 
@@ -1002,6 +1019,26 @@ export class PermissionManager {
     overlayTriggerOrigin?: string | null,
     context: PermissionCheckContext = {},
   ): PermissionCheckResult {
+    if (category === "meta") {
+      const invalidExternalMeta = source !== "builtin";
+      const missingBuiltinOverride = source === "builtin" &&
+        context.decisionOverride !== "ask" &&
+        context.decisionOverride !== "always-allow-with-audit";
+      if (invalidExternalMeta || missingBuiltinOverride) {
+        return {
+          decision: "deny",
+          reason: t("be_permissionManager.policyDenyReason", { category }),
+          layer: 0,
+          denyReasons: [{
+            layer: 0,
+            reason: invalidExternalMeta
+              ? "external-meta-forbidden"
+              : "builtin-meta-missing-decision-override",
+            source: "host-tool-governance",
+          }],
+        };
+      }
+    }
     const trust = this.resolveTrust(toolName, source);
     // Strict patterns (shared with the rest of the staged-origin flow — see
     // shared/overlay-trigger-source.ts + shared/mcp-app-message-source.ts). Loose
@@ -1593,7 +1630,9 @@ export class PermissionManager {
           reviewer: { route: "headless" },
         };
       case "override":
-        // meta category — returns `allow` (the registry override sentinel).
+        // A valid host builtin meta category returns `allow` (the registry
+        // override sentinel). Forged external or incomplete builtin meta
+        // shapes were immutably denied before every user/mode rule above.
         // The per-invocation `decisionOverride="ask"` re-elevation is handled
         // by the post-computation guard at the bottom of `checkDetailed`, which
         // is layer-agnostic (covers layer-3 allow-rule and layer-5 alwaysAllowed
