@@ -8,6 +8,7 @@ import {
   createRationaleRequiredControl,
   createRequestAnchor,
   createTriggeringBatchDisposition,
+  isForegroundRationaleOrchestrationEnabled,
   isRationaleEligible,
   parseRationaleResponse,
   toRationaleProviderEnvelope,
@@ -133,6 +134,24 @@ describe("foreground rationale contract", () => {
       "bounded-modal-ui",
     ]);
   });
+
+  it.each([
+    [false, undefined, undefined, false],
+    [false, "production", true, false],
+    [false, "development", true, false],
+    [false, "test", false, false],
+    [false, "test", true, true],
+    [true, "production", false, true],
+  ] as const)(
+    "resolves activation for production=%s env=%s testOverride=%s",
+    (productionEnabled, nodeEnv, enableDormantRationaleForTesting, expected) => {
+      expect(isForegroundRationaleOrchestrationEnabled({
+        productionEnabled,
+        nodeEnv,
+        enableDormantRationaleForTesting,
+      })).toBe(expected);
+    },
+  );
 
   it("requires explicit host turn/message IDs and seals a keyboard anchor", () => {
     expect(createRequestAnchor({

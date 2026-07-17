@@ -43,15 +43,18 @@ export type PostToolUseHook = (ctx: PostHookContext) => Promise<PostHookResult |
 export class HookRunner {
   private readonly preHooks: Array<{ name: string; handler: PreToolUseHook }> = [];
   private readonly postHooks: Array<{ name: string; handler: PostToolUseHook }> = [];
+  private generation = 0;
 
 
   registerPreHook(name: string, handler: PreToolUseHook): void {
     this.preHooks.push({ name, handler });
+    this.generation += 1;
   }
 
 
   registerPostHook(name: string, handler: PostToolUseHook): void {
     this.postHooks.push({ name, handler });
+    this.generation += 1;
   }
 
 
@@ -109,6 +112,8 @@ export class HookRunner {
     return feedbacks.length > 0 ? feedbacks.join("\n") : undefined;
   }
 
+
+  getGeneration(): string { return String(this.generation); }
 
   get preHookCount(): number { return this.preHooks.length; }
   get postHookCount(): number { return this.postHooks.length; }

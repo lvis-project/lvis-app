@@ -69,7 +69,7 @@ export type ApprovalMode = "default" | "ask_all" | "plan" | "full_auto";
  * `"agent-action"` is a plugin-origin host approval request that does
  * not correspond to a host tool execution.
  */
-export type ApprovalKind = "tool" | "out-of-allowed-dir" | "agent-action";
+export type ApprovalKind = "tool" | "out-of-allowed-dir" | "agent-action" | "rationale";
 
 export interface ApprovalRequest {
   id: string;
@@ -79,6 +79,8 @@ export interface ApprovalRequest {
    * Defaults to `"tool"` when omitted (backwards-compatible).
    */
   kind?: ApprovalKind;
+  /** Choices the host will accept for this request. */
+  allowedChoices?: readonly ApprovalChoice[];
   toolName: string;
   /** Permission policy category for the invocation shown in the UI. */
   toolCategory?: ToolCategory;
@@ -224,6 +226,32 @@ export interface ApprovalDecision {
 export const IPC_APPROVAL_REQUEST = "lvis:approval:request";
 export const IPC_APPROVAL_RESPOND = "lvis:approval:respond";
 
+/** Host-only timeout provenance; renderer objects can never enter this set. */
+const hostTimeoutDecisions = new WeakSet<ApprovalDecision>();
+
+export function isHostApprovalTimeoutDecision(
+  decision: ApprovalDecision | null | undefined,
+): decision is ApprovalDecision {
+  return decision !== null && decision !== undefined &&
+    hostTimeoutDecisions.has(decision);
+}
+
+/** Host-generated fail-closed denials are not user-authored deny choices. */
+const hostRejectedApprovalDecisions = new WeakSet<ApprovalDecision>();
+
+export function isHostApprovalRejectedDecision(
+  decision: ApprovalDecision | null | undefined,
+): decision is ApprovalDecision {
+  return decision !== null && decision !== undefined &&
+    hostRejectedApprovalDecisions.has(decision);
+}
+
+function markHostApprovalRejectedDecision(
+  decision: ApprovalDecision,
+): ApprovalDecision {
+  hostRejectedApprovalDecisions.add(decision);
+  return decision;
+}
 
 
 interface PendingEntry {
@@ -235,6 +263,7 @@ interface PendingEntry {
   toolName: string;
   category: "tool" | "agent-action";
   kind?: ApprovalKind;
+  allowedChoices?: readonly ApprovalChoice[];
   toolCategory?: ToolCategory;
   source?: "builtin" | "plugin" | "mcp";
   sourcePluginId?: string;
@@ -388,13 +417,16 @@ export class ApprovalGate {
     //
     // Caller-supplied capability is always preserved (`??` semantics).
     const isExecutionKind =
-      (req.kind === undefined || req.kind === "tool") &&
+      (req.kind === undefined || req.kind === "tool" || req.kind === "rationale") &&
       req.toolCategory !== "meta";
     const fullReq: ApprovalRequest = {
       ...req,
       sandboxCapability: req.sandboxCapability ??
         (isExecutionKind ? this.sandboxCapabilityProvider() : undefined),
-      requireExplicit: this.currentPolicy.requireExplicitApproval,
+      allowedChoices:
+        req.kind === "rationale" ? ["allow-once", "deny-once"] : req.allowedChoices,
+      requireExplicit:
+        req.kind === "rationale" ? true : this.currentPolicy.requireExplicitApproval,
     };
 
     // §S1: sensitive-path hard-block — runs BEFORE anything else so that
@@ -416,11 +448,11 @@ export class ApprovalGate {
           type: "approval",
           output: `[approval:sensitive-path-blocked] ${fullReq.id} ${formatApprovalAuditFields(fullReq)} raw=${rawCandidate} canonical=${caseFolded} pattern=${matchedPattern} → deny-once (hard-block)`,
         });
-        return {
+        return markHostApprovalRejectedDecision({
           requestId: fullReq.id,
           choice: "deny-once",
           rememberPattern: `Sensitive credential path blocked: ${matchedPattern}`,
-        };
+        });
       }
     }
 
@@ -436,7 +468,8 @@ export class ApprovalGate {
       fullReq.mode !== "ask_all" &&
       fullReq.mode !== "plan" &&
       fullReq.kind !== "out-of-allowed-dir" &&
-      fullReq.kind !== "agent-action"
+      fullReq.kind !== "agent-action" &&
+      fullReq.kind !== "rationale"
     ) {
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
@@ -459,7 +492,7 @@ export class ApprovalGate {
         type: "approval",
         output: `[approval:send-failed] ${fullReq.id} ${formatApprovalAuditFields(fullReq)} — webContents already destroyed → deny-once`,
       });
-      return { requestId: fullReq.id, choice: "deny-once" };
+      return markHostApprovalRejectedDecision({ requestId: fullReq.id, choice: "deny-once" });
     }
 
     // §S8 phase: requested
@@ -511,10 +544,12 @@ export class ApprovalGate {
           type: "approval",
           output: `[approval:timeout] ${fullReq.id} ${formatApprovalAuditFields(fullReq)} → deny-once`,
         });
-        resolve({
+        const timeoutDecision: ApprovalDecision = {
           requestId: fullReq.id,
           choice: "deny-once",
-        });
+        };
+        hostTimeoutDecisions.add(timeoutDecision);
+        resolve(timeoutDecision);
       }, this.timeoutMs);
 
       this.pending.set(fullReq.id, {
@@ -525,6 +560,7 @@ export class ApprovalGate {
         toolName: fullReq.toolName,
         category: fullReq.category,
         kind: fullReq.kind,
+        allowedChoices: fullReq.allowedChoices,
         toolCategory: fullReq.toolCategory,
         source: fullReq.source,
         sourcePluginId: fullReq.sourcePluginId,
@@ -568,7 +604,10 @@ export class ApprovalGate {
           type: "approval",
           output: `[approval:send-failed] ${fullReq.id} ${formatApprovalAuditFields(fullReq)} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
         });
-        resolve({ requestId: fullReq.id, choice: "deny-once" });
+        resolve(markHostApprovalRejectedDecision({
+          requestId: fullReq.id,
+          choice: "deny-once",
+        }));
       }
     });
   }
@@ -599,10 +638,29 @@ export class ApprovalGate {
         choice: "deny-once",
         rememberPattern: "approval integrity check failed",
       };
+      hostRejectedApprovalDecisions.add(forcedDecision);
       entry.resolve(forcedDecision);
       return forcedDecision;
     }
 
+    if (entry.allowedChoices && !entry.allowedChoices.includes(decision.choice)) {
+      clearTimeout(entry.timer);
+      this.pending.delete(requestId);
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "approval-gate",
+        type: "approval",
+        output: `[approval:choice-not-allowed] ${requestId} ${formatApprovalAuditFields(entry)} choice=${decision.choice} allowed=${entry.allowedChoices.join(",")} → deny-once (forced)`,
+      });
+      const forcedDecision: ApprovalDecision = {
+        requestId,
+        choice: "deny-once",
+        rememberPattern: "approval choice not allowed",
+      };
+      hostRejectedApprovalDecisions.add(forcedDecision);
+      entry.resolve(forcedDecision);
+      return forcedDecision;
+    }
     clearTimeout(entry.timer);
     this.pending.delete(requestId);
     // §S8 phase: decided
@@ -616,6 +674,36 @@ export class ApprovalGate {
     return decision;
   }
 
+  /**
+   * Fail-closed cancellation boundary for the host-owned rationale flow.
+   *
+   * This deliberately refuses to cancel ordinary approval requests: callers
+   * may retire only the exact pending rationale request they own. Removing the
+   * entry before resolving it makes a late renderer response a harmless
+   * unknown-request replay.
+   */
+  cancelPendingRationale(
+    requestId: string,
+    reason: "caller-abort" | "session-close" = "caller-abort",
+  ): boolean {
+    const entry = this.pending.get(requestId);
+    if (!entry || entry.kind !== "rationale") return false;
+
+    clearTimeout(entry.timer);
+    this.pending.delete(requestId);
+    this.auditLogger?.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "approval-gate",
+      type: "approval",
+      output: `[approval:cancelled] ${requestId} ${formatApprovalAuditFields(entry)} reason=${reason} → deny-once`,
+    });
+    entry.resolve(markHostApprovalRejectedDecision({
+      requestId,
+      choice: "deny-once",
+      rememberPattern: `rationale approval cancelled: ${reason}`,
+    }));
+    return true;
+  }
   /**
    * Issue #799 — server-side ApprovalRequest snapshot lookup.
    *
@@ -637,7 +725,7 @@ export class ApprovalGate {
     approvalCacheKey: string | undefined;
   } | null {
     const entry = this.pending.get(requestId);
-    if (!entry) return null;
+    if (!entry || entry.kind === "rationale") return null;
     return {
       toolName: entry.toolName,
       // PendingEntry.source can be undefined for legacy callers — default
@@ -654,7 +742,10 @@ export class ApprovalGate {
   disposeAll(): void {
     for (const [id, entry] of this.pending) {
       clearTimeout(entry.timer);
-      entry.resolve({ requestId: id, choice: "deny-once" });
+      entry.resolve(markHostApprovalRejectedDecision({
+        requestId: id,
+        choice: "deny-once",
+      }));
     }
     this.pending.clear();
   }

@@ -27,27 +27,167 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import {
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
+  fsyncSync,
+  lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
   chmodSync,
 } from "node:fs";
 import { join } from "node:path";
+import { platform } from "node:process";
 import { lvisHome } from "../shared/lvis-home.js";
 
 export const GENESIS_MARKER = "genesis";
 const AUDIT_HMAC_SECRET_NAME = "audit-hmac.key";
 const SAFE_STORAGE_SECRET_PREFIX = "safe:v1:";
+const DEFAULT_SECRET_READ_MAX_BYTES = 1024 * 1024;
+const MAX_SECRET_READ_LIMIT_BYTES = 16 * 1024 * 1024;
+const MAX_SAFE_STORAGE_FILE_BYTES = 32 * 1024 * 1024;
+const SECRET_AUTHORITY_MAX_BYTES = 4 * 1024;
+
+function hardenSecretDirectory(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (platform !== "win32") chmodSync(dir, 0o700);
+}
+
+function fsyncDirectory(dir: string): void {
+  if (platform === "win32") return;
+  const fd = openSync(dir, "r");
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Atomic temp -> fsync -> rename -> directory-fsync secret replacement. */
+function atomicWriteSecretFile(dir: string, path: string, value: string): void {
+  hardenSecretDirectory(dir);
+  const tempPath = `${path}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
+  let fd: number | undefined;
+  try {
+    fd = openSync(tempPath, "wx", 0o600);
+    writeFileSync(fd, value, { encoding: "utf-8" });
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
+    if (platform !== "win32") chmodSync(tempPath, 0o600);
+    renameSync(tempPath, path);
+    if (platform !== "win32") chmodSync(path, 0o600);
+    fsyncDirectory(dir);
+  } catch (cause) {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* preserve primary failure */ }
+    }
+    try { unlinkSync(tempPath); } catch { /* absent or already renamed */ }
+    throw cause;
+  }
+}
+
+function assertSecretReadLimit(maxBytes: number): void {
+  if (!Number.isSafeInteger(maxBytes) ||
+      maxBytes < 1 || maxBytes > MAX_SECRET_READ_LIMIT_BYTES) {
+    throw new TypeError("secret read byte limit is invalid");
+  }
+}
+
+function assertStoredSecretReadLimit(maxBytes: number): void {
+  if (!Number.isSafeInteger(maxBytes) ||
+      maxBytes < 1 || maxBytes > MAX_SAFE_STORAGE_FILE_BYTES) {
+    throw new TypeError("stored secret read byte limit is invalid");
+  }
+}
+
+function sameSecretFileIdentity(
+  left: { readonly dev: bigint; readonly ino: bigint },
+  right: { readonly dev: bigint; readonly ino: bigint },
+): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function readSecretFileUtf8Bounded(
+  filePath: string,
+  maxStoredBytes: number,
+): string | null {
+  assertStoredSecretReadLimit(maxStoredBytes);
+  const flags = constants.O_RDONLY |
+    (platform === "win32" ? 0 : constants.O_NOFOLLOW);
+  let fd: number | undefined;
+  try {
+    try {
+      fd = openSync(filePath, flags);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") return null;
+      throw error;
+    }
+    const before = fstatSync(fd, { bigint: true });
+    const pathAtOpen = lstatSync(filePath, { bigint: true });
+    if (!before.isFile() || pathAtOpen.isSymbolicLink() ||
+        !pathAtOpen.isFile() || !sameSecretFileIdentity(pathAtOpen, before)) {
+      throw new Error("secret authority path is not a stable regular file");
+    }
+    const size = Number(before.size);
+    if (!Number.isSafeInteger(size) || size < 0 || size > maxStoredBytes) {
+      throw new Error("secret authority exceeds read byte limit");
+    }
+    const buffer = Buffer.alloc(size);
+    let completed = 0;
+    while (completed < size) {
+      const read = readSync(fd, buffer, completed, size - completed, completed);
+      if (read === 0) {
+        throw new Error("secret authority was truncated during read");
+      }
+      completed += read;
+    }
+    const after = fstatSync(fd, { bigint: true });
+    const pathAfter = lstatSync(filePath, { bigint: true });
+    if (!after.isFile() || pathAfter.isSymbolicLink() || !pathAfter.isFile() ||
+        !sameSecretFileIdentity(before, after) ||
+        !sameSecretFileIdentity(after, pathAfter) ||
+        before.size !== after.size || before.mtimeNs !== after.mtimeNs ||
+        before.ctimeNs !== after.ctimeNs) {
+      throw new Error("secret authority changed during read");
+    }
+    const text = buffer.toString("utf8");
+    if (!Buffer.from(text, "utf8").equals(buffer)) {
+      throw new Error("secret authority is not valid UTF-8");
+    }
+    return text.replace(/\n$/, "");
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+function assertSecretValueWithinLimit(value: string, maxBytes: number): void {
+  if (Buffer.byteLength(value, "utf8") > maxBytes) {
+    throw new Error("secret authority value exceeds read byte limit");
+  }
+}
+
+function safeStorageFileLimit(maxValueBytes: number): number {
+  return Math.min(
+    MAX_SAFE_STORAGE_FILE_BYTES,
+    maxValueBytes * 16 + 4 * 1024,
+  );
+}
 
 /**
  * Stable storage interface — abstracts keychain vs file persistence.
  * Tests inject a memory-backed impl.
  */
 export interface SecretStore {
-  /** Read a secret by name. Returns null when absent. */
-  read(name: string): string | null;
+  /** Read at most maxBytes of decoded UTF-8 value. Returns null when absent. */
+  read(name: string, maxBytes: number): string | null;
   /** Write a secret by name. Throws on permission/IO errors. */
   write(name: string, value: string): void;
 }
@@ -68,9 +208,7 @@ export class FileSecretStore implements SecretStore {
 
   constructor(dir?: string) {
     this.dir = dir ?? join(lvisHome(), "secrets");
-    if (!existsSync(this.dir)) {
-      mkdirSync(this.dir, { recursive: true, mode: 0o700 });
-    }
+    hardenSecretDirectory(this.dir);
   }
 
   private path(name: string): string {
@@ -81,21 +219,21 @@ export class FileSecretStore implements SecretStore {
     return join(this.dir, name);
   }
 
-  read(name: string): string | null {
+  read(
+    name: string,
+    maxBytes = DEFAULT_SECRET_READ_MAX_BYTES,
+  ): string | null {
+    assertSecretReadLimit(maxBytes);
     const p = this.path(name);
-    if (!existsSync(p)) return null;
-    return readFileSync(p, "utf-8").replace(/\n$/, "");
+    const value = readSecretFileUtf8Bounded(p, maxBytes + 1);
+    if (value === null) return null;
+    assertSecretValueWithinLimit(value, maxBytes);
+    return value;
   }
 
   write(name: string, value: string): void {
     const p = this.path(name);
-    // Best-effort dir mode hardening — re-issue 0o700 each write so a
-    // post-install perm change doesn't slowly drift open.
-    if (existsSync(this.dir)) {
-      try { chmodSync(this.dir, 0o700); } catch { /* non-fatal */ }
-    }
-    writeFileSync(p, value, { encoding: "utf-8", mode: 0o600 });
-    try { chmodSync(p, 0o600); } catch { /* non-fatal */ }
+    atomicWriteSecretFile(this.dir, p, value);
   }
 }
 
@@ -112,9 +250,7 @@ export class SafeStorageSecretStore implements SecretStore {
     dir?: string,
   ) {
     this.dir = dir ?? join(lvisHome(), "secrets");
-    if (!existsSync(this.dir)) {
-      mkdirSync(this.dir, { recursive: true, mode: 0o700 });
-    }
+    hardenSecretDirectory(this.dir);
   }
 
   private path(name: string): string {
@@ -173,34 +309,40 @@ export class SafeStorageSecretStore implements SecretStore {
     }
   }
 
-  read(name: string): string | null {
+  read(
+    name: string,
+    maxBytes = DEFAULT_SECRET_READ_MAX_BYTES,
+  ): string | null {
     this.assertAvailable();
+    assertSecretReadLimit(maxBytes);
     const p = this.path(name);
-    if (!existsSync(p)) return null;
-    const encrypted = readFileSync(p, "utf-8").replace(/\n$/, "");
+    const encrypted = readSecretFileUtf8Bounded(
+      p,
+      safeStorageFileLimit(maxBytes),
+    );
+    if (encrypted === null) return null;
     if (!encrypted.startsWith(SAFE_STORAGE_SECRET_PREFIX)) {
       this.quarantineUnreadableSecret(name, p, "invalid-prefix");
       return null;
     }
+    let value: string;
     try {
-      return this.safeStorage.decryptString(
+      value = this.safeStorage.decryptString(
         Buffer.from(encrypted.slice(SAFE_STORAGE_SECRET_PREFIX.length), "base64"),
       );
     } catch (err) {
       this.quarantineUnreadableSecret(name, p, "decrypt-failed", err);
       return null;
     }
+    assertSecretValueWithinLimit(value, maxBytes);
+    return value;
   }
 
   write(name: string, value: string): void {
     this.assertAvailable();
     const p = this.path(name);
-    if (existsSync(this.dir)) {
-      try { chmodSync(this.dir, 0o700); } catch { /* non-fatal */ }
-    }
     const encrypted = SAFE_STORAGE_SECRET_PREFIX + this.safeStorage.encryptString(value).toString("base64");
-    writeFileSync(p, encrypted, { encoding: "utf-8", mode: 0o600 });
-    try { chmodSync(p, 0o600); } catch { /* non-fatal */ }
+    atomicWriteSecretFile(this.dir, p, encrypted);
   }
 }
 
@@ -209,8 +351,15 @@ export class SafeStorageSecretStore implements SecretStore {
  */
 export class MemorySecretStore implements SecretStore {
   private readonly map = new Map<string, string>();
-  read(name: string): string | null {
-    return this.map.has(name) ? this.map.get(name)! : null;
+  read(
+    name: string,
+    maxBytes = DEFAULT_SECRET_READ_MAX_BYTES,
+  ): string | null {
+    assertSecretReadLimit(maxBytes);
+    const value = this.map.get(name);
+    if (value === undefined) return null;
+    assertSecretValueWithinLimit(value, maxBytes);
+    return value;
   }
   write(name: string, value: string): void {
     this.map.set(name, value);
@@ -226,7 +375,7 @@ export class MemorySecretStore implements SecretStore {
  * audit chain rather than silently downgrade to no-tamper-evidence.
  */
 export function ensureAuditSecret(store: SecretStore): string {
-  const existing = store.read(AUDIT_HMAC_SECRET_NAME);
+  const existing = store.read(AUDIT_HMAC_SECRET_NAME, SECRET_AUTHORITY_MAX_BYTES);
   if (existing && existing.length >= 32) {
     return existing;
   }
@@ -389,7 +538,7 @@ export function verifyDailySeal(
   | { ok: false; reason: "seal-mismatch" }
   | { ok: false; reason: "no-file" } {
   if (!existsSync(filePath)) return { ok: false, reason: "no-file" };
-  const stored = store.read(sealKeyName(isoDate));
+  const stored = store.read(sealKeyName(isoDate), SECRET_AUTHORITY_MAX_BYTES);
   if (!stored) return { ok: false, reason: "no-seal" };
   const raw = readFileSync(filePath, "utf-8");
   const lines = raw.split("\n").filter((l) => l.trim().length > 0);

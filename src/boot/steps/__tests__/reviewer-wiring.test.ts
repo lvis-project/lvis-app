@@ -20,6 +20,10 @@ import {
   type RiskVerdict,
 } from "../../../permissions/reviewer/risk-classifier.js";
 import {
+  LlmRationaleScopeReviewer,
+  UnavailableRationaleScopeReviewer,
+} from "../../../permissions/reviewer/rationale-scope-reviewer.js";
+import {
   VerdictCache,
   type VerdictCacheLookupKey,
   type VerdictCacheContext,
@@ -65,6 +69,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
       deferredQueuePath: join(tmpDir, "queue.jsonl"),
     });
     expect(result.classifier).toBeInstanceOf(RuleBasedRiskClassifier);
+    expect(result.rationaleScopeReviewer).toBeInstanceOf(UnavailableRationaleScopeReviewer);
     expect(setReviewerSpy).toHaveBeenCalledOnce();
     expect(pm.hasReviewer()).toBe(true);
   });
@@ -84,6 +89,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
       deferredQueuePath: join(tmpDir, "queue.jsonl"),
     });
     expect(result.classifier).toBeInstanceOf(DisabledRiskClassifier);
+    expect(result.rationaleScopeReviewer).toBeInstanceOf(UnavailableRationaleScopeReviewer);
     expect(pm.hasReviewer()).toBe(true);
   });
 
@@ -113,6 +119,19 @@ describe("Permission policy P4 reviewer-wiring", () => {
       deferredQueuePath: join(tmpDir, "queue.jsonl"),
     });
     expect(result.classifier).toBeInstanceOf(LlmRiskClassifier);
+    expect(result.rationaleScopeReviewer).toBeInstanceOf(LlmRationaleScopeReviewer);
+    const classifierRuntime = result.classifier as unknown as {
+      provider: unknown;
+      model: string;
+    };
+    const rationaleRuntime = result.rationaleScopeReviewer as unknown as {
+      provider: unknown;
+      model: string;
+    };
+    expect(rationaleRuntime.provider).toBe(classifierRuntime.provider);
+    expect(classifierRuntime.model).toBe("gpt-4o-mini");
+    expect(rationaleRuntime.model).toBe("gpt-4o-mini");
+    expect(factorySpy).toHaveBeenCalledTimes(1);
     expect(factorySpy).toHaveBeenCalledWith("openai");
     expect(pm.hasReviewer()).toBe(true);
   });
@@ -154,6 +173,9 @@ describe("Permission policy P4 reviewer-wiring", () => {
     expect(result.effectiveSettings.provider).toBe("openai-compatible");
     expect(result.effectiveSettings.marketplaceProviderPresetId).toBe("future-router");
     expect(result.effectiveSettings.model).toBe("future/free");
+    expect(
+      (result.rationaleScopeReviewer as unknown as { model: string }).model,
+    ).toBe("future/free");
     expect(factorySpy).toHaveBeenCalledWith("openai-compatible");
     const { cacheScope } = setReviewerSpy.mock.calls[0][0];
     expect(cacheScope?.provider).toBe("openai-compatible");
@@ -244,6 +266,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
       deferredQueuePath: join(tmpDir, "queue-degrade-null.jsonl"),
     });
     expect(result.classifier).toBeInstanceOf(RuleBasedRiskClassifier);
+    expect(result.rationaleScopeReviewer).toBeInstanceOf(UnavailableRationaleScopeReviewer);
     expect(result.runtimeMode).toBe("llm-degraded-to-rule");
     expect(pm.isReviewerDegradedToRule()).toBe(true);
   });
@@ -626,7 +649,12 @@ describe("wireReviewerAndPermissions marketplace preset endpoint binding", () =>
       .mockResolvedValue(new Response("ok"));
     const provider = stubProvider([]);
     const createProvider = vi.fn(() => provider);
-    const wireReviewerAgentMock = vi.fn();
+    const initialRationaleScopeReviewer = { reevaluate: vi.fn() };
+    const rewiredRationaleScopeReviewer = { reevaluate: vi.fn() };
+    const wireReviewerAgentMock = vi
+      .fn()
+      .mockReturnValueOnce({ rationaleScopeReviewer: initialRationaleScopeReviewer })
+      .mockReturnValue({ rationaleScopeReviewer: rewiredRationaleScopeReviewer });
     vi.doMock("electron", () => ({
       BrowserWindow: { getAllWindows: () => [] },
     }));
@@ -690,14 +718,25 @@ describe("wireReviewerAndPermissions marketplace preset endpoint binding", () =>
     };
     const permissionManager = new PermissionManager(join(tmpDir, "boot-permissions.json"));
 
-    wireReviewerAndPermissions({
+    const bootContext = {
       toolRegistry: { setDenyRules: vi.fn() },
       permissionManager,
       settingsService,
       llmFetch: vi.fn(),
       getMainWindow: () => null,
       bootAuditLogger: { log: vi.fn() },
-    } as never);
+    };
+    wireReviewerAndPermissions(bootContext as never);
+    expect(
+      (bootContext as unknown as { rationaleScopeReviewer: unknown })
+        .rationaleScopeReviewer,
+    ).toBe(initialRationaleScopeReviewer);
+    (bootContext as unknown as { rewireReviewerAgent: () => void })
+      .rewireReviewerAgent();
+    expect(
+      (bootContext as unknown as { rationaleScopeReviewer: unknown })
+        .rationaleScopeReviewer,
+    ).toBe(rewiredRationaleScopeReviewer);
 
     const options = wireReviewerAgentMock.mock.calls[0]?.[0] as {
       readActiveLlm: () => { baseUrl?: string };
