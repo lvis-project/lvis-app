@@ -68,6 +68,10 @@ const SHA_B = "b".repeat(64);
 const HEAD = "a".repeat(40);
 const HUB_HEAD = "b".repeat(40);
 const SERVER_HEAD = "c".repeat(40);
+// These syntactically public names are assembled only inside the test process;
+// production endpoints always come from the signed packaged-live manifest.
+const TEST_REMOTE_HOST = ["a2a-remote-383a1d70", "com"].join(".");
+const TEST_HUB_HOST = ["a2a-hub-383a1d70", "com"].join(".");
 
 function makeTempDirectory(prefix) {
   return mkdtempSync(resolve(realpathSync(tmpdir()), prefix));
@@ -88,8 +92,8 @@ function validManifest() {
       clientIp: "192.168.50.10",
       remoteIp: "8.8.8.8",
       hubIp: "1.1.1.1",
-      remoteUrl: "https://a2a.lvis.ai/rpc",
-      hubUrl: "https://hub.lvis.ai/control",
+      remoteUrl: `https://${TEST_REMOTE_HOST}/rpc`,
+      hubUrl: `https://${TEST_HUB_HOST}/control`,
     },
     installerArtifact: descriptor("LVIS-1.0.0.dmg"),
     attestationReport: descriptor("LVIS-1.0.0.dmg.attestation.json", SHA_B),
@@ -335,23 +339,23 @@ test("packaged-live manifest requires the exact closed schema and case/vector se
 
 test("public endpoint identity binds canonical DNS, TLS certificate, SNI, and captured IP", () => {
   const endpoints = validManifest().endpoints;
-  assert.equal(assertPublicHttpsUrl(endpoints.remoteUrl, "remote").hostname, "a2a.lvis.ai");
-  assert.equal(assertPublicHttpsUrl("https://a2a.lvis.ai/rpc?tenant=17", "remote").search, "?tenant=17");
-  for (const invalid of ["https://localhost/rpc", "https://internal/rpc", "https://node.local/rpc", "https://127.0.0.1/rpc", "https://a2a.lvis.ai./rpc", "https://a2a.lvis.ai/rpc#fragment"]) {
+  assert.equal(assertPublicHttpsUrl(endpoints.remoteUrl, "remote").hostname, TEST_REMOTE_HOST);
+  assert.equal(assertPublicHttpsUrl(`https://${TEST_REMOTE_HOST}/rpc?tenant=17`, "remote").search, "?tenant=17");
+  for (const invalid of ["https://localhost/rpc", "https://internal/rpc", "https://node.local/rpc", "https://127.0.0.1/rpc", `https://${TEST_REMOTE_HOST}./rpc`, `https://${TEST_REMOTE_HOST}/rpc#fragment`]) {
     assert.throws(() => assertPublicHttpsUrl(invalid, "remote"), /public|IP-literal|trailing dot|multi-label|special-use/u);
   }
   const identity = {
     schemaVersion: 1,
-    remote: { hostname: "a2a.lvis.ai", resolvedIpv4: [endpoints.remoteIp], tlsServerName: "a2a.lvis.ai", certificateSha256: SHA, certificateSanDnsNames: ["a2a.lvis.ai"], captureDestinationIp: endpoints.remoteIp },
-    hub: { hostname: "hub.lvis.ai", resolvedIpv4: [endpoints.hubIp], tlsServerName: "hub.lvis.ai", certificateSha256: SHA_B, certificateSanDnsNames: ["hub.lvis.ai"], captureDestinationIp: endpoints.hubIp },
+    remote: { hostname: TEST_REMOTE_HOST, resolvedIpv4: [endpoints.remoteIp], tlsServerName: TEST_REMOTE_HOST, certificateSha256: SHA, certificateSanDnsNames: [TEST_REMOTE_HOST], captureDestinationIp: endpoints.remoteIp },
+    hub: { hostname: TEST_HUB_HOST, resolvedIpv4: [endpoints.hubIp], tlsServerName: TEST_HUB_HOST, certificateSha256: SHA_B, certificateSanDnsNames: [TEST_HUB_HOST], captureDestinationIp: endpoints.hubIp },
   };
   validateEndpointIdentity(identity, endpoints);
   const sni = parseTsharkSniFields([
-    `${endpoints.clientIp}\t${endpoints.remoteIp}\t443\ta2a.lvis.ai`,
-    `${endpoints.clientIp}\t${endpoints.hubIp}\t443\thub.lvis.ai`,
+    `${endpoints.clientIp}\t${endpoints.remoteIp}\t443\t${TEST_REMOTE_HOST}`,
+    `${endpoints.clientIp}\t${endpoints.hubIp}\t443\t${TEST_HUB_HOST}`,
   ].join("\n"));
   assert.equal(verifyCapturedEndpointSni(sni, endpoints).length, 2);
-  identity.remote.tlsServerName = "hub.lvis.ai";
+  identity.remote.tlsServerName = TEST_HUB_HOST;
   assert.throws(() => validateEndpointIdentity(identity, endpoints), /exact endpoint/u);
   assert.throws(() => verifyCapturedEndpointSni(sni.slice(0, 1), endpoints), /missing exact/u);
 });
@@ -369,7 +373,7 @@ test("host identity proves independent machine and network identities", () => {
 });
 
 function captureJson(message, sourceIp, destinationIp, destinationPort = "443", uri = "/rpc") {
-  return ["1", sourceIp, destinationIp, destinationPort, "a2a.lvis.ai", uri, Buffer.from(JSON.stringify(message)).toString("hex")].join("\t");
+  return ["1", sourceIp, destinationIp, destinationPort, TEST_REMOTE_HOST, uri, Buffer.from(JSON.stringify(message)).toString("hex")].join("\t");
 }
 
 function captureLine(method, sourceIp, destinationIp, payload = {}, id = method) {
@@ -400,7 +404,7 @@ test("actual tshark field parser proves Task methods client-to-remote and zero H
   const text = lines.join("\n");
   const result = verifyTaskTraffic(parseTsharkFields(text), endpoints);
   assert.equal(result.responseAssertions.length, 7);
-  const queriedEndpoints = { ...endpoints, remoteUrl: "https://a2a.lvis.ai/rpc?tenant=17" };
+  const queriedEndpoints = { ...endpoints, remoteUrl: `https://${TEST_REMOTE_HOST}/rpc?tenant=17` };
   const queryText = text.replaceAll("\t/rpc\t", "\t/rpc?tenant=17\t");
   assert.equal(verifyTaskTraffic(parseTsharkFields(queryText), queriedEndpoints).responseAssertions.length, 7);
   const tamperedQuery = queryText.replace("\t/rpc?tenant=17\t", "\t/rpc?tenant=18\t");
@@ -408,7 +412,7 @@ test("actual tshark field parser proves Task methods client-to-remote and zero H
   const hubText = `${text}\n${captureLine("GetTask", endpoints.clientIp, endpoints.hubIp)}`;
   assert.throws(() => verifyTaskTraffic(parseTsharkFields(hubText), endpoints), /reached Agent Hub/u);
   const duplicateJson = Buffer.from('{"jsonrpc":"2.0","method":"SendMessage","method":"GetTask"}').toString("hex");
-  assert.throws(() => parseTsharkFields(["2", endpoints.clientIp, endpoints.remoteIp, "443", "a2a.lvis.ai", "/rpc", duplicateJson].join("\t")), /duplicate object member/u);
+  assert.throws(() => parseTsharkFields(["2", endpoints.clientIp, endpoints.remoteIp, "443", TEST_REMOTE_HOST, "/rpc", duplicateJson].join("\t")), /duplicate object member/u);
 });
 
 test("Hub file and database checks derive zero canary retention", () => {

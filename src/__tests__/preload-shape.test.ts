@@ -442,6 +442,13 @@ describe("preload contextBridge world shape lock", () => {
           "previewClaudeDesktopMcpImport": "function",
           "readPluginUiModule": "function",
           "registerPluginWebview": "function",
+          "remoteA2a": [
+            "action",
+            "send",
+            "status",
+            "targets",
+            "task",
+          ],
           "removeRoutineV2": "function",
           "removeWorkBoardItem": "function",
           "reopenWorkBoardItem": "function",

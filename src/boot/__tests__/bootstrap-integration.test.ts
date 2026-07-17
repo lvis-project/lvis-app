@@ -487,6 +487,7 @@ describe("bootstrap() integration lock", () => {
   it("assembles the exact AppServices key set (C18 must not drop/rename a service)", () => {
     expect(Object.keys(services).sort()).toMatchInlineSnapshot(`
       [
+        "a2aRemoteRuntime",
         "agentArtifactStore",
         "agentProfileStore",
         "approvalGate",
@@ -525,6 +526,7 @@ describe("bootstrap() integration lock", () => {
         "refreshPluginNotifications",
         "refreshSandboxNetworkConfig",
         "registerPluginEventBridge",
+        "remoteA2AActionController",
         "rewireReviewerAgent",
         "routeEngine",
         "routineEngine",
