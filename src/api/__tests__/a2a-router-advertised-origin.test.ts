@@ -23,10 +23,10 @@ async function readCard(advertisedOrigin?: string, spoof = "evil.example.test") 
 
 describe("A2A advertised public origin", () => {
   it("uses only the fixed canonical HTTPS origin and keeps the Card digest stable across spoofed headers", async () => {
-    const first = await readCard("https://receiver.lvis.ai/", "first-evil.test");
-    const second = await readCard("https://receiver.lvis.ai/", "second-evil.test");
+    const first = await readCard("https://receiver-a2a-383a1d70.com/", "first-evil.test");
+    const second = await readCard("https://receiver-a2a-383a1d70.com/", "second-evil.test");
     expect(first.status).toBe(200);
-    expect(first.card.supportedInterfaces[0].url).toBe("https://receiver.lvis.ai/a2a/receiver");
+    expect(first.card.supportedInterfaces[0].url).toBe("https://receiver-a2a-383a1d70.com/a2a/receiver");
     expect(JSON.stringify(first.card)).not.toContain("evil.test");
     expect(second.card).toEqual(first.card);
     expect(second.headers.etag).toBe(first.headers.etag);
@@ -38,14 +38,14 @@ describe("A2A advertised public origin", () => {
   });
 
   it.each([
-    "http://receiver.example.test/",
-    "https://receiver.example.test/path",
-    "https://receiver.example.test:8443/",
-    "https://user@receiver.example.test/",
+    "http://receiver-a2a-383a1d70.com/",
+    "https://receiver-a2a-383a1d70.com/path",
+    "https://receiver-a2a-383a1d70.com:8443/",
+    "https://user@receiver-a2a-383a1d70.com/",
     "https://receiver/",
-    "https://receiver.lvis.ai./",
-    "https://receiver.lvis.ai/?",
-    "https://receiver.lvis.ai/#",
+    "https://receiver-a2a-383a1d70.com./",
+    "https://receiver-a2a-383a1d70.com/?",
+    "https://receiver-a2a-383a1d70.com/#",
     "https://receiver.local/",
     "https://receiver.internal/",
     "https://receiver.home.arpa/",

@@ -13,6 +13,7 @@ import {
   type A2ATaskState,
 } from "../shared/a2a.js";
 import {
+  A2A_EXACT_SEND_REPLAY_URI,
   A2A_EXACT_SEND_REPLAY_RETENTION_MS,
   A2A_REMOTE_MAX_REQUEST_BYTES,
   type A2ARemoteLineage,
@@ -330,7 +331,7 @@ export class A2ARemoteDurableStore {
     if (typeof item.snapshotId !== "string" || !SAFE_TOKEN.test(item.snapshotId)
       || item.credentialRevisionId !== prepared.intendedCredentialRevisionId
       || item.operation !== prepared.operation || item.method !== prepared.method
-      || item.extensionUri !== "https://lvis.ai/a2a/extensions/exact-send-replay/v1"
+      || item.extensionUri !== A2A_EXACT_SEND_REPLAY_URI
       || !this.validLineage(item.lineage)) return false;
     if (![item.resolvedAt, item.snapshotIssuedAt, item.snapshotExpiresAt].every((entry) => typeof entry === "string" && Number.isFinite(Date.parse(entry)))) return false;
     const binding = (key: keyof A2ARemotePreparedAttempt) => item[key] === prepared[key];
@@ -914,7 +915,7 @@ export class A2ARemoteDurableStore {
         payloadBodySha256: fields.payloadBodySha256,
         payloadSize: fields.payloadSize,
       };
-      if (fields.extensionUri !== "https://lvis.ai/a2a/extensions/exact-send-replay/v1"
+      if (fields.extensionUri !== A2A_EXACT_SEND_REPLAY_URI
         || JSON.stringify(providedBinding) !== JSON.stringify(expectedBinding)) return null;
       if (current.prepared.predecessorCredentialRevisionId) {
         const predecessor = [...state.attempts].reverse().find((item) =>

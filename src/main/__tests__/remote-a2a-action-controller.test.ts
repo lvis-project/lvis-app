@@ -5,7 +5,7 @@ import { createRemoteA2AActionController } from "../remote-a2a-action-controller
 const digest = "a".repeat(64);
 const config = {
   routeControlBaseUrl: "https://hub.example.test/",
-  receiverPublicOrigin: "https://receiver.lvis.ai/",
+  receiverPublicOrigin: "https://receiver-a2a-383a1d70.com/",
   outboundCallerGenerationId: "generation-1",
   receiverCallerGenerationId: "receiver-1",
   extensionSpecDigestSha256: digest,

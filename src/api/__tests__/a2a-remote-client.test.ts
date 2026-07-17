@@ -115,7 +115,7 @@ describe("A2A remote exact initial replay", () => {
 
   it.each([
     ["authentication", { status: 401, headers: {}, body: Buffer.alloc(0) }, "authentication-failed"],
-    ["terminal extension", { status: 200, headers: { "a2a-extensions": A2A_EXACT_SEND_REPLAY_URI }, body: Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: 41, error: { code: -32090, message: "Exact send replay conflict", data: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "EXACT_SEND_REPLAY_CONFLICT", domain: "lvis.ai" }] } })) }, "conflict"],
+    ["terminal extension", { status: 200, headers: { "a2a-extensions": A2A_EXACT_SEND_REPLAY_URI }, body: Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: 41, error: { code: -32090, message: "Exact send replay conflict", data: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "EXACT_SEND_REPLAY_CONFLICT", domain: A2A_EXACT_SEND_REPLAY_URI }] } })) }, "conflict"],
     ["remote error", { status: 200, headers: { "a2a-extensions": A2A_EXACT_SEND_REPLAY_URI }, body: Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: 41, error: { code: -32001, message: "Remote error" } })) }, "remote-error"],
   ])("atomically deletes the source payload after replay %s settlement", async (_label, terminalResponse, outcome) => {
     let disk: any;

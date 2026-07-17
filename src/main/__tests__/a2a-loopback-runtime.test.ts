@@ -138,7 +138,7 @@ describe("A2A production loopback runtime", () => {
         auditLogger: { log: auditLog } as never,
       },
       approveAgentAction,
-      advertisedOrigin: "https://receiver.lvis.ai/",
+      advertisedOrigin: "https://receiver-a2a-383a1d70.com/",
       wireTrustOrigin: "a2a-remote-wire",
       approvalReason: "[A2A Wire: Remote] Approve the remote mutation?",
       auditSessionId: "a2a-remote-wire",

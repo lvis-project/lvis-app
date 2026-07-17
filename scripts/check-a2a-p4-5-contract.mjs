@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const blueprintPath = resolve(root, "docs/blueprints/a2a-subagent-messaging.md");
 const specPath = resolve(root, "docs/protocols/lvis-a2a-exact-send-replay.md");
-const extensionUri = "https://lvis.ai/a2a/extensions/exact-send-replay/v1";
+const runtimeContractPath = resolve(root, "src/api/a2a-remote-contracts.ts");
+const extensionUri = "urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44";
 const officialSpec = "https://a2a-protocol.org/v1.0.0/specification/";
 const exactProtocolBindingPhrase = "`JSONRPC` (JSON-RPC) binding";
 const proseNameAsProtocolBinding = /`JSON-RPC`(?:\s+\(JSON-RPC\))?\s+binding/;
@@ -23,6 +24,10 @@ const expectedExtensionParams = {
 
 function fail(message) {
   throw new Error(`[a2a-p4-5-contract] ${message}`);
+}
+
+if (!/^urn:uuid:[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/u.test(extensionUri)) {
+  fail("extension identifier must remain a domain-free UUID URN");
 }
 
 function readRequired(path) {
@@ -352,7 +357,7 @@ function requireExactErrorContracts(text) {
     if (
       detail?.["@type"] !== "type.googleapis.com/google.rpc.ErrorInfo" ||
       detail.reason !== reason ||
-      detail.domain !== "lvis.ai"
+      detail.domain !== extensionUri
     ) {
       fail(`${code}: unexpected google.rpc.ErrorInfo detail`);
     }
@@ -412,6 +417,8 @@ function requireExactAgentExtensionContract(text) {
 
 const blueprint = readRequired(blueprintPath);
 const spec = readRequired(specPath);
+const runtimeContract = readRequired(runtimeContractPath);
+requireText(runtimeContract, JSON.stringify(extensionUri), "runtime extension identifier");
 requireText(
   blueprint,
   "P4-5/G005 direct remote-routing contract locked",
@@ -424,7 +431,7 @@ requireText(
 );
 requireText(
   spec,
-  "Status: normative implementation contract, locked 2026-07-16",
+  "Status: normative implementation contract, re-locked 2026-07-17",
   "exact-send-replay locked lifecycle",
 );
 for (const staleLifecycleMarker of [

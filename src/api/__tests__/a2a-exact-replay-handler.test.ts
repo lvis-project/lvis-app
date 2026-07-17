@@ -124,6 +124,7 @@ describe("exact replay extension negotiation", () => {
     ["duplicate field array", [A2A_EXACT_SEND_REPLAY_URI, A2A_EXACT_SEND_REPLAY_URI]],
     ["duplicate comma entry", `${A2A_EXACT_SEND_REPLAY_URI},${A2A_EXACT_SEND_REPLAY_URI}`],
     ["malformed token", "not-a-uri"],
+    ["unreviewed URN", "urn:uuid:00000000-0000-4000-8000-000000000000"],
     ["unknown required token", "https://example.test/a2a/unknown;required"],
   ])("rejects %s without invoking the base handler", async (_label, extensions) => {
     const { handler, handle } = fixture();

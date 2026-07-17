@@ -9,7 +9,7 @@ import {
 
 const digest = "a".repeat(64);
 function settings(features: Record<string, boolean>, secrets: Record<string, string> = {}, config: Record<string, unknown> = {}) {
-  const get = vi.fn((key: string) => key === "features" ? features : key === "a2aRemote" ? { routeControlBaseUrl: "https://hub.example.test/", receiverPublicOrigin: "https://receiver.lvis.ai/", outboundCallerGenerationId: "outbound-generation-1", receiverCallerGenerationId: "receiver-generation-1", extensionSpecDigestSha256: digest, targets: [{ targetAgentId: 1, label: "Agent one", interfaceUrl: "https://agent.example.test/a2a", agentCardDigestSha256: digest, trustKeyId: 2, credentialBindingId: 3, routePolicyVersion: 4, routePolicyDigestSha256: digest, intendedCredentialRevisionId: 5 }], receiverMaxKeysPerGeneration: 10, ...config } : undefined);
+  const get = vi.fn((key: string) => key === "features" ? features : key === "a2aRemote" ? { routeControlBaseUrl: "https://hub.example.test/", receiverPublicOrigin: "https://receiver-a2a-383a1d70.com/", outboundCallerGenerationId: "outbound-generation-1", receiverCallerGenerationId: "receiver-generation-1", extensionSpecDigestSha256: digest, targets: [{ targetAgentId: 1, label: "Agent one", interfaceUrl: "https://agent.example.test/a2a", agentCardDigestSha256: digest, trustKeyId: 2, credentialBindingId: 3, routePolicyVersion: 4, routePolicyDigestSha256: digest, intendedCredentialRevisionId: 5 }], receiverMaxKeysPerGeneration: 10, ...config } : undefined);
   const getEncryptedSecret = vi.fn((key: string) => secrets[key] ?? null);
   return { value: { get, getEncryptedSecret } as unknown as Pick<SettingsService, "get" | "getEncryptedSecret">, get, getEncryptedSecret };
 }
