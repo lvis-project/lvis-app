@@ -147,6 +147,7 @@ function readBody(req: IncomingMessage): Promise<Buffer | null> {
       total += chunk.length;
       if (total > MAX_BODY_BYTES) {
         overCap = true;
+        req.pause();
         resolve(null);
         return;
       }
@@ -368,7 +369,10 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
 
       const raw = await readBody(req);
       if (raw === null) {
-        sendJson(res, 413, { ok: false, error: "payload-too-large" });
+        res.once("finish", () => {
+          if (!req.destroyed) req.destroy();
+        });
+        sendJson(res, 413, { ok: false, error: "payload-too-large" }, { connection: "close" });
         return true;
       }
       const parsed = parseRequest(raw);
