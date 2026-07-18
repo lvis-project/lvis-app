@@ -45,10 +45,14 @@ import {
 import {
   __resetActiveSandboxCapabilityForTest,
   __resetWrappedPluginWorkersForTest,
+  getHostShellExecutionPlan,
   markPluginWorkerWrapped,
   setActiveSandboxCapability,
+  setSandboxRequestedAtBoot,
 } from "../../permissions/sandbox-capability.js";
+import { getHostShellExecutionPlanAuditProjection } from "../../permissions/host-shell-execution-plan.js";
 import { makeMockWebContents } from "../../__tests__/test-helpers.js";
+import { approvalCacheKeyFor } from "../pipeline/display-mask.js";
 
 // ─── Helpers ─────────────────────────────────────────
 
@@ -409,12 +413,23 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     const registry = new ToolRegistry();
     const bash = new BashTool();
     registry.register(bash);
+    __resetActiveSandboxCapabilityForTest();
+    setSandboxRequestedAtBoot(false);
 
     const permissionPath = join(mkdtempSync(join(tmpdir(), "lvis-shell-approval-")), "permissions.json");
     const permMgr = new PermissionManager(permissionPath);
     const firstInput = { command: "echo safe", timeoutSeconds: 1 };
     const secondInput = { command: "echo different", timeoutSeconds: 1 };
-    await permMgr.addAlwaysAllowedPersist(`bash:${bash.approvalCacheKey(firstInput)}`);
+    const firstApprovalCacheKey = approvalCacheKeyFor(
+      bash,
+      firstInput,
+      process.cwd(),
+      getHostShellExecutionPlanAuditProjection(getHostShellExecutionPlan()),
+    );
+    if (firstApprovalCacheKey === undefined) {
+      throw new Error("Bash must provide a sealed-plan approval cache key");
+    }
+    await permMgr.addAlwaysAllowedPersist(firstApprovalCacheKey);
 
     const approvalGate = {
       requestAndWait: vi.fn(async (req: { id: string }) => ({
@@ -3808,6 +3823,8 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     const registry = new ToolRegistry();
     const bash = new BashTool();
     registry.register(bash);
+    __resetActiveSandboxCapabilityForTest();
+    setSandboxRequestedAtBoot(false);
 
     const permMgr = new PermissionManager("/tmp/nonexistent-permissions-r2r4.json");
     // Force "ask" so the approval gate is invoked and receives the request.
@@ -3828,11 +3845,17 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     );
 
     const input = { command: "echo r2r4", timeoutSeconds: 1 };
-    // approvalCacheKeyFor() in executor prefixes the raw key with "${tool.name}:".
-    // Use the same prefix here so the assertion matches what the executor sends.
-    const expectedCacheKey = `bash:${bash.approvalCacheKey(input)}`;
-    // Sanity: the tool must produce a non-empty cache key for this test to be meaningful.
-    expect(expectedCacheKey).toBeTruthy();
+    // Canonical host shells partition cache keys by the sealed execution-plan
+    // identity, so renderer recording and rule lookup cannot cross substrates.
+    const expectedCacheKey = approvalCacheKeyFor(
+      bash,
+      input,
+      process.cwd(),
+      getHostShellExecutionPlanAuditProjection(getHostShellExecutionPlan()),
+    );
+    if (expectedCacheKey === undefined) {
+      throw new Error("Bash must provide a sealed-plan approval cache key");
+    }
 
     await executor.executeAll(
       [{ id: "tu-r2r4", name: "bash", input }],
