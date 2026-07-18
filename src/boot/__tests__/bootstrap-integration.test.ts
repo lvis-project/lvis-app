@@ -442,6 +442,7 @@ vi.mock("../../permissions/sandbox-capability.js", () => ({
 vi.mock("../../permissions/asrt-sandbox.js", () => ({
   initializeAsrtSandbox: vi.fn(async () => {}),
   checkAsrtDependencies: vi.fn(async () => ({ errors: [], warnings: [] })),
+  isAsrtLinuxRuntimeProbeError: vi.fn(() => false),
   isAsrtSandboxActive: vi.fn(() => false),
   updateAsrtSandboxConfig: vi.fn(async () => {}),
   computeUnionAllowedDomains: vi.fn(() => []),

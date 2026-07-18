@@ -18,7 +18,6 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createHash } from "node:crypto";
 import { resolveShell, shellEnvForChild } from "../lib/shell-resolver.js";
 import type { Readable } from "node:stream";
-import { isAbsolute, resolve as pathResolve } from "node:path";
 import { z } from "zod";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -35,13 +34,24 @@ import {
   validateShellWorkingDirectory,
 } from "./shell-path-policy.js";
 import {
-  isAsrtSandboxActive,
   wrapToolCommand,
   cleanupAsrtSandboxAfterCommand,
   getDefaultSensitiveReadDenyPaths,
   getDefaultSensitiveWriteDenyPaths,
 } from "../permissions/asrt-sandbox.js";
-import { isActiveSandboxShellContained } from "../permissions/sandbox-capability.js";
+import {
+  getHostShellExecutionPlan,
+  isIssuedHostShellExecutionPlan,
+} from "../permissions/sandbox-capability.js";
+import {
+  getHostShellExecutionPlanAuditProjection,
+  requiresExplicitHostShellFallbackApproval,
+} from "../permissions/host-shell-execution-plan.js";
+import {
+  canonicalizeHostShellAllowedDirectories,
+  consumeHostShellExecutionPermit,
+  resolveHostShellWorkingDirectory,
+} from "../permissions/host-shell-execution-permit.js";
 import { deriveSandboxWritePaths } from "../permissions/sandbox-write-jail.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
@@ -83,7 +93,18 @@ const NON_INTERACTIVE_MARKERS = [
   "--ci",
 ];
 
+const canonicalBashTools = new WeakSet<object>();
+
+export function isCanonicalBashTool(tool: unknown): tool is BashTool {
+  return typeof tool === "object" && tool !== null && canonicalBashTools.has(tool);
+}
+
 export class BashTool extends ZodTool<typeof BashToolInputSchema> {
+  constructor() {
+    super();
+    if (new.target === BashTool) canonicalBashTools.add(this);
+  }
+
   readonly name = "bash";
   readonly description = "Run a shell command in the local repository.";
   readonly inputSchema = BashToolInputSchema;
@@ -115,11 +136,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     }
 
     // Sandbox path check on cwd (if overridden).
-    const resolvedCwd = input.cwd
-      ? isAbsolute(input.cwd)
-        ? pathResolve(input.cwd)
-        : pathResolve(ctx.cwd, input.cwd)
-      : ctx.cwd;
+    const resolvedCwd = resolveHostShellWorkingDirectory(ctx.cwd, input.cwd);
     const cwdViolation = validateShellWorkingDirectory(resolvedCwd, ctx.cwd, ctx.extraAllowedDirectories);
     if (cwdViolation) {
       return { output: cwdViolation, isError: true };
@@ -134,25 +151,58 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       return { output: commandPathViolation, isError: true };
     }
 
-    // §691: ASRT (Anthropic sandbox-runtime) spawn path. The sandbox is gated
-    // at boot — `initializeAsrtSandbox` runs only when the user opted in
-
-    // AND the platform supports it. `isAsrtSandboxActive()` reflects that single
-    // boot-time decision; there is no runtime gate to re-evaluate here.
-    //
-    // When the gate is OFF (the DEFAULT — osToolSandbox ships false), this is
-    // skipped and we fall through to the plain `spawnWithTimeout` path,
-    // unchanged from pre-migration behavior.
-    if (isAsrtSandboxActive()) {
-      if (!isActiveSandboxShellContained()) {
+    // §691: the executor seals the host-shell substrate before permission
+    // routing. The supplied plan must come from the live host provider; a
+    // structural lookalike cannot downgrade an active ASRT route to plain spawn.
+    const suppliedHostShellPlan = ctx.hostShellExecutionPlan;
+    if (
+      suppliedHostShellPlan !== undefined &&
+      !isIssuedHostShellExecutionPlan(suppliedHostShellPlan)
+    ) {
+      return {
+        output: "spawn failed: shell execution plan was not issued by the host.",
+        isError: true,
+        metadata: { sandboxed: false, isolation: "none" },
+      };
+    }
+    const hostShellPlan = suppliedHostShellPlan ?? getHostShellExecutionPlan();
+    // A requested-sandbox fallback is an honest plain host child, never an ASRT child.
+    // Its opaque permit exists only after an allow-once approval for this exact
+    // command/cwd/tool-use tuple and is consumed before spawn.
+    if (requiresExplicitHostShellFallbackApproval(hostShellPlan)) {
+      const permitAccepted = consumeHostShellExecutionPermit({
+        permit: ctx.hostShellExecutionPermit,
+        plan: hostShellPlan,
+        toolName: "bash",
+        toolUseId:
+          typeof ctx.metadata.toolUseId === "string"
+            ? ctx.metadata.toolUseId
+            : undefined,
+        command: input.command,
+        requestedCwd: input.cwd,
+        executionCwd: ctx.cwd,
+        resolvedCwd,
+        timeoutSeconds: input.timeoutSeconds,
+        allowedDirectories: canonicalizeHostShellAllowedDirectories(ctx.extraAllowedDirectories),
+      });
+      if (!permitAccepted) {
         return {
-          output:
-            "spawn failed: ASRT shell tools require filesystem and process isolation; " +
-            "the active sandbox is only partially confined.",
+          output: "spawn failed: requested-sandbox shell execution requires a one-shot host approval permit.",
           isError: true,
-          metadata: { sandboxed: true },
+          metadata: { sandboxed: false, isolation: "none" },
         };
       }
+    }
+    if (hostShellPlan.mode === "blocked") {
+      return {
+        output:
+          "spawn failed: ASRT shell tools require filesystem and process isolation; " +
+          "the active sandbox is only partially confined.",
+        isError: true,
+        metadata: { sandboxed: false, isolation: "none" },
+      };
+    }
+    if (hostShellPlan.mode === "asrt") {
       // Write-jail = canonicalized union of the owner plugin sandbox root
       // (when plugin-owned) and the in-scope allowed directories
       // (cwd ∪ user-authorized extras). cwd stays readable but is no
@@ -166,7 +216,17 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       return await spawnWithSandbox(input.command, resolvedCwd, writePaths, input.timeoutSeconds);
     }
 
-    return await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds); // isolation=none path
+    const plainResult = await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds);
+    if (!hostShellPlan.requiresExplicitUserApproval) return plainResult;
+    return {
+      ...plainResult,
+      metadata: {
+        ...plainResult.metadata,
+        sandboxed: false,
+        isolation: "none",
+        sandboxExecutionPlan: getHostShellExecutionPlanAuditProjection(hostShellPlan),
+      },
+    };
   }
 }
 
@@ -275,7 +335,7 @@ export async function spawnWithSandbox(
     return {
       output: `spawn failed: ${(err as Error).message}`,
       isError: true,
-      metadata: { sandboxed: true },
+      metadata: { sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
     };
   }
 
@@ -284,7 +344,7 @@ export async function spawnWithSandbox(
     return {
       output: "spawn failed: ASRT returned an empty argv",
       isError: true,
-      metadata: { sandboxed: true },
+      metadata: { sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
     };
   }
 
@@ -355,7 +415,7 @@ export async function spawnWithSandbox(
       resolveResult({
         output: `spawn failed: ${err.message}`,
         isError: true,
-        metadata: { sandboxed: true },
+        metadata: { sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
       });
     });
   });
@@ -374,6 +434,7 @@ async function spawnWithTimeout(
       // Strip secrets (LVIS_*, *_API_KEY, GITHUB_TOKEN, AWS_*, etc.) from
       // the child's environment. Only generic shell/locale vars pass through.
       env: shellEnvForChild(shell, buildSafeChildEnv()),
+      shell: false,
     });
     trackManagedChildProcess(child, { label: "tool:bash" });
 

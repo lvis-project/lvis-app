@@ -98,6 +98,9 @@ export class SubAgentTranscriptAccumulator {
       ...(meta.category ? { category: meta.category } : {}),
       ...(meta.pluginId ? { pluginId: meta.pluginId } : {}),
       ...(meta.mcpServerId ? { mcpServerId: meta.mcpServerId } : {}),
+      ...(meta.executionPlan !== undefined
+        ? { executionPlan: meta.executionPlan }
+        : {}),
     });
   }
 

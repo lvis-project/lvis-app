@@ -189,6 +189,39 @@ describe("asrt-sandbox — gate ON wraps a real command under the OS sandbox", (
   });
 });
 
+/**
+ * ASRT 0.0.66 can return the bare command on Linux only when there are NO
+ * restrictions at all. LVIS's initialized config always carries
+ * `network.allowedDomains` (including [] = deny all), so this real contract
+ * locks that the same wrapper route used by the boot-time `true` probe reaches
+ * bwrap's secure user namespace/capability path rather than a no-op shell.
+ */
+describe("asrt-sandbox — Linux configured-wrapper runtime contract", () => {
+  it.runIf(process.platform === "linux")(
+    "emits bwrap with user namespace and dropped capabilities for the fixed probe command",
+    async () => {
+      // Keep the existing helper's contract: only unsupported/missing-dep hosts
+      // skip. A host with binaries but userns blocked must fail initialization,
+      // which is exactly the runtime-probe regression this test protects.
+      if (!(await asrtCanInitialize())) return;
+
+      await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+      const { argv } = await wrapToolCommand("true");
+      try {
+        expect(argv[1]).toBe("-c");
+        const renderedWrapper = argv[2] ?? "";
+        expect(renderedWrapper).toContain("bwrap");
+        expect(renderedWrapper).toContain("--unshare-user");
+        expect(renderedWrapper).toContain("--cap-drop");
+        expect(renderedWrapper).toContain("ALL");
+      } finally {
+        // wrapToolCommand increments ASRT's Linux bwrap cleanup accounting even
+        // though this contract test only inspects argv and does not spawn it.
+        await cleanupAsrtSandboxAfterCommand();
+      }
+    },
+  );
+});
 describe("asrt-sandbox — per-command trust boundary (security MINOR)", () => {
   it("a per-command filesystem wrap cannot carry a weakening flag (no such field)", async () => {
     if (!(await asrtCanInitialize())) return;

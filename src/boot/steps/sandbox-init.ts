@@ -5,6 +5,7 @@
 import { app } from "electron";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
+import type { SandboxGateReason } from "./sandbox-gate.js";
 
 const log = createLogger("lvis");
 
@@ -31,10 +32,12 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
   //     the gap is visible. When win32 IS ready → initialize ASRT normally and
   //     publish a PARTIAL capability (filesystem + network, process=false).
   {
-    const { initializeAsrtSandbox, checkAsrtDependencies } = await import(
-      "../../permissions/asrt-sandbox.js"
-    );
-    const { setActiveSandboxCapability } = await import(
+    const {
+      initializeAsrtSandbox,
+      checkAsrtDependencies,
+      isAsrtLinuxRuntimeProbeError,
+    } = await import("../../permissions/asrt-sandbox.js");
+    const { setActiveSandboxCapability, setSandboxRequestedAtBoot } = await import(
       "../../permissions/sandbox-capability.js"
     );
     const { sandboxConfinementForPlatform } = await import(
@@ -51,6 +54,10 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
     const explicitEnv = process.env["LVIS_SANDBOX_ENABLED"] === "1";
     const settingOn = settingsService.get("features")?.osToolSandbox ?? false;
     const sandboxOptIn = settingOn || explicitEnv;
+    // Seal request intent once for this process. Execution paths must not
+    // re-read the mutable settings UI: requested-on-but-degraded is security
+    // relevant for the Windows partial-shell Plan-B policy.
+    setSandboxRequestedAtBoot(sandboxOptIn);
 
     // Activation telemetry — which on-signal drove the gate. ONE event per boot
     // is emitted (below) at the terminal outcome so real-world activate/degrade/
@@ -254,6 +261,13 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
             platform: process.platform,
             depsOk: false,
           });
+          const runtimeProbeFailed =
+            process.platform === "linux" && isAsrtLinuxRuntimeProbeError(initErr);
+          const failureReason: SandboxGateReason = runtimeProbeFailed
+            ? failDecision.action === "abort"
+              ? "abort-linux-runtime-probe-failed"
+              : "degrade-linux-runtime-probe-failed"
+            : failDecision.reason;
           const cause = initErr instanceof Error ? initErr.message : String(initErr);
           if (failDecision.action === "abort") {
             // EXPLICIT opt-in — fail-closed even on init failure.
@@ -265,7 +279,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
               platform: process.platform,
               onSignal: sandboxGateOnSignal,
               outcome: "abort",
-              reason: failDecision.reason,
+              reason: failureReason,
             });
             throw initErr;
           }
@@ -280,9 +294,10 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
             platform: process.platform,
             onSignal: sandboxGateOnSignal,
             outcome: "degrade",
-            reason: failDecision.reason,
+            reason: failureReason,
           });
-          // sandboxActive stays false.
+          // sandboxActive stays false: a Linux runtime-probe failure never
+          // publishes a verified capability, so UI/reviewer remain kind="none".
         }
       }
     } else {

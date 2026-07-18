@@ -46,6 +46,7 @@ import type { PermissionCheckResult } from "../../permissions/permission-manager
 import type { ToolInvocationContext } from "../../permissions/reviewer/risk-classifier.js";
 import { RuleBasedRiskClassifier, maxVerdict } from "../../permissions/reviewer/risk-classifier.js";
 import { resolveReviewerSandboxCapability } from "../../permissions/sandbox-capability.js";
+import type { HostShellExecutionPlan } from "../../permissions/host-shell-execution-plan.js";
 import { lookupApproval, canonicalStringify } from "../../permissions/user-approval-store.js";
 import type { UserApprovalVerdict } from "../../shared/permissions-events.js";
 import { buildSandboxAuditEntry } from "../../audit/sandbox-audit.js";
@@ -67,6 +68,7 @@ export async function tryUserApprovalMemorySkip(
   mcpServerId?: string,
   workerId?: string,
   pluginId?: string,
+  hostShellExecutionPlan?: HostShellExecutionPlan,
 ): Promise<PermissionCheckResult | null> {
   // Identity = exactly what ToolApprovalDialog stored (canonical finalInput).
   const canonicalArgs = canonicalStringify(finalInput);
@@ -100,13 +102,14 @@ export async function tryUserApprovalMemorySkip(
   // rule reflect that this call's effects are NOT ASRT-isolated — except a
   // genuinely ASRT-wrapped external MCP worker (keyed on id)
   // or host-spawned plugin worker (keyed on pluginId + workerId).
-  const sandboxCapability = resolveReviewerSandboxCapability(
-    source,
-    toolName,
-    mcpServerId,
-    workerId,
-    pluginId,
-  );
+  const sandboxCapability = hostShellExecutionPlan?.capability ??
+    resolveReviewerSandboxCapability(
+      source,
+      toolName,
+      mcpServerId,
+      workerId,
+      pluginId,
+    );
   const ctx: ToolInvocationContext = {
     toolName,
     source,
