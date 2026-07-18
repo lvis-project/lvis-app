@@ -60,7 +60,7 @@ vi.mock("../../../permissions/permission-settings-store.js", () => ({
 import { registerPreviewHandlers } from "../preview.js";
 import { registerWorkspaceHandlers } from "../workspace.js";
 import { CHANNELS } from "../../../contract/app-contract.js";
-import { canonicalizePathForMatch } from "../../../permissions/sensitive-paths.js";
+import { canonicalizePathForMatch, caseFoldForMatch } from "../../../permissions/sensitive-paths.js";
 
 const deps = {
   auditLogger: { log: vi.fn() },
@@ -115,7 +115,7 @@ beforeEach(() => {
   additionalDirectories.value = [root];
   pendingWorkspaceRootRemovals.value = [];
   let operationSequence = 0;
-  const key = (value: string) => value.replace(/\\/g, "/").toLowerCase();
+  const key = (value: string) => caseFoldForMatch(canonicalizePathForMatch(value));
   beginWorkspaceRootRemovalPersistMock.mockImplementation(async (
     target: string,
     source: string,
