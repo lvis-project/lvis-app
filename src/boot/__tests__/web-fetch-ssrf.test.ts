@@ -1,9 +1,28 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { registerBuiltinTools } from "../tools.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { registerStandardCategories } from "../../permissions/category-registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 
+const mappedHosts = vi.hoisted(() => new Set<string>());
+
+vi.mock("../../main/manual-host-resolver.js", () => ({
+  isAppliedManualHostResolverUrl: vi.fn((value: string) => {
+    try {
+      return mappedHosts.has(new URL(value).hostname);
+    } catch {
+      return false;
+    }
+  }),
+}));
+
+function markMappedHost(value: string): void {
+  mappedHosts.add(new URL(value).hostname);
+}
+
+beforeEach(() => {
+  mappedHosts.clear();
+});
 /**
  * web_fetch must route through NetworkGuard.fetchPublicHttpResponse so
  * localhost / private / loopback / metadata endpoints are rejected before a
@@ -118,11 +137,9 @@ describe("web_fetch SSRF guard", () => {
     expect(result.output).toContain("resolved through electron");
   });
 
-  it("treats demo host-resolver mapped hosts as private-network approvals", async () => {
+  it("treats manually mapped hosts as private-network approvals", async () => {
+    markMappedHost("https://example.test.openai.azure.com/openai/v1/");
     const tool = makeWebFetchTool({
-      demoActiveVendor: "azure-foundry",
-      demoHostMapApplied: true,
-      demoHostMap: "example.test.openai.azure.com=10.182.192.10",
     });
     const input = { url: "https://example.test.openai.azure.com/openai/v1/" };
 
@@ -132,7 +149,8 @@ describe("web_fetch SSRF guard", () => {
     );
   });
 
-  it("allows mapped private addresses only through the direct private-network fetch path", async () => {
+  it("allows manually mapped private addresses only through the direct private-network fetch path", async () => {
+    markMappedHost("http://10.185.177.209/page");
     const networkFetch = vi.fn(async () =>
       new Response("<html><body>system proxy path</body></html>", { status: 200 }),
     );
@@ -142,9 +160,6 @@ describe("web_fetch SSRF guard", () => {
     const tool = makeWebFetchTool({
       networkFetch: networkFetch as typeof fetch,
       privateNetworkFetch: privateNetworkFetch as typeof fetch,
-      demoActiveVendor: "azure-foundry",
-      demoHostMapApplied: true,
-      demoHostMap: "10.185.177.209=10.182.192.10",
     });
 
     const result = await tool.execute(
@@ -158,7 +173,8 @@ describe("web_fetch SSRF guard", () => {
     expect(result.output).toContain("mapped private address");
   });
 
-  it("re-evaluates demo host mapping on every redirect hop before using direct fetch", async () => {
+  it("re-evaluates manual host mapping on every redirect hop before using direct fetch", async () => {
+    markMappedHost("http://10.185.177.209/page");
     const networkFetch = vi.fn(async () =>
       new Response("<html><body>public redirect target</body></html>", { status: 200 }),
     );
@@ -171,9 +187,6 @@ describe("web_fetch SSRF guard", () => {
     const tool = makeWebFetchTool({
       networkFetch: networkFetch as typeof fetch,
       privateNetworkFetch: privateNetworkFetch as typeof fetch,
-      demoActiveVendor: "azure-foundry",
-      demoHostMapApplied: true,
-      demoHostMap: "10.185.177.209=10.182.192.10",
     });
 
     const result = await tool.execute(
@@ -191,7 +204,8 @@ describe("web_fetch SSRF guard", () => {
     expect(result.output).toContain("public redirect target");
   });
 
-  it("blocks mapped demo redirects to unmapped private hosts without broadening approval", async () => {
+  it("blocks mapped redirects to unmapped private hosts without broadening approval", async () => {
+    markMappedHost("http://10.185.177.209/page");
     const networkFetch = vi.fn(async () =>
       new Response("<html><body>unmapped private target</body></html>", { status: 200 }),
     );
@@ -204,9 +218,6 @@ describe("web_fetch SSRF guard", () => {
     const tool = makeWebFetchTool({
       networkFetch: networkFetch as typeof fetch,
       privateNetworkFetch: privateNetworkFetch as typeof fetch,
-      demoActiveVendor: "azure-foundry",
-      demoHostMapApplied: true,
-      demoHostMap: "10.185.177.209=10.182.192.10",
     });
 
     const result = await tool.execute(
@@ -220,15 +231,13 @@ describe("web_fetch SSRF guard", () => {
     expect(result.output).toContain("non-public address");
   });
 
-  it("fails mapped demo fetches when the direct private-network fetch is not wired", async () => {
+  it("fails mapped manual-host fetches when the direct private-network fetch is not wired", async () => {
+    markMappedHost("http://10.185.177.209/page");
     const networkFetch = vi.fn(async () =>
       new Response("<html><body>system proxy path</body></html>", { status: 200 }),
     );
     const tool = makeWebFetchTool({
       networkFetch: networkFetch as typeof fetch,
-      demoActiveVendor: "azure-foundry",
-      demoHostMapApplied: true,
-      demoHostMap: "10.185.177.209=10.182.192.10",
     });
 
     const result = await tool.execute(
@@ -241,7 +250,7 @@ describe("web_fetch SSRF guard", () => {
     expect(result.output).toContain("private endpoint fetch is not configured");
   });
 
-  it("does not treat raw demo host-map entries as private when resolver rules were not applied", async () => {
+  it("does not treat an unmapped URL as private when resolver rules were not applied", async () => {
     const networkFetch = vi.fn(async () =>
       new Response("<html><body>normal network path</body></html>", { status: 200 }),
     );
@@ -251,9 +260,6 @@ describe("web_fetch SSRF guard", () => {
     const tool = makeWebFetchTool({
       networkFetch: networkFetch as typeof fetch,
       privateNetworkFetch: privateNetworkFetch as typeof fetch,
-      demoActiveVendor: "azure-foundry",
-      demoHostMapApplied: false,
-      demoHostMap: "93.184.216.34=10.182.192.10",
     });
     const input = { url: "http://93.184.216.34/page" };
 

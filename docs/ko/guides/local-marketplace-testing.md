@@ -261,7 +261,6 @@ bootstrap: <slug>@0.1.1 published (NNN bytes, sha256…)
 
 | env | start (자동) | dev (자동) | 효과 |
 |-----|:--:|:--:|------|
-| repo `.env.demo` → `LVIS_DEMO_*` | ✅ | ✅ | 로컬 데모 자격증명/host-map을 Electron boot 전에 주입 |
 | `LVIS_DEV_SKIP_SIG=1` | ✅ | ✅ | 매니페스트 서명 검증 skip |
 | `LVIS_ALLOW_LINKED_PLUGIN_ENTRY=1` | ✅ | ✅ | manifest entry 가 `../node_modules/@lvis/...` 같은 링크 가리키는 것 허용 |
 | `LVIS_DEV=1` | ❌ | ✅ | dev 게이트 마스터 — DevTools / hot-reload 활성화 |

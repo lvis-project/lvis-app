@@ -1,7 +1,7 @@
 /**
  * Cross-PR first-boot funnel e2e (#988 / #986).
  *
- * Each tutorial-track PR ships its own single-flow spec — LoginModal,
+ * Each tutorial-track PR ships its own single-flow spec — ScenarioShowcase,
  * Live Auto-play, SpotlightTour — but none sequences the *combined*
  * first-boot funnel a real user walks. A regression where (e.g.) marking
  * onboarding complete silently dismisses the tour without firing
@@ -9,9 +9,7 @@
  * that gap end-to-end:
  *
  *   fresh LVIS_HOME →
- *     ScenarioShowcase / LoginModal appears →
- *     "제가 발급받은 API 키가 있어요" (API 키 직접 입력) →
- *     inline Settings opens on the API-key editor →
+ *     ScenarioShowcase →
  *     MemorySeed wizard → PersonalizedWelcome →
  *     SpotlightTour broadcasts "first-boot-essentials" and walks every step →
  *     `~/.lvis/onboarding/tour-state.json` lists "first-boot-essentials"
@@ -26,9 +24,8 @@ import { test, expect } from './fixtures';
 import path from 'node:path';
 import fs from 'node:fs';
 
-// This spec drives the full no-key first-boot funnel (showcase → login → BYOK →
-// inline Settings). Opt out of the default seeded LLM key so the chain doesn't
-// short-circuit past the showcase/key-entry steps.
+// This spec drives the no-key first-boot funnel (showcase → memory → tour).
+// Opt out of the default seeded LLM key so the onboarding chain runs.
 test.use({ onboardingCompleted: false, seedApiKey: false });
 
 /** Read the persisted tour-state.json under the per-test LVIS_HOME. */
@@ -44,42 +41,20 @@ function readTourState(userDataDir: string): { completedScenarios?: string[] } |
   }
 }
 
-test.describe('first-boot funnel: onboarding → inline settings → tour completion', () => {
+test.describe('first-boot funnel: onboarding → memory → tour completion', () => {
   test('walks the full chain, persists tour completion, and does not re-open the tour on reload', async ({
     mainWindow,
     userDataDir,
-    t,
   }) => {
     // (1) Fresh boot → the Z chain mounts the ScenarioShowcase.
     const showcase = mainWindow.getByTestId('scenario-showcase');
     await expect(showcase).toBeVisible({ timeout: 30_000 });
 
-    // (2) Continue to login. The forced-choice CTA advances the chain
-    // to stage="login" so the LoginModal mounts.
+    // (2) The scenario choice advances directly to MemorySeed. Model and key
+    // configuration now live exclusively in Settings.
     await mainWindow.getByTestId('scenario-showcase:start').click();
-    const loginModal = mainWindow.getByTestId('login-modal');
-    await expect(loginModal).toBeVisible({ timeout: 10_000 });
 
-    // (3) Pick "API 키 직접 입력" (chip 2 / BYOK). This opens the inline
-    // Settings surface on the LLM tab and closes the LoginModal (which
-    // the chain treats as a login-skip, advancing to the MemorySeed
-    // stage).
-    await mainWindow.getByTestId('login-modal:chip-byok').click();
-    await expect(
-      mainWindow.getByRole('heading', { name: t('settingsContent.sidebarHeading') }),
-    ).toBeVisible({
-      timeout: 10_000,
-    });
-
-    await expect(mainWindow.getByTestId('llm-api-key-input')).toBeVisible();
-
-    await mainWindow.getByTestId('settings-inline-back').click();
-    await expect(
-      mainWindow.getByRole('heading', { name: t('settingsContent.sidebarHeading') }),
-    ).toBeHidden({ timeout: 10_000 });
-
-    // (4) MemorySeed wizard — the chain advanced to stage="memory" when the
-    // LoginModal closed. Fill 호칭 + 자기소개 and submit.
+    // (3) Fill 호칭 + 자기소개 and submit.
     const memoryDialog = mainWindow.getByTestId('memory-seed-dialog');
     await expect(memoryDialog).toBeVisible({ timeout: 15_000 });
     await memoryDialog.getByTestId('memory-seed-dialog:name').fill('Ken');
@@ -89,7 +64,7 @@ test.describe('first-boot funnel: onboarding → inline settings → tour comple
     await memoryDialog.getByTestId('memory-seed-dialog:submit').click();
     await expect(memoryDialog).toBeHidden({ timeout: 10_000 });
 
-    // (5) PersonalizedWelcome — forced choice. Pressing the only CTA
+    // (4) PersonalizedWelcome — forced choice. Pressing the only CTA
     // advances the chain to stage="tour", whose chain-effect broadcasts
     // `tour.start("first-boot-essentials")`.
     const welcome = mainWindow.getByTestId('personalized-welcome');
@@ -97,7 +72,7 @@ test.describe('first-boot funnel: onboarding → inline settings → tour comple
     await welcome.getByTestId('personalized-welcome:continue').click();
     await expect(welcome).toBeHidden({ timeout: 10_000 });
 
-    // (6) SpotlightTour mounts on the broadcast and runs the first-boot
+    // (5) SpotlightTour mounts on the broadcast and runs the first-boot
     // scenario against the live composer/action-bar anchors. The root
     // `spotlight-tour` div is a zero-size wrapper (its children — backdrop
     // + card — are position:fixed), so assert visibility on the card and
@@ -140,13 +115,13 @@ test.describe('first-boot funnel: onboarding → inline settings → tour comple
       )
       .toBe(true);
 
-    // (7) Completion is persisted: tour-state.json must list the scenario
+    // (6) Completion is persisted: tour-state.json must list the scenario
     // in completedScenarios (markComplete fired on the final step).
     await expect
       .poll(() => readTourState(userDataDir)?.completedScenarios ?? [], { timeout: 10_000 })
       .toContain('first-boot-essentials');
 
-    // (8) Reload the app. The boot probe now sees onboardingCompleted=true
+    // (7) Reload the app. The boot probe now sees onboardingCompleted=true
     // (the chain persisted it on stage="done"), so the chain skips and the
     // tour broadcast never fires — the tour must NOT auto-reopen.
     await mainWindow.reload();

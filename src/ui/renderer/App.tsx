@@ -135,11 +135,9 @@ export function App() {
   );
 
   // App state
-  // Z onboarding chain controller — owns hasApiKey, the chain reducer, the
-  // demo-reactivation flag, the boot-probe generation, and the four onboarding
-  // effects (boot probe / completion+tour broadcast / logout+reactivate /
-  // ⌘?-shortcut). Surfaces effectiveHasApiKey (the chain-masked key state) and
-  // checkApiKey. See use-onboarding-chain-controller.ts.
+  // Z onboarding chain controller owns hasApiKey, the chain reducer, and the
+  // boot / completion / tour-shortcut effects. It surfaces effectiveHasApiKey
+  // (the chain-masked key state) and checkApiKey.
   const {
     chainStage,
     dispatchChain,
@@ -149,8 +147,6 @@ export function App() {
     tourCompleted,
     checkApiKey,
     effectiveHasApiKey,
-    reactivationOpen,
-    setReactivationOpen,
   } = useOnboardingChainController(api);
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
@@ -929,7 +925,6 @@ export function App() {
 
       <AppDialogs
         api={api}
-        onOpenSettings={onOpenSettings}
         deferredQueueOpen={deferredQueueOpen}
         onDeferredQueueOpenChange={setDeferredQueueOpen}
         approvalQueue={approvalQueue}
@@ -941,9 +936,6 @@ export function App() {
         memorySeedNickname={memorySeedNickname}
         memorySeedIntroduction={memorySeedIntroduction}
         tourCompleted={tourCompleted}
-        checkApiKey={checkApiKey}
-        reactivationOpen={reactivationOpen}
-        onReactivationOpenChange={setReactivationOpen}
         firstRunPluginSummary={firstRunPluginSummary}
         marketplaceUrlReady={marketplaceUrlReady}
         bootstrapStatus={bootstrapStatus}

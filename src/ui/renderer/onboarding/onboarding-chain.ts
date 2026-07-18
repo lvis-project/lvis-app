@@ -6,7 +6,6 @@
 export type OnboardingChainStage =
   | "idle"
   | "showcase"
-  | "login"
   | "memory"
   | "personalized_welcome"
   | "tour"
@@ -32,7 +31,7 @@ export interface OnboardingMemorySeed {
  * How the chain arrived at the `done` stage. `done` is reached two ways
  * (see {@link nextOnboardingStage}): completing or dismissing the
  * SpotlightTour after the first-run funnel, or `probe-skip` when the
- * boot probe sent a returning user / demo-relaunched session straight to
+ * boot probe sent a returning user straight to
  * `done` without ever showing the tour. Downstream UI that should only
  * appear *after a real tour* (e.g. the post-tour first-task proposal) must
  * distinguish the two — `stage === "done"` alone cannot. Absent
@@ -45,7 +44,7 @@ export interface OnboardingChainState {
   /**
    * Scenario id (ScenarioShowcase card) the user chose to start with.
    * Read by downstream stages to personalise recommendations + tour.
-   * `null` when no card was picked (direct-login CTA or returning user).
+   * `null` when no card was picked (returning user).
    */
   selectedScenarioId: string | null;
 
@@ -54,8 +53,8 @@ export interface OnboardingChainState {
   memorySeed: OnboardingMemorySeed;
   /**
    * Why the chain reached `done` — `"chain"` (full funnel incl. tour) vs
-   * `"probe-skip"` (returning user / demo relaunch, tour never shown).
-   * Absent while still in progress; cleared on `logout-reset`.
+   * `"probe-skip"` (returning user, tour never shown).
+   * Absent while still in progress.
    */
   completionReason?: OnboardingCompletionReason;
 }
@@ -70,8 +69,6 @@ export type OnboardingChainEvent =
   | { type: "probe-skip" }
   | { type: "probe-start" }
   | { type: "showcase-start"; scenarioId?: string | null }
-  | { type: "login-success" }
-  | { type: "login-skip" }
   | {
       type: "memory-finish";
       nickname?: string;
@@ -79,11 +76,7 @@ export type OnboardingChainEvent =
     }
   | { type: "personalized-welcome-accept" }
   | { type: "tour-finish" }
-  | { type: "tour-skip" }
-
-
-
-  | { type: "logout-reset" };
+  | { type: "tour-skip" };
 
 /**
  * Pure stage transition. Unknown / out-of-order events are no-ops —
@@ -98,7 +91,6 @@ export function nextOnboardingStage(
   stage: OnboardingChainStage,
   event: OnboardingChainEvent,
 ): OnboardingChainStage {
-  if (event.type === "logout-reset") return "idle";
   switch (stage) {
     case "idle":
       if (event.type === "probe-skip") return "done";
@@ -106,7 +98,7 @@ export function nextOnboardingStage(
       return stage;
 
     case "showcase":
-      if (event.type === "showcase-start") return "login";
+      if (event.type === "showcase-start") return "memory";
       // `probe-skip` is intentionally NOT accepted from `showcase`.
       // Initial stage is `idle`; the async boot probe explicitly
       // dispatches either `probe-start` (mount showcase) or
@@ -115,11 +107,6 @@ export function nextOnboardingStage(
       // the closet-flash race where a stale probe-skip arriving after
       // showcase mount would dismiss the intro for genuinely
       // fresh-state users (#1014).
-      return stage;
-
-    case "login":
-      if (event.type === "login-success") return "memory";
-      if (event.type === "login-skip") return "memory";
       return stage;
 
     case "memory":
@@ -155,13 +142,6 @@ export function onboardingChainReducer(
   const stage = nextOnboardingStage(state.stage, event);
 
 
-  if (event.type === "logout-reset") {
-    return {
-      stage,
-      selectedScenarioId: null,
-      memorySeed: { nickname: "", introduction: "" },
-    };
-  }
   let selectedScenarioId = state.selectedScenarioId;
   let memorySeed = state.memorySeed;
   // Record *why* we reached `done`, ONLY on the actual transition into
@@ -170,7 +150,7 @@ export function onboardingChainReducer(
   // while already in `done` from overwriting a correct `"chain"` reason —
   // which would wrongly hide the post-tour UI for users who finished the
   // full funnel. A tour completion/dismissal = full first-run funnel;
-  // `probe-skip` = returning user / demo relaunch (tour never shown).
+  // `probe-skip` = returning user (tour never shown).
   let completionReason = state.completionReason;
   if (stage === "done" && state.stage !== "done") {
     if (

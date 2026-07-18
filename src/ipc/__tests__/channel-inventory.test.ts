@@ -8,10 +8,7 @@
  *
  * MUST pass against the current (unchanged) code.
  *
- * Determinism: the dev-flags gate is forced to unpackaged (`setIsPackaged(false)`)
- * so the dev domain (`index.ts` gates it on `!getIsPackaged()`) and the mockup
- * auth handler (`auth.ts` early-returns when `getIsPackaged() && !isDemoEnabled()`)
- * are always registered — capturing the full wire independent of the host env.
+ * Determinism: the dev-flags gate is forced to unpackaged (`setIsPackaged(false)`)\r\n * so the development-only domain is registered and the snapshot captures the\r\n * complete supported wire independently of the host environment.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -205,9 +202,6 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:attach:saveClipboardImage",
         "lvis:audit:search",
         "lvis:audit:stats",
-        "lvis:auth:login-mockup",
-        "lvis:auth:logout-broadcast",
-        "lvis:auth:reactivate-broadcast",
         "lvis:bootstrap:retry",
         "lvis:chat:abort",
         "lvis:chat:branch-from-checkpoint",
@@ -232,12 +226,6 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:chat:session-history",
         "lvis:chat:session-resume",
         "lvis:chat:sessions",
-        "lvis:demo:activate",
-        "lvis:demo:activate-embedded",
-        "lvis:demo:activate-ollama",
-        "lvis:demo:clear",
-        "lvis:demo:relaunch-after-activation",
-        "lvis:demo:status",
         "lvis:dev:getPreflightStatus",
         "lvis:dev:setPreflightOverride",
         "lvis:diagnostics:crash-list",

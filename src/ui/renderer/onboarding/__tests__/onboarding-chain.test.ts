@@ -275,7 +275,7 @@ describe("onboardingChainReducer — completionReason (post-tour-first-task gate
       type: "probe-skip",
     });
     expect(next.stage).toBe("done");
-    // Returning user / demo relaunch reached `done` without the tour — the
+    // A returning user reached `done` without the tour — the
     // post-tour first-task proposal must NOT fire for this reason.
     expect(next.completionReason).toBe("probe-skip");
   });

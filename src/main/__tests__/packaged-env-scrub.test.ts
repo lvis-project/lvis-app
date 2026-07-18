@@ -5,7 +5,7 @@ import {
 } from "../packaged-env-scrub.js";
 
 describe("packaged env scrub", () => {
-  it("scrubs dev/test/demo flags before packaged preload inheritance", () => {
+  it("scrubs dev/test flags before packaged preload inheritance", () => {
     const env: NodeJS.ProcessEnv = {
       LVIS_DEV: "1",
       LVIS_DEV_CONSOLE: "1",
@@ -15,7 +15,6 @@ describe("packaged env scrub", () => {
       LVIS_WIN_NO_SANDBOX: "1",
       LVIS_PLUGINS_DIR: "/tmp/plugins",
       LVIS_WHITELIST_OFFLINE: "1",
-      LVIS_DEMO_VENDOR: "azure-foundry",
       LVIS_HOME: "/tmp/lvis-home",
       NODE_ENV: "development",
     };
@@ -24,7 +23,6 @@ describe("packaged env scrub", () => {
 
     expect(scrubbed).toEqual([
       "LVIS_DEBUG_STREAM",
-      "LVIS_DEMO_VENDOR",
       "LVIS_DEV",
       "LVIS_DEV_CONSOLE",
       "LVIS_E2E",
@@ -39,13 +37,12 @@ describe("packaged env scrub", () => {
     });
   });
 
-  it("keeps the packaged scrub predicate aligned with dev-flags SOT plus demo capture", () => {
+  it("keeps the packaged scrub predicate aligned with dev-flags SOT", () => {
     expect(shouldScrubPackagedEnvKey("LVIS_DEV_RELOAD")).toBe(true);
     expect(shouldScrubPackagedEnvKey("LVIS_E2E")).toBe(true);
     expect(shouldScrubPackagedEnvKey("LVIS_DEBUG_STREAM")).toBe(true);
     expect(shouldScrubPackagedEnvKey("VITE_DEBUG_STREAM")).toBe(true);
     expect(shouldScrubPackagedEnvKey("LVIS_WHITELIST_OFFLINE")).toBe(true);
-    expect(shouldScrubPackagedEnvKey("LVIS_DEMO_HOST_MAP")).toBe(true);
 
     expect(shouldScrubPackagedEnvKey("LVIS_HOME")).toBe(false);
     expect(shouldScrubPackagedEnvKey("OPENAI_API_KEY")).toBe(false);

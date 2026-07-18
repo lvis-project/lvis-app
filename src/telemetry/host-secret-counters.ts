@@ -91,7 +91,7 @@ const KNOWN_PREFIXES = new Set<string>([
   "monotonicity",
   "no-cache",
   "corrupt",
-  "demo-snapshot",
+  "e2e-snapshot",
   "cache",
   "default",
   // Tier A plugin-egress buckets (hostFetch_egress / hostFetch_denied).

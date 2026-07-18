@@ -11,7 +11,7 @@
  *
  * Render condition is a single flag: `hasApiKey === false`. That prop is
  * `App.tsx`'s `effectiveLlmReady`, which already ORs in `llmReadyWithoutApiKey`
- * — so a keyless-ready session (embedded demo activation, a reachable local
+ * — so a keyless-ready session (a reachable local
  * Ollama, or an OpenAI-compatible vendor with a `baseUrl`) never renders the
  * chip. `null` means the boot probe has not resolved; we stay silent then, same
  * as the card did, so no fake "log in" flash paints before the probe lands.

@@ -2,7 +2,7 @@
  * #893 Stage 2 — whitelist registry unit tests.
  *
  * Covers the four tier-3 decision branches + monotonicity rollback guard +
- * the stale-grace window + the demo-snapshot path. Network fetch is faked
+ * the stale-grace window + the E2E-snapshot path. Network fetch is faked
  * with the test-only `online: false` flag so the suite never touches the
  * public CDN.
  */
@@ -372,50 +372,50 @@ describe("WhitelistRegistry — stale grace windows", () => {
   });
 });
 
-describe("WhitelistRegistry — demo snapshot path", () => {
-  it("loads the demo snapshot when useDemoSnapshot is true", async () => {
+describe("WhitelistRegistry — E2E snapshot path", () => {
+  it("loads the E2E snapshot when useE2eSnapshot is true", async () => {
     const userDataDir = freshUserData();
-    const demoDir = freshUserData();
-    const demoPath = join(demoDir, "marketplace-whitelist.demo.json");
+    const e2eDir = freshUserData();
+    const e2ePath = join(e2eDir, "marketplace-whitelist.e2e.json");
     const signed = makeSigned({
       issuedAt: "2026-05-17T00:00:00.000Z",
       expiresAt: "2030-01-01T00:00:00.000Z",
     });
-    mkdirSync(demoDir, { recursive: true });
-    writeFileSync(demoPath, signed.body, "utf-8");
-    writeFileSync(`${demoPath}.sig`, signed.signature, "utf-8");
+    mkdirSync(e2eDir, { recursive: true });
+    writeFileSync(e2ePath, signed.body, "utf-8");
+    writeFileSync(`${e2ePath}.sig`, signed.signature, "utf-8");
 
     await whitelistRegistry.init({
       userDataDir,
-      demoSnapshotPath: demoPath,
-      useDemoSnapshot: true,
+      e2eSnapshotPath: e2ePath,
+      useE2eSnapshot: true,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
     });
 
     const status = whitelistRegistry.status();
-    expect(status.source).toBe("demo-snapshot");
+    expect(status.source).toBe("e2e-snapshot");
     expect(status.state).toBe("fresh");
     const decision = whitelistRegistry.isAllowed("meeting", "llm.apiKey.openai");
     expect(decision.kind).toBe("allow");
   });
 
-  it("falls through to remote/cache when useDemoSnapshot is omitted even with a demo path", async () => {
+  it("falls through to remote/cache when useE2eSnapshot is omitted even with an E2E path", async () => {
     const userDataDir = freshUserData();
-    const demoDir = freshUserData();
-    const demoPath = join(demoDir, "marketplace-whitelist.demo.json");
+    const e2eDir = freshUserData();
+    const e2ePath = join(e2eDir, "marketplace-whitelist.e2e.json");
     const signed = makeSigned({
       issuedAt: "2026-05-17T00:00:00.000Z",
       expiresAt: "2030-01-01T00:00:00.000Z",
     });
-    writeFileSync(demoPath, signed.body, "utf-8");
-    writeFileSync(`${demoPath}.sig`, signed.signature, "utf-8");
+    writeFileSync(e2ePath, signed.body, "utf-8");
+    writeFileSync(`${e2ePath}.sig`, signed.signature, "utf-8");
 
-    // useDemoSnapshot omitted → demo skipped → no cache → no remote
+    // useE2eSnapshot omitted → E2E fixture skipped → no cache → no remote
     // (online:false) → no-cache-and-offline.
     await whitelistRegistry.init({
       userDataDir,
-      demoSnapshotPath: demoPath,
+      e2eSnapshotPath: e2ePath,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
     });

@@ -5,7 +5,7 @@
  *   - plugin-asset custom protocol scheme registration
  *   - WSL / GPU command-line switches
  *   - app name + AppUserModelId
- *   - demo activation hydration + host-resolver rules
+ *   - persisted host-resolver rules
  *   - packaged env scrub
  *
  * `src/main.ts` calls `runEarlyBootEnv()` once, near the top of its module
@@ -17,12 +17,6 @@ import { createLogger } from "../lib/logger.js";
 import { ensureWorkspaceCwd } from "./ensure-workspace-cwd.js";
 import { registerPluginAssetProtocolScheme } from "./plugin-asset-protocol.js";
 import { registerMcpAppProtocolScheme } from "./mcp-app-protocol.js";
-import { captureDemoCredentials } from "./demo-credentials.js";
-import {
-  loadEmbeddedDemoActivationSync,
-  loadPersistedDemoActivationSync,
-} from "./demo-activation-loader.js";
-import { applyDemoHostResolverRules } from "./demo-host-resolver.js";
 import { applyManualHostResolverRules } from "./manual-host-resolver.js";
 import { scrubPackagedProcessEnv } from "./packaged-env-scrub.js";
 import { resolveAppIconPath } from "./app-icon.js";
@@ -87,42 +81,10 @@ export function runEarlyBootEnv(): void {
   // `LVIS_DEV_NO_SANDBOX`, which made it incorrectly look like a dev flag;
   // the rename moves it out of the dev mask but it's still hard-gated on
   // `!app.isPackaged` by `dev-flags.ts:devNoSandboxAllowed()`.
-  // Demo activation code system — on packaged-app boot, if the user has
-  // previously activated via the LoginModal chip 1 (paste activation string),
-  // the decrypted `.env.demo` payload was persisted under
-  // `~/.lvis/secrets/.env.demo`. Inject those values into `process.env` BEFORE
-  // `captureDemoCredentials()` runs so the existing boot-time capture pipeline
-  // observes them identically to a dev-mode `.env.demo` on disk. Sync I/O so
-  // the capture sees the values without an awaited boot path.
-  loadPersistedDemoActivationSync();
-  // Internal-distribution builds embed an activation key in the bundle. When
-  // no `.env.demo` was persisted yet (fresh install), hydrate from that
-  // embedded key NOW — before `captureDemoCredentials()` + the host-resolver
-  // install below — so a first activation needs no relaunch (the Chromium
-  // host-resolver command line is frozen after `app.whenReady()`). No-op when
-  // a persisted file exists, no key is embedded, or the user logged out
-  // (demo-disabled sentinel). See loadEmbeddedDemoActivationSync.
-  loadEmbeddedDemoActivationSync();
-  // #893 / PR #894 B1 — Capture `LVIS_DEMO_*` BEFORE the scrub so the mockup
-  // auth handler can still consume the demo keys + enable flag through an
-  // internal channel, while the renderer/preload/workers never observe them
-  // via inherited `process.env`. Capture is idempotent; the scrub below
-  // runs unconditionally to close the env side-channel.
-  captureDemoCredentials();
-  // Path 2 hotfix — when `LVIS_DEMO_VENDOR=azure-foundry` and
-  // `LVIS_DEMO_HOST_MAP` is non-empty, install a Chromium `host-resolver-rules`
-  // switch so the demo Azure Foundry hostnames resolve to the internal
-  // intranet IPs *inside Electron only* (no `/etc/hosts` mutation, no sudo).
-  // MUST be called before `app.whenReady()` — done here so the switch is
-  // installed before any network service initialisation. Also runs BEFORE
-  // the env scrub for the same reason as `captureDemoCredentials()`: the
-  // vendor + map env vars are wiped immediately after.
-  applyDemoHostResolverRules(app);
   // Manual host-resolver map — applies the user-configured /etc/hosts-style
-  // mapping when authMode==="manual". No-op when demo mode is active (demo
-  // map takes precedence) or when no map has been configured. Reads the same
-  // settings file the SettingsService writes to (under app.getPath("userData"))
-  // so a map saved via Settings is the one applied on the next boot.
+  // mapping when it is configured. It reads the same settings file the
+  // SettingsService writes to (under app.getPath("userData")), so a map saved
+  // through Settings is applied on the next boot.
   applyManualHostResolverRules(app, app.getPath("userData"));
 
   if (app.isPackaged) {

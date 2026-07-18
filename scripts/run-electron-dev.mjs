@@ -26,10 +26,6 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, watch, copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { waitForAllFirstBuilds } from "./lib/dev-watcher-gate.mjs";
-import {
-  classifyElectronExit,
-  DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE,
-} from "./lib/dev-electron-exit.mjs";
 import { resolveBuildAssets } from "./lib/build-assets.mjs";
 import {
   extractUserDataDir,
@@ -570,7 +566,7 @@ function launchElectron() {
       // corp/VDI machines whose Chromium sandbox init fails without the flag.
       LVIS_WIN_NO_SANDBOX: process.env.LVIS_WIN_NO_SANDBOX,
     };
-    return prepareElectronLaunchEnv(e, { demoEnvRoot: repoRoot });
+    return prepareElectronLaunchEnv(e);
   })();
   const electronArgs = prepareElectronLaunchArgs([mainOutput], launchEnv, {
     profileName: DEV_PROFILE_NAME,
@@ -606,30 +602,9 @@ function launchElectron() {
   electronProc.on("exit", (code, signal) => {
     log("electron", `exited code=${code} signal=${signal ?? "-"}`);
     electronProc = null;
-    const exitAction = classifyElectronExit({
-      code,
-      signal,
-      shuttingDown,
-      restartInFlight,
-    });
-    if (exitAction === "restart") {
-      restartInFlight = true;
-      void (async () => {
-        try {
-          log(
-            "electron",
-            `demo activation requested dev relaunch (code=${DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE}) -> restarting (grace=${RESTART_DELAY_MS}ms)`,
-          );
-          await sleep(RESTART_DELAY_MS);
-          if (!shuttingDown) launchElectron();
-        } finally {
-          restartInFlight = false;
-        }
-      })();
-      return;
-    }
-    if (exitAction === "shutdown") {
-      // If electron exited on its own (window closed), shut down dev loop.
+    if (shuttingDown || restartInFlight) return;
+    if (signal !== "SIGTERM" && signal !== "SIGKILL") {
+      // If Electron exited on its own (window closed), shut down the dev loop.
       shutdown(0);
     }
   });

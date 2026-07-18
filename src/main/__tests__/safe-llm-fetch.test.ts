@@ -68,7 +68,7 @@ describe("safe LLM fetch", () => {
     );
   });
 
-  it("uses the direct private-endpoint fetch for mapped demo Foundry URLs", async () => {
+  it("uses the direct private-endpoint fetch for manually mapped Foundry URLs", async () => {
     const response = new Response("private");
     const netFetch = vi.fn(async () => new Response("public"));
     const privateFetch = vi.fn(async () => response);

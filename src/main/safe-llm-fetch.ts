@@ -44,7 +44,7 @@ export function isAllowedLlmFetchUrl(url: URL): boolean {
 }
 
 /**
- * Electron's network stack is required for demo/private-endpoint Azure Foundry
+ * Electron's network stack is required for manually mapped private-endpoint Azure Foundry
  * calls because Chromium owns the host-resolver rules. Keep that power scoped
  * to the only current LLM path that needs it.
  */

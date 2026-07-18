@@ -4,8 +4,8 @@ import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electro
  *
  * Verifies the first-boot funnel:
  *   1. Fresh HOME (`features.onboardingCompleted=false`, no API keys)
- *      starts at ScenarioShowcase and advances through LoginModal.
- *   2. The BYOK login path closes LoginModal and mounts MemorySeed.
+ *      starts at ScenarioShowcase and then opens MemorySeed.
+ *   2. The scenario choice opens MemorySeed directly.
  *   3. Filling in 호칭 + 자기소개 → "기억하고 시작하기" dismisses the
  *      wizard and seeds `~/.lvis/memories/MEMORY.md` Urgent Memory.
  *   4. PersonalizedWelcome advances to SpotlightTour via the Z chain-effect.
@@ -79,17 +79,7 @@ test.describe("memory seed onboarding wizard", () => {
   async function advanceToMemorySeed() {
     const showcase = page.getByTestId("scenario-showcase");
     await expect(showcase).toBeVisible({ timeout: 30_000 });
-
     await page.getByTestId("scenario-showcase:start").click();
-    const loginModal = page.getByTestId("login-modal");
-    await expect(loginModal).toBeVisible({ timeout: 10_000 });
-
-    await page.getByTestId("login-modal:chip-byok").click();
-    const settingsHeading = page.getByTestId("settings-sidebar-heading");
-    await expect(settingsHeading).toBeVisible({ timeout: 10_000 });
-
-    await page.getByTestId("settings-inline-back").click();
-    await expect(settingsHeading).toBeHidden({ timeout: 10_000 });
 
     const dialog = page.getByTestId("memory-seed-dialog");
     await expect(dialog).toBeVisible({ timeout: 15_000 });
@@ -179,7 +169,7 @@ test.describe("memory seed onboarding wizard", () => {
   });
 
   test("does not re-open on the second boot once onboarding is completed", async () => {
-    // First boot: advance through ScenarioShowcase/LoginModal, then dismiss via skip.
+    // First boot: advance through ScenarioShowcase, then dismiss MemorySeed via skip.
     const dialog = await advanceToMemorySeed();
     await dialog.getByTestId("memory-seed-dialog:skip").click();
     await expect(dialog).toBeHidden({ timeout: 10_000 });
@@ -210,7 +200,6 @@ test.describe("memory seed onboarding wizard", () => {
     // Wait long enough that the first-boot probe would have fired.
     await page.waitForTimeout(2_000);
     await expect(page.getByTestId("scenario-showcase")).toHaveCount(0);
-    await expect(page.getByTestId("login-modal")).toHaveCount(0);
     await expect(page.getByTestId("memory-seed-dialog")).toHaveCount(0);
   });
 });

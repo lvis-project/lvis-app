@@ -61,7 +61,7 @@ import {
 const log = createLogger("lvis");
 
 // Early boot environment — workspace cwd, plugin-asset protocol scheme, WSL/GPU
-// switches, app name/AppUserModelId, demo activation + host resolver, env
+// switches, app name/AppUserModelId, manual host resolver, env
 // scrub. MUST run before app.whenReady(); called here at module load.
 runEarlyBootEnv();
 

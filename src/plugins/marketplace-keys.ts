@@ -45,7 +45,7 @@ export const MARKETPLACE_PUBLIC_KEYS: Readonly<Record<string, string>> = Object.
 // have injected a per-run trust root.
 export const WHITELIST_PUBLIC_KEYS: Readonly<Record<string, PublicKeyInput>> = Object.freeze({
   // Base64 of raw 32-byte ed25519 public key. The matching private key
-  // signs both the offline demo snapshot (`resources/marketplace-whitelist.demo.json.sig`)
+  // signs both the offline E2E fixture (`resources/marketplace-whitelist.e2e.json.sig`)
   // and the live remote registry at
   // `https://lvis-project.github.io/marketplace-whitelist/v1/whitelist.json`.
   // Private key custody: GitHub Actions secret `WHITELIST_SIGNING_KEY`

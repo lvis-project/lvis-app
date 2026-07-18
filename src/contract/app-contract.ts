@@ -296,22 +296,6 @@ export const CHANNELS = {
   // instead of inline `"lvis:*"` literals. Byte-identical to the strings the
   // preload previously inlined; registered-handler groups are cross-checked by
   // the channel-inventory snapshot.
-  auth: {
-    loginMockup: "lvis:auth:login-mockup",
-    progress: "lvis:auth:progress",
-    logoutBroadcast: "lvis:auth:logout-broadcast",
-    reactivateBroadcast: "lvis:auth:reactivate-broadcast",
-    logoutReset: "lvis:auth:logout-reset",
-    reactivateDemo: "lvis:auth:reactivate-demo",
-  },
-  demo: {
-    status: "lvis:demo:status",
-    activate: "lvis:demo:activate",
-    activateEmbedded: "lvis:demo:activate-embedded",
-    activateOllama: "lvis:demo:activate-ollama",
-    relaunchAfterActivation: "lvis:demo:relaunch-after-activation",
-    clear: "lvis:demo:clear",
-  },
   tour: {
     getState: "lvis:tour:get-state",
     markComplete: "lvis:tour:mark-complete",

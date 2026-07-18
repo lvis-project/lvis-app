@@ -36,68 +36,60 @@ import { HybridRetriever } from "../main/hybrid-retriever.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
 import { IdleSchedulerService, adaptPowerMonitor } from "../main/idle-scheduler.js";
 import { fetchPublicHttpResponse } from "../core/network-guard.js";
-import { demoHostMapContainsHost } from "../main/demo-host-resolver.js";
+import { isAppliedManualHostResolverUrl } from "../main/manual-host-resolver.js";
 import { createLogger } from "../lib/logger.js";
 import { t } from "../i18n/index.js";
 const log = createLogger("lvis");
 
-type DemoHostResolverDeps = {
-  demoActiveVendor?: string;
-  demoHostMap?: string;
-  demoHostMapApplied?: boolean;
+type PrivateEndpointDeps = {
   privateNetworkFetch?: typeof fetch;
 };
 
-function isDemoHostResolverMappedUrl(
+function isManualHostResolverMappedUrl(
   input: unknown,
-  deps?: DemoHostResolverDeps,
+  _deps?: PrivateEndpointDeps,
 ): boolean {
   const args = input && typeof input === "object"
     ? input as Record<string, unknown>
     : {};
-  return (
-    deps?.demoActiveVendor === "azure-foundry" &&
-    deps.demoHostMapApplied === true &&
-    typeof args.url === "string" &&
-    demoHostMapContainsHost(deps.demoHostMap, args.url)
-  );
+  return typeof args.url === "string" && isAppliedManualHostResolverUrl(args.url);
 }
 
-function isDemoHostResolverMappedFetchInput(
+function isManualHostResolverMappedFetchInput(
   input: Parameters<typeof fetch>[0],
-  deps?: DemoHostResolverDeps,
+  deps?: PrivateEndpointDeps,
 ): boolean {
   if (typeof input === "string" || input instanceof URL) {
-    return isDemoHostResolverMappedUrl({ url: input.toString() }, deps);
+    return isManualHostResolverMappedUrl({ url: input.toString() }, deps);
   }
-  return isDemoHostResolverMappedUrl({ url: input.url }, deps);
+  return isManualHostResolverMappedUrl({ url: input.url }, deps);
 }
 
 function webFetchRequiresPrivateNetwork(
   input: unknown,
-  deps?: DemoHostResolverDeps,
+  deps?: PrivateEndpointDeps,
 ): boolean {
   const args = input && typeof input === "object"
     ? input as Record<string, unknown>
     : {};
-  return args.allowPrivateNetwork === true || isDemoHostResolverMappedUrl(input, deps);
+  return args.allowPrivateNetwork === true || isManualHostResolverMappedUrl(input, deps);
 }
 
 function webFetchPrivateNetworkPolicy(
   input: unknown,
-  deps?: DemoHostResolverDeps,
+  deps?: PrivateEndpointDeps,
 ): boolean | ((url: URL) => boolean) {
   const args = input && typeof input === "object"
     ? input as Record<string, unknown>
     : {};
   if (args.allowPrivateNetwork === true) return true;
-  if (!isDemoHostResolverMappedUrl(input, deps)) return false;
-  return (url: URL) => demoHostMapContainsHost(deps?.demoHostMap, url.toString());
+  if (!isManualHostResolverMappedUrl(input, deps)) return false;
+  return (url: URL) => isAppliedManualHostResolverUrl(url.toString());
 }
 
 function webFetchPrivateNetworkApprovalCacheKey(
   input: unknown,
-  deps?: DemoHostResolverDeps,
+  deps?: PrivateEndpointDeps,
 ): string | undefined {
   const args = input && typeof input === "object"
     ? input as Record<string, unknown>
@@ -118,7 +110,7 @@ function webFetchPrivateNetworkApprovalCacheKey(
 
 function webFetchCategoryForInput(
   input: unknown,
-  deps?: DemoHostResolverDeps,
+  deps?: PrivateEndpointDeps,
 ): "read" | "network" {
   return webFetchRequiresPrivateNetwork(input, deps) ? "network" : "read";
 }
@@ -178,13 +170,13 @@ function webFetchFetchImpl(
   deps: WorkflowToolDeps | undefined,
   networkFetch: typeof fetch,
 ): typeof fetch {
-  if (!isDemoHostResolverMappedUrl(input, deps)) return networkFetch;
+  if (!isManualHostResolverMappedUrl(input, deps)) return networkFetch;
   return (async (fetchInput: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    if (!isDemoHostResolverMappedFetchInput(fetchInput, deps)) {
+    if (!isManualHostResolverMappedFetchInput(fetchInput, deps)) {
       return networkFetch(fetchInput, init);
     }
     if (!deps?.privateNetworkFetch) {
-      throw new Error("web_fetch: private endpoint fetch is not configured for mapped demo host");
+      throw new Error("web_fetch: private endpoint fetch is not configured for a mapped host");
     }
     return deps.privateNetworkFetch(fetchInput, init);
   }) as typeof fetch;
@@ -453,14 +445,8 @@ export interface WorkflowToolDeps {
   getApprovalGate?: () => ApprovalGate | undefined;
   /** Electron network-stack fetch used when host-resolver-rules are active. */
   networkFetch?: typeof fetch;
-  /** Direct Electron fetch for demo host-map URLs when system proxy/PAC is active. */
+  /** Direct Electron fetch for persisted host-map URLs when system proxy/PAC is active. */
   privateNetworkFetch?: typeof fetch;
-  /** Captured demo vendor before packaged env scrub. */
-  demoActiveVendor?: string;
-  /** Captured Chromium host-resolver-rules map before packaged env scrub. */
-  demoHostMap?: string;
-  /** True only when Chromium host-resolver-rules were validated and applied at boot. */
-  demoHostMapApplied?: boolean;
   emitAgentSpawn?: (event: AgentSpawnEvent) => void;
   emitSkillLoad?: (event: SkillLoadEvent) => void;
 }

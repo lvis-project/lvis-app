@@ -130,7 +130,7 @@ export interface ResolveApiKeyDeps {
  * Only the three aliases that *differ* between the two surfaces are
  * mapped; `"openai"` passes through unchanged. Adding a new SDK alias
  * needs an entry here AND an `llm.apiKey.<host-vendor>` key wired into
- * the manifest allowlist + demo whitelist.
+ * the manifest allowlist + marketplace whitelist.
  */
 const VENDOR_ALIAS_MAP: Record<string, string> = {
   anthropic: "claude",

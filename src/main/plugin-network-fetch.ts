@@ -5,7 +5,7 @@
  * capability (`hostApi.hostFetch`), which the host backs with the fetch this
  * factory produces. The routing mirrors the chat LLM path (`safe-llm-fetch`):
  *
- *   - demo/corporate Azure *private-endpoint* URLs must egress through the
+ *   - manually mapped corporate Azure *private-endpoint* URLs must egress through the
  *     proxy-bypassing DIRECT session (Electron `host-resolver-rules` map the
  *     Azure hostname to the intranet IP). The corporate forward proxy, if used,
  *     resolves that hostname via PUBLIC DNS and hits the public endpoint, which
@@ -14,7 +14,7 @@
  *     PAC / WPAD + corporate CA).
  *
  * Pure + Electron-free so it is unit-testable; boot wires the two concrete
- * Electron fetch impls and the demo private-endpoint predicate.
+ * Electron fetch implementations and the manual private-endpoint predicate.
  */
 export function createPluginNetworkFetch(
   defaultFetch: typeof fetch,

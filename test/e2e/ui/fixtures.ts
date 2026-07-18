@@ -27,7 +27,6 @@ const E2E_PLUGIN_REPOS = [
   'lvis-plugin-work-assistant',
 ] as const;
 
-const E2E_RESOLVE_DEMO_KEY_TOOL = 'meeting_resolve_demo_key';
 const E2E_PLUGIN_UI_STUB_SOURCE =
   'export function mount({ root }) { root.textContent = "E2E Plugin UI"; }\nexport default { mount };\n';
 
@@ -45,74 +44,19 @@ type E2eManifest = {
   python?: unknown;
 };
 
-function addUniqueString(list: unknown, value: string): string[] {
-  const next = Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : [];
-  if (!next.includes(value)) next.push(value);
-  return next;
-}
-
 function manifestIdentitySha256FromPluginJson(pluginJsonPath: string): string {
   const manifest = JSON.parse(fs.readFileSync(pluginJsonPath, 'utf-8')) as unknown;
   return createHash('sha256').update(canonicalJSON(manifest)).digest('hex');
 }
 
-function prepareE2eManifest(manifest: E2eManifest, enableDemoKeyProbe: boolean): E2eManifest {
+function prepareE2eManifest(manifest: E2eManifest): E2eManifest {
   const base = { ...manifest };
   delete base.python;
-  if (!enableDemoKeyProbe || base.id !== 'meeting') return base;
-
-  const declaredHostKeyNames = Array.isArray(base.hostSecrets?.read)
-    ? base.hostSecrets.read.filter((item): item is string => typeof item === 'string')
-    : [];
-  const hostSecretReads = declaredHostKeyNames.includes('llm.apiKey.openai')
-    ? declaredHostKeyNames
-    : [...declaredHostKeyNames, 'llm.apiKey.openai'];
-  return {
-    ...base,
-    hostSecrets: { read: hostSecretReads },
-    tools: addUniqueString(base.tools, E2E_RESOLVE_DEMO_KEY_TOOL),
-    uiActions: addUniqueString(base.uiActions, E2E_RESOLVE_DEMO_KEY_TOOL),
-    toolSchemas: {
-      ...(base.toolSchemas ?? {}),
-      [E2E_RESOLVE_DEMO_KEY_TOOL]: {
-        description: 'E2E-only probe that resolves the host-managed OpenAI key through hostApi.resolveApiKey.',
-        category: 'read',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-          additionalProperties: false,
-        },
-      },
-    },
-  };
+  return base;
 }
 
-function buildHostPluginStub(manifestId: string, enableDemoKeyProbe: boolean): string {
-  if (!enableDemoKeyProbe || manifestId !== 'meeting') {
-    return `export default function createPlugin() { return { handlers: {}, start() {}, stop() {} }; }\n`;
-  }
-
-  return `export default function createPlugin(context) {
-  return {
-    handlers: {
-      ${E2E_RESOLVE_DEMO_KEY_TOOL}: async () => {
-        const resolver = context.hostApi && context.hostApi.resolveApiKey;
-        if (typeof resolver !== "function") {
-          return { ok: false, reason: "missing-resolveApiKey" };
-        }
-        const result = await resolver({ purpose: "llm", vendor: "openai" });
-        if (!result.ok) return result;
-        try {
-          return { ok: true, vendor: result.vendor, bearer: result.bearer() };
-        } finally {
-          result.release();
-        }
-      }
-    },
-    start() {},
-    stop() {}
-  };
-}\n`;
+function buildHostPluginStub(): string {
+  return `export default function createPlugin() { return { handlers: {}, start() {}, stop() {} }; }\n`;
 }
 
 function buildSignedWhitelistEnv(
@@ -151,7 +95,7 @@ function buildSignedWhitelistEnv(
       },
     ],
   };
-  const whitelistPath = path.join(lvisHomeForTest, 'e2e-marketplace-whitelist.demo.json');
+  const whitelistPath = path.join(lvisHomeForTest, 'e2e-marketplace-whitelist.e2e.json');
   fs.writeFileSync(whitelistPath, body, 'utf-8');
   fs.writeFileSync(`${whitelistPath}.sig`, JSON.stringify(envelope), 'utf-8');
   return {
@@ -203,7 +147,6 @@ function resolveE2ePluginSourceRoot(repoRoot: string): string {
 async function seedE2ePlugins(
   repoRoot: string,
   lvisHomeForTest: string,
-  enableDemoKeyProbe: boolean,
   seedTogglePlugin: boolean,
   seedRepositoryPlugins: boolean,
 ): Promise<LaunchEnv> {
@@ -288,10 +231,7 @@ async function seedE2ePlugins(
       }
 
       const sourceManifestText = fs.readFileSync(sourceManifest, 'utf-8');
-      const manifest = prepareE2eManifest(
-        JSON.parse(sourceManifestText) as E2eManifest,
-        enableDemoKeyProbe,
-      );
+      const manifest = prepareE2eManifest(JSON.parse(sourceManifestText) as E2eManifest);
       if (typeof manifest.id !== 'string' || typeof manifest.version !== 'string') {
         throw new Error(`[e2e] invalid plugin manifest: ${sourceManifest}`);
       }
@@ -319,7 +259,7 @@ async function seedE2ePlugins(
       fs.mkdirSync(targetDist, { recursive: true, mode: 0o700 });
       fs.writeFileSync(
         path.join(targetDist, 'hostPlugin.js'),
-        buildHostPluginStub(manifest.id, enableDemoKeyProbe),
+        buildHostPluginStub(),
         'utf-8',
       );
       for (const ui of uiEntries) {
@@ -452,7 +392,6 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     const e2eWhitelistEnv = await seedE2ePlugins(
       repoRoot,
       lvisHomeForTest,
-      launchEnv.LVIS_E2E_RESOLVE_DEMO_KEY_PROBE === '1',
       seedTogglePlugin,
       seedRepositoryPlugins,
     );

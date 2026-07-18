@@ -11,7 +11,6 @@ import type {
   OnboardingChainEvent,
   OnboardingChainStage,
 } from "./onboarding/onboarding-chain.js";
-import { LoginModal } from "./components/LoginModal.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
 import { SnapEdgeHighlight } from "./components/SnapEdgeHighlight.js";
 
@@ -23,13 +22,11 @@ type Api = ReturnType<typeof getApi>;
  * Behavior-preserving extraction of App.tsx's dialog tail: the deferred
  * approval queue + approval dialog, the Z onboarding chain (staged so exactly
  * one chain dialog mounts at a time), the always-mounted SpotlightTour /
- * PostTourFirstTask, the demo-reactivation LoginModal, and the DevConsoleToggle
- * / SnapEdgeHighlight singletons. All state lives in App; this component is a
+ * PostTourFirstTask, and the DevConsoleToggle / SnapEdgeHighlight singletons.
  * pure function of props (the chain reducer's dispatch is threaded through).
  */
 export function AppDialogs({
   api,
-  onOpenSettings,
   deferredQueueOpen,
   onDeferredQueueOpenChange,
   approvalQueue,
@@ -41,9 +38,6 @@ export function AppDialogs({
   memorySeedNickname,
   memorySeedIntroduction,
   tourCompleted,
-  checkApiKey,
-  reactivationOpen,
-  onReactivationOpenChange,
   firstRunPluginSummary,
   marketplaceUrlReady,
   bootstrapStatus,
@@ -52,9 +46,6 @@ export function AppDialogs({
   onComposerSeedText,
 }: {
   api: Api;
-  /** Route the LoginModal's "bring your own key" affordance to the inline
-   *  settings panel (LLM tab) — there is no detached settings window anymore. */
-  onOpenSettings: (tab?: string) => void;
   deferredQueueOpen: boolean;
   onDeferredQueueOpenChange: (open: boolean) => void;
   approvalQueue: Parameters<typeof ApprovalDialog>[0]["queue"];
@@ -67,9 +58,6 @@ export function AppDialogs({
   memorySeedNickname: string;
   memorySeedIntroduction: string;
   tourCompleted: boolean;
-  checkApiKey: () => Promise<boolean>;
-  reactivationOpen: boolean;
-  onReactivationOpenChange: (open: boolean) => void;
   firstRunPluginSummary: Parameters<typeof PersonalizedWelcome>[0]["pluginSummary"];
   marketplaceUrlReady: boolean;
   bootstrapStatus: Parameters<typeof PersonalizedWelcome>[0]["bootstrapStatus"];
@@ -95,39 +83,9 @@ export function AppDialogs({
           dispatchChain({ type: "showcase-start", scenarioId })
         }
       />
-      <LoginModal
-        api={api}
-        onOpenSettings={onOpenSettings}
-        open={chainStage === "login"}
-        onOpenChange={(next) => {
-          if (chainStage !== "login") return;
-          if (!next) {
-            // Radix closed the dialog — treat any close that didn't
-            // already advance the chain as a user-initiated skip.
-            dispatchChain({ type: "login-skip" });
-          }
-        }}
-        onSuccess={() => {
-          void checkApiKey();
-          dispatchChain({ type: "login-success" });
-        }}
-      />
 
 
 
-      <LoginModal
-        api={api}
-        onOpenSettings={onOpenSettings}
-        open={reactivationOpen}
-        forceActivation
-        onOpenChange={(next) => {
-          if (!next) onReactivationOpenChange(false);
-        }}
-        onSuccess={() => {
-          void checkApiKey();
-          onReactivationOpenChange(false);
-        }}
-      />
 
 
 

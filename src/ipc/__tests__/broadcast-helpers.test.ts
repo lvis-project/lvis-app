@@ -84,7 +84,7 @@ describe("fanOutToAllWindows", () => {
     const w1 = liveWindow();
     const w2 = liveWindow();
 
-    fanOutToAllWindows([w1, w2] as never, "lvis:auth:logout-reset", undefined, {
+    fanOutToAllWindows([w1, w2] as never, "lvis:test:audit", undefined, {
       auditLogger,
     });
 
@@ -93,7 +93,7 @@ describe("fanOutToAllWindows", () => {
       expect.objectContaining({
         type: "info",
         sessionId: "ipc",
-        input: "[broadcast] channel=lvis:auth:logout-reset delivered=2/2",
+        input: "[broadcast] channel=lvis:test:audit delivered=2/2",
       }),
     );
   });
@@ -126,7 +126,7 @@ describe("fanOutToAllWindows", () => {
   });
 
   it("does not emit an audit row when no auditLogger is supplied", () => {
-    // Smoke check that the demo.ts path (logger-less, audit-less) is a no-op
+    // Smoke check that a logger-less, audit-less path is a no-op
     // beyond the sends themselves.
     const w1 = liveWindow();
     const delivered = fanOutToAllWindows([w1] as never, "lvis:test", undefined);

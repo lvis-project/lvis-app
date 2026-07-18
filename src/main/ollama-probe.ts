@@ -1,7 +1,7 @@
 /**
  * Ollama local-model availability probe (#1498 — no-key onboarding).
  *
- * A user without a demo activation key or a BYOK API key (off the internal
+ * A user without an API key (off the internal
  * network, remote/home, or an external evaluator) can still get a first
  * value-experience if they already run Ollama locally. This module owns the
  * single question "is a local Ollama server reachable right now" so the
@@ -25,8 +25,7 @@ const OLLAMA_PROBE_TIMEOUT_MS = 500;
 /**
  * Test seam. `undefined` (the default) means "run the real network probe";
  * a boolean short-circuits to that value without touching the network.
- * Mirrors the `_setEmbeddedActivationCodeForTest` convention in
- * `demo-embedded-activation.ts`.
+ * Keeps the production probe replaceable in unit tests.
  */
 let ollamaAvailableOverrideForTest: boolean | undefined;
 

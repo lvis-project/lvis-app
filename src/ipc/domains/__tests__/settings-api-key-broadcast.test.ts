@@ -1026,7 +1026,6 @@ describe("settings:update rejects hostResolverMap changes", () => {
 
     const result = await invoke("lvis:settings:update", {
       llm: {
-        authMode: "manual",
         hostResolverMap: "10.0.0.1 endpoint.example.com",
       },
     });

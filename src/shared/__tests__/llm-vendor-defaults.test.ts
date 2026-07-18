@@ -59,14 +59,14 @@ describe("isLLMVendor", () => {
   });
 });
 
-describe("LLMVendorSettings — #893 top-level authMode promotion", () => {
-  it("no vendor's default block carries an `authMode` field (promoted top-level)", () => {
+describe("LLMVendorSettings — retired login metadata", () => {
+  it("does not retain an `authMode` field in default vendor blocks", () => {
     for (const v of LLM_VENDORS) {
       expect("authMode" in LLM_VENDOR_DEFAULTS[v]).toBe(false);
     }
   });
 
-  it("freshVendorBlocks() returns default-visible mutable copies without authMode", () => {
+  it("freshVendorBlocks() returns default-visible mutable copies without retired metadata", () => {
     const blocks = freshVendorBlocks();
     expect(Object.keys(blocks).sort()).toEqual(
       [...DEFAULT_VISIBLE_LLM_VENDOR_IDS].sort(),

@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import electronPath from "electron";
 import {
   prepareElectronLaunchArgs,
@@ -8,7 +7,6 @@ import {
 
 const args = process.argv.slice(2);
 const env = { ...process.env };
-const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 delete env.ELECTRON_RUN_AS_NODE;
 
 // Ensure NODE_ENV is set so logger.ts can select pino-pretty at module load
@@ -34,13 +32,7 @@ if (!env.LVIS_DEV_CONSOLE) {
 // so a packaged binary that inherits LVIS_WIN_NO_SANDBOX=1 still keeps
 // Chromium sandboxing.
 //
-// The shared helper also auto-loads `.env.demo` from the repo root when present
-// and forces UTF-8 subprocess defaults. Dev and start launchers intentionally
-// use the same helper/order so `.env.demo` cannot affect Electron flags
-// differently across validation paths.
-prepareElectronLaunchEnv(env, {
-  demoEnvRoot: repoRoot,
-});
+// The shared helper owns launch-environment normalization (including UTF-8`r`n// defaults). Dev and start launchers intentionally use the same helper/order.`r`nprepareElectronLaunchEnv(env);
 
 // Windows corp PCs often run Electron under EDR/AV sandboxing + restricted
 // GPU drivers (Hyper-V isolation / VDI / locked-down ANGLE). Under those

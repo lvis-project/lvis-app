@@ -117,7 +117,6 @@ describe("preload contextBridge world shape lock", () => {
           ],
           "env": [
             "debugStream",
-            "demoVendor",
             "enableDevConsole",
             "isDev",
             "isE2E",
@@ -217,13 +216,6 @@ describe("preload contextBridge world shape lock", () => {
             "getStats",
             "search",
           ],
-          "auth": [
-            "broadcastLogoutReset",
-            "broadcastReactivateDemo",
-            "onLogoutReset",
-            "onProgress",
-            "onReactivateDemo",
-          ],
           "callPluginMethod": "function",
           "captureUserKeyboardIntent": "function",
           "chatAbort": "function",
@@ -255,14 +247,6 @@ describe("preload contextBridge world shape lock", () => {
           "deleteMarketplaceApiKey": "function",
           "deletePersonaPrompt": "function",
           "deleteWebApiKey": "function",
-          "demo": [
-            "activate",
-            "activateEmbedded",
-            "activateOllama",
-            "clearDemo",
-            "relaunchAfterActivation",
-            "status",
-          ],
           "dev": [
             "getPreflightStatus",
             "setPreflightOverride",
@@ -313,7 +297,6 @@ describe("preload contextBridge world shape lock", () => {
           "listSessionTodos": "function",
           "listSkills": "function",
           "listWorkBoard": "function",
-          "loginMockup": "function",
           "logs": [
             "tail",
           ],

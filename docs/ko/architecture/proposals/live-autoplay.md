@@ -1,8 +1,8 @@
 # Live Auto-play — LVIS 가 스스로 1턴 시연
 
 > **Status**: SUPERSEDED — the scripted demo-autoplay layer was removed once the
-> onboarding login scenario became the canonical first-boot flow. The
-> `ScenarioShowcase` grid + login CTA remain; the inline scripted-turn replay,
+> onboarding flow no longer used an activation-login stage. The
+> `ScenarioShowcase` grid and MemorySeed progression remain; the inline scripted-turn replay,
 > the `demoAutoplayEnabled` flag, and the `engine/demo-autoplay/` engine were
 > deleted. This document is kept as a historical record of the original
 > proposal only.
@@ -17,8 +17,7 @@
 > It describes a design that has since been REMOVED (the scripted-autoplay engine,
 > the `demoAutoplayEnabled` flag, and the inline replay no longer exist). Read it as a
 > record of the original intent, NOT as a description of current behaviour. The
-> canonical first-boot flow is now the onboarding login scenario (`ScenarioShowcase`
-> grid + login CTA).
+> canonical first-boot flow is now `ScenarioShowcase` → MemorySeed → personalized welcome → tour.
 
 ## 1. Motivation
 

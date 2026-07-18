@@ -97,7 +97,7 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
       `${JSON.stringify(buildE2eBaseSettings(true, 'en'), null, 2)}\n`,
       'utf-8',
     );
-    // Seed a usable demo LLM key so the composer is enabled for chat-* captures.
+    // Seed a usable test LLM key so the composer is enabled for chat-* captures.
     fs.writeFileSync(
       path.join(userDataDir, 'lvis-secrets.json'),
       JSON.stringify(buildE2eSecrets(), null, 2) + '\n',
@@ -142,11 +142,6 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
         LVIS_HOME: lvisHomeForTest,
         NODE_ENV: 'test',
         ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
-        // Demo activation placeholder — never a real code. See README.md
-        // "Environment variables". Left unset by default; callers running
-        // against demo-gated screens must export LVIS_DEMO_ACTIVATION_CODE
-        // themselves (real internal value; not something this harness ships).
-        LVIS_DEMO_ACTIVATION_CODE: process.env.LVIS_DEMO_ACTIVATION_CODE,
       }),
       timeout: 30_000,
     });

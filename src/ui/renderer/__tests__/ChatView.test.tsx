@@ -181,7 +181,7 @@ describe("ChatView", () => {
       );
 
       await act(async () => {
-        fireEvent.click(container.querySelector('[data-testid="settings-inline-back"]')!);
+        fireEvent.click(container.querySelector('[data-testid="settings-close"]')!);
       });
 
       await waitFor(() => {

@@ -6,8 +6,7 @@
 // provided by Electron at runtime, must share a singleton across plugins, or
 // need real node_modules paths at runtime.
 import { build, context } from "esbuild";
-import { existsSync, rmSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,92 +15,6 @@ const repoRoot = resolve(__dirname, "..");
 const outfile = resolve(repoRoot, "dist", "src", "main", "main.js");
 const watchMode = process.argv.includes("--watch");
 
-// Embedded activation key (internal-distribution builds). An explicit
-// `LVIS_EMBED_DEMO_ACTIVATION` env var takes precedence over the
-// gitignored repo-root `.env.demo`; neither source present → empty string
-// and the login flow keeps the manual activation-key paste input. The
-// activation string never enters git — it exists only in the produced
-// bundle (see src/main/demo-embedded-activation.ts for the threat-model
-// note on collapsing the codec's 2-factor delivery for these builds).
-//
-// Resolved once per process: under `--watch` the embed is frozen at
-// watch-start, so adding or editing `.env.demo` mid-watch requires a
-// watcher restart to take effect. The dev flow (`bun run dev`) is
-// unaffected — run-electron.mjs injects `.env.demo` into process.env at
-// runtime, so the embedded-key path is primarily a packaged-build concern.
-//
-// #1498 — public/external distribution channel guard. `LVIS_DISTRIBUTION_CHANNEL`
-// defaults to "internal" (unset = internal, zero regression for every existing
-// build/CI/dev invocation). Only an EXPLICIT "public" value activates the
-// guard: embedding a demo activation key into a build destined for an external
-// channel would collapse the codec's 2-factor delivery model for an audience
-// outside the internal network boundary the threat model assumes (see
-// src/main/demo-embedded-activation.ts). Fail loud — same pattern as the
-// malformed-key guard below — rather than silently stripping the embed, so a
-// misconfigured public release pipeline is caught at build time, not by an
-// after-the-fact security review.
-const DISTRIBUTION_CHANNEL = (process.env.LVIS_DISTRIBUTION_CHANNEL ?? "internal").trim();
-function assertNoPublicEmbed() {
-  if (DISTRIBUTION_CHANNEL !== "public") return;
-  const hasExplicitEnv = Boolean(process.env.LVIS_EMBED_DEMO_ACTIVATION?.trim());
-  const hasEnvDemoFile = existsSync(resolve(repoRoot, ".env.demo"));
-  if (hasExplicitEnv || hasEnvDemoFile) {
-    process.stderr.write(
-      "[esbuild-main] LVIS_DISTRIBUTION_CHANNEL=public forbids an embedded demo " +
-        "activation key. Remove LVIS_EMBED_DEMO_ACTIVATION / .env.demo from this " +
-        "build's environment, or unset LVIS_DISTRIBUTION_CHANNEL for an internal " +
-        "build (see docs/development/release-process.md).\n",
-    );
-    process.exit(1);
-  }
-}
-assertNoPublicEmbed();
-
-const ACTIVATION_WIRE_RE = /^LVIS-DEMO:v1:[A-Za-z0-9_-]+$/;
-function resolveEmbeddedActivationCode() {
-  const explicit = process.env.LVIS_EMBED_DEMO_ACTIVATION?.trim();
-  if (explicit) {
-    // Fail loud on a malformed env embed — same no-silent-downgrade rule
-    // the `.env.demo` branch below honors. A typo'd / plaintext / truncated
-    // value would otherwise ship `autoActivatable=true` and silently
-    // degrade to the manual-paste fallback on first launch, defeating the
-    // zero-input goal. Structural check only (cheap); the full GCM decrypt
-    // still happens at runtime in lvis:demo:activate-embedded.
-    if (!ACTIVATION_WIRE_RE.test(explicit)) {
-      process.stderr.write(
-        "[esbuild-main] LVIS_EMBED_DEMO_ACTIVATION is set but is not a valid " +
-          "LVIS-DEMO:v1:<base64url> string — refusing to embed a malformed key\n",
-      );
-      process.exit(1);
-    }
-    return explicit;
-  }
-  const envDemoPath = resolve(repoRoot, ".env.demo");
-  if (!existsSync(envDemoPath)) return "";
-  // Reuse the canonical encrypt CLI so the embed path and the manual
-  // issuance path share one codec source of truth (bun runs the TS
-  // script natively — same toolchain as the rest of the build).
-  const encrypt = spawnSync(
-    "bun",
-    [resolve(repoRoot, "scripts", "encrypt-demo-credentials.ts"), envDemoPath],
-    { encoding: "utf8" },
-  );
-  if (encrypt.status !== 0) {
-    // A present-but-unusable `.env.demo` is a build error, not a silent
-    // downgrade to manual activation — fail loud so the packaging machine
-    // never ships a build that quietly lost its zero-input demo flow.
-    process.stderr.write(
-      `[esbuild-main] embedded activation encrypt failed: ${encrypt.stderr || encrypt.error?.message || "unknown"}\n`,
-    );
-    process.exit(1);
-  }
-  return encrypt.stdout.trim();
-}
-
-const embeddedActivationCode = resolveEmbeddedActivationCode();
-process.stdout.write(
-  `[esbuild-main] embedded activation key: ${embeddedActivationCode.length > 0 ? "present" : "absent"}\n`,
-);
 
 const buildOptions = {
   entryPoints: [resolve(repoRoot, "src", "main.ts")],
@@ -111,9 +24,6 @@ const buildOptions = {
   platform: "node",
   target: ["node20"],
   legalComments: "none",
-  define: {
-    __LVIS_EMBEDDED_DEMO_ACTIVATION_CODE__: JSON.stringify(embeddedActivationCode),
-  },
   external: [
     "electron",
     "electron-updater",

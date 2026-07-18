@@ -7,11 +7,6 @@
 //   node scripts/capture-screenshots.mjs --grep chat    # filter by key substring
 //   node scripts/capture-screenshots.mjs --skip-build   # reuse an existing dist/
 //
-// Env:
-//   LVIS_DEMO_ACTIVATION_CODE  — optional; only needed for scenarios that
-//                                require demo-gated vendor login (none in the
-//                                current matrix — see test/screenshots/README.md).
-//
 // Requires `bun install` to have been run in this worktree already (this
 // script does not install dependencies).
 

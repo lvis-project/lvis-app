@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
   type Dispatch,
-  type SetStateAction,
 } from "react";
 import type { getApi } from "../api-client.js";
 import {
@@ -14,7 +13,6 @@ import {
   type OnboardingChainEvent,
   type OnboardingChainStage,
 } from "../onboarding/onboarding-chain.js";
-import { shouldOpenDemoReactivationOnBoot } from "../onboarding/demo-reactivation-gate.js";
 import { hasSeenFirstBootTour } from "../onboarding/first-boot-tour-gate.js";
 import { LLM_VENDORS } from "../../../shared/llm-vendor-defaults.js";
 
@@ -35,18 +33,15 @@ export interface UseOnboardingChainControllerResult {
    * so downstream empty-state branches stay in their loading shape (#1014).
    */
   effectiveHasApiKey: boolean | null;
-  reactivationOpen: boolean;
-  setReactivationOpen: Dispatch<SetStateAction<boolean>>;
 }
 
 /**
  * The Z onboarding chain controller, extracted verbatim from App.tsx.
  *
- * Owns the chain reducer, `hasApiKey`, the demo-reactivation flag, and the
- * boot-probe generation counter, plus the four onboarding effects: the first-
- * boot probe (classifies the boot exactly once per generation), the completion
- * + tour-broadcast side-effects (StrictMode-guarded via refs), the logout /
- * reactivate broadcast listeners, and the ⌘/Ctrl+Shift+/ tour shortcut.
+ * Owns the chain reducer, `hasApiKey`, and the boot-probe generation counter,
+ * plus the onboarding effects: the first-boot probe (classifies each boot
+ * generation once), completion + tour-broadcast side-effects
+ * (StrictMode-guarded via refs), and the ⌘/Ctrl+Shift+/ tour shortcut.
  *
  * Only depends on `api`; every transition after the probe is driven by user
  * actions on the chain dialogs (dispatchChain) so the funnel stays deterministic.
@@ -87,11 +82,10 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
   const memorySeedIntroduction = chainState.memorySeed.introduction;
 
 
-  const [reactivationOpen, setReactivationOpen] = useState(false);
   // Z chain — `tourCompleted` gates the PostTourFirstTask proposal. It is
   // true ONLY once the user finished or dismissed the first-run tour and
   // reached `done` with completionReason "chain".
-  // `done` reached via `probe-skip` (returning user / demo relaunch)
+  // `done` reached via `probe-skip` (returning user)
   // remains excluded because
   //     the tour was never shown, so a "post-tour" proposal is wrong.
   const tourCompleted =
@@ -114,7 +108,6 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
   // the freshly-cleared state. Without this the original `firstBootProbedRef`
   // boolean gate (now removed) prevented logout from re-entering the
   // ScenarioShowcase.
-  const [bootProbeGen, setBootProbeGen] = useState(0);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -128,13 +121,6 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
         void checkApiKey();
         const settings = await api.getSettings();
         if (cancelled) return;
-        const demoStatus = await api.demo.status().catch(() => null);
-        if (cancelled) return;
-        if (shouldOpenDemoReactivationOnBoot(settings, demoStatus)) {
-          dispatchChain({ type: "probe-skip" });
-          setReactivationOpen(true);
-          return;
-        }
         if (settings.features?.onboardingCompleted === true) {
           dispatchChain({ type: "probe-skip" });
           return;
@@ -173,7 +159,7 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
       }
     })();
     return () => { cancelled = true; };
-  }, [api, checkApiKey, bootProbeGen]);
+  }, [api, checkApiKey]);
 
   const markOnboardingCompleted = useCallback(async () => {
     try {
@@ -231,29 +217,6 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
   //
 
 
-  useEffect(() => {
-
-
-    const unsubLogout = api.auth?.onLogoutReset?.(() => {
-      dispatchChain({ type: "logout-reset" });
-      chainTourBroadcastRef.current = false;
-      chainCompletionPersistedRef.current = false;
-      // Bump the boot-probe generation so the existing probe effect re-runs
-      // against the now-cleared settings (`onboardingCompleted=false`) and
-      // wipes-clear vendor keys. Without this the chain would stay at `idle`
-      // forever because `dispatchChain({logout-reset})` collapses to idle
-      // but no follow-up `probe-start` ever fires.
-      setBootProbeGen((g) => g + 1);
-      void checkApiKey();
-    });
-    const unsubReactivate = api.auth?.onReactivateDemo?.(() => {
-      setReactivationOpen(true);
-    });
-    return () => {
-      unsubLogout?.();
-      unsubReactivate?.();
-    };
-  }, [api, checkApiKey]);
 
   // Tutorial-C SpotlightTour trigger (PR #983 follow-up). ⌘+Shift+/ ("⌘?")
   // is the canonical "help" shortcut on macOS; on Windows/Linux Ctrl+Shift+/
@@ -311,7 +274,5 @@ export function useOnboardingChainController(api: Api): UseOnboardingChainContro
     tourCompleted,
     checkApiKey,
     effectiveHasApiKey,
-    reactivationOpen,
-    setReactivationOpen,
   };
 }

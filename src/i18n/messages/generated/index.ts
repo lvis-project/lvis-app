@@ -6,7 +6,7 @@
  * objects) and merges the English default catalog here. Non-English generated
  * catalogs are language-pack chunks under `../generated-locales/`.
  *
- * Fragments: 184
+ * Fragments: 182
  */
 import { en as en_actionPanel } from "./actionPanel.js";
 import { en as en_app } from "./app.js";
@@ -111,7 +111,6 @@ import { en as en_htmlPreview } from "./htmlPreview.js";
 import { en as en_inputActionBar } from "./inputActionBar.js";
 import { en as en_lazyCalendar } from "./lazyCalendar.js";
 import { en as en_llmTab } from "./llmTab.js";
-import { en as en_loginModalConversational } from "./loginModalConversational.js";
 import { en as en_mainToolbar } from "./mainToolbar.js";
 import { en as en_marketplaceAnnouncementBanner } from "./marketplaceAnnouncementBanner.js";
 import { en as en_marketplaceTab } from "./marketplaceTab.js";
@@ -177,7 +176,6 @@ import { en as en_trustOriginLabel } from "./trustOriginLabel.js";
 import { en as en_turnActionBar } from "./turnActionBar.js";
 import { en as en_unifiedSearchPanel } from "./unifiedSearchPanel.js";
 import { en as en_usageDashboard } from "./usageDashboard.js";
-import { en as en_useAuthProgress } from "./useAuthProgress.js";
 import { en as en_useChatState } from "./useChatState.js";
 import { en as en_useMemorySearch } from "./useMemorySearch.js";
 import { en as en_usePluginMarketplace } from "./usePluginMarketplace.js";
@@ -297,7 +295,6 @@ export const generatedEn: Record<string, string> = {
   ...en_inputActionBar,
   ...en_lazyCalendar,
   ...en_llmTab,
-  ...en_loginModalConversational,
   ...en_mainToolbar,
   ...en_marketplaceAnnouncementBanner,
   ...en_marketplaceTab,
@@ -363,7 +360,6 @@ export const generatedEn: Record<string, string> = {
   ...en_turnActionBar,
   ...en_unifiedSearchPanel,
   ...en_usageDashboard,
-  ...en_useAuthProgress,
   ...en_useChatState,
   ...en_useMemorySearch,
   ...en_usePluginMarketplace,

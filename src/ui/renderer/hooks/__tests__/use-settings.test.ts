@@ -7,7 +7,6 @@ import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 function makeSettings(): AppSettings {
   return {
     llm: {
-      authMode: "manual",
       provider: "openai",
       vendors: {
         openai: {
