@@ -9,6 +9,80 @@ const lineage = { targetAgentId: 1, interfaceUrl: "https://agent.example.test/a2
 function snapshot(revision: number): A2ARouteSnapshot { return { ...lineage, snapshotId: `snapshot-${revision}`, credentialRevisionId: revision, credentialVersion: 1, credentialProvider: "vault", credentialExternalVersion: `v${revision}`, advertisedInterfaceId: 6, interfaceHealthObservationId: 7, healthObservedAt: "2026-07-16T00:00:00.000Z", healthExpiresAt: "2099-01-01T00:00:00.000Z", wireConformanceArtifactId: "artifact-1", wireConformanceArtifactDigestSha256: digest, servedSpecObservationId: 8, wireConformanceEvidenceId: 9, controlPlaneHeadSha: "1".repeat(40), lvisAppHeadSha: "2".repeat(40), remoteServerHeadSha: "3".repeat(40), a2aTckTag: "v1.0.0", a2aTckCommitSha: "4".repeat(40), controlPlaneLockDigestSha256: digest, lvisAppLockDigestSha256: digest, remoteServerLockDigestSha256: digest, a2aTckLockDigestSha256: digest, a2aSpecificationUri: A2A_SPECIFICATION_URI, issuedAt: "2026-07-16T00:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z", extensionUri: A2A_EXACT_SEND_REPLAY_URI, authenticationScheme: "Bearer", protocolBinding: "JSONRPC", protocolVersion: "1.0" }; }
 
 describe("A2A remote exact initial replay", () => {
+  it("rejects depth-1 with only a fixed redacted audit before authorization, journal, secret, Hub, or socket effects", async () => {
+    const readJson = vi.fn(async <T>(_name: string, fallback: T) => structuredClone(fallback));
+    const writeJson = vi.fn();
+    const authorize = vi.fn(() => true);
+    const approve = vi.fn();
+    const prepareSecret = vi.fn();
+    const resolve = vi.fn();
+    const invoke = vi.fn();
+    const audit = vi.fn();
+    const store = new A2ARemoteDurableStore({
+      namespace: { readJson, writeJson },
+      encryption: {
+        isEncryptionAvailable: () => true,
+        encryptString: (value) => Buffer.from(value),
+        decryptString: (value) => value.toString(),
+      },
+    });
+    const client = new A2ARemoteClient({
+      enabled: true,
+      authorizer: { authorize },
+      approver: { approve },
+      store,
+      secretResolver: { prepare: prepareSecret },
+      controlPlane: { resolve },
+      transport: { invoke },
+      audit,
+    });
+
+    await expect(client.execute({
+      operationId: "depth-1-rejected",
+      attemptId: "depth-1-attempt",
+      operation: "initial-send",
+      targetLabel: "Agent one",
+      authorization: {
+        ownerId: "child-owner",
+        projectRoot: "/project",
+        profileId: "child-profile",
+        origin: "subagent",
+        depth: 1,
+        targetAgentId: 1,
+        interfaceUrl: lineage.interfaceUrl,
+      },
+      lineage,
+      intendedCredentialRevisionId: 11,
+      request: {
+        id: 1,
+        method: A2AJsonRpcMethod.SEND_MESSAGE,
+        params: {
+          message: {
+            messageId: "depth-1-message",
+            role: "ROLE_USER",
+            parts: [{ text: "must not leave the host" }],
+          },
+        },
+      },
+      messageId: "depth-1-message",
+    })).resolves.toEqual({ ok: false, outcome: "not-sent" });
+
+    expect(authorize).not.toHaveBeenCalled();
+    expect(approve).not.toHaveBeenCalled();
+    expect(readJson).not.toHaveBeenCalled();
+    expect(writeJson).not.toHaveBeenCalled();
+    expect(prepareSecret).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(audit).toHaveBeenCalledTimes(1);
+    expect(audit).toHaveBeenCalledWith({
+      type: "a2a-remote-operation",
+      operation: "initial-send",
+      outcome: "unauthorized",
+      code: "host-authorization-failed",
+    });
+  });
+
   it.each([
     ["explicit deny", "deny"],
     ["thrown gate", "throw"],

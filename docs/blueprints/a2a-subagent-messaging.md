@@ -1541,6 +1541,40 @@ Agent Hub route resolution is no-store. Revocation before resolve blocks the
 socket and the only residual resolve-commit-to-socket race is recorded with its
 fixed redacted audit outcome.
 
+#### D8 post-routing decision review (retained creation depth-1, 2026-07-18)
+
+The separate D8 review keeps the creation graph at depth 1. P4-5 made a direct
+remote route available to the main host, but it produced no evidence that
+recursive local or remote creation is necessary or safe:
+
+- The remote client rejects any authorization whose depth is not zero before
+  host authorization, approval, durable preparation, secret resolution, route
+  resolution, or network activity. The main-owned controller supplies only
+  depth zero, while depth-1 child and resumed-child tool surfaces still exclude
+  agent creation.
+- Current local and CI regressions prove the depth hard-stop, scoped tool
+  removal, and resume invariants. The packaged-live gate is not yet complete,
+  so there is no signed cross-host reliability, latency, recovery, or operator
+  evidence that could justify multiplying task ownership and failure states.
+- Deeper creation would require new limits for fan-out, total descendants,
+  budgets, cancellation propagation, approval ownership, credential scope,
+  audit lineage, retention, and recovery. None of those policies is implied by
+  A2A messaging or by a routable Agent Card.
+
+Therefore D8 remains **creation depth-1 with no compatibility alias or
+fallback**. This creation-depth limit forbids recursive agent creation; it is
+not the remote client's `authorization.depth` value, which must remain zero.
+A future proposal may reopen creation depth only when both conditions hold:
+
+1. The signed packaged-live matrix passes.
+2. The proposal supplies a concrete user need, a threat model, bounded resource
+   and delegation policy, explicit user-approval semantics, end-to-end audit and
+   recovery design, and adversarial regressions proving fail-closed behavior
+   before any authorization, durable state mutation, secret, control-plane, or
+   network effect other than the fixed redacted rejection audit.
+
+Until then, messaging may expand the communication graph only.
+
 ## Cross-host implementation review and follow-on constraints
 
 A fourth review lane compared current CLI/Desktop hosts using primary sources. The detailed notes and contribution drafts live in [the upstream contribution candidates](../research/a2a-upstream-contribution-candidates.md).
