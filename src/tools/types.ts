@@ -14,6 +14,8 @@
 import type { ChatInputOrigin } from "../shared/chat-origin.js";
 
 export type ToolSource = "builtin" | "plugin" | "mcp";
+import type { HostShellExecutionPlan } from "../permissions/host-shell-execution-plan.js";
+import type { HostShellExecutionPermit } from "../permissions/host-shell-execution-permit.js";
 export type TrustLevel = "high" | "medium" | "low";
 
 /**
@@ -105,6 +107,16 @@ export interface ToolExecutionContext {
    * can confine writes to the plugin's namespace rather than the bare cwd.
    */
   ownerPluginSandboxRoot?: string;
+  /**
+   * Host-generated once before permission processing for builtin bash/PowerShell.
+   * Tool code must use this plan rather than recomputing a late fallback.
+   */
+  hostShellExecutionPlan?: HostShellExecutionPlan;
+  /**
+   * Opaque one-shot approval proof for a requested-sandbox plain-shell fallback.
+   * It is minted only after allow-once and is consumed by bash/PowerShell.
+   */
+  hostShellExecutionPermit?: HostShellExecutionPermit;
   metadata: Record<string, unknown>;
 
 

@@ -34,6 +34,12 @@
 import { t } from "../i18n/index.js";
 import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { SandboxConfinement } from "../shared/sandbox-capability-info.js";
+import {
+  buildHostShellExecutionPlan,
+  getHostShellExecutionPlanAuditProjection,
+  type HostShellExecutionPlan,
+  type HostShellExecutionPlanAuditProjection,
+} from "./host-shell-execution-plan.js";
 
 // RENDERER-SAFETY: this module is imported by the renderer (ToolApprovalDialog
 // uses isWeakSandbox / the types), so it MUST NOT statically import
@@ -98,6 +104,8 @@ export interface SandboxCapability {
  */
 let _activeCapability: SandboxCapability | undefined;
 let _sandboxGeneration = 0;
+let _sandboxRequestedAtBoot = false;
+const _issuedHostShellExecutionPlans = new WeakSet<HostShellExecutionPlan>();
 
 /** Monotonic identity for capability and wrapped-worker membership changes. */
 export function getSandboxGeneration(): string {
@@ -114,6 +122,30 @@ export function setActiveSandboxCapability(cap: SandboxCapability): void {
   _activeCapability = cap;
   _sandboxGeneration += 1;
 }
+/**
+ * Publish the one boot-time sandbox intent snapshot. This is deliberately
+ * independent from the live active capability: requested-on-but-degraded and
+ * explicit-off both have kind="none", yet Windows Plan B must distinguish them
+ * without re-reading mutable renderer settings.
+ *
+ * @internal — only the boot-time sandbox init path and tests should call this.
+ */
+export function setSandboxRequestedAtBoot(requested: boolean): void {
+  if (_sandboxRequestedAtBoot !== requested) _sandboxGeneration += 1;
+  _sandboxRequestedAtBoot = requested;
+}
+
+/** True only when the sandbox was requested for this process at boot. */
+export function isSandboxRequestedAtBoot(): boolean {
+  return _sandboxRequestedAtBoot;
+}
+
+/** @internal — test teardown only. */
+export function __resetSandboxRequestedAtBootForTest(): void {
+  if (_sandboxRequestedAtBoot) _sandboxGeneration += 1;
+  _sandboxRequestedAtBoot = false;
+}
+
 
 /**
  * Reset the active capability cache. Used by test teardown.
@@ -145,6 +177,32 @@ export function detectSandboxCapability(): SandboxCapability {
     reason: "no OS sandbox configured for the host process",
   };
 }
+/**
+ * Resolve the boot-sealed execution plan for builtin host shell tools.
+ * It is intentionally separate from detectSandboxCapability(): Windows Plan B
+ * selects a plain child and must not present the process-global partial ASRT
+ * capability as if it confined that child.
+ */
+export function getHostShellExecutionPlan(): HostShellExecutionPlan {
+  const plan = buildHostShellExecutionPlan({
+    platform: process.platform,
+    requestedSandbox: isSandboxRequestedAtBoot(),
+    activeCapability: detectSandboxCapability(),
+  });
+  _issuedHostShellExecutionPlans.add(plan);
+  return plan;
+}
+
+/**
+ * True only for a plan produced by the host's live provider. Shell tools use
+ * this to reject structural lookalikes passed by a direct in-process caller.
+ */
+export function isIssuedHostShellExecutionPlan(
+  plan: HostShellExecutionPlan,
+): boolean {
+  return _issuedHostShellExecutionPlans.has(plan);
+}
+
 
 /**
  * Tool names whose effects run on the ASRT-wrapped host-shell substrate.
@@ -369,9 +427,14 @@ export function resolveReviewerSandboxCapability(
   mcpServerId?: string,
   workerId?: string,
   pluginId?: string,
+  hostShellExecutionPlan?: HostShellExecutionPlan,
 ): SandboxCapability {
   if (source === "builtin" && ASRT_WRAPPED_SHELL_TOOLS.has(toolName)) {
-    return detectSandboxCapability();
+    // The executor seals this plan before any reviewer/cache path. Never
+    // recompute a host-shell substrate after it has been selected for an
+    // invocation; an ASRT teardown must become a fail-closed execution error,
+    // not a reviewer verdict for a different late fallback.
+    return hostShellExecutionPlan?.capability ?? getHostShellExecutionPlan().capability;
   }
   // worker-confinement PR D-1: a wrapped host-spawned plugin worker genuinely
   // runs under ASRT — report its real capability so the reviewer composition
@@ -433,6 +496,8 @@ export interface ReviewerSandboxCacheState {
   readonly mcpServerId?: string;
   readonly pluginId?: string;
   readonly workerId?: string;
+  /** Present only for a canonical builtin shell with a host-sealed plan. */
+  readonly hostShellExecutionPlan?: HostShellExecutionPlanAuditProjection;
   readonly capability: {
     readonly kind: SandboxKind;
     readonly confidence: SandboxConfidence;
@@ -457,6 +522,7 @@ export function resolveReviewerSandboxCacheState(
   mcpServerId?: string,
   workerId?: string,
   pluginId?: string,
+  hostShellExecutionPlan?: HostShellExecutionPlan,
 ): ReviewerSandboxCacheState {
   const capability = resolveReviewerSandboxCapability(
     source,
@@ -464,7 +530,14 @@ export function resolveReviewerSandboxCacheState(
     mcpServerId,
     workerId,
     pluginId,
+    hostShellExecutionPlan,
   );
+  const hostShellExecutionPlanAudit =
+    source === "builtin" &&
+    ASRT_WRAPPED_SHELL_TOOLS.has(toolName) &&
+    hostShellExecutionPlan !== undefined
+      ? getHostShellExecutionPlanAuditProjection(hostShellExecutionPlan)
+      : undefined;
   const substrate = (() => {
     if (source === "builtin" && ASRT_WRAPPED_SHELL_TOOLS.has(toolName)) {
       return "host-shell" as const;
@@ -475,7 +548,9 @@ export function resolveReviewerSandboxCacheState(
   })();
   const wrapped =
     substrate === "host-shell"
-      ? capability.kind === "asrt"
+      ? hostShellExecutionPlan !== undefined
+        ? hostShellExecutionPlan.mode === "asrt"
+        : capability.kind === "asrt"
       : substrate === "mcp-worker" && mcpServerId !== undefined
         ? isMcpServerWrapped(mcpServerId) && capability.kind === "asrt"
         : substrate === "plugin-worker" && pluginId !== undefined && workerId !== undefined
@@ -489,6 +564,9 @@ export function resolveReviewerSandboxCacheState(
     ...(mcpServerId !== undefined ? { mcpServerId } : {}),
     ...(pluginId !== undefined ? { pluginId } : {}),
     ...(workerId !== undefined ? { workerId } : {}),
+    ...(hostShellExecutionPlanAudit === undefined
+      ? {}
+      : { hostShellExecutionPlan: hostShellExecutionPlanAudit }),
     capability: {
       kind: capability.kind,
       confidence: capability.confidence,
@@ -588,7 +666,7 @@ export function isWeakSandbox(cap: SandboxCapability): boolean {
  * Behaviour invariant: a full-confine ASRT relaxes ALL categories, matching the
  * historical `isWeakSandbox(cap) === false` behavior. A partial-confine ASRT
  * relaxes only the categories covered by its declared dimensions. This actively
- * applies on Windows ASRT 0.0.64 (`filesystem + network`, no process): network
+ * applies on Windows ASRT 0.0.66 (`filesystem + network`, no process): network
  * and filesystem-bearing read/write/meta calls may relax, but shell calls may
  * not relax because process isolation is absent.
  */

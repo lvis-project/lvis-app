@@ -7,6 +7,10 @@
  * callbacks. No executor state is touched.
  */
 import { maskSensitiveData } from "../../audit/dlp-filter.js";
+import {
+  getHostShellExecutionPlanCacheIdentity,
+  type HostShellExecutionPlanAuditProjection,
+} from "../../permissions/host-shell-execution-plan.js";
 import type { PermissionReviewEvent } from "../../shared/permission-review-status.js";
 import type { Tool } from "../base.js";
 import type {
@@ -45,14 +49,25 @@ export function approvalCacheKeyFor(
   tool: Tool,
   input: Record<string, unknown>,
   cwd: string,
+  hostShellExecutionPlan?: HostShellExecutionPlanAuditProjection,
 ): string | undefined {
   const rawKey = tool.approvalCacheKey?.(input, { cwd });
-  if (rawKey === undefined) return undefined;
-  const key = rawKey.trim();
-  if (!key) {
+  const key = rawKey?.trim();
+  if (rawKey !== undefined && !key) {
     throw new Error(`approvalCacheKey for ${tool.name} returned an empty key`);
   }
-  return `${tool.name}:${key}`;
+  const base = key === undefined ? undefined : `${tool.name}:${key}`;
+  if (hostShellExecutionPlan === undefined) return base;
+
+  const planIdentity = getHostShellExecutionPlanCacheIdentity(
+    hostShellExecutionPlan,
+  );
+  // A canonical host shell still needs a plan partition when it does not
+  // declare a tool-specific key: lookupApproval also receives canonical args,
+  // so this only adds the sealed execution substrate to that identity.
+  return base === undefined
+    ? `${tool.name}:${planIdentity}`
+    : `${base}:${planIdentity}`;
 }
 
 export function emitToolStart(

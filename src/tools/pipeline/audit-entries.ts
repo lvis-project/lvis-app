@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import type { Tool } from "../base.js";
 import type { ToolSource, ToolCategory } from "../types.js";
 import type { PermissionCheckResult } from "../../permissions/permission-manager.js";
-import type { PermissionAuditEntryInput, HookResult } from "../../audit/audit-schema.js";
+import type { PermissionAuditEntryInput, HookResult, ToolExecutionAuditMetadata } from "../../audit/audit-schema.js";
 import type { HookTrustOrigin, ScriptHookInvocationResult } from "../../hooks/script-hook-types.js";
 import type { HookDispatchResult } from "../../hooks/script-hook-manager.js";
 import type { ToolPermissionContext } from "../executor.js";
@@ -73,13 +73,16 @@ function permissionAuditBase(args: {
   source: ToolSource;
   category: ToolCategory;
   trustOrigin: HookTrustOrigin;
+  audit?: ToolExecutionAuditMetadata;
 }): Pick<
   Extract<PermissionAuditEntryInput, { decision: "allow" }>,
-  "ts" | "auditId" | "trustOrigin" | "tool" | "source" | "category"
+  "ts" | "auditId" | "toolUseId" | "executionPlan" | "trustOrigin" | "tool" | "source" | "category"
 > {
   return {
     ts: new Date().toISOString(),
     auditId: randomUUID(),
+    ...(args.audit?.toolUseId !== undefined ? { toolUseId: args.audit.toolUseId } : {}),
+    ...(args.audit?.executionPlan !== undefined ? { executionPlan: args.audit.executionPlan } : {}),
     trustOrigin: args.trustOrigin,
     tool: args.toolName,
     source: args.source,
@@ -168,6 +171,7 @@ export function permissionAuditEntryFromToolCall(args: {
   cwd: string;
   auditDirectory?: string;
   hookChain?: HookResult[];
+  audit?: ToolExecutionAuditMetadata;
 }): PermissionAuditEntryInput {
   const base = permissionAuditBase(args);
   if (args.permission?.deferred) {
@@ -225,6 +229,7 @@ export function permissionAuditAskEntryFromToolCall(args: {
   trustOrigin: HookTrustOrigin;
   cwd: string;
   auditDirectory?: string;
+  audit?: ToolExecutionAuditMetadata;
 }): PermissionAuditEntryInput {
   const auditDirectory = auditDirectoryForInput(args.tool, args.input, args.cwd, args.auditDirectory);
   const askEntry: Extract<PermissionAuditEntryInput, { decision: "ask" }> = {

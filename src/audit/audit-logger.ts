@@ -120,6 +120,15 @@ export interface AuditEntry {
     source?: string;
     trust?: string;
     executionTimeMs?: number;
+    /** Host tool-use correlation, when an execution pipeline supplied one. */
+    toolUseId?: string;
+    /**
+     * Public-safe host shell substrate selected for the invocation. This
+     * deliberately excludes tool arguments, paths, permits, and approval
+     * integrity material.
+     */
+    executionPlan?: import("../permissions/host-shell-execution-plan.js").HostShellExecutionPlanAuditProjection;
+
     permissionDecision?: string;
     permissionReason?: string;
     rateLimitRemaining?: number;

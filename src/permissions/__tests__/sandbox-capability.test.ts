@@ -1,16 +1,22 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import { setProcessPlatform } from "../../testing/process-platform.js";
+
 import {
   __resetActiveSandboxCapabilityForTest,
   detectSandboxCapability,
   formatSandboxCapabilityForPrompt,
+  __resetSandboxRequestedAtBootForTest,
   isActiveSandboxFilesystemContained,
   isActiveSandboxFilesystemContainedForPluginEffects,
+  getHostShellExecutionPlan,
+  resolveReviewerSandboxCapability,
   isActiveSandboxShellContained,
   isWeakSandbox,
   markPluginWorkerWrapped,
   sandboxRelaxesCategory,
   setActiveSandboxCapability,
+  setSandboxRequestedAtBoot,
   unmarkPluginWorkerWrapped,
   type SandboxCapability,
 } from "../sandbox-capability.js";
@@ -418,6 +424,54 @@ describe("formatSandboxCapabilityForPrompt — per-dimension confines", () => {
     expect(result).toContain("executionSandbox=asrt (verified, win32)");
     expect(result).toContain("confines[net:✓ fs:✓ proc:✗]");
   });
+
+
+describe("sandbox-capability — boot-sealed host shell plan", () => {
+  const originalPlatform = process.platform;
+
+  afterEach(() => {
+    __resetActiveSandboxCapabilityForTest();
+    __resetSandboxRequestedAtBootForTest();
+    setProcessPlatform(originalPlatform);
+  });
+
+  it("reports Windows requested partial host shells as effective none to the reviewer", () => {
+    setProcessPlatform("win32");
+    setSandboxRequestedAtBoot(true);
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "srt-win active",
+      confines: { filesystem: true, process: false, network: true },
+    });
+
+    const plan = getHostShellExecutionPlan();
+    expect(plan).toMatchObject({
+      mode: "plain",
+      fallbackReason: "windows-partial-shell-acl-unsafe",
+      requiresExplicitUserApproval: true,
+      capability: {
+        kind: "none",
+        confines: { filesystem: false, process: false, network: false },
+      },
+    });
+    expect(resolveReviewerSandboxCapability("builtin", "bash")).toMatchObject({
+      kind: "none",
+      confines: { filesystem: false, process: false, network: false },
+    });
+  });
+
+  it("does not turn explicit sandbox-off into the Windows one-shot fallback", () => {
+    setProcessPlatform("win32");
+    setSandboxRequestedAtBoot(false);
+
+    const plan = getHostShellExecutionPlan();
+    expect(plan.mode).toBe("plain");
+    expect(plan.fallbackReason).toBe("none");
+    expect(plan.requiresExplicitUserApproval).toBe(false);
+  });
+});
 
   it("surfaces all-✓ confines for a full-confine asrt", () => {
     const full: SandboxCapability = {
