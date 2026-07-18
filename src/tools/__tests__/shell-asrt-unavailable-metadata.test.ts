@@ -36,7 +36,8 @@ function expectPreSpawnFailuresToBeUnavailable(
   expect(wrapFailure).toContain(unavailableMetadata);
   expect(emptyArgvFailure).toContain(unavailableMetadata);
   expect(spawnFailure).toContain(unavailableMetadata);
-  expect(implementation.match(new RegExp(unavailableMetadata.replace(/[{}]/g, "\\$&"), "g"))).toHaveLength(3);
+  const unavailableMetadataOccurrences = implementation.split(unavailableMetadata).length - 1;
+  expect(unavailableMetadataOccurrences).toBe(3);
 }
 
 describe("ASRT unavailable metadata", () => {
