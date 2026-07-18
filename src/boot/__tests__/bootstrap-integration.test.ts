@@ -438,6 +438,7 @@ vi.mock("../../permissions/sandbox-capability.js", () => ({
   isActiveSandboxShellContained: vi.fn(() => false),
   isActiveSandboxFilesystemContainedForPluginEffects: vi.fn(() => false),
   setActiveSandboxCapability: vi.fn(),
+  setSandboxRequestedAtBoot: vi.fn(),
 }));
 vi.mock("../../permissions/asrt-sandbox.js", () => ({
   initializeAsrtSandbox: vi.fn(async () => {}),
