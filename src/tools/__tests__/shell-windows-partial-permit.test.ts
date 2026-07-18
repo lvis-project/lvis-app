@@ -6,31 +6,16 @@ import {
   __resetActiveSandboxCapabilityForTest,
   __resetSandboxRequestedAtBootForTest,
   getHostShellExecutionPlan,
-  setActiveSandboxCapability,
-  setSandboxRequestedAtBoot,
 } from "../../permissions/sandbox-capability.js";
 import { buildHostShellExecutionPlan } from "../../permissions/host-shell-execution-plan.js";
 import { setProcessPlatform } from "../../testing/process-platform.js";
+import {
+  partialWindowsAsrt,
+  requestedSandboxUnavailable,
+} from "../../testing/host-shell-sandbox-fixtures.js";
 
 const ORIGINAL_PLATFORM = process.platform;
 
-function partialWindowsAsrt(): void {
-  setProcessPlatform("win32");
-  setSandboxRequestedAtBoot(true);
-  setActiveSandboxCapability({
-    kind: "asrt",
-    confidence: "verified",
-    platform: "win32",
-    reason: "srt-win partial",
-    confines: { filesystem: true, process: false, network: true },
-  });
-}
-
-function requestedSandboxUnavailable(platform: "darwin" | "linux" | "win32"): void {
-  setProcessPlatform(platform);
-  __resetActiveSandboxCapabilityForTest();
-  setSandboxRequestedAtBoot(true);
-}
 function context(plan: ToolExecutionContext["hostShellExecutionPlan"]): ToolExecutionContext {
   return {
     cwd: process.cwd(),
