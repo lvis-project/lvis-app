@@ -4,6 +4,7 @@ import type {
   PermissionReviewStatus,
 } from "../shared/permission-review-status.js";
 import type { LLMVendor } from "../shared/llm-vendor-defaults.js";
+import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
 import { t } from "../i18n/index.js";
 
 export type TokenUsageSegment = {
@@ -43,6 +44,8 @@ export type StreamEvent = {
   source?: "builtin" | "plugin" | "mcp";
   pluginId?: string;
   mcpServerId?: string;
+  /** Renderer-safe host shell substrate projection on tool completion. */
+  executionPlan?: HostShellExecutionPlanAuditProjection;
   verdictLevel?: PermissionReviewRiskLevel;
   approvalPurpose?: ApprovalPurposeSuggestion;
   roundIndex?: number;
@@ -149,6 +152,8 @@ export type ToolEntryItem = {
   category?: "read" | "write" | "shell" | "network" | "meta";
   pluginId?: string;
   mcpServerId?: string;
+  /** Renderer-safe host shell substrate projection on tool completion. */
+  executionPlan?: HostShellExecutionPlanAuditProjection;
   /** Optional MCP Apps UI payload from MCP tool response. */
   uiPayload?: {
     serverId: string;
@@ -761,6 +766,7 @@ export function applyToolEnd(
     category?: "read" | "write" | "shell" | "network" | "meta";
     pluginId?: string;
     mcpServerId?: string;
+    executionPlan?: ToolEntryItem["executionPlan"];
   },
 ): ChatEntry[] {
   const next = [...entries];
@@ -785,6 +791,9 @@ export function applyToolEnd(
       ...(payload.category ? { category: payload.category } : {}),
       ...(payload.pluginId ? { pluginId: payload.pluginId } : {}),
       ...(payload.mcpServerId ? { mcpServerId: payload.mcpServerId } : {}),
+      ...(payload.executionPlan !== undefined
+        ? { executionPlan: payload.executionPlan }
+        : {}),
       ...(payload.uiPayload && { uiPayload: payload.uiPayload }),
       ...(typeof payload.durationMs === "number" && { durationMs: payload.durationMs }),
     };

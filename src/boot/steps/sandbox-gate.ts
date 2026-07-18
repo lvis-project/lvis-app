@@ -10,7 +10,9 @@ export type SandboxGateReason =
   | "deps-present"
   | "degrade-windows-not-installed"
   | "degrade-default-cannot-activate"
-  | "abort-explicit-cannot-activate";
+  | "abort-explicit-cannot-activate"
+  | "degrade-linux-runtime-probe-failed"
+  | "abort-linux-runtime-probe-failed";
 
 export interface SandboxGateInputs {
   /** `features.osToolSandbox` — staged default value or Settings toggle. */

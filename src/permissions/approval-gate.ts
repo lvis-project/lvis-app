@@ -23,6 +23,15 @@ import {
 } from "../shared/rationale-approval-display.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import type { ApprovalPurposeSuggestion } from "../shared/permission-review-status.js";
+import { parseHostShellExecutionInput } from "./host-shell-execution-input.js";
+import {
+  type HostShellExecutionPermitBinding,
+} from "./host-shell-execution-permit.js";
+import {
+  getHostShellExecutionPlanAuditProjection,
+  isIssuedHostShellExecutionPlanAuditProjection,
+  type HostShellExecutionPlanAuditProjection,
+} from "./host-shell-execution-plan.js";
 
 // ─── Args DLP masking ────────────────────────────────
 
@@ -135,6 +144,12 @@ export interface ApprovalRequest {
    */
   sandboxCapability?: SandboxCapability;
   /**
+   * Renderer-safe, allowlist-only execution substrate snapshot for a host shell
+   * action. It intentionally contains no command, CWD, directory scope,
+   * approval binding, permit, nonce, or HMAC material.
+   */
+  executionPlan?: HostShellExecutionPlanAuditProjection;
+  /**
    * §S1: absolute filesystem path the tool intends to touch. When set and
    * matched against SENSITIVE_PATH_PATTERNS, the request is hard-blocked
    * BEFORE the user dialog is shown. Cannot be overridden.
@@ -190,6 +205,28 @@ export interface ApprovalRequest {
    */
   hmac?: string;
 }
+
+/**
+ * Input accepted by {@link ApprovalGate.requestAndWait} before the host seals
+ * nonce/HMAC and derives the renderer-facing `requireExplicit` field.
+ *
+ * `forceExplicit` is deliberately one-way: callers can only make a dialog
+ * stricter than the current policy, never relax it. It is used by execution
+ * routes whose substrate requires per-invocation, affirmative consent.
+ */
+export type ApprovalRequestInput = Omit<
+  ApprovalRequest,
+  "requireExplicit" | "executionPlan"
+> & {
+  /** Host-issued safe projection; structural lookalikes are rejected before IPC. */
+  readonly executionPlan?: HostShellExecutionPlanAuditProjection;
+  readonly forceExplicit?: true;
+  /**
+   * Host-only binding for an explicit plain-shell fallback permit. It is retained only
+   * in the pending entry and never serialized to the renderer or audit payload.
+   */
+  readonly hostShellExecutionPermitBinding?: HostShellExecutionPermitBinding;
+};
 
 export type ApprovalChoice =
   "allow-once" | "allow-session" | "allow-always" | "deny-once" | "deny-always";
@@ -255,6 +292,89 @@ function markHostApprovalRejectedDecision(
   return decision;
 }
 
+// Renderer-visible approval decisions are ordinary objects. This private map
+// records the exact object that completed an HMAC-verified, explicit, one-shot
+// Plan-B approval, so a structural `{ choice: "allow-once" }` cannot mint a
+// plain-shell capability.
+const hostApprovedOneShotExecutionBindings = new WeakMap<
+  ApprovalDecision,
+  HostShellExecutionPermitBinding
+>();
+
+function sameHostShellExecutionPermitBinding(
+  actual: HostShellExecutionPermitBinding,
+  expected: HostShellExecutionPermitBinding,
+): boolean {
+  return (
+    actual.planIdentity === expected.planIdentity &&
+    actual.plan === expected.plan &&
+    actual.toolName === expected.toolName &&
+    actual.toolUseId === expected.toolUseId &&
+    actual.command === expected.command &&
+    actual.requestedCwd === expected.requestedCwd &&
+    actual.executionCwd === expected.executionCwd &&
+    actual.resolvedCwd === expected.resolvedCwd &&
+    actual.timeoutSeconds === expected.timeoutSeconds &&
+    actual.allowedDirectories.length === expected.allowedDirectories.length &&
+    actual.allowedDirectories.every(
+      (directory, index) => directory === expected.allowedDirectories[index],
+    )
+  );
+}
+
+/**
+ * The Plan-B binding is deliberately renderer-invisible, but it must describe
+ * exactly the shell action the renderer is asked to approve. Otherwise an
+ * in-process caller could present a benign request while retaining a binding
+ * for a different plain-host spawn. Normalize only the schema-relevant shell
+ * fields so an omitted default timeout has the same meaning on both sides.
+ */
+function matchesHostShellExecutionPermitBindingRequest(
+  request: Omit<ApprovalRequest, "requireExplicit">,
+  binding: HostShellExecutionPermitBinding,
+): boolean {
+  if (
+    request.category !== "tool" ||
+    (request.kind !== undefined && request.kind !== "tool") ||
+    request.source !== "builtin" ||
+    request.toolCategory !== "shell" ||
+    request.toolName !== binding.toolName
+  ) {
+    return false;
+  }
+  try {
+    const parsed = parseHostShellExecutionInput(request.args);
+    if (parsed === undefined) return false;
+    return canonicalStringify({
+      command: parsed.command,
+      cwd: parsed.cwd ?? null,
+      timeoutSeconds: parsed.timeoutSeconds,
+    }) === canonicalStringify({
+      command: binding.command,
+      cwd: binding.requestedCwd ?? null,
+      timeoutSeconds: binding.timeoutSeconds,
+    });
+  } catch {
+    // A malformed/proxy argument or binding is never approval-equivalent.
+    return false;
+  }
+}
+
+/**
+ * Verify and burn the host-only receipt for a Plan-B execution permit. A
+ * mismatch is terminal for that receipt to prevent action probing or replay.
+ */
+export function consumeHostApprovedOneShotExecutionBinding(
+  decision: ApprovalDecision | undefined,
+  expected: HostShellExecutionPermitBinding,
+): boolean {
+  if (decision === undefined) return false;
+  const actual = hostApprovedOneShotExecutionBindings.get(decision);
+  if (actual === undefined) return false;
+  hostApprovedOneShotExecutionBindings.delete(decision);
+  return sameHostShellExecutionPermitBinding(actual, expected);
+}
+
 interface PendingEntry {
   resolve: (decision: ApprovalDecision) => void;
   reject: (err: Error) => void;
@@ -277,6 +397,8 @@ interface PendingEntry {
    * agent-action) do not propagate a cache key.
    */
   approvalCacheKey?: string;
+  executionPlan?: HostShellExecutionPlanAuditProjection;
+  hostShellExecutionPermitBinding?: HostShellExecutionPermitBinding;
   /** Confused-deputy nonce issued for this request (echoed back verbatim) */
   nonce: string;
   /** Expected HMAC for this request (confused-deputy defense) */
@@ -292,7 +414,7 @@ function formatApprovalAuditFields(fields: {
   sourcePluginId?: string;
   approvalScope?: string;
   trustOrigin?: string;
-}): string {
+}, executionPlan?: HostShellExecutionPlanAuditProjection): string {
   return [
     `toolName=${fields.toolName}`,
     `category=${fields.category}`,
@@ -302,6 +424,18 @@ function formatApprovalAuditFields(fields: {
     `sourcePluginId=${fields.sourcePluginId ?? "none"}`,
     `approvalScope=${fields.approvalScope ?? "none"}`,
     `trustOrigin=${fields.trustOrigin ?? "unknown"}`,
+    ...(executionPlan === undefined ? [] : [
+      `executionPlan.version=${executionPlan.version}`,
+      `executionPlan.identity=${executionPlan.identity}`,
+      `executionPlan.platform=${executionPlan.platform}`,
+      `executionPlan.requestedSandbox=${executionPlan.requestedSandbox}`,
+      `executionPlan.mode=${executionPlan.mode}`,
+      `executionPlan.fallbackReason=${executionPlan.fallbackReason}`,
+      `executionPlan.requiresExplicitUserApproval=${executionPlan.requiresExplicitUserApproval}`,
+      `executionPlan.capability.kind=${executionPlan.capability.kind}`,
+      `executionPlan.capability.confidence=${executionPlan.capability.confidence}`,
+      `executionPlan.capability.confines=${JSON.stringify(executionPlan.capability.confines ?? {})}`,
+    ]),
   ].join(" ");
 }
 /**
@@ -462,9 +596,16 @@ export class ApprovalGate {
    * ConversationLoop.executeOne() awaits this and blocks the turn.
    * The requireExplicit field controls renderer dismiss behavior.
    */
-  async requestAndWait(
-    req: Omit<ApprovalRequest, "requireExplicit">,
-  ): Promise<ApprovalDecision> {
+  async requestAndWait(req: ApprovalRequestInput): Promise<ApprovalDecision> {
+    const {
+      forceExplicit = false,
+      hostShellExecutionPermitBinding,
+      executionPlan: requestedExecutionPlan,
+      sandboxCapability: requestedSandboxCapability,
+      ...request
+    } = req;
+    // Do not forward the host-only binding to renderer or audit payloads.
+    // Audit receives only its allowlist execution-plan projection.
     const rationaleDisplay = parseValidRationaleApprovalDisplay(req);
 
     // Rationale is a host-owned, one-shot approval surface. Validate its
@@ -484,6 +625,92 @@ export class ApprovalGate {
         rememberPattern: "invalid rationale approval display",
       });
     }
+
+    const suppliedExecutionPlan = requestedExecutionPlan === undefined
+      ? undefined
+      : isIssuedHostShellExecutionPlanAuditProjection(requestedExecutionPlan)
+        ? requestedExecutionPlan
+        : undefined;
+    if (requestedExecutionPlan !== undefined && suppliedExecutionPlan === undefined) {
+      // Never copy a structural lookalike into an IPC payload or an audit row:
+      // even additional fields on an otherwise plausible object could leak the
+      // private Plan-B binding/action context.
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "approval-gate",
+        type: "approval",
+        output: `[approval:execution-plan-invalid] ${req.id} ${formatApprovalAuditFields(request)} -> deny-once`,
+      });
+      return markHostApprovalRejectedDecision({
+        requestId: req.id,
+        choice: "deny-once",
+        rememberPattern: "execution plan projection was not issued by the host",
+      });
+    }
+
+    const requestedChoices = req.allowedChoices;
+    const hasOneShotHostShellApprovalContract =
+      forceExplicit === true &&
+      requestedChoices?.length === 2 &&
+      requestedChoices.includes("allow-once") &&
+      requestedChoices.includes("deny-once");
+    if (
+      hostShellExecutionPermitBinding !== undefined &&
+      (
+        !hasOneShotHostShellApprovalContract ||
+        !matchesHostShellExecutionPermitBindingRequest(
+          request,
+          hostShellExecutionPermitBinding,
+        )
+      )
+    ) {
+      // Do not expose the host-only binding to the renderer, and do not retain
+      // it in pending state. A UI request that differs from the bound plain
+      // spawn must never mint a receipt, even after an authenticated response.
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "approval-gate",
+        type: "approval",
+        output: `[approval:host-shell-binding-mismatch] ${req.id} ${formatApprovalAuditFields(request)} -> deny-once`,
+      });
+      return markHostApprovalRejectedDecision({
+        requestId: req.id,
+        choice: "deny-once",
+        rememberPattern: "host shell approval binding did not match displayed request",
+      });
+    }
+    const oneShotPermitBinding =
+      hostShellExecutionPermitBinding !== undefined &&
+      hasOneShotHostShellApprovalContract
+        ? Object.freeze({
+            ...hostShellExecutionPermitBinding,
+            allowedDirectories: Object.freeze([...hostShellExecutionPermitBinding.allowedDirectories]),
+          })
+        : undefined;
+    const boundExecutionPlan = oneShotPermitBinding === undefined
+      ? undefined
+      : getHostShellExecutionPlanAuditProjection(oneShotPermitBinding.plan);
+    if (
+      boundExecutionPlan !== undefined &&
+      suppliedExecutionPlan !== undefined &&
+      suppliedExecutionPlan !== boundExecutionPlan
+    ) {
+      // A Plan-B display must describe the exact host-sealed plan behind the
+      // hidden permit. Do not allow a second, even host-issued, projection to
+      // make the user approve a different substrate.
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "approval-gate",
+        type: "approval",
+        output: `[approval:execution-plan-mismatch] ${req.id} ${formatApprovalAuditFields(request, boundExecutionPlan)} -> deny-once`,
+      });
+      return markHostApprovalRejectedDecision({
+        requestId: req.id,
+        choice: "deny-once",
+        rememberPattern: "execution plan did not match the host shell binding",
+      });
+    }
+    const executionPlanAudit = boundExecutionPlan ?? suppliedExecutionPlan;
 
     // Round-3 code-reviewer MAJOR + round-4 critic CRITICAL + round-5
     // critic MAJOR-1 — sandbox capability injection is scoped to the
@@ -509,7 +736,10 @@ export class ApprovalGate {
         req.kind === "rationale") &&
       req.toolCategory !== "meta";
     const fullReq: ApprovalRequest = {
-      ...req,
+      ...request,
+      ...(executionPlanAudit === undefined
+        ? {}
+        : { executionPlan: executionPlanAudit }),
       // Rationale's generic reason is deliberately not caller-controlled.
       // Set this before all downstream handling, including audit, OS
       // notification, HMAC sealing, pending state, and renderer narrowing.
@@ -517,9 +747,17 @@ export class ApprovalGate {
         req.kind === "rationale" && rationaleDisplay !== null
           ? RATIONALE_HOST_OWNED_REASON
           : req.reason,
-      sandboxCapability:
-        req.sandboxCapability ??
-        (isExecutionKind ? this.sandboxCapabilityProvider() : undefined),
+      // A sealed execution plan is the only renderer-safe authority
+      // description for canonical host shells. Its projection deliberately
+      // excludes the host capability's free-form reason, so never retain or
+      // inject the raw capability alongside it.
+      ...(executionPlanAudit === undefined
+        ? {
+            sandboxCapability:
+              requestedSandboxCapability ??
+              (isExecutionKind ? this.sandboxCapabilityProvider() : undefined),
+          }
+        : {}),
       allowedChoices:
         req.kind === "rationale"
           ? ["allow-once", "deny-once"]
@@ -527,7 +765,7 @@ export class ApprovalGate {
       requireExplicit:
         req.kind === "rationale"
           ? true
-          : this.currentPolicy.requireExplicitApproval,
+          : forceExplicit || this.currentPolicy.requireExplicitApproval,
     };
 
     // §S1: sensitive-path hard-block — runs BEFORE anything else so that
@@ -547,7 +785,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:sensitive-path-blocked] ${fullReq.id} ${formatApprovalAuditFields(fullReq)} raw=${rawCandidate} canonical=${caseFolded} pattern=${matchedPattern} → deny-once (hard-block)`,
+          output: `[approval:sensitive-path-blocked] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} raw=${rawCandidate} canonical=${caseFolded} pattern=${matchedPattern} → deny-once (hard-block)`,
         });
         return markHostApprovalRejectedDecision({
           requestId: fullReq.id,
@@ -576,7 +814,7 @@ export class ApprovalGate {
         timestamp: new Date().toISOString(),
         sessionId: "approval-gate",
         type: "approval",
-        output: `[approval:read-only-auto-approve] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} mode=${fullReq.mode ?? "default"} → allow-once`,
+        output: `[approval:read-only-auto-approve] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} mode=${fullReq.mode ?? "default"} → allow-once`,
       });
       return {
         requestId: fullReq.id,
@@ -591,7 +829,7 @@ export class ApprovalGate {
         timestamp: new Date().toISOString(),
         sessionId: "approval-gate",
         type: "approval",
-        output: `[approval:send-failed] ${fullReq.id} ${formatApprovalAuditFields(fullReq)} — webContents already destroyed → deny-once`,
+        output: `[approval:send-failed] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} — webContents already destroyed → deny-once`,
       });
       return markHostApprovalRejectedDecision({
         requestId: fullReq.id,
@@ -606,7 +844,7 @@ export class ApprovalGate {
       type: "approval",
       // Emit provenance fields needed to distinguish a host tool ask from a
       // plugin-origin agent-action request during incident replay.
-      input: `[approval:requested] ${fullReq.id} ${formatApprovalAuditFields(fullReq)}`,
+      input: `[approval:requested] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)}`,
     });
 
     // Issue #260 — surface a system notification when an approval is about
@@ -646,7 +884,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:timeout] ${fullReq.id} ${formatApprovalAuditFields(fullReq)} → deny-once`,
+          output: `[approval:timeout] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} → deny-once`,
         });
         const timeoutDecision: ApprovalDecision = {
           requestId: fullReq.id,
@@ -670,6 +908,12 @@ export class ApprovalGate {
         sourcePluginId: fullReq.sourcePluginId,
         approvalScope: fullReq.approvalScope,
         approvalCacheKey: fullReq.approvalCacheKey,
+        ...(executionPlanAudit === undefined
+          ? {}
+          : { executionPlan: executionPlanAudit }),
+        ...(oneShotPermitBinding !== undefined
+          ? { hostShellExecutionPermitBinding: oneShotPermitBinding }
+          : {}),
         nonce,
         expectedHmac,
       });
@@ -717,7 +961,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:send-failed] ${fullReq.id} ${formatApprovalAuditFields(fullReq)} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
+          output: `[approval:send-failed] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
         });
         resolve(
           markHostApprovalRejectedDecision({
@@ -751,7 +995,7 @@ export class ApprovalGate {
         timestamp: new Date().toISOString(),
         sessionId: "approval-gate",
         type: "approval",
-        output: `[approval:nonce-mismatch] ${requestId} ${formatApprovalAuditFields(entry)} choice=${decision.choice} nonceProvided=${decision.nonce ? "yes" : "no"} hmacProvided=${decision.hmac ? "yes" : "no"} → deny-once (forced)`,
+        output: `[approval:nonce-mismatch] ${requestId} ${formatApprovalAuditFields(entry, entry.executionPlan)} choice=${decision.choice} nonceProvided=${decision.nonce ? "yes" : "no"} hmacProvided=${decision.hmac ? "yes" : "no"} → deny-once (forced)`,
       });
       const forcedDecision: ApprovalDecision = {
         requestId,
@@ -773,7 +1017,7 @@ export class ApprovalGate {
         timestamp: new Date().toISOString(),
         sessionId: "approval-gate",
         type: "approval",
-        output: `[approval:choice-not-allowed] ${requestId} ${formatApprovalAuditFields(entry)} choice=${decision.choice} allowed=${entry.allowedChoices.join(",")} → deny-once (forced)`,
+        output: `[approval:choice-not-allowed] ${requestId} ${formatApprovalAuditFields(entry, entry.executionPlan)} choice=${decision.choice} allowed=${entry.allowedChoices.join(",")} → deny-once (forced)`,
       });
       const forcedDecision: ApprovalDecision = {
         requestId,
@@ -798,12 +1042,21 @@ export class ApprovalGate {
         : decision;
     clearTimeout(entry.timer);
     this.pending.delete(requestId);
+    if (
+      entry.hostShellExecutionPermitBinding !== undefined &&
+      resolvedDecision.choice === "allow-once"
+    ) {
+      hostApprovedOneShotExecutionBindings.set(
+        resolvedDecision,
+        entry.hostShellExecutionPermitBinding,
+      );
+    }
     // §S8 phase: decided
     this.auditLogger?.log({
       timestamp: new Date().toISOString(),
       sessionId: "approval-gate",
       type: "approval",
-      output: `[approval:decided] ${requestId} ${formatApprovalAuditFields(entry)} choice=${resolvedDecision.choice} rememberPattern=${resolvedDecision.rememberPattern ?? "none"}`,
+      output: `[approval:decided] ${requestId} ${formatApprovalAuditFields(entry, entry.executionPlan)} choice=${resolvedDecision.choice} rememberPattern=${resolvedDecision.rememberPattern ?? "none"}`,
     });
     entry.resolve(resolvedDecision);
     return resolvedDecision;
@@ -830,7 +1083,7 @@ export class ApprovalGate {
       timestamp: new Date().toISOString(),
       sessionId: "approval-gate",
       type: "approval",
-      output: `[approval:cancelled] ${requestId} ${formatApprovalAuditFields(entry)} reason=${reason} → deny-once`,
+      output: `[approval:cancelled] ${requestId} ${formatApprovalAuditFields(entry, entry.executionPlan)} reason=${reason} → deny-once`,
     });
     entry.resolve(
       markHostApprovalRejectedDecision({

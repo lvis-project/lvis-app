@@ -12,6 +12,7 @@ import type {
   PermissionCheckResult,
 } from "../../permissions/permission-manager.js";
 import type { PermissionEvaluationContext } from "../../permissions/evaluation-context.js";
+import type { HostShellExecutionPlan } from "../../permissions/host-shell-execution-plan.js";
 import { isReviewerAutoDecisionOutcome } from "../../permissions/permission-manager.js";
 import type { RiskVerdict } from "../../permissions/reviewer/risk-classifier.js";
 import type { ApprovalPurposeSuggestion } from "../../shared/permission-review-status.js";
@@ -39,6 +40,7 @@ export async function dispatchReviewerForHeadless(
   callbacks: ToolExecutorCallbacks | undefined,
   meta: ToolCallMeta,
   approvalPurpose: ApprovalPurposeSuggestion | undefined,
+  hostShellExecutionPlan?: HostShellExecutionPlan,
   abortSignal?: AbortSignal,
 ): Promise<
   | { allowed: true; permissionResult: PermissionCheckResult }
@@ -112,6 +114,9 @@ export async function dispatchReviewerForHeadless(
       ...(meta.mcpServerId !== undefined ? { mcpServerId: meta.mcpServerId } : {}),
       ...(meta.pluginId !== undefined ? { pluginId: meta.pluginId } : {}),
       ...(meta.workerId !== undefined ? { workerId: meta.workerId } : {}),
+      ...(hostShellExecutionPlan === undefined
+        ? {}
+        : { hostShellExecutionPlan }),
     },
     {
       allowedPluginIds: context.allowedPluginIds
@@ -185,6 +190,7 @@ export async function dispatchReviewerForInteractiveAuto(
   callbacks: ToolExecutorCallbacks | undefined,
   meta: ToolCallMeta,
   approvalPurpose: ApprovalPurposeSuggestion | undefined,
+  hostShellExecutionPlan?: HostShellExecutionPlan,
   abortSignal?: AbortSignal,
 ): Promise<PermissionCheckResult | null> {
   if (context.headless === true) return null;
@@ -232,6 +238,9 @@ export async function dispatchReviewerForInteractiveAuto(
         ...(meta.mcpServerId !== undefined ? { mcpServerId: meta.mcpServerId } : {}),
         ...(meta.pluginId !== undefined ? { pluginId: meta.pluginId } : {}),
         ...(meta.workerId !== undefined ? { workerId: meta.workerId } : {}),
+        ...(hostShellExecutionPlan === undefined
+          ? {}
+          : { hostShellExecutionPlan }),
       },
       {
         allowedPluginIds: context.allowedPluginIds
