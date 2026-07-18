@@ -614,12 +614,12 @@ describe("invocation audit and sealed resume", () => {
       "invocation-audit-terminal",
     ]);
     const sourceMarkers = [
-      ["current-invocation-scope-revalidate", "createInvocationContext(invocationPermissionContext, executionCwd)"],
+      ["current-invocation-scope-revalidate", "createInvocationContext(permissionContext, executionCwd)"],
       ["current-policy-mode-revalidate", "policyMode: this.permissionManager?.getMode?.()"],
       ["current-permission-revalidate", "this.permissionManager.checkDetailed("],
       ["current-sandbox-capability-revalidate", "        !this.sandboxFsContainedProvider(tool)\n      ) {"],
       ["permission-request-hook", "const permHook = await this.runScriptHook("],
-      ["permission-ask-audit", "await this.auditPermissionAsk("],
+      ["permission-ask-audit", "await auditCurrentPermissionAsk("],
       ["script-pre-tool-use", "const scriptPre = await this.runScriptHook("],
       ["rate-limit", "this.rateLimiter.check(toolUse.name, trust)"],
       ["permission-audit-writable-fail-closed", "this.auditLogger.assertPermissionAuditWritable()"],
@@ -631,7 +631,7 @@ describe("invocation audit and sealed resume", () => {
       ["post-failure-lifecycle", "\"PostToolUseFailure\","],
       ["post-exec-dlp-display-audit", "const dlpResult = maskSensitiveData(content)"],
       ["tool-end-emit", "callbacks?.onToolEnd?.(toolUse.name, displayContent"],
-      ["final-permission-audit", "await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent"],
+      ["final-permission-audit", "await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent"],
     ] as const;
     let sourceCursor = -1;
     let contractCursor = -1;
@@ -650,8 +650,8 @@ describe("invocation audit and sealed resume", () => {
         phase: "resume-cas-validate",
         beforePhase: null,
         afterPhase: "current-invocation-scope-revalidate",
-        lowerSourceMarker: "const reviewerInput = maskToolInputForDisplay(finalInput)",
-        upperSourceMarker: "createInvocationContext(invocationPermissionContext, executionCwd)",
+        lowerSourceMarker: "const target = extractSealedRationaleExecutionTarget(request);",
+        upperSourceMarker: "createInvocationContext(permissionContext, executionCwd)",
       },
       {
         phase: "approval-allow-once-cas-consume",
@@ -671,8 +671,8 @@ describe("invocation audit and sealed resume", () => {
         phase: "invocation-audit-terminal",
         beforePhase: "final-permission-audit",
         afterPhase: null,
-        lowerSourceMarker: "await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent",
-        upperSourceMarker: "    return {\n      tool_use_id: toolUse.id,",
+        lowerSourceMarker: "await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent",
+        upperSourceMarker: "    return withHostShellExecutionPlan({\n      tool_use_id: toolUse.id,",
       },
     ] as const;
     for (const slot of virtualInsertionSlots) {
