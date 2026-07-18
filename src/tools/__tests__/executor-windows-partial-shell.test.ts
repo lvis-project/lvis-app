@@ -21,6 +21,10 @@ import {
   setSandboxRequestedAtBoot,
 } from "../../permissions/sandbox-capability.js";
 import { setProcessPlatform } from "../../testing/process-platform.js";
+import {
+  partialWindowsAsrt,
+  requestedSandboxUnavailable,
+} from "../../testing/host-shell-sandbox-fixtures.js";
 import type { AuditEntry, AuditLogger } from "../../audit/audit-logger.js";
 import type { PermissionAuditEntryInput } from "../../audit/audit-schema.js";
 import { getHostShellExecutionPlanAuditProjection } from "../../permissions/host-shell-execution-plan.js";
@@ -58,18 +62,6 @@ function dynamicShellProbe(execute: (ctx: import("../types.js").ToolExecutionCon
   });
 }
 
-function partialWindowsAsrt(): void {
-  setProcessPlatform("win32");
-  setSandboxRequestedAtBoot(true);
-  setActiveSandboxCapability({
-    kind: "asrt",
-    confidence: "verified",
-    platform: "win32",
-    reason: "srt-win partial",
-    confines: { filesystem: true, process: false, network: true },
-  });
-}
-
 function fullDarwinAsrt(): void {
   setProcessPlatform("darwin");
   setSandboxRequestedAtBoot(true);
@@ -81,12 +73,6 @@ function fullDarwinAsrt(): void {
     confines: { filesystem: true, process: true, network: true },
   });
 }
-function requestedSandboxUnavailable(platform: "darwin" | "linux" | "win32"): void {
-  setProcessPlatform(platform);
-  __resetActiveSandboxCapabilityForTest();
-  setSandboxRequestedAtBoot(true);
-}
-
 function explicitlySandboxOff(platform: "darwin" | "linux" | "win32"): void {
   setProcessPlatform(platform);
   __resetActiveSandboxCapabilityForTest();
