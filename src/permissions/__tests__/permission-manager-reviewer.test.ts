@@ -21,6 +21,7 @@ import {
   type RiskVerdict,
 } from "../reviewer/risk-classifier.js";
 import { BashTool } from "../../tools/bash.js";
+import { buildHostShellExecutionPlan } from "../host-shell-execution-plan.js";
 import {
   __resetActiveSandboxCapabilityForTest,
   __resetWrappedPluginWorkersForTest,
@@ -162,6 +163,76 @@ describe("PermissionManager.dispatchReviewer", () => {
     expect(second.verdict).toEqual(first.verdict);
   });
 
+  it("uses the sealed full-ASRT host plan for reviewer capability and cache partitioning", async () => {
+    const classifier: RiskClassifier = {
+      classify: vi.fn((ctx: ToolInvocationContext): RiskVerdict => (
+        ctx.sandboxCapability.kind === "asrt"
+          ? { level: "low", reason: "sealed full ASRT" }
+          : { level: "high", reason: "unconfined shell" }
+      )),
+    };
+    pm.setReviewer({ classifier, cache, deferredQueue: queue });
+    const fullPlan = buildHostShellExecutionPlan({
+      platform: "darwin",
+      requestedSandbox: true,
+      activeCapability: {
+        kind: "asrt",
+        confidence: "verified",
+        platform: "darwin",
+        reason: "full ASRT sealed before review",
+        confines: { filesystem: true, process: true, network: true },
+      },
+    });
+    const explicitOffPlan = buildHostShellExecutionPlan({
+      platform: "darwin",
+      requestedSandbox: false,
+      activeCapability: {
+        kind: "none",
+        confidence: "verified",
+        platform: "darwin",
+        reason: "sandbox explicitly off",
+        confines: { filesystem: false, process: false, network: false },
+      },
+    });
+    const base = {
+      source: "builtin" as const,
+      category: "shell" as const,
+      pathFields: [],
+      finalInput: { command: "echo sealed-plan" },
+      allowedDirectories: [allowedDir("/Users/ken/work")],
+      sensitivePathsAdjacent: [],
+      trustOrigin: "user-keyboard" as const,
+    };
+
+    // No process-global active capability is published: the reviewer must still
+    // receive the invocation's sealed full-ASRT plan, not recompute `none`.
+    const first = await pm.dispatchReviewer("bash", {
+      ...base,
+      hostShellExecutionPlan: fullPlan,
+    }, undefined, { defer: "none" });
+    const samePlan = await pm.dispatchReviewer("bash", {
+      ...base,
+      hostShellExecutionPlan: fullPlan,
+    }, undefined, { defer: "none" });
+    const changedPlan = await pm.dispatchReviewer("bash", {
+      ...base,
+      hostShellExecutionPlan: explicitOffPlan,
+    }, undefined, { defer: "none" });
+
+    expect(first.verdict.level).toBe("low");
+    expect(samePlan.cacheReason).toBe("hit");
+    expect(changedPlan.verdict.level).toBe("high");
+    expect(changedPlan.cacheReason).not.toBe("hit");
+    expect(classifier.classify).toHaveBeenCalledTimes(2);
+    expect(classifier.classify).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ sandboxCapability: fullPlan.capability }),
+    );
+    expect(classifier.classify).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ sandboxCapability: explicitOffPlan.capability }),
+    );
+  });
   it("does not replay a plugin-worker relaxed verdict after the worker un-wraps", async () => {
     setActiveSandboxCapability({
       kind: "asrt",

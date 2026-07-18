@@ -98,6 +98,7 @@ function dispatch(
     callbacks,
     meta,
     undefined,
+    undefined,
     abortSignal,
   ] as const;
   return kind === "headless"

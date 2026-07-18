@@ -4,11 +4,21 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   ApprovalGate,
+  consumeHostApprovedOneShotExecutionBinding,
   isHostApprovalRejectedDecision,
   isHostApprovalTimeoutDecision,
 } from "../approval-gate.js";
-import type { ApprovalRequest, ApprovalDecision } from "../approval-gate.js";
+import type {
+  ApprovalDecision,
+  ApprovalRequest,
+  ApprovalRequestInput,
+} from "../approval-gate.js";
 import type { RationaleApprovalDisplay } from "../../shared/rationale-approval-display.js";
+import type { HostShellExecutionPermitBinding } from "../host-shell-execution-permit.js";
+import {
+  buildHostShellExecutionPlan,
+  getHostShellExecutionPlanAuditProjection,
+} from "../host-shell-execution-plan.js";
 import { makeTestPolicy } from "./test-helpers.js";
 
 // ─── Mock WebContents ─────────────────────────────────
@@ -24,8 +34,8 @@ function makeMockWebContents(
   };
 }
 
-// requestAndWait accepts Omit<ApprovalRequest, "requireExplicit"> — no requireExplicit here
-type RequestInput = Omit<ApprovalRequest, "requireExplicit">;
+// requestAndWait accepts the unsealed input; the gate owns `requireExplicit`.
+type RequestInput = ApprovalRequestInput;
 
 function makeRequest(overrides?: Partial<RequestInput>): RequestInput {
   return {
@@ -126,6 +136,260 @@ describe("ApprovalGate", () => {
     const result = await promise;
     expect(result.choice).toBe("allow-once");
     expect(result.requestId).toBe("req-1");
+  });
+
+  it("issues a private one-shot receipt only after an HMAC-verified allow-once", async () => {
+    const wc = makeMockWebContents();
+    const auditLogger = { log: vi.fn() };
+    const gate = new ApprovalGate(
+      wc as never,
+      makeTestPolicy({ requireExplicitApproval: false }),
+      undefined,
+      auditLogger as never,
+    );
+    const plan = buildHostShellExecutionPlan({
+      platform: "win32",
+      requestedSandbox: true,
+      activeCapability: {
+        kind: "asrt",
+        confidence: "verified",
+        platform: "win32",
+        reason: "test-only reason that must not enter the audit log",
+        confines: { filesystem: true, process: false, network: true },
+      },
+    });
+    const binding: HostShellExecutionPermitBinding = Object.freeze({
+      plan,
+      planIdentity: "host-shell-execution-plan/v2:win32:windows-partial-shell-acl-unsafe",
+      toolName: "bash",
+      toolUseId: "receipt-tool-use",
+      command: "echo receipt",
+      requestedCwd: "subdir",
+      executionCwd: "C:/repo",
+      resolvedCwd: "C:/repo/subdir",
+      timeoutSeconds: 30,
+      allowedDirectories: Object.freeze(["c:/repo/extra"]),
+    });
+    const req = makeRequest({
+      id: "req-host-shell-receipt",
+      toolName: "bash",
+      toolCategory: "shell",
+      args: {
+        command: binding.command,
+        cwd: binding.requestedCwd,
+        timeoutSeconds: binding.timeoutSeconds,
+      },
+      allowedChoices: ["allow-once", "deny-once"],
+      forceExplicit: true,
+      hostShellExecutionPermitBinding: binding,
+    });
+
+    const promise = gate.requestAndWait(req);
+    const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
+    expect(sent).toMatchObject({
+      executionPlan: getHostShellExecutionPlanAuditProjection(plan),
+      allowedChoices: ["allow-once", "deny-once"],
+      requireExplicit: true,
+    });
+    expect(sent.sandboxCapability).toBeUndefined();
+    expect(JSON.stringify(sent.executionPlan)).not.toContain(binding.command);
+    expect(JSON.stringify(sent.executionPlan)).not.toContain(binding.executionCwd);
+    expect(sent).not.toHaveProperty("forceExplicit");
+    expect(sent).not.toHaveProperty("hostShellExecutionPermitBinding");
+
+    gate.resolve(req.id, {
+      requestId: req.id,
+      choice: "allow-once",
+      nonce: sent.nonce,
+      hmac: sent.hmac,
+    });
+    const decision = await promise;
+    const auditText = JSON.stringify(auditLogger.log.mock.calls);
+    expect(auditText).toContain(`executionPlan.identity=${plan.identity}`);
+    expect(auditText).toContain("executionPlan.requestedSandbox=true");
+    expect(auditText).toContain("executionPlan.mode=plain");
+    expect(auditText).toContain("executionPlan.fallbackReason=windows-partial-shell-acl-unsafe");
+    expect(auditText).toContain("executionPlan.capability.kind=none");
+    expect(auditText).not.toContain(binding.command);
+    expect(auditText).not.toContain(binding.requestedCwd!);
+    expect(auditText).not.toContain(binding.executionCwd);
+    expect(auditText).not.toContain(binding.resolvedCwd);
+    expect(auditText).not.toContain("test-only reason that must not enter the audit log");
+    expect(consumeHostApprovedOneShotExecutionBinding(decision, binding)).toBe(true);
+    expect(consumeHostApprovedOneShotExecutionBinding(decision, binding)).toBe(false);
+  });
+
+  it("fails closed before renderer IPC when a Plan-B binding differs from the displayed shell request", async () => {
+    const plan = buildHostShellExecutionPlan({
+      platform: "win32",
+      requestedSandbox: true,
+      activeCapability: {
+        kind: "asrt",
+        confidence: "verified",
+        platform: "win32",
+        reason: "test-only",
+        confines: { filesystem: true, process: false, network: true },
+      },
+    });
+    const binding: HostShellExecutionPermitBinding = Object.freeze({
+      plan,
+      planIdentity: plan.identity,
+      toolName: "bash",
+      toolUseId: "mismatch-tool-use",
+      command: "echo host-only-command",
+      requestedCwd: "subdir",
+      executionCwd: "C:/repo",
+      resolvedCwd: "C:/repo/subdir",
+      timeoutSeconds: 30,
+      allowedDirectories: Object.freeze(["c:/repo/extra"]),
+    });
+    const cases = [
+      {
+        label: "tool",
+        toolName: "powershell",
+        args: { command: binding.command, cwd: binding.requestedCwd, timeoutSeconds: binding.timeoutSeconds },
+      },
+      {
+        label: "command",
+        toolName: binding.toolName,
+        args: { command: "echo renderer-command", cwd: binding.requestedCwd, timeoutSeconds: binding.timeoutSeconds },
+      },
+      {
+        label: "cwd",
+        toolName: binding.toolName,
+        args: { command: binding.command, cwd: "other", timeoutSeconds: binding.timeoutSeconds },
+      },
+      {
+        label: "timeout",
+        toolName: binding.toolName,
+        args: { command: binding.command, cwd: binding.requestedCwd, timeoutSeconds: 31 },
+      },
+    ];
+
+    for (const mismatch of cases) {
+      const wc = makeMockWebContents();
+      const auditLogger = { log: vi.fn() };
+      const gate = new ApprovalGate(wc as never, undefined, undefined, auditLogger as never);
+      const result = await gate.requestAndWait(makeRequest({
+        id: `req-host-shell-mismatch-${mismatch.label}`,
+        toolName: mismatch.toolName,
+        toolCategory: "shell",
+        args: mismatch.args,
+        allowedChoices: ["allow-once", "deny-once"],
+        forceExplicit: true,
+        hostShellExecutionPermitBinding: binding,
+      }));
+
+      expect(result).toMatchObject({ choice: "deny-once" });
+      expect(isHostApprovalRejectedDecision(result)).toBe(true);
+      expect(wc.send).not.toHaveBeenCalled();
+      expect(gate.pendingCount).toBe(0);
+      expect(consumeHostApprovedOneShotExecutionBinding(result, binding)).toBe(false);
+      const auditText = JSON.stringify(auditLogger.log.mock.calls);
+      expect(auditText).toContain("[approval:host-shell-binding-mismatch]");
+      expect(auditText).not.toContain(binding.command);
+      expect(auditText).not.toContain(binding.executionCwd);
+    }
+  });
+
+  it("rejects a structural executionPlan projection before it reaches the renderer or audit", async () => {
+    const plan = buildHostShellExecutionPlan({
+      platform: "win32",
+      requestedSandbox: true,
+      activeCapability: {
+        kind: "asrt",
+        confidence: "verified",
+        platform: "win32",
+        reason: "test-only",
+        confines: { filesystem: true, process: false, network: true },
+      },
+    });
+    const leakedMarker = "must-not-cross-execution-plan-boundary";
+    const wc = makeMockWebContents();
+    const auditLogger = { log: vi.fn() };
+    const gate = new ApprovalGate(wc as never, undefined, undefined, auditLogger as never);
+
+    const result = await gate.requestAndWait(makeRequest({
+      id: "req-structural-execution-plan",
+      executionPlan: {
+        ...getHostShellExecutionPlanAuditProjection(plan),
+        leakedMarker,
+      } as never,
+    }));
+
+    expect(result).toMatchObject({ choice: "deny-once" });
+    expect(isHostApprovalRejectedDecision(result)).toBe(true);
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(gate.pendingCount).toBe(0);
+    const auditText = JSON.stringify(auditLogger.log.mock.calls);
+    expect(auditText).toContain("[approval:execution-plan-invalid]");
+    expect(auditText).not.toContain(leakedMarker);
+  });
+
+  it("requires a supplied executionPlan to be the exact projection of the hidden Plan-B binding", async () => {
+    const plan = buildHostShellExecutionPlan({
+      platform: "win32",
+      requestedSandbox: true,
+      activeCapability: {
+        kind: "asrt",
+        confidence: "verified",
+        platform: "win32",
+        reason: "test-only",
+        confines: { filesystem: true, process: false, network: true },
+      },
+    });
+    const binding: HostShellExecutionPermitBinding = Object.freeze({
+      plan,
+      planIdentity: plan.identity,
+      toolName: "bash",
+      toolUseId: "plan-mismatch-tool-use",
+      command: "echo host-only-command",
+      requestedCwd: "subdir",
+      executionCwd: "C:/repo",
+      resolvedCwd: "C:/repo/subdir",
+      timeoutSeconds: 30,
+      allowedDirectories: Object.freeze(["c:/repo/extra"]),
+    });
+    const otherPlan = buildHostShellExecutionPlan({
+      platform: "win32",
+      requestedSandbox: false,
+      activeCapability: {
+        kind: "none",
+        confidence: "verified",
+        platform: "win32",
+        reason: "inactive",
+        confines: { filesystem: false, process: false, network: false },
+      },
+    });
+    const wc = makeMockWebContents();
+    const auditLogger = { log: vi.fn() };
+    const gate = new ApprovalGate(wc as never, undefined, undefined, auditLogger as never);
+
+    const result = await gate.requestAndWait(makeRequest({
+      id: "req-binding-execution-plan-mismatch",
+      toolName: binding.toolName,
+      toolCategory: "shell",
+      args: {
+        command: binding.command,
+        cwd: binding.requestedCwd,
+        timeoutSeconds: binding.timeoutSeconds,
+      },
+      allowedChoices: ["allow-once", "deny-once"],
+      forceExplicit: true,
+      executionPlan: getHostShellExecutionPlanAuditProjection(otherPlan),
+      hostShellExecutionPermitBinding: binding,
+    }));
+
+    expect(result).toMatchObject({ choice: "deny-once" });
+    expect(isHostApprovalRejectedDecision(result)).toBe(true);
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(gate.pendingCount).toBe(0);
+    expect(consumeHostApprovedOneShotExecutionBinding(result, binding)).toBe(false);
+    const auditText = JSON.stringify(auditLogger.log.mock.calls);
+    expect(auditText).toContain("[approval:execution-plan-mismatch]");
+    expect(auditText).toContain(`executionPlan.identity=${plan.identity}`);
+    expect(auditText).not.toContain(binding.command);
+    expect(auditText).not.toContain(binding.executionCwd);
   });
 
   it("audits agent-action issuer plugin id and scope on request and decision", async () => {
@@ -355,6 +619,21 @@ describe("ApprovalGate", () => {
     expect(payload.requireExplicit).toBe(false);
 
     // cleanup
+    gate.resolve(req.id, { requestId: req.id, choice: "deny-once" });
+  });
+
+  it("forceExplicit은 완화 정책에서도 명시적 승인을 유지한다", async () => {
+    const wc = makeMockWebContents();
+    const policy = makeTestPolicy({ requireExplicitApproval: false });
+    const gate = new ApprovalGate(wc as never, policy);
+    const req = makeRequest({ id: "req-forced-explicit", forceExplicit: true });
+
+    gate.requestAndWait(req);
+
+    const [, payload] = wc.send.mock.calls[0] as [string, ApprovalRequest];
+    expect(payload.requireExplicit).toBe(true);
+    expect(payload).not.toHaveProperty("forceExplicit");
+
     gate.resolve(req.id, { requestId: req.id, choice: "deny-once" });
   });
 

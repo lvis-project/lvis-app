@@ -3,6 +3,7 @@
 
 
 
+import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
@@ -164,7 +165,7 @@ export interface TrustedSandboxSettings {
  * per command, and it can only ever NARROW or RE-SHAPE the filesystem jail —
  * it cannot widen network egress and cannot carry any sandbox-weakening flag.
  *
- * Windows ASRT 0.0.64 note: `srt-win exec` supports per-exec `denyRead` /
+ * Windows ASRT 0.0.66 note: `srt-win exec` supports per-exec `denyRead` /
  * `denyWrite` only. Non-empty per-exec `allowRead` / `allowWrite` is rejected
  * before calling ASRT. Long-lived plugin workers that need explicit read/write
  * grants use {@link grantWindowsWorkerFilesystemAccess} with a dedicated
@@ -332,7 +333,7 @@ export function assertPerExecFilesystemSupported(
     return;
   }
   throw new Error(
-    `${caller}: ASRT 0.0.64 on Windows does not support per-exec ` +
+    `${caller}: ASRT 0.0.66 on Windows does not support per-exec ` +
       "filesystem.allowRead/allowWrite; only per-exec denyRead/denyWrite " +
       "are supported. Long-lived plugin workers must use the holder-PID " +
       "Windows ACL grant path instead.",
@@ -444,7 +445,7 @@ export function isAsrtSandboxActive(): boolean {
  * PLATFORM: every entry is a LITERAL absolute path (NO glob chars). On macOS the
  * stripped path is a recursive seatbelt subpath; on Linux bwrap deny-binds the
  * literal path (bwrap cannot glob — ASRT only `expandGlobPattern`s entries that
- * CONTAIN glob chars, so literals are safe on both). On Windows, ASRT 0.0.64
+ * CONTAIN glob chars, so literals are safe on both). On Windows, ASRT 0.0.66
  * applies filesystem rules through the srt-sandbox user ACL backend.
  *
  * NO-FALLBACK (deny-by-default): paths are derived from `os.homedir()` /
@@ -735,6 +736,205 @@ export function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): San
 }
 
 /**
+ * A fixed, no-I/O workload used only to prove that Linux can actually start the
+ * configured ASRT/bwrap wrapper. ASRT 0.0.66's dependency check verifies
+ * binaries, but cannot detect hosts that prohibit the wrapper's user namespace
+ * / seccomp setup until a wrapped process starts.
+ *
+ * This command has no arguments, performs no writes, and makes no network
+ * request. It is passed through the SAME initialized ASRT config that tools use
+ * (no custom config), so a successful probe proves the real wrapper path rather
+ * than merely the presence of `bwrap` on PATH.
+ */
+const ASRT_LINUX_RUNTIME_PROBE_COMMAND = "true";
+const ASRT_LINUX_RUNTIME_PROBE_TIMEOUT_MS = 5_000;
+// A SIGKILL request is not proof that bwrap has released its mount state. Give
+// the child a short, bounded chance to emit `close` before ASRT cleanup/reset.
+const ASRT_LINUX_RUNTIME_PROBE_CLOSE_GRACE_MS = 1_000;
+
+/** Stable machine code for a Linux ASRT wrapper that cannot actually execute. */
+export const ASRT_LINUX_RUNTIME_PROBE_ERROR_CODE = "asrt-linux-runtime-probe-failed";
+
+/**
+ * Typed boot-time degradation signal for a Linux ASRT wrapper runtime failure.
+ *
+ * Boot catches this separately from generic initialization failures so audit
+ * telemetry can distinguish a missing binary from a host policy that blocks the
+ * configured bwrap/user-namespace/seccomp path. The message is deliberately
+ * bounded and never includes child stdout/stderr or environment data.
+ */
+export class AsrtLinuxRuntimeProbeError extends Error {
+  readonly code = ASRT_LINUX_RUNTIME_PROBE_ERROR_CODE;
+
+  constructor(detail: string) {
+    super(`ASRT Linux runtime probe failed: ${detail}`);
+    this.name = "AsrtLinuxRuntimeProbeError";
+  }
+}
+
+export function isAsrtLinuxRuntimeProbeError(
+  error: unknown,
+): error is AsrtLinuxRuntimeProbeError {
+  return error instanceof AsrtLinuxRuntimeProbeError;
+}
+
+/**
+ * Spawn the exact argv returned by ASRT for the fixed runtime-probe command.
+ * There is intentionally no host-shell/plain-spawn retry: the caller needs a
+ * real ASRT execution or a typed boot degradation, never a false active state.
+ */
+function executeLinuxAsrtRuntimeProbe(
+  wrapped: SandboxWrapResult,
+  abortController: AbortController,
+): Promise<void> {
+  const [executable, ...args] = wrapped.argv;
+  if (typeof executable !== "string" || executable.length === 0) {
+    return Promise.reject(
+      new AsrtLinuxRuntimeProbeError("configured ASRT wrapper returned no executable"),
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let closeGraceTimeout: ReturnType<typeof setTimeout> | undefined;
+    let timeoutFailure: AsrtLinuxRuntimeProbeError | undefined;
+    const finish = (error?: AsrtLinuxRuntimeProbeError) => {
+      if (settled) return;
+      settled = true;
+      if (timeout !== undefined) clearTimeout(timeout);
+      if (closeGraceTimeout !== undefined) clearTimeout(closeGraceTimeout);
+      if (error !== undefined) reject(error);
+      else resolve();
+    };
+
+    let child: ReturnType<typeof spawn>;
+    try {
+      // Use ASRT's exact descriptor and shell:false. `true` is the only workload
+      // here; this probe never falls back to a plain host shell command.
+      child = spawn(executable, args, {
+        cwd: process.cwd(),
+        env: wrapped.env,
+        shell: false,
+        stdio: "ignore",
+      });
+    } catch {
+      finish(
+        new AsrtLinuxRuntimeProbeError("configured ASRT wrapper could not be spawned"),
+      );
+      return;
+    }
+
+    child.once("error", () => {
+      // Once SIGKILL has been requested, wait for `close` (or the bounded
+      // grace) so cleanup cannot race bwrap's exit/mount teardown.
+      if (timeoutFailure !== undefined) return;
+      finish(
+        new AsrtLinuxRuntimeProbeError("configured ASRT wrapper could not be spawned"),
+      );
+    });
+    child.once("close", (code, signal) => {
+      if (timeoutFailure !== undefined) {
+        finish(timeoutFailure);
+        return;
+      }
+      if (code === 0 && signal == null) {
+        finish();
+        return;
+      }
+      finish(
+        new AsrtLinuxRuntimeProbeError(
+          signal != null
+            ? `configured ASRT wrapper terminated by ${signal}`
+            : `configured ASRT wrapper exited with status ${code ?? "unknown"}`,
+        ),
+      );
+    });
+    timeout = setTimeout(() => {
+      // Mark the timeout before kill so a synchronous `close` is still
+      // classified as timeout, then wait for exit before cleanup/reset.
+      timeoutFailure = new AsrtLinuxRuntimeProbeError(
+        `configured ASRT wrapper timed out after ${ASRT_LINUX_RUNTIME_PROBE_TIMEOUT_MS}ms`,
+      );
+      closeGraceTimeout = setTimeout(() => {
+        // Do not wait forever for a broken ChildProcess implementation. The
+        // probe remains failed; this merely bounds boot before best-effort
+        // cleanup/reset runs.
+        finish(timeoutFailure);
+      }, ASRT_LINUX_RUNTIME_PROBE_CLOSE_GRACE_MS);
+      abortController.abort();
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // The grace still bounds the failed probe before best-effort cleanup.
+      }
+    }, ASRT_LINUX_RUNTIME_PROBE_TIMEOUT_MS);
+  });
+}
+
+/**
+ * Linux-only post-initialize probe. ASRT's regular dependency check is
+ * intentionally binary-only; this validates the exact live configuration's
+ * bwrap invocation before the adapter exposes `active=true` to host tools.
+ */
+async function verifyLinuxAsrtRuntime(
+  SandboxManager: Awaited<ReturnType<typeof loadSandboxManager>>,
+): Promise<void> {
+  if (process.platform !== "linux") return;
+
+  const abortController = new AbortController();
+  let wrapped = false;
+  try {
+    // No binShell/customConfig override: this is the exact initialized wrapper
+    // configuration used by regular tool execution, with the fixed `true` probe.
+    const probe = await SandboxManager.wrapWithSandboxArgv(
+      ASRT_LINUX_RUNTIME_PROBE_COMMAND,
+      undefined,
+      undefined,
+      abortController.signal,
+      process.cwd(),
+    );
+    wrapped = true;
+    await executeLinuxAsrtRuntimeProbe(probe, abortController);
+  } catch (error) {
+    if (isAsrtLinuxRuntimeProbeError(error)) throw error;
+    throw new AsrtLinuxRuntimeProbeError("configured ASRT wrapper could not be prepared");
+  } finally {
+    abortController.abort();
+    if (wrapped) {
+      try {
+        // bwrap may leave mount-point artifacts even for this no-I/O command.
+        SandboxManager.cleanupAfterCommand();
+      } catch {
+        // Cleanup failure means the configured runtime path is not healthy
+        // enough to publish. The initialize caller resets the singleton before
+        // surfacing this typed degradation.
+        throw new AsrtLinuxRuntimeProbeError("configured ASRT wrapper cleanup failed");
+      }
+    }
+  }
+}
+
+/**
+ * Forget a just-initialized ASRT singleton after the runtime probe fails.
+ * `active` is not set until after the probe, but the manager may already own
+ * proxy/helper state; reset it best-effort without masking the typed failure.
+ */
+async function discardFailedAsrtInitialization(
+  SandboxManager: Awaited<ReturnType<typeof loadSandboxManager>>,
+): Promise<void> {
+  active = false;
+  _baseTrustedSettings = undefined;
+  _workerUnixSocketDirs.clear();
+  try {
+    await SandboxManager.reset();
+  } catch {
+    // The caller must still receive the probe error and boot must remain
+    // degraded; a reset failure cannot make the capability verified.
+  }
+}
+
+/**
  * Initialize the ASRT {@link SandboxManager} singleton from TRUSTED settings.
  *
  * Builds the config from trusted settings (network `allowedDomains` is the
@@ -788,6 +988,15 @@ export async function initializeAsrtSandbox(
   _workerUnixSocketDirs.clear();
   const config = buildSandboxConfig(withWorkerUnixSockets(trustedSettings));
   await SandboxManager.initialize(config, askCb, enableLogMonitor);
+  try {
+    // Linux's ASRT dependency check only proves executables are installed. Run
+    // the configured wrapper once before publishing the adapter as active so a
+    // host that blocks user namespaces/seccomp cannot appear "verified".
+    await verifyLinuxAsrtRuntime(SandboxManager);
+  } catch (error) {
+    await discardFailedAsrtInitialization(SandboxManager);
+    throw error;
+  }
   active = true;
 }
 
@@ -1128,7 +1337,7 @@ export async function unregisterWorkerUnixSocketDir(socketDir: string): Promise<
 
 /**
  * Apply a Windows-only, worker-lifetime filesystem grant under a dedicated
- * holder PID. ASRT 0.0.64 cannot carry per-exec allowRead/allowWrite through
+ * holder PID. ASRT 0.0.66 cannot carry per-exec allowRead/allowWrite through
  * `wrapWithSandboxArgv()`, and `updateConfig()` explicitly does not apply
  * Windows filesystem changes live. The supported live primitive is therefore
  * srt-win's refcounted ACL grant/revoke path, keyed by a holder PID that the

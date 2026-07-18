@@ -27,7 +27,7 @@
  *     so the worker may BIND the socket. The host connects from OUTSIDE the
  *     sandbox (unconstrained).
  *   - Windows: no reliable UDS-bind primitive, so the worker keeps its TCP
- *     control channel. ASRT 0.0.64 cannot accept per-exec filesystem
+ *     control channel. ASRT 0.0.66 cannot accept per-exec filesystem
  *     allowRead/allowWrite, but it DOES expose a live ACL grant primitive
  *     keyed by holder PID. The host therefore creates a dedicated holder
  *     process per worker, applies explicit worker-scoped read/write grants to

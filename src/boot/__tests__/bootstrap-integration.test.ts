@@ -438,10 +438,12 @@ vi.mock("../../permissions/sandbox-capability.js", () => ({
   isActiveSandboxShellContained: vi.fn(() => false),
   isActiveSandboxFilesystemContainedForPluginEffects: vi.fn(() => false),
   setActiveSandboxCapability: vi.fn(),
+  setSandboxRequestedAtBoot: vi.fn(),
 }));
 vi.mock("../../permissions/asrt-sandbox.js", () => ({
   initializeAsrtSandbox: vi.fn(async () => {}),
   checkAsrtDependencies: vi.fn(async () => ({ errors: [], warnings: [] })),
+  isAsrtLinuxRuntimeProbeError: vi.fn(() => false),
   isAsrtSandboxActive: vi.fn(() => false),
   updateAsrtSandboxConfig: vi.fn(async () => {}),
   computeUnionAllowedDomains: vi.fn(() => []),

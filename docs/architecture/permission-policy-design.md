@@ -43,7 +43,7 @@ does not make an invalid tool definition valid.
 | --- | --- |
 | Default | Allows low-risk workspace reads; asks for mutation, network, shell, and out-of-scope access. |
 | Strict | Asks for reads as well as mutation. Useful for high-control sessions. |
-| Auto-review | Uses the reviewer for eligible write/network/shell calls. Low can pass inline, medium/high ask or defer. |
+| Auto-review | Uses the reviewer for eligible write/network/shell calls and host-built-in `meta` calls declared with `decisionOverride: "ask"`. The same configured enabled threshold (low or medium) applies to every eligible call; higher verdicts ask or defer, while `off` keeps the existing modal path. |
 | Allow | Allows after hard gates and audit. It does not bypass sensitive paths, invalid manifests, or sandbox rules. |
 
 ## Foreground And Headless Behavior
